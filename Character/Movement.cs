@@ -5,114 +5,120 @@ namespace MTile;
 
 public abstract class MovementState
 {
-    public abstract MovementState Update(PhysicsBody body, PlayerInput input, ChunkMap chunks, float dt);
+    public abstract int ActivePriority { get; }
+    public abstract int PassivePriority { get; }
+
+    public abstract bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities);
+    public abstract bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities);
+
+    public virtual void Enter(EnvironmentContext ctx, PlayerAbilityState abilities) {}
+    public virtual void Exit(EnvironmentContext ctx, PlayerAbilityState abilities) {}
+
+    public abstract void Update(EnvironmentContext ctx, PlayerAbilityState abilities);
 }
 
 public class FallingState : MovementState
 {
-    private const float BodyHalfHeight = PlayerCharacter.Radius;
-    private const float FloatHeight = PlayerCharacter.Radius;
-
     private const float AirAccel = 1500f;
     private const float MaxAirSpeed = 150f;
     private const float AirDrag = 500f;
 
-    public override MovementState Update(PhysicsBody body, PlayerInput input, ChunkMap chunks, float dt)
+    public override int ActivePriority => 0;
+    public override int PassivePriority => 0;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (GroundChecker.TryFind(body, chunks, BodyHalfHeight, FloatHeight, out var contact))
-        {
-            body.Constraints.Add(contact);
-            return new StandingState(contact);
-        }
-
-        float inputX = (input.Right ? 1f : 0f) - (input.Left ? 1f : 0f);
-
-        if (inputX != 0f)
-        {
-            int wallDir = (int)MathF.Sign(inputX);
-            if (WallChecker.TryFind(body, chunks, PlayerCharacter.Radius, 0f, wallDir, out var wallContact))
-            {
-                body.Constraints.Add(wallContact);
-                return new WallSlidingState(wallDir, wallContact);
-            }
-        }
-
         var force = Vector2.Zero;
+        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
+        
         if (inputX != 0f)
         {
             force.X += inputX * AirAccel;
-            float excess = MathF.Abs(body.Velocity.X) - MaxAirSpeed;
-            if (excess > 0f && MathF.Sign(body.Velocity.X) == MathF.Sign(inputX) && dt > 0f)
+            float excess = MathF.Abs(ctx.Body.Velocity.X) - MaxAirSpeed;
+            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
             {
-                force.X -= MathF.Sign(body.Velocity.X) * excess / dt;
+                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
             }
         }
-        else if (dt > 0f)
+        else if (ctx.Dt > 0f)
         {
-            force.X = Math.Clamp(-body.Velocity.X / dt, -AirDrag, AirDrag);
+            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -AirDrag, AirDrag);
         }
         
-        body.AppliedForce = force;
-        return this;
+        ctx.Body.AppliedForce = force;
     }
 }
 
 public class StandingState : MovementState
 {
-    private const float BodyHalfHeight = PlayerCharacter.Radius;
-    private const float FloatHeight    = PlayerCharacter.Radius;
-    private const float SpringK        = 300f;   // upward spring stiffness (stable when < 4/dt²)
+    private const float SpringK        = 300f;
     private const float WalkAccel      = 3000f;
     private const float MaxWalkSpeed   = 100f;
     private const float BrakingForce   = 3000f;
 
-    private readonly FloatingSurfaceDistance _ground;
+    public override int ActivePriority => 10;
+    public override int PassivePriority => 10;
 
-    public StandingState(FloatingSurfaceDistance ground) => _ground = ground;
+    private FloatingSurfaceDistance _ground;
 
-    public override MovementState Update(PhysicsBody body, PlayerInput input, ChunkMap chunks, float dt)
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (input.Space || input.Up)
-        {
-            body.Constraints.Remove(_ground);
-            return new JumpingState(body);
-        }
+        return ctx.TryGetGround(out _);
+    }
 
-        if (!GroundChecker.TryFind(body, chunks, BodyHalfHeight, FloatHeight, out var refreshed))
-        {
-            body.Constraints.Remove(_ground);
-            return new FallingState();
-        }
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        return ctx.TryGetGround(out _);
+    }
 
-        _ground.Position  = refreshed.Position;
-        _ground.Normal    = refreshed.Normal;
-        _ground.MinDistance = refreshed.MinDistance;
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (ctx.TryGetGround(out var contact))
+        {
+            _ground = contact;
+            ctx.Body.Constraints.Add(_ground);
+        }
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (_ground != null)
+            ctx.Body.Constraints.Remove(_ground);
+        _ground = null;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (ctx.TryGetGround(out var refreshed))
+        {
+            _ground.Position  = refreshed.Position;
+            _ground.Normal    = refreshed.Normal;
+            _ground.MinDistance = refreshed.MinDistance;
+        }
 
         var force = Vector2.Zero;
 
-        // Spring: push upward when body dips below standing height.
-        float dist = Vector2.Dot(body.Position - _ground.Position, _ground.Normal);
+        float dist = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
         float gap  = _ground.MinDistance - dist;
         if (gap > 0f)
             force += _ground.Normal * gap * SpringK;
 
-        // Horizontal: accelerate toward input or brake to a stop.
-        float inputX = (input.Right ? 1f : 0f) - (input.Left ? 1f : 0f);
+        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
         if (inputX != 0f)
         {
             force.X += inputX * WalkAccel;
-            // Cancel any velocity exceeding MaxWalkSpeed in the walk direction this frame.
-            float excess = MathF.Abs(body.Velocity.X) - MaxWalkSpeed;
-            if (excess > 0f && MathF.Sign(body.Velocity.X) == MathF.Sign(inputX) && dt > 0f)
-                force.X -= MathF.Sign(body.Velocity.X) * excess / dt;
+            float excess = MathF.Abs(ctx.Body.Velocity.X) - MaxWalkSpeed;
+            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
+                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
         }
-        else if (dt > 0f)
+        else if (ctx.Dt > 0f)
         {
-            // Cancel horizontal velocity up to BrakingForce this frame.
-            force.X = Math.Clamp(-body.Velocity.X / dt, -BrakingForce, BrakingForce);
+            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -BrakingForce, BrakingForce);
         }
         
-        body.AppliedForce = force;
-        return this;
+        ctx.Body.AppliedForce = force;
     }
 }

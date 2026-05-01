@@ -1,0 +1,12 @@
+{
+  "Extents": 2,
+  "ChunkFiles": {
+    "0,-1": "start.txt"
+  },
+  "Rules": [
+    {
+      "Condition": "y >= 0",
+      "IsSolid": true
+    }
+  ]
+}

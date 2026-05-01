@@ -4,7 +4,7 @@ namespace MTile;
 
 public class Chunk
 {
-    public const int Size = 32;
+    public const int Size = 16;
     public const int TileSize = 16;
 
     public Point ChunkPos;

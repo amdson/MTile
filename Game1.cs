@@ -33,18 +33,8 @@ public class Game1 : Game
 
     protected override void Initialize()
     {
-        for (int cx = -2; cx <= 2; cx++)
-            for (int cy = -1; cy <= 1; cy++)
-            {
-                var chunk = new Chunk { ChunkPos = new Point(cx, cy) };
-                for (int tx = 0; tx < Chunk.Size; tx++)
-                    for (int ty = 0; ty < Chunk.Size; ty++) {
-                        chunk.Tiles[tx, ty].IsSolid = (cy * Chunk.Size + ty) >= 0;
-                        chunk.Tiles[tx, ty].IsSolid = chunk.Tiles[tx, ty].IsSolid || ((cx == -1) && (tx < Chunk.Size / 2) && (cy * Chunk.Size + ty) <= -10);
-                        chunk.Tiles[tx, ty].IsSolid = chunk.Tiles[tx, ty].IsSolid || (cx < -1);
-                    }
-                _chunks[new Point(cx, cy)] = chunk;
-            }
+        string terrainConfigPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Levels", "terrain.json");
+        TerrainLoader.Load(terrainConfigPath, _chunks);
 
         _player = new PlayerCharacter(new Vector2(0f, -200f));
         _bodies.Add(_player.Body);

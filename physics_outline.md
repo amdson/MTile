@@ -94,76 +94,34 @@ PointContact: pos, distance, active, force
 
 -In some cases, the number of available contacts may be extremely large, in which case it would be better to have a set of availability checker functions which movement states, etc can query. 
 
-## TODO
-Right now MovementStates follow an explicitly designed FSM, in which each MovementState update must consider all possible transitions to other movement states
-based on player controls. 
+## IMPLEMENTED: Implicit Priority-Driven FSM
+The explicit FSM model has been fully refactored into an Implicit Priority-Driven FSM handled centrally by `PlayerCharacter` using `EnvironmentContext` and `PlayerAbilityState`.
 
-I'd like to update this to an implicit FSM in which MovementStates return control to a hander function after every update. The handler function should have access to player position and velocity, to mandatory physics contacts (those forced by the existence of the player polygon), and to a list of all available physics contacts, as well as their active or inactive status. It should also have access to the current MovementState, and associated data such as time in the movement state, whether the movement state has marked itself as completed, etc. 
+### 1. Environmental Context and Physics Contacts
+Rather than evaluating abstract flags like `IsGrounded` up-front, the central handler provides an `EnvironmentContext` that runs spatial capabilities as concrete `PhysicsContact` objects on demand:
 
-Each MovementState subclass should be implemented with a list of PreConditions, Conditions, and PostEffects (such as marking double jump unavailable). For instance, Standing requires an available surface to activate GroundChecker as a PreCondition to enter the Standing state, as well as as a Condition to remain in the Standing state. Jumping on the other hand requires ground as a PreCondition, but not as a Condition. DoubleJumping has "in air" as a PreCondition, and should remove double jump availability as a post-effect. After activation, the player may continue jumping to modulate jump height as currently implemented. 
+* **Mandatory Contacts**: Hard constraints resulting from the character polygon directly colliding with world geometry. These are automatically accumulated during the physics sweep step.
+* **Available Contacts (Checkers)**: Lazy-evaluation functions configured inside the `EnvironmentContext` (`TryGetGround()`, `TryGetWall(dir)`). These functions probe the space around the polygon only when requested, returning transient contacts to save spatial lookup resources.
+* **Active Contacts**: When an available contact is accepted by a movement state (e.g., `StandingState` confirming it has ground), the state explicitly adopts the contact in its `Enter()` method, injecting it into the `PhysicsBody` constraints, and correctly removing it during `Exit()`.
 
-Each MovementState should also implement (or use default values for) its ActivePriority and PassivePriority. When in progress, movements should have priority ActivePriority. When considered as options, movements should have priority PassivePriority. 
+Additionally, the handler manages a persistent `PlayerAbilityState` container that securely holds ability cooldowns, timers, and flags across movement cycles.
 
-# Implicit Priority-Driven FSM Refactor
-
-Based on the `physics_outline.md` todo section and the current state of the codebase, this document outlines the fundamental architectural shift from an **Explicit FSM** (where states are responsible for deciding what state comes next) to an **Implicit, Priority-Driven FSM** (where a central handler continuously evaluates environmental conditions and chooses the highest-priority state).
-
-## 1. Environmental Context and Physics Contacts
-Rather than evaluating abstract flags like `IsGrounded` up-front, the central handler will provide an `EnvironmentContext` that models spatial interactions as concrete `PhysicsContact` objects. Because generating all possible contacts for every tile near the character is computationally wasteful, this context should categorize contacts and generate them on-demand:
-
-* **Mandatory Contacts**: These are hard constraints resulting from the character polygon directly colliding with world geometry. These are automatically accumulated during the physics sweep step and made available to the handler so states know what the character is physically bounded by.
-* **Available Contacts (Checkers)**: A suite of lazy-evaluation functions (like `GroundChecker` or `WallChecker`) accessible through the `EnvironmentContext`. These functions probe the space around the polygon and return transient contacts (e.g., a `FloatingSurfaceDistance` contact if ground is within step-down range, or a wall contact for sliding). 
-* **Active Contacts**: The subset of Available Contacts that a movement state explicitly chooses to adopt and apply to the `PhysicsBody` constraints. For instance, when `StandingState` evaluates `CheckPreConditions`, it queries the ground checker; if an available ground contact exists, it claims it, moving it to Active status, which allows the physics engine to apply the spring push-back force.
-
-* **Create a `PlayerState` / `AbilityTracker`**: A container holding persistent movement flags (e.g., `TimeInCurrentState`, `CanDoubleJump`, `HasDashed`).
-
-## 2. Refactoring the `MovementState` Base Class
-The `MovementState.cs` base class will be heavily expanded from a simple `Update` method to a full lifecycle pipeline. You will need to add:
-
+### 2. The `MovementState` Lifecycle
+`MovementState` successfully operates as an isolated component reacting to the handler loop via an expanded lifecycle:
 * **Properties**:
-  * `ActivePriority` (int/enum): How hard this state fights to stay active once it has started (e.g., a hard-locked animation like a vault might have ultra-high active priority).
-  * `PassivePriority` (int/enum): How eagerly this state wants to take over when considered from the background (e.g., `Standing` beats `Falling` if ground is present, `WallJump` beats `WallSlide` if input is pressed).
+  * `ActivePriority`: How hard this state fights to stay active (Jump = 50, Standing = 10).
+  * `PassivePriority`: How eagerly this state wants to take over from the background (Jump = 30, Standing = 10).
 * **Methods**:
-  * `CheckPreConditions(...)`: Evaluates the input buffer, `EnvironmentContext`, and `PlayerState` to return a `bool` determining if the move can *begin*.
-  * `CheckConditions(...)`: Evaluates if the move is allowed to *continue* (e.g., `Standing` fails if `IsGrounded` becomes false).
-  * `ApplyPostEffects(...)`: Fired strictly when exiting the state (e.g., stripping the `CanDoubleJump` flag, clearing specific physics constraints).
-  * `Update(...)`: Will no longer return a `MovementState`. It will now return `void` or a status enum (like `InProgress`, `Finished`) and solely focus on injecting `AppliedForce` to the `PhysicsBody`.
+  * `CheckPreConditions(...)`: Evaluates input and Environment to return a `bool` determining if the move can *begin*.
+  * `CheckConditions(...)`: Evaluates if the move is allowed to *continue*.
+  * `Enter(...)` / `Exit(...)`: Fired strictly when crossing into or abandoning the state (handles Constraint additions/removals and timer resets).
+  * `Update(...)`: Simply injects forces into `AppliedForce`. It no longer returns transition instructions.
 
-## 3. Creating the `MovementHandler`
-This will likely act as the brain inside `PlayerCharacter.Update` (or separated into a dedicated handler class).
-
-* **State Registry**: The handler needs a list of all possible movement states instantiated in memory (or a factory to spin them up).
-* **The Evaluation Loop**:
-  1. Gather inputs and populate the `EnvironmentContext`. Also include the set of available physics contacts (ground contacts, wall contacts, etc) in EnvironmentContext. 
-  2. Check if the *Current State* meets its `CheckConditions()`. If it fails, call its `ApplyPostEffects()` and set current state to a null/fallback state (like `FallingState`). 
-  3. Iterate through all states in the registry. For those whose `CheckPreConditions()` return true, evaluate their `PassivePriority`.
-  4. Compare the highest eligible `PassivePriority` against the current state's `ActivePriority`. If the challenger wins, call `ApplyPostEffects()` on the old state, and swap to the new state.
-  5. Run the new/surviving State's `Update()` to apply physical forces.
-
-## 4. Adapting Existing States
-You will need to decouple your current states from each other.
-
-* **`FallingState`**:
-  * *PreConditions*: Always true (acts as the ultimate fallback).
-  * *Conditions*: Always true.
-  * *Priority*: Lowest passive, lowest active.
-* **`StandingState`**:
-  * *PreConditions*: `EnvironmentContext.GroundChecker.TryFind(...)` returns an available `FloatingSurfaceDistance` contact.
-  * *Conditions*: `EnvironmentContext.GroundChecker.TryFind(...)` continues to return a valid contact.
-  * *Priority*: Medium passive (beats falling).
-* **`JumpingState` & `WallJumpingState`**:
-  * *PreConditions*: `Input.Jump` == true && (`StandingState` provides its active ground contact, OR `EnvironmentContext.WallChecker` provides an available wall contact).
-  * *Conditions*: `Input.JumpHold` == true && `TimeInState < MaxHoldTime`.
-  * *PostEffects*: Mark jump as consumed for this air-cycle.
-  * *Priority*: High passive (interrupts standing/falling instantly), High active (prevents being overridden by falling until the jump arc is complete).
-
-## 5. Implementation Roadmap
-To avoid breaking the rendering or physics loop during this transition, consider doing it iteratively:
-
-1. **Data Structures First**: Create `EnvironmentContext` and `AbilityTracker`. Update `PlayerCharacter` to build this context at the top of the frame.
-2. **Expand the Base Class**: Add the Priorities, PreConditions, and PostEffects to `MovementState` without changing the `Update` signature just yet.
-3. **Build the Handler**: Add the priority-evaluation loop into `PlayerCharacter.cs`. Let it pick the next state, but temporarily allow states to force-return transitions to ensure backward compatibility while you migrate.
-4. **Port States One by One**: Remove the hard-coded `return new XXXState()` calls from your states one at a time, moving that logic into `CheckPreConditions` and setting up their priorities.
-5. **Cleanup**: Change `MovementState.Update` to return `void` and rely 100% on the Implicit Handler.
-
-Adding new movement states like a `LedgeGrabState` later will only involve creating the class with a high `PassivePriority`, writing a `CheckPreCondition` looking for ledge geometry, and dropping it into the registry. The Handler will securely manage the transitions.
+### 3. Centralized Handler loop
+The brain inside `PlayerCharacter.Update` automates transitions securely:
+1. Packages the contextual inputs, dt, geometry, and physics body into `EnvironmentContext`.
+2. Checks if current state `CheckConditions()` still validates. If it fails, `Exit()` is called and state nulls back to `FallingState.Enter()`.
+3. Iterates over all instantiated movement configurations (`FallingState`, `StandingState`, `JumpingState`, `WallSlidingState`, `WallJumpingState`).
+4. Finds the registry member passing `CheckPreConditions()` with the highest `PassivePriority`.
+5. If the challenger's `PassivePriority` beats the current state's `ActivePriority`, `Exit()` is called on the old, and `Enter()` triggers the new.
+6. The winning State evaluates `Update()` forces.
