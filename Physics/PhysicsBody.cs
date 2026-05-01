@@ -7,6 +7,7 @@ public class PhysicsBody
 {
     public Vector2 Position;
     public Vector2 Velocity;
+    public Vector2 AppliedForce;
     public Polygon Polygon;
     public List<PhysicsContact> Constraints = new();
 

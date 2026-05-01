@@ -16,17 +16,19 @@ public static class PhysicsWorld
     {
         foreach (var body in bodies)
         {
+            body.Velocity += body.AppliedForce * dt;
+            body.AppliedForce = Vector2.Zero;
             body.Velocity += gravity * dt;
 
             foreach (var c in body.Constraints)
             {
-                if (c is not SurfaceDistance sd) continue;
-                float dist = Vector2.Dot(body.Position - sd.Position, sd.Normal);
-                if (dist < sd.MinDistance)
+                if (c is not SurfaceContact sc) continue;
+                float dist = Vector2.Dot(body.Position - sc.Position, sc.Normal);
+                if (dist < sc.MinDistance)
                 {
-                    float vn = Vector2.Dot(body.Velocity, sd.Normal);
+                    float vn = Vector2.Dot(body.Velocity, sc.Normal);
                     if (vn < 0f)
-                        body.Velocity -= vn * sd.Normal;
+                        body.Velocity -= vn * sc.Normal;
                 }
             }
 
@@ -110,17 +112,19 @@ public static class PhysicsWorld
     {
         foreach (var body in bodies)
         {
+            body.Velocity += body.AppliedForce * dt;
+            body.AppliedForce = Vector2.Zero;
             body.Velocity += gravity * dt;
 
             foreach (var c in body.Constraints)
             {
-                if (c is not SurfaceDistance sd) continue;
-                float dist = Vector2.Dot(body.Position - sd.Position, sd.Normal);
-                if (dist < sd.MinDistance)
+                if (c is not SurfaceContact sc) continue;
+                float dist = Vector2.Dot(body.Position - sc.Position, sc.Normal);
+                if (dist < sc.MinDistance)
                 {
-                    float vn = Vector2.Dot(body.Velocity, sd.Normal);
+                    float vn = Vector2.Dot(body.Velocity, sc.Normal);
                     if (vn < 0f)
-                        body.Velocity -= vn * sd.Normal;
+                        body.Velocity -= vn * sc.Normal;
                 }
             }
 
@@ -151,6 +155,7 @@ public static class PhysicsWorld
             bool anyHit = false;
             float minT = 1f;
             Vector2 hitNormal = Vector2.Zero;
+            bool hitFromFloating = false;
 
             int cxMin = (int)Math.Floor((float)sweptBounds.Left / chunkPixelSize);
             int cxMax = (int)Math.Floor((float)sweptBounds.Right / chunkPixelSize);
@@ -185,7 +190,23 @@ public static class PhysicsWorld
                     minT = swept.T;
                     hitNormal = swept.Normal;
                     anyHit = true;
+                    hitFromFloating = false;
                 }
+            }
+
+            // Treat each FloatingSurfaceDistance as a plane the body sweeps against.
+            foreach (var c in body.Constraints)
+            {
+                if (c is not FloatingSurfaceDistance fsd) continue;
+                float dn = Vector2.Dot(displacement, fsd.Normal);
+                if (dn >= 0f) continue;
+                float distNow = Vector2.Dot(pos - fsd.Position, fsd.Normal);
+                float t = (fsd.MinDistance - distNow) / dn;
+                if (t < 0f || t > minT) continue;
+                minT = t;
+                hitNormal = fsd.Normal;
+                anyHit = true;
+                hitFromFloating = true;
             }
 
             if (!anyHit) break;
@@ -204,10 +225,11 @@ public static class PhysicsWorld
             float vn = Vector2.Dot(body.Velocity, hitNormal);
             if (vn < 0f) body.Velocity -= vn * hitNormal;
 
-            float dn = Vector2.Dot(displacement, hitNormal);
-            if (dn < 0f) displacement -= dn * hitNormal;
+            float dn2 = Vector2.Dot(displacement, hitNormal);
+            if (dn2 < 0f) displacement -= dn2 * hitNormal;
 
-            UpdateSurfaceConstraint(body, pos, hitNormal);
+            if (!hitFromFloating)
+                UpdateSurfaceConstraint(body, pos, hitNormal);
         }
 
         return pos + displacement;

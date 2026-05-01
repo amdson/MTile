@@ -13,7 +13,7 @@ public class Game1 : Game
     private Texture2D _pixel;
 
     private readonly List<PhysicsBody> _bodies = new();
-    private PhysicsBody _hexagon;
+    private PlayerCharacter _player;
 
     private static readonly Vector2 Gravity = new(0f, 300f);
     private readonly ChunkMap _chunks = new();
@@ -42,13 +42,12 @@ public class Game1 : Game
                         chunk.Tiles[tx, ty].IsSolid = (cy * Chunk.Size + ty) >= 0;
                         chunk.Tiles[tx, ty].IsSolid = chunk.Tiles[tx, ty].IsSolid || ((cx == -1) && (tx < Chunk.Size / 2) && (cy * Chunk.Size + ty) <= -10);
                         chunk.Tiles[tx, ty].IsSolid = chunk.Tiles[tx, ty].IsSolid || (cx < -1);
-
                     }
                 _chunks[new Point(cx, cy)] = chunk;
             }
 
-        _hexagon = new PhysicsBody(Polygon.CreateRegular(40f, 6), new Vector2(0f, -200f));
-        _bodies.Add(_hexagon);
+        _player = new PlayerCharacter(new Vector2(0f, -200f));
+        _bodies.Add(_player.Body);
 
         base.Initialize();
     }
@@ -56,18 +55,10 @@ public class Game1 : Game
     protected override void LoadContent()
     {
         _spriteBatch = new SpriteBatch(GraphicsDevice);
-
         _pixel = new Texture2D(GraphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
     }
 
-
-    /* Update loop
-    1. Gather player input
-    2. Update controller state
-    3. Check 
-    3. Update movement state based on input, player state (position and constraints), current movement state, 
-    */
     protected override void Update(GameTime gameTime)
     {
         var keyboardState = Keyboard.GetState();
@@ -80,29 +71,16 @@ public class Game1 : Game
         var viewport = GraphicsDevice.Viewport;
         var screenCenter = new Vector2(viewport.Width / 2f, viewport.Height / 2f);
         var mouseWorldPos = _camera.ScreenToWorld(mouseState.Position.ToVector2(), screenCenter);
-        
+
         _controller.Update(mouseWorldPos);
-        
 
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
-        Vector2 force = Vector2.Zero;
-        float forceSpeed = 1000f;
-
-        if (_controller.Current.Left)
-            force.X -= forceSpeed;
-        if (_controller.Current.Right)
-            force.X += forceSpeed;
-        if (_controller.Current.Up)
-            force.Y -= forceSpeed;
-        if (_controller.Current.Down)
-            force.Y += forceSpeed;
-
-        _hexagon.Velocity += force * dt; 
+        _player.Update(_controller.Current, _chunks, dt);
 
         PhysicsWorld.StepSwept(_bodies, _chunks, dt, Gravity);
 
-        _camera.TrackTarget(_hexagon.Position, screenCenter);
+        _camera.TrackTarget(_player.Body.Position, screenCenter);
 
         base.Update(gameTime);
     }
@@ -119,17 +97,18 @@ public class Game1 : Game
         foreach (var chunk in _chunks)
             DrawChunk(chunk);
 
-        DrawPolygon(_hexagon.Polygon, _hexagon.Position, Color.LimeGreen);
+        DrawPolygon(_player.Body.Polygon, _player.Body.Position,
+            _player.IsGrounded ? Color.LimeGreen : Color.Orange);
 
         if (DebugDrawConstraints)
             foreach (var body in _bodies)
                 foreach (var c in body.Constraints)
-                    if (c is SurfaceDistance sd)
-                        DrawConstraintArrow(sd.Position, sd.Normal);
+                    if (c is SurfaceContact sc)
+                        DrawConstraintArrow(sc.Position, sc.Normal,
+                            c is FloatingSurfaceDistance ? Color.Cyan : Color.Yellow);
 
         _spriteBatch.End();
 
-        // Draw screen-space UI elements like the cursor dot
         _spriteBatch.Begin();
         var mousePos = _controller.Current.MousePosition;
         _spriteBatch.Draw(_pixel, new Rectangle(mousePos.X - 2, mousePos.Y - 2, 5, 5), Color.Red);
@@ -174,15 +153,15 @@ public class Game1 : Game
             DrawLine(verts[i], verts[(i + 1) % verts.Length], color);
     }
 
-    private void DrawConstraintArrow(Vector2 position, Vector2 normal)
+    private void DrawConstraintArrow(Vector2 position, Vector2 normal, Color color)
     {
         const float shaftLength = 20f;
         const float headLength = 8f;
         var tip = position + normal * shaftLength;
         var perp = new Vector2(-normal.Y, normal.X);
-        DrawLine(position, tip, Color.Yellow);
-        DrawLine(tip, tip + (-normal + perp) * headLength * 0.707f, Color.Yellow);
-        DrawLine(tip, tip + (-normal - perp) * headLength * 0.707f, Color.Yellow);
+        DrawLine(position, tip, color);
+        DrawLine(tip, tip + (-normal + perp) * headLength * 0.707f, color);
+        DrawLine(tip, tip + (-normal - perp) * headLength * 0.707f, color);
     }
 
     private void DrawLine(Vector2 start, Vector2 end, Color color, int thickness = 2)
