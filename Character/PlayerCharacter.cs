@@ -21,7 +21,10 @@ public class PlayerCharacter
         
         _stateRegistry.Add(new FallingState());
         _stateRegistry.Add(new StandingState());
+        _stateRegistry.Add(new CrouchedState());
         _stateRegistry.Add(new JumpingState());
+        _stateRegistry.Add(new RunningJumpState());
+        _stateRegistry.Add(new DoubleJumpingState());
         _stateRegistry.Add(new WallSlidingState(1));
         _stateRegistry.Add(new WallSlidingState(-1));
         _stateRegistry.Add(new WallJumpingState(1));
@@ -30,8 +33,14 @@ public class PlayerCharacter
         _currentState = _stateRegistry[0]; // falling
     }
 
+    private PlayerInput _lastInput;
+
     public void Update(PlayerInput input, ChunkMap chunks, float dt)
     {
+        bool jumpJustPressed = (input.Space && !_lastInput.Space) || (input.Up && !_lastInput.Up);
+        _abilities.JumpJustPressed = jumpJustPressed;
+        _lastInput = input;
+
         var ctx = new EnvironmentContext
         {
             Input = input,
@@ -39,6 +48,11 @@ public class PlayerCharacter
             Dt = dt,
             Body = Body
         };
+
+        if (IsGrounded || ctx.TryGetWall(1, out _) || ctx.TryGetWall(-1, out _))
+        {
+            _abilities.HasDoubleJumped = false;
+        }
 
         if (!_currentState.CheckConditions(ctx, _abilities))
         {
@@ -74,5 +88,5 @@ public class PlayerCharacter
         _currentState.Update(ctx, _abilities);
     }
 
-    public bool IsGrounded => _currentState is StandingState;
+    public bool IsGrounded => _currentState is StandingState || _currentState is CrouchedState;
 }

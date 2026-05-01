@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
@@ -19,6 +20,8 @@ public class Game1 : Game
     private readonly ChunkMap _chunks = new();
     private readonly Camera _camera = new();
     private readonly Controller _controller = new();
+    
+    private FileSystemWatcher _movementConfigWatcher;
 
     public bool DebugDrawConstraints = true;
 
@@ -35,6 +38,21 @@ public class Game1 : Game
     {
         string terrainConfigPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Levels", "terrain.json");
         TerrainLoader.Load(terrainConfigPath, _chunks);
+
+        string configPath = Path.GetFullPath("movement_config.json");
+        MovementConfig.Load(configPath);
+        
+        _movementConfigWatcher = new FileSystemWatcher(Path.GetDirectoryName(configPath))
+        {
+            Filter = Path.GetFileName(configPath),
+            NotifyFilter = NotifyFilters.LastWrite,
+            EnableRaisingEvents = true
+        };
+        _movementConfigWatcher.Changed += (s, e) =>
+        {
+            System.Threading.Thread.Sleep(50);
+            MovementConfig.Load(configPath);
+        };
 
         _player = new PlayerCharacter(new Vector2(0f, -200f));
         _bodies.Add(_player.Body);
@@ -110,6 +128,7 @@ public class Game1 : Game
     protected override void UnloadContent()
     {
         _pixel?.Dispose();
+        _movementConfigWatcher?.Dispose();
         base.UnloadContent();
     }
 

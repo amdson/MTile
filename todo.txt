@@ -1,0 +1,7 @@
+- Track forces exterted on PhysicsContacts by movement logic (and anything else)
+- Allow a max force to be specified for PhysicsContacts, exceeding of which resulting in removal
+- Implement block creation on right-click
+- Implement moving surfaces and integrate into block creation. 
+- Implement actions in addition to movements
+- Implement roll, ledge, overcrop, ceiling, guard, and dodge, moves. 
+- 
