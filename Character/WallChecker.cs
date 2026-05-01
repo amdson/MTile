@@ -5,27 +5,36 @@ namespace MTile;
 
 public static class WallChecker
 {
-    private const float ProbeSlack = 10f; // Look for a wall within this distance
-    
-    // Returns 1 if touching right wall, -1 if touching left wall, 0 if neither.
-    public static int Check(PhysicsBody body, ChunkMap chunks, float bodyHalfWidth)
+    private const float ProbeSlack = 12f;
+
+    // Returns true and fills `contact` if a solid wall face is within probe range on the given side.
+    // wallDir: 1 = right wall, -1 = left wall.
+    // floatWidth is added to bodyHalfWidth to set the contact's MinDistance (typically 0 for walls).
+    public static bool TryFind(
+        PhysicsBody body,
+        ChunkMap chunks,
+        float bodyHalfWidth,
+        float floatWidth,
+        int wallDir,
+        out FloatingSurfaceDistance contact)
     {
+        contact = null;
         var bounds = body.Polygon.GetBounds(body.Position);
-        float probeTop = bounds.Top + 2f;    // Ignore small steps
-        float probeBottom = bounds.Bottom - 2f; 
-        
-        float probeLeft = bounds.Left - ProbeSlack;
-        float probeRight = bounds.Right + ProbeSlack;
+
+        float probeTop    = bounds.Top    + 2f;
+        float probeBottom = bounds.Bottom - 2f;
+        float probeLeft   = wallDir == 1 ? bounds.Right              : bounds.Left - ProbeSlack;
+        float probeRight  = wallDir == 1 ? bounds.Right + ProbeSlack : bounds.Left;
 
         const int chunkPixelSize = Chunk.Size * Chunk.TileSize;
 
-        int cxMin = (int)Math.Floor(probeLeft / chunkPixelSize);
-        int cxMax = (int)Math.Floor(probeRight / chunkPixelSize);
-        int cyMin = (int)Math.Floor(probeTop / chunkPixelSize);
-        int cyMax = (int)Math.Floor(probeBottom / chunkPixelSize);
+        float bestX = wallDir == 1 ? float.MaxValue : float.MinValue;
+        bool  found = false;
 
-        bool hitLeft = false;
-        bool hitRight = false;
+        int cxMin = (int)Math.Floor(probeLeft  / chunkPixelSize);
+        int cxMax = (int)Math.Floor(probeRight / chunkPixelSize);
+        int cyMin = (int)Math.Floor(probeTop   / chunkPixelSize);
+        int cyMax = (int)Math.Floor(probeBottom / chunkPixelSize);
 
         for (int cx = cxMin; cx <= cxMax; cx++)
         for (int cy = cyMin; cy <= cyMax; cy++)
@@ -36,9 +45,9 @@ public static class WallChecker
             float chunkOriginX = cx * chunkPixelSize;
             float chunkOriginY = cy * chunkPixelSize;
 
-            int txMin = Math.Max(0, (int)Math.Floor((probeLeft - chunkOriginX) / Chunk.TileSize));
+            int txMin = Math.Max(0, (int)Math.Floor((probeLeft  - chunkOriginX) / Chunk.TileSize));
             int txMax = Math.Min(Chunk.Size - 1, (int)Math.Floor((probeRight - chunkOriginX) / Chunk.TileSize));
-            int tyMin = Math.Max(0, (int)Math.Floor((probeTop - chunkOriginY) / Chunk.TileSize));
+            int tyMin = Math.Max(0, (int)Math.Floor((probeTop    - chunkOriginY) / Chunk.TileSize));
             int tyMax = Math.Min(Chunk.Size - 1, (int)Math.Floor((probeBottom - chunkOriginY) / Chunk.TileSize));
 
             if (txMin > txMax || tyMin > tyMax) continue;
@@ -48,23 +57,27 @@ public static class WallChecker
             {
                 if (!chunk.Tiles[tx, ty].IsSolid) continue;
 
-                float tileLeftX = chunkOriginX + tx * Chunk.TileSize;
-                float tileRightX = tileLeftX + Chunk.TileSize;
+                float tileLeft  = chunkOriginX + tx * Chunk.TileSize;
+                float tileRight = tileLeft + Chunk.TileSize;
 
-                // Ignore tiles we are inside or above/below
-                if (tileRightX <= bounds.Left) 
+                if (wallDir == 1)
                 {
-                    if (tileRightX >= probeLeft) hitLeft = true;
+                    if (tileLeft < bounds.Right) continue;
+                    if (tileLeft < bestX) { bestX = tileLeft; found = true; }
                 }
-                else if (tileLeftX >= bounds.Right)
+                else
                 {
-                    if (tileLeftX <= probeRight) hitRight = true;
+                    if (tileRight > bounds.Left) continue;
+                    if (tileRight > bestX) { bestX = tileRight; found = true; }
                 }
             }
         }
 
-        if (hitRight) return 1;
-        if (hitLeft) return -1;
-        return 0;
+        if (!found) return false;
+
+        var normal   = wallDir == 1 ? new Vector2(-1f, 0f) : new Vector2(1f, 0f);
+        var position = new Vector2(bestX, body.Position.Y);
+        contact = new FloatingSurfaceDistance(position, normal, bodyHalfWidth + floatWidth);
+        return true;
     }
 }

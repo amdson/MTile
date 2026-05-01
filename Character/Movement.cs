@@ -25,25 +25,29 @@ public class FallingState : MovementState
             return new StandingState(contact);
         }
 
-        int wallDir = WallChecker.Check(body, chunks, PlayerCharacter.Radius);
-        if (wallDir != 0 && ((wallDir == 1 && input.Right) || (wallDir == -1 && input.Left)))
+        float inputX = (input.Right ? 1f : 0f) - (input.Left ? 1f : 0f);
+
+        if (inputX != 0f)
         {
-            return new WallSlidingState(wallDir);
+            int wallDir = (int)MathF.Sign(inputX);
+            if (WallChecker.TryFind(body, chunks, PlayerCharacter.Radius, 0f, wallDir, out var wallContact))
+            {
+                body.Constraints.Add(wallContact);
+                return new WallSlidingState(wallDir, wallContact);
+            }
         }
 
         var force = Vector2.Zero;
-        float inputX = (input.Right ? 1f : 0f) - (input.Left ? 1f : 0f);
-        
         if (inputX != 0f)
         {
             force.X += inputX * AirAccel;
             float excess = MathF.Abs(body.Velocity.X) - MaxAirSpeed;
-            if (excess > 0f && MathF.Sign(body.Velocity.X) == MathF.Sign(inputX))
+            if (excess > 0f && MathF.Sign(body.Velocity.X) == MathF.Sign(inputX) && dt > 0f)
             {
                 force.X -= MathF.Sign(body.Velocity.X) * excess / dt;
             }
         }
-        else
+        else if (dt > 0f)
         {
             force.X = Math.Clamp(-body.Velocity.X / dt, -AirDrag, AirDrag);
         }
@@ -99,15 +103,15 @@ public class StandingState : MovementState
             force.X += inputX * WalkAccel;
             // Cancel any velocity exceeding MaxWalkSpeed in the walk direction this frame.
             float excess = MathF.Abs(body.Velocity.X) - MaxWalkSpeed;
-            if (excess > 0f && MathF.Sign(body.Velocity.X) == MathF.Sign(inputX))
+            if (excess > 0f && MathF.Sign(body.Velocity.X) == MathF.Sign(inputX) && dt > 0f)
                 force.X -= MathF.Sign(body.Velocity.X) * excess / dt;
         }
-        else
+        else if (dt > 0f)
         {
             // Cancel horizontal velocity up to BrakingForce this frame.
             force.X = Math.Clamp(-body.Velocity.X / dt, -BrakingForce, BrakingForce);
         }
-
+        
         body.AppliedForce = force;
         return this;
     }

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("MTile.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f25b34123a0db9ae50fb36b2e383271bf1f707b4")]
 [assembly: System.Reflection.AssemblyProductAttribute("MTile.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("MTile.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

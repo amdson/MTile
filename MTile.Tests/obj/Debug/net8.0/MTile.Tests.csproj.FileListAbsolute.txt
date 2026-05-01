@@ -119,3 +119,4 @@ C:\Users\amdic\dev\MTile\MTile.Tests\obj\Debug\net8.0\refint\MTile.Tests.dll
 C:\Users\amdic\dev\MTile\MTile.Tests\obj\Debug\net8.0\MTile.Tests.pdb
 C:\Users\amdic\dev\MTile\MTile.Tests\obj\Debug\net8.0\MTile.Tests.genruntimeconfig.cache
 C:\Users\amdic\dev\MTile\MTile.Tests\obj\Debug\net8.0\ref\MTile.Tests.dll
+C:\Users\amdic\dev\MTile\MTile.Tests\obj\Debug\net8.0\MTile.Tests.sourcelink.json
