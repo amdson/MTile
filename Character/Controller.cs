@@ -37,6 +37,13 @@ namespace MTile
             return _inputBuffer[index];
         }
 
+        // Used by headless simulation: advances the buffer with a scripted input instead of reading hardware.
+        public void InjectInput(PlayerInput input)
+        {
+            _currentIndex = (_currentIndex + 1) % BufferSize;
+            _inputBuffer[_currentIndex] = input;
+        }
+
         public void Update(Vector2 mouseWorldPosition)
         {
             _currentIndex = (_currentIndex + 1) % BufferSize;
@@ -46,10 +53,10 @@ namespace MTile
 
             _inputBuffer[_currentIndex] = new PlayerInput
             {
-                Left = keyboardState.IsKeyDown(Keys.Left),
-                Right = keyboardState.IsKeyDown(Keys.Right),
-                Up = keyboardState.IsKeyDown(Keys.Up),
-                Down = keyboardState.IsKeyDown(Keys.Down),
+                Left  = keyboardState.IsKeyDown(Keys.Left)  || keyboardState.IsKeyDown(Keys.A),
+                Right = keyboardState.IsKeyDown(Keys.Right) || keyboardState.IsKeyDown(Keys.D),
+                Up    = keyboardState.IsKeyDown(Keys.Up)    || keyboardState.IsKeyDown(Keys.W),
+                Down  = keyboardState.IsKeyDown(Keys.Down)  || keyboardState.IsKeyDown(Keys.S),
                 LeftClick = mouseState.LeftButton == ButtonState.Pressed,
                 RightClick = mouseState.RightButton == ButtonState.Pressed,
                 MousePosition = mouseState.Position,

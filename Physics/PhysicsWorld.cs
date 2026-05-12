@@ -23,6 +23,7 @@ public static class PhysicsWorld
             foreach (var c in body.Constraints)
             {
                 if (c is not SurfaceContact sc) continue;
+                // TODO replace dist heuristic with check for line-segment intersection between body and plane
                 float dist = Vector2.Dot(body.Position - sc.Position, sc.Normal);
                 if (dist < sc.MinDistance)
                 {

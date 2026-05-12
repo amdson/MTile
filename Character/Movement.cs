@@ -97,10 +97,14 @@ public class StandingState : MovementState
 
         var force = Vector2.Zero;
 
-        float dist = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
-        float gap  = _ground.MinDistance - dist;
+        float dist           = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
+        float gap            = _ground.MinDistance - dist;
+        float velAlongNormal = Vector2.Dot(ctx.Body.Velocity, _ground.Normal);
         if (gap > 0f)
-            force += _ground.Normal * gap * MovementConfig.Current.SpringK;
+            force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
+        float velExcess = velAlongNormal - MovementConfig.Current.SpringMaxRiseSpeed;
+        if (velExcess > 0f && ctx.Dt > 0f)
+            force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
         if (inputX != 0f)
@@ -128,17 +132,19 @@ public class CrouchedState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        return ctx.Input.Down && ctx.TryGetGround(out _);
-    }
+        // return (ctx.Input.Down || ctx.TryGetCeiling(out _)) && ctx.TryGetCrouchGround(out _);
+        return ctx.Input.Down && ctx.TryGetCrouchGround(out _);
+
+    }   
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        return ctx.Input.Down && ctx.TryGetGround(out _);
+        return (ctx.Input.Down || ctx.TryGetCeiling(out _)) && ctx.TryGetCrouchGround(out _);
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (ctx.TryGetGround(out var contact))
+        if (ctx.TryGetCrouchGround(out var contact))
         {
             _ground = contact;
             ctx.Body.Constraints.Add(_ground);
@@ -154,7 +160,7 @@ public class CrouchedState : MovementState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (ctx.TryGetGround(out var refreshed))
+        if (ctx.TryGetCrouchGround(out var refreshed))
         {
             _ground.Position  = refreshed.Position;
             _ground.Normal    = refreshed.Normal;
@@ -163,10 +169,14 @@ public class CrouchedState : MovementState
 
         var force = Vector2.Zero;
 
-        float dist = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
-        float gap  = _ground.MinDistance - dist;
+        float dist           = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
+        float gap            = _ground.MinDistance - dist;
+        float velAlongNormal = Vector2.Dot(ctx.Body.Velocity, _ground.Normal);
         if (gap > 0f)
-            force += _ground.Normal * gap * MovementConfig.Current.SpringK;
+            force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
+        float velExcess = velAlongNormal - MovementConfig.Current.SpringMaxRiseSpeed;
+        if (velExcess > 0f && ctx.Dt > 0f)
+            force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
         if (inputX != 0f)

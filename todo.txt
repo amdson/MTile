@@ -1,7 +1,81 @@
+Thoughts
+ParkourState, and the Jump states are still pretty poor. DropDown isn't working. Jump from under ledge is still failing. 
+
+The common theme with most of these states that aren't working is that they have environment pre-conditions, and manipulate the character on a semi-scripted movement path from a semi-arbitrary start point to a target point. It's proving quite difficult to keep these looking clean, smooth, and controllable/intuitive though. 
+
+There's a few common goals here. 
+- respect player intent as much as possible. Pressing arrows indicates an intent to go in a certain direction. Inputting a command indicates an intent to carry out a movement, either now or later. Use of controller buffer / move priority should reflect this
+- make player movement predictable
+- make player movement continuous. 
+    - Avoid frequent jerky movements
+    - preserve normal velocity. e.g. walking over and ducking under random obstacles should feel as smooth as just walking over flat ground, occasionally slowed by crouching. 
+    - prevent the player from running into corners, getting blocked by overhands, etc, when a movement state is capable of preventing it
+- don't fight the player
+    - make sure there's a way to do everything the player can reasonably do. for instance, it should be possible to approach an outcrop without triggering a vault, but it should also be possible to correctly trigger a vault without needing significantly good timing. 
+
+Right now, there's maybe three states planned that require guided movement, with the ParkourState being the archetypal one. I'd like to try to really nail ParkourState, and then use the ideas from that to quickly recreate the other similar states, like LedgePull, LedgeDrop, CoveredJump, etc. 
+
+ParkourState unifies the previous VaultState and DuckState, which handled smoothly vaulting over blocks and smoothly ducking under ledges respectively. I felt I had to combine them, because under some edge cases such as climbing a stairway of blocks into a covered tunnel, both need to activate smoothly. 
+
+The basic idea of ParkourState:
+
+A) the player is moving to the left or right
+B) they run into an obstacle, like a one block height platform, or a slightly lower than head height tunnel, or stairs leading up or down into a tunnel
+
+E.g.
+    
+OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+OOOOOOOOOOOOOOOOOOOOOOXXXXXXXXXXXXXXXXXXXX
+OOOOXXXXXXXXXXOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+XXXXXXXXXXXXXXXXXXXXOOOOOOOOOOOOOOOOOOOOOO
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+C) They either moving fast enough, or holding up/down to trigger state entry
+
+D) I then push the player onto a movement path which keeps them moving over/under/into the obstacle without interupting their movement. I also add constraints/phantom surfaces to prevent them from running into corners etc. 
+
+- Although the path is planned/scripted, it should feel like a continuation of the walking state. This means that it should be completely interruptable, by letting go of the arrow key, jumping, etc, and it shouldn't induce anything the feels unnatural, like artificially fast jumps or drops, strange looking slowdowns or speedups, etc. 
+
+- Right now I'm using a bunch of random scripted forces to generate this effect, but it's painful, and I'd really like a more general method. 
+
+- There's lots of ideas. One medium complicated one would be to build a Bezier curve system, which takes in the players inital position and velocity, figures out their target endpoint when they exit parkour state (up or down a block, slightly crouched, etc), and calculates a path which is smooth, preserves horizontal velocity, etc. I could then just use forces to push the player along that path. 
+- Another is to take the phantom constraints idea further. Right now I'm adding floating surfaces to corners during the parkourstate, so that the character can't unintentionally run into edges. I could take that further, so that normal player movement, combined with extra constraints, produces the parkour effect. I'd probably need to tweak collisions, force from movement, etc, to keep movement looking continuous. 
+
+In general this is a hard problem, but I need a principled, extendable system for producing these effects. 
+
+
+
+
+
+TODO now
+- When jump is pressed while coming out from under a ledge, the player should end up jumping up and out, similar to a wall jump, instead of bumping their head. When jump is pressed and the player is fully covered by a ledge, they should simply not jump, meaning that we can implement this behavior by adding a check for initializing jump which prevents it when a ceiling is blocking, but allowing an under-ledge jump to be buffered, with a little bit of special handling to prevent head hitting. 
+- fix issue where vaulting into an overcropped tunnel triggers alternating vault and duck under states, randomly bouncing player around
+- the best fix is likely to merge these states into a unified "ParkourState" which handles pushing both up and down through obstacles, since this is a case where the constraints of both duck and leap over need to be activated. 
+- Related: make sure floating ramp contacts are active only when pushing player over/under lip in vault and duck actions. 
+- similar issue where ledge pulling into an overcropped tunnel fails to pull player in properly. Perhaps transition ledge pulling into the parkour state after the initial pull upwards to keep the code concise. 
+- make jump higher priority than wall jump, unless player is pressing out or in to wall, so that it's possible to jump parallel to wall. 
+- make vault require left/right dir to be pressed into direction of vault to activate/continue 
+- make player crouch automatically to avoid wall friction when under ledge
+- make duck under put player at stable height under ledge, so there isn't bobbing up and down. 
+- Make ledge grab pull player to a resting height just below lip. 
+- Make down arrow when player is overlooking ledge drop player into ledge grab. 
+
+
+TODO later
+- Add comments to all movementstates summarizing requirements
+- Bezier curves for vault, ledge pull, and duck, which initialize arc from player position and velocity and conclude arc at target point, under constraint of avoiding corner. Try to do this in a pragmatic, configurable way. Player should be forced on Bezier path through forces strongly proportional to devation from expected pos/vel, with a capped maximum. 
+- modify vault, ledge pull, duck under, etc to maintain momentum and keep movement snappy feeling, but also interruptable. 
+- Integrate controller buffer parsing into movement more deeply, so that controller inputs can change movement state priority, determine which of several possible transitions is applied, etc. For instance, wall jump should only be executed after an initial jump if the jump button was recently tapped down and the down-tap didn't induce an initial jump. Or low ledge vault should be possible from either standing or running, but it should only be applied if up arrow is pressed as well as left or right pressed in direction of wall when the player is standing. However, if the player is running it should activate simply when left or right arrow is pressed into wall. 
+
 - Track forces exterted on PhysicsContacts by movement logic (and anything else)
 - Allow a max force to be specified for PhysicsContacts, exceeding of which resulting in removal
-- Implement block creation on right-click
-- Implement moving surfaces and integrate into block creation. 
-- Implement actions in addition to movements
 - Implement roll, ledge, overcrop, ceiling, guard, and dodge, moves. 
-- 
+- Implement principled quality of life moves, such as ceiling sweep to avoid running into a ceiling corner when jumping up. 
+
+- Implement block creation on right-click 
+- Implement moving surfaces and integrate into block creation, so players can do things like sweep themselves up by creating blocks underneath them, and use the velocity from this for a really high jump. 
+- Implement resource tracking to limit block creation rate. 
+- Implement logic for block creation limits. (Block creation must begin within certain radius of player, but can extend slightly out of this radius after initialization as long as it's continuously active.)
+- Implement actions in addition to movements. Slashes, stabs, mana stuff, etc. 
+- Add semi-procedural animations. 

@@ -6,11 +6,23 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
+public class PerlinConfig
+{
+    public int   Seed            { get; set; } = 0;
+    public float Scale           { get; set; } = 0.04f;
+    public int   Octaves         { get; set; } = 4;
+    public float Persistence     { get; set; } = 0.5f;
+    public float Lacunarity      { get; set; } = 2.0f;
+    public int   GroundLevel     { get; set; } = 0;    // baseline in world tile Y coords
+    public int   HeightAmplitude { get; set; } = 8;    // ± tiles of variation
+}
+
 public class TerrainConfig
 {
-    public int Extents { get; set; } = 2; // Generate chunks from -Extents to +Extents
-    public Dictionary<string, string> ChunkFiles { get; set; } = new(); // "x,y" : "filename.txt"
+    public int Extents { get; set; } = 2;
+    public Dictionary<string, string> ChunkFiles { get; set; } = new();
     public List<TerrainRule> Rules { get; set; } = new();
+    public PerlinConfig Perlin { get; set; } = null; // when set, replaces Rules for unassigned chunks
 }
 
 public class TerrainRule
@@ -36,13 +48,11 @@ public static class TerrainLoader
                 string key = $"{cx},{cy}";
                 
                 if (config.ChunkFiles.TryGetValue(key, out string filename))
-                {
                     LoadChunkFromFile(chunk, Path.Combine(dir, filename));
-                }
+                else if (config.Perlin != null)
+                    GenerateWithPerlin(chunk, config.Perlin);
                 else
-                {
                     ApplyRules(chunk, config.Rules);
-                }
                 chunks[chunk.ChunkPos] = chunk;
             }
         }
@@ -64,6 +74,23 @@ public static class TerrainLoader
         }
     }
     
+    private static void GenerateWithPerlin(Chunk chunk, PerlinConfig cfg)
+    {
+        var noise = new PerlinNoise1D(cfg.Seed);
+        for (int tx = 0; tx < Chunk.Size; tx++)
+        {
+            int worldX    = chunk.ChunkPos.X * Chunk.Size + tx;
+            float h       = noise.Fbm(worldX * cfg.Scale, cfg.Octaves, cfg.Persistence, cfg.Lacunarity);
+            int surfaceY  = cfg.GroundLevel + (int)MathF.Round(h * cfg.HeightAmplitude);
+
+            for (int ty = 0; ty < Chunk.Size; ty++)
+            {
+                int worldY = chunk.ChunkPos.Y * Chunk.Size + ty;
+                chunk.Tiles[tx, ty].IsSolid = worldY >= surfaceY;
+            }
+        }
+    }
+
     private static void ApplyRules(Chunk chunk, List<TerrainRule> rules)
     {
         for (int tx = 0; tx < Chunk.Size; tx++)

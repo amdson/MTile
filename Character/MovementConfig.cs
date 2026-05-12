@@ -33,6 +33,8 @@ public class MovementConfig
 
     // Ground Movement
     public float SpringK { get; set; } = 300f;
+    public float SpringDamping { get; set; } = 35f;
+    public float SpringMaxRiseSpeed { get; set; } = 80f;
     public float WalkAccel { get; set; } = 3000f;
     public float MaxWalkSpeed { get; set; } = 100f;
     public float BrakingForce { get; set; } = 3000f;
@@ -49,6 +51,49 @@ public class MovementConfig
     public float RunJumpVelocity { get; set; } = -120f;
     public float RunJumpHoldForce { get; set; } = -1200f;
     public float RunJumpMinSpeed { get; set; } = 80f;
+
+    // Duck Under
+    public float DuckAutoFireSpeed { get; set; } = 40f;
+    public float DuckForce         { get; set; } = 4000f;
+    public float DuckPushForce     { get; set; } = 500f;
+    public float MaxDuckTime       { get; set; } = 0.5f;
+
+    // Ledge Grab / Pull
+    public float GrabGravityCancel { get; set; } = 600f;
+    public float GrabSpringK       { get; set; } = 300f;
+    public float GrabDamping       { get; set; } = 100f;
+
+    // Duck Under (stable height)
+    public float DuckDamping       { get; set; } = 80f;
+
+    // Ledge Vault
+    public float VaultAutoFireSpeed { get; set; } = 90f;
+    public float VaultLiftForce  { get; set; } = 2000f;
+    public float VaultPushForce  { get; set; } = 500f;
+    public float MaxVaultTime    { get; set; } = 0.5f;
+
+    // Guided States (Parkour, LedgePull, LedgeDrop, CoveredJump — path-followed via PD control)
+    // Stability condition for 30fps Euler integration: K·dt² + D·dt < 2
+    // At dt=1/30: K·0.001 + D·0.033 < 2 → with K=200, D=40: 0.20+1.32=1.52 ✓
+    public float GuidedSpringK        { get; set; } = 200f;
+    public float GuidedDamping        { get; set; } = 40f;
+    public float GuidedMaxForce       { get; set; } = 10000f;
+    public float GuidedLookahead      { get; set; } = 0.05f;  // fraction of path to look ahead
+    public float GuidedGravityCancel  { get; set; } = 600f;
+    public float GuidedMinDuration    { get; set; } = 0.15f;
+    public float GuidedMaxDuration    { get; set; } = 0.6f;
+    public float GuidedRefSpeed       { get; set; } = 80f;    // fallback for duration estimate
+
+    // Vault kick — instantaneous velocity bump applied at ParkourState entry.
+    // Forward component is scaled by wallDir; upward is negative Y.
+    public float VaultKickForward     { get; set; } = 0f;
+    public float VaultKickUp          { get; set; } = -40f;
+
+    // Phantom safety ramps near corners during ParkourState. Originally a
+    // belt-and-suspenders against the path-tracking PD slipping into the
+    // corner geometry. Off by default — the multi-segment path + apex clamp
+    // should keep the body clear without needing the constraint.
+    public bool  ParkourSafetyRamps   { get; set; } = false;
 
     // Double Jump
     public float DoubleJumpVelocity { get; set; } = -100f;
