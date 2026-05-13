@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "j3U1hAIqGY4=",
+  "dgSpecHash": "r11zxix1eeo=",
   "success": true,
-  "projectFilePath": "C:\\Users\\amdic\\dev\\MTile\\MTile.Tests\\MTile.Tests.csproj",
+  "projectFilePath": "c:\\Users\\amdic\\dev\\MTile\\MTile.Tests\\MTile.Tests.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\amdic\\.nuget\\packages\\coverlet.collector\\6.0.0\\coverlet.collector.6.0.0.nupkg.sha512",
     "C:\\Users\\amdic\\.nuget\\packages\\microsoft.codecoverage\\17.8.0\\microsoft.codecoverage.17.8.0.nupkg.sha512",

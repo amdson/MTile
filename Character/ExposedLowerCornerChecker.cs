@@ -19,22 +19,21 @@ public static class ExposedLowerCornerChecker
         out ExposedLowerCorner corner)
     {
         corner = default;
-        var bounds = body.Polygon.GetBounds(body.Position);
+        var bounds = body.Bounds;
+        // Probe a side slab from the body's head down to its center — corners whose bottom is in
+        // this y window are at "head height" relative to the body.
+        var probe = bounds.StripBeside(wallDir, ProbeSlack).WithVerticalRange(bounds.Top, bounds.CenterY);
+        float bodyFace = bounds.Side(wallDir);
+        float playerHead = bounds.Top;
 
-        float probeLeft   = wallDir == 1 ? bounds.Right              : bounds.Left - ProbeSlack;
-        float probeRight  = wallDir == 1 ? bounds.Right + ProbeSlack : bounds.Left;
-        float probeTop    = body.Position.Y - 2f * PlayerCharacter.Radius;
-        float probeBottom = body.Position.Y;
-
-        float playerHead  = body.Position.Y - PlayerCharacter.Radius;
         float bestBottomY = float.MinValue;
         float bestX       = 0f;
         bool  found       = false;
 
-        foreach (var tile in TileQuery.SolidTilesInRect(chunks, probeLeft, probeTop, probeRight, probeBottom))
+        foreach (var tile in TileQuery.SolidTilesInRect(chunks, probe))
         {
-            if (wallDir ==  1 && tile.WorldLeft  < bounds.Right) continue;
-            if (wallDir == -1 && tile.WorldRight > bounds.Left)  continue;
+            if (wallDir ==  1 && tile.WorldLeft  < bodyFace) continue;
+            if (wallDir == -1 && tile.WorldRight > bodyFace) continue;
 
             if (playerHead >= tile.WorldBottom) continue;
 

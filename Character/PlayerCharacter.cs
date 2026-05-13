@@ -42,9 +42,10 @@ public class PlayerCharacter
         _stateRegistry.Add(new WallSlidingState(-1));
         _stateRegistry.Add(new WallJumpingState(1));
         _stateRegistry.Add(new WallJumpingState(-1));
-        _stateRegistry.Add(new CeilingJumpState());
+        _stateRegistry.Add(new CoveredJumpState());
         _stateRegistry.Add(new ParkourState(1));
         _stateRegistry.Add(new ParkourState(-1));
+        _stateRegistry.Add(new DropdownState());
         _stateRegistry.Add(new LedgeGrabState(1));
         _stateRegistry.Add(new LedgeGrabState(-1));
         _stateRegistry.Add(new LedgePullState(1));

@@ -2,7 +2,6 @@ C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\CoverletSourceRootsMapping
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\testhost.dll
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\MTile.deps.json
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\MTile.runtimeconfig.json
-C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\MTile.exe
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\testhost.exe
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\xunit.runner.visualstudio.dotnetcore.testadapter.dll
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\xunit.runner.reporters.netcoreapp10.dll
@@ -124,3 +123,4 @@ C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\Content\DebugFont.xnb
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\Levels\start.txt
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\Levels\terrain.json
 c:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\Levels\course.txt
+C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\MTile.exe

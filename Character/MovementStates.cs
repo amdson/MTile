@@ -14,12 +14,11 @@ public class JumpingState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (!abilities.JumpJustPressed || !ctx.TryGetGround(out _)) return false;
-        // Fully covered by ceiling → no jump (CeilingJumpState handles the partial case)
-        bool fullyCovered = ctx.TryGetCeiling(out _)
-            && !ctx.TryGetExposedLowerCorner(1, out _)
-            && !ctx.TryGetExposedLowerCorner(-1, out _);
-        return !fullyCovered;
+        if (!abilities.JumpJustPressed || !ctx.TryGetGround(out var ground)) return false;
+        // Low ceiling (≤ 2 tiles) overhead: head would smack — defer to CoveredJumpState.
+        if (ctx.TryGetCeiling(out var ceiling)
+            && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
+        return true;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -32,7 +31,7 @@ public class JumpingState : MovementState
         _timeInState = 0f;
         _jumpReleased = !ctx.Input.Space;
         ctx.Body.Velocity.Y = MovementConfig.Current.JumpVelocity;
-        
+
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
     }
 
@@ -73,12 +72,11 @@ public class RunningJumpState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (!abilities.JumpJustPressed || !ctx.TryGetGround(out _)) return false;
+        if (!abilities.JumpJustPressed || !ctx.TryGetGround(out var ground)) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
-        bool fullyCovered = ctx.TryGetCeiling(out _)
-            && !ctx.TryGetExposedLowerCorner(1, out _)
-            && !ctx.TryGetExposedLowerCorner(-1, out _);
-        return !fullyCovered;
+        if (ctx.TryGetCeiling(out var ceiling)
+            && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
+        return true;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -139,13 +137,27 @@ public class WallSlidingState : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         bool pressingIntoWall = (_wallDir == 1 && ctx.Input.Right) || (_wallDir == -1 && ctx.Input.Left);
-        return pressingIntoWall && !ctx.TryGetCeiling(out _) && !ctx.TryGetGround(out _) && ctx.TryGetWall(_wallDir, out _);
+        return pressingIntoWall && !ctx.TryGetCeiling(out _) && !IsActuallyGrounded(ctx) && ctx.TryGetWall(_wallDir, out _);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         bool pressingIntoWall = (_wallDir == 1 && ctx.Input.Right) || (_wallDir == -1 && ctx.Input.Left);
-        return pressingIntoWall && !ctx.TryGetCeiling(out _) && !ctx.TryGetGround(out _) && ctx.TryGetWall(_wallDir, out _);
+        return pressingIntoWall && !ctx.TryGetCeiling(out _) && !IsActuallyGrounded(ctx) && ctx.TryGetWall(_wallDir, out _);
+    }
+
+    // GroundChecker.TryFind reports "grounded" whenever the floor is within ProbeSlack (20px) below
+    // the body's bottom vertex — i.e. a body still ~20px above its rest height counts. For most
+    // states that slack is right (lets the body stick to the floor through small bounces / slopes),
+    // but during a wall-slide it means a body that's visually still mid-air against a wall — but
+    // happens to have a floor in range below — exits to FallingState→StandingState before it
+    // actually lands. Use a tighter test here: only count as grounded once the body's reached its
+    // rest height (≈ 2·Radius above the floor).
+    private static bool IsActuallyGrounded(EnvironmentContext ctx)
+    {
+        if (!ctx.TryGetGround(out var ground)) return false;
+        float dist = ground.Position.Y - ctx.Body.Position.Y;
+        return dist <= 2f * PlayerCharacter.Radius + 2f;
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -210,10 +222,15 @@ public class WallJumpingState : MovementState
     }
 
     public override int ActivePriority => 50;
-    public override int PassivePriority => 40;
+    // Strictly above DoubleJumping's 40 — when both could fire (player near a wall, jump tapped,
+    // double-jump still available), WallJump wins. DoubleJump still fires when no wall is detected.
+    public override int PassivePriority => 45;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
+        // Any horizontal arrow held — either pressing INTO the wall (the classic wall-slide jump) or
+        // pressing AWAY from it (falling alongside a wall, kicking off it). Both should fire WallJump.
+        // The no-input case (`Space` with no arrow held) falls through to DoubleJumping.
         bool pressingHorizontal = ctx.Input.Left || ctx.Input.Right;
         return pressingHorizontal && abilities.JumpJustPressed && ctx.TryGetWall(_wallDir, out _);
     }
@@ -273,7 +290,11 @@ public class DoubleJumpingState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        return abilities.JumpJustPressed && !abilities.HasDoubleJumped && !ctx.TryGetGround(out _) && !ctx.TryGetWall(1, out _) && !ctx.TryGetWall(-1, out _);
+        // No wall check: when the player IS pressing into a wall, WallJumpingState wins the tie
+        // via earlier registration (same Passive=40, first-found wins). When they're not pressing
+        // into a wall — e.g. dropping off a platform while holding the away direction — DoubleJump
+        // is the right fire here.
+        return abilities.JumpJustPressed && !abilities.HasDoubleJumped && !ctx.TryGetGround(out _);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -318,268 +339,315 @@ public class DoubleJumpingState : MovementState
     }
 }
 
-// Launched when jump is pressed while partially under a ceiling (edge case of under-ledge exit).
-// Pushes the player up and away from the overhang like a wall jump.
-public class CeilingJumpState : MovementState
+// Jump initiated while partially under an overhang. Phase 1 (SlidingOut): the jump impulse is
+// withheld — the body stays grounded (just gravity + tile collision, so at its natural low resting
+// height, which is what fits under a low slab) and walks toward the open side, an Under SteeringRamp
+// stamped on the overhang's bottom corner keeping the head from clipping it. The instant nothing's
+// overhead (!TryGetCeiling) it flips to phase 2 (Jumping): a verbatim ground jump (JumpVelocity +
+// JumpHoldForce) that does NOT consume the double jump. Held-jump only for now (a tapped-jump
+// buffered variant is TBD). Replaces the old diagonal "ceiling jump" launch.
+public class CoveredJumpState : MovementState
 {
-    public override int ActivePriority  => 52;
-    public override int PassivePriority => 32;
+    private enum Phase { SlidingOut, Jumping }
 
-    private bool _jumpReleased;
-    private float _timeInState;
     private int _openDir;
+    private float _slideSpeed;          // |horizontal velocity| at Enter, floored at MaxWalkSpeed — preserved through the slide
+    private SteeringRamp _ramp;
+    private FloatingSurfaceDistance _ground;  // held through phase 1: the body keeps its standing
+                                              // float height so the ceiling probe (anchored on the
+                                              // head) doesn't slip off the overhead slab and fire
+                                              // phase 2 prematurely. Removed on the phase-2 transition.
+    private Phase _phase;
+    private float _slideTime;
+    private float _jumpHoldTime;
+    private bool _jumpReleased;
+
+    public override int ActivePriority  => MovementPriorities.CoveredJumpActive;
+    public override int PassivePriority => MovementPriorities.CoveredJumpPassive;
+
+    // Side to exit toward: if the player's pressing a direction, honor it (never flip to the opposite
+    // side even if its edge is closer). From a standstill, pick whichever edge is nearer. An edge
+    // only "counts" if the body's leading vertex has actually pushed past it — until then the player
+    // is still deep enough under the overhang that a slide-then-jump isn't the right move yet.
+    // (Derived from CeilingChecker, not ExposedLowerCornerChecker: the latter only sees slabs whose
+    // bottom is within ~Radius of the head, which never holds for a grounded body on a tile-aligned
+    // floor — see CeilingChecker.TryFindExitEdge.)
+    private static bool TryPickOpenDir(EnvironmentContext ctx, out int dir, out Vector2 corner)
+    {
+        int want = ctx.Intent.CurrentHorizontal;
+        var bounds = ctx.Body.Bounds;
+
+        if (want != 0)
+        {
+            if (CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, want, out corner)
+                && IsStickingOut(bounds, want, corner.X))
+            { dir = want; return true; }
+            dir = 0; corner = default; return false;
+        }
+        // Standstill: closer edge wins. If only one side has one (and the body's past it), pick it.
+        bool hasR = CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks,  1, out var cR) && IsStickingOut(bounds,  1, cR.X);
+        bool hasL = CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, -1, out var cL) && IsStickingOut(bounds, -1, cL.X);
+        if (!hasR && !hasL) { dir = 0; corner = default; return false; }
+        if (!hasL) { dir =  1; corner = cR; return true; }
+        if (!hasR) { dir = -1; corner = cL; return true; }
+        float distR = cR.X - ctx.Body.Position.X;
+        float distL = ctx.Body.Position.X - cL.X;
+        if (distR <= distL) { dir =  1; corner = cR; return true; }
+        dir = -1; corner = cL; return true;
+    }
+
+    // Body's leading edge has crossed the ceiling lip — i.e. some part of the polygon is no longer
+    // shadowed by the overhang on side `dir`. Until this is true the player's still deep inside the
+    // overhang and a slide-and-jump isn't the right maneuver yet.
+    private static bool IsStickingOut(BoundingBox bounds, int dir, float edgeX)
+        => dir == 1 ? bounds.Right > edgeX : bounds.Left < edgeX;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (!abilities.JumpJustPressed) return false;
-        if (!ctx.TryGetCeiling(out _)) return false;
-        // Partially under overhang: one side has an exposed lower corner (the overhang edge)
-        return ctx.TryGetExposedLowerCorner(1, out _) || ctx.TryGetExposedLowerCorner(-1, out _);
+        if (!ctx.Input.Space) return false;            // held-jump (tapped-jump variant TBD)
+        if (!ctx.TryGetGround(out var ground)) return false;
+        if (!ctx.TryGetCeiling(out var ceiling)) return false;   // must actually be under something
+        // Only relevant for low ceilings (≤ 2 tiles). At 3+ tiles a regular jump fits with margin —
+        // JumpingState handles those, and its precondition is the complement of this one.
+        if (ground.Position.Y - ceiling.Position.Y > 2 * Chunk.TileSize) return false;
+        return TryPickOpenDir(ctx, out _, out _);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-        => !_jumpReleased && _timeInState < MovementConfig.Current.WallJumpMaxHoldTime;
+    {
+        if (_phase == Phase.SlidingOut)
+        {
+            if (!ctx.Input.Space) return false;                                          // let go of jump → abort
+            if (ctx.Intent.CurrentHorizontal == -_openDir) return false;                 // reversing interrupts cleanly
+            return _slideTime < MovementConfig.Current.MaxCoveredSlideTime;              // stuck → bail to Falling
+        }
+        return !_jumpReleased && _jumpHoldTime < MovementConfig.Current.MaxJumpHoldTime;  // same as JumpingState
+    }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        _timeInState = 0f;
-        _jumpReleased = !ctx.Input.Space;
-        // Jump away from whichever side has the overhang
-        _openDir = ctx.TryGetExposedLowerCorner(1, out _) ? -1 : 1;
-        ctx.Body.Velocity = new Vector2(_openDir * MovementConfig.Current.WallJumpInitialVelX,
-                                        MovementConfig.Current.WallJumpInitialVelY);
-        ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
+        TryPickOpenDir(ctx, out _openDir, out var corner);
+        _slideSpeed = MathF.Max(MathF.Abs(ctx.Body.Velocity.X), MovementConfig.Current.MaxWalkSpeed);
+        _ramp = new SteeringRamp { Sense = SteeringSense.Under, ForwardDir = _openDir, Corner = corner };
+        ctx.Body.Constraints.Add(_ramp);
+        // Hold the ground constraint through phase 1 — see _ground.
+        if (ctx.TryGetGround(out var ground))
+        {
+            _ground = ground;
+            ctx.Body.Constraints.Add(_ground);
+        }
+        _phase = Phase.SlidingOut;
+        _slideTime = 0f;
+        // HasDoubleJumped intentionally left untouched (already false from being grounded) — this jump is "free".
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (_ramp   != null) ctx.Body.Constraints.Remove(_ramp);
+        if (_ground != null) ctx.Body.Constraints.Remove(_ground);
+        _ramp = null;
+        _ground = null;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        _timeInState += ctx.Dt;
+        var cfg = MovementConfig.Current;
+
+        if (_phase == Phase.SlidingOut)
+        {
+            _slideTime += ctx.Dt;
+
+            // Flip to the jump the instant nothing's overhead.
+            if (!ctx.TryGetCeiling(out _))
+            {
+                if (_ground != null) { ctx.Body.Constraints.Remove(_ground); _ground = null; }
+                // Drop the ramp too: with the Clearance shift it can spuriously catch a left-edge
+                // vertex that's still 1-2px inside the slab's x-range right after clearing it, and
+                // rotate the launch's upward velocity sideways. The slide is over — no more insurance.
+                if (_ramp   != null) { ctx.Body.Constraints.Remove(_ramp);   _ramp   = null; }
+                ctx.Body.Velocity.Y = cfg.JumpVelocity;
+                _phase = Phase.Jumping;
+                _jumpHoldTime = 0f;
+                _jumpReleased = !ctx.Input.Space;
+                ctx.Body.AppliedForce = Vector2.Zero;
+                return;
+            }
+
+            // Keep the ramp anchored on the ceiling's exit edge (it'll go inert on its own once the body's past it).
+            if (CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, _openDir, out var freshCorner))
+                _ramp.Corner = freshCorner;
+
+            // Refresh the ground constraint's pose so a sloped/stepped floor doesn't fight the spring.
+            if (_ground != null && ctx.TryGetGround(out var refreshedGround))
+            {
+                _ground.Position    = refreshedGround.Position;
+                _ground.Normal      = refreshedGround.Normal;
+                _ground.MinDistance = refreshedGround.MinDistance;
+            }
+
+            // Spring force toward float height (mirrors StandingState) so the body holds standing
+            // height through the slide. Without this, gravity pulls the head down and the ceiling
+            // probe slips off the overhead slab, firing phase 2 mid-tunnel.
+            var slideForce = Vector2.Zero;
+            if (_ground != null)
+            {
+                float dist           = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
+                float gap            = _ground.MinDistance - dist;
+                float velAlongNormal = Vector2.Dot(ctx.Body.Velocity, _ground.Normal);
+                if (gap > 0f)
+                    slideForce += _ground.Normal * (gap * cfg.SpringK - velAlongNormal * cfg.SpringDamping);
+                float velExcess = velAlongNormal - cfg.SpringMaxRiseSpeed;
+                if (velExcess > 0f && ctx.Dt > 0f)
+                    slideForce -= _ground.Normal * velExcess / ctx.Dt;
+            }
+
+            // Walk toward the open side, preserving entry speed (WalkAccel·dt ≈ MaxWalkSpeed ⇒ a
+            // from-standstill press leaves the overhang in one frame). The Under ramp's redirect
+            // (in StepSwept) handles the head if the body rises into the overhang's bottom edge.
+            float along = _openDir * ctx.Body.Velocity.X;
+            slideForce.X += _openDir * AirControl.SoftClampVelocity(along, _slideSpeed, cfg.WalkAccel, ctx.Dt);
+            ctx.Body.AppliedForce = slideForce;
+            return;
+        }
+
+        // Phase.Jumping — verbatim ground jump.
+        _jumpHoldTime += ctx.Dt;
         if (!ctx.Input.Space) _jumpReleased = true;
 
         var force = Vector2.Zero;
-        force.Y += MovementConfig.Current.WallJumpHoldForce;
-
-        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
-        if (inputX != 0f)
-        {
-            force.X += inputX * MovementConfig.Current.WallJumpAirAccel;
-            float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.WallJumpMaxAirSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
-                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
-        }
-        else if (ctx.Dt > 0f)
-        {
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -MovementConfig.Current.WallJumpAirDrag, MovementConfig.Current.WallJumpAirDrag);
-        }
+        force.Y += cfg.JumpHoldForce;
+        if (_jumpHoldTime <= ctx.Dt)
+            force.Y += cfg.JumpInitForce;
+        force.X += AirControl.Apply(ctx, cfg.AirAccel, cfg.MaxAirSpeed, cfg.AirDrag);
 
         ctx.Body.AppliedForce = force;
     }
 }
 
-// Handles vault (upper corner), duck-under (lower corner), and overcrop (both simultaneously).
-// Plans a Hermite path from current pos/vel to a goal point past the obstacle, then PD-tracks it.
-// Phantom corner ramps remain as a safety net against geometric wedging if the controller slips.
-public class ParkourState : GuidedState
+// Steers the body over a low step (an exposed upper corner — a "vault") and/or under a low ceiling
+// (an exposed lower corner — an "overcrop"/duck), using one SteeringRamp per corner. The redirect
+// (in PhysicsWorld.StepSwept) rotates velocity onto the shallowest trajectory that clears the
+// corner(s); when both are present (a step with a slab right above it) the redirect's multi-ramp
+// combine threads the body through the gap. This state owns the ramps' lifecycle, cancels gravity
+// in proportion to ramp weight (so a walking-speed climb doesn't stall at the apex), and pushes
+// along the surface toward the entry speed (so the maneuver preserves momentum and bootstraps a
+// from-rest entry). Phase: one-block obstacles. See STEERING_RAMP_IMPL.md / STEERING_RAMPS.md.
+public class ParkourState : MovementState
 {
+    // Caps the along-ramp speed target at entrySpeed / MinClimbCos (≈ 4×) on near-vertical sections,
+    // so a steep climb happens fast instead of stalling the body's forward progress for several frames.
+    private const float MinClimbCos = 0.25f;
+
     private readonly int _wallDir;
+    private SteeringRamp _overRamp;    // from an exposed upper corner (vault), or null
+    private SteeringRamp _underRamp;   // from an exposed lower corner (overcrop/duck), or null
+    private float _entrySpeed;         // |horizontal velocity| at Enter, floored at MaxWalkSpeed — the maneuver preserves this
 
     public ParkourState(int wallDir) => _wallDir = wallDir;
 
-    public override int ActivePriority  => MovementPriorities.GuidedActive;
-    public override int PassivePriority => MovementPriorities.GuidedPassive;
+    public override int ActivePriority  => MovementPriorities.GuidedActive;   // below the jumps ⇒ a jump preempts the maneuver
+    public override int PassivePriority => MovementPriorities.GuidedPassive;   // above free air/ground ⇒ triggers automatically
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        // Sustained press toward wall, OR moving fast enough into the obstacle to auto-fire
-        bool pressingToward = ctx.Intent.HeldHorizontal == _wallDir;
-        float autoFireSpeed = MathF.Min(MovementConfig.Current.VaultAutoFireSpeed,
-                                        MovementConfig.Current.DuckAutoFireSpeed);
-        bool runningInto = ctx.Body.Velocity.X * _wallDir > autoFireSpeed;
-        if (!pressingToward && !runningInto) return false;
-
-        bool hasUpper = ctx.TryGetExposedCorner(_wallDir, out _);
-        bool hasLower = ctx.TryGetExposedLowerCorner(_wallDir, out _);
-        bool onGround = ctx.TryGetGround(out _);
-
-        if (!hasUpper && !hasLower) return false;
-        // Vault from air requires explicit Up press; duck always requires ground
-        //TODO duck should not always require ground
-        if (hasUpper && !onGround && !(pressingToward && ctx.Input.Up)) return false;
-        if (hasLower && !onGround) return false;
-        return true;
+        // Deliberate hold into the obstacle, from the ground, with a vault-range upper corner OR an
+        // overcrop lower corner ahead. The lower-corner case is suppressed when jump was just
+        // pressed, so "press jump near an overhang" goes to a jump state, not a duck (interim D2).
+        if (ctx.Intent.HeldHorizontal != _wallDir || !ctx.TryGetGround(out _)) return false;
+        return ctx.TryGetExposedCorner(_wallDir, out _)
+            || (ctx.TryGetExposedLowerCorner(_wallDir, out _) && !ctx.Intent.JumpJustPressed);
     }
 
-    protected override bool IntentHeld(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        // Releasing direction interrupts cleanly
-        return ctx.Intent.CurrentHorizontal == _wallDir;
+        // Releasing direction interrupts cleanly (velocity was never snapped, so it just falls through).
+        if (ctx.Intent.CurrentHorizontal != _wallDir) return false;
+        // Stay alive while a corner is still detected, or a ramp is still doing something — the
+        // checker drops the corner a frame or two before the ramp goes inert at the crest/clear point.
+        if (ctx.TryGetExposedCorner(_wallDir, out _) || ctx.TryGetExposedLowerCorner(_wallDir, out _)) return true;
+        return (_overRamp  != null && _overRamp.Weight  > SteeringRamp.WeightEpsilon)
+            || (_underRamp != null && _underRamp.Weight > SteeringRamp.WeightEpsilon);
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        // Instantaneous velocity bump at vault entry — gives the move a "pop"
-        // and seeds the path's V0 with non-degenerate velocity for at-rest entries.
-        var cfg = MovementConfig.Current;
-        ctx.Body.Velocity += new Vector2(_wallDir * cfg.VaultKickForward, cfg.VaultKickUp);
-        base.Enter(ctx, abilities);
-    }
-
-    protected override bool TryPlan(EnvironmentContext ctx, PlayerAbilityState abilities,
-                                    out GuidedPath path,
-                                    out List<FloatingSurfaceDistance> safetyConstraints)
-    {
-        path = null;
-        safetyConstraints = new List<FloatingSurfaceDistance>();
-
-        bool hasUpper = ctx.TryGetExposedCorner(_wallDir, out var upper);
-        bool hasLower = ctx.TryGetExposedLowerCorner(_wallDir, out var lower);
-        if (!hasUpper && !hasLower) return false;
-
-        var cfg = MovementConfig.Current;
-        float radius = PlayerCharacter.Radius;
-        Vector2 startPos = ctx.Body.Position;
-        Vector2 startVel = ctx.Body.Velocity;
-
-        // Don't let downward body velocity become the path's initial tangent —
-        // a positive V0.Y makes the Hermite curve dip below startPos before
-        // climbing to the goal, and the dip can pierce nearby terrain. PD
-        // damping reconciles the body's actual Vy in the first few frames.
-        if (startVel.Y > 0f) startVel.Y = 0f;
-
-        // Goal pos depends on which corners are present
-        Vector2 goalPos;
-        if (hasUpper && hasLower)
-        {
-            // Overcrop — go through the gap, midway between corners
-            float gx = (upper.InnerEdge.X + lower.InnerEdge.X) * 0.5f + _wallDir * 2f * radius;
-            float gy = (upper.InnerEdge.Y + lower.InnerEdge.Y) * 0.5f;
-            goalPos  = new Vector2(gx, gy);
-        }
-        else if (hasUpper)
-        {
-            // Vault — above and past the corner
-            goalPos = new Vector2(upper.InnerEdge.X + _wallDir * 2f * radius,
-                                  upper.InnerEdge.Y - 1.5f * radius);
-            // If a ceiling sits above the landing spot (low-clearance corridor with
-            // a stalactite over the next floor), keep the body's top below it.
-            // Otherwise the path puts body.top inside the stalactite and X-velocity
-            // gets clamped on contact.
-            ClampApexBelowCeiling(ctx.Chunks, ref goalPos, radius);
-        }
-        else
-        {
-            // Duck — below the overhang and past it
-            goalPos = new Vector2(lower.InnerEdge.X + _wallDir * 2f * radius,
-                                  lower.InnerEdge.Y + radius);
-        }
-        // Preserve incoming horizontal momentum: body exits the vault at
-        // max(|startVel.X|, MaxWalkSpeed) in the vault direction. Capping at
-        // MaxWalkSpeed would force the PD to bleed off speed during chained
-        // vaults, making the course feel sluggish even at full pace.
-        float goalSpeed = MathF.Max(MathF.Abs(startVel.X), cfg.MaxWalkSpeed);
-        Vector2 goalVel = new Vector2(_wallDir * goalSpeed, 0f);
-
-        // Insert the intermediate (forced vertical climb) only when the body has
-        // already reached the wall — i.e. it can't naturally arc over via momentum.
-        // For approaching-with-speed entries, a single-segment Hermite is smoother
-        // because the multi-segment plan has a degenerate first segment (chord ≪
-        // V·Dur) which makes the PD fight the body's actual velocity.
-        float wallTouchX = upper.InnerEdge.X - _wallDir * radius;
-        bool atOrPastWall = (startPos.X - wallTouchX) * _wallDir >= 0f;
-
-        if (hasUpper && !hasLower && atOrPastWall)
-        {
-            // Vault from at-or-past wall: 2-segment path with an intermediate above
-            // the corner. Forces the first segment to be a vertical climb so the
-            // path can't cut through the wall.
-            //
-            // Intermediate body position:
-            //   X — body's current X if it hasn't reached "wall touch" yet, otherwise
-            //       the wall-touch X. Picking max-or-min by wallDir keeps the segment
-            //       monotone (never doubles back) and degenerates to a vertical line
-            //       when the body is already at the wall.
-            //   Y — corner.Y - radius - clearance, so the body's bottom-most extent
-            //       sits a small margin above the corner top. Without clearance the
-            //       hexagon's edge brushes the corner and chunk collision pins X.
-            const float ApexClearance = 5f;
-            float midX = (_wallDir == 1)
-                ? MathF.Max(startPos.X, wallTouchX)
-                : MathF.Min(startPos.X, wallTouchX);
-            Vector2 midPos = new Vector2(midX + _wallDir * ApexClearance, upper.InnerEdge.Y - radius - ApexClearance);
-            ClampApexBelowCeiling(ctx.Chunks, ref midPos, radius);
-
-            // Velocity at the intermediate carries the body's current horizontal speed
-            // forward (no artificial deceleration) but zeros vertical motion (apex).
-            // This also keeps segment 1's V0=V1 X-component equal when the body is at
-            // the wall (Vx=0), so segment 1 collapses to a true vertical climb.
-            Vector2 midVel = new Vector2(startVel.X, 0f);
-
-            float chord1 = (midPos  - startPos).Length();
-            float chord2 = (goalPos - midPos).Length();
-            float refSpd = cfg.GuidedRefSpeed;
-            float speed1 = MathF.Max(MathF.Abs(startVel.X), refSpd);
-            float speed2 = MathF.Max(MathF.Abs(midVel.X),   refSpd);
-            float dur1   = MathHelper.Clamp(chord1 / speed1, cfg.GuidedMinDuration, cfg.GuidedMaxDuration);
-            float dur2   = MathHelper.Clamp(chord2 / speed2, cfg.GuidedMinDuration, cfg.GuidedMaxDuration);
-
-            path = new GuidedPath(new[]
-            {
-                new GuidedPath.Segment(startPos, startVel, midPos,  midVel,  dur1),
-                new GuidedPath.Segment(midPos,   midVel,   goalPos, goalVel, dur2),
-            });
-        }
-        else
-        {
-            // Overcrop or duck: single segment goes between corners or under the
-            // overhang. Wall geometry doesn't block these the way it blocks vaults.
-            float chord = (goalPos - startPos).Length();
-            float speed = MathF.Max(MathF.Abs(startVel.X), cfg.GuidedRefSpeed);
-            float dur   = MathHelper.Clamp(chord / speed, cfg.GuidedMinDuration, cfg.GuidedMaxDuration);
-            path = GuidedPath.Plan(startPos, startVel, goalPos, goalVel, dur);
-        }
-
-        // Phantom safety ramps near corners. Toggled via MovementConfig so we
-        // can compare path-only vs path+ramp behavior in testing.
-        if (cfg.ParkourSafetyRamps)
-        {
-            if (hasUpper)
-                safetyConstraints.Add(new FloatingSurfaceDistance(
-                    upper.InnerEdge,
-                    new Vector2(-_wallDir * 0.5f, -0.5f),
-                    1000f));
-            if (hasLower)
-                safetyConstraints.Add(new FloatingSurfaceDistance(
-                    lower.InnerEdge,
-                    new Vector2(-_wallDir * MathF.Sqrt(3f) * 0.5f, 0.5f),
-                    1000f));
-        }
-
         abilities.HasDoubleJumped = false;
-        return true;
+        // Preserve whatever horizontal speed the body came in with (floored at walking speed so a
+        // from-rest / flush-against-the-obstacle entry still has a target to drive toward).
+        _entrySpeed = MathF.Max(MathF.Abs(ctx.Body.Velocity.X), MovementConfig.Current.MaxWalkSpeed);
+        Reconcile(ctx);
     }
 
-    // Pushes apex Y down so the body's top stays below the lowest ceiling tile
-    // hanging over the apex. Prevents the vault path from sending body.top into
-    // a stalactite in low-clearance corridors. Probes upward over the body's
-    // top-edge X-extent (≈ radius/2 either side of apex.X), 4 tiles above.
-    private static void ClampApexBelowCeiling(ChunkMap chunks, ref Vector2 apex, float radius)
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        float halfTopWidth = radius * 0.5f;
-        float left   = apex.X - halfTopWidth;
-        float right  = apex.X + halfTopWidth;
-        float top    = apex.Y - 4f * Chunk.TileSize;
-        float bottom = apex.Y;
+        if (_overRamp  != null) ctx.Body.Constraints.Remove(_overRamp);
+        if (_underRamp != null) ctx.Body.Constraints.Remove(_underRamp);
+        _overRamp = _underRamp = null;
+    }
 
-        float lowestCeilingBottom = float.MinValue;
-        foreach (var tile in TileQuery.SolidTilesInRect(chunks, left, top, right, bottom))
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        Reconcile(ctx);
+        if (_overRamp == null && _underRamp == null) { ctx.Body.AppliedForce = Vector2.Zero; return; }
+
+        var verts = ctx.Body.Polygon.GetVertices(ctx.Body.Position);
+        _overRamp?.Recompute(verts);
+        _underRamp?.Recompute(verts);
+
+        var cfg = MovementConfig.Current;
+
+        // Cancel gravity in proportion to the strongest engaged ramp: the redirect (in StepSwept)
+        // rescales velocity to its own magnitude every step, so without this the climb bleeds speed.
+        float maxWeight = MathF.Max(_overRamp?.Weight ?? 0f, _underRamp?.Weight ?? 0f);
+        Vector2 force = new Vector2(0f, -cfg.RampAntiGravForce * maxWeight);
+
+        // Pick a push direction: with exactly one ramp engaged, push along its implicit surface and
+        // scale the target by 1/cos(θ*) so the horizontal component stays near the entry speed even
+        // on a steep section; otherwise (none engaged yet, or both — a "jump and duck" gap) push
+        // straight forward and let the redirect's combine do the steering.
+        SteeringRamp solo = null; int engaged = 0;
+        if (_overRamp  != null && _overRamp.Weight  > SteeringRamp.WeightEpsilon) { engaged++; solo = _overRamp; }
+        if (_underRamp != null && _underRamp.Weight > SteeringRamp.WeightEpsilon) { engaged++; solo = _underRamp; }
+
+        Vector2 dir  = engaged == 1 ? solo.SurfaceDir : new Vector2(_wallDir, 0f);
+        float   cosT = engaged == 1 ? MathF.Max(MathF.Cos(solo.ThetaStar), MinClimbCos) : 1f;
+        float   targetAlong = _entrySpeed / cosT;
+        force += dir * AirControl.SoftClampVelocity(Vector2.Dot(ctx.Body.Velocity, dir), targetAlong, cfg.WalkAccel, ctx.Dt);
+
+        // Cap |velocity| at the target only when steering off a single surface (so the climb force
+        // can't inflate it through the redirect's rescale); the multi-ramp combine manages its own.
+        if (_overRamp  != null) _overRamp.MaxSpeed  = (engaged == 1 && solo == _overRamp)  ? targetAlong : float.PositiveInfinity;
+        if (_underRamp != null) _underRamp.MaxSpeed = (engaged == 1 && solo == _underRamp) ? targetAlong : float.PositiveInfinity;
+
+        ctx.Body.AppliedForce = force;
+    }
+
+    // Add/remove the Over and Under SteeringRamps to match the corners currently detected ahead,
+    // and keep their Corner anchors fresh. Idempotent; runs every frame so a staircase or a chain
+    // of obstacles is handled without a one-frame gap where the ramps blink out.
+    private void Reconcile(EnvironmentContext ctx)
+    {
+        if (ctx.TryGetExposedCorner(_wallDir, out var up))
         {
-            if (tile.WorldBottom > lowestCeilingBottom) lowestCeilingBottom = tile.WorldBottom;
+            if (_overRamp == null)
+            {
+                _overRamp = new SteeringRamp { Sense = SteeringSense.Over, ForwardDir = _wallDir };
+                ctx.Body.Constraints.Add(_overRamp);
+            }
+            _overRamp.Corner = up.InnerEdge;
         }
-        if (lowestCeilingBottom == float.MinValue) return;
+        else if (_overRamp != null) { ctx.Body.Constraints.Remove(_overRamp); _overRamp = null; }
 
-        // body.Y - radius >= ceilingBottom + 1 → body.Y >= ceilingBottom + radius + 1
-        float minY = lowestCeilingBottom + radius + 1f;
-        if (apex.Y < minY) apex.Y = minY;
+        if (ctx.TryGetExposedLowerCorner(_wallDir, out var lo))
+        {
+            if (_underRamp == null)
+            {
+                _underRamp = new SteeringRamp { Sense = SteeringSense.Under, ForwardDir = _wallDir };
+                ctx.Body.Constraints.Add(_underRamp);
+            }
+            _underRamp.Corner = lo.InnerEdge;
+        }
+        else if (_underRamp != null) { ctx.Body.Constraints.Remove(_underRamp); _underRamp = null; }
     }
 }
 
@@ -764,3 +832,100 @@ public class LedgePullState : MovementState
     }
 }
 
+// Hold Down while standing on the edge of a platform → slip off. Removes the float-height ground
+// constraint so the body's no longer spring-held above the surface (gravity + tile collision keep
+// it on the platform until its center clears the edge), applies a horizontal slide force in the
+// chosen direction (so a crouched/sunken body actually gets pushed out from over the platform —
+// same idiom as CoveredJumpState's phase 1), and stamps an Over SteeringRamp on the platform's edge
+// corner as insurance against clipping the corner mid-slip. Exits to FallingState the instant the
+// body's no longer over any floor.
+public class DropdownState : MovementState
+{
+    private int _dropDir;
+    private SteeringRamp _ramp;
+    private float _slideSpeed;
+    private float _slideTime;
+    private bool _exitingAirborne;   // set when CheckConditions detects the body just left the platform — Exit dampens Vx accordingly
+
+    public override int ActivePriority  => MovementPriorities.DropdownActive;
+    public override int PassivePriority => MovementPriorities.DropdownPassive;
+
+    // Same pattern as CoveredJumpState.TryPickOpenDir: honor input direction strictly when held,
+    // closer edge from a standstill, never flip to the opposite side. Edge from GroundChecker.
+    private static bool TryPickDropDir(EnvironmentContext ctx, out int dir, out Vector2 corner)
+    {
+        int want = ctx.Intent.CurrentHorizontal;
+        if (want != 0)
+        {
+            if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, want, out corner)) { dir = want; return true; }
+            dir = 0; corner = default; return false;
+        }
+        bool hasR = GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks,  1, out var cR);
+        bool hasL = GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, -1, out var cL);
+        if (!hasR && !hasL) { dir = 0; corner = default; return false; }
+        if (!hasL) { dir =  1; corner = cR; return true; }
+        if (!hasR) { dir = -1; corner = cL; return true; }
+        float distR = cR.X - ctx.Body.Position.X;
+        float distL = ctx.Body.Position.X - cL.X;
+        if (distR <= distL) { dir =  1; corner = cR; return true; }
+        dir = -1; corner = cL; return true;
+    }
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (!ctx.Input.Down) return false;
+        if (!ctx.TryGetGround(out _)) return false;
+        return TryPickDropDir(ctx, out _, out _);
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (!ctx.Input.Down) return false;
+        if (!ctx.TryGetGround(out _)) { _exitingAirborne = true; return false; }   // body's airborne ⇒ Falling takes over
+        return _slideTime < MovementConfig.Current.MaxDropdownTime;
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        TryPickDropDir(ctx, out _dropDir, out var corner);
+        // MaxWalkSpeed is the slide target — fast enough to clear the corner within MaxDropdownTime
+        // from a standstill. Running entries keep their momentum since Update only applies force when
+        // the body's slower than the target.
+        _slideSpeed = MovementConfig.Current.MaxWalkSpeed;
+        _ramp = new SteeringRamp { Sense = SteeringSense.Over, ForwardDir = _dropDir, Corner = corner };
+        ctx.Body.Constraints.Add(_ramp);
+        _slideTime = 0f;
+        _exitingAirborne = false;
+        // No FloatingSurfaceDistance: the body's leaving the surface, so don't spring it back up.
+        // StandingState/CrouchedState's ground constraint was already removed on their Exit.
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (_ramp != null) ctx.Body.Constraints.Remove(_ramp);
+        _ramp = null;
+        // Soften the horizontal velocity on the slip-off so the drop lands close to the wall rather
+        // than flinging the body forward at the full slide speed. Only apply when we exited via going
+        // airborne (not on cancel via !Down or timeout).
+        if (_exitingAirborne)
+            ctx.Body.Velocity.X *= MovementConfig.Current.DropdownExitVelMult;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        _slideTime += ctx.Dt;
+        var cfg = MovementConfig.Current;
+
+        // Refresh ramp anchor (the corner may shift slightly as the body crosses tile boundaries).
+        if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, _dropDir, out var freshCorner))
+            _ramp.Corner = freshCorner;
+
+        // Slide toward the edge, but never brake a faster-than-target body — a running entry should
+        // keep its momentum through the slide. Gravity does the vertical work.
+        float along = _dropDir * ctx.Body.Velocity.X;
+        float fx = 0f;
+        if (along < _slideSpeed)
+            fx = _dropDir * AirControl.SoftClampVelocity(along, _slideSpeed, cfg.WalkAccel, ctx.Dt);
+        ctx.Body.AppliedForce = new Vector2(fx, 0f);
+    }
+}

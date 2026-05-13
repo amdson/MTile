@@ -20,19 +20,19 @@ public static class ExposedUpperCornerChecker
     // of the hexagonal body (slightly less than radius).
     private const float MinBodyDepthBelowCorner = 10f;
 
-    // Vault range: center down to feet
+    // Vault range: from the body's center down to its feet — corners whose top is in this y window
+    // are reachable for a step-up.
     public static bool TryFind(PhysicsBody body, ChunkMap chunks, int wallDir, out ExposedCorner corner)
     {
-        float probeTop    = body.Position.Y;
-        float probeBottom = body.Position.Y + PlayerCharacter.Radius;
-        return TryFindInRange(body, chunks, wallDir, probeTop, probeBottom, MaxTopProbeDistance, out corner);
+        var bounds = body.Bounds;
+        return TryFindInRange(body, chunks, wallDir, bounds.CenterY, bounds.Bottom, MaxTopProbeDistance, out corner);
     }
 
-    // Ledge grab range: point probe at head height
+    // Ledge-grab range: a point probe at head height (top of the body's bounding box).
     public static bool TryFindAboveHead(PhysicsBody body, ChunkMap chunks, int wallDir, out ExposedCorner corner)
     {
-        float probeY = body.Position.Y - PlayerCharacter.Radius;
-        return TryFindInRange(body, chunks, wallDir, probeY, probeY, float.MaxValue, out corner);
+        float headY = body.Bounds.Top;
+        return TryFindInRange(body, chunks, wallDir, headY, headY, float.MaxValue, out corner);
     }
 
     private static bool TryFindInRange(
@@ -45,19 +45,18 @@ public static class ExposedUpperCornerChecker
         out ExposedCorner corner)
     {
         corner = default;
-        var bounds = body.Polygon.GetBounds(body.Position);
-
-        float probeLeft  = wallDir == 1 ? bounds.Right              : bounds.Left - ProbeSlack;
-        float probeRight = wallDir == 1 ? bounds.Right + ProbeSlack : bounds.Left;
+        var bounds = body.Bounds;
+        var probe = bounds.StripBeside(wallDir, ProbeSlack).WithVerticalRange(probeTop, probeBottom);
+        float bodyFace = bounds.Side(wallDir);
 
         float bestTopY = float.MinValue;
         float bestX    = 0f;
         bool  found    = false;
 
-        foreach (var tile in TileQuery.SolidTilesInRect(chunks, probeLeft, probeTop, probeRight, probeBottom))
+        foreach (var tile in TileQuery.SolidTilesInRect(chunks, probe))
         {
-            if (wallDir ==  1 && tile.WorldLeft  < bounds.Right) continue;
-            if (wallDir == -1 && tile.WorldRight > bounds.Left)  continue;
+            if (wallDir ==  1 && tile.WorldLeft  < bodyFace) continue;
+            if (wallDir == -1 && tile.WorldRight > bodyFace) continue;
 
             if (!TileQuery.IsTopExposed(chunks, tile)) continue;
 

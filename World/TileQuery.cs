@@ -21,6 +21,10 @@ public static class TileQuery
 {
     private const int ChunkPixelSize = Chunk.Size * Chunk.TileSize;
 
+    // Convenience overload: query solid tiles overlapping a BoundingBox-defined region.
+    public static IEnumerable<TileRef> SolidTilesInRect(ChunkMap chunks, BoundingBox region)
+        => SolidTilesInRect(chunks, region.Left, region.Top, region.Right, region.Bottom);
+
     public static IEnumerable<TileRef> SolidTilesInRect(
         ChunkMap chunks, float left, float top, float right, float bottom)
     {

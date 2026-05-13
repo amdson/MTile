@@ -86,7 +86,9 @@ public class Polygon
         return (min, max);
     }
 
-    // Axis-aligned bounding box in world space (integer pixels).
+    // Axis-aligned bounding box in world space (integer pixels). Used by the physics step's
+    // collision broadphase, which is built around MonoGame's Rectangle. For checker / region queries
+    // prefer GetBoundingBox below — float precision and equipped with region builders.
     public Rectangle GetBounds(Vector2 position, float rotation = 0f)
     {
         var verts = GetVertices(position, rotation);
@@ -106,5 +108,21 @@ public class Polygon
         int bottom = (int)MathF.Ceiling(maxY);
 
         return new Rectangle(left, top, right - left, bottom - top);
+    }
+
+    // Float-precision axis-aligned bounding box in world space.
+    public BoundingBox GetBoundingBox(Vector2 position, float rotation = 0f)
+    {
+        var verts = GetVertices(position, rotation);
+        float minX = verts[0].X, maxX = verts[0].X;
+        float minY = verts[0].Y, maxY = verts[0].Y;
+        for (int i = 1; i < verts.Length; i++)
+        {
+            if (verts[i].X < minX) minX = verts[i].X;
+            if (verts[i].X > maxX) maxX = verts[i].X;
+            if (verts[i].Y < minY) minY = verts[i].Y;
+            if (verts[i].Y > maxY) maxY = verts[i].Y;
+        }
+        return new BoundingBox(minX, minY, maxX, maxY);
     }
 }

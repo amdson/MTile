@@ -129,6 +129,10 @@ public static class PhysicsWorld
                 }
             }
 
+            // Steering ramps: rotate velocity onto the shallowest trajectory that clears the corner
+            // (derived from the polygon each step). Position is still resolved by the real tile sweep below.
+            SteeringRamp.ApplyRedirect(body);
+
             body.Position = ResolveChunkCollisionsSwept(body, chunks, body.Position, body.Position + body.Velocity * dt);
 
             var bodyBounds = body.Polygon.GetBounds(body.Position);

@@ -95,6 +95,24 @@ public class MovementConfig
     // should keep the body clear without needing the constraint.
     public bool  ParkourSafetyRamps   { get; set; } = false;
 
+    // Steering Ramps (ParkourState — see Character/STEERING_RAMP_IMPL.md)
+    // Force (px/s²) the vault state applies straight up, scaled by the ramp's weight; should match
+    // gravity so the climb is gravity-neutral while the ramp is fully engaged.
+    public float RampAntiGravForce { get; set; } = 600f;
+
+    // Covered Jump (jump initiated while partially under an overhang — see CoveredJumpState)
+    // Hard cap on the slide-out phase so a degenerate "can't actually get clear" position bails to
+    // Falling instead of hanging. The slide itself reuses WalkAccel / MaxWalkSpeed.
+    public float MaxCoveredSlideTime { get; set; } = 0.4f;
+
+    // Dropdown (hold Down on a platform edge — see DropdownState). Same role as MaxCoveredSlideTime:
+    // hard cap so a stuck position falls through to Falling instead of hanging.
+    public float MaxDropdownTime { get; set; } = 0.4f;
+    // Horizontal velocity is scaled by this factor at the moment the body goes airborne off the
+    // platform edge, so the drop trajectory lands close to the wall rather than flinging the body
+    // forward at the full slide speed.
+    public float DropdownExitVelMult { get; set; } = 0.4f;
+
     // Double Jump
     public float DoubleJumpVelocity { get; set; } = -100f;
     public float DoubleJumpHoldForce { get; set; } = -1500f;
