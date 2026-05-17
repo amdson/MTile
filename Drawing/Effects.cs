@@ -77,6 +77,24 @@ public static class Effects
         }
     }
 
+    // Single soft dot at the cursor, called every frame to leave a fading trail.
+    // Tiny life + zero velocity so each spawn stays put and decays in place —
+    // motion comes from the cursor moving between spawn calls.
+    public static void MouseTrailTick(ParticleSystem ps, Vector2 pos)
+    {
+        ref var p = ref ps.Spawn();
+        p.Position     = pos;
+        p.Velocity     = Vector2.Zero;
+        p.Acceleration = Vector2.Zero;
+        p.MaxLife      = 0.18f;
+        p.Life         = p.MaxLife;
+        p.StartColor   = new Color(255, 240, 180, 200);
+        p.EndColor     = new Color(255, 100,  40,   0);
+        p.StartSize    = 3f;
+        p.EndSize      = 1f;
+        p.Kind         = ParticleKind.Disc;
+    }
+
     private static Vector2 Rotate(Vector2 v, float radians)
     {
         float c = MathF.Cos(radians), s = MathF.Sin(radians);

@@ -7,7 +7,7 @@ using Microsoft.Xna.Framework.Input;
 
 namespace MTile;
 
-public class Game1 : Game
+public class Game1 : Game, IEntitySpawner
 {
     private GraphicsDeviceManager _graphics;
     private SpriteBatch _spriteBatch;
@@ -16,6 +16,7 @@ public class Game1 : Game
 
     private readonly List<PhysicsBody> _bodies = new();
     private PlayerCharacter _player;
+    private Vector2 _playerSpawn;
 
     private static readonly Vector2 Gravity = new(0f, 600f);
     private readonly ChunkMap _chunks = new();
@@ -26,48 +27,39 @@ public class Game1 : Game
     private readonly Camera _camera = new();
     private readonly Controller _controller = new();
 
+    // Stage-owned scene props. The active Stage's Populate fills these; Update
+    // ticks every callback in _stageTickers, Draw renders every entry in
+    // _platforms. Cleared between stage loads (currently load-once at startup).
+    private readonly List<Action<float>>            _stageTickers = new();
+    private readonly List<(MovingRectangle Rect, Color Color)> _platforms = new();
+    private GameConfig _config;
+
     private DrawContext _draw;
     private readonly ParticleSystem _particles = new(capacity: 2048);
     // Tracked frame-to-frame so the landing-puff fires exactly once on the
     // air→ground transition (rather than every frame the player is grounded).
     private bool _wasGroundedLastFrame;
 
-    public bool DebugDrawHitboxes = true;
-    public bool DebugDrawPlayerOrientation = true;
-
     // Edge-detect 'P' so a held key doesn't flip the planner every frame.
     private bool _wasPDown;
-    // Show the underlying physics polygons over the sprites. Off by default — flip
-    // on to verify that art and physics agree.
-    public bool DebugDrawBodies = false;
 
-    private MovingRectangle _movingRect;
-    // Sinusoidal motion: y(t) = MovingRectBaseY + MovingRectAmplitude * sin(2π t / MovingRectPeriod)
-    private const float MovingRectBaseX     = 180f;
-    private const float MovingRectBaseY     = -140f;
-    private const float MovingRectAmplitude =   40f;
-    private const float MovingRectPeriod    =    3f;
-    private float _time;
-
-    // Ferris-wheel cluster: four rectangular blocks rotate around a common center,
-    // 90° apart. Each is its own MovingRectangle (independent provider) so the
-    // physics solver sees them as four separate moving surfaces.
-    private MovingRectangle[] _ferrisBlocks;
-    private const int   FerrisCount        =     4;
-    private const float FerrisCenterX      =  -120f;
-    private const float FerrisCenterY      =  -150f;
-    private const float FerrisRadius       =    80f;
-    private const float FerrisBlockWidth   =    32f;
-    private const float FerrisBlockHeight  =    16f;
-    private const float FerrisPeriod       =     6f;  // seconds per revolution
-    
     private FileSystemWatcher _movementConfigWatcher;
 
-    public bool DebugDrawConstraints = true;
 
     public Game1()
     {
-        _graphics = new GraphicsDeviceManager(this);
+        // Load game config before the GraphicsDeviceManager finalizes so window
+        // prefs (size, fullscreen) take effect on the first frame instead of
+        // resizing once gameplay starts.
+        string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "game_config.json");
+        _config = GameConfig.Load(configPath);
+
+        _graphics = new GraphicsDeviceManager(this)
+        {
+            PreferredBackBufferWidth  = _config.WindowWidth,
+            PreferredBackBufferHeight = _config.WindowHeight,
+            IsFullScreen              = _config.Fullscreen,
+        };
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
         IsFixedTimeStep = true;
@@ -76,57 +68,34 @@ public class Game1 : Game
 
     protected override void Initialize()
     {
-        string terrainConfigPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Levels", "terrain.json");
+        var stage = Stages.Get(_config.Stage);
+
+        string terrainConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Levels", stage.TerrainConfig);
         TerrainLoader.Load(terrainConfigPath, _chunks);
 
-        string configPath = Path.GetFullPath("movement_config.json");
-        MovementConfig.Load(configPath);
-        
-        _movementConfigWatcher = new FileSystemWatcher(Path.GetDirectoryName(configPath))
+        string movementCfgPath = Path.GetFullPath("movement_config.json");
+        MovementConfig.Load(movementCfgPath);
+
+        _movementConfigWatcher = new FileSystemWatcher(Path.GetDirectoryName(movementCfgPath))
         {
-            Filter = Path.GetFileName(configPath),
+            Filter = Path.GetFileName(movementCfgPath),
             NotifyFilter = NotifyFilters.LastWrite,
             EnableRaisingEvents = true
         };
         _movementConfigWatcher.Changed += (s, e) =>
         {
             System.Threading.Thread.Sleep(50);
-            MovementConfig.Load(configPath);
+            MovementConfig.Load(movementCfgPath);
         };
 
-        _player = new PlayerCharacter(new Vector2(0f, -200f));
+        _playerSpawn = stage.PlayerSpawn;
+        _player = new PlayerCharacter(_playerSpawn);
         _bodies.Add(_player.Body);
         _hittables.Add(_player);
 
-        _movingRect = new MovingRectangle(new Vector2(MovingRectBaseX, MovingRectBaseY), 64f, 16f);
-        _chunks.Providers.Add(_movingRect);
-
-        _ferrisBlocks = new MovingRectangle[FerrisCount];
-        for (int i = 0; i < FerrisCount; i++)
-        {
-            float angle = i * MathHelper.TwoPi / FerrisCount;
-            var pos = new Vector2(
-                FerrisCenterX + FerrisRadius * MathF.Cos(angle),
-                FerrisCenterY + FerrisRadius * MathF.Sin(angle));
-            _ferrisBlocks[i] = new MovingRectangle(pos, FerrisBlockWidth, FerrisBlockHeight);
-            _chunks.Providers.Add(_ferrisBlocks[i]);
-        }
-
-        // Test entities for combat. Three balloons hovering near the player's start
-        // height; two balls resting near the ground line.
-        SpawnEntity(EntityFactory.Balloon(new Vector2( 60f, -240f)));
-        SpawnEntity(EntityFactory.Balloon(new Vector2(100f, -260f)));
-        SpawnEntity(EntityFactory.Balloon(new Vector2(-60f, -250f)));
-        SpawnEntity(EntityFactory.Ball   (new Vector2( 40f, -160f)));
-        SpawnEntity(EntityFactory.Ball   (new Vector2(-40f, -160f)));
-
-        // Impact-damage test chamber. The stone wall (cols 13-15 of start.txt)
-        // sits at x ∈ [208, 256]; these floating balls hover in the open space
-        // between the player's left platform and the wall, at the player's
-        // standing-floor height. Slash / pulse them rightward to crash them in.
-        SpawnEntity(EntityFactory.FloatingBall(new Vector2(140f, -208f)));
-        SpawnEntity(EntityFactory.FloatingBall(new Vector2(100f, -216f)));
-        SpawnEntity(EntityFactory.FloatingBall(new Vector2( 60f, -212f)));
+        // Hand control to the stage. It populates platforms, tickers, and entities;
+        // see Stages.PopulateStart / PopulateArena for the per-stage scripts.
+        stage.Populate(this);
 
         // Wire tile-break debris. ChunkMap doesn't know about particles; it just
         // raises the event with the cell's center and material, and Effects.TileBreak
@@ -137,12 +106,22 @@ public class Game1 : Game
         base.Initialize();
     }
 
-    private void SpawnEntity(Entity e)
+    // Stage-facing API. Stages call these from Populate to register entities,
+    // dynamic platforms, and per-frame tickers without touching Game1's private state.
+    public void SpawnEntity(Entity e)
     {
         _entities.Add(e);
         _hittables.Add(e);
         _bodies.Add(e.Body);
     }
+
+    public void AddPlatform(MovingRectangle rect, Color color)
+    {
+        _platforms.Add((rect, color));
+        _chunks.Providers.Add(rect);
+    }
+
+    public void AddTicker(Action<float> tick) => _stageTickers.Add(tick);
 
     protected override void LoadContent()
     {
@@ -177,26 +156,29 @@ public class Game1 : Game
 
         _controller.Update(mouseWorldPos);
 
+        // Mirror config toggles into the action-side static so BlockEruptionAction.Draw
+        // can consult it without taking GameConfig as a dependency.
+        EruptionPlanner.DebugDrawMassBall = _config.DebugDrawMassBall;
+
+        // Cosmetic cursor trail — one tiny world-space dot per frame at the
+        // cursor position. The dots decay in place, so the trail is the residue
+        // of the cursor's recent motion. Particles are drawn within the world
+        // transform below, so the trail tracks the cursor naturally.
+        if (_config.MouseTrail) Effects.MouseTrailTick(_particles, mouseWorldPos);
+
         HandleBuildInput();
 
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
         // Tick dynamic surfaces BEFORE the body sweep (per roadmap §2D update ordering).
-        _time += dt;
-        float rectY = MovingRectBaseY + MovingRectAmplitude * MathF.Sin(_time * MathHelper.TwoPi / MovingRectPeriod);
-        _movingRect.SetPosition(new Vector2(MovingRectBaseX, rectY), dt);
-
-        float wheelAngle = _time * MathHelper.TwoPi / FerrisPeriod;
-        for (int i = 0; i < FerrisCount; i++)
-        {
-            float angle = wheelAngle + i * MathHelper.TwoPi / FerrisCount;
-            var pos = new Vector2(
-                FerrisCenterX + FerrisRadius * MathF.Cos(angle),
-                FerrisCenterY + FerrisRadius * MathF.Sin(angle));
-            _ferrisBlocks[i].SetPosition(pos, dt);
-        }
+        // Each ticker was registered by the active stage's Populate (e.g. the
+        // sinusoidal bobber and ferris wheel on the start stage).
+        foreach (var tick in _stageTickers) tick(dt);
 
         _chunks.TickSprouts(dt);
+        // Decay per-cell impact accumulator so stray small impulses (walking,
+        // tiny bumps) bleed off instead of accreting toward a fake landing.
+        _chunks.Impact.Tick(dt);
 
         // Combat frame phases:
         //   1. Clear both registries.
@@ -209,7 +191,23 @@ public class Game1 : Game
         _hurtboxes.Clear();
         foreach (var h in _hittables) h.PublishHurtboxes(_hurtboxes);
         _player.Update(_controller, _chunks, _hitboxes, _hurtboxes, dt);
+        // Entity AI tick. Slotted between hurtbox publication and CombatSystem
+        // so any hitboxes published here (Stalker lunge) resolve this frame.
+        // Pass _player so AI can target it; null-target enemies would just skip.
+        // Snapshot count so newly-spawned entities (turret bullets, etc.) skip
+        // their first Update and start being ticked next frame.
+        int entityCount = _entities.Count;
+        for (int i = 0; i < entityCount; i++) _entities[i].Update(dt, _player, _hitboxes, this);
         CombatSystem.Apply(_chunks, _hitboxes, _hurtboxes);
+
+        // Player respawn on death. Reset position, velocity, health — the FSMs
+        // re-evaluate from the new pose on the next frame (Falling → Standing
+        // once the body lands on the floor).
+        if (!_player.IsAlive)
+        {
+            _player.Respawn(_playerSpawn);
+            Effects.Puff(_particles, _player.Body.Position, Color.LimeGreen);
+        }
 
         // Entity gravity-scale opt-out — applied as a counter-force right before
         // PhysicsWorld integrates gravity uniformly. Balloons (GravityScale=0) end
@@ -239,7 +237,7 @@ public class Game1 : Game
         foreach (var e in _entities)
         {
             if (e.Sprite == null) continue;
-            e.Sprite.Position = e.Body.Position;
+            e.SyncSprite();
             e.Sprite.Update(dt);
         }
 
@@ -252,7 +250,7 @@ public class Game1 : Game
 
         _particles.Update(dt);
 
-        _camera.TrackTarget(_player.Body.Position, screenCenter);
+        _camera.TrackTarget(_player.Body.Position, screenCenter, dt);
 
         base.Update(gameTime);
     }
@@ -269,16 +267,11 @@ public class Game1 : Game
         foreach (var chunk in _chunks)
             DrawChunk(chunk);
 
-        _spriteBatch.Draw(_pixel, new Rectangle(
-            (int)_movingRect.Left, (int)_movingRect.Top,
-            (int)(_movingRect.Right - _movingRect.Left), (int)(_movingRect.Bottom - _movingRect.Top)),
-            Color.SteelBlue);
-
-        foreach (var b in _ferrisBlocks)
+        foreach (var (r, color) in _platforms)
             _spriteBatch.Draw(_pixel, new Rectangle(
-                (int)b.Left, (int)b.Top,
-                (int)(b.Right - b.Left), (int)(b.Bottom - b.Top)),
-                Color.DarkOrange);
+                (int)r.Left, (int)r.Top,
+                (int)(r.Right - r.Left), (int)(r.Bottom - r.Top)),
+                color);
 
         foreach (var s in _chunks.ActiveSprouts)
         {
@@ -300,7 +293,7 @@ public class Game1 : Game
         }
 
         if (_player.Sprite != null) _player.Sprite.Draw(_draw);
-        if (DebugDrawBodies)
+        if (_config.DebugDrawBodies)
         {
             DrawPolygon(_player.Body.Polygon, _player.Body.Position,
                 (_player.IsGrounded ? Color.LimeGreen : Color.Orange) * 0.5f);
@@ -315,11 +308,15 @@ public class Game1 : Game
         // Action overlay (slash arc, etc.) in world space, on top of the body.
         _player.CurrentAction.Draw(_spriteBatch, _pixel, _player.Body);
 
-        if (DebugDrawHitboxes)
+        if (_config.DebugDrawHitboxes)
             foreach (var hb in _hitboxes.All)
                 DrawHitbox(hb);
 
-        if (DebugDrawPlayerOrientation)
+        if (_config.DebugDrawHurtboxes)
+            foreach (var hb in _hurtboxes.All)
+                DrawHurtbox(hb);
+
+        if (_config.DebugDrawPlayerOrientation)
         {
             var bodyPos = _player.Body.Position;
             // Facing intent — short magenta arrow on the side the player is oriented toward.
@@ -328,21 +325,29 @@ public class Game1 : Game
             DrawLine(bodyPos, _controller.Current.MouseWorldPosition, Color.Yellow * 0.6f, 1);
         }
 
-        if (DebugDrawConstraints)
+        if (_config.DebugDrawConstraints)
             foreach (var body in _bodies)
                 foreach (var c in body.Constraints)
                     if (c is SurfaceContact sc)
                         DrawConstraintArrow(sc.Position, sc.Normal,
                             c is FloatingSurfaceDistance ? Color.Cyan : Color.Yellow);
 
-        if (_player.CurrentState is GuidedState gs && gs.ActivePath != null)
+        if (_config.DebugDrawGuidedPath
+            && _player.CurrentState is GuidedState gs && gs.ActivePath != null)
             DrawGuidedPath(gs.ActivePath, gs.CurrentProgressT);
+
+        // Enemy health bars in world space, drawn just above each wounded body.
+        // Skip undamaged ones so passive entities (intact balls, balloons) don't
+        // clutter the screen with full-green bars.
+        foreach (var e in _entities)
+            if (_config.DebugDrawHealthBars && e.Health < e.MaxHealth) DrawEntityHealthBar(e);
 
         _spriteBatch.End();
 
         _spriteBatch.Begin();
         var mousePos = _controller.Current.MousePosition;
         _spriteBatch.Draw(_pixel, new Rectangle(mousePos.X - 2, mousePos.Y - 2, 5, 5), Color.Red);
+        if (_config.DebugDrawHealthBars) DrawPlayerHealthBar();
         _spriteBatch.DrawString(_debugFont, _player.CurrentStateName,  new Vector2(8,  8), Color.White);
         _spriteBatch.DrawString(_debugFont, _player.CurrentActionName, new Vector2(8, 24), Color.White);
         _spriteBatch.DrawString(_debugFont,
@@ -352,7 +357,8 @@ public class Game1 : Game
 
         // Diagnostic overlay for active GuidedPath: shows planner's actual
         // start/end positions and the body's position so we can compare.
-        if (_player.CurrentState is GuidedState gs2 && gs2.ActivePath != null)
+        if (_config.DebugDrawGuidedPath
+            && _player.CurrentState is GuidedState gs2 && gs2.ActivePath != null)
         {
             var p   = gs2.ActivePath;
             var sp  = p.Sample(0f);
@@ -379,6 +385,11 @@ public class Game1 : Game
     // strays out of range silently drops the out-of-range cells but resumes
     // requests as it swings back in.
     private const float BuildReach = 64f;
+    // Multiplier on BuildReach when the candidate cell has a sprout neighbour
+    // (Pending or Growing) — i.e. it's chaining off an existing placement.
+    // Lets the player extend a build outward beyond their normal reach without
+    // having to re-anchor near the player.
+    private const float ChainBuildReachMul = 2f;
     private void HandleBuildInput()
     {
         var input = _controller.Current;
@@ -397,11 +408,22 @@ public class Game1 : Game
             var cellCenter = new Vector2(
                 gtx * Chunk.TileSize + Chunk.TileSize * 0.5f,
                 gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
-            if (Vector2.DistanceSquared(_player.Body.Position, cellCenter) > BuildReach * BuildReach)
+            // Chain-extended reach when any 4-neighbour is already a sprout
+            // (Pending or Growing). TryRequestTile registers each placed cell
+            // in the graph immediately, so a single drag's later cells see
+            // earlier ones as parents and inherit the extended reach.
+            float maxReach = HasSproutNeighbour(gtx, gty) ? BuildReach * ChainBuildReachMul : BuildReach;
+            if (Vector2.DistanceSquared(_player.Body.Position, cellCenter) > maxReach * maxReach)
                 continue;
             _chunks.TryRequestTile(gtx, gty);
         }
     }
+
+    private bool HasSproutNeighbour(int gtx, int gty) =>
+        _chunks.Graph.TryGet(gtx,     gty + 1, out _) ||
+        _chunks.Graph.TryGet(gtx - 1, gty,     out _) ||
+        _chunks.Graph.TryGet(gtx + 1, gty,     out _) ||
+        _chunks.Graph.TryGet(gtx,     gty - 1, out _);
 
     protected override void UnloadContent()
     {
@@ -459,6 +481,36 @@ public class Game1 : Game
             DrawLine(verts[i], verts[(i + 1) % verts.Length], color);
     }
 
+    // Compact 16×2 bar floating above the entity. Background dark gray, fill
+    // green→red as HP drops, both in world space so the bar tracks the body.
+    private void DrawEntityHealthBar(Entity e)
+    {
+        const int BarWidth   = 18;
+        const int BarHeight  = 2;
+        var bounds = e.Body.Bounds;
+        int x = (int)(bounds.CenterX - BarWidth * 0.5f);
+        int y = (int)(bounds.Top - 6);
+        float frac = MathHelper.Clamp(e.Health / e.MaxHealth, 0f, 1f);
+        _spriteBatch.Draw(_pixel, new Rectangle(x, y, BarWidth, BarHeight), new Color(40, 40, 40));
+        _spriteBatch.Draw(_pixel, new Rectangle(x, y, (int)(BarWidth * frac), BarHeight),
+            Color.Lerp(Color.Red, Color.LimeGreen, frac));
+    }
+
+    // Screen-space HP indicator in the upper-left, beneath the state labels.
+    // 120 px wide, color shifts green→red as HP drops; flashes when invuln so
+    // the player can read "I just got hit, I'm safe for a moment."
+    private void DrawPlayerHealthBar()
+    {
+        const int X = 8, Y = 56, BarW = 120, BarH = 8;
+        float frac = MathHelper.Clamp(_player.Health / _player.MaxHealth, 0f, 1f);
+        _spriteBatch.Draw(_pixel, new Rectangle(X, Y, BarW, BarH), new Color(40, 40, 40));
+        _spriteBatch.Draw(_pixel, new Rectangle(X, Y, (int)(BarW * frac), BarH),
+            Color.Lerp(Color.Red, Color.LimeGreen, frac));
+        _spriteBatch.DrawString(_debugFont,
+            $"HP {_player.Health:F1}/{_player.MaxHealth:F1}",
+            new Vector2(X + BarW + 8, Y - 4), Color.White);
+    }
+
     private void DrawConstraintArrow(Vector2 position, Vector2 normal, Color color)
     {
         const float shaftLength = 20f;
@@ -505,6 +557,27 @@ public class Game1 : Game
             DrawLine(br, bl, color, 1);
             DrawLine(bl, tl, color, 1);
         }
+    }
+
+    // Defensive region outline. Distinct color from hitboxes (cyan) so the two
+    // overlays are readable side-by-side. Hurtboxes are always axis-aligned AABBs,
+    // so no polygon path is needed.
+    private void DrawHurtbox(Hurtbox hb)
+    {
+        var color = Color.Cyan;
+        var rect = new Rectangle(
+            (int)hb.Region.Left, (int)hb.Region.Top,
+            (int)(hb.Region.Right - hb.Region.Left),
+            (int)(hb.Region.Bottom - hb.Region.Top));
+        _spriteBatch.Draw(_pixel, rect, color * 0.18f);
+        var tl = new Vector2(hb.Region.Left,  hb.Region.Top);
+        var tr = new Vector2(hb.Region.Right, hb.Region.Top);
+        var br = new Vector2(hb.Region.Right, hb.Region.Bottom);
+        var bl = new Vector2(hb.Region.Left,  hb.Region.Bottom);
+        DrawLine(tl, tr, color, 1);
+        DrawLine(tr, br, color, 1);
+        DrawLine(br, bl, color, 1);
+        DrawLine(bl, tl, color, 1);
     }
 
     private void DrawLine(Vector2 start, Vector2 end, Color color, int thickness = 2)

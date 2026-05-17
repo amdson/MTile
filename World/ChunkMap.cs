@@ -20,6 +20,12 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // Sparse per-cell HP. Damaged tiles have an entry until they break or get cleared.
     public readonly TileDamage Damage = new();
 
+    // Per-cell accumulated impact impulse, with decay. PhysicsWorld routes
+    // contact impulses through this so a spring-padded landing (player) accrues
+    // damage over the frames the spring spreads the impulse across — see
+    // TileImpactAccumulator for the design rationale.
+    public readonly TileImpactAccumulator Impact = new();
+
     // Fires when BreakCell actually clears a Solid tile. Arguments are the cell's
     // world-space center and its material type at break time. Subscribers (Game1's
     // particle system) react to feedback events without ChunkMap knowing about them.

@@ -357,6 +357,44 @@ public class GroundSlash3 : SlashLikeAction
     }
 }
 
+// Crouch slash — only fires from CrouchedState. Longer reach than a stand slash,
+// no combo chain (deliberately a one-and-done from a low stance). Preempts
+// GroundSlash1 via higher passive priority when crouched; precondition fails
+// when not crouched so the regular slash takes over.
+public class CrouchSlash : SlashLikeAction
+{
+    protected override float Duration            => 0.16f;
+    protected override float ArcRadiusScale      => 1.45f;
+    protected override float SweepAngleDeg       => 90f;
+    protected override float SweepDirection      => +1f;
+    protected override float KnockbackMagnitude  => 240f;
+    protected override Color SlashColor          => Color.Goldenrod;
+    protected override bool  RequireGround       => true;
+    protected override bool  RequireAir          => false;
+
+    // Beats GroundSlash1 (30/30) on ties without out-prioritizing Slash2/3 combos (50).
+    public override int PassivePriority => 32;
+
+    protected override bool CombosOk(ConditionState c) => true;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Standard slash gating PLUS the player must be in CrouchedState. The
+        // base class doesn't expose CheckPreConditions in a way we can extend
+        // cleanly, so we duplicate its check and add the crouch requirement.
+        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (!ctx.TryGetGround(out _)) return false;
+        if (ctx.PreviousState(0) is not CrouchedState) return false;
+        return true;
+    }
+
+    // No combo flag set on exit — crouch slash terminates the chain.
+    protected override void OnExitSetFlags(ConditionState c, int f)
+    {
+        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 5, f);
+    }
+}
+
 // ---------- Air combo: AS1 → AS2 -----------------------------------------------
 
 // Opening air slash. Tighter & faster than ground S1, blue.
@@ -421,8 +459,15 @@ public class StabAction : ActionState
     private const float LungeEnd     = 0.4f;
     private const float LungeSpeed   = 90f;     // px/s horizontal target during lunge
 
-    private const float Reach                 = PlayerCharacter.Radius * 3.0f;
-    private const float PrimaryHalfWidth      = PlayerCharacter.Radius * 0.35f;
+    private const float Reach                 = PlayerCharacter.Radius * 3.3f;
+    private const float PrimaryHalfWidth      = PlayerCharacter.Radius * 0.55f;
+    // Soft mid-attack steering. The captured _stabDir rotates toward the current
+    // mouse direction at up to MaxSteerSpeed rad/s, with the total deviation from
+    // the initial swipe angle capped at MaxTotalSteer. Lets the player adjust the
+    // angle slightly during the wind-up + active window without making stab feel
+    // like a homing missile.
+    private const float MaxSteerSpeed = 1.8f;     // rad/s
+    private const float MaxTotalSteer = 0.55f;    // rad (~31°)
     // Tile-shockwave reach — significantly longer + wider than the entity-hitbox.
     // Lets stab dig through several tiles at once without hitting balloons/enemies
     // beyond its visible thrust extent.
@@ -453,6 +498,9 @@ public class StabAction : ActionState
 
     private float   _timeInState;
     private Vector2 _stabDir;
+    // Initial captured swipe angle. _stabDir rotates around this anchor each
+    // frame as the cursor moves; total deviation is clamped to MaxTotalSteer.
+    private float   _initialStabAngle;
     private bool    _isGrounded;
     private int     _hitId;
     // Captured once at Enter; constant for the duration of the stab. 1× on ground,
@@ -494,6 +542,7 @@ public class StabAction : ActionState
         {
             _stabDir = new Vector2(facing, 0f);
         }
+        _initialStabAngle = MathF.Atan2(_stabDir.Y, _stabDir.X);
 
         // Air-stab dive boost: project velocity onto the captured stab direction
         // at the instant of commit. Ground stab + negative projection (velocity
@@ -568,6 +617,29 @@ public class StabAction : ActionState
     {
         _timeInState += ctx.Dt;
 
+        // Soft mouse-tracking: rotate _stabDir toward the cursor direction, with
+        // both a per-frame angular-velocity cap and a total-deviation cap from
+        // the initial angle. Hemisphere-clamp the target like the initial capture
+        // so a cursor behind the player doesn't yank the stab backwards.
+        int facing = ab.Facing == 0 ? 1 : ab.Facing;
+        Vector2 toMouse = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+        if (toMouse.X * facing < 0f) toMouse.X = 0f;
+        if (toMouse.LengthSquared() > 1e-4f)
+        {
+            float targetAngle = MathF.Atan2(toMouse.Y, toMouse.X);
+            float currentAngle = MathF.Atan2(_stabDir.Y, _stabDir.X);
+            float delta        = WrapAngle(targetAngle - currentAngle);
+            float maxStep      = MaxSteerSpeed * ctx.Dt;
+            if (delta >  maxStep) delta =  maxStep;
+            if (delta < -maxStep) delta = -maxStep;
+            float newAngle = currentAngle + delta;
+            // Clamp total deviation from initial.
+            float dev = WrapAngle(newAngle - _initialStabAngle);
+            if (dev >  MaxTotalSteer) newAngle = _initialStabAngle + MaxTotalSteer;
+            if (dev < -MaxTotalSteer) newAngle = _initialStabAngle - MaxTotalSteer;
+            _stabDir = new Vector2(MathF.Cos(newAngle), MathF.Sin(newAngle));
+        }
+
         if (_timeInState >= HurtboxStartTime &&
             _timeInState <= HurtboxStartTime + HurtboxActiveDuration &&
             ctx.Hitboxes != null)
@@ -607,6 +679,14 @@ public class StabAction : ActionState
                 HitTargets.TilesOnly,
                 shape: _blockPoly, shapePos: blockCenter, shapeRotation: rotation));
         }
+    }
+
+    // Wrap an angle into [-π, π] so steering math doesn't wind up around a full circle.
+    private static float WrapAngle(float a)
+    {
+        while (a >  MathF.PI) a -= MathF.Tau;
+        while (a < -MathF.PI) a += MathF.Tau;
+        return a;
     }
 
     public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body)
@@ -793,6 +873,12 @@ internal static class BlockEruptionHelpers
 
 public class BlockReadyAction : ActionState
 {
+    // Minimum hold-in-solid time before exiting-out-of-solid arms the eruption.
+    // Below this, BlockReady ends quietly (no eruption armed); the still-held
+    // RMB then drops back to NullAction and HandleBuildInput in Game1 picks it
+    // up as a normal tile-placement drag. Lets the player tap RMB on a block
+    // and start building without committing to an eruption charge.
+    private const float MinChargeToArm  = 1.0f;
     // Saturation point — best release timing for max budget.
     private const float SaturationTime  = 2.0f;
     // Past saturation, budget drops by 35% (the "timing penalty"). Sharp transition
@@ -847,9 +933,14 @@ public class BlockReadyAction : ActionState
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         // Arm the eruption only if the natural exit happened: cursor swept OUT
-        // of solid while RMB is still held. Other exits (RMB released without
-        // exiting solid, attack-preempt with cursor still in solid) disarm.
-        if (ctx.Input.RightClick && !BlockEruptionHelpers.IsCursorInSolid(ctx))
+        // of solid while RMB is still held AND we've charged past MinChargeToArm.
+        // Below the charge threshold (a quick RMB tap on a block), don't arm —
+        // the still-held RMB will pass through to HandleBuildInput as normal
+        // tile placement on the cursor drag. Other exits (RMB released without
+        // exiting solid, attack-preempt) also disarm.
+        if (ctx.Input.RightClick &&
+            !BlockEruptionHelpers.IsCursorInSolid(ctx) &&
+            _chargeTime >= MinChargeToArm)
         {
             ab.Condition.BlockEruptionArmed = true;
             ab.Condition.BlockChargeTime   = _chargeTime;
@@ -914,6 +1005,11 @@ public class BlockEruptionAction : ActionState
     private Vector2        _origin;
     private SmoothPen      _pen;
     private List<PathSample> _samples;
+    // Cached most-recent mass-ball simulation result. Re-computed each Update
+    // off the live samples + current charge budget so the preview tracks the
+    // gesture. Only populated when MassBall mode is active (PriorityField has
+    // no analogous "ball" — its preview would need its own renderer).
+    private MassBallPlanner.SimulationResult _simResult;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
         => ctx.Input.RightClick && ab.Condition.BlockEruptionArmed;
@@ -940,6 +1036,20 @@ public class BlockEruptionAction : ActionState
     {
         _pen.Update(ctx.Input.MouseWorldPosition, ctx.Dt);
         _samples.Add(new PathSample(_pen.Position, _pen.Velocity));
+
+        // Re-simulate when the preview is on so Draw can render an up-to-date
+        // ball trajectory + landing cells. Skipped when off so we don't burn
+        // cycles every frame on a sim no one is looking at. Caches the chunks
+        // ref so Draw doesn't need ctx (which it isn't given).
+        if (EruptionPlanner.DebugDrawMassBall && EruptionPlanner.CurrentMode == EruptionPlannerMode.MassBall)
+        {
+            int budget = ComputeBudget(_chargeTime);
+            _simResult = MassBallPlanner.Simulate(ctx.Chunks, _origin, _samples, budget);
+        }
+        else
+        {
+            _simResult = null;
+        }
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
@@ -991,6 +1101,42 @@ public class BlockEruptionAction : ActionState
             var p = _samples[i].Position;
             sb.Draw(pixel, new Rectangle((int)p.X - 1, (int)p.Y - 1, 3, 3),
                 Color.SandyBrown * (0.35f + 0.5f * t));
+        }
+
+        // Mass-ball simulation preview. Renders the predicted ball trajectory as
+        // tiny dim dots and outlines the cells the ball is expected to sprout —
+        // so the player can see *where* their gesture is going to deposit before
+        // they release. Off by default; toggle via game_config.json.
+        if (_simResult == null) return;
+        var traj = _simResult.BallTrajectory;
+        for (int i = 0; i < traj.Count; i++)
+        {
+            var p = traj[i];
+            float t = traj.Count <= 1 ? 1f : (float)i / (traj.Count - 1);
+            sb.Draw(pixel,
+                new Rectangle((int)p.X - 1, (int)p.Y - 1, 2, 2),
+                new Color(220, 180, 80) * (0.35f + 0.4f * t));
+        }
+        // Final ball-rest position — chunky dot at the end of the trajectory.
+        if (traj.Count > 0)
+        {
+            var last = traj[traj.Count - 1];
+            sb.Draw(pixel,
+                new Rectangle((int)last.X - 3, (int)last.Y - 3, 7, 7),
+                new Color(255, 140, 40));
+        }
+        // Predicted sprout cells — translucent outline on each tile so the
+        // player sees the deposit footprint.
+        foreach (var (gtx, gty) in _simResult.SproutCells)
+        {
+            int x = gtx * Chunk.TileSize;
+            int y = gty * Chunk.TileSize;
+            int s = Chunk.TileSize;
+            var c = new Color(180, 120, 60) * 0.45f;
+            sb.Draw(pixel, new Rectangle(x,         y,         s, 1), c);
+            sb.Draw(pixel, new Rectangle(x,         y + s - 1, s, 1), c);
+            sb.Draw(pixel, new Rectangle(x,         y,         1, s), c);
+            sb.Draw(pixel, new Rectangle(x + s - 1, y,         1, s), c);
         }
     }
 }

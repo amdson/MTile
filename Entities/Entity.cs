@@ -23,7 +23,7 @@ public class Entity : IHittable
     // to the global gravity so we don't have to touch PhysicsWorld.
     public float GravityScale = 1f;
     public Color Color        = Color.White;
-    public Faction Faction { get; init; } = Faction.Neutral;
+    public Faction Faction { get; set; } = Faction.Neutral;
     // Optional visual. When null, Game1 falls back to drawing the body polygon outline.
     public Sprite Sprite;
 
@@ -53,4 +53,30 @@ public class Entity : IHittable
         if (GravityScale == 1f) return;
         Body.AppliedForce += globalGravity * (GravityScale - 1f);
     }
+
+    // Per-frame AI / scripted-behavior hook. Default is no-op — passive entities
+    // (balloons, balls) ignore it. Active entities (enemies) override to drive
+    // their physics body and publish offensive hitboxes. Called by Game1 between
+    // hurtbox publication and CombatSystem.Apply so hitboxes published here
+    // resolve the same frame.
+    //
+    // `spawner` lets an entity emit new entities mid-update (e.g. a turret firing
+    // a bullet). Spawned entities are added to the game's lists after the loop
+    // finishes, so they don't trip the in-flight foreach.
+    public virtual void Update(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner) { }
+
+    // Sync any sprite state that's NOT a 1:1 mirror of Body.Position — Game1 sets
+    // Position uniformly; orientation, animation phase, or tinting are owned here.
+    // Default no-op for entities whose sprite is purely positional (balls, balloons).
+    public virtual void SyncSprite()
+    {
+        if (Sprite != null) Sprite.Position = Body.Position;
+    }
+}
+
+// Callback handed to entity Update so AI can spawn child entities (projectiles,
+// summons) without touching Game1's internal lists directly.
+public interface IEntitySpawner
+{
+    void SpawnEntity(Entity e);
 }

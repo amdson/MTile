@@ -124,3 +124,5 @@ C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\Levels\start.txt
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\Levels\terrain.json
 c:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\Levels\course.txt
 C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\MTile.exe
+C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\Levels\arena.json
+C:\Users\amdic\dev\MTile\MTile.Tests\bin\Debug\net8.0\game_config.json

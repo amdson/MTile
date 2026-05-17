@@ -22,13 +22,45 @@ public class PlayerCharacter : IHittable
 
     public Faction Faction => MTile.Faction.Player;
 
-    // Player is one big hurtbox covering its body bounds. Future: split into head/body
-    // for headshots, or shrink during dodge frames.
-    public void PublishHurtboxes(HurtboxWorld world)
-        => world.Publish(new Hurtbox(Body.Bounds, MTile.Faction.Player, this));
+    // Combat stats. MaxHealth tuned so a Stalker takes ~4 lunges to down the
+    // player; Mass divides incoming knockback impulses (heavier = less yeet).
+    public float   MaxHealth = 3f;
+    public float   Health;
+    public float   Mass      = 2.5f;
+    // Brief invuln after taking a hit so a multi-frame enemy hitbox (or two
+    // overlapping enemies) doesn't shred the player in a single frame. The
+    // (HitId, Target) dedupe in CombatSystem already handles single-attack
+    // multi-frame, so this is mostly belt-and-suspenders for stacked attackers.
+    private const float HitInvulnDuration = 0.4f;
+    private float _hitInvulnRemaining;
+    public bool IsAlive => Health > 0f;
 
-    // V1 stub. HP, stun, knockback live here once the player can actually take damage.
-    public void OnHit(in Hitbox hit, in Hurtbox myHurtbox) { }
+    // Player is one big hurtbox covering its body bounds. Future: split into head/body
+    // for headshots, or shrink during dodge frames. Suppressed during invuln so
+    // CombatSystem doesn't even consider hits during the recovery window.
+    public void PublishHurtboxes(HurtboxWorld world)
+    {
+        if (_hitInvulnRemaining > 0f) return;
+        world.Publish(new Hurtbox(Body.Bounds, MTile.Faction.Player, this));
+    }
+
+    public void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
+    {
+        Health -= hit.Damage;
+        if (Mass > 0f) Body.Velocity += hit.KnockbackImpulse / Mass;
+        _hitInvulnRemaining = HitInvulnDuration;
+    }
+
+    // Called by Game1 on Health <= 0 to reset to a clean starting state. Cheaper
+    // than a full re-init of the FSMs — the next Update will re-evaluate state
+    // from the new position and arrive at Falling → Standing naturally.
+    public void Respawn(Vector2 position)
+    {
+        Body.Position = position;
+        Body.Velocity = Vector2.Zero;
+        Health        = MaxHealth;
+        _hitInvulnRemaining = HitInvulnDuration;
+    }
     
     private readonly PlayerAbilityState _abilities = new();
     private MovementState _currentState;
@@ -70,7 +102,27 @@ public class PlayerCharacter : IHittable
     public PlayerCharacter(Vector2 startPosition)
     {
         Body = new PhysicsBody(Polygon.CreateRegular(Radius, 6), startPosition);
+        // Landing impact damage. PhysicsWorld dispatches this whenever a body
+        // hits a surface (chunk OR floating-surface constraint) with vnRel < 0
+        // and Impact != null. Tuning rationale:
+        //   - Threshold 700: a 5-block fall (v ≈ 310 px/s) reaches impulse 775
+        //     and just barely chips tiles; a 1-2 block jump (v ≈ 150-200) sits
+        //     well under, so normal play doesn't damage terrain.
+        //   - Mass 2.5 matches the combat-knockback Mass, so the player's
+        //     "weight" reads consistently between knockback and impact.
+        //   - DamagePerUnitImpulse 0.04: a 10-block plunge (v ≈ 440) does
+        //     ~16 dmg spread across 2-3 cells under the body → ~5 each, which
+        //     breaks Sand (max HP ~1) and cracks Dirt. Diving from very tall
+        //     heights cracks Stone.
+        // Slamming horizontally into walls at high speed also chips them
+        // (running max ~100 px/s stays safe; bouncing > 280 px/s starts chipping).
+        Body.Impact = new ImpactDamage {
+            Mass                 = 2.5f,
+            ImpulseThreshold     = 700f,
+            DamagePerUnitImpulse = 0.04f,
+        };
         Sprite = Sprites.Player(Radius);
+        Health = MaxHealth;
         _getState  = GetPreviousState;
         _getAction = GetPreviousAction;
 
@@ -81,6 +133,7 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new ReadyAction());       // 10/15  — wind-up on LMB press
         _actionRegistry.Add(new RecoveryAction());    // 40/45  — post-attack lockout
         _actionRegistry.Add(new GroundSlash1());      // 30/30
+        _actionRegistry.Add(new CrouchSlash());       // 30/32  — crouch-only, no combo
         _actionRegistry.Add(new AirSlash1());         // 30/30
         _actionRegistry.Add(new StabAction());        // 30/30
         _actionRegistry.Add(new PulseAction());       // 30/30  — Circle gesture
@@ -116,6 +169,7 @@ public class PlayerCharacter : IHittable
     public void Update(Controller controller, ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes, float dt)
     {
         _frame++;
+        if (_hitInvulnRemaining > 0f) _hitInvulnRemaining -= dt;
 
         var input = controller.Current;
         var prev  = controller.GetPrevious(1);

@@ -31,27 +31,51 @@ public static class MassBallPlanner
     // Spring + damping between ball and puller. Stiffness controls how tightly
     // the ball tracks; damping controls overshoot. Underdamped = the ball wobbles
     // around the puller and the deposit pattern wobbles with it (a feature).
-    private const float SpringStiffness   = 60f;
+    private const float SpringStiffness   = 120f;
     private const float SpringDamping     = 12f;
     // Per-step leak — fraction of remaining mass. Scaled by ball speed so a
     // stationary ball still drains slowly (SpeedScaleMin floor) but a fast ball
     // dumps more per step.
     private const float LeakFractionBase  = 0.05f;
     private const float SpeedRef          = 100f;
-    private const float SpeedScaleMin     = 0.3f;
-    private const float SpeedScaleMax     = 2.0f;
+    private const float SpeedScaleMin     = 0.8f;
+    private const float SpeedScaleMax     = 1.2f;
     // Mass needed to spawn one tile. Total spawned ≈ budget / Threshold, modulo
     // mass lost to terrain-discard and spill-cutoffs.
-    private const float Threshold         = 1f;
+    private const float Threshold         = 0.6f;
     // Recursion guards on the spill cascade.
     private const float EpsAmount         = 0.001f;
     private const int   MaxSpillDepth     = 8;
 
     public static readonly TileType DefaultType = TileType.Dirt;
 
+    // Read-only view of one sim run. Used both by Plan() to commit sprouts and
+    // by BlockEruptionAction.Draw to preview the ball's path + landing cells
+    // mid-gesture. Created via Simulate(); SproutCells co  dmes back in the same
+    // order they crossed threshold so Plan can submit them in deposit order.
+    public sealed class SimulationResult
+    {
+        public readonly List<Vector2> BallTrajectory = new();
+        public readonly List<(int gtx, int gty)> SproutCells = new();
+    }
+
     public static void Plan(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget)
     {
-        if (budget <= 0 || samples == null || samples.Count == 0) return;
+        var sim = Simulate(chunks, origin, samples, budget);
+        // Spawn in the order cells crossed the threshold during the sim. The
+        // sprout-graph still handles parent-dependency ordering — we just submit.
+        foreach (var (gtx, gty) in sim.SproutCells)
+            chunks.TryRequestTile(gtx, gty, DefaultType);
+    }
+
+    // Pure simulation — no side effects on the world. Reads chunk state for the
+    // "discard mass on solid" rule and returns the predicted trajectory + sprout
+    // cell list. Called by Plan() to drive actual commits, and by the action's
+    // Draw to render the live preview.
+    public static SimulationResult Simulate(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget)
+    {
+        var result = new SimulationResult();
+        if (budget <= 0 || samples == null || samples.Count == 0) return result;
 
         Vector2 ballPos = origin;
         Vector2 ballVel = Vector2.Zero;
@@ -59,7 +83,8 @@ public static class MassBallPlanner
 
         var field         = new Dictionary<(int, int), float>();
         var sproutedSet   = new HashSet<(int, int)>();
-        var sproutedOrder = new List<(int, int)>();
+        var sproutedOrder = result.SproutCells;
+        result.BallTrajectory.Add(ballPos);
 
         float pullerSampleFloat = 0f;
         int   lastSample        = samples.Count - 1;
@@ -107,6 +132,7 @@ public static class MassBallPlanner
             int gty = (int)MathF.Floor(ballPos.Y / Chunk.TileSize);
 
             Deposit(chunks, gtx, gty, leak, 0, field, sproutedSet, sproutedOrder);
+            result.BallTrajectory.Add(ballPos);
 
             // No early-break on "puller at end + ball at rest" — when the player
             // barely moves the mouse, the ball settles within ~10 steps and we'd
@@ -116,11 +142,7 @@ public static class MassBallPlanner
             // radiates that mass outward through neighbors — same total block
             // count as a swept gesture, just clustered tighter.
         }
-
-        // Spawn in the order cells crossed the threshold during the sim. The
-        // sprout-graph still handles parent-dependency ordering — we just submit.
-        foreach (var (gtx, gty) in sproutedOrder)
-            chunks.TryRequestTile(gtx, gty, DefaultType);
+        return result;
     }
 
     private static void Deposit(

@@ -5814,11 +5814,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "c:\\Users\\amdic\\dev\\MTile\\MTile.Tests\\MTile.Tests.csproj",
+      "projectUniqueName": "C:\\Users\\amdic\\dev\\MTile\\MTile.Tests\\MTile.Tests.csproj",
       "projectName": "MTile.Tests",
-      "projectPath": "c:\\Users\\amdic\\dev\\MTile\\MTile.Tests\\MTile.Tests.csproj",
+      "projectPath": "C:\\Users\\amdic\\dev\\MTile\\MTile.Tests\\MTile.Tests.csproj",
       "packagesPath": "C:\\Users\\amdic\\.nuget\\packages\\",
-      "outputPath": "c:\\Users\\amdic\\dev\\MTile\\MTile.Tests\\obj\\",
+      "outputPath": "C:\\Users\\amdic\\dev\\MTile\\MTile.Tests\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\amdic\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -5833,8 +5833,8 @@
         "net8.0": {
           "targetAlias": "net8.0",
           "projectReferences": {
-            "c:\\Users\\amdic\\dev\\MTile\\MTile.csproj": {
-              "projectPath": "c:\\Users\\amdic\\dev\\MTile\\MTile.csproj"
+            "C:\\Users\\amdic\\dev\\MTile\\MTile.csproj": {
+              "projectPath": "C:\\Users\\amdic\\dev\\MTile\\MTile.csproj"
             }
           }
         }

@@ -19,6 +19,13 @@ public static class EntityFactory
 
     public static Entity Ball(Vector2 pos) => MakeBall(pos, gravityScale: 1f, Color.SteelBlue);
 
+    // First active NPC. Walks toward the player on the ground and commits to a
+    // telegraph→lunge attack when in range. See StalkerEnemy for the AI.
+    public static StalkerEnemy Stalker(Vector2 pos) => new(pos);
+
+    // Stationary ranged enemy. See TurretEnemy for the charge → fire cycle.
+    public static TurretEnemy Turret(Vector2 pos) => new(pos);
+
     // Same crasher config as Ball but weightless — for the impact-damage test
     // chamber, where the player slashes balls into a wall without gravity
     // dropping them to the floor first.

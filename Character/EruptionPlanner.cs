@@ -32,6 +32,11 @@ public static class EruptionPlanner
     // which dispatches to the chosen implementation. Defaults to PriorityField.
     public static EruptionPlannerMode CurrentMode = EruptionPlannerMode.MassBall;
 
+    // Mirrored from GameConfig.DebugDrawMassBall each frame by Game1.Update.
+    // BlockEruptionAction.Draw reads it directly — keeps the config-reading
+    // surface area limited to Game1 while still letting actions consult it.
+    public static bool DebugDrawMassBall = false;
+
     public static void Plan(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget)
     {
         if (CurrentMode == EruptionPlannerMode.MassBall)

@@ -94,7 +94,7 @@ public static class PhysicsWorld
                 if (vnRel < 0f)
                 {
                     body.Velocity -= vnRel * normal;
-                    ApplyFrictionAtImpact(body, normal, shape.Velocity, ComputeFrictionForNormal(normal), savedForce, dt);
+                    ApplyFrictionAtImpact(body, normal, shape.Velocity, ComputeFrictionForNormal(body, normal), savedForce, dt);
                     TryApplyImpactDamage(body, bounds, normal, vnRel, chunks);
                 }
 
@@ -196,7 +196,7 @@ public static class PhysicsWorld
                 minT = swept.T;
                 hitNormal = swept.Normal;
                 hitSurfaceVel = shape.Velocity;
-                hitFriction = ComputeFrictionForNormal(swept.Normal);
+                hitFriction = ComputeFrictionForNormal(body, swept.Normal);
                 anyHit = true;
                 hitFromFloating = false;
             }
@@ -240,8 +240,13 @@ public static class PhysicsWorld
             {
                 body.Velocity -= vnRel * hitNormal;
                 ApplyFrictionAtImpact(body, hitNormal, hitSurfaceVel, hitFriction, savedForce, dt);
-                if (!hitFromFloating)
-                    TryApplyImpactDamage(body, body.Polygon.GetBoundingBox(pos), hitNormal, vnRel, chunks);
+                // Impact damage fires on BOTH chunk-collision and FSD-collision
+                // events — the latter is how the player lands (StandingState's
+                // ground FSD takes the impulse). The probe strip below the body
+                // finds the actual tile cells to damage; FSDs are virtual planes
+                // but the body's bounds at impact still line up with real cells.
+                // Players who shouldn't break tiles just don't set body.Impact.
+                TryApplyImpactDamage(body, body.Polygon.GetBoundingBox(pos), hitNormal, vnRel, chunks);
             }
 
             float dn2 = Vector2.Dot(displacement, hitNormal);
@@ -269,8 +274,9 @@ public static class PhysicsWorld
     {
         // Floor-pointing normals (within ~45° of straight up) get the ground-friction
         // default; walls and ceilings stay frictionless so wall-slides and head-bumps
-        // don't pick up a spurious tangential coupling.
-        float friction = normal.Y < -0.7f ? MovementConfig.Current.GroundFriction : 0f;
+        // don't pick up a spurious tangential coupling. Scaled per body so enemies
+        // can be made slippery (slide visibly when slashed).
+        float friction = (normal.Y < -0.7f ? MovementConfig.Current.GroundFriction : 0f) * body.FrictionScale;
 
         foreach (var c in body.Constraints)
         {
@@ -324,8 +330,9 @@ public static class PhysicsWorld
     // Floor-pointing normals (within ~45° of straight up) get the configured
     // ground-friction coefficient; walls and ceilings stay frictionless so
     // wall-slides and head-bumps don't pick up a spurious tangential coupling.
-    private static float ComputeFrictionForNormal(Vector2 normal)
-        => normal.Y < -0.7f ? MovementConfig.Current.GroundFriction : 0f;
+    // Scaled by the body's per-body FrictionScale (enemies use < 1 to be slippery).
+    private static float ComputeFrictionForNormal(PhysicsBody body, Vector2 normal)
+        => (normal.Y < -0.7f ? MovementConfig.Current.GroundFriction : 0f) * body.FrictionScale;
 
     // Probe a thin slab along the impact face for every tile pressed against it,
     // then split the impulse-derived damage equally among them. This is what makes
@@ -338,8 +345,7 @@ public static class PhysicsWorld
     {
         if (body.Impact == null) return;
         float impulse = body.Impact.Mass * MathF.Abs(vnRel);
-        float over    = impulse - body.Impact.ImpulseThreshold;
-        if (over <= 0f) return;
+        if (impulse <= 0f) return;
 
         const float probe = 1f;
         BoundingBox strip;
@@ -357,8 +363,19 @@ public static class PhysicsWorld
         }
         if (_impactCells.Count == 0) return;
 
-        float per = over * body.Impact.DamagePerUnitImpulse / _impactCells.Count;
-        foreach (var (gtx, gty) in _impactCells) chunks.DamageCell(gtx, gty, per);
+        // Each cell sees its share of the impulse routed through the
+        // accumulator. The cell-level threshold + decay handles spring-padded
+        // landings: even if a single frame's impulse is below threshold, the
+        // accumulator integrates the spring's bleed-out and fires damage once
+        // the running total crosses. AccrueAndConsume returns the over-
+        // threshold portion already net of the threshold, so we just multiply
+        // by the body's damage coefficient.
+        float perCellImpulse = impulse / _impactCells.Count;
+        foreach (var (gtx, gty) in _impactCells)
+        {
+            float over = chunks.Impact.AccrueAndConsume(gtx, gty, perCellImpulse, body.Impact.ImpulseThreshold);
+            if (over > 0f) chunks.DamageCell(gtx, gty, over * body.Impact.DamagePerUnitImpulse);
+        }
     }
 
     // Probe the strip just beyond the body's face along -normal for any solid shape.

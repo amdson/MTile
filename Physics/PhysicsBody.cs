@@ -15,6 +15,12 @@ public class PhysicsBody
     // for null at each impulse site and dispatches damage when present.
     public ImpactDamage Impact;
 
+    // Per-body multiplier on the global ground friction. 1.0 (default) matches
+    // the player's tuned feel; enemies set this lower so a slash impulse actually
+    // visibly chucks them across the ground instead of being eaten by friction
+    // in 1-2 frames. Applied wherever PhysicsWorld assigns or computes friction.
+    public float FrictionScale = 1f;
+
     // Float-precision AABB of the polygon at the body's current position. Recomputes on access (cheap
     // for a 6-vertex hex). Doubles as a probe-region builder — `body.Bounds.StripAbove(20)` gives the
     // 20px slab right above the body for ceiling-probing, etc. See BoundingBox.

@@ -1,0 +1,16 @@
+{
+  "Stage": "arena",
+  "WindowWidth": 1600,
+  "WindowHeight": 1200,
+  "Fullscreen": false,
+
+  "DebugDrawHitboxes":          false,
+  "DebugDrawHurtboxes":         false,
+  "DebugDrawPlayerOrientation": false,
+  "DebugDrawBodies":            false,
+  "DebugDrawConstraints":       false,
+  "DebugDrawGuidedPath":        true,
+  "DebugDrawHealthBars":        true,
+  "DebugDrawMassBall":          true,
+  "MouseTrail": true
+}
