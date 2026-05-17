@@ -150,18 +150,20 @@ public class PhysicsTests
     {
         // Arrange
         var chunks = new ChunkMap();
-        var chunk = new Chunk { ChunkPos = new Point(0, 0) }; 
-        for (int tx = 0; tx < Chunk.Size; tx++) 
-        for (int ty = 0; ty < Chunk.Size; ty++) 
+        var chunk = new Chunk { ChunkPos = new Point(0, 0) };
+        for (int tx = 0; tx < Chunk.Size; tx++)
+        for (int ty = 0; ty < Chunk.Size; ty++)
         {
             chunk.Tiles[tx, ty].IsSolid = true;
         }
         chunks[chunk.ChunkPos] = chunk;
 
         var hex = CreateHexagon();
-        
-        // Chunk is from X=0 to X=512. Put hex at X=600, moving left.
-        var body = new PhysicsBody(hex, new Vector2(600f, 256f)); 
+
+        // Chunk is 16 tiles × 16 px = 256 px wide, spans X∈[0, 256]. Put hex at X=400 moving
+        // left at -1000 px/s; unobstructed it would travel -200 px to X=200 (well inside the
+        // chunk). The swept resolver must stop it before phasing in.
+        var body = new PhysicsBody(hex, new Vector2(400f, 128f));
         body.Velocity = new Vector2(-1000f, 0f);
 
         var bodies = new System.Collections.Generic.List<PhysicsBody> { body };
@@ -169,8 +171,9 @@ public class PhysicsTests
         // Act
         PhysicsWorld.StepSwept(bodies, chunks, 0.2f, Vector2.Zero);
 
-        // Assert
-        Assert.True(body.Position.X >= 512f - 2f, $"Hexagon phased into the chunk! Final position: {body.Position}");
+        // Assert: hex left vertex at X=center−34.64 should rest against the chunk's right edge
+        // at X=256 → center at 256 + 34.64 ≈ 290.64.
+        Assert.True(body.Position.X >= 290f, $"Hexagon phased into the chunk! Final position: {body.Position}");
     }
 
     [Fact]
@@ -215,23 +218,23 @@ public class PhysicsTests
     {
         // Recreate the user's specific state: touching the ground, moving left into a wall.
         var chunks = new ChunkMap();
-        var chunk = new Chunk { ChunkPos = new Point(0, 0) }; 
+        var chunk = new Chunk { ChunkPos = new Point(0, 0) };
         chunks[new Point(0, 0)] = chunk;
 
-        // Build a floor from X=0 to 512 at ty=16 (Y=256)
-        // Build a wall at tx=2 (X=32 to 48) from ty=0 to 16 (Y=0 to 256)
-        for (int tx = 0; tx < Chunk.Size; tx++) chunk.Tiles[tx, 16].IsSolid = true;
-        for (int ty = 0; ty <= 16; ty++) chunk.Tiles[2, ty].IsSolid = true;
+        // Chunk is 16×16 tiles (16 px each); valid tile indices are 0..15.
+        // Floor: row 15 (Y∈[240, 256], top at Y=240) across all columns.
+        // Wall:  col 2 (X∈[32, 48], right edge X=48), rows 0..14 (Y∈[0, 240], stops at the
+        //        floor's top).
+        for (int tx = 0; tx < Chunk.Size; tx++) chunk.Tiles[tx, 15].IsSolid = true;
+        for (int ty = 0; ty <= 14; ty++)        chunk.Tiles[2,  ty].IsSolid = true;
 
         var hex = CreateHexagon();
-        
-        // Hexagon radius 40. Floor surface is at Y=256. Hexagon center should be at Y=216 to touch the floor.
-        // Wall right edge is at X=48. Hexagon center at X=100.
-        var body = new PhysicsBody(hex, new Vector2(100f, 216f)); 
-        
-        // body.Constraints.Add(new SurfaceDistance(new Vector2(100f, 256f), new Vector2(0f, -1f), 0f));
 
-        // Moving left fast
+        // Hexagon radius 40; resting on the floor → center.Y = 240 − 40 = 200.
+        // Start X=100 so hex.Left ≈ 65.36 is 17 px clear of the wall's right edge at X=48.
+        var body = new PhysicsBody(hex, new Vector2(100f, 200f));
+
+        // Moving left fast — without resolution the body would travel −100 px to X=0, well past the wall.
         body.Velocity = new Vector2(-1000f, 0f);
 
         var bodies = new System.Collections.Generic.List<PhysicsBody> { body };
@@ -239,9 +242,7 @@ public class PhysicsTests
         // Act
         PhysicsWorld.StepSwept(bodies, chunks, 0.1f, Vector2.Zero);
 
-        // Assert
-        // Hexagon left edge (center.X - 34.64). Should hit wall at X=48. 
-        // center.X should not go below 48 + 34.64 = 82.64.
+        // Assert: hex left vertex rests against the wall at X=48 → center.X ≈ 48 + 34.64 = 82.64.
         Assert.True(body.Position.X >= 80f, $"Hexagon phased through the wall while grounded! Final position: {body.Position}");
     }
 }

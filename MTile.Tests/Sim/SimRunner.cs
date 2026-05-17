@@ -36,6 +36,8 @@ public static class SimRunner
         player.Body.Velocity = cfg.StartVelocity;
         var bodies  = new List<PhysicsBody> { player.Body };
         var ctrl    = new Controller();
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
         var frames  = new List<SimFrame>(cfg.Frames);
         SimFrame? prev = null;
         string lastState = "";
@@ -45,7 +47,9 @@ public static class SimRunner
             var input = cfg.Script.Get(f, prev);
             ctrl.InjectInput(input);
 
-            player.Update(ctrl, cfg.Terrain, cfg.Dt);
+            cfg.Terrain.TickSprouts(cfg.Dt);
+
+            player.Update(ctrl, cfg.Terrain, hitboxes, hurtboxes, cfg.Dt);
 
             // Capture AppliedForce HERE — PhysicsWorld resets it to zero during StepSwept.
             float fx = player.Body.AppliedForce.X;

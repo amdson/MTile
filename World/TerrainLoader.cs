@@ -86,7 +86,17 @@ public static class TerrainLoader
             for (int ty = 0; ty < Chunk.Size; ty++)
             {
                 int worldY = chunk.ChunkPos.Y * Chunk.Size + ty;
-                chunk.Tiles[tx, ty].IsSolid = worldY >= surfaceY;
+                bool solid = worldY >= surfaceY;
+                chunk.Tiles[tx, ty].IsSolid = solid;
+                if (solid)
+                {
+                    // Depth-layered material: thin sandy crust, dirt mid-layer, stone deep.
+                    int depth = worldY - surfaceY;
+                    chunk.Tiles[tx, ty].Type =
+                        depth < 2 ? TileType.Sand
+                      : depth < 6 ? TileType.Dirt
+                      :             TileType.Stone;
+                }
             }
         }
     }

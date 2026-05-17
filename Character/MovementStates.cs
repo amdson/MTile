@@ -11,6 +11,7 @@ public class JumpingState : MovementState
 
     private bool _jumpReleased;
     private float _timeInState;
+    private FloatingSurfaceDistance _source;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -23,16 +24,40 @@ public class JumpingState : MovementState
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        return !_jumpReleased && _timeInState < MovementConfig.Current.MaxJumpHoldTime;
+        if (_jumpReleased || _timeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
+        // The jump is anchored to its source surface. Once the body has risen out
+        // of the (wider-than-Standing) probe window, the "relative-to-source" frame
+        // no longer means anything — end the jump and let Falling take over.
+        return TryFindSource(ctx, out _);
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         _timeInState = 0f;
         _jumpReleased = !ctx.Input.Space;
-        ctx.Body.Velocity.Y = MovementConfig.Current.JumpVelocity;
 
+        // Replace any pre-existing FSD (e.g. StandingState's _ground) with our own
+        // source FSD: same kind of contact, just tuned for an airborne body.
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
+        if (TryFindSource(ctx, out _source))
+        {
+            // Airborne — no tangential coupling to the source surface, else friction
+            // would dominate the gentle air-drag tangential dynamics.
+            _source.Friction = 0f;
+            ctx.Body.Constraints.Add(_source);
+        }
+
+        // Vertical velocity is set *relative* to the source surface, not added to
+        // the body's current vy. Adding to the current velocity produces pathological
+        // launches when the body enters with redirected vy (e.g. mid-Parkour ramp).
+        float sourceVy = _source?.SurfaceVelocity.Y ?? 0f;
+        ctx.Body.Velocity.Y = sourceVy + MovementConfig.Current.JumpVelocity;
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (_source != null) ctx.Body.Constraints.Remove(_source);
+        _source = null;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -40,26 +65,37 @@ public class JumpingState : MovementState
         _timeInState += ctx.Dt;
         if (!ctx.Input.Space) _jumpReleased = true;
 
+        // Refresh the source FSD's pose so the body's vertical motion is tracked
+        // relative to a moving source surface throughout the jump.
+        if (_source != null && TryFindSource(ctx, out var refreshed))
+        {
+            _source.Position        = refreshed.Position;
+            _source.Normal          = refreshed.Normal;
+            _source.MinDistance     = refreshed.MinDistance;
+            _source.SurfaceVelocity = refreshed.SurfaceVelocity;
+        }
+
+        var cfg = MovementConfig.Current;
+        var m   = ctx.Modifiers;
         var force = Vector2.Zero;
-        force.Y += MovementConfig.Current.JumpHoldForce;
-        if (_timeInState <= ctx.Dt) 
-            force.Y += MovementConfig.Current.JumpInitForce;
-        
-        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
-        if (inputX != 0f)
-        {
-            force.X += inputX * MovementConfig.Current.AirAccel;
-            float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.MaxAirSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
-                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
-        }
-        else if (ctx.Dt > 0f)
-        {
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -MovementConfig.Current.AirDrag, MovementConfig.Current.AirDrag);
-        }
+        force.Y += cfg.JumpHoldForce;
+        if (_timeInState <= ctx.Dt)
+            force.Y += cfg.JumpInitForce;
+
+        force.X = AirControl.Apply(ctx,
+            cfg.AirAccel    * m.AirAccel,
+            cfg.MaxAirSpeed * m.MaxAirSpeed,
+            cfg.AirDrag     * m.AirDrag);
 
         ctx.Body.AppliedForce = force;
     }
+
+    private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
+        => GroundChecker.TryFind(
+            ctx.Body, ctx.Chunks,
+            PlayerCharacter.Radius, PlayerCharacter.Radius,
+            MovementConfig.Current.JumpSourceProbeSlack,
+            out source);
 }
 
 public class RunningJumpState : MovementState
@@ -69,6 +105,7 @@ public class RunningJumpState : MovementState
 
     private bool _jumpReleased;
     private float _timeInState;
+    private FloatingSurfaceDistance _source;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -81,16 +118,31 @@ public class RunningJumpState : MovementState
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        return !_jumpReleased && _timeInState < MovementConfig.Current.MaxJumpHoldTime;
+        if (_jumpReleased || _timeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
+        return TryFindSource(ctx, out _);
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         _timeInState = 0f;
         _jumpReleased = !ctx.Input.Space;
-        ctx.Body.Velocity.Y = MovementConfig.Current.RunJumpVelocity;
-        
+
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
+        if (TryFindSource(ctx, out _source))
+        {
+            _source.Friction = 0f;
+            ctx.Body.Constraints.Add(_source);
+        }
+
+        // See JumpingState.Enter — vy is relative to source, not additive.
+        float sourceVy = _source?.SurfaceVelocity.Y ?? 0f;
+        ctx.Body.Velocity.Y = sourceVy + MovementConfig.Current.RunJumpVelocity;
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (_source != null) ctx.Body.Constraints.Remove(_source);
+        _source = null;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -98,26 +150,35 @@ public class RunningJumpState : MovementState
         _timeInState += ctx.Dt;
         if (!ctx.Input.Space) _jumpReleased = true;
 
+        if (_source != null && TryFindSource(ctx, out var refreshed))
+        {
+            _source.Position        = refreshed.Position;
+            _source.Normal          = refreshed.Normal;
+            _source.MinDistance     = refreshed.MinDistance;
+            _source.SurfaceVelocity = refreshed.SurfaceVelocity;
+        }
+
+        var cfg = MovementConfig.Current;
+        var m   = ctx.Modifiers;
         var force = Vector2.Zero;
-        force.Y += MovementConfig.Current.RunJumpHoldForce;
-        if (_timeInState <= ctx.Dt) 
-            force.Y += MovementConfig.Current.JumpInitForce;
-        
-        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
-        if (inputX != 0f)
-        {
-            force.X += inputX * MovementConfig.Current.AirAccel;
-            float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.MaxAirSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
-                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
-        }
-        else if (ctx.Dt > 0f)
-        {
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -MovementConfig.Current.AirDrag, MovementConfig.Current.AirDrag);
-        }
+        force.Y += cfg.RunJumpHoldForce;
+        if (_timeInState <= ctx.Dt)
+            force.Y += cfg.JumpInitForce;
+
+        force.X = AirControl.Apply(ctx,
+            cfg.AirAccel    * m.AirAccel,
+            cfg.MaxAirSpeed * m.MaxAirSpeed,
+            cfg.AirDrag     * m.AirDrag);
 
         ctx.Body.AppliedForce = force;
     }
+
+    private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
+        => GroundChecker.TryFind(
+            ctx.Body, ctx.Chunks,
+            PlayerCharacter.Radius, PlayerCharacter.Radius,
+            MovementConfig.Current.JumpSourceProbeSlack,
+            out source);
 }
 
 public class WallSlidingState : MovementState
@@ -317,23 +378,17 @@ public class DoubleJumpingState : MovementState
         _timeInState += ctx.Dt;
         if (!ctx.Input.Space) _jumpReleased = true;
 
+        var cfg = MovementConfig.Current;
+        var m   = ctx.Modifiers;
         var force = Vector2.Zero;
-        force.Y += MovementConfig.Current.DoubleJumpHoldForce;
+        force.Y += cfg.DoubleJumpHoldForce;
         if (_timeInState <= ctx.Dt)
-            force.Y += MovementConfig.Current.DoubleJumpInitForce;
+            force.Y += cfg.DoubleJumpInitForce;
 
-        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
-        if (inputX != 0f)
-        {
-            force.X += inputX * MovementConfig.Current.AirAccel;
-            float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.MaxAirSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
-                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
-        }
-        else if (ctx.Dt > 0f)
-        {
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -MovementConfig.Current.AirDrag, MovementConfig.Current.AirDrag);
-        }
+        force.X = AirControl.Apply(ctx,
+            cfg.AirAccel    * m.AirAccel,
+            cfg.MaxAirSpeed * m.MaxAirSpeed,
+            cfg.AirDrag     * m.AirDrag);
 
         ctx.Body.AppliedForce = force;
     }
@@ -407,6 +462,7 @@ public class CoveredJumpState : MovementState
         if (!ctx.Input.Space) return false;            // held-jump (tapped-jump variant TBD)
         if (!ctx.TryGetGround(out var ground)) return false;
         if (!ctx.TryGetCeiling(out var ceiling)) return false;   // must actually be under something
+        if (!ctx.Input.Left && !ctx.Input.Right) return false;  // must be pressing a direction 
         // Only relevant for low ceilings (≤ 2 tiles). At 3+ tiles a regular jump fits with margin —
         // JumpingState handles those, and its precondition is the complement of this one.
         if (ground.Position.Y - ceiling.Position.Y > 2 * Chunk.TileSize) return false;
@@ -465,7 +521,9 @@ public class CoveredJumpState : MovementState
                 // vertex that's still 1-2px inside the slab's x-range right after clearing it, and
                 // rotate the launch's upward velocity sideways. The slide is over — no more insurance.
                 if (_ramp   != null) { ctx.Body.Constraints.Remove(_ramp);   _ramp   = null; }
-                ctx.Body.Velocity.Y = cfg.JumpVelocity;
+                // Add (don't overwrite) so a moving floor's vertical velocity carries
+                // into the launch — see JumpingState.Enter.
+                ctx.Body.Velocity.Y += cfg.JumpVelocity;
                 _phase = Phase.Jumping;
                 _jumpHoldTime = 0f;
                 _jumpReleased = !ctx.Input.Space;
@@ -852,16 +910,24 @@ public class DropdownState : MovementState
 
     // Same pattern as CoveredJumpState.TryPickOpenDir: honor input direction strictly when held,
     // closer edge from a standstill, never flip to the opposite side. Edge from GroundChecker.
+    //
+    // The IsHangingOver gate (mirrors CoveredJump's IsStickingOut) keeps Dropdown from firing
+    // when the body is fully on the platform — the player should crouch in that case, not slip.
+    // Only fires once some portion of the body's bounding box has pushed past the drop edge.
     private static bool TryPickDropDir(EnvironmentContext ctx, out int dir, out Vector2 corner)
     {
         int want = ctx.Intent.CurrentHorizontal;
+        var bounds = ctx.Body.Bounds;
+
         if (want != 0)
         {
-            if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, want, out corner)) { dir = want; return true; }
+            if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, want, out corner)
+                && IsHangingOver(bounds, want, corner.X))
+            { dir = want; return true; }
             dir = 0; corner = default; return false;
         }
-        bool hasR = GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks,  1, out var cR);
-        bool hasL = GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, -1, out var cL);
+        bool hasR = GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks,  1, out var cR) && IsHangingOver(bounds,  1, cR.X);
+        bool hasL = GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, -1, out var cL) && IsHangingOver(bounds, -1, cL.X);
         if (!hasR && !hasL) { dir = 0; corner = default; return false; }
         if (!hasL) { dir =  1; corner = cR; return true; }
         if (!hasR) { dir = -1; corner = cL; return true; }
@@ -870,6 +936,11 @@ public class DropdownState : MovementState
         if (distR <= distL) { dir =  1; corner = cR; return true; }
         dir = -1; corner = cL; return true;
     }
+
+    // Some portion of the body's bounding box has crossed the drop edge — i.e. is over
+    // empty air rather than over the platform. Mirrors CoveredJumpState.IsStickingOut.
+    private static bool IsHangingOver(BoundingBox bounds, int dir, float edgeX)
+        => dir == 1 ? bounds.Right > edgeX : bounds.Left < edgeX;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {

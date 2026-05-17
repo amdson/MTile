@@ -17,6 +17,13 @@ public class MovementConfig
     public float JumpHoldForce { get; set; } = -1500f;
     public float JumpInitForce { get; set; } = 0f;
     public float MaxJumpHoldTime { get; set; } = 0.12f;
+    // Wider-than-Standing probe slack for the jump-source FSD. Jumping states
+    // keep an FSD pointing at the surface the player launched from so the jump
+    // velocity is defined *relative* to that surface (essential when entering
+    // from Parkour with ramp-redirected vy). The window has to outlast the
+    // held-jump ascent (~20 px at default tuning) or CheckConditions trips
+    // mid-jump and the hold force cuts out.
+    public float JumpSourceProbeSlack { get; set; } = 60f;
 
     // Wall Sliding
     public float SlideTerminalSpeed { get; set; } = 40f;
@@ -37,7 +44,17 @@ public class MovementConfig
     public float SpringMaxRiseSpeed { get; set; } = 80f;
     public float WalkAccel { get; set; } = 3000f;
     public float MaxWalkSpeed { get; set; } = 100f;
+    // Legacy: used to be StandingState/CrouchedState's brake force when no input.
+    // Now the equivalent role is played by SurfaceContact.Friction (set on floor
+    // contacts at collision time, value below). Kept for movement_config.json
+    // backward compatibility but unused by code.
     public float BrakingForce { get; set; } = 3000f;
+    // Floor-contact friction coefficient (px/s²), applied by the physics solver as
+    // a cap on relative tangential velocity change per frame. Matches the old
+    // BrakingForce in magnitude so braking from a walk still stops the body in
+    // one frame on static ground; on a moving surface it pulls the body's
+    // tangential velocity toward the surface's (the tangential carry).
+    public float GroundFriction { get; set; } = 3000f;
     
     // Crouching
     public float CrouchMaxWalkSpeed { get; set; } = 50f;
@@ -112,6 +129,11 @@ public class MovementConfig
     // platform edge, so the drop trajectory lands close to the wall rather than flinging the body
     // forward at the full slide speed.
     public float DropdownExitVelMult { get; set; } = 0.4f;
+
+    // Tile sprout — duration of the grow animation when a new tile is placed.
+    // Sprout translates from its parent tile's center to its target cell center
+    // over this window, then commits as a regular solid tile.
+    public float SproutLifetime { get; set; } = 0.1f;
 
     // Double Jump
     public float DoubleJumpVelocity { get; set; } = -100f;

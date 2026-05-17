@@ -16,6 +16,10 @@ public static class PhysicsWorld
     {
         foreach (var body in bodies)
         {
+            // Saved before reset so the friction step can tell whether the state
+            // applied a tangential force this frame (walking / running / etc.).
+            // If so, friction stays out of the way; otherwise it brakes / carries.
+            Vector2 savedForce = body.AppliedForce;
             body.Velocity += body.AppliedForce * dt;
             body.AppliedForce = Vector2.Zero;
             body.Velocity += gravity * dt;
@@ -27,14 +31,27 @@ public static class PhysicsWorld
                 float dist = Vector2.Dot(body.Position - sc.Position, sc.Normal);
                 if (dist < sc.MinDistance)
                 {
-                    float vn = Vector2.Dot(body.Velocity, sc.Normal);
-                    if (vn < 0f)
-                        body.Velocity -= vn * sc.Normal;
+                    // Zero the *relative* normal velocity (body − surface) so a body
+                    // resting on a moving surface inherits its motion. For a static
+                    // surface SurfaceVelocity is zero and this collapses to the old form.
+                    float vnRel = Vector2.Dot(body.Velocity - sc.SurfaceVelocity, sc.Normal);
+                    if (vnRel < 0f)
+                        body.Velocity -= vnRel * sc.Normal;
                 }
+                // Friction is tangential coupling that exists whenever the surface
+                // is engaged with the body — and the contact's presence in
+                // body.Constraints is the engagement signal (owning states add on
+                // Enter, remove on Exit). It can't be coupled to the normal-impulse
+                // gate above because a body hovering on a soft spring contact
+                // (StandingState's FSD) has its normal motion managed by the
+                // state's spring force, not by the constraint loop — so the impulse
+                // gate never fires in steady state and a coupled friction call
+                // would never brake horizontal motion.
+                ApplyContactFriction(body, sc, savedForce, dt);
             }
 
             var nextPos = body.Position + body.Velocity * dt;
-            nextPos = ResolveChunkCollisions(body, chunks, nextPos);
+            nextPos = ResolveChunkCollisions(body, chunks, nextPos, savedForce, dt);
             body.Position = nextPos;
 
             var bodyBounds = body.Polygon.GetBounds(body.Position);
@@ -42,62 +59,46 @@ public static class PhysicsWorld
             {
                 if (c is not SurfaceDistance sd) return false;
                 if (Vector2.Dot(body.Position - sd.Position, sd.Normal) > 2f * Epsilon) return true;
-                return !WorldHasSurface(chunks, bodyBounds, sd.Normal);
+                // Query-driven refresh: re-probe each frame so a moving source surface's
+                // current velocity overwrites the snapshot stamped at collision time.
+                if (!TryFindContactSurface(chunks, bodyBounds, sd.Normal, out var surfaceVel)) return true;
+                sd.SurfaceVelocity = surfaceVel;
+                return false;
             });
         }
     }
 
-    private static Vector2 ResolveChunkCollisions(PhysicsBody body, ChunkMap chunks, Vector2 nextPos)
+    private static Vector2 ResolveChunkCollisions(PhysicsBody body, ChunkMap chunks, Vector2 nextPos, Vector2 savedForce, float dt)
     {
-        const int chunkPixelSize = Chunk.Size * Chunk.TileSize;
         const int maxIterations = 8;
 
         for (int iter = 0; iter < maxIterations; iter++)
         {
-            var bounds = body.Polygon.GetBounds(nextPos);
+            var bounds = body.Polygon.GetBoundingBox(nextPos);
             bool anyHit = false;
 
-            int cxMin = (int)Math.Floor((float)bounds.Left / chunkPixelSize);
-            int cxMax = (int)Math.Floor((float)bounds.Right / chunkPixelSize);
-            int cyMin = (int)Math.Floor((float)bounds.Top / chunkPixelSize);
-            int cyMax = (int)Math.Floor((float)bounds.Bottom / chunkPixelSize);
-
-            for (int cx = cxMin; cx <= cxMax; cx++)
-            for (int cy = cyMin; cy <= cyMax; cy++)
+            foreach (var shape in WorldQuery.SolidShapesInRect(chunks, bounds))
             {
-                var chunkPos = new Point(cx, cy);
-                if (!chunks.TryGet(chunkPos, out var chunk)) continue;
+                var hit = Collision.Check(body.Polygon, nextPos, 0f, shape.Polygon, shape.Position, 0f);
+                if (!hit.Intersects) continue;
 
-                float chunkOriginX = cx * chunkPixelSize;
-                float chunkOriginY = cy * chunkPixelSize;
+                anyHit = true;
+                var normal = Vector2.Normalize(hit.MTV);
+                nextPos += hit.MTV + normal * Epsilon;
+                bounds = body.Polygon.GetBoundingBox(nextPos);
 
-                int txMin = Math.Max(0, (int)Math.Floor((bounds.Left - chunkOriginX) / Chunk.TileSize));
-                int txMax = Math.Min(Chunk.Size - 1, (int)Math.Floor((bounds.Right - chunkOriginX) / Chunk.TileSize));
-                int tyMin = Math.Max(0, (int)Math.Floor((bounds.Top - chunkOriginY) / Chunk.TileSize));
-                int tyMax = Math.Min(Chunk.Size - 1, (int)Math.Floor((bounds.Bottom - chunkOriginY) / Chunk.TileSize));
-
-                if (txMin > txMax || tyMin > tyMax) continue;
-
-                for (int tx = txMin; tx <= txMax; tx++)
-                for (int ty = tyMin; ty <= tyMax; ty++)
+                // Zero the *relative* normal velocity so a body landing on a moving
+                // surface emerges moving with it along the contact normal — the carry.
+                // For static tiles shape.Velocity is zero and this collapses to absolute.
+                float vnRel = Vector2.Dot(body.Velocity - shape.Velocity, normal);
+                if (vnRel < 0f)
                 {
-                    if (!chunk.Tiles[tx, ty].IsSolid) continue;
-
-                    var tilePos = TileWorld.TileCenter(chunkPos, new Point(tx, ty));
-                    var hit = Collision.Check(body.Polygon, nextPos, 0f, TileWorld.TileShape, tilePos, 0f);
-                    if (!hit.Intersects) continue;
-
-                    anyHit = true;
-                    var normal = Vector2.Normalize(hit.MTV);
-                    nextPos += hit.MTV + normal * Epsilon;
-                    bounds = body.Polygon.GetBounds(nextPos);
-
-                    float vn = Vector2.Dot(body.Velocity, normal);
-                    if (vn < 0f)
-                        body.Velocity -= vn * normal;
-
-                    UpdateSurfaceConstraint(body, nextPos, normal);
+                    body.Velocity -= vnRel * normal;
+                    ApplyFrictionAtImpact(body, normal, shape.Velocity, ComputeFrictionForNormal(normal), savedForce, dt);
+                    TryApplyImpactDamage(body, bounds, normal, vnRel, chunks);
                 }
+
+                UpdateSurfaceConstraint(body, nextPos, normal, shape.Velocity);
             }
 
             if (!anyHit) break;
@@ -113,6 +114,7 @@ public static class PhysicsWorld
     {
         foreach (var body in bodies)
         {
+            Vector2 savedForce = body.AppliedForce;
             body.Velocity += body.AppliedForce * dt;
             body.AppliedForce = Vector2.Zero;
             body.Velocity += gravity * dt;
@@ -123,31 +125,49 @@ public static class PhysicsWorld
                 float dist = Vector2.Dot(body.Position - sc.Position, sc.Normal);
                 if (dist < sc.MinDistance)
                 {
-                    float vn = Vector2.Dot(body.Velocity, sc.Normal);
-                    if (vn < 0f)
-                        body.Velocity -= vn * sc.Normal;
+                    // Zero the *relative* normal velocity (body − surface) so a body
+                    // resting on a moving surface inherits its motion. For a static
+                    // surface SurfaceVelocity is zero and this collapses to the old form.
+                    float vnRel = Vector2.Dot(body.Velocity - sc.SurfaceVelocity, sc.Normal);
+                    if (vnRel < 0f)
+                        body.Velocity -= vnRel * sc.Normal;
                 }
+                // See the matching note in Step(): friction is gated on contact
+                // presence, not on the impulse condition, so soft spring contacts
+                // still brake tangential motion in steady state.
+                ApplyContactFriction(body, sc, savedForce, dt);
             }
 
             // Steering ramps: rotate velocity onto the shallowest trajectory that clears the corner
             // (derived from the polygon each step). Position is still resolved by the real tile sweep below.
             SteeringRamp.ApplyRedirect(body);
 
-            body.Position = ResolveChunkCollisionsSwept(body, chunks, body.Position, body.Position + body.Velocity * dt);
+            // Depenetration pre-pass. The swept solver only ejects by Epsilon per bounce
+            // when the body starts overlapping a shape — fine for static tiles the body
+            // never enters, but a TileSprout that flipped to Solid mid-overlap can leave
+            // the body wedged by several px, and 4 bounces × 0.5 px isn't enough. Discrete
+            // ResolveChunkCollisions applies the full MTV per iter (cap 8), so it cleanly
+            // ejects from any starting overlap before the sweep begins.
+            body.Position = ResolveChunkCollisions(body, chunks, body.Position, savedForce, dt);
+
+            body.Position = ResolveChunkCollisionsSwept(body, chunks, body.Position, body.Position + body.Velocity * dt, savedForce, dt);
 
             var bodyBounds = body.Polygon.GetBounds(body.Position);
             body.Constraints.RemoveAll(c =>
             {
                 if (c is not SurfaceDistance sd) return false;
                 if (Vector2.Dot(body.Position - sd.Position, sd.Normal) > 2f * Epsilon) return true;
-                return !WorldHasSurface(chunks, bodyBounds, sd.Normal);
+                // Query-driven refresh: re-probe each frame so a moving source surface's
+                // current velocity overwrites the snapshot stamped at collision time.
+                if (!TryFindContactSurface(chunks, bodyBounds, sd.Normal, out var surfaceVel)) return true;
+                sd.SurfaceVelocity = surfaceVel;
+                return false;
             });
         }
     }
 
-    private static Vector2 ResolveChunkCollisionsSwept(PhysicsBody body, ChunkMap chunks, Vector2 pos, Vector2 targetPos)
+    private static Vector2 ResolveChunkCollisionsSwept(PhysicsBody body, ChunkMap chunks, Vector2 pos, Vector2 targetPos, Vector2 savedForce, float dt)
     {
-        const int chunkPixelSize = Chunk.Size * Chunk.TileSize;
         const int maxBounces = 4;
 
         var displacement = targetPos - pos;
@@ -160,43 +180,25 @@ public static class PhysicsWorld
             bool anyHit = false;
             float minT = 1f;
             Vector2 hitNormal = Vector2.Zero;
+            Vector2 hitSurfaceVel = Vector2.Zero;
+            float hitFriction = 0f;
             bool hitFromFloating = false;
 
-            int cxMin = (int)Math.Floor((float)sweptBounds.Left / chunkPixelSize);
-            int cxMax = (int)Math.Floor((float)sweptBounds.Right / chunkPixelSize);
-            int cyMin = (int)Math.Floor((float)sweptBounds.Top / chunkPixelSize);
-            int cyMax = (int)Math.Floor((float)sweptBounds.Bottom / chunkPixelSize);
-
-            for (int cx = cxMin; cx <= cxMax; cx++)
-            for (int cy = cyMin; cy <= cyMax; cy++)
+            // All solid shapes — tiles, sprouts, external dynamic providers — go
+            // through WorldQuery so the sweep sees one unified surface set. For
+            // static tiles shape.Velocity is zero; the relative-frame carry math
+            // below collapses to the absolute case.
+            foreach (var shape in WorldQuery.SolidShapesInRect(chunks, sweptBounds))
             {
-                var chunkPos = new Point(cx, cy);
-                if (!chunks.TryGet(chunkPos, out var chunk)) continue;
+                var swept = Collision.Swept(body.Polygon, pos, 0f, displacement, shape.Polygon, shape.Position, 0f);
+                if (!swept.Hit || swept.T > minT) continue;
 
-                float chunkOriginX = cx * chunkPixelSize;
-                float chunkOriginY = cy * chunkPixelSize;
-
-                int txMin = Math.Max(0, (int)Math.Floor((sweptBounds.Left - chunkOriginX) / Chunk.TileSize));
-                int txMax = Math.Min(Chunk.Size - 1, (int)Math.Floor((sweptBounds.Right - chunkOriginX) / Chunk.TileSize));
-                int tyMin = Math.Max(0, (int)Math.Floor((sweptBounds.Top - chunkOriginY) / Chunk.TileSize));
-                int tyMax = Math.Min(Chunk.Size - 1, (int)Math.Floor((sweptBounds.Bottom - chunkOriginY) / Chunk.TileSize));
-
-                if (txMin > txMax || tyMin > tyMax) continue;
-
-                for (int tx = txMin; tx <= txMax; tx++)
-                for (int ty = tyMin; ty <= tyMax; ty++)
-                {
-                    if (!chunk.Tiles[tx, ty].IsSolid) continue;
-
-                    var tilePos = TileWorld.TileCenter(chunkPos, new Point(tx, ty));
-                    var swept = Collision.Swept(body.Polygon, pos, 0f, displacement, TileWorld.TileShape, tilePos, 0f);
-                    if (!swept.Hit || swept.T > minT) continue;
-
-                    minT = swept.T;
-                    hitNormal = swept.Normal;
-                    anyHit = true;
-                    hitFromFloating = false;
-                }
+                minT = swept.T;
+                hitNormal = swept.Normal;
+                hitSurfaceVel = shape.Velocity;
+                hitFriction = ComputeFrictionForNormal(swept.Normal);
+                anyHit = true;
+                hitFromFloating = false;
             }
 
             // Treat each FloatingSurfaceDistance as a plane the body sweeps against.
@@ -210,6 +212,8 @@ public static class PhysicsWorld
                 if (t < 0f || t > minT) continue;
                 minT = t;
                 hitNormal = fsd.Normal;
+                hitSurfaceVel = fsd.SurfaceVelocity;
+                hitFriction = fsd.Friction;
                 anyHit = true;
                 hitFromFloating = true;
             }
@@ -219,7 +223,7 @@ public static class PhysicsWorld
             // Already overlapping at start of step: fall back to discrete push-out at target position.
             if (hitNormal == Vector2.Zero)
             {
-                pos = ResolveChunkCollisions(body, chunks, pos + displacement);
+                pos = ResolveChunkCollisions(body, chunks, pos + displacement, savedForce, dt);
                 displacement = Vector2.Zero;
                 break;
             }
@@ -227,32 +231,47 @@ public static class PhysicsWorld
             pos += displacement * minT + hitNormal * Epsilon;
             displacement *= 1f - minT;
 
-            float vn = Vector2.Dot(body.Velocity, hitNormal);
-            if (vn < 0f) body.Velocity -= vn * hitNormal;
+            // Zero the *relative* normal velocity so a body landing on a moving surface
+            // emerges moving with it along the contact normal — the carry. Pair it
+            // with friction so the same impulse that locks normal motion also brakes
+            // tangential motion (Coulomb-coupled).
+            float vnRel = Vector2.Dot(body.Velocity - hitSurfaceVel, hitNormal);
+            if (vnRel < 0f)
+            {
+                body.Velocity -= vnRel * hitNormal;
+                ApplyFrictionAtImpact(body, hitNormal, hitSurfaceVel, hitFriction, savedForce, dt);
+                if (!hitFromFloating)
+                    TryApplyImpactDamage(body, body.Polygon.GetBoundingBox(pos), hitNormal, vnRel, chunks);
+            }
 
             float dn2 = Vector2.Dot(displacement, hitNormal);
             if (dn2 < 0f) displacement -= dn2 * hitNormal;
 
             if (!hitFromFloating)
-                UpdateSurfaceConstraint(body, pos, hitNormal);
+                UpdateSurfaceConstraint(body, pos, hitNormal, hitSurfaceVel);
         }
 
         return pos + displacement;
     }
 
-    private static Rectangle GetSweptBounds(Polygon polygon, Vector2 pos, Vector2 displacement)
+    private static BoundingBox GetSweptBounds(Polygon polygon, Vector2 pos, Vector2 displacement)
     {
-        var b0 = polygon.GetBounds(pos);
-        var b1 = polygon.GetBounds(pos + displacement);
-        int left   = Math.Min(b0.Left,   b1.Left);
-        int top    = Math.Min(b0.Top,    b1.Top);
-        int right  = Math.Max(b0.Right,  b1.Right);
-        int bottom = Math.Max(b0.Bottom, b1.Bottom);
-        return new Rectangle(left, top, right - left, bottom - top);
+        var b0 = polygon.GetBoundingBox(pos);
+        var b1 = polygon.GetBoundingBox(pos + displacement);
+        return new BoundingBox(
+            MathF.Min(b0.Left,   b1.Left),
+            MathF.Min(b0.Top,    b1.Top),
+            MathF.Max(b0.Right,  b1.Right),
+            MathF.Max(b0.Bottom, b1.Bottom));
     }
 
-    private static void UpdateSurfaceConstraint(PhysicsBody body, Vector2 resolvedPos, Vector2 normal)
+    private static void UpdateSurfaceConstraint(PhysicsBody body, Vector2 resolvedPos, Vector2 normal, Vector2 surfaceVelocity)
     {
+        // Floor-pointing normals (within ~45° of straight up) get the ground-friction
+        // default; walls and ceilings stay frictionless so wall-slides and head-bumps
+        // don't pick up a spurious tangential coupling.
+        float friction = normal.Y < -0.7f ? MovementConfig.Current.GroundFriction : 0f;
+
         foreach (var c in body.Constraints)
         {
             if (c is SurfaceDistance sd && Vector2.Dot(sd.Normal, normal) > 0.9f)
@@ -260,54 +279,116 @@ public static class PhysicsWorld
                 sd.Position = resolvedPos;
                 sd.Normal = normal;
                 sd.MinDistance = Epsilon;
+                sd.SurfaceVelocity = surfaceVelocity;
+                sd.Friction = friction;
                 return;
             }
         }
-        body.Constraints.Add(new SurfaceDistance(resolvedPos, normal, Epsilon));
+        body.Constraints.Add(new SurfaceDistance(resolvedPos, normal, Epsilon)
+        {
+            SurfaceVelocity = surfaceVelocity,
+            Friction = friction,
+        });
     }
 
-    private static bool WorldHasSurface(ChunkMap chunks, Rectangle bodyBounds, Vector2 normal)
-    {
-        const int chunkPixelSize = Chunk.Size * Chunk.TileSize;
-        const int probe = 2;
+    // Apply friction at a single contact, capping the body's *relative* tangential
+    // velocity reduction per step at Friction · dt. If the state has applied a
+    // tangential force this frame (walking, running, etc.), we skip — the state is
+    // actively driving the body, and the contact's job is to not fight that.
+    // Without a tangential applied force the friction handles both braking-when-
+    // grounded and the tangential carry from moving surfaces.
+    private static void ApplyContactFriction(PhysicsBody body, SurfaceContact sc, Vector2 savedForce, float dt)
+        => ApplyFrictionAtImpact(body, sc.Normal, sc.SurfaceVelocity, sc.Friction, savedForce, dt);
 
-        // Thin strip just beyond the body's face in the -normal direction.
-        Rectangle strip;
+    // Same logic, callable at sweep-intercept sites where the caller has the raw
+    // normal/surface-velocity/friction rather than a SurfaceContact instance.
+    private static void ApplyFrictionAtImpact(PhysicsBody body, Vector2 normal, Vector2 surfaceVelocity, float friction, Vector2 savedForce, float dt)
+    {
+        if (friction <= 0f) return;
+
+        Vector2 vRel = body.Velocity - surfaceVelocity;
+        Vector2 vTangent = vRel - Vector2.Dot(vRel, normal) * normal;
+        float vTangentMag = vTangent.Length();
+        if (vTangentMag < 0.001f) return;
+
+        Vector2 tangentDir = vTangent / vTangentMag;
+        // If the state pushed along this tangent, leave friction off. Threshold is
+        // generous (~1 N/kg) so micro-noise in AppliedForce doesn't keep friction
+        // suppressed when the state is effectively idle.
+        if (MathF.Abs(Vector2.Dot(savedForce, tangentDir)) > 1f) return;
+
+        float deltaMag = MathF.Min(vTangentMag, friction * dt);
+        body.Velocity -= tangentDir * deltaMag;
+    }
+
+    // Floor-pointing normals (within ~45° of straight up) get the configured
+    // ground-friction coefficient; walls and ceilings stay frictionless so
+    // wall-slides and head-bumps don't pick up a spurious tangential coupling.
+    private static float ComputeFrictionForNormal(Vector2 normal)
+        => normal.Y < -0.7f ? MovementConfig.Current.GroundFriction : 0f;
+
+    // Probe a thin slab along the impact face for every tile pressed against it,
+    // then split the impulse-derived damage equally among them. This is what makes
+    // a body landing on the boundary between two tiles damage *both* rather than
+    // crediting whichever the collision solver iterated to first. The strip
+    // direction mirrors TryFindContactSurface: `normal` points from surface to
+    // body, so the impact face is on the -normal side.
+    private static readonly List<(int gtx, int gty)> _impactCells = new(4);
+    private static void TryApplyImpactDamage(PhysicsBody body, BoundingBox bounds, Vector2 normal, float vnRel, ChunkMap chunks)
+    {
+        if (body.Impact == null) return;
+        float impulse = body.Impact.Mass * MathF.Abs(vnRel);
+        float over    = impulse - body.Impact.ImpulseThreshold;
+        if (over <= 0f) return;
+
+        const float probe = 1f;
+        BoundingBox strip;
+        if (MathF.Abs(normal.Y) >= MathF.Abs(normal.X))
+            strip = normal.Y < 0 ? bounds.StripBelow(probe) : bounds.StripAbove(probe);
+        else
+            strip = normal.X < 0 ? bounds.StripRight(probe) : bounds.StripLeft(probe);
+
+        _impactCells.Clear();
+        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, strip))
+        {
+            int gtx = (int)MathF.Floor(shape.WorldCenterX / Chunk.TileSize);
+            int gty = (int)MathF.Floor(shape.WorldCenterY / Chunk.TileSize);
+            _impactCells.Add((gtx, gty));
+        }
+        if (_impactCells.Count == 0) return;
+
+        float per = over * body.Impact.DamagePerUnitImpulse / _impactCells.Count;
+        foreach (var (gtx, gty) in _impactCells) chunks.DamageCell(gtx, gty, per);
+    }
+
+    // Probe the strip just beyond the body's face along -normal for any solid shape.
+    // Returns the first shape's velocity if one is found (zero for tiles), or false
+    // if the strip is empty. Used both to prune constraints whose source surface is
+    // gone and to refresh kept constraints' SurfaceVelocity each frame — without
+    // that refresh, a sinusoidal platform's constraint clamps the body to its
+    // collision-time velocity even as the platform decelerates, sending the body
+    // ballistic on direction reversals.
+    private static bool TryFindContactSurface(ChunkMap chunks, Rectangle bodyBounds, Vector2 normal, out Vector2 surfaceVelocity)
+    {
+        const float probe = 2f;
+
+        BoundingBox strip;
         if (MathF.Abs(normal.Y) >= MathF.Abs(normal.X))
             strip = normal.Y < 0
-                ? new Rectangle(bodyBounds.Left, bodyBounds.Bottom, bodyBounds.Width, probe)
-                : new Rectangle(bodyBounds.Left, bodyBounds.Top - probe, bodyBounds.Width, probe);
+                ? new BoundingBox(bodyBounds.Left, bodyBounds.Bottom,         bodyBounds.Right, bodyBounds.Bottom + probe)
+                : new BoundingBox(bodyBounds.Left, bodyBounds.Top - probe,    bodyBounds.Right, bodyBounds.Top);
         else
             strip = normal.X < 0
-                ? new Rectangle(bodyBounds.Right, bodyBounds.Top, probe, bodyBounds.Height)
-                : new Rectangle(bodyBounds.Left - probe, bodyBounds.Top, probe, bodyBounds.Height);
+                ? new BoundingBox(bodyBounds.Right,         bodyBounds.Top, bodyBounds.Right + probe, bodyBounds.Bottom)
+                : new BoundingBox(bodyBounds.Left - probe,  bodyBounds.Top, bodyBounds.Left,          bodyBounds.Bottom);
 
-        int cxMin = (int)Math.Floor((float)strip.Left / chunkPixelSize);
-        int cxMax = (int)Math.Floor((float)strip.Right / chunkPixelSize);
-        int cyMin = (int)Math.Floor((float)strip.Top / chunkPixelSize);
-        int cyMax = (int)Math.Floor((float)strip.Bottom / chunkPixelSize);
-
-        for (int cx = cxMin; cx <= cxMax; cx++)
-        for (int cy = cyMin; cy <= cyMax; cy++)
+        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, strip))
         {
-            var chunkPos = new Point(cx, cy);
-            if (!chunks.TryGet(chunkPos, out var chunk)) continue;
-
-            float chunkOriginX = cx * chunkPixelSize;
-            float chunkOriginY = cy * chunkPixelSize;
-
-            int txMin = Math.Max(0, (int)Math.Floor((strip.Left - chunkOriginX) / Chunk.TileSize));
-            int txMax = Math.Min(Chunk.Size - 1, (int)Math.Floor((strip.Right - chunkOriginX) / Chunk.TileSize));
-            int tyMin = Math.Max(0, (int)Math.Floor((strip.Top - chunkOriginY) / Chunk.TileSize));
-            int tyMax = Math.Min(Chunk.Size - 1, (int)Math.Floor((strip.Bottom - chunkOriginY) / Chunk.TileSize));
-
-            if (txMin > txMax || tyMin > tyMax) continue;
-
-            for (int tx = txMin; tx <= txMax; tx++)
-            for (int ty = tyMin; ty <= tyMax; ty++)
-                if (chunk.Tiles[tx, ty].IsSolid) return true;
+            surfaceVelocity = shape.Velocity;
+            return true;
         }
-
+        surfaceVelocity = Vector2.Zero;
         return false;
     }
+
 }

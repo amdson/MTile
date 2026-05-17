@@ -55,7 +55,12 @@ public static class CeilingChecker
         float probeY = ceilingBottomY - ts * 0.5f;
         int bodyCol = (int)MathF.Floor(body.Position.X / ts);
 
-        for (int k = 1; k <= MaxScanTiles; k++)
+        // Start at k=0 so the body's own column is checked. If the body has already
+        // crossed the corner (its center is in the empty column past the ceiling slab),
+        // we still need to report the slab's actual edge — not skip past it to the
+        // next-further-out empty column, which would put the reported corner way out
+        // in open air and make IsStickingOut spuriously return false.
+        for (int k = 0; k <= MaxScanTiles; k++)
         {
             int col = bodyCol + dir * k;
             float cx = col * ts + ts * 0.5f;

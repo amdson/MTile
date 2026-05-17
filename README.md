@@ -20,8 +20,4 @@ If you are iterating on the `Collision.cs` logic to fix the left-movement phase-
 dotnet watch test --project MTile.Tests/MTile.Tests.csproj
 ```
 
-## Structure
-- `PhysicsTests.cs`: Includes cases to assert that a hexagon overlapping a tile from different directions (e.g. left vs right) calculates an MTV that pushes the hexagon OUT correctly. The test `HexagonCollidingWithTileLeftSide_ShouldPushHexagonLeft` reproduces/validates the scenario where moving left causes issues if the MTV points the wrong way.
-- Also includes integration-style test `HexagonMovingLeftIntoGame1SolidWall_ShouldNotPhase` and `HexagonMovingLeftIntoFullChunk_ShouldStopAndNotPhase` to ensure sweeping operations don't miscalculate collision normals when sliding/moving against a chunk entirely filled with solid tiles.
-- **Found Issue**: The test `HexagonGetBounds_WithNegativeCoords_ShouldEncompassLeftmostVertex` explicitly catches a bug causing the polygon to phase through tiles when moving left. The bounding box uses `(int)` cast which truncates towards zero (e.g. `-45.44` becomes `-45`). This means the physics engine gets a tighter bounding box on the left size and skips collision checks entirely for that side! You can resolve this issue in `Polygon.cs` by swapping the casts to `Math.Floor` and `Math.Ceiling`.
 

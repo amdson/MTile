@@ -8,10 +8,20 @@ public class EnvironmentContext
     public PlayerInput Input;
     public Controller Controller;
     public Func<int, MovementState> PreviousState;
+    public Func<int, ActionState>   PreviousAction;
     public ChunkMap Chunks;
+    public HitboxWorld  Hitboxes;     // offensive — publishers (action FSM, AI) push hitboxes here
+    public HurtboxWorld Hurtboxes;    // defensive — read-only for actions, populated each frame by IHittable.PublishHurtboxes
+    public IntentBuffer Intents;      // gesture-parsed action intents (Click, Stab, PressEdge); action FSM reads + consumes
+    public ConditionState Condition;  // combat condition flags (Slash2Ready, RecoveryActive, …) — lives on PlayerAbilityState
+    public int   CurrentFrame;        // monotonic frame counter for intent age + flag expiry
     public float Dt;
     public PhysicsBody Body;
     public InputIntent Intent;
+    // Multiplicative scalars on movement knobs (WalkAccel, MaxAirSpeed, GroundFriction, …).
+    // Reset to Identity each frame in PlayerCharacter.Update, populated by the current
+    // action's ApplyMovementModifiers, then read by movement states at their config sites.
+    public MovementModifiers Modifiers;
 
     private bool _groundSearched;
     private bool _hasGround;

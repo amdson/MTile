@@ -13,16 +13,35 @@ public static class GroundChecker
         float bodyHalfHeight,
         float floatHeight,
         out FloatingSurfaceDistance contact)
+        => TryFind(body, chunks, bodyHalfHeight, floatHeight, ProbeSlack, out contact);
+
+    // Probe-slack overload: airborne states (JumpingState etc.) use a wider window
+    // so the jump's reference to the source surface persists through the early
+    // ascent even though the body has already left the standing-spring's tight band.
+    public static bool TryFind(
+        PhysicsBody body,
+        ChunkMap chunks,
+        float bodyHalfHeight,
+        float floatHeight,
+        float probeSlack,
+        out FloatingSurfaceDistance contact)
     {
         contact = null;
-        var probe = body.Bounds.StripBelow(floatHeight + ProbeSlack);
+        var probe = body.Bounds.StripBelow(floatHeight + probeSlack);
 
-        float bestSurfaceY = float.MaxValue;
-        foreach (var tile in TileQuery.SolidTilesInRect(chunks, probe))
+        float   bestSurfaceY   = float.MaxValue;
+        Vector2 bestSurfaceVel = Vector2.Zero;
+        // Route through WorldQuery so dynamic shapes (moving platforms) participate
+        // alongside tiles. Velocity propagates to the returned contact so the body's
+        // standing-spring damping uses relative-frame velocity (no fight with carry).
+        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, probe))
         {
-            if (tile.WorldTop < probe.Top - 1f) continue;
-            if (tile.WorldTop < bestSurfaceY)
-                bestSurfaceY = tile.WorldTop;
+            if (shape.WorldTop < probe.Top - 1f) continue;
+            if (shape.WorldTop < bestSurfaceY)
+            {
+                bestSurfaceY   = shape.WorldTop;
+                bestSurfaceVel = shape.Velocity;
+            }
         }
 
         if (bestSurfaceY == float.MaxValue) return false;
@@ -30,7 +49,14 @@ public static class GroundChecker
         contact = new FloatingSurfaceDistance(
             new Vector2(body.Position.X, bestSurfaceY),
             new Vector2(0f, -1f),
-            bodyHalfHeight + floatHeight);
+            bodyHalfHeight + floatHeight)
+        {
+            SurfaceVelocity = bestSurfaceVel,
+            // The state-owned standing-spring contact carries the same default
+            // ground friction as collision-spawned floor SDs, so the body brakes
+            // when no input is held even in steady-state hovering above the floor.
+            Friction = MovementConfig.Current.GroundFriction,
+        };
         return true;
     }
 
@@ -52,6 +78,21 @@ public static class GroundChecker
         float probeY = floorTopY + ts * 0.5f;
         int bodyCol = (int)MathF.Floor(body.Position.X / ts);
 
+        // If the body's center is already over an empty column (it's crossed a drop edge),
+        // the edge is at the boundary between this column and the supporting platform. Only
+        // a valid drop in direction `dir` if the supporting platform is on the -dir side —
+        // otherwise the body is hanging off the *opposite* edge and moving in `dir` would
+        // walk back onto a platform, not off one.
+        if (!TileQuery.IsSolidAt(chunks, bodyCol * ts + ts * 0.5f, probeY))
+        {
+            int supportCol = bodyCol - dir;
+            if (!TileQuery.IsSolidAt(chunks, supportCol * ts + ts * 0.5f, probeY)) return false;
+            float edgeX0 = dir == 1 ? bodyCol * ts : (bodyCol + 1) * ts;
+            corner = new Vector2(edgeX0, floorTopY);
+            return true;
+        }
+
+        // bodyCol is solid above the floor: scan in dir for the first empty column.
         for (int k = 1; k <= MaxScanTiles; k++)
         {
             int col = bodyCol + dir * k;

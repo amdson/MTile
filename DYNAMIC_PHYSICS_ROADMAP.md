@@ -27,64 +27,99 @@ Two helpers that already point the way toward generalization:
 
 ## 2. Abstractions to introduce
 
-### A. `ISolidShape` (or `Surface`)
+### A. `ISolidShapeProvider` — a registry of shape providers
 
-The thing every collider has in common: a polygon at a position with an optional velocity, plus an identity that survives frame to frame.
+The world doesn't track "tiles plus a side-list of dynamic surfaces" (which makes `ChunkMap` a special case). It tracks a list of **providers** that can each answer "what solid shapes are in this region?". `ChunkMap` is one provider; future shape-generating entities (growing blocks, moving platforms, destructible debris) each implement the same interface and register.
 
 ```
-interface ISolidShape
-    Polygon  Polygon      // could be a singleton TileShape for tiles, or per-instance for dynamic surfaces
-    Vector2  Position     // center, world space
-    Vector2  Velocity     // (0,0) for tiles; nonzero for moving surfaces
-    BoundingBox Bounds    // typically Polygon.GetBoundingBox(Position) but cacheable
-    // identity — used by constraints to verify their source is still alive
+interface ISolidShapeProvider
+    IEnumerable<SolidShapeRef> ShapesInRect(BoundingBox region)
+    bool                       IsSolidAt(float x, float y)
 ```
 
-Tiles satisfy this implicitly: `Polygon = TileWorld.TileShape`, `Position = TileCenter(chunk, idx)`, `Velocity = 0`. We don't have to *promote* tiles into heap allocations — `TileRef` already carries enough to materialize an `ISolidShape` view on demand.
+The world-level `SolidShapesInRect` / `IsSolidAt` queries fan out across all registered providers.
 
-Dynamic surfaces (growing blocks, eventually moving platforms) satisfy it directly as small classes.
+`SolidShapeRef` is a small struct carrying everything a caller needs to act on the shape *without reaching back to the provider*:
+
+```
+struct SolidShapeRef
+    float       WorldLeft, WorldTop, WorldRight, WorldBottom   // AABB, matches existing checker filters
+    Vector2     Position                                       // center
+    Vector2     Velocity                                       // (0,0) for static tiles; nonzero for moving surfaces
+    Polygon     Polygon                                        // for SAT/sweep — singleton TileShape for tiles, per-instance for dynamic
+```
+
+Crucially **`Velocity` is part of the ref**, not something the sweep code reaches back to the provider for. The relative-velocity sweep (§2D) needs it for every candidate shape, and we don't want the per-shape callback.
+
+Tiles don't get promoted into heap allocations — `ChunkMap`'s provider implementation materializes a `SolidShapeRef` view on demand from `TileRef` data (singleton `TileWorld.TileShape`, `Velocity = Vector2.Zero`).
 
 ### B. Unified spatial query
 
+`TileQuery` (or whatever we end up calling the world-level façade) exposes:
+
 ```
-TileQuery.SolidShapesInRect(world, BoundingBox region) → IEnumerable<SolidShapeRef>
-TileQuery.IsSolidAt(world, x, y)                       → bool, considers both tiles and dynamic surfaces
+SolidShapesInRect(world, BoundingBox region) → IEnumerable<SolidShapeRef>     // fan-out across providers
+IsSolidAt(world, x, y)                       → bool                            // fan-out across providers
 ```
 
-`SolidShapeRef` is a small struct with `WorldLeft/Top/Right/Bottom` (so existing checker filters keep working) plus a discriminator + back-reference for identity. The existing `TileRef`-returning overload stays as a fast path for tile-only callers (e.g. the physics broadphase).
+Both go through the same abstraction. The exit-edge / drop-edge scanners use `IsSolidAt` for point probes; the checkers use `SolidShapesInRect` for region probes. Either way, all shape kinds participate equally.
 
-For dynamic surfaces, the world needs a spatial index — even a flat list is fine to start (there will be O(1)–O(10) of them at any time during normal gameplay).
+The existing `SolidTilesInRect` (returning `TileRef`) stays as a tile-only fast path for the physics broadphase, which doesn't care about the unified view.
 
-### C. Constraint binding to a source
+For dynamic-surface storage inside individual providers, a flat list is fine (O(1)–O(10) per provider during normal gameplay). Indexing is a future optimization, not a phase-1 concern.
 
-Two viable shapes:
+### C. Constraints carry no parent state — everything re-queries
 
-1. **Source handle + offset** — constraint stores `(ISolidShape source, Vector2 localAnchor)`. Each step, world position is `source.Position + localAnchor` (with rotation if ever needed). When `source` is removed, the constraint is auto-detached. Cleanest but requires plumbing a handle through every contact type.
-2. **State-owned refresh** — keep constraints as absolute positions, but the owning movement state is responsible for re-pinning them every frame against the current source. Already what `StandingState` does today.
+Constraints stay as absolute `Vector2 Position + Normal + MinDistance`, with **zero identity tied to the surface that spawned them**. Every "is this surface still here?" check goes through the world query. Two consequences:
 
-Option 2 is the lower-disturbance path and matches what already exists. Option 1 is cleaner long-term but I'd defer it until the second or third moving-surface feature reveals what handle granularity actually helps.
+- **State-owned constraints** (`StandingState._ground`, `WallSlidingState._wall`, etc.) get re-pinned every frame from a fresh `TryGetGround / TryGetWall / TryGetCeiling`. Most states already do this; the audit work (phase 3) is fixing the few that don't — `DropdownState._ground` is the obvious one.
+- **Collision-spawned constraints** (`SurfaceDistance` from `PhysicsWorld.UpdateSurfaceConstraint`) get pruned by the same world-query pattern. `WorldHasSurface` already does this for tiles — it just needs to route through the new unified query so it sees dynamic surfaces too.
 
-Either way: the **collision-spawned** constraints (`SurfaceDistance` added by `PhysicsWorld.UpdateSurfaceConstraint`) need to know which surface they came from so they can be invalidated when that surface vanishes (tile destruction) or moves (growing block).
+This means the question "what happens when the surface under me changes or disappears?" has exactly one answer: next query, no surface (or different surface) → state's refresh updates the constraint, or `CheckConditions` returns false and the body falls. No stale handles to drop, no source identity to track.
 
-### D. Sweep with relative velocity
+### D. Sweep against moving surfaces is a single relative-frame swept-collision
 
-`Collision.Swept(polyA, posA, displacementA, polyB, posB, 0)` currently treats the second shape as immobile. For a moving surface the sweep is on the **relative** displacement `displacementA − surface.Velocity * dt`. After resolution, the body's velocity normal component should be matched to the surface's velocity normal component (so a body resting on a rising block rises with it), not zeroed.
+`Collision.Swept(polyA, posA, displacementA, polyB, posB)` against a static B is mathematically identical to the same call with B moving at `displacementB`, *provided* `displacementA` is replaced by `displacementA − displacementB`. The frame-of-reference shift makes the moving-B case fall out of the existing routine for free.
 
-This is a small math change to `Collision.Swept`'s call site in `ResolveChunkCollisionsSwept`. The collision primitive itself doesn't need to change — only what we pass into it and how we apply the result.
+Two tiny touches:
+
+1. **Pass `displacementB` to the sweep** (or do the subtraction at the call site — cosmetic). The collision primitive itself doesn't change.
+2. **Resolve velocity in the relative frame.** Today: `body.Velocity -= vn * hitNormal` (zero the normal component, body stops dead). Generalized: `body.Velocity -= (vn_body − vn_surface) * hitNormal` — zero the *relative* normal component. For a static surface `vn_surface = 0` and behavior is unchanged. For a rising platform, the body emerges moving at the platform's vy along the contact normal. **That's the carry. It's not a separate step — it's what resolving in the relative frame *means*.**
+
+#### Update ordering
+
+Advance surface positions *first*, then sweep bodies against them. Conceptual model: "world ticks forward, body reacts." The sweep math then operates on `surface.Position` (post-move) with the body's relative displacement `bodyDisp − surfaceDisp` — equivalent to sweeping against the pre-move position with the surface's velocity, just bookkept the other way. Either works; advancing surfaces first matches "the body cannot interrupt a surface's motion" semantics and avoids the inverse case (body sweeps, ends up where a surface would have moved to, surface's tick blocks itself on the body).
+
+#### Embedded handling (fast surfaces / spawn overlap)
+
+If a body ends up overlapping a surface at the start of a step — surface moved faster than the sweep can chase (relative displacement greater than body width in the sweep direction), or surface spawned inside the body — the existing `hitNormal == Vector2.Zero` fallback in `ResolveChunkCollisionsSwept` already handles this for tiles: it punts to the discrete `ResolveChunkCollisions`, which uses `Collision.Check` for an SAT MTV and pushes the body out by it. Extend the same fallback to dynamic surfaces:
+
+1. Detect overlap via `Collision.Check` against the surface.
+2. Push the body out by the MTV.
+3. Set the body's velocity along the MTV normal to match the surface's velocity along the same normal (so the body emerges riding the surface, just one frame later than a clean sweep would've placed it).
+
+Costs a frame of visual snap; doesn't blow up. If a real scenario shows tunneling becomes common, the next-step mitigation is substepping the world tick when any surface's per-frame displacement exceeds a fraction of the smallest body dimension. Defer until needed.
+
+#### What this doesn't solve
+
+**Converging surfaces.** Two moving surfaces closing on a body, body squished between. No physical resolution — something has to give. Standard game answers: kill the body, or push it perpendicular to both surfaces' velocities (the remaining free axis). Not relevant to the moving-rectangle scenario; flag and defer.
 
 ---
 
 ## 3. Changes by component
 
 ### `Physics/PhysicsWorld.cs`
-- Take a `World` (or expanded `ChunkMap`) that exposes both tiles and dynamic surfaces.
-- `ResolveChunkCollisionsSwept` iterates dynamic surfaces alongside tiles. For each, sweep with relative velocity.
-- "Carry" behavior: when a sweep collision resolves against a moving surface, set the body's velocity component along the surface's normal to match the surface's velocity component (so the body rides along instead of getting punched off).
-- `UpdateSurfaceConstraint` records the source surface on the added `SurfaceDistance`. The stale-removal loop already checks distance + `WorldHasSurface`; extend it to also drop constraints whose source is gone.
+- Take a world handle that exposes the registered providers (`ISolidShapeProvider`s) plus a top-level `SolidShapesInRect` / `IsSolidAt`.
+- Advance every shape provider's surfaces (call their per-frame tick) **before** sweeping bodies.
+- `ResolveChunkCollisionsSwept` iterates the unified shape view from `SolidShapesInRect`. For each candidate, sweep the body's displacement in the relative frame (`bodyDisp − shape.Velocity * dt`) — same `Collision.Swept` routine, just one extra term in the input. Velocity resolution on hit uses the relative normal component (§2D).
+- The existing `hitNormal == Vector2.Zero` fallback handles embedded cases; route its discrete push-out through the unified view so it covers dynamic surfaces too.
+- `WorldHasSurface` (used to prune stale `SurfaceDistance`s) routes through the unified `IsSolidAt`. No identity bookkeeping on the constraints themselves — they're just position + normal, validated each frame against the world.
 
 ### `World/TileQuery.cs`
-- Add the `SolidShapesInRect` / `IsSolidAt(world, …)` overloads described in §2B.
-- Generalize `IsTopExposed` / `IsBottomExposed` from "is the neighboring tile empty" to "is there any solid shape touching that face." Right now both are 1-tile-offset point probes — they'll work for tile↔tile checks but miss a growing block touching the top of an existing tile. Probably fine to leave them tile-only for now; ramp/corner detection on a tile that's about to be capped by a growing block is an edge case worth flagging but not blocking.
+- `ChunkMap` becomes the first `ISolidShapeProvider`. Its `SolidShapesInRect` wraps the existing `SolidTilesInRect` and materializes a `SolidShapeRef` per `TileRef` (singleton `TileWorld.TileShape`, `Velocity = Vector2.Zero`). Its `IsSolidAt` wraps the existing one.
+- Top-level `TileQuery.SolidShapesInRect(world, region)` / `IsSolidAt(world, x, y)` fan out across all registered providers.
+- The existing tile-only overloads stay for the physics broadphase fast path.
+- `IsTopExposed` / `IsBottomExposed` stay tile-only for now (they're 1-tile-offset point probes). Generalizing them to "is there *any* solid shape touching that face" matters for corner detection on tiles about to be capped by a growing block — flag, don't block. The first growing-block scenarios don't hit this.
 
 ### Checkers
 The five checkers are almost ready for this. Each one:
@@ -145,8 +180,9 @@ Ordered roughly by how likely you are to hit them when first turning on dynamic 
 6. **`EnvironmentContext` caching** — caches all probes for the duration of one `PlayerCharacter.Update`. As long as bodies and surfaces are stepped *between* `Update`s rather than mid-update, the cache is safe. Worth a sanity assertion (positions don't change inside `Update`).
 7. **`ExposedUpperCornerChecker.MinBodyDepthBelowCorner` and `MaxTopProbeDistance`** — both are body-position-relative thresholds tuned for static tile geometry. Should still work but if a growing block's top is rising past the body during a vault attempt, the corner will appear to "approach" the body each frame and the vault may engage/disengage rapidly. Worth a play-test on a grow-into-vault scenario.
 8. **`SteeringRamp.ResolveVelocity` rescales `|v|` to its own magnitude each step** — if the body's velocity has been augmented by a moving surface's carry (gained vy), the rescale could fight the carry. Probably needs the carry component to be applied *after* the redirect, or excluded from the rescale.
-9. **`PhysicsWorld.WorldHasSurface`** — used to prune dead `SurfaceDistance` constraints. Iterates the chunk grid only; won't notice a wall provided by a dynamic surface that just despawned. Constraints anchored on departed dynamic surfaces will linger one frame, then get pruned when their distance test fails. Acceptable; flag if it bites.
-10. **Tests** — every sim test stages a static `ChunkMap` and runs the player against it. None of them exercise moving surfaces. The first dynamic-surface scenario needs a fresh test harness with the ability to spawn / move / destroy surfaces alongside the player.
+9. **`PhysicsWorld.WorldHasSurface`** — used to prune dead `SurfaceDistance` constraints. Iterates the chunk grid only; once routed through the unified `IsSolidAt` it'll see dynamic surfaces too. Until then, constraints anchored on departed dynamic surfaces linger one frame and get pruned on the next distance failure. Acceptable.
+10. **Converging surfaces.** Two moving surfaces closing on a body with the body squished between them. Not relevant for the first moving-rectangle scenario; will matter once we have multiple independent moving things. Policy is a game-design call (kill the body? push out along the perpendicular axis?) — flag, don't solve preemptively.
+11. **Tests** — every sim test stages a static `ChunkMap` and runs the player against it. None of them exercise moving surfaces. The first dynamic-surface scenario needs a fresh test harness with the ability to spawn / move / destroy surfaces alongside the player.
 
 ---
 
@@ -154,29 +190,43 @@ Ordered roughly by how likely you are to hit them when first turning on dynamic 
 
 Each phase ends with a checkpoint: existing behavior on existing terrain unchanged, plus one new capability.
 
-1. **Surface abstraction, no behavior change.** Introduce `ISolidShape` (or just a `SolidShapeRef` struct), add `SolidShapesInRect` / `IsSolidAt(world, …)` overloads, add an empty dynamic-surface list to the world. Don't change any caller yet. *Checkpoint: tests green, no observable change.*
-2. **Dynamic surface collision in the broadphase.** `PhysicsWorld.ResolveChunkCollisionsSwept` iterates dynamic surfaces. Add a temporary test surface — a static "phantom block" — placed manually. Confirm the body collides with it identically to a tile. *Checkpoint: a phantom block at (X,Y) is indistinguishable from a real tile at (X,Y).*
-3. **Tile destruction.** Add `ChunkMap.DestroyTile`. Audit movement states for unrefreshed ground/wall/ceiling constraints; fix as found. *Checkpoint: standing on a tile, destroying it, body falls cleanly.*
-4. **Checker generalization.** One checker at a time: route through `SolidShapesInRect`. Verify tile-only scenes are byte-identical. Then verify a dynamic surface is detected the same. The exit-edge scanners get the surface-anchored rewrite here. *Checkpoint: standing on a dynamic surface, walking off it, dropping off it, etc. all work.*
-5. **Moving surfaces (sweep + carry).** Implement relative-velocity sweep and the carry step in `ResolveChunkCollisionsSwept`. Test with a hand-built "elevator" surface — translate it up at fixed velocity, verify the body rides it without separating or sinking. *Checkpoint: moving platforms work in a sandbox.*
-6. **Growing block.** Implement `GrowingBlock` as a `Position`-translating dynamic surface that commits to the chunk on completion. Wire `ChunkMap.CreateTile` to spawn one. *Checkpoint: spawning a block underfoot lifts the player; spawning one next to the player without touching them is harmless.*
-7. **Polish.** Decisions about crush behavior, spawn collisions with non-player bodies (when those exist), and the corner-detection-during-growth edge cases.
+1. **Provider abstraction, no behavior change.** Introduce `ISolidShapeProvider`, `SolidShapeRef`, and the world-level `SolidShapesInRect` / `IsSolidAt` fan-out. Implement the provider on `ChunkMap`. Register it with the world. Don't change any caller yet. *Checkpoint: tests green, no observable change — every existing query has the same answer it had before.*
+2. **Constraint-refresh audit.** Make sure every state-owned ground/wall/ceiling constraint is refreshed from a fresh world query each frame, and that every collision-spawned `SurfaceDistance` is pruned by the unified `IsSolidAt`. `DropdownState._ground` is the known offender; expect to find one or two more. *Checkpoint: still no behavior change, but the invariant "no constraint outlives the world's answer to the query that justified it" holds across all states.*
+3. **Tile destruction.** Add `ChunkMap.DestroyTile`. With the audit done, this should just work. *Checkpoint: standing on a tile, destroying it, body falls cleanly. Standing under a ceiling, destroying it, ceiling-dependent constraints drop. WallSliding next to a wall, destroying the wall, body falls.*
+4. **Checker generalization + non-grid edge scans.** Route every checker through `SolidShapesInRect`. Verify tile-only scenes are byte-identical. Rewrite `CeilingChecker.TryFindExitEdge` and `GroundChecker.TryFindDropEdge` from "scan tile columns until empty" to "find the bounding-box edge of the surface, in direction `dir`." For tile slabs the result is identical to the column walk; for a single dynamic surface it's `surface.Bounds.Side(dir)`. *Checkpoint: a hand-placed static "phantom block" (a dynamic surface with `Velocity = 0`) is indistinguishable from a real tile to every state — standing, walking, vaulting, dropping off, ducking under all work on it.*
+5. **Relative-velocity sweep.** One parameter through `Collision.Swept` (or one subtraction at the call site), one minus sign on the velocity-resolution line in `ResolveChunkCollisionsSwept`, extend the embedded-overlap fallback to dynamic surfaces. *Checkpoint: a hand-built "elevator" surface translating up at fixed velocity carries the body without separating or sinking; the body can walk along the top tangentially; jumping off works; landing on it from above works.*
+6. **The moving rectangle as a concrete first scenario.** Wire up a `MovingRectangle` (or equivalent) that oscillates up and down through a sandbox. Player should be able to jump onto it, ride it, jump off, jump back on. *Checkpoint: a play-test scenario where the rectangle is the gameplay element, not just a test fixture.*
+7. **Growing block.** With the moving rectangle proven, `GrowingBlock` is "moving rectangle with a one-shot lifecycle" — translates up over N frames, commits to the chunk, removes itself. *Checkpoint: spawning a block underfoot lifts the player; spawning one in clear air is harmless; spawning one against a ceiling stalls.*
+8. **Polish.** Crush behavior policy, corner-detection-during-growth edge cases, converging-surface squish handling.
 
 ---
 
-## 8. Open design questions to settle before implementation
+## 8. Design decisions
 
-- **Dynamic surface ↔ dynamic surface collisions?** Two growing blocks both rising at the same cell, or a growing block intersecting an existing moving platform. Probably "no, not yet" — but the abstraction shouldn't actively prevent it.
-- **Constraint binding: handle vs refresh?** Option 1 vs Option 2 from §2C. I'd start with refresh (matches current pattern); revisit when the third moving-feature lands.
-- **Polygon scale vs position translate** for the growing block? I lean translate (constant polygon, velocity falls out naturally, single source of truth for sweep math).
-- **What happens when growth is blocked?** Block rising into a ceiling, or into a body that can't move. Stall? Crush? Cancel and refund? Probably stall is the right default — `Velocity.Y = 0` if the sweep test reports zero clearance — and let policy be a config flag later.
-- **Identity for surfaces.** `object` reference? `int id`? Composite key for tiles like `(chunkPos, tileIndex)`? The constraint-source binding (Option 1) is the only place this matters; tile-based callers can keep using `TileRef` directly.
-- **Spatial index for dynamic surfaces.** Flat list is fine until there are dozens. Beyond that, a uniform grid (or just bucket by chunk) is the obvious next step. Don't pre-optimize.
+### Resolved
+
+- **Constraint binding.** Query-driven refresh. No identity, no source handles, no parent state on either state-owned or collision-spawned constraints. Validity = "the world still answers yes to the query that justified me."
+- **Surface identity.** Not needed in constraints (per above). Providers can use whatever identity they want internally; tile-based callers keep using `TileRef`.
+- **Update ordering.** Surfaces tick first, bodies sweep against post-move surface positions using relative-velocity math.
+- **Sweep math.** Single relative-frame `Collision.Swept`. Carry is the natural consequence of resolving in the relative frame, not a separate step.
+- **Embedded-body handling.** Reuse the existing discrete-push-out fallback (`hitNormal == Vector2.Zero` branch), extended to dynamic surfaces, with velocity matching on push-out so the body emerges riding the surface.
+
+### Still open
+
+- **Polygon scale vs position translate** for the growing block? I lean translate (constant polygon, velocity falls out naturally, single source of truth for sweep math). Decide at phase 7.
+- **What happens when growth is blocked?** Block rising into a ceiling, or into a body that can't move. Stall? Crush? Cancel? Probably stall is the right default — `Velocity.Y = 0` if the sweep reports zero clearance — and let policy be a config flag later.
+- **Dynamic surface ↔ dynamic surface collisions?** Probably "no, not yet" — but the abstraction shouldn't actively prevent it.
+- **Converging-surface squish policy.** What happens to a body between two converging surfaces. Game-design call, not relevant until there are multiple independent moving things.
+- **Spatial index for dynamic surfaces.** Flat list inside each provider is fine until there are dozens. Beyond that, a uniform grid (or bucketing by chunk) is the obvious next step. Don't pre-optimize.
 
 ---
 
 ## TL;DR
 
-The single highest-leverage change is **giving `TileQuery.SolidShapesInRect` a unified view of tiles + dynamic surfaces** and letting `PhysicsWorld.ResolveChunkCollisionsSwept` consume it. Every checker and every state then becomes shape-agnostic almost for free, because they're already routed through `body.Bounds.StripXxx` → spatial query → filter, and the filter already operates on `WorldLeft/Top/Right/Bottom`. The two scanners that walk integer tile columns (`TryFindExitEdge`, `TryFindDropEdge`) are the only checker code that needs a real rewrite for moving surfaces.
+`ISolidShapeProvider` is the central abstraction. `ChunkMap` is one provider among many; future dynamic-surface entities register the same way. The world-level `SolidShapesInRect` / `IsSolidAt` fan out across providers, and the result type carries position + velocity + bounds so the sweep doesn't reach back per-shape.
 
-After that, tile destruction is a single `IsSolid = false` plus a constraint-refresh audit; tile creation is a `GrowingBlock` dynamic surface that translates up over N frames and commits itself to the chunk at the end. The trickiest *gameplay* question isn't in the physics — it's deciding what happens to a body wedged between a growing block and a ceiling. Defer.
+Constraints carry no parent state. Every "is this surface still here?" check goes through the world query — state-owned constraints get re-pinned each frame, collision-spawned ones get pruned by the same mechanism. The audit work in phase 2 is finding the few states that don't already refresh (e.g. `DropdownState._ground`).
+
+The sweep math is not new code, just a frame-of-reference shift: pass `displacementB` to `Collision.Swept`, and zero the *relative* normal velocity on resolution instead of the absolute. Carry falls out for free. Embedded bodies are caught by the existing discrete-push-out fallback, extended to dynamic surfaces.
+
+The phasing chains: abstractions → constraint audit → tile destruction → checker generalization → relative-velocity sweep → moving rectangle (the first real scenario) → growing block (a one-shot lifecycle on top of moving rectangle) → policy polish. The trickiest *gameplay* question isn't in the physics — it's deciding what happens to a body wedged between a growing block and a ceiling. Defer.

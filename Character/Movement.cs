@@ -28,27 +28,16 @@ public class FallingState : MovementState
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         var force = Vector2.Zero;
-        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
-        
-        if (inputX != 0f)
-        {
-            force.X += inputX * MovementConfig.Current.AirAccel;
-            float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.MaxAirSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
-            {
-                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
-            }
-        }
-        else if (ctx.Dt > 0f)
-        {
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -MovementConfig.Current.AirDrag, MovementConfig.Current.AirDrag);
-        }
-        
+        var cfg = MovementConfig.Current;
+        var m   = ctx.Modifiers;
+        force.X = AirControl.Apply(ctx,
+            cfg.AirAccel    * m.AirAccel,
+            cfg.MaxAirSpeed * m.MaxAirSpeed,
+            cfg.AirDrag     * m.AirDrag);
+
         if (ctx.Input.Down)
-        {
-            force.Y += MovementConfig.Current.FastFallForce;
-        }
-        
+            force.Y += cfg.FastFallForce;
+
         ctx.Body.AppliedForce = force;
     }
 }
@@ -90,35 +79,51 @@ public class StandingState : MovementState
     {
         if (ctx.TryGetGround(out var refreshed))
         {
-            _ground.Position  = refreshed.Position;
-            _ground.Normal    = refreshed.Normal;
-            _ground.MinDistance = refreshed.MinDistance;
+            _ground.Position        = refreshed.Position;
+            _ground.Normal          = refreshed.Normal;
+            _ground.MinDistance     = refreshed.MinDistance;
+            _ground.SurfaceVelocity = refreshed.SurfaceVelocity;
         }
+        // Refresh friction every frame so action-driven modifiers (e.g. Stab's
+        // lunge dip) take effect immediately without needing a state re-entry.
+        _ground.Friction = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
 
         var force = Vector2.Zero;
+        var cfg = MovementConfig.Current;
+        var m   = ctx.Modifiers;
 
+        // Spring damping uses *relative* normal velocity so the body's
+        // surface-matched motion (carried by a moving platform) isn't damped
+        // back to zero — only deviations from the surface are.
         float dist           = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
         float gap            = _ground.MinDistance - dist;
-        float velAlongNormal = Vector2.Dot(ctx.Body.Velocity, _ground.Normal);
+        float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
         if (gap > 0f)
-            force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
-        float velExcess = velAlongNormal - MovementConfig.Current.SpringMaxRiseSpeed;
+            force += _ground.Normal * (gap * cfg.SpringK - velAlongNormal * cfg.SpringDamping);
+        float velExcess = velAlongNormal - cfg.SpringMaxRiseSpeed;
         if (velExcess > 0f && ctx.Dt > 0f)
             force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
         if (inputX != 0f)
         {
-            force.X += inputX * MovementConfig.Current.WalkAccel;
-            float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.MaxWalkSpeed;
+            float walkAccel    = cfg.WalkAccel    * m.WalkAccel;
+            float maxWalkSpeed = cfg.MaxWalkSpeed * m.MaxWalkSpeed;
+            force.X += inputX * walkAccel;
+            float excess = MathF.Abs(ctx.Body.Velocity.X) - maxWalkSpeed;
             if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
                 force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
+            // Excess correction can zero out the walk force when the body is already
+            // moving faster than MaxWalkSpeed in the input direction (e.g. just exited
+            // a vault). Without a residual tangential force here, the physics solver's
+            // friction would brake the body back down to MaxWalkSpeed. Keep a tiny
+            // walk-intent signal so friction recognizes the state is still driving.
+            if (MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && MathF.Abs(force.X) < 2f)
+                force.X = inputX * 2f;
         }
-        else if (ctx.Dt > 0f)
-        {
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -MovementConfig.Current.BrakingForce, MovementConfig.Current.BrakingForce);
-        }
-        
+        // No-input braking: handled by SurfaceContact.Friction in the physics solver
+        // now — applying tangential force here would just suppress that friction.
+
         ctx.Body.AppliedForce = force;
     }
 }
@@ -162,16 +167,19 @@ public class CrouchedState : MovementState
     {
         if (ctx.TryGetCrouchGround(out var refreshed))
         {
-            _ground.Position  = refreshed.Position;
-            _ground.Normal    = refreshed.Normal;
-            _ground.MinDistance = refreshed.MinDistance;
+            _ground.Position        = refreshed.Position;
+            _ground.Normal          = refreshed.Normal;
+            _ground.MinDistance     = refreshed.MinDistance;
+            _ground.SurfaceVelocity = refreshed.SurfaceVelocity;
         }
+        // Same per-frame friction refresh as Standing — see comment there.
+        _ground.Friction = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
 
         var force = Vector2.Zero;
 
         float dist           = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
         float gap            = _ground.MinDistance - dist;
-        float velAlongNormal = Vector2.Dot(ctx.Body.Velocity, _ground.Normal);
+        float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
         if (gap > 0f)
             force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
         float velExcess = velAlongNormal - MovementConfig.Current.SpringMaxRiseSpeed;
@@ -185,11 +193,12 @@ public class CrouchedState : MovementState
             float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.CrouchMaxWalkSpeed;
             if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
                 force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
+            // Walk-intent signal so the solver's friction doesn't brake an
+            // overspeed-coasting body — see StandingState.Update.
+            if (MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && MathF.Abs(force.X) < 2f)
+                force.X = inputX * 2f;
         }
-        else if (ctx.Dt > 0f)
-        {
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -MovementConfig.Current.BrakingForce, MovementConfig.Current.BrakingForce);
-        }
+        // No-input braking handled by SurfaceContact.Friction in the physics solver.
         
         ctx.Body.AppliedForce = force;
     }
