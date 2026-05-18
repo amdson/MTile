@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\MTile.csproj" />
+    <ProjectReference Include="..\MTile.Core.csproj" />
   </ItemGroup>
 
 </Project>

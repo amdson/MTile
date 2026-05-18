@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <TieredCompilation>false</TieredCompilation>
+    <AssemblyName>MTile.Core</AssemblyName>
+    <RootNamespace>MTile</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Source code at the repo root is the library. Tests and the desktop host
+         each live in their own subdir and are excluded from the library compile glob. -->
+    <Compile Remove="MTile.Tests\**" />
+    <Compile Remove="MTile.Desktop\**" />
+    <Compile Remove="MTile.Web\**" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 3 will conditionally swap this for the KNI Blazor backend on the
+         web host. The library compiles against the DesktopGL API surface for now. -->
+    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
+  </ItemGroup>
+</Project>

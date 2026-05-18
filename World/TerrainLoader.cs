@@ -35,10 +35,17 @@ public static class TerrainLoader
 {
     public static void Load(string configPath, ChunkMap chunks)
     {
-        string dir = Path.GetDirectoryName(configPath);
-        string json = File.ReadAllText(configPath);
-        var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-        var config = JsonSerializer.Deserialize<TerrainConfig>(json, opts);
+        // Sibling chunk files live next to the config. Forward-slash join keeps
+        // the path TitleContainer-compatible on both DesktopGL and WASM.
+        string dir = (Path.GetDirectoryName(configPath) ?? "").Replace('\\', '/');
+
+        TerrainConfig config;
+        using (var stream = TitleContent.TryOpenRead(configPath))
+        {
+            if (stream == null) return;
+            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            config = JsonSerializer.Deserialize<TerrainConfig>(stream, opts);
+        }
 
         for (int cx = -config.Extents; cx <= config.Extents; cx++)
         {
@@ -46,9 +53,12 @@ public static class TerrainLoader
             {
                 var chunk = new Chunk { ChunkPos = new Point(cx, cy) };
                 string key = $"{cx},{cy}";
-                
+
                 if (config.ChunkFiles.TryGetValue(key, out string filename))
-                    LoadChunkFromFile(chunk, Path.Combine(dir, filename));
+                {
+                    string chunkPath = string.IsNullOrEmpty(dir) ? filename : $"{dir}/{filename}";
+                    LoadChunkFromFile(chunk, chunkPath);
+                }
                 else if (config.Perlin != null)
                     GenerateWithPerlin(chunk, config.Perlin);
                 else
@@ -57,15 +67,16 @@ public static class TerrainLoader
             }
         }
     }
-    
+
     private static void LoadChunkFromFile(Chunk chunk, string path)
     {
-        if (!File.Exists(path)) return;
-        string[] lines = File.ReadAllLines(path);
+        using var stream = TitleContent.TryOpenRead(path);
+        if (stream == null) return;
+        using var reader = new StreamReader(stream);
         for (int ty = 0; ty < Chunk.Size; ty++)
         {
-            if (ty >= lines.Length) break;
-            string line = lines[ty];
+            string line = reader.ReadLine();
+            if (line == null) break;
             for (int tx = 0; tx < Chunk.Size; tx++)
             {
                 if (tx >= line.Length) break;

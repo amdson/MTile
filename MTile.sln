@@ -2,7 +2,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.2.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MTile", "MTile.csproj", "{82070760-C668-5FAB-A5A8-F053BC985CA6}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MTile.Core", "MTile.Core.csproj", "{82070760-C668-5FAB-A5A8-F053BC985CA6}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MTile.Desktop", "MTile.Desktop\MTile.Desktop.csproj", "{8C4D2E1A-9F3B-4E5C-A1D7-2F8E6B0C9D34}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MTile.Tests", "MTile.Tests\MTile.Tests.csproj", "{5A1B2C3D-4E5F-6789-ABCD-EF0123456789}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -14,6 +18,14 @@ Global
 		{82070760-C668-5FAB-A5A8-F053BC985CA6}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{82070760-C668-5FAB-A5A8-F053BC985CA6}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{82070760-C668-5FAB-A5A8-F053BC985CA6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8C4D2E1A-9F3B-4E5C-A1D7-2F8E6B0C9D34}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8C4D2E1A-9F3B-4E5C-A1D7-2F8E6B0C9D34}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8C4D2E1A-9F3B-4E5C-A1D7-2F8E6B0C9D34}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8C4D2E1A-9F3B-4E5C-A1D7-2F8E6B0C9D34}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5A1B2C3D-4E5F-6789-ABCD-EF0123456789}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5A1B2C3D-4E5F-6789-ABCD-EF0123456789}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5A1B2C3D-4E5F-6789-ABCD-EF0123456789}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5A1B2C3D-4E5F-6789-ABCD-EF0123456789}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

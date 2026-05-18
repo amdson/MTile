@@ -51,8 +51,9 @@ public class Game1 : Game, IEntitySpawner
         // Load game config before the GraphicsDeviceManager finalizes so window
         // prefs (size, fullscreen) take effect on the first frame instead of
         // resizing once gameplay starts.
-        string configPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "game_config.json");
-        _config = GameConfig.Load(configPath);
+        // Title-relative path: resolved via TitleContent → TitleContainer (works on
+        // both DesktopGL and the planned Blazor/WASM build).
+        _config = GameConfig.Load("game_config.json");
 
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -70,23 +71,34 @@ public class Game1 : Game, IEntitySpawner
     {
         var stage = Stages.Get(_config.Stage);
 
-        string terrainConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Levels", stage.TerrainConfig);
-        TerrainLoader.Load(terrainConfigPath, _chunks);
+        // Title-relative; chunk files referenced by the config resolve next to it.
+        TerrainLoader.Load($"Levels/{stage.TerrainConfig}", _chunks);
 
-        string movementCfgPath = Path.GetFullPath("movement_config.json");
-        MovementConfig.Load(movementCfgPath);
-
-        _movementConfigWatcher = new FileSystemWatcher(Path.GetDirectoryName(movementCfgPath))
+        // On desktop, point at the absolute repo-source path so FileSystemWatcher
+        // can hot-reload tuning edits. On web (Blazor WASM), the filesystem APIs
+        // throw PlatformNotSupported — load from a title-relative path instead and
+        // skip the watcher entirely.
+        if (OperatingSystem.IsBrowser())
         {
-            Filter = Path.GetFileName(movementCfgPath),
-            NotifyFilter = NotifyFilters.LastWrite,
-            EnableRaisingEvents = true
-        };
-        _movementConfigWatcher.Changed += (s, e) =>
+            MovementConfig.Load("movement_config.json");
+        }
+        else
         {
-            System.Threading.Thread.Sleep(50);
+            string movementCfgPath = Path.GetFullPath("movement_config.json");
             MovementConfig.Load(movementCfgPath);
-        };
+
+            _movementConfigWatcher = new FileSystemWatcher(Path.GetDirectoryName(movementCfgPath))
+            {
+                Filter = Path.GetFileName(movementCfgPath),
+                NotifyFilter = NotifyFilters.LastWrite,
+                EnableRaisingEvents = true
+            };
+            _movementConfigWatcher.Changed += (s, e) =>
+            {
+                System.Threading.Thread.Sleep(50);
+                MovementConfig.Load(movementCfgPath);
+            };
+        }
 
         _playerSpawn = stage.PlayerSpawn;
         _player = new PlayerCharacter(_playerSpawn);

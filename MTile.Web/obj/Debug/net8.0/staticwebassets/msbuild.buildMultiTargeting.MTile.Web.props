@@ -1,0 +1,3 @@
+﻿<Project>
+  <Import Project="..\build\MTile.Web.props" />
+</Project>

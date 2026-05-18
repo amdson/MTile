@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>MTile</title>
+    <base href="./" />
+    <style>
+        html, body { margin: 0; padding: 0; background: #111; }
+        #blazor-error-ui {
+            background: #b80000; color: white; padding: 1rem;
+            display: none; position: fixed; bottom: 0; left: 0; right: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="app">
+        <div id="loading" style="display: table-cell; margin: auto; width:100vw; height:100vh; vertical-align: middle; background: #111; color:#eee;">
+            <div style="display: block; margin: auto; width: 9em; font-family: system-ui, sans-serif;">
+                <div style="text-align: center; font-size: 0.85em;">Made with <a href="https://github.com/kniEngine/kni" style="color:#9cf;">KNI</a></div>
+                <div style="text-align: center; font-size: 1.8em;">loading&nbsp;<marquee style="width:0.9em; vertical-align: bottom;">.&nbsp;.&nbsp;.&nbsp;&nbsp;&nbsp;</marquee></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="" class="reload">Reload</a>
+        <a class="dismiss">&times;</a>
+    </div>
+
+    <script src="_framework/blazor.webassembly.js"></script>
+
+    <!-- KNI WASM JS shims. Versions follow the nkast.Wasm.* package versions and
+         should be kept in sync if the KNI package set is upgraded. -->
+    <script src="_content/nkast.Wasm.Dom/js/JSObject.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.Dom/js/Window.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.Dom/js/Document.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.Dom/js/Navigator.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.Dom/js/Gamepad.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.Dom/js/Media.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.XHR/js/XHR.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.Canvas/js/Canvas.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.Canvas/js/CanvasGLContext.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.Audio/js/Audio.8.0.5.js"></script>
+    <script src="_content/nkast.Wasm.XR/js/XR.8.0.5.js"></script>
+
+    <script>
+        function tickJS() {
+            window.theInstance.invokeMethod('TickDotNet');
+            window.requestAnimationFrame(tickJS);
+        }
+
+        window.initRenderJS = (instance) => {
+            window.theInstance = instance;
+
+            var canvas = document.getElementById('theCanvas');
+            var holder = document.getElementById('canvasHolder');
+            canvas.width = holder.clientWidth;
+            canvas.height = holder.clientHeight;
+            canvas.addEventListener("contextmenu", e => e.preventDefault());
+
+            window.requestAnimationFrame(tickJS);
+        };
+
+        // Prevent arrow keys / space / wheel from scrolling the outer page
+        // when the game is embedded in an iframe (e.g. itch.io).
+        window.addEventListener("keydown", function (event) {
+            if ([32, 37, 38, 39, 40].indexOf(event.keyCode) > -1)
+                event.preventDefault();
+        });
+        window.addEventListener("wheel", function (event) {
+            event.preventDefault();
+        }, { passive: false });
+    </script>
+</body>
+
+</html>

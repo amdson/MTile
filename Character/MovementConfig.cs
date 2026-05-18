@@ -148,22 +148,23 @@ public class MovementConfig
 
     public static void Load(string path)
     {
-        if (File.Exists(path))
+        try
         {
-            try
+            using var stream = TitleContent.TryOpenRead(path);
+            if (stream == null)
             {
-                var json = File.ReadAllText(path);
-                var options = new JsonSerializerOptions { ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
-                _current = JsonSerializer.Deserialize<MovementConfig>(json, options) ?? new MovementConfig();
+                // On desktop, seed an editable copy next to the binary so dev hot-reload
+                // has something to watch. On web (TitleContainer-only), Save will no-op
+                // via its own try/catch; defaults stay in effect.
+                Save(path);
+                return;
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[MovementConfig] Load failed: {ex.Message}");
-            }
+            var options = new JsonSerializerOptions { ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+            _current = JsonSerializer.Deserialize<MovementConfig>(stream, options) ?? new MovementConfig();
         }
-        else
+        catch (Exception ex)
         {
-            Save(path);
+            Console.WriteLine($"[MovementConfig] Load failed: {ex.Message}");
         }
     }
 

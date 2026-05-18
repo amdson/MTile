@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <TieredCompilation>false</TieredCompilation>
+    <AssemblyName>MTile</AssemblyName>
+    <RootNamespace>MTile</RootNamespace>
+    <ApplicationManifest>..\app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\Icon.ico</ApplicationIcon>
+    <!-- Required by MonoGame.Content.Builder.Task to select the right /platform: -->
+    <MonoGamePlatform>DesktopGL</MonoGamePlatform>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="..\Icon.ico" Link="Icon.ico">
+      <LogicalName>Icon.ico</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\Icon.bmp" Link="Icon.bmp">
+      <LogicalName>Icon.bmp</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Asset bundling for the desktop build. Each platform host (Desktop, Web)
+         declares its own copy rules so source files at the repo root can land
+         in the right place — alongside the binary on desktop, under wwwroot on web. -->
+    <None Include="..\game_config.json" Link="game_config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\movement_config.json" Link="movement_config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\Levels\**\*" Link="Levels\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Content pipeline lives with the executable so .xnb output lands next to
+         the binary. The shared .mgcb at the repo root is referenced via a link. -->
+    <MonoGameContentReference Include="..\Content\Content.mgcb" Link="Content\Content.mgcb" />
+    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MTile.Core.csproj" />
+  </ItemGroup>
+</Project>

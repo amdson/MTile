@@ -1,0 +1,22 @@
+{
+  "AirAccel": 1500,
+  "MaxAirSpeed": 150,
+  "AirDrag": 500,
+  "JumpVelocity": -100,
+  "JumpHoldForce": -1500,
+  "JumpInitForce": 0,
+  "MaxJumpHoldTime": 0.12,
+  "SlideTerminalSpeed": 40,
+  "SlideDrag": 300,
+  "WallJumpInitialVelX": 250,
+  "WallJumpInitialVelY": -150,
+  "WallJumpAirAccel": 1500,
+  "WallJumpMaxAirSpeed": 150,
+  "WallJumpAirDrag": 500,
+  "WallJumpHoldForce": -1000,
+  "WallJumpMaxHoldTime": 0.12,
+  "SpringK": 300,
+  "WalkAccel": 3000,
+  "MaxWalkSpeed": 100,
+  "BrakingForce": 3000
+}

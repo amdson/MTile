@@ -31,12 +31,12 @@ public sealed class GameConfig
 
     public static GameConfig Load(string path)
     {
-        if (!File.Exists(path)) return new GameConfig();
         try
         {
+            using var stream = TitleContent.TryOpenRead(path);
+            if (stream == null) return new GameConfig();
             var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            return JsonSerializer.Deserialize<GameConfig>(File.ReadAllText(path), opts)
-                ?? new GameConfig();
+            return JsonSerializer.Deserialize<GameConfig>(stream, opts) ?? new GameConfig();
         }
         catch (Exception)
         {
