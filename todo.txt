@@ -8,12 +8,27 @@
 - Get the destructive physics feeling significantly more destructive. When the player is thrown hard enough into rocks, they should smash through dozens of blocks, not just break one or two. There should be attacks which generate these kinds of forces all the time. On the other hand, the player shouldn't break most blocks just by running into them. We need to tune physics until this works for all cases. 
 - Expand hit-boxes of both slash and stab moves by a factor of 1.75. 
 - Make stab carry-through force always apply force in the direction of the stab, not just left/right. 
-- get game running in-browser
 - add gitignore for all the dll files etc
+- Add a turn-around attack in air (click on opposite side of facing direction) to get a fast, narrow, longer range turn around slash or click and drag to get a more powerful, longer range spin-stab), and set it up so that face direction in air only changes with turn-around attacks. 
+- Add a ranged attack option with e.g. shift-left click. (a fast moving ball of energy fired in the direction of the mouse) 
+- Add a charged ranged attack with shift-left click hold-swipe (a particle beam attack, which breaks most blocks) 
+- Add a ranges area attack (a lobbed ball) with shift-right click. The ball should spawn a decently large number of blocks in an overspilling radius when it lands, and do a decent amount of area damage. The number of blocks should increase with charging. 
+- Add some kind of explosive attack, such as a land mine or grenade. 
+- Add lava effects, or something similar, as a fast-spreading terrain hazard. (How to allow lava placement? treat as another block option, and let players pick active block with numbers?) 
+- Allow players to pick which block to place from a few options. (sand, dirt, stone, another "foam" block which is very cheap, but decays after placement)
+- Add a stunned state for when the player is hit hard by attacks, in which the player has mild control over movement, but can't jump or attack immediately. 
+- Don't fully allow moves to interrupt jump, but prevent player from initiating jump immediately after getting hit so allow for basic combos. 
 
-In smash ultimate, there's A-moves, air A-moves, tilt attacks, B-moves, rolls, shields, dodges, and grabs. Right now I have slashes in air, slashes on ground/crouched, stabs, block placement, and block placement variants + a bunch of movement options, although the number of options in smash is vastly higher. In this game, stun-states etc are much rarer, so it's much harder to imagine something like a combo. That said, it's definitely good for gameplay if things like disadvantage states are possible. The simplest combo is just iterating slash attacks. Let's say one player gets this going on the other. What should happen? I'd like to give the attacked player some mobility, so that they're not dead in the water, but I'd rather not give them full movement, because then the attack would feel weightless. Should I interrupt jumps, for instance? One thing I could do would be to make slashes actually add a pretty decent amount of force, so that it's possible to hit the enemy into a wall repeatedly. 
+In smash ultimate, there's A-moves, air A-moves, tilt attacks, B-moves, rolls, shields, dodges, and grabs. Right now I have slashes in air, slashes on ground/crouched, stabs, block placement, and block placement variants + a bunch of movement options, although the number of options in smash is vastly higher. In this game, stun-states etc are much rarer, so it's much harder to imagine something like a combo. That said, it's definitely good for gameplay if things like disadvantage states are possible. The simplest combo is just iterating slash attacks. Let's say one player gets this going on the other. What should happen? I'd like to give the attacked player some mobility, so that they're not dead in the water, but I'd rather not give them full movement, because then the attack would feel insubstancial. Should I interrupt jumps, for instance? If the player's spamming jump as they're hit, they shouldn't simply escape. But also they shouldn't be powerless, and I dislike locking them out of movestates. In particular, full stun-lock loops should be impossible. 
 
 Let's say the player is hit very hard by a stab attack, and they go flying. They probably shouldn't be able to double jump in this state, so maybe I should actually add a stunned / ragdolled state to the game? At least for the duration that they're moving rapidly? 
+
+
+
+
+
+
+
 
 
 
