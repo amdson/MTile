@@ -340,7 +340,6 @@ public static class PhysicsWorld
     // crediting whichever the collision solver iterated to first. The strip
     // direction mirrors TryFindContactSurface: `normal` points from surface to
     // body, so the impact face is on the -normal side.
-    private static readonly List<(int gtx, int gty)> _impactCells = new(4);
     private static void TryApplyImpactDamage(PhysicsBody body, BoundingBox bounds, Vector2 normal, float vnRel, ChunkMap chunks)
     {
         if (body.Impact == null) return;
@@ -354,14 +353,19 @@ public static class PhysicsWorld
         else
             strip = normal.X < 0 ? bounds.StripRight(probe) : bounds.StripLeft(probe);
 
-        _impactCells.Clear();
+        // Local list (not static): PhysicsWorld is a static class but xUnit runs
+        // test classes in parallel, so a static scratch list races across
+        // concurrent StepSwept calls and trips the List enumerator's version
+        // check mid-foreach. The per-call alloc is one ~4-element List on the
+        // rare frames a body actually impacts terrain — cheap.
+        var impactCells = new List<(int gtx, int gty)>(4);
         foreach (var shape in WorldQuery.SolidShapesInRect(chunks, strip))
         {
             int gtx = (int)MathF.Floor(shape.WorldCenterX / Chunk.TileSize);
             int gty = (int)MathF.Floor(shape.WorldCenterY / Chunk.TileSize);
-            _impactCells.Add((gtx, gty));
+            impactCells.Add((gtx, gty));
         }
-        if (_impactCells.Count == 0) return;
+        if (impactCells.Count == 0) return;
 
         // Each cell sees its share of the impulse routed through the
         // accumulator. The cell-level threshold + decay handles spring-padded
@@ -370,8 +374,8 @@ public static class PhysicsWorld
         // the running total crosses. AccrueAndConsume returns the over-
         // threshold portion already net of the threshold, so we just multiply
         // by the body's damage coefficient.
-        float perCellImpulse = impulse / _impactCells.Count;
-        foreach (var (gtx, gty) in _impactCells)
+        float perCellImpulse = impulse / impactCells.Count;
+        foreach (var (gtx, gty) in impactCells)
         {
             float over = chunks.Impact.AccrueAndConsume(gtx, gty, perCellImpulse, body.Impact.ImpulseThreshold);
             if (over > 0f) chunks.DamageCell(gtx, gty, over * body.Impact.DamagePerUnitImpulse);

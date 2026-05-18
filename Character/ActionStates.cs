@@ -996,7 +996,7 @@ public class BlockEruptionAction : ActionState
     private const float SaturationTime = 2.0f;
     private const float DipFactor      = 0.65f;
     private const float BudgetMin      = 0f;
-    private const float BudgetMax      = 60f;
+    private const float BudgetMax      = 125f; 
 
     public override int ActivePriority  => 9;
     public override int PassivePriority => 10;

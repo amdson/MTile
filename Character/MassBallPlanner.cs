@@ -62,8 +62,24 @@ public static class MassBallPlanner
     public static void Plan(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget)
     {
         var sim = Simulate(chunks, origin, samples, budget);
-        // Spawn in the order cells crossed the threshold during the sim. The
-        // sprout-graph still handles parent-dependency ordering — we just submit.
+
+        // Submit in taxicab-distance order from the eruption origin, not the
+        // cascade-discovery order Simulate returns. TryRequestTile silently
+        // rejects any cell that has no Solid AND no in-graph 4-neighbor at the
+        // moment of submission, so a cell whose only viable parent is further
+        // along sproutedOrder gets orphaned. Sorting by Manhattan distance
+        // ensures every cell's closest-to-origin neighbour is submitted first
+        // and is in the graph by the time the cell itself is submitted, since
+        // a Manhattan-(d+1) cell always has a Manhattan-d cell as a neighbour.
+        int originGtx = (int)MathF.Floor(origin.X / Chunk.TileSize);
+        int originGty = (int)MathF.Floor(origin.Y / Chunk.TileSize);
+        sim.SproutCells.Sort((a, b) =>
+        {
+            int da = Math.Abs(a.gtx - originGtx) + Math.Abs(a.gty - originGty);
+            int db = Math.Abs(b.gtx - originGtx) + Math.Abs(b.gty - originGty);
+            return da.CompareTo(db);
+        });
+
         foreach (var (gtx, gty) in sim.SproutCells)
             chunks.TryRequestTile(gtx, gty, DefaultType);
     }
@@ -92,7 +108,6 @@ public static class MassBallPlanner
         for (int step = 0; step < MaxSteps; step++)
         {
             if (mass < EpsAmount) break;
-
             // Advance puller along the polyline. Past the recorded end, linearly
             // extrapolate along the last sample's velocity — a brief sweep keeps
             // the puller drifting in the swept direction so mass deposits along a
@@ -130,7 +145,7 @@ public static class MassBallPlanner
 
             int gtx = (int)MathF.Floor(ballPos.X / Chunk.TileSize);
             int gty = (int)MathF.Floor(ballPos.Y / Chunk.TileSize);
-
+            
             Deposit(chunks, gtx, gty, leak, 0, field, sproutedSet, sproutedOrder);
             result.BallTrajectory.Add(ballPos);
 
