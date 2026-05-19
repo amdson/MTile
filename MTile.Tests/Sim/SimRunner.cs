@@ -28,6 +28,29 @@ public class SimConfig
     public Vector2      Gravity       { get; init; } = new Vector2(0f, 600f);
 }
 
+// Per-player config for the multi-player runner (SimRunner.RunMulti). Each player
+// brings its own start pose + script; all share the terrain, gravity, dt, and the
+// HitboxWorld/HurtboxWorld so attacks between players resolve like in real play.
+public class SimPlayer
+{
+    public Vector2     StartPosition { get; init; } = Vector2.Zero;
+    public Vector2     StartVelocity { get; init; } = Vector2.Zero;
+    public InputScript Script        { get; init; } = InputScript.Always(default);
+    // CombatSystem skips intersection when attacker.Faction == target.Faction.
+    // Solo play uses Player for both; multi-player tests typically tag opponents
+    // with Neutral or Enemy so cross-player hits actually register.
+    public Faction     Faction       { get; init; } = MTile.Faction.Player;
+}
+
+public class SimConfigMulti
+{
+    public ChunkMap         Terrain { get; init; } = new ChunkMap();
+    public IList<SimPlayer> Players { get; init; } = new List<SimPlayer>();
+    public int              Frames  { get; init; } = 120;
+    public float            Dt      { get; init; } = 1f / 30f;
+    public Vector2          Gravity { get; init; } = new Vector2(0f, 600f);
+}
+
 public static class SimRunner
 {
     public static SimFrame[] Run(SimConfig cfg)
@@ -69,5 +92,94 @@ public static class SimRunner
         }
 
         return frames.ToArray();
+    }
+
+    // Multi-player headless sim. Each player has its own Controller (fed by its
+    // own InputScript) and a per-frame trace. All players share the HitboxWorld /
+    // HurtboxWorld so cross-player attacks resolve through CombatSystem.Apply —
+    // letting tests script e.g. "player 0 spams slash combo while player 1 holds
+    // a movement direction" and assert that player 1 doesn't escape the cone.
+    //
+    // Returns a SimFrame[][] indexed [playerIdx][frame]. Optional callbacks:
+    //   onFrame    — fires AFTER each frame's full update (combat + physics applied);
+    //                use to sample non-frame state (Combat.HitstunActive, Health, …).
+    //   outPlayers — fires once at the end with the final PlayerCharacter[].
+    public static SimFrame[][] RunMulti(SimConfigMulti cfg,
+                                        Action<int, PlayerCharacter[]>? onFrame = null,
+                                        Action<PlayerCharacter[]>? outPlayers = null)
+    {
+        int n = cfg.Players.Count;
+        if (n == 0) return Array.Empty<SimFrame[]>();
+
+        var players = new PlayerCharacter[n];
+        var ctrls   = new Controller[n];
+        var bodies  = new List<PhysicsBody>(n);
+        var traces  = new List<SimFrame>[n];
+        var lastStates = new string[n];
+        var prevs   = new SimFrame?[n];
+
+        for (int i = 0; i < n; i++)
+        {
+            players[i] = new PlayerCharacter(cfg.Players[i].StartPosition);
+            players[i].Body.Velocity = cfg.Players[i].StartVelocity;
+            players[i].Faction       = cfg.Players[i].Faction;
+            ctrls[i] = new Controller();
+            bodies.Add(players[i].Body);
+            traces[i] = new List<SimFrame>(cfg.Frames);
+            lastStates[i] = "";
+        }
+
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+
+        for (int f = 0; f < cfg.Frames; f++)
+        {
+            cfg.Terrain.TickSprouts(cfg.Dt);
+
+            // Mirror Game1.Update phase order: clear combat registries → publish
+            // hurtboxes → run each player's Update (which publishes hitboxes) →
+            // CombatSystem.Apply → physics step.
+            hitboxes.Clear();
+            hurtboxes.Clear();
+            for (int i = 0; i < n; i++) players[i].PublishHurtboxes(hurtboxes);
+
+            // Inject input + update each player. Capture AppliedForce per-player
+            // before StepSwept zeroes them.
+            var fx = new float[n];
+            var fy = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                var input = cfg.Players[i].Script.Get(f, prevs[i]);
+                ctrls[i].InjectInput(input);
+                players[i].Update(ctrls[i], cfg.Terrain, hitboxes, hurtboxes, cfg.Dt);
+                fx[i] = players[i].Body.AppliedForce.X;
+                fy[i] = players[i].Body.AppliedForce.Y;
+            }
+
+            CombatSystem.Apply(cfg.Terrain, hitboxes, hurtboxes);
+
+            PhysicsWorld.StepSwept(bodies, cfg.Terrain, cfg.Dt, cfg.Gravity);
+
+            for (int i = 0; i < n; i++)
+            {
+                string state = players[i].CurrentStateName;
+                bool transition = state != lastStates[i];
+                lastStates[i] = state;
+
+                var sf = new SimFrame(f, f * cfg.Dt,
+                    players[i].Body.Position.X, players[i].Body.Position.Y,
+                    players[i].Body.Velocity.X, players[i].Body.Velocity.Y,
+                    fx[i], fy[i], state, transition);
+                traces[i].Add(sf);
+                prevs[i] = sf;
+            }
+
+            onFrame?.Invoke(f, players);
+        }
+
+        outPlayers?.Invoke(players);
+        var result = new SimFrame[n][];
+        for (int i = 0; i < n; i++) result[i] = traces[i].ToArray();
+        return result;
     }
 }

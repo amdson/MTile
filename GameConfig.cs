@@ -29,6 +29,20 @@ public sealed class GameConfig
     // against busy terrain. Set false to disable; toggle independently of debug overlays.
     public bool MouseTrail { get; set; } = true;
 
+    // Manual-test affordance: spawn a second PlayerCharacter at SecondPlayerOffset
+    // (world-space, relative to the stage's player spawn). The secondary's Controller
+    // is never wired to hardware — real input still controls the primary only — but
+    // the body is a full IHittable so the primary can slash it and observe hitstun /
+    // stun / knockback dynamics. SimRunner has the headless equivalent for tests.
+    public bool    SpawnSecondPlayer    { get; set; } = false;
+    public float   SecondPlayerOffsetX  { get; set; } = 64f;
+    public float   SecondPlayerOffsetY  { get; set; } = 0f;
+
+    // Initial player-selected block type for both drag-build and BlockEruption.
+    // Switched at runtime via the 1/2/3/4 number keys (Game1.HandleInput). Stored
+    // as a string in the config for readability; parsed once at load.
+    public string StartingBlockType { get; set; } = "Dirt";
+
     public static GameConfig Load(string path)
     {
         try

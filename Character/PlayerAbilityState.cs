@@ -24,4 +24,8 @@ public class PlayerAbilityState
     // so action states read/write through the same well-known struct, the same way
     // movement states use PlayerAbilityState for HasDoubleJumped etc.
     public ConditionState Condition = new();
+
+    // Defensive combat state — hitstun / stun / hit-history. Sibling of Condition;
+    // populated by PlayerCharacter.OnHit, read by jump preconditions etc.
+    public CombatState Combat = new();
 }

@@ -3,7 +3,6 @@
   "WindowWidth": 1600,
   "WindowHeight": 1200,
   "Fullscreen": false,
-
   "DebugDrawHitboxes":          false,
   "DebugDrawHurtboxes":         false,
   "DebugDrawPlayerOrientation": false,

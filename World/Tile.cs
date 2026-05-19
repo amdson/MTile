@@ -16,6 +16,11 @@ public enum TileType : byte
     Stone,
     Dirt,
     Sand,
+    // Cheap throwaway material. Half the HP of dirt and decays back to Empty
+    // after FoamDecay.DefaultLifetime seconds. Player-selectable via the block
+    // picker; not produced by terrain generation. Useful as scaffolding /
+    // temporary cover during combat.
+    Foam,
 }
 
 public struct Tile

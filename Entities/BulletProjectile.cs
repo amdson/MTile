@@ -1,4 +1,3 @@
-using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -6,7 +5,7 @@ namespace MTile;
 // Turret round. Flies at constant velocity (gravity-free), publishes a small
 // hitbox each frame so it damages anything it overlaps mid-flight, and self-
 // destructs on three triggers:
-//   1. Lifetime expires (range limit).
+//   1. Lifetime expires (range limit, handled by Projectile base).
 //   2. The physics solver has effectively halted it (collision with terrain).
 //   3. It hits something the player can't deflect (slash-faction mismatch).
 //
@@ -14,7 +13,7 @@ namespace MTile;
 // It reorients along the slash's knockback vector, gets a speed boost, and
 // flips its own Faction to Player — the same hitbox the bullet publishes per
 // frame will then read as Player.Owner, hurting enemies instead of the player.
-public class BulletProjectile : Entity
+public class BulletProjectile : Projectile
 {
     private const float LifeSeconds        = 1.4f;
     private const float DamagePerFrame     = 0.5f;
@@ -27,16 +26,13 @@ public class BulletProjectile : Entity
     private static int _nextHitId = 3_000_001;
     private int _hitId = System.Threading.Interlocked.Increment(ref _nextHitId);
 
-    private float _age;
-
     public BulletProjectile(Vector2 pos, Vector2 velocity)
-        : base(new PhysicsBody(Polygon.CreateRegular(3f, 6), pos), health: 0.1f)
+        : base(new PhysicsBody(Polygon.CreateRegular(3f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: Faction.Enemy)
     {
         Body.Velocity = velocity;
         Mass          = 0.4f;
         GravityScale  = 0f;
         Color         = Color.OrangeRed;
-        Faction       = Faction.Enemy;
         Sprite        = Sprites.Bullet(3f);
     }
 
@@ -57,7 +53,7 @@ public class BulletProjectile : Entity
             Body.Velocity = dir * DeflectSpeed;
             Faction       = Faction.Player;
             Color         = Color.Cyan;
-            _age          = 0f;
+            Age           = 0f;
             // Fresh HitId so the (HitId,Target) dedupe in CombatSystem treats
             // post-deflect overlaps as a new attack — without this, any enemy
             // the bullet had already brushed pre-deflect would be immune.
@@ -69,21 +65,17 @@ public class BulletProjectile : Entity
         Health = 0f;
     }
 
-    public override void Update(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
+    protected override void ProjectileUpdate(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
     {
-        if (IsDead) return;
-        _age += dt;
-
         // Collision-detect via velocity magnitude — the chunk solver halts the
         // body when it runs into a tile, so a fully-stopped bullet has hit
         // something solid. Skip the check briefly after spawn so the muzzle
         // velocity has time to register.
-        if (_age >= ArmDelay && Body.Velocity.LengthSquared() < CollisionStopSpeed * CollisionStopSpeed)
+        if (Age >= ArmDelay && Body.Velocity.LengthSquared() < CollisionStopSpeed * CollisionStopSpeed)
         {
             Health = 0f;
             return;
         }
-        if (_age >= LifeSeconds) { Health = 0f; return; }
 
         // Publish a small offensive hitbox at the bullet's current position. The
         // CombatSystem dedupe (HitId,Target) ensures a bullet damages each entity

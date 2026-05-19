@@ -23,6 +23,7 @@ public class TileDamage
         TileType.Sand  => TileMaxHP * 0.5f,
         TileType.Dirt  => TileMaxHP * 1.0f,
         TileType.Stone => TileMaxHP * 2.0f,
+        TileType.Foam  => TileMaxHP * 0.5f,   // cheap; chips on a single slash
         _              => TileMaxHP,
     };
 

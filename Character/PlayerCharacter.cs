@@ -20,7 +20,11 @@ public class PlayerCharacter : IHittable
     // player instead of the entity factory.
     public Vector2 Gravity = new(0f, 600f);
 
-    public Faction Faction => MTile.Faction.Player;
+    // Combat faction. Default Player; settable so a second PlayerCharacter spawned
+    // for two-player combat (Game1.AddSecondaryPlayer / SimRunner.RunMulti) can be
+    // re-tagged Enemy/Neutral and become a valid target through CombatSystem's
+    // self-damage filter. Real solo play never touches this — the default stands.
+    public Faction Faction { get; set; } = MTile.Faction.Player;
 
     // Combat stats. MaxHealth tuned so a Stalker takes ~4 lunges to down the
     // player; Mass divides incoming knockback impulses (heavier = less yeet).
@@ -33,6 +37,30 @@ public class PlayerCharacter : IHittable
     // multi-frame, so this is mostly belt-and-suspenders for stacked attackers.
     private const float HitInvulnDuration = 0.4f;
     private float _hitInvulnRemaining;
+
+    // Crush-damage tuning. Reads PhysicsBody.LastImpulseMagnitude (max |vnRel|
+    // absorbed by collision resolution last step). Below the threshold normal
+    // landings and casual wall-bumps are free; above it the excess scales into
+    // HP damage and also routes through Combat.OnHitRegistered so hitstun / stun
+    // gates kick in (a hard fall briefly locks jump even though no attack hit).
+    // Separate from _hitInvulnRemaining: a slash-then-thrown-into-wall combo
+    // should land both the slash damage AND the crush damage, not one or the
+    // other. _lastCrushFrame is the cross-event cooldown that prevents the same
+    // wall-slam being charged twice.
+    //
+    // Threshold sized so the player's own jumps don't self-damage:
+    //   * Held single jump lands at vy ≈ 260-270 (measured)
+    //   * Held running jump (RunJumpVelocity -120) lands ~290
+    //   * Held jump + double jump compounds to ~340-370 in worst case
+    // 400 puts all self-jumps comfortably free while keeping plunges from
+    // height (≥ 9-10 tiles) painful. Was 200 — caught every normal jump
+    // landing, dealing ~0.21 HP per jump and triggering hitstun that blocked
+    // the next jump (the "fails to jump occasionally" + "damage every jump"
+    // pair the bug report linked).
+    private const float CrushImpulseThreshold = 400f;
+    private const float CrushDamagePerImpulse = 0.003f;
+    private const int   CrushCooldownFrames   = 6;
+    private int _lastCrushFrame = int.MinValue / 2;
     public bool IsAlive => Health > 0f;
 
     // Player is one big hurtbox covering its body bounds. Future: split into head/body
@@ -41,14 +69,28 @@ public class PlayerCharacter : IHittable
     public void PublishHurtboxes(HurtboxWorld world)
     {
         if (_hitInvulnRemaining > 0f) return;
-        world.Publish(new Hurtbox(Body.Bounds, MTile.Faction.Player, this));
+        world.Publish(new Hurtbox(Body.Bounds, Faction, this));
     }
 
     public void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
+        // Guard parry — roadmap §1.5. If GuardActive and the hit lands in the
+        // front-cone, absorb completely: no damage, no knockback, no hitstun.
+        // Weak in-cone hits additionally charge GuardRetaliate (see CombatState.TryParry).
+        if (_abilities.Combat.TryParry(hit.KnockbackImpulse, hit.Damage, _abilities.Facing, _frame))
+            return;
+
         Health -= hit.Damage;
         if (Mass > 0f) Body.Velocity += hit.KnockbackImpulse / Mass;
         _hitInvulnRemaining = HitInvulnDuration;
+
+        // Register the hit for hitstun (every hit) and stash impulse/direction
+        // for the stun-threshold check. Uses the raw KnockbackImpulse magnitude —
+        // independent of player Mass so the attack's "strength" reads consistently
+        // across players of different mass.
+        var dir = hit.KnockbackImpulse;
+        if (dir.LengthSquared() > 1e-4f) dir.Normalize();
+        _abilities.Combat.OnHitRegistered(_frame, hit.KnockbackImpulse.Length(), dir);
     }
 
     // Called by Game1 on Health <= 0 to reset to a clean starting state. Cheaper
@@ -86,6 +128,13 @@ public class PlayerCharacter : IHittable
     // Monotonic frame counter — used for intent age + ConditionState flag expiry.
     // Distinct from _historyHead (which mods to HistorySize).
     private int _frame;
+    public int Frame => _frame;
+    // Written by Game1 each tick *before* Update — records the frame on which
+    // Game1.HandleBuildInput last actually placed a tile. Plumbed into
+    // EnvironmentContext so BlockReadyAction can cancel an in-flight charge while
+    // the player is actively building. Default is a far-past value so a fresh
+    // PlayerCharacter (tests, secondary players) reads as "never built."
+    public int LastTilePlacedFrame { get; set; } = int.MinValue / 2;
 
     public MovementState GetPreviousState(int framesBack)
     {
@@ -137,14 +186,23 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new AirSlash1());         // 30/30
         _actionRegistry.Add(new StabAction());        // 30/30
         _actionRegistry.Add(new PulseAction());       // 30/30  — Circle gesture
-        _actionRegistry.Add(new BlockReadyAction());  // 8/10   — RMB in solid (below ReadyAction)
-        _actionRegistry.Add(new BlockEruptionAction()); // 9/10 — armed handoff from BlockReady
+        _actionRegistry.Add(new BlockReadyAction());     // 8/10   — RMB hold-in-solid charge
+        _actionRegistry.Add(new BlockEruptionAction());  // 9/10   — RMB hold-out-of-solid after arming, fires on release
         _actionRegistry.Add(new GroundSlash2());      // 30/50  — combo (Slash2Ready gated)
         _actionRegistry.Add(new GroundSlash3());      // 30/50  — combo
         _actionRegistry.Add(new AirSlash2());         // 30/50  — combo
+        _actionRegistry.Add(new AirTurnSlash());      // 30/35  — air backward-click turnaround
+        _actionRegistry.Add(new AirSpinStab());       // 30/35  — air backward-swipe stab
+        _actionRegistry.Add(new GuardAction());       // 35/40  — Shift held, no L/R, parry posture
+        _actionRegistry.Add(new GuardRetaliateAction()); // 30/55 — click during GuardCharged
+        _actionRegistry.Add(new EnergyBallAction());     // 40/45 — Shift+LMB tap, preempts Guard briefly
+        _actionRegistry.Add(new BeamAction());           // 40/45 — Shift+LMB hold, sustained beam after charge
+        _actionRegistry.Add(new GrenadeAction());        // 40/45 — F press, throws sticky grenade
+        _actionRegistry.Add(new LobbedAreaAction());     // 40/45 — Shift+RMB charge, ranged eruption on landing
         _currentAction = _actionRegistry[0];
 
         _stateRegistry.Add(new FallingState());
+        _stateRegistry.Add(new StunnedState());
         _stateRegistry.Add(new StandingState());
         _stateRegistry.Add(new CrouchedState());
         _stateRegistry.Add(new JumpingState());
@@ -166,10 +224,24 @@ public class PlayerCharacter : IHittable
         _currentState = _stateRegistry[0]; // falling
     }
 
-    public void Update(Controller controller, ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes, float dt)
+    public void Update(Controller controller, ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes, float dt, IEntitySpawner spawner = null)
     {
         _frame++;
         if (_hitInvulnRemaining > 0f) _hitInvulnRemaining -= dt;
+
+        // Crush damage: turn the previous step's largest |vnRel| into HP loss
+        // when it crosses CrushImpulseThreshold. Reads PhysicsBody.LastImpulse
+        // Magnitude (written by PhysicsWorld.StepSwept). Routes through
+        // OnHitRegistered so a hard fall / wall slam also lights up Hitstun and
+        // (if hard enough) Stun — "I just slammed down, give me a sec."
+        if (Body.LastImpulseMagnitude > CrushImpulseThreshold
+            && _frame - _lastCrushFrame >= CrushCooldownFrames)
+        {
+            float excess = Body.LastImpulseMagnitude - CrushImpulseThreshold;
+            Health -= excess * CrushDamagePerImpulse;
+            _abilities.Combat.OnHitRegistered(_frame, Body.LastImpulseMagnitude, Vector2.Zero);
+            _lastCrushFrame = _frame;
+        }
 
         var input = controller.Current;
         var prev  = controller.GetPrevious(1);
@@ -179,6 +251,8 @@ public class PlayerCharacter : IHittable
 
         // Expire combo / recovery flags whose window closed since last frame.
         _abilities.Condition.Tick(_frame);
+        // Expire hitstun / stun whose window closed.
+        _abilities.Combat.Tick(_frame);
 
         // Edge-detect input gestures and enqueue intents. Done BEFORE the FSMs so
         // freshly-released clicks are visible to action preconditions this frame.
@@ -193,9 +267,12 @@ public class PlayerCharacter : IHittable
             Chunks         = chunks,
             Hitboxes       = hitboxes,
             Hurtboxes      = hurtboxes,
+            Spawner        = spawner,
             Intents        = _intents,
             Condition      = _abilities.Condition,
+            Combat         = _abilities.Combat,
             CurrentFrame   = _frame,
+            LastTilePlacedFrame = LastTilePlacedFrame,
             Dt             = dt,
             Body           = Body,
             Intent         = InputIntent.From(controller),
@@ -204,7 +281,10 @@ public class PlayerCharacter : IHittable
 
         // Facing tracks the last non-zero horizontal input so standstill actions
         // (slash from a stop) still have a direction. Movement code doesn't read this.
-        if (ctx.Intent.CurrentHorizontal != 0) _abilities.Facing = ctx.Intent.CurrentHorizontal;
+        // Roadmap §1.6: facing is sticky in air — only ground-state input writes here.
+        // Air-direction changes route through AirTurnSlash / AirSpinStab, which flip
+        // Facing themselves on Enter.
+        if (IsGrounded && ctx.Intent.CurrentHorizontal != 0) _abilities.Facing = ctx.Intent.CurrentHorizontal;
 
         if (IsGrounded || ctx.TryGetWall(1, out _) || ctx.TryGetWall(-1, out _))
         {
@@ -309,4 +389,7 @@ public class PlayerCharacter : IHittable
     // Read-only exposure of intent-direction for debug overlays. Movement code reads
     // from _abilities directly; this exists so Game1 can render a facing indicator.
     public int Facing => _abilities.Facing;
+    // Defensive combat state — exposed for tests / HUD / debug overlays that
+    // want to read HitstunActive, StunActive, LastHitImpulse, etc.
+    public CombatState Combat => _abilities.Combat;
 }

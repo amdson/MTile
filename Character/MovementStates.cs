@@ -16,6 +16,11 @@ public class JumpingState : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (!abilities.JumpJustPressed || !ctx.TryGetGround(out var ground)) return false;
+        // Hitstun gate: a player just hit can't immediately jump out of the followup.
+        // Movement otherwise stays free — hitstun ONLY blocks the recovery option that
+        // resets vertical position cheaply.
+        if (ctx.Combat?.HitstunActive == true) return false;
+        if (ctx.Combat?.StunActive    == true) return false;
         // Low ceiling (≤ 2 tiles) overhead: head would smack — defer to CoveredJumpState.
         if (ctx.TryGetCeiling(out var ceiling)
             && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
@@ -110,6 +115,8 @@ public class RunningJumpState : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (!abilities.JumpJustPressed || !ctx.TryGetGround(out var ground)) return false;
+        if (ctx.Combat?.HitstunActive == true) return false;
+        if (ctx.Combat?.StunActive    == true) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
         if (ctx.TryGetCeiling(out var ceiling)
             && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
@@ -293,6 +300,8 @@ public class WallJumpingState : MovementState
         // pressing AWAY from it (falling alongside a wall, kicking off it). Both should fire WallJump.
         // The no-input case (`Space` with no arrow held) falls through to DoubleJumping.
         bool pressingHorizontal = ctx.Input.Left || ctx.Input.Right;
+        if (ctx.Combat?.HitstunActive == true) return false;
+        if (ctx.Combat?.StunActive    == true) return false;
         return pressingHorizontal && abilities.JumpJustPressed && ctx.TryGetWall(_wallDir, out _);
     }
 
@@ -355,6 +364,8 @@ public class DoubleJumpingState : MovementState
         // via earlier registration (same Passive=40, first-found wins). When they're not pressing
         // into a wall — e.g. dropping off a platform while holding the away direction — DoubleJump
         // is the right fire here.
+        if (ctx.Combat?.HitstunActive == true) return false;
+        if (ctx.Combat?.StunActive    == true) return false;
         return abilities.JumpJustPressed && !abilities.HasDoubleJumped && !ctx.TryGetGround(out _);
     }
 

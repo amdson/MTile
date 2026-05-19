@@ -1,0 +1,78 @@
+using Microsoft.Xna.Framework;
+
+namespace MTile;
+
+// Roadmap §4.1. Player-spawned ranged projectile, fired by EnergyBallAction
+// (Shift+LMB-tap). Flies straight toward the cursor at a fixed speed, publishes
+// a small hitbox each frame. Dies on lifetime expiry OR when the physics solver
+// halts it (terrain hit) — same "collision via velocity-magnitude" trick
+// BulletProjectile uses.
+//
+// Faction = Player, so the same hitbox the projectile publishes can hurt enemy
+// hurtboxes via CombatSystem. Distinct dedupe HitId means each enemy takes
+// damage at most once per energy ball.
+//
+// Roadmap calls for "pierces 1–2 tiles before dying (uses §2 destructive-physics
+// machinery)." That falls out for free as soon as Body.Impact is set:
+// PhysicsWorld's break-through path bleeds normal velocity, the ball survives
+// the contact, then dies on the next collision (or lifetime).
+public class EnergyBallProjectile : Projectile
+{
+    private const float Speed              = 500f;
+    private const float LifeSeconds        = 1.2f;
+    private const float DamagePerFrame     = 1.0f;
+    private const float HitboxHalfSize     = 5f;
+    private const float CollisionStopSpeed = 30f;
+    private const float ArmDelay           = 0.03f;
+    private const float KnockbackImpulse   = 280f;
+
+    private static int _nextHitId = 4_000_001;
+    private readonly int _hitId = System.Threading.Interlocked.Increment(ref _nextHitId);
+
+    public EnergyBallProjectile(Vector2 pos, Vector2 dir)
+        : base(new PhysicsBody(Polygon.CreateRegular(4f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: Faction.Player)
+    {
+        if (dir.LengthSquared() < 1e-4f) dir = Vector2.UnitX;
+        dir.Normalize();
+        Body.Velocity = dir * Speed;
+        // Impact config so the ball can pierce 1-2 cells before dying — the
+        // chunk solver's break-through path keeps it moving once a tile breaks
+        // under the impulse threshold. Tuned so a single Stone won't stop it
+        // dead but a stack of 3 will (cheap "limited piercing" without an
+        // explicit penetration counter).
+        Body.Impact = new ImpactDamage
+        {
+            Mass                 = 1.2f,
+            ImpulseThreshold     = 50f,
+            DamagePerUnitImpulse = 0.04f,
+            BreakThreshold       = 80f,
+            NormalRetainOnBreak  = 0.55f,
+        };
+        Mass         = 0.5f;
+        GravityScale = 0f;
+        Color        = Color.LightCyan;
+        Sprite       = Sprites.Bullet(4f);
+    }
+
+    protected override void ProjectileUpdate(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
+    {
+        if (Age >= ArmDelay && Body.Velocity.LengthSquared() < CollisionStopSpeed * CollisionStopSpeed)
+        {
+            Health = 0f;
+            return;
+        }
+
+        var p = Body.Position;
+        var region = new BoundingBox(
+            p.X - HitboxHalfSize, p.Y - HitboxHalfSize,
+            p.X + HitboxHalfSize, p.Y + HitboxHalfSize);
+
+        Vector2 vel = Body.Velocity;
+        Vector2 dir = vel.LengthSquared() > 0.01f ? Vector2.Normalize(vel) : Vector2.UnitX;
+        hitboxes?.Publish(new Hitbox(
+            region, _hitId, DamagePerFrame,
+            dir * KnockbackImpulse,
+            Faction, this, Color,
+            targets: HitTargets.EntitiesOnly));
+    }
+}

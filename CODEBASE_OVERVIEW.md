@@ -64,7 +64,7 @@ Rotates body velocity onto the shallowest trajectory clearing an upper/lower cor
 ### `ChunkMap` ([World/ChunkMap.cs](World/ChunkMap.cs))
 Dictionary of `Point → Chunk`. Each chunk = 16×16 tiles; each tile = 16px (`Chunk.TileSize`). API surface:
 - **Cell state** — `GetCellState(gtx, gty)` returns `Empty | Sprouting | Solid`; `GetCellType` returns `Stone | Dirt | Sand`.
-- **Sprouts** — `TryRequestTile(gtx, gty, type)` builds either a Growing or Pending `TileSproutNode` in `Graph`. Growing sprouts have a `Polygon` and `Velocity` lerping from parent to target cell; Pending nodes are invisible until their first parent finalizes.
+- **Sprouts** — `TryRequestTile(gtx, gty, type)` builds either a Growing or Pending `TileSproutNode` in `Graph`. Growing sprouts have a `Polygon` and `Velocity` lerping from parent to target cell; Pending nodes are invisible until their first parent finalizes. 
 - **Damage** — `DamageCell(gtx, gty, amount)` → `TileDamage.ApplyDamage` accumulates per-cell HP; on threshold the cell breaks. `BreakCell` flips to Empty and fires `OnTileBroken(center, type)`.
 - **TickSprouts(dt)** — ages Growing sprouts; finalizes complete ones (cell flips Solid, dropped from graph); promotes Pending children.
 

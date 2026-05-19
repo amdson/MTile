@@ -7,7 +7,7 @@ using Microsoft.Xna.Framework.Input;
 
 namespace MTile;
 
-public class Game1 : Game, IEntitySpawner
+public class Game1 : Game, IEntitySpawner, IChunkProvider
 {
     private GraphicsDeviceManager _graphics;
     private SpriteBatch _spriteBatch;
@@ -18,8 +18,22 @@ public class Game1 : Game, IEntitySpawner
     private PlayerCharacter _player;
     private Vector2 _playerSpawn;
 
+    // Secondary PlayerCharacters: full hittables in the world (the primary can
+    // slash them, they take knockback/hitstun, etc.) but their Controllers are
+    // never fed hardware input — real input controls _player only. Useful for
+    // manual playtesting of combat (set GameConfig.SpawnSecondPlayer) and as the
+    // visual analogue of SimRunner's multi-player path.
+    private readonly List<(PlayerCharacter Player, Controller Ctrl)> _secondaryPlayers = new();
+
     private static readonly Vector2 Gravity = new(0f, 600f);
+    // Exposed so action FSMs can compute ballistic launch velocities against the
+    // same gravity vector the physics world integrates with. Defaults to the
+    // global value; ranged-attack code reads it through this static accessor.
+    public static float WorldGravityY => Gravity.Y;
     private readonly ChunkMap _chunks = new();
+    // IChunkProvider — exposes the chunk map to entities that need to mutate it
+    // (LobbedAreaProjectile detonates by calling EruptionPlanner.Plan on landing).
+    public ChunkMap Chunks => _chunks;
     private readonly HitboxWorld  _hitboxes  = new();   // offensive — populated by attackers during update
     private readonly HurtboxWorld _hurtboxes = new();   // defensive — populated by IHittables before update
     private readonly List<IHittable> _hittables = new();
@@ -36,12 +50,23 @@ public class Game1 : Game, IEntitySpawner
 
     private DrawContext _draw;
     private readonly ParticleSystem _particles = new(capacity: 2048);
+    // Cursor trail — a fading ribbon trailing the world-space mouse position.
+    // Lifetime is short so the trail dies cleanly when the cursor parks.
+    private readonly Trail _cursorTrail = new(capacity: 24, lifetime: 0.22f);
     // Tracked frame-to-frame so the landing-puff fires exactly once on the
     // air→ground transition (rather than every frame the player is grounded).
     private bool _wasGroundedLastFrame;
 
     // Edge-detect 'P' so a held key doesn't flip the planner every frame.
     private bool _wasPDown;
+
+    // Active material for drag-to-build (HandleBuildInput) and BlockEruption.
+    // Cycled via the 1/2/3/4 number keys; initial value from GameConfig.
+    private TileType _activeBlockType = TileType.Dirt;
+    // Most recent player-frame on which HandleBuildInput actually placed a tile.
+    // Pushed to _player.LastTilePlacedFrame each tick so BlockReadyAction can read
+    // it via EnvironmentContext and cancel its charge mid-build (roadmap §3).
+    private int _lastTilePlacedFrame = int.MinValue / 2;
 
     private FileSystemWatcher _movementConfigWatcher;
 
@@ -105,6 +130,20 @@ public class Game1 : Game, IEntitySpawner
         _bodies.Add(_player.Body);
         _hittables.Add(_player);
 
+        // Seed the block picker from config. Falls back to Dirt on any unknown
+        // string so a stale or hand-edited game_config.json doesn't crash startup.
+        if (!Enum.TryParse<TileType>(_config.StartingBlockType, ignoreCase: true, out _activeBlockType))
+            _activeBlockType = TileType.Dirt;
+
+        // Optional second player for manual combat testing — spawned at an offset
+        // from the primary's spawn, with its own (idle) Controller. Real input
+        // continues to drive _player only.
+        if (_config.SpawnSecondPlayer)
+        {
+            var offset = new Vector2(_config.SecondPlayerOffsetX, _config.SecondPlayerOffsetY);
+            AddSecondaryPlayer(_playerSpawn + offset);
+        }
+
         // Hand control to the stage. It populates platforms, tickers, and entities;
         // see Stages.PopulateStart / PopulateArena for the per-stage scripts.
         stage.Populate(this);
@@ -135,6 +174,21 @@ public class Game1 : Game, IEntitySpawner
 
     public void AddTicker(Action<float> tick) => _stageTickers.Add(tick);
 
+    // Spawns an additional PlayerCharacter alongside _player. The returned
+    // Controller is the input channel for this body: tests / scripted scenarios
+    // call its InjectInput each frame, hardware input never touches it. Camera,
+    // HUD, and respawn-on-death stay tied to _player; this is purely a target
+    // body that participates in physics + combat.
+    public (PlayerCharacter Player, Controller Ctrl) AddSecondaryPlayer(Vector2 spawn)
+    {
+        var ctrl = new Controller();
+        var player = new PlayerCharacter(spawn);
+        _bodies.Add(player.Body);
+        _hittables.Add(player);
+        _secondaryPlayers.Add((player, ctrl));
+        return (player, ctrl);
+    }
+
     protected override void LoadContent()
     {
         _spriteBatch = new SpriteBatch(GraphicsDevice);
@@ -161,6 +215,13 @@ public class Game1 : Game, IEntitySpawner
                 : EruptionPlannerMode.PriorityField;
         _wasPDown = pDown;
 
+        // Number-key block picker (1=Stone, 2=Dirt, 3=Sand, 4=Foam). No edge detect
+        // needed — repeated frames just re-assign the same value.
+        if (keyboardState.IsKeyDown(Keys.D1)) _activeBlockType = TileType.Stone;
+        if (keyboardState.IsKeyDown(Keys.D2)) _activeBlockType = TileType.Dirt;
+        if (keyboardState.IsKeyDown(Keys.D3)) _activeBlockType = TileType.Sand;
+        if (keyboardState.IsKeyDown(Keys.D4)) _activeBlockType = TileType.Foam;
+
         var mouseState = Mouse.GetState();
         var viewport = GraphicsDevice.Viewport;
         var screenCenter = new Vector2(viewport.Width / 2f, viewport.Height / 2f);
@@ -171,12 +232,21 @@ public class Game1 : Game, IEntitySpawner
         // Mirror config toggles into the action-side static so BlockEruptionAction.Draw
         // can consult it without taking GameConfig as a dependency.
         EruptionPlanner.DebugDrawMassBall = _config.DebugDrawMassBall;
+        // Block-picker → planner statics so BlockEruption / MassBall use the
+        // active material when they fire. Updated every frame so 1/2/3/4 has
+        // immediate effect on the next eruption release.
+        EruptionPlanner.ActiveType   = _activeBlockType;
+        MassBallPlanner.ActiveType   = _activeBlockType;
 
-        // Cosmetic cursor trail — one tiny world-space dot per frame at the
-        // cursor position. The dots decay in place, so the trail is the residue
-        // of the cursor's recent motion. Particles are drawn within the world
-        // transform below, so the trail tracks the cursor naturally.
-        if (_config.MouseTrail) Effects.MouseTrailTick(_particles, mouseWorldPos);
+        // Cosmetic cursor trail — a fading ribbon in world-space drawn from
+        // the residue of the cursor's recent motion. Drawn inside the world
+        // transform in Draw so it tracks the cursor naturally.
+        if (_config.MouseTrail)
+        {
+            _cursorTrail.Tick((float)gameTime.ElapsedGameTime.TotalSeconds);
+            _cursorTrail.Push(mouseWorldPos);
+        }
+        else _cursorTrail.Clear();
 
         HandleBuildInput();
 
@@ -202,7 +272,12 @@ public class Game1 : Game, IEntitySpawner
         _hitboxes.Clear();
         _hurtboxes.Clear();
         foreach (var h in _hittables) h.PublishHurtboxes(_hurtboxes);
-        _player.Update(_controller, _chunks, _hitboxes, _hurtboxes, dt);
+        _player.LastTilePlacedFrame = _lastTilePlacedFrame;
+        _player.Update(_controller, _chunks, _hitboxes, _hurtboxes, dt, this);
+        // Secondary players tick with their own (test-injectable) controllers.
+        // Hardware input never touched them in this method.
+        foreach (var (p, c) in _secondaryPlayers)
+            p.Update(c, _chunks, _hitboxes, _hurtboxes, dt);
         // Entity AI tick. Slotted between hurtbox publication and CombatSystem
         // so any hitboxes published here (Stalker lunge) resolve this frame.
         // Pass _player so AI can target it; null-target enemies would just skip.
@@ -245,6 +320,12 @@ public class Game1 : Game, IEntitySpawner
         {
             _player.Sprite.Position = _player.Body.Position;
             _player.Sprite.Update(dt);
+        }
+        foreach (var (p, _) in _secondaryPlayers)
+        {
+            if (p.Sprite == null) continue;
+            p.Sprite.Position = p.Body.Position;
+            p.Sprite.Update(dt);
         }
         foreach (var e in _entities)
         {
@@ -305,10 +386,15 @@ public class Game1 : Game, IEntitySpawner
         }
 
         if (_player.Sprite != null) _player.Sprite.Draw(_draw);
+        foreach (var (p, _) in _secondaryPlayers)
+            if (p.Sprite != null) p.Sprite.Draw(_draw);
         if (_config.DebugDrawBodies)
         {
             DrawPolygon(_player.Body.Polygon, _player.Body.Position,
                 (_player.IsGrounded ? Color.LimeGreen : Color.Orange) * 0.5f);
+            foreach (var (p, _) in _secondaryPlayers)
+                DrawPolygon(p.Body.Polygon, p.Body.Position,
+                    (p.IsGrounded ? Color.LimeGreen : Color.Orange) * 0.5f);
             foreach (var e in _entities)
                 DrawPolygon(e.Body.Polygon, e.Body.Position, Color.White * 0.3f);
         }
@@ -316,6 +402,11 @@ public class Game1 : Game, IEntitySpawner
         // Particles drawn over gameplay but under debug overlays — they're feedback,
         // not diagnostic info.
         _particles.Draw(_draw);
+        // Cursor ribbon over the world but under action overlays so the slash/stab
+        // tip dots still read on top when the cursor passes near them.
+        _cursorTrail.Draw(_spriteBatch, _pixel,
+            new Color(255, 240, 180, 220), new Color(255, 100, 40, 0),
+            3f, 1f);
 
         // Action overlay (slash arc, etc.) in world space, on top of the body.
         _player.CurrentAction.Draw(_spriteBatch, _pixel, _player.Body);
@@ -367,6 +458,8 @@ public class Game1 : Game, IEntitySpawner
             new Vector2(8, 40),
             EruptionPlanner.CurrentMode == EruptionPlannerMode.MassBall ? Color.LightCoral : Color.LightSkyBlue);
 
+        DrawBlockPickerHud();
+
         // Diagnostic overlay for active GuidedPath: shows planner's actual
         // start/end positions and the body's position so we can compare.
         if (_config.DebugDrawGuidedPath
@@ -406,10 +499,12 @@ public class Game1 : Game, IEntitySpawner
     {
         var input = _controller.Current;
         if (!input.RightClick) return;
-        // RMB is committed to the block-eruption gesture while either of its
-        // action states is current — suppress the drag-to-build path so the
-        // eruption can claim the input cleanly.
-        if (_player.CurrentAction is BlockReadyAction or BlockEruptionAction) return;
+        // HandleBuildInput coexists with BlockReadyAction by design: every
+        // frame a tile actually gets placed here, BlockReadyAction's Update
+        // sees the bumped LastTilePlacedFrame and decays its charge by Dt.
+        // BlockEruptionAction is still suppressed though — once the eruption
+        // is armed, RMB is committed to the gesture.
+        if (_player.CurrentAction is BlockEruptionAction) return;
 
         var prev = _controller.GetPrevious(1);
         var segStart = prev.RightClick ? prev.MouseWorldPosition : input.MouseWorldPosition;
@@ -427,7 +522,8 @@ public class Game1 : Game, IEntitySpawner
             float maxReach = HasSproutNeighbour(gtx, gty) ? BuildReach * ChainBuildReachMul : BuildReach;
             if (Vector2.DistanceSquared(_player.Body.Position, cellCenter) > maxReach * maxReach)
                 continue;
-            _chunks.TryRequestTile(gtx, gty);
+            var node = _chunks.TryRequestTile(gtx, gty, _activeBlockType);
+            if (node != null) _lastTilePlacedFrame = _player.Frame;
         }
     }
 
@@ -483,6 +579,7 @@ public class Game1 : Game, IEntitySpawner
         TileType.Sand  => new Color(220, 200, 150),  // warm light sandy
         TileType.Dirt  => new Color(110,  75,  45),  // earthy mid-brown
         TileType.Stone => Color.Gray,                 // existing
+        TileType.Foam  => new Color(235, 240, 250),  // near-white, faint blue tint
         _              => Color.Gray,
     };
 
@@ -511,6 +608,61 @@ public class Game1 : Game, IEntitySpawner
     // Screen-space HP indicator in the upper-left, beneath the state labels.
     // 120 px wide, color shifts green→red as HP drops; flashes when invuln so
     // the player can read "I just got hit, I'm safe for a moment."
+    // Top-right block-picker indicator: four 24x24 swatches in a row, one per
+    // pickable TileType (Stone/Dirt/Sand/Foam), with the currently-selected one
+    // brightened and outlined. Number labels (1-4) sit underneath each swatch
+    // so the keybinding is obvious. Foam swatch has a tiny decay-second hint
+    // beneath its label since it's the only type with a built-in expiry.
+    private void DrawBlockPickerHud()
+    {
+        // Picker order matches the keybinding: 1→Stone, 2→Dirt, 3→Sand, 4→Foam.
+        // Locked-in here so the HUD layout and the keypress handler can't drift.
+        var types = new[] { TileType.Stone, TileType.Dirt, TileType.Sand, TileType.Foam };
+
+        const int SwatchSize    = 24;
+        const int SwatchGap     = 6;
+        const int RightPadding  = 12;
+        const int TopPadding    = 8;
+        const int LabelOffset   = SwatchSize + 4;
+
+        int viewportW = GraphicsDevice.Viewport.Width;
+        int totalW    = types.Length * SwatchSize + (types.Length - 1) * SwatchGap;
+        int x0        = viewportW - RightPadding - totalW;
+        int y0        = TopPadding;
+
+        for (int i = 0; i < types.Length; i++)
+        {
+            int x = x0 + i * (SwatchSize + SwatchGap);
+            bool selected = types[i] == _activeBlockType;
+
+            // Dim background panel; selected swatch shows the actual tile color
+            // at full brightness, others render at ~40% so the active pick reads
+            // at a glance even when the unpicked colors are nearby in hue.
+            var col = GetTileBaseColor(types[i]);
+            var fill = selected ? col : new Color((int)(col.R * 0.4f), (int)(col.G * 0.4f), (int)(col.B * 0.4f));
+            _spriteBatch.Draw(_pixel, new Rectangle(x, y0, SwatchSize, SwatchSize), fill);
+
+            // Outline on the selected swatch; thin gray border on unselected so
+            // the row reads as four distinct cells even on dark background.
+            var border = selected ? Color.White : new Color(80, 80, 80);
+            _spriteBatch.Draw(_pixel, new Rectangle(x,                  y0,                  SwatchSize, 1), border);
+            _spriteBatch.Draw(_pixel, new Rectangle(x,                  y0 + SwatchSize - 1, SwatchSize, 1), border);
+            _spriteBatch.Draw(_pixel, new Rectangle(x,                  y0,                  1, SwatchSize), border);
+            _spriteBatch.Draw(_pixel, new Rectangle(x + SwatchSize - 1, y0,                  1, SwatchSize), border);
+
+            // Number key label (1..4) under the swatch.
+            string keyLabel = (i + 1).ToString();
+            _spriteBatch.DrawString(_debugFont, keyLabel,
+                new Vector2(x + SwatchSize / 2f - 4, y0 + LabelOffset),
+                selected ? Color.White : new Color(160, 160, 160));
+        }
+
+        // Type name spelled out below the row so the selection is unambiguous
+        // even if a swatch color collides with terrain tints.
+        _spriteBatch.DrawString(_debugFont, _activeBlockType.ToString(),
+            new Vector2(x0, y0 + LabelOffset + 16), Color.White);
+    }
+
     private void DrawPlayerHealthBar()
     {
         const int X = 8, Y = 56, BarW = 120, BarH = 8;

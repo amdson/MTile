@@ -58,6 +58,11 @@ public static class EruptionPlanner
     // to Stone in the existing code path; for the eruption move we override to Dirt.
     public static readonly TileType DefaultType = TileType.Dirt;
 
+    // Runtime-mutable override used by Game1's block picker (1/2/3/4 number keys).
+    // Each eruption release reads this once when computing the type to pass to
+    // TryRequestTile. Game1 syncs it from _activeBlockType every Update.
+    public static TileType ActiveType = TileType.Dirt;
+
     private static void PlanPriorityField(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget)
     {
         if (budget <= 0 || samples == null || samples.Count == 0) return;
@@ -137,7 +142,7 @@ public static class EruptionPlanner
 
         foreach (var (gtx, gty) in picks)
         {
-            chunks.TryRequestTile(gtx, gty, DefaultType);
+            chunks.TryRequestTile(gtx, gty, ActiveType);
         }
     }
 }

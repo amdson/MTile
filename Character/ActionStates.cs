@@ -154,8 +154,16 @@ public abstract class SlashLikeAction : ActionState
     // Per-frame damage tuned so 2 frames of active window at 30 fps total ≈ TileMaxHP.
     // (Slashes now fire fast enough that the active window is ~2 frames, not 4.)
     private const float SlashDamagePerFrame   = TileDamage.TileMaxHP / 2f;
-    private const float BaseArcRadius         = PlayerCharacter.Radius * 1.5f;
-    private const int   TrailLen              = 6;
+    // Hitbox scale bump per roadmap §1.7 (1.75× — was 1.0×). Combat felt
+    // unrewarding with apex-only hitboxes that just barely covered the dot's
+    // visible reach; widening makes near-misses rarer without changing the
+    // arc shape or apex position. Per-variant ArcRadiusScale still stacks on
+    // top of this, so AirSlash1 (0.9×) and GroundSlash3 (1.3×) still differ.
+    private const float BaseArcRadius         = PlayerCharacter.Radius * 1.5f * 1.75f;
+    // Cosmetic trail behind the apex dot. Lifetime ≈ a few frames so the ribbon
+    // reads as motion blur, not afterimage.
+    private const int   TrailCapacity         = 8;
+    private const float TrailLifetime         = 0.12f;
 
     // Shared monotonic counter so all slash variants generate unique HitIds; CombatSystem
     // dedupes per (HitId, Target), so multi-frame hitboxes only land once per entity.
@@ -176,6 +184,9 @@ public abstract class SlashLikeAction : ActionState
     protected virtual  void    OnEnterClearFlags(ConditionState cond) { }
     // Override to set the next-stage flag + recovery duration.
     protected abstract void    OnExitSetFlags(ConditionState cond, int currentFrame);
+    // AirTurnSlash overrides this to true so a click behind the player gives a
+    // genuine backward slash instead of a perpendicular one (roadmap §1.6).
+    protected virtual  bool    AllowBackward       => false;
     // -----------------------------------------------------------------------
 
     protected float ArcRadius => BaseArcRadius * ArcRadiusScale;
@@ -183,9 +194,7 @@ public abstract class SlashLikeAction : ActionState
     private float   _timeInState;
     private Vector2 _slashDir;
     private int     _hitId;
-    private readonly Vector2[] _trail = new Vector2[TrailLen];
-    private int     _trailHead;
-    private int     _trailFilled;
+    private readonly Trail _trail = new(TrailCapacity, TrailLifetime);
 
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
@@ -193,6 +202,9 @@ public abstract class SlashLikeAction : ActionState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        // Stun gate: a stunned player can't initiate slashes. Guard is the
+        // intended escape (it can fire during stun); see roadmap §1.5.
+        if (ctx.Combat?.StunActive == true) return false;
         bool grounded = ctx.TryGetGround(out _);
         if (RequireGround && !grounded) return false;
         if (RequireAir    &&  grounded) return false;
@@ -208,8 +220,7 @@ public abstract class SlashLikeAction : ActionState
         _timeInState = 0f;
         _slashDir    = ComputeSlashDir(ctx, ab);
         _hitId       = System.Threading.Interlocked.Increment(ref _nextHitId);
-        _trailHead   = 0;
-        _trailFilled = 0;
+        _trail.Clear();
         ctx.Intents.Consume(IntentType.Click, ctx.CurrentFrame);
         OnEnterClearFlags(ab.Condition);
     }
@@ -217,14 +228,14 @@ public abstract class SlashLikeAction : ActionState
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
         => OnExitSetFlags(ab.Condition, ctx.CurrentFrame);
 
-    // Mouse-to-body direction, hemisphere-clamped so a click behind the player
-    // produces a perpendicular slash rather than a backward one. Degenerate inputs
-    // fall back to (Facing, 0).
-    private static Vector2 ComputeSlashDir(EnvironmentContext ctx, PlayerAbilityState ab)
+    // Mouse-to-body direction, hemisphere-clamped (unless AllowBackward) so a
+    // click behind the player produces a perpendicular slash rather than a
+    // backward one. Degenerate inputs fall back to (Facing, 0).
+    private Vector2 ComputeSlashDir(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
         Vector2 raw = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-        if (raw.X * facing < 0f) raw.X = 0f;
+        if (!AllowBackward && raw.X * facing < 0f) raw.X = 0f;
         if (raw.LengthSquared() < 1e-4f) return new Vector2(facing, 0f);
         return Vector2.Normalize(raw);
     }
@@ -233,9 +244,8 @@ public abstract class SlashLikeAction : ActionState
     {
         _timeInState += ctx.Dt;
         var dot = ComputeDotPosition(ctx.Body.Position);
-        _trail[_trailHead] = dot;
-        _trailHead = (_trailHead + 1) % TrailLen;
-        if (_trailFilled < TrailLen) _trailFilled++;
+        _trail.Tick(ctx.Dt);
+        _trail.Push(dot);
 
         float windowStart = Duration * HurtboxStartFraction;
         float windowEnd   = windowStart + Duration * HurtboxActiveFraction;
@@ -267,16 +277,9 @@ public abstract class SlashLikeAction : ActionState
 
     public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body)
     {
-        for (int i = 0; i < _trailFilled; i++)
-        {
-            int idx = (_trailHead - 1 - i + TrailLen) % TrailLen;
-            float alpha = 1f - (float)i / TrailLen;
-            int size = i == 0 ? 4 : 3;
-            var p = _trail[idx];
-            sb.Draw(pixel,
-                new Rectangle((int)p.X - size / 2, (int)p.Y - size / 2, size, size),
-                SlashColor * alpha);
-        }
+        // Ribbon trails the apex dot — thick + saturated near the newest sample,
+        // thinning and fading toward the tail.
+        _trail.Draw(sb, pixel, SlashColor, SlashColor * 0f, 4f, 1f);
     }
 }
 
@@ -383,6 +386,7 @@ public class CrouchSlash : SlashLikeAction
         // base class doesn't expose CheckPreConditions in a way we can extend
         // cleanly, so we duplicate its check and add the crouch requirement.
         if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (ctx.Combat?.StunActive == true) return false;
         if (!ctx.TryGetGround(out _)) return false;
         if (ctx.PreviousState(0) is not CrouchedState) return false;
         return true;
@@ -441,6 +445,53 @@ public class AirSlash2 : SlashLikeAction
     }
 }
 
+// Air turn-around slash. Roadmap §1.6: clicking on the opposite side of facing
+// in air fires a fast, narrow, long-reach slash AND flips Facing in air (the
+// only mechanism that does so, since PlayerCharacter.Update no longer writes
+// Facing in air). Higher passive priority than AirSlash1 so a backward-click
+// in air picks this instead of being clamped to perpendicular AirSlash1.
+public class AirTurnSlash : SlashLikeAction
+{
+    protected override float Duration            => 0.11f;
+    protected override float ArcRadiusScale      => 1.40f;   // long reach
+    protected override float SweepAngleDeg       => 60f;     // narrow
+    protected override float SweepDirection      => +1f;
+    protected override float KnockbackMagnitude  => 240f;
+    protected override Color SlashColor          => Color.Violet;
+    protected override bool  RequireGround       => false;
+    protected override bool  RequireAir          => true;
+    protected override bool  AllowBackward       => true;
+
+    // Beat AirSlash1 (30/30) when both could fire; AirSlash2 combo (50) still wins.
+    public override int PassivePriority => 35;
+
+    // Mouse must be on the side opposite Facing for the turn-around to make
+    // sense. Without this, this state would just steal every air-click.
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!base.CheckPreConditions(ctx, ab)) return false;
+        int facing = ab.Facing == 0 ? 1 : ab.Facing;
+        float dx = ctx.Input.MouseWorldPosition.X - ctx.Body.Position.X;
+        return dx * facing < 0f;
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Flip facing FIRST so the base class's ComputeSlashDir reads the new
+        // facing when hemisphere-clamping (well, it doesn't clamp since
+        // AllowBackward=true, but the fallback (Facing, 0) at degenerate input
+        // still points the right way).
+        ab.Facing = -(ab.Facing == 0 ? 1 : ab.Facing);
+        base.Enter(ctx, ab);
+    }
+
+    protected override void OnExitSetFlags(ConditionState c, int f)
+    {
+        // No combo follow-up — turn-around is one-and-done. Short recovery.
+        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 4, f);
+    }
+}
+
 // ---------- Stab — long-hold + swipe gesture -----------------------------------
 
 // Linear thrust along the captured swipe direction. Longer duration, longer recovery,
@@ -448,8 +499,12 @@ public class AirSlash2 : SlashLikeAction
 public class StabAction : ActionState
 {
     private const float Duration              = 0.60f;
-    private const float HurtboxStartTime      = 0.25f;
-    private const float HurtboxActiveDuration = 0.15f;
+    // Active window timed to the strike phase of the visual curve (Draw): the box
+    // opens just as the tip starts whipping forward out of the wind-up, and stays
+    // alive through the snap into the hold. In normalized state-time that's
+    // ≈ 0.20–0.50 of Duration, matching WindupEnd → mid-hold.
+    private const float HurtboxStartTime      = 0.12f;
+    private const float HurtboxActiveDuration = 0.18f;
 
     // Lunge window: a short forward-glide phase AFTER the hitbox active window
     // (0.25–0.40) and BEFORE the settle (0.55–0.60). During this window the
@@ -459,8 +514,11 @@ public class StabAction : ActionState
     private const float LungeEnd     = 0.4f;
     private const float LungeSpeed   = 90f;     // px/s horizontal target during lunge
 
-    private const float Reach                 = PlayerCharacter.Radius * 3.3f;
-    private const float PrimaryHalfWidth      = PlayerCharacter.Radius * 0.55f;
+    // Roadmap §1.7 hitbox bump (1.75×). Reach + half-width both grow so the
+    // stab feels longer AND wider, not just longer-thin. BlockReach/HalfWidth
+    // below get the same scale.
+    private const float Reach                 = PlayerCharacter.Radius * 3.3f  * 1.75f;
+    private const float PrimaryHalfWidth      = PlayerCharacter.Radius * 0.55f * 1.75f;
     // Soft mid-attack steering. The captured _stabDir rotates toward the current
     // mouse direction at up to MaxSteerSpeed rad/s, with the total deviation from
     // the initial swipe angle capped at MaxTotalSteer. Lets the player adjust the
@@ -471,8 +529,8 @@ public class StabAction : ActionState
     // Tile-shockwave reach — significantly longer + wider than the entity-hitbox.
     // Lets stab dig through several tiles at once without hitting balloons/enemies
     // beyond its visible thrust extent.
-    private const float BlockReach            = PlayerCharacter.Radius * 6.0f;
-    private const float BlockHalfWidth        = PlayerCharacter.Radius * 0.9f;
+    private const float BlockReach            = PlayerCharacter.Radius * 6.0f * 1.75f;
+    private const float BlockHalfWidth        = PlayerCharacter.Radius * 0.9f * 1.75f;
     private const float KnockbackMagnitude    = 380f;
     private const float DamagePerFrame        = TileDamage.TileMaxHP / 4f;
 
@@ -510,14 +568,30 @@ public class StabAction : ActionState
     // when boost is ~1× so an unboosted stab does zero extra allocation.
     private Polygon _blockPoly;
     private float   _blockReach;
+    // Tip ribbon — short lifetime so the trail snaps with the strike rather than
+    // lingering past the retract.
+    private readonly Trail _tipTrail = new(capacity: 10, lifetime: 0.14f);
 
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
 
     private Color CurrentColor => _isGrounded ? Color.Goldenrod : Color.MediumPurple;
 
+    // AirSpinStab overrides true so the swipe (and mid-attack mouse-steer clamp)
+    // can point backward relative to Facing. Default Stab still clamps to front.
+    protected virtual bool AllowBackward => false;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-        => ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out _);
+    {
+        if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out _)) return false;
+        if (ctx.Combat?.StunActive == true) return false;
+        // Shift+LMB-hold-swipe is reserved for BeamAction. A Stab intent
+        // emitted from a Shift-held press would otherwise route to a normal
+        // stab on release; gate it off so the beam path doesn't double-fire.
+        // AirSpinStab overrides this by checking its own preconditions.
+        if (ctx.Input.Shift) return false;
+        return true;
+    }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab)
         => _timeInState < Duration;
@@ -527,13 +601,15 @@ public class StabAction : ActionState
         _timeInState = 0f;
         _isGrounded  = ctx.TryGetGround(out _);
         _hitId       = System.Threading.Interlocked.Increment(ref _nextHitId);
+        _tipTrail.Clear();
 
-        // Capture swipe direction from the intent; hemisphere-clamp like slash.
+        // Capture swipe direction from the intent; hemisphere-clamp like slash
+        // (unless AllowBackward — AirSpinStab keeps backward swipes intact).
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
         if (ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent))
         {
             var raw = intent.Direction;
-            if (raw.X * facing < 0f) raw.X = 0f;
+            if (!AllowBackward && raw.X * facing < 0f) raw.X = 0f;
             if (raw.LengthSquared() < 1e-4f) raw = new Vector2(facing, 0f);
             _stabDir = Vector2.Normalize(raw);
             ctx.Intents.Consume(IntentType.Stab, ctx.CurrentFrame);
@@ -593,29 +669,27 @@ public class StabAction : ActionState
         m.AirDrag        *= 1.3f;
     }
 
-    // Forward glide during the lunge window. "Ensure-at-least" semantics: raises
-    // velocity toward the target each frame but never lowers it, so a player
-    // already moving faster than the lunge speed doesn't get nerfed, and the
-    // assist re-applies every frame inside the window so per-frame friction can't
-    // brake it down between calls.
+    // Forward glide along the stab direction during the lunge window. Generalized
+    // from "Velocity.X" to a full-vector projection so a diagonal or vertical
+    // stab carries the player in that direction, not just horizontally (roadmap
+    // §1.7). "Ensure-at-least" semantic preserved: project current velocity onto
+    // _stabDir, raise to LungeSpeed if below. A player already moving faster
+    // along the stab direction isn't nerfed.
     public override void ApplyActionForces(EnvironmentContext ctx)
     {
         if (!_isGrounded) return;
         if (_timeInState < LungeStart || _timeInState > LungeEnd) return;
 
-        float dirX = MathF.Sign(_stabDir.X);
-        if (dirX == 0f) return;     // vertical stab — no horizontal lunge
-
-        float target = dirX * LungeSpeed;
         var v = ctx.Body.Velocity;
-        if (dirX > 0f && v.X < target) v.X = target;
-        else if (dirX < 0f && v.X > target) v.X = target;
-        ctx.Body.Velocity = v;
+        float velAlongStab = Vector2.Dot(v, _stabDir);
+        if (velAlongStab < LungeSpeed)
+            ctx.Body.Velocity = v + _stabDir * (LungeSpeed - velAlongStab);
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         _timeInState += ctx.Dt;
+        _tipTrail.Tick(ctx.Dt);
 
         // Soft mouse-tracking: rotate _stabDir toward the cursor direction, with
         // both a per-frame angular-velocity cap and a total-deviation cap from
@@ -623,7 +697,7 @@ public class StabAction : ActionState
         // so a cursor behind the player doesn't yank the stab backwards.
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
         Vector2 toMouse = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-        if (toMouse.X * facing < 0f) toMouse.X = 0f;
+        if (!AllowBackward && toMouse.X * facing < 0f) toMouse.X = 0f;
         if (toMouse.LengthSquared() > 1e-4f)
         {
             float targetAngle = MathF.Atan2(toMouse.Y, toMouse.X);
@@ -639,6 +713,11 @@ public class StabAction : ActionState
             if (dev < -MaxTotalSteer) newAngle = _initialStabAngle - MaxTotalSteer;
             _stabDir = new Vector2(MathF.Cos(newAngle), MathF.Sin(newAngle));
         }
+
+        // Sample the visible tip into the trail so Draw can render a fading ribbon
+        // chasing the strike. Uses the same extension curve as Draw — factored so
+        // there's one source of truth.
+        _tipTrail.Push(ctx.Body.Position + _stabDir * TipExtension(_timeInState / Duration));
 
         if (_timeInState >= HurtboxStartTime &&
             _timeInState <= HurtboxStartTime + HurtboxActiveDuration &&
@@ -689,17 +768,205 @@ public class StabAction : ActionState
         return a;
     }
 
+    // Phase boundaries for the visible extension curve (in normalized state time
+    // t = _timeInState / Duration). The strike phase is what the hurtbox active
+    // window is timed against — it opens at ~WindupEnd and closes inside Hold.
+    private const float WindupEnd      = 0.18f;  // small backward draw of the arm
+    private const float StrikeEnd      = 0.42f;  // tip reaches full reach
+    private const float HoldEnd        = 0.67f;  // holds at full reach before retracting
+    private const float PullbackFrac   = 0.10f;  // how far back the tip pulls, as a fraction of Reach
+
+    // Tip extension along _stabDir at normalized state-time `t`, in pixels.
+    // Negative = pulled back behind the body. Built as four piecewise cubic
+    // Béziers so each phase keeps a tangent we control: a soft windup, a fast
+    // snap, a hold at full reach, and a smooth retract. The control-point
+    // biases shape the easing:
+    //   • Windup:   P1 near P0 → slow start (the wind-up "settles").
+    //   • Strike:   P1 near P0, P2 near P3 → ease-in-out with a steep middle,
+    //               reading as anticipation → snap.
+    //   • Retract:  P1 near P0, P2 ~ P3 → ease-out, the arm relaxes.
+    private static float TipExtension(float t)
+    {
+        t = MathHelper.Clamp(t, 0f, 1f);
+        float pb = -PullbackFrac * Reach;
+        if (t < WindupEnd)
+        {
+            float u = t / WindupEnd;
+            return Bezier.Cubic(0f, 0f, pb, pb, u);
+        }
+        if (t < StrikeEnd)
+        {
+            float u = (t - WindupEnd) / (StrikeEnd - WindupEnd);
+            return Bezier.Cubic(pb, pb, Reach * 1.08f, Reach, u);
+        }
+        if (t < HoldEnd) return Reach;
+        {
+            float u = (t - HoldEnd) / (1f - HoldEnd);
+            return Bezier.Cubic(Reach, Reach, 0f, 0f, u);
+        }
+    }
+
     public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body)
     {
-        // Thrust extends along _stabDir, peaks at t=0.5, retracts. Draw a dot at the tip
-        // plus a short trailing dot at half-extent so the motion reads as linear.
-        float t = MathHelper.Clamp(_timeInState / Duration, 0f, 1f);
-        float ext = Reach * MathF.Sin(MathF.PI * t);
+        // Trail first so the tip dot reads on top of the ribbon.
+        var color = CurrentColor;
+        _tipTrail.Draw(sb, pixel, color, color * 0f, 4f, 1f);
+
+        float ext = TipExtension(_timeInState / Duration);
         var tip   = body.Position + _stabDir * ext;
         var mid   = body.Position + _stabDir * (ext * 0.5f);
-        var color = CurrentColor;
         sb.Draw(pixel, new Rectangle((int)tip.X - 2, (int)tip.Y - 2, 4, 4), color);
         sb.Draw(pixel, new Rectangle((int)mid.X - 1, (int)mid.Y - 1, 3, 3), color * 0.5f);
+    }
+}
+
+// Air spin-stab. Roadmap §1.6: a Stab swipe pointed opposite of facing while in
+// air. Inherits stab's hitboxes, dive-boost, and steer logic — the only delta is
+// AllowBackward + an air+backward-swipe precondition + a Facing flip on Enter.
+public class AirSpinStab : StabAction
+{
+    protected override bool AllowBackward => true;
+
+    // Beat the default StabAction (30/30) on ties when both could fire.
+    public override int PassivePriority => 35;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!base.CheckPreConditions(ctx, ab)) return false;
+        // Air-only.
+        if (ctx.TryGetGround(out _)) return false;
+        // Backward swipe — intent direction's X must oppose Facing.
+        if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent)) return false;
+        int facing = ab.Facing == 0 ? 1 : ab.Facing;
+        return intent.Direction.X * facing < 0f;
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Flip facing so the spin-stab leaves the player oriented the new way.
+        // Done BEFORE base.Enter so any facing-derived fallback in capture
+        // matches the new direction.
+        ab.Facing = -(ab.Facing == 0 ? 1 : ab.Facing);
+        base.Enter(ctx, ab);
+    }
+}
+
+// ---------- Guard — hold Shift to parry incoming hits ---------------------------
+
+// Defensive posture. Held while Shift is down (with no L/R held — moving cancels
+// the guard). Sets Combat.GuardActive so PlayerCharacter.OnHit's parry path can
+// run; applies a slowdown to walk/air speeds; draws a small shield indicator.
+//
+// A successful weak in-cone parry (Combat.TryParry) sets Combat.GuardCharged,
+// arming GuardRetaliateAction (LMB-press while charged → fast forward slash).
+// Air-allowed per user note in the roadmap §9: yes, allow guard in air. The
+// slowdown via modifiers is identical air-vs-ground; no separate movement state.
+public class GuardAction : ActionState
+{
+    public override int ActivePriority  => 35;   // beats slash candidates (30) but loses to Recovery (40)
+    public override int PassivePriority => 40;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.Shift)        return false;
+        if (ctx.Input.Left || ctx.Input.Right) return false;  // no activation while pushing L/R
+        if (ctx.Combat?.StunActive == true)    return false;
+        if (ab.Condition.RecoveryActive)       return false;
+        return true;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.Shift) return false;
+        if (ctx.Input.Left || ctx.Input.Right) return false;
+        if (ctx.Combat?.StunActive == true) return false;
+        return true;
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (ctx.Combat != null) ctx.Combat.GuardActive = true;
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (ctx.Combat != null) ctx.Combat.GuardActive = false;
+    }
+
+    // Slow walk, slower air. Gravity normal — guard doesn't levitate.
+    public override void ApplyMovementModifiers(ref MovementModifiers m)
+    {
+        m.MaxWalkSpeed *= 0.5f;
+        m.WalkAccel    *= 0.5f;
+        m.MaxAirSpeed  *= 0.8f;
+        m.AirAccel     *= 0.8f;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab) { }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body)
+    {
+        // Shield indicator: a short bar in front of the body, colored by charge
+        // state. Tinted gold when GuardCharged is armed so the player has a
+        // visible cue that GuardRetaliate is available.
+        // We don't have ab here, so read directly from the IHittable owner if
+        // present — but Draw signature is just (sb, pixel, body). Use a static
+        // accessor pattern instead: read from a per-frame static set by Update.
+        // Simpler — skip charged-state tinting at the cost of a worse visual.
+        // (Charged state shows up via GuardRetaliateAction firing on click.)
+        const int W = 4;
+        const int H = 12;
+        var pos = body.Position;
+        // No facing here — center the indicator above the head.
+        var rect = new Rectangle((int)pos.X - W / 2, (int)pos.Y - (int)PlayerCharacter.Radius - H - 2, W, H);
+        sb.Draw(pixel, rect, Color.LightSteelBlue * 0.8f);
+    }
+}
+
+// ---------- GuardRetaliate — fast counter from a charged parry ------------------
+
+// Fires when LMB is pressed during the GuardCharged window. A forward slash with
+// short duration, narrow sweep, big knockback. Consumes the charge on Enter so
+// it doesn't refire while the click is held. Higher passive priority than the
+// regular slashes so the click goes here instead of a normal GroundSlash1.
+public class GuardRetaliateAction : SlashLikeAction
+{
+    protected override float Duration            => 0.10f;
+    protected override float ArcRadiusScale      => 1.20f;
+    protected override float SweepAngleDeg       => 70f;
+    protected override float SweepDirection      => +1f;
+    protected override float KnockbackMagnitude  => 420f;     // top-end — counters reward heavily
+    protected override Color SlashColor          => Color.Cyan;
+    protected override bool  RequireGround       => false;
+    protected override bool  RequireAir          => false;
+
+    public override int PassivePriority => 55;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Must be charged AND have a click intent. Don't gate on GuardActive
+        // itself — the charge persists for a window even after the player
+        // releases Shift (and lets go of Guard), so they can parry → release
+        // → retaliate in a quick sequence.
+        if (ctx.Combat?.GuardCharged != true) return false;
+        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (ctx.Combat?.StunActive == true) return false;
+        return true;
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Consume the charge — one retaliate per parry. Set GuardCharged = false
+        // BEFORE base.Enter so a held-click doesn't immediately re-enter from
+        // CheckPreConditions (which would still see the click intent until base
+        // consumes it).
+        if (ctx.Combat != null) ctx.Combat.GuardCharged = false;
+        base.Enter(ctx, ab);
+    }
+
+    protected override void OnExitSetFlags(ConditionState c, int f)
+    {
+        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 3, f);
     }
 }
 
@@ -835,9 +1102,9 @@ public class PulseAction : ActionState
 //   BlockEruptionAction   — RMB held with cursor OUTSIDE solid AND BlockEruption-
 //                            Armed flag set. Samples a smoothed path of cursor
 //                            positions/velocities. On RMB release, runs the
-//                            EruptionPlanner to spawn N dirt sprouts.
+//                            EruptionPlanner to spawn N tile sprouts.
 //
-// Priority arrangement (per the user's spec):
+// Priority arrangement:
 //   BlockReady     Active 8,  Passive 10  — under ReadyAction.Active (10), so
 //                                            ReadyAction (Passive 15) can preempt
 //                                            to cancel via attack input.
@@ -895,61 +1162,79 @@ public class BlockReadyAction : ActionState
 
     private float   _chargeTime;
     private Vector2 _originCell;
+    // Tracks the cursor's in-solid state on the previous Update tick. The
+    // in→out transition is the ignition event that arms BlockEruption.
+    private bool    _inSolidLastFrame;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        // RMB press-edge + cursor currently in solid.
+        // RMB press-edge anywhere — the charge starts wherever the press
+        // happens. Arming for BlockEruption is decided later by Update when
+        // the cursor sweeps out of a solid cell.
         if (!ctx.Input.RightClick) return false;
         var prev = ctx.Controller.GetPrevious(1);
-        if (prev.RightClick) return false;
-        return BlockEruptionHelpers.IsCursorInSolid(ctx);
+        return !prev.RightClick;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-    {
-        // Alive only while RMB held AND cursor still in solid. When the cursor
-        // exits, this returns false → BlockEruptionAction's precondition picks up
-        // via the armed flag set in Exit.
-        if (!ctx.Input.RightClick) return false;
-        return BlockEruptionHelpers.IsCursorInSolid(ctx);
-    }
+        // Alive while RMB held. Cursor position no longer ends the state —
+        // it's checked in Update to arm BlockEruption on the in→out sweep.
+        => ctx.Input.RightClick;
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         _chargeTime = 0f;
-        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
-        _originCell = BlockEruptionHelpers.CellCenter(gtx, gty);
+        // Fresh charge starts unarmed — Update sets the flag on the sweep.
+        ab.Condition.BlockEruptionArmed = false;
+        _inSolidLastFrame = BlockEruptionHelpers.IsCursorInSolid(ctx);
+        if (_inSolidLastFrame)
+        {
+            var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+            _originCell = BlockEruptionHelpers.CellCenter(gtx, gty);
+        }
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        _chargeTime += ctx.Dt;
-        // Re-anchor origin to the current cell so a slow drag through several
-        // solid cells uses the last one visited as the ignition point.
-        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
-        _originCell = BlockEruptionHelpers.CellCenter(gtx, gty);
-    }
+        // Charge grows when nothing was placed this frame; decays at the same
+        // rate when HandleBuildInput just committed a tile. Lets a held RMB
+        // that's actively building stay near zero, while a held RMB over a
+        // wall (no placement possible) accumulates normally.
+        bool placedThisFrame = ctx.LastTilePlacedFrame == ctx.CurrentFrame;
+        if (placedThisFrame) _chargeTime = MathF.Max(0f, _chargeTime - ctx.Dt);
+        else                 _chargeTime += ctx.Dt;
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
-    {
-        // Arm the eruption only if the natural exit happened: cursor swept OUT
-        // of solid while RMB is still held AND we've charged past MinChargeToArm.
-        // Below the charge threshold (a quick RMB tap on a block), don't arm —
-        // the still-held RMB will pass through to HandleBuildInput as normal
-        // tile placement on the cursor drag. Other exits (RMB released without
-        // exiting solid, attack-preempt) also disarm.
-        if (ctx.Input.RightClick &&
-            !BlockEruptionHelpers.IsCursorInSolid(ctx) &&
-            _chargeTime >= MinChargeToArm)
+        bool inSolid = BlockEruptionHelpers.IsCursorInSolid(ctx);
+        if (inSolid)
+        {
+            // Re-anchor origin to the current solid cell. After the cursor
+            // sweeps out, _originCell retains the last solid cell visited —
+            // that's the ignition point used by BlockEruption.
+            var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+            _originCell = BlockEruptionHelpers.CellCenter(gtx, gty);
+        }
+
+        // In→out sweep arms BlockEruption (set BlockEruptionArmed + handoff
+        // fields). The FSM picks up the armed flag on the following frame's
+        // scan; BlockEruption.Enter consumes it.
+        if (_inSolidLastFrame && !inSolid && _chargeTime >= MinChargeToArm)
         {
             ab.Condition.BlockEruptionArmed = true;
             ab.Condition.BlockChargeTime   = _chargeTime;
             ab.Condition.BlockChargeOrigin = _originCell;
         }
-        else
-        {
+        _inSolidLastFrame = inSolid;
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Arming happens in Update on the in→out sweep. On a natural release
+        // (RMB up) with no pending armed handoff, clear the flag so a stale
+        // arm doesn't leak into a future press. If RMB is still held, we're
+        // being preempted by another action (likely BlockEruption itself);
+        // leave the flag intact so its Enter can consume it.
+        if (!ctx.Input.RightClick)
             ab.Condition.BlockEruptionArmed = false;
-        }
     }
 
     // Heavy stance during the charge — same shape as Stab's modifier set, applies
@@ -996,33 +1281,39 @@ public class BlockEruptionAction : ActionState
     private const float SaturationTime = 2.0f;
     private const float DipFactor      = 0.65f;
     private const float BudgetMin      = 0f;
-    private const float BudgetMax      = 125f; 
+    private const float BudgetMax      = 60f;
+    // Trigger-arming window. Once BlockReady arms the eruption (cursor swept
+    // out of solid), the player has this long to release RMB before the
+    // arming auto-cancels. Avoids "I swept past a wall 5 seconds ago and
+    // forgot, then released somewhere weird" surprise fires.
+    private const float ArmingWindow   = 0.6f;
 
     public override int ActivePriority  => 9;
     public override int PassivePriority => 10;
 
     private float          _chargeTime;
+    private float          _timeInState;
     private Vector2        _origin;
     private SmoothPen      _pen;
     private List<PathSample> _samples;
     // Cached most-recent mass-ball simulation result. Re-computed each Update
     // off the live samples + current charge budget so the preview tracks the
-    // gesture. Only populated when MassBall mode is active (PriorityField has
-    // no analogous "ball" — its preview would need its own renderer).
+    // gesture. Only populated when MassBall mode is active.
     private MassBallPlanner.SimulationResult _simResult;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
         => ctx.Input.RightClick && ab.Condition.BlockEruptionArmed;
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-        => ctx.Input.RightClick;
+        => ctx.Input.RightClick && _timeInState < ArmingWindow;
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         // Consume the armed flag + capture the charge/origin handoff.
         ab.Condition.BlockEruptionArmed = false;
-        _chargeTime = ab.Condition.BlockChargeTime;
-        _origin     = ab.Condition.BlockChargeOrigin;
+        _chargeTime  = ab.Condition.BlockChargeTime;
+        _origin      = ab.Condition.BlockChargeOrigin;
+        _timeInState = 0f;
 
         _pen     = new SmoothPen(ctx.Input.MouseWorldPosition);
         _samples = new List<PathSample>(64);
@@ -1034,13 +1325,13 @@ public class BlockEruptionAction : ActionState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab)
     {
+        _timeInState += ctx.Dt;
         _pen.Update(ctx.Input.MouseWorldPosition, ctx.Dt);
         _samples.Add(new PathSample(_pen.Position, _pen.Velocity));
 
         // Re-simulate when the preview is on so Draw can render an up-to-date
         // ball trajectory + landing cells. Skipped when off so we don't burn
-        // cycles every frame on a sim no one is looking at. Caches the chunks
-        // ref so Draw doesn't need ctx (which it isn't given).
+        // cycles every frame on a sim no one is looking at.
         if (EruptionPlanner.DebugDrawMassBall && EruptionPlanner.CurrentMode == EruptionPlannerMode.MassBall)
         {
             int budget = ComputeBudget(_chargeTime);
@@ -1140,3 +1431,422 @@ public class BlockEruptionAction : ActionState
         }
     }
 }
+
+// ---------- Ranged: EnergyBall (Shift + LMB tap) --------------------------------
+
+// Roadmap §4.1. Short action that spawns one EnergyBallProjectile toward the
+// cursor and sets a brief recovery. Priority sits ABOVE GuardAction's Active 35
+// so a Shift+click during a guard stance momentarily preempts the guard to fire,
+// then the FSM re-evaluates and Guard re-arms on the next frame.
+public class EnergyBallAction : ActionState
+{
+    private const float Duration       = 0.15f;
+    private const int   RecoveryFrames = 4;
+    // Distance ahead of the player center where the projectile spawns. Keeps
+    // the ball from immediately overlapping the player's body/hurtbox.
+    private const float SpawnOffset    = PlayerCharacter.Radius * 1.2f;
+
+    private float _timeInState;
+
+    public override int ActivePriority  => 40;
+    public override int PassivePriority => 45;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.Shift) return false;
+        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (ctx.Combat?.StunActive == true) return false;
+        if (ab.Condition.RecoveryActive)    return false;
+        return true;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+        => _timeInState < Duration;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        _timeInState = 0f;
+        ctx.Intents.Consume(IntentType.Click, ctx.CurrentFrame);
+
+        if (ctx.Spawner == null) return;
+        Vector2 toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+        Vector2 dir = toCursor.LengthSquared() < 1e-4f
+            ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
+            : Vector2.Normalize(toCursor);
+        var spawnPos = ctx.Body.Position + dir * SpawnOffset;
+        ctx.Spawner.SpawnEntity(new EnergyBallProjectile(spawnPos, dir));
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        _timeInState += ctx.Dt;
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        ConditionState.SetFor(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoveryFrames, ctx.CurrentFrame);
+    }
+}
+
+// ---------- Ranged: Beam (Shift + LMB hold) -------------------------------------
+
+// Roadmap §4.2 — sustained particle beam. Shift+LMB press-edge starts charging;
+// once _chargeTime ≥ MinChargeTime AND LMB still held, the beam fires every
+// frame for up to MaxFiringTime. Release LMB at any point during charge → no
+// beam fires (the user's "fails when interrupted early" requirement makes the
+// move non-spammable).
+//
+// Why not piggy-back on Stab intent (which is the roadmap's original gesture
+// suggestion): Stab fires on RELEASE, after a long hold + swipe. We want the
+// beam visible DURING the hold so the player can sweep it across targets while
+// firing. Press-edge + per-frame LMB poll matches the intended feel.
+//
+// Click coexistence: when a short Shift+LMB tap releases inside the charge
+// window, BeamAction.CheckConditions returns false (LMB released), BeamAction
+// exits without firing, and the same release frame's Click intent routes to
+// EnergyBallAction. So short Shift+LMB = energy ball, long Shift+LMB = beam.
+public class BeamAction : ActionState
+{
+    private const float MinChargeTime    = 0.35f;
+    private const float MaxFiringTime    = 0.55f;
+    // Beam reach in world pixels — beyond this the segments stop publishing.
+    private const float MaxBeamLength    = 220f;
+    private const int   BeamSegments     = 14;
+    private const float SegmentHalfSize  = 6f;
+    private const float DamagePerFrame   = TileDamage.TileMaxHP * 0.45f;   // breaks Stone in 2-3 frames of overlap
+    private const float KnockbackImpulse = 320f;
+    private const int   RecoveryFrames   = 6;
+
+    private static int _nextHitId = 6_000_001;
+
+    private float _chargeTime;
+    private float _firingTime;
+    private bool  _firing;
+    private int   _hitId;
+    // Cached for Draw — Update has access to ctx (cursor); Draw doesn't. Last
+    // beam direction + reach computed during Update is stored here so the visual
+    // dot chain tracks the actual hitbox chain.
+    private Vector2 _lastBeamDir   = Vector2.UnitX;
+    private float   _lastBeamReach;
+
+    public override int ActivePriority  => 40;
+    public override int PassivePriority => 45;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.Shift) return false;
+        if (!ctx.Input.LeftClick) return false;
+        var prev = ctx.Controller.GetPrevious(1);
+        if (prev.LeftClick) return false;
+        if (ctx.Combat?.StunActive == true) return false;
+        if (ab.Condition.RecoveryActive)    return false;
+        return true;
+    }
+
+    // Alive while Shift + LMB both held AND we're either charging or within the
+    // firing window. Releasing LMB during charge cancels the beam; releasing
+    // during firing ends the beam cleanly.
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.LeftClick) return false;
+        if (!ctx.Input.Shift)     return false;
+        if (ctx.Combat?.StunActive == true) return false;
+        if (_firing && _firingTime >= MaxFiringTime) return false;
+        return true;
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        _chargeTime = 0f;
+        _firingTime = 0f;
+        _firing     = false;
+        _hitId      = System.Threading.Interlocked.Increment(ref _nextHitId);
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!_firing)
+        {
+            _chargeTime += ctx.Dt;
+            if (_chargeTime >= MinChargeTime) _firing = true;
+            return;
+        }
+        _firingTime += ctx.Dt;
+        if (ctx.Hitboxes == null) return;
+
+        // Beam reaches from player center toward cursor, clamped to MaxBeamLength.
+        var start = ctx.Body.Position;
+        var toCursor = ctx.Input.MouseWorldPosition - start;
+        float len = toCursor.Length();
+        if (len < 1e-3f) return;
+        var dir = toCursor / len;
+        float reach = MathF.Min(len, MaxBeamLength);
+        _lastBeamDir   = dir;
+        _lastBeamReach = reach;
+
+        // Publish a chain of segment hitboxes along the beam. HitTargets.All so
+        // each segment damages BOTH tiles and entities — that's what makes the
+        // beam carve tunnels through terrain while also hurting anything in its
+        // line of fire. Shared HitId across segments means the (HitId,Target)
+        // dedupe in CombatSystem treats the whole beam as ONE attack per
+        // entity — chained segments don't multi-hit a single body.
+        for (int i = 0; i < BeamSegments; i++)
+        {
+            float t = (i + 1f) / BeamSegments;
+            var center = start + dir * (reach * t);
+            var region = new BoundingBox(
+                center.X - SegmentHalfSize, center.Y - SegmentHalfSize,
+                center.X + SegmentHalfSize, center.Y + SegmentHalfSize);
+            ctx.Hitboxes.Publish(new Hitbox(
+                region, _hitId, DamagePerFrame,
+                dir * KnockbackImpulse,
+                Faction.Player, this, Color.Magenta));
+        }
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Recovery on exit no matter how we left — a successful beam locks the
+        // player out of follow-up Shift+LMB for a moment, an interrupted charge
+        // does likewise (which is a feel-call; it punishes spamming).
+        ConditionState.SetFor(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoveryFrames, ctx.CurrentFrame);
+    }
+
+    // Heavy stance while charging + firing — beam needs the player committed.
+    public override void ApplyMovementModifiers(ref MovementModifiers m)
+    {
+        m.MaxWalkSpeed *= 0.4f;
+        m.WalkAccel    *= 0.6f;
+        m.MaxAirSpeed  *= 0.5f;
+        m.AirAccel     *= 0.6f;
+    }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body)
+    {
+        if (!_firing)
+        {
+            // Charge ring at the player so the player can see the wind-up. Single
+            // dot pulse — keep cheap; tune later if it needs more presence.
+            float frac = _chargeTime / MinChargeTime;
+            int   r    = (int)(2 + 6 * frac);
+            var col = Color.Lerp(new Color(80, 0, 100), Color.Magenta, frac);
+            sb.Draw(pixel, new Rectangle((int)body.Position.X - r, (int)body.Position.Y - r, r * 2, r * 2), col * 0.6f);
+            return;
+        }
+        // Active beam: dot chain along the firing line, using the cached
+        // direction + reach from the most recent Update.
+        for (int i = 0; i < BeamSegments; i++)
+        {
+            float t = (i + 1f) / BeamSegments;
+            var p = body.Position + _lastBeamDir * (_lastBeamReach * t);
+            sb.Draw(pixel, new Rectangle((int)p.X - 2, (int)p.Y - 2, 4, 4), Color.Magenta);
+        }
+    }
+}
+
+// ---------- Ranged: LobbedArea (Shift + RMB charge) -----------------------------
+
+// Roadmap §4.3 — ranged eruption. Hold Shift+RMB to charge a budget like
+// BlockReadyAction does; on release, launch a LobbedAreaProjectile on a
+// ballistic arc toward the cursor that detonates at landing into a mass-ball
+// eruption + radial AOE.
+//
+// Why this collides with BlockReadyAction's RMB-anywhere charge: BlockReady
+// doesn't gate on Shift. LobbedArea adds the Shift requirement, and its
+// higher priority (45 passive) wins press-edge selection when Shift is held.
+// Non-Shift RMB still routes to BlockReady as before. Once LobbedAreaAction
+// is current, RMB-held keeps it active even if the player releases Shift —
+// the gesture is committed at press-edge.
+public class LobbedAreaAction : ActionState
+{
+    private const float MinChargeToFire = 0.4f;
+    private const float SaturationTime  = 1.8f;
+    private const float DipFactor       = 0.7f;
+    private const float BudgetMin       = 0f;
+    private const float BudgetMax       = 50f;
+    private const int   RecoveryFrames  = 6;
+    // Ballistic arc: vertical speed at launch lifts the ball over a tunable apex
+    // height; horizontal speed is derived from cursor-distance / time-of-flight
+    // so the ball lands AT the cursor under standard MovementConfig gravity.
+    // We don't actually integrate gravity ourselves — PhysicsBody handles that;
+    // we just pick (vx, vy) such that the parabola hits the cursor.
+    private const float LaunchApexBoost = 180f;       // upward velocity at launch (px/s)
+    private const float SpawnOffset     = PlayerCharacter.Radius * 1.2f;
+
+    private float   _chargeTime;
+    private Vector2 _cursorAtPress;
+
+    public override int ActivePriority  => 40;
+    public override int PassivePriority => 45;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.Shift) return false;
+        if (!ctx.Input.RightClick) return false;
+        var prev = ctx.Controller.GetPrevious(1);
+        if (prev.RightClick) return false;
+        if (ctx.Combat?.StunActive == true) return false;
+        if (ab.Condition.RecoveryActive)    return false;
+        return true;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+        => ctx.Input.RightClick;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        _chargeTime    = 0f;
+        _cursorAtPress = ctx.Input.MouseWorldPosition;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        _chargeTime += ctx.Dt;
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Recovery regardless — short-charge release still locks out a follow-up
+        // throw for a moment so spamming low-budget lobs is throttled.
+        ConditionState.SetFor(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoveryFrames, ctx.CurrentFrame);
+
+        // RMB still held = forced exit (preemption) — don't fire.
+        if (ctx.Input.RightClick) return;
+        if (_chargeTime < MinChargeToFire) return;
+        if (ctx.Spawner == null) return;
+
+        int budget = ComputeBudget(_chargeTime);
+        if (budget <= 0) return;
+
+        // Capture cursor at release (player may have re-aimed during the charge).
+        var target = ctx.Input.MouseWorldPosition;
+        var spawnPos = ctx.Body.Position + Vector2.Normalize(target - ctx.Body.Position + new Vector2(1e-3f, 0f)) * SpawnOffset;
+        var launchVel = ComputeBallisticLaunch(spawnPos, target);
+
+        // Pick up the player's active block type for the eruption shape — same
+        // material the BlockReady charge would have used.
+        ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(spawnPos, launchVel, budget, EruptionPlanner.ActiveType));
+    }
+
+    // Ballistic solve: given gravity g (from MovementConfig.Current.Gravity),
+    // pick vy = -LaunchApexBoost (upward), then time-of-flight to reach the
+    // target's Y under gravity, then vx = dx / t. Clamps t to a minimum so a
+    // target right on top of the player doesn't divide by zero.
+    private static Vector2 ComputeBallisticLaunch(Vector2 from, Vector2 to)
+    {
+        float g = Game1.WorldGravityY;
+        if (g <= 0f) g = 1f;
+        Vector2 d = to - from;
+        // Solve d.y = vy * t + 0.5 * g * t^2  with vy = -LaunchApexBoost.
+        // → 0.5 g t^2 + (-LaunchApexBoost) t - d.y = 0.
+        float a = 0.5f * g;
+        float b = -LaunchApexBoost;
+        float c = -d.Y;
+        float disc = b * b - 4f * a * c;
+        float t;
+        if (disc < 0f)
+        {
+            // Target above max apex — fall back to a fixed time.
+            t = 0.8f;
+        }
+        else
+        {
+            float sqrtDisc = MathF.Sqrt(disc);
+            // Both roots positive when target below apex; pick the LATER one
+            // (descending arc into target). When target above launch point,
+            // there's one positive root — Max picks it.
+            float t1 = (-b - sqrtDisc) / (2f * a);
+            float t2 = (-b + sqrtDisc) / (2f * a);
+            t = MathF.Max(t1, t2);
+            if (t < 0.1f) t = 0.1f;
+        }
+        return new Vector2(d.X / t, -LaunchApexBoost);
+    }
+
+    private static int ComputeBudget(float chargeTime)
+    {
+        float raw;
+        if (chargeTime < SaturationTime)
+            raw = MathHelper.Lerp(BudgetMin, BudgetMax, chargeTime / SaturationTime);
+        else
+            raw = BudgetMax * DipFactor;
+        return (int)MathF.Round(raw);
+    }
+
+    // Heavy stance while charging — same shape as BlockReady's.
+    public override void ApplyMovementModifiers(ref MovementModifiers m)
+    {
+        m.MaxWalkSpeed *= 0.4f;
+        m.WalkAccel    *= 0.5f;
+        m.MaxAirSpeed  *= 0.5f;
+        m.AirAccel     *= 0.6f;
+        m.GravityScale *= 0.5f;
+    }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body)
+    {
+        // Charge ring at the player. Color ramps from olive → goldenrod as the
+        // budget grows; past saturation it dims to indicate the budget dip.
+        bool saturated = _chargeTime >= SaturationTime;
+        float frac = saturated ? 1f : (_chargeTime / SaturationTime);
+        int r = (int)(2 + 8f * frac);
+        Color col = saturated
+            ? new Color(160, 120, 40)
+            : Color.Lerp(new Color(80, 60, 20), Color.Goldenrod, frac);
+        sb.Draw(pixel, new Rectangle((int)body.Position.X - r, (int)body.Position.Y - r, r * 2, r * 2), col * 0.55f);
+    }
+}
+
+// ---------- Ranged: StickyGrenade (F key press) ---------------------------------
+
+// Roadmap §4.4 — sticky-grenade throw. F press-edge spawns a grenade toward
+// the cursor. Shift+RMB was the original roadmap binding but that gesture is
+// now taken by LobbedAreaAction (charge + release for ranged eruption); F is
+// the unambiguous fallback. No charging — single-tap throw at fixed velocity.
+public class GrenadeAction : ActionState
+{
+    private const float Duration       = 0.15f;
+    private const int   RecoveryFrames = 5;
+    private const float SpawnOffset    = PlayerCharacter.Radius * 1.2f;
+
+    private float _timeInState;
+
+    public override int ActivePriority  => 40;
+    public override int PassivePriority => 45;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.F) return false;
+        var prev = ctx.Controller.GetPrevious(1);
+        if (prev.F) return false;
+        if (ctx.Combat?.StunActive == true) return false;
+        if (ab.Condition.RecoveryActive)    return false;
+        return true;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+        => _timeInState < Duration;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        _timeInState = 0f;
+        if (ctx.Spawner == null) return;
+        Vector2 toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+        Vector2 dir = toCursor.LengthSquared() < 1e-4f
+            ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
+            : Vector2.Normalize(toCursor);
+        var spawnPos = ctx.Body.Position + dir * SpawnOffset;
+        ctx.Spawner.SpawnEntity(new StickyGrenadeProjectile(spawnPos, dir));
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        _timeInState += ctx.Dt;
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        ConditionState.SetFor(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoveryFrames, ctx.CurrentFrame);
+    }
+}
+

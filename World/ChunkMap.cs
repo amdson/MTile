@@ -26,6 +26,11 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // TileImpactAccumulator for the design rationale.
     public readonly TileImpactAccumulator Impact = new();
 
+    // Per-cell decay timer for Foam tiles. Registered on Foam-sprout finalize,
+    // ticked alongside sprouts, cleared on BreakCell so a foam tile broken
+    // early (by damage / overwrite) doesn't fire a second BreakCell later.
+    public readonly FoamDecay Foam = new();
+
     // Fires when BreakCell actually clears a Solid tile. Arguments are the cell's
     // world-space center and its material type at break time. Subscribers (Game1's
     // particle system) react to feedback events without ChunkMap knowing about them.
@@ -197,6 +202,13 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // children (first parent to finalize wins → promote child to Growing).
     public void TickSprouts(float dt)
     {
+        // Foam decay runs unconditionally each frame — its lifecycle is
+        // independent of sprout finalization. Do it first so a foam cell that
+        // expires this frame is broken before subsequent passes (impact / damage)
+        // try to read it as solid. Lambda wraps BreakCell to discard the bool
+        // return (Action<int,int> expects void).
+        Foam.Tick(dt, (gx, gy) => BreakCell(gx, gy));
+
         List<TileSproutNode> finalize = null;
         foreach (var n in Graph.Growing)
         {
@@ -213,6 +225,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 chunk.Tiles[n.Tx, n.Ty].State  = TileState.Solid;
                 chunk.Tiles[n.Tx, n.Ty].Sprout = null;
             }
+            // Foam tiles get a decay timer registered the moment they finalize;
+            // see FoamDecay. Other types never enter the decay map.
+            if (n.Type == TileType.Foam)
+                Foam.Register(n.Gtx, n.Gty);
             Graph.Remove(n);
 
             var parentCenter = CellCenter(n.Gtx, n.Gty);   // == n.EndCenter (now committed)
@@ -264,6 +280,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         var brokenType = chunk.Tiles[tx, ty].Type;
         chunk.Tiles[tx, ty].IsSolid = false;
         Damage.Clear(gtx, gty);
+        // Foam decay entry (if any) is invalidated by the break — without this,
+        // a foam tile broken early would still trigger another BreakCell when
+        // its timer expires (no-op on an empty cell, but a needless call).
+        if (brokenType == TileType.Foam) Foam.Clear(gtx, gty);
         OnTileBroken?.Invoke(CellCenter(gtx, gty), brokenType);
         return true;
     }

@@ -17,6 +17,46 @@ public abstract class MovementState
     public abstract void Update(EnvironmentContext ctx, PlayerAbilityState abilities);
 }
 
+// Heavy-hit lock-out. Preempts Standing/Crouched/WallSliding/Falling so the
+// muted air-control profile applies as soon as a stun-flagged hit lands. Does
+// NOT preempt active jumps (50+) — a player hit mid-jump finishes the existing
+// arc and only enters StunnedState after Falling takes over.
+//
+// While stunned:
+//   - Horizontal accel × 0.4, max-air-speed × 0.7, air-drag × 1.5 — player can
+//     nudge but can't redirect the knockback trajectory.
+//   - Action FSM gates (Slash*, Stab) refuse to fire (gated on Combat.StunActive).
+//   - HitstunActive is also true throughout (every hit sets it), keeping the
+//     jump preconditions blocked even past the 8-frame hitstun base window.
+//
+// State holds no constraints — physics handles ground/wall contact through
+// the world's collision resolver. HasDoubleJumped is NOT reset on exit; a
+// player stunned out of a double-jump doesn't suddenly regain it.
+public class StunnedState : MovementState
+{
+    public override int ActivePriority  => 25;
+    public override int PassivePriority => 25;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+        => ctx.Combat?.StunActive == true;
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+        => ctx.Combat?.StunActive == true;
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        var force = Vector2.Zero;
+        var cfg = MovementConfig.Current;
+        var m   = ctx.Modifiers;
+        force.X = AirControl.Apply(ctx,
+            cfg.AirAccel    * m.AirAccel    * 0.4f,
+            cfg.MaxAirSpeed * m.MaxAirSpeed * 0.7f,
+            cfg.AirDrag     * m.AirDrag     * 1.5f);
+
+        ctx.Body.AppliedForce = force;
+    }
+}
+
 public class FallingState : MovementState
 {
     public override int ActivePriority => 0;

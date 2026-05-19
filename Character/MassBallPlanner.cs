@@ -49,6 +49,10 @@ public static class MassBallPlanner
 
     public static readonly TileType DefaultType = TileType.Dirt;
 
+    // Runtime-mutable override matching EruptionPlanner.ActiveType. Game1's
+    // block picker writes here each frame; Plan reads at commit time.
+    public static TileType ActiveType = TileType.Dirt;
+
     // Read-only view of one sim run. Used both by Plan() to commit sprouts and
     // by BlockEruptionAction.Draw to preview the ball's path + landing cells
     // mid-gesture. Created via Simulate(); SproutCells co  dmes back in the same
@@ -81,7 +85,7 @@ public static class MassBallPlanner
         });
 
         foreach (var (gtx, gty) in sim.SproutCells)
-            chunks.TryRequestTile(gtx, gty, DefaultType);
+            chunks.TryRequestTile(gtx, gty, ActiveType);
     }
 
     // Pure simulation — no side effects on the world. Reads chunk state for the

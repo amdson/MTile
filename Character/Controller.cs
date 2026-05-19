@@ -15,6 +15,9 @@ namespace MTile
         public Vector2 MouseWorldPosition;
         public bool Space;
         public bool Shift;
+        // F key: bound to GrenadeAction (Shift+RMB is reserved for LobbedAreaAction).
+        // Polled by GrenadeAction's CheckPreConditions on press-edge.
+        public bool F;
     }
 
     public class Controller
@@ -62,7 +65,8 @@ namespace MTile
                 MousePosition = mouseState.Position,
                 MouseWorldPosition = mouseWorldPosition,
                 Space = keyboardState.IsKeyDown(Keys.Space),
-                Shift = keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift)
+                Shift = keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift),
+                F     = keyboardState.IsKeyDown(Keys.F),
             };
         }
     }
