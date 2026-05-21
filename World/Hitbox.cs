@@ -3,8 +3,23 @@ using Microsoft.Xna.Framework;
 namespace MTile;
 
 // Faction tag for self-damage filtering. Used on both Hitbox.Owner (attacker) and
-// Hurtbox.Owner (target); intersection skipped when they match.
-public enum Faction { Player, Enemy, Neutral }
+// Hurtbox.Owner (target); intersection skipped when they match. Each player gets its
+// own faction (Player1/Player2) so the two can damage each other while still being
+// self-immune; NPC code that means "any player" must use Factions.IsPlayer, not an
+// equality check. Add Player3/… here if more local players are ever needed.
+public enum Faction { Player1, Player2, Enemy, Neutral }
+
+public static class Factions
+{
+    // "Belongs to a player" — the test NPC/projectile code wants instead of
+    // `== Faction.Player1`, so it stays correct as player factions are added.
+    public static bool IsPlayer(Faction f) => f == Faction.Player1 || f == Faction.Player2;
+
+    // The faction for the Nth player (0-based): primary = Player1, first secondary =
+    // Player2, etc. Clamped to the last defined player faction.
+    public static Faction ForPlayerIndex(int index) =>
+        index <= 0 ? Faction.Player1 : Faction.Player2;
+}
 
 // Which kinds of targets a hitbox can damage. Useful for "shockwave" effects that
 // reach further into terrain than they do entities, or buff hitboxes (heal allies

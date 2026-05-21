@@ -74,4 +74,14 @@ public class IntentBuffer
 
     public void Prune(int currentFrame)
         => _intents.RemoveAll(i => i.Consumed || currentFrame - i.IssuedFrame > MaxAgeFrames);
+
+    // Snapshot/restore (roadmap goal 4 §E). ActionIntent is a struct, so the array
+    // copy is a deep copy; restore replaces the live list contents in place.
+    public ActionIntent[] Capture() => _intents.ToArray();
+
+    public void Restore(ActionIntent[] intents)
+    {
+        _intents.Clear();
+        if (intents != null) _intents.AddRange(intents);
+    }
 }

@@ -22,7 +22,7 @@ public class StickyGrenadeProjectile : Projectile
     private const float FuseSeconds      = 1.2f;
     private const float StickStopSpeed   = 28f;         // |v| below this → considered stuck
     private const float ArmDelay         = 0.04f;       // skip stop-check at t=0
-    private const float Mass_            = 0.6f;        // ballistic mass for body
+    private const float BodyMass         = 0.6f;
     private const float ExplosionRadius  = 56f;         // covers ~3.5 tiles each side
     private const int   ExplosionSegments = 12;
     private const float SegmentHalfSize  = 10f;
@@ -33,20 +33,41 @@ public class StickyGrenadeProjectile : Projectile
     // accumulation because the hitbox only lives for one frame).
     private const float ExplosionDamage  = TileDamage.TileMaxHP * 1.2f;
 
-    private static int _nextHitId = 5_000_001;
-    private readonly int _hitId = System.Threading.Interlocked.Increment(ref _nextHitId);
+    private readonly int _hitId;
 
     private bool  _stuck;
     private float _stuckSince;       // Age at time of sticking; explosion fires at _stuckSince + FuseSeconds
     private bool  _exploded;
 
-    public StickyGrenadeProjectile(Vector2 pos, Vector2 dir)
-        : base(new PhysicsBody(Polygon.CreateRegular(5f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: Faction.Player)
+    public override EntityKind Kind => EntityKind.StickyGrenade;
+
+    // _hitId is immutable (ctor) — recorded for Rehydrate. The fuse flags are
+    // mutable per-frame state and round-trip on a live restore too.
+    protected override void WriteState(ref EntitySnapshot s)
     {
+        base.WriteState(ref s);
+        s.HitId      = _hitId;
+        s.Stuck      = _stuck;
+        s.StuckSince = _stuckSince;
+        s.Exploded   = _exploded;
+    }
+
+    protected override void ReadState(in EntitySnapshot s)
+    {
+        base.ReadState(in s);
+        _stuck      = s.Stuck;
+        _stuckSince = s.StuckSince;
+        _exploded   = s.Exploded;
+    }
+
+    public StickyGrenadeProjectile(Vector2 pos, Vector2 dir, int hitId, Faction owner)
+        : base(new PhysicsBody(Polygon.CreateRegular(5f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: owner)
+    {
+        _hitId = hitId;
         if (dir.LengthSquared() < 1e-4f) dir = Vector2.UnitX;
         dir.Normalize();
         Body.Velocity = dir * ThrowSpeed;
-        Mass          = Mass_;
+        Mass          = BodyMass;
         GravityScale  = 1f;
         Color         = Color.OliveDrab;
         Sprite        = Sprites.Ball(5f);
@@ -94,7 +115,7 @@ public class StickyGrenadeProjectile : Projectile
                 hitboxes.Publish(new Hitbox(
                     region, _hitId, ExplosionDamage,
                     dir * ExplosionKnockback,
-                    Faction.Player, this, Color.Orange));
+                    Faction, this, Color.Orange));
             }
         }
         _exploded = true;

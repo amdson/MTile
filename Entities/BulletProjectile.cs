@@ -23,12 +23,33 @@ public class BulletProjectile : Projectile
     private const float ArmDelay           = 0.04f;      // skip stop-check at t=0 (just spawned)
     private const float DeflectSpeed       = 520f;       // post-deflect bullet speed
 
-    private static int _nextHitId = 3_000_001;
-    private int _hitId = System.Threading.Interlocked.Increment(ref _nextHitId);
+    // Held (not just an int) because a deflect re-mints a fresh HitId from OnHit,
+    // which has no spawner reference of its own.
+    private readonly HitIdAllocator _hitIds;
+    private int _hitId;
 
-    public BulletProjectile(Vector2 pos, Vector2 velocity)
+    public override EntityKind Kind => EntityKind.Bullet;
+
+    // _hitId is mutable here (a deflect re-mints it), so it round-trips through the
+    // snapshot. _hitIds is the shared allocator ref — supplied to Rehydrate via the
+    // ctor, never copied as data.
+    protected override void WriteState(ref EntitySnapshot s)
+    {
+        base.WriteState(ref s);
+        s.HitId = _hitId;
+    }
+
+    protected override void ReadState(in EntitySnapshot s)
+    {
+        base.ReadState(in s);
+        _hitId = s.HitId;
+    }
+
+    public BulletProjectile(Vector2 pos, Vector2 velocity, HitIdAllocator hitIds)
         : base(new PhysicsBody(Polygon.CreateRegular(3f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: Faction.Enemy)
     {
+        _hitIds = hitIds;
+        _hitId  = hitIds.Next();
         Body.Velocity = velocity;
         Mass          = 0.4f;
         GravityScale  = 0f;
@@ -43,7 +64,7 @@ public class BulletProjectile : Projectile
         // forward / pulse radial), so the bullet flies the way the player
         // swung. Speed is reset to a fixed value so a glancing slash still
         // produces a clean fast deflect.
-        if (hit.Owner == Faction.Player)
+        if (Factions.IsPlayer(hit.Owner))
         {
             Vector2 dir = hit.KnockbackImpulse;
             if (dir.LengthSquared() < 0.01f) dir = -Body.Velocity;
@@ -51,13 +72,15 @@ public class BulletProjectile : Projectile
             dir.Normalize();
 
             Body.Velocity = dir * DeflectSpeed;
-            Faction       = Faction.Player;
+            // Inherit the deflecting player's faction: the bounced bullet now hurts
+            // the OTHER player + enemies, but not the deflector (self-immune).
+            Faction       = hit.Owner;
             Color         = Color.Cyan;
             Age           = 0f;
             // Fresh HitId so the (HitId,Target) dedupe in CombatSystem treats
             // post-deflect overlaps as a new attack — without this, any enemy
             // the bullet had already brushed pre-deflect would be immune.
-            _hitId = System.Threading.Interlocked.Increment(ref _nextHitId);
+            _hitId = _hitIds.Next();
             return;
         }
 

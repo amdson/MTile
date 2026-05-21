@@ -37,4 +37,20 @@ public abstract class Projectile : Entity
 
     // Per-frame behavior after the base class has aged + lifetime-checked.
     protected abstract void ProjectileUpdate(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner);
+
+    // Snapshot the shared projectile fuse/lifetime alongside the base entity fields.
+    // Concrete projectiles chain through these for their own per-type state.
+    protected override void WriteState(ref EntitySnapshot s)
+    {
+        base.WriteState(ref s);
+        s.Age      = Age;
+        s.Lifetime = Lifetime;
+    }
+
+    protected override void ReadState(in EntitySnapshot s)
+    {
+        base.ReadState(in s);
+        Age      = s.Age;
+        Lifetime = s.Lifetime;
+    }
 }

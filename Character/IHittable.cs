@@ -10,4 +10,11 @@ public interface IHittable
     Faction Faction { get; }
     void PublishHurtboxes(HurtboxWorld world);
     void OnHit(in Hitbox hit, in Hurtbox myHurtbox);
+
+    // Stable identity for snapshot/restore. The combat dedupe table (HitId → set of
+    // already-hit targets) is held by reference at runtime; to snapshot it we record
+    // sets of these ids and resolve them back to live objects on restore (roadmap
+    // goal 4 §H). Assigned by Simulation from its deterministic id counter — players
+    // and entities draw from the same sequence so ids never collide.
+    int HittableId { get; }
 }

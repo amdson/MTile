@@ -13,6 +13,20 @@ public class EnvironmentContext
     public HitboxWorld  Hitboxes;     // offensive — publishers (action FSM, AI) push hitboxes here
     public HurtboxWorld Hurtboxes;    // defensive — read-only for actions, populated each frame by IHittable.PublishHurtboxes
     public IEntitySpawner Spawner;    // ranged-attack actions call SpawnEntity to launch projectiles; null in headless tests
+    // Owning player's faction. Stamped on every hitbox/projectile an action publishes
+    // so attacks from different players resolve against each other (and stay self-
+    // immune). Set by PlayerCharacter.Update from its own Faction each frame.
+    public Faction Faction;
+    // Deterministic HitId source for any hitbox an action publishes / projectile it
+    // spawns. Set by PlayerCharacter.Update from its (sim-shared) allocator. Replaces
+    // the old per-class static counters — see HitIdAllocator.
+    public HitIdAllocator HitIds;
+    // Player-selected eruption planner mode + block material, driven by this player's
+    // own input (P toggle, 1-4 keys). Read by BlockEruptionAction / LobbedAreaAction
+    // when they fire. Carried here (rather than planner statics) so each player's
+    // selection is independent and rollback-deterministic.
+    public EruptionPlannerMode EruptionMode;
+    public TileType ActiveBlockType;
     public IntentBuffer Intents;      // gesture-parsed action intents (Click, Stab, PressEdge); action FSM reads + consumes
     public ConditionState Condition;  // combat condition flags (Slash2Ready, RecoveryActive, …) — lives on PlayerAbilityState
     public CombatState    Combat;     // defensive condition: hitstun, stun, last-hit data — gates jump preconditions etc.

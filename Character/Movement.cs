@@ -8,13 +8,27 @@ public abstract class MovementState
     public abstract int ActivePriority { get; }
     public abstract int PassivePriority { get; }
 
+    // CheckPreConditions (candidate selection) reads only ctx + abilities, never the
+    // current activation's vars — so it keeps the lean signature. The lifecycle
+    // methods below run on the active/transitioning state and carry MovementVars,
+    // the plain-data per-activation state (see MovementVars).
     public abstract bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities);
-    public abstract bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities);
+    public abstract bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars);
 
-    public virtual void Enter(EnvironmentContext ctx, PlayerAbilityState abilities) {}
-    public virtual void Exit(EnvironmentContext ctx, PlayerAbilityState abilities) {}
+    public virtual void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) {}
+    public virtual void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) {}
 
-    public abstract void Update(EnvironmentContext ctx, PlayerAbilityState abilities);
+    public abstract void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars);
+
+    // Snapshot/restore hook (roadmap goal 4). The only per-player instance data left
+    // on a movement state is its transient soft-contact ref cache(s) (_ground,
+    // _source, _wall, …). A restore drops the soft contacts from Body.Constraints
+    // (only Maintained hard contacts survive — see BodyState), so these caches would
+    // be left dangling. PlayerCharacter.RestoreState calls this on every registry
+    // state to null them; the owning state's idempotent Ensure… then rebuilds its
+    // contact on the next Update from the restored body pose. No-op for stateless
+    // states (Falling, Stunned, jumps without a source cache).
+    public virtual void ResetTransient() { }
 }
 
 // Heavy-hit lock-out. Preempts Standing/Crouched/WallSliding/Falling so the
@@ -40,10 +54,10 @@ public class StunnedState : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => ctx.Combat?.StunActive == true;
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
         => ctx.Combat?.StunActive == true;
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         var force = Vector2.Zero;
         var cfg = MovementConfig.Current;
@@ -63,9 +77,9 @@ public class FallingState : MovementState
     public override int PassivePriority => 0;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) => true;
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         var force = Vector2.Zero;
         var cfg = MovementConfig.Current;
@@ -94,13 +108,27 @@ public class StandingState : MovementState
         return ctx.TryGetGround(out _);
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         return ctx.TryGetGround(out _);
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+        => EnsureGround(ctx);
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        if (_ground != null)
+            ctx.Body.Constraints.Remove(_ground);
+        _ground = null;
+    }
+
+    // Idempotent ground-contact acquisition. Called from Enter and the top of Update
+    // so the (non-snapshotted) soft contact self-heals after a restore drops it.
+    // No-op in normal play, where Enter already established it.
+    private void EnsureGround(EnvironmentContext ctx)
+    {
+        if (_ground != null) return;
         if (ctx.TryGetGround(out var contact))
         {
             _ground = contact;
@@ -108,15 +136,11 @@ public class StandingState : MovementState
         }
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        if (_ground != null)
-            ctx.Body.Constraints.Remove(_ground);
-        _ground = null;
-    }
+    public override void ResetTransient() => _ground = null;
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        EnsureGround(ctx);
         if (ctx.TryGetGround(out var refreshed))
         {
             _ground.Position        = refreshed.Position;
@@ -182,13 +206,25 @@ public class CrouchedState : MovementState
 
     }   
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         return (ctx.Input.Down || ctx.TryGetCeiling(out _)) && ctx.TryGetCrouchGround(out _);
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+        => EnsureGround(ctx);
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        if (_ground != null)
+            ctx.Body.Constraints.Remove(_ground);
+        _ground = null;
+    }
+
+    // Idempotent crouch-ground acquisition — see StandingState.EnsureGround.
+    private void EnsureGround(EnvironmentContext ctx)
+    {
+        if (_ground != null) return;
         if (ctx.TryGetCrouchGround(out var contact))
         {
             _ground = contact;
@@ -196,15 +232,11 @@ public class CrouchedState : MovementState
         }
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        if (_ground != null)
-            ctx.Body.Constraints.Remove(_ground);
-        _ground = null;
-    }
+    public override void ResetTransient() => _ground = null;
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        EnsureGround(ctx);
         if (ctx.TryGetCrouchGround(out var refreshed))
         {
             _ground.Position        = refreshed.Position;

@@ -30,6 +30,40 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // ticked alongside sprouts, cleared on BreakCell so a foam tile broken
     // early (by damage / overwrite) doesn't fire a second BreakCell later.
     public readonly FoamDecay Foam = new();
+    // Cached delegate for Foam.Tick so we don't allocate a fresh closure per call.
+    private readonly Action<int, int> _breakCellAction;
+
+    // Reversible delta log for the dense tile grid (roadmap goal 6). Every tile write
+    // + lazy chunk creation funnels through WriteTile/GetOrCreateChunk, which append
+    // here; CaptureTerrain records the mark and RestoreTerrain rewinds to it. The
+    // sparse side-structures above (Graph/Damage/Foam/Impact) are value-snapshotted
+    // instead (they tick every frame). See TerrainJournal.
+    private readonly TerrainJournal _journal = new();
+
+    public ChunkMap() => _breakCellAction = (gx, gy) => BreakCell(gx, gy);
+
+    // Lazily materialize a chunk, journaling the creation so a restore can drop it.
+    private Chunk GetOrCreateChunk(Point pos)
+    {
+        if (_dict.TryGetValue(pos, out var c)) return c;
+        c = new Chunk { ChunkPos = pos };
+        _dict[pos] = c;
+        _journal.RecordChunkCreated(pos);
+        return c;
+    }
+
+    // The single journaled tile-mutation primitive. Records the cell's prior state +
+    // type before overwriting it, so the dense grid is fully roll-back-able. Sprout
+    // refs aren't journaled — they're re-linked from the restored graph (see
+    // RestoreTerrain), keeping the journal entries purely value data.
+    private void WriteTile(Chunk chunk, int tx, int ty, TileState state, TileType type, TileSproutNode sprout)
+    {
+        ref var t = ref chunk.Tiles[tx, ty];
+        _journal.RecordTileWrite(chunk.ChunkPos, tx, ty, t.State, t.Type);
+        t.State  = state;
+        t.Type   = type;
+        t.Sprout = sprout;
+    }
 
     // Fires when BreakCell actually clears a Solid tile. Arguments are the cell's
     // world-space center and its material type at break time. Subscribers (Game1's
@@ -166,18 +200,12 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
 
         if (solidParentCenter.HasValue)
         {
-            if (!_dict.TryGetValue(chunkPos, out var chunk))
-            {
-                chunk = new Chunk { ChunkPos = chunkPos };
-                _dict[chunkPos] = chunk;
-            }
+            var chunk = GetOrCreateChunk(chunkPos);
             var node = Graph.AddGrowing(chunkPos, tx, ty, gtx, gty,
                 solidParentCenter.Value, CellCenter(gtx, gty),
                 MovementConfig.Current.SproutLifetime);
             node.Type = type;
-            chunk.Tiles[tx, ty].State  = TileState.Sprouting;
-            chunk.Tiles[tx, ty].Type   = type;
-            chunk.Tiles[tx, ty].Sprout = node;
+            WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
             return node;
         }
 
@@ -205,9 +233,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // Foam decay runs unconditionally each frame — its lifecycle is
         // independent of sprout finalization. Do it first so a foam cell that
         // expires this frame is broken before subsequent passes (impact / damage)
-        // try to read it as solid. Lambda wraps BreakCell to discard the bool
-        // return (Action<int,int> expects void).
-        Foam.Tick(dt, (gx, gy) => BreakCell(gx, gy));
+        // try to read it as solid.
+        Foam.Tick(dt, _breakCellAction);
 
         List<TileSproutNode> finalize = null;
         foreach (var n in Graph.Growing)
@@ -221,10 +248,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         foreach (var n in finalize)
         {
             if (_dict.TryGetValue(n.ChunkPos, out var chunk))
-            {
-                chunk.Tiles[n.Tx, n.Ty].State  = TileState.Solid;
-                chunk.Tiles[n.Tx, n.Ty].Sprout = null;
-            }
+                WriteTile(chunk, n.Tx, n.Ty, TileState.Solid, chunk.Tiles[n.Tx, n.Ty].Type, null);
             // Foam tiles get a decay timer registered the moment they finalize;
             // see FoamDecay. Other types never enter the decay map.
             if (n.Type == TileType.Foam)
@@ -240,14 +264,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                     continue;
 
                 // Materialize the chunk + tile state now that the child is physical.
-                if (!_dict.TryGetValue(child.ChunkPos, out var childChunk))
-                {
-                    childChunk = new Chunk { ChunkPos = child.ChunkPos };
-                    _dict[child.ChunkPos] = childChunk;
-                }
-                childChunk.Tiles[child.Tx, child.Ty].State  = TileState.Sprouting;
-                childChunk.Tiles[child.Tx, child.Ty].Type   = child.Type;
-                childChunk.Tiles[child.Tx, child.Ty].Sprout = child;
+                var childChunk = GetOrCreateChunk(child.ChunkPos);
+                WriteTile(childChunk, child.Tx, child.Ty, TileState.Sprouting, child.Type, child);
             }
         }
     }
@@ -278,7 +296,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         if (!_dict.TryGetValue(chunkPos, out var chunk)) return false;
         if (!chunk.Tiles[tx, ty].IsSolid) return false;
         var brokenType = chunk.Tiles[tx, ty].Type;
-        chunk.Tiles[tx, ty].IsSolid = false;
+        // Empty the cell (journaled). Type is preserved in the prior-state record so a
+        // restore brings the material back; the live cell's Type is irrelevant once Empty.
+        WriteTile(chunk, tx, ty, TileState.Empty, brokenType, null);
         Damage.Clear(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
         // a foam tile broken early would still trigger another BreakCell when
@@ -293,5 +313,46 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     {
         var (gtx, gty) = WorldToGlobalCell(worldX, worldY);
         return BreakCell(gtx, gty);
+    }
+
+    // ── Snapshot / restore (roadmap goal 6) ─────────────────────────────────────
+    // Dense tile grid: a journal mark (rewound on restore). Sparse side-structures:
+    // value copies. Together these roll the whole terrain back to capture time.
+    public TerrainSnapshot CaptureTerrain() => new()
+    {
+        JournalMark = _journal.Mark,
+        Graph       = Graph.Capture(),
+        Damage      = Damage.Capture(),
+        Foam        = Foam.Capture(),
+        Impact      = Impact.Capture(),
+    };
+
+    public void RestoreTerrain(TerrainSnapshot s)
+    {
+        // 1. Roll the dense grid back by undoing journaled writes/creations past the
+        //    mark. RevertTile clears Sprout refs (re-linked in step 3).
+        _journal.RewindTo(s.JournalMark, RevertTile, pos => _dict.Remove(pos));
+
+        // 2. Restore the sparse structures by value.
+        Graph.Restore(s.Graph);
+        Damage.Restore(s.Damage);
+        Foam.Restore(s.Foam);
+        Impact.Restore(s.Impact);
+
+        // 3. Re-link tile→sprout refs. Every Growing node's cell is Sprouting at the
+        //    restored frame (grid and graph were captured together), so this rebuilds
+        //    the Tile.Sprout pointers the journal deliberately didn't carry.
+        foreach (var n in Graph.Growing)
+            if (_dict.TryGetValue(n.ChunkPos, out var chunk))
+                chunk.Tiles[n.Tx, n.Ty].Sprout = n;
+    }
+
+    private void RevertTile(Point chunkPos, int tx, int ty, TileState prevState, TileType prevType)
+    {
+        if (!_dict.TryGetValue(chunkPos, out var chunk)) return;
+        ref var t = ref chunk.Tiles[tx, ty];
+        t.State  = prevState;
+        t.Type   = prevType;
+        t.Sprout = null;   // re-linked in RestoreTerrain step 3 if this cell is Sprouting
     }
 }

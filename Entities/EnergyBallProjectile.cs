@@ -26,12 +26,23 @@ public class EnergyBallProjectile : Projectile
     private const float ArmDelay           = 0.03f;
     private const float KnockbackImpulse   = 280f;
 
-    private static int _nextHitId = 4_000_001;
-    private readonly int _hitId = System.Threading.Interlocked.Increment(ref _nextHitId);
+    private readonly int _hitId;
 
-    public EnergyBallProjectile(Vector2 pos, Vector2 dir)
-        : base(new PhysicsBody(Polygon.CreateRegular(4f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: Faction.Player)
+    public override EntityKind Kind => EntityKind.EnergyBall;
+
+    // _hitId is immutable (set once at construction); WriteState records it so
+    // Rehydrate can pass it back through the ctor. No ReadState override needed —
+    // the base body/stat restore is sufficient for a live-entity restore.
+    protected override void WriteState(ref EntitySnapshot s)
     {
+        base.WriteState(ref s);
+        s.HitId = _hitId;
+    }
+
+    public EnergyBallProjectile(Vector2 pos, Vector2 dir, int hitId, Faction owner)
+        : base(new PhysicsBody(Polygon.CreateRegular(4f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: owner)
+    {
+        _hitId = hitId;
         if (dir.LengthSquared() < 1e-4f) dir = Vector2.UnitX;
         dir.Normalize();
         Body.Velocity = dir * Speed;

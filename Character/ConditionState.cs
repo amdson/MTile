@@ -45,4 +45,20 @@ public class ConditionState
         flag = true;
         expire = currentFrame + durationFrames;
     }
+
+    // Snapshot/restore (roadmap goal 4 §E). All fields are value types, so a clone is
+    // a flat field-copy into a fresh instance — no aliasing back into the live state.
+    public ConditionState Clone() => (ConditionState)MemberwiseClone();
+
+    public void CopyFrom(ConditionState o)
+    {
+        Slash2Ready = o.Slash2Ready; Slash2ExpireFrame = o.Slash2ExpireFrame;
+        Slash3Ready = o.Slash3Ready; Slash3ExpireFrame = o.Slash3ExpireFrame;
+        AirSlash2Ready = o.AirSlash2Ready; AirSlash2ExpireFrame = o.AirSlash2ExpireFrame;
+        RecoveryActive = o.RecoveryActive; RecoveryExpireFrame = o.RecoveryExpireFrame;
+        GuardWindow = o.GuardWindow; GuardWindowExpireFrame = o.GuardWindowExpireFrame;
+        BlockEruptionArmed = o.BlockEruptionArmed;
+        BlockChargeTime = o.BlockChargeTime;
+        BlockChargeOrigin = o.BlockChargeOrigin;
+    }
 }

@@ -13,10 +13,10 @@ namespace MTile;
 // stage to load by name; the registry below is the canonical list.
 public sealed class Stage
 {
-    public string         Name;
-    public string         TerrainConfig;   // filename inside Levels/ — TerrainLoader handles the rest
-    public Vector2        PlayerSpawn;
-    public Action<Game1>  Populate;
+    public string             Name;
+    public string             TerrainConfig;   // filename inside Levels/ — TerrainLoader handles the rest
+    public Vector2            PlayerSpawn;
+    public Action<Simulation> Populate;
 }
 
 public static class Stages
@@ -56,17 +56,18 @@ public static class Stages
 
     // ─── populate implementations ─────────────────────────────────────────────
 
-    private static void PopulateStart(Game1 g)
+    private static void PopulateStart(Simulation g)
     {
         // Sinusoidal vertical bobber — tests landing on a vertically-moving surface.
         const float baseX = 180f, baseY = -140f, amp = 40f, period = 3f;
         var movingRect = new MovingRectangle(new Vector2(baseX, baseY), 64f, 16f);
         g.AddPlatform(movingRect, Color.SteelBlue);
-        float t1 = 0f;
-        g.AddTicker(dt => {
-            t1 += dt;
-            float y = baseY + amp * MathF.Sin(t1 * MathHelper.TwoPi / period);
-            movingRect.SetPosition(new Vector2(baseX, y), dt);
+        // Ticker receives ABSOLUTE elapsed sim time (not dt) so platform motion is a
+        // pure function of time — snapshot/restore just records the elapsed clock and
+        // platform pose, with no hidden closure accumulator (roadmap goal 4 §H).
+        g.AddTicker(t => {
+            float y = baseY + amp * MathF.Sin(t * MathHelper.TwoPi / period);
+            movingRect.SetPosition(new Vector2(baseX, y), Simulation.FixedDt);
         });
 
         // Ferris-wheel cluster — four blocks rotating 90° apart around a shared
@@ -81,15 +82,13 @@ public static class Stages
             blocks[i] = new MovingRectangle(pos, fw, fh);
             g.AddPlatform(blocks[i], Color.DarkOrange);
         }
-        float t2 = 0f;
-        g.AddTicker(dt => {
-            t2 += dt;
-            float wheelAngle = t2 * MathHelper.TwoPi / fperiod;
+        g.AddTicker(t => {
+            float wheelAngle = t * MathHelper.TwoPi / fperiod;
             for (int i = 0; i < count; i++)
             {
                 float angle = wheelAngle + i * MathHelper.TwoPi / count;
                 var pos = new Vector2(cx + radius * MathF.Cos(angle), cy + radius * MathF.Sin(angle));
-                blocks[i].SetPosition(pos, dt);
+                blocks[i].SetPosition(pos, Simulation.FixedDt);
             }
         });
 
@@ -106,7 +105,7 @@ public static class Stages
         g.SpawnEntity(EntityFactory.Stalker(new Vector2(180f, -200f)));
     }
 
-    private static void PopulateArena(Game1 g)
+    private static void PopulateArena(Simulation g)
     {
         // Floor at world y ≈ 96 (tile y=6); player spawn (64,0) is mid-arena and
         // drops cleanly to the floor. Walls at world x ≈ -192 and 320, ceiling at

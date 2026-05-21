@@ -16,10 +16,12 @@ public class CombatState
     public bool    HitstunActive;     public int HitstunExpireFrame;
     public bool    StunActive;        public int StunExpireFrame;
 
-    // Most-recent hit's energy + direction. Read by the stun-threshold check in
-    // OnHit and (later) by the guard-cone filter.
     public float   LastHitImpulse;    public int LastHitFrame;
-    public Vector2 LastHitDirection;
+
+    // Hoisted gates so callers can write `ctx.Combat?.BlocksAttack == true` instead
+    // of repeating raw flag checks at every action/movement precondition site.
+    public bool BlocksAttack => StunActive;
+    public bool BlocksJump   => HitstunActive || StunActive;
 
     // Guard (parry) — roadmap §1.5. GuardActive is the moment-to-moment "Shift
     // held + no L/R" gate, written by GuardAction.Enter/Exit. GuardCharged is the
@@ -54,10 +56,9 @@ public class CombatState
     private const float StunImpulseThreshold = 350f;
     private const int   StunFrames           = 18;
 
-    public void OnHitRegistered(int currentFrame, float impulse, Vector2 direction)
+    public void OnHitRegistered(int currentFrame, float impulse)
     {
         LastHitImpulse   = impulse;
-        LastHitDirection = direction;
         LastHitFrame     = currentFrame;
 
         int extension = HitstunActive ? ExtensionHitstunFrames : InitialHitstunFrames;
@@ -105,5 +106,18 @@ public class CombatState
             GuardCharged = true;
         }
         return true;
+    }
+
+    // Snapshot/restore (roadmap goal 4 §E). All fields are value types — a clone is
+    // a flat field-copy with no aliasing back into the live combat state.
+    public CombatState Clone() => (CombatState)MemberwiseClone();
+
+    public void CopyFrom(CombatState o)
+    {
+        HitstunActive = o.HitstunActive; HitstunExpireFrame = o.HitstunExpireFrame;
+        StunActive = o.StunActive; StunExpireFrame = o.StunExpireFrame;
+        LastHitImpulse = o.LastHitImpulse; LastHitFrame = o.LastHitFrame;
+        GuardActive = o.GuardActive;
+        GuardCharged = o.GuardCharged; GuardChargedExpireFrame = o.GuardChargedExpireFrame;
     }
 }

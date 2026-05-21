@@ -9,6 +9,11 @@ public class PlayerCharacter : IHittable
 {
     public const float Radius = 9.5f;
 
+    // Stable identity for snapshot/restore (IHittable.HittableId). Assigned by
+    // Simulation from its deterministic id counter, shared with entities.
+    public int Id;
+    public int HittableId => Id;
+
     public readonly PhysicsBody Body;
     // Owned visual. Game1 syncs Position each frame and calls Update + Draw.
     // Null in headless test contexts where rendering isn't needed.
@@ -24,7 +29,7 @@ public class PlayerCharacter : IHittable
     // for two-player combat (Game1.AddSecondaryPlayer / SimRunner.RunMulti) can be
     // re-tagged Enemy/Neutral and become a valid target through CombatSystem's
     // self-damage filter. Real solo play never touches this — the default stands.
-    public Faction Faction { get; set; } = MTile.Faction.Player;
+    public Faction Faction { get; set; } = MTile.Faction.Player1;
 
     // Combat stats. MaxHealth tuned so a Stalker takes ~4 lunges to down the
     // player; Mass divides incoming knockback impulses (heavier = less yeet).
@@ -84,13 +89,10 @@ public class PlayerCharacter : IHittable
         if (Mass > 0f) Body.Velocity += hit.KnockbackImpulse / Mass;
         _hitInvulnRemaining = HitInvulnDuration;
 
-        // Register the hit for hitstun (every hit) and stash impulse/direction
-        // for the stun-threshold check. Uses the raw KnockbackImpulse magnitude —
-        // independent of player Mass so the attack's "strength" reads consistently
-        // across players of different mass.
-        var dir = hit.KnockbackImpulse;
-        if (dir.LengthSquared() > 1e-4f) dir.Normalize();
-        _abilities.Combat.OnHitRegistered(_frame, hit.KnockbackImpulse.Length(), dir);
+        // Register the hit for hitstun (every hit) + the stun-threshold check.
+        // Uses raw KnockbackImpulse magnitude — independent of player Mass so the
+        // attack's "strength" reads consistently across players of different mass.
+        _abilities.Combat.OnHitRegistered(_frame, hit.KnockbackImpulse.Length());
     }
 
     // Called by Game1 on Health <= 0 to reset to a clean starting state. Cheaper
@@ -106,6 +108,9 @@ public class PlayerCharacter : IHittable
     
     private readonly PlayerAbilityState _abilities = new();
     private MovementState _currentState;
+    // Plain-data per-activation state for the current movement state (see MovementVars).
+    // Lives here (not on the flyweight state instances) so it's a single snapshot unit.
+    private MovementVars _moveVars;
 
     private readonly List<MovementState> _stateRegistry = new();
 
@@ -116,6 +121,10 @@ public class PlayerCharacter : IHittable
 
     private readonly List<ActionState> _actionRegistry = new();
     private ActionState _currentAction;
+    // Plain-data per-activation state for the action FSM — action-side analogue of
+    // _moveVars. Passed by ref into the current action's lifecycle, by `in` into its
+    // read-only hooks (modifiers/forces/draw). See ActionVars.
+    private ActionVars _actionVars;
     private readonly ActionState[] _actionHistory = new ActionState[HistorySize];
     private int _actionHistoryHead = 0;
     private readonly Func<int, ActionState> _getAction;
@@ -135,6 +144,23 @@ public class PlayerCharacter : IHittable
     // the player is actively building. Default is a far-past value so a fresh
     // PlayerCharacter (tests, secondary players) reads as "never built."
     public int LastTilePlacedFrame { get; set; } = int.MinValue / 2;
+
+    // Deterministic HitId source. Defaults to a private allocator (sufficient for
+    // solo play / single-player tests); Simulation overrides this with one shared
+    // across all players + entities so cross-source ids never collide.
+    public HitIdAllocator HitIds { get; set; } = new();
+
+    // Player-local block/eruption selection, driven by this player's own input
+    // (1-4 keys → block type; P → planner mode). Formerly global planner statics.
+    // Read by the eruption actions via EnvironmentContext, and by Simulation's
+    // drag-build + the HUD. Defaults mirror the old static defaults.
+    private TileType            _activeBlockType = TileType.Dirt;
+    private EruptionPlannerMode _eruptionMode    = EruptionPlannerMode.MassBall;
+    private bool                _wasPDown;
+    // Settable so Simulation can seed the initial selection from GameConfig;
+    // thereafter it's driven by this player's own input each frame.
+    public TileType            ActiveBlockType { get => _activeBlockType; set => _activeBlockType = value; }
+    public EruptionPlannerMode EruptionMode    => _eruptionMode;
 
     public MovementState GetPreviousState(int framesBack)
     {
@@ -239,12 +265,27 @@ public class PlayerCharacter : IHittable
         {
             float excess = Body.LastImpulseMagnitude - CrushImpulseThreshold;
             Health -= excess * CrushDamagePerImpulse;
-            _abilities.Combat.OnHitRegistered(_frame, Body.LastImpulseMagnitude, Vector2.Zero);
+            _abilities.Combat.OnHitRegistered(_frame, Body.LastImpulseMagnitude);
             _lastCrushFrame = _frame;
         }
 
         var input = controller.Current;
         var prev  = controller.GetPrevious(1);
+
+        // Block-picker + planner-mode selection from this player's own input.
+        // Number keys are level-triggered (re-assign harmlessly); P is edge-detected
+        // so a held key toggles once. Formerly interpreted in Game1/Simulation against
+        // global planner statics — now player-local and rollback-deterministic.
+        if (input.Num1) _activeBlockType = TileType.Stone;
+        if (input.Num2) _activeBlockType = TileType.Dirt;
+        if (input.Num3) _activeBlockType = TileType.Sand;
+        if (input.Num4) _activeBlockType = TileType.Foam;
+        if (input.P && !_wasPDown)
+            _eruptionMode = _eruptionMode == EruptionPlannerMode.PriorityField
+                ? EruptionPlannerMode.MassBall
+                : EruptionPlannerMode.PriorityField;
+        _wasPDown = input.P;
+
         _abilities.JumpJustPressed  = input.Space && !prev.Space;
         _abilities.UpJustPressed    = input.Up    && !prev.Up;
         _abilities.DownJustPressed  = input.Down  && !prev.Down;
@@ -268,6 +309,10 @@ public class PlayerCharacter : IHittable
             Hitboxes       = hitboxes,
             Hurtboxes      = hurtboxes,
             Spawner        = spawner,
+            Faction        = Faction,
+            HitIds         = HitIds,
+            EruptionMode   = _eruptionMode,
+            ActiveBlockType = _activeBlockType,
             Intents        = _intents,
             Condition      = _abilities.Condition,
             Combat         = _abilities.Combat,
@@ -291,11 +336,11 @@ public class PlayerCharacter : IHittable
             _abilities.HasDoubleJumped = false;
         }
 
-        if (!_currentState.CheckConditions(ctx, _abilities))
+        if (!_currentState.CheckConditions(ctx, _abilities, ref _moveVars))
         {
-            _currentState.Exit(ctx, _abilities);
+            _currentState.Exit(ctx, _abilities, ref _moveVars);
             _currentState = _stateRegistry.First(s => s is FallingState);
-            _currentState.Enter(ctx, _abilities);
+            _currentState.Enter(ctx, _abilities, ref _moveVars);
         }
 
         MovementState bestChoice = null;
@@ -304,7 +349,7 @@ public class PlayerCharacter : IHittable
         foreach (var state in _stateRegistry)
         {
             if (state == _currentState) continue;
-            
+
             if (state.CheckPreConditions(ctx, _abilities))
             {
                 if (state.PassivePriority > highestPriority)
@@ -317,19 +362,19 @@ public class PlayerCharacter : IHittable
 
         if (bestChoice != null && highestPriority > _currentState.ActivePriority)
         {
-            _currentState.Exit(ctx, _abilities);
+            _currentState.Exit(ctx, _abilities, ref _moveVars);
             _currentState = bestChoice;
-            _currentState.Enter(ctx, _abilities);
+            _currentState.Enter(ctx, _abilities, ref _moveVars);
         }
 
         // Action FSM selection moved BEFORE Movement.Update so the freshly-selected
         // action's modifiers are in effect when movement reads physics knobs this
         // same frame. Action.Update still runs after Movement.Update (below).
-        if (!_currentAction.CheckConditions(ctx, _abilities))
+        if (!_currentAction.CheckConditions(ctx, _abilities, ref _actionVars))
         {
-            _currentAction.Exit(ctx, _abilities);
+            _currentAction.Exit(ctx, _abilities, ref _actionVars);
             _currentAction = _actionRegistry.First(a => a is NullAction);
-            _currentAction.Enter(ctx, _abilities);
+            _currentAction.Enter(ctx, _abilities, ref _actionVars);
         }
 
         ActionState bestAction = null;
@@ -345,21 +390,21 @@ public class PlayerCharacter : IHittable
         }
         if (bestAction != null && bestActionPriority > _currentAction.ActivePriority)
         {
-            _currentAction.Exit(ctx, _abilities);
+            _currentAction.Exit(ctx, _abilities, ref _actionVars);
             _currentAction = bestAction;
-            _currentAction.Enter(ctx, _abilities);
+            _currentAction.Enter(ctx, _abilities, ref _actionVars);
         }
 
         // The current action declares its modifier scalars for this frame, then
         // movement reads them through ctx.Modifiers.
-        _currentAction.ApplyMovementModifiers(ref ctx.Modifiers);
+        _currentAction.ApplyMovementModifiers(ref ctx.Modifiers, in _actionVars);
 
-        _currentState.Update(ctx, _abilities);
+        _currentState.Update(ctx, _abilities, ref _moveVars);
 
         // Action gets to augment the body's force AFTER movement has written it but
         // BEFORE Action.Update — keeps Update free for FSM logic, lets the physics
         // augmentation live in its own dedicated hook.
-        _currentAction.ApplyActionForces(ctx);
+        _currentAction.ApplyActionForces(ctx, in _actionVars);
 
         // Apply gravity-scale modifier as a counter-force, identical in shape to
         // Entity.PreStep. With GravityScale = 1 this is a no-op; with 0.3 the body
@@ -367,7 +412,7 @@ public class PlayerCharacter : IHittable
         if (ctx.Modifiers.GravityScale != 1f)
             Body.AppliedForce += Gravity * (ctx.Modifiers.GravityScale - 1f);
 
-        _currentAction.Update(ctx, _abilities);
+        _currentAction.Update(ctx, _abilities, ref _actionVars);
 
         _historyHead = (_historyHead + 1) % HistorySize;
         _stateHistory[_historyHead] = _currentState;
@@ -385,6 +430,9 @@ public class PlayerCharacter : IHittable
     public string CurrentStateName => _currentState?.GetType().Name ?? "None";
     public MovementState CurrentState => _currentState;
     public ActionState CurrentAction => _currentAction;
+    // Per-activation action vars, exposed read-only so the renderer can pass them
+    // into CurrentAction.Draw (which now reads its sim state from ActionVars).
+    public ActionVars CurrentActionVars => _actionVars;
     public string CurrentActionName => _currentAction?.GetType().Name ?? "None";
     // Read-only exposure of intent-direction for debug overlays. Movement code reads
     // from _abilities directly; this exists so Game1 can render a facing indicator.
@@ -392,4 +440,102 @@ public class PlayerCharacter : IHittable
     // Defensive combat state — exposed for tests / HUD / debug overlays that
     // want to read HitstunActive, StunActive, LastHitImpulse, etc.
     public CombatState Combat => _abilities.Combat;
+
+    // ── Snapshot/restore (roadmap goal 4 §A) ────────────────────────────────────
+    // Capture the full per-player simulation state into a flat PlayerSnapshot. The
+    // two FSMs become registry indices; the per-activation data is the value-struct
+    // blobs; helper objects deep-copy their state. Render-only fields (Sprite) are
+    // excluded. The Controller is captured at the sim level, not here.
+    public PlayerSnapshot CaptureState()
+    {
+        return new PlayerSnapshot
+        {
+            Id                  = Id,
+            Body                = BodyState.Capture(Body),
+            Health              = Health,
+            HitInvulnRemaining  = _hitInvulnRemaining,
+            LastCrushFrame      = _lastCrushFrame,
+            Frame               = _frame,
+            LastTilePlacedFrame = LastTilePlacedFrame,
+            StateIndex          = _stateRegistry.IndexOf(_currentState),
+            ActionIndex         = _actionRegistry.IndexOf(_currentAction),
+            StateHistory        = MapStateRing(_stateHistory),
+            ActionHistory       = MapActionRing(_actionHistory),
+            HistoryHead         = _historyHead,
+            ActionHistoryHead   = _actionHistoryHead,
+            MoveVars            = _moveVars,
+            ActionVars          = _actionVars,
+            Abilities           = _abilities.Clone(),
+            Parser              = _inputParser.Capture(),
+            Intents             = _intents.Capture(),
+            Eruption            = EruptionAction.CaptureGesture(),
+            ActiveBlockType     = _activeBlockType,
+            EruptionMode        = _eruptionMode,
+            WasPDown            = _wasPDown,
+        };
+    }
+
+    public void RestoreState(in PlayerSnapshot s)
+    {
+        Id                  = s.Id;
+        s.Body.RestoreInto(Body);
+        Health              = s.Health;
+        _hitInvulnRemaining = s.HitInvulnRemaining;
+        _lastCrushFrame     = s.LastCrushFrame;
+        _frame              = s.Frame;
+        LastTilePlacedFrame = s.LastTilePlacedFrame;
+
+        _currentState  = _stateRegistry[s.StateIndex];
+        _currentAction = _actionRegistry[s.ActionIndex];
+        UnmapStateRing(s.StateHistory, _stateHistory);
+        UnmapActionRing(s.ActionHistory, _actionHistory);
+        _historyHead       = s.HistoryHead;
+        _actionHistoryHead = s.ActionHistoryHead;
+
+        _moveVars   = s.MoveVars;
+        _actionVars = s.ActionVars;
+        _abilities.CopyFrom(s.Abilities);
+        _inputParser.Restore(s.Parser);
+        _intents.Restore(s.Intents);
+        EruptionAction.RestoreGesture(s.Eruption);
+
+        _activeBlockType = s.ActiveBlockType;
+        _eruptionMode    = s.EruptionMode;
+        _wasPDown        = s.WasPDown;
+
+        // The restored body keeps only its Maintained (hard) contacts; the soft
+        // contacts are gone, so every movement state's transient contact-ref cache is
+        // now stale. Null them all so the active state's idempotent Ensure… rebuilds
+        // its contact next Update from the restored pose (see ResetTransient).
+        foreach (var st in _stateRegistry) st.ResetTransient();
+    }
+
+    // The BlockEruptionAction flyweight in this player's registry — owner of the one
+    // reference-type per-activation buffer (_pen/_samples) that needs a deep copy.
+    private BlockEruptionAction EruptionAction
+        => _actionRegistry.OfType<BlockEruptionAction>().First();
+
+    private int[] MapStateRing(MovementState[] ring)
+    {
+        var idx = new int[ring.Length];
+        for (int i = 0; i < ring.Length; i++) idx[i] = ring[i] == null ? -1 : _stateRegistry.IndexOf(ring[i]);
+        return idx;
+    }
+
+    private int[] MapActionRing(ActionState[] ring)
+    {
+        var idx = new int[ring.Length];
+        for (int i = 0; i < ring.Length; i++) idx[i] = ring[i] == null ? -1 : _actionRegistry.IndexOf(ring[i]);
+        return idx;
+    }
+
+    private void UnmapStateRing(int[] idx, MovementState[] ring)
+    {
+        for (int i = 0; i < ring.Length; i++) ring[i] = (idx == null || idx[i] < 0) ? null : _stateRegistry[idx[i]];
+    }
+
+    private void UnmapActionRing(int[] idx, ActionState[] ring)
+    {
+        for (int i = 0; i < ring.Length; i++) ring[i] = (idx == null || idx[i] < 0) ? null : _actionRegistry[idx[i]];
+    }
 }

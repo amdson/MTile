@@ -42,5 +42,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MTile.Core.csproj" />
+    <!-- WebRTC transport (pulls in SIPSorcery transitively; desktop-only). -->
+    <ProjectReference Include="..\MTile.Rtc\MTile.Rtc.csproj" />
   </ItemGroup>
 </Project>

@@ -126,4 +126,47 @@ public class InputParser
             _activePressFrame = -1;
         }
     }
+
+    // ── Snapshot/restore (roadmap goal 4 §E) ────────────────────────────────────
+    // The parser's whole mutable state is the press-tracking + circle accumulators +
+    // idempotency guards. All value types, captured into a flat struct.
+    public InputParserState Capture() => new()
+    {
+        ActivePressFrame     = _activePressFrame,
+        ActivePressMouse     = _activePressMouse,
+        CumAngle             = _cumAngle,
+        LastDir              = _lastDir,
+        HasLastDir           = _hasLastDir,
+        LastPressEdgeEmitted = _lastPressEdgeEmitted,
+        LastClickEmitted     = _lastClickEmitted,
+        LastStabEmitted      = _lastStabEmitted,
+        LastCircleEmitted    = _lastCircleEmitted,
+    };
+
+    public void Restore(in InputParserState s)
+    {
+        _activePressFrame     = s.ActivePressFrame;
+        _activePressMouse     = s.ActivePressMouse;
+        _cumAngle             = s.CumAngle;
+        _lastDir              = s.LastDir;
+        _hasLastDir           = s.HasLastDir;
+        _lastPressEdgeEmitted = s.LastPressEdgeEmitted;
+        _lastClickEmitted     = s.LastClickEmitted;
+        _lastStabEmitted      = s.LastStabEmitted;
+        _lastCircleEmitted    = s.LastCircleEmitted;
+    }
+}
+
+// Flat snapshot of InputParser's mutable fields (roadmap goal 4 §E).
+public struct InputParserState
+{
+    public int     ActivePressFrame;
+    public Vector2 ActivePressMouse;
+    public float   CumAngle;
+    public Vector2 LastDir;
+    public bool    HasLastDir;
+    public int     LastPressEdgeEmitted;
+    public int     LastClickEmitted;
+    public int     LastStabEmitted;
+    public int     LastCircleEmitted;
 }

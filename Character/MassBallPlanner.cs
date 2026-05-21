@@ -18,7 +18,7 @@ namespace MTile;
 // stationary. Trade: less predictable count + shape, more "alive" feel.
 //
 // Toggle between this and the priority-field planner at runtime via the 'P'
-// key in Game1 (EruptionPlanner.CurrentMode).
+// key, tracked per-player (PlayerCharacter.EruptionMode) and passed into Plan.
 public static class MassBallPlanner
 {
     // Sim integration step. ~60Hz; ~50-200 steps over a typical gesture.
@@ -47,12 +47,6 @@ public static class MassBallPlanner
     private const float EpsAmount         = 0.001f;
     private const int   MaxSpillDepth     = 8;
 
-    public static readonly TileType DefaultType = TileType.Dirt;
-
-    // Runtime-mutable override matching EruptionPlanner.ActiveType. Game1's
-    // block picker writes here each frame; Plan reads at commit time.
-    public static TileType ActiveType = TileType.Dirt;
-
     // Read-only view of one sim run. Used both by Plan() to commit sprouts and
     // by BlockEruptionAction.Draw to preview the ball's path + landing cells
     // mid-gesture. Created via Simulate(); SproutCells co  dmes back in the same
@@ -63,7 +57,7 @@ public static class MassBallPlanner
         public readonly List<(int gtx, int gty)> SproutCells = new();
     }
 
-    public static void Plan(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget)
+    public static void Plan(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget, TileType activeType)
     {
         var sim = Simulate(chunks, origin, samples, budget);
 
@@ -85,7 +79,7 @@ public static class MassBallPlanner
         });
 
         foreach (var (gtx, gty) in sim.SproutCells)
-            chunks.TryRequestTile(gtx, gty, ActiveType);
+            chunks.TryRequestTile(gtx, gty, activeType);
     }
 
     // Pure simulation — no side effects on the world. Reads chunk state for the

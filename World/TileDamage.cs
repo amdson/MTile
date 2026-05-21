@@ -52,4 +52,15 @@ public class TileDamage
 
     // Iterate damaged cells. For debug overlays / cracks rendering.
     public IEnumerable<KeyValuePair<(int gtx, int gty), float>> Damaged => _hp;
+
+    // Snapshot/restore (roadmap goal 6). Sparse + value-typed, so a dict copy is a
+    // full deep copy with no aliasing into the live store.
+    public Dictionary<(int gtx, int gty), float> Capture() => new(_hp);
+
+    public void Restore(Dictionary<(int gtx, int gty), float> src)
+    {
+        _hp.Clear();
+        if (src == null) return;
+        foreach (var kv in src) _hp[kv.Key] = kv.Value;
+    }
 }

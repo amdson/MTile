@@ -37,9 +37,10 @@ public class SimPlayer
     public Vector2     StartVelocity { get; init; } = Vector2.Zero;
     public InputScript Script        { get; init; } = InputScript.Always(default);
     // CombatSystem skips intersection when attacker.Faction == target.Faction.
-    // Solo play uses Player for both; multi-player tests typically tag opponents
-    // with Neutral or Enemy so cross-player hits actually register.
-    public Faction     Faction       { get; init; } = MTile.Faction.Player;
+    // Solo play uses Player1 for both; multi-player tests can give each player its
+    // own faction (Player1/Player2) so cross-player hits register, or tag opponents
+    // Neutral/Enemy.
+    public Faction     Faction       { get; init; } = MTile.Faction.Player1;
 }
 
 public class SimConfigMulti
@@ -117,10 +118,12 @@ public static class SimRunner
         var traces  = new List<SimFrame>[n];
         var lastStates = new string[n];
         var prevs   = new SimFrame?[n];
+        // Shared HitId source across all players so cross-player attack ids are unique.
+        var hitIds = new HitIdAllocator();
 
         for (int i = 0; i < n; i++)
         {
-            players[i] = new PlayerCharacter(cfg.Players[i].StartPosition);
+            players[i] = new PlayerCharacter(cfg.Players[i].StartPosition) { HitIds = hitIds };
             players[i].Body.Velocity = cfg.Players[i].StartVelocity;
             players[i].Faction       = cfg.Players[i].Faction;
             ctrls[i] = new Controller();
@@ -131,6 +134,7 @@ public static class SimRunner
 
         var hitboxes  = new HitboxWorld();
         var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
 
         for (int f = 0; f < cfg.Frames; f++)
         {
@@ -156,7 +160,7 @@ public static class SimRunner
                 fy[i] = players[i].Body.AppliedForce.Y;
             }
 
-            CombatSystem.Apply(cfg.Terrain, hitboxes, hurtboxes);
+            combat.Apply(cfg.Terrain, hitboxes, hurtboxes);
 
             PhysicsWorld.StepSwept(bodies, cfg.Terrain, cfg.Dt, cfg.Gravity);
 

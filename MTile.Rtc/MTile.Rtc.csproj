@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Desktop-only WebRTC transport (pure C#, via SIPSorcery). Separated from
+       MTile.Core so the browser/KNI build never tries to pull in sockets, and so
+       both MTile.Desktop and MTile.Tests can use it. Bridges the transport-agnostic
+       RollbackSession (in Core) to a real RTCPeerConnection + DataChannel. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>MTile.Rtc</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SIPSorcery" Version="10.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MTile.Core.csproj" />
+  </ItemGroup>
+
+</Project>

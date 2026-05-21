@@ -330,10 +330,13 @@ public static class PhysicsWorld
                 return;
             }
         }
+        // Maintained: these solver-owned resting contacts persist across frames and
+        // are the only constraints a snapshot needs to capture (see PhysicsContact).
         body.Constraints.Add(new SurfaceDistance(resolvedPos, normal, Epsilon)
         {
             SurfaceVelocity = surfaceVelocity,
             Friction = friction,
+            Maintained = true,
         });
     }
 

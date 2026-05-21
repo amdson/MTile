@@ -28,21 +28,21 @@ public enum EruptionPlannerMode { PriorityField, MassBall }
 // (which is what the user wants — the eruption energy is "absorbed" by terrain).
 public static class EruptionPlanner
 {
-    // Runtime planner-mode selector. BlockEruptionAction.Exit calls Plan(),
-    // which dispatches to the chosen implementation. Defaults to PriorityField.
-    public static EruptionPlannerMode CurrentMode = EruptionPlannerMode.MassBall;
+    // Debug-render flag, mirrored from GameConfig.DebugDrawMassBall each frame by
+    // Game1. Read by BlockEruptionAction to decide whether to compute the mass-ball
+    // preview. NOT sim-affecting — the preview (MassBallPlanner.Simulate) has no
+    // world side effects — so it can safely stay a render-config static.
+    public static bool DebugDrawMassBall = true;
 
-    // Mirrored from GameConfig.DebugDrawMassBall each frame by Game1.Update.
-    // BlockEruptionAction.Draw reads it directly — keeps the config-reading
-    // surface area limited to Game1 while still letting actions consult it.
-    public static bool DebugDrawMassBall = false;
-
-    public static void Plan(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget)
+    // Stateless: mode + material come from the caller (the player's selection),
+    // not from planner statics — see EnvironmentContext.EruptionMode/ActiveBlockType.
+    public static void Plan(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples,
+                            int budget, EruptionPlannerMode mode, TileType activeType)
     {
-        if (CurrentMode == EruptionPlannerMode.MassBall)
-            MassBallPlanner.Plan(chunks, origin, samples, budget);
+        if (mode == EruptionPlannerMode.MassBall)
+            MassBallPlanner.Plan(chunks, origin, samples, budget, activeType);
         else
-            PlanPriorityField(chunks, origin, samples, budget);
+            PlanPriorityField(chunks, origin, samples, budget, activeType);
     }
 
     // Per-sample base radius in pixels. Tuned so a stationary pen covers ~3 tiles
@@ -54,16 +54,7 @@ public static class EruptionPlanner
     private const float RefSpeed        = 120f;
     private const float MinSpeed        = 20f;   // floor so a near-stationary sample doesn't blow radius up
 
-    // Default tile type for eruption-spawned blocks. Sprout-spawned tiles default
-    // to Stone in the existing code path; for the eruption move we override to Dirt.
-    public static readonly TileType DefaultType = TileType.Dirt;
-
-    // Runtime-mutable override used by Game1's block picker (1/2/3/4 number keys).
-    // Each eruption release reads this once when computing the type to pass to
-    // TryRequestTile. Game1 syncs it from _activeBlockType every Update.
-    public static TileType ActiveType = TileType.Dirt;
-
-    private static void PlanPriorityField(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget)
+    private static void PlanPriorityField(ChunkMap chunks, Vector2 origin, IReadOnlyList<PathSample> samples, int budget, TileType activeType)
     {
         if (budget <= 0 || samples == null || samples.Count == 0) return;
 
@@ -142,7 +133,7 @@ public static class EruptionPlanner
 
         foreach (var (gtx, gty) in picks)
         {
-            chunks.TryRequestTile(gtx, gty, ActiveType);
+            chunks.TryRequestTile(gtx, gty, activeType);
         }
     }
 }

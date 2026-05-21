@@ -23,7 +23,7 @@ public static class Effects
             p.Velocity        = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * spd;
             p.Acceleration    = new Vector2(0f, 200f);
             p.MaxLife         = 0.4f + (float)_rng.NextDouble() * 0.3f;
-            p .Life            = p.MaxLife;
+            p.Life            = p.MaxLife;
             p.StartColor      = color;
             p.EndColor        = color * 0f;
             p.StartSize       = 3f;

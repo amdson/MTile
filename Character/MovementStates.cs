@@ -9,9 +9,9 @@ public class JumpingState : MovementState
     public override int ActivePriority => 50;
     public override int PassivePriority => 30;
 
-    private bool _jumpReleased;
-    private float _timeInState;
     private FloatingSurfaceDistance _source;
+
+    public override void ResetTransient() => _source = null;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -19,38 +19,31 @@ public class JumpingState : MovementState
         // Hitstun gate: a player just hit can't immediately jump out of the followup.
         // Movement otherwise stays free — hitstun ONLY blocks the recovery option that
         // resets vertical position cheaply.
-        if (ctx.Combat?.HitstunActive == true) return false;
-        if (ctx.Combat?.StunActive    == true) return false;
+        if (ctx.Combat?.BlocksJump == true) return false;
         // Low ceiling (≤ 2 tiles) overhead: head would smack — defer to CoveredJumpState.
         if (ctx.TryGetCeiling(out var ceiling)
             && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
         return true;
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        if (_jumpReleased || _timeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
+        if (vars.JumpReleased || vars.TimeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
         // The jump is anchored to its source surface. Once the body has risen out
         // of the (wider-than-Standing) probe window, the "relative-to-source" frame
         // no longer means anything — end the jump and let Falling take over.
         return TryFindSource(ctx, out _);
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _timeInState = 0f;
-        _jumpReleased = !ctx.Input.Space;
+        vars.TimeInState = 0f;
+        vars.JumpReleased = !ctx.Input.Space;
 
         // Replace any pre-existing FSD (e.g. StandingState's _ground) with our own
         // source FSD: same kind of contact, just tuned for an airborne body.
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
-        if (TryFindSource(ctx, out _source))
-        {
-            // Airborne — no tangential coupling to the source surface, else friction
-            // would dominate the gentle air-drag tangential dynamics.
-            _source.Friction = 0f;
-            ctx.Body.Constraints.Add(_source);
-        }
+        EnsureSource(ctx);
 
         // Vertical velocity is set *relative* to the source surface, not added to
         // the body's current vy. Adding to the current velocity produces pathological
@@ -59,16 +52,31 @@ public class JumpingState : MovementState
         ctx.Body.Velocity.Y = sourceVy + MovementConfig.Current.JumpVelocity;
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (_source != null) ctx.Body.Constraints.Remove(_source);
         _source = null;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    // Idempotent source-FSD acquisition — see StandingState.EnsureGround. No-op in
+    // normal play (Enter established it); rebuilds after a restore drops it.
+    private void EnsureSource(EnvironmentContext ctx)
     {
-        _timeInState += ctx.Dt;
-        if (!ctx.Input.Space) _jumpReleased = true;
+        if (_source != null) return;
+        if (TryFindSource(ctx, out _source))
+        {
+            // Airborne — no tangential coupling to the source surface, else friction
+            // would dominate the gentle air-drag tangential dynamics.
+            _source.Friction = 0f;
+            ctx.Body.Constraints.Add(_source);
+        }
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        EnsureSource(ctx);
+        vars.TimeInState += ctx.Dt;
+        if (!ctx.Input.Space) vars.JumpReleased = true;
 
         // Refresh the source FSD's pose so the body's vertical motion is tracked
         // relative to a moving source surface throughout the jump.
@@ -84,7 +92,7 @@ public class JumpingState : MovementState
         var m   = ctx.Modifiers;
         var force = Vector2.Zero;
         force.Y += cfg.JumpHoldForce;
-        if (_timeInState <= ctx.Dt)
+        if (vars.TimeInState <= ctx.Dt)
             force.Y += cfg.JumpInitForce;
 
         force.X = AirControl.Apply(ctx,
@@ -108,54 +116,61 @@ public class RunningJumpState : MovementState
     public override int ActivePriority => 55;
     public override int PassivePriority => 35;
 
-    private bool _jumpReleased;
-    private float _timeInState;
     private FloatingSurfaceDistance _source;
+
+    public override void ResetTransient() => _source = null;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (!abilities.JumpJustPressed || !ctx.TryGetGround(out var ground)) return false;
-        if (ctx.Combat?.HitstunActive == true) return false;
-        if (ctx.Combat?.StunActive    == true) return false;
+        if (ctx.Combat?.BlocksJump == true) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
         if (ctx.TryGetCeiling(out var ceiling)
             && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
         return true;
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        if (_jumpReleased || _timeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
+        if (vars.JumpReleased || vars.TimeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
         return TryFindSource(ctx, out _);
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _timeInState = 0f;
-        _jumpReleased = !ctx.Input.Space;
+        vars.TimeInState = 0f;
+        vars.JumpReleased = !ctx.Input.Space;
 
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
-        if (TryFindSource(ctx, out _source))
-        {
-            _source.Friction = 0f;
-            ctx.Body.Constraints.Add(_source);
-        }
+        EnsureSource(ctx);
 
         // See JumpingState.Enter — vy is relative to source, not additive.
         float sourceVy = _source?.SurfaceVelocity.Y ?? 0f;
         ctx.Body.Velocity.Y = sourceVy + MovementConfig.Current.RunJumpVelocity;
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (_source != null) ctx.Body.Constraints.Remove(_source);
         _source = null;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    // Idempotent source-FSD acquisition — see JumpingState.EnsureSource.
+    private void EnsureSource(EnvironmentContext ctx)
     {
-        _timeInState += ctx.Dt;
-        if (!ctx.Input.Space) _jumpReleased = true;
+        if (_source != null) return;
+        if (TryFindSource(ctx, out _source))
+        {
+            _source.Friction = 0f;
+            ctx.Body.Constraints.Add(_source);
+        }
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        EnsureSource(ctx);
+        vars.TimeInState += ctx.Dt;
+        if (!ctx.Input.Space) vars.JumpReleased = true;
 
         if (_source != null && TryFindSource(ctx, out var refreshed))
         {
@@ -169,7 +184,7 @@ public class RunningJumpState : MovementState
         var m   = ctx.Modifiers;
         var force = Vector2.Zero;
         force.Y += cfg.RunJumpHoldForce;
-        if (_timeInState <= ctx.Dt)
+        if (vars.TimeInState <= ctx.Dt)
             force.Y += cfg.JumpInitForce;
 
         force.X = AirControl.Apply(ctx,
@@ -194,6 +209,8 @@ public class WallSlidingState : MovementState
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _ground;
 
+    public override void ResetTransient() { _wall = null; _ground = null; }
+
     public WallSlidingState(int wallDir)
     {
         _wallDir = wallDir;
@@ -208,7 +225,7 @@ public class WallSlidingState : MovementState
         return pressingIntoWall && !ctx.TryGetCeiling(out _) && !IsActuallyGrounded(ctx) && ctx.TryGetWall(_wallDir, out _);
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         bool pressingIntoWall = (_wallDir == 1 && ctx.Input.Right) || (_wallDir == -1 && ctx.Input.Left);
         return pressingIntoWall && !ctx.TryGetCeiling(out _) && !IsActuallyGrounded(ctx) && ctx.TryGetWall(_wallDir, out _);
@@ -228,21 +245,10 @@ public class WallSlidingState : MovementState
         return dist <= 2f * PlayerCharacter.Radius + 2f;
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        if (ctx.TryGetWall(_wallDir, out var contact))
-        {
-            _wall = contact;
-            ctx.Body.Constraints.Add(_wall);
-        }
-        if (ctx.TryGetGround(out var ground))
-        {
-            _ground = ground;
-            ctx.Body.Constraints.Add(_ground);
-        }
-    }
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+        => EnsureContacts(ctx);
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (_wall != null)
             ctx.Body.Constraints.Remove(_wall);
@@ -252,8 +258,25 @@ public class WallSlidingState : MovementState
         _ground = null;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    // Idempotent wall/ground acquisition — see StandingState.EnsureGround. Ground is
+    // optional (a wall-slide with no floor in range keeps _ground null).
+    private void EnsureContacts(EnvironmentContext ctx)
     {
+        if (_wall == null && ctx.TryGetWall(_wallDir, out var contact))
+        {
+            _wall = contact;
+            ctx.Body.Constraints.Add(_wall);
+        }
+        if (_ground == null && ctx.TryGetGround(out var ground))
+        {
+            _ground = ground;
+            ctx.Body.Constraints.Add(_ground);
+        }
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        EnsureContacts(ctx);
         if (ctx.TryGetWall(_wallDir, out var refreshed))
         {
             _wall.Position = refreshed.Position;
@@ -281,8 +304,6 @@ public class WallSlidingState : MovementState
 public class WallJumpingState : MovementState
 {
     private readonly int _wallDir;
-    private float _timeInState;
-    private bool _jumpReleased;
 
     public WallJumpingState(int wallDir)
     {
@@ -300,30 +321,29 @@ public class WallJumpingState : MovementState
         // pressing AWAY from it (falling alongside a wall, kicking off it). Both should fire WallJump.
         // The no-input case (`Space` with no arrow held) falls through to DoubleJumping.
         bool pressingHorizontal = ctx.Input.Left || ctx.Input.Right;
-        if (ctx.Combat?.HitstunActive == true) return false;
-        if (ctx.Combat?.StunActive    == true) return false;
+        if (ctx.Combat?.BlocksJump == true) return false;
         return pressingHorizontal && abilities.JumpJustPressed && ctx.TryGetWall(_wallDir, out _);
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        return !_jumpReleased && _timeInState < MovementConfig.Current.WallJumpMaxHoldTime;
+        return !vars.JumpReleased && vars.TimeInState < MovementConfig.Current.WallJumpMaxHoldTime;
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _timeInState = 0f;
-        _jumpReleased = !ctx.Input.Space;
-        
+        vars.TimeInState = 0f;
+        vars.JumpReleased = !ctx.Input.Space;
+
         int dirAwayFromWall = _wallDir == 1 ? -1 : 1;
         ctx.Body.Velocity = new Vector2(dirAwayFromWall * MovementConfig.Current.WallJumpInitialVelX, MovementConfig.Current.WallJumpInitialVelY);
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _timeInState += ctx.Dt;
+        vars.TimeInState += ctx.Dt;
         bool jumpHeld = ctx.Input.Space;
-        if (!jumpHeld) _jumpReleased = true;
+        if (!jumpHeld) vars.JumpReleased = true;
 
         var force = Vector2.Zero;
         force.Y += MovementConfig.Current.WallJumpHoldForce;
@@ -355,45 +375,41 @@ public class DoubleJumpingState : MovementState
     public override int ActivePriority => 60;
     public override int PassivePriority => 40;
 
-    private bool _jumpReleased;
-    private float _timeInState;
-
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         // No wall check: when the player IS pressing into a wall, WallJumpingState wins the tie
         // via earlier registration (same Passive=40, first-found wins). When they're not pressing
         // into a wall — e.g. dropping off a platform while holding the away direction — DoubleJump
         // is the right fire here.
-        if (ctx.Combat?.HitstunActive == true) return false;
-        if (ctx.Combat?.StunActive    == true) return false;
+        if (ctx.Combat?.BlocksJump == true) return false;
         return abilities.JumpJustPressed && !abilities.HasDoubleJumped && !ctx.TryGetGround(out _);
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        return !_jumpReleased && _timeInState < MovementConfig.Current.DoubleJumpMaxHoldTime;
+        return !vars.JumpReleased && vars.TimeInState < MovementConfig.Current.DoubleJumpMaxHoldTime;
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _timeInState = 0f;
-        _jumpReleased = !ctx.Input.Space;
+        vars.TimeInState = 0f;
+        vars.JumpReleased = !ctx.Input.Space;
         abilities.HasDoubleJumped = true;
-        
+
         // Kill existing vertical momentum entirely
         ctx.Body.Velocity.Y = MovementConfig.Current.DoubleJumpVelocity;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _timeInState += ctx.Dt;
-        if (!ctx.Input.Space) _jumpReleased = true;
+        vars.TimeInState += ctx.Dt;
+        if (!ctx.Input.Space) vars.JumpReleased = true;
 
         var cfg = MovementConfig.Current;
         var m   = ctx.Modifiers;
         var force = Vector2.Zero;
         force.Y += cfg.DoubleJumpHoldForce;
-        if (_timeInState <= ctx.Dt)
+        if (vars.TimeInState <= ctx.Dt)
             force.Y += cfg.DoubleJumpInitForce;
 
         force.X = AirControl.Apply(ctx,
@@ -414,19 +430,15 @@ public class DoubleJumpingState : MovementState
 // buffered variant is TBD). Replaces the old diagonal "ceiling jump" launch.
 public class CoveredJumpState : MovementState
 {
-    private enum Phase { SlidingOut, Jumping }
-
-    private int _openDir;
-    private float _slideSpeed;          // |horizontal velocity| at Enter, floored at MaxWalkSpeed — preserved through the slide
+    // Scalar per-activation state (OpenDir, SlideSpeed, CoveredPhase, SlideTime,
+    // JumpHoldTime, JumpReleased) lives in MovementVars now; only the soft-contact
+    // refs stay as transient instance caches (rebuilt by EnsureContacts).
     private SteeringRamp _ramp;
+    public override void ResetTransient() { _ramp = null; _ground = null; }
     private FloatingSurfaceDistance _ground;  // held through phase 1: the body keeps its standing
                                               // float height so the ceiling probe (anchored on the
                                               // head) doesn't slip off the overhead slab and fire
                                               // phase 2 prematurely. Removed on the phase-2 transition.
-    private Phase _phase;
-    private float _slideTime;
-    private float _jumpHoldTime;
-    private bool _jumpReleased;
 
     public override int ActivePriority  => MovementPriorities.CoveredJumpActive;
     public override int PassivePriority => MovementPriorities.CoveredJumpPassive;
@@ -480,35 +492,47 @@ public class CoveredJumpState : MovementState
         return TryPickOpenDir(ctx, out _, out _);
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        if (_phase == Phase.SlidingOut)
+        if (vars.CoveredPhase == CoveredJumpPhase.SlidingOut)
         {
             if (!ctx.Input.Space) return false;                                          // let go of jump → abort
-            if (ctx.Intent.CurrentHorizontal == -_openDir) return false;                 // reversing interrupts cleanly
-            return _slideTime < MovementConfig.Current.MaxCoveredSlideTime;              // stuck → bail to Falling
+            if (ctx.Intent.CurrentHorizontal == -vars.OpenDir) return false;             // reversing interrupts cleanly
+            return vars.SlideTime < MovementConfig.Current.MaxCoveredSlideTime;          // stuck → bail to Falling
         }
-        return !_jumpReleased && _jumpHoldTime < MovementConfig.Current.MaxJumpHoldTime;  // same as JumpingState
+        return !vars.JumpReleased && vars.JumpHoldTime < MovementConfig.Current.MaxJumpHoldTime;  // same as JumpingState
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        TryPickOpenDir(ctx, out _openDir, out var corner);
-        _slideSpeed = MathF.Max(MathF.Abs(ctx.Body.Velocity.X), MovementConfig.Current.MaxWalkSpeed);
-        _ramp = new SteeringRamp { Sense = SteeringSense.Under, ForwardDir = _openDir, Corner = corner };
-        ctx.Body.Constraints.Add(_ramp);
-        // Hold the ground constraint through phase 1 — see _ground.
-        if (ctx.TryGetGround(out var ground))
+        TryPickOpenDir(ctx, out vars.OpenDir, out _);
+        vars.SlideSpeed = MathF.Max(MathF.Abs(ctx.Body.Velocity.X), MovementConfig.Current.MaxWalkSpeed);
+        vars.CoveredPhase = CoveredJumpPhase.SlidingOut;
+        vars.SlideTime = 0f;
+        EnsureContacts(ctx, ref vars);
+        // HasDoubleJumped intentionally left untouched (already false from being grounded) — this jump is "free".
+    }
+
+    // Idempotent contact acquisition for the slide-out phase. The ramp's corner is
+    // re-derived from vars.OpenDir (same source TryPickOpenDir used), and the ground
+    // contact is held through phase 1 — see _ground. No-op once phase 2 (Jumping)
+    // has dropped both. Rebuilds after a restore drops the soft contacts.
+    private void EnsureContacts(EnvironmentContext ctx, ref MovementVars vars)
+    {
+        if (vars.CoveredPhase != CoveredJumpPhase.SlidingOut) return;
+        if (_ramp == null && CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, vars.OpenDir, out var corner))
+        {
+            _ramp = new SteeringRamp { Sense = SteeringSense.Under, ForwardDir = vars.OpenDir, Corner = corner };
+            ctx.Body.Constraints.Add(_ramp);
+        }
+        if (_ground == null && ctx.TryGetGround(out var ground))
         {
             _ground = ground;
             ctx.Body.Constraints.Add(_ground);
         }
-        _phase = Phase.SlidingOut;
-        _slideTime = 0f;
-        // HasDoubleJumped intentionally left untouched (already false from being grounded) — this jump is "free".
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (_ramp   != null) ctx.Body.Constraints.Remove(_ramp);
         if (_ground != null) ctx.Body.Constraints.Remove(_ground);
@@ -516,13 +540,14 @@ public class CoveredJumpState : MovementState
         _ground = null;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        EnsureContacts(ctx, ref vars);
         var cfg = MovementConfig.Current;
 
-        if (_phase == Phase.SlidingOut)
+        if (vars.CoveredPhase == CoveredJumpPhase.SlidingOut)
         {
-            _slideTime += ctx.Dt;
+            vars.SlideTime += ctx.Dt;
 
             // Flip to the jump the instant nothing's overhead.
             if (!ctx.TryGetCeiling(out _))
@@ -535,15 +560,15 @@ public class CoveredJumpState : MovementState
                 // Add (don't overwrite) so a moving floor's vertical velocity carries
                 // into the launch — see JumpingState.Enter.
                 ctx.Body.Velocity.Y += cfg.JumpVelocity;
-                _phase = Phase.Jumping;
-                _jumpHoldTime = 0f;
-                _jumpReleased = !ctx.Input.Space;
+                vars.CoveredPhase = CoveredJumpPhase.Jumping;
+                vars.JumpHoldTime = 0f;
+                vars.JumpReleased = !ctx.Input.Space;
                 ctx.Body.AppliedForce = Vector2.Zero;
                 return;
             }
 
             // Keep the ramp anchored on the ceiling's exit edge (it'll go inert on its own once the body's past it).
-            if (CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, _openDir, out var freshCorner))
+            if (CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, vars.OpenDir, out var freshCorner))
                 _ramp.Corner = freshCorner;
 
             // Refresh the ground constraint's pose so a sloped/stepped floor doesn't fight the spring.
@@ -573,19 +598,19 @@ public class CoveredJumpState : MovementState
             // Walk toward the open side, preserving entry speed (WalkAccel·dt ≈ MaxWalkSpeed ⇒ a
             // from-standstill press leaves the overhang in one frame). The Under ramp's redirect
             // (in StepSwept) handles the head if the body rises into the overhang's bottom edge.
-            float along = _openDir * ctx.Body.Velocity.X;
-            slideForce.X += _openDir * AirControl.SoftClampVelocity(along, _slideSpeed, cfg.WalkAccel, ctx.Dt);
+            float along = vars.OpenDir * ctx.Body.Velocity.X;
+            slideForce.X += vars.OpenDir * AirControl.SoftClampVelocity(along, vars.SlideSpeed, cfg.WalkAccel, ctx.Dt);
             ctx.Body.AppliedForce = slideForce;
             return;
         }
 
         // Phase.Jumping — verbatim ground jump.
-        _jumpHoldTime += ctx.Dt;
-        if (!ctx.Input.Space) _jumpReleased = true;
+        vars.JumpHoldTime += ctx.Dt;
+        if (!ctx.Input.Space) vars.JumpReleased = true;
 
         var force = Vector2.Zero;
         force.Y += cfg.JumpHoldForce;
-        if (_jumpHoldTime <= ctx.Dt)
+        if (vars.JumpHoldTime <= ctx.Dt)
             force.Y += cfg.JumpInitForce;
         force.X += AirControl.Apply(ctx, cfg.AirAccel, cfg.MaxAirSpeed, cfg.AirDrag);
 
@@ -610,7 +635,9 @@ public class ParkourState : MovementState
     private readonly int _wallDir;
     private SteeringRamp _overRamp;    // from an exposed upper corner (vault), or null
     private SteeringRamp _underRamp;   // from an exposed lower corner (overcrop/duck), or null
-    private float _entrySpeed;         // |horizontal velocity| at Enter, floored at MaxWalkSpeed — the maneuver preserves this
+
+    public override void ResetTransient() { _overRamp = null; _underRamp = null; }
+    // _entrySpeed (preserved entry speed) now lives in MovementVars.EntrySpeed.
 
     public ParkourState(int wallDir) => _wallDir = wallDir;
 
@@ -627,7 +654,7 @@ public class ParkourState : MovementState
             || (ctx.TryGetExposedLowerCorner(_wallDir, out _) && !ctx.Intent.JumpJustPressed);
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         // Releasing direction interrupts cleanly (velocity was never snapped, so it just falls through).
         if (ctx.Intent.CurrentHorizontal != _wallDir) return false;
@@ -638,23 +665,23 @@ public class ParkourState : MovementState
             || (_underRamp != null && _underRamp.Weight > SteeringRamp.WeightEpsilon);
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         abilities.HasDoubleJumped = false;
         // Preserve whatever horizontal speed the body came in with (floored at walking speed so a
         // from-rest / flush-against-the-obstacle entry still has a target to drive toward).
-        _entrySpeed = MathF.Max(MathF.Abs(ctx.Body.Velocity.X), MovementConfig.Current.MaxWalkSpeed);
+        vars.EntrySpeed = MathF.Max(MathF.Abs(ctx.Body.Velocity.X), MovementConfig.Current.MaxWalkSpeed);
         Reconcile(ctx);
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (_overRamp  != null) ctx.Body.Constraints.Remove(_overRamp);
         if (_underRamp != null) ctx.Body.Constraints.Remove(_underRamp);
         _overRamp = _underRamp = null;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         Reconcile(ctx);
         if (_overRamp == null && _underRamp == null) { ctx.Body.AppliedForce = Vector2.Zero; return; }
@@ -680,7 +707,7 @@ public class ParkourState : MovementState
 
         Vector2 dir  = engaged == 1 ? solo.SurfaceDir : new Vector2(_wallDir, 0f);
         float   cosT = engaged == 1 ? MathF.Max(MathF.Cos(solo.ThetaStar), MinClimbCos) : 1f;
-        float   targetAlong = _entrySpeed / cosT;
+        float   targetAlong = vars.EntrySpeed / cosT;
         force += dir * AirControl.SoftClampVelocity(Vector2.Dot(ctx.Body.Velocity, dir), targetAlong, cfg.WalkAccel, ctx.Dt);
 
         // Cap |velocity| at the target only when steering off a single surface (so the climb force
@@ -727,7 +754,8 @@ public class LedgeGrabState : MovementState
     private readonly int _wallDir;
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _floor;
-    private float _timeInState;
+
+    public override void ResetTransient() { _wall = null; _floor = null; }
 
     public LedgeGrabState(int wallDir) => _wallDir = wallDir;
 
@@ -753,18 +781,18 @@ public class LedgeGrabState : MovementState
         return false;
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         bool pressingAway = (_wallDir == 1 && ctx.Input.Left) || (_wallDir == -1 && ctx.Input.Right);
         if (pressingAway) return false;
         // Grace period: drop-in enters with Down still held, so ignore Down for first ~3 frames.
-        if (_timeInState < 0.1f) return true;
+        if (vars.TimeInState < 0.1f) return true;
         return !ctx.Input.Down;
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _timeInState = 0f;
+        vars.TimeInState = 0f;
 
         // Prefer above-head corner (approach from side); fall back to foot-level (drop from above)
         Vector2 cornerEdge;
@@ -778,30 +806,15 @@ public class LedgeGrabState : MovementState
 
         ctx.Body.Velocity = Vector2.Zero;
 
-        // Wall pin: use detected wall, or derive from corner X when approaching from above
-        if (!ctx.TryGetWall(_wallDir, out _wall))
-        {
-            _wall = new FloatingSurfaceDistance(
-                new Vector2(cornerEdge.X, ctx.Body.Position.Y),
-                new Vector2(-_wallDir, 0f),
-                PlayerCharacter.Radius);
-        }
-
-        _floor = new FloatingSurfaceDistance(
-            new Vector2(ctx.Body.Position.X, cornerEdge.Y + 2f * PlayerCharacter.Radius),
-            new Vector2(0f, -1f),
-            PlayerCharacter.Radius);
-
-        ctx.Body.Constraints.Add(_wall);
-        ctx.Body.Constraints.Add(_floor);
-
         abilities.IsLedgeGrabbing  = true;
         abilities.GrabWallDir      = _wallDir;
         abilities.GrabbedCorner    = cornerEdge;
         abilities.HasDoubleJumped  = false;
+
+        EnsureContacts(ctx, abilities);
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (_wall  != null) ctx.Body.Constraints.Remove(_wall);
         if (_floor != null) ctx.Body.Constraints.Remove(_floor);
@@ -811,9 +824,35 @@ public class LedgeGrabState : MovementState
         abilities.GrabWallDir     = 0;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    // Idempotent pin acquisition, rebuilt from the (snapshotted) GrabbedCorner.
+    // Wall pin: detected wall, or derived from corner X when approaching from above.
+    // Floor pin: a horizontal plane two radii below the corner. No-op in normal play.
+    private void EnsureContacts(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        _timeInState += ctx.Dt;
+        var cornerEdge = abilities.GrabbedCorner;
+        if (_wall == null)
+        {
+            if (!ctx.TryGetWall(_wallDir, out _wall))
+                _wall = new FloatingSurfaceDistance(
+                    new Vector2(cornerEdge.X, ctx.Body.Position.Y),
+                    new Vector2(-_wallDir, 0f),
+                    PlayerCharacter.Radius);
+            ctx.Body.Constraints.Add(_wall);
+        }
+        if (_floor == null)
+        {
+            _floor = new FloatingSurfaceDistance(
+                new Vector2(ctx.Body.Position.X, cornerEdge.Y + 2f * PlayerCharacter.Radius),
+                new Vector2(0f, -1f),
+                PlayerCharacter.Radius);
+            ctx.Body.Constraints.Add(_floor);
+        }
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        EnsureContacts(ctx, abilities);
+        vars.TimeInState += ctx.Dt;
         var cfg = MovementConfig.Current;
         float hangY  = abilities.GrabbedCorner.Y + PlayerCharacter.Radius;
         float error  = ctx.Body.Position.Y - hangY;
@@ -829,7 +868,8 @@ public class LedgePullState : MovementState
     private readonly int _wallDir;
     private PointForceContact _spring;
     private FloatingSurfaceDistance _ramp;
-    private float _timeInState;
+
+    public override void ResetTransient() { _spring = null; _ramp = null; }
 
     public LedgePullState(int wallDir) => _wallDir = wallDir;
 
@@ -841,11 +881,11 @@ public class LedgePullState : MovementState
         && abilities.IsLedgeGrabbing
         && abilities.GrabWallDir == _wallDir;
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (!ctx.Input.Up) return false;
         if (_spring == null) return false;
-        if (_timeInState >= MovementConfig.Current.MaxVaultTime) return false;
+        if (vars.TimeInState >= MovementConfig.Current.MaxVaultTime) return false;
 
         float cornerTopY = _spring.Position.Y;
         float cornerX    = _spring.Position.X;
@@ -856,20 +896,13 @@ public class LedgePullState : MovementState
         return !(atStandingHeight && pastCorner);
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _timeInState = 0f;
-
-        var cornerEdge = abilities.GrabbedCorner;
-        _spring = new PointForceContact(cornerEdge);
-        var rampNormal = new Vector2(-_wallDir * 0.5f, -0.5f);
-        _ramp = new FloatingSurfaceDistance(cornerEdge, rampNormal, 1000f);
-
-        ctx.Body.Constraints.Add(_spring);
-        ctx.Body.Constraints.Add(_ramp);
+        vars.TimeInState = 0f;
+        EnsureContacts(ctx, abilities);
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (_spring != null) ctx.Body.Constraints.Remove(_spring);
         if (_ramp   != null) ctx.Body.Constraints.Remove(_ramp);
@@ -877,9 +910,32 @@ public class LedgePullState : MovementState
         _ramp   = null;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    // Idempotent acquisition, rebuilt from the (snapshotted) GrabbedCorner. The
+    // spring lasts the whole pull; the ramp only applies until the body rises past
+    // the corner lip (Update removes it then) — so its rebuild is gated on the same
+    // height test, otherwise a restore taken after the ramp was dropped would wrongly
+    // re-add it. No-op in normal play.
+    private void EnsureContacts(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        _timeInState += ctx.Dt;
+        var cornerEdge = abilities.GrabbedCorner;
+        if (_spring == null)
+        {
+            _spring = new PointForceContact(cornerEdge);
+            ctx.Body.Constraints.Add(_spring);
+        }
+        bool rampApplies = ctx.Body.Position.Y >= cornerEdge.Y - 2f * PlayerCharacter.Radius;
+        if (_ramp == null && rampApplies)
+        {
+            var rampNormal = new Vector2(-_wallDir * 0.5f, -0.5f);
+            _ramp = new FloatingSurfaceDistance(cornerEdge, rampNormal, 1000f);
+            ctx.Body.Constraints.Add(_ramp);
+        }
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        EnsureContacts(ctx, abilities);
+        vars.TimeInState += ctx.Dt;
 
         float cornerTopY = _spring.Position.Y;
         var   cfg        = MovementConfig.Current;
@@ -910,11 +966,10 @@ public class LedgePullState : MovementState
 // body's no longer over any floor.
 public class DropdownState : MovementState
 {
-    private int _dropDir;
     private SteeringRamp _ramp;
-    private float _slideSpeed;
-    private float _slideTime;
-    private bool _exitingAirborne;   // set when CheckConditions detects the body just left the platform — Exit dampens Vx accordingly
+    // DropDir, SlideSpeed, SlideTime, ExitingAirborne now live in MovementVars.
+
+    public override void ResetTransient() => _ramp = null;
 
     public override int ActivePriority  => MovementPriorities.DropdownActive;
     public override int PassivePriority => MovementPriorities.DropdownPassive;
@@ -960,54 +1015,66 @@ public class DropdownState : MovementState
         return TryPickDropDir(ctx, out _, out _);
     }
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (!ctx.Input.Down) return false;
-        if (!ctx.TryGetGround(out _)) { _exitingAirborne = true; return false; }   // body's airborne ⇒ Falling takes over
-        return _slideTime < MovementConfig.Current.MaxDropdownTime;
+        if (!ctx.TryGetGround(out _)) { vars.ExitingAirborne = true; return false; }   // body's airborne ⇒ Falling takes over
+        return vars.SlideTime < MovementConfig.Current.MaxDropdownTime;
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        TryPickDropDir(ctx, out _dropDir, out var corner);
+        TryPickDropDir(ctx, out vars.DropDir, out _);
         // MaxWalkSpeed is the slide target — fast enough to clear the corner within MaxDropdownTime
         // from a standstill. Running entries keep their momentum since Update only applies force when
         // the body's slower than the target.
-        _slideSpeed = MovementConfig.Current.MaxWalkSpeed;
-        _ramp = new SteeringRamp { Sense = SteeringSense.Over, ForwardDir = _dropDir, Corner = corner };
-        ctx.Body.Constraints.Add(_ramp);
-        _slideTime = 0f;
-        _exitingAirborne = false;
+        vars.SlideSpeed = MovementConfig.Current.MaxWalkSpeed;
+        vars.SlideTime = 0f;
+        vars.ExitingAirborne = false;
+        EnsureRamp(ctx, vars.DropDir);
         // No FloatingSurfaceDistance: the body's leaving the surface, so don't spring it back up.
         // StandingState/CrouchedState's ground constraint was already removed on their Exit.
     }
 
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities)
+    // Idempotent Over-ramp acquisition; corner re-derived from dropDir (same source
+    // TryPickDropDir used). No-op in normal play; rebuilds after a restore drops it.
+    private void EnsureRamp(EnvironmentContext ctx, int dropDir)
+    {
+        if (_ramp != null) return;
+        if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, dropDir, out var corner))
+        {
+            _ramp = new SteeringRamp { Sense = SteeringSense.Over, ForwardDir = dropDir, Corner = corner };
+            ctx.Body.Constraints.Add(_ramp);
+        }
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (_ramp != null) ctx.Body.Constraints.Remove(_ramp);
         _ramp = null;
         // Soften the horizontal velocity on the slip-off so the drop lands close to the wall rather
         // than flinging the body forward at the full slide speed. Only apply when we exited via going
         // airborne (not on cancel via !Down or timeout).
-        if (_exitingAirborne)
+        if (vars.ExitingAirborne)
             ctx.Body.Velocity.X *= MovementConfig.Current.DropdownExitVelMult;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities)
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        _slideTime += ctx.Dt;
+        EnsureRamp(ctx, vars.DropDir);
+        vars.SlideTime += ctx.Dt;
         var cfg = MovementConfig.Current;
 
         // Refresh ramp anchor (the corner may shift slightly as the body crosses tile boundaries).
-        if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, _dropDir, out var freshCorner))
+        if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, vars.DropDir, out var freshCorner))
             _ramp.Corner = freshCorner;
 
         // Slide toward the edge, but never brake a faster-than-target body — a running entry should
         // keep its momentum through the slide. Gravity does the vertical work.
-        float along = _dropDir * ctx.Body.Velocity.X;
+        float along = vars.DropDir * ctx.Body.Velocity.X;
         float fx = 0f;
-        if (along < _slideSpeed)
-            fx = _dropDir * AirControl.SoftClampVelocity(along, _slideSpeed, cfg.WalkAccel, ctx.Dt);
+        if (along < vars.SlideSpeed)
+            fx = vars.DropDir * AirControl.SoftClampVelocity(along, vars.SlideSpeed, cfg.WalkAccel, ctx.Dt);
         ctx.Body.AppliedForce = new Vector2(fx, 0f);
     }
 }

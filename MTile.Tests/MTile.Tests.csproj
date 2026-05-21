@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\MTile.Core.csproj" />
+    <ProjectReference Include="..\MTile.Rtc\MTile.Rtc.csproj" />
   </ItemGroup>
 
 </Project>

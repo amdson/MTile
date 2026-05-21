@@ -54,7 +54,26 @@ public class StalkerEnemy : Entity
     private float   _stateTime;
     private int     _facing    = 1;
     private int     _hitId;
-    private static int _nextHitId = 50_000_001;   // distinct range for log clarity
+
+    public override EntityKind Kind => EntityKind.Stalker;
+
+    protected override void WriteState(ref EntitySnapshot s)
+    {
+        base.WriteState(ref s);
+        s.AIState   = (int)_state;
+        s.StateTime = _stateTime;
+        s.Facing    = _facing;
+        s.HitId     = _hitId;
+    }
+
+    protected override void ReadState(in EntitySnapshot s)
+    {
+        base.ReadState(in s);
+        _state     = (AIState)s.AIState;
+        _stateTime = s.StateTime;
+        _facing    = s.Facing;
+        _hitId     = s.HitId;
+    }
 
     public StalkerEnemy(Vector2 pos)
         : base(new PhysicsBody(Polygon.CreateRegular(9f, 6), pos), health: 1.5f)
@@ -95,7 +114,7 @@ public class StalkerEnemy : Entity
                 Body.Velocity.X = _facing * ChaseSpeed;
                 if (MathF.Abs(toPlayer.X) < LungeRange && MathF.Abs(toPlayer.Y) < LungeVerticalSlack)
                 {
-                    _hitId = Interlocked.Increment(ref _nextHitId);
+                    _hitId = spawner.HitIds.Next();
                     Transition(AIState.Telegraph);
                 }
                 break;

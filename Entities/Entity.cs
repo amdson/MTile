@@ -27,7 +27,18 @@ public class Entity : IHittable
     // Optional visual. When null, Game1 falls back to drawing the body polygon outline.
     public Sprite Sprite;
 
+    // Stable identity for snapshot/restore (roadmap goal 4 §G). Assigned once by
+    // Simulation when the entity is spawned, from a deterministic counter, so the
+    // same entity carries the same id across a snapshot/restore round-trip — which
+    // is what lets the combat dedupe table be snapshotted by id (see CombatSystem).
+    public int Id;
+    public int HittableId => Id;
+
     public bool IsDead => Health <= 0f;
+
+    // Concrete-type tag for rehydration (see EntitySnapshot.Rehydrate). The base
+    // Entity (balloons/balls) reports Generic; each polymorphic subtype overrides.
+    public virtual EntityKind Kind => EntityKind.Generic;
 
     public Entity(PhysicsBody body, float health)
     {
@@ -72,6 +83,48 @@ public class Entity : IHittable
     {
         if (Sprite != null) Sprite.Position = Body.Position;
     }
+
+    // ── Snapshot/restore (roadmap goal 4 §G) ────────────────────────────────────
+    // Capture the entity's full mutable state into a flat EntitySnapshot. The base
+    // fills the shared fields (id, body, stats, immutable shape/impact refs); each
+    // subtype adds its own via WriteState. Symmetric with RestoreInto/ReadState.
+    public EntitySnapshot Capture()
+    {
+        var s = new EntitySnapshot
+        {
+            Kind         = Kind,
+            Id           = Id,
+            Body         = BodyState.Capture(Body),
+            Health       = Health,
+            MaxHealth    = MaxHealth,
+            Mass         = Mass,
+            GravityScale = GravityScale,
+            Color        = Color,
+            Faction      = Faction,
+            Polygon      = Body.Polygon,   // immutable shape
+            Impact       = Body.Impact,    // immutable config
+        };
+        WriteState(ref s);
+        return s;
+    }
+
+    public void RestoreInto(in EntitySnapshot s)
+    {
+        Id           = s.Id;
+        s.Body.RestoreInto(Body);
+        Health       = s.Health;
+        MaxHealth    = s.MaxHealth;
+        Mass         = s.Mass;
+        GravityScale = s.GravityScale;
+        Color        = s.Color;
+        Faction      = s.Faction;
+        ReadState(in s);
+    }
+
+    // Subtype hooks for the per-type fields (AI state, projectile fuses, …). Base
+    // entities (balloons/balls) carry none, so the defaults are no-ops.
+    protected virtual void WriteState(ref EntitySnapshot s) { }
+    protected virtual void ReadState(in EntitySnapshot s) { }
 }
 
 // Callback handed to entity Update so AI can spawn child entities (projectiles,
@@ -79,4 +132,7 @@ public class Entity : IHittable
 public interface IEntitySpawner
 {
     void SpawnEntity(Entity e);
+    // Shared, deterministic HitId source so AI / projectiles mint ids from the same
+    // sequence as player attacks (see HitIdAllocator).
+    HitIdAllocator HitIds { get; }
 }

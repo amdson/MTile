@@ -29,6 +29,12 @@ public sealed class GameConfig
     // against busy terrain. Set false to disable; toggle independently of debug overlays.
     public bool MouseTrail { get; set; } = true;
 
+    // Desktop-only dev affordance: watch movement_config.json and hot-reload tuning
+    // edits mid-session. This mutates a sim-affecting static (MovementConfig.Current)
+    // at an arbitrary wall-clock moment, which would desync rollback netcode — so
+    // multiplayer MUST run with this false (both peers share fixed, identical config).
+    public bool HotReloadMovementConfig { get; set; } = true;
+
     // Manual-test affordance: spawn a second PlayerCharacter at SecondPlayerOffset
     // (world-space, relative to the stage's player spawn). The secondary's Controller
     // is never wired to hardware — real input still controls the primary only — but

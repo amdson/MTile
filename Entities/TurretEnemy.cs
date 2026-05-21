@@ -27,6 +27,24 @@ public class TurretEnemy : Entity
     // locked at the charge start so the player can read the line of fire and dodge.
     private Vector2 _aim = new(1f, 0f);
 
+    public override EntityKind Kind => EntityKind.Turret;
+
+    protected override void WriteState(ref EntitySnapshot s)
+    {
+        base.WriteState(ref s);
+        s.AIState   = (int)_state;
+        s.StateTime = _stateTime;
+        s.Aim       = _aim;
+    }
+
+    protected override void ReadState(in EntitySnapshot s)
+    {
+        base.ReadState(in s);
+        _state     = (AIState)s.AIState;
+        _stateTime = s.StateTime;
+        _aim       = s.Aim;
+    }
+
     public TurretEnemy(Vector2 pos)
         : base(new PhysicsBody(Polygon.CreateRegular(Radius, 8), pos), health: 2.0f)
     {
@@ -75,7 +93,7 @@ public class TurretEnemy : Entity
                 {
                     // Fire. Spawn a bullet at the muzzle, headed along _aim at BulletSpeed.
                     var muzzle = Body.Position + _aim * MuzzleOffset;
-                    spawner?.SpawnEntity(new BulletProjectile(muzzle, _aim * BulletSpeed));
+                    spawner?.SpawnEntity(new BulletProjectile(muzzle, _aim * BulletSpeed, spawner.HitIds));
                     Transition(AIState.Cooldown);
                 }
                 break;

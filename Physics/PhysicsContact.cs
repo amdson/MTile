@@ -2,7 +2,17 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-public abstract class PhysicsContact { }
+public abstract class PhysicsContact
+{
+    // True for contacts that are *durable simulation state* and must survive a
+    // snapshot/restore: the resting SurfaceDistance contacts the collision solver
+    // persists across frames (a body at rest doesn't re-collide, so they aren't
+    // regenerated). State-owned soft contacts (FloatingSurfaceDistance, SteeringRamp,
+    // PointForceContact) leave this false — they're re-derived each frame from
+    // {state scalars + abilities + body pose + a world query}, so snapshot skips
+    // them and the owning state rebuilds them. See Plans/STATE_SNAPSHOT_PLAN.md.
+    public bool Maintained;
+}
 
 public abstract class SurfaceContact(Vector2 position, Vector2 normal, float minDistance) : PhysicsContact
 {

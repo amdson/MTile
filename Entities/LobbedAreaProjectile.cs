@@ -26,15 +26,35 @@ public class LobbedAreaProjectile : Projectile
     private const float ExplosionKnockback = 520f;
     private const float ExplosionDamage   = TileDamage.TileMaxHP * 0.8f;
 
-    private static int _nextHitId = 7_000_001;
-    private readonly int _hitId = System.Threading.Interlocked.Increment(ref _nextHitId);
+    private readonly int _hitId;
 
     private readonly int _budget;
     private readonly TileType _tileType;
+    private readonly EruptionPlannerMode _mode;
     private bool _detonated;
 
-    public LobbedAreaProjectile(Vector2 pos, Vector2 launchVelocity, int budget, TileType tileType)
-        : base(new PhysicsBody(Polygon.CreateRegular(5f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: Faction.Player)
+    public override EntityKind Kind => EntityKind.LobbedArea;
+
+    // All of hitId/budget/tileType/mode are immutable (ctor) — recorded so Rehydrate
+    // can reconstruct via the ctor. Only _detonated is mutable per-frame state.
+    protected override void WriteState(ref EntitySnapshot s)
+    {
+        base.WriteState(ref s);
+        s.HitId     = _hitId;
+        s.Budget    = _budget;
+        s.TileType  = _tileType;
+        s.Mode      = _mode;
+        s.Detonated = _detonated;
+    }
+
+    protected override void ReadState(in EntitySnapshot s)
+    {
+        base.ReadState(in s);
+        _detonated = s.Detonated;
+    }
+
+    public LobbedAreaProjectile(Vector2 pos, Vector2 launchVelocity, int budget, TileType tileType, EruptionPlannerMode mode, int hitId, Faction owner)
+        : base(new PhysicsBody(Polygon.CreateRegular(5f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: owner)
     {
         Body.Velocity = launchVelocity;
         Mass          = 0.8f;
@@ -43,6 +63,8 @@ public class LobbedAreaProjectile : Projectile
         Sprite        = Sprites.Ball(5f);
         _budget       = budget;
         _tileType     = tileType;
+        _mode         = mode;
+        _hitId        = hitId;
     }
 
     protected override void ProjectileUpdate(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
@@ -60,19 +82,9 @@ public class LobbedAreaProjectile : Projectile
         if (chunks != null && _budget > 0)
         {
             var samples = new[] { new PathSample(Body.Position, Vector2.Zero) };
-            // Force the planner's active type for this one call. The planner
-            // statics are mutated globally each frame from Game1 anyway, so a
-            // brief override + restore is safe.
-            var savedMass  = MassBallPlanner.ActiveType;
-            var savedField = EruptionPlanner.ActiveType;
-            MassBallPlanner.ActiveType = _tileType;
-            EruptionPlanner.ActiveType = _tileType;
-            try   { EruptionPlanner.Plan(chunks, Body.Position, samples, _budget); }
-            finally
-            {
-                MassBallPlanner.ActiveType = savedMass;
-                EruptionPlanner.ActiveType = savedField;
-            }
+            // Mode + material were captured at launch time, so the eruption uses the
+            // selection the player had when they threw — no global planner statics.
+            EruptionPlanner.Plan(chunks, Body.Position, samples, _budget, _mode, _tileType);
         }
 
         // 2) AOE damage segments — same radial-shove shape StickyGrenade uses.
@@ -90,7 +102,7 @@ public class LobbedAreaProjectile : Projectile
                 hitboxes.Publish(new Hitbox(
                     region, _hitId, ExplosionDamage,
                     dir * ExplosionKnockback,
-                    Faction.Player, this, Color.Goldenrod));
+                    Faction, this, Color.Goldenrod));
             }
         }
         _detonated = true;

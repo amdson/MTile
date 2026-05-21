@@ -16,13 +16,17 @@ namespace MTile;
 //             prunes when the HitId disappears (attack ended).
 //   Tiles:   No dedupe — multi-frame hitboxes accumulate damage on a tile every
 //            frame they overlap. Preserves the progressive darkening visual.
-public static class CombatSystem
+// Instance-owned (not static): the (HitId → already-hit targets) dedupe table
+// persists across frames, so it's simulation state that must be snapshot/restored
+// for rollback. One CombatSystem per Simulation. The geometry helper below stays
+// static — it's a pure function.
+public sealed class CombatSystem
 {
-    private static readonly Dictionary<int, HashSet<IHittable>> _hitDedupe = new();
-    private static readonly HashSet<int> _liveHitIds = new();
-    private static readonly List<int> _scratchPrune = new();
+    private readonly Dictionary<int, HashSet<IHittable>> _hitDedupe = new();
+    private readonly HashSet<int> _liveHitIds = new();
+    private readonly List<int> _scratchPrune = new();
 
-    public static void Apply(ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes)
+    public void Apply(ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes)
     {
         _liveHitIds.Clear();
 
@@ -87,6 +91,42 @@ public static class CombatSystem
         foreach (var k in _hitDedupe.Keys)
             if (!_liveHitIds.Contains(k)) _scratchPrune.Add(k);
         foreach (var k in _scratchPrune) _hitDedupe.Remove(k);
+    }
+
+    // ── Snapshot/restore (roadmap goal 4 §H) ────────────────────────────────────
+    // The cross-frame (HitId → already-hit targets) table is the only durable combat
+    // state. It holds IHittable *references*, which go stale across a restore (entities
+    // may be rehydrated as new objects), so it's snapshotted by stable HittableId and
+    // resolved back to live objects on restore. _liveHitIds / _scratchPrune are
+    // per-Apply scratch and need no snapshot. Order within a set doesn't matter — it's
+    // a membership test (alreadyHit.Contains).
+    public Dictionary<int, int[]> CaptureDedupe(Func<IHittable, int> idOf)
+    {
+        var outMap = new Dictionary<int, int[]>(_hitDedupe.Count);
+        foreach (var (hitId, set) in _hitDedupe)
+        {
+            var ids = new int[set.Count];
+            int i = 0;
+            foreach (var h in set) ids[i++] = idOf(h);
+            outMap[hitId] = ids;
+        }
+        return outMap;
+    }
+
+    public void RestoreDedupe(Dictionary<int, int[]> data, Func<int, IHittable> resolve)
+    {
+        _hitDedupe.Clear();
+        if (data == null) return;
+        foreach (var (hitId, ids) in data)
+        {
+            var set = new HashSet<IHittable>(ids.Length);
+            foreach (var id in ids)
+            {
+                var h = resolve(id);
+                if (h != null) set.Add(h);   // a target that no longer exists is simply dropped
+            }
+            _hitDedupe[hitId] = set;
+        }
     }
 
     // SAT: arbitrary convex polygon (given by its pre-computed world vertices +

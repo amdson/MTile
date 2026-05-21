@@ -3,13 +3,16 @@
   "WindowWidth": 1600,
   "WindowHeight": 1200,
   "Fullscreen": false,
-  "DebugDrawHitboxes":          false,
-  "DebugDrawHurtboxes":         false,
-  "DebugDrawPlayerOrientation": false,
-  "DebugDrawBodies":            false,
-  "DebugDrawConstraints":       false,
+  "DebugDrawHitboxes":          true,
+  "DebugDrawHurtboxes":         true,
+  "DebugDrawPlayerOrientation": true,
+  "DebugDrawBodies":            true,
+  "DebugDrawConstraints":       true,
   "DebugDrawGuidedPath":        true,
   "DebugDrawHealthBars":        true,
   "DebugDrawMassBall":          true,
-  "MouseTrail": true
+  "MouseTrail": true,
+  "SpawnSecondPlayer": true,
+  "SecondPlayerOffsetX": 96,
+  "SecondPlayerOffsetY": 0
 }

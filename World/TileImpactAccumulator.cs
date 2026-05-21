@@ -51,6 +51,16 @@ public sealed class TileImpactAccumulator
         return 0f;
     }
 
+    // Snapshot/restore (roadmap goal 6). Dict copy = deep copy (value-typed entries).
+    public Dictionary<(int gtx, int gty), float> Capture() => new(_accum);
+
+    public void Restore(Dictionary<(int gtx, int gty), float> src)
+    {
+        _accum.Clear();
+        if (src == null) return;
+        foreach (var kv in src) _accum[kv.Key] = kv.Value;
+    }
+
     public void Tick(float dt)
     {
         if (_accum.Count == 0 || dt <= 0f) return;
