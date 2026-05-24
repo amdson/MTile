@@ -49,7 +49,7 @@ Content (`.xnb`) is built from `Content/Content.mgcb` by `MonoGame.Content.Build
 ## Config & assets at runtime
 
 - `movement_config.json` — movement tuning, **hot-reloaded** via `FileSystemWatcher` (gated by `GameConfig.HotReloadMovementConfig`; off in multiplayer). Edit while the game runs to retune.
-- `game_config.json` — match/stage config (`GameConfig`).
+- `game_config.json` — match/stage config (`GameConfig`). Top-level tuning that overrides `movement_config.json` lives here too (e.g. `SproutLifetime`), applied once in the `Simulation` ctor.
 - `Levels/*.json` — terrain: chunk-position → ASCII-file map + Perlin params, loaded by `TerrainLoader`.
 
 Each host copies these from the repo root into its own output (Desktop: alongside the binary; Web: into `wwwroot/`). Edit the **root** copies — the per-host copies under `bin/` and `MTile.Web/wwwroot/` are generated and gitignored.

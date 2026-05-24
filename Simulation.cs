@@ -108,6 +108,11 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
 
     public Simulation(GameConfig config, Stage stage)
     {
+        // Push top-level config tuning onto the live MovementConfig sink. Game1 has
+        // already called MovementConfig.Load(...) by now, so this override wins over
+        // movement_config.json. One-shot at construction => snapshot-safe.
+        MovementConfig.Current.SproutLifetime = config.SproutLifetime;
+
         _chunks = new ChunkMap();
         // Title-relative; chunk files referenced by the config resolve next to it.
         TerrainLoader.Load($"Levels/{stage.TerrainConfig}", _chunks);

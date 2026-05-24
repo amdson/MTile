@@ -49,6 +49,12 @@ public sealed class GameConfig
     // as a string in the config for readability; parsed once at load.
     public string StartingBlockType { get; set; } = "Dirt";
 
+    // Tile sprout grow duration (seconds). Promoted from MovementConfig so match-level
+    // tuning lives in one place. The Simulation ctor pushes this onto
+    // MovementConfig.Current.SproutLifetime once at construction, so the game-config
+    // value wins over movement_config.json. Default mirrors MovementConfig's default.
+    public float SproutLifetime { get; set; } = 0.1f;
+
     public static GameConfig Load(string path)
     {
         try

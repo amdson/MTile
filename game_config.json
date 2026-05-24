@@ -14,5 +14,6 @@
   "MouseTrail": true,
   "SpawnSecondPlayer": true,
   "SecondPlayerOffsetX": 96,
-  "SecondPlayerOffsetY": 0
+  "SecondPlayerOffsetY": 0,
+  "SproutLifetime": 0.1
 }
