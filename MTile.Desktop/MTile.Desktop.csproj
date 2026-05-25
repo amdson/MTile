@@ -33,6 +33,10 @@
     <None Include="..\Levels\**\*" Link="Levels\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Authored skeleton animations (edited via MTile.Demo, played by CharacterAnimator). -->
+    <None Include="..\SkeletonStates\**\*" Link="SkeletonStates\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <!-- Content pipeline lives with the executable so .xnb output lands next to

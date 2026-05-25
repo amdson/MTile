@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <TieredCompilation>false</TieredCompilation>
+    <AssemblyName>MTile.Demo</AssemblyName>
+    <RootNamespace>MTileDemo</RootNamespace>
+    <Nullable>disable</Nullable>
+    <MonoGamePlatform>DesktopGL</MonoGamePlatform>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Reuse the game library (and its MonoGame.Framework.DesktopGL dependency,
+         which flows through transitively). -->
+    <ProjectReference Include="..\MTile.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Shares the game's content project so the editor can load DebugFont for the
+         sidebar / header text. .xnb output lands next to the binary. -->
+    <MonoGameContentReference Include="..\Content\Content.mgcb" Link="Content\Content.mgcb" />
+    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.*" />
+  </ItemGroup>
+</Project>

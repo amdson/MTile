@@ -6,6 +6,11 @@ namespace MTile;
 public static class GroundChecker
 {
     private const float ProbeSlack = 20f;
+    // Pull the left/right faces inward so a wall tile the body's side vertex is merely flush
+    // against (its column shares the strip-below's boundary) isn't reported as a floor under the
+    // body. Mirror of WallChecker.VerticalInset — without it, pressing jump while wall-sliding
+    // reads as grounded and fires a normal jump.
+    private const float HorizontalInset = 2f;
 
     public static bool TryFind(
         PhysicsBody body,
@@ -27,7 +32,7 @@ public static class GroundChecker
         out FloatingSurfaceDistance contact)
     {
         contact = null;
-        var probe = body.Bounds.StripBelow(floatHeight + probeSlack);
+        var probe = body.Bounds.InsetHorizontal(HorizontalInset).StripBelow(floatHeight + probeSlack);
 
         float   bestSurfaceY   = float.MaxValue;
         Vector2 bestSurfaceVel = Vector2.Zero;

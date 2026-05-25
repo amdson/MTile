@@ -1105,13 +1105,22 @@ internal static class BlockEruptionHelpers
             gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
 }
 
+// The RMB ground-editing action. One state owns the whole right-button gesture:
+//   • Drag-to-build — every cell the cursor sweeps through (within reach) is fed to
+//     TryRequestTile, so a held RMB paints tiles. Folded in from what used to be
+//     Simulation.HandleBuildInput; living inside the FSM means building can't run
+//     concurrently with an attack or with the eruption it charges into.
+//   • Charge — accumulates while the cursor CAN'T place (over a wall); decays while it
+//     is actively placing. So painting tiles keeps the charge near zero, while holding
+//     over solid terrain builds it toward an eruption.
+//   • Arm — an in→out sweep (cursor leaving solid) past MinChargeToArm hands off to
+//     BlockEruptionAction, which fires on release.
 public class BlockReadyAction : ActionState
 {
     // Minimum hold-in-solid time before exiting-out-of-solid arms the eruption.
-    // Below this, BlockReady ends quietly (no eruption armed); the still-held
-    // RMB then drops back to NullAction and HandleBuildInput in Game1 picks it
-    // up as a normal tile-placement drag. Lets the player tap RMB on a block
-    // and start building without committing to an eruption charge.
+    // Below this, BlockReady just keeps painting tiles (the charge stays near zero
+    // while placing), so the player can tap RMB on a block and start building without
+    // committing to an eruption charge.
     private const float MinChargeToArm  = 1.0f;
     // Saturation point — best release timing for max budget.
     private const float SaturationTime  = 2.0f;
@@ -1123,6 +1132,16 @@ public class BlockReadyAction : ActionState
     private const float BudgetMax       = 60f;
     // Visual ring on the origin cell — radius grows with charge fraction.
     private const float MaxIndicatorRadius = Chunk.TileSize * 1.8f;
+
+    // Drag-to-build reach (px) from the player center; a sprout/solid neighbour on the
+    // target cell extends it so a build can chain outward. Moved here verbatim from the
+    // old Simulation.HandleBuildInput.
+    private const float BuildReach         = 64f;
+    private const float ChainBuildReachMul = 2f;
+    // The heavy "committed" stance only kicks in once the charge has actually started
+    // building (over a wall). While painting tiles the charge stays below this, so
+    // ordinary drag-building leaves movement unencumbered.
+    private const float StanceChargeFloor  = 0.15f;
 
     public override int ActivePriority  => 8;
     public override int PassivePriority => 10;
@@ -1157,11 +1176,20 @@ public class BlockReadyAction : ActionState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        // Charge grows when nothing was placed this frame; decays at the same
-        // rate when HandleBuildInput just committed a tile. Lets a held RMB
-        // that's actively building stay near zero, while a held RMB over a
-        // wall (no placement possible) accumulates normally.
-        bool placedThisFrame = ctx.LastTilePlacedFrame == ctx.CurrentFrame;
+        // Once the charge passes the arm threshold the player is committed to an
+        // eruption, not painting — so building stops. That keeps the in→out sweep that
+        // arms the eruption from also drag-placing a stray tile at the exit cell (the
+        // bug the old before-the-FSM HandleBuildInput had). Below the threshold, paint
+        // freely.
+        bool committed = vars.ChargeTime >= MinChargeToArm;
+
+        // Drag-to-build: paint tiles along the cursor sweep and learn whether we
+        // actually committed any this frame.
+        bool placedThisFrame = !committed && TryDragPlace(ctx);
+
+        // Charge grows when nothing was placed this frame; decays at the same rate when
+        // we just committed a tile. A held RMB that's actively building stays near zero,
+        // while a held RMB over a wall (no placement possible) accumulates normally.
         if (placedThisFrame) vars.ChargeTime = MathF.Max(0f, vars.ChargeTime - ctx.Dt);
         else                 vars.ChargeTime += ctx.Dt;
 
@@ -1174,6 +1202,7 @@ public class BlockReadyAction : ActionState
             var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
             vars.OriginCell = BlockEruptionHelpers.CellCenter(gtx, gty);
         }
+        vars.CursorPosition = ctx.Input.MouseWorldPosition;
 
         // In→out sweep arms BlockEruption (set BlockEruptionArmed + handoff
         // fields). The FSM picks up the armed flag on the following frame's
@@ -1198,10 +1227,45 @@ public class BlockReadyAction : ActionState
             ab.Condition.BlockEruptionArmed = false;
     }
 
-    // Heavy stance during the charge — same shape as Stab's modifier set, applies
-    // on ground + air. Players can still nudge but not sprint mid-charge.
+    // Drag-to-build sweep (folded in from Simulation.HandleBuildInput). While RMB is
+    // held, every cell the cursor passes through (within reach of the player center) is
+    // requested as a tile. Returns true iff at least one tile was actually committed
+    // this frame — the charge logic uses that to decide grow-vs-decay.
+    private static bool TryDragPlace(EnvironmentContext ctx)
+    {
+        var input = ctx.Input;
+        var prev  = ctx.Controller.GetPrevious(1);
+        // On the press-edge frame prev.RightClick is false, so the segment collapses to
+        // the current point (a single cell) rather than sweeping from a stale position.
+        var segStart = prev.RightClick ? prev.MouseWorldPosition : input.MouseWorldPosition;
+        var segEnd   = input.MouseWorldPosition;
+
+        bool placed = false;
+        foreach (var (gtx, gty) in MouseSweep.Cells(segStart, segEnd))
+        {
+            var cellCenter = BlockEruptionHelpers.CellCenter(gtx, gty);
+            float maxReach = HasSproutNeighbour(ctx.Chunks, gtx, gty) ? BuildReach * ChainBuildReachMul : BuildReach;
+            if (Vector2.DistanceSquared(ctx.Body.Position, cellCenter) > maxReach * maxReach)
+                continue;
+            if (ctx.Chunks.TryRequestTile(gtx, gty, ctx.ActiveBlockType) != null)
+                placed = true;
+        }
+        return placed;
+    }
+
+    private static bool HasSproutNeighbour(ChunkMap chunks, int gtx, int gty) =>
+        chunks.Graph.TryGet(gtx,     gty + 1, out _) ||
+        chunks.Graph.TryGet(gtx - 1, gty,     out _) ||
+        chunks.Graph.TryGet(gtx + 1, gty,     out _) ||
+        chunks.Graph.TryGet(gtx,     gty - 1, out _);
+
+    // Heavy stance — same shape as Stab's modifier set, on ground + air. Gated on the
+    // charge actually having started (over a wall): while merely painting tiles the
+    // charge stays below StanceChargeFloor, so ordinary drag-building stays nimble; the
+    // commitment slow only bites once the player is genuinely charging an eruption.
     public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
     {
+        if (vars.ChargeTime < StanceChargeFloor) return;
         m.MaxWalkSpeed   *= 0.35f;
         m.WalkAccel      *= 0.5f;
         m.GroundFriction *= 1.5f;
@@ -1230,7 +1294,7 @@ public class BlockReadyAction : ActionState
         for (int i = 0; i < segments; i++)
         {
             float a = i * MathHelper.TwoPi / segments;
-            var p = vars.OriginCell + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
+            var p = vars.CursorPosition + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
             sb.Draw(pixel, new Rectangle((int)p.X - 1, (int)p.Y - 1, 3, 3), color);
         }
     }
@@ -1242,7 +1306,7 @@ public class BlockEruptionAction : ActionState
     private const float SaturationTime = 2.0f;
     private const float DipFactor      = 0.65f;
     private const float BudgetMin      = 0f;
-    private const float BudgetMax      = 60f;
+    private const float BudgetMax      = 240f;
     // Trigger-arming window. Once BlockReady arms the eruption (cursor swept
     // out of solid), the player has this long to release RMB before the
     // arming auto-cancels. Avoids "I swept past a wall 5 seconds ago and
@@ -1503,20 +1567,61 @@ public class BeamAction : ActionState
 {
     private const float MinChargeTime    = 0.35f;
     private const float MaxFiringTime    = 0.55f;
-    // Beam reach in world pixels — beyond this the segments stop publishing.
-    private const float MaxBeamLength    = 220f;
-    private const int   BeamSegments     = 14;
+    // Hard cap on reach in world pixels. The beam now marches in fixed StepSize
+    // increments out to this length; the *effective* reach is usually shorter,
+    // cut off wherever the energy model (below) decays past EnergyCutoff. Through
+    // open air the beam lances the full length; boring into stone it dies in a
+    // few cells. Extended well past the old 220px so it reads as a long lance.
+    private const float MaxBeamLength    = 420f;
+    private const float StepSize         = 14f;                              // world-px between sampled segments
+    private const int   MaxSteps         = (int)(MaxBeamLength / StepSize) + 1;
     private const float SegmentHalfSize  = 6f;
-    private const float DamagePerFrame   = TileDamage.TileMaxHP * 0.45f;   // breaks Stone in 2-3 frames of overlap
+    private const float DamagePerFrame   = TileDamage.TileMaxHP * 0.45f;   // full-energy damage; breaks Stone in 2-3 frames of overlap
     private const float KnockbackImpulse = 320f;
     private const int   RecoveryFrames   = 6;
 
+    // --- Energy model (the "strength through blocks / air" math) ---------------
+    // The beam carries a normalized energy that starts at 1.0 at the muzzle and is
+    // multiplicatively attenuated each step. Damage + knockback delivered to a cell
+    // scale with the energy ARRIVING at it (before that cell's own absorption), so a
+    // tile shields whatever sits behind it. Air bleeds energy slowly (beam diffuses
+    // over distance); solids bleed it hard, weighted by the material's durability so
+    // stone chokes the beam far faster than sand.
+    private const float AirRetentionPerStep  = 0.992f;  // ~0.79 over the full air run — stays strong
+    private const float SolidRetentionBase   = 0.55f;   // per-step retention for a 1×TileMaxHP (Dirt) cell
+    private const float EnergyCutoff         = 0.05f;   // below this the beam is spent; reach ends here
 
-    // Render-only cache. The beam's live sim state (charge/firing timers, hitId)
-    // lives in ActionVars; these two only feed Draw's dot chain and self-heal on
-    // the next firing Update, so they stay out of the snapshot. See ActionVars header.
-    private Vector2 _lastBeamDir   = Vector2.UnitX;
-    private float   _lastBeamReach;
+    // Per-step solid retention, tied to material durability so the falloff curve is
+    // driven by the same numbers that set break HP. Stone (2.0) chokes hardest.
+    private static float SolidRetention(TileType type)
+        => MathF.Pow(SolidRetentionBase, TileDamage.MaxHPFor(type) / TileDamage.TileMaxHP);
+
+    // Streaming-particle look: a handful of motes ride outward along the beam, each
+    // dragging a fading Trail ribbon (Drawing/Trail.cs). They re-launch from the
+    // muzzle on a staggered cycle so there's always a steady stream in flight.
+    private const int   MoteCount    = 5;
+    private const float MoteHz       = 12.25f;   // outward runs per second per mote
+    private const int   MoteTrailCap = 12;
+    private const float MoteTrailLife = 0.11f;
+
+    // Render-only cache. The beam's live sim state (charge/firing timers, hitId,
+    // locked BeamDir) lives in ActionVars; these only feed Draw and self-heal on the
+    // next firing Update (Trails are advanced there, where ctx.Dt is available, just
+    // like the cursor trail is ticked from Game1.Update), so they stay out of the
+    // snapshot. See ActionVars header.
+    private Vector2   _lastBeamDir   = Vector2.UnitX;
+    private float     _lastBeamReach;
+    private int       _segCount;
+    private readonly Vector2[] _segPos    = new Vector2[MaxSteps];
+    private readonly float[]   _segEnergy = new float[MaxSteps];
+    private readonly Trail[]   _motes     = new Trail[MoteCount];
+    private readonly int[]     _moteCycle = new int[MoteCount];   // last sweep index per mote; change ⇒ re-launch
+
+    public BeamAction()
+    {
+        for (int m = 0; m < MoteCount; m++)
+            _motes[m] = new Trail(MoteTrailCap, MoteTrailLife);
+    }
 
     public override int ActivePriority  => 40;
     public override int PassivePriority => 45;
@@ -1540,6 +1645,9 @@ public class BeamAction : ActionState
         if (!ctx.Input.LeftClick) return false;
         if (!ctx.Input.Shift)     return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
+        // Moving or jumping breaks concentration — the beam demands a planted stance.
+        // Cancels during charge AND firing, so any L/R/Space input drops the beam.
+        if (ctx.Input.Left || ctx.Input.Right || ctx.Input.Space) return false;
         if (vars.Firing && vars.FiringTime >= MaxFiringTime) return false;
         return true;
     }
@@ -1550,6 +1658,12 @@ public class BeamAction : ActionState
         vars.FiringTime = 0f;
         vars.Firing     = false;
         vars.HitId      = ctx.HitIds.Next();
+        // Drop any ribbons left over from a previous activation.
+        for (int m = 0; m < MoteCount; m++)
+        {
+            _motes[m].Clear();
+            _moteCycle[m] = int.MinValue;
+        }
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -1557,39 +1671,90 @@ public class BeamAction : ActionState
         if (!vars.Firing)
         {
             vars.ChargeTime += ctx.Dt;
-            if (vars.ChargeTime >= MinChargeTime) vars.Firing = true;
+            if (vars.ChargeTime >= MinChargeTime)
+            {
+                vars.Firing = true;
+                // Lock the aim the instant firing begins. The player aims freely
+                // during the charge wind-up; once the beam lights it commits to a
+                // fixed angle for the rest of the burst (the player can still walk,
+                // so the muzzle origin tracks the body — only the direction sticks).
+                var aim = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+                vars.BeamDir = aim.LengthSquared() > 1e-6f
+                    ? Vector2.Normalize(aim)
+                    : new Vector2(ab.Facing, 0f);
+            }
             return;
         }
         vars.FiringTime += ctx.Dt;
         if (ctx.Hitboxes == null) return;
 
-        // Beam reaches from player center toward cursor, clamped to MaxBeamLength.
+        // Beam emanates from the (moving) muzzle along the LOCKED direction.
         var start = ctx.Body.Position;
-        var toCursor = ctx.Input.MouseWorldPosition - start;
-        float len = toCursor.Length();
-        if (len < 1e-3f) return;
-        var dir = toCursor / len;
-        float reach = MathF.Min(len, MaxBeamLength);
-        _lastBeamDir   = dir;
-        _lastBeamReach = reach;
+        var dir   = vars.BeamDir;
+        if (dir.LengthSquared() < 1e-6f) return;
 
-        // Publish a chain of segment hitboxes along the beam. HitTargets.All so
-        // each segment damages BOTH tiles and entities — that's what makes the
-        // beam carve tunnels through terrain while also hurting anything in its
-        // line of fire. Shared HitId across segments means the (HitId,Target)
-        // dedupe in CombatSystem treats the whole beam as ONE attack per
-        // entity — chained segments don't multi-hit a single body.
-        for (int i = 0; i < BeamSegments; i++)
+        // March outward in fixed StepSize cells, attenuating energy as we cross air
+        // and solids. Each step publishes a hitbox whose damage scales with the
+        // energy arriving there; we stop once the beam is spent (EnergyCutoff) so a
+        // wall of stone visibly shortens the beam while open air lets it run long.
+        //
+        // HitTargets.All so each segment damages BOTH tiles and entities — that's
+        // what carves tunnels while also hurting anything in the line of fire. The
+        // shared HitId means CombatSystem's (HitId,Target) dedupe treats the whole
+        // beam as ONE attack per entity, so chained segments don't multi-hit a body.
+        float energy = 1f;
+        int   count  = 0;
+        for (int s = 0; s < MaxSteps; s++)
         {
-            float t = (i + 1f) / BeamSegments;
-            var center = start + dir * (reach * t);
+            float dist   = (s + 0.5f) * StepSize;
+            if (dist > MaxBeamLength) break;
+            var   center = start + dir * dist;
+
+            // Damage uses the energy ARRIVING at this cell (before its absorption).
+            float arriving = energy;
+            _segPos[count]    = center;
+            _segEnergy[count] = arriving;
+            count++;
+
             var region = new BoundingBox(
                 center.X - SegmentHalfSize, center.Y - SegmentHalfSize,
                 center.X + SegmentHalfSize, center.Y + SegmentHalfSize);
             ctx.Hitboxes.Publish(new Hitbox(
-                region, vars.HitId, DamagePerFrame,
-                dir * KnockbackImpulse,
+                region, vars.HitId, DamagePerFrame * arriving,
+                dir * (KnockbackImpulse * arriving),
                 ctx.Faction, this, Color.Magenta));
+
+            // Attenuate for the next step based on what THIS cell is made of.
+            int gtx = (int)MathF.Floor(center.X / Chunk.TileSize);
+            int gty = (int)MathF.Floor(center.Y / Chunk.TileSize);
+            if (ctx.Chunks.GetCellState(gtx, gty) == TileState.Solid)
+                energy *= SolidRetention(ctx.Chunks.GetCellType(gtx, gty));
+            else
+                energy *= AirRetentionPerStep;
+
+            if (energy < EnergyCutoff) break;
+        }
+
+        _lastBeamDir   = dir;
+        _lastBeamReach = count * StepSize;
+        _segCount      = count;
+
+        // Advance the streaming motes. Each rides a staggered phase from muzzle (f=0)
+        // to tip (f=1); when its phase rolls over to a new cycle it re-launches from
+        // the muzzle, so we Clear the ribbon to avoid a streak snapping back across
+        // the beam. Tick-then-Push mirrors the cursor trail in Game1.Update.
+        for (int m = 0; m < MoteCount; m++)
+        {
+            float phase = vars.FiringTime * MoteHz + (float)m / MoteCount;
+            int   cycle = (int)MathF.Floor(phase);
+            float f     = phase - cycle;
+            if (cycle != _moteCycle[m])
+            {
+                _motes[m].Clear();
+                _moteCycle[m] = cycle;
+            }
+            _motes[m].Tick(ctx.Dt);
+            _motes[m].Push(start + dir * (_lastBeamReach * f));
         }
     }
 
@@ -1622,14 +1787,29 @@ public class BeamAction : ActionState
             sb.Draw(pixel, new Rectangle((int)body.Position.X - r, (int)body.Position.Y - r, r * 2, r * 2), col * 0.6f);
             return;
         }
-        // Active beam: dot chain along the firing line, using the cached
-        // direction + reach from the most recent Update.
-        for (int i = 0; i < BeamSegments; i++)
+        if (_segCount <= 0) return;
+
+        // Faint beam core: a thin dot at each marched step, dimmed/brightened by the
+        // energy that reached it, so the taper toward the tip (and the abrupt end
+        // where the beam bored into stone) still reads. Kept subtle — the streaming
+        // ribbons below are the main event.
+        var dimCol  = new Color(90, 0, 110);
+        var coreCol = new Color(220, 140, 255);
+        for (int i = 0; i < _segCount; i++)
         {
-            float t = (i + 1f) / BeamSegments;
-            var p = body.Position + _lastBeamDir * (_lastBeamReach * t);
-            sb.Draw(pixel, new Rectangle((int)p.X - 2, (int)p.Y - 2, 4, 4), Color.Magenta);
+            float e   = _segEnergy[i];
+            var   col = Color.Lerp(dimCol, coreCol, e) * 0.5f;
+            int   r   = (int)(1f + 2f * e);
+            var   p   = _segPos[i];
+            sb.Draw(pixel, new Rectangle((int)p.X - r, (int)p.Y - r, r * 2, r * 2), col);
         }
+
+        // Streaming particles: each mote's fading Trail ribbon, advanced in Update.
+        // Newer (head) end is bright white-magenta; it tapers to transparent.
+        var head = new Color(255, 220, 255);
+        var tail = new Color(180, 40, 220, 0);
+        for (int m = 0; m < MoteCount; m++)
+            _motes[m].Draw(sb, pixel, head, tail, startWidth: 3.5f);
     }
 }
 

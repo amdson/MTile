@@ -6,7 +6,7 @@ namespace MTile;
 public class Camera
 {
     public Vector2 Position;
-    public float Zoom = 1f;
+    public float Zoom = 1.25f;
     public float Buffer = 150f;
     // Per-second rate the camera lerps vertically toward the target when not
     // pinned to a dead-zone edge. Without this, a jump apex snaps the camera
@@ -14,7 +14,7 @@ public class Camera
     // zone, so the camera stays high. The relax pulls Y back down toward the
     // target each frame; slow enough that jumps still feel punchy, fast enough
     // that the screen recenters between platforms.
-    public float VerticalRelaxRate = 1.8f;
+    public float VerticalRelaxRate = 10f;
 
     // Moves the camera only when target crosses inside the buffer boundary,
     // then bleeds Y toward the target so vertical excursions self-recover.

@@ -31,12 +31,6 @@ public class EnvironmentContext
     public ConditionState Condition;  // combat condition flags (Slash2Ready, RecoveryActive, …) — lives on PlayerAbilityState
     public CombatState    Combat;     // defensive condition: hitstun, stun, last-hit data — gates jump preconditions etc.
     public int   CurrentFrame;        // monotonic frame counter for intent age + flag expiry
-    // Most recent frame on which Game1.HandleBuildInput actually placed a tile via
-    // TryRequestTile. BlockReadyAction reads this to cancel an in-flight charge
-    // whenever the player is actively building (roadmap §3 "track whether the
-    // player is actively producing blocks"). Defaults to a far-past value so
-    // freshly-constructed contexts read as "no recent build."
-    public int   LastTilePlacedFrame;
     public float Dt;
     public PhysicsBody Body;
     public InputIntent Intent;

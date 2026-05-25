@@ -12,6 +12,14 @@ public abstract class PhysicsContact
     // {state scalars + abilities + body pose + a world query}, so snapshot skips
     // them and the owning state rebuilds them. See Plans/STATE_SNAPSHOT_PLAN.md.
     public bool Maintained;
+
+    // Per-step transient: total impulse delivered TO the body through this contact
+    // during the most recent PhysicsWorld.StepSwept. Accumulates both normal-resolve
+    // and tangential-friction components. Zeroed at the top of StepSwept; NOT
+    // snapshotted (so it doesn't appear in BodyState). Diagnostics-only — readers
+    // (impact-damage gating, jitter detection, steering-ramp tuning) inspect it
+    // post-step.
+    public Vector2 LastImpulse;
 }
 
 public abstract class SurfaceContact(Vector2 position, Vector2 normal, float minDistance) : PhysicsContact

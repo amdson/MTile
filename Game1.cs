@@ -51,6 +51,12 @@ public class Game1 : Game
 
     private FileSystemWatcher _movementConfigWatcher;
 
+    // Procedural skeleton animation for the primary player. Render-only, pull-model
+    // (reads sim state via CharacterAnimSample; never writes back). Scale fits the
+    // ~62px-tall rig to the player's ~19px body.
+    private CharacterAnimator _animator;
+    private const float SkeletonScale = 0.6f;
+
     public Game1()
     {
         // Load game config before the GraphicsDeviceManager finalizes so window
@@ -145,6 +151,10 @@ public class Game1 : Game
         _pixel.SetData(new[] { Color.White });
         _debugFont = Content.Load<SpriteFont>("DebugFont");
         _draw = new DrawContext(_spriteBatch, _pixel);
+        // Load authored skeleton animations (copied next to the binary). Empty on
+        // platforms without a readable filesystem (e.g. WASM) → procedural fallback.
+        var anims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
+        _animator = new CharacterAnimator(SkeletonExamples.Biped(), anims);
     }
 
     // The player this client controls + the camera follows. Host (index 0) = primary;
@@ -211,6 +221,11 @@ public class Game1 : Game
             player.Sprite.Position = player.Body.Position;
             player.Sprite.Update(dt);
         }
+
+        // Procedural skeleton: pull a read-only sample of the player and advance the
+        // animator. One-way — the sim is unaware this happens.
+        if (_config.DebugDrawSkeleton)
+            _animator.Update(CharacterAnimSample.From(player, dt));
         foreach (var (p, _) in _sim.SecondaryPlayers)
         {
             if (p.Sprite == null) continue;
@@ -279,9 +294,14 @@ public class Game1 : Game
             else DrawPolygon(e.Body.Polygon, e.Body.Position, e.Color);
         }
 
-        if (player.Sprite != null) player.Sprite.Draw(_draw);
-        foreach (var (p, _) in _sim.SecondaryPlayers)
-            if (p.Sprite != null) p.Sprite.Draw(_draw);
+        if (_config.DrawPlayerSprites)
+        {
+            if (player.Sprite != null) player.Sprite.Draw(_draw);
+            foreach (var (p, _) in _sim.SecondaryPlayers)
+                if (p.Sprite != null) p.Sprite.Draw(_draw);
+        }
+        if (_config.DebugDrawSkeleton)
+            _animator.Draw(_draw, player.Body.Position, player.Facing, SkeletonScale);
         if (_config.DebugDrawBodies)
         {
             DrawPolygon(player.Body.Polygon, player.Body.Position,

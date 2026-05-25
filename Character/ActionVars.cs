@@ -40,11 +40,13 @@ public struct ActionVars
     public float   TipExt;            // Stab (cached tip extension, read back by Draw)
 
     public Vector2 OriginCell;        // BlockReady
+    public Vector2 CursorPosition;     // BlockReady
     public bool    InSolidLastFrame;  // BlockReady
     public Vector2 Origin;            // BlockEruption
 
     public float   FiringTime;        // Beam
     public bool    Firing;            // Beam
+    public Vector2 BeamDir;           // Beam — aim direction, locked the frame firing starts (sim state: drives hitbox placement)
 
     public Vector2 CursorAtPress;     // LobbedArea
 }

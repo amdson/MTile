@@ -1,36 +1,37 @@
-- Guard state
-    - Slows character, involves both a Guard action and a Guard movement state. 
-    - Activated by shift key
-    - If hit by an attack from the correct angle, with damage below a threshold, becomes charged, allows player to retaliate with a fast GuardRetaliate attack. 
-    - Kills momentum of projectiles on contact
-- Set up BlockEruption so it can charge when player simply holds down right click anywhere. Instead of tracking whether mouse is over a filled tile, track whether player is actively producing blocks. If they're not, enter the charging state. 
-- Damage the player when they're crushed by blocks, etc by tracking the force exerted on them through the physics system. 
-- Get the destructive physics feeling significantly more destructive. When the player is thrown hard enough into rocks, they should smash through dozens of blocks, not just break one or two. There should be attacks which generate these kinds of forces all the time. On the other hand, the player shouldn't break most blocks just by running into them. We need to tune physics until this works for all cases. 
-- Expand hit-boxes of both slash and stab moves by a factor of 1.75. 
-- Make stab carry-through force always apply force in the direction of the stab, not just left/right. 
-- add gitignore for all the dll files etc
-- Add a turn-around attack in air (click on opposite side of facing direction) to get a fast, narrow, longer range turn around slash or click and drag to get a more powerful, longer range spin-stab), and set it up so that face direction in air only changes with turn-around attacks. 
-- Add a ranged attack option with e.g. shift-left click. (a fast moving ball of energy fired in the direction of the mouse) 
-- Add a charged ranged attack with shift-left click hold-swipe (a particle beam attack, which breaks most blocks) 
-- Add a ranges area attack (a lobbed ball) with shift-right click. The ball should spawn a decently large number of blocks in an overspilling radius when it lands, and do a decent amount of area damage. The number of blocks should increase with charging. 
-- Add some kind of explosive attack, such as a land mine or grenade. 
-- Add lava effects, or something similar, as a fast-spreading terrain hazard. (How to allow lava placement? treat as another block option, and let players pick active block with numbers?) 
-- Allow players to pick which block to place from a few options. (sand, dirt, stone, another "foam" block which is very cheap, but decays after placement)
-- Add a stunned state for when the player is hit hard by attacks, in which the player has mild control over movement, but can't jump or attack immediately. 
-- Don't fully allow moves to interrupt jump, but prevent player from initiating jump immediately after getting hit so allow for basic combos. 
+- Track forces applied by physics contacts at all times, so that by the end of an update physics contacts always know the total force that's been exerted through them. 
+- Cap forces added by ramps to velocity so that players never accelerate at unrealistic speeds (this is an issue when parkor state moves players upwards on high ledges). 
+- Holding up should trigger player to enter ledge grab and then trigger them to move up out of ledge grab (player shouldn't have to tap up twice). However, it should be easy to tap jump and not move up out of ledge grab. 
+- Pressing right while in ledge grab should pull player over and onto the ledge. 
+- Dropdown from ledge should push the player into ledge grab state unless they're holding down when drop down ends. 
+- Normal movement should never break blocks. Generate a set of tests for when players run into wall, crouch, drop down, etc
+- the player's standing state jitters when they're pushed up by blocks right now. possibly because the moving rectangles disappear momentarily when the tile sprouts convert to solid tiles? 
+- make tile generation speed a parameter in game config (the rate at which tile sprouts grow)
+- add a cooldown to block charge starting up again after placing a block, so that if the player is actively building the block charge state is never visually active. 
+- Pressing up while next to a two high ledge should trigger a mini jump into parkour state so that the player smoothly arcs over the corner. The jump should be scaled up a bit if the player is moving into the ledge quickly and is far enough away that the jump won't carry them into a wall
+
+
+
+
+
+
+
+
+
+
+
+TODO later
+- Fix recurring issue with breaking blocks on contact. 
+
+- Test multiplayer
+- Add a grab move (shift click)
+- Test guard state
+- Add boss template
+- Build boss optimizer
+
 
 In smash ultimate, there's A-moves, air A-moves, tilt attacks, B-moves, rolls, shields, dodges, and grabs. Right now I have slashes in air, slashes on ground/crouched, stabs, block placement, and block placement variants + a bunch of movement options, although the number of options in smash is vastly higher. In this game, stun-states etc are much rarer, so it's much harder to imagine something like a combo. That said, it's definitely good for gameplay if things like disadvantage states are possible. The simplest combo is just iterating slash attacks. Let's say one player gets this going on the other. What should happen? I'd like to give the attacked player some mobility, so that they're not dead in the water, but I'd rather not give them full movement, because then the attack would feel insubstancial. Should I interrupt jumps, for instance? If the player's spamming jump as they're hit, they shouldn't simply escape. But also they shouldn't be powerless, and I dislike locking them out of movestates. In particular, full stun-lock loops should be impossible. 
 
 Let's say the player is hit very hard by a stab attack, and they go flying. They probably shouldn't be able to double jump in this state, so maybe I should actually add a stunned / ragdolled state to the game? At least for the duration that they're moving rapidly? 
-
-
-
-
-
-
-
-
-
 
 - activate parkourstate only for one block vaults. for two block, create a similar state that includes an initial hop to provide vertical acceleration, and 
 - make vault require left/right dir to be pressed into direction of vault to activate/continue 

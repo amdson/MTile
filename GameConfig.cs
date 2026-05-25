@@ -24,6 +24,12 @@ public sealed class GameConfig
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
     public bool DebugDrawMassBall          { get; set; } = false;
+    // Procedural skeleton animation overlay on the primary player (render-only,
+    // pull-model). On by default while the rig is being built out.
+    public bool DebugDrawSkeleton          { get; set; } = true;
+    // The player's vector sprite (the placeholder hexagon body). Turn off to view
+    // the skeleton on its own. Independent of DebugDrawBodies (the physics polygon).
+    public bool DrawPlayerSprites          { get; set; } = true;
 
     // Cosmetic: tiny particle trail under the cursor so it's easier to spot
     // against busy terrain. Set false to disable; toggle independently of debug overlays.

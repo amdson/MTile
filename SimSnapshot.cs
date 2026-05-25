@@ -13,7 +13,6 @@ public sealed class SimSnapshot
 {
     // Sim-level scalars.
     public int   HitIdValue;            // HitIdAllocator.Value
-    public int   LastTilePlacedFrame;
     public int   NextId;                // entity/player id counter
     public float Elapsed;               // absolute sim clock (drives platform tickers)
 

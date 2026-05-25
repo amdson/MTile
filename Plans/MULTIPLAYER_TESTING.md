@@ -12,13 +12,13 @@ of two base64 blobs.
 
 ## Quick test — two windows on one machine
 
-The fastest sanity check. Open **two terminals** at the repo root.
+The fastest sanity check. Open **two terminals** at the repo root. 
 
 **Terminal 1 — host (you'll be player 1):**
 ```
 dotnet run --project MTile.Desktop -- host
 ```
-It prints an **OFFER** blob (one long line) and waits.
+It prints an **OFFER** blob (one long line) and waits. 
 
 **Terminal 2 — joiner (you'll be player 2):**
 ```
@@ -94,7 +94,9 @@ bring-up path) — no networking involved.
 ## Troubleshooting
 
 | Symptom | Likely cause / fix |
+
 |---|---|
+
 | `Connection timed out` after pasting | Blob was truncated or line-wrapped on paste. Re-copy the **entire** single line between the `===` markers. |
 | Times out across the internet, fine on LAN | NAT traversal failed (likely symmetric NAT). Needs a TURN relay (not yet wired). |
 | Windows firewall prompt on first run | Allow UDP for the app — WebRTC needs it. |

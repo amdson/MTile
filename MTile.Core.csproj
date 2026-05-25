@@ -14,6 +14,7 @@
     <Compile Remove="MTile.Desktop\**" />
     <Compile Remove="MTile.Web\**" />
     <Compile Remove="MTile.Rtc\**" />
+    <Compile Remove="MTile.Demo\**" />
   </ItemGroup>
   <ItemGroup>
     <!-- Phase 3 will conditionally swap this for the KNI Blazor backend on the

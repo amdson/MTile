@@ -42,7 +42,7 @@ the action + movement FSMs today; update when bindings change.
 | Input | Action | Notes |
 |---|---|---|
 | **Shift + LMB tap** (release ≤ 6 frames) | `EnergyBallAction` | Light-cyan piercing projectile toward cursor |
-| **Shift + LMB hold** (≥ 0.35s charge) | `BeamAction` | Magenta sustained beam ≤ 0.55s; release early = no fire |
+| **Shift + LMB hold** (≥ 0.35s charge) | `BeamAction` | Magenta sustained beam ≤ 0.55s; release early = no fire. Aim freely during charge; angle **locks** when the beam lights. Moving (L/R) or jumping cancels it — needs a planted stance. Strength decays through air and (faster) through blocks — stone chokes it short, open air lets it lance the full ~420px. |
 | **Shift + RMB hold + release** (≥ 0.4s) | `LobbedAreaAction` | Sienna ballistic ball → mass-ball eruption + radial AOE at landing |
 | **F press** | `GrenadeAction` | Olive ballistic grenade, sticks on contact, 1.2s fuse → radial AOE |
 
@@ -50,8 +50,8 @@ the action + movement FSMs today; update when bindings change.
 
 | Input | Action | Notes |
 |---|---|---|
-| **RMB hold + drag** (no Shift) | Drag-place tiles | `Game1.HandleBuildInput` — places `_activeBlockType` along cursor sweep |
-| **RMB hold ≥ 1.0s + release** (anywhere, no Shift) | `BlockReadyAction` → eruption | Charge-anywhere block eruption; cancels if HandleBuildInput places a tile within 10 frames |
+| **RMB hold + drag** (no Shift) | Drag-place tiles | `BlockReadyAction.TryDragPlace` — places `_activeBlockType` along the cursor sweep while charge stays below the arm threshold |
+| **RMB hold ≥ 1.0s + release** (anywhere, no Shift) | `BlockReadyAction` → eruption | Same action: once charge passes `MinChargeToArm` it commits to an eruption and stops drag-placing; an in→out sweep arms it, release fires |
 | **1 / 2 / 3 / 4** | Pick Sand / Dirt / Stone / Foam | `_activeBlockType` (also drives eruption/lobbed-area material) |
 
 ## Action priority cheatsheet

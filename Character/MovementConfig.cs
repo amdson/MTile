@@ -117,6 +117,13 @@ public class MovementConfig
     // gravity so the climb is gravity-neutral while the ramp is fully engaged.
     public float RampAntiGravForce { get; set; } = 600f;
 
+    // Hard cap on the magnitude of the upward velocity the parkour redirect may
+    // produce (px/s, y-down convention so the cap is on |negative vy|). On top of
+    // the existing MaxSpeed cap: a steep redirect on a tall ledge converts
+    // horizontal speed into a fast vertical kick that magnitude alone allows. Set
+    // slightly above |JumpVelocity| so a one-block vault still feels punchy.
+    public float ParkourRampMaxVy { get; set; } = 200f;
+
     // Covered Jump (jump initiated while partially under an overhang — see CoveredJumpState)
     // Hard cap on the slide-out phase so a degenerate "can't actually get clear" position bails to
     // Falling instead of hanging. The slide itself reuses WalkAccel / MaxWalkSpeed.

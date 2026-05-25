@@ -30,6 +30,14 @@ public sealed class SteeringRamp : PhysicsContact
     // force can't blow the speed up through the rescale. Default = no cap.
     public float   MaxSpeed = float.PositiveInfinity;
 
+    // Optional ceiling on the magnitude of the *upward* (negative-Y) component the
+    // redirect may produce. Caps just the vy after rotation, on top of MaxSpeed:
+    // a steep redirect on a tall ledge converts horizontal speed into a fast
+    // vertical kick that the magnitude cap still allows, sending the player
+    // ballistic. Default = no cap. Y-down convention: upward = negative Y, so
+    // the clamp is body.Velocity.Y >= -MaxRedirectVy.
+    public float   MaxRedirectVy = float.PositiveInfinity;
+
     private const float ThetaBand      = 0.15f;   // radians: width of the Weight fade near ThetaStar = 0
     private const float BindEpsilon    = 1e-3f;   // a vertex binds iff rf > eps && rc > eps
     private const float SpeedEpsilon   = 1e-2f;   // below this speed there is nothing to redistribute
@@ -99,18 +107,28 @@ public sealed class SteeringRamp : PhysicsContact
     public static void ResolveVelocity(PhysicsBody body, List<SteeringRamp> ramps)
     {
         float cap = float.PositiveInfinity;
-        foreach (var r in ramps) if (r.MaxSpeed < cap) cap = r.MaxSpeed;
-        float s = MathF.Min(body.Velocity.Length(), cap);
+        float vyCap = float.PositiveInfinity;
+        foreach (var r in ramps)
+        {
+            if (r.MaxSpeed < cap) cap = r.MaxSpeed;
+            if (r.MaxRedirectVy < vyCap) vyCap = r.MaxRedirectVy;
+        }
+        Vector2 vBefore = body.Velocity;
+        float s = MathF.Min(vBefore.Length(), cap);
         if (s < SpeedEpsilon) return;
 
         if (ramps.Count == 1)
         {
             var ramp = ramps[0];
-            Vector2 v = body.Velocity;
+            Vector2 v = vBefore;
             float into = MathF.Max(0f, Vector2.Dot(v, ramp.BannedDir));
             Vector2 vRem = v - ramp.Weight * into * ramp.BannedDir;
             float remLen = vRem.Length();
             body.Velocity = remLen > SpeedEpsilon ? vRem * (s / remLen) : s * ramp.SurfaceDir;
+            // Vertical kick cap: y-down ⇒ upward is negative Y, so clamp from below.
+            if (body.Velocity.Y < -vyCap) body.Velocity = new Vector2(body.Velocity.X, -vyCap);
+            // Record per-contact impulse delivered to the body by the redirect.
+            ramp.LastImpulse += body.Velocity - vBefore;
             return;
         }
 
@@ -119,7 +137,7 @@ public sealed class SteeringRamp : PhysicsContact
         float maxW = 0f;
         foreach (var r in ramps) if (r.Weight > maxW) maxW = r.Weight;
         float lambda = CombineLambda * maxW;
-        Vector2 vHat = Vector2.Normalize(body.Velocity);
+        Vector2 vHat = Vector2.Normalize(vBefore);
         float baseAngle = MathF.Atan2(vHat.Y, vHat.X);
 
         const int Samples = 64;
@@ -134,6 +152,15 @@ public sealed class SteeringRamp : PhysicsContact
             if (cost < bestCost) { bestCost = cost; bestAngle = ang; }
         }
         body.Velocity = new Vector2(MathF.Cos(bestAngle), MathF.Sin(bestAngle)) * s;
+        if (body.Velocity.Y < -vyCap) body.Velocity = new Vector2(body.Velocity.X, -vyCap);
+        // Distribute the redirect impulse across ramps weighted by Weight / ΣWeight.
+        Vector2 dv = body.Velocity - vBefore;
+        float wSum = 0f;
+        foreach (var r in ramps) wSum += r.Weight;
+        if (wSum > 0f)
+        {
+            foreach (var r in ramps) r.LastImpulse += dv * (r.Weight / wSum);
+        }
     }
 
     private static float Smoothstep(float edge0, float edge1, float x)

@@ -52,10 +52,6 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     private readonly List<Action<float>>                       _stageTickers = new();
     private readonly List<(MovingRectangle Rect, Color Color)> _platforms    = new();
 
-    // Most recent frame on which HandleBuildInput placed a tile. Plumbed into the
-    // player so BlockReadyAction can cancel its charge mid-build.
-    private int _lastTilePlacedFrame = int.MinValue / 2;
-
     // Deterministic id source for snapshot identity (roadmap goal 4 §G/§H). Players
     // and entities draw from the same monotonic sequence in construction/spawn order,
     // so a given object keeps its id across a snapshot/restore round-trip and the
@@ -193,8 +189,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
 
         // Block-picker (1-4) and planner-mode toggle (P) are now interpreted per-player
         // inside PlayerCharacter.Update from its own input — no global planner statics.
-
-        HandleBuildInput();
+        // Drag-to-build also lives per-player now, inside BlockReadyAction.
 
         // Tick dynamic surfaces BEFORE the body sweep (roadmap §2D update ordering).
         // Tickers receive absolute elapsed time so platform motion is a pure function
@@ -210,7 +205,6 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         _hitboxes.Clear();
         _hurtboxes.Clear();
         foreach (var h in _hittables) h.PublishHurtboxes(_hurtboxes);
-        _player.LastTilePlacedFrame = _lastTilePlacedFrame;
         _player.Update(_controller, _chunks, _hitboxes, _hurtboxes, dt, this);
         foreach (var (p, c) in _secondaryPlayers)
             p.Update(c, _chunks, _hitboxes, _hurtboxes, dt);
@@ -241,41 +235,6 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             _entities.RemoveAt(i);
         }
     }
-
-    // Drag-to-build: while right-click is held, every cell the cursor sweeps through
-    // is fed to TryRequestTile in path order. Reach is measured from the player center;
-    // a sprout neighbour extends reach so a build can chain outward.
-    private const float BuildReach = 64f;
-    private const float ChainBuildReachMul = 2f;
-    private void HandleBuildInput()
-    {
-        var input = _controller.Current;
-        if (!input.RightClick) return;
-        // Once an eruption is armed, RMB is committed to the gesture.
-        if (_player.CurrentAction is BlockEruptionAction) return;
-
-        var prev = _controller.GetPrevious(1);
-        var segStart = prev.RightClick ? prev.MouseWorldPosition : input.MouseWorldPosition;
-        var segEnd   = input.MouseWorldPosition;
-
-        foreach (var (gtx, gty) in MouseSweep.Cells(segStart, segEnd))
-        {
-            var cellCenter = new Vector2(
-                gtx * Chunk.TileSize + Chunk.TileSize * 0.5f,
-                gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
-            float maxReach = HasSproutNeighbour(gtx, gty) ? BuildReach * ChainBuildReachMul : BuildReach;
-            if (Vector2.DistanceSquared(_player.Body.Position, cellCenter) > maxReach * maxReach)
-                continue;
-            var node = _chunks.TryRequestTile(gtx, gty, _player.ActiveBlockType);
-            if (node != null) _lastTilePlacedFrame = _player.Frame;
-        }
-    }
-
-    private bool HasSproutNeighbour(int gtx, int gty) =>
-        _chunks.Graph.TryGet(gtx,     gty + 1, out _) ||
-        _chunks.Graph.TryGet(gtx - 1, gty,     out _) ||
-        _chunks.Graph.TryGet(gtx + 1, gty,     out _) ||
-        _chunks.Graph.TryGet(gtx,     gty - 1, out _);
 
     // Cheap, pure, order-stable hash of the gameplay-significant sim state (GGPO_PLAN
     // §F/§I.2). Two peers running the same confirmed inputs must produce the same
@@ -340,7 +299,6 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         return new SimSnapshot
         {
             HitIdValue           = _hitIds.Value,
-            LastTilePlacedFrame  = _lastTilePlacedFrame,
             NextId               = _nextId,
             Elapsed              = _elapsed,
             Primary              = _player.CaptureState(),
@@ -359,7 +317,6 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         // Sim scalars first (id counter must be set before any rehydrate that mints
         // — none currently do, but keep the ordering honest).
         _hitIds.Value       = snap.HitIdValue;
-        _lastTilePlacedFrame = snap.LastTilePlacedFrame;
         _nextId             = snap.NextId;
         _elapsed            = snap.Elapsed;
 

@@ -23,7 +23,7 @@ public static class MassBallPlanner
 {
     // Sim integration step. ~60Hz; ~50-200 steps over a typical gesture.
     private const float DtPerStep         = 1f / 60f;
-    private const int   MaxSteps          = 240;
+    private const int   MaxSteps          = 60;
     // Puller advances by this many path-sample indices per sim step. <1 keeps
     // the puller a bit slower than the original cursor so the ball doesn't
     // overshoot the end of the recorded path before its mass is spent.
@@ -31,18 +31,19 @@ public static class MassBallPlanner
     // Spring + damping between ball and puller. Stiffness controls how tightly
     // the ball tracks; damping controls overshoot. Underdamped = the ball wobbles
     // around the puller and the deposit pattern wobbles with it (a feature).
-    private const float SpringStiffness   = 120f;
+    private const float SpringStiffness   = 70f;
     private const float SpringDamping     = 12f;
     // Per-step leak — fraction of remaining mass. Scaled by ball speed so a
     // stationary ball still drains slowly (SpeedScaleMin floor) but a fast ball
     // dumps more per step.
-    private const float LeakFractionBase  = 0.05f;
+    private const float LeakFractionBase  = 0.1f;
+    private const float LeakMin     = 1.0f;
     private const float SpeedRef          = 100f;
     private const float SpeedScaleMin     = 0.8f;
     private const float SpeedScaleMax     = 1.2f;
     // Mass needed to spawn one tile. Total spawned ≈ budget / Threshold, modulo
     // mass lost to terrain-discard and spill-cutoffs.
-    private const float Threshold         = 0.6f;
+    private const float Threshold         = 1f;
     // Recursion guards on the spill cascade.
     private const float EpsAmount         = 0.001f;
     private const int   MaxSpillDepth     = 8;
@@ -92,7 +93,8 @@ public static class MassBallPlanner
         if (budget <= 0 || samples == null || samples.Count == 0) return result;
 
         Vector2 ballPos = origin;
-        Vector2 ballVel = Vector2.Zero;
+        // Vector2 ballVel = Vector2.Zero;
+        Vector2 ballVel = samples[0].Velocity; 
         float   mass    = budget;
 
         var field         = new Dictionary<(int, int), float>();
@@ -138,7 +140,7 @@ public static class MassBallPlanner
             // Leak — fraction of remaining mass, scaled by ball speed.
             float speed = ballVel.Length();
             float scale = MathHelper.Clamp(speed / SpeedRef, SpeedScaleMin, SpeedScaleMax);
-            float leak  = MathF.Min(mass, mass * LeakFractionBase * scale);
+            float leak  = MathF.Min(mass, (mass * LeakFractionBase * scale + LeakMin) * DtPerStep * 60f);
             mass -= leak;
 
             int gtx = (int)MathF.Floor(ballPos.X / Chunk.TileSize);
@@ -148,7 +150,7 @@ public static class MassBallPlanner
             result.BallTrajectory.Add(ballPos);
 
             // No early-break on "puller at end + ball at rest" — when the player
-            // barely moves the mouse, the ball settles within ~10 steps and we'd
+            // barely moves the mouse, the ball settles wid thin ~10 steps and we'd
             // exit with most of the budget unspent. Letting the loop run until
             // mass is depleted (or MaxSteps caps it) means a stationary release
             // dumps its full budget into the rest cell, and the spill cascade

@@ -47,6 +47,11 @@ public readonly struct BoundingBox
     // tile that the body's bottom vertex barely grazes).
     public BoundingBox InsetVertical(float amount) => new(Left, Top + amount, Right, Bottom - amount);
 
+    // Mirror of InsetVertical: pull the left and right faces inward. Used by the floor probe
+    // (GroundChecker) so a wall tile the body's side vertex is merely flush against doesn't get
+    // reported as ground directly beneath the body.
+    public BoundingBox InsetHorizontal(float amount) => new(Left + amount, Top, Right - amount, Bottom);
+
     // Same x-extent as this box, but the given vertical range. Useful when a checker has body-relative
     // x bounds (a side strip) but a specific y window (e.g. "from the body's center down to its feet").
     public BoundingBox WithVerticalRange(float top, float bottom) => new(Left, top, Right, bottom);

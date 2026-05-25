@@ -21,7 +21,6 @@ public struct PlayerSnapshot
     public float HitInvulnRemaining;
     public int   LastCrushFrame;
     public int   Frame;
-    public int   LastTilePlacedFrame;
 
     // FSM current selection + history rings, as registry indices.
     public int   StateIndex;

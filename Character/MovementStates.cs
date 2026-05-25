@@ -277,6 +277,7 @@ public class WallSlidingState : MovementState
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         EnsureContacts(ctx);
+
         if (ctx.TryGetWall(_wallDir, out var refreshed))
         {
             _wall.Position = refreshed.Position;
@@ -298,6 +299,8 @@ public class WallSlidingState : MovementState
         ctx.Body.AppliedForce = vy > 0f
             ? new Vector2(0f, -(vy / terminalSpeed) * MovementConfig.Current.SlideDrag)
             : Vector2.Zero;
+        // Restore double jump
+        abilities.HasDoubleJumped = false;
     }
 }
 
@@ -714,6 +717,11 @@ public class ParkourState : MovementState
         // can't inflate it through the redirect's rescale); the multi-ramp combine manages its own.
         if (_overRamp  != null) _overRamp.MaxSpeed  = (engaged == 1 && solo == _overRamp)  ? targetAlong : float.PositiveInfinity;
         if (_underRamp != null) _underRamp.MaxSpeed = (engaged == 1 && solo == _underRamp) ? targetAlong : float.PositiveInfinity;
+        // Additionally cap the vertical kick the redirect can produce — a steep
+        // redirect on a tall ledge otherwise yeets the body upward at unrealistic
+        // vy. Applied unconditionally per ramp; harmless on shallow redirects.
+        if (_overRamp  != null) _overRamp.MaxRedirectVy  = MovementConfig.Current.ParkourRampMaxVy;
+        if (_underRamp != null) _underRamp.MaxRedirectVy = MovementConfig.Current.ParkourRampMaxVy;
 
         ctx.Body.AppliedForce = force;
     }

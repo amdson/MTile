@@ -138,12 +138,6 @@ public class PlayerCharacter : IHittable
     // Distinct from _historyHead (which mods to HistorySize).
     private int _frame;
     public int Frame => _frame;
-    // Written by Game1 each tick *before* Update — records the frame on which
-    // Game1.HandleBuildInput last actually placed a tile. Plumbed into
-    // EnvironmentContext so BlockReadyAction can cancel an in-flight charge while
-    // the player is actively building. Default is a far-past value so a fresh
-    // PlayerCharacter (tests, secondary players) reads as "never built."
-    public int LastTilePlacedFrame { get; set; } = int.MinValue / 2;
 
     // Deterministic HitId source. Defaults to a private allocator (sufficient for
     // solo play / single-player tests); Simulation overrides this with one shared
@@ -212,7 +206,7 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new AirSlash1());         // 30/30
         _actionRegistry.Add(new StabAction());        // 30/30
         _actionRegistry.Add(new PulseAction());       // 30/30  — Circle gesture
-        _actionRegistry.Add(new BlockReadyAction());     // 8/10   — RMB hold-in-solid charge
+        _actionRegistry.Add(new BlockReadyAction());     // 8/10   — RMB drag-build + hold-in-solid charge
         _actionRegistry.Add(new BlockEruptionAction());  // 9/10   — RMB hold-out-of-solid after arming, fires on release
         _actionRegistry.Add(new GroundSlash2());      // 30/50  — combo (Slash2Ready gated)
         _actionRegistry.Add(new GroundSlash3());      // 30/50  — combo
@@ -317,7 +311,6 @@ public class PlayerCharacter : IHittable
             Condition      = _abilities.Condition,
             Combat         = _abilities.Combat,
             CurrentFrame   = _frame,
-            LastTilePlacedFrame = LastTilePlacedFrame,
             Dt             = dt,
             Body           = Body,
             Intent         = InputIntent.From(controller),
@@ -331,7 +324,7 @@ public class PlayerCharacter : IHittable
         // Facing themselves on Enter.
         if (IsGrounded && ctx.Intent.CurrentHorizontal != 0) _abilities.Facing = ctx.Intent.CurrentHorizontal;
 
-        if (IsGrounded || ctx.TryGetWall(1, out _) || ctx.TryGetWall(-1, out _))
+        if (IsGrounded)
         {
             _abilities.HasDoubleJumped = false;
         }
@@ -456,7 +449,6 @@ public class PlayerCharacter : IHittable
             HitInvulnRemaining  = _hitInvulnRemaining,
             LastCrushFrame      = _lastCrushFrame,
             Frame               = _frame,
-            LastTilePlacedFrame = LastTilePlacedFrame,
             StateIndex          = _stateRegistry.IndexOf(_currentState),
             ActionIndex         = _actionRegistry.IndexOf(_currentAction),
             StateHistory        = MapStateRing(_stateHistory),
@@ -483,7 +475,6 @@ public class PlayerCharacter : IHittable
         _hitInvulnRemaining = s.HitInvulnRemaining;
         _lastCrushFrame     = s.LastCrushFrame;
         _frame              = s.Frame;
-        LastTilePlacedFrame = s.LastTilePlacedFrame;
 
         _currentState  = _stateRegistry[s.StateIndex];
         _currentAction = _actionRegistry[s.ActionIndex];
