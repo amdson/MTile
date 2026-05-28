@@ -15,20 +15,18 @@ public sealed class SimSnapshot
     public int   HitIdValue;            // HitIdAllocator.Value
     public float Elapsed;               // absolute sim clock (drives platform tickers)
 
-    // ECS world identity bookkeeping (slot generations + free list). Owns EntityId
-    // allocation; the live-only ref stores (bodies/entities/players) are rebuilt from
-    // the entity/player snapshots below, not captured here.
+    // The ECS world snapshot: slot generations + free list (EntityId bookkeeping) PLUS
+    // every snapshotted value-component store — PlayerData, EntityData, and BodyStateComp.
+    // This is the single rollback substrate now: players' and entities' serializable
+    // state live here, not in separate per-type arrays. The live-only ref stores
+    // (PlayerRef/EntityRef/PhysicsBodyComponent) are skipped and rebuilt on restore.
+    // Spawn order is preserved by the order-preserving component stores.
     public WorldSnapshot World;
 
-    // Players. The primary plus any secondaries, each with its own controller ring.
-    public PlayerSnapshot   Primary;
-    public ControllerState  PrimaryController;
-    public PlayerSnapshot[]  Secondaries;
+    // Player controllers. Controllers live outside the World (one input channel per
+    // player), so their rings are captured here alongside the World snapshot.
+    public ControllerState   PrimaryController;
     public ControllerState[] SecondaryControllers;
-
-    // Entities, in spawn order (so the rebuilt _entities/_bodies lists keep the same
-    // iteration order the original run had — matters for deterministic stepping).
-    public EntitySnapshot[] Entities;
 
     // Combat dedupe table, keyed HitId → set of already-hit EntityIds. See
     // CombatSystem.CaptureDedupe.

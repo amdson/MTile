@@ -35,7 +35,7 @@ public class Entity : IHittable
 
     public bool IsDead => Health <= 0f;
 
-    // Concrete-type tag for rehydration (see EntitySnapshot.Rehydrate). The base
+    // Concrete-type tag for rehydration (see EntityFactory.Rehydrate). The base
     // Entity (balloons/balls) reports Generic; each polymorphic subtype overrides.
     public virtual EntityKind Kind => EntityKind.Generic;
 
@@ -83,47 +83,45 @@ public class Entity : IHittable
         if (Sprite != null) Sprite.Position = Body.Position;
     }
 
-    // ── Snapshot/restore (roadmap goal 4 §G) ────────────────────────────────────
-    // Capture the entity's full mutable state into a flat EntitySnapshot. The base
-    // fills the shared fields (id, body, stats, immutable shape/impact refs); each
-    // subtype adds its own via WriteState. Symmetric with RestoreInto/ReadState.
-    public EntitySnapshot Capture()
+    // ── Snapshot/restore (Plans/ECS_MIGRATION_PLAN.md, Phases 4-6) ───────────────
+    // Serializable state lives in the World's value-component stores (EntityData +
+    // BodyStateComp) keyed by this entity's Id. The live object stays the authority
+    // during a Step; these methods sync it to/from the components only at snapshot
+    // boundaries. The component-set IS the snapshot — no separate per-entity struct
+    // array. Symmetric with WriteState/ReadState, which marshal the subtype fields.
+    public void CaptureState(World world)
     {
-        var s = new EntitySnapshot
-        {
-            Kind         = Kind,
-            Id           = Id,
-            Body         = BodyState.Capture(Body),
-            Health       = Health,
-            MaxHealth    = MaxHealth,
-            Mass         = Mass,
-            GravityScale = GravityScale,
-            Color        = Color,
-            Faction      = Faction,
-            Polygon      = Body.Polygon,   // immutable shape
-            Impact       = Body.Impact,    // immutable config
-        };
-        WriteState(ref s);
-        return s;
+        ref var d = ref world.Get<EntityData>(Id);
+        d.Kind         = Kind;
+        d.Health       = Health;
+        d.MaxHealth    = MaxHealth;
+        d.Mass         = Mass;
+        d.GravityScale = GravityScale;
+        d.Color        = Color;
+        d.Faction      = Faction;
+        d.Polygon      = Body.Polygon;   // immutable shape
+        d.Impact       = Body.Impact;    // immutable config
+        WriteState(ref d);
+        world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
 
-    public void RestoreInto(in EntitySnapshot s)
+    public void RestoreState(World world)
     {
-        Id           = s.Id;
-        s.Body.RestoreInto(Body);
-        Health       = s.Health;
-        MaxHealth    = s.MaxHealth;
-        Mass         = s.Mass;
-        GravityScale = s.GravityScale;
-        Color        = s.Color;
-        Faction      = s.Faction;
-        ReadState(in s);
+        var d = world.Get<EntityData>(Id);
+        Health       = d.Health;
+        MaxHealth    = d.MaxHealth;
+        Mass         = d.Mass;
+        GravityScale = d.GravityScale;
+        Color        = d.Color;
+        Faction      = d.Faction;
+        ReadState(in d);
+        world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
     }
 
     // Subtype hooks for the per-type fields (AI state, projectile fuses, …). Base
     // entities (balloons/balls) carry none, so the defaults are no-ops.
-    protected virtual void WriteState(ref EntitySnapshot s) { }
-    protected virtual void ReadState(in EntitySnapshot s) { }
+    protected virtual void WriteState(ref EntityData s) { }
+    protected virtual void ReadState(in EntityData s) { }
 }
 
 // Callback handed to entity Update so AI can spawn child entities (projectiles,

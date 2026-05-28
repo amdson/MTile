@@ -40,14 +40,14 @@ public abstract class Projectile : Entity
 
     // Snapshot the shared projectile fuse/lifetime alongside the base entity fields.
     // Concrete projectiles chain through these for their own per-type state.
-    protected override void WriteState(ref EntitySnapshot s)
+    protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
         s.Age      = Age;
         s.Lifetime = Lifetime;
     }
 
-    protected override void ReadState(in EntitySnapshot s)
+    protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
         Age      = s.Age;

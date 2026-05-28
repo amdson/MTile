@@ -14,7 +14,7 @@ namespace MTile;
 // BruteEnemy is left as a hand-written reference — it documents the "by hand"
 // path. The factory is the path for everything new.
 //
-// Snapshot/restore: each blueprint owns its EntityKind. EntitySnapshot.Rehydrate
+// Snapshot/restore: each blueprint owns its EntityKind. EntityFactory.Rehydrate
 // dispatches to EnemyFactory.Create for any kind whose blueprint is registered.
 // Adding a new enemy type is therefore exactly two edits — (1) an EntityKind
 // variant, (2) an EnemyFactory.Register call during startup — and nothing else
@@ -116,7 +116,7 @@ public static class EnemyFactory
 
     // Built-in registrations. Add new ones here (or call Register from your own
     // startup code). The EntityKind values referenced here must exist — see
-    // Entities/EntitySnapshot.cs.
+    // Entities/EntityKind.cs.
     private static void RegisterBuiltIns()
     {
         // Skirmisher — light, fast, mid-range harasser. Demonstrates picking a
@@ -146,7 +146,7 @@ public static class EnemyFactory
         });
 
         // Template — uncomment and adapt for your own types. Each new blueprint
-        // wants its own EntityKind in EntitySnapshot.cs.
+        // wants its own EntityKind in EntityKind.cs.
         //
         // Register(new EnemyBlueprint
         // {

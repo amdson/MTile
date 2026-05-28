@@ -49,4 +49,27 @@ public static class EntityFactory
             Sprite       = Sprites.Ball(6f),
         };
     }
+
+    // Construct a fresh entity of the captured Kind from the snapshot components, for
+    // restore of an entity that despawned since the snapshot frame (a live entity is
+    // restored in place by RestoreState instead). The gameplay ctor runs (sprite,
+    // immutable Impact/config); the caller then calls RestoreState to overwrite every
+    // dynamic field from the components, so post-ctor transients don't leak. `hitIds`
+    // is only consulted by Bullet (re-deflect allocator); its counter is restored
+    // separately by SimSnapshot. Falls through to a Generic entity for any kind not
+    // registered with EnemyFactory — the same path the old EntitySnapshot.Rehydrate took.
+    public static Entity Rehydrate(in EntityData d, in BodyState body, HitIdAllocator hitIds)
+        => d.Kind switch
+        {
+            EntityKind.Generic       => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
+            EntityKind.Stalker       => new StalkerEnemy(body.Position),
+            EntityKind.Turret        => new TurretEnemy(body.Position),
+            EntityKind.Bullet        => new BulletProjectile(body.Position, body.Velocity, hitIds),
+            EntityKind.EnergyBall    => new EnergyBallProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
+            EntityKind.StickyGrenade => new StickyGrenadeProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
+            EntityKind.LobbedArea    => new LobbedAreaProjectile(body.Position, body.Velocity, d.Budget, d.TileType, d.Mode, d.HitId, d.Faction),
+            EntityKind.Brute         => new BruteEnemy(body.Position),
+            _ when EnemyFactory.IsRegistered(d.Kind) => EnemyFactory.Create(d.Kind, body.Position),
+            _                        => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
+        };
 }

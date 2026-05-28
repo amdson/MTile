@@ -57,7 +57,7 @@ public class StalkerEnemy : Entity
 
     public override EntityKind Kind => EntityKind.Stalker;
 
-    protected override void WriteState(ref EntitySnapshot s)
+    protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
         s.AIState   = (int)_state;
@@ -66,7 +66,7 @@ public class StalkerEnemy : Entity
         s.HitId     = _hitId;
     }
 
-    protected override void ReadState(in EntitySnapshot s)
+    protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
         _state     = (AIState)s.AIState;

@@ -33,13 +33,13 @@ public class BulletProjectile : Projectile
     // _hitId is mutable here (a deflect re-mints it), so it round-trips through the
     // snapshot. _hitIds is the shared allocator ref — supplied to Rehydrate via the
     // ctor, never copied as data.
-    protected override void WriteState(ref EntitySnapshot s)
+    protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
         s.HitId = _hitId;
     }
 
-    protected override void ReadState(in EntitySnapshot s)
+    protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
         _hitId = s.HitId;

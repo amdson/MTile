@@ -37,7 +37,7 @@ public class EnergyBallProjectile : Projectile
     // _hitId is immutable (set once at construction); WriteState records it so
     // Rehydrate can pass it back through the ctor. No ReadState override needed —
     // the base body/stat restore is sufficient for a live-entity restore.
-    protected override void WriteState(ref EntitySnapshot s)
+    protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
         s.HitId = _hitId;

@@ -38,6 +38,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // collect-then-iterate phases consume. Reused to keep allocations off the hot path.
     private readonly List<PhysicsBody> _bodyScratch   = new();
     private readonly List<Entity>      _entityScratch = new();
+    // Ids of the entities to rebuild during Restore, collected from the restored
+    // EntityData store before re-registering the live-only ref stores (so the
+    // re-registration doesn't structurally modify a store mid-query).
+    private readonly List<EntityId>    _restoreIdScratch = new();
     // Per-frame intersection pass; owns the cross-frame (HitId,Target) dedupe table.
     private readonly CombatSystem _combat = new();
     // Single deterministic HitId source shared by all players + entities.
@@ -63,13 +67,24 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // with no hidden accumulator state.
     private float _elapsed;
 
-    // Mark the live-only registry stores so the World snapshot skips them (they hold
-    // class refs). Called once per construction before any entity is registered.
+    // Configure the World's component stores once per construction, before any entity
+    // is registered. Two flavors:
+    //   • Live-only ref stores (PlayerRef/EntityRef/PhysicsBodyComponent) wrap class
+    //     objects — skipped by the World snapshot, rebuilt from rehydrated entities on
+    //     restore.
+    //   • Snapshotted value stores (EntityData/PlayerData/BodyStateComp) hold the
+    //     serializable entity + player state and ARE captured. BodyStateComp and
+    //     PlayerData wrap reference state (a body's maintained-contact list; a player's
+    //     history arrays / cloned abilities / gesture samples), so they register
+    //     deep-clone hooks — a shallow array copy would alias that live state into the
+    //     snapshot.
     private void MarkWorldStores()
     {
         _world.MarkLiveOnly<PlayerRef>();
         _world.MarkLiveOnly<EntityRef>();
         _world.MarkLiveOnly<PhysicsBodyComponent>();
+        _world.SetCloner<BodyStateComp>(b => new BodyStateComp { State = b.State.DeepCopy() });
+        _world.SetCloner<PlayerData>(d => d.DeepCopy());
     }
 
     // Register a player/entity in the World: mint its id, stamp it on the object, and
@@ -82,6 +97,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         p.Id = id;
         _world.Add<PlayerRef>(id).Obj = p;
         _world.Add<PhysicsBodyComponent>(id).Body = p.Body;
+        // Snapshotted state mirrors — empty now, populated from the live player at each
+        // Snapshot() via CaptureState; the World captures them as the rollback substrate.
+        _world.Add<PlayerData>(id);
+        _world.Add<BodyStateComp>(id);
     }
 
     // Resolve an EntityId to its live IHittable for CombatSystem dispatch.
@@ -169,6 +188,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         e.Id = id;
         _world.Add<EntityRef>(id).Obj = e;
         _world.Add<PhysicsBodyComponent>(id).Body = e.Body;
+        // Snapshotted state mirrors — empty now, populated from the live object at each
+        // Snapshot() via CaptureState; the World captures them as the rollback substrate.
+        _world.Add<EntityData>(id);
+        _world.Add<BodyStateComp>(id);
     }
 
     public void AddPlatform(MovingRectangle rect, Color color)
@@ -327,19 +350,17 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // platform clock). Terrain (chunks/tiles) is out of scope here — goal 6.
     public SimSnapshot Snapshot()
     {
-        var secondaries = new PlayerSnapshot[_secondaryPlayers.Count];
-        var secCtrls    = new ControllerState[_secondaryPlayers.Count];
+        var secCtrls = new ControllerState[_secondaryPlayers.Count];
         for (int i = 0; i < _secondaryPlayers.Count; i++)
-        {
-            secondaries[i] = _secondaryPlayers[i].Player.CaptureState();
-            secCtrls[i]    = _secondaryPlayers[i].Ctrl.Capture();
-        }
+            secCtrls[i] = _secondaryPlayers[i].Ctrl.Capture();
 
-        // Entities in World (spawn) order so the rebuilt set keeps iteration order.
-        _entityScratch.Clear();
-        foreach (var r in _world.Query<EntityRef>()) _entityScratch.Add(r.Component1.Obj);
-        var entities = new EntitySnapshot[_entityScratch.Count];
-        for (int i = 0; i < _entityScratch.Count; i++) entities[i] = _entityScratch[i].Capture();
+        // Sync every live player + entity's serializable state into its World value
+        // components (PlayerData/EntityData + BodyStateComp), THEN capture the World —
+        // those component stores ARE the snapshot now; there's no separate per-player or
+        // per-entity struct array. Player capture must precede _world.Capture() below.
+        _player.CaptureState(_world);
+        foreach (var (p, _) in _secondaryPlayers) p.CaptureState(_world);
+        foreach (var r in _world.Query<EntityRef>()) r.Component1.Obj.CaptureState(_world);
 
         var platforms = new PlatformState[_platforms.Count];
         for (int i = 0; i < _platforms.Count; i++)
@@ -350,11 +371,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             HitIdValue           = _hitIds.Value,
             World                = _world.Capture(),
             Elapsed              = _elapsed,
-            Primary              = _player.CaptureState(),
             PrimaryController    = _controller.Capture(),
-            Secondaries          = secondaries,
             SecondaryControllers = secCtrls,
-            Entities             = entities,
             Dedupe               = _combat.CaptureDedupe(),
             Platforms            = platforms,
             Terrain              = _chunks.CaptureTerrain(),
@@ -379,31 +397,44 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         // Terrain: rewind the dense-grid journal + restore the sparse structures.
         _chunks.RestoreTerrain(snap.Terrain);
 
-        // Players (count is fixed across the sim's life — restore in place, re-register).
-        _player.RestoreState(snap.Primary);
-        _controller.Restore(snap.PrimaryController);
+        // Players (count is fixed across the sim's life). Re-register the live-only refs
+        // at each player's stable id, then restore state FROM the World components the
+        // World.Restore above just rehydrated (PlayerData + BodyStateComp). Controllers
+        // live outside the World, so they restore from the snapshot's own arrays.
         _world.Add<PlayerRef>(_player.Id).Obj = _player;
         _world.Add<PhysicsBodyComponent>(_player.Id).Body = _player.Body;
+        _player.RestoreState(_world);
+        _controller.Restore(snap.PrimaryController);
         for (int i = 0; i < _secondaryPlayers.Count; i++)
         {
             var p = _secondaryPlayers[i].Player;
-            p.RestoreState(snap.Secondaries[i]);
-            _secondaryPlayers[i].Ctrl.Restore(snap.SecondaryControllers[i]);
             _world.Add<PlayerRef>(p.Id).Obj = p;
             _world.Add<PhysicsBodyComponent>(p.Id).Body = p.Body;
+            p.RestoreState(_world);
+            _secondaryPlayers[i].Ctrl.Restore(snap.SecondaryControllers[i]);
         }
 
-        // Entities: rebuild from the snapshot in spawn order. Restore into a still-live
-        // entity where its id matches; otherwise rehydrate a fresh one. Live entities
-        // absent from the snapshot (spawned after the snapshot frame) are simply not
-        // re-registered — they're gone. Re-add registry components at each id.
-        foreach (var es in snap.Entities)
+        // Entities: the restored EntityData store (spawn order) is the authoritative set
+        // to rebuild — its ids + Kinds came back with the World capture. Collect the ids
+        // first (so re-registering the live-only ref stores doesn't modify a store mid-
+        // query), then for each: restore into a still-live entity where the id matches,
+        // else rehydrate a fresh one from its captured Kind. Live entities absent from
+        // the snapshot (spawned after the snapshot frame) are never re-registered.
+        _restoreIdScratch.Clear();
+        foreach (var r in _world.Query<EntityData>()) _restoreIdScratch.Add(r.Entity);
+        foreach (var id in _restoreIdScratch)
         {
             Entity e;
-            if (live.TryGetValue(es.Id, out var existing)) { existing.RestoreInto(in es); e = existing; }
-            else                                           { e = es.Rehydrate(_hitIds); }
-            _world.Add<EntityRef>(es.Id).Obj = e;
-            _world.Add<PhysicsBodyComponent>(es.Id).Body = e.Body;
+            if (live.TryGetValue(id, out var existing)) { e = existing; }
+            else
+            {
+                var body = _world.Get<BodyStateComp>(id).State;
+                e = EntityFactory.Rehydrate(in _world.Get<EntityData>(id), in body, _hitIds);
+                e.Id = id;
+            }
+            _world.Add<EntityRef>(id).Obj = e;
+            _world.Add<PhysicsBodyComponent>(id).Body = e.Body;
+            e.RestoreState(_world);
         }
 
         // Platforms — restore pose; tickers re-derive motion from _elapsed next Step.

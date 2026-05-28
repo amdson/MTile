@@ -253,13 +253,13 @@ public abstract class EnemyEntity : Entity
     }
 
     // ── Snapshot/restore ────────────────────────────────────────────────────
-    // Per the MVP plan we reuse a few existing EntitySnapshot fields (AIState,
-    // StateTime, Facing, HitId) and add three new ones (ActionIdx, ActionTime,
-    // LockedFacing). Per-action durations are recomputed from the live
+    // Per the MVP plan we reuse a few shared EntityData fields (AIState,
+    // StateTime, Facing, HitId) and the EnemyEntity action-FSM ones (ActionIdx,
+    // ActionTime, LockedFacing). Per-action durations are recomputed from the live
     // flyweight on restore by replaying Enter into a scratch vars; this keeps
-    // the snapshot footprint flat without coupling the snapshot struct to
+    // the snapshot footprint flat without coupling the component to
     // action-specific knobs.
-    protected override void WriteState(ref EntitySnapshot s)
+    protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
         s.AIState      = _currentMovement;
@@ -271,7 +271,7 @@ public abstract class EnemyEntity : Entity
         s.LockedFacing = _actionVars.LockedFacing;
     }
 
-    protected override void ReadState(in EntitySnapshot s)
+    protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
         _currentMovement       = s.AIState;

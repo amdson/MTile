@@ -37,7 +37,7 @@ public class LobbedAreaProjectile : Projectile
 
     // All of hitId/budget/tileType/mode are immutable (ctor) — recorded so Rehydrate
     // can reconstruct via the ctor. Only _detonated is mutable per-frame state.
-    protected override void WriteState(ref EntitySnapshot s)
+    protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
         s.HitId     = _hitId;
@@ -47,7 +47,7 @@ public class LobbedAreaProjectile : Projectile
         s.Detonated = _detonated;
     }
 
-    protected override void ReadState(in EntitySnapshot s)
+    protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
         _detonated = s.Detonated;

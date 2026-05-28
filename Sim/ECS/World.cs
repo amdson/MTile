@@ -122,6 +122,14 @@ public sealed class World
         _liveOnly.Add(typeof(T));
     }
 
+    // Register a deep-clone hook for a snapshotted component type. Needed when the
+    // struct wraps a class ref whose state is mutated in place (e.g. a body's contact
+    // list), so capture/restore deep-copy each element instead of aliasing the live
+    // store. Pure-value components don't need this — their shallow array copy is exact.
+    // Idempotent; also materializes the store.
+    public void SetCloner<T>(Func<T, T> cloner) where T : struct
+        => Store<T>().Cloner = cloner;
+
     // ── Snapshot / restore ───────────────────────────────────────────────────────
     public WorldSnapshot Capture()
     {

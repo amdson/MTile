@@ -29,7 +29,7 @@ public class TurretEnemy : Entity
 
     public override EntityKind Kind => EntityKind.Turret;
 
-    protected override void WriteState(ref EntitySnapshot s)
+    protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
         s.AIState   = (int)_state;
@@ -37,7 +37,7 @@ public class TurretEnemy : Entity
         s.Aim       = _aim;
     }
 
-    protected override void ReadState(in EntitySnapshot s)
+    protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
         _state     = (AIState)s.AIState;

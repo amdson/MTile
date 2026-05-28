@@ -43,7 +43,7 @@ public class StickyGrenadeProjectile : Projectile
 
     // _hitId is immutable (ctor) — recorded for Rehydrate. The fuse flags are
     // mutable per-frame state and round-trip on a live restore too.
-    protected override void WriteState(ref EntitySnapshot s)
+    protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
         s.HitId      = _hitId;
@@ -52,7 +52,7 @@ public class StickyGrenadeProjectile : Projectile
         s.Exploded   = _exploded;
     }
 
-    protected override void ReadState(in EntitySnapshot s)
+    protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
         _stuck      = s.Stuck;

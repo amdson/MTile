@@ -55,7 +55,7 @@ public struct ActionVars
 // the one piece of per-activation action state that can't ride in the flat
 // ActionVars struct (a mutable SmoothPen + a growing List<PathSample>). PathSample
 // is a readonly struct, so the array is a true deep copy. Captured/restored by
-// BlockEruptionAction.CaptureGesture/RestoreGesture and carried in PlayerSnapshot.
+// BlockEruptionAction.CaptureGesture/RestoreGesture and carried in PlayerData.
 public struct EruptionGestureState
 {
     public bool         HasPen;

@@ -444,43 +444,40 @@ public class PlayerCharacter : IHittable
     // want to read HitstunActive, StunActive, LastHitImpulse, etc.
     public CombatState Combat => _abilities.Combat;
 
-    // ── Snapshot/restore (roadmap goal 4 §A) ────────────────────────────────────
-    // Capture the full per-player simulation state into a flat PlayerSnapshot. The
-    // two FSMs become registry indices; the per-activation data is the value-struct
-    // blobs; helper objects deep-copy their state. Render-only fields (Sprite) are
-    // excluded. The Controller is captured at the sim level, not here.
-    public PlayerSnapshot CaptureState()
+    // ── Snapshot/restore (Plans/ECS_MIGRATION_PLAN.md, Phases 5-6) ───────────────
+    // Serializable player state lives in the World's PlayerData + BodyStateComp stores
+    // keyed by this player's Id; these methods sync it to/from the live object at
+    // snapshot boundaries. The two FSMs become registry indices; per-activation data is
+    // the value-struct blobs; helper objects deep-copy their state. Render-only fields
+    // (Sprite) are excluded. The Controller is captured at the sim level, not here.
+    public void CaptureState(World world)
     {
-        return new PlayerSnapshot
-        {
-            Id                  = Id,
-            Body                = BodyState.Capture(Body),
-            Health              = Health,
-            HitInvulnRemaining  = _hitInvulnRemaining,
-            LastCrushFrame      = _lastCrushFrame,
-            Frame               = _frame,
-            StateIndex          = _stateRegistry.IndexOf(_currentState),
-            ActionIndex         = _actionRegistry.IndexOf(_currentAction),
-            StateHistory        = MapStateRing(_stateHistory),
-            ActionHistory       = MapActionRing(_actionHistory),
-            HistoryHead         = _historyHead,
-            ActionHistoryHead   = _actionHistoryHead,
-            MoveVars            = _moveVars,
-            ActionVars          = _actionVars,
-            Abilities           = _abilities.Clone(),
-            Parser              = _inputParser.Capture(),
-            Intents             = _intents.Capture(),
-            Eruption            = EruptionAction.CaptureGesture(),
-            ActiveBlockType     = _activeBlockType,
-            EruptionMode        = _eruptionMode,
-            WasPDown            = _wasPDown,
-        };
+        ref var d = ref world.Get<PlayerData>(Id);
+        d.Health             = Health;
+        d.HitInvulnRemaining = _hitInvulnRemaining;
+        d.LastCrushFrame     = _lastCrushFrame;
+        d.Frame              = _frame;
+        d.StateIndex         = _stateRegistry.IndexOf(_currentState);
+        d.ActionIndex        = _actionRegistry.IndexOf(_currentAction);
+        d.StateHistory       = MapStateRing(_stateHistory);
+        d.ActionHistory      = MapActionRing(_actionHistory);
+        d.HistoryHead        = _historyHead;
+        d.ActionHistoryHead  = _actionHistoryHead;
+        d.MoveVars           = _moveVars;
+        d.ActionVars         = _actionVars;
+        d.Abilities          = _abilities.Clone();
+        d.Parser             = _inputParser.Capture();
+        d.Intents            = _intents.Capture();
+        d.Eruption           = EruptionAction.CaptureGesture();
+        d.ActiveBlockType    = _activeBlockType;
+        d.EruptionMode       = _eruptionMode;
+        d.WasPDown           = _wasPDown;
+        world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
 
-    public void RestoreState(in PlayerSnapshot s)
+    public void RestoreState(World world)
     {
-        Id                  = s.Id;
-        s.Body.RestoreInto(Body);
+        var s = world.Get<PlayerData>(Id);
         Health              = s.Health;
         _hitInvulnRemaining = s.HitInvulnRemaining;
         _lastCrushFrame     = s.LastCrushFrame;
@@ -503,6 +500,8 @@ public class PlayerCharacter : IHittable
         _activeBlockType = s.ActiveBlockType;
         _eruptionMode    = s.EruptionMode;
         _wasPDown        = s.WasPDown;
+
+        world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
 
         // The restored body keeps only its Maintained (hard) contacts; the soft
         // contacts are gone, so every movement state's transient contact-ref cache is

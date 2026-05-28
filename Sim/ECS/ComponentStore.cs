@@ -38,6 +38,15 @@ internal sealed class ComponentStore<T> : IComponentStore where T : struct
     private T[]        _data;
     private int        _count;
 
+    // Optional deep-clone hook. Pure-value structs leave this null and snapshot via a
+    // shallow array copy (correct — every field is a value). Structs that wrap class
+    // refs whose state is mutated in place (BodyState's contact list, a player's cloned
+    // ability/gesture helpers) set a cloner so capture/restore deep-copy each element
+    // instead of aliasing the live store into the snapshot. Applied symmetrically on
+    // BOTH capture and restore so one snapshot can be restored repeatedly (the rollback
+    // case re-restores the same frame) without sharing mutable refs.
+    public Func<T, T> Cloner;
+
     public ComponentStore(int capacity = 8)
     {
         _sparse = NewSparse(capacity);
@@ -142,7 +151,7 @@ internal sealed class ComponentStore<T> : IComponentStore where T : struct
     {
         Sparse = (int[])_sparse.Clone(),
         Dense  = (EntityId[])_dense.Clone(),
-        Data   = (T[])_data.Clone(),
+        Data   = CloneData(_data, _count),
         Count  = _count,
     };
 
@@ -151,7 +160,18 @@ internal sealed class ComponentStore<T> : IComponentStore where T : struct
         var s = (Snap)snapshot;
         _sparse = (int[])s.Sparse.Clone();
         _dense  = (EntityId[])s.Dense.Clone();
-        _data   = (T[])s.Data.Clone();
+        _data   = CloneData(s.Data, s.Count);
         _count  = s.Count;
+    }
+
+    // Shallow array copy when no cloner is set (pure-value T); otherwise per-element
+    // deep clone of the live slots (0..count). Slots past count are unused and left
+    // default — symmetric with Clear/RemoveEntity, which default the tail.
+    private T[] CloneData(T[] src, int count)
+    {
+        if (Cloner == null) return (T[])src.Clone();
+        var copy = new T[src.Length];
+        for (int i = 0; i < count; i++) copy[i] = Cloner(src[i]);
+        return copy;
     }
 }

@@ -67,6 +67,22 @@ public struct BodyState
                 b.Constraints.Add(Clone(Maintained[i]));
     }
 
+    // Deep-copy this snapshot, including a fresh clone of every maintained contact.
+    // Used as the World store's Cloner for BodyStateComp so capture/restore never
+    // alias the contact array (the structs copy by value, but the PhysicsContact[]
+    // is a shared ref until re-cloned). Pose/kinematics are value types, copied free.
+    public readonly BodyState DeepCopy()
+    {
+        var copy = this;
+        if (Maintained != null && Maintained.Length > 0)
+        {
+            var contacts = new PhysicsContact[Maintained.Length];
+            for (int i = 0; i < Maintained.Length; i++) contacts[i] = Clone(Maintained[i]);
+            copy.Maintained = contacts;
+        }
+        return copy;
+    }
+
     // Deep-copy a single contact, preserving its concrete type + Maintained flag.
     private static PhysicsContact Clone(PhysicsContact c) => c switch
     {
