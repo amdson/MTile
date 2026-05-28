@@ -13,8 +13,12 @@ public sealed class SimSnapshot
 {
     // Sim-level scalars.
     public int   HitIdValue;            // HitIdAllocator.Value
-    public int   NextId;                // entity/player id counter
     public float Elapsed;               // absolute sim clock (drives platform tickers)
+
+    // ECS world identity bookkeeping (slot generations + free list). Owns EntityId
+    // allocation; the live-only ref stores (bodies/entities/players) are rebuilt from
+    // the entity/player snapshots below, not captured here.
+    public WorldSnapshot World;
 
     // Players. The primary plus any secondaries, each with its own controller ring.
     public PlayerSnapshot   Primary;

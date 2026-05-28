@@ -140,7 +140,7 @@ public static class PhysicsWorld
     }
 
     public static void StepSwept(
-        List<PhysicsBody> bodies,
+        IReadOnlyList<PhysicsBody> bodies,
         ChunkMap chunks,
         float dt,
         Vector2 gravity)

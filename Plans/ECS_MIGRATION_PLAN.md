@@ -230,39 +230,60 @@ bridge dies in phase 3.
 - The bridge is the only place that maps `EntityId` → object. Everything else
   uses the `EntityId` directly.
 
-### Phase 2 — Bodies become components
+### Phase 2 — World integration: bodies-as-components + identity registry
 
-`PhysicsBody` moves out of `Entity`/`PlayerCharacter` and into the ECS. Owners
-hold an `EntityId`; the body is fetched via the world.
+**Re-scoped during implementation.** Originally split across Phase 2 (bodies)
+and Phase 3 (entity registry); merged because they entangle through `EntityId`
+allocation and iteration order. Snapshot integration (the original Phase 6) is
+deliberately kept *light* here — see below.
+
+**Design decisions (locked with the user):**
+- **`PhysicsBody` stays a class.** Everything in the game uses it as one unit and
+  mutates it by reference (`ctx.Body.Velocity += force`). It's stored in the World
+  wrapped in a struct: `struct PhysicsBodyComponent { PhysicsBody Body; }`. No
+  value-ification, no struct conversion — movement/physics code is untouched.
+- **The World becomes the `EntityId` authority**, retiring `Simulation._nextId`.
+  Players/entities get their id from `world.Create()`.
+- **Ref-holding stores are live-only, not World-snapshotted.** `PhysicsBodyComponent`,
+  `EntityRef { Entity Obj }`, `PlayerRef { PlayerCharacter Obj }` hold class refs;
+  a value-clone snapshot would alias live objects. So the World snapshot owns only
+  the **slot/generation/free bookkeeping** (pure value data); entity/player *state*
+  stays on the existing `EntitySnapshot`/`PlayerSnapshot` path. On restore, the
+  ref stores are rebuilt from the rehydrated entities. (A small reconcile remains;
+  it's killed in a later phase when entities decompose into real value components.)
+- **ComponentStore removal is order-preserving** (shift, not swap-with-last). The
+  sim's determinism — the state hash and snapshot/restore — relies on stable
+  spawn-order iteration of bodies/entities, so World iteration must match
+  insertion order and reproduce it after a restore.
 
 **Files:**
-- New: `Sim/ECS/Components/PhysicsBodyComponent.cs` (renamed type)
-- [Physics/PhysicsBody.cs](../Physics/PhysicsBody.cs) — either becomes the
-  component directly (rename to `PhysicsBodyComponent`, make it a `struct`) or
-  stays as a thin instance type that the component wraps; pick the simpler
-  variant during implementation
-- [Physics/PhysicsWorld.cs](../Physics/PhysicsWorld.cs) `StepSwept(IList<PhysicsBody>, ...)` →
-  `StepSwept(World, ...)`. Iterates `world.Query<PhysicsBodyComponent>()`.
-- [Simulation.cs:29](../Simulation.cs#L29) — delete `_bodies` list; queries
-  replace it
-- [Entities/Entity.cs:16](../Entities/Entity.cs#L16) `public PhysicsBody Body`
-  → `public EntityId Id; ref PhysicsBodyComponent Body => ref world.Get<PhysicsBodyComponent>(Id);`
-- [Character/PlayerCharacter.cs:17](../Character/PlayerCharacter.cs#L17) — same
+- `Sim/ECS/ComponentStore.cs` — order-preserving `RemoveEntity` (stable insertion order).
+- `Sim/ECS/World.cs` — `MarkLiveOnly<T>()`: such stores are skipped by `Capture`
+  and cleared by `Restore`. `WorldSnapshot` then carries only id bookkeeping.
+- New: `Sim/ECS/Components/EcsComponents.cs` — `PhysicsBodyComponent`, `EntityRef`,
+  `PlayerRef`.
+- [Physics/PhysicsWorld.cs](../Physics/PhysicsWorld.cs) — `StepSwept` iterates
+  `world.Query<PhysicsBodyComponent>()` instead of `List<PhysicsBody>`.
+- [Simulation.cs](../Simulation.cs) — hold a `World`; `NextId` → `world.Create()`;
+  register `EntityRef`/`PlayerRef`/`PhysicsBodyComponent` on spawn; mark them
+  live-only; replace `_bodies`/`_entities`/`_hittables` iteration with queries and
+  the Phase 1 `ResolveHittable` linear scan with a World lookup; fold `WorldSnapshot`
+  (id bookkeeping) into `SimSnapshot`; rebuild ref stores on restore.
 
-**Risks:**
-- `PhysicsBody.Constraints` is a `List<PhysicsContact>` — keeping a list on a
-  struct works (the list ref is value-copied), but be careful with snapshot:
-  the list itself needs deep-copy on snapshot or the snapshot aliases the
-  live list. Existing snapshot already handles this; transfer the logic.
-- Many sim tests construct `PhysicsBody` directly. They'll need a small
-  helper (`SimTest.SpawnBody(world, pos)`) that returns the EntityId.
+**Iteration-order contract:** stores are created in canonical order (primary
+player, secondaries, then entities in spawn order); order-preserving removal keeps
+it; restore re-registers in the same order ⇒ identical stepping + hash.
 
 **Done when:**
-- `Simulation._bodies` is gone.
-- `PhysicsWorld.StepSwept` queries the world.
-- All sim tests green.
+- `_bodies`/`_entities`/`_hittables` and `ResolveHittable` are gone.
+- `PhysicsWorld.StepSwept` queries the World.
+- Full suite green, especially `SnapshotRoundTripTests`.
 
 ### Phase 3 — Entity registry replaces `_entities` / `_hittables`
+
+**Absorbed into the re-scoped Phase 2** (the registry and bodies entangle through
+id allocation + iteration order, so they landed together). Retained below for the
+original rationale.
 
 The OO `Entity` objects still exist, but they're stored in an `EntityRef`
 component (`struct EntityRef { Entity Object }`), and `Simulation` iterates

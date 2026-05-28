@@ -26,12 +26,18 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // same gravity vector the physics world integrates with.
     public static float WorldGravityY => Gravity.Y;
 
-    private readonly List<PhysicsBody> _bodies = new();
     private readonly ChunkMap _chunks;
     private readonly HitboxWorld  _hitboxes  = new();
     private readonly HurtboxWorld _hurtboxes = new();
-    private readonly List<IHittable> _hittables = new();
-    private readonly List<Entity>    _entities  = new();
+    // The ECS world: owns EntityId allocation and the live-only registry components
+    // (PhysicsBodyComponent / EntityRef / PlayerRef). Single source of truth for the
+    // body + entity sets; the lists it replaced (_bodies/_entities/_hittables) are gone.
+    private readonly World _world = new();
+    // Per-step projections of the World into plain lists. Rebuilt each Step in World
+    // (spawn) order; never the source of truth, just a view the physics API + the
+    // collect-then-iterate phases consume. Reused to keep allocations off the hot path.
+    private readonly List<PhysicsBody> _bodyScratch   = new();
+    private readonly List<Entity>      _entityScratch = new();
     // Per-frame intersection pass; owns the cross-frame (HitId,Target) dedupe table.
     private readonly CombatSystem _combat = new();
     // Single deterministic HitId source shared by all players + entities.
@@ -52,28 +58,37 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     private readonly List<Action<float>>                       _stageTickers = new();
     private readonly List<(MovingRectangle Rect, Color Color)> _platforms    = new();
 
-    // Deterministic id source for snapshot identity (roadmap goal 4 §G/§H). Players
-    // and entities draw from the same monotonic sequence in construction/spawn order,
-    // so a given object keeps its id across a snapshot/restore round-trip and the
-    // combat dedupe table can be snapshotted by id. Restored alongside the rest of
-    // the sim so post-restore spawns mint the same ids as the original run.
-    private int _nextId;
-
     // Absolute elapsed sim time (seconds), advanced by one FixedDt per Step. Drives
     // moving-platform tickers as a pure function of time so platforms snapshot/restore
     // with no hidden accumulator state.
     private float _elapsed;
 
-    // Mint the next entity id. The underlying counter stays an int (snapshotted and
-    // mixed into the determinism hash); EntityId wraps it. Pre-increment ⇒ ids start
-    // at 1, so EntityId.None (Index 0) never collides with a live entity.
-    private EntityId NextId() => new EntityId(++_nextId);
+    // Mark the live-only registry stores so the World snapshot skips them (they hold
+    // class refs). Called once per construction before any entity is registered.
+    private void MarkWorldStores()
+    {
+        _world.MarkLiveOnly<PlayerRef>();
+        _world.MarkLiveOnly<EntityRef>();
+        _world.MarkLiveOnly<PhysicsBodyComponent>();
+    }
 
-    // Resolve an EntityId to its live IHittable for CombatSystem dispatch. Linear scan
-    // of the (small) hittable set — replaced by a world query in a later ECS phase.
+    // Register a player/entity in the World: mint its id, stamp it on the object, and
+    // add the registry components. Order of registration across the sim's lifetime is
+    // canonical (primary, secondaries, entities in spawn order) and reproduced on
+    // restore, so World iteration matches the old list order.
+    private void RegisterPlayer(PlayerCharacter p)
+    {
+        var id = _world.Create();
+        p.Id = id;
+        _world.Add<PlayerRef>(id).Obj = p;
+        _world.Add<PhysicsBodyComponent>(id).Body = p.Body;
+    }
+
+    // Resolve an EntityId to its live IHittable for CombatSystem dispatch.
     private IHittable ResolveHittable(EntityId id)
     {
-        foreach (var h in _hittables) if (h.Id == id) return h;
+        if (_world.Has<PlayerRef>(id)) return _world.Get<PlayerRef>(id).Obj;
+        if (_world.Has<EntityRef>(id)) return _world.Get<EntityRef>(id).Obj;
         return null;
     }
 
@@ -89,9 +104,17 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // ── Read-only views for the render shell ────────────────────────────────────
     public PlayerCharacter Player => _player;
     public IReadOnlyList<(PlayerCharacter Player, Controller Ctrl)> SecondaryPlayers => _secondaryPlayers;
-    public IReadOnlyList<Entity> Entities => _entities;
+    // Render/test views, projected from the World on access (spawn order). Not on the
+    // sim hot path — Game1 reads them while drawing, tests while asserting.
+    public IReadOnlyList<Entity> Entities
+    {
+        get { var l = new List<Entity>(); foreach (var r in _world.Query<EntityRef>()) l.Add(r.Component1.Obj); return l; }
+    }
     public IReadOnlyList<(MovingRectangle Rect, Color Color)> Platforms => _platforms;
-    public IReadOnlyList<PhysicsBody> Bodies => _bodies;
+    public IReadOnlyList<PhysicsBody> Bodies
+    {
+        get { var l = new List<PhysicsBody>(); foreach (var r in _world.Query<PhysicsBodyComponent>()) l.Add(r.Component1.Body); return l; }
+    }
     public HitboxWorld  Hitboxes  => _hitboxes;
     public HurtboxWorld Hurtboxes => _hurtboxes;
     public PlayerInput CurrentInput => _controller.Current;
@@ -107,9 +130,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     {
         _chunks      = chunks;
         _playerSpawn = playerSpawn;
-        _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, Id = NextId(), CombatSystem = _combat };
-        _bodies.Add(_player.Body);
-        _hittables.Add(_player);
+        MarkWorldStores();
+        _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, CombatSystem = _combat };
+        RegisterPlayer(_player);
         populate?.Invoke(this);
     }
 
@@ -120,9 +143,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         TerrainLoader.Load($"Levels/{stage.TerrainConfig}", _chunks);
 
         _playerSpawn = stage.PlayerSpawn;
-        _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, Id = NextId(), CombatSystem = _combat };
-        _bodies.Add(_player.Body);
-        _hittables.Add(_player);
+        MarkWorldStores();
+        _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, CombatSystem = _combat };
+        RegisterPlayer(_player);
 
         // Seed the block picker from config. Falls back to Dirt on any unknown string.
         if (Enum.TryParse<TileType>(config.StartingBlockType, ignoreCase: true, out var startType))
@@ -142,10 +165,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // ── Stage-facing API (called from Stage.Populate) ───────────────────────────
     public void SpawnEntity(Entity e)
     {
-        e.Id = NextId();
-        _entities.Add(e);
-        _hittables.Add(e);
-        _bodies.Add(e.Body);
+        var id = _world.Create();
+        e.Id = id;
+        _world.Add<EntityRef>(id).Obj = e;
+        _world.Add<PhysicsBodyComponent>(id).Body = e.Body;
     }
 
     public void AddPlatform(MovingRectangle rect, Color color)
@@ -167,12 +190,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         var player = new PlayerCharacter(spawn)
         {
             HitIds  = _hitIds,
-            Id      = NextId(),
             Faction = Factions.ForPlayerIndex(_secondaryPlayers.Count + 1),
             CombatSystem = _combat,
         };
-        _bodies.Add(player.Body);
-        _hittables.Add(player);
+        RegisterPlayer(player);
         _secondaryPlayers.Add((player, ctrl));
         return (player, ctrl);
     }
@@ -216,13 +237,21 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         // (publishes hitboxes) → entity AI → CombatSystem.Apply → physics.
         _hitboxes.Clear();
         _hurtboxes.Clear();
-        foreach (var h in _hittables) h.PublishHurtboxes(_hurtboxes);
+        // Hurtboxes in canonical order: primary, secondaries, then entities (spawn order).
+        _player.PublishHurtboxes(_hurtboxes);
+        foreach (var (p, _) in _secondaryPlayers) p.PublishHurtboxes(_hurtboxes);
+        foreach (var r in _world.Query<EntityRef>()) r.Component1.Obj.PublishHurtboxes(_hurtboxes);
+
         _player.Update(_controller, _chunks, _hitboxes, _hurtboxes, dt, this);
         foreach (var (p, c) in _secondaryPlayers)
             p.Update(c, _chunks, _hitboxes, _hurtboxes, dt);
-        // Snapshot count so newly-spawned entities skip their first Update.
-        int entityCount = _entities.Count;
-        for (int i = 0; i < entityCount; i++) _entities[i].Update(dt, _player, _hitboxes, this);
+
+        // Collect the current entity set before updating so entities spawned during a
+        // sibling's Update skip their first frame (matches the old count-snapshot).
+        _entityScratch.Clear();
+        foreach (var r in _world.Query<EntityRef>()) _entityScratch.Add(r.Component1.Obj);
+        foreach (var e in _entityScratch) e.Update(dt, _player, _hitboxes, this);
+
         _combat.Apply(_chunks, _hitboxes, _hurtboxes, ResolveHittable);
 
         // Player respawn on death.
@@ -233,19 +262,20 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         }
 
         // Entity gravity-scale opt-out, applied right before uniform gravity integrates.
-        foreach (var e in _entities) e.PreStep(Gravity);
+        // Fresh query so entities spawned this frame are included (as before).
+        foreach (var r in _world.Query<EntityRef>()) r.Component1.Obj.PreStep(Gravity);
 
-        PhysicsWorld.StepSwept(_bodies, _chunks, dt, Gravity);
+        // Project the World's bodies into the scratch list (spawn order) for the solver.
+        _bodyScratch.Clear();
+        foreach (var r in _world.Query<PhysicsBodyComponent>()) _bodyScratch.Add(r.Component1.Body);
+        PhysicsWorld.StepSwept(_bodyScratch, _chunks, dt, Gravity);
 
-        // Sweep up entities that died this frame: remove from physics first, then
-        // the IHittable list, then the entity list.
-        for (int i = _entities.Count - 1; i >= 0; i--)
-        {
-            if (!_entities[i].IsDead) continue;
-            _bodies.Remove(_entities[i].Body);
-            _hittables.Remove(_entities[i]);
-            _entities.RemoveAt(i);
-        }
+        // Sweep up entities that died this frame: collect dead ids, then destroy them in
+        // the World (drops their EntityRef + PhysicsBodyComponent).
+        _entityScratch.Clear();
+        foreach (var r in _world.Query<EntityRef>())
+            if (r.Component1.Obj.IsDead) _entityScratch.Add(r.Component1.Obj);
+        foreach (var e in _entityScratch) _world.Destroy(e.Id);
     }
 
     // Cheap, pure, order-stable hash of the gameplay-significant sim state (GGPO_PLAN
@@ -273,16 +303,20 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         MixF(_player.Health);
         foreach (var (p, _) in _secondaryPlayers) { MixBody(p.Body); MixF(p.Health); }
 
-        Mix((uint)_entities.Count);
-        foreach (var e in _entities)
+        // Entities in World (spawn) order — same fingerprint shape as the old list.
+        int entityCount = 0;
+        foreach (var _ in _world.Query<EntityRef>()) entityCount++;
+        Mix((uint)entityCount);
+        foreach (var r in _world.Query<EntityRef>())
         {
+            var e = r.Component1.Obj;
             Mix((uint)e.Id.Index);
             MixBody(e.Body);
             MixF(e.Health);
         }
 
         Mix((uint)_hitIds.Value);
-        Mix((uint)_nextId);
+        Mix((uint)_world.SlotCount);   // analogue of the old monotonic id counter
         return h;
     }
 
@@ -301,8 +335,11 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             secCtrls[i]    = _secondaryPlayers[i].Ctrl.Capture();
         }
 
-        var entities = new EntitySnapshot[_entities.Count];
-        for (int i = 0; i < _entities.Count; i++) entities[i] = _entities[i].Capture();
+        // Entities in World (spawn) order so the rebuilt set keeps iteration order.
+        _entityScratch.Clear();
+        foreach (var r in _world.Query<EntityRef>()) _entityScratch.Add(r.Component1.Obj);
+        var entities = new EntitySnapshot[_entityScratch.Count];
+        for (int i = 0; i < _entityScratch.Count; i++) entities[i] = _entityScratch[i].Capture();
 
         var platforms = new PlatformState[_platforms.Count];
         for (int i = 0; i < _platforms.Count; i++)
@@ -311,7 +348,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         return new SimSnapshot
         {
             HitIdValue           = _hitIds.Value,
-            NextId               = _nextId,
+            World                = _world.Capture(),
             Elapsed              = _elapsed,
             Primary              = _player.CaptureState(),
             PrimaryController    = _controller.Capture(),
@@ -326,47 +363,48 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
 
     public void Restore(SimSnapshot snap)
     {
-        // Sim scalars first (id counter must be set before any rehydrate that mints
-        // — none currently do, but keep the ordering honest).
-        _hitIds.Value       = snap.HitIdValue;
-        _nextId             = snap.NextId;
-        _elapsed            = snap.Elapsed;
+        _hitIds.Value = snap.HitIdValue;
+        _elapsed      = snap.Elapsed;
+
+        // Snapshot the live entity set (by id) BEFORE the World restore clears the
+        // registry stores — used to restore-in-place where an id still matches.
+        var live = new Dictionary<EntityId, Entity>();
+        foreach (var r in _world.Query<EntityRef>()) live[r.Component1.Obj.Id] = r.Component1.Obj;
+
+        // Restore the World's id bookkeeping (slot generations + free list) and clear
+        // the live-only ref stores. We re-register every player/entity below, in
+        // canonical order, so World iteration order is reproduced exactly.
+        _world.Restore(snap.World);
 
         // Terrain: rewind the dense-grid journal + restore the sparse structures.
         _chunks.RestoreTerrain(snap.Terrain);
 
-        // Players (count is fixed across the sim's life — restore in place).
+        // Players (count is fixed across the sim's life — restore in place, re-register).
         _player.RestoreState(snap.Primary);
         _controller.Restore(snap.PrimaryController);
+        _world.Add<PlayerRef>(_player.Id).Obj = _player;
+        _world.Add<PhysicsBodyComponent>(_player.Id).Body = _player.Body;
         for (int i = 0; i < _secondaryPlayers.Count; i++)
         {
-            _secondaryPlayers[i].Player.RestoreState(snap.Secondaries[i]);
+            var p = _secondaryPlayers[i].Player;
+            p.RestoreState(snap.Secondaries[i]);
             _secondaryPlayers[i].Ctrl.Restore(snap.SecondaryControllers[i]);
+            _world.Add<PlayerRef>(p.Id).Obj = p;
+            _world.Add<PhysicsBodyComponent>(p.Id).Body = p.Body;
         }
 
-        // Entities: rebuild the live set from the snapshot. Restore into a still-live
-        // entity where its id matches; otherwise rehydrate a fresh one. Any live
-        // entity absent from the snapshot (spawned after the snapshot frame) is
-        // dropped. The new lists are built in snapshot (spawn) order.
-        var live = new Dictionary<EntityId, Entity>(_entities.Count);
-        foreach (var e in _entities) live[e.Id] = e;
-
-        _entities.Clear();
+        // Entities: rebuild from the snapshot in spawn order. Restore into a still-live
+        // entity where its id matches; otherwise rehydrate a fresh one. Live entities
+        // absent from the snapshot (spawned after the snapshot frame) are simply not
+        // re-registered — they're gone. Re-add registry components at each id.
         foreach (var es in snap.Entities)
         {
-            if (live.TryGetValue(es.Id, out var existing)) { existing.RestoreInto(in es); _entities.Add(existing); }
-            else                                            _entities.Add(es.Rehydrate(_hitIds));
+            Entity e;
+            if (live.TryGetValue(es.Id, out var existing)) { existing.RestoreInto(in es); e = existing; }
+            else                                           { e = es.Rehydrate(_hitIds); }
+            _world.Add<EntityRef>(es.Id).Obj = e;
+            _world.Add<PhysicsBodyComponent>(es.Id).Body = e.Body;
         }
-
-        // Rebuild the body + hittable lists in canonical order: primary player,
-        // secondary players, then entities in spawn order. PhysicsWorld.StepSwept and
-        // the combat passes iterate these, so identical order ⇒ identical stepping.
-        _bodies.Clear();
-        _hittables.Clear();
-        _bodies.Add(_player.Body);
-        _hittables.Add(_player);
-        foreach (var (p, _) in _secondaryPlayers) { _bodies.Add(p.Body); _hittables.Add(p); }
-        foreach (var e in _entities)              { _bodies.Add(e.Body); _hittables.Add(e); }
 
         // Platforms — restore pose; tickers re-derive motion from _elapsed next Step.
         for (int i = 0; i < _platforms.Count && i < snap.Platforms.Length; i++)

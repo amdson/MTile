@@ -295,6 +295,24 @@ public class Game1 : Game
                 Color.LightSkyBlue);
         }
 
+        // Ghost outlines of queued (Pending) sprouts so players can preview the
+        // build they're generating before each block starts growing. Pending nodes
+        // have no live Center, so draw at the target cell (gtx*16+8, gty*16+8).
+        foreach (var s in chunks.PendingSprouts)
+        {
+            const float half = Chunk.TileSize * 0.5f;
+            float cx = s.Gtx * Chunk.TileSize + half;
+            float cy = s.Gty * Chunk.TileSize + half;
+            int left = (int)(cx - half);
+            int top  = (int)(cy - half);
+            int size = Chunk.TileSize - 1;
+            var ghost = Color.LightSkyBlue * 0.4f;
+            _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            size, 1),    ghost);
+            _spriteBatch.Draw(_pixel, new Rectangle(left,            top + size - 1, size, 1),    ghost);
+            _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            1,    size), ghost);
+            _spriteBatch.Draw(_pixel, new Rectangle(left + size - 1, top,            1,    size), ghost);
+        }
+
         // Entities before the player so the player overlays them when they overlap.
         foreach (var e in _sim.Entities)
         {

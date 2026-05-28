@@ -74,6 +74,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // present in the world. Pending nodes live solely in the graph.
     public IReadOnlyList<TileSproutNode> ActiveSprouts => Graph.Growing;
 
+    // Drawing-only view of queued (not yet growing) sprouts, used to render ghost
+    // outlines of the build a player has requested. Not physically present.
+    public IReadOnlyList<TileSproutNode> PendingSprouts => Graph.Pending;
+
     private const int ChunkPixelSize = Chunk.Size * Chunk.TileSize;
 
     public Chunk this[Point pos]
