@@ -13,7 +13,7 @@ namespace MTile;
 // captured at the sim level (see SimSnapshot).
 public struct PlayerSnapshot
 {
-    public int Id;
+    public EntityId Id;
 
     public BodyState Body;
 

@@ -22,7 +22,7 @@
          from KNI's nkast.Xna.Framework. Simpler to compile twice than to
          multi-target the library. -->
     <Compile Include="..\**\*.cs"
-             Exclude="..\MTile.Tests\**;..\MTile.Desktop\**;..\MTile.Web\**;..\MTile.Rtc\**;..\MTile.Demo\**;..\**\obj\**;..\**\bin\**" />
+             Exclude="..\MTile.Tests\**;..\MTile.Desktop\**;..\MTile.Web\**;..\MTile.Rtc\**;..\MTile.Demo\**;..\**\obj\**;..\**\bin\**;..\.claude\**" />
   </ItemGroup>
 
   <ItemGroup>
@@ -52,8 +52,10 @@
        was tried first but only populated bin/wwwroot, which the dev server doesn't
        serve. The copied files are gitignored. -->
   <Target Name="StageGameAssetsToWwwroot" BeforeTargets="BeforeBuild">
-    <Copy SourceFiles="..\game_config.json"     DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="..\movement_config.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\game_config.json"       DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\movement_config.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\impact_profiles.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\material_strengths.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
     <ItemGroup>
       <_LevelAsset Include="..\Levels\**\*" />
     </ItemGroup>

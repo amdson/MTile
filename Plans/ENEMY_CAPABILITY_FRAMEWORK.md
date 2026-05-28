@@ -1,564 +1,524 @@
-# Enemy Capability Framework — Design Spec
+# Enemy Capability Framework — MVP
 
-**Status:** draft / not yet implemented. 
+**Status:** draft / not yet implemented.
 
-**Goal:** a parameterized capability layer for a marquee NPC ("the boss") — pre-coded
-attacks, terrain plays, telegraphs, and resource/limitation systems — over which we
-write *arbitrary controller code* to make behavior interesting and challenging. The
-moves are dumb and reusable; the controller is the brain.
+**Goal:** the smallest possible reusable enemy scaffold built the same way the player is —
+two concurrent FSMs (movement + action), flyweight states with per-activation value
+structs, snapshot via plain data. MVP = **one base class, one attack action, a small
+handful of movement states**. Everything richer (multiple attacks, posture, charge meters,
+phased AI, feints, sim-side telegraph descriptors) is explicitly out of scope and can be
+added later without re-shaping the foundation.
 
-## Design constraints (non-negotiable, from the existing engine)
+## Design constraints (carry over from the engine)
 
-1. **Determinism + snapshot-safe.** The sim is rollback-bound (`Plans/ROLLBACK_ROADMAP.md`).
-   Every bit of AI/move/controller state must be plain data captured in a snapshot, and
-   advance purely from `(state, input, FixedDt)`. **No `System.Random`, no wall-clock, no
-   sim-affecting statics.** Randomness comes from a *seeded, snapshotted* PRNG (`DetRng`).
-3. **Reuse the engine's own pattern.** This deliberately mirrors `PlayerCharacter` +
-   `ActionState`/`ActionVars`: **flyweight move objects + a plain-data per-activation
-   vars struct + a registry**. If you understand the player action FSM, you understand
-   this. Snapshotting "just works" the same way (registry index + value struct).
-4. **Sim owns timing; render owns pixels.** A telegraph's *timing and danger* is sim
-   state; its *appearance* is cosmetic and drawn by `Game1`, never fed back.
+1. **Determinism + snapshot-safe.** Same rules as the player ([Plans/ROLLBACK_ROADMAP.md](ROLLBACK_ROADMAP.md)).
+   All per-activation state lives in `ref`-passed value structs; the flyweight state
+   objects are stateless. No `System.Random`, no wall-clock reads, no sim-affecting
+   mutable statics.
+2. **Mirror the player.** `EnemyMovementState`/`EnemyActionState` are the enemy analogues
+   of [Character/MovementStates.cs](../Character/MovementStates.cs) and [Character/ActionStates.cs](../Character/ActionStates.cs).
+   Same precondition + priority + Enter/Update/Exit shape. Two registries, one current
+   index each, the same selection loop.
+3. **Telegraphs are animation, not sim.** Just like the player's slash dot, the stab tip
+   ribbon, or the guard shield: an attack's tell is drawn in the state's `Draw` from its
+   `vars.TimeInState` and `vars.WindupDuration`. No `Telegraph` struct, no sim/render
+   bridge. The damage window is authoritative; the visual is whatever the renderer reads
+   off `vars`.
+4. **Sim owns timing; render owns pixels.** Same rule as everywhere else.
 
 ## Layering
 
 ```
-   EnemyController  (the brain — arbitrary, swappable logic)
-        │ chooses / scores moves, reads a plain-data Blackboard + DetRng
-        ▼
-   EnemyMove (flyweight)   ── Windup → Active → Recovery, publishes hitboxes,
-        │ per-activation     drives the body, spawns projectiles/terrain,
-        │ state in           declares its Telegraph + resource cost + gates
-        ▼ EnemyMoveVars
-   EnemyResources   stamina · charge meter · posture/poise · cooldowns · charges
-   Telegraph        sim-side tell descriptor (kind, progress, pos) → Game1 renders
-        ▼
-   BossEntity : Entity   host — owns registry + vars + resources + blackboard + rng,
-                         captured/restored via WriteState/ReadState
+   EnemyEntity : Entity
+        │ owns two FSMs + small AI scratch state, snapshotted
+        ├──> Movement FSM:  EnemyMovementState (flyweight) + EnemyMovementVars (value struct)
+        └──> Action   FSM:  EnemyActionState   (flyweight) + EnemyActionVars   (value struct)
+
+   EnemyContext   — per-frame bundle (analogue of EnvironmentContext)
 ```
 
-Mapping to existing analogues so it's familiar:
+Mapping to the player so it's familiar:
 
-| This framework | Mirrors in player code |
+| MVP framework | Mirrors in player code |
 |---|---|
-| `BossEntity` | `PlayerCharacter` |
-| `EnemyMove` (flyweight) | `ActionState` |
-| `EnemyMoveVars` (value struct) | `ActionVars` |
-| `_moveRegistry` + current index | `_actionRegistry` + `_currentAction` |
-| `EnemyController.ChooseMove` | the action-FSM precondition/priority scan |
+| `EnemyEntity` | `PlayerCharacter` |
+| `EnemyMovementState` | `MovementState` |
+| `EnemyActionState` | `ActionState` |
+| `EnemyMovementVars` / `EnemyActionVars` | `MovementVars` / `ActionVars` |
 | `EnemyContext` | `EnvironmentContext` |
-| `BossSnapshot` | `PlayerSnapshot` |
+| (no separate input — AI reads ctx and writes intents internally) | `PlayerInput` |
+| `EnemySnapshot` field on `EntitySnapshot` | `PlayerSnapshot` |
 
 ---
 
-## 1. `BossEntity : Entity`
+## 1. `EnemyEntity : Entity`
 
-The host. An `Entity` subtype (`EntityKind.Boss`) so it rides every existing system —
-physics body, `IHittable`/hurtbox, `CombatSystem`, knockback, snapshot — for free.
+The host. An `Entity` subtype (`EntityKind.Enemy`) so it rides every existing system
+(`PhysicsBody`, `IHittable`/`Hurtbox`, `CombatSystem`, knockback, snapshot) for free.
+Same shape as [Entities/StalkerEnemy.cs](../Entities/StalkerEnemy.cs), generalized so concrete enemies
+just hand it a movement-state list and an action-state list.
 
 ```csharp
-public sealed class BossEntity : Entity
+public class EnemyEntity : Entity
 {
-    public override EntityKind Kind => EntityKind.Boss;
+    public override EntityKind Kind => EntityKind.Enemy;
 
-    // Flyweight moves, constructed once in a fixed order (index == snapshot identity).
-    private readonly List<EnemyMove> _moves = new();
-    private int _currentMove = -1;               // -1 == idle
-    private EnemyMoveVars _vars;                  // per-activation state (value struct)
+    private readonly List<EnemyMovementState> _movement;
+    private readonly List<EnemyActionState>   _actions;
+    private int _currentMovement = 0;
+    private int _currentAction   = -1;        // -1 == none
+    private EnemyMovementVars _moveVars;
+    private EnemyActionVars   _actionVars;
+    private int   _facing = 1;
+    private int   _frame;
 
-    private EnemyResources _resources;            // meters / cooldowns (value struct)
-    private DetRng _rng;                          // seeded, snapshotted PRNG
-    private EnemyController _controller;           // brain (logic only; data is below)
-    private ControllerBlackboard _brain;          // controller's plain-data memory
-    private Telegraph _telegraph;                  // current tell (sim side)
-    private int _facing = -1;
-    private int _frame;
-
-    public Telegraph CurrentTelegraph => _telegraph;   // read-only, for Game1
-    public float Posture => _resources.Posture;        // for a HUD bar
-
-    public BossEntity(Vector2 pos, int seed)
-        : base(new PhysicsBody(Polygon.CreateRegular(14f, 6), pos), health: 40f)
+    public EnemyEntity(Vector2 pos, float hp,
+                       List<EnemyMovementState> movement,
+                       List<EnemyActionState> actions)
+        : base(new PhysicsBody(Polygon.CreateRegular(12f, 6), pos), health: hp)
     {
-        Mass = 6f; Faction = Faction.Enemy; Color = Color.MediumPurple;
-        Sprite = Sprites.Boss(14f);            // add a sprite in Sprites.cs
-        _rng = new DetRng(seed);
-        _resources = EnemyResources.Initial();
-        _controller = new PhasedController();   // swap this to retune behavior
-
-        // Order matters only as snapshot identity + a tiebreak; gates do real selection.
-        _moves.Add(new HeavyOverhead());     // 0
-        _moves.Add(new PillarUppercut());    // 1
-        _moves.Add(new ChargedBolt());       // 2
-        _moves.Add(new WallRaise());         // 3
-        _moves.Add(new DashReposition());    // 4
-        // …
+        _movement = movement;   // index order == snapshot identity
+        _actions  = actions;
+        Faction   = Faction.Enemy;
     }
 
     public override void Update(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
     {
         if (IsDead) return;
         _frame++;
-        var chunks = (spawner as IChunkProvider)?.Chunks;   // same cast LobbedArea uses
 
         var ctx = new EnemyContext {
             Dt = dt, Frame = _frame, Self = this, Player = player,
-            Hitboxes = hitboxes, Spawner = spawner, Chunks = chunks,
+            Hitboxes = hitboxes, Spawner = spawner,
         };
 
-        _resources.Tick(dt);                 // bleed cooldowns, regen stamina/charge
-
-        // Face the player only while NOT mid-move (committed moves lock facing in OnStart).
-        if (_currentMove < 0)
+        // Face the player only while NOT mid-action (actions lock facing on Enter).
+        if (_currentAction < 0)
         {
-            var dx = player.Body.Position.X - Body.Position.X;
+            float dx = player.Body.Position.X - Body.Position.X;
             if (MathF.Abs(dx) > 1f) _facing = dx >= 0 ? 1 : -1;
         }
+        ctx.Facing = _facing;
 
-        // 1) If a move is running, advance it. It reports DONE / CANCELLABLE / COMMITTED.
-        MoveStatus status = MoveStatus.Idle;
-        if (_currentMove >= 0)
-            status = _moves[_currentMove].Tick(ctx, ref _vars, ref _resources, ref _rng, ref _telegraph, _facing);
+        // 1) Action FSM — same precondition+priority scan as ActionState (see §3).
+        SelectAndStep(_actions, ref _currentAction, ref _actionVars, ctx, isAction: true);
 
-        // 2) Let the controller pick a new move when idle or in a cancellable tail.
-        if (_currentMove < 0 || status == MoveStatus.Done || status == MoveStatus.Cancellable)
+        // 2) Movement FSM — same scan as MovementState.
+        SelectAndStep(_movement, ref _currentMovement, ref _moveVars, ctx, isAction: false);
+    }
+
+    // Single shared loop for both FSMs — they have identical shape. See §2/§3 for the
+    // base classes; the loop here just calls CheckPreConditions on every state, picks
+    // the highest-priority candidate (with the current state's *active* priority as
+    // the incumbency tiebreak), and runs Enter/Update/Exit.
+    private void SelectAndStep<TState, TVars>(
+        List<TState> states, ref int current, ref TVars vars, in EnemyContext ctx, bool isAction)
+        where TState : EnemyState<TVars>
+        where TVars  : struct
+    {
+        int next = -1, bestPri = int.MinValue;
+        for (int i = 0; i < states.Count; i++)
         {
-            int next = _controller.ChooseMove(ctx, _moves, in _resources, ref _brain, ref _rng, status);
-            if (next >= 0 && next != _currentMove && _moves[next].CanStart(ctx, in _resources))
+            if (!states[i].CheckPreConditions(ctx)) continue;
+            int pri = (i == current) ? states[i].ActivePriority : states[i].PassivePriority;
+            if (pri > bestPri) { bestPri = pri; next = i; }
+        }
+        if (next != current)
+        {
+            if (current >= 0) states[current].Exit(ctx, ref vars);
+            current = next;
+            vars = default;
+            if (current >= 0) states[current].Enter(ctx, ref vars);
+        }
+        if (current >= 0)
+        {
+            // CheckConditions can drop us back to "no state" for actions, or to the
+            // fallback movement state (typically index 0 = Idle/Fall).
+            if (!states[current].CheckConditions(ctx, ref vars))
             {
-                if (_currentMove >= 0) _moves[_currentMove].OnExit(ctx, ref _vars, ref _telegraph);
-                _currentMove = next;
-                _vars = default;
-                _moves[next].OnStart(ctx, ref _vars, ref _resources, _facing);  // pays cost, locks facing, sets telegraph
+                states[current].Exit(ctx, ref vars);
+                current = isAction ? -1 : 0;
+                vars = default;
+                if (current >= 0) states[current].Enter(ctx, ref vars);
             }
-            else if (status == MoveStatus.Done)
+            else
             {
-                _moves[_currentMove].OnExit(ctx, ref _vars, ref _telegraph);
-                _currentMove = -1;
-                _telegraph = Telegraph.None;
+                states[current].Update(ctx, ref vars);
             }
         }
     }
 
-    // Posture/poise + stagger reaction (see §4). Base applies HP damage + knockback.
-    public override void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
+    public override void Draw(SpriteBatch sb, Texture2D pixel)
     {
-        base.OnHit(hit, myHurtbox);
-        if (IsDead) return;
-        _resources.Posture -= hit.KnockbackImpulse.Length() * EnemyResources.PostureLossPerImpulse;
-        // Interrupt non-armored moves; a posture break forces a Staggered move.
-        bool armored = _currentMove >= 0 && _moves[_currentMove].HasArmor(in _vars);
-        if (_resources.Posture <= 0f) { ForceMove(MoveIds.Staggered); _resources.Posture = 0f; }
-        else if (!armored && _currentMove >= 0) { ForceMove(MoveIds.Flinch); }
+        base.Draw(sb, pixel);
+        if (_currentMovement >= 0) _movement[_currentMovement].Draw(sb, pixel, Body, in _moveVars);
+        if (_currentAction   >= 0) _actions  [_currentAction  ].Draw(sb, pixel, Body, in _actionVars);
     }
 }
 ```
 
-`Update` returning a `MoveStatus` from `Tick` is the **commitment lever**: a `Committed`
-heavy can't be cancelled (guaranteeing your punish window); a `Cancellable` tail lets the
-controller chain or bail.
+The selection rules (active vs passive priority, incumbency, two-FSM concurrency) are
+copied verbatim from the player so the determinism and rollback behavior is identical.
+Action-FSM `current = -1` is the analogue of the player's `NullAction` always-on
+fallback — equivalent and simpler for MVP since enemies don't need a per-frame "ready"
+indicator.
 
 ---
 
-## 2. `EnemyMove` (flyweight) + `EnemyMoveVars`
+## 2. `EnemyMovementState` — the movement FSM
 
-Stateless logic, like `ActionState`. All per-activation state lives in the `ref`-passed
-`EnemyMoveVars`, so capture is a struct copy.
+Same shape as `MovementState`. MVP ships three concrete states, picked by AI-style
+preconditions reading `ctx.ToPlayer` / `ctx.Dist`:
+
+| State           | When it runs (precondition)                              | Notes |
+|-----------------|----------------------------------------------------------|-------|
+| `EnemyIdleState`| always (priority 0 — fallback)                            | brakes velocity, faces player |
+| `EnemyChaseState`| `ctx.Dist > AttackRange`                                  | walks toward player |
+| `EnemyAttackHoldState` | an attack is committing (`ctx.Self.IsActionCommitted`) | roots the body; locks out chase |
+
+The "committing" bit is the only coupling between FSMs — same direction as the player
+(actions may influence movement; movement does not read action state's *contents*, just
+a single committed flag the action exposes via `vars.Committed`). This mirrors the
+existing `MovementModifiers` channel.
 
 ```csharp
-public enum MovePhase  : byte { Windup, Active, Recovery }
-public enum MoveStatus : byte { Idle, Running, Committed, Cancellable, Done }
-
-public abstract class EnemyMove
+public abstract class EnemyMovementState : EnemyState<EnemyMovementVars>
 {
-    // Frame/second budgets — the windup/active/recovery triad. Telegraph length is
-    // usually == Windup; difficulty tuning shortens windup, not just +damage.
-    public abstract float Windup   { get; }
-    public abstract float Active   { get; }
-    public abstract float Recovery { get; }
-
-    // Which cooldown family this move belongs to (so the controller can't chain two
-    // heavies). And what it costs to start.
-    public abstract CooldownFamily Family { get; }
-    public virtual  float StaminaCost  => 0f;
-    public virtual  float ChargeCost   => 0f;
-
-    // Gate: range band, grounded-only, meter availability, phase unlock, cooldown ready.
-    public abstract bool CanStart(in EnemyContext ctx, in EnemyResources res);
-
-    // Lock facing, pay costs, arm telegraph, snapshot aim/target into vars.
-    public abstract void OnStart(in EnemyContext ctx, ref EnemyMoveVars v, ref EnemyResources res, int facing);
-
-    // Per-frame: advance phase timer, publish hitboxes during Active, drive body,
-    // spawn projectiles/terrain. Returns status (Committed during heavy windup/active).
-    public abstract MoveStatus Tick(in EnemyContext ctx, ref EnemyMoveVars v,
-                                    ref EnemyResources res, ref DetRng rng,
-                                    ref Telegraph tel, int facing);
-
-    public virtual void OnExit(in EnemyContext ctx, ref EnemyMoveVars v, ref Telegraph tel) {}
-
-    // Hyperarmor: if true, OnHit won't interrupt this move (still takes damage).
-    public virtual bool HasArmor(in EnemyMoveVars v) => false;
-
-    // ── shared helpers every concrete move reuses ───────────────────────────────
-    protected static MovePhase PhaseOf(in EnemyMoveVars v, float windup, float active)
-        => v.TimeInMove < windup ? MovePhase.Windup
-         : v.TimeInMove < windup + active ? MovePhase.Active : MovePhase.Recovery;
-
-    // Mint a single HitId on Active-entry so a multi-frame hitbox dedupes to one hit.
-    protected static void EnsureHitId(in EnemyContext ctx, ref EnemyMoveVars v)
-    { if (v.HitId == 0) v.HitId = ctx.Spawner.HitIds.Next(); }
+    // Same Active/PassivePriority + Check + Enter/Exit/Update + Draw as EnemyState<>.
 }
 
-// Superset of every move's per-activation fields, unioned (mutually exclusive in time),
-// exactly like ActionVars. Value type → struct-copy snapshot.
-public struct EnemyMoveVars
+public struct EnemyMovementVars
 {
-    public float   TimeInMove;
-    public int     HitId;
-    public int     LockedFacing;
-    public Vector2 Aim;          // ranged: locked aim at windup end
-    public Vector2 TargetCell;   // terrain moves: where to erupt
-    public float   Charge;       // chargeable moves
-    public int     SubCount;     // barrage shot index, spike segment, etc.
-    public int     SubTimer;     // frames since last sub-emit
-    public bool    Fired;        // one-shot guards
+    public float TimeInState;
+    // Add scratch fields as concrete states need them (e.g. target cell, hop timer).
+}
+
+public class EnemyIdleState : EnemyMovementState
+{
+    public override int ActivePriority  => 5;
+    public override int PassivePriority => 0;
+    public override bool CheckPreConditions(in EnemyContext ctx) => true;
+    public override bool CheckConditions  (in EnemyContext ctx, ref EnemyMovementVars v) => true;
+    public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
+    {
+        v.TimeInState += ctx.Dt;
+        ctx.Self.Body.Velocity.X *= 0.8f;
+    }
+}
+
+public class EnemyChaseState : EnemyMovementState
+{
+    private const float Speed = 70f;
+    public override int ActivePriority  => 20;
+    public override int PassivePriority => 15;
+    public override bool CheckPreConditions(in EnemyContext ctx) => ctx.Dist > 56f && !ctx.Self.IsActionCommitted;
+    public override bool CheckConditions  (in EnemyContext ctx, ref EnemyMovementVars v) => !ctx.Self.IsActionCommitted;
+    public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
+    {
+        v.TimeInState += ctx.Dt;
+        ctx.Self.Body.Velocity.X = ctx.Facing * Speed;
+    }
+}
+
+public class EnemyAttackHoldState : EnemyMovementState
+{
+    public override int ActivePriority  => 40;
+    public override int PassivePriority => 35;
+    public override bool CheckPreConditions(in EnemyContext ctx) => ctx.Self.IsActionCommitted;
+    public override bool CheckConditions  (in EnemyContext ctx, ref EnemyMovementVars v) => ctx.Self.IsActionCommitted;
+    public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
+    {
+        v.TimeInState += ctx.Dt;
+        ctx.Self.Body.Velocity.X *= 0.6f;     // root in place for readability
+    }
+}
+```
+
+That's the whole movement layer for MVP: idle, chase, attack-hold. Adding a `JumpState`,
+`RepositionDash`, etc. later is a new flyweight + a precondition — no framework change.
+
+---
+
+## 3. `EnemyActionState` — the action FSM
+
+Same shape as `ActionState`. MVP ships **one** concrete action: a melee `EnemyMeleeAction`
+with Windup → Active → Recovery, telegraphed by `Draw` (a growing dot / shake / color
+ramp keyed on `vars.TimeInState / vars.WindupDuration`).
+
+```csharp
+public abstract class EnemyActionState : EnemyState<EnemyActionVars>
+{
+    // Lifecycle inherited from EnemyState<>.
+}
+
+public struct EnemyActionVars
+{
+    public float TimeInState;
+    public int   LockedFacing;
+    public int   HitId;
+    public bool  Committed;      // read by EnemyAttackHoldState; set in Enter, cleared in Exit
+    public float WindupDuration; // copied from the flyweight at Enter so Draw can read it
+    public float ActiveDuration;
+    public float RecoveryDuration;
+}
+
+public class EnemyMeleeAction : EnemyActionState
+{
+    // Tuning knobs — would be virtual properties if we had multiple variants, but for
+    // MVP we keep them as constants. New variants subclass and override.
+    protected virtual float Windup   => 0.45f;
+    protected virtual float Active   => 0.12f;
+    protected virtual float Recovery => 0.40f;
+    protected virtual float Range    => 32f;
+    protected virtual float Damage   => 1.0f;
+    protected virtual Vector2 Knockback => new(220f, -90f);
+
+    public override int ActivePriority  => 30;
+    public override int PassivePriority => 25;
+
+    public override bool CheckPreConditions(in EnemyContext ctx)
+        => ctx.Dist < Range && MathF.Abs(ctx.ToPlayer.Y) < 24f;
+
+    public override bool CheckConditions(in EnemyContext ctx, ref EnemyActionVars v)
+        => v.TimeInState < v.WindupDuration + v.ActiveDuration + v.RecoveryDuration;
+
+    public override void Enter(in EnemyContext ctx, ref EnemyActionVars v)
+    {
+        v.LockedFacing     = ctx.Facing;
+        v.HitId            = ctx.Spawner.HitIds.Next();
+        v.Committed        = true;
+        v.WindupDuration   = Windup;
+        v.ActiveDuration   = Active;
+        v.RecoveryDuration = Recovery;
+    }
+
+    public override void Exit(in EnemyContext ctx, ref EnemyActionVars v) => v.Committed = false;
+
+    public override void Update(in EnemyContext ctx, ref EnemyActionVars v)
+    {
+        v.TimeInState += ctx.Dt;
+        float t = v.TimeInState;
+        if (t < v.WindupDuration) return;                                 // telegraphing
+        if (t >= v.WindupDuration + v.ActiveDuration) return;             // recovery
+
+        // Active window — publish a forward hitbox each frame; CombatSystem dedupes on HitId.
+        var c = ctx.Self.Body.Position + new Vector2(v.LockedFacing * 22f, 0f);
+        var region = new BoundingBox(c.X - 12f, c.Y - 12f, c.X + 12f, c.Y + 12f);
+        ctx.Hitboxes?.Publish(new Hitbox(
+            region, v.HitId, Damage,
+            new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
+            Faction.Enemy, ctx.Self, Color.OrangeRed,
+            targets: HitTargets.EntitiesOnly));
+    }
+
+    // Telegraph IS the Draw. Mirror player slash/stab visuals — read everything off vars.
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    {
+        float t = v.TimeInState;
+        if (t < v.WindupDuration)
+        {
+            float p = t / v.WindupDuration;   // 0 → 1 across windup
+            // Growing red dot offset toward facing; alpha + size ramp on p.
+            int sz = 2 + (int)(p * 4f);
+            var pos = body.Position + new Vector2(v.LockedFacing * (8f + p * 14f), 0f);
+            var color = Color.Lerp(new Color(255, 80, 80, 100), Color.Red, p);
+            sb.Draw(pixel, new Rectangle((int)pos.X - sz / 2, (int)pos.Y - sz / 2, sz, sz), color);
+        }
+        else if (t < v.WindupDuration + v.ActiveDuration)
+        {
+            // Strike flash — full-intensity slab where the hitbox is.
+            var c = body.Position + new Vector2(v.LockedFacing * 22f, 0f);
+            sb.Draw(pixel, new Rectangle((int)c.X - 12, (int)c.Y - 12, 24, 24), Color.OrangeRed * 0.7f);
+        }
+        // Recovery: nothing — body sprite alone reads the lockout, same as player slash.
+    }
+}
+```
+
+That's the whole action layer for MVP: one melee swing. Adding a ranged projectile spawn
+or a ground-pound terrain mutation later is a new `EnemyActionState` subclass — no
+framework change.
+
+---
+
+## 4. `EnemyState<TVars>` — the shared base
+
+Both FSMs share one tiny base so `SelectAndStep<>` in `EnemyEntity` can drive them with
+the same loop. Lifted directly from the player's two base classes, intersected.
+
+```csharp
+public abstract class EnemyState<TVars> where TVars : struct
+{
+    public abstract int  ActivePriority  { get; }
+    public abstract int  PassivePriority { get; }
+    public abstract bool CheckPreConditions(in EnemyContext ctx);
+    public abstract bool CheckConditions  (in EnemyContext ctx, ref TVars v);
+    public virtual  void Enter (in EnemyContext ctx, ref TVars v) {}
+    public virtual  void Exit  (in EnemyContext ctx, ref TVars v) {}
+    public abstract void Update(in EnemyContext ctx, ref TVars v);
+    public virtual  void Draw  (SpriteBatch sb, Texture2D pixel, PhysicsBody body, in TVars v) {}
 }
 ```
 
 ---
 
-## 3. `EnemyContext`
+## 5. `EnemyContext`
 
-Per-`Update` bundle, analogous to `EnvironmentContext`. Built fresh each frame, never
+Per-`Update` bundle, analogue of `EnvironmentContext`. Built fresh each frame, never
 stored, so it carries no snapshot weight.
 
 ```csharp
-public readonly struct EnemyContext
+public struct EnemyContext
 {
     public float Dt; public int Frame;
-    public BossEntity Self;
+    public EnemyEntity Self;
     public PlayerCharacter Player;
     public HitboxWorld Hitboxes;
-    public IEntitySpawner Spawner;     // .HitIds, .SpawnEntity
-    public ChunkMap Chunks;            // terrain reads/writes (may be null in tests)
+    public IEntitySpawner Spawner;     // .HitIds, .SpawnEntity (for ranged variants later)
+    public int Facing;                  // set by EnemyEntity.Update before scanning states
 
     public Vector2 ToPlayer => Player.Body.Position - Self.Body.Position;
     public float   Dist     => ToPlayer.Length();
 }
 ```
 
----
-
-## 4. `EnemyResources` — meters, cooldowns, limits
-
-All the "what makes it interesting" dials. Plain data; ticks deterministically.
-
-```csharp
-public enum CooldownFamily : byte { None, Light, Heavy, Ranged, Terrain, Mobility, COUNT }
-
-public struct EnemyResources
-{
-    public float Stamina;       public const float StaminaMax = 100f;
-    public float Charge;        public const float ChargeMax  = 100f;   // builds → ultimate
-    public float Posture;       public const float PostureMax = 100f;   // stagger bar (§1.OnHit)
-    public int   DashCharges;                                            // discrete ammo
-
-    // One timer per family; a move sets its family's timer on start, Tick bleeds them.
-    // Fixed-size array → trivially snapshotted (deep-copied on capture).
-    public float[] Cooldowns;   // length (int)CooldownFamily.COUNT
-
-    public const float PostureLossPerImpulse = 0.15f;
-    public const float StaminaRegenPerSec = 18f;
-    public const float ChargeGainPerSec   = 6f;     // race the player to interrupt
-    public const float PostureRegenPerSec = 8f;     // regens when not recently hit
-
-    public static EnemyResources Initial() => new() {
-        Stamina = StaminaMax, Charge = 0f, Posture = PostureMax,
-        DashCharges = 2, Cooldowns = new float[(int)CooldownFamily.COUNT],
-    };
-
-    public void Tick(float dt)
-    {
-        Stamina = MathF.Min(StaminaMax, Stamina + StaminaRegenPerSec * dt);
-        Charge  = MathF.Min(ChargeMax,  Charge  + ChargeGainPerSec   * dt);
-        Posture = MathF.Min(PostureMax, Posture + PostureRegenPerSec * dt);
-        for (int i = 0; i < Cooldowns.Length; i++)
-            if (Cooldowns[i] > 0f) Cooldowns[i] = MathF.Max(0f, Cooldowns[i] - dt);
-    }
-
-    public bool Ready(CooldownFamily f) => Cooldowns[(int)f] <= 0f;
-    public void Trigger(CooldownFamily f, float seconds) => Cooldowns[(int)f] = seconds;
-}
-```
-
-This single struct already expresses every limitation from the brainstorm: stamina-gated
-flurries, a charge meter racing toward an ultimate, posture/poise stagger, discrete dash
-charges, and per-family cooldowns that stop two heavies chaining.
+No `Chunks` field yet — terrain-interacting attacks aren't in MVP scope (add when the
+first terrain-mutating action is written).
 
 ---
 
-## 5. `Telegraph` — the sim↔render bridge
+## 6. Snapshot integration
 
-The tell's *existence, timing, and geometry* are sim state (deterministic, snapshotted);
-its pixels are drawn by `Game1` and never read back. This keeps "challenging but fair"
-honest: the danger window is authoritative, not a render artifact.
+Two ints + two value structs + a facing/frame counter. Use the same pattern as the other
+entity subtypes (`StalkerEnemy.WriteState/ReadState`) — fold these fields into a new
+`EnemySnapshot` nullable on `EntitySnapshot`, or — since the count is small — reuse the
+existing `AIState`/`StateTime`/`Facing`/`HitId` fields plus two new ones (`ActionIdx`,
+`ActionTime`). MVP picks the **second** option to avoid touching the snapshot system
+beyond a couple of fields:
+
+- `EntitySnapshot.AIState` → `_currentMovement` (already an int, repurposed)
+- `EntitySnapshot.StateTime` → `_moveVars.TimeInState`
+- `EntitySnapshot.Facing` → `_facing`
+- `EntitySnapshot.HitId` → `_actionVars.HitId`
+- **new** `EntitySnapshot.ActionIdx` (int) → `_currentAction`
+- **new** `EntitySnapshot.ActionTime` (float) → `_actionVars.TimeInState`
+- **new** `EntitySnapshot.LockedFacing` (int) → `_actionVars.LockedFacing`
+
+The melee action's `WindupDuration`/`ActiveDuration`/`RecoveryDuration` are copied from
+the flyweight on Enter, so they restore deterministically by re-running Enter logic —
+but since restore writes them *back* into vars, persist them too if Enter isn't replayed
+on restore. (Three more floats; or recompute from the flyweight via the current
+`ActionIdx`. MVP recomputes — simpler.)
 
 ```csharp
-public enum TelegraphKind : byte { None, ChargeRing, GroundMarker, DangerLine, LandingReticle, Beam, Flash }
-
-public struct Telegraph
+// In EnemyEntity:
+protected override void WriteState(ref EntitySnapshot s)
 {
-    public TelegraphKind Kind;
-    public float   Progress;   // 0→1 across windup; Game1 maps to ring radius / fill / alpha
-    public Vector2 Pos;        // world-space anchor
-    public Vector2 Dir;        // for lines/beams
-    public float   Radius;     // for rings / AoE footprints
-    public float   Severity;   // 0..1 → color ramp + screen-shake amplitude in Game1
-    public static readonly Telegraph None = default;
-}
-```
-
-Game1 hook (cosmetic, in the existing Draw, world-space pass):
-```csharp
-foreach (var e in _sim.Entities)
-    if (e is BossEntity boss) DrawTelegraph(boss.CurrentTelegraph);
-```
-`DrawTelegraph` is pure rendering — reuse `DrawContext.Ring/Line`, `Effects`, screen shake.
-
----
-
-## 6. Determinism & snapshot integration (the one coordination point)
-
-`BossEntity` carries more state than the flat `EntitySnapshot` union holds. Rather than
-bloat that struct with boss-only fields, add **one nullable reference** to it and let the
-boss fill it in `WriteState`/`ReadState` (the existing subtype hook). This is the **only**
-edit to a file the main agent owns — flag it in the PR.
-
-```csharp
-// In EntitySnapshot (the single shared edit):
-public BossSnapshot Boss;   // null for non-boss entities; deep-copied on capture
-
-// New file BossSnapshot.cs — all plain data, no live refs:
-public sealed class BossSnapshot
-{
-    public int CurrentMove; public EnemyMoveVars Vars; public EnemyResources Resources;
-    public DetRngState Rng;  public ControllerBlackboard Brain;
-    public Telegraph Telegraph; public int Facing; public int Frame;
-}
-
-// In BossEntity:
-protected override void WriteState(ref EntitySnapshot s) {
     base.WriteState(ref s);
-    s.Boss = new BossSnapshot {
-        CurrentMove = _currentMove, Vars = _vars,
-        Resources = _resources.DeepCopy(),   // copies the Cooldowns[] array
-        Rng = _rng.Capture(), Brain = _brain, Telegraph = _telegraph,
-        Facing = _facing, Frame = _frame,
-    };
+    s.AIState      = _currentMovement;
+    s.StateTime    = _moveVars.TimeInState;
+    s.Facing       = _facing;
+    s.HitId        = _actionVars.HitId;
+    s.ActionIdx    = _currentAction;
+    s.ActionTime   = _actionVars.TimeInState;
+    s.LockedFacing = _actionVars.LockedFacing;
 }
-protected override void ReadState(in EntitySnapshot s) {
+protected override void ReadState(in EntitySnapshot s)
+{
     base.ReadState(in s);
-    var b = s.Boss;
-    _currentMove = b.CurrentMove; _vars = b.Vars;
-    _resources = b.Resources.DeepCopy(); _rng.Restore(b.Rng);
-    _brain = b.Brain; _telegraph = b.Telegraph; _facing = b.Facing; _frame = b.Frame;
-}
-```
-Also add `EntityKind.Boss` + a `Rehydrate` case (`new BossEntity(Body.Position, seed:0)` then
-`RestoreInto` overwrites everything). The seed is restored via `DetRngState`, so the ctor
-seed is irrelevant after restore.
-
-`DetRng` is a tiny seeded PRNG (e.g. xorshift32) as a value struct with `Capture()/Restore()`
-returning/taking a `DetRngState { uint S; }`. **Every** stochastic choice (feint-or-real,
-move variety, jitter) draws from it. `ControllerBlackboard` is a plain struct of value
-fields only (see §8). Fixed-size arrays only — no `List`, no dictionaries — so capture is
-cheap and aliasing-free.
-
-> **Snapshot rule of thumb for this subsystem:** if a move or controller needs to remember
-> something between frames, it goes in `EnemyMoveVars`, `EnemyResources`, or
-> `ControllerBlackboard` — never as a private field on a flyweight `EnemyMove` or on the
-> `EnemyController`. Those two are stateless by contract (exactly like `ActionState`).
-
----
-
-## 7. Worked example moves
-
-### 7a. HeavyOverhead — the "respect me" slam
-
-```csharp
-public sealed class HeavyOverhead : EnemyMove
-{
-    public override float Windup => 0.70f;   // long, readable
-    public override float Active => 0.12f;
-    public override float Recovery => 0.55f; // your guaranteed punish window on whiff
-    public override CooldownFamily Family => CooldownFamily.Heavy;
-    public override float StaminaCost => 35f;
-
-    public override bool CanStart(in EnemyContext ctx, in EnemyResources res)
-        => res.Ready(Family) && res.Stamina >= StaminaCost
-        && ctx.Dist < 60f && MathF.Abs(ctx.ToPlayer.Y) < 30f;
-
-    public override bool HasArmor(in EnemyMoveVars v) => v.TimeInMove < Windup; // armored windup
-
-    public override void OnStart(in EnemyContext ctx, ref EnemyMoveVars v, ref EnemyResources res, int facing)
-    {
-        v.LockedFacing = facing;
-        res.Stamina -= StaminaCost;
-        res.Trigger(Family, 3.0f);
-    }
-
-    public override MoveStatus Tick(in EnemyContext ctx, ref EnemyMoveVars v, ref EnemyResources res,
-                                    ref DetRng rng, ref Telegraph tel, int facing)
-    {
-        v.TimeInMove += ctx.Dt;
-        var phase = PhaseOf(v, Windup, Active);
-        ctx.Self.Body.Velocity.X *= 0.8f;   // root in place — readable
-
-        if (phase == MovePhase.Windup)
-        {
-            tel = new Telegraph { Kind = TelegraphKind.Flash, Pos = ctx.Self.Body.Position,
-                                  Progress = v.TimeInMove / Windup, Severity = 1f };
-            return MoveStatus.Committed;     // cannot be cancelled
-        }
-        if (phase == MovePhase.Active)
-        {
-            EnsureHitId(ctx, ref v);
-            var c = ctx.Self.Body.Position + new Vector2(v.LockedFacing * 26f, 6f);
-            var region = new BoundingBox(c.X - 26f, c.Y - 20f, c.X + 26f, c.Y + 22f);
-            ctx.Hitboxes?.Publish(new Hitbox(region, v.HitId, 1.5f,
-                new Vector2(v.LockedFacing * 520f, 120f),   // knock toward the ground/wall → crush combo
-                Faction.Enemy, ctx.Self, Color.OrangeRed, HitTargets.All));   // also cracks tiles
-            tel = Telegraph.None;
-            return MoveStatus.Committed;
-        }
-        return v.TimeInMove >= Windup + Active + Recovery ? MoveStatus.Done : MoveStatus.Running;
+    _currentMovement       = s.AIState;
+    _moveVars              = default; _moveVars.TimeInState = s.StateTime;
+    _facing                = s.Facing;
+    _currentAction         = s.ActionIdx;
+    _actionVars            = default;
+    _actionVars.HitId        = s.HitId;
+    _actionVars.TimeInState  = s.ActionTime;
+    _actionVars.LockedFacing = s.LockedFacing;
+    _actionVars.Committed    = _currentAction >= 0;
+    // Re-derive WindupDuration/ActiveDuration/RecoveryDuration from the flyweight:
+    if (_currentAction >= 0 && _actions[_currentAction] is EnemyMeleeAction m) {
+        _actionVars.WindupDuration   = m.GetWindup();   // expose protected knobs via internal getters
+        _actionVars.ActiveDuration   = m.GetActive();
+        _actionVars.RecoveryDuration = m.GetRecovery();
     }
 }
 ```
 
-### 7b. PillarUppercut — terrain launcher (signature)
+**Snapshot rule of thumb:** anything that needs to survive a frame goes in
+`EnemyMovementVars` or `EnemyActionVars` — never as a private field on a flyweight state
+or on the `EnemyEntity` outside the fields enumerated above.
 
-Windup glows the cell under the player; Active sprouts a column there to launch them. Pure
-terrain attack, on-theme. Counter: move off the marked cell during the tell.
-
-```csharp
-public override void OnStart(in EnemyContext ctx, ref EnemyMoveVars v, ref EnemyResources res, int facing)
-{
-    res.Trigger(Family, 4f);
-    // Snapshot the target cell at windup start so it's dodgeable (doesn't track).
-    var p = ctx.Player.Body.Position;
-    v.TargetCell = new Vector2(MathF.Floor(p.X / Chunk.TileSize), MathF.Floor(p.Y / Chunk.TileSize) + 1);
-}
-// Tick: Windup → ChargeRing telegraph on the cell center. Active → ctx.Chunks?.TryRequestTile(
-//   (int)v.TargetCell.X, (int)v.TargetCell.Y, TileType.Stone) + a brief upward hitbox so
-//   it both launches via the sprout collision and juggles. Family = Terrain.
-```
-
-### 7c. ChargedBolt — committed ranged punish
-
-`CanStart`: mid/long range, `Ready(Ranged)`. `OnStart`: lock facing, `Trigger(Ranged, 1.5f)`.
-Windup: `DangerLine` telegraph along `Aim` (locked at windup *end* so a late dodge works).
-Active: `ctx.Spawner.SpawnEntity(new EnergyBallProjectile(muzzle, v.Aim * speed, ctx.Spawner.HitIds.Next()))`
-— reuses the existing projectile + its own snapshot. Recovery: long, punishable.
-
-These three already exercise: armored windup, knock-into-terrain crush setup, terrain
-mutation, projectile spawning, and three telegraph kinds — i.e. the whole scaffold.
-
----
-
-## 8. The controller (the brain)
-
-Logic only; its memory is the plain-data `ControllerBlackboard`. Swap controllers to
-retune the whole fight without touching moves.
+Add `EntityKind.Enemy` + a `Rehydrate` case (construct an `EnemyEntity` with empty move
+lists is wrong — Rehydrate needs to know which *concrete enemy* it was). MVP punts this:
+the only enemy in MVP is a single concrete `BruteEnemy : EnemyEntity` that constructs
+its own movement+action list in its ctor, exactly like `StalkerEnemy` does.
 
 ```csharp
-public struct ControllerBlackboard
+public sealed class BruteEnemy : EnemyEntity
 {
-    public byte  Phase;            // 0/1/2 escalation (HP thresholds)
-    public float DecisionTimer;    // throttle re-decisions
-    public int   LastMove;
-    // Habit tracking — cheap counters, decayed over time, drive anti-pattern play:
-    public int   PlayerJumps;      // ++ when player airborne-attacks
-    public int   PlayerParries;    // ++ when player guards
-    public float HabitDecay;
-}
+    public BruteEnemy(Vector2 pos)
+        : base(pos, hp: 3f,
+               movement: new() { new EnemyIdleState(), new EnemyChaseState(), new EnemyAttackHoldState() },
+               actions:  new() { new EnemyMeleeAction() })
+    { Color = Color.DarkOrange; Sprite = Sprites.Stalker(12f); }
 
-public interface EnemyController
-{
-    // Return a move index to start, or -1 to keep doing nothing this frame.
-    int ChooseMove(in EnemyContext ctx, IReadOnlyList<EnemyMove> moves,
-                   in EnemyResources res, ref ControllerBlackboard bb,
-                   ref DetRng rng, MoveStatus current);
+    public override EntityKind Kind => EntityKind.Brute;
 }
 ```
 
-A `PhasedController` sketch composes the personality patterns from the brainstorm:
-- **Phase by HP:** `bb.Phase` steps at 66%/33%; higher phases unlock terrain moves + shorten
-  effective decision delay.
-- **Spacing FSM:** pick from range-banded pools (close → Heavy/Pillar, mid → Bolt/Dash-in,
-  far → mortar/charge-the-ultimate). Mirrors `StalkerEnemy`'s Chase→…→Recover skeleton.
-- **Anti-pattern:** if `bb.PlayerJumps` is high, weight anti-airs; if `bb.PlayerParries` is
-  high, weight a guard-break / unblockable grab and *feint* more.
-- **Feints:** with `rng`-driven probability, start a move whose windup it cancels into a
-  block or dash (a dedicated `Feint` move, or a `Cancellable` windup variant) to bait the
-  dodge, then punish.
-- **Mistake injection:** every N seconds force a `Cancellable` idle so a skilled player gets
-  a guaranteed pressure window — the fairness valve.
-
-Habit counters update in `BossEntity.Update` (or here) from observable player state
-(`player.CurrentActionName`, `player.IsGrounded`, `player.Combat`), decayed by `HabitDecay`
-so the boss adapts but also forgets.
-
 ---
 
-## 9. Integration checklist (what touches the live tree)
+## 7. Integration checklist (what touches the live tree)
 
 Additive new files (no conflicts):
-- `Entities/BossEntity.cs`, `Entities/EnemyMove.cs`, `Entities/EnemyMoveVars.cs`,
-  `Entities/EnemyResources.cs`, `Entities/EnemyContext.cs`, `Entities/Telegraph.cs`,
-  `Entities/EnemyController.cs` (+ `PhasedController`), `Entities/DetRng.cs`,
-  `Entities/BossSnapshot.cs`, and one file per move (or a `Moves/` subfolder).
-- `Drawing/Sprites.cs`: add `Sprites.Boss(...)` (additive method).
+- `Entities/EnemyEntity.cs`, `Entities/EnemyContext.cs`, `Entities/EnemyState.cs`,
+  `Entities/EnemyMovementStates.cs` (Idle/Chase/AttackHold), `Entities/EnemyActions.cs`
+  (`EnemyMeleeAction`), `Entities/BruteEnemy.cs`.
 
-Shared touchpoints (coordinate / small):
-- **`EntitySnapshot`**: add `public BossSnapshot Boss;` + `EntityKind.Boss` + a `Rehydrate`
-  case. **This is the one real coordination point with the main agent's snapshot work.**
-- `Game1.Draw`: add the `DrawTelegraph` cosmetic hook (+ optional posture HUD bar).
-- A `Stage.Populate` (or a new `boss` stage in `Stages`): `g.SpawnEntity(new BossEntity(pos, seed))`.
+Shared touchpoints (small, coordinated):
+- `EntitySnapshot`: add `int ActionIdx; float ActionTime; int LockedFacing;` + an
+  `EntityKind.Brute` enum value + a `Rehydrate` case for `new BruteEnemy(Body.Position)`.
+- `Stage.Populate` (or a new test stage): `g.SpawnEntity(new BruteEnemy(pos))`.
 
 Do **not** touch: `PhysicsWorld`, `CombatSystem`, `PlayerCharacter`, `Simulation.Step`
-ordering. The boss is just another `Entity` to all of them.
+ordering. The enemy is just another `Entity` to all of them.
 
-## 10. Build milestones
+---
 
-1. **Skeleton + one move.** `BossEntity` + `EnemyMove`/`Vars` + `EnemyContext` + a hardcoded
-   controller that only ever does `HeavyOverhead`. No telegraph render yet. Prove it spawns,
-   attacks, takes damage, dies.
-2. **Telegraph bridge.** `Telegraph` struct + `Game1.DrawTelegraph`. Make the windup readable.
-3. **Resources.** `EnemyResources` (stamina + one cooldown family + posture). Wire posture
-   into `OnHit` for a stagger reaction. Verify a heavy can't chain.
-4. **Snapshot.** `BossSnapshot` + `DetRng` + the `EntitySnapshot` seam. Add a
-   `SnapshotRoundTripTests` case: spawn a boss, run mid-move, snapshot, run, restore, assert
-   identical trace. **This is the gate** — do it before adding many moves, while state is small.
-5. **Move library.** Flesh out the brainstorm: terrain plays, ranged, traps. Each is a new
-   flyweight; snapshot already covers them via `EnemyMoveVars`.
-6. **Controller.** Replace the hardcoded brain with `PhasedController`: spacing FSM, phases,
-   habit tracking, feints, mistake injection.
+## 8. Build milestones
 
-## 11. Open questions / decisions to revisit
+1. **Plumbing.** `EnemyEntity` + `EnemyState<>` + `EnemyContext`. No states yet — entity
+   just sits there. Prove it spawns, takes damage, dies.
+2. **One movement state.** Add `EnemyIdleState` only; verify the selection loop runs
+   and `_currentMovement` snapshots/restores cleanly.
+3. **Chase + AttackHold + one melee action.** All three movement states and
+   `EnemyMeleeAction`. The boss walks up, telegraphs (Draw), swings (hitbox), recovers.
+4. **Snapshot round-trip test.** Add `BruteEnemy` to a `SnapshotRoundTripTests` case
+   mid-windup, mid-active, mid-recovery, mid-chase. **This is the gate** before adding
+   more enemies.
+5. **(Out of MVP)** Second action variant, ranged projectile attack, terrain-mutating
+   attack, jump movement state, posture/charge meters, multi-enemy controller — each is
+   a strictly additive change once the gate above is green.
 
-- **Multi-hitbox moves** (spin, barrage): one `HitId` per *logical* hit, or per move? Spin
-  wants per-tick-window ids so each rotation can re-hit; barrage wants one per projectile.
-  `EnemyMoveVars.SubCount` + minting a fresh id per sub-emit handles both.
-- **Controller as data vs code:** start with `interface EnemyController` (code). If we ever
-  want data-driven/authored behavior or per-instance variation, move to a behavior-tree or
-  scored-utility table — but the snapshot model (blackboard struct) stays the same.
-- **Telegraph audio/shake** are cosmetic, but their *trigger* must be sim-derived
-  (`Telegraph.Severity`) so replays line up.
-- **Difficulty knobs:** prefer shrinking telegraph windows and tightening punish windows over
-  raising damage — the framework already isolates those as per-move fields.
-- **Posture vs hitstun overlap:** decide whether a posture break routes through the same
-  hitstun/`CombatState` machinery the player uses, or a boss-local stagger move (sketch uses
-  the latter for independence).
-```
+---
+
+## 9. Deferred (explicitly NOT in MVP)
+
+- **Resources / meters** (stamina, posture, charge, cooldown families). No struct, no
+  rules. Per-attack cooldowns, if needed before the deferred work lands, live as a
+  single `float _attackCooldown` field on `EnemyEntity` ticked in `Update`.
+- **Sim-side `Telegraph` descriptor.** Animations read `vars.TimeInState /
+  vars.WindupDuration` in `Draw` — same as the player's slash/stab visuals. If we ever
+  need a HUD danger overlay or screen-shake-on-windup, add it as a render-side reader of
+  the same vars, not a new sim struct.
+- **`DetRng` / `ControllerBlackboard` / phased AI / feints / habit tracking.** State
+  selection is the precondition+priority scan, deterministic and replayable. Adding a
+  PRNG for variety is straightforward later (seed in `EnemyEntity`, snapshot the state),
+  but no MVP enemy needs it.
+- **`MoveStatus.Committed` / `Cancellable` etc.** Replaced by the single `vars.Committed`
+  bool the movement FSM reads. Richer status reporting comes back if/when an action
+  needs to expose more granularity (e.g. "in a cancellable tail").
+- **`HasArmor` / hyperarmor** during windup. Added per-action later as a `vars.Armored`
+  bool the entity's `OnHit` checks.
+- **Hot-swappable controllers / data-driven behavior trees.** Reconsider once we have
+  3+ enemies with overlapping decision logic.

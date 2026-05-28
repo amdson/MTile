@@ -255,12 +255,19 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 Foam.Register(n.Gtx, n.Gty);
             Graph.Remove(n);
 
+            // The parent's age crossed Lifetime this tick. Carry its overshoot
+            // (Age − Lifetime ∈ [0, dt)) into the child's starting Age so growth
+            // is continuous across the handoff — the child resumes from where
+            // the parent left off, not from t=0 (which would put the child's
+            // polygon exactly atop the just-Solid parent cell for one frame).
+            float overshoot = MathF.Max(0f, n.Age - n.Lifetime);
+
             var parentCenter = CellCenter(n.Gtx, n.Gty);   // == n.EndCenter (now committed)
             foreach (var child in n.Children)
             {
                 if (child.Status != TileSproutStatus.Pending) continue;
                 var childCenter = CellCenter(child.Gtx, child.Gty);
-                if (!Graph.TryPromote(child, parentCenter, childCenter, MovementConfig.Current.SproutLifetime))
+                if (!Graph.TryPromote(child, parentCenter, childCenter, MovementConfig.Current.SproutLifetime, overshoot))
                     continue;
 
                 // Materialize the chunk + tile state now that the child is physical.

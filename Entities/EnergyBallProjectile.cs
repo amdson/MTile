@@ -24,7 +24,11 @@ public class EnergyBallProjectile : Projectile
     private const float HitboxHalfSize     = 5f;
     private const float CollisionStopSpeed = 30f;
     private const float ArmDelay           = 0.03f;
-    private const float KnockbackImpulse   = 280f;
+    // Sits in line with the brute's melee/lunge knockback (460/540) so a
+    // ranged punish reads like a thrown body-check on hit rather than a poke.
+    // vs player Mass 2.5 → 216 px/s; vs Brute Mass 1.2 → 450 px/s; vs Stalker
+    // Mass 1.0 → 540 px/s.
+    private const float KnockbackImpulse   = 540f;
 
     private readonly int _hitId;
 
@@ -48,17 +52,10 @@ public class EnergyBallProjectile : Projectile
         Body.Velocity = dir * Speed;
         // Impact config so the ball can pierce 1-2 cells before dying — the
         // chunk solver's break-through path keeps it moving once a tile breaks
-        // under the impulse threshold. Tuned so a single Stone won't stop it
-        // dead but a stack of 3 will (cheap "limited piercing" without an
-        // explicit penetration counter).
-        Body.Impact = new ImpactDamage
-        {
-            Mass                 = 1.2f,
-            ImpulseThreshold     = 50f,
-            DamagePerUnitImpulse = 0.04f,
-            BreakThreshold       = 80f,
-            NormalRetainOnBreak  = 0.55f,
-        };
+        // under the impulse threshold. Tuning lives in impact_profiles.json
+        // under the "energy_ball" key (default thresholds are tight so a
+        // single Stone won't stop it dead but a stack of 3 will).
+        Body.Impact = ImpactProfiles.Build(ImpactProfiles.EnergyBall);
         Mass         = 0.5f;
         GravityScale = 0f;
         Color        = Color.LightCyan;
@@ -83,7 +80,7 @@ public class EnergyBallProjectile : Projectile
         hitboxes?.Publish(new Hitbox(
             region, _hitId, DamagePerFrame,
             dir * KnockbackImpulse,
-            Faction, this, Color,
+            Faction, Id, Color,
             targets: HitTargets.EntitiesOnly));
     }
 }

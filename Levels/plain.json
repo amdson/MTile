@@ -1,0 +1,10 @@
+{
+  "Extents": 1,
+  "ChunkFiles": {
+    "-1,0": "plain_left.txt",
+    "1,0": "plain_right.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 6", "IsSolid": true }
+  ]
+}

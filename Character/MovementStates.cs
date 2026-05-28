@@ -108,6 +108,7 @@ public class JumpingState : MovementState
             ctx.Body, ctx.Chunks,
             PlayerCharacter.Radius, PlayerCharacter.Radius,
             MovementConfig.Current.JumpSourceProbeSlack,
+            ctx.Dt,
             out source);
 }
 
@@ -200,6 +201,7 @@ public class RunningJumpState : MovementState
             ctx.Body, ctx.Chunks,
             PlayerCharacter.Radius, PlayerCharacter.Radius,
             MovementConfig.Current.JumpSourceProbeSlack,
+            ctx.Dt,
             out source);
 }
 
@@ -687,22 +689,16 @@ public class ParkourState : MovementState
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         Reconcile(ctx);
-        if (_overRamp == null && _underRamp == null) { ctx.Body.AppliedForce = Vector2.Zero; return; }
+        ctx.Body.AppliedForce = Vector2.Zero;   // ParkourState never writes raw force — all routing goes through the ramps.
+        if (_overRamp == null && _underRamp == null) return;
 
         var verts = ctx.Body.Polygon.GetVertices(ctx.Body.Position);
         _overRamp?.Recompute(verts);
         _underRamp?.Recompute(verts);
 
-        var cfg = MovementConfig.Current;
-
-        // Cancel gravity in proportion to the strongest engaged ramp: the redirect (in StepSwept)
-        // rescales velocity to its own magnitude every step, so without this the climb bleeds speed.
-        float maxWeight = MathF.Max(_overRamp?.Weight ?? 0f, _underRamp?.Weight ?? 0f);
-        Vector2 force = new Vector2(0f, -cfg.RampAntiGravForce * maxWeight);
-
-        // Pick a push direction: with exactly one ramp engaged, push along its implicit surface and
+        // Pick target direction: with exactly one ramp engaged, drive along its implicit surface and
         // scale the target by 1/cos(θ*) so the horizontal component stays near the entry speed even
-        // on a steep section; otherwise (none engaged yet, or both — a "jump and duck" gap) push
+        // on a steep section. Otherwise (none engaged yet, or both — a "jump and duck" gap) drive
         // straight forward and let the redirect's combine do the steering.
         SteeringRamp solo = null; int engaged = 0;
         if (_overRamp  != null && _overRamp.Weight  > SteeringRamp.WeightEpsilon) { engaged++; solo = _overRamp; }
@@ -711,19 +707,30 @@ public class ParkourState : MovementState
         Vector2 dir  = engaged == 1 ? solo.SurfaceDir : new Vector2(_wallDir, 0f);
         float   cosT = engaged == 1 ? MathF.Max(MathF.Cos(solo.ThetaStar), MinClimbCos) : 1f;
         float   targetAlong = vars.EntrySpeed / cosT;
-        force += dir * AirControl.SoftClampVelocity(Vector2.Dot(ctx.Body.Velocity, dir), targetAlong, cfg.WalkAccel, ctx.Dt);
+        Vector2 targetVelocity = dir * targetAlong;
 
-        // Cap |velocity| at the target only when steering off a single surface (so the climb force
-        // can't inflate it through the redirect's rescale); the multi-ramp combine manages its own.
-        if (_overRamp  != null) _overRamp.MaxSpeed  = (engaged == 1 && solo == _overRamp)  ? targetAlong : float.PositiveInfinity;
-        if (_underRamp != null) _underRamp.MaxSpeed = (engaged == 1 && solo == _underRamp) ? targetAlong : float.PositiveInfinity;
-        // Additionally cap the vertical kick the redirect can produce — a steep
-        // redirect on a tall ledge otherwise yeets the body upward at unrealistic
-        // vy. Applied unconditionally per ramp; harmless on shallow redirects.
-        if (_overRamp  != null) _overRamp.MaxRedirectVy  = MovementConfig.Current.ParkourRampMaxVy;
-        if (_underRamp != null) _underRamp.MaxRedirectVy = MovementConfig.Current.ParkourRampMaxVy;
-
-        ctx.Body.AppliedForce = force;
+        // Write the target onto each ramp so SteeringRamp.ResolveVelocity drives the body
+        // toward it (subject to MaxForce·dt clipping). The same target goes on both engaged
+        // ramps in the multi-ramp case — averaging in ResolveVelocity then collapses to that
+        // target. The anti-gravity term ParkourState used to add explicitly is now absorbed
+        // into the drive: each frame the ramp computes dv = target − vBefore, and that
+        // delta naturally counteracts whatever gravity·dt was just added to vBefore.
+        if (_overRamp  != null)
+        {
+            _overRamp.HasTarget      = _overRamp.Weight  > SteeringRamp.WeightEpsilon;
+            _overRamp.TargetVelocity = targetVelocity;
+            _overRamp.MaxSpeed       = float.PositiveInfinity;   // target mode supersedes MaxSpeed
+            _overRamp.MaxRedirectVy  = MovementConfig.Current.ParkourRampMaxVy;
+            _overRamp.MaxForce       = MovementConfig.Current.ParkourRampMaxForce;
+        }
+        if (_underRamp != null)
+        {
+            _underRamp.HasTarget      = _underRamp.Weight > SteeringRamp.WeightEpsilon;
+            _underRamp.TargetVelocity = targetVelocity;
+            _underRamp.MaxSpeed       = float.PositiveInfinity;
+            _underRamp.MaxRedirectVy  = MovementConfig.Current.ParkourRampMaxVy;
+            _underRamp.MaxForce       = MovementConfig.Current.ParkourRampMaxForce;
+        }
     }
 
     // Add/remove the Over and Under SteeringRamps to match the corners currently detected ahead,

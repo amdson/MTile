@@ -47,6 +47,19 @@ public static class Stages
             PlayerSpawn   = new Vector2(64f, 0f),
             Populate      = PopulateArena,
         });
+
+        // ─── plain ────────────────────────────────────────────────────────────
+        // Flat open plain flanked by stepped hills on either side. Smoke-test
+        // stage for the MVP EnemyEntity framework — two BruteEnemy spawns on
+        // the flat section so the player can engage the new melee AI without
+        // other terrain distractions. Open sky (no ceiling) so the hills read
+        // as outdoor terrain rather than a bounded room.
+        Register(new Stage {
+            Name          = "plain",
+            TerrainConfig = "plain.json",
+            PlayerSpawn   = new Vector2(16f, 0f),
+            Populate      = PopulatePlain,
+        });
     }
 
     public static void Register(Stage s) => _registry[s.Name] = s;
@@ -125,5 +138,23 @@ public static class Stages
         // either dodge their line of fire or close in and slash them down.
         g.SpawnEntity(EntityFactory.Turret(new Vector2(-160f, -140f)));
         g.SpawnEntity(EntityFactory.Turret(new Vector2( 280f, -140f)));
+    }
+
+    private static void PopulatePlain(Simulation g)
+    {
+        // Floor sits at world tile y = 6 → world Y = 96; a body with radius ~12
+        // centers on Y ≈ 80 when standing on the floor. Skirmishers spawn on the
+        // flat section, one to each side of the player so the engagement reads
+        // immediately on stage load. Built via EnemyFactory so the blueprint
+        // (radius / health / FSM lists) is the single source of truth — swap
+        // EntityKind here to test other registered enemies.
+        const float floorY = 80f;
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Skirmisher, new Vector2(-100f, floorY)));
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Skirmisher, new Vector2( 140f, floorY)));
+
+        // A couple of ammo balls so the player has something to chuck at the
+        // brutes — mirrors the arena setup.
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(-40f, 40f)));
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2( 80f, 40f)));
     }
 }

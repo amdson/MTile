@@ -44,7 +44,7 @@ public class RampVerticalCapTests(ITestOutputHelper output)
         var (body, _) = BuildHighCornerRamp(vyCap: float.PositiveInfinity);
         body.Velocity = new Vector2(300f, 0f);
 
-        SteeringRamp.ApplyRedirect(body);
+        SteeringRamp.ApplyRedirect(body, 1f / 30f);
 
         output.WriteLine($"no-cap result: vy = {body.Velocity.Y:F2}");
         // Sanity-check the fixture: redirect should have produced a strong upward kick.
@@ -61,7 +61,7 @@ public class RampVerticalCapTests(ITestOutputHelper output)
         var (body, ramp) = BuildHighCornerRamp(vyCap);
         body.Velocity = new Vector2(300f, 0f);
 
-        SteeringRamp.ApplyRedirect(body);
+        SteeringRamp.ApplyRedirect(body, 1f / 30f);
 
         output.WriteLine($"vyCap={vyCap}: result vy = {body.Velocity.Y:F2}, |v|={body.Velocity.Length():F2}");
         // Y-down: upward is negative. Cap clamps vy >= -vyCap.
@@ -71,6 +71,59 @@ public class RampVerticalCapTests(ITestOutputHelper output)
         // Per-contact impulse should reflect the delta we actually applied.
         Assert.True(ramp.LastImpulse.Y > -vyCap - 300f - Epsilon,
             $"ramp.LastImpulse.Y={ramp.LastImpulse.Y} outside plausible range for vy cap {vyCap}");
+    }
+
+    // ── Layer 1: MaxForce clip ─────────────────────────────────────────────
+    // Soft-constraint ramp behavior. The redirect's Δv is bounded to
+    // MaxForce·dt per step, so an external velocity stronger than the ramp
+    // gets clipped: most stays in body.Velocity (heading into the surface)
+    // and a real impact resolves downstream. Default MaxForce=+∞ ⇒ unchanged
+    // legacy behavior, which is what every other test in this file expects.
+
+    [Fact]
+    public void MaxForce_FiniteCap_ClipsRedirectDvToMaxForceTimesDt()
+    {
+        // Inbound velocity is huge (1000 px/s into the banned direction).
+        // With no force cap, the ramp would zero the banned component and
+        // emit something along SurfaceDir. With MaxForce·dt = 50 px/s the
+        // Δv from vBefore must be ≤ 50 in magnitude.
+        var (body, ramp) = BuildHighCornerRamp(vyCap: float.PositiveInfinity);
+        ramp.MaxForce = 1500f;          // px/s²
+        body.Velocity = new Vector2(1000f, 0f);
+        Vector2 vBefore = body.Velocity;
+
+        const float dt = 1f / 30f;       // ⇒ MaxDv = 1500/30 = 50 px/s
+        SteeringRamp.ApplyRedirect(body, dt);
+
+        Vector2 dv = body.Velocity - vBefore;
+        output.WriteLine($"dv.Length() = {dv.Length():F3} (expected ≤ 50.0)");
+        output.WriteLine($"body.Velocity post-clip = ({body.Velocity.X:F2}, {body.Velocity.Y:F2})");
+        Assert.True(dv.Length() <= 50f + 0.01f,
+            $"Δv magnitude {dv.Length():F3} exceeds MaxForce·dt = 50.0");
+        // The unredirected forward velocity must still be substantial — the
+        // body should NOT have been fully redirected away from the wall.
+        Assert.True(body.Velocity.X > 900f,
+            $"Expected most forward velocity to survive the cap, got vx={body.Velocity.X:F2}");
+        // LastImpulse must reflect the (clipped) actual Δv, not the ideal one.
+        Assert.InRange(ramp.LastImpulse.Length(), dv.Length() - 0.01f, dv.Length() + 0.01f);
+    }
+
+    [Fact]
+    public void MaxForce_InfiniteCap_BehavesLikeLegacyFullRedirect()
+    {
+        // Sanity: with MaxForce = +∞ the ramp redirects to full magnitude
+        // along SurfaceDir, same as before this knob existed.
+        var (body, _) = BuildHighCornerRamp(vyCap: float.PositiveInfinity);
+        // ramp.MaxForce left at default = +∞
+        body.Velocity = new Vector2(300f, 0f);
+
+        SteeringRamp.ApplyRedirect(body, 1f / 30f);
+
+        output.WriteLine($"no-force-cap result: ({body.Velocity.X:F2}, {body.Velocity.Y:F2})");
+        // Same expectation as HighCorner_FastInbound_WithoutCap_VyExceedsLimit:
+        // strong upward redirect because the ramp is at infinite stiffness.
+        Assert.True(body.Velocity.Y < -100f,
+            $"Expected strong upward redirect with infinite force cap, got vy={body.Velocity.Y:F2}");
     }
 
     // End-to-end through PhysicsWorld + a real one-block vault, asserting that the

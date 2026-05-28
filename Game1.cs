@@ -114,6 +114,14 @@ public class Game1 : Game
             }
         }
 
+        // One-shot config loads for impact tuning. No hot-reload (unlike
+        // movement_config.json) — these are sim-affecting per-body parameters
+        // and the rollback peers would desync if one side picked up an edit
+        // mid-match. Title-relative paths work on both DesktopGL (resolved
+        // via TitleContainer) and Blazor WASM (HTTP fetch from wwwroot).
+        ImpactProfiles.Load("impact_profiles.json");
+        MaterialStrengths.Load("material_strengths.json");
+
         // A networked match always has two real players (local + remote), so force the
         // second player on regardless of config.
         if (_net != null) _config.SpawnSecondPlayer = true;
@@ -321,6 +329,12 @@ public class Game1 : Game
 
         // Action overlay (slash arc, etc.) in world space, on top of the body.
         player.CurrentAction.Draw(_spriteBatch, _pixel, player.Body, player.CurrentActionVars);
+
+        // Enemy FSM telegraph/strike overlays — same world-space layer as the
+        // player's action draw, so windup tells read alongside the player's
+        // slash arcs.
+        foreach (var e in _sim.Entities)
+            if (e is EnemyEntity en) en.DrawOverlay(_spriteBatch, _pixel);
 
         if (_config.DebugDrawHitboxes)
             foreach (var hb in _sim.Hitboxes.All)

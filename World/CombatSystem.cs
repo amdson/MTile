@@ -22,13 +22,29 @@ namespace MTile;
 // static — it's a pure function.
 public sealed class CombatSystem
 {
-    private readonly Dictionary<int, HashSet<IHittable>> _hitDedupe = new();
+    private readonly Dictionary<int, HashSet<EntityId>> _hitDedupe = new();
     private readonly HashSet<int> _liveHitIds = new();
     private readonly List<int> _scratchPrune = new();
+    // Per-frame recoil tally — accumulated impulse to apply to each hitbox's
+    // attacker, keyed by HitId. Cleared at the start of every Apply (per-step
+    // transient; not snapshotted). Attackers read via PeekRecoil in their
+    // ApplyActionForces hook — that runs in frame N+1 before frame N+1's Apply
+    // clears the dict, so the tally is effectively a 1-frame inbox from
+    // CombatSystem to the action layer.
+    private readonly Dictionary<int, Vector2> _recoilByHitId = new();
 
-    public void Apply(ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes)
+    public Vector2 PeekRecoil(int hitId)
+        => _recoilByHitId.TryGetValue(hitId, out var v) ? v : Vector2.Zero;
+
+    // `resolve` maps a hurtbox's owning EntityId back to the live IHittable so OnHit
+    // can be dispatched. The dedupe table and snapshots key on EntityId (value
+    // identity), but the actual damage callback still needs the object. Callers own
+    // the entity set, so they supply the lookup.
+    public void Apply(ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes,
+                      Func<EntityId, IHittable> resolve)
     {
         _liveHitIds.Clear();
+        _recoilByHitId.Clear();
 
         foreach (var hit in hitboxes.All)
         {
@@ -61,7 +77,23 @@ public sealed class CombatSystem
                             (gtx + 1) * Chunk.TileSize, (gty + 1) * Chunk.TileSize);
                         if (!OverlapsPolyAABB(hitVerts, hitAxes, tileAABB)) continue;
                     }
-                    chunks.DamageCell(gtx, gty, hit.Damage);
+                    // Snapshot the material BEFORE DamageCell, since a break clears
+                    // the cell and we'd lose the type info for the hardness gate.
+                    var typeBefore  = chunks.GetCellType(gtx, gty);
+                    var stateBefore = chunks.GetCellState(gtx, gty);
+                    // DamageCell returns true iff the tile broke this call.
+                    bool broke = chunks.DamageCell(gtx, gty, hit.Damage);
+                    if (hit.RecoilScale > 0f && stateBefore == TileState.Solid)
+                    {
+                        // Two gates, both must allow before crediting recoil:
+                        //   BreakProtected ⇒ skip cells that this hit destroyed.
+                        //   MinMaterialHP  ⇒ skip cells whose material is below the
+                        //                    hardness floor (e.g. sand under a stab).
+                        bool breakAllows = !hit.RecoilBreakProtected || !broke;
+                        bool hardEnough  = TileDamage.MaxHPFor(typeBefore) > hit.RecoilMinMaterialHP;
+                        if (breakAllows && hardEnough)
+                            AccumulateRecoil(hit.HitId, -hit.KnockbackImpulse * hit.RecoilScale);
+                    }
                 }
             }
 
@@ -70,7 +102,7 @@ public sealed class CombatSystem
             {
                 if (!_hitDedupe.TryGetValue(hit.HitId, out var alreadyHit))
                 {
-                    alreadyHit = new HashSet<IHittable>();
+                    alreadyHit = new HashSet<EntityId>();
                     _hitDedupe[hit.HitId] = alreadyHit;
                 }
                 foreach (var hb in hurtboxes.All)
@@ -79,8 +111,12 @@ public sealed class CombatSystem
                     if (alreadyHit.Contains(hb.Target)) continue;
                     if (!HitboxWorld.Overlaps(hit.Region, hb.Region)) continue;
                     if (hit.Shape != null && !OverlapsPolyAABB(hitVerts, hitAxes, hb.Region)) continue;
-                    hb.Target.OnHit(hit, hb);
+                    var target = resolve(hb.Target);
+                    if (target == null) continue;   // owner despawned this frame — skip
+                    target.OnHit(hit, hb);
                     alreadyHit.Add(hb.Target);
+                    if (hit.RecoilScale > 0f)
+                        AccumulateRecoil(hit.HitId, -hit.KnockbackImpulse * hit.RecoilScale);
                 }
             }
         }
@@ -95,38 +131,35 @@ public sealed class CombatSystem
 
     // ── Snapshot/restore (roadmap goal 4 §H) ────────────────────────────────────
     // The cross-frame (HitId → already-hit targets) table is the only durable combat
-    // state. It holds IHittable *references*, which go stale across a restore (entities
-    // may be rehydrated as new objects), so it's snapshotted by stable HittableId and
-    // resolved back to live objects on restore. _liveHitIds / _scratchPrune are
-    // per-Apply scratch and need no snapshot. Order within a set doesn't matter — it's
-    // a membership test (alreadyHit.Contains).
-    public Dictionary<int, int[]> CaptureDedupe(Func<IHittable, int> idOf)
+    // state. It now keys on EntityId (value identity), so capture/restore is a plain
+    // value copy of each set — no id-of / resolve callbacks, and no staleness across a
+    // restore (a rehydrated entity carries the same EntityId). _liveHitIds /
+    // _scratchPrune are per-Apply scratch and need no snapshot. Order within a set
+    // doesn't matter — it's a membership test (alreadyHit.Contains).
+    public Dictionary<int, EntityId[]> CaptureDedupe()
     {
-        var outMap = new Dictionary<int, int[]>(_hitDedupe.Count);
+        var outMap = new Dictionary<int, EntityId[]>(_hitDedupe.Count);
         foreach (var (hitId, set) in _hitDedupe)
         {
-            var ids = new int[set.Count];
-            int i = 0;
-            foreach (var h in set) ids[i++] = idOf(h);
+            var ids = new EntityId[set.Count];
+            set.CopyTo(ids);
             outMap[hitId] = ids;
         }
         return outMap;
     }
 
-    public void RestoreDedupe(Dictionary<int, int[]> data, Func<int, IHittable> resolve)
+    public void RestoreDedupe(Dictionary<int, EntityId[]> data)
     {
         _hitDedupe.Clear();
         if (data == null) return;
         foreach (var (hitId, ids) in data)
-        {
-            var set = new HashSet<IHittable>(ids.Length);
-            foreach (var id in ids)
-            {
-                var h = resolve(id);
-                if (h != null) set.Add(h);   // a target that no longer exists is simply dropped
-            }
-            _hitDedupe[hitId] = set;
-        }
+            _hitDedupe[hitId] = new HashSet<EntityId>(ids);
+    }
+
+    private void AccumulateRecoil(int hitId, Vector2 impulse)
+    {
+        _recoilByHitId.TryGetValue(hitId, out var cur);
+        _recoilByHitId[hitId] = cur + impulse;
     }
 
     // SAT: arbitrary convex polygon (given by its pre-computed world vertices +

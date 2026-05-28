@@ -3,7 +3,7 @@
   "WindowWidth": 900,
   "WindowHeight": 700,
   "Fullscreen": false,
-  "DebugDrawHitboxes":          false,
+  "DebugDrawHitboxes":          true,
   "DebugDrawHurtboxes":         false,
   "DebugDrawPlayerOrientation": false,
   "DebugDrawBodies":            false,
@@ -13,7 +13,7 @@
   "DebugDrawHealthBars":        false,
   "DebugDrawMassBall":          true,
   "MouseTrail": true,
-  "SpawnSecondPlayer": true,
+  "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
   "SecondPlayerOffsetY": 0
 }

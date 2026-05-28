@@ -115,7 +115,7 @@ public class StickyGrenadeProjectile : Projectile
                 hitboxes.Publish(new Hitbox(
                     region, _hitId, ExplosionDamage,
                     dir * ExplosionKnockback,
-                    Faction, this, Color.Orange));
+                    Faction, Id, Color.Orange));
             }
         }
         _exploded = true;

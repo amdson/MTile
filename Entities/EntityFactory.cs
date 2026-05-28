@@ -35,14 +35,10 @@ public static class EntityFactory
     {
         var body = new PhysicsBody(Polygon.CreateRegular(6f, 8), pos)
         {
-            // Crasher config: momentum past threshold chips tiles. Terminal-ish
-            // falls (~400-500 px/s) break Dirt, harder throws break Stone.
-            Impact = new ImpactDamage
-            {
-                Mass                 = 2.5f,
-                ImpulseThreshold     = 200f,
-                DamagePerUnitImpulse = 0.1f,
-            },
+            // Crasher config: terminal-ish falls (~400-500 px/s) break Dirt,
+            // harder throws break Stone. Tuning lives in impact_profiles.json
+            // under the "ball" key.
+            Impact = ImpactProfiles.Build(ImpactProfiles.Ball),
         };
         return new Entity(body, health: 1.0f)
         {

@@ -123,7 +123,9 @@ public static class SimRunner
 
         for (int i = 0; i < n; i++)
         {
-            players[i] = new PlayerCharacter(cfg.Players[i].StartPosition) { HitIds = hitIds };
+            // Distinct EntityId per player so the combat dedupe table (keyed on
+            // EntityId) doesn't conflate them. Ids start at 1; None (0) is reserved.
+            players[i] = new PlayerCharacter(cfg.Players[i].StartPosition) { HitIds = hitIds, Id = new EntityId(i + 1) };
             players[i].Body.Velocity = cfg.Players[i].StartVelocity;
             players[i].Faction       = cfg.Players[i].Faction;
             ctrls[i] = new Controller();
@@ -135,6 +137,16 @@ public static class SimRunner
         var hitboxes  = new HitboxWorld();
         var hurtboxes = new HurtboxWorld();
         var combat    = new CombatSystem();
+        // Recoil tally lives on CombatSystem and is read by actions in
+        // ApplyActionForces. Wire it through to each player so attack recoil
+        // (stab pogo, etc.) actually fires in multi-player sim tests.
+        for (int i = 0; i < n; i++) players[i].CombatSystem = combat;
+
+        IHittable ResolvePlayer(EntityId id)
+        {
+            foreach (var p in players) if (p.Id == id) return p;
+            return null;
+        }
 
         for (int f = 0; f < cfg.Frames; f++)
         {
@@ -160,7 +172,7 @@ public static class SimRunner
                 fy[i] = players[i].Body.AppliedForce.Y;
             }
 
-            combat.Apply(cfg.Terrain, hitboxes, hurtboxes);
+            combat.Apply(cfg.Terrain, hitboxes, hurtboxes, ResolvePlayer);
 
             PhysicsWorld.StepSwept(bodies, cfg.Terrain, cfg.Dt, cfg.Gravity);
 

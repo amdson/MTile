@@ -15,6 +15,14 @@ public enum EntityKind
     EnergyBall,
     StickyGrenade,
     LobbedArea,
+    Brute,          // MVP EnemyEntity subtype (see Plans/ENEMY_CAPABILITY_FRAMEWORK.md)
+
+    // Factory-built enemy variants. Each blueprint registered with
+    // EnemyFactory owns its own EntityKind so Rehydrate can dispatch to it.
+    // Add new variants here as you draft new enemy types — names are the
+    // single source of truth for snapshot identity across hosts and replays.
+    Skirmisher,
+    Bombardier,
 }
 
 // Flat, plain-data snapshot of any entity (roadmap goal 4 / Plans/STATE_SNAPSHOT_PLAN
@@ -27,7 +35,7 @@ public enum EntityKind
 public struct EntitySnapshot
 {
     public EntityKind Kind;
-    public int        Id;
+    public EntityId   Id;
 
     public BodyState Body;       // pose + kinematics + maintained contacts (§B)
 
@@ -48,11 +56,19 @@ public struct EntitySnapshot
     public float Age;
     public float Lifetime;
 
-    // AI (Stalker / Turret) — AIState is the concrete enum cast to int.
+    // AI (Stalker / Turret / Brute movement-FSM index) — AIState is the
+    // concrete enum cast to int, or the EnemyEntity movement-state index.
     public int     AIState;
     public float   StateTime;
     public int     Facing;
     public Vector2 Aim;
+
+    // EnemyEntity (Brute, …) action-FSM. ActionIdx == -1 means "no action
+    // active." LockedFacing is the facing captured at action Enter so a swing
+    // doesn't reverse if the body slides past the player mid-windup.
+    public int   ActionIdx;
+    public float ActionTime;
+    public int   LockedFacing;
 
     // Projectile subtype state
     public int                 HitId;
@@ -82,6 +98,12 @@ public struct EntitySnapshot
             EntityKind.EnergyBall    => new EnergyBallProjectile(Body.Position, Body.Velocity, HitId, Faction),
             EntityKind.StickyGrenade => new StickyGrenadeProjectile(Body.Position, Body.Velocity, HitId, Faction),
             EntityKind.LobbedArea    => new LobbedAreaProjectile(Body.Position, Body.Velocity, Budget, TileType, Mode, HitId, Faction),
+            EntityKind.Brute         => new BruteEnemy(Body.Position),
+            // Factory-registered enemies (Skirmisher, Bombardier, …) — the
+            // blueprint reconstructs body shape, mass, FSM state lists, etc.
+            // Falls through to Generic if the kind isn't registered, which is
+            // also the path for any unknown future variant.
+            _ when EnemyFactory.IsRegistered(Kind) => EnemyFactory.Create(Kind, Body.Position),
             _                        => new Entity(new PhysicsBody(Polygon, Body.Position) { Impact = Impact }, MaxHealth),
         };
         e.RestoreInto(in this);

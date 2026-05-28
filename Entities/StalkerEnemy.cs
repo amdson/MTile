@@ -142,7 +142,7 @@ public class StalkerEnemy : Entity
                     hitboxes?.Publish(new Hitbox(
                         region, _hitId, LungeDamage,
                         new Vector2(_facing * LungeKnockback.X, LungeKnockback.Y),
-                        Faction.Enemy, this, Color.OrangeRed,
+                        Faction.Enemy, Id, Color.OrangeRed,
                         targets: HitTargets.EntitiesOnly));
                 }
                 if (_stateTime >= LungeDuration) Transition(AIState.Recover);

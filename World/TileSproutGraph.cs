@@ -45,10 +45,13 @@ public sealed class TileSproutGraph
 
     // First-parent-completed-wins. If two parents finalize in the same tick,
     // the first call promotes the child; subsequent calls see Growing and bail.
-    public bool TryPromote(TileSproutNode node, Vector2 parentCenter, Vector2 endCenter, float lifetime)
+    // initialAge: the parent's overshoot (Age - Lifetime) at finalize time. Passed
+    // through so the child picks up where the parent left off without losing any
+    // sub-frame growth budget. Defaults to 0 for non-finalize-driven promotions.
+    public bool TryPromote(TileSproutNode node, Vector2 parentCenter, Vector2 endCenter, float lifetime, float initialAge = 0f)
     {
         if (node.Status != TileSproutStatus.Pending) return false;
-        node.PromoteToGrowing(parentCenter, endCenter, lifetime);
+        node.PromoteToGrowing(parentCenter, endCenter, lifetime, initialAge);
         _pending.Remove(node);
         _growing.Add(node);
         return true;

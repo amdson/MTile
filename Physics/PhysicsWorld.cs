@@ -43,15 +43,7 @@ public static class PhysicsWorld
                         if (mag > body.LastImpulseMagnitude) body.LastImpulseMagnitude = mag;
                     }
                 }
-                // Friction is tangential coupling that exists whenever the surface
-                // is engaged with the body — and the contact's presence in
-                // body.Constraints is the engagement signal (owning states add on
-                // Enter, remove on Exit). It can't be coupled to the normal-impulse
-                // gate above because a body hovering on a soft spring contact
-                // (StandingState's FSD) has its normal motion managed by the
-                // state's spring force, not by the constraint loop — so the impulse
-                // gate never fires in steady state and a coupled friction call
-                // would never brake horizontal motion.
+
                 ApplyContactFriction(body, sc, savedForce, dt);
             }
 
@@ -79,7 +71,7 @@ public static class PhysicsWorld
 
         for (int iter = 0; iter < maxIterations; iter++)
         {
-            var bounds = body.Polygon.GetBoundingBox(nextPos);
+            var bounds = body.Polygon.GetBoundingBox(nextPos).Union(body.Polygon.GetBoundingBox(body.Position));
 
             // Resolve the SINGLE deepest-penetrating shape this iteration, then re-evaluate.
             // The old loop pushed out of every overlapping shape in tile-iteration (left→
@@ -111,13 +103,11 @@ public static class PhysicsWorld
 
             var normal = Vector2.Normalize(bestMtv);
             nextPos += bestMtv + normal * Epsilon;
-            var resolvedBounds = body.Polygon.GetBoundingBox(nextPos);
 
             // Zero the *relative* normal velocity so a body landing on a moving
-            // surface emerges moving with it along the contact normal — the carry.
+            // surface emerges moving with it along the contact normal
             // For static tiles shape.Velocity is zero and this collapses to absolute.
             float vnRel = Vector2.Dot(body.Velocity - bestShapeVel, normal);
-            bool brokeThrough = false;
             Vector2 frictionDv = Vector2.Zero;
             if (vnRel < 0f)
             {
@@ -125,24 +115,26 @@ public static class PhysicsWorld
                 float mag = MathF.Abs(vnRel);
                 if (mag > body.LastImpulseMagnitude) body.LastImpulseMagnitude = mag;
                 frictionDv = ApplyFrictionAtImpact(body, normal, bestShapeVel, ComputeFrictionForNormal(body, normal), savedForce, dt);
-                brokeThrough = TryApplyImpactDamage(body, resolvedBounds, normal, vnRel, chunks);
-                if (brokeThrough && body.Impact != null)
+                if (body.Impact != null
+                    && body.Impact.BounceRestitution > 0f
+                    && MathF.Abs(vnRel) >= body.Impact.BounceImpulseThreshold)
                 {
-                    body.Velocity += vnRel * normal;
-                    body.Velocity -= vnRel * (1f - body.Impact.NormalRetainOnBreak) * normal;
+                    // Carry-zero already applied above (relative normal V = 0). Stack
+                    // the rebound on top: net Δv = -(1+e)·vnRel·normal, i.e. body
+                    // emerges moving away from the surface at e·|vnRel|.
+                    body.Velocity -= vnRel * body.Impact.BounceRestitution * normal;
                 }
+                // Damage is no longer fired here — see ApplyContactDamage, which
+                // walks body.Constraints once per StepSwept after all impulses
+                // have been delivered to their per-contact LastImpulse fields.
             }
 
-            if (!brokeThrough)
-            {
-                var sd = UpdateSurfaceConstraint(body, nextPos, normal, bestShapeVel);
-                // Accumulate impulse delivered TO the body through this contact: the
-                // normal-resolve component (-vnRel*normal — sign matches "force on
-                // body") plus any tangential friction delta. Skipped on break-through
-                // because no persistent contact represents the now-broken surface.
-                if (vnRel < 0f) sd.LastImpulse += -vnRel * normal;
-                sd.LastImpulse += frictionDv;
-            }
+            var sd = UpdateSurfaceConstraint(body, nextPos, normal, bestShapeVel);
+            // Accumulate impulse delivered TO the body through this contact: the
+            // normal-resolve component (-vnRel*normal — sign matches "force on
+            // body") plus any tangential friction delta.
+            if (vnRel < 0f) sd.LastImpulse += -vnRel * normal;
+            sd.LastImpulse += frictionDv;
         }
         return nextPos;
     }
@@ -194,7 +186,7 @@ public static class PhysicsWorld
 
             // Steering ramps: rotate velocity onto the shallowest trajectory that clears the corner
             // (derived from the polygon each step). Position is still resolved by the real tile sweep below.
-            SteeringRamp.ApplyRedirect(body);
+            SteeringRamp.ApplyRedirect(body, dt);
 
             // Depenetration pre-pass. The swept solver only ejects by Epsilon per bounce
             // when the body starts overlapping a shape — fine for static tiles the body
@@ -288,65 +280,149 @@ public static class PhysicsWorld
             pos += displacement * minT + hitNormal * Epsilon;
             displacement *= 1f - minT;
 
-            // Zero the *relative* normal velocity so a body landing on a moving surface
-            // emerges moving with it along the contact normal — the carry. Pair it
-            // with friction so the same impulse that locks normal motion also brakes
-            // tangential motion (Coulomb-coupled).
+            // Carry-zero with absorption cap: the body would ideally lose
+            // |vnRel| of inbound normal velocity (full stop along normal). But
+            // the impacted tile face can only absorb so much impulse before it
+            // breaks; beyond that the body keeps the surplus as continued
+            // inbound velocity, which the NEXT sweep iteration sees against
+            // the layer behind. Per cell, absorption capacity = impulse
+            // required to (a) cross body.Impact.ImpulseThreshold and (b) drive
+            // remaining HP to zero given DamagePerUnitImpulse. Summed across
+            // the cells in the impact strip, that's the cap on impulse
+            // delivered through this contact. If idealImpulse ≤ totalCap the
+            // body absorbs fully (carry-zero, same as before); if it exceeds
+            // the cap the cells break and the body plows on.
             float vnRel = Vector2.Dot(body.Velocity - hitSurfaceVel, hitNormal);
-            bool brokeThrough = false;
             Vector2 frictionDv = Vector2.Zero;
+            float dvNormalMag = 0f;
+            bool brokeThrough = false;
             if (vnRel < 0f)
             {
-                // Provisionally zero the normal velocity (carry preserved). If we
-                // then find this was a break-through, undo the full zero and
-                // replace with the bleed-off.
-                body.Velocity -= vnRel * hitNormal;
-                float mag = MathF.Abs(vnRel);
-                if (mag > body.LastImpulseMagnitude) body.LastImpulseMagnitude = mag;
-                frictionDv = ApplyFrictionAtImpact(body, hitNormal, hitSurfaceVel, hitFriction, savedForce, dt);
-                // Impact damage fires on BOTH chunk-collision and FSD-collision
-                // events — the latter is how the player lands (StandingState's
-                // ground FSD takes the impulse). The probe strip below the body
-                // finds the actual tile cells to damage; FSDs are virtual planes
-                // but the body's bounds at impact still line up with real cells.
-                // Players who shouldn't break tiles just don't set body.Impact.
-                brokeThrough = TryApplyImpactDamage(body, body.Polygon.GetBoundingBox(pos), hitNormal, vnRel, chunks);
-                if (brokeThrough && body.Impact != null)
+                float vnAbs = MathF.Abs(vnRel);
+                float dvCapMag = vnAbs;
+
+                if (!hitFromFloating && body.Impact != null)
                 {
-                    // Restore the velocity we zeroed, then bleed by the configured
-                    // retain factor. Net effect: body keeps NormalRetainOnBreak of
-                    // its pre-impact inward velocity, surface friction still
-                    // applied (Coulomb-coupled), tile is gone. Next frame's sweep
-                    // continues into the now-empty space — one block per frame
-                    // penetration (per the user's no-substep directive).
-                    body.Velocity += vnRel * hitNormal;                              // undo carry-zero
-                    body.Velocity -= vnRel * (1f - body.Impact.NormalRetainOnBreak) * hitNormal;
+                    ComputeImpactCells(body, pos, hitNormal, chunks, _impactCellsScratch);
+                    int n = _impactCellsScratch.Count;
+                    if (n > 0)
+                    {
+                        float totalCapImpulse = 0f;
+                        float dmgRate = MathF.Max(body.Impact.DamagePerUnitImpulse, 1e-6f);
+                        foreach (var (gtx, gty) in _impactCellsScratch)
+                        {
+                            var type = chunks.GetCellType(gtx, gty);
+                            float hpRemaining = MathF.Max(0f, TileDamage.MaxHPFor(type) - chunks.Damage.Get(gtx, gty));
+                            totalCapImpulse += body.Impact.ImpulseThreshold + hpRemaining / dmgRate;
+                        }
+                        float capDvMag = totalCapImpulse / MathF.Max(body.Impact.Mass, 1e-6f);
+                        if (vnAbs > capDvMag)
+                        {
+                            dvCapMag = capDvMag;
+                            brokeThrough = true;
+                        }
+
+                        // Distribute the actually-delivered impulse across the
+                        // cells and chip/break them. On a break-through pass
+                        // each cell receives exactly its cap, so the accumulator's
+                        // over-portion equals hpRemaining/dmgRate and the cell
+                        // breaks. Below-cap passes chip per the old formula.
+                        float deliveredImpulse = dvCapMag * body.Impact.Mass;
+                        float perCell = deliveredImpulse / n;
+                        foreach (var (gtx, gty) in _impactCellsScratch)
+                        {
+                            float over = chunks.Impact.AccrueAndConsume(gtx, gty, perCell, body.Impact.ImpulseThreshold);
+                            if (over > 0f) chunks.DamageCell(gtx, gty, over * body.Impact.DamagePerUnitImpulse);
+                        }
+                    }
+                }
+
+                dvNormalMag = dvCapMag;
+                body.Velocity += dvCapMag * hitNormal;
+                if (dvCapMag > body.LastImpulseMagnitude) body.LastImpulseMagnitude = dvCapMag;
+
+                frictionDv = ApplyFrictionAtImpact(body, hitNormal, hitSurfaceVel, hitFriction, savedForce, dt);
+
+                // Bounce only on hard-stop (no break-through). A break-through
+                // body is already carrying inbound momentum into the empty
+                // space behind the broken cells — restitution on top would
+                // double-count the redirect.
+                if (!brokeThrough
+                    && body.Impact != null
+                    && body.Impact.BounceRestitution > 0f
+                    && vnAbs >= body.Impact.BounceImpulseThreshold)
+                {
+                    body.Velocity -= vnRel * body.Impact.BounceRestitution * hitNormal;
                 }
             }
 
             float dn2 = Vector2.Dot(displacement, hitNormal);
-            if (dn2 < 0f) displacement -= dn2 * hitNormal;
+            if (dn2 < 0f)
+            {
+                if (brokeThrough)
+                {
+                    // Body retains (vnRel + dvCapMag) of inbound normal velocity
+                    // (still negative — going INTO surface). Match that fraction
+                    // in the displacement so the next iteration's sweep starts
+                    // from a consistent position/velocity pair.
+                    float retainRatio = (vnRel + dvNormalMag) / vnRel;  // ∈ (0, 1]
+                    displacement -= dn2 * (1f - retainRatio) * hitNormal;
+                }
+                else
+                {
+                    displacement -= dn2 * hitNormal;
+                }
+            }
 
             // The contact this impulse is delivered through: tile-hit creates/refreshes
             // a solver-owned SurfaceDistance; FSD-hit already has the state-owned
-            // contact. Either way, accumulate the normal + friction deltas onto it so
-            // callers see consistent per-contact totals.
-            SurfaceContact contact = null;
-            if (!hitFromFloating && !brokeThrough)
-                contact = UpdateSurfaceConstraint(body, pos, hitNormal, hitSurfaceVel);
-            else if (hitFromFloating)
-                contact = hitFsd;
+            // contact. LastImpulse reflects the impulse actually delivered (clipped
+            // by the absorption cap), not the would-be impulse.
+            SurfaceContact contact = hitFromFloating
+                ? hitFsd
+                : UpdateSurfaceConstraint(body, pos, hitNormal, hitSurfaceVel);
             if (contact != null)
             {
-                if (vnRel < 0f) contact.LastImpulse += -vnRel * hitNormal;
+                if (vnRel < 0f) contact.LastImpulse += dvNormalMag * hitNormal;
                 contact.LastImpulse += frictionDv;
             }
-            // Break-through: end the sweep here, body pauses at the block
-            // boundary for this frame, next frame continues into the opening.
-            if (brokeThrough) break;
         }
 
         return pos + displacement;
+    }
+
+    // Scratch list reused across ResolveChunkCollisionsSwept iterations; the
+    // method is static so a static buffer keeps allocations off the hot path.
+    // Not thread-safe — Step/StepSwept are single-threaded by design.
+    private static readonly List<(int gtx, int gty)> _impactCellsScratch = new(4);
+
+    // Cells touching the impact face along -normal. Mirrors the old
+    // ApplyContactDamage strip query: inset along the face by 2 px so a hex
+    // body's AABB-graze on adjacent columns doesn't count (mirrors
+    // GroundChecker.HorizontalInset).
+    private static void ComputeImpactCells(PhysicsBody body, Vector2 pos, Vector2 normal, ChunkMap chunks, List<(int gtx, int gty)> cells)
+    {
+        cells.Clear();
+        const float probe = 1f;
+        const float inset = 2f;
+        var bounds = body.Polygon.GetBoundingBox(pos);
+        BoundingBox strip;
+        if (MathF.Abs(normal.Y) >= MathF.Abs(normal.X))
+        {
+            var face = bounds.InsetHorizontal(inset);
+            strip = normal.Y < 0 ? face.StripBelow(probe) : face.StripAbove(probe);
+        }
+        else
+        {
+            var face = bounds.InsetVertical(inset);
+            strip = normal.X < 0 ? face.StripRight(probe) : face.StripLeft(probe);
+        }
+        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, strip))
+        {
+            int gtx = (int)MathF.Floor(shape.WorldCenterX / Chunk.TileSize);
+            int gty = (int)MathF.Floor(shape.WorldCenterY / Chunk.TileSize);
+            cells.Add((gtx, gty));
+        }
     }
 
     private static BoundingBox GetSweptBounds(Polygon polygon, Vector2 pos, Vector2 displacement)
@@ -396,11 +472,7 @@ public static class PhysicsWorld
     }
 
     // Apply friction at a single contact, capping the body's *relative* tangential
-    // velocity reduction per step at Friction · dt. If the state has applied a
-    // tangential force this frame (walking, running, etc.), we skip — the state is
-    // actively driving the body, and the contact's job is to not fight that.
-    // Without a tangential applied force the friction handles both braking-when-
-    // grounded and the tangential carry from moving surfaces.
+    // velocity reduction per step at Friction · dt. 
     private static void ApplyContactFriction(PhysicsBody body, SurfaceContact sc, Vector2 savedForce, float dt)
     {
         Vector2 dv = ApplyFrictionAtImpact(body, sc.Normal, sc.SurfaceVelocity, sc.Friction, savedForce, dt);
@@ -439,62 +511,6 @@ public static class PhysicsWorld
     // Scaled by the body's per-body FrictionScale (enemies use < 1 to be slippery).
     private static float ComputeFrictionForNormal(PhysicsBody body, Vector2 normal)
         => (normal.Y < -0.7f ? MovementConfig.Current.GroundFriction : 0f) * body.FrictionScale;
-
-    // Probe a thin slab along the impact face for every tile pressed against it,
-    // then split the impulse-derived damage equally among them. This is what makes
-    // a body landing on the boundary between two tiles damage *both* rather than
-    // crediting whichever the collision solver iterated to first. The strip
-    // direction mirrors TryFindContactSurface: `normal` points from surface to
-    // body, so the impact face is on the -normal side.
-    // Returns true iff impulse ≥ Impact.BreakThreshold AND at least one tile cell
-    // actually broke this call. The resolver uses this signal to decide whether
-    // to bleed normal velocity (break-through) vs zero it (chip / no-damage).
-    private static bool TryApplyImpactDamage(PhysicsBody body, BoundingBox bounds, Vector2 normal, float vnRel, ChunkMap chunks)
-    {
-        if (body.Impact == null) return false;
-        float impulse = body.Impact.Mass * MathF.Abs(vnRel);
-        if (impulse <= 0f) return false;
-
-        const float probe = 1f;
-        BoundingBox strip;
-        if (MathF.Abs(normal.Y) >= MathF.Abs(normal.X))
-            strip = normal.Y < 0 ? bounds.StripBelow(probe) : bounds.StripAbove(probe);
-        else
-            strip = normal.X < 0 ? bounds.StripRight(probe) : bounds.StripLeft(probe);
-
-        // Local list (not static): PhysicsWorld is a static class but xUnit runs
-        // test classes in parallel, so a static scratch list races across
-        // concurrent StepSwept calls and trips the List enumerator's version
-        // check mid-foreach. The per-call alloc is one ~4-element List on the
-        // rare frames a body actually impacts terrain — cheap.
-        var impactCells = new List<(int gtx, int gty)>(4);
-        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, strip))
-        {
-            int gtx = (int)MathF.Floor(shape.WorldCenterX / Chunk.TileSize);
-            int gty = (int)MathF.Floor(shape.WorldCenterY / Chunk.TileSize);
-            impactCells.Add((gtx, gty));
-        }
-        if (impactCells.Count == 0) return false;
-
-        // Each cell sees its share of the impulse routed through the
-        // accumulator. The cell-level threshold + decay handles spring-padded
-        // landings: even if a single frame's impulse is below threshold, the
-        // accumulator integrates the spring's bleed-out and fires damage once
-        // the running total crosses. AccrueAndConsume returns the over-
-        // threshold portion already net of the threshold, so we just multiply
-        // by the body's damage coefficient.
-        bool anyBroken = false;
-        float perCellImpulse = impulse / impactCells.Count;
-        foreach (var (gtx, gty) in impactCells)
-        {
-            float over = chunks.Impact.AccrueAndConsume(gtx, gty, perCellImpulse, body.Impact.ImpulseThreshold);
-            if (over > 0f && chunks.DamageCell(gtx, gty, over * body.Impact.DamagePerUnitImpulse))
-                anyBroken = true;
-        }
-        // Break-through report: the contact face has opened AND the body had
-        // enough momentum to count as plowing through (vs a soft chip-and-stop).
-        return anyBroken && impulse >= body.Impact.BreakThreshold;
-    }
 
     // Probe the strip just beyond the body's face along -normal for any solid shape.
     // Returns the first shape's velocity if one is found (zero for tiles), or false

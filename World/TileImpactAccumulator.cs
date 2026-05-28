@@ -19,10 +19,16 @@ namespace MTile;
 //   Tick             — exponential decay each frame; prunes near-zero entries.
 public sealed class TileImpactAccumulator
 {
-    // Decay rate (1/sec) — exp(-Decay·dt) per frame. Tuned for a half-life of
-    // ~0.23s so a spring-cushioned landing's worth of frames still adds up,
-    // but stray small impulses from normal play bleed off quickly.
-    private const float Decay = 0.1f;
+    // Decay rate (1/sec) — exp(-Decay·dt) per frame. Aggressive (half-life
+    // ~23 ms ≈ 1 frame) so steady-state impulses (gravity-catch on a static
+    // body, walking friction) saturate well below ImpulseThreshold and never
+    // commit damage. Impact events deposit a single big chunk that fires the
+    // accumulator in one step; the prior "spring-cushioned landing builds up
+    // over many frames" use case no longer applies because FSDs catch those
+    // (MaxGroundEngageVnRel routes hard landings through the swept-tile path
+    // instead, and ApplyContactDamage walks contacts post-step so the impulse
+    // is already aggregated).
+    private const float Decay = 30f;
     // Below this, an entry is removed entirely to keep the dictionary bounded.
     private const float PruneEps = 0.5f;
 

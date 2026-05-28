@@ -31,8 +31,7 @@ public class Entity : IHittable
     // Simulation when the entity is spawned, from a deterministic counter, so the
     // same entity carries the same id across a snapshot/restore round-trip — which
     // is what lets the combat dedupe table be snapshotted by id (see CombatSystem).
-    public int Id;
-    public int HittableId => Id;
+    public EntityId Id { get; set; }
 
     public bool IsDead => Health <= 0f;
 
@@ -48,7 +47,7 @@ public class Entity : IHittable
     }
 
     public void PublishHurtboxes(HurtboxWorld world)
-        => world.Publish(new Hurtbox(Body.Bounds, Faction, this));
+        => world.Publish(new Hurtbox(Body.Bounds, Faction, Id));
 
     public virtual void OnHit(in Hitbox hit, in Hurtbox _)
     {
@@ -135,4 +134,8 @@ public interface IEntitySpawner
     // Shared, deterministic HitId source so AI / projectiles mint ids from the same
     // sequence as player attacks (see HitIdAllocator).
     HitIdAllocator HitIds { get; }
+    // World handle for AI states that need tile queries (e.g. surface-anchored
+    // movement). Read-only sampling only — don't mutate from inside a state, so
+    // sampling order doesn't matter for determinism.
+    ChunkMap Chunks { get; }
 }

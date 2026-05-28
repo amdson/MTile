@@ -18,7 +18,7 @@ public sealed class ImpactDamage
     public float Mass = 1f;
     // Below this impulse, no damage is dealt — lets a body settle on a tile under
     // gravity without slowly chipping it away from sub-frame micro-impacts.
-    public float ImpulseThreshold = 200f;
+    public float ImpulseThreshold = 350f;
     // Damage = (impulse - ImpulseThreshold) * DamagePerUnitImpulse, then split
     // equally among the tiles touching the impact face.
     public float DamagePerUnitImpulse = 0.01f;
@@ -44,4 +44,14 @@ public sealed class ImpactDamage
     // Fraction of pre-impact normal velocity retained after a successful break-
     // through. 0.6 = lose 40% to breakage energy; revisit during playtest.
     public float NormalRetainOnBreak = 0.6f;
+
+    // Coefficient of restitution for hard impacts against tiles that DON'T break.
+    // 0 (default) = stick (legacy behavior: relative normal velocity zeroed).
+    // 1 = perfect elastic. Stays inert below BounceImpulseThreshold so a body
+    // settling to rest doesn't quiver. Mutually exclusive with break-through:
+    // if the impact broke a tile, the bleed-through path runs; otherwise — if
+    // |vnRel| is above the bounce threshold — the body rebounds. See
+    // PhysicsWorld.ResolveChunkCollisions{,Swept}.
+    public float BounceRestitution     = 0f;
+    public float BounceImpulseThreshold = 200f;
 }

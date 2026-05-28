@@ -26,9 +26,9 @@ public sealed class SimSnapshot
     // iteration order the original run had — matters for deterministic stepping).
     public EntitySnapshot[] Entities;
 
-    // Combat dedupe table, keyed HitId → set of HittableIds (resolved to live objects
-    // on restore). See CombatSystem.CaptureDedupe.
-    public Dictionary<int, int[]> Dedupe;
+    // Combat dedupe table, keyed HitId → set of already-hit EntityIds. See
+    // CombatSystem.CaptureDedupe.
+    public Dictionary<int, EntityId[]> Dedupe;
 
     // Moving-platform poses, in registration order. Position+velocity is enough since
     // the tickers re-derive motion purely from Elapsed.

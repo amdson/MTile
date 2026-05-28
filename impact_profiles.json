@@ -1,0 +1,52 @@
+{
+  // Per-body Impact tuning. See Physics/ImpactProfiles.cs for field
+  // semantics. Keys here must match the constants in ImpactProfiles
+  // (Player / Ball / EnergyBall).
+  //
+  // Mass:                    px/s · this = impulse magnitude on impact.
+  // ImpulseThreshold:        below this, no tile damage at all.
+  // DamagePerUnitImpulse:    HP per unit of over-threshold impulse, split
+  //                          equally across cells touching the impact face.
+  // BreakThreshold:          above this AND a tile broke ⇒ bleed-through
+  //                          (retain NormalRetainOnBreak * pre-impact vy).
+  // BounceRestitution:       0..1 coefficient of restitution when the impact
+  //                          does NOT break a tile (mutually exclusive with
+  //                          break-through). 0 = stick.
+  // BounceImpulseThreshold:  below this |vnRel|, no bounce — body sticks
+  //                          (prevents quiver near rest).
+
+  // Tuned to the PlayerImpactByVelocityTests spec:
+  //   single jump (impact ≈ 256 px/s, impulse ≈ 640): FSD catches — no break/bounce
+  //   double jump (impact ≈ 363 px/s, impulse ≈ 908): bounce off Stone+Dirt, break Sand
+  //   terminal    (impact ≈ 850 px/s, impulse ≈ 2125): bounce off Stone, break Dirt+Sand
+  // The "FSD catches single jump" half is gated by MovementConfig.MaxGroundEngageVnRel.
+  "player": {
+    "Mass": 2.5,
+    "ImpulseThreshold": 100,
+    "DamagePerUnitImpulse": 0.0008,
+    "BreakThreshold": 800,
+    "NormalRetainOnBreak": 0.6,
+    "BounceRestitution": 0.35,
+    "BounceImpulseThreshold": 300
+  },
+
+  "ball": {
+    "Mass": 2.5,
+    "ImpulseThreshold": 200,
+    "DamagePerUnitImpulse": 0.1,
+    "BreakThreshold": 1100,
+    "NormalRetainOnBreak": 0.6,
+    "BounceRestitution": 0,
+    "BounceImpulseThreshold": 200
+  },
+
+  "energy_ball": {
+    "Mass": 1.2,
+    "ImpulseThreshold": 50,
+    "DamagePerUnitImpulse": 0.04,
+    "BreakThreshold": 80,
+    "NormalRetainOnBreak": 0.55,
+    "BounceRestitution": 0,
+    "BounceImpulseThreshold": 200
+  }
+}

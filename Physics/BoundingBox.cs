@@ -1,4 +1,5 @@
 namespace MTile;
+using System;
 
 // Axis-aligned float-precision rectangle. Doubles as a polygon's bounding box (see PhysicsBody.Bounds
 // / Polygon.GetBoundingBox) and as a "region" type for probe queries — the StripXxx builders return
@@ -55,6 +56,13 @@ public readonly struct BoundingBox
     // Same x-extent as this box, but the given vertical range. Useful when a checker has body-relative
     // x bounds (a side strip) but a specific y window (e.g. "from the body's center down to its feet").
     public BoundingBox WithVerticalRange(float top, float bottom) => new(Left, top, Right, bottom);
+
+    public BoundingBox Union(BoundingBox other)
+        => new(
+            left:   MathF.Min(Left, other.Left),
+            top:    MathF.Min(Top, other.Top),
+            right:  MathF.Max(Right, other.Right),
+            bottom: MathF.Max(Bottom, other.Bottom));
 
     public override string ToString() => $"[{Left:F1},{Top:F1} → {Right:F1},{Bottom:F1}]";
 }

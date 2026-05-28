@@ -116,7 +116,7 @@ public class BulletProjectile : Projectile
         hitboxes?.Publish(new Hitbox(
             region, _hitId, DamagePerFrame,
             dir * KnockbackImpulse,
-            Faction, this, Color,
+            Faction, Id, Color,
             targets: HitTargets.EntitiesOnly));
     }
 }

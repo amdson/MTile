@@ -11,9 +11,9 @@ public readonly struct Hurtbox
 {
     public readonly BoundingBox Region;   // AABB in world coords
     public readonly Faction     Owner;    // for self-damage filtering against Hitbox.Owner
-    public readonly IHittable   Target;   // dispatch back-pointer for OnHit
+    public readonly EntityId    Target;   // owning entity — CombatSystem resolves it to dispatch OnHit
 
-    public Hurtbox(BoundingBox region, Faction owner, IHittable target)
+    public Hurtbox(BoundingBox region, Faction owner, EntityId target)
     {
         Region = region;
         Owner  = owner;

@@ -1,0 +1,12 @@
+Entities should be parametrized on a budget. 
+
+TRAITS
+- Mass
+- Volume
+- Max mana
+- Mana recovery rate
+- Hit points
+- Strength
+- Action pool (action states available)
+- Movement pool (movement states available)
+

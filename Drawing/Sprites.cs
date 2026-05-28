@@ -117,4 +117,32 @@ public static class Sprites
         sprite.Play(anim);
         return sprite;
     }
+
+    // Brute: thicker hex body in dark red with a single big central eye and
+    // angled "horn" lines on top. Two-frame idle pulse on the eye reads as a
+    // slow breath.
+    public static AnimatedSprite Brute(float radius)
+    {
+        var bodyColor  = new Color(150, 30, 30);
+        var innerColor = new Color(80, 20, 20);
+        var eyeColor   = Color.Goldenrod;
+
+        Pose Frame(float eyePulse) => new Pose()
+            .Ring(Vector2.Zero, radius,         bodyColor,  6, 2f)
+            .Ring(Vector2.Zero, radius * 0.65f, innerColor, 6, 1f)
+            .Disc(new Vector2(0f, -1f), 2.5f + eyePulse * 0.5f, eyeColor)
+            // Horns — short outward-angled lines off the top.
+            .Line(new Vector2(-radius * 0.45f, -radius * 0.7f),
+                  new Vector2(-radius * 0.7f,  -radius * 1.0f), bodyColor, 1f)
+            .Line(new Vector2( radius * 0.45f, -radius * 0.7f),
+                  new Vector2( radius * 0.7f,  -radius * 1.0f), bodyColor, 1f);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(0f), Frame(1f) },
+            frameDuration: 0.30f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
 }

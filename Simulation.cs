@@ -64,7 +64,18 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // with no hidden accumulator state.
     private float _elapsed;
 
-    private int NextId() => ++_nextId;
+    // Mint the next entity id. The underlying counter stays an int (snapshotted and
+    // mixed into the determinism hash); EntityId wraps it. Pre-increment ⇒ ids start
+    // at 1, so EntityId.None (Index 0) never collides with a live entity.
+    private EntityId NextId() => new EntityId(++_nextId);
+
+    // Resolve an EntityId to its live IHittable for CombatSystem dispatch. Linear scan
+    // of the (small) hittable set — replaced by a world query in a later ECS phase.
+    private IHittable ResolveHittable(EntityId id)
+    {
+        foreach (var h in _hittables) if (h.Id == id) return h;
+        return null;
+    }
 
     // IChunkProvider — lets entities (LobbedAreaProjectile) mutate the chunk map.
     public ChunkMap Chunks => _chunks;
@@ -96,7 +107,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     {
         _chunks      = chunks;
         _playerSpawn = playerSpawn;
-        _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, Id = NextId() };
+        _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, Id = NextId(), CombatSystem = _combat };
         _bodies.Add(_player.Body);
         _hittables.Add(_player);
         populate?.Invoke(this);
@@ -109,7 +120,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         TerrainLoader.Load($"Levels/{stage.TerrainConfig}", _chunks);
 
         _playerSpawn = stage.PlayerSpawn;
-        _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, Id = NextId() };
+        _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, Id = NextId(), CombatSystem = _combat };
         _bodies.Add(_player.Body);
         _hittables.Add(_player);
 
@@ -158,6 +169,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             HitIds  = _hitIds,
             Id      = NextId(),
             Faction = Factions.ForPlayerIndex(_secondaryPlayers.Count + 1),
+            CombatSystem = _combat,
         };
         _bodies.Add(player.Body);
         _hittables.Add(player);
@@ -211,7 +223,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         // Snapshot count so newly-spawned entities skip their first Update.
         int entityCount = _entities.Count;
         for (int i = 0; i < entityCount; i++) _entities[i].Update(dt, _player, _hitboxes, this);
-        _combat.Apply(_chunks, _hitboxes, _hurtboxes);
+        _combat.Apply(_chunks, _hitboxes, _hurtboxes, ResolveHittable);
 
         // Player respawn on death.
         if (!_player.IsAlive)
@@ -264,7 +276,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         Mix((uint)_entities.Count);
         foreach (var e in _entities)
         {
-            Mix((uint)e.Id);
+            Mix((uint)e.Id.Index);
             MixBody(e.Body);
             MixF(e.Health);
         }
@@ -306,7 +318,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             Secondaries          = secondaries,
             SecondaryControllers = secCtrls,
             Entities             = entities,
-            Dedupe               = _combat.CaptureDedupe(h => h.HittableId),
+            Dedupe               = _combat.CaptureDedupe(),
             Platforms            = platforms,
             Terrain              = _chunks.CaptureTerrain(),
         };
@@ -336,7 +348,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         // entity where its id matches; otherwise rehydrate a fresh one. Any live
         // entity absent from the snapshot (spawned after the snapshot frame) is
         // dropped. The new lists are built in snapshot (spawn) order.
-        var live = new Dictionary<int, Entity>(_entities.Count);
+        var live = new Dictionary<EntityId, Entity>(_entities.Count);
         foreach (var e in _entities) live[e.Id] = e;
 
         _entities.Clear();
@@ -363,9 +375,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             _platforms[i].Rect.Velocity = snap.Platforms[i].Velocity;
         }
 
-        // Combat dedupe — resolve snapshotted HittableIds back to live objects.
-        var byId = new Dictionary<int, IHittable>(_hittables.Count);
-        foreach (var h in _hittables) byId[h.HittableId] = h;
-        _combat.RestoreDedupe(snap.Dedupe, id => byId.TryGetValue(id, out var h) ? h : null);
+        // Combat dedupe — keyed on EntityId now, so it's a direct value restore.
+        _combat.RestoreDedupe(snap.Dedupe);
     }
 }

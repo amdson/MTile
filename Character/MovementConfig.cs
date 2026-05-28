@@ -42,6 +42,14 @@ public class MovementConfig
     public float SpringK { get; set; } = 300f;
     public float SpringDamping { get; set; } = 35f;
     public float SpringMaxRiseSpeed { get; set; } = 80f;
+    // Max relative normal velocity at which the standing-FSD is allowed to
+    // engage. Body approaching the surface faster than this defers to the
+    // swept-tile-collision path (so ImpactDamage.BounceRestitution fires);
+    // body moving away faster (just bounced / jumped) isn't spring-caught.
+    // Default float.MaxValue ⇒ off — the spring catches every landing as
+    // before. Bodies that want to bounce off non-breaking tiles (e.g. the
+    // player off stone) lower this so the swept-impact path sees the hit.
+    public float MaxGroundEngageVnRel { get; set; } = 300f;
     public float WalkAccel { get; set; } = 3000f;
     public float MaxWalkSpeed { get; set; } = 100f;
     // Legacy: used to be StandingState/CrouchedState's brake force when no input.
@@ -123,6 +131,19 @@ public class MovementConfig
     // horizontal speed into a fast vertical kick that magnitude alone allows. Set
     // slightly above |JumpVelocity| so a one-block vault still feels punchy.
     public float ParkourRampMaxVy { get; set; } = 200f;
+
+    // Per-step impulse magnitude the parkour ramp may deliver (px/s² ⇒ Δv
+    // cap = ParkourRampMaxForce · dt). With a finite cap the ramp becomes a
+    // soft constraint: it drives velocity toward its target *up to* this
+    // strength per step, and stronger external forces (knockback, gravity
+    // overrun) keep velocity into the tile so the swept resolver picks up
+    // the impact normally.
+    //
+    // Default matches WalkAccel (3000) so a normal parkour entry reaches
+    // target velocity over ~2-3 frames — matches the legacy SoftClampVelocity
+    // ramp-up — while typical knockback Δv (~200-400 px/s, ie ~6000-12000
+    // px/s² equivalent) overshoots the cap and reaches the underlying tile.
+    public float ParkourRampMaxForce { get; set; } = 3500f;
 
     // Covered Jump (jump initiated while partially under an overhang — see CoveredJumpState)
     // Hard cap on the slide-out phase so a degenerate "can't actually get clear" position bails to

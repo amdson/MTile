@@ -242,14 +242,37 @@ public class CombatHitstunTests(ITestOutputHelper output)
     }
 
     // Single-player crush test: drop the player from height onto solid ground.
-    // Free-fall velocity at impact exceeds CrushImpulseThreshold (400 px/s, vs
-    // ~270 for a max-hold self-jump landing), so HP should drop. A normal
-    // short fall (no excess) leaves HP at MaxHealth.
+    // Free-fall velocity at impact exceeds CrushImpulseThreshold (700 px/s, vs
+    // ~270 for a max-hold self-jump landing and ≤580 for sand impacts), so HP
+    // should drop. A normal short fall (no excess) leaves HP at MaxHealth.
     [Fact]
     public void Crush_HardFallDealsDamage()
     {
-        // Tall column of empty above flat ground. Ground top y = 12*16 = 192.
+        // Tall column of empty above flat ground. Need vy > 700 at impact for
+        // crush damage to fire; from rest under gravity 600, that's ~408 px of
+        // free fall. Use 32 rows of empty above the floor to give plenty of
+        // headroom (~480 px drop ⇒ vy ≈ 760 at impact).
         var terrain = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOO
@@ -264,8 +287,7 @@ public class CombatHitstunTests(ITestOutputHelper output)
             OOOOOOOOOOOOOOOO
             XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        // Drop from near the top — gravity 600 over ~10 rows (~160 px) gives vy
-        // well over CrushImpulseThreshold by impact.
+        // Drop from y=20 onto floor top at y=512: ~492 px fall, impact vy ≈ 770.
         var cfg = new SimConfig
         {
             Terrain       = terrain,

@@ -9,10 +9,9 @@ public class PlayerCharacter : IHittable
 {
     public const float Radius = 9.5f;
 
-    // Stable identity for snapshot/restore (IHittable.HittableId). Assigned by
+    // Stable identity for snapshot/restore (IHittable.Id). Assigned by
     // Simulation from its deterministic id counter, shared with entities.
-    public int Id;
-    public int HittableId => Id;
+    public EntityId Id { get; set; }
 
     public readonly PhysicsBody Body;
     // Owned visual. Game1 syncs Position each frame and calls Update + Draw.
@@ -53,16 +52,21 @@ public class PlayerCharacter : IHittable
     // other. _lastCrushFrame is the cross-event cooldown that prevents the same
     // wall-slam being charged twice.
     //
-    // Threshold sized so the player's own jumps don't self-damage:
+    // Threshold sized so the player's own jumps + sand impacts don't self-damage:
     //   * Held single jump lands at vy ≈ 260-270 (measured)
     //   * Held running jump (RunJumpVelocity -120) lands ~290
     //   * Held jump + double jump compounds to ~340-370 in worst case
-    // 400 puts all self-jumps comfortably free while keeping plunges from
-    // height (≥ 9-10 tiles) painful. Was 200 — caught every normal jump
-    // landing, dealing ~0.21 HP per jump and triggering hitstun that blocked
-    // the next jump (the "fails to jump occasionally" + "damage every jump"
-    // pair the bug report linked).
-    private const float CrushImpulseThreshold = 400f;
+    //   * Sand impact: PhysicsWorld now caps the body's per-hit Δv at the tile
+    //     face's absorption capacity. For sand that's
+    //     (ImpulseThreshold + MaxHp/DamagePerUnitImpulse)/Mass per cell —
+    //     290 px/s on one cell, 580 on two (worst case for the hex body),
+    //     regardless of incoming speed. Threshold of 700 means hitting any
+    //     amount of sand never reaches the crush gate.
+    // Plunges onto stone (cap 1040 per cell, no break-through ⇒ full carry-zero
+    // at vnAbs ≈ 849 from terminal velocity) still trigger crush; 2-cell-dirt
+    // plunges likewise. Was 400 — pre-absorption-cap that was sized for self-
+    // jumps only, before sand impacts could legally exceed it.
+    private const float CrushImpulseThreshold = 700f;
     private const float CrushDamagePerImpulse = 0.003f;
     private const int   CrushCooldownFrames   = 6;
     private int _lastCrushFrame = int.MinValue / 2;
@@ -74,7 +78,7 @@ public class PlayerCharacter : IHittable
     public void PublishHurtboxes(HurtboxWorld world)
     {
         if (_hitInvulnRemaining > 0f) return;
-        world.Publish(new Hurtbox(Body.Bounds, Faction, this));
+        world.Publish(new Hurtbox(Body.Bounds, Faction, Id));
     }
 
     public void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
@@ -144,6 +148,12 @@ public class PlayerCharacter : IHittable
     // across all players + entities so cross-source ids never collide.
     public HitIdAllocator HitIds { get; set; } = new();
 
+    // The sim's CombatSystem, used by actions to read per-frame recoil tallies
+    // populated in CombatSystem.Apply (Newton's-third-law back-impulse on hits).
+    // Null in headless tests that don't drive combat; ApplyActionForces hooks
+    // guard accordingly.
+    public CombatSystem CombatSystem { get; set; }
+
     // Player-local block/eruption selection, driven by this player's own input
     // (1-4 keys → block type; P → planner mode). Formerly global planner statics.
     // Read by the eruption actions via EnvironmentContext, and by Simulation's
@@ -185,11 +195,9 @@ public class PlayerCharacter : IHittable
         //     heights cracks Stone.
         // Slamming horizontally into walls at high speed also chips them
         // (running max ~100 px/s stays safe; bouncing > 280 px/s starts chipping).
-        Body.Impact = new ImpactDamage {
-            Mass                 = 2.5f,
-            ImpulseThreshold     = 700f,
-            DamagePerUnitImpulse = 0.04f,
-        };
+        // Tuning lives in impact_profiles.json under the "player" key —
+        // see Physics/ImpactProfiles.cs for defaults + load semantics.
+        Body.Impact = ImpactProfiles.Build(ImpactProfiles.Player);
         Sprite = Sprites.Player(Radius);
         Health = MaxHealth;
         _getState  = GetPreviousState;
@@ -304,7 +312,9 @@ public class PlayerCharacter : IHittable
             Hurtboxes      = hurtboxes,
             Spawner        = spawner,
             Faction        = Faction,
+            SelfId         = Id,
             HitIds         = HitIds,
+            CombatSystem   = CombatSystem,
             EruptionMode   = _eruptionMode,
             ActiveBlockType = _activeBlockType,
             Intents        = _intents,

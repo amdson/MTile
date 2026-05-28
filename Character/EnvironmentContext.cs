@@ -17,6 +17,9 @@ public class EnvironmentContext
     // so attacks from different players resolve against each other (and stay self-
     // immune). Set by PlayerCharacter.Update from its own Faction each frame.
     public Faction Faction;
+    // Owning entity's id. Stamped on every hitbox an action publishes (Hitbox.Source)
+    // so a hit can be attributed back to its attacker. Set by PlayerCharacter.Update.
+    public EntityId SelfId;
     // Deterministic HitId source for any hitbox an action publishes / projectile it
     // spawns. Set by PlayerCharacter.Update from its (sim-shared) allocator. Replaces
     // the old per-class static counters — see HitIdAllocator.
@@ -30,6 +33,7 @@ public class EnvironmentContext
     public IntentBuffer Intents;      // gesture-parsed action intents (Click, Stab, PressEdge); action FSM reads + consumes
     public ConditionState Condition;  // combat condition flags (Slash2Ready, RecoveryActive, …) — lives on PlayerAbilityState
     public CombatState    Combat;     // defensive condition: hitstun, stun, last-hit data — gates jump preconditions etc.
+    public CombatSystem   CombatSystem; // sim-shared hit resolver — actions read PeekRecoil(HitId) to apply Newton's-third-law back-impulse
     public int   CurrentFrame;        // monotonic frame counter for intent age + flag expiry
     public float Dt;
     public PhysicsBody Body;
@@ -93,7 +97,17 @@ public class EnvironmentContext
     {
         if (!searched)
         {
-            has = GroundChecker.TryFind(Body, Chunks, PlayerCharacter.Radius, floatHeight, out contact);
+            // Thread Dt through so end-of-step prediction picks the surface that
+            // *will* be highest after one timestep — see GroundChecker.TryFind.
+            // MaxGroundEngageVnRel gates the spring against high-relative-speed
+            // engagement, so a hard-bouncing body lands via the swept-impact
+            // path instead of being caught by the FSD. Off by default.
+            has = GroundChecker.TryFind(
+                Body, Chunks,
+                PlayerCharacter.Radius, floatHeight,
+                GroundChecker.ProbeSlack, Dt,
+                MovementConfig.Current.MaxGroundEngageVnRel,
+                out contact);
             searched = true;
         }
         ground = contact;

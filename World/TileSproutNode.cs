@@ -44,7 +44,7 @@ public sealed class TileSproutNode
         Status = TileSproutStatus.Pending;
     }
 
-    public void PromoteToGrowing(Vector2 startCenter, Vector2 endCenter, float lifetime)
+    public void PromoteToGrowing(Vector2 startCenter, Vector2 endCenter, float lifetime, float initialAge = 0f)
     {
         Status      = TileSproutStatus.Growing;
         StartCenter = startCenter;
@@ -52,7 +52,12 @@ public sealed class TileSproutNode
         Lifetime    = MathF.Max(1e-4f, lifetime);
         Velocity    = (endCenter - startCenter) / Lifetime;
         Polygon     = TileWorld.TileShape;
-        Age         = 0f;
+        // initialAge carries over the parent's overshoot — when a parent finalized
+        // because its Age crossed Lifetime mid-frame, the leftover (Age - Lifetime)
+        // is time that conceptually belongs to the child. Without it, the child
+        // starts at the parent's center (its StartCenter) for one frame and its
+        // polygon exactly overlaps the just-Solid parent cell. See ChunkMap.TickSprouts.
+        Age         = MathF.Max(0f, initialAge);
         SproutParents.Clear();
     }
 

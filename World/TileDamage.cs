@@ -15,17 +15,11 @@ public class TileDamage
     // takes one full slash to break, regardless of how TileMaxHP is tuned.
     public const float TileMaxHP = 1.0f;
 
-    // Per-type durability in multiples of TileMaxHP. Sand crumbles fast, dirt is
-    // the baseline, stone needs multiple slashes. Tuned for a slash dealing
-    // ~TileMaxHP per hit (after the 2-frame damage window cumulates).
-    public static float MaxHPFor(TileType type) => type switch
-    {
-        TileType.Sand  => TileMaxHP * 0.5f,
-        TileType.Dirt  => TileMaxHP * 1.0f,
-        TileType.Stone => TileMaxHP * 2.0f,
-        TileType.Foam  => TileMaxHP * 0.5f,   // cheap; chips on a single slash
-        _              => TileMaxHP,
-    };
+    // Per-type durability. Delegates to MaterialStrengths so the values can be
+    // tuned from material_strengths.json without recompiling. Defaults there
+    // match the legacy switch (Sand 0.5, Dirt 1.0, Stone 2.0, Foam 0.5),
+    // expressed in the same TileMaxHP-multiple units.
+    public static float MaxHPFor(TileType type) => MaterialStrengths.MaxHPFor(type);
 
     // Add `amount` damage to (gtx, gty). Returns true iff the tile crossed its
     // type-specific max HP and should be broken — the caller is responsible for

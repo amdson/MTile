@@ -252,7 +252,7 @@ public abstract class SlashLikeAction : ActionState
             ctx.Hitboxes.Publish(new Hitbox(
                 region, vars.HitId, SlashDamagePerFrame,
                 vars.SlashDir * KnockbackMagnitude,
-                ctx.Faction, this, SlashColor));
+                ctx.Faction, ctx.SelfId, SlashColor));
         }
     }
 
@@ -527,6 +527,18 @@ public class StabAction : ActionState
     private const float BlockHalfWidth        = PlayerCharacter.Radius * 0.9f * 1.75f;
     private const float KnockbackMagnitude    = 380f;
     private const float DamagePerFrame        = TileDamage.TileMaxHP / 4f;
+    // Recoil per connecting entity/cell, scaled against KnockbackImpulse and
+    // negated when applied to the attacker. BreakProtected ⇒ cells that the
+    // stab destroys this frame don't contribute (so ploughing through sand /
+    // dirt remains thrust-positive). Survivors (e.g. stone tiles) do — pogo.
+    // Tuned at 1.0: a single connecting stone cell delivers -380 px/s of
+    // recoil per active frame, easily overwhelming the lunge (+90) and ground
+    // friction, so the stab clearly pogos off hard surfaces.
+    private const float RecoilScale           = 0.0f;
+    // Hardness floor: sand (MaxHP 0.5) doesn't pogo even on its first contact
+    // frame (when BreakProtected can't yet save us — sand takes 2 hits to
+    // break). Dirt (1.0) and stone (2.0) still pogo.
+    private const float RecoilMinMaterialHP   = 0.5f;
 
     // Air-stab dive boost. Velocity projected onto _stabDir at the moment of commit
     // maps via clamp + lerp to a scalar in [MinBoost, MaxBoost]. Applied to damage
@@ -656,13 +668,30 @@ public class StabAction : ActionState
     // along the stab direction isn't nerfed.
     public override void ApplyActionForces(EnvironmentContext ctx, in ActionVars vars)
     {
-        if (!vars.IsGrounded) return;
-        if (vars.TimeInState < LungeStart || vars.TimeInState > LungeEnd) return;
+        // Lunge first (the "ensure ≥ LungeSpeed along stab" assist), then recoil.
+        // Order matters: recoil after lunge means a hard surface's back-impulse
+        // can actually flip Vx negative (pogo); recoil before lunge would let
+        // the lunge re-positivize Vx and erase the pogo entirely.
+        if (vars.IsGrounded && vars.TimeInState >= LungeStart && vars.TimeInState <= LungeEnd)
+        {
+            var v = ctx.Body.Velocity;
+            float velAlongStab = Vector2.Dot(v, vars.StabDir);
+            if (velAlongStab < LungeSpeed)
+                ctx.Body.Velocity = v + vars.StabDir * (LungeSpeed - velAlongStab);
+        }
 
-        var v = ctx.Body.Velocity;
-        float velAlongStab = Vector2.Dot(v, vars.StabDir);
-        if (velAlongStab < LungeSpeed)
-            ctx.Body.Velocity = v + vars.StabDir * (LungeSpeed - velAlongStab);
+        // Newton's-third-law recoil from last frame's connecting hits. Read once
+        // per frame; applied as an instantaneous Δv (body has no mass, impulse
+        // and Δv coincide). BreakProtected on the primary box means only cells
+        // that survived the hit / entities that were struck contribute, so
+        // ploughing through sand stays thrust-positive while a stab into stone
+        // bounces the player off. Runs regardless of grounded/lunge windows so
+        // air-stab pogo (the canonical pogo case) also fires.
+        if (ctx.CombatSystem != null)
+        {
+            var recoil = ctx.CombatSystem.PeekRecoil(vars.HitId);
+            if (recoil != Vector2.Zero) ctx.Body.Velocity += recoil;
+        }
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -715,8 +744,10 @@ public class StabAction : ActionState
             ctx.Hitboxes.Publish(new Hitbox(
                 primaryAABB, vars.HitId, dmg,
                 vars.StabDir * KnockbackMagnitude,
-                ctx.Faction, this, ColorFor(vars.IsGrounded),
-                shape: PrimaryPoly, shapePos: primaryCenter, shapeRotation: rotation));
+                ctx.Faction, ctx.SelfId, ColorFor(vars.IsGrounded),
+                shape: PrimaryPoly, shapePos: primaryCenter, shapeRotation: rotation,
+                recoilScale: RecoilScale, recoilBreakProtected: true,
+                recoilMinMaterialHP: RecoilMinMaterialHP));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No
             // knockback (knockback comes from the primary box). Tiles only — passes
@@ -732,7 +763,7 @@ public class StabAction : ActionState
             ctx.Hitboxes.Publish(new Hitbox(
                 blockAABB, vars.HitId, dmg,
                 Vector2.Zero,
-                ctx.Faction, this,
+                ctx.Faction, ctx.SelfId,
                 blockColor,
                 HitTargets.TilesOnly,
                 shape: vars.BlockPoly, shapePos: blockCenter, shapeRotation: rotation));
@@ -1039,7 +1070,7 @@ public class PulseAction : ActionState
             ctx.Hitboxes.Publish(new Hitbox(
                 region, vars.HitId, DamagePerFrame,
                 dir * KnockbackMagnitude + bodyVel,
-                ctx.Faction, this, color));
+                ctx.Faction, ctx.SelfId, color));
         }
     }
 
@@ -1722,7 +1753,7 @@ public class BeamAction : ActionState
             ctx.Hitboxes.Publish(new Hitbox(
                 region, vars.HitId, DamagePerFrame * arriving,
                 dir * (KnockbackImpulse * arriving),
-                ctx.Faction, this, Color.Magenta));
+                ctx.Faction, ctx.SelfId, Color.Magenta));
 
             // Attenuate for the next step based on what THIS cell is made of.
             int gtx = (int)MathF.Floor(center.X / Chunk.TileSize);

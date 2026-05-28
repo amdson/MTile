@@ -102,7 +102,7 @@ public class LobbedAreaProjectile : Projectile
                 hitboxes.Publish(new Hitbox(
                     region, _hitId, ExplosionDamage,
                     dir * ExplosionKnockback,
-                    Faction, this, Color.Goldenrod));
+                    Faction, Id, Color.Goldenrod));
             }
         }
         _detonated = true;
