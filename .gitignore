@@ -10,6 +10,8 @@
 # so the Blazor WASM dev server can serve them. The originals live at repo root.
 MTile.Web/wwwroot/game_config.json
 MTile.Web/wwwroot/movement_config.json
+MTile.Web/wwwroot/impact_profiles.json
+MTile.Web/wwwroot/material_strengths.json
 MTile.Web/wwwroot/Levels/
 MTile.Web/wwwroot/Content/
 
