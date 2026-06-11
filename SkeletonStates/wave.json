@@ -1,6 +1,7 @@
 {
   "Name": "wave",
   "Type": "Misc",
+  "Skeleton": "biped",
   "Duration": 1.2,
   "Loop": true,
   "Keyframes": [
@@ -9,91 +10,55 @@
       "Bones": [
         {
           "Bone": "hip",
-          "Tx": 0,
-          "Ty": 0,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "chest",
-          "Tx": 0,
-          "Ty": -16,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "head",
-          "Tx": 0,
-          "Ty": -10,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_l_upper",
-          "Tx": -7,
-          "Ty": -2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_l_lower",
-          "Tx": -10,
-          "Ty": 0,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_r_upper",
-          "Tx": 7,
-          "Ty": -2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_r_lower",
-          "Tx": 10,
-          "Ty": 0,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_l_upper",
-          "Tx": -5,
-          "Ty": 2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_l_lower",
-          "Tx": -1,
-          "Ty": 14,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_upper",
-          "Tx": 5,
-          "Ty": 2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_lower",
-          "Tx": 1,
-          "Ty": 14,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
         }
       ]
     },
@@ -102,91 +67,55 @@
       "Bones": [
         {
           "Bone": "hip",
-          "Tx": 0,
-          "Ty": 0,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "chest",
-          "Tx": 0,
-          "Ty": -16,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "head",
-          "Tx": 0,
-          "Ty": -10,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_l_upper",
-          "Tx": -7,
-          "Ty": -2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_l_lower",
-          "Tx": -10,
-          "Ty": 0,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_r_upper",
-          "Tx": 7,
-          "Ty": -2,
-          "Rotation": 2.2,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 2.2
         },
         {
           "Bone": "arm_r_lower",
-          "Tx": 10,
-          "Ty": 0,
-          "Rotation": 0.6,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0.6
         },
         {
           "Bone": "leg_l_upper",
-          "Tx": -5,
-          "Ty": 2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_l_lower",
-          "Tx": -1,
-          "Ty": 14,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_upper",
-          "Tx": 5,
-          "Ty": 2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_lower",
-          "Tx": 1,
-          "Ty": 14,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
         }
       ]
     }

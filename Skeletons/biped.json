@@ -1,0 +1,135 @@
+{
+  "Name": "biped",
+  "Bones": [
+    {
+      "Name": "hip",
+      "Parent": null,
+      "Tx": 2.600006,
+      "Ty": 3.9200058,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 0
+    },
+    {
+      "Name": "chest",
+      "Parent": "hip",
+      "Tx": 0,
+      "Ty": -16,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 16
+    },
+    {
+      "Name": "head",
+      "Parent": "chest",
+      "Tx": 0,
+      "Ty": -10,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 8
+    },
+    {
+      "Name": "arm_l_upper",
+      "Parent": "chest",
+      "Tx": -10.348786,
+      "Ty": -2.9567971,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 10
+    },
+    {
+      "Name": "arm_l_lower",
+      "Parent": "arm_l_upper",
+      "Tx": -10,
+      "Ty": 0,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 10
+    },
+    {
+      "Name": "arm_r_upper",
+      "Parent": "chest",
+      "Tx": 9.972739,
+      "Ty": -2.849355,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 10
+    },
+    {
+      "Name": "arm_r_lower",
+      "Parent": "arm_r_upper",
+      "Tx": 10,
+      "Ty": 0,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 10
+    },
+    {
+      "Name": "leg_l_upper",
+      "Parent": "hip",
+      "Tx": -12.354759,
+      "Ty": 4.9419036,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 12
+    },
+    {
+      "Name": "leg_l_lower",
+      "Parent": "leg_l_upper",
+      "Tx": -1,
+      "Ty": 14,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 12
+    },
+    {
+      "Name": "foot_l",
+      "Parent": "leg_l_lower",
+      "Tx": 2,
+      "Ty": 2,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 6
+    },
+    {
+      "Name": "leg_r_upper",
+      "Parent": "hip",
+      "Tx": 13.979735,
+      "Ty": 5.591894,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 12
+    },
+    {
+      "Name": "leg_r_lower",
+      "Parent": "leg_r_upper",
+      "Tx": 1,
+      "Ty": 14,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 12
+    },
+    {
+      "Name": "foot_r",
+      "Parent": "leg_r_lower",
+      "Tx": 2,
+      "Ty": 2,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 6
+    }
+  ]
+}

@@ -1,8 +1,8 @@
 {
-  "Name": "fall",
-  "Type": "Fall",
+  "Name": "crouch",
+  "Type": "Crouch",
   "Skeleton": "biped",
-  "Duration": 0.4,
+  "Duration": 0.3,
   "Loop": false,
   "Keyframes": [
     {
@@ -14,7 +14,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -0.1
+          "Rotation": 0.25
         },
         {
           "Bone": "head",
@@ -22,7 +22,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -1.8
+          "Rotation": -0.3
         },
         {
           "Bone": "arm_l_lower",
@@ -30,7 +30,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.8
+          "Rotation": 0.3
         },
         {
           "Bone": "arm_r_lower",
@@ -38,11 +38,11 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 0.25
+          "Rotation": 0.7
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0.5
+          "Rotation": 0.19084106
         },
         {
           "Bone": "foot_l",
@@ -50,11 +50,11 @@
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": -0.35
+          "Rotation": -0.7
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": -0.5
+          "Rotation": -0.02855693
         },
         {
           "Bone": "foot_r",

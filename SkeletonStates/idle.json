@@ -1,6 +1,7 @@
 {
   "Name": "idle",
   "Type": "Idle",
+  "Skeleton": "biped",
   "Duration": 1.5,
   "Loop": true,
   "Keyframes": [
@@ -9,91 +10,47 @@
       "Bones": [
         {
           "Bone": "hip",
-          "Tx": 0,
-          "Ty": 0,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "chest",
-          "Tx": 0,
-          "Ty": -16,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "head",
-          "Tx": 0,
-          "Ty": -10,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_l_upper",
-          "Tx": -7,
-          "Ty": -2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_l_lower",
-          "Tx": -10,
-          "Ty": 0,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_r_upper",
-          "Tx": 7,
-          "Ty": -2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "arm_r_lower",
-          "Tx": 10,
-          "Ty": 0,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_l_upper",
-          "Tx": -5,
-          "Ty": 2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_l_lower",
-          "Tx": -1,
-          "Ty": 14,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_upper",
-          "Tx": 5,
-          "Ty": 2,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_lower",
-          "Tx": 1,
-          "Ty": 14,
-          "Rotation": 0,
-          "Sx": 1,
-          "Sy": 1
+          "Rotation": 0
         }
       ]
     }
