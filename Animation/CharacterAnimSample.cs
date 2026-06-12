@@ -16,18 +16,23 @@ public readonly struct CharacterAnimSample
     public readonly string  MovementState;  // PlayerCharacter.CurrentStateName
     public readonly string  Action;         // PlayerCharacter.CurrentActionName
     public readonly float   Dt;             // render delta time (NOT the sim fixed dt)
+    // Seconds since the current action entered (ActionVars.TimeInState). Deterministic
+    // sim time — drives the action overlay clip so the slash pose stays frame-synced
+    // with the hitbox windows and survives rollback.
+    public readonly float   ActionTime;
 
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
-        string movementState, string action, float dt)
+        string movementState, string action, float dt, float actionTime = 0f)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
-        MovementState = movementState; Action = action; Dt = dt;
+        MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
     }
 
     // Pull the sample from a live character through its public surface only. The
     // direction of the dependency is animation -> character, never the reverse.
     public static CharacterAnimSample From(PlayerCharacter p, float dt)
         => new(p.Body.Position, p.Body.Velocity, p.Facing, p.IsGrounded,
-               p.CurrentStateName, p.CurrentActionName, dt);
+               p.CurrentStateName, p.CurrentActionName, dt,
+               p.CurrentActionVars.TimeInState);
 }

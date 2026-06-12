@@ -6,8 +6,9 @@ namespace MTile;
 
 public class JumpingState : MovementState
 {
-    public override int ActivePriority => 50;
-    public override int PassivePriority => 30;
+    public override int ActivePriority => MovementPriorities.JumpActive;
+    public override int PassivePriority => MovementPriorities.JumpPassive;
+    public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
 
     private FloatingSurfaceDistance _source;
 
@@ -15,11 +16,13 @@ public class JumpingState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (!abilities.JumpJustPressed || !ctx.TryGetGround(out var ground)) return false;
-        // Hitstun gate: a player just hit can't immediately jump out of the followup.
-        // Movement otherwise stays free — hitstun ONLY blocks the recovery option that
-        // resets vertical position cheaply.
-        if (ctx.Combat?.BlocksJump == true) return false;
+        // Buffered jump intent rather than a raw edge: a press up to
+        // JumpBufferFrames before landing still fires. Consumed in Enter.
+        if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, IntentBuffer.JumpBufferFrames)) return false;
+        if (!ctx.TryGetGround(out var ground)) return false;
+        // Hitstun/stun lock-out is enforced centrally via RequiredCapabilities.Jump
+        // (the selection loop drops jump candidates while BlocksJump). Movement
+        // otherwise stays free — it only blocks the cheap vertical-reset option.
         // Low ceiling (≤ 2 tiles) overhead: head would smack — defer to CoveredJumpState.
         if (ctx.TryGetCeiling(out var ceiling)
             && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
@@ -39,6 +42,7 @@ public class JumpingState : MovementState
     {
         vars.TimeInState = 0f;
         vars.JumpReleased = !ctx.Input.Space;
+        ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, IntentBuffer.JumpBufferFrames);
 
         // Replace any pre-existing FSD (e.g. StandingState's _ground) with our own
         // source FSD: same kind of contact, just tuned for an airborne body.
@@ -114,8 +118,9 @@ public class JumpingState : MovementState
 
 public class RunningJumpState : MovementState
 {
-    public override int ActivePriority => 55;
-    public override int PassivePriority => 35;
+    public override int ActivePriority => MovementPriorities.RunningJumpActive;
+    public override int PassivePriority => MovementPriorities.RunningJumpPassive;
+    public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
 
     private FloatingSurfaceDistance _source;
 
@@ -123,8 +128,8 @@ public class RunningJumpState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        if (!abilities.JumpJustPressed || !ctx.TryGetGround(out var ground)) return false;
-        if (ctx.Combat?.BlocksJump == true) return false;
+        if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, IntentBuffer.JumpBufferFrames)) return false;
+        if (!ctx.TryGetGround(out var ground)) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
         if (ctx.TryGetCeiling(out var ceiling)
             && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
@@ -141,6 +146,7 @@ public class RunningJumpState : MovementState
     {
         vars.TimeInState = 0f;
         vars.JumpReleased = !ctx.Input.Space;
+        ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, IntentBuffer.JumpBufferFrames);
 
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
         EnsureSource(ctx);
@@ -218,8 +224,8 @@ public class WallSlidingState : MovementState
         _wallDir = wallDir;
     }
 
-    public override int ActivePriority => 20;
-    public override int PassivePriority => 20;
+    public override int ActivePriority => MovementPriorities.WallSlideActive;
+    public override int PassivePriority => MovementPriorities.WallSlidePassive;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -315,19 +321,25 @@ public class WallJumpingState : MovementState
         _wallDir = wallDir;
     }
 
-    public override int ActivePriority => 50;
-    // Strictly above DoubleJumping's 40 — when both could fire (player near a wall, jump tapped,
-    // double-jump still available), WallJump wins. DoubleJump still fires when no wall is detected.
-    public override int PassivePriority => 45;
+    public override int ActivePriority => MovementPriorities.WallJumpActive;
+    public override int PassivePriority => MovementPriorities.WallJumpPassive;
+    public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
+
+    // Read by LedgePullState.Suppresses to decide whether a mid-pull wall jump is an
+    // away-press bail-out (allowed) or an inward press (suppressed → queues for LedgeJump).
+    public int WallDir => _wallDir;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         // Any horizontal arrow held — either pressing INTO the wall (the classic wall-slide jump) or
         // pressing AWAY from it (falling alongside a wall, kicking off it). Both should fire WallJump.
         // The no-input case (`Space` with no arrow held) falls through to DoubleJumping.
+        // (The mid-pull "inward press queues for LedgeJump instead" rule lives in
+        // LedgePullState.Suppresses, not here.)
         bool pressingHorizontal = ctx.Input.Left || ctx.Input.Right;
-        if (ctx.Combat?.BlocksJump == true) return false;
-        return pressingHorizontal && abilities.JumpJustPressed && ctx.TryGetWall(_wallDir, out _);
+        if (!pressingHorizontal) return false;
+        if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, IntentBuffer.JumpBufferFrames)) return false;
+        return ctx.TryGetWall(_wallDir, out _);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -339,6 +351,7 @@ public class WallJumpingState : MovementState
     {
         vars.TimeInState = 0f;
         vars.JumpReleased = !ctx.Input.Space;
+        ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, IntentBuffer.JumpBufferFrames);
 
         int dirAwayFromWall = _wallDir == 1 ? -1 : 1;
         ctx.Body.Velocity = new Vector2(dirAwayFromWall * MovementConfig.Current.WallJumpInitialVelX, MovementConfig.Current.WallJumpInitialVelY);
@@ -377,17 +390,17 @@ public class WallJumpingState : MovementState
 
 public class DoubleJumpingState : MovementState
 {
-    public override int ActivePriority => 60;
-    public override int PassivePriority => 40;
+    public override int ActivePriority => MovementPriorities.DoubleJumpActive;
+    public override int PassivePriority => MovementPriorities.DoubleJumpPassive;
+    public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        // No wall check: when the player IS pressing into a wall, WallJumpingState wins the tie
-        // via earlier registration (same Passive=40, first-found wins). When they're not pressing
-        // into a wall — e.g. dropping off a platform while holding the away direction — DoubleJump
-        // is the right fire here.
-        if (ctx.Combat?.BlocksJump == true) return false;
-        return abilities.JumpJustPressed && !abilities.HasDoubleJumped && !ctx.TryGetGround(out _);
+        // No wall check: when the player IS pressing into a wall, WallJumpingState wins outright
+        // (its Passive 45 beats DoubleJump's 40). When they're NOT pressing into a wall — e.g.
+        // dropping off a platform while holding the away direction — DoubleJump is the right fire.
+        return ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, IntentBuffer.JumpBufferFrames)
+            && !abilities.HasDoubleJumped && !ctx.TryGetGround(out _);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -399,6 +412,7 @@ public class DoubleJumpingState : MovementState
     {
         vars.TimeInState = 0f;
         vars.JumpReleased = !ctx.Input.Space;
+        ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, IntentBuffer.JumpBufferFrames);
         abilities.HasDoubleJumped = true;
 
         // Kill existing vertical momentum entirely
@@ -447,6 +461,10 @@ public class CoveredJumpState : MovementState
 
     public override int ActivePriority  => MovementPriorities.CoveredJumpActive;
     public override int PassivePriority => MovementPriorities.CoveredJumpPassive;
+    // Like the rest of the jump family, the hitstun/stun lock-out applies — a stunned
+    // player under an overhang can't covered-jump out. (Previously missing: the inline
+    // BlocksJump gate the other jumps carried was never added here.)
+    public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
 
     // Side to exit toward: if the player's pressing a direction, honor it (never flip to the opposite
     // side even if its edge is closer). From a standstill, pick whichever edge is nearer. An edge
@@ -654,6 +672,8 @@ public class ParkourState : MovementState
         // Deliberate hold into the obstacle, from the ground, with a vault-range upper corner OR an
         // overcrop lower corner ahead. The lower-corner case is suppressed when jump was just
         // pressed, so "press jump near an overhang" goes to a jump state, not a duck (interim D2).
+        // (An in-progress ledge pull suppresses this vault — see LedgePullState.Suppresses — so
+        // the lip reading as ground mid-pull can't steal the maneuver.)
         if (ctx.Intent.HeldHorizontal != _wallDir || !ctx.TryGetGround(out _)) return false;
         return ctx.TryGetExposedCorner(_wallDir, out _)
             || (ctx.TryGetExposedLowerCorner(_wallDir, out _) && !ctx.Intent.JumpJustPressed);
@@ -774,8 +794,8 @@ public class LedgeGrabState : MovementState
 
     public LedgeGrabState(int wallDir) => _wallDir = wallDir;
 
-    public override int ActivePriority  => 42;
-    public override int PassivePriority => 42;
+    public override int ActivePriority  => MovementPriorities.LedgeGrabActive;
+    public override int PassivePriority => MovementPriorities.LedgeGrabPassive;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -793,15 +813,37 @@ public class LedgeGrabState : MovementState
         // Path B: drop from above — Down just pressed, exposed corner at foot level
         if (abilities.DownJustPressed && ctx.TryGetExposedCorner(_wallDir, out _))
             return true;
+        // Path C: re-grab after an abandoned pull — the pull ended (Up released, or
+        // MaxVaultTime ran out) before the body made it over the corner, so the hands
+        // are still on the lip. Re-entering the hang lets its spring/damper absorb the
+        // pull's velocity through the contact, instead of the body exiting airborne
+        // with a jump-sized vy (Plans/LEDGE_PULL_INPUT_MATRIX.md rows D-H, N).
+        if (ctx.PreviousState(0) is LedgePullState pull && pull.WallDir == _wallDir
+            && !PullCompleted(ctx, abilities))
+            return true;
         return false;
+    }
+
+    // Same geometry as LedgePullState's completion test: standing height AND past the
+    // corner horizontally. A completed pull must exit onto the platform, not re-grab.
+    private bool PullCompleted(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        var corner = abilities.GrabbedCorner;
+        bool atStandingHeight = ctx.Body.Position.Y < corner.Y - 2f * PlayerCharacter.Radius;
+        bool pastCorner       = _wallDir == 1
+            ? ctx.Body.Position.X > corner.X
+            : ctx.Body.Position.X < corner.X;
+        return atStandingHeight && pastCorner;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        // Entry grace (~3 frames): drop-in enters with Down still held, and a re-grab
+        // from an abandoned pull needs the damper a few frames to absorb the pull's
+        // velocity before an away/Down exit may carry it out of the state.
+        if (vars.TimeInState < 0.1f) return true;
         bool pressingAway = (_wallDir == 1 && ctx.Input.Left) || (_wallDir == -1 && ctx.Input.Right);
         if (pressingAway) return false;
-        // Grace period: drop-in enters with Down still held, so ignore Down for first ~3 frames.
-        if (vars.TimeInState < 0.1f) return true;
         return !ctx.Input.Down;
     }
 
@@ -809,21 +851,30 @@ public class LedgeGrabState : MovementState
     {
         vars.TimeInState = 0f;
 
-        // Prefer above-head corner (approach from side); fall back to foot-level (drop from above)
-        Vector2 cornerEdge;
-        if (ctx.TryGetLedgeCorner(_wallDir, out var grabCorner))
-            cornerEdge = grabCorner.InnerEdge;
-        else
+        // Re-grab (path C) keeps the corner the pull was working on — the checkers
+        // can't see it from the risen pose — and keeps the body's velocity: the hang
+        // spring/damper dissipates it through the hand contact rather than an
+        // impulsive write. Fresh grabs zero velocity (an impulsive catch) and read
+        // the corner from the checkers as before.
+        bool regrab = ctx.PreviousState(0) is LedgePullState;
+        if (!regrab)
         {
-            ctx.TryGetExposedCorner(_wallDir, out var dropCorner);
-            cornerEdge = dropCorner.InnerEdge;
-        }
+            // Prefer above-head corner (approach from side); fall back to foot-level (drop from above)
+            Vector2 cornerEdge;
+            if (ctx.TryGetLedgeCorner(_wallDir, out var grabCorner))
+                cornerEdge = grabCorner.InnerEdge;
+            else
+            {
+                ctx.TryGetExposedCorner(_wallDir, out var dropCorner);
+                cornerEdge = dropCorner.InnerEdge;
+            }
 
-        ctx.Body.Velocity = Vector2.Zero;
+            ctx.Body.Velocity = Vector2.Zero;
+            abilities.GrabbedCorner = cornerEdge;
+        }
 
         abilities.IsLedgeGrabbing  = true;
         abilities.GrabWallDir      = _wallDir;
-        abilities.GrabbedCorner    = cornerEdge;
         abilities.HasDoubleJumped  = false;
 
         EnsureContacts(ctx, abilities);
@@ -869,10 +920,38 @@ public class LedgeGrabState : MovementState
         EnsureContacts(ctx, abilities);
         vars.TimeInState += ctx.Dt;
         var cfg = MovementConfig.Current;
-        float hangY  = abilities.GrabbedCorner.Y + PlayerCharacter.Radius;
-        float error  = ctx.Body.Position.Y - hangY;
-        float vy     = ctx.Body.Velocity.Y;
-        ctx.Body.AppliedForce = new Vector2(0f, -cfg.GrabGravityCancel - error * cfg.GrabSpringK - vy * cfg.GrabDamping);
+        var corner = abilities.GrabbedCorner;
+
+        // The hang is a 2D anchor — hands gripping a fixed corner — so spring-damp the
+        // body toward the hang point on BOTH axes (symmetric: Radius below the corner
+        // top, Radius to the body's side of the corner X). The horizontal term is what
+        // absorbs a re-grab's retained away-from-wall velocity; without it the body
+        // coasts off forever, since the wall pin is one-sided (blocks moving INTO the
+        // wall only) and nothing else damps X.
+        float hangY = corner.Y + PlayerCharacter.Radius;
+        float hangX = corner.X - _wallDir * PlayerCharacter.Radius;
+
+        var force = Vector2.Zero;
+        force.X = SpringDampForce(ctx.Body.Position.X - hangX, ctx.Body.Velocity.X, cfg, ctx.Dt);
+        force.Y = -cfg.GrabGravityCancel
+                + SpringDampForce(ctx.Body.Position.Y - hangY, ctx.Body.Velocity.Y, cfg, ctx.Dt);
+        ctx.Body.AppliedForce = force;
+    }
+
+    // Spring toward an anchor with a saturated damper. The raw linear damping term
+    // (GrabDamping=100 vs 1/dt=30) overshoots per Euler step — harmless while the hang
+    // FSDs clamp the body, but a re-grab from an abandoned pull arrives at pull speed
+    // and would oscillate divergently. Clamp the damper at the force that exactly zeroes
+    // velocity this frame. Same saturated-brake idiom as LedgePull's crest.
+    private static float SpringDampForce(float error, float vel, MovementConfig cfg, float dt)
+    {
+        float damping = -vel * cfg.GrabDamping;
+        if (dt > 0f)
+        {
+            float cancel = -vel / dt;
+            if (MathF.Abs(damping) > MathF.Abs(cancel)) damping = cancel;
+        }
+        return -error * cfg.GrabSpringK + damping;
     }
 }
 
@@ -888,13 +967,40 @@ public class LedgePullState : MovementState
 
     public LedgePullState(int wallDir) => _wallDir = wallDir;
 
-    public override int ActivePriority  => 43;
-    public override int PassivePriority => 43;
+    // Read by LedgeGrabState's re-grab path and LedgeJumpState's preconditions to
+    // match the side they're taking over from.
+    public int WallDir => _wallDir;
+
+    public override int ActivePriority  => MovementPriorities.LedgePullActive;
+    public override int PassivePriority => MovementPriorities.LedgePullPassive;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => abilities.UpJustPressed
         && abilities.IsLedgeGrabbing
         && abilities.GrabWallDir == _wallDir;
+
+    // The pull owns the corner while it executes — and for the one frame after it exits,
+    // since the selection loop calls Suppresses on PreviousState(0). Both rules below
+    // previously lived as `PreviousState(0) is LedgePullState` gates inside the candidate
+    // states; centralizing them here makes the pull's contract local and complete.
+    public override bool Suppresses(MovementState candidate, EnvironmentContext ctx)
+    {
+        // Once the body rises beside the lip the ledge top reads as ground, so an inward
+        // hold satisfies ParkourState's preconditions and its GuidedPassive (45) would
+        // steal the maneuver from the pull (43). The pull completes/exits on its own terms
+        // and a queued jump routes to LedgeJumpState (LEDGE_PULL_INPUT_MATRIX.md rows B, K).
+        if (candidate is ParkourState) return true;
+        // Mid-pull, only an *away* press reads as "kick off the wall and bail". An inward
+        // press means "jump up onto the ledge" — suppress WallJump so the intent stays
+        // queued for LedgeJumpState at the top (row K). Use the candidate's own wall side,
+        // exactly as the old in-WallJump gate did.
+        if (candidate is WallJumpingState wj)
+        {
+            bool pressingAway = wj.WallDir == 1 ? ctx.Input.Left : ctx.Input.Right;
+            return !pressingAway;
+        }
+        return false;
+    }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
@@ -952,6 +1058,12 @@ public class LedgePullState : MovementState
         EnsureContacts(ctx, abilities);
         vars.TimeInState += ctx.Dt;
 
+        // Keep a queued jump alive while committed to the pull: LedgeJumpState
+        // consumes it at the natural jump point (standing height beside the lip).
+        // The keep-alive stops when the pull ends, so an unconsumed press expires
+        // on its normal window (e.g. after a release → re-grab).
+        ctx.Intents.Refresh(IntentType.Jump, ctx.CurrentFrame, IntentBuffer.JumpBufferFrames);
+
         float cornerTopY = _spring.Position.Y;
         var   cfg        = MovementConfig.Current;
         var   force      = Vector2.Zero;
@@ -967,6 +1079,63 @@ public class LedgePullState : MovementState
                 force.Y = Math.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.VaultLiftForce);
             force.X = _wallDir * cfg.VaultPushForce;
         }
+
+        ctx.Body.AppliedForce = force;
+    }
+}
+
+// Jump executed at the top of a ledge pull — the natural jump point where the body
+// reaches standing height beside the lip — without completing the over-the-corner
+// push or touching ground. Fires from a queued (or fresh) Jump intent that
+// LedgePullState keep-alives; anchors to abilities.GrabbedCorner rather than a
+// ground probe, because beside the lip there is no reliable ground yet. The launch
+// is a JumpServo toward LedgeJumpTargetVy relative to the (static) ledge, so the
+// pull's surplus vy is braked down to a normal jump, not stacked onto one
+// (Plans/LEDGE_PULL_INPUT_MATRIX.md rows I, J′, K).
+public class LedgeJumpState : MovementState
+{
+    private readonly int _wallDir;
+
+    public LedgeJumpState(int wallDir) => _wallDir = wallDir;
+
+    public override int ActivePriority  => MovementPriorities.LedgeJumpActive;
+    public override int PassivePriority => MovementPriorities.LedgeJumpPassive;
+    public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        if (ctx.PreviousState(0) is not LedgePullState pull || pull.WallDir != _wallDir) return false;
+        if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, IntentBuffer.JumpBufferFrames)) return false;
+        // Natural jump point: the body has risen to standing height beside the lip.
+        return ctx.Body.Position.Y <= abilities.GrabbedCorner.Y - 2f * PlayerCharacter.Radius;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+        => !vars.JumpReleased && vars.TimeInState < MovementConfig.Current.MaxJumpHoldTime;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        vars.TimeInState  = 0f;
+        vars.JumpReleased = !ctx.Input.Space;
+        ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, IntentBuffer.JumpBufferFrames);
+        // No velocity write — the servo in Update IS the launch.
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        vars.TimeInState += ctx.Dt;
+        if (!ctx.Input.Space) vars.JumpReleased = true;
+
+        var cfg = MovementConfig.Current;
+        var m   = ctx.Modifiers;
+        var force = Vector2.Zero;
+        // Ledge terrain is static — sourceVy = 0.
+        force.Y = JumpServo.Force(ctx.Body.Velocity.Y, 0f,
+            cfg.LedgeJumpTargetVy, cfg.LedgeJumpServoAccel, cfg.LedgeJumpGravityCancel, ctx.Dt);
+        force.X = AirControl.Apply(ctx,
+            cfg.AirAccel    * m.AirAccel,
+            cfg.MaxAirSpeed * m.MaxAirSpeed,
+            cfg.AirDrag     * m.AirDrag);
 
         ctx.Body.AppliedForce = force;
     }

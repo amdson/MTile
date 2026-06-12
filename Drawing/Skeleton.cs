@@ -24,11 +24,16 @@ public readonly struct Bone
 
 public sealed class Skeleton
 {
+    // Logical rig name (matches the Skeletons/<Name>.json file an authored rig was
+    // loaded from). Animation clips reference rigs by this name, and CharacterAnimator
+    // refuses clips whose AnimationDocument.Skeleton doesn't match the rig it owns.
+    public readonly string Name;
     public readonly Bone[] Bones;
     private readonly Dictionary<string, int> _byName;
 
-    public Skeleton(Bone[] bones)
+    public Skeleton(string name, Bone[] bones)
     {
+        Name  = name  ?? throw new ArgumentNullException(nameof(name));
         Bones = bones ?? throw new ArgumentNullException(nameof(bones));
         _byName = new Dictionary<string, int>(bones.Length);
         for (int i = 0; i < bones.Length; i++)
@@ -55,6 +60,9 @@ public sealed class Skeleton
 public sealed class SkeletonBuilder
 {
     private readonly List<Bone> _bones = new();
+    private readonly string     _name;
+
+    public SkeletonBuilder(string name) { _name = name; }
 
     public int Add(string name, int parent, BoneTransform bind, float length = 0f)
     {
@@ -69,5 +77,5 @@ public sealed class SkeletonBuilder
     public int AddRoot(string name, BoneTransform bind, float length = 0f)
         => Add(name, -1, bind, length);
 
-    public Skeleton Build() => new(_bones.ToArray());
+    public Skeleton Build() => new(_name, _bones.ToArray());
 }

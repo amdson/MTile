@@ -1,35 +1,50 @@
-using Microsoft.Xna.Framework;
+using System;
+using System.IO;
 
 namespace MTile;
 
-// Example rigs to exercise the skeleton utilities. Pure construction helpers — not
-// wired into the game. Coordinates are Y-down (up is -Y), local to each parent.
+// Rig loading. Coordinates are Y-down (up is -Y), local to each parent. The ONLY
+// source of a rig is its authored Skeletons/<name>.json — there is deliberately no
+// procedural fallback, so every host (game, editor, web, tests) renders the same
+// figure or fails loudly at startup. Regenerating a lost rig = git.
 public static class SkeletonExamples
 {
-    // A minimal humanoid stick figure: hip root, spine→chest→head, two arms, two
-    // legs. Joint positions alone define the silhouette (segments connect parent→
-    // child), so all rotations are 0 in the bind pose. Returns a fresh Skeleton;
-    // call CreatePose() to get an editable pose.
-    public static Skeleton Biped()
+    public const string BipedName = "biped";
+
+    // Load a named rig from Skeletons/<name>.json. Throws with the expected path
+    // when the directory or file is missing/unreadable — content is authored-only.
+    public static Skeleton Load(string name)
     {
-        var b = new SkeletonBuilder();
+        string dir = FindSkeletonsDir()
+            ?? throw new FileNotFoundException(
+                "No Skeletons/ directory found (searched up from " +
+                $"{AppContext.BaseDirectory}). The rig '{name}' must be authored at " +
+                $"Skeletons/{name}.json — restore it from the repo.");
+        return SkeletonStore.Load(dir, name)
+            ?? throw new FileNotFoundException(
+                $"Rig '{name}' not found or unreadable at {Path.Combine(dir, name + ".json")}. " +
+                "Content is authored-only (no procedural fallback) — restore it from the repo.");
+    }
 
-        int hip   = b.AddRoot("hip",   BoneTransform.Identity);
-        int chest = b.Add("chest", hip,   new BoneTransform(new Vector2(0f, -16f), 0f), 16f);
-        b.Add("head",  chest, new BoneTransform(new Vector2(0f, -10f), 0f), 8f);
+    // Convenience for callers that hardcode the biped rig (Game1, tests, the
+    // editor). Equivalent to Load(BipedName).
+    public static Skeleton Biped() => Load(BipedName);
 
-        int armLU = b.Add("arm_l_upper", chest, new BoneTransform(new Vector2(-7f, -2f), 0f), 10f);
-        b.Add("arm_l_lower", armLU, new BoneTransform(new Vector2(-10f, 0f), 0f), 10f);
-
-        int armRU = b.Add("arm_r_upper", chest, new BoneTransform(new Vector2(7f, -2f), 0f), 10f);
-        b.Add("arm_r_lower", armRU, new BoneTransform(new Vector2(10f, 0f), 0f), 10f);
-
-        int legLU = b.Add("leg_l_upper", hip, new BoneTransform(new Vector2(-5f, 2f), 0f), 12f);
-        b.Add("leg_l_lower", legLU, new BoneTransform(new Vector2(-1f, 14f), 0f), 12f);
-
-        int legRU = b.Add("leg_r_upper", hip, new BoneTransform(new Vector2(5f, 2f), 0f), 12f);
-        b.Add("leg_r_lower", legRU, new BoneTransform(new Vector2(1f, 14f), 0f), 12f);
-
-        return b.Build();
+    // Walk up from the running binary looking for either a Skeletons/ folder beside
+    // the executable (Desktop layout) or the repo root (Demo running from bin/...).
+    // Returns null if no candidate exists.
+    private static string FindSkeletonsDir()
+    {
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d != null)
+        {
+            string c = Path.Combine(d.FullName, "Skeletons");
+            if (Directory.Exists(c)) return c;
+            // repo-root sentinel for editor runs out of bin/
+            if (File.Exists(Path.Combine(d.FullName, "MTile.sln")))
+                return Path.Combine(d.FullName, "Skeletons");
+            d = d.Parent;
+        }
+        return null;
     }
 }

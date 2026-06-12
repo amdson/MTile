@@ -6,7 +6,7 @@ namespace MTile;
 public class Camera
 {
     public Vector2 Position;
-    public float Zoom = 1.25f;
+    public float Zoom = 1.55f;
     public float Buffer = 150f;
     // Per-second rate the camera lerps vertically toward the target when not
     // pinned to a dead-zone edge. Without this, a jump apex snaps the camera

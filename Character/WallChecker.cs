@@ -22,25 +22,17 @@ public static class WallChecker
         var probe = bounds.InsetVertical(VerticalInset).StripBeside(wallDir, ProbeSlack);
         float bodyFace = bounds.Side(wallDir);
 
-        float bestX = wallDir == 1 ? float.MaxValue : float.MinValue;
-        bool  found = false;
+        // For wallDir = +1 the nearest wall is the tile with the SMALLEST WorldLeft
+        // outside the body's right face; for wallDir = -1 it's the largest WorldRight
+        // outside the body's left face.
+        var chain = TileQuery.Tiles(chunks, probe)
+            .Where(TileFilters.OutsideBodyFace(bodyFace, wallDir));
+        var best = wallDir == 1
+            ? chain.MinBy(t => t.WorldLeft)
+            : chain.MaxBy(t => t.WorldRight);
+        if (best is not { } b) return false;
 
-        foreach (var tile in TileQuery.SolidTilesInRect(chunks, probe))
-        {
-            if (wallDir == 1)
-            {
-                if (tile.WorldLeft < bodyFace) continue;
-                if (tile.WorldLeft < bestX) { bestX = tile.WorldLeft; found = true; }
-            }
-            else
-            {
-                if (tile.WorldRight > bodyFace) continue;
-                if (tile.WorldRight > bestX) { bestX = tile.WorldRight; found = true; }
-            }
-        }
-
-        if (!found) return false;
-
+        float bestX = wallDir == 1 ? b.WorldLeft : b.WorldRight;
         contact = new FloatingSurfaceDistance(
             new Vector2(bestX, body.Position.Y),
             wallDir == 1 ? new Vector2(-1f, 0f) : new Vector2(1f, 0f),

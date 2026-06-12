@@ -56,6 +56,7 @@ public class Game1 : Game
     // ~62px-tall rig to the player's ~19px body.
     private CharacterAnimator _animator;
     private const float SkeletonScale = 0.6f;
+    private float _simAccum;   // fixed-step accumulator for GameConfig.TimeScale (slow-mo)
 
     public Game1()
     {
@@ -162,7 +163,7 @@ public class Game1 : Game
         // Load authored skeleton animations (copied next to the binary). Empty on
         // platforms without a readable filesystem (e.g. WASM) → procedural fallback.
         var anims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
-        _animator = new CharacterAnimator(SkeletonExamples.Biped(), anims);
+        _animator = new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, anims);
     }
 
     // The player this client controls + the camera follows. Host (index 0) = primary;
@@ -201,14 +202,18 @@ public class Game1 : Game
                     _session.Receive(in pkt);
             _session.TryStep();
         }
-        else if (_botInput != null)
-        {
-            // With a second player present offline, the bot spoofs its input (P2).
-            _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
-        }
         else
         {
-            _sim.Step(input);
+            // Slow-/fast-motion (offline only): accumulate TimeScale and run that many
+            // fixed steps this frame — <1 skips frames (slow-mo), >1 runs extra, 0 pauses.
+            _simAccum += MathF.Max(0f, _config.TimeScale);
+            while (_simAccum >= 1f)
+            {
+                _simAccum -= 1f;
+                // With a second player present offline, the bot spoofs its input (P2).
+                if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
+                else                   _sim.Step(input);
+            }
         }
 
         // ── Cosmetic-only systems below; they read sim state but never write it ──
@@ -233,7 +238,8 @@ public class Game1 : Game
         // Procedural skeleton: pull a read-only sample of the player and advance the
         // animator. One-way — the sim is unaware this happens.
         if (_config.DebugDrawSkeleton)
-            _animator.Update(CharacterAnimSample.From(player, dt));
+            // Scale the animator's dt too so easing/idle slow with the sim under TimeScale.
+            _animator.Update(CharacterAnimSample.From(player, dt * _config.TimeScale));
         foreach (var (p, _) in _sim.SecondaryPlayers)
         {
             if (p.Sprite == null) continue;
@@ -327,7 +333,17 @@ public class Game1 : Game
                 if (p.Sprite != null) p.Sprite.Draw(_draw);
         }
         if (_config.DebugDrawSkeleton)
-            _animator.Draw(_draw, player.Body.Position, player.Facing, SkeletonScale);
+        {
+            // Drop the rig so its bind-pose soles rest on the ground line. A grounded
+            // body floats 2·Radius above the floor (GroundChecker rest distance), so
+            // the ground sits that far below the body center.
+            float groundY    = player.Body.Position.Y + 2f * PlayerCharacter.Radius;
+            // Per-frame sole: drop the rig so the lowest point of the *current* pose
+            // rests on the ground, so swinging/arcing feet don't punch through.
+            float rootY       = groundY - _animator.CurrentSoleY() * SkeletonScale;
+            _animator.Draw(_draw, new Vector2(player.Body.Position.X, rootY), player.Facing,
+                           _config.DebugDrawSkeletonJoints, _config.DebugHighlightPlantFoot);
+        }
         if (_config.DebugDrawBodies)
         {
             DrawPolygon(player.Body.Polygon, player.Body.Position,
@@ -376,6 +392,11 @@ public class Game1 : Game
                         DrawConstraintArrow(sc.Position, sc.Normal,
                             c is FloatingSurfaceDistance ? Color.Cyan : Color.Yellow);
 
+        if (_config.DebugDrawSteeringRamps)
+            foreach (var body in _sim.Bodies)
+                foreach (var c in body.Constraints)
+                    if (c is SteeringRamp ramp) DrawSteeringRamp(ramp);
+
         // Enemy health bars in world space, drawn just above each wounded body.
         foreach (var e in _sim.Entities)
             if (_config.DebugDrawHealthBars && e.Health < e.MaxHealth) DrawEntityHealthBar(e);
@@ -388,9 +409,10 @@ public class Game1 : Game
         if (_config.DebugDrawHealthBars) DrawPlayerHealthBar();
         _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8,  8), Color.White);
         _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, 24), Color.White);
+        _spriteBatch.DrawString(_debugFont, $"Anim: {_animator.State.Clip}", new Vector2(8, 40), Color.Aqua);
         _spriteBatch.DrawString(_debugFont,
             $"Planner: {_sim.EruptionMode}  (P to toggle)",
-            new Vector2(8, 40),
+            new Vector2(8, 56),
             _sim.EruptionMode == EruptionPlannerMode.MassBall ? Color.LightCoral : Color.LightSkyBlue);
 
         DrawBlockPickerHud();
@@ -534,6 +556,36 @@ public class Game1 : Game
         DrawLine(position, tip, color);
         DrawLine(tip, tip + (-normal + perp) * headLength * 0.707f, color);
         DrawLine(tip, tip + (-normal - perp) * headLength * 0.707f, color);
+    }
+
+    // Visualize one SteeringRamp at its corner: the surface tangent (the "ramp" the
+    // body skims along), the banned direction (into the solid), and the corner dot.
+    // Color = Sense (Over: lime / Under: orange); opacity fades with Weight so inert
+    // ramps appear ghosted.
+    private void DrawSteeringRamp(SteeringRamp ramp)
+    {
+        var baseColor = ramp.Sense == SteeringSense.Over ? Color.LimeGreen : Color.Orange;
+        float alpha = 0.25f + 0.75f * MathHelper.Clamp(ramp.Weight, 0f, 1f);
+        var color   = baseColor * alpha;
+        var banned  = baseColor * (alpha * 0.45f);
+
+        // Tangent line through the corner (the implicit ramp surface, on both sides).
+        const float Tangent = 28f;
+        var tan = ramp.SurfaceDir * Tangent;
+        DrawLine(ramp.Corner - tan, ramp.Corner + tan, color, 2);
+
+        // Arrowhead at the leading tip so the travel direction reads.
+        var lead = ramp.Corner + tan;
+        var perp = new Vector2(-ramp.SurfaceDir.Y, ramp.SurfaceDir.X) * 6f;
+        DrawLine(lead, lead - tan * 0.25f + perp, color, 1);
+        DrawLine(lead, lead - tan * 0.25f - perp, color, 1);
+
+        // Banned direction (into the solid) — a short ghosted stub from the corner.
+        DrawLine(ramp.Corner, ramp.Corner + ramp.BannedDir * 14f, banned, 1);
+
+        // Corner marker.
+        _draw.Disc(ramp.Corner, 3f, color);
+        _draw.Ring(ramp.Corner, 5f, color, 12, 1f);
     }
 
     // Translucent fill + crisp outline. Color owned by the publisher (Hitbox.DebugColor).

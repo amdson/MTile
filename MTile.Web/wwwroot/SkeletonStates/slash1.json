@@ -1,0 +1,238 @@
+{
+  "Name": "slash1",
+  "Type": "GroundSlash1",
+  "Skeleton": "biped",
+  "Duration": 0.14,
+  "Loop": false,
+  "Region": "UpperBody",
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0.3
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 0.5
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -2.4
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -0.6
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
+        }
+      ]
+    },
+    {
+      "Time": 0.3,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": 0.1
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 0.2
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -0.9
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -0.2
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
+        }
+      ]
+    },
+    {
+      "Time": 0.6,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": 0.35
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -0.4
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 1.5
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.5
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
+        }
+      ]
+    },
+    {
+      "Time": 1,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": 0.15
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -0.2
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 1.1
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.3
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
+        }
+      ]
+    }
+  ]
+}

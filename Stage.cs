@@ -60,6 +60,18 @@ public static class Stages
             PlayerSpawn   = new Vector2(16f, 0f),
             Populate      = PopulatePlain,
         });
+
+        // ─── flat ─────────────────────────────────────────────────────────────
+        // Empty, perfectly flat plain (floor at world tile y = 6, open sky, no
+        // hills/chunk art, no entities or platforms). A clean testbed for the
+        // locomotion/cadence work: walk back and forth and watch the skeleton's
+        // foot-plant against featureless ground. Select via game_config "Stage":"flat".
+        Register(new Stage {
+            Name          = "flat",
+            TerrainConfig = "flat.json",
+            PlayerSpawn   = new Vector2(0f, -200f),
+            Populate      = _ => { },
+        });
     }
 
     public static void Register(Stage s) => _registry[s.Name] = s;

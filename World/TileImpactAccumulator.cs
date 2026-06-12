@@ -28,7 +28,7 @@ public sealed class TileImpactAccumulator
     // (MaxGroundEngageVnRel routes hard landings through the swept-tile path
     // instead, and ApplyContactDamage walks contacts post-step so the impulse
     // is already aggregated).
-    private const float Decay = 30f;
+    private const float Decay = 100f;
     // Below this, an entry is removed entirely to keep the dictionary bounded.
     private const float PruneEps = 0.5f;
 

@@ -248,7 +248,9 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new LedgeGrabState(-1));
         _stateRegistry.Add(new LedgePullState(1));
         _stateRegistry.Add(new LedgePullState(-1));
-        
+        _stateRegistry.Add(new LedgeJumpState(1));
+        _stateRegistry.Add(new LedgeJumpState(-1));
+
         _currentState = _stateRegistry[0]; // falling
     }
 
@@ -349,9 +351,23 @@ public class PlayerCharacter : IHittable
         MovementState bestChoice = null;
         int highestPriority = int.MinValue;
 
+        // Cross-cutting capability lock-out (combat hitstun/stun blocks Jump). Computed
+        // once; candidate states declaring a blocked capability are skipped. Gates entry
+        // only — the current state's continuation is governed by its CheckConditions.
+        var blockedCaps = ctx.Combat?.BlocksJump == true
+            ? MovementCapability.Jump
+            : MovementCapability.None;
+
+        // The state active at the end of last frame owns one-frame suppression rights —
+        // it still points at a maneuver (e.g. LedgePull) for the frame after that maneuver
+        // exits to Falling, which is exactly when a bystander would otherwise steal control.
+        var owner = ctx.PreviousState(0);
+
         foreach (var state in _stateRegistry)
         {
             if (state == _currentState) continue;
+            if ((state.RequiredCapabilities & blockedCaps) != 0) continue;
+            if (owner != null && owner.Suppresses(state, ctx)) continue;
 
             if (state.CheckPreConditions(ctx, _abilities))
             {

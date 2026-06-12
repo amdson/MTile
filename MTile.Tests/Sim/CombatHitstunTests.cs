@@ -113,9 +113,9 @@ public class CombatHitstunTests(ITestOutputHelper output)
         Assert.True(sawHitstun, "Expected Combat.HitstunActive to be true at some frame after the slash landed.");
 
         // 3) During every hitstun frame, the victim must not be in a jump state.
-        //    (CoveredJumpState is the only one I deliberately left ungated; it
-        //    won't fire on flat ground without an overhead ceiling, so checking
-        //    for any name containing "Jumping" is safe.)
+        //    (CoveredJumpState is now gated by the capability mask too, but it
+        //    can't fire on flat ground without an overhead ceiling anyway, so the
+        //    "Jumping"-name check below remains sufficient here.)
         for (int f = 0; f < traces[1].Length; f++)
         {
             if (!hitstunPerFrame[f]) continue;

@@ -9,9 +9,20 @@ namespace MTile;
 // One keyframe: a full pose placed at a point on the normalized [0,1] timeline.
 public sealed class AnimationKeyframe
 {
-    public float                Time  { get; set; }
-    public List<PoseBoneEntry>  Bones { get; set; } = new();
+    public float                Time     { get; set; }
+    public List<PoseBoneEntry>  Bones    { get; set; } = new();
+    // Contact annotations active at this keyframe (planted feet / external pins).
+    // Null on legacy files → no contacts (airborne); the locomotion solver then
+    // falls back to the velocity-driven phase advance. See ContactLabel.
+    public List<ContactLabel>   Contacts { get; set; }
 }
+
+// Which part of the rig an animation owns when composed as a layer. Movement clips
+// are FullBody; an action overlay (slash/stab) is typically UpperBody so the legs
+// keep walking underneath. Resolved to a concrete bone set per skeleton by BoneMask.
+// FullBody must stay value 0: it is the serialization default, omitted on save
+// (WhenWritingDefault) so legacy files stay textually stable.
+public enum AnimRegion { FullBody, UpperBody, LowerBody }
 
 // A named animation: a Type-tagged time series of keyframes, serialized as one JSON
 // file. Sampling between keyframes (in the editor / a future runtime player) lerps
@@ -20,13 +31,18 @@ public sealed class AnimationDocument
 {
     public string                  Name      { get; set; } = "unnamed";
     public string                  Type      { get; set; } = "Misc";
+    // Name of the rig this clip was authored against (Skeletons/<Skeleton>.json).
+    // Defaults to "biped" so pre-multirig pose files still resolve cleanly. New
+    // captures always write this explicitly; CharacterAnimator filters its
+    // bindings to clips whose Skeleton matches the rig it was constructed with.
+    public string                  Skeleton  { get; set; } = "biped";
     public float                   Duration  { get; set; } = 1f;     // seconds for the full [0,1] timeline
     public bool                    Loop      { get; set; } = true;
+    // Bone region this clip owns when layered (see AnimRegion). Missing in legacy
+    // JSON → FullBody; FullBody is omitted on save so legacy files round-trip clean.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public AnimRegion              Region    { get; set; } = AnimRegion.FullBody;
     public List<AnimationKeyframe> Keyframes { get; set; } = new();
-
-    // Legacy single-pose field from the earlier pose-only format. Migrated to a
-    // t=0 keyframe on load, then nulled so it isn't written back.
-    public List<PoseBoneEntry> Bones { get; set; }
 
     [JsonIgnore] public string FilePath { get; set; }
 
@@ -40,6 +56,8 @@ public static class AnimationStore
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        // ContactSource reads/writes as "SelfPlant"/"External" rather than 0/1.
+        Converters = { new JsonStringEnumConverter() },
     };
 
     public static List<AnimationDocument> LoadAll(string dir)
@@ -53,13 +71,7 @@ public static class AnimationStore
                 var doc = JsonSerializer.Deserialize<AnimationDocument>(File.ReadAllText(path), Opts);
                 if (doc == null) continue;
                 doc.Keyframes ??= new List<AnimationKeyframe>();
-
-                // Migrate a legacy single-pose file into a one-keyframe animation.
-                if (doc.Keyframes.Count == 0 && doc.Bones is { Count: > 0 })
-                    doc.Keyframes.Add(new AnimationKeyframe { Time = 0f, Bones = doc.Bones });
-                doc.Bones = null;
-
-                if (doc.Keyframes.Count == 0) continue;   // nothing usable
+                if (doc.Keyframes.Count == 0) continue;   // nothing usable (incl. pre-keyframe-era files)
                 doc.SortKeyframes();
                 doc.FilePath = path;
                 list.Add(doc);

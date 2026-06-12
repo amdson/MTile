@@ -1,0 +1,585 @@
+{
+  "Name": "run",
+  "Type": "Run",
+  "Skeleton": "biped",
+  "Duration": 0.8,
+  "Loop": true,
+  "Keyframes": [
+    {
+      "Time": 0.0014084507,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 3.7012742
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.42153203
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -3.3653831
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.9412665
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -1.0539465
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.8461784
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.4348745
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0.3090649
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.18465194
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_r",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.15492958,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 4.7651854
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.7912107
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -4.313981
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.2025319
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -1.9756877
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 2.1597414
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.4348745
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0.8355843
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.3283968
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_r",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.3366197,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 5.111004
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.92814505
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -4.732588
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.4314555
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -2.056592
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.4268302
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -0.5494182
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.3554385
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.39551452
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_r",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.4830986,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 5.111004
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.92814505
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -4.732588
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.4314555
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -2.1120906
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.5540094
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -0.5494182
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.62496
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.36860672
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_r",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.5028169,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 5.111004
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.92814505
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -4.732588
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.4314555
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -2.1120906
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.5540094
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -0.5494182
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.62496
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.36860672
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_l",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.6507042,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 5.111004
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.92814505
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -4.732588
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.4314555
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -1.2008156
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.3792604
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -0.5494182
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.0049422
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.36860672
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_l",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.80704224,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 5.111004
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.92814505
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -4.732588
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.4314555
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -0.744184
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.6881502
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.0292621
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0.08314106
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.36860672
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_l",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.96478873,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 5.111004
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.92814505
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -4.732588
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.4314555
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -0.744184
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.6881502
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.0292621
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0.08314106
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.43811497
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_l",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.97887325,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": -0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.36473435
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 5.111004
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.92814505
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -4.732588
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.4314555
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -0.744184
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.6881502
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.0292621
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0.20057535
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.43811497
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.0080572
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_r",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    }
+  ]
+}

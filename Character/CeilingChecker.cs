@@ -12,18 +12,14 @@ public static class CeilingChecker
         contact = null;
         var probe = body.Bounds.StripAbove(ProbeSlack);
 
-        float bestCeilY = float.MinValue;
-        foreach (var tile in TileQuery.SolidTilesInRect(chunks, probe))
-        {
-            if (tile.WorldBottom > bestCeilY)
-                bestCeilY = tile.WorldBottom;
-        }
-
-        if (bestCeilY == float.MinValue) return false;
+        // Pick the lowest tile-bottom (= largest Y under MonoGame y-down) in the probe.
+        // That's the closest ceiling face.
+        var best = TileQuery.Tiles(chunks, probe).MaxBy(t => t.WorldBottom);
+        if (best is not { } b) return false;
 
         // Constraint: body.Y - bestCeilY >= Radius  →  body center stays Radius below ceiling bottom.
         contact = new FloatingSurfaceDistance(
-            new Vector2(body.Position.X, bestCeilY),
+            new Vector2(body.Position.X, b.WorldBottom),
             new Vector2(0f, 1f),
             PlayerCharacter.Radius);
         return true;

@@ -24,16 +24,21 @@ public readonly struct Affine2
 
     public static readonly Affine2 Identity = new(1f, 0f, 0f, 1f, 0f, 0f);
 
-    // Translation/Rotation/Scale → matrix, applied in the order S, then R, then T
-    // (the conventional local-bone transform). Scale is per-axis.
+    // Local bone transform composed as R * T * S (apply S, then T, then R). The
+    // outer R rotates the translation along with the linear part, so a bone's local
+    // Rotation rotates its joint position around the parent — the standard skeletal-
+    // animation convention. Under this composition, pose.Rotation literally means
+    // "this bone's angle relative to its parent": editing it rotates the bone's own
+    // segment around the parent's joint and drags the subtree along, while leaving
+    // siblings untouched.
     public static Affine2 FromTRS(Vector2 translation, float rotation, Vector2 scale)
     {
         float c = MathF.Cos(rotation), s = MathF.Sin(rotation);
-        // R * S
         return new Affine2(
             c * scale.X, -s * scale.Y,
             s * scale.X,  c * scale.Y,
-            translation.X, translation.Y);
+            c * translation.X - s * translation.Y,
+            s * translation.X + c * translation.Y);
     }
 
     // Compose: Multiply(a, b) applies b first, then a — i.e. world = parentWorld * childLocal.

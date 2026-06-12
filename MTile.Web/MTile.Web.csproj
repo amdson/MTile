@@ -62,6 +62,16 @@
     <Copy SourceFiles="@(_LevelAsset)"
           DestinationFiles="@(_LevelAsset->'$(MSBuildThisFileDirectory)wwwroot\Levels\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <_SkeletonStateAsset Include="..\SkeletonStates\**\*" />
+      <_SkeletonAsset      Include="..\Skeletons\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SkeletonStateAsset)"
+          DestinationFiles="@(_SkeletonStateAsset->'$(MSBuildThisFileDirectory)wwwroot\SkeletonStates\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_SkeletonAsset)"
+          DestinationFiles="@(_SkeletonAsset->'$(MSBuildThisFileDirectory)wwwroot\Skeletons\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
   </Target>
 
   <ItemGroup>

@@ -4,18 +4,18 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-public readonly struct TileRef
-{
-    public readonly float WorldLeft;
-    public readonly float WorldTop;
-
-    public float WorldRight   => WorldLeft + Chunk.TileSize;
-    public float WorldBottom  => WorldTop  + Chunk.TileSize;
-    public float WorldCenterX => WorldLeft + Chunk.TileSize * 0.5f;
-    public float WorldCenterY => WorldTop  + Chunk.TileSize * 0.5f;
-
-    public TileRef(float left, float top) { WorldLeft = left; WorldTop = top; }
-}
+/*
+Types of queries to support:
+- SolidTilesInRect
+- SolidTilesInArea (e.g. circle or capsule) 
+- IsSolidAt (point query or tile query)
+- Is(Top/Bottom/Left/Right)Exposed
+- IntersectsLineSegment
+- TileEdgesInRect
+- TileCornersInRect
+- OpenEdgesInRect (Edge for which parent tile is solid, but no solid tile borders the edge)
+- OpenCornersInRect (Corner for which parent tile is solid, but no solid tile borders the corner, including diagonals)
+*/
 
 public static class TileQuery
 {
@@ -52,10 +52,11 @@ public static class TileQuery
             for (int ty = tyMin; ty <= tyMax; ty++)
             {
                 if (chunk.Tiles[tx, ty].IsSolid)
-                    yield return new TileRef(ox + tx * Chunk.TileSize, oy + ty * Chunk.TileSize);
+                    yield return new TileRef(cx * Chunk.Size + tx, cy * Chunk.Size + ty);
             }
         }
     }
+
 
     public static bool IsSolidAt(ChunkMap chunks, float worldX, float worldY)
     {
@@ -72,4 +73,56 @@ public static class TileQuery
 
     public static bool IsBottomExposed(ChunkMap chunks, TileRef tile)
         => !IsSolidAt(chunks, tile.WorldCenterX, tile.WorldBottom + Chunk.TileSize * 0.5f);
+
+    // ── Fluent query layer ────────────────────────────────────────────────
+    //
+    // Tiles / Edges / Corners return small builder structs that wrap the
+    // seed enumeration plus a ChunkMap reference. Callers chain Where(...)
+    // with named filters from TileFilters / EdgeFilters / CornerFilters and
+    // close with a reduction (MaxBy / MinBy / FirstOrDefault / Any) or a
+    // plain foreach. The aim is one composable, individually-testable rule
+    // per Where — see Plans / discussion of the inset-corner bug for why
+    // inline foreach-and-if blocks were fragile.
+
+    // Solid tiles overlapping `region`. Asymmetric on purpose: tiles have a
+    // clear existence boolean (IsSolid), so it's wasteful to enumerate empty
+    // cells. Edges and corners are geometric constructs that belong to a
+    // solid tile, so they enumerate all four faces / corners of every solid
+    // and let predicates decide which are interesting.
+    public static TileQueryChain Tiles(ChunkMap chunks, BoundingBox region)
+        => new(chunks, SolidTilesInRect(chunks, region));
+
+    // All four edges of every solid tile in `region`. Filter with
+    // EdgeFilters.IsOpen for outward-facing wall / floor / ceiling faces,
+    // or EdgeFilters.Type(...) to keep one side only.
+    public static EdgeQueryChain Edges(ChunkMap chunks, BoundingBox region)
+        => new(chunks, EnumerateEdges(chunks, region));
+
+    // All four corners of every solid tile in `region`. CornerFilters.IsOpen
+    // narrows to convex (outward) corners — the precondition for vault /
+    // overcrop ramps in ParkourState.
+    public static CornerQueryChain Corners(ChunkMap chunks, BoundingBox region)
+        => new(chunks, EnumerateCorners(chunks, region));
+
+    private static IEnumerable<EdgeRef> EnumerateEdges(ChunkMap chunks, BoundingBox region)
+    {
+        foreach (var tile in SolidTilesInRect(chunks, region))
+        {
+            yield return new EdgeRef(tile, EdgeType.Top);
+            yield return new EdgeRef(tile, EdgeType.Bottom);
+            yield return new EdgeRef(tile, EdgeType.Left);
+            yield return new EdgeRef(tile, EdgeType.Right);
+        }
+    }
+
+    private static IEnumerable<CornerRef> EnumerateCorners(ChunkMap chunks, BoundingBox region)
+    {
+        foreach (var tile in SolidTilesInRect(chunks, region))
+        {
+            yield return new CornerRef(tile, CornerType.TopLeft);
+            yield return new CornerRef(tile, CornerType.TopRight);
+            yield return new CornerRef(tile, CornerType.BottomLeft);
+            yield return new CornerRef(tile, CornerType.BottomRight);
+        }
+    }
 }

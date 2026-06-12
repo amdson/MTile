@@ -59,11 +59,13 @@ public static class SkeletonRenderer
             }
         }
 
-        // Joints drawn last so they read clearly on top of the segments.
-        for (int i = 0; i < bones.Length; i++)
-        {
-            Color c = bones[i].IsRoot ? style.RootColor : style.JointColor;
-            ctx.Disc(world[i].Translation, style.JointRadius, c);
-        }
+        // Joints drawn last so they read clearly on top of the segments. Skipped
+        // entirely when JointRadius <= 0 (hosts hide the nodes that way).
+        if (style.JointRadius > 0f)
+            for (int i = 0; i < bones.Length; i++)
+            {
+                Color c = bones[i].IsRoot ? style.RootColor : style.JointColor;
+                ctx.Disc(world[i].Translation, style.JointRadius, c);
+            }
     }
 }

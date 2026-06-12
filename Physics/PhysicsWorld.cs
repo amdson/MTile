@@ -303,13 +303,14 @@ public static class PhysicsWorld
 
                 if (!hitFromFloating && body.Impact != null)
                 {
-                    ComputeImpactCells(body, pos, hitNormal, chunks, _impactCellsScratch);
-                    int n = _impactCellsScratch.Count;
+                    var impactCells = _impactCellsScratch ??= new(4);
+                    ComputeImpactCells(body, pos, hitNormal, chunks, impactCells);
+                    int n = impactCells.Count;
                     if (n > 0)
                     {
                         float totalCapImpulse = 0f;
                         float dmgRate = MathF.Max(body.Impact.DamagePerUnitImpulse, 1e-6f);
-                        foreach (var (gtx, gty) in _impactCellsScratch)
+                        foreach (var (gtx, gty) in impactCells)
                         {
                             var type = chunks.GetCellType(gtx, gty);
                             float hpRemaining = MathF.Max(0f, TileDamage.MaxHPFor(type) - chunks.Damage.Get(gtx, gty));
@@ -329,7 +330,7 @@ public static class PhysicsWorld
                         // breaks. Below-cap passes chip per the old formula.
                         float deliveredImpulse = dvCapMag * body.Impact.Mass;
                         float perCell = deliveredImpulse / n;
-                        foreach (var (gtx, gty) in _impactCellsScratch)
+                        foreach (var (gtx, gty) in impactCells)
                         {
                             float over = chunks.Impact.AccrueAndConsume(gtx, gty, perCell, body.Impact.ImpulseThreshold);
                             if (over > 0f) chunks.DamageCell(gtx, gty, over * body.Impact.DamagePerUnitImpulse);
@@ -392,9 +393,12 @@ public static class PhysicsWorld
     }
 
     // Scratch list reused across ResolveChunkCollisionsSwept iterations; the
-    // method is static so a static buffer keeps allocations off the hot path.
-    // Not thread-safe — Step/StepSwept are single-threaded by design.
-    private static readonly List<(int gtx, int gty)> _impactCellsScratch = new(4);
+    // method is static so a per-thread buffer keeps allocations off the hot path.
+    // [ThreadStatic] rather than plain static: the game steps on one thread (and
+    // sees a single instance, same as before), but the test runner steps
+    // independent sims on parallel threads — a shared list corrupts impact
+    // results and throws "collection was modified" mid-enumeration.
+    [ThreadStatic] private static List<(int gtx, int gty)> _impactCellsScratch;
 
     // Cells touching the impact face along -normal. Mirrors the old
     // ApplyContactDamage strip query: inset along the face by 2 px so a hex

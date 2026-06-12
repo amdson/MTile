@@ -8,6 +8,19 @@ public abstract class MovementState
     public abstract int ActivePriority { get; }
     public abstract int PassivePriority { get; }
 
+    // Capabilities this state needs to be ENTERED. The selection loop skips this state
+    // as a candidate while any required capability is in the frame's blocked mask
+    // (currently: combat hitstun/stun blocks Jump). Does NOT gate continuation — a
+    // running state keeps running via CheckConditions regardless. See MovementCapability.
+    public virtual MovementCapability RequiredCapabilities => MovementCapability.None;
+
+    // Lets the currently-active state (and, for one frame after it exits, the
+    // just-departed state — the loop queries PreviousState(0)) veto specific candidates
+    // that priority alone would let win. Used to keep an owned maneuver (e.g. an
+    // in-progress ledge pull) from being stolen by a higher-passive bystander. Default:
+    // suppress nothing.
+    public virtual bool Suppresses(MovementState candidate, EnvironmentContext ctx) => false;
+
     // CheckPreConditions (candidate selection) reads only ctx + abilities, never the
     // current activation's vars — so it keeps the lean signature. The lifecycle
     // methods below run on the active/transitioning state and carry MovementVars,
@@ -48,8 +61,8 @@ public abstract class MovementState
 // player stunned out of a double-jump doesn't suddenly regain it.
 public class StunnedState : MovementState
 {
-    public override int ActivePriority  => 25;
-    public override int PassivePriority => 25;
+    public override int ActivePriority  => MovementPriorities.StunnedActive;
+    public override int PassivePriority => MovementPriorities.StunnedPassive;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => ctx.Combat?.StunActive == true;
@@ -73,8 +86,8 @@ public class StunnedState : MovementState
 
 public class FallingState : MovementState
 {
-    public override int ActivePriority => 0;
-    public override int PassivePriority => 0;
+    public override int ActivePriority => MovementPriorities.FallingActive;
+    public override int PassivePriority => MovementPriorities.FallingPassive;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) => true;
@@ -98,8 +111,8 @@ public class FallingState : MovementState
 
 public class StandingState : MovementState
 {
-    public override int ActivePriority => 10;
-    public override int PassivePriority => 10;
+    public override int ActivePriority => MovementPriorities.StandingActive;
+    public override int PassivePriority => MovementPriorities.StandingPassive;
 
     private FloatingSurfaceDistance _ground;
 
@@ -194,8 +207,8 @@ public class StandingState : MovementState
 
 public class CrouchedState : MovementState
 {
-    public override int ActivePriority => 15;
-    public override int PassivePriority => 15;
+    public override int ActivePriority => MovementPriorities.CrouchedActive;
+    public override int PassivePriority => MovementPriorities.CrouchedPassive;
 
     private FloatingSurfaceDistance _ground;
 

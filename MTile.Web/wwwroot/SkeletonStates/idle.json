@@ -1,0 +1,58 @@
+{
+  "Name": "idle",
+  "Type": "Idle",
+  "Skeleton": "biped",
+  "Duration": 1.5,
+  "Loop": true,
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": 0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
+        }
+      ]
+    }
+  ]
+}

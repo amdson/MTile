@@ -43,6 +43,11 @@
     <None Include="..\SkeletonStates\**\*" Link="SkeletonStates\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Shared rig (bone proportions). SkeletonExamples.Biped() loads this and falls
+         back to a procedural builder if the file is missing. -->
+    <None Include="..\Skeletons\**\*" Link="Skeletons\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <!-- Content pipeline lives with the executable so .xnb output lands next to

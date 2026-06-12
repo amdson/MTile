@@ -1,313 +1,515 @@
-# Animation ↔ Gamestate Matching: Locomotion Cadence (Mechanism #1)
+# Animation ↔ Gamestate Matching: Locomotion via Constraint Optimization
 
-Status: **planned, not implemented.** This is the design for the first slice of
-matching animation playback to real motion. Scope here is deliberately narrow:
-**cadence** (playback-rate matching for walk/run on ground). Positional constraint
-solving (foot-lock IK, vault-hand-on-corner) is **Mechanism #2** and is only
-sketched at the end so this data model doesn't paint us into a corner.
+Status: **planned, not implemented.** Design for matching animation playback to real
+motion. The first slice we build is **cadence** (playback-rate matching for walk/run/
+climb on ground). Inverse kinematics (foot-lock, vault-hand-on-corner) is the second
+slice — but the key decision in this plan is that **both are the same optimization**
+at different degrees of freedom, so the cadence implementation is literally the outer
+loop of the IK-era solver with the inner solve stubbed.
 
-Companion docs: [ANIMATION_LAYERING_PLAN.md](ANIMATION_LAYERING_PLAN.md) (movement
-+ action layering), and the animator itself lives in
-[Animation/CharacterAnimator.cs](../Animation/CharacterAnimator.cs).
+Companion docs: [ANIMATION_LAYERING_PLAN.md](ANIMATION_LAYERING_PLAN.md) (movement +
+action layering). Animator: [Animation/CharacterAnimator.cs](../Animation/CharacterAnimator.cs).
+Sampler: [Animation/AnimationSampler.cs](../Animation/AnimationSampler.cs). Rig:
+[Drawing/SkeletonExamples.cs](../Drawing/SkeletonExamples.cs).
 
 ---
 
-## 1. The problem, split into two mechanisms
+## 1. The core idea
 
-The user's framing: "the pace of running needs to match the player movement speed,"
-and "if the player vaults, their hand is on the corner." These read as one problem
-but have **different dimensionality**, and conflating them makes both harder:
+Match an animation to real motion by treating it as **constraint optimization**, not
+a hand-derived playback formula. Label points on the skeleton as *contacts* (a planted
+foot, a hand on a vault corner). Each contact is a node that should sit at a known
+**world target**. Each frame we choose animation parameters to minimize how far the
+labeled nodes land from their targets.
 
-| | Mechanism #1 — **Cadence** | Mechanism #2 — **Contact constraints** |
+For the first slice the only free parameter is **phase advance `Δφ`** (how far to
+advance the clip this frame). Later, the leg/arm joint angles join the parameter set
+and the same minimize gains an IK sub-solve. Nothing about the framing changes — only
+the dimensionality.
+
+This replaces the earlier "derive a horizontal `clipStride` scalar" idea, which baked
+in a single axis and couldn't express vertical constraints (ladder climb) or the
+vault. The optimization is axis-agnostic by construction.
+
+---
+
+## 2. Why optimization (and not the analytic formula)
+
+The no-slip invariant for a planted node is "zero world velocity." Written analytically
+it needs the node's **clip-space velocity** `p'(φ)` — a derivative estimated off
+discrete keyframes, which is noisy and has kinks at every keyframe boundary. It is also
+over-determined (a 2D constraint, a 1D knob), forcing a least-squares projection plus
+an ad-hoc regularizer near stride reversals.
+
+The optimization formulation sidesteps all of that:
+
+- It only ever **evaluates poses** (which the sampler already does) — no clip
+  derivative anywhere in the data path.
+- Over-determination is automatic: minimizing `‖·‖²` *is* the least-squares solve.
+- The degeneracy at stride reversal stops being a divide-by-zero and becomes a **flat
+  loss landscape** — bounded and well-behaved — resolved by a principled momentum prior
+  (§4) rather than an injected `ε`.
+
+The one derivative we *do* embrace later is the **IK Jacobian** (forward kinematics
+w.r.t. joint angles) — but for 2-bone limbs even that is unnecessary because there's a
+closed form (§6). So the solver carries no clip-derivative estimates at all.
+
+---
+
+## 3. Contacts and targets
+
+A **contact** is a labeled node on the skeleton plus a policy for where its world
+target comes from. The labeled set changes through the cycle (left foot plants, lifts,
+right foot plants).
+
+Two target sources, one primitive:
+
+- **SelfPlant** (foot no-slip): on the frame a node becomes labeled, **capture** its
+  current world position; **hold** that point as the target until the label drops.
+  This is what pins a walking foot.
+- **External** (vault / ledge): the target is a fixed world point supplied by the
+  sim/level (the corner being vaulted), active over a time window. Same minimize,
+  different target source.
+
+Capture/hold state is **render-only** animator state — it never enters `Simulation`,
+so determinism/rollback is unaffected (consistent with the pull-model boundary).
+(External targets refine this slightly: the *sim publishes* the anchor point it
+already computes — e.g. the vault corner via `PlayerAbilityState` — and the animator
+reads it through the sample; all hold/ease state stays animator-side. See
+[VAULT_HAND_PIN_PLAN.md](VAULT_HAND_PIN_PLAN.md).)
+
+### Contact node = a bone tip
+
+A contact point is a bone's tip: `WorldOf(bone).TransformPoint(new Vector2(bone.Length, 0))`.
+Today the biped's `leg_*_lower` bones use `Length` only as a leaf orientation tick, so
+there is no explicit toe/ankle. **Decision (§12.1):** add explicit `foot_l`/`foot_r`
+leaf bones so the contact point is unambiguous and gives future IK a clean target.
+
+---
+
+## 4. The loss
+
+For a candidate phase advance `Δφ`, sample the clip at `φ+Δφ`, run forward kinematics,
+and sum the squared world-space miss of every active contact, plus a smoothness prior:
+
+```
+L(Δφ) = Σᵢ wᵢ · ‖ Cᵢ(φ+Δφ) − tᵢ ‖²   +   λ · (Δφ − Δφ_prev)²
+
+  Cᵢ(φ+Δφ)  world position of contact node i at the candidate phase
+            = root · pose(φ+Δφ) forward-kinematics to node i's tip
+  tᵢ         contact i's world target (captured SelfPlant point, or External point)
+  wᵢ         contact weight (from the label; soft contacts < 1)
+  λ          momentum/smoothness prior weight
+```
+
+- **Axis-agnostic:** it is just `‖worldPos − target‖²`. Horizontal walk, vertical
+  climb, diagonal vault ramp are the same equation; the clip's contact geometry decides
+  the axis, never the solver.
+- **Multi-contact:** more squared terms; still one scalar `Δφ`. Two planted feet or
+  hand+foot fall out as the natural least-squares over all active contacts.
+- **The prior is load-bearing, not a hack:** where contacts don't determine cadence
+  (stride reversal; or, post-IK, any reachable phase) the first term is flat and
+  `λ·(Δφ−Δφ_prev)²` picks "keep going at the previous rate." It also suppresses
+  frame-to-frame jitter.
+
+Body motion enters through `Cᵢ` (the node's world pos includes the new body position
+in `root`), so cadence is driven by real motion without a separate "ground distance"
+computation.
+
+---
+
+## 5. The solver — outer loop (build this first)
+
+A **1-D, derivative-free, forward-bracketed** minimize of `L(Δφ)`.
+
+- **Method:** golden-section search (Brent later only if profiling demands). ~30 lines,
+  hand-rolled, pure `MathF` — no external dependency (see §11).
+- **Forward-bracketed is non-negotiable:** `L` is multimodal over a cyclic clip (a foot
+  crosses the same world point twice per cycle). A global minimize would teleport or
+  reverse the phase. Search `Δφ ∈ [0, Δφ_max]` only, with `Δφ_max` set by a max
+  plausible cadence per frame.
+- **Cost:** a handful of bones × ~10–20 evals, serial, allocation-free. Negligible for
+  our character counts.
+
+### 5.1 Event-aware substepping (the "multi-frame" case)
+
+A single large frame step can advance phase far enough to **cross a contact event** — a
+foot lifts and the other plants *within* the step. You cannot solve that span with one
+fixed target set. So advance phase in segments bounded by the next contact-change
+keyframe:
+
+```
+remaining = desiredTotalStep            // bound by velocity / Δφ_max
+while remaining > 0:
+    segEnd   = phase to next contact-change keyframe (or remaining, whichever first)
+    Δφ_seg   = SolvePhaseStep(clip, φ, root, min(remaining, segEnd))   // golden-section
+    apply Δφ_seg; φ = Wrap01(φ + Δφ_seg)
+    on crossing a contact change: release lifted contacts, capture newly-planted ones
+    remaining -= Δφ_seg
+```
+
+Bonus: within a segment the contact set is constant, so the loss is smooth (no
+foot-switch kink) → each golden-section solve sees a unimodal piece. Correctness and
+conditioning from the same mechanism.
+
+### 5.2 Contact swap handling (foot lift/plant)
+
+The hard moment is the **plant swap**: at some phase, foot A lifts and foot B plants.
+The decisions below trade a little exactness for a lot of simplicity — and lose almost
+no fidelity at 30 fps.
+
+**Feather the contact weight — make the swap a crossover, not an instant.** Each
+contact's `Weight` ramps rather than toggling: A's `1→0` as it lifts, B's `0→1` as it
+plants, with a short overlap window where both are partially weighted. The least-squares
+loss then blends both constraints automatically:
+
+```
+L(Δφ) = w_A·‖C_A − t_A‖² + w_B·‖C_B − t_B‖² + λ(Δφ − Δφ_prev)²
+```
+
+This dissolves the "what is the new constraint's start point?" question: **capture B's
+target the moment its weight first goes nonzero**, while B's influence on the solve is
+still near zero. A slightly-wrong capture barely affects the solve; by the time `w_B`
+ramps to 1, B has been pinned for several frames and settled. The error is absorbed in
+the low-weight region instead of popping.
+
+**Bound `Δφ_max` below one stance window.** Wanted anyway (stops skipping a whole step
+per frame; keeps the golden-section bracket on a smooth piece). It also guarantees a
+frame crosses **at most one swap**, so the bookkeeping never compounds. At 30 fps a
+frame advances only ~10–13% of a stance even at a sprint, so a frame rarely straddles a
+swap and, when it does, by a small margin.
+
+**Lazy end-of-frame capture — no exact-instant substep.** Per frame:
+
+1. Solve `Δφ ∈ [0, Δφ_max]` with weights evaluated across the candidate span (a frame
+   straddling the swap automatically sees the blended A+B loss — no special case).
+2. Advance `φ`; store `Δφ` as `Δφ_prev`.
+3. Reconcile contacts at the new `φ`: a contact whose weight just left zero gets its
+   target captured **now**, one FK eval under the current (end-of-frame) body root — no
+   within-frame body interpolation. A contact whose weight hit zero is dropped.
+
+**Explicitly skipped:** interpolating body position to the exact swap instant and
+re-solving the post-swap remainder within the same frame. The sub-frame exactness it
+buys is below perceptual threshold given `Δφ`/frame ≪ stance window. (If a freshly-
+planted foot ever needs one notch more precision, capture it at the swap *keyframe*
+`φ_swap` instead of end-of-frame `φ` — one extra pose sample — but feathering should
+make this unnecessary.)
+
+**Continuity:** the momentum prior `λ(Δφ − Δφ_prev)²` carries the phase rate smoothly
+through the swap, so cadence doesn't lurch when the active constraint changes. **IK era:**
+drive each leg's IK target weight by the same contact weight — the lifting leg ramps
+back to the clip/FK pose while the planting leg ramps onto its captured point, so the
+limb transitions FK→IK with no snap.
+
+---
+
+## 6. The solver — inner loop (IK era; stub for now)
+
+When joint angles join the parameter set, the structure is **bilevel**, not one big
+Jacobian — because `Δφ` and joint angles are different *kinds* of variable:
+
+| variable | nature | method |
 |---|---|---|
-| DOF | 1 (a scalar: how fast the clip plays) | 2 per contact (a world point the node must hit) |
-| Drives | playback rate / phase advance | actual bone positions (via IK) |
-| Solves | "pace matches speed" | "foot doesn't slip", "hand on corner" |
-| Needs | clip stride length + body distance | contact labels + 2-bone IK + terrain query |
-| This doc | **yes** | sketched only (§8) |
+| `Δφ` | kinky (keyframe boundaries), periodic, forward-bounded | derivative-free golden-section (outer) |
+| joint angles `θ` | smooth, analytic FK | closed form / Gauss-Newton (inner) |
 
-A 1-DOF time knob **cannot** satisfy a 2-DOF positional invariant except in the
-idealized flat-ground / constant-velocity case. So we build cadence first (it makes
-walk *and* run look right on flat ground with zero IK), then layer IK on top later.
+```
+outer:  φ  ← golden-section on the POST-IK residual
+inner:  θ  ← given φ, solve joints to hit contact targets
+```
 
-We already distance-phase crudely: [CharacterAnimator.cs](../Animation/CharacterAnimator.cs)
-advances `Phase` by `speed * dt * PhasePerPixel`. The hardcoded `PhasePerPixel = 0.010f`
-is exactly the constant this plan replaces with a value **derived from the clip**.
+- **Inner is a small damped Gauss-Newton, piloted by the vault hand pin** (revised —
+  see [VAULT_HAND_PIN_PLAN.md](VAULT_HAND_PIN_PLAN.md) §5.3, which pilots the shared
+  `LimbSolver` on a problem with *no phase DOF*). Rationale for preferring it over the
+  earlier closed-form law-of-cosines plan: the stay-near-pose prior kills branch/bend
+  flips and reach-limit snapping by construction, warm starts give temporal coherence,
+  and differentiating the *actual* FK encodes the rig's R·T·S pivot conventions
+  automatically (hand-deriving chain geometry is where the errors live — see that
+  plan's §5.2). Cost: 2–4 warm-started iterations on a ≤4-DOF dense system per
+  evaluation instead of O(1) — still trivially cheap inside the bilevel loop, and §11's
+  hand-rolled-GN clause already blessed it. **Closed-form remains the documented
+  fallback** (same plan, §5.3 tail) if the pilot disappoints. The bilevel structure
+  itself is unchanged and non-negotiable: Δφ stays on the derivative-free outer loop —
+  one unified loss, two nested solvers matched to variable type, never one flat solver.
+- **The objective shifts when IK lands — internalize this.** Once IK can pin the foot
+  for any nearby `φ`, the contact term goes to ~0 across a *range* of `φ`, so contacts
+  **stop determining cadence**. `φ` is then pinned by (a) a **reach-feasibility barrier**
+  (soft penalty as the planted leg nears full extension — don't let the body outrun the
+  locked foot) and (b) the **momentum prior**. IK does not make the φ-solve harder; it
+  empties the contact term and hands φ's job to the barrier + prior. The residual left
+  after IK is exactly the slip IK couldn't absorb (over-extension), which is what the
+  barrier is protecting against.
+- **Multi-state interpolation** (blending two clips) adds a weight `α`, but `α` is
+  scheduled by the transition (a crossfade timer), so it's a **parameter** of the loss,
+  not a solved DOF. Dimensionality stays low.
+
+For the first slice, the inner solve is the identity (no IK): `Cᵢ` is read straight
+from the sampled pose. Adding IK later is a localized change inside the loss evaluation.
 
 ---
 
-## 2. Core principle: distance-phasing with clip-derived stride
+## 7. Data model (sketches)
 
-Drive the phase by **distance traveled**, not by inverting foot velocity.
-
-The tempting formulation `dφ/dt = -v_body / (d footLocal/dφ)` blows up at the stride
-extremes where the foot reverses (denominator → 0) and when standing still. Instead:
-
-```
-phase += distanceTraveledAlongGround / clipStride
-```
-
-where `clipStride` is the world distance the body should cover in **one full cycle**
-so the plant foot lands without slipping. The key move: **derive `clipStride` from
-the clip itself** = the horizontal local travel of the planted foot during its stance
-window. Then:
-
-- Re-tuning a clip in the editor auto-retunes its pace (no magic constant to chase).
-- Running = the same machinery with a longer-stride clip. No code path differs.
-- It's stable: we integrate distance, never divide by a vanishing derivative.
-
-### 2.1 Deriving `clipStride` from a clip
-
-A foot is "planted" over a contiguous span of keyframes (its stance window). During
-stance, in the skeleton's local/root frame, the foot travels backward from a forward
-extreme to a rear extreme — that backward local travel is what visually propels the
-body. The body must advance by exactly that much over the same phase span so the
-foot stays put in world space.
-
-```
-For each foot's stance window [φ_down, φ_up]:
-    footLocalX(φ_down)  = forward-most foot x in root space
-    footLocalX(φ_up)    = rear-most foot x in root space
-    strideContribution  = footLocalX(φ_down) - footLocalX(φ_up)   // > 0
-```
-
-For a clean alternating gait the two feet contribute equal strides; we take
-`clipStride = sum of per-foot stride contributions` over one full cycle (or the mean
-of the two, depending on labeling — see §6 open question). This is computed **once**
-when a clip is bound (precompute, cache on the document), not per frame.
-
-Foot local position at a keyframe = resolve the pose under an **identity root** and
-read the contact node's world position. We already have everything for this:
-`SkeletonPose.ComputeWorld(Affine2.Identity)` then `WorldPosition(node)`.
-
----
-
-## 3. What a "contact node" is (rig decision)
-
-A contact is a labeled **point on the skeleton**, not just a bone. Today the biped
-([Drawing/SkeletonExamples.cs](../Drawing/SkeletonExamples.cs)) has `leg_l_lower` /
-`leg_r_lower` whose `Length` is only a leaf orientation tick — the visible shin is the
-*translation* to the lower-leg joint, so there's no explicit toe/ankle point.
-
-**Decision to confirm (see §9):** define a contact point as a **bone tip** =
-`WorldOf(bone).TransformPoint(new Vector2(bone.Length, 0))`, and add explicit
-`foot_l` / `foot_r` leaf bones to the biped so the contact point is unambiguous and
-editable. Alternative: reuse the lower-leg joint as the ankle. Adding feet is cleaner
-and gives the future IK something to aim.
-
----
-
-## 4. Data model changes (sketches)
-
-### 4.1 Contact labels on keyframes
-
-Each keyframe declares which nodes are in contact at that instant. The label set
-**changes between frames** (left foot plants, then right). Minimal, JSON-friendly,
-additive to the existing format (absent → no contacts, fully back-compatible).
+### 7.1 Contact label on a keyframe — additive, back-compatible
 
 ```csharp
-// Animation/PoseState.cs  (or a new Animation/ContactLabel.cs)
+// Animation/ContactLabel.cs (new)
 
-// One contact annotation on a keyframe: a named node that is planted (zero world
-// velocity) at this keyframe's instant. Weight allows soft transitions later;
-// 1 = fully planted, 0 = free. For Mechanism #1 we only read Weight >= 0.5.
+// Where a contact's world target comes from.
+public enum ContactSource { SelfPlant, External }
+
+// One contact annotation on a keyframe: a named node that should be pinned at this
+// keyframe's instant. Absent/empty list on a keyframe = airborne (no contacts).
 public sealed class ContactLabel
 {
-    public string Node   { get; set; }       // bone name; contact point = its tip
-    public float  Weight { get; set; } = 1f; // planted strength, [0,1]
+    public string        Node   { get; set; }                    // bone name; point = its tip
+    public float         Weight { get; set; } = 1f;              // wᵢ in the loss, [0,1]
+    public ContactSource Source { get; set; } = ContactSource.SelfPlant;
 }
 ```
 
 ```csharp
-// Animation/AnimationDocument.cs  — extend AnimationKeyframe
-
+// Animation/AnimationDocument.cs — extend AnimationKeyframe (rides existing JSON I/O)
 public sealed class AnimationKeyframe
 {
     public float                Time     { get; set; }
     public List<PoseBoneEntry>  Bones    { get; set; } = new();
-    public List<ContactLabel>   Contacts { get; set; }   // null/empty = airborne frame
+    public List<ContactLabel>   Contacts { get; set; }   // null = no contacts this frame
 }
 ```
 
-### 4.2 Precomputed locomotion profile (the derived stride)
+`System.Text.Json` picks up `Contacts` automatically; old files (no `Contacts`) load
+as airborne-everywhere and fall back to the legacy velocity-based phase advance.
 
-Computed once per clip at bind time and cached. Keeps the per-frame path allocation-
-free and keeps derivation logic out of the hot loop.
+### 7.2 Active contact target — animator runtime state (render-only)
 
 ```csharp
-// Animation/LocomotionProfile.cs  (new)
-
-// Per-clip cadence data derived from contact labels + foot geometry. Built once when
-// a clip is bound to the animator (or by the editor for display). Pure function of
-// the AnimationDocument + Skeleton — no per-frame state, safe to cache on the clip.
-public sealed class LocomotionProfile
+// held inside CharacterAnimator
+private struct ActiveContact
 {
-    public float ClipStride { get; private set; }   // world px the body covers per full cycle
-    public bool  HasContacts { get; private set; }  // false → fall back to old PhasePerPixel
-
-    // Resolves each keyframe under identity root, finds each node's stance window,
-    // sums the backward local travel. See §2.1.
-    public static LocomotionProfile Build(AnimationDocument doc, Skeleton skeleton,
-                                          SkeletonPose scratch);
-
-    // Cadence: how much normalized phase to advance for a given ground distance.
-    // phaseDelta = distance / ClipStride   (guarded against ClipStride <= 0).
-    public float PhaseForDistance(float groundDistance);
+    public int           Bone;     // resolved bone index of the contact node
+    public Vector2       Target;   // world point to pin to
+    public float         Weight;
+    public ContactSource Source;
 }
+private readonly List<ActiveContact> _contacts = new();   // rebuilt as labels change
+private float _prevPhaseStep;                              // Δφ_prev for the momentum prior
 ```
 
-### 4.3 Binding the profile to a clip
+Capture/hold logic: when a label appears at the current phase, resolve its world
+position once and store as `Target` (SelfPlant) or take the supplied point (External);
+keep it until the label drops at a later keyframe.
 
-The animator already holds `Dictionary<AnimClip, AnimationDocument> _clips`. Add a
-parallel cache (or wrap both in a small struct):
-
-```csharp
-// in CharacterAnimator
-private readonly Dictionary<AnimClip, LocomotionProfile> _profiles = new();
-// built in the constructor right after _clips is populated:
-//   _profiles[clip] = LocomotionProfile.Build(anim, skeleton, scratchPose);
-```
-
----
-
-## 5. Runtime integration (CharacterAnimator)
-
-Change is localized to the phase-advance step (§ "2. Advance the locomotion phase").
-
-### 5.1 Distance, along the ground
-
-Track distance traveled between frames. For flat ground this is `|Δposition.X|`;
-designed from the start to be the projection onto the surface tangent so slopes are
-not a special case we retrofit later.
+### 7.3 Solvers (hand-rolled, WASM-safe)
 
 ```csharp
-// new field
-private Vector2 _prevPosForPhase;
-
-// in Update(), replacing the speed*dt*PhasePerPixel line:
-float groundDist = MathF.Abs(s.Position.X - _prevPosForPhase.X);   // TODO: project on tangent
-if (clip is AnimClip.Walk or AnimClip.WalkBack
-    && _profiles.TryGetValue(clip, out var prof) && prof.HasContacts)
+// Animation/GoldenSection.cs (new) — 1-D derivative-free minimize on [lo, hi].
+public static class GoldenSection
 {
-    _state.Phase = Wrap01(_state.Phase + prof.PhaseForDistance(groundDist));
+    // Minimizes f on [lo, hi] to tolerance tol or maxIters. Allocation-free.
+    public static float Minimize(Func<float, float> f, float lo, float hi,
+                                 float tol = 1e-3f, int maxIters = 24);
 }
-else if (clip is AnimClip.Walk or AnimClip.WalkBack)
-{
-    _state.Phase = Wrap01(_state.Phase + MathF.Abs(s.Velocity.X) * dt * PhasePerPixel); // legacy fallback
-}
-else if (clip == AnimClip.Idle) { /* unchanged bob */ }
-_prevPosForPhase = s.Position;
 ```
-
-### 5.2 Phase → sample time
-
-Authored clips are currently sampled by **elapsed seconds** (`_state.ClipTime`) in
-`AnimationSampler.SampleAtTime`. For locomotion we want to sample by **phase**, not
-wall-clock, so the cadence actually drives the pose. Add a phase-driven entry point:
 
 ```csharp
-// AnimationSampler — phase is already normalized [0,1]; reuse SampleNormalized.
-AnimationSampler.SampleNormalized(anim, _state.Phase, _kfA, _kfB, _target);
+// Animation/LimbSolver.cs (new, IK era) — damped Gauss-Newton over a limb's local
+// rotation deltas (≤4 DOF incl. optional root offset), minimizing contact residual
+// + stay-near-pose priors. Hand-rolled, fixed-size, allocation-free, WASM-safe.
+// Piloted (and specified in detail) by VAULT_HAND_PIN_PLAN.md §5.3; shared by the
+// vault pin and this plan's Phase 5 foot IK. The closed-form law-of-cosines
+// TwoBoneIk sketched in earlier revisions survives as the documented fallback there.
+public static class LimbSolver { /* see VAULT_HAND_PIN_PLAN.md §5.3 */ }
 ```
 
-So: locomotion clips (Walk/WalkBack/Idle) sample by `_state.Phase`; one-shot clips
-(Jump/Fall/Vault/Crouch) keep sampling by `_state.ClipTime`. A per-clip flag
-(`Loop` already exists on the document, and is a decent proxy: looped → phase-driven,
-one-shot → time-driven) can select which.
+### 7.4 The per-frame phase solve (ties it together)
 
-### 5.3 What stays the same
-
-- The directional lean post-process (§3b) and landing squash (§3c) are unchanged —
-  they sit on top of the sampled base pose.
-- The pull-model boundary is untouched: still read-only `CharacterAnimSample.From`,
-  still render-only, still no feedback into the sim. Determinism is unaffected
-  because none of this lives in `Simulation.Step`.
-
----
-
-## 6. Editor support (MTile.Demo)
-
-To author contacts and verify stride visually:
-
-- **Label toggle:** select a node, press a key to toggle its contact label on the
-  active keyframe (writes `AnimationKeyframe.Contacts`).
-- **Render planted nodes** distinctly (e.g. filled red disc) so the stance schedule
-  is visible while scrubbing.
-- **Stride readout:** show `LocomotionProfile.ClipStride` for the selected clip, and
-  optionally draw the planted foot's world track across the cycle (a horizontal bar
-  whose length is the stride) so authors can see slip at a glance.
-- Saving already round-trips the document; `Contacts` rides along via the existing
-  `AnimationStore.Save` (System.Text.Json picks up the new property automatically).
+```csharp
+// inside CharacterAnimator — replaces the PhasePerPixel line for locomotion clips
+float SolvePhaseStep(AnimationDocument clip, float phi, in Affine2 root, float maxStep)
+{
+    float Loss(float dphi)
+    {
+        AnimationSampler.SampleNormalized(clip, Wrap01(phi + dphi), _kfA, _kfB, _scratch);
+        _scratch.ComputeWorld(root);
+        // (IK era: solve inner joints here, then read Cᵢ from the IK'd pose.)
+        float e = 0f;
+        foreach (var c in _contacts)
+        {
+            Vector2 tip = _scratch.WorldOf(c.Bone)
+                                  .TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
+            e += c.Weight * (tip - c.Target).LengthSquared();
+        }
+        float d = dphi - _prevPhaseStep;
+        return e + Lambda * d * d;
+    }
+    return GoldenSection.Minimize(Loss, 0f, maxStep);
+}
+```
 
 ---
 
-## 7. Edge cases to handle (call them out now)
+## 8. Runtime integration (CharacterAnimator)
 
-1. **Standstill / sub-threshold speed.** `groundDist → 0` freezes the cycle
-   mid-stride with a foot possibly in the air. Keep the existing `WalkSpeedThreshold`
-   blend to Idle; ensure the freeze lands on a planted-foot phase if we ever hold
-   mid-walk.
-2. **Flight phase (running).** A keyframe span with **zero** contacts is legal — the
-   profile must tolerate it (don't divide by zero stride; that span just contributes
-   no plant). Cadence coasts through flight.
-3. **Slopes.** No-slip is along the **surface tangent**, not world-X. We stub
-   `groundDist` as `|Δx|` now but route it through a "project on tangent" TODO so the
-   fix is one function later, not a rewrite.
-4. **Reach feasibility (couples to Mechanism #2).** If the body outruns the locked
-   foot, the leg over-extends. The clean resolution is to *choose* stride so the
-   locked foot stays within leg reach — i.e. `clipStride` is bounded by leg length.
-   For now, cadence alone won't over-extend because there's no lock yet; note it for
-   when IK lands.
-5. **Direction sign on slopes.** Cadence magnitude uses distance; the *clip* already
-   encodes forward vs backpedal (Walk vs WalkBack). Velocity sign only picks the clip
-   (existing `SelectClip`), not the phase rate.
+Change is localized to the phase-advance step in `Update`:
 
----
+1. Resolve `root` for the current frame (already done for `Draw`; hoist it so the solve
+   and the render share it).
+2. Refresh `_contacts` from the active clip's labels at the current phase: release
+   contacts whose label dropped, capture newly-appeared ones (§7.2).
+3. Event-aware substep loop (§5.1) calling `SolvePhaseStep`; store the last `Δφ` into
+   `_prevPhaseStep`.
+4. Sample the clip **by phase** for locomotion (`SampleNormalized(clip, _state.Phase,…)`),
+   keeping one-shot clips (Jump/Fall/Vault/Crouch) sampled by `ClipTime` as today. The
+   `Loop` flag is a good selector (looped → phase-driven, one-shot → time-driven), or an
+   explicit `bool PhaseDriven` (§12.3).
+5. Directional lean (§3b in the animator) and landing squash (§3c) still apply on top of
+   the sampled base pose — unchanged.
 
-## 8. Forward path to Mechanism #2 (IK) — keep the door open
+Unchanged invariants: read-only `CharacterAnimSample`, render-only, no feedback into the
+sim. None of this lives in `Simulation.Step`.
 
-Not building now, but the §4 data model is chosen so this drops in cleanly:
-
-- **Contact target + source policy.** A contact is `node → world target`, with two
-  target sources:
-  - *captured-from-self* (foot plant): on touchdown, capture the node's current world
-    position; hold it until the label drops; IK keeps the leg reaching it.
-  - *supplied-by-environment* (vault): the corner is a fixed world point handed in by
-    the sim/level, active over a time window. Same primitive, different source.
-- This means `ContactLabel` may later gain `enum ContactSource { SelfPlant, External }`
-  and the animator a small `IkSolver` (2-bone analytic leg/arm solve). The captured
-  world point lives in animator state (render-only), never in the sim.
-- Hysteresis on plant/lift transitions to avoid jitter; release the lock when the
-  label weight crosses below a threshold.
-
-Sketch only — do not implement until cadence is in and proven on flat ground.
+Fallback: clips with no contact labels (or `HasContacts == false`) keep the existing
+`speed * dt * PhasePerPixel` advance, so nothing regresses before labels are authored.
 
 ---
 
-## 9. Open questions / decisions to confirm
+## 9. Editor support (MTile.Demo)
 
-1. **Add explicit `foot_l`/`foot_r` bones** to the biped, or treat the lower-leg
-   joint as the ankle? (Recommend: add feet — cleaner contact point + IK target.)
-2. **Per-foot vs summed stride.** Sum both feet's stance travel over a full cycle, or
-   average and assume symmetric gait? (Recommend: sum; tolerant of asymmetric clips.)
-3. **Phase vs time sampling selector.** Use the existing `Loop` flag (looped →
-   phase-driven), or add an explicit `bool PhaseDriven` to `AnimationDocument`?
-4. **Where stride is cached.** On `LocomotionProfile` held by the animator (proposed),
-   or memoized on `AnimationDocument` itself? (Animator-side keeps the document a pure
-   serialization DTO.)
-5. **Initial labeling pass.** Hand-label `walk` and `walkback` seeds in
-   `DemoGame.BuildSeeds`, or only via the editor? (Recommend: seed `walk` so there's a
-   working example to derive stride from on day one.)
+- **Label toggle:** select a node, press a key to toggle its `ContactLabel` on the
+  active keyframe; cycle `Source` (SelfPlant/External) with a modifier.
+- **Render planted nodes** distinctly (filled red disc) so the stance schedule is
+  visible while scrubbing.
+- **Slip readout:** with a synthetic constant body velocity, drive the solver and draw
+  the planted node's world track across a cycle — a near-stationary point means good
+  no-slip. Lets authors tune contact timing by eye.
+- Saving round-trips `Contacts` through the existing `AnimationStore.Save`.
 
 ---
 
-## 10. Suggested build order
+## 10. Edge cases
 
-1. Rig: add `foot_l`/`foot_r` (if confirmed) + `ContactLabel` type + keyframe field.
-2. `LocomotionProfile.Build` + a unit test in `MTile.Tests` deriving stride from a
-   hand-built 2-keyframe clip (pure math, no rendering — fits the headless test rig).
-3. Editor: label toggle + planted-node rendering + stride readout.
-4. Hand-label the `walk` seed; eyeball stride.
-5. Animator: swap phase advance to `PhaseForDistance`, sample locomotion by phase.
-6. Verify in-game: pace tracks speed across a range; no visible foot slip on flat
-   ground. Then (separately) start Mechanism #2.
+1. **Standstill / sub-threshold speed:** keep the `WalkSpeedThreshold` blend to Idle;
+   freeze on a planted-foot phase.
+2. **Flight phase (run):** a span with zero contacts is legal — `_contacts` empties, the
+   loss is just the prior, cadence coasts. No divide-by-anything.
+3. **Slopes:** targets are world points and the loss is axis-agnostic, so a foot planted
+   on a slope is handled with no special case once the contact point snaps to terrain
+   (a downward query — stub now, fill later).
+4. **Reach feasibility:** harmless pre-IK (no lock to over-extend). Becomes the dominant
+   φ-driver post-IK via the reach barrier (§6).
+5. **IK solution flips (IK era):** fix the knee/elbow bend side by convention and
+   warm-start from the previous frame so the post-IK residual stays smooth in `φ`; the
+   `λ` prior smooths any remaining jitter.
+
+---
+
+## 11. WASM / dependency constraints
+
+The shared source compiles twice — under DesktopGL (`MTile.Core`) and KNI/Blazor WASM
+(`MTile.Web`). The solver lives in shared `Animation/` code, so it must run in WASM.
+
+- **No external solver library.** Native-backed options (NLopt wrappers, MKL paths) use
+  P/Invoke → unavailable in Blazor WASM. Math.NET Numerics is the only pure-managed
+  option that would run, but it's oversized for a 1-D search + closed-form IK, adds
+  download weight (the web csproj is size-conscious, `RunAOTCompilation=false`), and can
+  fight trimming. Accord.NET / SolverFoundation are effectively dead.
+- **Hand-roll both pieces** (`GoldenSection`, `TwoBoneIk`): pure `MathF`/`Vector2`,
+  allocation-free, single-threaded (Blazor WASM is single-threaded by default), WASM-safe
+  by construction — the same discipline already used for `Affine2`.
+- Revisit a real solver library **only** for long chains or a coupled full-body solve —
+  and even then prefer a ~60-line hand-rolled dense Gauss-Newton/LM for a per-frame
+  render-side loop.
+
+---
+
+## 12. Open decisions
+
+**Resolved — action/movement layering:** action clips are **constraint-free, fixed-rate
+overlays**. They carry no contact labels, never enter the cadence φ-solve, and add no
+phase DOF; the action layer just reads its own `ActionVars.TimeInState`, samples, and
+blends onto the movement pose per a per-bone mask (see
+[ANIMATION_LAYERING_PLAN.md](ANIMATION_LAYERING_PLAN.md)). **All contacts and IK live on
+the movement layer only.** The lone positional action-like invariant — the vault hand on
+the corner — is not an action: vault is a *movement* state (`ParkourState`), so that pin,
+if ever wanted, is an External contact on the movement layer's contact set, not action-
+side. This removes the two-clock coupling entirely; don't re-litigate it.
+
+1. **Add explicit `foot_l`/`foot_r` bones** to the biped (recommended) vs. reuse the
+   lower-leg joint as the ankle.
+2. **`λ` (momentum prior weight)** and **`Δφ_max` (max phase step / cadence clamp)** —
+   tune by eye in the editor.
+3. **Phase vs time sampling selector:** reuse the `Loop` flag, or add explicit
+   `bool PhaseDriven` to `AnimationDocument`.
+4. **Initial labeling:** hand-label the `walk` seed in `DemoGame.BuildSeeds` so there's a
+   working contact example day one, vs. editor-only.
+5. **Golden-section tolerance / iteration cap** — start at `tol 1e-3`, `maxIters 24`.
+
+---
+
+## 13. Implementation phases
+
+Each phase is independently shippable and ends with a concrete verification. A recurring
+gate applies to **every** phase touching shared code: it must compile under **both**
+`MTile.Core` (DesktopGL) and `MTile.Web` (KNI/Blazor WASM). Determinism is not a gate —
+all of this is render-only and never enters `Simulation.Step`.
+
+### Phase 0 — Rig + data scaffolding (no behavior change)
+- **Do:** add `foot_l`/`foot_r` leaf bones to `SkeletonExamples.Biped` (§12.1); add the
+  `ContactLabel` type + `ContactSource` enum (§7.1); add the `Contacts` field to
+  `AnimationKeyframe`.
+- **Stub/defer:** nothing reads `Contacts` yet.
+- **Verify:** both builds green; existing `SkeletonStates/*.json` still load (no
+  `Contacts` → treated as airborne); the game and demo run visually identical to today.
+
+### Phase 1 — Golden-section minimizer + headless test (pure math)
+- **Do:** implement `GoldenSection.Minimize` (§7.3), allocation-free.
+- **Stub/defer:** no game wiring.
+- **Verify:** a `MTile.Tests` unit test builds a 2-keyframe clip with one labeled
+  contact + a synthetic constant body velocity, runs the solve loop, and asserts the
+  planted node's world position stays within tolerance across the cycle. Fits the
+  headless `MTile.Tests/Sim` style (no rendering).
+
+### Phase 2 — Cadence wiring, single contact (no swap yet)
+- **Do:** add the `ActiveContact` capture/hold state (§7.2), hoist `root`, implement
+  `SolvePhaseStep` (§7.4), and switch **locomotion** clips to phase-driven sampling
+  (one-shots stay `ClipTime`-driven). Resolve §12.3 (reuse `Loop`, or add `PhaseDriven`).
+  Hand-label the `walk` seed in `DemoGame.BuildSeeds` with one planted foot per half-
+  cycle (hard switch tolerated here).
+- **Stub/defer:** swap feathering, substepping, IK. Legacy `PhasePerPixel` fallback stays
+  for unlabeled clips.
+- **Verify in-game:** walk pace tracks body speed across a range; foot slip is visibly
+  reduced vs. the old constant. A small pop at the foot swap is acceptable for now.
+
+### Phase 3 — Swap handling (feather + bound + lazy capture)
+- **Do:** implement §5.1 substep loop + §5.2 feathered-weight crossover, the `Δφ_max`
+  bound, lazy end-of-frame capture, and the `λ` momentum prior. Re-label `walk` (and add
+  `walkback`) with weights that ramp across keyframes. Tune `λ`, `Δφ_max` (§12.2).
+- **Stub/defer:** IK.
+- **Verify in-game:** foot-plant transitions are smooth (no pop at the swap); cadence
+  stays continuous through swaps and across speed changes; standstill blends to Idle
+  cleanly (§10.1).
+
+### Phase 4 — Editor support (authoring)
+- **Do:** §9 — contact label toggle, `Source` cycle, planted-node rendering, slip readout
+  in `MTile.Demo`.
+- **Note:** can be pulled before Phase 3 if hand-labeling seeds in `BuildSeeds` gets
+  painful — it's a pure authoring aid, no runtime dependency.
+- **Verify:** can author/inspect/save contacts visually; the slip readout reflects label
+  timing changes.
+
+### Phase 5 — IK era (separate slice; only after cadence is proven)
+- **Do:** adopt `LimbSolver` (§7.3 — damped GN, piloted and proven by the vault hand
+  pin first; closed-form fallback if that pilot disappointed), plug the inner solve into
+  the loss evaluation (§6), add the reach-feasibility barrier, switch SelfPlant feet to
+  hard pins, drive IK target weight by contact weight (§5.2). The **External**
+  vault-corner contact is designed separately in
+  [VAULT_HAND_PIN_PLAN.md](VAULT_HAND_PIN_PLAN.md) — External contacts **bypass the
+  φ-solve entirely** (the vault clip is a one-shot with no phase DOF); their solve is a
+  draw-time post-pass, a different call site from the bilevel cadence loss here.
+  `LimbSolver` is the shared utility both consume. NOTE before implementing either: the
+  rig-convention findings in that plan's §5.2 (R·T·S pivot semantics, rotation-only
+  keyframes → the chain base is the *parent* origin, not the first joint) apply to this
+  phase's leg IK too — the GN Jacobian encodes them automatically, the fallback doesn't.
+- **Verify in-game:** no measurable slip (hard pin); legs handle slopes and don't over-
+  extend (barrier); vault hand reaches the corner; no limb snap at swaps (weight ramp).

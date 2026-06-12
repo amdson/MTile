@@ -42,11 +42,22 @@ public class InputParser
     private int _lastClickEmitted     = int.MinValue;
     private int _lastStabEmitted      = int.MinValue;
     private int _lastCircleEmitted    = int.MinValue;
+    private int _lastJumpEmitted      = int.MinValue;
 
     public void Detect(Controller controller, IntentBuffer buffer, int currentFrame)
     {
         var cur  = controller.Current;
         var prev = controller.GetPrevious(1);
+
+        // Jump edge — Space just went down. Movement-side intent: jump states Peek
+        // this within IntentBuffer.JumpBufferFrames (so a slightly-early press still
+        // fires on landing), and guided states (LedgePull) keep it alive until their
+        // natural jump point.
+        if (cur.Space && !prev.Space && currentFrame > _lastJumpEmitted)
+        {
+            buffer.Issue(new ActionIntent { Type = IntentType.Jump, IssuedFrame = currentFrame });
+            _lastJumpEmitted = currentFrame;
+        }
 
         // Press edge — LMB just went down. Start tracking the press.
         if (cur.LeftClick && !prev.LeftClick && currentFrame > _lastPressEdgeEmitted)
@@ -141,6 +152,7 @@ public class InputParser
         LastClickEmitted     = _lastClickEmitted,
         LastStabEmitted      = _lastStabEmitted,
         LastCircleEmitted    = _lastCircleEmitted,
+        LastJumpEmitted      = _lastJumpEmitted,
     };
 
     public void Restore(in InputParserState s)
@@ -154,6 +166,7 @@ public class InputParser
         _lastClickEmitted     = s.LastClickEmitted;
         _lastStabEmitted      = s.LastStabEmitted;
         _lastCircleEmitted    = s.LastCircleEmitted;
+        _lastJumpEmitted      = s.LastJumpEmitted;
     }
 }
 
@@ -169,4 +182,5 @@ public struct InputParserState
     public int     LastClickEmitted;
     public int     LastStabEmitted;
     public int     LastCircleEmitted;
+    public int     LastJumpEmitted;
 }

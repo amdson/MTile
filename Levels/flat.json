@@ -1,0 +1,6 @@
+{
+  "Extents": 3,
+  "Rules": [
+    { "Condition": "y >= 6", "IsSolid": true }
+  ]
+}

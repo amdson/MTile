@@ -1,0 +1,201 @@
+{
+  "Name": "walk",
+  "Type": "Walk",
+  "Skeleton": "biped",
+  "Duration": 0.8,
+  "Loop": true,
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": 0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -0.8
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 0.8
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": -1
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_r",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 0.5,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": 0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 0.8
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -0.8
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -1
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_l",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    },
+    {
+      "Time": 1,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": 0
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -0.8
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 0.8
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": -1
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
+        }
+      ],
+      "Contacts": [
+        {
+          "Node": "foot_r",
+          "Weight": 1,
+          "Source": "SelfPlant"
+        }
+      ]
+    }
+  ]
+}

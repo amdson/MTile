@@ -1,5 +1,5 @@
 {
-  "Stage": "start",
+  "Stage": "flat",
   "WindowWidth": 900,
   "WindowHeight": 700,
   "Fullscreen": false,
@@ -9,11 +9,13 @@
   "DebugDrawBodies":            false,
   "DrawPlayerSprites":          false,
   "DebugDrawConstraints":       false,
+  "DebugDrawSteeringRamps":     true,
   "DebugDrawGuidedPath":        false,
   "DebugDrawHealthBars":        false,
   "DebugDrawMassBall":          true,
   "MouseTrail": true,
   "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
-  "SecondPlayerOffsetY": 0
+  "SecondPlayerOffsetY": 0,
+  "TimeScale": 1.0
 }

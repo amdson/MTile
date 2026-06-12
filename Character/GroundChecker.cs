@@ -71,10 +71,44 @@ public static class GroundChecker
         float   bestProjectedTop = float.MaxValue;
         float   bestSurfaceY     = float.MaxValue;
         Vector2 bestSurfaceVel   = Vector2.Zero;
-        // Route through WorldQuery so dynamic shapes (moving platforms) participate
-        // alongside tiles. Velocity propagates to the returned contact so the body's
-        // standing-spring damping uses relative-frame velocity (no fight with carry).
-        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, probe))
+
+        // Static tile floors via the new query layer. Tiles carry no velocity so
+        // the projection-with-dt step collapses; pick the smallest WorldTop (=
+        // highest tile top in y-down) inside the probe slab.
+        var tileTop = TileQuery.Tiles(chunks, probe)
+            .Where((_, t) => t.WorldTop >= probe.Top - 1f)
+            .MinBy(t => t.WorldTop);
+        if (tileTop is { } t)
+        {
+            bestProjectedTop = t.WorldTop;
+            bestSurfaceY     = t.WorldTop;
+            bestSurfaceVel   = Vector2.Zero;
+        }
+
+        // Growing sprouts live on the ChunkMap and may carry velocity (lerping
+        // toward solid). Inlined here rather than via WorldQuery so the tile
+        // branch above stays in the fluent layer without double-counting tiles
+        // through ChunkMap-as-ISolidShapeProvider.
+        const float half = Chunk.TileSize * 0.5f;
+        foreach (var s in chunks.Graph.Growing)
+        {
+            var c = s.Center;
+            if (c.X + half <= probe.Left || c.X - half >= probe.Right) continue;
+            if (c.Y + half <= probe.Top  || c.Y - half >= probe.Bottom) continue;
+            float top = c.Y - half;
+            if (top < probe.Top - 1f) continue;
+            float projectedTop = top + s.Velocity.Y * dt;
+            if (projectedTop < bestProjectedTop)
+            {
+                bestProjectedTop = projectedTop;
+                bestSurfaceY     = top;
+                bestSurfaceVel   = s.Velocity;
+            }
+        }
+
+        // External shape providers (moving platforms, future dynamic geometry).
+        foreach (var provider in chunks.Providers)
+        foreach (var shape in provider.ShapesInRect(probe))
         {
             if (shape.WorldTop < probe.Top - 1f) continue;
             float projectedTop = shape.WorldTop + shape.Velocity.Y * dt;

@@ -88,6 +88,16 @@ public class MovementConfig
     public float GrabSpringK       { get; set; } = 300f;
     public float GrabDamping       { get; set; } = 100f;
 
+    // Ledge Jump (launch at the top of a ledge pull — see LedgeJumpState).
+    // The launch is a saturated velocity servo toward TargetVy relative to the
+    // ledge: it pushes a slow body toward the target and brakes the pull's surplus
+    // vy down to it, so the jump can never exit faster than the target. ServoAccel
+    // caps the per-step push (3000 ⇒ ~100 px/s gained per frame at 30 fps);
+    // GravityCancel keeps the servo authoritative over vy while powered.
+    public float LedgeJumpTargetVy      { get; set; } = -210f;
+    public float LedgeJumpServoAccel    { get; set; } = 3000f;
+    public float LedgeJumpGravityCancel { get; set; } = 600f;
+
     // Duck Under (stable height)
     public float DuckDamping       { get; set; } = 80f;
 

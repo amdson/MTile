@@ -3,17 +3,15 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-// One bone's local transform in a saved pose, matched back to a live skeleton by
-// Bone name (so reordering bones doesn't corrupt files). Plain properties so
-// System.Text.Json round-trips it without custom converters.
+// One bone's per-keyframe pose data. The only authored channel is Rotation —
+// translation, scale, and bone length live in the rig (Skeletons/<name>.json) and
+// are shared by every animation, so all clips draw against the same figure. Stale
+// Tx/Ty/Sx/Sy properties in old JSON files are silently ignored on load (unknown
+// members) and scrubbed on the next save.
 public sealed class PoseBoneEntry
 {
     public string Bone     { get; set; }
-    public float  Tx       { get; set; }
-    public float  Ty       { get; set; }
     public float  Rotation { get; set; }
-    public float  Sx       { get; set; } = 1f;
-    public float  Sy       { get; set; } = 1f;
 }
 
 // Convert between a live SkeletonPose and the serializable per-bone list. Shared by
@@ -25,19 +23,19 @@ public static class PoseData
         var list = new List<PoseBoneEntry>(pose.Count);
         for (int i = 0; i < pose.Count; i++)
         {
-            var t = pose.Local[i];
             list.Add(new PoseBoneEntry
             {
-                Bone = pose.Skeleton.Bones[i].Name,
-                Tx = t.Translation.X, Ty = t.Translation.Y,
-                Rotation = t.Rotation,
-                Sx = t.Scale.X, Sy = t.Scale.Y,
+                Bone     = pose.Skeleton.Bones[i].Name,
+                Rotation = pose.Local[i].Rotation,
             });
         }
         return list;
     }
 
-    // Apply onto a pose (resets to bind first; bones absent from the list stay at bind).
+    // Apply onto a pose (resets to bind first; bones absent from the list stay at
+    // bind). Rotation comes from the keyframe; translation and scale always come
+    // from the shared skeleton's bind — the rig is the single source of truth for
+    // proportions, so a rig edit shows in every clip.
     public static void Apply(List<PoseBoneEntry> bones, SkeletonPose pose)
     {
         pose.SetToBind();
@@ -46,8 +44,8 @@ public static class PoseData
         {
             int i = pose.Skeleton.IndexOf(e.Bone);
             if (i < 0) continue;
-            pose.SetLocal(i, new BoneTransform(
-                new Vector2(e.Tx, e.Ty), e.Rotation, new Vector2(e.Sx, e.Sy)));
+            var bind = pose.Skeleton.Bones[i].Bind;
+            pose.SetLocal(i, new BoneTransform(bind.Translation, e.Rotation, bind.Scale));
         }
     }
 }

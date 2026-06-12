@@ -21,12 +21,21 @@ public sealed class GameConfig
     public bool DebugDrawPlayerOrientation { get; set; } = true;
     public bool DebugDrawBodies            { get; set; } = false;
     public bool DebugDrawConstraints       { get; set; } = true;
+    // Phantom corner-clearance "ramps" at exposed step corners / overhangs. Draws each
+    // active SteeringRamp's corner, surface tangent (the trajectory the body skims to),
+    // and banned direction (into the solid). Colored by Sense: Over = green, Under = orange.
+    public bool DebugDrawSteeringRamps     { get; set; } = true;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
     public bool DebugDrawMassBall          { get; set; } = false;
     // Procedural skeleton animation overlay on the primary player (render-only,
     // pull-model). On by default while the rig is being built out.
     public bool DebugDrawSkeleton          { get; set; } = true;
+    // Skeleton joint node discs. Off by default — the rig reads clearly from its
+    // bones, and the nodes clutter the locomotion view. Turn on to inspect the rig.
+    public bool DebugDrawSkeletonJoints    { get; set; } = false;
+    // Highlight the foot the cadence solver is currently pinning (the plant foot).
+    public bool DebugHighlightPlantFoot    { get; set; } = true;
     // The player's vector sprite (the placeholder hexagon body). Turn off to view
     // the skeleton on its own. Independent of DebugDrawBodies (the physics polygon).
     public bool DrawPlayerSprites          { get; set; } = true;
@@ -34,6 +43,11 @@ public sealed class GameConfig
     // Cosmetic: tiny particle trail under the cursor so it's easier to spot
     // against busy terrain. Set false to disable; toggle independently of debug overlays.
     public bool MouseTrail { get; set; } = true;
+
+    // Debug/view time scale for the OFFLINE sim. 1 = normal; 0.2 runs the whole
+    // simulation (and thus the animations it drives) at a fifth speed for inspecting
+    // motion; 0 pauses; >1 fast-forwards. Ignored in networked play (would desync).
+    public float TimeScale { get; set; } = 1f;
 
     // Desktop-only dev affordance: watch movement_config.json and hot-reload tuning
     // edits mid-session. This mutates a sim-affecting static (MovementConfig.Current)

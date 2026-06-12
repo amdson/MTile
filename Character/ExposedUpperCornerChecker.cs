@@ -10,74 +10,81 @@ public readonly struct ExposedCorner
 
 public static class ExposedUpperCornerChecker
 {
-    private const float ProbeSlack          = 18f;
-    // Reject corners whose top is more than this far below the body's center.
-    // Set to body radius so a body at "raw ground rest" Y (just touching the
-    // ground without spring lift) can still vault a 1-block obstacle.
-    private const float MaxTopProbeDistance = 16f;
-    // Reject corners whose top is at or above the body's bottom — body has
-    // already cleared the corner, no vault is needed. Approximates apothem
-    // of the hexagonal body (slightly less than radius).
-    private const float MinBodyDepthBelowCorner = 10f;
+    private const float ProbeSlack = 18f;
 
-    // Vault range: from the body's center down to its feet — corners whose top is in this y window
-    // are reachable for a step-up.
+    // ParkourState vault precondition band, in tile heights above the body's
+    // "standing base" — the Y where the body's feet would rest if grounded at
+    // its current (X, Y):
+    //   StandingBaseY = body.Position.Y + 2 * PlayerCharacter.Radius
+    //                 = body center + (halfH + floatHeight)   (apex-to-floor in standing pose)
+    // A corner whose WorldTop sits inside
+    //   [StandingBaseY - MaxVaultHeightTiles*TS, StandingBaseY - MinVaultHeightTiles*TS]
+    // is "vault-able": shallow enough to crest from the current altitude, tall
+    // enough to actually be a step rather than the floor or a flush wall corner.
+    //
+    // 0.5..1.2 brackets the canonical 1-block vault (TS) with small play margin.
+    // It excludes:
+    //   - 0-block (flush) corners — the body would just walk over.
+    //   - 2-block+ corners — the wall above the step is in the way (TallWall).
+    //   - corners the body has already crested (above the upper bound of the band).
+    private const float MinVaultHeightTiles = 0.5f;
+    private const float MaxVaultHeightTiles = 1.2f;
+
+    // ParkourState precondition: is there a vault-able upper corner on `wallDir`?
+    // Picks the shallowest qualifying corner — largest WorldTop inside the band.
     public static bool TryFind(PhysicsBody body, ChunkMap chunks, int wallDir, out ExposedCorner corner)
-    {
-        var bounds = body.Bounds;
-        return TryFindInRange(body, chunks, wallDir, bounds.CenterY, bounds.Bottom, MaxTopProbeDistance, out corner);
-    }
-
-    // Ledge-grab range: a point probe at head height (top of the body's bounding box).
-    public static bool TryFindAboveHead(PhysicsBody body, ChunkMap chunks, int wallDir, out ExposedCorner corner)
-    {
-        float headY = body.Bounds.Top;
-        return TryFindInRange(body, chunks, wallDir, headY, headY, float.MaxValue, out corner);
-    }
-
-    private static bool TryFindInRange(
-        PhysicsBody body,
-        ChunkMap chunks,
-        int wallDir,
-        float probeTop,
-        float probeBottom,
-        float maxTopDist,
-        out ExposedCorner corner)
     {
         corner = default;
         var bounds = body.Bounds;
-        var probe = bounds.StripBeside(wallDir, ProbeSlack).WithVerticalRange(probeTop, probeBottom);
+        float standingBaseY = body.Position.Y + 2f * PlayerCharacter.Radius;
+        float bandTop    = standingBaseY - MaxVaultHeightTiles * Chunk.TileSize;
+        float bandBottom = standingBaseY - MinVaultHeightTiles * Chunk.TileSize;
+
+        var probe = bounds.StripBeside(wallDir, ProbeSlack).WithVerticalRange(bandTop, bandBottom);
         float bodyFace = bounds.Side(wallDir);
 
-        float bestTopY = float.MinValue;
-        float bestX    = 0f;
-        bool  found    = false;
+        //   - OutsideBodyFace          tile sits on the body-far side of the facing face.
+        //   - TopExposed               no solid directly above (true outer face).
+        //   - BodyFacingNeighborEmpty  edge-vs-interior rule (fixes inset-corner bug).
+        //   - UpperDiagonalClear       rejects notch corners under an overhang.
+        //   - WorldTopInRange          pins tile.WorldTop strictly within the band;
+        //                              a tile spans a full TS so it can overlap the
+        //                              probe rect without its top being in the band.
+        var best = TileQuery.Tiles(chunks, probe)
+            .Where(TileFilters.OutsideBodyFace(bodyFace, wallDir))
+            .Where(TileFilters.TopExposed)
+            .Where(TileFilters.BodyFacingNeighborEmpty(wallDir))
+            .Where(TileFilters.UpperDiagonalClear(wallDir))
+            .Where(TileFilters.WorldTopInRange(bandTop, bandBottom))
+            .MaxBy(t => t.WorldTop);
 
-        foreach (var tile in TileQuery.SolidTilesInRect(chunks, probe))
-        {
-            if (wallDir ==  1 && tile.WorldLeft  < bodyFace) continue;
-            if (wallDir == -1 && tile.WorldRight > bodyFace) continue;
+        if (best is not { } b) return false;
+        float bestX = wallDir == 1 ? b.WorldLeft : b.WorldRight;
+        corner = new ExposedCorner(new Vector2(bestX, b.WorldTop));
+        return true;
+    }
 
-            if (!TileQuery.IsTopExposed(chunks, tile)) continue;
+    // Ledge-grab probe (above-head, single-Y line). Targets a different reach
+    // than TryFind: the body's head height, where the corner of a graspable
+    // ledge would sit. Kept separate so the vault band doesn't apply here.
+    public static bool TryFindAboveHead(PhysicsBody body, ChunkMap chunks, int wallDir, out ExposedCorner corner)
+    {
+        corner = default;
+        var bounds = body.Bounds;
+        float headY = bounds.Top;
+        var probe = bounds.StripBeside(wallDir, ProbeSlack).WithVerticalRange(headY, headY);
+        float bodyFace = bounds.Side(wallDir);
 
-            // Clearance: tile diagonally above-inward must also be empty
-            if (TileQuery.IsSolidAt(chunks, tile.WorldCenterX - wallDir * Chunk.TileSize, tile.WorldTop - Chunk.TileSize * 0.5f)) continue;
+        var best = TileQuery.Tiles(chunks, probe)
+            .Where(TileFilters.OutsideBodyFace(bodyFace, wallDir))
+            .Where(TileFilters.TopExposed)
+            .Where(TileFilters.BodyFacingNeighborEmpty(wallDir))
+            .Where(TileFilters.UpperDiagonalClear(wallDir))
+            .MaxBy(t => t.WorldTop);
 
-            if (tile.WorldTop > bestTopY)
-            {
-                bestTopY = tile.WorldTop;
-                bestX    = wallDir == 1 ? tile.WorldLeft : tile.WorldRight;
-                found    = true;
-            }
-        }
-
-        if (!found) return false;
-        if (probeTop - bestTopY > maxTopDist) return false;
-        // Body already above the corner (its bottom edge is past the tile top) —
-        // nothing to vault, return false so ParkourState doesn't re-fire after
-        // a successful climb.
-        if (bestTopY - probeTop >= MinBodyDepthBelowCorner) return false;
-        corner = new ExposedCorner(new Vector2(bestX, bestTopY));
+        if (best is not { } b) return false;
+        float bestX = wallDir == 1 ? b.WorldLeft : b.WorldRight;
+        corner = new ExposedCorner(new Vector2(bestX, b.WorldTop));
         return true;
     }
 }
