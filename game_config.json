@@ -1,5 +1,5 @@
 {
-  "Stage": "flat",
+  "Stage": "training",
   "WindowWidth": 900,
   "WindowHeight": 700,
   "Fullscreen": false,

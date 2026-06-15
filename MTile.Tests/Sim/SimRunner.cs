@@ -136,6 +136,7 @@ public static class SimRunner
 
         var hitboxes  = new HitboxWorld();
         var hurtboxes = new HurtboxWorld();
+        var fields    = new ForceFieldWorld();
         var combat    = new CombatSystem();
         // Recoil tally lives on CombatSystem and is read by actions in
         // ApplyActionForces. Wire it through to each player so attack recoil
@@ -152,11 +153,12 @@ public static class SimRunner
         {
             cfg.Terrain.TickSprouts(cfg.Dt);
 
-            // Mirror Game1.Update phase order: clear combat registries → publish
-            // hurtboxes → run each player's Update (which publishes hitboxes) →
-            // CombatSystem.Apply → physics step.
+            // Mirror Simulation.Step phase order: clear combat registries → publish
+            // hurtboxes → run each player's Update (which publishes hitboxes +
+            // force fields) → CombatSystem.Apply → field forces → physics step.
             hitboxes.Clear();
             hurtboxes.Clear();
+            fields.Clear();
             for (int i = 0; i < n; i++) players[i].PublishHurtboxes(hurtboxes);
 
             // Inject input + update each player. Capture AppliedForce per-player
@@ -167,12 +169,21 @@ public static class SimRunner
             {
                 var input = cfg.Players[i].Script.Get(f, prevs[i]);
                 ctrls[i].InjectInput(input);
-                players[i].Update(ctrls[i], cfg.Terrain, hitboxes, hurtboxes, cfg.Dt);
+                players[i].Update(ctrls[i], cfg.Terrain, hitboxes, hurtboxes, cfg.Dt, forceFields: fields);
                 fx[i] = players[i].Body.AppliedForce.X;
                 fy[i] = players[i].Body.AppliedForce.Y;
             }
 
             combat.Apply(cfg.Terrain, hitboxes, hurtboxes, ResolvePlayer);
+
+            PhysicsBody ResolveBody(EntityId id)
+            {
+                foreach (var p in players) if (p.Id == id) return p.Body;
+                return null;
+            }
+            ForceFieldSystem.Apply(fields, hurtboxes, ResolveBody, cfg.Dt,
+                onGrabHeld: id => { foreach (var p in players) if (p.Id == id) p.Combat.MarkGrabbed(p.Frame); },
+                onThrown:   id => { foreach (var p in players) if (p.Id == id) p.Combat.RegisterThrown(p.Frame, cfg.Dt); });
 
             PhysicsWorld.StepSwept(bodies, cfg.Terrain, cfg.Dt, cfg.Gravity);
 

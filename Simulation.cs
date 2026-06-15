@@ -19,7 +19,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // regardless of wall-clock frame time — a hard requirement for deterministic
     // replay. Game1 still runs at this rate (IsFixedTimeStep), but the sim no longer
     // trusts the GameTime value; it uses this constant.
-    public const float FixedDt = 1f / 30f;
+    public const float FixedDt = 1f / 60f;
 
     public static readonly Vector2 Gravity = new(0f, 600f);
     // Exposed so action FSMs can compute ballistic launch velocities against the
@@ -29,6 +29,11 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     private readonly ChunkMap _chunks;
     private readonly HitboxWorld  _hitboxes  = new();
     private readonly HurtboxWorld _hurtboxes = new();
+    // Frame-scoped holding/push fields (COMBAT_FEEL_PLAN Phase 2). Same lifecycle
+    // as _hitboxes: cleared every Step, re-published by live action states, applied
+    // as forces BEFORE the physics step. Never snapshotted — regenerates from FSM
+    // state after a restore exactly like hitboxes do.
+    private readonly ForceFieldWorld _fields = new();
     // The ECS world: owns EntityId allocation and the live-only registry components
     // (PhysicsBodyComponent / EntityRef / PlayerRef). Single source of truth for the
     // body + entity sets; the lists it replaced (_bodies/_entities/_hittables) are gone.
@@ -136,6 +141,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     }
     public HitboxWorld  Hitboxes  => _hitboxes;
     public HurtboxWorld Hurtboxes => _hurtboxes;
+    public ForceFieldWorld ForceFields => _fields;
     public PlayerInput CurrentInput => _controller.Current;
     // Primary player's current selections — surfaced for the HUD.
     public TileType            ActiveBlockType => _player.ActiveBlockType;
@@ -257,17 +263,19 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         _chunks.Impact.Tick(dt);
 
         // Combat frame phases: clear registries → publish hurtboxes → player update
-        // (publishes hitboxes) → entity AI → CombatSystem.Apply → physics.
+        // (publishes hitboxes + force fields) → entity AI → CombatSystem.Apply →
+        // force-field forces → physics.
         _hitboxes.Clear();
         _hurtboxes.Clear();
+        _fields.Clear();
         // Hurtboxes in canonical order: primary, secondaries, then entities (spawn order).
         _player.PublishHurtboxes(_hurtboxes);
         foreach (var (p, _) in _secondaryPlayers) p.PublishHurtboxes(_hurtboxes);
         foreach (var r in _world.Query<EntityRef>()) r.Component1.Obj.PublishHurtboxes(_hurtboxes);
 
-        _player.Update(_controller, _chunks, _hitboxes, _hurtboxes, dt, this);
+        _player.Update(_controller, _chunks, _hitboxes, _hurtboxes, dt, this, _fields);
         foreach (var (p, c) in _secondaryPlayers)
-            p.Update(c, _chunks, _hitboxes, _hurtboxes, dt);
+            p.Update(c, _chunks, _hitboxes, _hurtboxes, dt, null, _fields);
 
         // Collect the current entity set before updating so entities spawned during a
         // sibling's Update skip their first frame (matches the old count-snapshot).
@@ -276,6 +284,19 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         foreach (var e in _entityScratch) e.Update(dt, _player, _hitboxes, this);
 
         _combat.Apply(_chunks, _hitboxes, _hurtboxes, ResolveHittable);
+
+        // Force fields act this frame: applied after every publisher has updated
+        // (so all of the frame's fields exist) and before the physics step (unlike
+        // hitboxes, which resolve post-step). Targets are the hurtbox set.
+        ForceFieldSystem.Apply(_fields, _hurtboxes,
+            id => _world.Has<PhysicsBodyComponent>(id) ? _world.Get<PhysicsBodyComponent>(id).Body : null,
+            dt,
+            // Grab fields flag their victim grabbed (Phase 6): gate normal attacks/jump,
+            // leave only struggle attacks. Uses the victim's own frame so the gates
+            // that read GrabbedActive line up next step.
+            onGrabHeld: id => { if (ResolveHittable(id) is PlayerCharacter pc) pc.Combat.MarkGrabbed(pc.Frame); },
+            // Throw fields stun their victim so they exit the throw into Tumble.
+            onThrown:   id => { if (ResolveHittable(id) is PlayerCharacter pc) pc.Combat.RegisterThrown(pc.Frame, dt); });
 
         // Player respawn on death.
         if (!_player.IsAlive)
@@ -374,6 +395,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             PrimaryController    = _controller.Capture(),
             SecondaryControllers = secCtrls,
             Dedupe               = _combat.CaptureDedupe(),
+            HitConfirm           = _combat.CaptureHitConfirm(),
             Platforms            = platforms,
             Terrain              = _chunks.CaptureTerrain(),
         };
@@ -446,5 +468,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
 
         // Combat dedupe — keyed on EntityId now, so it's a direct value restore.
         _combat.RestoreDedupe(snap.Dedupe);
+        // Hit-confirm inbox — pending message for the frame after the snapshot.
+        _combat.RestoreHitConfirm(snap.HitConfirm);
     }
 }

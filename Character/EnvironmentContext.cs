@@ -36,6 +36,14 @@ public class EnvironmentContext
     public CombatSystem   CombatSystem; // sim-shared hit resolver — actions read PeekRecoil(HitId) to apply Newton's-third-law back-impulse
     public int   CurrentFrame;        // monotonic frame counter for intent age + flag expiry
     public float Dt;
+    // Frame-scoped force-field registry (COMBAT_FEEL_PLAN Phase 2) — actions publish
+    // holding/push fields here, mirroring the Hitboxes lifecycle (cleared every frame
+    // by the sim, re-broadcast by live states). Null in hosts that don't drive fields.
+    public ForceFieldWorld ForceFields;
+    // Jump-press buffer window in frames at THIS context's step rate. Jump states
+    // pass this to Intents.Peek/Consume/Refresh so the real-time window
+    // (IntentBuffer.JumpBufferSeconds) is rate-independent.
+    public int JumpBufferFrames => SimFrames.FromSeconds(IntentBuffer.JumpBufferSeconds, Dt);
     public PhysicsBody Body;
     public InputIntent Intent;
     // Multiplicative scalars on movement knobs (WalkAccel, MaxAirSpeed, GroundFriction, …).

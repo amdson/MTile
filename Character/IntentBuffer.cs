@@ -34,13 +34,18 @@ public struct ActionIntent
 // memory.
 public class IntentBuffer
 {
-    private const int MaxAgeFrames = 60;
+    // Loose upper bound on gesture replay (~2 s at 60 fps). Deliberately a frame
+    // count, not seconds-derived: it's a safety cap, not a feel knob, and Peek's
+    // default parameter must be a compile-time constant.
+    private const int MaxAgeFrames = 120;
 
-    // Jump presses use a much shorter window than the global 2 s gesture cap: a
+    // Jump presses use a much shorter window than the global gesture cap: a
     // slightly-early press should buffer onto the next landing/launch, not replay
-    // half a second later. Guided states (LedgePull) extend a pending jump's life
+    // half a second later. Authored in seconds (≈4 frames at the original 30 fps);
+    // jump states read the frame count via ctx.JumpBufferFrames, which converts at
+    // the actual step rate. Guided states (LedgePull) extend a pending jump's life
     // via Refresh so it fires at the maneuver's natural jump point.
-    public const int JumpBufferFrames = 4;
+    public const float JumpBufferSeconds = 4f / 30f;
 
     private readonly List<ActionIntent> _intents = new();
     public IReadOnlyList<ActionIntent> All => _intents;
@@ -102,10 +107,11 @@ public class IntentBuffer
         return false;
     }
 
-    public void Prune(int currentFrame)
+    // `jumpBufferFrames` is the rate-converted jump window (the caller owns dt).
+    public void Prune(int currentFrame, int jumpBufferFrames)
         => _intents.RemoveAll(i => i.Consumed
             || currentFrame - i.IssuedFrame > MaxAgeFrames
-            || (i.Type == IntentType.Jump && currentFrame - i.IssuedFrame > JumpBufferFrames));
+            || (i.Type == IntentType.Jump && currentFrame - i.IssuedFrame > jumpBufferFrames));
 
     // Snapshot/restore (roadmap goal 4 §E). ActionIntent is a struct, so the array
     // copy is a deep copy; restore replaces the live list contents in place.

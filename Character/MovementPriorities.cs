@@ -50,6 +50,15 @@ public static class MovementPriorities
     public const int StunnedActive  = 25;
     public const int StunnedPassive = 25;
 
+    // Tumble: airborne heavy-hit launch (COMBAT_FEEL_PLAN Phase 4). Active 51 keeps
+    // it in the launch band — once launched, Falling/WallSlide/ledge-grabs can't
+    // steal the body (and those grabs are capability-blocked during the disadvantage
+    // window anyway). Passive 26 sits just above StunnedState (25) so a grounded
+    // stun that gets knocked airborne flips into Tumble, while staying below the
+    // active jumps (50+) so a player hit mid-jump finishes the arc before tumbling.
+    public const int TumbleActive  = 51;
+    public const int TumblePassive = 26;
+
     // Guided (path-followed) — preempts free air, preempted by jumps.
     public const int GuidedActive   = 25;
     public const int GuidedPassive  = 45;

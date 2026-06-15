@@ -15,7 +15,9 @@ namespace MTile;
 //   neither → dropped (no intent)
 public class InputParser
 {
-    public const int   ClickMaxHoldFrames     = 6;
+    // Authored in seconds (0.2 s ≈ the original 6 frames at 30 fps); converted to
+    // frames per-call at the actual step rate in Detect.
+    public const float ClickMaxHoldSeconds    = 0.2f;
     public const float StabSwipeThreshold     = 12f;
     private const float StabSwipeThresholdSq  = StabSwipeThreshold * StabSwipeThreshold;
     // Circle gesture tuning. Mouse must travel at least MinCircleRadius from the
@@ -44,8 +46,9 @@ public class InputParser
     private int _lastCircleEmitted    = int.MinValue;
     private int _lastJumpEmitted      = int.MinValue;
 
-    public void Detect(Controller controller, IntentBuffer buffer, int currentFrame)
+    public void Detect(Controller controller, IntentBuffer buffer, int currentFrame, float dt)
     {
+        int clickMaxHoldFrames = SimFrames.FromSeconds(ClickMaxHoldSeconds, dt);
         var cur  = controller.Current;
         var prev = controller.GetPrevious(1);
 
@@ -98,13 +101,13 @@ public class InputParser
         {
             int     holdFrames    = currentFrame - _activePressFrame;
             Vector2 swipe         = cur.MouseWorldPosition - _activePressMouse;
-            bool    holdIsClick   = holdFrames <= ClickMaxHoldFrames;
-            bool    holdIsCircle  = holdFrames >  ClickMaxHoldFrames
+            bool    holdIsClick   = holdFrames <= clickMaxHoldFrames;
+            bool    holdIsCircle  = holdFrames >  clickMaxHoldFrames
                                   && MathF.Abs(_cumAngle) >= CircleAngleThreshold;
             // Circle wins over Stab when both could match — a closed loop usually
             // ends near the press-center (small swipe) but a wide arc could end far,
             // and a circle "feels" like the right read in that case.
-            bool    holdIsStab    = holdFrames >  ClickMaxHoldFrames
+            bool    holdIsStab    = holdFrames >  clickMaxHoldFrames
                                   && swipe.LengthSquared() >= StabSwipeThresholdSq
                                   && !holdIsCircle;
 

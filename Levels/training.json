@@ -1,0 +1,8 @@
+{
+  "Extents": 2,
+  "Rules": [
+    { "Condition": "y >= 6",  "IsSolid": true },
+    { "Condition": "x < -18", "IsSolid": false },
+    { "Condition": "x > 18",  "IsSolid": false }
+  ]
+}

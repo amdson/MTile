@@ -46,6 +46,12 @@ public class ConditionState
         expire = currentFrame + durationFrames;
     }
 
+    // Seconds-authored variant — durations are tuned in real time and converted at
+    // the caller's actual step rate, so combo windows / recovery feel identical at
+    // 60 fps (Simulation.FixedDt) and in headless tests stepping a different dt.
+    public static void SetForSeconds(ref bool flag, ref int expire, float seconds, int currentFrame, float dt)
+        => SetFor(ref flag, ref expire, SimFrames.FromSeconds(seconds, dt), currentFrame);
+
     // Snapshot/restore (roadmap goal 4 §E). All fields are value types, so a clone is
     // a flat field-copy into a fresh instance — no aliasing back into the live state.
     public ConditionState Clone() => (ConditionState)MemberwiseClone();

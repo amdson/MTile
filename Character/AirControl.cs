@@ -33,7 +33,12 @@ public static class AirControl
             else
             {
                 // At or above cap in input direction. Brake the excess so vx settles
-                // to maxSpeed in one frame; no additional accel applied.
+                // to maxSpeed in one frame; no additional accel applied. During
+                // hitstun (PreserveExternalVelocity) the brake is skipped entirely —
+                // otherwise this one line would erase knockback within a frame or
+                // two whenever the victim holds a direction. Input still can't ADD
+                // speed past the cap (the accel branch above never runs over-cap).
+                if (ctx.Modifiers.PreserveExternalVelocity) return 0f;
                 float excess = vInInputDir - maxSpeed;
                 return -inputX * excess / ctx.Dt;
             }

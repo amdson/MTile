@@ -61,6 +61,19 @@ public static class Stages
             Populate      = PopulatePlain,
         });
 
+        // ─── training ─────────────────────────────────────────────────────────
+        // Combat-feel testbed (COMBAT_FEEL_PLAN): a plateau over void with a
+        // training dummy — a secondary PlayerCharacter parked at the center that
+        // periodically slashes or stabs without moving. The dummy auto-resets to
+        // its home spot when killed or displaced too far (knocked off the edge),
+        // and the primary player respawns if they fall into the void.
+        Register(new Stage {
+            Name          = "training",
+            TerrainConfig = "training.json",
+            PlayerSpawn   = TrainingPlayerSpawn,
+            Populate      = PopulateTraining,
+        });
+
         // ─── flat ─────────────────────────────────────────────────────────────
         // Empty, perfectly flat plain (floor at world tile y = 6, open sky, no
         // hills/chunk art, no entities or platforms). A clean testbed for the
@@ -150,6 +163,115 @@ public static class Stages
         // either dodge their line of fire or close in and slash them down.
         g.SpawnEntity(EntityFactory.Turret(new Vector2(-160f, -140f)));
         g.SpawnEntity(EntityFactory.Turret(new Vector2( 280f, -140f)));
+    }
+
+    // Shared between the stage registration and the void-respawn ticker below.
+    private static readonly Vector2 TrainingPlayerSpawn = new(-120f, 60f);
+
+    private static void PopulateTraining(Simulation g)
+    {
+        // Plateau: solid for tile x ∈ [-18, 18], top at tile y = 6 (world y = 96).
+        // Dummy home is the plateau center, body resting on the floor.
+        var home = new Vector2(8f, 75f);
+        const float MaxDrift = 150f;   // px from home before the dummy auto-resets
+        const float VoidY    = 320f;   // below the plateau face — somebody fell off
+
+        var (dummy, ctrl) = g.AddSecondaryPlayer(home);
+
+        // Dummy attack script, driven as a pure function of the sim clock + sim
+        // state (positions, facing) — deterministic and rollback-safe for the same
+        // reason entity AI is: it reads only sim state and is re-derived on replay.
+        // Cycle: face the player → attack (alternating slash / stab) → idle.
+        //
+        // NOTE: this stage drives secondary player 0's controller from the ticker.
+        // Don't combine it with the two-input Step(p0, p1) netcode path — both
+        // would inject into the same controller each frame.
+        const int CycleFrames    = 150;  // 2.5 s at 60 fps
+        const int AttackStart    = 30;   // cycle frame the button goes down
+        const int StabHoldFrames = 20;   // > the 0.2 s click window ⇒ reads as a stab
+
+        g.AddTicker(t =>
+        {
+            // Auto-reset: killed, knocked off the plateau, or otherwise displaced.
+            if (!dummy.IsAlive || Vector2.Distance(dummy.Body.Position, home) > MaxDrift)
+                dummy.Respawn(home);
+
+            // The void has no floor — give the primary player a respawn too.
+            var hero = g.Player;
+            if (hero.Body.Position.Y > VoidY)
+                hero.Respawn(TrainingPlayerSpawn);
+
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            int cf        = frame % CycleFrames;
+            bool stabTurn = (frame / CycleFrames) % 2 == 1;
+
+            Vector2 toPlayer = hero.Body.Position - dummy.Body.Position;
+            int wantFacing = toPlayer.X >= 0f ? 1 : -1;
+            Vector2 dir = toPlayer.LengthSquared() < 1f
+                ? new Vector2(wantFacing, 0f)
+                : Vector2.Normalize(toPlayer);
+
+            var input = new PlayerInput
+            {
+                // Default aim: at the player. Slash direction comes from
+                // mouse-relative-to-body; the stab frames override this below.
+                MouseWorldPosition = dummy.Body.Position + dir * 60f,
+            };
+
+            // One frame of directional input right before the attack flips Facing
+            // toward the player (ground facing tracks horizontal input). Gated on
+            // a mismatch so the dummy doesn't creep — a single frame of walk accel
+            // is ~1 px, and MaxDrift catches any slow accumulation.
+            if (cf == AttackStart - 1 && dummy.Facing != wantFacing)
+            {
+                if (wantFacing > 0) input.Right = true; else input.Left = true;
+            }
+
+            // Walk back to the post between attacks. The stab's grounded lunge
+            // glides the dummy ~25 px toward its target each stab turn — rather
+            // than letting that accumulate into a MaxDrift reset, the dummy
+            // re-centers itself outside the attack window.
+            //
+            // BUT not while it's recently been hit: otherwise the re-center input
+            // fights the player's knockback every frame and the dummy reads as
+            // "stuck in place" — it strolls back the instant a hit displaces it.
+            // Hold off until it's been un-hit for ReturnDelaySeconds so the
+            // knockback (and the percent-scaled launches at higher %) actually land.
+            const float ReturnDelaySeconds = 0.9f;
+            int returnDelayFrames = SimFrames.FromSeconds(ReturnDelaySeconds, Simulation.FixedDt);
+            bool recentlyHit = dummy.Combat.HitstunActive || dummy.Combat.StunActive
+                || (dummy.Combat.LastHitFrame > 0
+                    && dummy.Frame - dummy.Combat.LastHitFrame < returnDelayFrames);
+
+            bool inAttackWindow = cf >= AttackStart - 1 && cf < AttackStart + StabHoldFrames + 8;
+            float dxHome = home.X - dummy.Body.Position.X;
+            if (!inAttackWindow && !recentlyHit && MathF.Abs(dxHome) > 4f)
+            {
+                if (dxHome > 0f) input.Right = true; else input.Left = true;
+            }
+
+            if (!stabTurn)
+            {
+                // Slash: 1-frame click (release next frame ⇒ Click intent).
+                input.LeftClick = cf == AttackStart;
+            }
+            else
+            {
+                // Stab: hold past the click window while the cursor swipes outward
+                // toward the player; the release frame's default mouse position
+                // still sits along `dir`, so the press→release swipe reads as a
+                // clean stab gesture in that direction.
+                int hold = cf - AttackStart;
+                if (hold >= 0 && hold < StabHoldFrames)
+                {
+                    input.LeftClick = true;
+                    input.MouseWorldPosition = dummy.Body.Position
+                        + dir * (10f + 80f * hold / (StabHoldFrames - 1f));
+                }
+            }
+
+            ctrl.InjectInput(input);
+        });
     }
 
     private static void PopulatePlain(Simulation g)

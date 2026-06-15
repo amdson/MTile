@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -55,6 +56,13 @@ public class Game1 : Game
     // (reads sim state via CharacterAnimSample; never writes back). Scale fits the
     // ~62px-tall rig to the player's ~19px body.
     private CharacterAnimator _animator;
+    // One animator per secondary player (training dummy, second local player, …),
+    // same pull-model. Grown lazily in Update to match the sim's secondary count;
+    // index i animates SecondaryPlayers[i].
+    private readonly List<CharacterAnimator> _secondaryAnimators = new();
+    // The authored clip set, kept so secondary animators built after LoadContent
+    // bind the same animations as the primary's.
+    private List<AnimationDocument> _skeletonAnims = new();
     private const float SkeletonScale = 0.6f;
     private float _simAccum;   // fixed-step accumulator for GameConfig.TimeScale (slow-mo)
 
@@ -162,8 +170,8 @@ public class Game1 : Game
         _draw = new DrawContext(_spriteBatch, _pixel);
         // Load authored skeleton animations (copied next to the binary). Empty on
         // platforms without a readable filesystem (e.g. WASM) → procedural fallback.
-        var anims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
-        _animator = new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, anims);
+        _skeletonAnims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
+        _animator = new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims);
     }
 
     // The player this client controls + the camera follows. Host (index 0) = primary;
@@ -238,8 +246,17 @@ public class Game1 : Game
         // Procedural skeleton: pull a read-only sample of the player and advance the
         // animator. One-way — the sim is unaware this happens.
         if (_config.DebugDrawSkeleton)
+        {
             // Scale the animator's dt too so easing/idle slow with the sim under TimeScale.
             _animator.Update(CharacterAnimSample.From(player, dt * _config.TimeScale));
+            // Secondary players (training dummy, P2) get their own animators so
+            // each rig tracks its own body, facing, and action timing.
+            while (_secondaryAnimators.Count < _sim.SecondaryPlayers.Count)
+                _secondaryAnimators.Add(new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims));
+            for (int i = 0; i < _sim.SecondaryPlayers.Count; i++)
+                _secondaryAnimators[i].Update(
+                    CharacterAnimSample.From(_sim.SecondaryPlayers[i].Player, dt * _config.TimeScale));
+        }
         foreach (var (p, _) in _sim.SecondaryPlayers)
         {
             if (p.Sprite == null) continue;
@@ -343,6 +360,17 @@ public class Game1 : Game
             float rootY       = groundY - _animator.CurrentSoleY() * SkeletonScale;
             _animator.Draw(_draw, new Vector2(player.Body.Position.X, rootY), player.Facing,
                            _config.DebugDrawSkeletonJoints, _config.DebugHighlightPlantFoot);
+
+            // Secondary players' rigs — same ground-drop math, each from its own animator.
+            for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
+            {
+                var p = _sim.SecondaryPlayers[i].Player;
+                var anim = _secondaryAnimators[i];
+                float pGroundY = p.Body.Position.Y + 2f * PlayerCharacter.Radius;
+                float pRootY   = pGroundY - anim.CurrentSoleY() * SkeletonScale;
+                anim.Draw(_draw, new Vector2(p.Body.Position.X, pRootY), p.Facing,
+                          _config.DebugDrawSkeletonJoints, _config.DebugHighlightPlantFoot);
+            }
         }
         if (_config.DebugDrawBodies)
         {
@@ -362,7 +390,12 @@ public class Game1 : Game
             3f);
 
         // Action overlay (slash arc, etc.) in world space, on top of the body.
+        // Secondary players too — the training dummy's slash arcs / stab ribbons
+        // are its attack telegraphs. Each PlayerCharacter owns its action-state
+        // instances, so the per-action trails don't cross-contaminate.
         player.CurrentAction.Draw(_spriteBatch, _pixel, player.Body, player.CurrentActionVars);
+        foreach (var (p, _) in _sim.SecondaryPlayers)
+            p.CurrentAction.Draw(_spriteBatch, _pixel, p.Body, p.CurrentActionVars);
 
         // Enemy FSM telegraph/strike overlays — same world-space layer as the
         // player's action draw, so windup tells read alongside the player's
@@ -545,6 +578,12 @@ public class Game1 : Game
         _spriteBatch.DrawString(_debugFont,
             $"HP {player.Health:F1}/{player.MaxHealth:F1}",
             new Vector2(X + BarW + 8, Y - 4), Color.White);
+        // Escalation percent (COMBAT_FEEL_PLAN Phase 5) — the monotonic meter that
+        // scales incoming knockback. Tints hotter as it climbs.
+        float pct = player.Combat.DamagePercent;
+        var pctColor = Color.Lerp(Color.White, Color.OrangeRed, MathHelper.Clamp(pct / 200f, 0f, 1f));
+        _spriteBatch.DrawString(_debugFont, $"{pct:F0}%",
+            new Vector2(X + BarW + 8, Y + 10), pctColor);
     }
 
     private void DrawConstraintArrow(Vector2 position, Vector2 normal, Color color)

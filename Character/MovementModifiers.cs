@@ -20,6 +20,13 @@ public struct MovementModifiers
     // Applied by PlayerCharacter.Update via a counter-force at the very end of the frame,
     // identical in shape to what Entity.PreStep does for entities.
     public float GravityScale;
+    // When true, the walk/air speed caps stop BRAKING velocity that already exceeds
+    // them — input can still add speed up to the cap, but externally-applied velocity
+    // (knockback, throws) is left to drag/friction instead of being clipped back to
+    // the cap in one frame. Set during hitstun (COMBAT_FEEL_PLAN Phase 1) so a hit
+    // actually displaces; consumed by AirControl.Apply and the ground states'
+    // overspeed correction.
+    public bool PreserveExternalVelocity;
 
     public static MovementModifiers Identity => new()
     {
@@ -30,5 +37,6 @@ public struct MovementModifiers
         MaxAirSpeed    = 1f,
         AirDrag        = 1f,
         GravityScale   = 1f,
+        PreserveExternalVelocity = false,
     };
 }

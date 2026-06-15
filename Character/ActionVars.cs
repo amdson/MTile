@@ -29,6 +29,9 @@ public struct ActionVars
     public bool    IsGrounded;        // Ready, Stab, Pulse
     public int     Facing;            // Ready
     public int     HitId;             // Slash*, Stab, Pulse, Beam
+    public bool    AttackConnected;   // Slash* — latched true once the HitId connects with an
+                                      // entity (read from CombatSystem.PeekHits), so combo
+                                      // openers can gate their follow-up on a hit (Phase 3).
 
     public Vector2 SlashDir;          // Slash* (incl. GuardRetaliate)
 
@@ -49,6 +52,9 @@ public struct ActionVars
     public Vector2 BeamDir;           // Beam — aim direction, locked the frame firing starts (sim state: drives hitbox placement)
 
     public Vector2 CursorAtPress;     // LobbedArea
+
+    public bool    GrabThrowing;      // GrabAction — false during the hold phase, true once releasing into the throw
+    public Vector2 GrabDir;           // GrabAction — hold focus / throw direction
 }
 
 // Deep-copyable snapshot of BlockEruptionAction's reference-type gesture buffer —

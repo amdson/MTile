@@ -64,14 +64,85 @@ public class StunnedState : MovementState
     public override int ActivePriority  => MovementPriorities.StunnedActive;
     public override int PassivePriority => MovementPriorities.StunnedPassive;
 
+    // Grounded-only since Phase 4: an airborne heavy hit goes to TumbleState (launch
+    // band) instead, so a launched body can't be rescued by terrain. A grounded
+    // stun (horizontal hit, body stays on the floor) still lands here. When a
+    // grounded stun gets knocked airborne mid-window, this CheckConditions drops
+    // (→ Falling) and TumbleState's higher passive grabs the body.
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-        => ctx.Combat?.StunActive == true;
+        => ctx.Combat?.StunActive == true && ctx.TryGetGround(out _);
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-        => ctx.Combat?.StunActive == true;
+        => ctx.Combat?.StunActive == true && ctx.TryGetGround(out _);
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        var force = Vector2.Zero;
+        var cfg = MovementConfig.Current;
+        var m   = ctx.Modifiers;
+        force.X = AirControl.Apply(ctx,
+            cfg.AirAccel    * m.AirAccel    * 0.4f,
+            cfg.MaxAirSpeed * m.MaxAirSpeed * 0.7f,
+            cfg.AirDrag     * m.AirDrag     * 1.5f);
+
+        ctx.Body.AppliedForce = force;
+    }
+}
+
+// Airborne heavy-hit launch (COMBAT_FEEL_PLAN Phase 4). A hit whose impulse crosses
+// the stun threshold sets StunActive; while the victim is airborne that becomes a
+// Tumble rather than a grounded Stun. Tumble lives in the launch band (Active 51) so
+// once launched the body stays tumbling until it lands or techs — combined with the
+// capability mask (which blocks WallCling/LedgeGrab during stun/hitstun) this is what
+// makes a knockback into a juggle/edgeguard instead of a free wall-cling reset.
+//
+// Control is muted air-control (DI only), like StunnedState. PreserveExternalVelocity
+// is forced on so the muted speed cap never brakes the launch even in the stun tail
+// after hitstun lapses.
+//
+// Tech (defensive option): a buffered Jump intent while a surface is within the tech
+// probe (just before landing) ends the launch early, grants brief i-frames, and pops
+// the body up — so a read launch can be survived with precise timing. Outside that
+// window the body just rides the tumble down and eats the landing.
+public class TumbleState : MovementState
+{
+    // Tech window: ground detected within this slack below the body (but the body
+    // isn't yet "grounded" by the normal 20px probe, which would exit Tumble) opens
+    // the tech window — roughly the last few frames of the descent.
+    private const float TechProbeSlack   = 60f;
+    private const float TechInvulnSeconds = 0.25f;
+    private const float TechBounceVy     = 260f;   // upward pop on a successful tech
+    private const float TechHorizKeep    = 0.3f;   // fraction of horizontal speed kept
+
+    public override int ActivePriority  => MovementPriorities.TumbleActive;
+    public override int PassivePriority => MovementPriorities.TumblePassive;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+        => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+        => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        // Tech: buffered jump + a surface within the tech probe ⇒ bail the launch.
+        if (ctx.Combat != null
+            && ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)
+            && GroundChecker.TryFind(ctx.Body, ctx.Chunks,
+                   PlayerCharacter.Radius, PlayerCharacter.Radius,
+                   TechProbeSlack, ctx.Dt, out _))
+        {
+            ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
+            ctx.Combat.Tech(ctx.CurrentFrame, ctx.Dt, TechInvulnSeconds);
+            ctx.Body.Velocity = new Vector2(ctx.Body.Velocity.X * TechHorizKeep, -TechBounceVy);
+            ctx.Body.AppliedForce = Vector2.Zero;
+            return;
+        }
+
+        // Launch must never be braked by the muted speed cap (the stun tail can
+        // outlive hitstun, which is what otherwise forces PreserveExternalVelocity).
+        ctx.Modifiers.PreserveExternalVelocity = true;
+
         var force = Vector2.Zero;
         var cfg = MovementConfig.Current;
         var m   = ctx.Modifiers;
@@ -187,8 +258,12 @@ public class StandingState : MovementState
             float walkAccel    = cfg.WalkAccel    * m.WalkAccel;
             float maxWalkSpeed = cfg.MaxWalkSpeed * m.MaxWalkSpeed;
             force.X += inputX * walkAccel;
+            // Over-cap brake skipped during hitstun so horizontal knockback on a
+            // grounded victim isn't clipped back to walk speed in one frame — see
+            // MovementModifiers.PreserveExternalVelocity.
             float excess = MathF.Abs(ctx.Body.Velocity.X) - maxWalkSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
+            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f
+                && !m.PreserveExternalVelocity)
                 force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
             // Excess correction can zero out the walk force when the body is already
             // moving faster than MaxWalkSpeed in the input direction (e.g. just exited
@@ -276,7 +351,8 @@ public class CrouchedState : MovementState
         {
             force.X += inputX * MovementConfig.Current.CrouchWalkAccel;
             float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.CrouchMaxWalkSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f)
+            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f
+                && !ctx.Modifiers.PreserveExternalVelocity)
                 force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
             // Walk-intent signal so the solver's friction doesn't brake an
             // overspeed-coasting body — see StandingState.Update.

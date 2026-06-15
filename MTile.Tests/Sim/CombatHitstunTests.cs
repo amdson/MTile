@@ -81,7 +81,7 @@ public class CombatHitstunTests(ITestOutputHelper output)
 
         var hitstunPerFrame = new List<bool>(cfg.Frames);
         bool sawHitstun = false;
-        float? finalVictimHealth = null;
+        float? finalVictimPercent = null;
 
         var traces = SimRunner.RunMulti(cfg,
             onFrame: (f, ps) =>
@@ -90,7 +90,7 @@ public class CombatHitstunTests(ITestOutputHelper output)
                 hitstunPerFrame.Add(h);
                 if (h) sawHitstun = true;
             },
-            outPlayers: ps => finalVictimHealth = ps[1].Health);
+            outPlayers: ps => finalVictimPercent = ps[1].Combat.DamagePercent);
 
         SimReport.WriteCsv(traces[0], "hitstun_attacker", outputDir: null);
         SimReport.WriteCsv(traces[1], "hitstun_victim",   outputDir: null);
@@ -100,14 +100,15 @@ public class CombatHitstunTests(ITestOutputHelper output)
         for (int f = 0; f < hitstunPerFrame.Count; f++)
         {
             if (!hitstunPerFrame[f]) continue;
-            output.WriteLine($"first hitstun at frame {f}, victim state={traces[1][f].State}, health={finalVictimHealth}");
+            output.WriteLine($"first hitstun at frame {f}, victim state={traces[1][f].State}, percent={finalVictimPercent}");
             break;
         }
 
-        // 1) The slash must actually land (health drops from MaxHealth=3).
-        Assert.NotNull(finalVictimHealth);
-        Assert.True(finalVictimHealth < 3.0f,
-            $"Slash never connected — victim health stayed at {finalVictimHealth}. Check geometry / mouse direction.");
+        // 1) The slash must actually land. Direct hits no longer chip HP (Phase 5) —
+        //    connection is observed via the victim's escalation percent rising.
+        Assert.NotNull(finalVictimPercent);
+        Assert.True(finalVictimPercent > 0f,
+            $"Slash never connected — victim percent stayed at {finalVictimPercent}. Check geometry / mouse direction.");
 
         // 2) Hitstun must have fired at some point.
         Assert.True(sawHitstun, "Expected Combat.HitstunActive to be true at some frame after the slash landed.");
@@ -181,7 +182,7 @@ public class CombatHitstunTests(ITestOutputHelper output)
 
     // A high-knockback hit (Stab, KnockbackMagnitude=380) crosses CombatState's
     // StunImpulseThreshold (350) and flips StunActive — verified via the victim
-    // entering StunnedState. The complementary case (Slash1, knockback 200, below
+    // entering StunnedState. The complementary case (Slash1, knockback 60, below
     // threshold) is already covered by Hitstun_BlocksJumpAfterSlashLands which
     // sees the victim stay in StandingState (only hitstun fires, not stun).
     [Fact]

@@ -131,7 +131,19 @@ public class RecoveryAction : ActionState
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
         => ab.Condition.RecoveryActive;
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars) {}
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        // Hold-field continuation (COMBAT_FEEL_PLAN Phase 2): the stateless field
+        // dies with its publishing state, so the gap between a hold-slash and its
+        // combo follow-up would drop the victim. Recovery is the live state during
+        // that gap — while a combo window from a holding slash is open, keep
+        // broadcasting a weaker pull. vars.SlashDir survives from the slash's
+        // activation (RecoveryAction never writes vars), so the field stays aimed.
+        if ((ab.Condition.Slash2Ready || ab.Condition.Slash3Ready)
+            && vars.SlashDir != Vector2.Zero)
+            SlashLikeAction.PublishHoldField(ctx, vars.SlashDir,
+                SlashLikeAction.HoldFieldBaseRadius, strengthScale: 0.6f);
+    }
 }
 
 // Shared base for slash-shaped moves. Subclasses configure arc shape, color, posture
@@ -159,7 +171,22 @@ public abstract class SlashLikeAction : ActionState
     // visible reach; widening makes near-misses rarer without changing the
     // arc shape or apex position. Per-variant ArcRadiusScale still stacks on
     // top of this, so AirSlash1 (0.9×) and GroundSlash3 (1.3×) still differ.
-    private const float BaseArcRadius         = PlayerCharacter.Radius * 1.5f * 1.75f;
+    // Internal (not private) so RecoveryAction can publish the hold-field
+    // continuation at the same geometry.
+    internal const float BaseArcRadius        = PlayerCharacter.Radius * 1.5f * 1.75f;
+    internal const float HoldFieldBaseRadius  = BaseArcRadius;
+
+    // Hold-field tuning (COMBAT_FEEL_PLAN Phase 2). Variants with HoldVictims=true
+    // broadcast a ForceField each frame of the slash that servo-pulls enemies
+    // toward a focus in front of the attacker — keeping them in range for the next
+    // slice instead of knocking them out of it. Stateless: the field is re-published
+    // per frame and dies with the action (see ForceField). MaxAccel is the escape
+    // valve — strong enough to beat hitstun-muted control, weak enough that a jump
+    // or launch tears free.
+    private const float HoldFieldTargetSpeed  = 160f;   // px/s toward the focus
+    private const float HoldFieldMaxAccel     = 4000f;  // px/s² servo clamp
+    private const float HoldFieldFocusDist    = 0.7f;   // focus at this × radius along SlashDir
+    private const float HoldFieldRegionScale  = 1.4f;   // region half-size = this × radius
     // Cosmetic trail behind the apex dot. Lifetime ≈ a few frames so the ribbon
     // reads as motion blur, not afterimage.
     private const int   TrailCapacity         = 8;
@@ -179,11 +206,22 @@ public abstract class SlashLikeAction : ActionState
     protected virtual  bool    CombosOk(ConditionState cond) => true;
     // Override to clear the flag we just used + the recovery flag.
     protected virtual  void    OnEnterClearFlags(ConditionState cond) { }
-    // Override to set the next-stage flag + recovery duration.
-    protected abstract void    OnExitSetFlags(ConditionState cond, int currentFrame);
+    // Override to set the next-stage flag + recovery duration. Durations are
+    // authored in seconds (SetForSeconds) — `dt` is the step rate to convert at.
+    // `connected` is the Phase 3 hit-confirm: true iff this slash landed on an
+    // entity. Combo openers gate their follow-up flag on it (whiffed pokes don't
+    // chain); finishers/one-shots ignore it and just schedule recovery.
+    protected abstract void    OnExitSetFlags(ConditionState cond, int currentFrame, float dt, bool connected);
     // AirTurnSlash overrides this to true so a click behind the player gives a
     // genuine backward slash instead of a perpendicular one (roadmap §1.6).
     protected virtual  bool    AllowBackward       => false;
+    // Hitstun override in seconds (< 0 ⇒ derive from impulse). Hold-slashes carry
+    // a tiny impulse (they pull, not push) so they declare their hitstun explicitly.
+    protected virtual  float   HitstunSecondsOverride => -1f;
+    // When true, the slash broadcasts a holding ForceField each frame (see the
+    // HoldField* constants above). Ground combo openers (S1/S2) hold; finishers
+    // and pokes don't.
+    protected virtual  bool    HoldVictims         => false;
     // -----------------------------------------------------------------------
 
     protected float ArcRadius => BaseArcRadius * ArcRadiusScale;
@@ -211,16 +249,17 @@ public abstract class SlashLikeAction : ActionState
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        vars.TimeInState = 0f;
-        vars.SlashDir    = ComputeSlashDir(ctx, ab);
-        vars.HitId       = ctx.HitIds.Next();
+        vars.TimeInState     = 0f;
+        vars.SlashDir        = ComputeSlashDir(ctx, ab);
+        vars.HitId           = ctx.HitIds.Next();
+        vars.AttackConnected = false;
         _trail.Clear();
         ctx.Intents.Consume(IntentType.Click, ctx.CurrentFrame);
         OnEnterClearFlags(ab.Condition);
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => OnExitSetFlags(ab.Condition, ctx.CurrentFrame);
+        => OnExitSetFlags(ab.Condition, ctx.CurrentFrame, ctx.Dt, vars.AttackConnected);
 
     // Mouse-to-body direction, hemisphere-clamped (unless AllowBackward) so a
     // click behind the player produces a perpendicular slash rather than a
@@ -241,6 +280,14 @@ public abstract class SlashLikeAction : ActionState
         _trail.Tick(ctx.Dt);
         _trail.Push(dot);
 
+        // Hit-confirm latch (Phase 3): poll the prior frame's connection count for
+        // this HitId. Entity hits are deduped per target, so the count is non-zero
+        // only on the frame after a fresh connection — latch it so OnExitSetFlags
+        // (which fires a few frames later, after the active window) can gate combos.
+        if (!vars.AttackConnected && ctx.CombatSystem != null
+            && ctx.CombatSystem.PeekHits(vars.HitId) > 0)
+            vars.AttackConnected = true;
+
         float windowStart = Duration * HurtboxStartFraction;
         float windowEnd   = windowStart + Duration * HurtboxActiveFraction;
         if (vars.TimeInState >= windowStart && vars.TimeInState <= windowEnd && ctx.Hitboxes != null)
@@ -252,8 +299,32 @@ public abstract class SlashLikeAction : ActionState
             ctx.Hitboxes.Publish(new Hitbox(
                 region, vars.HitId, SlashDamagePerFrame,
                 vars.SlashDir * KnockbackMagnitude,
-                ctx.Faction, ctx.SelfId, SlashColor));
+                ctx.Faction, ctx.SelfId, SlashColor,
+                hitstunSecondsOverride: HitstunSecondsOverride));
         }
+
+        // Holding slashes broadcast their pull field for the WHOLE slash (not just
+        // the damage window) so a victim clipped early in the arc is still held
+        // through the follow-through. Re-published every frame; see ForceField.
+        if (HoldVictims)
+            PublishHoldField(ctx, vars.SlashDir, ArcRadius, strengthScale: 1f);
+    }
+
+    // Shared by the slash Update (full strength) and RecoveryAction's combo-gap
+    // continuation (weaker). Focus sits in front of the attacker along `dir`;
+    // the region is wide enough to cover the arc's reach so anything the slash
+    // can touch is also held.
+    internal static void PublishHoldField(EnvironmentContext ctx, Vector2 dir, float radius, float strengthScale)
+    {
+        if (ctx.ForceFields == null) return;
+        var focus = ctx.Body.Position + dir * (radius * HoldFieldFocusDist);
+        float r = radius * HoldFieldRegionScale;
+        ctx.ForceFields.Publish(new ForceField(
+            new BoundingBox(focus.X - r, focus.Y - r, focus.X + r, focus.Y + r),
+            focus,
+            HoldFieldTargetSpeed * strengthScale,
+            HoldFieldMaxAccel   * strengthScale,
+            ctx.Faction, ctx.SelfId));
     }
 
     private Vector2 ComputeDotPosition(Vector2 anchor, in ActionVars vars)
@@ -279,7 +350,11 @@ public abstract class SlashLikeAction : ActionState
 
 // ---------- Ground combo: S1 → S2 → S3 -----------------------------------------
 
-// Opening ground slash. Wide CCW sweep, red.
+// Opening ground slash. Wide CCW sweep, red. Holds rather than launches
+// (COMBAT_FEEL_PLAN Phase 2): the knockback is a light tap and the slash
+// broadcasts a holding field pulling the victim into S2's reach — the combo
+// finisher (S3) is where the launch lives. Real hitstun comes from the
+// explicit override, not the (now tiny) impulse.
 public class GroundSlash1 : SlashLikeAction
 {
     // Slashes are fast — Duration tuned so the active damage window is ~2 frames at 30 fps.
@@ -288,14 +363,20 @@ public class GroundSlash1 : SlashLikeAction
     protected override float ArcRadiusScale      => 1.0f;
     protected override float SweepAngleDeg       => 100f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 200f;
+    protected override float KnockbackMagnitude  => 60f;     // was 200 — hold, don't shove
     protected override Color SlashColor          => Color.Red;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
-    protected override void OnExitSetFlags(ConditionState c, int f)
+    protected override float HitstunSecondsOverride => 0.30f;
+    protected override bool  HoldVictims         => true;
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetFor(ref c.Slash2Ready,    ref c.Slash2ExpireFrame,    30, f);
-        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  3,  f);
+        // Hit-confirm (`connected`) is tracked but intentionally does NOT gate the
+        // chain right now — the S2 window opens whether or not S1 landed. To make
+        // the combo hit-confirmed (Phase 3 whiff-punish), wrap the Slash2Ready set in
+        // `if (connected)`.
+        ConditionState.SetForSeconds(ref c.Slash2Ready, ref c.Slash2ExpireFrame, 1.0f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.1f, f, dt);
     }
 }
 
@@ -306,10 +387,12 @@ public class GroundSlash2 : SlashLikeAction
     protected override float ArcRadiusScale      => 1.05f;
     protected override float SweepAngleDeg       => 110f;
     protected override float SweepDirection      => -1f;
-    protected override float KnockbackMagnitude  => 260f;
+    protected override float KnockbackMagnitude  => 80f;     // was 260 — still holding
     protected override Color SlashColor          => Color.Red;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
+    protected override float HitstunSecondsOverride => 0.30f;
+    protected override bool  HoldVictims         => true;
 
     // Combo moves preempt Recovery via higher passive priority.
     public override int PassivePriority => 50;
@@ -320,10 +403,11 @@ public class GroundSlash2 : SlashLikeAction
         c.Slash2Ready    = false;
         c.RecoveryActive = false;
     }
-    protected override void OnExitSetFlags(ConditionState c, int f)
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetFor(ref c.Slash3Ready,    ref c.Slash3ExpireFrame,    30, f);
-        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  3,  f);
+        // `connected` tracked but not gating — see GroundSlash1.OnExitSetFlags.
+        ConditionState.SetForSeconds(ref c.Slash3Ready, ref c.Slash3ExpireFrame, 1.0f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.1f, f, dt);
     }
 }
 
@@ -347,10 +431,10 @@ public class GroundSlash3 : SlashLikeAction
         c.Slash3Ready    = false;
         c.RecoveryActive = false;
     }
-    protected override void OnExitSetFlags(ConditionState c, int f)
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
         // End of chain — no further combo flag.
-        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 5, f);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.167f, f, dt);
     }
 }
 
@@ -387,9 +471,9 @@ public class CrouchSlash : SlashLikeAction
     }
 
     // No combo flag set on exit — crouch slash terminates the chain.
-    protected override void OnExitSetFlags(ConditionState c, int f)
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 5, f);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.167f, f, dt);
     }
 }
 
@@ -406,10 +490,11 @@ public class AirSlash1 : SlashLikeAction
     protected override Color SlashColor          => Color.DeepSkyBlue;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
-    protected override void OnExitSetFlags(ConditionState c, int f)
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetFor(ref c.AirSlash2Ready, ref c.AirSlash2ExpireFrame, 30, f);
-        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  3,  f);
+        // `connected` tracked but not gating — see GroundSlash1.OnExitSetFlags.
+        ConditionState.SetForSeconds(ref c.AirSlash2Ready, ref c.AirSlash2ExpireFrame, 1.0f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.1f, f, dt);
     }
 }
 
@@ -433,9 +518,9 @@ public class AirSlash2 : SlashLikeAction
         c.AirSlash2Ready = false;
         c.RecoveryActive = false;
     }
-    protected override void OnExitSetFlags(ConditionState c, int f)
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 4, f);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.133f, f, dt);
     }
 }
 
@@ -479,10 +564,10 @@ public class AirTurnSlash : SlashLikeAction
         base.Enter(ctx, ab, ref vars);
     }
 
-    protected override void OnExitSetFlags(ConditionState c, int f)
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
         // No combo follow-up — turn-around is one-and-done. Short recovery.
-        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 4, f);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.133f, f, dt);
     }
 }
 
@@ -497,7 +582,10 @@ public class StabAction : ActionState
     // opens just as the tip starts whipping forward out of the wind-up, and stays
     // alive through the snap into the hold. In normalized state-time that's
     // ≈ 0.20–0.50 of Duration, matching WindupEnd → mid-hold.
-    private const float HurtboxStartTime      = 0.12f;
+    // Startup bumped 0.12 → 0.18 s (≈11 frames at 60 fps) as part of the Phase 3
+    // commitment spectrum: the stab is now a launcher (3× knockback below), so it
+    // earns a real wind-up — whiffing it is punishable, landing it is a kill move.
+    private const float HurtboxStartTime      = 0.18f;
     private const float HurtboxActiveDuration = 0.18f;
 
     // Lunge window: a short forward-glide phase AFTER the hitbox active window
@@ -525,7 +613,11 @@ public class StabAction : ActionState
     // beyond its visible thrust extent.
     private const float BlockReach            = PlayerCharacter.Radius * 6.0f * 1.75f;
     private const float BlockHalfWidth        = PlayerCharacter.Radius * 0.9f * 1.75f;
-    private const float KnockbackMagnitude    = 380f;
+    // Phase 3 power spectrum: 3× the old 380. At Mass 2.5 that's ~456 px/s of
+    // launch — well over the 350 stun threshold, so a clean stab launches AND
+    // stuns (→ TumbleState in the air). The payoff that justifies the longer
+    // startup + recovery and the commitment of the long swipe gesture.
+    private const float KnockbackMagnitude    = 1140f;
     private const float DamagePerFrame        = TileDamage.TileMaxHP / 4f;
     // Recoil per connecting entity/cell, scaled against KnockbackImpulse and
     // negated when applied to the attacker. BreakProtected ⇒ cells that the
@@ -644,8 +736,8 @@ public class StabAction : ActionState
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         // Larger recovery than slashes — stab can't roll directly into anything.
-        ConditionState.SetFor(ref ab.Condition.RecoveryActive,
-                              ref ab.Condition.RecoveryExpireFrame, 9, ctx.CurrentFrame);
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
+                              ref ab.Condition.RecoveryExpireFrame, 0.3f, ctx.CurrentFrame, ctx.Dt);
     }
 
     // Heavy-stance modifiers throughout the stab; friction dips during the lunge
@@ -967,9 +1059,9 @@ public class GuardRetaliateAction : SlashLikeAction
         base.Enter(ctx, ab, ref vars);
     }
 
-    protected override void OnExitSetFlags(ConditionState c, int f)
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetFor(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 3, f);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.1f, f, dt);
     }
 }
 
@@ -1020,8 +1112,8 @@ public class PulseAction : ActionState
     {
         // Long recovery — pulse is the biggest single attack, can't roll directly
         // into anything else.
-        ConditionState.SetFor(ref ab.Condition.RecoveryActive,
-                              ref ab.Condition.RecoveryExpireFrame, 12, ctx.CurrentFrame);
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
+                              ref ab.Condition.RecoveryExpireFrame, 0.4f, ctx.CurrentFrame, ctx.Dt);
     }
 
     // Heavy stance throughout the pulse — applies on ground AND in air, unlike
@@ -1531,8 +1623,8 @@ public class BlockEruptionAction : ActionState
 // then the FSM re-evaluates and Guard re-arms on the next frame.
 public class EnergyBallAction : ActionState
 {
-    private const float Duration       = 0.15f;
-    private const int   RecoveryFrames = 4;
+    private const float Duration        = 0.15f;
+    private const float RecoverySeconds = 0.133f;
     // Distance ahead of the player center where the projectile spawns. Keeps
     // the ball from immediately overlapping the player's body/hurtbox.
     private const float SpawnOffset    = PlayerCharacter.Radius * 1.2f;
@@ -1573,7 +1665,7 @@ public class EnergyBallAction : ActionState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        ConditionState.SetFor(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoveryFrames, ctx.CurrentFrame);
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
     }
 }
 
@@ -1609,7 +1701,7 @@ public class BeamAction : ActionState
     private const float SegmentHalfSize  = 6f;
     private const float DamagePerFrame   = TileDamage.TileMaxHP * 0.45f;   // full-energy damage; breaks Stone in 2-3 frames of overlap
     private const float KnockbackImpulse = 320f;
-    private const int   RecoveryFrames   = 6;
+    private const float RecoverySeconds  = 0.2f;
 
     // --- Energy model (the "strength through blocks / air" math) ---------------
     // The beam carries a normalized energy that starts at 1.0 at the muzzle and is
@@ -1794,7 +1886,7 @@ public class BeamAction : ActionState
         // Recovery on exit no matter how we left — a successful beam locks the
         // player out of follow-up Shift+LMB for a moment, an interrupted charge
         // does likewise (which is a feel-call; it punishes spamming).
-        ConditionState.SetFor(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoveryFrames, ctx.CurrentFrame);
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
     }
 
     // Heavy stance while charging + firing — beam needs the player committed.
@@ -1864,7 +1956,7 @@ public class LobbedAreaAction : ActionState
     private const float DipFactor       = 0.7f;
     private const float BudgetMin       = 0f;
     private const float BudgetMax       = 50f;
-    private const int   RecoveryFrames  = 6;
+    private const float RecoverySeconds = 0.2f;
     // Ballistic arc: vertical speed at launch lifts the ball over a tunable apex
     // height; horizontal speed is derived from cursor-distance / time-of-flight
     // so the ball lands AT the cursor under standard MovementConfig gravity.
@@ -1905,7 +1997,7 @@ public class LobbedAreaAction : ActionState
     {
         // Recovery regardless — short-charge release still locks out a follow-up
         // throw for a moment so spamming low-budget lobs is throttled.
-        ConditionState.SetFor(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoveryFrames, ctx.CurrentFrame);
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
 
         // RMB still held = forced exit (preemption) — don't fire.
         if (ctx.Input.RightClick) return;
@@ -2003,7 +2095,7 @@ public class LobbedAreaAction : ActionState
 public class GrenadeAction : ActionState
 {
     private const float Duration       = 0.15f;
-    private const int   RecoveryFrames = 5;
+    private const float RecoverySeconds = 0.167f;
     private const float SpawnOffset    = PlayerCharacter.Radius * 1.2f;
 
     public override int ActivePriority  => 40;
@@ -2041,7 +2133,171 @@ public class GrenadeAction : ActionState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        ConditionState.SetFor(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoveryFrames, ctx.CurrentFrame);
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
     }
+}
+
+// ---------- Grab — Shift + RMB: hold an opponent, then throw ---------------------
+//
+// COMBAT_FEEL_PLAN Phase 6: the grab completes the RPS triangle (grab beats guard,
+// attack beats grab, guard beats attack). It's the Phase 2 hold-field turned up — a
+// strong short-range ForceField in front of the grabber that flags whoever it holds
+// `GrabbedActive` (so their normal attacks/jump gate off; only struggle attacks fire).
+// It is stateless like every field: the "grab" persists only while this action keeps
+// broadcasting. It IGNORES guard for free (a field never goes through the OnHit/parry
+// path). Releasing RMB (or hitting the hold cap) flings the victim with a brief
+// high-speed directional field — into terrain at high percent that's the Phase 5 KO.
+//
+// Grab-break falls out for free: CheckConditions ends the grab the moment the grabber
+// is in hitstun, so a struggle attack that connects (→ grabber hitstun) drops the
+// field, which clears the victim's GrabbedActive a couple frames later. A whiffed grab
+// still runs its hold→throw→recovery, so an opponent who reads it punishes the lag.
+public class GrabAction : ActionState
+{
+    private const float GrabHoldMaxSeconds = 1.2f;    // auto-throw if held this long
+    private const float ThrowSeconds       = 0.12f;   // throw-field duration
+    private const float RecoverySeconds    = 0.3f;    // lag after a grab (the whiff-punish window)
+    private const float Range       = PlayerCharacter.Radius * 2.4f;   // field region half-size
+    private const float FocusDist   = PlayerCharacter.Radius * 1.6f;   // hold focus in front of the grabber
+    private const float PullSpeed   = 320f;
+    private const float PullAccel   = 9000f;          // strong — overpowers the victim walking away
+    private const float ThrowSpeed  = 520f;
+    private const float ThrowAccel  = 12000f;
+
+    public override int ActivePriority  => 46;   // above LobbedArea(45)/Guard(40), below GuardRetaliate(55)
+    public override int PassivePriority => 46;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.Shift || !ctx.Input.RightClick) return false;
+        if (ctx.Controller.GetPrevious(1).RightClick) return false;     // press-edge only
+        if (ctx.Combat?.BlocksAttack == true) return false;             // not while stunned/grabbed
+        if (ctx.Combat?.HitstunActive == true) return false;            // not while in hitstun
+        if (ab.Condition.RecoveryActive) return false;
+        return true;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        // Grab-break: a hit on the grabber ends the hold — the struggle-attack counter
+        // works through this for free.
+        if (ctx.Combat?.HitstunActive == true) return false;
+        if (vars.GrabThrowing) return vars.ChargeTime < ThrowSeconds;
+        return true;   // hold phase persists; Update transitions to the throw
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState  = 0f;
+        vars.ChargeTime   = 0f;
+        vars.GrabThrowing = false;
+        vars.GrabDir      = AimDir(ctx, ab);
+    }
+
+    private static Vector2 AimDir(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        int facing = ab.Facing == 0 ? 1 : ab.Facing;
+        Vector2 raw = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+        return raw.LengthSquared() > 1e-2f ? Vector2.Normalize(raw) : new Vector2(facing, 0f);
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        int facing = ab.Facing == 0 ? 1 : ab.Facing;
+        if (!vars.GrabThrowing)
+        {
+            vars.TimeInState += ctx.Dt;
+            bool holding = ctx.Input.RightClick && vars.TimeInState < GrabHoldMaxSeconds;
+            if (holding)
+            {
+                var focus = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;
+                if (ctx.ForceFields != null)
+                    ctx.ForceFields.Publish(new ForceField(
+                        new BoundingBox(focus.X - Range, focus.Y - Range, focus.X + Range, focus.Y + Range),
+                        focus, PullSpeed, PullAccel, ctx.Faction, ctx.SelfId, Color.Magenta, isGrab: true));
+                return;
+            }
+            // Release or hold-cap → enter the throw.
+            vars.GrabThrowing = true;
+            vars.ChargeTime   = 0f;
+            vars.GrabDir      = AimDir(ctx, ab);
+        }
+
+        // Throw phase: a brief high-speed directional field flings whoever's still
+        // held-adjacent along GrabDir (no IsGrab — the victim is released, not held).
+        vars.ChargeTime += ctx.Dt;
+        if (ctx.ForceFields != null)
+        {
+            // Region hugs the held position; focus is far down GrabDir so the servo
+            // drives the victim to ThrowSpeed away from the grabber.
+            var hold  = ctx.Body.Position + vars.GrabDir * FocusDist;
+            var focus = ctx.Body.Position + vars.GrabDir * 400f;
+            ctx.ForceFields.Publish(new ForceField(
+                new BoundingBox(hold.X - Range, hold.Y - Range, hold.X + Range, hold.Y + Range),
+                focus, ThrowSpeed, ThrowAccel, ctx.Faction, ctx.SelfId, Color.HotPink,
+                isGrab: false, isThrow: true));
+        }
+    }
+
+    // Heavy stance while grabbing — the grabber is committed.
+    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
+    {
+        m.MaxWalkSpeed *= 0.4f;
+        m.WalkAccel    *= 0.5f;
+        m.MaxAirSpeed  *= 0.6f;
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
+            ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+    }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    {
+        int facing = vars.GrabDir.X >= 0f ? 1 : -1;
+        var focus = body.Position + (vars.GrabThrowing ? vars.GrabDir : new Vector2(facing, 0f)) * FocusDist;
+        var color = vars.GrabThrowing ? Color.HotPink : Color.Magenta;
+        sb.Draw(pixel, new Rectangle((int)focus.X - 3, (int)focus.Y - 3, 6, 6), color * 0.8f);
+    }
+}
+
+// ---------- Struggle: the one attack a grabbed player can throw -------------------
+//
+// COMBAT_FEEL_PLAN Phase 6. A weak slash exempt from the BlocksAttack gate that grabs
+// impose — it requires GrabbedActive and skips the gate the normal slashes obey. It's
+// short-range (the grab holds you adjacent), modest knockback with a small fixed
+// hitstun so it reliably stuns the grabber — which drops their grab (CheckConditions
+// `!HitstunActive`) and frees you. Its startup is the grabber's guaranteed window to
+// throw first: a prompt throw beats a struggle, a greedy hold eats it.
+public class GrabbedSlash : SlashLikeAction
+{
+    protected override float Duration            => 0.16f;
+    protected override float ArcRadiusScale      => 0.9f;     // short — held adjacent
+    protected override float SweepAngleDeg       => 80f;
+    protected override float SweepDirection      => +1f;
+    protected override float KnockbackMagnitude  => 120f;     // modest — just enough to stun → break
+    protected override Color SlashColor          => Color.Yellow;
+    protected override bool  RequireGround       => false;
+    protected override bool  RequireAir          => false;
+    // Fixed hitstun so even this weak hit reliably stuns the grabber (→ grab-break),
+    // independent of the grabber's percent.
+    protected override float HitstunSecondsOverride => 0.20f;
+
+    // Beats NullAction; no combo. Normal slashes are gated off while grabbed, so this
+    // is the only attack available.
+    public override int PassivePriority => 36;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // EXEMPT from the BlocksAttack gate (which a grab raises) — that's the whole
+        // point. Requires being grabbed + a click intent.
+        if (ctx.Combat?.GrabbedActive != true) return false;
+        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        return true;
+    }
+
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
+        => ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.15f, f, dt);
 }
 

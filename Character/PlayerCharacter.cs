@@ -35,10 +35,12 @@ public class PlayerCharacter : IHittable
     public float   MaxHealth = 3f;
     public float   Health;
     public float   Mass      = 2.5f;
-    // Brief invuln after taking a hit so a multi-frame enemy hitbox (or two
-    // overlapping enemies) doesn't shred the player in a single frame. The
-    // (HitId, Target) dedupe in CombatSystem already handles single-attack
-    // multi-frame, so this is mostly belt-and-suspenders for stacked attackers.
+    // Spawn protection only (COMBAT_FEEL_PLAN Phase 1). The old post-HIT invuln is
+    // gone — it outlasted hitstun, which made follow-up hits (strings, juggles)
+    // mathematically impossible. Single-attack multi-frame is already handled by
+    // the (HitId, Target) dedupe in CombatSystem; stacked-attacker burst damage is
+    // now a legitimate combo. Respawn still grants this window so a fresh spawn
+    // isn't hit on frame one.
     private const float HitInvulnDuration = 0.4f;
     private float _hitInvulnRemaining;
 
@@ -68,8 +70,19 @@ public class PlayerCharacter : IHittable
     // jumps only, before sand impacts could legally exceed it.
     private const float CrushImpulseThreshold = 700f;
     private const float CrushDamagePerImpulse = 0.003f;
-    private const int   CrushCooldownFrames   = 6;
+    private const float CrushCooldownSeconds  = 0.2f;   // ≈ the original 6 frames at 30 fps
     private int _lastCrushFrame = int.MinValue / 2;
+
+    // Fast HP regen (COMBAT_FEEL_PLAN Phase 5). HP is a quick-recovering pool now that
+    // direct hits don't chip it — the lasting pressure is the monotonic DamagePercent.
+    // Regen pauses briefly after an HP loss (crush is the only HP-loss path, so its
+    // frame anchors the delay — already snapshotted, no extra field needed).
+    private const float HealthRegenPerSecond = 0.8f;
+    private const float RegenDelaySeconds    = 1.0f;
+    // The dt this player is being stepped at, captured at the top of Update.
+    // OnHit fires from CombatSystem.Apply (after all updates, same frame), so it
+    // reads the current frame's value. Not snapshotted — rewritten every Update.
+    private float _dt = Simulation.FixedDt;
     public bool IsAlive => Health > 0f;
 
     // Player is one big hurtbox covering its body bounds. Future: split into head/body
@@ -83,20 +96,33 @@ public class PlayerCharacter : IHittable
 
     public void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
+        // Tech i-frames (Phase 4): a freshly-teched player no-ops incoming hits for
+        // a short window so the tech recovery isn't immediately re-punished.
+        if (_abilities.Combat.IsInvulnerable(_frame)) return;
+
         // Guard parry — roadmap §1.5. If GuardActive and the hit lands in the
         // front-cone, absorb completely: no damage, no knockback, no hitstun.
         // Weak in-cone hits additionally charge GuardRetaliate (see CombatState.TryParry).
-        if (_abilities.Combat.TryParry(hit.KnockbackImpulse, hit.Damage, _abilities.Facing, _frame))
+        if (_abilities.Combat.TryParry(hit.KnockbackImpulse, hit.Damage, _abilities.Facing, _frame, _dt))
             return;
 
-        Health -= hit.Damage;
-        if (Mass > 0f) Body.Velocity += hit.KnockbackImpulse / Mass;
-        _hitInvulnRemaining = HitInvulnDuration;
+        // Escalation model (COMBAT_FEEL_PLAN Phase 5): a direct combat hit does NOT
+        // chip HP — it raises this player's monotonic DamagePercent and applies
+        // knockback scaled by that percent. Real HP loss comes from the resulting
+        // hard impact into terrain (the crush path in Update, which scales with how
+        // hard you're slammed). So low % ⇒ pushed around harmlessly; high % ⇒ flung
+        // into walls/floor hard enough to take crush damage. The hit's "damage" stat
+        // is now its percent contribution; tile damage still uses it on the tile path.
+        _abilities.Combat.AddPercent(hit.Damage);
+        float kbScale = _abilities.Combat.KnockbackScale;
+        if (Mass > 0f) Body.Velocity += hit.KnockbackImpulse * kbScale / Mass;
 
-        // Register the hit for hitstun (every hit) + the stun-threshold check.
-        // Uses raw KnockbackImpulse magnitude — independent of player Mass so the
-        // attack's "strength" reads consistently across players of different mass.
-        _abilities.Combat.OnHitRegistered(_frame, hit.KnockbackImpulse.Length());
+        // Register the hit for hitstun (every hit) + the stun-threshold check, using
+        // the percent-scaled impulse so high-% hits stun longer and cross the stun /
+        // Tumble threshold. Raw magnitude (pre-mass) so strength reads consistently
+        // across masses. Hold-slashes still carry an explicit HitstunSecondsOverride.
+        _abilities.Combat.OnHitRegistered(_frame, hit.KnockbackImpulse.Length() * kbScale, _dt,
+                                          hit.HitstunSecondsOverride);
     }
 
     // Called by Game1 on Health <= 0 to reset to a clean starting state. Cheaper
@@ -108,6 +134,8 @@ public class PlayerCharacter : IHittable
         Body.Velocity = Vector2.Zero;
         Health        = MaxHealth;
         _hitInvulnRemaining = HitInvulnDuration;
+        // KO resets the escalation percent — the only thing that clears it (Phase 5).
+        _abilities.Combat.DamagePercent = 0f;
     }
     
     private readonly PlayerAbilityState _abilities = new();
@@ -226,11 +254,15 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new EnergyBallAction());     // 40/45 — Shift+LMB tap, preempts Guard briefly
         _actionRegistry.Add(new BeamAction());           // 40/45 — Shift+LMB hold, sustained beam after charge
         _actionRegistry.Add(new GrenadeAction());        // 40/45 — F press, throws sticky grenade
-        _actionRegistry.Add(new LobbedAreaAction());     // 40/45 — Shift+RMB charge, ranged eruption on landing
+        // LobbedAreaAction (Shift+RMB charge) deactivated — that binding is now Grab
+        // (COMBAT_FEEL_PLAN Phase 6). Re-add the line to restore the ranged eruption.
+        _actionRegistry.Add(new GrabAction());           // 46/46 — Shift+RMB hold → grab → throw
+        _actionRegistry.Add(new GrabbedSlash());         // 36/36 — struggle (exempt while grabbed)
         _currentAction = _actionRegistry[0];
 
         _stateRegistry.Add(new FallingState());
         _stateRegistry.Add(new StunnedState());
+        _stateRegistry.Add(new TumbleState());
         _stateRegistry.Add(new StandingState());
         _stateRegistry.Add(new CrouchedState());
         _stateRegistry.Add(new JumpingState());
@@ -254,9 +286,10 @@ public class PlayerCharacter : IHittable
         _currentState = _stateRegistry[0]; // falling
     }
 
-    public void Update(Controller controller, ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes, float dt, IEntitySpawner spawner = null)
+    public void Update(Controller controller, ChunkMap chunks, HitboxWorld hitboxes, HurtboxWorld hurtboxes, float dt, IEntitySpawner spawner = null, ForceFieldWorld forceFields = null)
     {
         _frame++;
+        _dt = dt;
         if (_hitInvulnRemaining > 0f) _hitInvulnRemaining -= dt;
 
         // Crush damage: turn the previous step's largest |vnRel| into HP loss
@@ -265,13 +298,25 @@ public class PlayerCharacter : IHittable
         // OnHitRegistered so a hard fall / wall slam also lights up Hitstun and
         // (if hard enough) Stun — "I just slammed down, give me a sec."
         if (Body.LastImpulseMagnitude > CrushImpulseThreshold
-            && _frame - _lastCrushFrame >= CrushCooldownFrames)
+            && _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt))
         {
             float excess = Body.LastImpulseMagnitude - CrushImpulseThreshold;
             Health -= excess * CrushDamagePerImpulse;
-            _abilities.Combat.OnHitRegistered(_frame, Body.LastImpulseMagnitude);
+            // Short fixed hitstun (the old 8-frames-at-30fps feel) and NO control
+            // mute: a hard landing briefly gates jump ("give me a sec") but doesn't
+            // turn walking to mush — that treatment is for combat hits.
+            _abilities.Combat.OnHitRegistered(_frame, Body.LastImpulseMagnitude, dt,
+                hitstunSecondsOverride: 0.27f, muteControl: false);
             _lastCrushFrame = _frame;
         }
+
+        // Fast HP regen (Phase 5): HP recovers quickly once you've been clear of hard
+        // impacts for RegenDelaySeconds. Crush is the only HP-loss path, so its frame
+        // (_lastCrushFrame) anchors the delay. The monotonic DamagePercent does NOT
+        // regen — it's the lasting pressure that eventually makes any hit lethal.
+        if (Health < MaxHealth
+            && _frame - _lastCrushFrame >= SimFrames.FromSeconds(RegenDelaySeconds, dt))
+            Health = MathF.Min(MaxHealth, Health + HealthRegenPerSecond * dt);
 
         var input = controller.Current;
         var prev  = controller.GetPrevious(1);
@@ -301,7 +346,7 @@ public class PlayerCharacter : IHittable
 
         // Edge-detect input gestures and enqueue intents. Done BEFORE the FSMs so
         // freshly-released clicks are visible to action preconditions this frame.
-        _inputParser.Detect(controller, _intents, _frame);
+        _inputParser.Detect(controller, _intents, _frame, dt);
 
         var ctx = new EnvironmentContext
         {
@@ -312,6 +357,7 @@ public class PlayerCharacter : IHittable
             Chunks         = chunks,
             Hitboxes       = hitboxes,
             Hurtboxes      = hurtboxes,
+            ForceFields    = forceFields,
             Spawner        = spawner,
             Faction        = Faction,
             SelfId         = Id,
@@ -351,12 +397,12 @@ public class PlayerCharacter : IHittable
         MovementState bestChoice = null;
         int highestPriority = int.MinValue;
 
-        // Cross-cutting capability lock-out (combat hitstun/stun blocks Jump). Computed
-        // once; candidate states declaring a blocked capability are skipped. Gates entry
-        // only — the current state's continuation is governed by its CheckConditions.
-        var blockedCaps = ctx.Combat?.BlocksJump == true
-            ? MovementCapability.Jump
-            : MovementCapability.None;
+        // Cross-cutting capability lock-out (combat hitstun/stun blocks Jump +
+        // WallCling + LedgeGrab — see CombatState.BlockedCapabilities). Computed
+        // once; candidate states declaring a blocked capability are skipped. Gates
+        // entry only — the current state's continuation is governed by its
+        // CheckConditions.
+        var blockedCaps = ctx.Combat?.BlockedCapabilities ?? MovementCapability.None;
 
         // The state active at the end of last frame owns one-frame suppression rights —
         // it still points at a maneuver (e.g. LedgePull) for the frame after that maneuver
@@ -418,6 +464,20 @@ public class PlayerCharacter : IHittable
         // movement reads them through ctx.Modifiers.
         _currentAction.ApplyMovementModifiers(ref ctx.Modifiers, in _actionVars);
 
+        // Hitstun mutes self-control AFTER action modifiers so a hit always wins
+        // the stack (COMBAT_FEEL_PLAN Phase 1): knockback displaces instead of
+        // being steered away or clipped by the speed caps. The residual accel is
+        // the victim's DI; PreserveExternalVelocity stops AirControl / the ground
+        // states from braking over-cap velocity back down.
+        if (_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl)
+        {
+            ctx.Modifiers.WalkAccel      *= CombatState.HitstunAccelScale;
+            ctx.Modifiers.AirAccel       *= CombatState.HitstunAccelScale;
+            ctx.Modifiers.AirDrag        *= CombatState.HitstunDragScale;
+            ctx.Modifiers.GroundFriction *= CombatState.HitstunFrictionScale;
+            ctx.Modifiers.PreserveExternalVelocity = true;
+        }
+
         _currentState.Update(ctx, _abilities, ref _moveVars);
 
         // Action gets to augment the body's force AFTER movement has written it but
@@ -442,7 +502,7 @@ public class PlayerCharacter : IHittable
         // Drop consumed + aged-out intents so the buffer stays small. Pruning here
         // (rather than at the top) lets a newly-issued intent be Peeked + Consumed
         // in the same frame it was emitted.
-        _intents.Prune(_frame);
+        _intents.Prune(_frame, ctx.JumpBufferFrames);
     }
 
     public bool IsGrounded => _currentState is StandingState || _currentState is CrouchedState;

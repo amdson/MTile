@@ -120,9 +120,6 @@ public class TwoPlayerStepTests(ITestOutputHelper output)
         Assert.Equal(Faction.Player1, p1.Faction);
         Assert.Equal(Faction.Player2, p2.Faction);
 
-        float p1Start = p1.Health;
-        float p2Start = p2.Health;
-
         // P1 clicks (1-frame LMB press → Click → Slash) toward P2 every 12 frames;
         // P2 stands still. Aim the cursor at P2 so the slash arc sweeps over it.
         for (int f = 0; f < 90; f++)
@@ -135,9 +132,12 @@ public class TwoPlayerStepTests(ITestOutputHelper output)
             sim.Step(p1In, default);
         }
 
-        Assert.True(p2.Health < p2Start, $"P2 should take slash damage (start {p2Start}, end {p2.Health})");
-        Assert.Equal(p1Start, p1.Health);   // attacker never damages itself
-        output.WriteLine($"P2 health {p2Start} → {p2.Health}; P1 unharmed at {p1.Health}.");
+        // Direct hits feed the escalation percent now (Phase 5), not HP. P2 should
+        // accrue percent from P1's slashes; P1 stays at 0 (self-immune).
+        Assert.True(p2.Combat.DamagePercent > 0f,
+            $"P2 should accrue percent from slashes (got {p2.Combat.DamagePercent}).");
+        Assert.Equal(0f, p1.Combat.DamagePercent);   // attacker never hits itself
+        output.WriteLine($"P2 percent {p2.Combat.DamagePercent}; P1 at {p1.Combat.DamagePercent}.");
     }
 
     [Fact]

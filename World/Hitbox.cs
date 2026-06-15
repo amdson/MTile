@@ -68,13 +68,18 @@ public readonly struct Hitbox
     // whether the cell happens to break this frame. Independent of
     // BreakProtected; both gates can apply. Default 0 ⇒ every solid cell counts.
     public readonly float       RecoilMinMaterialHP;
+    // Hitstun duration override in SECONDS (COMBAT_FEEL_PLAN Phase 2). Default
+    // (< 0) means "derive from impulse magnitude" — see CombatState.OnHitRegistered.
+    // Lets a weak multi-hit attack (hold-slash, impulse 60) still carry real
+    // hitstun, and a heavy be tuned independently of its knockback number.
+    public readonly float       HitstunSecondsOverride;
 
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
                   Color? debugColor = null, HitTargets targets = HitTargets.All,
                   Polygon shape = null, Vector2 shapePos = default, float shapeRotation = 0f,
                   float recoilScale = 0f, bool recoilBreakProtected = false,
-                  float recoilMinMaterialHP = 0f)
+                  float recoilMinMaterialHP = 0f, float hitstunSecondsOverride = -1f)
     {
         Region               = region;
         HitId                = hitId;
@@ -90,5 +95,6 @@ public readonly struct Hitbox
         RecoilScale          = recoilScale;
         RecoilBreakProtected = recoilBreakProtected;
         RecoilMinMaterialHP  = recoilMinMaterialHP;
+        HitstunSecondsOverride = hitstunSecondsOverride;
     }
 }

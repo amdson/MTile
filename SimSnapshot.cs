@@ -32,6 +32,11 @@ public sealed class SimSnapshot
     // CombatSystem.CaptureDedupe.
     public Dictionary<int, EntityId[]> Dedupe;
 
+    // Hit-confirm inbox, keyed HitId → entities connected on the snapshot frame. A
+    // pending frame-N→N+1 message read by attackers the frame after a hit lands
+    // (CombatSystem.PeekHits); must round-trip so a replay can't miss a connection.
+    public Dictionary<int, int> HitConfirm;
+
     // Moving-platform poses, in registration order. Position+velocity is enough since
     // the tickers re-derive motion purely from Elapsed.
     public PlatformState[] Platforms;

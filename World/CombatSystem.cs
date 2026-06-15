@@ -32,9 +32,23 @@ public sealed class CombatSystem
     // clears the dict, so the tally is effectively a 1-frame inbox from
     // CombatSystem to the action layer.
     private readonly Dictionary<int, Vector2> _recoilByHitId = new();
+    // Per-frame hit-confirm tally — count of ENTITIES a hitbox connected with this
+    // frame, keyed by HitId. Same 1-frame-inbox lifecycle as _recoilByHitId: cleared
+    // at the start of every Apply, populated as entity hits land, read the next frame
+    // by the attacker's action. Because entity hits are deduped per (HitId, Target),
+    // a given target only counts on the frame it first connects — so an attack that
+    // polls PeekHits each of its active/recovery frames sees the connection exactly
+    // once and can latch a "did I hit?" flag (COMBAT_FEEL_PLAN Phase 3 hit-confirm).
+    private readonly Dictionary<int, int> _entityHitsByHitId = new();
 
     public Vector2 PeekRecoil(int hitId)
         => _recoilByHitId.TryGetValue(hitId, out var v) ? v : Vector2.Zero;
+
+    // Entities this HitId connected with on the LAST resolved frame. Read by an
+    // attacker's action (one frame after the hit) to confirm a strike landed —
+    // e.g. to gate a combo follow-up on a hit (whiff-punish), per Phase 3.
+    public int PeekHits(int hitId)
+        => _entityHitsByHitId.TryGetValue(hitId, out var n) ? n : 0;
 
     // `resolve` maps a hurtbox's owning EntityId back to the live IHittable so OnHit
     // can be dispatched. The dedupe table and snapshots key on EntityId (value
@@ -45,6 +59,7 @@ public sealed class CombatSystem
     {
         _liveHitIds.Clear();
         _recoilByHitId.Clear();
+        _entityHitsByHitId.Clear();
 
         foreach (var hit in hitboxes.All)
         {
@@ -115,6 +130,8 @@ public sealed class CombatSystem
                     if (target == null) continue;   // owner despawned this frame — skip
                     target.OnHit(hit, hb);
                     alreadyHit.Add(hb.Target);
+                    _entityHitsByHitId.TryGetValue(hit.HitId, out var prevHits);
+                    _entityHitsByHitId[hit.HitId] = prevHits + 1;
                     if (hit.RecoilScale > 0f)
                         AccumulateRecoil(hit.HitId, -hit.KnockbackImpulse * hit.RecoilScale);
                 }
@@ -154,6 +171,22 @@ public sealed class CombatSystem
         if (data == null) return;
         foreach (var (hitId, ids) in data)
             _hitDedupe[hitId] = new HashSet<EntityId>(ids);
+    }
+
+    // The hit-confirm tally IS durable across a snapshot boundary even though it's
+    // rebuilt every Apply: it's a frame-N→frame-N+1 message (the attacker reads it
+    // the frame after the hit lands — see PeekHits / SlashLikeAction). A snapshot
+    // taken between the hit's Apply and the attacker's next read must carry it, or the
+    // replayed run would miss a connection and diverge (the combo gate latches off it).
+    // _recoilByHitId is the same kind of inbox but is currently always empty
+    // (RecoilScale = 0 everywhere); if that changes it needs the same treatment.
+    public Dictionary<int, int> CaptureHitConfirm() => new(_entityHitsByHitId);
+
+    public void RestoreHitConfirm(Dictionary<int, int> data)
+    {
+        _entityHitsByHitId.Clear();
+        if (data == null) return;
+        foreach (var (hitId, n) in data) _entityHitsByHitId[hitId] = n;
     }
 
     private void AccumulateRecoil(int hitId, Vector2 impulse)
