@@ -73,13 +73,19 @@ public readonly struct Hitbox
     // Lets a weak multi-hit attack (hold-slash, impulse 60) still carry real
     // hitstun, and a heavy be tuned independently of its knockback number.
     public readonly float       HitstunSecondsOverride;
+    // Struggle / grab-break channel (COMBAT_FEEL_PLAN Phase 6). When > 0, this hit
+    // erodes the GRABBER's grab strength by this amount instead of dealing the usual
+    // knockback / percent / hitstun — PlayerCharacter.OnHit branches on it and returns
+    // early. Default 0 ⇒ a normal hit. Only the exempt GrabbedSlash sets it.
+    public readonly float       GrabStrengthDamage;
 
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
                   Color? debugColor = null, HitTargets targets = HitTargets.All,
                   Polygon shape = null, Vector2 shapePos = default, float shapeRotation = 0f,
                   float recoilScale = 0f, bool recoilBreakProtected = false,
-                  float recoilMinMaterialHP = 0f, float hitstunSecondsOverride = -1f)
+                  float recoilMinMaterialHP = 0f, float hitstunSecondsOverride = -1f,
+                  float grabStrengthDamage = 0f)
     {
         Region               = region;
         HitId                = hitId;
@@ -96,5 +102,6 @@ public readonly struct Hitbox
         RecoilBreakProtected = recoilBreakProtected;
         RecoilMinMaterialHP  = recoilMinMaterialHP;
         HitstunSecondsOverride = hitstunSecondsOverride;
+        GrabStrengthDamage     = grabStrengthDamage;
     }
 }

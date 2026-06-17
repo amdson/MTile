@@ -1,6 +1,6 @@
 {
-  "Name": "slash1",
-  "Type": "GroundSlash2",
+  "Name": "airslash2",
+  "Type": "AirSlash2",
   "Skeleton": "biped",
   "Duration": 0.14,
   "Loop": true,

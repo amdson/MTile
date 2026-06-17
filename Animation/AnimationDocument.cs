@@ -6,15 +6,42 @@ using System.Text.Json.Serialization;
 
 namespace MTile;
 
+// A labeled non-bone construct attached to an animation: a reference point or a
+// vector. Used to encode the relationship between the pose and a parametrized attack
+// (e.g. a "spear_tip" point where the glow dot sits, a "stab_ray" vector). Authored in
+// the editor per-keyframe, interpolated across keyframes, carried forward like contacts.
+// Coordinates are stored as floats (System.Text.Json skips Vector2's fields), local to
+// the optional Parent bone — or to the character root when Parent is null.
+public enum AnimAdditionKind { Point, Vector }
+
+public sealed class AnimAddition
+{
+    public string           Name   { get; set; }            // label, e.g. "spear_tip"
+    public AnimAdditionKind Kind   { get; set; }            // Point | Vector
+    public string           Parent { get; set; }            // anchor bone name; null = root space
+    public float            Px     { get; set; }            // position (local to Parent / root)
+    public float            Py     { get; set; }
+    public float            Dx     { get; set; }            // Vector: components from the point
+    public float            Dy     { get; set; }
+
+    public AnimAddition Clone() => new()
+    {
+        Name = Name, Kind = Kind, Parent = Parent, Px = Px, Py = Py, Dx = Dx, Dy = Dy,
+    };
+}
+
 // One keyframe: a full pose placed at a point on the normalized [0,1] timeline.
 public sealed class AnimationKeyframe
 {
-    public float                Time     { get; set; }
-    public List<PoseBoneEntry>  Bones    { get; set; } = new();
+    public float                Time      { get; set; }
+    public List<PoseBoneEntry>  Bones     { get; set; } = new();
     // Contact annotations active at this keyframe (planted feet / external pins).
     // Null on legacy files → no contacts (airborne); the locomotion solver then
     // falls back to the velocity-driven phase advance. See ContactLabel.
-    public List<ContactLabel>   Contacts { get; set; }
+    public List<ContactLabel>   Contacts  { get; set; }
+    // Labeled points/vectors authored on this keyframe (see AnimAddition). Null on
+    // legacy files. Carried forward when a new keyframe is sampled, like Contacts.
+    public List<AnimAddition>   Additions { get; set; }
 }
 
 // Which part of the rig an animation owns when composed as a layer. Movement clips

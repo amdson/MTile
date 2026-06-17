@@ -56,6 +56,19 @@ public sealed class DemoGame : Game
     private MouseState    _prevMs;
     private KeyboardState _prevKb;
 
+    // Animation additions (labeled points/vectors) editing.
+    private int  _selectedAdd = -1;           // index into active keyframe's Additions
+    private int  _dragAdd      = -1;          // addition being dragged
+    private bool _dragAddTip;                 // dragging a vector's tip vs its origin
+    // Text-input naming for a pending addition or a new bone (label-on-create).
+    private enum NameTarget { None, Addition, Bone }
+    private NameTarget   _naming = NameTarget.None;
+    private string       _nameBuffer = "";
+    private AnimAddition _pendingAddition;
+    private int          _pendingBoneParent;
+    private Vector2      _pendingBoneLocal;
+    private bool         _showHelp;           // H toggles the grouped controls panel
+
     private const int   SidebarW = 250;
     private const int   PadTop   = 12;
     private const int   RowH     = 40;
@@ -85,6 +98,18 @@ public sealed class DemoGame : Game
         _pixel.SetData(new[] { Color.White });
         _font = Content.Load<SpriteFont>("DebugFont");
         _draw = new DrawContext(_spriteBatch, _pixel);
+
+        // Printable characters for the naming mode. Control chars (Enter/Back/Esc) are
+        // handled by keyboard polling; this only fires once naming is active, so the key
+        // that *starts* naming (P/V/B) isn't captured (naming isn't on yet when it fires).
+        Window.TextInput += (s, e) =>
+        {
+            if (_naming != NameTarget.None && !char.IsControl(e.Character))
+                _nameBuffer += e.Character;
+        };
+
+        _shotPath = Environment.GetEnvironmentVariable("MTILE_SHOT");
+        if (Environment.GetEnvironmentVariable("MTILE_SHOT_HELP") != null) _showHelp = true;
 
         _dir = FindStatesDir();
         // Authored-only content: the rig comes from Skeletons/biped.json and throws
@@ -116,7 +141,21 @@ public sealed class DemoGame : Game
         var ms = Mouse.GetState();
         var kb = Keyboard.GetState();
         var mp = new Vector2(ms.X, ms.Y);
-        if (kb.IsKeyDown(Keys.Escape)) Exit();
+
+        // Naming mode swallows all other input: Enter commits, Esc cancels, Back edits.
+        if (_naming != NameTarget.None)
+        {
+            if (Pressed(kb, Keys.Back) && _nameBuffer.Length > 0) _nameBuffer = _nameBuffer[..^1];
+            else if (Pressed(kb, Keys.Enter))  CommitName();
+            else if (Pressed(kb, Keys.Escape)) CancelName();
+            _prevMs = ms; _prevKb = kb;
+            base.Update(gameTime);
+            return;
+        }
+
+        // Edge-triggered so an Escape still held from cancelling a label (which
+        // returned above last frame) doesn't immediately fall through and Exit.
+        if (Pressed(kb, Keys.Escape)) Exit();
         UpdateRoot();   // tracks window size + the flip toggle
 
         bool ctrl        = kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl);
@@ -132,7 +171,12 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 3);
         if (Pressed(kb, Keys.F)) FlipAnimation();
         if (Pressed(kb, Keys.Space)) TogglePlay();
-        if (Pressed(kb, Keys.Delete)) DeleteActiveKeyframe();
+        if (Pressed(kb, Keys.Delete)) { if (_selectedAdd >= 0) RemoveSelectedAddition(); else DeleteActiveKeyframe(); }
+        // Add labeled constructs: P point, V vector (to the active keyframe), B child bone.
+        if (Pressed(kb, Keys.P)) BeginAddAddition(AnimAdditionKind.Point, mp);
+        if (Pressed(kb, Keys.V)) BeginAddAddition(AnimAdditionKind.Vector, mp);
+        if (Pressed(kb, Keys.B)) BeginAddBone(mp);
+        if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
         if (Doc != null)
         {
             bool shift = kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift);
@@ -170,9 +214,18 @@ public sealed class DemoGame : Game
             }
             else if (!_playing)
             {
-                int bone = _activeKey >= 0 ? PickJoint(world, mp) : -1;
-                if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
-                else _dragBone = bone;
+                // Addition handles take priority over joints (they sit on top of the rig).
+                if (_activeKey >= 0 && TryPickAddition(world, mp, out int ai, out bool tip))
+                {
+                    _selectedAdd = ai; _dragAdd = ai; _dragAddTip = tip;
+                }
+                else
+                {
+                    int bone = _activeKey >= 0 ? PickJoint(world, mp) : -1;
+                    if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
+                    else _dragBone = bone;
+                    _selectedAdd = -1;
+                }
             }
         }
 
@@ -191,6 +244,10 @@ public sealed class DemoGame : Game
         {
             Scrub(XToTime(mp.X));
         }
+        else if (leftDown && _dragAdd >= 0 && _activeKey >= 0)
+        {
+            DragAddition(world, mp);
+        }
         else if (leftDown && _dragBone >= 0 && _activeKey >= 0)
         {
             var touched = EditBone(world, _dragBone, mp);
@@ -206,7 +263,7 @@ public sealed class DemoGame : Game
             }
         }
 
-        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; }
+        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; }
 
         _prevMs = ms;
         _prevKb = kb;
@@ -267,7 +324,7 @@ public sealed class DemoGame : Game
             _pose.Local[bone].Rotation += SignedAngle(boneVec, cursorVec);
             return EditTouched.Pose;
         }
-        // Translate — pure rig edit. R·T·S: the joint sits at R(θ_pose)·t_bind in the
+        // Translate — pure rig edit. R|T|S: the joint sits at R(θ_pose)|t_bind in the
         // parent frame, so the bind that puts the joint under the cursor is the cursor
         // un-rotated by the bone's own pose rotation (skipping this made any bone with
         // a nonzero keyframe rotation leap to the rotated cursor position).
@@ -314,15 +371,44 @@ public sealed class DemoGame : Game
 
     protected override void Draw(GameTime gameTime)
     {
+        // Dev screenshot: MTILE_SHOT=path captures one frame (optionally with the help
+        // panel open via MTILE_SHOT_HELP) and exits. Render through a target so the
+        // capture is immune to window focus.
+        _shotFrame++;
+        bool capturing = _shotPath != null && _shotFrame >= 10;
+        RenderTarget2D rt = null;
+        if (capturing)
+        {
+            var pp = GraphicsDevice.PresentationParameters;
+            rt = new RenderTarget2D(GraphicsDevice, pp.BackBufferWidth, pp.BackBufferHeight);
+            GraphicsDevice.SetRenderTarget(rt);
+        }
+
         GraphicsDevice.Clear(new Color(22, 24, 30));
         _spriteBatch.Begin();
         DrawSidebar();
         DrawEditor();
         DrawTimeline();
         DrawHeader();
+        DrawHelpOverlay();
+        DrawNamingOverlay();
         _spriteBatch.End();
+
+        if (capturing)
+        {
+            GraphicsDevice.SetRenderTarget(null);
+            _spriteBatch.Begin();
+            _spriteBatch.Draw(rt, GraphicsDevice.Viewport.Bounds, Color.White);
+            _spriteBatch.End();
+            try { using var fs = File.Create(_shotPath); rt.SaveAsPng(fs, rt.Width, rt.Height); } catch { }
+            rt.Dispose();
+            Exit();
+        }
         base.Draw(gameTime);
     }
+
+    private string _shotPath;
+    private int _shotFrame;
 
     private void DrawSidebar()
     {
@@ -376,6 +462,49 @@ public sealed class DemoGame : Game
             if (i == _dragBone)       _draw.Disc(p, 6f, Color.White);
             else if (i == _hoverBone) _draw.Disc(p, 6f, Color.LightYellow);
             else _draw.Ring(p, 5f, _skeleton.Bones[i].IsRoot ? Color.Yellow : Color.OrangeRed, 12, 1.5f);
+        }
+
+        DrawAdditions(world);
+    }
+
+    // Draw the keyframe's labeled additions: points as a ringed dot, vectors as a labeled
+    // arrow. Editable (bright) on the active keyframe; dimmed + interpolated otherwise.
+    private void DrawAdditions(Affine2[] world)
+    {
+        var doc = Doc; if (doc == null) return;
+        bool editable = _activeKey >= 0;
+        var adds = editable ? doc.Keyframes[_activeKey].Additions
+                            : AnimAdditionSampler.Sample(doc, _scrubT);
+        if (adds == null) return;
+
+        for (int i = 0; i < adds.Count; i++)
+        {
+            var a = adds[i];
+            Vector2 o = AdditionOriginWorld(a, world);
+            Color col = !editable             ? new Color(90, 140, 130)
+                      : i == _selectedAdd     ? Color.White
+                                              : new Color(120, 230, 200);
+            if (a.Kind == AnimAdditionKind.Vector)
+            {
+                Vector2 t = AdditionTipWorld(a, world);
+                _draw.Line(o, t, col, 2f);
+                Vector2 dir = t - o;
+                if (dir.LengthSquared() > 1e-3f)
+                {
+                    dir.Normalize();
+                    var n = new Vector2(-dir.Y, dir.X);
+                    _draw.Line(t, t - dir * 8f + n * 5f, col, 2f);
+                    _draw.Line(t, t - dir * 8f - n * 5f, col, 2f);
+                }
+                _draw.Disc(o, 3f, col);
+            }
+            else
+            {
+                _draw.Ring(o, 5f, col, 14, 1.5f);
+                _draw.Disc(o, 2f, col);
+            }
+            if (!string.IsNullOrEmpty(a.Name))
+                _spriteBatch.DrawString(_font, a.Name, o + new Vector2(8f, -6f), col);
         }
     }
 
@@ -482,6 +611,152 @@ public sealed class DemoGame : Game
         _dirty = true;
     }
 
+    // === labeled additions (points / vectors) + new bones ====================
+
+    // Start adding a point/vector at the cursor (root-local), then prompt for a name.
+    private void BeginAddAddition(AnimAdditionKind kind, Vector2 mp)
+    {
+        if (Doc == null || _activeKey < 0) return;   // only on an editable keyframe
+        Vector2 local = _root.Inverse().TransformPoint(mp);
+        _pendingAddition = new AnimAddition
+        {
+            Kind = kind, Parent = null, Px = local.X, Py = local.Y,
+            Dx = kind == AnimAdditionKind.Vector ? 12f : 0f, Dy = 0f,   // default vector points +X
+        };
+        _naming = NameTarget.Addition;
+        _nameBuffer = "";
+    }
+
+    // Start adding a child bone of the hovered joint (or root) at the cursor, then name it.
+    private void BeginAddBone(Vector2 mp)
+    {
+        int parent = _hoverBone >= 0 ? _hoverBone : 0;
+        var world  = _pose.ComputeWorld(_root);
+        _pendingBoneParent = parent;
+        _pendingBoneLocal  = world[parent].Inverse().TransformPoint(mp);
+        _naming = NameTarget.Bone;
+        _nameBuffer = "";
+    }
+
+    private void CommitName()
+    {
+        string name = string.IsNullOrWhiteSpace(_nameBuffer) ? DefaultName() : _nameBuffer.Trim();
+        if (_naming == NameTarget.Addition && _pendingAddition != null && Doc != null && _activeKey >= 0)
+        {
+            _pendingAddition.Name = name;
+            var kf = Doc.Keyframes[_activeKey];
+            kf.Additions ??= new List<AnimAddition>();
+            kf.Additions.Add(_pendingAddition);
+            _selectedAdd = kf.Additions.Count - 1;
+            _dirty = true;
+        }
+        else if (_naming == NameTarget.Bone)
+        {
+            AddBone(name, _pendingBoneParent, _pendingBoneLocal);
+        }
+        EndNaming();
+    }
+
+    private void CancelName() => EndNaming();
+    private void EndNaming() { _naming = NameTarget.None; _nameBuffer = ""; _pendingAddition = null; }
+
+    private string DefaultName()
+    {
+        if (_naming == NameTarget.Bone) return UniqueBoneName("bone");
+        string stem = _pendingAddition?.Kind == AnimAdditionKind.Vector ? "vector" : "point";
+        int n = Doc?.Keyframes[_activeKey].Additions?.Count ?? 0;
+        return $"{stem}{n}";
+    }
+
+    private void AddBone(string name, int parent, Vector2 local)
+    {
+        if (_skeleton.IndexOf(name) >= 0) name = UniqueBoneName(name);
+        _skeleton = _skeleton.WithBone(name, parent, new BoneTransform(local, 0f, Vector2.One), 0f);
+        RecreatePoses();
+        _skelDirty = true;
+    }
+
+    // The pose scratch buffers are sized to the bone count, so a rig that grew needs fresh
+    // poses; reapply the active keyframe (by name) so the figure is unchanged but for the
+    // new bone (which sits at bind everywhere until posed).
+    private void RecreatePoses()
+    {
+        _pose = _skeleton.CreatePose();
+        _kfA  = _skeleton.CreatePose();
+        _kfB  = _skeleton.CreatePose();
+        if (Doc != null && _activeKey >= 0) PoseData.Apply(Doc.Keyframes[_activeKey].Bones, _pose);
+        else SamplePose(_scrubT);
+        RecomputeFloorLine();
+    }
+
+    private string UniqueBoneName(string baseName)
+    {
+        if (_skeleton.IndexOf(baseName) < 0) return baseName;
+        for (int n = 2; ; n++)
+            if (_skeleton.IndexOf($"{baseName}{n}") < 0) return $"{baseName}{n}";
+    }
+
+    private void RemoveSelectedAddition()
+    {
+        if (Doc == null || _activeKey < 0) return;
+        var adds = Doc.Keyframes[_activeKey].Additions;
+        if (adds == null || _selectedAdd < 0 || _selectedAdd >= adds.Count) return;
+        adds.RemoveAt(_selectedAdd);
+        if (adds.Count == 0) Doc.Keyframes[_activeKey].Additions = null;
+        _selectedAdd = -1;
+        _dirty = true;
+    }
+
+    // Pick the nearest addition handle (a vector's tip, or a point/vector origin) within
+    // PickR; reports whether the tip was hit (so a drag edits direction vs position).
+    private bool TryPickAddition(Affine2[] world, Vector2 mp, out int idx, out bool tip)
+    {
+        idx = -1; tip = false;
+        var adds = _activeKey >= 0 ? Doc?.Keyframes[_activeKey].Additions : null;
+        if (adds == null) return false;
+        float best = PickR * PickR;
+        for (int i = 0; i < adds.Count; i++)
+        {
+            var a = adds[i];
+            if (a.Kind == AnimAdditionKind.Vector)
+            {
+                float dt = Vector2.DistanceSquared(AdditionTipWorld(a, world), mp);
+                if (dt < best) { best = dt; idx = i; tip = true; }
+            }
+            float doo = Vector2.DistanceSquared(AdditionOriginWorld(a, world), mp);
+            if (doo < best) { best = doo; idx = i; tip = false; }
+        }
+        return idx >= 0;
+    }
+
+    private void DragAddition(Affine2[] world, Vector2 mp)
+    {
+        var a = Doc.Keyframes[_activeKey].Additions[_dragAdd];
+        Vector2 local = AdditionParentTransform(a, world).Inverse().TransformPoint(mp);
+        if (_dragAddTip && a.Kind == AnimAdditionKind.Vector) { a.Dx = local.X - a.Px; a.Dy = local.Y - a.Py; }
+        else                                                  { a.Px = local.X;        a.Py = local.Y; }
+        _dirty = true;
+    }
+
+    // An addition lives in its Parent bone's frame, or the character root when Parent is null.
+    private Affine2 AdditionParentTransform(AnimAddition a, Affine2[] world)
+    {
+        if (a.Parent != null) { int pi = _skeleton.IndexOf(a.Parent); if (pi >= 0) return world[pi]; }
+        return _root;
+    }
+    private Vector2 AdditionOriginWorld(AnimAddition a, Affine2[] world)
+        => AdditionParentTransform(a, world).TransformPoint(new Vector2(a.Px, a.Py));
+    private Vector2 AdditionTipWorld(AnimAddition a, Affine2[] world)
+        => AdditionParentTransform(a, world).TransformPoint(new Vector2(a.Px + a.Dx, a.Py + a.Dy));
+
+    private static List<AnimAddition> CloneAdditions(List<AnimAddition> src)
+    {
+        if (src == null || src.Count == 0) return null;
+        var copy = new List<AnimAddition>(src.Count);
+        foreach (var a in src) copy.Add(a.Clone());
+        return copy;
+    }
+
     private void DrawTimeline()
     {
         var doc = Doc;
@@ -503,15 +778,12 @@ public sealed class DemoGame : Game
         _draw.Line(new Vector2(px, y - 20), new Vector2(px, y + 20), new Color(255, 180, 60), 1.5f);
     }
 
+    // Compact status header: what clip / where in time / current values. The full
+    // key cheatsheet lives in the H help panel so the top bar stays uncluttered.
     private void DrawHeader()
     {
         var doc = Doc;
         string title = doc != null ? $"[{doc.Type}] {doc.Name}" : "(none)";
-        string state = _playing      ? $"PLAYING @ t={_scrubT:0.00}"
-                     : _activeKey >= 0 ? $"keyframe {_activeKey} @ t={_scrubT:0.00}  (editable)"
-                                       : $"interpolated @ t={_scrubT:0.00}  (K to sample)";
-        Color stateColor = _playing ? new Color(255, 200, 80)
-                         : _activeKey >= 0 ? new Color(150, 230, 150) : new Color(150, 160, 175);
         // Two dirty flags: animation keyframes (orange) and the rig itself (cyan).
         // Both clear on Ctrl-S; the rig flag means Skeletons/<rig>.json will be rewritten.
         bool anyDirty = _dirty || _skelDirty;
@@ -521,14 +793,67 @@ public sealed class DemoGame : Game
                                             : "";
         _spriteBatch.DrawString(_font, $"{title}{tag}",
             new Vector2(SidebarW + 16, 10), anyDirty ? Color.Orange : Color.White);
-        _spriteBatch.DrawString(_font, state, new Vector2(SidebarW + 16, 28), stateColor);
+
+        string state = _playing      ? $"PLAYING @ t={_scrubT:0.00}"
+                     : _activeKey >= 0 ? $"keyframe {_activeKey} @ t={_scrubT:0.00}  (editable)"
+                                       : $"interpolated @ t={_scrubT:0.00}  (K to sample)";
+        Color stateColor = _playing ? new Color(255, 200, 80)
+                         : _activeKey >= 0 ? new Color(150, 230, 150) : new Color(150, 160, 175);
+        _spriteBatch.DrawString(_font,
+            $"{state}    |    {_editMode.ToString().ToUpperInvariant()} (Tab)",
+            new Vector2(SidebarW + 16, 28), stateColor);
+
         if (doc != null)
             _spriteBatch.DrawString(_font,
-                $"dur {doc.Duration:0.0}s ([ ])  loop {(doc.Loop ? "on" : "off")} (L)  region {doc.Region} (R)  type (T)",
+                $"dur {doc.Duration:0.0}s  |  loop {(doc.Loop ? "on" : "off")}  |  region {doc.Region}",
                 new Vector2(SidebarW + 16, 46), new Color(160, 170, 185));
-        _spriteBatch.DrawString(_font,
-            $"mode: {_editMode.ToString().ToUpperInvariant()} (Tab) | M+click mark | F flip | Space play | K sample | Del | Ctrl-S | N | C clone",
+
+        _spriteBatch.DrawString(_font, "H controls   |   Ctrl-S save   |   K sample keyframe",
             new Vector2(SidebarW + 16, 64), new Color(130, 140, 155));
+    }
+
+    // Grouped key cheatsheet, toggled by H. Sections so related controls cluster instead
+    // of one dense line — scales as the editor grows (additions, bones, …).
+    private static readonly (string Group, string Keys)[] HelpRows =
+    {
+        ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
+        ("Edit",     "Tab mode (rotate/translate/resize)    drag joint    M+click contact    F flip"),
+        ("Add",      "P point    V vector    B bone    (then type a name, Enter)"),
+        ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
+        ("File",     "Ctrl-S save  (writes clips + rig)"),
+    };
+
+    private void DrawHelpOverlay()
+    {
+        if (!_showHelp) return;
+        int x = SidebarW + 30, y = 130;
+        var panel = new Rectangle(x - 16, y - 34, W - SidebarW - 60, HelpRows.Length * 30 + 60);
+        Fill(panel, new Color(16, 18, 26, 240));
+        _draw.Line(new Vector2(panel.Left, panel.Top),    new Vector2(panel.Right, panel.Top),    new Color(90, 130, 120), 1f);
+        _draw.Line(new Vector2(panel.Left, panel.Bottom), new Vector2(panel.Right, panel.Bottom), new Color(90, 130, 120), 1f);
+
+        _spriteBatch.DrawString(_font, "CONTROLS", new Vector2(x, y - 26), new Color(150, 200, 255));
+        _spriteBatch.DrawString(_font, "H to close", new Vector2(panel.Right - 100, y - 26), new Color(120, 130, 145));
+        for (int i = 0; i < HelpRows.Length; i++)
+        {
+            int ry = y + 10 + i * 30;
+            _spriteBatch.DrawString(_font, HelpRows[i].Group, new Vector2(x, ry), new Color(255, 200, 120));
+            _spriteBatch.DrawString(_font, HelpRows[i].Keys,  new Vector2(x + 96, ry), new Color(205, 210, 220));
+        }
+    }
+
+    // Modal name prompt while adding a point/vector/bone.
+    private void DrawNamingOverlay()
+    {
+        if (_naming == NameTarget.None) return;
+        string what = _naming == NameTarget.Bone ? "bone"
+                    : _pendingAddition?.Kind == AnimAdditionKind.Vector ? "vector" : "point";
+        var box = new Rectangle(SidebarW + 40, H / 2 - 26, 420, 52);
+        Fill(box, new Color(18, 20, 28));
+        _draw.Line(new Vector2(box.Left,  box.Top),    new Vector2(box.Right, box.Top),    new Color(120, 230, 200), 1f);
+        _draw.Line(new Vector2(box.Left,  box.Bottom), new Vector2(box.Right, box.Bottom), new Color(120, 230, 200), 1f);
+        _spriteBatch.DrawString(_font, $"name {what}:  {_nameBuffer}_", new Vector2(box.Left + 12, box.Top + 9), Color.White);
+        _spriteBatch.DrawString(_font, "Enter = accept    Esc = cancel", new Vector2(box.Left + 12, box.Top + 28), new Color(150, 160, 175));
     }
 
     // === timeline geometry ===================================================
@@ -582,6 +907,7 @@ public sealed class DemoGame : Game
         _scrubT = Doc.Keyframes[k].Time;
         PoseData.Apply(Doc.Keyframes[k].Bones, _pose);
         _dragBone = -1;
+        _selectedAdd = -1;
     }
 
     // Scrub the playhead: snap to a keyframe if close (then it's editable), else
@@ -619,6 +945,7 @@ public sealed class DemoGame : Game
             Time = _scrubT,
             Bones = PoseData.Capture(_pose),
             Contacts = CloneContactsAt(_scrubT),
+            Additions = AnimAdditionSampler.CloneEffectiveAt(doc, _scrubT),
         };
         doc.Keyframes.Add(kf);
         doc.SortKeyframes();
@@ -686,9 +1013,10 @@ public sealed class DemoGame : Game
         foreach (var kf in src.Keyframes)
             copy.Keyframes.Add(new AnimationKeyframe
             {
-                Time     = kf.Time,
-                Bones    = CloneBones(kf.Bones),
-                Contacts = CloneContacts(kf.Contacts),
+                Time      = kf.Time,
+                Bones     = CloneBones(kf.Bones),
+                Contacts  = CloneContacts(kf.Contacts),
+                Additions = CloneAdditions(kf.Additions),
             });
         _docs.Add(copy);
         SelectAnimation(_docs.Count - 1);

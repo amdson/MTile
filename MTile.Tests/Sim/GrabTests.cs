@@ -11,7 +11,8 @@ namespace MTile.Tests;
 // Grab is Shift+RMB: a strong short-range hold field that flags the victim
 // GrabbedActive (gating their normal attacks/jump). It ignores guard (fields bypass
 // the parry path). A grabbed victim's one option is the exempt struggle slash, which
-// stuns the grabber → the grab drops (grab-break). Releasing RMB flings the victim.
+// erodes the grabber's GrabStrength (without stunning them) until the grab drops
+// (grab-break). Releasing RMB flings the victim.
 public class GrabTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
@@ -66,11 +67,12 @@ public class GrabTests(ITestOutputHelper output)
         Assert.True(sawGrabbed, "Guard must not prevent a grab (fields bypass the parry path).");
     }
 
-    // While grabbed, a normal slash is gated off (BlocksAttack), but the exempt
-    // struggle slash fires and stuns the grabber → the grab breaks and the victim is
-    // freed. (Victim holds Left to face the grabber so the struggle arc reaches it.)
+    // While grabbed, a normal slash is gated off (BlocksAttack), but the exempt struggle
+    // slash fires and erodes the grabber's GrabStrength — WITHOUT stunning them — until
+    // the hold drops and the victim is freed. (Victim holds Left to face the grabber so
+    // the struggle arc reaches it.)
     [Fact]
-    public void StruggleSlash_BreaksGrab()
+    public void StruggleSlash_ErodesGrabStrength_AndBreaksGrab_WithoutStunningGrabber()
     {
         // Victim: idle until grabbed, then repeatedly tap LMB while facing left
         // (Left held + cursor to the left) so the struggle arc sweeps over the grabber.
@@ -83,25 +85,33 @@ public class GrabTests(ITestOutputHelper output)
             .For(1, click).For(3, noClick)
             .For(1, click).For(3, noClick)
             .For(1, click).For(3, noClick)
+            .For(1, click).For(3, noClick)
             .Forever(noClick);
 
-        bool grabberHitstun = false;
-        bool victimFreedAfterStruggle = false;
         bool sawStruggle = false;
+        bool grabberHitstun = false;
+        float minGrabStrength = float.MaxValue;
+        bool sawGrabbed = false;
+        bool victimFreedAfterGrabbed = false;
         SimRunner.RunMulti(Build(GrabHold(), victim),
             onFrame: (f, ps) =>
             {
                 if (ps[1].CurrentActionName == "GrabbedSlash") sawStruggle = true;
                 if (ps[0].Combat.HitstunActive) grabberHitstun = true;
-                // Once the grabber's been stunned, the field stops and the victim's
-                // grabbed flag should lapse.
-                if (grabberHitstun && !ps[1].Combat.GrabbedActive) victimFreedAfterStruggle = true;
+                if (ps[1].Combat.GrabbedActive) sawGrabbed = true;
+                // Only track strength while the grab is live (it's reset on grab Enter).
+                if (ps[0].CurrentActionName == "GrabAction")
+                    minGrabStrength = MathF.Min(minGrabStrength, ps[0].Combat.GrabStrength);
+                // Grab dropped after the victim had been grabbed → struggle freed them.
+                if (sawGrabbed && !ps[1].Combat.GrabbedActive) victimFreedAfterGrabbed = true;
             });
 
-        output.WriteLine($"struggle fired={sawStruggle}, grabber hitstun={grabberHitstun}, freed={victimFreedAfterStruggle}");
+        output.WriteLine($"struggle fired={sawStruggle}, grabber hitstun={grabberHitstun}, " +
+                         $"min grab strength={minGrabStrength:F1}, freed={victimFreedAfterGrabbed}");
         Assert.True(sawStruggle, "Grabbed victim should be able to fire the exempt struggle slash.");
-        Assert.True(grabberHitstun, "Struggle slash should connect and stun the grabber.");
-        Assert.True(victimFreedAfterStruggle, "Grab should break (victim freed) once the grabber is stunned.");
+        Assert.False(grabberHitstun, "Struggle slash must NOT stun the grabber (it only erodes grab strength).");
+        Assert.True(minGrabStrength <= 0f, "Repeated struggles should erode grab strength to 0.");
+        Assert.True(victimFreedAfterGrabbed, "Grab should break (victim freed) once grab strength is depleted.");
     }
 
     // Releasing the grab flings the victim away (the throw). With the grabber facing/

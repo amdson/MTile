@@ -68,6 +68,20 @@ public class CombatState
         if (expire > GrabbedExpireFrame) GrabbedExpireFrame = expire;
     }
 
+    // Grab strength (struggle mechanic). Lives on the GRABBER's combat state: GrabAction
+    // sets it to full on Enter, and each connecting struggle slash from the victim erodes
+    // it (ErodeGrab, routed through the grab-strength hit path in PlayerCharacter.OnHit).
+    // GrabAction.CheckConditions drops the hold once it reaches 0 — that's the grab-break,
+    // replacing the old "one struggle hit stuns the grabber → break". The struggle hit
+    // deliberately applies no knockback/hitstun, so wearing a grab down never stuns the
+    // grabber (which unbalanced trades). Snapshotted (CopyFrom).
+    public float GrabStrength;
+    public void ErodeGrab(float amount)
+    {
+        GrabStrength -= amount;
+        if (GrabStrength < 0f) GrabStrength = 0f;
+    }
+
     // A throw flings + stuns the victim (Phase 6). Routed through OnHitRegistered with
     // a stun-threshold impulse so the victim exits the throw into Tumble (airborne):
     // committed, control-muted, able to tech, and bouncing hard off terrain — instead
@@ -240,6 +254,7 @@ public class CombatState
         DamagePercent = o.DamagePercent;
         InvulnExpireFrame = o.InvulnExpireFrame;
         GrabbedActive = o.GrabbedActive; GrabbedExpireFrame = o.GrabbedExpireFrame;
+        GrabStrength = o.GrabStrength;
         GuardActive = o.GuardActive;
         GuardCharged = o.GuardCharged; GuardChargedExpireFrame = o.GuardChargedExpireFrame;
     }

@@ -42,6 +42,13 @@ public abstract class ActionState
     // the frame and BEFORE Action.Update — so action-driven forces stack on top
     // of, not in competition with, the movement-driven force. Default no-op.
     public virtual void ApplyActionForces(EnvironmentContext ctx, in ActionVars vars) { }
+
+    // Nominal lifetime of one activation, in seconds, for the animation layer ONLY
+    // (render-only — never read by the sim). The action overlay clip is time-remapped
+    // to span exactly [0, OverlayDuration] so it plays through once as the action runs,
+    // independent of how long the authored clip's own timeline is. 0 = no fixed length;
+    // the animator falls back to the clip's own Duration. See CharacterAnimSample.
+    public virtual float OverlayDuration => 0f;
 }
 
 // Always-on fallback. Mirrors FallingState's role in the movement FSM.
@@ -222,14 +229,27 @@ public abstract class SlashLikeAction : ActionState
     // HoldField* constants above). Ground combo openers (S1/S2) hold; finishers
     // and pokes don't.
     protected virtual  bool    HoldVictims         => false;
+    // When > 0, this slash erodes a grabber's grab strength instead of dealing the
+    // usual knockback / hitstun (the struggle channel — see Hitbox.GrabStrengthDamage).
+    // Only GrabbedSlash overrides this; every normal slash hits normally.
+    protected virtual  float   GrabStrengthDamage  => 0f;
     // -----------------------------------------------------------------------
 
     protected float ArcRadius => BaseArcRadius * ArcRadiusScale;
 
     private readonly Trail _trail = new(TrailCapacity, TrailLifetime);
 
+    // Render-only accessors so a glow pass (Game1) can render the slash apex as a glowing
+    // shape + trail instead of the flat ribbon. The trail is the swept apex history.
+    public Trail SlashTrail     => _trail;
+    public Color SlashGlowColor => SlashColor;
+
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
+
+    // The slash lives for [0, Duration]; the overlay clip is remapped onto that so it
+    // sweeps once over the swing regardless of the authored clip's own timeline length.
+    public override float OverlayDuration => Duration;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
@@ -300,7 +320,8 @@ public abstract class SlashLikeAction : ActionState
                 region, vars.HitId, SlashDamagePerFrame,
                 vars.SlashDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, SlashColor,
-                hitstunSecondsOverride: HitstunSecondsOverride));
+                hitstunSecondsOverride: HitstunSecondsOverride,
+                grabStrengthDamage: GrabStrengthDamage));
         }
 
         // Holding slashes broadcast their pull field for the WHOLE slash (not just
@@ -340,12 +361,10 @@ public abstract class SlashLikeAction : ActionState
         return anchor + dir * (ArcRadius * outF);
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
-    {
-        // Ribbon trails the apex dot — thick + saturated near the newest sample,
-        // thinning and fading toward the tail.
-        _trail.Draw(sb, pixel, SlashColor, SlashColor * 0f, 4f);
-    }
+    // The slash apex is rendered as a glowing triangle + trail by Game1's glow pass
+    // (GlowRenderer), which needs its own PrimitiveBatch pass outside this SpriteBatch
+    // block. SlashTrail/SlashGlowColor expose what it needs; nothing to draw here.
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars) { }
 }
 
 // ---------- Ground combo: S1 → S2 → S3 -----------------------------------------
@@ -655,6 +674,11 @@ public class StabAction : ActionState
     // lingering past the retract. Render-only; not part of ActionVars.
     private readonly Trail _tipTrail = new(capacity: 10, lifetime: 0.14f);
 
+    // Render-only accessors so Game1's glow pass can render the stab tip as a glowing
+    // sphere + trail instead of the flat ribbon. Color depends on grounded-ness.
+    public Trail TipTrail => _tipTrail;
+    public Color StabColorFor(bool grounded) => ColorFor(grounded);
+
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
 
@@ -908,17 +932,10 @@ public class StabAction : ActionState
         }
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
-    {
-        // Trail first so the tip dot reads on top of the ribbon.
-        var color = ColorFor(vars.IsGrounded);
-        _tipTrail.Draw(sb, pixel, color, color * 0f, 4f);
-
-        var tip   = body.Position + vars.StabDir * vars.TipExt;
-        var mid   = body.Position + vars.StabDir * (vars.TipExt * 0.5f);
-        sb.Draw(pixel, new Rectangle((int)tip.X - 2, (int)tip.Y - 2, 4, 4), color);
-        sb.Draw(pixel, new Rectangle((int)mid.X - 1, (int)mid.Y - 1, 3, 3), color * 0.5f);
-    }
+    // The stab tip is rendered as a glowing sphere + trail by Game1's glow pass
+    // (GlowRenderer), which needs its own PrimitiveBatch pass outside this SpriteBatch
+    // block. TipTrail/StabColorFor expose what it needs; nothing to draw here.
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars) { }
 }
 
 // Air spin-stab. Roadmap §1.6: a Stab swipe pointed opposite of facing while in
@@ -2148,13 +2165,19 @@ public class GrenadeAction : ActionState
 // path). Releasing RMB (or hitting the hold cap) flings the victim with a brief
 // high-speed directional field — into terrain at high percent that's the Phase 5 KO.
 //
-// Grab-break falls out for free: CheckConditions ends the grab the moment the grabber
-// is in hitstun, so a struggle attack that connects (→ grabber hitstun) drops the
-// field, which clears the victim's GrabbedActive a couple frames later. A whiffed grab
-// still runs its hold→throw→recovery, so an opponent who reads it punishes the lag.
+// Grab-break is a strength contest: the hold starts at GrabStrengthMax, and each
+// connecting struggle slash erodes it (the struggle hit deliberately deals no stun —
+// see GrabbedSlash). CheckConditions releases the grab once GrabStrength hits 0, which
+// clears the victim's GrabbedActive a couple frames later. A heavier hit on the grabber
+// (real hitstun, e.g. a third party) still drops the hold immediately. A whiffed grab
+// runs its hold→throw→recovery, so an opponent who reads it punishes the lag.
 public class GrabAction : ActionState
 {
     private const float GrabHoldMaxSeconds = 1.2f;    // auto-throw if held this long
+    // Grab strength the hold starts with; each connecting struggle slash erodes it by
+    // GrabbedSlash.GrabStrengthDamage (1.0), so a fresh grab survives 2 struggles and
+    // breaks on the 3rd. Bump for a stickier grab, lower for an easier mash-out.
+    private const float GrabStrengthMax    = 3f;
     private const float ThrowSeconds       = 0.12f;   // throw-field duration
     private const float RecoverySeconds    = 0.3f;    // lag after a grab (the whiff-punish window)
     private const float Range       = PlayerCharacter.Radius * 2.4f;   // field region half-size
@@ -2179,9 +2202,11 @@ public class GrabAction : ActionState
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        // Grab-break: a hit on the grabber ends the hold — the struggle-attack counter
-        // works through this for free.
+        // Grab-break: a hard hit on the grabber (hitstun) drops the hold outright, and
+        // the struggle attack wears the hold down — once the victim's struggles have
+        // eroded GrabStrength to 0, the grab releases (the new primary break path).
         if (ctx.Combat?.HitstunActive == true) return false;
+        if (ctx.Combat != null && ctx.Combat.GrabStrength <= 0f) return false;
         if (vars.GrabThrowing) return vars.ChargeTime < ThrowSeconds;
         return true;   // hold phase persists; Update transitions to the throw
     }
@@ -2192,6 +2217,7 @@ public class GrabAction : ActionState
         vars.ChargeTime   = 0f;
         vars.GrabThrowing = false;
         vars.GrabDir      = AimDir(ctx, ab);
+        if (ctx.Combat != null) ctx.Combat.GrabStrength = GrabStrengthMax;
     }
 
     private static Vector2 AimDir(EnvironmentContext ctx, PlayerAbilityState ab)
@@ -2264,25 +2290,27 @@ public class GrabAction : ActionState
 
 // ---------- Struggle: the one attack a grabbed player can throw -------------------
 //
-// COMBAT_FEEL_PLAN Phase 6. A weak slash exempt from the BlocksAttack gate that grabs
-// impose — it requires GrabbedActive and skips the gate the normal slashes obey. It's
-// short-range (the grab holds you adjacent), modest knockback with a small fixed
-// hitstun so it reliably stuns the grabber — which drops their grab (CheckConditions
-// `!HitstunActive`) and frees you. Its startup is the grabber's guaranteed window to
-// throw first: a prompt throw beats a struggle, a greedy hold eats it.
+// COMBAT_FEEL_PLAN Phase 6. A slash exempt from the BlocksAttack gate that grabs impose
+// — it requires GrabbedActive and skips the gate the normal slashes obey. It's
+// short-range (the grab holds you adjacent) and does NOT stun or knock back the grabber:
+// instead each connecting hit erodes the grabber's GrabStrength (GrabStrengthDamage),
+// and the grab releases once that reaches 0. Stunning the grabber would let the victim
+// trade out of every grab and unbalanced the exchange, so the struggle just wears the
+// hold down. Its startup is the grabber's window to throw first: a prompt throw beats a
+// struggle, a greedy hold eats it.
 public class GrabbedSlash : SlashLikeAction
 {
     protected override float Duration            => 0.16f;
     protected override float ArcRadiusScale      => 0.9f;     // short — held adjacent
     protected override float SweepAngleDeg       => 80f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 120f;     // modest — just enough to stun → break
+    protected override float KnockbackMagnitude  => 0f;       // no knockback — erodes grab strength instead
     protected override Color SlashColor          => Color.Yellow;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => false;
-    // Fixed hitstun so even this weak hit reliably stuns the grabber (→ grab-break),
-    // independent of the grabber's percent.
-    protected override float HitstunSecondsOverride => 0.20f;
+    // The struggle channel: each connecting hit removes this much grab strength from
+    // the grabber (GrabStrengthMax 3 ⇒ breaks on the 3rd). No hitstun is dealt.
+    protected override float GrabStrengthDamage  => 1f;
 
     // Beats NullAction; no combo. Normal slashes are gated off while grabbed, so this
     // is the only attack available.

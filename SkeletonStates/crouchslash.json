@@ -1,6 +1,6 @@
 {
-  "Name": "slash1",
-  "Type": "GroundSlash2",
+  "Name": "crouchslash",
+  "Type": "CrouchSlash",
   "Skeleton": "biped",
   "Duration": 0.14,
   "Loop": true,

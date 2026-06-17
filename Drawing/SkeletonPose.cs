@@ -87,6 +87,18 @@ public sealed class SkeletonPose
         _worldValid = false;
     }
 
+    // Per-bone blend factor — same as above but each bone eases at its own rate
+    // (t[i] = 1 - exp(-stiffness_i * dt)). Lets a faster-moving region (e.g. an
+    // attacking upper body) snap to its target while the rest keeps a softer follow.
+    public void BlendToward(SkeletonPose target, ReadOnlySpan<float> t)
+    {
+        if (target.Count != Count) throw new ArgumentException("Pose bone count mismatch.");
+        if (t.Length != Count) throw new ArgumentException("Blend-factor count mismatch.");
+        for (int i = 0; i < Count; i++)
+            Local[i] = BoneTransform.Lerp(Local[i], target.Local[i], t[i]);
+        _worldValid = false;
+    }
+
     // ---- world resolution ----------------------------------------------------
 
     // Resolve every bone's world transform under a `root` placement (the whole-

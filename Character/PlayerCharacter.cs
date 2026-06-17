@@ -106,6 +106,17 @@ public class PlayerCharacter : IHittable
         if (_abilities.Combat.TryParry(hit.KnockbackImpulse, hit.Damage, _abilities.Facing, _frame, _dt))
             return;
 
+        // Struggle / grab-break (COMBAT_FEEL_PLAN Phase 6). A grabbed victim's exempt
+        // slash erodes THIS player's grab strength instead of dealing knockback/percent/
+        // hitstun — so struggling wears the hold down without ever stunning the grabber
+        // (a stun would let the victim trade out of every grab, which broke balance).
+        // GrabAction.CheckConditions drops the hold once GrabStrength hits 0.
+        if (hit.GrabStrengthDamage > 0f)
+        {
+            _abilities.Combat.ErodeGrab(hit.GrabStrengthDamage);
+            return;
+        }
+
         // Escalation model (COMBAT_FEEL_PLAN Phase 5): a direct combat hit does NOT
         // chip HP — it raises this player's monotonic DamagePercent and applies
         // knockback scaled by that percent. Real HP loss comes from the resulting

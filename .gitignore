@@ -17,3 +17,7 @@ MTile.Web/wwwroot/Content/
 
 # Local sim CSVs the tests dump on run — regenerated each test run.
 MTile.Tests/*.csv
+
+# Dev screenshots (F12 / MTILE_SCREENSHOT capture).
+screenshot_*.png
+_shot_*.png

@@ -164,6 +164,33 @@ public class ActionOverlayTests
             $"pose should hold the final keyframe past the clip end; got {anim.Pose.Local[armR].Rotation}");
     }
 
+    // When the action declares a duration, the clip's whole [0,1] timeline is remapped
+    // onto [0, ActionDuration] — so a 0.14s clip stretched onto a 0.5s action sits at
+    // its MIDPOINT at t=0.25s, instead of having clamped to its end (as the un-remapped
+    // path, keyed to the clip's own 0.14s, would).
+    [Fact]
+    public void Overlay_TimeRemapsToActionDuration()
+    {
+        var skel = SkeletonExamples.Biped();
+        int armR = skel.IndexOf("arm_r_upper");
+        float Mid = 0.5f * (0.5f + SlashArm);   // RampSlash midpoint: lerp(0.5, 2.0, 0.5)
+
+        // Remap: 0.5s action, frozen at the halfway mark -> clip sits at its midpoint.
+        var remap = NewAnimator(skel);
+        var stR = new DriveState { ActionTime = 0.25f, FreezeActionTime = true, ActionDuration = 0.5f };
+        Drive(remap, skel, ref stR, frames: 40, action: "RampSlash");
+        Assert.True(MathF.Abs(remap.Pose.Local[armR].Rotation - Mid) < 0.1f,
+            $"remapped clip should sit at its midpoint ({Mid}); got {remap.Pose.Local[armR].Rotation}");
+
+        // No declared duration: keyed to the clip's own 0.14s, so 0.25s is well past the
+        // end and the arm has clamped to the final pose.
+        var noRemap = NewAnimator(skel);
+        var stN = new DriveState { ActionTime = 0.25f, FreezeActionTime = true, ActionDuration = 0f };
+        Drive(noRemap, skel, ref stN, frames: 40, action: "RampSlash");
+        Assert.True(MathF.Abs(noRemap.Pose.Local[armR].Rotation - SlashArm) < 0.1f,
+            $"un-remapped clip should hold its end ({SlashArm}); got {noRemap.Pose.Local[armR].Rotation}");
+    }
+
     // --- harness ------------------------------------------------------------
 
     private struct DriveState
@@ -171,6 +198,7 @@ public class ActionOverlayTests
         public float X;
         public float ActionTime;
         public bool  FreezeActionTime;
+        public float ActionDuration;   // 0 = use the clip's own Duration (no remap)
     }
 
     private static CharacterAnimator NewAnimator(Skeleton skel)
@@ -191,7 +219,7 @@ public class ActionOverlayTests
             st.X += WalkVx * Dt;
             anim.Update(new CharacterAnimSample(
                 new Vector2(st.X, 0f), new Vector2(WalkVx, 0f), +1, true,
-                "WalkState", action, Dt, st.ActionTime));
+                "WalkState", action, Dt, st.ActionTime, st.ActionDuration));
             if (!st.FreezeActionTime) st.ActionTime += Dt;
         }
     }

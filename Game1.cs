@@ -43,6 +43,10 @@ public class Game1 : Game
     private readonly Camera _camera = new();
 
     private DrawContext _draw;
+    private PrimitiveBatch _prims;
+    private DensityField _density;
+    private SkeletonMetaballRenderer _metaballs;
+    private GlowRenderer _glow;
     private readonly ParticleSystem _particles = new(capacity: 2048);
     // Cursor trail — a fading ribbon trailing the world-space mouse position.
     private readonly Trail _cursorTrail = new(capacity: 24, lifetime: 0.22f);
@@ -64,7 +68,22 @@ public class Game1 : Game
     // bind the same animations as the primary's.
     private List<AnimationDocument> _skeletonAnims = new();
     private const float SkeletonScale = 0.6f;
+    // Render-only trail of the primary player's animated "knife" bone, fed while a slash
+    // overlay is playing so the glow triangle sweeps with the hand (not the hitbox dot).
+    private Trail _knifeTrail;
+    private const string KnifeBone = "knife";
     private float _simAccum;   // fixed-step accumulator for GameConfig.TimeScale (slow-mo)
+
+    // Screenshot capture (desktop dev tool). F12 grabs a timestamped PNG next to the
+    // binary. If the MTILE_SCREENSHOT env var is set, auto-capture to that path after
+    // _autoShotFrame frames have rendered, then exit — lets a headless run produce a
+    // frame for review. Captures through a RenderTarget so it's immune to window focus.
+    private string _autoShotPath;
+    private int _frameCount;
+    private const int _autoShotFrame = 20;
+    private bool _shotPending;
+    private bool _exitAfterShot;
+    private Keys _prevShotKey;   // F12 edge-detect
 
     public Game1()
     {
@@ -79,6 +98,12 @@ public class Game1 : Game
             PreferredBackBufferHeight = _config.WindowHeight,
             IsFullScreen              = _config.Fullscreen,
         };
+        // The glow/metaball passes bind an offscreen RenderTarget mid-frame and then
+        // rebind the backbuffer. RenderTargets default to DiscardContents, which would
+        // wipe the already-drawn scene on rebind — preserve it so the scene survives.
+        _graphics.PreparingDeviceSettings += (s, e) =>
+            e.GraphicsDeviceInformation.PresentationParameters.RenderTargetUsage =
+                RenderTargetUsage.PreserveContents;
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
         IsFixedTimeStep = true;
@@ -87,6 +112,14 @@ public class Game1 : Game
 
     protected override void Initialize()
     {
+        // Auto-screenshot for headless review: MTILE_SCREENSHOT=path captures one frame
+        // then exits. Desktop only (browser has no filesystem).
+        if (!OperatingSystem.IsBrowser())
+        {
+            _autoShotPath = Environment.GetEnvironmentVariable("MTILE_SCREENSHOT");
+            if (!string.IsNullOrEmpty(_autoShotPath)) { _shotPending = true; _exitAfterShot = true; }
+        }
+
         var stage = Stages.Get(_config.Stage);
 
         // Movement tuning. On desktop, point at the absolute repo-source path so
@@ -168,6 +201,14 @@ public class Game1 : Game
         _pixel.SetData(new[] { Color.White });
         _debugFont = Content.Load<SpriteFont>("DebugFont");
         _draw = new DrawContext(_spriteBatch, _pixel);
+        _prims = new PrimitiveBatch(GraphicsDevice);
+        // Half-res field (downscale 2) — cheaper and softer; 8-bit Color until banding
+        // proves we need HalfVector4 (RENDERING_UPGRADE_PLAN spike #0).
+        _density = new DensityField(GraphicsDevice, kernelSize: 128, downscale: 2);
+        var splatFx     = Content.Load<Effect>("CapsuleSplat");
+        var compositeFx = Content.Load<Effect>("MetaballComposite");
+        _metaballs = new SkeletonMetaballRenderer(GraphicsDevice, splatFx, compositeFx, downscale: 2);
+        _glow = new GlowRenderer(GraphicsDevice);
         // Load authored skeleton animations (copied next to the binary). Empty on
         // platforms without a readable filesystem (e.g. WASM) → procedural fallback.
         _skeletonAnims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
@@ -188,6 +229,19 @@ public class Game1 : Game
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed ||
             keyboardState.IsKeyDown(Keys.Escape))
             Exit();
+
+        // F12: manual screenshot to a timestamped PNG next to the binary (desktop only).
+        if (!OperatingSystem.IsBrowser())
+        {
+            bool f12 = keyboardState.IsKeyDown(Keys.F12);
+            if (f12 && _prevShotKey != Keys.F12)
+            {
+                _autoShotPath = Path.Combine(AppContext.BaseDirectory,
+                    $"screenshot_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+                _shotPending = true;
+            }
+            _prevShotKey = f12 ? Keys.F12 : Keys.None;
+        }
 
         var mouseState = Mouse.GetState();
         var viewport = GraphicsDevice.Viewport;
@@ -244,19 +298,19 @@ public class Game1 : Game
         }
 
         // Procedural skeleton: pull a read-only sample of the player and advance the
-        // animator. One-way — the sim is unaware this happens.
-        if (_config.DebugDrawSkeleton)
-        {
-            // Scale the animator's dt too so easing/idle slow with the sim under TimeScale.
-            _animator.Update(CharacterAnimSample.From(player, dt * _config.TimeScale));
-            // Secondary players (training dummy, P2) get their own animators so
-            // each rig tracks its own body, facing, and action timing.
-            while (_secondaryAnimators.Count < _sim.SecondaryPlayers.Count)
-                _secondaryAnimators.Add(new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims));
-            for (int i = 0; i < _sim.SecondaryPlayers.Count; i++)
-                _secondaryAnimators[i].Update(
-                    CharacterAnimSample.From(_sim.SecondaryPlayers[i].Player, dt * _config.TimeScale));
-        }
+        // animator every frame. One-way — the sim is unaware this happens. The rig is
+        // drawn only under DebugDrawSkeleton, but the pose runs always so render effects
+        // (the knife-anchored slash glow below) can read animated bone positions.
+        // Scale the animator's dt too so easing/idle slow with the sim under TimeScale.
+        _animator.Update(CharacterAnimSample.From(player, dt * _config.TimeScale));
+        // Secondary players (training dummy, P2) get their own animators so
+        // each rig tracks its own body, facing, and action timing.
+        while (_secondaryAnimators.Count < _sim.SecondaryPlayers.Count)
+            _secondaryAnimators.Add(new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims));
+        for (int i = 0; i < _sim.SecondaryPlayers.Count; i++)
+            _secondaryAnimators[i].Update(
+                CharacterAnimSample.From(_sim.SecondaryPlayers[i].Player, dt * _config.TimeScale));
+        UpdateKnifeTrail(player, dt);
         foreach (var (p, _) in _sim.SecondaryPlayers)
         {
             if (p.Sprite == null) continue;
@@ -289,6 +343,23 @@ public class Game1 : Game
 
     protected override void Draw(GameTime gameTime)
     {
+        _frameCount++;
+        // Capture this frame? Manual (F12) fires immediately; auto (env var) waits a few
+        // frames so the world settles. Render through an offscreen target, save it, then
+        // blit to the backbuffer — immune to window focus/occlusion.
+        bool capturing = _shotPending && !OperatingSystem.IsBrowser()
+                         && (!_exitAfterShot || _frameCount >= _autoShotFrame);
+        RenderTarget2D shotTarget = null;
+        if (capturing)
+        {
+            var pp = GraphicsDevice.PresentationParameters;
+            // PreserveContents: the glow pass rebinds this target mid-frame, so it must
+            // not discard the scene drawn before the glow.
+            shotTarget = new RenderTarget2D(GraphicsDevice, pp.BackBufferWidth, pp.BackBufferHeight,
+                false, pp.BackBufferFormat, DepthFormat.None, 0, RenderTargetUsage.PreserveContents);
+            GraphicsDevice.SetRenderTarget(shotTarget);
+        }
+
         GraphicsDevice.Clear(Color.Black);
 
         var viewport = GraphicsDevice.Viewport;
@@ -407,6 +478,10 @@ public class Game1 : Game
             foreach (var hb in _sim.Hitboxes.All)
                 DrawHitbox(hb);
 
+        if (_config.DebugDrawForceFields)
+            foreach (var f in _sim.ForceFields.All)
+                DrawForceField(f);
+
         if (_config.DebugDrawHurtboxes)
             foreach (var hb in _sim.Hurtboxes.All)
                 DrawHurtbox(hb);
@@ -436,10 +511,36 @@ public class Game1 : Game
 
         _spriteBatch.End();
 
+        // PrimitiveBatch layer (gradients / curves / surfaces) draws in world space on
+        // top of the SpriteBatch pass. Demo card for now; real users (metaballs) land later.
+        if (_config.DebugDrawPrimitiveDemo)
+            DrawPrimitiveDemo(_camera.GetTransform(screenCenter),
+                              new Vector2(player.Body.Position.X, player.Body.Position.Y - 80f));
+
+        if (_config.DebugDrawDensityDemo)
+            DrawDensityDemo(_camera.GetTransform(screenCenter),
+                            new Vector2(player.Body.Position.X, player.Body.Position.Y - 80f));
+
+        if (_config.DebugDrawMetaballDemo)
+            DrawMetaballDemo(_camera.GetTransform(screenCenter),
+                             new Vector2(player.Body.Position.X, player.Body.Position.Y - 70f));
+
+        // Glowing-shape pass (world space): the slash apex renders as a glowing triangle +
+        // trail here, since GlowRenderer needs its own pass outside the SpriteBatch block.
+        var camTransform = _camera.GetTransform(screenCenter);
+        RenderActionGlow(camTransform, player.CurrentAction, player.CurrentActionVars, _knifeTrail);
+        foreach (var (p, _) in _sim.SecondaryPlayers)
+            RenderActionGlow(camTransform, p.CurrentAction, p.CurrentActionVars);
+
+        if (_config.DebugDrawGlowDemo)
+            DrawGlowDemo(camTransform,
+                         new Vector2(player.Body.Position.X, player.Body.Position.Y - 70f));
+
         _spriteBatch.Begin();
         var mousePos = _sim.CurrentInput.MousePosition;
         _spriteBatch.Draw(_pixel, new Rectangle(mousePos.X - 2, mousePos.Y - 2, 5, 5), Color.Red);
         if (_config.DebugDrawHealthBars) DrawPlayerHealthBar();
+        DrawPercentHud();   // always on — the percent meter is a core gameplay readout, not debug
         _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8,  8), Color.White);
         _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, 24), Color.White);
         _spriteBatch.DrawString(_debugFont, $"Anim: {_animator.State.Clip}", new Vector2(8, 40), Color.Aqua);
@@ -452,14 +553,161 @@ public class Game1 : Game
 
         _spriteBatch.End();
 
+        if (capturing)
+        {
+            GraphicsDevice.SetRenderTarget(null);
+            GraphicsDevice.Clear(Color.Black);
+            _spriteBatch.Begin();
+            _spriteBatch.Draw(shotTarget, GraphicsDevice.Viewport.Bounds, Color.White);
+            _spriteBatch.End();
+            try
+            {
+                using var fs = File.Create(_autoShotPath);
+                shotTarget.SaveAsPng(fs, shotTarget.Width, shotTarget.Height);
+            }
+            catch { /* dev tool — never crash the game over a failed save */ }
+            shotTarget.Dispose();
+            _shotPending = false;
+            if (_exitAfterShot) Exit();
+        }
+
         base.Draw(gameTime);
     }
 
     protected override void UnloadContent()
     {
         _pixel?.Dispose();
+        _density?.Dispose();
+        _metaballs?.Dispose();
         _movementConfigWatcher?.Dispose();
         base.UnloadContent();
+    }
+
+    // Dev preview of the PrimitiveBatch layer: a gradient quad, a stroked cubic Bezier
+    // with a width+color taper, and a parametric surface (wavy grid colored by uv). All
+    // anchored at `anchor` in world space. Toggled by GameConfig.DebugDrawPrimitiveDemo.
+    private void DrawPrimitiveDemo(Matrix transform, Vector2 anchor)
+    {
+        _prims.Begin(transform);
+
+        // Gradient quad — four corner colors interpolate across the fill.
+        var q = anchor + new Vector2(-90f, 0f);
+        _prims.Quad(q, q + new Vector2(60f, 0f), q + new Vector2(60f, 50f), q + new Vector2(0f, 50f),
+                    Color.Red, Color.Yellow, Color.Lime, Color.Cyan);
+
+        // Stroked cubic Bezier, tapering white->magenta along its length.
+        Primitives.StrokeBezier(_prims,
+            anchor + new Vector2(-10f, 50f), anchor + new Vector2(20f, -40f),
+            anchor + new Vector2(60f,  60f), anchor + new Vector2(95f,  0f),
+            width: 6f, Color.White, Color.Magenta);
+
+        // Parametric surface: a sine-warped grid, hue ramped across u and v.
+        Vector2 sbase = anchor + new Vector2(20f, 0f);
+        Primitives.Surface(_prims,
+            (u, v) => sbase + new Vector2(u * 70f, v * 50f + MathF.Sin(u * MathF.PI * 2f) * 8f),
+            (u, v) => new Color(u, v, 1f - u * v), ucount: 20, vcount: 14);
+
+        _prims.End();
+    }
+
+    // Dev preview of the DensityField glow layer: a cluster of overlapping colored
+    // kernels splatted into the field RT and composited additively, so the additive sum
+    // (the "sum of kernels around particles") reads as merging soft glow. Toggled by
+    // GameConfig.DebugDrawDensityDemo.
+    private void DrawDensityDemo(Matrix transform, Vector2 anchor)
+    {
+        _density.Begin(transform);
+        // A ring of colored blobs plus a bright core — overlaps merge additively.
+        _density.Splat(anchor,                              34f, new Color(40, 120, 255));
+        _density.Splat(anchor + new Vector2( 26f,  4f),     30f, new Color(255, 60, 160));
+        _density.Splat(anchor + new Vector2(-24f,  8f),     28f, new Color(80, 255, 140));
+        _density.Splat(anchor + new Vector2(  6f, -22f),    26f, new Color(255, 200, 40));
+        _density.Splat(anchor + new Vector2( 40f, -16f),    18f, new Color(180, 120, 255));
+        _density.End();
+        _density.Composite();
+    }
+
+    // Dev preview of the segment-metaball shaders: a synthetic stick figure (torso, two
+    // arms, two legs) built as bone segments and rendered as one merged gooey blob. Tests
+    // the CapsuleSplat + MetaballComposite path before it's wired to the real skeleton.
+    private readonly List<MetaballBone> _metaballDemoBones = new();
+    private void DrawMetaballDemo(Matrix transform, Vector2 anchor)
+    {
+        var blob = new Color(120, 200, 255);
+        Vector2 hip = anchor, neck = anchor + new Vector2(0f, -34f), head = neck + new Vector2(0f, -10f);
+        _metaballDemoBones.Clear();
+        _metaballDemoBones.Add(new MetaballBone(hip, neck, blob));                              // torso
+        _metaballDemoBones.Add(new MetaballBone(neck, head, blob));                             // neck->head
+        _metaballDemoBones.Add(new MetaballBone(neck, neck + new Vector2(-22f, 18f), blob));    // left arm
+        _metaballDemoBones.Add(new MetaballBone(neck, neck + new Vector2( 22f, 18f), blob));    // right arm
+        _metaballDemoBones.Add(new MetaballBone(hip,  hip  + new Vector2(-14f, 34f), blob));    // left leg
+        _metaballDemoBones.Add(new MetaballBone(hip,  hip  + new Vector2( 14f, 34f), blob));    // right leg
+
+        var style = MetaballStyle.Default;
+        style.Radius = 18f;
+        style.Iso    = 0.35f;
+        style.Edge   = 0.05f;
+        style.Inner  = new Color(120, 230, 255);
+        style.Rim    = new Color(20, 70, 200);
+        _metaballs.Render(transform, _metaballDemoBones, style);
+    }
+
+    // Feed the primary player's knife-anchored slash trail. While a slash overlay is
+    // actually eased in (its clip is playing), push the animated knife bone's world
+    // position so the glow triangle sweeps with the hand; otherwise let the trail age
+    // out. Slashes without an authored clip never raise ActionWeight, so they fall back
+    // to the hitbox-driven SlashTrail in RenderActionGlow. Render-only.
+    private void UpdateKnifeTrail(PlayerCharacter player, float dt)
+    {
+        _knifeTrail ??= new Trail(24, 0.16f);
+        _knifeTrail.Tick(dt);
+        if (player.CurrentAction is SlashLikeAction && _animator.OverlayActive)
+        {
+            // Same root the rig Draw uses: drop the rig so the current pose's sole rests
+            // on the ground line under the body center. Read the knife from the LIVE
+            // pose so the glow stays welded to the rendered hand. The upper body now
+            // stiffens during the overlay (CharacterAnimator §4), so the live rig keeps
+            // most of the authored sweep instead of low-passing it away.
+            float groundY = player.Body.Position.Y + 2f * PlayerCharacter.Radius;
+            float rootY   = groundY - _animator.CurrentSoleY() * SkeletonScale;
+            if (_animator.TryBoneOrigin(KnifeBone, new Vector2(player.Body.Position.X, rootY),
+                                        player.Facing, out var knife, fromOverlay: false))
+                _knifeTrail.Push(knife);
+        }
+    }
+
+    // Render the glowing-shape effect for an action if it's a slash: the swept apex
+    // becomes a glowing triangle trailing a colored aura streak. Replaces the old ribbon.
+    // `knifeTrail` (primary player only) anchors the sweep to the animated knife bone;
+    // when it's empty (e.g. a slash with no authored clip) it falls back to the action's
+    // own hitbox-driven trail.
+    private void RenderActionGlow(Matrix cam, ActionState action, in ActionVars vars, Trail knifeTrail = null)
+    {
+        if (action is SlashLikeAction slash)
+        {
+            Trail t = (knifeTrail != null && knifeTrail.Count >= 1) ? knifeTrail : slash.SlashTrail;
+            if (t.Count >= 1)
+                _glow.DrawTrailGlow(cam, t, slash.SlashGlowColor,
+                                    auraRadius: 13f, coreSize: 5f, intensity: 0.8f);
+        }
+        else if (action is StabAction stab && stab.TipTrail.Count >= 1)
+            _glow.DrawTrailGlow(cam, stab.TipTrail, stab.StabColorFor(vars.IsGrounded),
+                                auraRadius: 14f, coreSize: 6f, intensity: 0.8f, core: GlowCore.Sphere);
+    }
+
+    // Dev preview of the glow effect: a glowing triangle riding a curved trail, built from
+    // a synthetic Trail so the streak is visible without a live slash. GameConfig.DebugDrawGlowDemo.
+    private Trail _glowDemoTrail;
+    private float _glowDemoT;
+    private void DrawGlowDemo(Matrix cam, Vector2 anchor)
+    {
+        _glowDemoTrail ??= new Trail(16, 0.4f);
+        // Sweep a point along a lissajous curve, pushing one sample per frame.
+        _glowDemoT += 0.08f;
+        var p = anchor + new Vector2(MathF.Sin(_glowDemoT) * 70f, MathF.Cos(_glowDemoT * 1.7f) * 30f);
+        _glowDemoTrail.Tick(1f / 30f);
+        _glowDemoTrail.Push(p);
+        _glow.DrawTrailGlow(cam, _glowDemoTrail, new Color(120, 200, 255), auraRadius: 20f, coreSize: 9f);
     }
 
     private void DrawChunk(Chunk chunk)
@@ -578,12 +826,40 @@ public class Game1 : Game
         _spriteBatch.DrawString(_debugFont,
             $"HP {player.Health:F1}/{player.MaxHealth:F1}",
             new Vector2(X + BarW + 8, Y - 4), Color.White);
-        // Escalation percent (COMBAT_FEEL_PLAN Phase 5) — the monotonic meter that
-        // scales incoming knockback. Tints hotter as it climbs.
-        float pct = player.Combat.DamagePercent;
-        var pctColor = Color.Lerp(Color.White, Color.OrangeRed, MathHelper.Clamp(pct / 200f, 0f, 1f));
+    }
+
+    // Escalation percent (COMBAT_FEEL_PLAN Phase 5) — the monotonic meter that scales
+    // incoming knockback. A core gameplay readout, so it's always on (independent of
+    // DebugDrawHealthBars), pinned to the lower-left and tinted hotter as it climbs.
+    private void DrawPercentHud()
+    {
+        var vp = GraphicsDevice.Viewport;
+        float pct = _sim.Player.Combat.DamagePercent;
+        var color = Color.Lerp(Color.White, Color.OrangeRed, MathHelper.Clamp(pct / 200f, 0f, 1f));
         _spriteBatch.DrawString(_debugFont, $"{pct:F0}%",
-            new Vector2(X + BarW + 8, Y + 10), pctColor);
+            new Vector2(12f, vp.Height - 34f), color,
+            0f, Vector2.Zero, 1.6f, SpriteEffects.None, 0f);
+    }
+
+    // Force-field overlay (hold / grab / throw) — faint region fill + outline + a
+    // focus marker, colored by the field's DebugColor. Mirrors DrawHitbox; world-space.
+    private void DrawForceField(ForceField f)
+    {
+        var color = f.DebugColor;
+        var r = f.Region;
+        var rect = new Rectangle((int)r.Left, (int)r.Top,
+            (int)(r.Right - r.Left), (int)(r.Bottom - r.Top));
+        _spriteBatch.Draw(_pixel, rect, color * 0.12f);
+        var tl = new Vector2(r.Left,  r.Top);
+        var tr = new Vector2(r.Right, r.Top);
+        var br = new Vector2(r.Right, r.Bottom);
+        var bl = new Vector2(r.Left,  r.Bottom);
+        DrawLine(tl, tr, color, 1);
+        DrawLine(tr, br, color, 1);
+        DrawLine(br, bl, color, 1);
+        DrawLine(bl, tl, color, 1);
+        // Focus marker — the point the servo pulls/flings toward.
+        _spriteBatch.Draw(_pixel, new Rectangle((int)f.Focus.X - 2, (int)f.Focus.Y - 2, 4, 4), color);
     }
 
     private void DrawConstraintArrow(Vector2 position, Vector2 normal, Color color)

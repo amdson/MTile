@@ -36,6 +36,13 @@ public sealed class CharacterAnimator
     private const float PhasePerPixel       = 0.010f; // legacy fallback: cycles/sec per px/s
     private const float IdleBobHz           = 0.30f;  // breathing cycles/sec
     private const float Stiffness           = 20f;    // pose-follow rate (1/sec)
+    // Upper body (chest subtree: arms + knife) eases far faster *while an action
+    // overlay is active*, ramped in by ActionWeight. A slash is ~0.14s with sub-20ms
+    // swing segments; the base 20/s (50ms τ) low-passes ~70% of that authored range
+    // away. ~90/s (≈11ms τ) passes ~90% so the rendered hand — and the knife glow
+    // welded to it — tracks the real attack. Gated by ActionWeight so locomotion's
+    // softer arm follow is untouched; only attacks snap.
+    private const float UpperBodyStiffness  = 90f;
     private const float WalkLean            = 0.25f;  // torso lean at full walk speed
     private const float WalkLeanRefSpeed    = 160f;   // px/s at which lean reaches max
 
@@ -85,6 +92,8 @@ public sealed class CharacterAnimator
     // overlays: no contact labels, never enter the cadence φ-solve.
     private readonly Dictionary<string, AnimationDocument> _actionClips = new(StringComparer.Ordinal);
     private readonly bool[][]     _regionMasks;   // per-AnimRegion bone masks, resolved once
+    private readonly bool[]       _upperMask;     // chest subtree — bones that snap during attacks
+    private readonly float[]      _blend;         // scratch: per-bone ease factor each frame
     private readonly SkeletonPose _actionPose;    // last-sampled overlay pose (persisted so the fade-out blends from it)
     private string            _boundAction;       // action name the overlay is bound to
     private AnimationDocument _boundActionClip;   // null = no overlay for the bound action
@@ -132,6 +141,8 @@ public sealed class CharacterAnimator
         _regionMasks = new bool[3][];
         foreach (AnimRegion r in Enum.GetValues<AnimRegion>())
             _regionMasks[(int)r] = BoneMask.Resolve(skeleton, r);
+        _upperMask = _regionMasks[(int)AnimRegion.UpperBody];
+        _blend     = new float[skeleton.Count];
 
         int I(string n) => skeleton.IndexOf(n);
         _hip = I("hip"); _chest = I("chest");
@@ -234,7 +245,19 @@ public sealed class CharacterAnimator
         }
         bool overlayActive = _boundActionClip != null;
         if (overlayActive)
-            AnimationSampler.SampleAtTime(_boundActionClip, s.ActionTime, _kfA, _kfB, _actionPose);
+        {
+            // Time-remap: when the action declares a length, stretch/compress the clip's
+            // whole [0,1] timeline onto the action's [0, ActionDuration] so it sweeps
+            // exactly once over the swing (ignoring the clip's own Duration/Loop). Clamp
+            // past the end so it holds the final pose through recovery. No declared
+            // length → fall back to the clip's authored seconds.
+            if (s.ActionDuration > 1e-4f)
+                AnimationSampler.SampleNormalized(
+                    _boundActionClip, MathHelper.Clamp(s.ActionTime / s.ActionDuration, 0f, 1f),
+                    _kfA, _kfB, _actionPose);
+            else
+                AnimationSampler.SampleAtTime(_boundActionClip, s.ActionTime, _kfA, _kfB, _actionPose);
+        }
         float wRate = overlayActive ? ActionEaseIn : ActionEaseOut;
         _state.ActionWeight += ((overlayActive ? 1f : 0f) - _state.ActionWeight)
                              * (1f - MathF.Exp(-wRate * dt));
@@ -265,8 +288,16 @@ public sealed class CharacterAnimator
             Translate(_hip, new Vector2(0f, 3f * k));
         }
 
-        // 4. Ease the live pose toward the target (framerate-independent).
-        _pose.BlendToward(_target, 1f - MathF.Exp(-Stiffness * dt));
+        // 4. Ease the live pose toward the target (framerate-independent). Per-bone:
+        //    the upper-body subtree stiffens with ActionWeight so an attack's fast swing
+        //    isn't low-passed away (and the knife glow, read from this live pose, stays
+        //    welded to the rendered hand); everything else keeps the soft locomotion rate.
+        float baseB  = 1f - MathF.Exp(-Stiffness * dt);
+        float upperK = Stiffness + (UpperBodyStiffness - Stiffness) * _state.ActionWeight;
+        float upperB = 1f - MathF.Exp(-upperK * dt);
+        for (int i = 0; i < _skeleton.Count; i++)
+            _blend[i] = _upperMask[i] ? upperB : baseB;
+        _pose.BlendToward(_target, _blend);
 
         _prev = s;
         _hasPrev = true;
@@ -293,6 +324,28 @@ public sealed class CharacterAnimator
                                    .TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
                 ctx.Disc(tip, PlantFootMarkerRadius, PlantFootMarkerColor);
             }
+    }
+
+    // Whether an action overlay clip is currently bound and playing (vs faded out).
+    public bool OverlayActive => _boundActionClip != null;
+
+    // World position of a named bone's origin under the same root Draw() uses, WITHOUT
+    // drawing the rig — lets a host anchor a render effect (e.g. the slash glow) to an
+    // animated bone. `fromOverlay` reads the RAW action-overlay pose (the authored
+    // attack trajectory at ActionTime, full weight, no pose-smoothing) instead of the
+    // eased live pose, so a glow shows the full motion the clip encodes even though the
+    // visible rig eases/lags; it falls back to the live pose when no overlay is active.
+    // false if the bone is absent. Pure pull / render-only.
+    public bool TryBoneOrigin(string name, Vector2 worldPos, int facing,
+                              out Vector2 origin, bool fromOverlay = false)
+    {
+        int b = _skeleton.IndexOf(name);
+        if (b < 0) { origin = worldPos; return false; }
+        int dir = facing == 0 ? 1 : facing;
+        var root = Affine2.FromTRS(worldPos, 0f, new Vector2(dir * _scale, _scale));
+        var pose = (fromOverlay && _boundActionClip != null) ? _actionPose : _pose;
+        origin = pose.ComputeWorld(root)[b].Translation;
+        return true;
     }
 
     // --- clip selection ------------------------------------------------------

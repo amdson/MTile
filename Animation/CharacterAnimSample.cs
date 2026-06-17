@@ -20,13 +20,20 @@ public readonly struct CharacterAnimSample
     // sim time — drives the action overlay clip so the slash pose stays frame-synced
     // with the hitbox windows and survives rollback.
     public readonly float   ActionTime;
+    // Nominal total length of the current action (ActionState.OverlayDuration), seconds.
+    // The overlay clip is remapped to span exactly [0, ActionDuration] so it plays
+    // through once over the action's lifetime. 0 = no fixed length → the animator uses
+    // the clip's own Duration instead.
+    public readonly float   ActionDuration;
 
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
-        string movementState, string action, float dt, float actionTime = 0f)
+        string movementState, string action, float dt, float actionTime = 0f,
+        float actionDuration = 0f)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
+        ActionDuration = actionDuration;
     }
 
     // Pull the sample from a live character through its public surface only. The
@@ -34,5 +41,6 @@ public readonly struct CharacterAnimSample
     public static CharacterAnimSample From(PlayerCharacter p, float dt)
         => new(p.Body.Position, p.Body.Velocity, p.Facing, p.IsGrounded,
                p.CurrentStateName, p.CurrentActionName, dt,
-               p.CurrentActionVars.TimeInState);
+               p.CurrentActionVars.TimeInState,
+               p.CurrentAction?.OverlayDuration ?? 0f);
 }

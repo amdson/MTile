@@ -27,6 +27,9 @@ public sealed class GameConfig
     public bool DebugDrawSteeringRamps     { get; set; } = true;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
+    // Force fields (hold / grab / throw) — on by default so the otherwise-invisible
+    // combat fields read while playtesting (COMBAT_FEEL_PLAN Phases 2/6).
+    public bool DebugDrawForceFields       { get; set; } = true;
     public bool DebugDrawMassBall          { get; set; } = false;
     // Procedural skeleton animation overlay on the primary player (render-only,
     // pull-model). On by default while the rig is being built out.
@@ -43,6 +46,21 @@ public sealed class GameConfig
     // Cosmetic: tiny particle trail under the cursor so it's easier to spot
     // against busy terrain. Set false to disable; toggle independently of debug overlays.
     public bool MouseTrail { get; set; } = true;
+
+    // Dev preview for the new PrimitiveBatch layer (gradients / stroked Bezier curves /
+    // parametric surfaces). Draws a demo card in world space above the player. Render-only.
+    public bool DebugDrawPrimitiveDemo { get; set; } = false;
+
+    // Dev preview for the DensityField glow layer (additive kernel accumulation in a
+    // RenderTarget). Draws a cluster of overlapping colored glow blobs. Render-only.
+    public bool DebugDrawDensityDemo { get; set; } = false;
+
+    // Dev preview for the segment-metaball shaders (CapsuleSplat + MetaballComposite):
+    // a synthetic stick figure of bone segments rendered as one merged gooey blob.
+    public bool DebugDrawMetaballDemo { get; set; } = false;
+
+    // Dev preview for the GlowRenderer: a glowing triangle riding a curved motion trail.
+    public bool DebugDrawGlowDemo { get; set; } = false;
 
     // Debug/view time scale for the OFFLINE sim. 1 = normal; 0.2 runs the whole
     // simulation (and thus the animations it drives) at a fifth speed for inspecting

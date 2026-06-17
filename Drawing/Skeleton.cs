@@ -53,6 +53,21 @@ public sealed class Skeleton
         => _byName.TryGetValue(name, out int i) ? i : -1;
 
     public SkeletonPose CreatePose() => new(this);
+
+    // Return a new Skeleton with one bone appended. The parent already exists (so its
+    // index precedes the new one), keeping the parent-before-child invariant; the Bones
+    // array is readonly, so growing the rig means building a fresh Skeleton. Existing
+    // poses must be recreated against the result (they're sized to the old bone count);
+    // clips reference bones by name, so they're unaffected (the new bone sits at bind).
+    public Skeleton WithBone(string name, int parentIndex, BoneTransform bind, float length = 0f)
+    {
+        if (parentIndex >= Bones.Length)
+            throw new ArgumentOutOfRangeException(nameof(parentIndex), "Parent must be an existing bone.");
+        var arr = new Bone[Bones.Length + 1];
+        Array.Copy(Bones, arr, Bones.Length);
+        arr[Bones.Length] = new Bone(name, parentIndex, bind, length);
+        return new Skeleton(Name, arr);
+    }
 }
 
 // Convenience builder: add bones by name and get back their index to use as a

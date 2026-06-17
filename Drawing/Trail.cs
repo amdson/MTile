@@ -57,6 +57,13 @@ public sealed class Trail
 
     public void Clear() => _count = 0;
 
+    // Sample access, newest (i=0) → oldest (i=Count-1). For consumers that render the
+    // trail themselves (e.g. the glow renderer) instead of via Draw.
+    public Vector2 PositionFromNewest(int i) => _pos[(_head - 1 - i + Capacity) % Capacity];
+    public float   AgeFromNewest(int i)      => _age[(_head - 1 - i + Capacity) % Capacity];
+    public float   AgeFractionFromNewest(int i)
+        => MathHelper.Clamp(AgeFromNewest(i) / Lifetime, 0f, 1f);
+
     // Connects consecutive samples newest → oldest with a Catmull-Rom spline,
     // emitted as `Subdivisions` short line segments per source-segment. The
     // spline passes through every sample, so the trail shape matches the raw
