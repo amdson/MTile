@@ -62,6 +62,20 @@ public sealed class GameConfig
     // Dev preview for the GlowRenderer: a glowing triangle riding a curved motion trail.
     public bool DebugDrawGlowDemo { get; set; } = false;
 
+    // Route the primary player's attack glow through GlowTrailField — the persistent
+    // reaction–diffusion accumulation buffer (decay + reproject + blur + stamp) — so
+    // the slash/stab leaves a soft world-anchored streak instead of the primitive
+    // GlowRenderer triangle/sphere. Off → the old per-frame primitive glow. Render-only.
+    public bool GlowTrailField { get; set; } = true;
+
+    // Route the locomotion cadence (the per-frame phase advance Δφ) through the new
+    // generalized least-squares animation solver instead of the legacy 1-D golden-
+    // section search. Phase 1 minimizes the SAME objective (horizontal foot no-slip +
+    // playback continuity), so it should match the old cadence — it exists to prove the
+    // general solver machinery before later phases add joint corrections and a solved
+    // CoM offset. Render-only. See Plans/ANIMATION_SOLVER_PLAN.md.
+    public bool AnimSolver { get; set; } = false;
+
     // Debug/view time scale for the OFFLINE sim. 1 = normal; 0.2 runs the whole
     // simulation (and thus the animations it drives) at a fifth speed for inspecting
     // motion; 0 pauses; >1 fast-forwards. Ignored in networked play (would desync).

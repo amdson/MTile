@@ -86,7 +86,7 @@ public sealed class Trail
     {
         if (_count < 2) return;
         int last = _count - 1;
-
+        
         // First pass — sum chord distances between consecutive samples to
         // get total trail length. Straight chords, not the rendered spline
         // arc length; the two are close enough for picking a taper slope.

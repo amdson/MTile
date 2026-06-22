@@ -5,6 +5,18 @@
   "Duration": 0.14,
   "Loop": true,
   "Region": "UpperBody",
+  "ExtraBones": [
+    {
+      "Name": "knife",
+      "Parent": "arm_r_lower",
+      "Tx": 0.025818586,
+      "Ty": -4.547424,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 0
+    }
+  ],
   "Keyframes": [
     {
       "Time": 0.0014084507,

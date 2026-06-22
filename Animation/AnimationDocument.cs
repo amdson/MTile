@@ -69,6 +69,14 @@ public sealed class AnimationDocument
     // JSON → FullBody; FullBody is omitted on save so legacy files round-trip clean.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public AnimRegion              Region    { get; set; } = AnimRegion.FullBody;
+    // Clip-local bones layered onto the base rig (named by Skeleton) for THIS clip
+    // only — e.g. a "knife" held in the hand during a slash, which shouldn't bloat the
+    // shared biped rig that walk/idle draw against. Each must Parent an existing base
+    // bone by name. Null/omitted on clips that add nothing (the common case), so legacy
+    // files round-trip unchanged. Composed in by SkeletonComposition: the editor layers
+    // the active clip's set; the runtime layers the union across all bound clips.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<SkeletonBoneRecord> ExtraBones { get; set; }
     public List<AnimationKeyframe> Keyframes { get; set; } = new();
 
     [JsonIgnore] public string FilePath { get; set; }

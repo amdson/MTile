@@ -103,6 +103,27 @@ public sealed class CharacterAnimator
     private CharacterAnimSample _prev;      // previous frame's sample
     private bool _hasPrev;
 
+    // The clip doc sampled this frame and the normalized time it was sampled at —
+    // remembered so the host can pull labeled additions (e.g. the "com" reference
+    // point) for the exact pose being drawn, after Update returns.
+    private AnimationDocument _curDoc;
+    private float             _curComT;
+
+    // Generalized cadence solver (Plans/ANIMATION_SOLVER_PLAN.md, Phase 1). When on,
+    // the phase advance Δφ comes from a Levenberg–Marquardt least-squares solve over
+    // the SAME objective the golden-section path minimizes (horizontal foot no-slip +
+    // playback continuity), proving the general machinery at parity before later phases
+    // add joint corrections, a CoM offset, and more constraints. Off → the legacy 1-D
+    // golden-section solve. Render-only either way.
+    private readonly bool                _useSolver;
+    private readonly LeastSquaresSolver  _ls;
+    private readonly float[]             _solveVars, _solveLo, _solveHi;
+    private readonly LeastSquaresSolver.ResidualFn _cadenceResiduals;
+    // Per-solve context the residual closure reads (set just before each Minimize call).
+    private AnimationDocument _solveClip;
+    private float             _solvePhi;
+    private Affine2           _solveRoot;
+
     // Cached bone indices (resolved once).
     private readonly int _hip, _chest;
 
@@ -127,25 +148,46 @@ public sealed class CharacterAnimator
         return sole;
     }
 
-    public CharacterAnimator(Skeleton skeleton, float scale, IEnumerable<AnimationDocument> animations = null)
+    public CharacterAnimator(Skeleton skeleton, float scale, IEnumerable<AnimationDocument> animations = null,
+                             bool useSolver = false)
     {
-        _skeleton = skeleton;
+        // Materialize once: the list is walked twice (compose the rig, then bind clips).
+        var anims = animations == null ? null
+                  : animations as IReadOnlyList<AnimationDocument> ?? new List<AnimationDocument>(animations);
+        // Layer in clip-local attachment bones (e.g. a slash's knife) so the rig can
+        // resolve them; the base Skeletons/*.json stays free of attack-specific bones.
+        var rig = SkeletonComposition.WithClipBones(skeleton, anims);
+
+        _skeleton = rig;
         _scale    = scale;
-        _pose     = skeleton.CreatePose();
-        _target   = skeleton.CreatePose();
-        _kfA      = skeleton.CreatePose();
-        _kfB      = skeleton.CreatePose();
-        _scratch  = skeleton.CreatePose();
-        _actionPose = skeleton.CreatePose();
+        _pose     = rig.CreatePose();
+        _target   = rig.CreatePose();
+        _kfA      = rig.CreatePose();
+        _kfB      = rig.CreatePose();
+        _scratch  = rig.CreatePose();
+        _actionPose = rig.CreatePose();
 
         _regionMasks = new bool[3][];
         foreach (AnimRegion r in Enum.GetValues<AnimRegion>())
-            _regionMasks[(int)r] = BoneMask.Resolve(skeleton, r);
+            _regionMasks[(int)r] = BoneMask.Resolve(rig, r);
         _upperMask = _regionMasks[(int)AnimRegion.UpperBody];
-        _blend     = new float[skeleton.Count];
+        _blend     = new float[rig.Count];
 
-        int I(string n) => skeleton.IndexOf(n);
+        int I(string n) => rig.IndexOf(n);
         _hip = I("hip"); _chest = I("chest");
+
+        // Sized for Phase 1 (one Δφ variable) with headroom for later phases (joint
+        // corrections, a 2-D CoM offset → ~16 variables; a handful of contact residuals
+        // + regularizers → ~16 rows). Allocated only when the solver path is active.
+        _useSolver = useSolver;
+        if (_useSolver)
+        {
+            _ls = new LeastSquaresSolver(maxVars: 16, maxRes: 16);
+            _solveVars = new float[16];
+            _solveLo   = new float[16];
+            _solveHi   = new float[16];
+            _cadenceResiduals = CadenceResiduals;
+        }
 
         // Bind each clip category to the first authored animation whose Type matches
         // the enum name (case-insensitive) AND whose Skeleton matches this rig.
@@ -153,10 +195,10 @@ public sealed class CharacterAnimator
         // archetypes shares the SkeletonStates/ pool and each animator picks its own.
         // Types that aren't an AnimClip are action overlays, keyed by exact name;
         // stray types ("Misc") land there harmlessly — no action ever looks them up.
-        if (animations != null)
-            foreach (var anim in animations)
+        if (anims != null)
+            foreach (var anim in anims)
             {
-                if (anim.Skeleton != skeleton.Name) continue;
+                if (anim.Skeleton != rig.Name) continue;
                 if (Enum.TryParse<AnimClip>(anim.Type, ignoreCase: true, out var clip))
                 {
                     if (!_clips.ContainsKey(clip)) _clips[clip] = anim;
@@ -203,9 +245,20 @@ public sealed class CharacterAnimator
             RefreshContacts(anim, _state.Phase, root);
             if (_contacts.Count > 0)
             {
-                float dphi = SolvePhaseStep(anim, _state.Phase, root);
+                float dphi = _useSolver ? SolvePhaseStepLm(anim, _state.Phase, root)
+                                        : SolvePhaseStep(anim, _state.Phase, root);
                 _state.Phase   = Wrap01(_state.Phase + dphi);
                 _prevPhaseStep = dphi;
+            }
+            else
+            {
+                // Flight: a run's no-contact window has no planted foot to pin against,
+                // so there's nothing for the cadence solver to do. Coast the cycle at the
+                // last solved step's momentum (falling back to the distance-based rate on
+                // a cold entry) so the swing keeps moving until the next foot plants and
+                // the solver re-engages — otherwise the phase would freeze mid-air.
+                _state.Phase = Wrap01(_state.Phase +
+                    (_prevPhaseStep > 1e-5f ? _prevPhaseStep : speed * dt * PhasePerPixel));
             }
         }
         else
@@ -222,6 +275,10 @@ public sealed class CharacterAnimator
             throw new InvalidOperationException(
                 $"No authored animation bound for clip '{clip}'. Add a SkeletonStates/*.json " +
                 $"with Type=\"{clip}\" (loaded into CharacterAnimator).");
+
+        _curDoc  = anim;
+        _curComT = IsPhaseDriven(clip) ? _state.Phase
+                                       : AnimationSampler.NormalizedTime(anim, _state.ClipTime);
 
         if (IsPhaseDriven(clip))
             AnimationSampler.SampleNormalized(anim, _state.Phase, _kfA, _kfB, _target);
@@ -346,6 +403,56 @@ public sealed class CharacterAnimator
         var pose = (fromOverlay && _boundActionClip != null) ? _actionPose : _pose;
         origin = pose.ComputeWorld(root)[b].Translation;
         return true;
+    }
+
+    // The clip's bundled center-of-mass reference point (the "com" Point addition),
+    // in rig-local space, sampled at the pose drawn this frame. This is the anchor a
+    // host maps onto the character's physics body (its polygon centroid = the real
+    // COM) to place the rig — replacing the ad-hoc "drop until the lowest foot touches
+    // the ground" rule, which can't ever let both feet leave the ground (a run's flight
+    // phase). Returns false for clips that don't author one (the host then falls back).
+    public bool TryComReference(out Vector2 comLocal)
+        => SampleNamedPoint(_curDoc, _curComT, "com", out comLocal);
+
+    // Non-allocating lerp of a named root-space Point addition across the keyframes
+    // bracketing normalized time t (cf. AnimAdditionSampler.Sample, which allocates a
+    // list every call). Holds the value when only one bracketing keyframe defines it.
+    private static bool SampleNamedPoint(AnimationDocument doc, float t, string name, out Vector2 p)
+    {
+        p = default;
+        var ks = doc?.Keyframes;
+        if (ks == null || ks.Count == 0) return false;
+        t = MathHelper.Clamp(t, ks[0].Time, ks[ks.Count - 1].Time);
+
+        int i = 0;
+        while (i < ks.Count - 1 && ks[i + 1].Time < t) i++;
+        int j = Math.Min(i + 1, ks.Count - 1);
+
+        bool ha = TryPointAt(ks[i], name, out var pa);
+        bool hb = TryPointAt(ks[j], name, out var pb);
+        if (ha && hb)
+        {
+            float span = ks[j].Time - ks[i].Time;
+            float u = span <= 1e-6f ? 0f : (t - ks[i].Time) / span;
+            p = Vector2.Lerp(pa, pb, u);
+            return true;
+        }
+        if (ha) { p = pa; return true; }
+        if (hb) { p = pb; return true; }
+        return false;
+    }
+
+    private static bool TryPointAt(AnimationKeyframe k, string name, out Vector2 p)
+    {
+        p = default;
+        if (k.Additions == null) return false;
+        foreach (var a in k.Additions)
+            if (a.Kind == AnimAdditionKind.Point && a.Name == name)
+            {
+                p = new Vector2(a.Px, a.Py);
+                return true;
+            }
+        return false;
     }
 
     // --- clip selection ------------------------------------------------------
@@ -489,12 +596,80 @@ public sealed class CharacterAnimator
             foreach (var c in _contacts)
             {
                 Vector2 tip = _scratch.WorldOf(c.Bone).TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
-                e += c.Weight * (tip - c.Target).LengthSquared();
+                // Penalize only HORIZONTAL (along-ground) slip. The planted foot must not
+                // slide across the ground, but its vertical arc (lift over the stance) is
+                // intrinsic to the cadence and is reconciled by the ground/COM anchor — not
+                // something Δφ should fight. Penalizing the Y component made the vertical
+                // arc dominate the loss at walk speed (small horizontal drift), pinning Δφ
+                // to ~0 every frame: the cadence froze below the run-speed band.
+                float dx = tip.X - c.Target.X;
+                e += c.Weight * dx * dx;
             }
             float d = dphi - _prevPhaseStep;
             return e + PhaseStepPrior * d * d;
         }
         return GoldenSection.Minimize(Loss, 0f, MaxPhaseStep);
+    }
+
+    // Solver-path equivalent of SolvePhaseStep: the SAME objective (horizontal foot
+    // no-slip + a playback-continuity prior) cast as least-squares residuals and
+    // minimized over the single variable Δφ ∈ [0, MaxPhaseStep] by the general LM core.
+    // At parity this lands on the same Δφ the golden-section search finds; it exists so
+    // the solver framework is exercised end-to-end before later phases add variables
+    // (joint corrections, CoM offset) and constraints. See ANIMATION_SOLVER_PLAN Phase 1.
+    private float SolvePhaseStepLm(AnimationDocument clip, float phi, in Affine2 root)
+    {
+        _solveClip = clip; _solvePhi = phi; _solveRoot = root;
+        _solveLo[0] = 0f; _solveHi[0] = MaxPhaseStep;
+
+        // The cadence objective is NON-CONVEX in Δφ: a planted foot's horizontal track
+        // is non-monotonic over a stance arc (it can drift forward before sweeping back),
+        // so the gradient at Δφ=0 may point into the Δφ<0 wall while the true minimum
+        // sits further inside the bracket. A purely local descent stalls there. Globalize
+        // with a cheap coarse seed search (1-D only), keeping the momentum warm-start
+        // (Δφ_prev) as a candidate so steady-state locomotion stays smooth, then let LM
+        // refine. The full multi-DOF solver can't grid-search — it leans on temporal
+        // warm-starting from the previous frame instead (ANIMATION_SOLVER_PLAN §3.5).
+        float best     = MathHelper.Clamp(_prevPhaseStep, 0f, MaxPhaseStep);
+        float bestCost = CadenceCostAt(best);
+        const int seeds = 9;
+        for (int k = 0; k <= seeds; k++)
+        {
+            float s = MaxPhaseStep * k / seeds;
+            float c = CadenceCostAt(s);
+            if (c < bestCost) { bestCost = c; best = s; }
+        }
+
+        _solveVars[0] = best;
+        _ls.Minimize(_cadenceResiduals,
+                     _solveVars.AsSpan(0, 1), _solveLo.AsSpan(0, 1), _solveHi.AsSpan(0, 1));
+        return _solveVars[0];
+    }
+
+    private float CadenceCostAt(float dphi)
+    {
+        Span<float> s = stackalloc float[1];
+        s[0] = dphi;
+        return _ls.Cost(_cadenceResiduals, s);
+    }
+
+    // r(Δφ): one row per planted contact (√weight · horizontal slip of its tip at phase
+    // φ+Δφ) plus one playback-continuity row (√PhaseStepPrior · (Δφ − Δφ_prev)). The sum
+    // of squares is exactly the golden-section Loss, so the two paths share a minimum.
+    private int CadenceResiduals(ReadOnlySpan<float> x, Span<float> r)
+    {
+        float dphi = x[0];
+        AnimationSampler.SampleNormalized(_solveClip, Wrap01(_solvePhi + dphi), _kfA, _kfB, _scratch);
+        _scratch.ComputeWorld(_solveRoot);
+
+        int n = 0;
+        foreach (var c in _contacts)
+        {
+            Vector2 tip = _scratch.WorldOf(c.Bone).TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
+            r[n++] = MathF.Sqrt(c.Weight) * (tip.X - c.Target.X);          // horizontal no-slip
+        }
+        r[n++] = MathF.Sqrt(PhaseStepPrior) * (dphi - _prevPhaseStep);     // playback continuity
+        return n;
     }
 
     private int ActiveIndex(int bone)

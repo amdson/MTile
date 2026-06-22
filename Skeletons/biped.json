@@ -4,8 +4,8 @@
     {
       "Name": "hip",
       "Parent": null,
-      "Tx": -3.9999924,
-      "Ty": 2.1200027,
+      "Tx": -3.5999908,
+      "Ty": -12.879993,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
@@ -130,16 +130,6 @@
       "Sx": 1,
       "Sy": 1,
       "Length": 6
-    },
-    {
-      "Name": "knife",
-      "Parent": "arm_r_lower",
-      "Tx": 0.025818586,
-      "Ty": -4.547424,
-      "Rotation": 0,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 0
     }
   ]
 }

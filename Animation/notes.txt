@@ -1,0 +1,29 @@
+what i'd like to do right now is to build a generalized pipeline for going from the player's action state + movement state + position + environment -> clips + constraints -> joint angles + skeleton offset from CoM. 
+
+this will be a complicated procedure, and will involve significant refactoring. 
+
+Pseudocode
+
+Say that all non-state gamestate (player pos, local tiles, etc, is bundled in a variable named env)
+
+1. constraints.extend(get_local_constraints(env)) # get a list of constraints implied by environment and player pos only (like limbs not intersecting with walls and ground, etc). 
+
+2. Say that motions are a generalization of animation clips, essentially they should be functions which map from a clip time to a skeleton pose (optionally with weights on different bones in the pose). 
+motions = []
+For state in states:
+    new_motions.extend(get_motions(state, env)) #get one or more motions from each state (ActionState or MovementState)
+    constraints.extend(get_state_constraints(state, env)) #get one or more state specific constraints (e.g. no slip condition for active feet on their supporting surface in running state, or guarantee that clip time matches action progress for stab action state)
+    # Note that state constraints are generated without awareness of clip time, since clip time is solved for later. so for cases where constraint behavior depends on clip time, such as the no slip condition for feet, in which the foot for which no-slip is active depends on clip progress, the constraint should be parametrized by clip time. 
+
+# We should eventially implement no-slip constraints, fixed point constraints, no-penetration constraints, and constraints on the offset between animation CoM and player CoM. 
+
+#Assume a list of active motions from the previous frame. Say that motions are corresponding if they're the same type (e.g. running, walking, slashing)
+3. For motion in new_motions:
+    - If no corresponding active motion existent, add to active motions
+    - Else, pull prior clip time and clip playback rate from matching active motion
+
+4. Leave clip times of new frame as free parameters. 
+def skeleton_pose(motions, clip_times):
+    return weighted_average(motion.get_weighted_frame(clip_time) for motion, clip_time in zip(motions, clip_times))
+
+5. Solve for clip times + perturbations to angles of final skeleton that best optimize sum of all constraints. This includes constraints on playback rate continuity, no-slip conditions, and others previously mentioned

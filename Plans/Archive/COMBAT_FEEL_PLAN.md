@@ -256,8 +256,7 @@ Input: **Shift + RMB** (per user). `LobbedAreaAction` deactivated to free the bi
       anymore — guard should instead bleed percent/knockback through, and the
       just-frame parry on Shift *press* is a separate task. The existing full-parry
       `GuardAction` already supplies "guard beats attack," so the RPS triangle closes:
-      grab beats guard (ignores it), attack beats grab (whiff lag / struggle), guard
-      beats attack (parry).
+      aats attack (parry).
 - [x] Sim tests: `GrabTests` — grab flags GrabbedActive; grab ignores guard; a
       grabbed victim's struggle slash stuns the grabber and breaks the grab (freeing
       them); releasing the grab flings the victim (Vx > 200).

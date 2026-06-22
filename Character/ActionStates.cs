@@ -682,6 +682,10 @@ public class StabAction : ActionState
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
 
+    // Remap the overlay clip onto the stab's [0, Duration] so the authored thrust sweeps
+    // once over the swing — windup/strike/hold/retract stay synced to the hitbox windows.
+    public override float OverlayDuration => Duration;
+
     private static Color ColorFor(bool isGrounded) => isGrounded ? Color.Goldenrod : Color.MediumPurple;
 
     // AirSpinStab overrides true so the swipe (and mid-attack mouse-steer clamp)

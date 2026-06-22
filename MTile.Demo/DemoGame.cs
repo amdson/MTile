@@ -30,6 +30,11 @@ public sealed class DemoGame : Game
     private SpriteFont  _font;
     private DrawContext _draw;
 
+    // The shared base rig (Skeletons/<name>.json). `_skeleton` is the working rig the
+    // editor poses/draws: base + the ACTIVE clip's ExtraBones composed in, rebuilt on
+    // every clip switch. Keeping them separate means clip-local bones (a slash's knife)
+    // never leak into the base rig on save, and walk/idle don't show another clip's knife.
+    private Skeleton     _baseSkeleton;
     private Skeleton     _skeleton;
     private SkeletonPose _pose;          // rendered / working pose
     private SkeletonPose _kfA, _kfB;     // scratch for interpolation
@@ -67,6 +72,7 @@ public sealed class DemoGame : Game
     private AnimAddition _pendingAddition;
     private int          _pendingBoneParent;
     private Vector2      _pendingBoneLocal;
+    private bool         _pendingBoneBase;     // Shift+B: add to the base rig vs the active clip
     private bool         _showHelp;           // H toggles the grouped controls panel
 
     private const int   SidebarW = 250;
@@ -115,7 +121,8 @@ public sealed class DemoGame : Game
         // Authored-only content: the rig comes from Skeletons/biped.json and throws
         // if missing (no procedural fallback), and the clip list is exactly what's
         // on disk in SkeletonStates/ (no seed autogeneration). N / C create clips.
-        _skeleton = SkeletonExamples.Biped();
+        _baseSkeleton = SkeletonExamples.Biped();
+        _skeleton = _baseSkeleton;
         _pose = _skeleton.CreatePose();
         _kfA  = _skeleton.CreatePose();
         _kfB  = _skeleton.CreatePose();
@@ -173,9 +180,10 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.Space)) TogglePlay();
         if (Pressed(kb, Keys.Delete)) { if (_selectedAdd >= 0) RemoveSelectedAddition(); else DeleteActiveKeyframe(); }
         // Add labeled constructs: P point, V vector (to the active keyframe), B child bone.
+        // B adds the bone to the active clip (clip-local); Shift+B adds it to the base rig.
         if (Pressed(kb, Keys.P)) BeginAddAddition(AnimAdditionKind.Point, mp);
         if (Pressed(kb, Keys.V)) BeginAddAddition(AnimAdditionKind.Vector, mp);
-        if (Pressed(kb, Keys.B)) BeginAddBone(mp);
+        if (Pressed(kb, Keys.B)) BeginAddBone(mp, toBase: kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift));
         if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
         if (Doc != null)
         {
@@ -258,7 +266,10 @@ public sealed class DemoGame : Game
             }
             if ((touched & EditTouched.Rig) != 0)
             {
-                _skelDirty = true;
+                // A base-bone bind edit dirties the rig file; a clip-local bone's edit
+                // dirties the active clip (its ExtraBones live in the animation file).
+                if (IsBaseBone(_skeleton.Bones[_dragBone].Name)) _skelDirty = true;
+                else _dirty = true;
                 RecomputeFloorLine();
             }
         }
@@ -343,7 +354,26 @@ public sealed class DemoGame : Game
         var newBind = new BoneTransform(t, old.Bind.Rotation, old.Bind.Scale);
         _skeleton.Bones[i] = new Bone(old.Name, old.Parent, newBind, old.Length);
         _pose.Local[i].Translation = t;
+
+        // Mirror into the backing store so the edit survives a recompose / save. A base
+        // bone writes back to the base rig; a clip-local bone updates its ExtraBones
+        // record on the active clip (the working rig is rebuilt from those two sources).
+        int bi = _baseSkeleton.IndexOf(old.Name);
+        if (bi >= 0)
+        {
+            var b = _baseSkeleton.Bones[bi];
+            _baseSkeleton.Bones[bi] = new Bone(b.Name, b.Parent,
+                new BoneTransform(t, b.Bind.Rotation, b.Bind.Scale), b.Length);
+        }
+        else
+        {
+            var rec = Doc?.ExtraBones?.Find(r => r.Name == old.Name);
+            if (rec != null) { rec.Tx = t.X; rec.Ty = t.Y; }
+        }
     }
+
+    // True when the named bone belongs to the base rig (vs the active clip's ExtraBones).
+    private bool IsBaseBone(string name) => _baseSkeleton.IndexOf(name) >= 0;
 
     // Floor line tracks the bind-pose sole; recompute after any rig edit so the
     // ground reference stays consistent with the live silhouette.
@@ -461,7 +491,15 @@ public sealed class DemoGame : Game
 
             if (i == _dragBone)       _draw.Disc(p, 6f, Color.White);
             else if (i == _hoverBone) _draw.Disc(p, 6f, Color.LightYellow);
-            else _draw.Ring(p, 5f, _skeleton.Bones[i].IsRoot ? Color.Yellow : Color.OrangeRed, 12, 1.5f);
+            else
+            {
+                // Clip-local bones (this clip's ExtraBones) ring in cyan so it's obvious
+                // which joints belong to the active clip vs the shared base rig.
+                Color ring = !IsBaseBone(_skeleton.Bones[i].Name) ? new Color(90, 220, 230)
+                           : _skeleton.Bones[i].IsRoot            ? Color.Yellow
+                                                                  : Color.OrangeRed;
+                _draw.Ring(p, 5f, ring, 12, 1.5f);
+            }
         }
 
         DrawAdditions(world);
@@ -628,12 +666,14 @@ public sealed class DemoGame : Game
     }
 
     // Start adding a child bone of the hovered joint (or root) at the cursor, then name it.
-    private void BeginAddBone(Vector2 mp)
+    // toBase = Shift+B: a base-rig bone; otherwise a clip-local bone on the active clip.
+    private void BeginAddBone(Vector2 mp, bool toBase)
     {
         int parent = _hoverBone >= 0 ? _hoverBone : 0;
         var world  = _pose.ComputeWorld(_root);
         _pendingBoneParent = parent;
         _pendingBoneLocal  = world[parent].Inverse().TransformPoint(mp);
+        _pendingBoneBase   = toBase;
         _naming = NameTarget.Bone;
         _nameBuffer = "";
     }
@@ -652,7 +692,7 @@ public sealed class DemoGame : Game
         }
         else if (_naming == NameTarget.Bone)
         {
-            AddBone(name, _pendingBoneParent, _pendingBoneLocal);
+            AddBone(name, _pendingBoneParent, _pendingBoneLocal, _pendingBoneBase);
         }
         EndNaming();
     }
@@ -668,12 +708,43 @@ public sealed class DemoGame : Game
         return $"{stem}{n}";
     }
 
-    private void AddBone(string name, int parent, Vector2 local)
+    // Add a bone. Default (B) is clip-local: it lives in the ACTIVE clip's ExtraBones and
+    // is saved into that animation file, so it shows only while editing this clip and never
+    // touches the shared rig. Shift+B adds to the base rig instead (toBase). `parent` is an
+    // index into the current working rig; we store the parent by NAME so it resolves after
+    // recomposition. With no active clip, a clip-local add falls back to the base rig.
+    private void AddBone(string name, int parent, Vector2 local, bool toBase)
     {
         if (_skeleton.IndexOf(name) >= 0) name = UniqueBoneName(name);
-        _skeleton = _skeleton.WithBone(name, parent, new BoneTransform(local, 0f, Vector2.One), 0f);
+        string parentName = _skeleton.Bones[parent].Name;
+
+        if (toBase || Doc == null)
+        {
+            int p = _baseSkeleton.IndexOf(parentName);
+            if (p < 0) return;   // can't parent a base bone to a clip-local one
+            _baseSkeleton = _baseSkeleton.WithBone(name, p, new BoneTransform(local, 0f, Vector2.One), 0f);
+            _skelDirty = true;
+        }
+        else
+        {
+            Doc.ExtraBones ??= new List<SkeletonBoneRecord>();
+            Doc.ExtraBones.Add(new SkeletonBoneRecord
+            {
+                Name = name, Parent = parentName,
+                Tx = local.X, Ty = local.Y, Rotation = 0f, Sx = 1f, Sy = 1f, Length = 0f,
+            });
+            _dirty = true;
+        }
+        RebuildWorkingRig();
+    }
+
+    // Recompose the working rig from the base plus the active clip's ExtraBones, and
+    // recreate the pose buffers (sized to the bone count). Called on clip switch and after
+    // any bone add.
+    private void RebuildWorkingRig()
+    {
+        _skeleton = SkeletonComposition.Compose(_baseSkeleton, Doc?.ExtraBones);
         RecreatePoses();
-        _skelDirty = true;
     }
 
     // The pose scratch buffers are sized to the bone count, so a rig that grew needs fresh
@@ -818,7 +889,7 @@ public sealed class DemoGame : Game
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
         ("Edit",     "Tab mode (rotate/translate/resize)    drag joint    M+click contact    F flip"),
-        ("Add",      "P point    V vector    B bone    (then type a name, Enter)"),
+        ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
         ("File",     "Ctrl-S save  (writes clips + rig)"),
     };
@@ -894,7 +965,9 @@ public sealed class DemoGame : Game
     {
         _playing = false;
         _selected = i;
+        _activeKey = -1;            // stale index from the previous clip; SelectKeyframe resets it
         var doc = _docs[i];
+        RebuildWorkingRig();        // compose base + THIS clip's ExtraBones
         if (doc.Keyframes.Count == 0)
             doc.Keyframes.Add(new AnimationKeyframe { Time = 0f, Bones = PoseData.Capture(_skeleton.CreatePose()) });
         doc.SortKeyframes();
@@ -1057,11 +1130,13 @@ public sealed class DemoGame : Game
 
         if (_skelDirty)
         {
+            // Capture the BASE rig only — clip-local bones live in their clip's ExtraBones
+            // (saved above), so they must never be baked back into the shared rig file.
             string skelDir = SkeletonsDir(_dir);
-            var doc = SkeletonStore.Capture(_skeleton.Name, _skeleton);
+            var doc = SkeletonStore.Capture(_baseSkeleton.Name, _baseSkeleton);
             SkeletonStore.Save(doc, skelDir);
             _skelDirty = false;
-            Console.WriteLine($"Saved rig '{_skeleton.Name}' to {skelDir}");
+            Console.WriteLine($"Saved rig '{_baseSkeleton.Name}' to {skelDir}");
         }
     }
 

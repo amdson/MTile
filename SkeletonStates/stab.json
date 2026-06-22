@@ -1,0 +1,77 @@
+{
+  "Name": "stab",
+  "Type": "StabAction",
+  "Skeleton": "biped",
+  "Duration": 0.6,
+  "Loop": false,
+  "Region": "UpperBody",
+  "ExtraBones": [
+    {
+      "Name": "knife",
+      "Parent": "arm_r_lower",
+      "Tx": 0.025818586,
+      "Ty": -4.547424,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 0
+    }
+  ],
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        { "Bone": "chest", "Rotation": 0.08 },
+        { "Bone": "head", "Rotation": 0 },
+        { "Bone": "arm_l_upper", "Rotation": -0.9 },
+        { "Bone": "arm_l_lower", "Rotation": -0.7 },
+        { "Bone": "arm_r_upper", "Rotation": -0.2 },
+        { "Bone": "arm_r_lower", "Rotation": -1.25 }
+      ]
+    },
+    {
+      "Time": 0.18,
+      "Bones": [
+        { "Bone": "chest", "Rotation": -0.06 },
+        { "Bone": "head", "Rotation": 0.05 },
+        { "Bone": "arm_l_upper", "Rotation": -0.75 },
+        { "Bone": "arm_l_lower", "Rotation": -0.55 },
+        { "Bone": "arm_r_upper", "Rotation": -0.45 },
+        { "Bone": "arm_r_lower", "Rotation": -1.75 }
+      ]
+    },
+    {
+      "Time": 0.42,
+      "Bones": [
+        { "Bone": "chest", "Rotation": 0.3 },
+        { "Bone": "head", "Rotation": -0.05 },
+        { "Bone": "arm_l_upper", "Rotation": -1.15 },
+        { "Bone": "arm_l_lower", "Rotation": -0.9 },
+        { "Bone": "arm_r_upper", "Rotation": 0.08 },
+        { "Bone": "arm_r_lower", "Rotation": 0.02 }
+      ]
+    },
+    {
+      "Time": 0.67,
+      "Bones": [
+        { "Bone": "chest", "Rotation": 0.24 },
+        { "Bone": "head", "Rotation": -0.03 },
+        { "Bone": "arm_l_upper", "Rotation": -1.1 },
+        { "Bone": "arm_l_lower", "Rotation": -0.88 },
+        { "Bone": "arm_r_upper", "Rotation": 0.1 },
+        { "Bone": "arm_r_lower", "Rotation": 0.06 }
+      ]
+    },
+    {
+      "Time": 1,
+      "Bones": [
+        { "Bone": "chest", "Rotation": 0.1 },
+        { "Bone": "head", "Rotation": 0 },
+        { "Bone": "arm_l_upper", "Rotation": -0.95 },
+        { "Bone": "arm_l_lower", "Rotation": -0.72 },
+        { "Bone": "arm_r_upper", "Rotation": -0.18 },
+        { "Bone": "arm_r_lower", "Rotation": -1.15 }
+      ]
+    }
+  ]
+}
