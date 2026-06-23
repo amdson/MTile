@@ -69,6 +69,14 @@ public sealed class AnimationDocument
     // JSON → FullBody; FullBody is omitted on save so legacy files round-trip clean.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public AnimRegion              Region    { get; set; } = AnimRegion.FullBody;
+    // Blend weight applied to bones OUTSIDE this clip's Region when it's layered as an
+    // overlay (the Region's own bones always blend at full slot weight). 0 = a hard mask
+    // (the legacy / default behavior: an UpperBody slash leaves the legs entirely to the
+    // base clip). >0 lets a "whole-body" overlay lightly drive its off-region bones — e.g.
+    // a Pulse cast authored Region=UpperBody with OffRegionWeight=0.3 braces the legs at
+    // 30% without taking them over. Omitted on save when 0 so legacy files round-trip clean.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public float                   OffRegionWeight { get; set; } = 0f;
     // Clip-local bones layered onto the base rig (named by Skeleton) for THIS clip
     // only — e.g. a "knife" held in the hand during a slash, which shouldn't bloat the
     // shared biped rig that walk/idle draw against. Each must Parent an existing base

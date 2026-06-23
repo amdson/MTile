@@ -39,24 +39,16 @@ public static class SkeletonRenderer
         var world = pose.ComputeWorld(root);
         var bones = pose.Skeleton.Bones;
 
-        // Bone segments: a line from the parent joint to this joint.
+        // Bone segments: each bone is its OWN body, joint → tip (Length along local +X). The rig
+        // is a joint chain (child.joint == parent.tip exactly), so these connect end-to-end with
+        // no gaps or duplicates — and every leaf (head, forearms, feet) draws, which a
+        // parent.joint→this.joint pass would miss.
         for (int i = 0; i < bones.Length; i++)
         {
+            if (bones[i].Length <= 0f) continue;   // a length-0 root / marker has no segment
             Vector2 here = world[i].Translation;
-
-            if (bones[i].Parent >= 0)
-            {
-                Vector2 parent = world[bones[i].Parent].Translation;
-                ctx.Line(parent, here, style.BoneColor, style.BoneThickness);
-            }
-
-            // Orientation tick along the bone's local +X by its Length — shows
-            // facing even for leaf bones that have no child segment.
-            if (style.DrawAxes && bones[i].Length > 0f)
-            {
-                Vector2 tip = world[i].TransformPoint(new Vector2(bones[i].Length, 0f));
-                ctx.Line(here, tip, style.AxisColor, 1f);
-            }
+            Vector2 tip  = world[i].TransformPoint(new Vector2(bones[i].Length, 0f));
+            ctx.Line(here, tip, style.BoneColor, style.BoneThickness);
         }
 
         // Joints drawn last so they read clearly on top of the segments. Skipped

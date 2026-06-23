@@ -291,7 +291,10 @@ public class CharacterAnimatorTests
     {
         int i = skel.IndexOf(bone);
         var t = p.Local[i];
-        t.Rotation = rot;
+        // Bind-relative: `rot` is a swing from the bone's rest orientation. The joint-chain rig
+        // gives legs a non-zero bind rotation (≈π/2, pointing down), so a synthetic clip that
+        // means "swing the thigh ±rot from vertical" must add it (was absolute under the old rig).
+        t.Rotation = skel.Bones[i].Bind.Rotation + rot;
         p.SetLocal(i, t);
     }
 }

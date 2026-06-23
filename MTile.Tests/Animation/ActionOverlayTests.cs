@@ -67,6 +67,86 @@ public class ActionOverlayTests
         }
     }
 
+    // A graded overlay (OffRegionWeight > 0) drives its OFF-region bones a fraction of the
+    // way toward the overlay pose, while its in-region bones still go to full weight. End-to-
+    // end check of the per-bone graded blend (EaseSlot fill + PaintMotionLayer lerp).
+    [Fact]
+    public void GradedOverlay_PartiallyDrives_OffRegionBones()
+    {
+        var skel = SkeletonExamples.Biped();
+        int armR = skel.IndexOf("arm_r_upper");
+        int legL = skel.IndexOf("leg_l_upper");
+        const float LegBase = 1.0f, LegOverlay = 0.0f, Off = 0.3f;
+
+        // Static FullBody base holds the leg at LegBase (no contacts -> no cadence to perturb
+        // it); the UpperBody cast sets the same leg to LegOverlay with a 0.3 off-region weight.
+        var anim = new CharacterAnimator(skel, 0.6f, new[]
+        {
+            StaticBase(skel, "Walk", legRot: LegBase),
+            GradedCast(skel, "GradedCast", arm: SlashArm, legRot: LegOverlay, off: Off),
+        });
+
+        var st = new DriveState();
+        Drive(anim, skel, ref st, frames: 60, action: "GradedCast");   // saturate the ease-in
+        Assert.True(anim.State.ActionWeight > 0.98f, $"weight should saturate; got {anim.State.ActionWeight}");
+
+        // In-region arm: full weight -> reaches the overlay pose.
+        Assert.True(MathF.Abs(anim.Pose.Local[armR].Rotation - SlashArm) < 0.1f,
+            $"in-region arm should reach the overlay pose; got {anim.Pose.Local[armR].Rotation}");
+        // Off-region leg: blended ~Off of the way from base to overlay.
+        float expectLeg = MathHelper.Lerp(LegBase, LegOverlay, Off);   // lerp(1,0,0.3) = 0.7
+        Assert.True(MathF.Abs(anim.Pose.Local[legL].Rotation - expectLeg) < 0.03f,
+            $"off-region leg should sit at lerp(base,overlay,{Off})={expectLeg}; got {anim.Pose.Local[legL].Rotation}");
+    }
+
+    // OffRegionWeight defaults to 0 -> a hard mask: off-region bones stay bit-identical to a
+    // no-overlay control. Regression guard for the legacy binary-mask behavior.
+    [Fact]
+    public void GradedOverlay_ZeroOff_IsHardMask()
+    {
+        var skel = SkeletonExamples.Biped();
+        int legL = skel.IndexOf("leg_l_upper");
+        AnimationDocument[] Clips() => new[]
+        {
+            StaticBase(skel, "Walk", legRot: 1.0f),
+            GradedCast(skel, "HardCast", arm: SlashArm, legRot: 0.0f, off: 0f),
+        };
+        var graded  = new CharacterAnimator(skel, 0.6f, Clips());
+        var control = new CharacterAnimator(skel, 0.6f, Clips());
+
+        var stA = new DriveState();
+        var stB = new DriveState();
+        for (int i = 0; i < 30; i++)
+        {
+            Drive(graded,  skel, ref stA, frames: 1, action: "HardCast");
+            Drive(control, skel, ref stB, frames: 1, action: "");
+        }
+        Assert.Equal(control.Pose.Local[legL].Rotation, graded.Pose.Local[legL].Rotation);
+    }
+
+    // A graded overlay over a cadence-driven walk: the off-region legs are partly pulled by the
+    // overlay yet keep cycling. The graded per-bone weight feeds the cadence Jacobian's base-
+    // blend product, so the solver must still advance rather than freeze/NaN.
+    [Fact]
+    public void GradedOverlay_OverWalk_CadenceStillAdvances()
+    {
+        var skel = SkeletonExamples.Biped();
+        int legL = skel.IndexOf("leg_l_upper");
+        var anim = new CharacterAnimator(skel, 0.6f, new[]
+        {
+            BuildWalkClip(skel),                                       // contacts -> cadence runs
+            GradedCast(skel, "GradedCast", arm: SlashArm, legRot: 0.0f, off: 0.3f),
+        });
+
+        var st = new DriveState();
+        Drive(anim, skel, ref st, frames: 20, action: "GradedCast");
+        float a = anim.Pose.Local[legL].Rotation;
+        Assert.False(float.IsNaN(a), "graded overlay produced NaN legs under cadence");
+        Drive(anim, skel, ref st, frames: 5, action: "GradedCast");
+        Assert.True(MathF.Abs(a - anim.Pose.Local[legL].Rotation) > 1e-4f,
+            "legs froze under a graded overlay — cadence should keep cycling");
+    }
+
     // NullAction/ReadyAction/RecoveryAction/None read as "no action": weight stays 0
     // even with a bound slash clip.
     [Theory]
@@ -104,11 +184,13 @@ public class ActionOverlayTests
         int armR = skel.IndexOf("arm_r_upper");
 
         var st = new DriveState();
+        Drive(anim, skel, ref st, frames: 10, action: "");                 // settle into the walk pose
+        float walkArm = anim.Pose.Local[armR].Rotation;                    // the rest target it eases back to
         Drive(anim, skel, ref st, frames: 15, action: "GroundSlash1");
         Assert.True(anim.State.ActionWeight > 0.9f);
 
         float prevW = anim.State.ActionWeight;
-        float prevArm = anim.Pose.Local[armR].Rotation;
+        float slashArm = anim.Pose.Local[armR].Rotation;                   // arm at the slash peak
         for (int i = 0; i < 30; i++)
         {
             Drive(anim, skel, ref st, frames: 1, action: "RecoveryAction");
@@ -118,8 +200,12 @@ public class ActionOverlayTests
             prevW = w;
         }
         Assert.Equal(0f, anim.State.ActionWeight);
-        Assert.True(MathF.Abs(anim.Pose.Local[armR].Rotation) < MathF.Abs(prevArm),
-            "arm should ease back toward the walk pose after the action ends");
+        // Eased back toward the walk pose: the arm is closer to the walk rotation than the slash
+        // peak was. (The joint-chain rig gives the rest arm a non-zero bind rotation, so measure
+        // relative to the walk pose, not |rotation|.)
+        float dEnd   = MathF.Abs(MathHelper.WrapAngle(anim.Pose.Local[armR].Rotation - walkArm));
+        float dSlash = MathF.Abs(MathHelper.WrapAngle(slashArm - walkArm));
+        Assert.True(dEnd < dSlash, $"arm should ease back toward the walk pose (dEnd {dEnd:0.###} !< dSlash {dSlash:0.###})");
     }
 
     // A combo rebind (GroundSlash1 -> GroundSlash3) swaps the clip without the weight
@@ -233,6 +319,45 @@ public class ActionOverlayTests
         clip.Keyframes.Add(LocoKf(skel, 0.5f, legL: -1.0f, legR:  1.0f, plant: "foot_l"));
         clip.Keyframes.Add(LocoKf(skel, 1f,   legL:  1.0f, legR: -1.0f, plant: "foot_r"));
         return clip;
+    }
+
+    // A static FullBody base that just holds leg_l_upper at legRot (two identical keyframes,
+    // no contacts) — a fixed off-region target for the graded-overlay tests.
+    private static AnimationDocument StaticBase(Skeleton skel, string type, float legRot)
+    {
+        var clip = new AnimationDocument { Name = type.ToLowerInvariant(), Type = type, Duration = 0.8f, Loop = true };
+        clip.Keyframes.Add(LegKf(skel, 0f, legRot));
+        clip.Keyframes.Add(LegKf(skel, 1f, legRot));
+        return clip;
+    }
+
+    // An UpperBody overlay that poses both an in-region bone (arm_r_upper) and an off-region
+    // bone (leg_l_upper), with a graded OffRegionWeight so the leg blends partially.
+    private static AnimationDocument GradedCast(Skeleton skel, string type, float arm, float legRot, float off)
+    {
+        var clip = new AnimationDocument
+        {
+            Name = type.ToLowerInvariant(), Type = type, Duration = 0.14f, Loop = false,
+            Region = AnimRegion.UpperBody, OffRegionWeight = off,
+        };
+        clip.Keyframes.Add(CastKf(skel, 0f, arm, legRot));
+        clip.Keyframes.Add(CastKf(skel, 1f, arm, legRot));
+        return clip;
+    }
+
+    private static AnimationKeyframe LegKf(Skeleton skel, float t, float legRot)
+    {
+        var p = skel.CreatePose();
+        SetRot(skel, p, "leg_l_upper", legRot);
+        return new AnimationKeyframe { Time = t, Bones = PoseData.Capture(p) };
+    }
+
+    private static AnimationKeyframe CastKf(Skeleton skel, float t, float arm, float legRot)
+    {
+        var p = skel.CreatePose();
+        SetRot(skel, p, "arm_r_upper", arm);
+        SetRot(skel, p, "leg_l_upper", legRot);
+        return new AnimationKeyframe { Time = t, Bones = PoseData.Capture(p) };
     }
 
     // UpperBody overlay clip ramping arm_r_upper from armStart to armEnd. No contacts —

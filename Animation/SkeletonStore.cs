@@ -6,19 +6,30 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-// One bone in the serialized skeleton: full topology + bind transform. Parents are
+// One bone in the serialized skeleton: topology + bind transform. Parents are
 // referenced by NAME so reordering bones across edits / format revisions doesn't
 // silently re-parent anything (a stable handle the way PoseBoneEntry.Bone is).
+//
+// The biped is a pure joint chain, so a bone's attach is almost always its parent's
+// tip (parent.Length, 0). Tx/Ty/Sx/Sy are therefore NULLABLE and omitted from the
+// file when they hold the implied chain default (attach = parent tip, scale = 1);
+// only off-chain bones (the root's world offset, a knife jutting sideways from a hand)
+// carry explicit values. ResolveBind fills the gaps at load.
 public sealed class SkeletonBoneRecord
 {
     public string Name     { get; set; }
     public string Parent   { get; set; }       // null → root
-    public float  Tx       { get; set; }
-    public float  Ty       { get; set; }
-    public float  Rotation { get; set; }
-    public float  Sx       { get; set; } = 1f;
-    public float  Sy       { get; set; } = 1f;
+    public float? Tx       { get; set; }        // omitted ⇒ parent.Length (chain attach)
+    public float? Ty       { get; set; }        // omitted ⇒ 0
+    public float  Rotation { get; set; }        // bind (rest) orientation, local radians
+    public float? Sx       { get; set; }        // omitted ⇒ 1
+    public float? Sy       { get; set; }        // omitted ⇒ 1
     public float  Length   { get; set; }
+
+    // Resolve the bind transform, deriving any omitted attach from the chain. A root
+    // (no parent) defaults its attach to the origin; a child defaults to its parent's tip.
+    public BoneTransform ResolveBind(float parentLength)
+        => new(new Vector2(Tx ?? parentLength, Ty ?? 0f), Rotation, new Vector2(Sx ?? 1f, Sy ?? 1f));
 }
 
 // A serializable rig: bone proportions live here, NOT in the per-keyframe pose. The
@@ -37,6 +48,7 @@ public static class SkeletonStore
     {
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
     // Load Skeletons/<name>.json from `dir`. Returns null if missing or malformed
@@ -67,17 +79,22 @@ public static class SkeletonStore
         for (int i = 0; i < skel.Count; i++)
         {
             var b = skel.Bones[i];
-            doc.Bones.Add(new SkeletonBoneRecord
+            // Mirror ResolveBind: emit attach/scale only when they DEVIATE from the chain
+            // default (parent tip, scale 1), so a clean joint chain serializes to just
+            // Name/Parent/Rotation/Length.
+            float defTx = b.Parent >= 0 ? skel.Bones[b.Parent].Length : 0f;
+            var rec = new SkeletonBoneRecord
             {
                 Name     = b.Name,
                 Parent   = b.Parent >= 0 ? skel.Bones[b.Parent].Name : null,
-                Tx       = b.Bind.Translation.X,
-                Ty       = b.Bind.Translation.Y,
                 Rotation = b.Bind.Rotation,
-                Sx       = b.Bind.Scale.X,
-                Sy       = b.Bind.Scale.Y,
                 Length   = b.Length,
-            });
+            };
+            if (b.Bind.Translation.X != defTx) rec.Tx = b.Bind.Translation.X;
+            if (b.Bind.Translation.Y != 0f)    rec.Ty = b.Bind.Translation.Y;
+            if (b.Bind.Scale.X != 1f)          rec.Sx = b.Bind.Scale.X;
+            if (b.Bind.Scale.Y != 1f)          rec.Sy = b.Bind.Scale.Y;
+            doc.Bones.Add(rec);
         }
         return doc;
     }
@@ -110,7 +127,8 @@ public static class SkeletonStore
         var b = new SkeletonBuilder(doc.Name);
         foreach (var r in ordered)
         {
-            var bind = new BoneTransform(new Vector2(r.Tx, r.Ty), r.Rotation, new Vector2(r.Sx, r.Sy));
+            float parentLen = r.Parent != null ? byName[r.Parent].Length : 0f;
+            var bind = r.ResolveBind(parentLen);
             int idx = r.Parent == null
                 ? b.AddRoot(r.Name, bind, r.Length)
                 : b.Add(r.Name, indexByName[r.Parent], bind, r.Length);

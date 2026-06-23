@@ -102,7 +102,7 @@ public class GoldenSectionTests
         var p = skel.CreatePose();
         int li = skel.IndexOf("leg_l_upper");
         var t = p.Local[li];
-        t.Rotation = rot;
+        t.Rotation = skel.Bones[li].Bind.Rotation + rot;   // swing around the leg's rest (down) orientation
         p.SetLocal(li, t);
         return new AnimationKeyframe { Time = time, Bones = PoseData.Capture(p) };
     }

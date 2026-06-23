@@ -122,10 +122,11 @@ public sealed class CharacterAnimator
         public string             Key;        // source id (action name / movement clip name); null = idle
         public AnimationDocument  Clip;       // target clip this frame; null = idle / fading out
         public bool[]             Mask;       // Region bone mask (held through the fade-out)
+        public float              OffWeight;  // Clip.OffRegionWeight: weight for bones outside Mask (0 = hard mask)
         public float              Weight;     // eased opacity 0..1
         public bool               Active;     // composed this frame (Weight>eps && Mask!=null)
         public readonly SkeletonPose Pose;    // last-sampled overlay pose (persisted for the fade-out)
-        public readonly float[]   BoneWeight; // per-bone opacity (Mask? Weight : 0) — compose scratch
+        public readonly float[]   BoneWeight; // per-bone opacity ((Mask?1:OffWeight)*Weight) — compose scratch
         public OverlaySlot(Skeleton rig) { Pose = rig.CreatePose(); BoneWeight = new float[rig.Count]; }
     }
     private const int   OverlaySlotCount = 3;       // Action (0) + two movement overlays
@@ -442,8 +443,13 @@ public sealed class CharacterAnimator
         {
             if (!slot.Active) continue;
             _anyOverlay = true;
+            // Per-bone survival of the base layer = Π(1−w) over slots, using each bone's
+            // GRADED weight (BoneWeight, freshly filled in EaseSlot above) so a graded
+            // off-region overlay correctly tells the cadence Jacobian the legs are only
+            // partly overridden. Off-region bones at OffWeight=0 contribute *=1 (no-op),
+            // reproducing the old hard-mask product exactly.
             for (int i = 0; i < _skeleton.Count; i++)
-                if (slot.Mask[i]) _baseBlend[i] *= 1f - slot.Weight;
+                _baseBlend[i] *= 1f - slot.BoneWeight[i];
         }
 
         // 2. Advance the locomotion phase. A Walk/WalkBack clip with contact labels is
@@ -944,8 +950,12 @@ public sealed class CharacterAnimator
             for (int j = c.Bone; j >= 0; j = _skeleton.Bones[j].Parent)
             {
                 int par = _skeleton.Bones[j].Parent;
-                Affine2 wp = par < 0 ? _solveRoot : _scratch.WorldOf(par);   // θ_j pivots about j's parent joint
-                Vector2 lev = Lever(wp, tip);                                // ∂tip/∂θ_j (exact, handles facing flip + shear)
+                // T·R·S: θ_j pivots about j's OWN joint (= parent's tip, a point fixed under θ_j),
+                // and the rotation acts in the parent's linear frame A_p. (Was R·T·S: pivot = parent
+                // origin — that's the rewrite that moved the pivot from the parent to this joint.)
+                Affine2 wp = par < 0 ? _solveRoot : _scratch.WorldOf(par);   // A_p: parent linear frame
+                Vector2 pivot = _scratch.WorldOf(j).Translation;            // j's own joint
+                Vector2 lev = Lever(wp, pivot, tip);                         // ∂tip/∂θ_j (exact; facing flip + scale)
                 float blend = _baseBlend[j];   // Π(1−w) over the active overlay slots masking j
                 jac[hRow * stride + (2 + j)] = sw * blend * lev.X;           // ∂H/∂Δθ_j
                 jac[vRow * stride + (2 + j)] = sw * blend * lev.Y;           // ∂V/∂Δθ_j
@@ -964,14 +974,14 @@ public sealed class CharacterAnimator
         for (int i = 0; i < bones; i++) { jac[row * stride + (2 + i)] = sqrtLam; row++; }  // Tikhonov
     }
 
-    // The 2D rotation lever arm ∂p/∂θ for a joint whose rotation pivots in the world frame
-    // `wp` (its parent's world transform), evaluated at world point `p`. Exactly
-    // A·J·A⁻¹·(p − wp.translation) where A is wp's linear part and J the 90° rotation — so it
-    // is correct under the facing-flip reflection and any bind shear/squash (it reduces to
-    // the bare perp(p − origin) when A is a pure rotation). Returns 0 if wp is singular.
-    private static Vector2 Lever(in Affine2 wp, Vector2 p)
+    // The 2D rotation lever arm ∂p/∂θ for a joint whose rotation acts in the linear frame `wp`
+    // (its parent's world transform) and pivots about `pivot` (the joint's own world origin under
+    // T·R·S), evaluated at world point `p`. Exactly A·J·A⁻¹·(p − pivot) where A is wp's linear part
+    // and J the 90° rotation — correct under the facing-flip reflection and any scale/squash
+    // (reduces to the bare perp(p − pivot) when A is a pure rotation). Returns 0 if wp is singular.
+    private static Vector2 Lever(in Affine2 wp, Vector2 pivot, Vector2 p)
     {
-        float dx = p.X - wp.Tx, dy = p.Y - wp.Ty;
+        float dx = p.X - pivot.X, dy = p.Y - pivot.Y;
         float det = wp.M11 * wp.M22 - wp.M12 * wp.M21;
         if (MathF.Abs(det) < 1e-12f) return Vector2.Zero;
         float inv = 1f / det;
@@ -1034,7 +1044,7 @@ public sealed class CharacterAnimator
         {
             slot.Key = key;
             slot.Clip = clip;
-            if (clip != null) slot.Mask = _regionMasks[(int)clip.Region];
+            if (clip != null) { slot.Mask = _regionMasks[(int)clip.Region]; slot.OffWeight = clip.OffRegionWeight; }
         }
         else slot.Clip = clip;
     }
@@ -1052,7 +1062,7 @@ public sealed class CharacterAnimator
         slot.Active = slot.Weight > OverlayWeightEps && slot.Mask != null;
         if (slot.Active)
             for (int i = 0; i < _skeleton.Count; i++)
-                slot.BoneWeight[i] = slot.Mask[i] ? slot.Weight : 0f;
+                slot.BoneWeight[i] = (slot.Mask[i] ? 1f : slot.OffWeight) * slot.Weight;
         else if (!bound) { slot.Weight = 0f; slot.Key = null; }   // snap the fade tail, free the slot
     }
 

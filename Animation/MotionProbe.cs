@@ -169,9 +169,9 @@ public static class MotionProbe
         var flags = new List<string>();
         foreach (var s in new[] { "l", "r" })
         {
-            // Joints by POSITION, not name (skill principle #2): leg_*_upper.joint IS the knee,
-            // leg_*_lower.joint IS the ankle, foot_*.tip is the toe.
-            Vector2 knee = J($"leg_{s}_upper"), ankle = J($"leg_{s}_lower"), toe = T($"foot_{s}");
+            // Joint-chain rig: joints now align with anatomy — leg_*_upper.joint = hip,
+            // leg_*_lower.joint = KNEE, foot_*.joint = ANKLE, foot_*.tip = TOE.
+            Vector2 knee = J($"leg_{s}_lower"), ankle = J($"foot_{s}"), toe = T($"foot_{s}");
             Vector2 dd = ankle - hip; float L = dd.Length();
             // signed cross (knee-hip)×(ankle-hip): + = knee on the front side (correct), - = recurvatum.
             float side = L > 1e-4f ? ((knee.X - hip.X) * dd.Y - (knee.Y - hip.Y) * dd.X) / L : 0f;

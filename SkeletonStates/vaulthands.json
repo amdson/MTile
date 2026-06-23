@@ -2,30 +2,66 @@
   "Name": "vaulthands",
   "Type": "VaultHands",
   "Skeleton": "biped",
-  "Region": "UpperBody",
   "Duration": 0.45,
   "Loop": false,
+  "Region": "UpperBody",
   "Keyframes": [
     {
       "Time": 0,
       "Bones": [
-        { "Bone": "chest", "Rotation": 0.45 },
-        { "Bone": "head", "Rotation": -0.15 },
-        { "Bone": "arm_l_upper", "Rotation": -2.4 },
-        { "Bone": "arm_l_lower", "Rotation": -0.5 },
-        { "Bone": "arm_r_upper", "Rotation": 2.4 },
-        { "Bone": "arm_r_lower", "Rotation": 0.5 }
+        {
+          "Bone": "chest",
+          "Rotation": -1.1207963
+        },
+        {
+          "Bone": "head",
+          "Rotation": -0.14999998
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 0.74159265
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.49999994
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -0.74159265
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.5
+        }
       ]
     },
     {
       "Time": 1,
       "Bones": [
-        { "Bone": "chest", "Rotation": 0.1 },
-        { "Bone": "head", "Rotation": 0.15 },
-        { "Bone": "arm_l_upper", "Rotation": 0.5 },
-        { "Bone": "arm_l_lower", "Rotation": -0.2 },
-        { "Bone": "arm_r_upper", "Rotation": -0.5 },
-        { "Bone": "arm_r_lower", "Rotation": 0.2 }
+        {
+          "Bone": "chest",
+          "Rotation": -1.4707963
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.14999998
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -2.6415927
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.20000005
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 2.6415925
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.20000005
+        }
       ]
     }
   ]

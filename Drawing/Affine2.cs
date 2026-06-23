@@ -103,7 +103,16 @@ public struct BoneTransform
 
     public static BoneTransform Identity => new(Vector2.Zero, 0f, Vector2.One);
 
-    public Affine2 ToAffine() => Affine2.FromTRS(Translation, Rotation, Scale);
+    // Local bone transform as T · R · S (apply S, then R, then T): the bone's joint sits at a
+    // FIXED point `Translation` in the parent's frame (its attach = the parent's tip), and
+    // Rotation pivots the bone + its subtree about that joint — the joint-chain convention.
+    // Translation is NOT rotated (contrast Affine2.FromTRS, R·T·S, still used for the root
+    // placement where Rotation is 0, so the two orderings coincide there).
+    public Affine2 ToAffine()
+    {
+        float c = MathF.Cos(Rotation), s = MathF.Sin(Rotation);
+        return new Affine2(c * Scale.X, -s * Scale.Y, s * Scale.X, c * Scale.Y, Translation.X, Translation.Y);
+    }
 
     // Per-component blend; rotation takes the shortest angular path.
     public static BoneTransform Lerp(in BoneTransform a, in BoneTransform b, float t)
