@@ -1,12 +1,25 @@
 {
-  "Name": "walk",
-  "Type": "Walk",
+  "Name": "airturnslash",
+  "Type": "AirTurnSlash",
   "Skeleton": "biped",
-  "Duration": 0.8,
+  "Duration": 0.14,
   "Loop": true,
+  "Region": "UpperBody",
+  "ExtraBones": [
+    {
+      "Name": "knife",
+      "Parent": "arm_r_lower",
+      "Tx": 0.025818586,
+      "Ty": -4.547424,
+      "Rotation": 0,
+      "Sx": 1,
+      "Sy": 1,
+      "Length": 0
+    }
+  ],
   "Keyframes": [
     {
-      "Time": 0,
+      "Time": 0.0014084507,
       "Bones": [
         {
           "Bone": "hip",
@@ -14,127 +27,60 @@
         },
         {
           "Bone": "chest",
-          "Rotation": 0
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 0.4
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": -0.4
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": 0
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": -0.5
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 0.6
-        },
-        {
-          "Bone": "foot_l",
-          "Rotation": 0
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 0.5
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.5
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": 0
-        }
-      ],
-      "Contacts": [
-        {
-          "Node": "foot_l",
-          "Weight": 1,
-          "Source": "SelfPlant"
-        }
-      ]
-    },
-    {
-      "Time": 0.25,
-      "Bones": [
-        {
-          "Bone": "hip",
-          "Rotation": 0
-        },
-        {
-          "Bone": "chest",
-          "Rotation": 0
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": 0
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 0
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 0.2
-        },
-        {
-          "Bone": "foot_l",
-          "Rotation": 0
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": -0.5
-        },
-        {
-          "Bone": "leg_r_lower",
           "Rotation": 0.15
         },
         {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -1.1830436
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.90496296
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 1.0607452
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.607152
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -1.0427207
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.7012458
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.2507277
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0.47274894
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.18489584
+        },
+        {
           "Bone": "foot_r",
           "Rotation": 0
-        }
-      ],
-      "Contacts": [
+        },
         {
-          "Node": "foot_l",
-          "Weight": 1,
-          "Source": "SelfPlant"
+          "Bone": "knife",
+          "Rotation": -5.4657664
         }
       ]
     },
     {
-      "Time": 0.5,
+      "Time": 0.29859155,
       "Bones": [
         {
           "Bone": "hip",
@@ -142,7 +88,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": 0
+          "Rotation": 0.30970192
         },
         {
           "Bone": "head",
@@ -150,55 +96,52 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -0.4
+          "Rotation": -1.1116432
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": 0
+          "Rotation": -0.85824376
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 0.4
+          "Rotation": 1.2955848
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": 0
+          "Rotation": -0.8458291
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 0.5
+          "Rotation": -0.9888897
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0.5
+          "Rotation": 1.6134181
         },
         {
           "Bone": "foot_l",
-          "Rotation": 0
+          "Rotation": -1.1861582
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": -0.5
+          "Rotation": 0.448343
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.6
+          "Rotation": -0.17535049
         },
         {
           "Bone": "foot_r",
           "Rotation": 0
-        }
-      ],
-      "Contacts": [
+        },
         {
-          "Node": "foot_r",
-          "Weight": 1,
-          "Source": "SelfPlant"
+          "Bone": "knife",
+          "Rotation": -5.55266
         }
       ]
     },
     {
-      "Time": 0.75,
+      "Time": 0.52394366,
       "Bones": [
         {
           "Bone": "hip",
@@ -206,7 +149,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": 0
+          "Rotation": 0.49472532
         },
         {
           "Bone": "head",
@@ -214,50 +157,108 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": 0
+          "Rotation": -0.9192589
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": 0
+          "Rotation": -0.73236144
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 0
+          "Rotation": 0.14644863
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": 0
+          "Rotation": -0.98686635
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -0.5
+          "Rotation": -0.843845
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0.15
+          "Rotation": 1.3767711
         },
         {
           "Bone": "foot_l",
-          "Rotation": 0
+          "Rotation": -1.0121793
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 0
+          "Rotation": 0.3825826
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.2
+          "Rotation": -0.14963108
         },
         {
           "Bone": "foot_r",
           "Rotation": 0
-        }
-      ],
-      "Contacts": [
+        },
         {
-          "Node": "foot_r",
-          "Weight": 1,
-          "Source": "SelfPlant"
+          "Bone": "knife",
+          "Rotation": -5.3692627
+        }
+      ]
+    },
+    {
+      "Time": 0.73802817,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": 0.14046362
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -0.9192589
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.73236144
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 0.29213268
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.0736903
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -0.843845
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.3767711
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.0121793
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 0.3825826
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": -0.14963108
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": 0
+        },
+        {
+          "Bone": "knife",
+          "Rotation": -5.78679
         }
       ]
     },
@@ -270,7 +271,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": 0
+          "Rotation": 0.14046362
         },
         {
           "Bone": "head",
@@ -278,50 +279,47 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": 0.4
+          "Rotation": -0.9192589
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": 0
+          "Rotation": -0.73236144
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": -0.4
+          "Rotation": 1.2166468
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": 0
+          "Rotation": -2.33429
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -0.5
+          "Rotation": -0.843845
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0.6
+          "Rotation": 1.3767711
         },
         {
           "Bone": "foot_l",
-          "Rotation": 0
+          "Rotation": -1.0121793
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 0.5
+          "Rotation": 0.3825826
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.5
+          "Rotation": -0.14963108
         },
         {
           "Bone": "foot_r",
           "Rotation": 0
-        }
-      ],
-      "Contacts": [
+        },
         {
-          "Node": "foot_l",
-          "Weight": 1,
-          "Source": "SelfPlant"
+          "Bone": "knife",
+          "Rotation": -5.78679
         }
       ]
     }

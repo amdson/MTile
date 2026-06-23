@@ -50,6 +50,18 @@ public sealed class CharacterAnimator
     private const float MaxPhaseStep   = 0.25f;  // max Δφ/frame; < one stance window (§5.2)
     private const float PhaseStepPrior = 8f;     // λ — momentum prior weight (tune by eye, §12.2)
     private const float FeatherWidth   = 0.12f;  // phase span of the foot-swap crossover (§5.2)
+    // Phase 2 (ANIMATION_SOLVER_PLAN): per-bone angle corrections Δθ on top of the
+    // authored blend, kept minimal by a Tikhonov prior so the solve is a structural
+    // no-op until a hard constraint (later phases) actually needs to bend a joint.
+    private const float PosePrior      = 25f;    // λ_θ — Tikhonov weight on each Δθ (rad⁻²)
+    private const float AngleCorrLimit = 0.6f;   // box on each Δθ (rad); the prior keeps |Δθ|≪this
+    // Phase 3: a solved vertical root offset δ (world px) around the com/sole baseline.
+    // A hard per-contact ground row pins the planted foot to its plant height (body bobs
+    // to hold it); a SOFT ComOffset row pulls δ→0 (back to the baseline) so a no-contact
+    // flight frame settles to the com anchor. ComWeightY ≪ contact weight so the foot
+    // wins during stance (§4.4: soft com lets NoSlip win vertically → body rises in flight).
+    private const float ComWeightY     = 0.05f;  // soft tier on δ (vs contact weight ≈ 1)
+    private const float VertOffsetLimit = 24f;   // box on δ (world px)
 
     // --- action overlay ---
     // Asymmetric on purpose: GroundSlash1 lasts ~0.14s, so the overlay must register
@@ -66,7 +78,7 @@ public sealed class CharacterAnimator
     private readonly float        _scale;   // rig→world scale; the solve needs it, not just Draw
     private readonly SkeletonPose _pose;    // live output, eased each frame
     private readonly SkeletonPose _target;  // target assembled this frame
-    private readonly SkeletonPose _kfA, _kfB;   // scratch for animation sampling
+    private readonly SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
     private readonly SkeletonPose _scratch;     // scratch for the cadence loss evaluation
 
     // A planted contact the cadence solver pins this frame: a bone whose tip should
@@ -88,16 +100,42 @@ public sealed class CharacterAnimator
     private readonly Dictionary<AnimClip, AnimationDocument> _clips = new();
 
     // Action overlay clips, keyed by exact action class name (AnimationDocument.Type
-    // that fails the AnimClip parse, e.g. "GroundSlash1"). Constraint-free fixed-rate
-    // overlays: no contact labels, never enter the cadence φ-solve.
+    // that fails the AnimClip parse, e.g. "GroundSlash1"). Fixed-rate overlays carrying
+    // no contact labels of their OWN — but they ARE composed into the pose the cadence
+    // solve optimizes (post-blend, Phase 4.5), so the feet the solver pins are the feet
+    // of the blended skeleton, not the bare locomotion clip.
     private readonly Dictionary<string, AnimationDocument> _actionClips = new(StringComparer.Ordinal);
     private readonly bool[][]     _regionMasks;   // per-AnimRegion bone masks, resolved once
     private readonly bool[]       _upperMask;     // chest subtree — bones that snap during attacks
     private readonly float[]      _blend;         // scratch: per-bone ease factor each frame
-    private readonly SkeletonPose _actionPose;    // last-sampled overlay pose (persisted so the fade-out blends from it)
-    private string            _boundAction;       // action name the overlay is bound to
-    private AnimationDocument _boundActionClip;   // null = no overlay for the bound action
-    private bool[]            _actionMask;        // mask of the bound clip's Region (kept through fade-out)
+
+    // Overlay motion layers composed onto the base pose (Phase 4), generalized from a single
+    // Action overlay into an ordered STACK so a movement-sourced overlay (e.g. parkour hands)
+    // can co-exist with an Action overlay (e.g. a slash). Slot 0 is PRIVILEGED — the Action-FSM
+    // overlay that drives ActionWeight / OverlayActive / the knife pose; slots 1+ are sourced
+    // from the MovementState by ResolveMovementOverlays. They paint in order (ComposeOverlays);
+    // disjoint masks compose trivially, a shared bone resolves by paint order × weight. The base
+    // layer's surviving coefficient is the per-bone product Π(1−w) over the slots masking it —
+    // cached in _baseBlend, which the analytic Jacobian scales each base-driven column by.
+    private sealed class OverlaySlot
+    {
+        public string             Key;        // source id (action name / movement clip name); null = idle
+        public AnimationDocument  Clip;       // target clip this frame; null = idle / fading out
+        public bool[]             Mask;       // Region bone mask (held through the fade-out)
+        public float              Weight;     // eased opacity 0..1
+        public bool               Active;     // composed this frame (Weight>eps && Mask!=null)
+        public readonly SkeletonPose Pose;    // last-sampled overlay pose (persisted for the fade-out)
+        public readonly float[]   BoneWeight; // per-bone opacity (Mask? Weight : 0) — compose scratch
+        public OverlaySlot(Skeleton rig) { Pose = rig.CreatePose(); BoneWeight = new float[rig.Count]; }
+    }
+    private const int   OverlaySlotCount = 3;       // Action (0) + two movement overlays
+    private const float OverlayWeightEps = 1e-3f;
+    private readonly OverlaySlot[] _slots;
+    private OverlaySlot ActionSlot => _slots[0];
+    private readonly float[] _baseBlend;            // per-bone Π(1−w) of the active slots masking the bone
+    private bool _anyOverlay;                        // any slot composed this frame
+    private readonly List<(string key, AnimationDocument clip, float tau)> _ovBuf = new();  // resolver scratch
+    private readonly bool[] _ovClaimed = new bool[OverlaySlotCount];                          // request→slot assignment
 
     private CharacterAnimState  _state;
     private CharacterAnimSample _prev;      // previous frame's sample
@@ -119,10 +157,13 @@ public sealed class CharacterAnimator
     private readonly LeastSquaresSolver  _ls;
     private readonly float[]             _solveVars, _solveLo, _solveHi;
     private readonly LeastSquaresSolver.ResidualFn _cadenceResiduals;
+    private readonly LeastSquaresSolver.JacobianFn _cadenceJacobian;   // analytic J (replaces FD)
+    private readonly float[]             _angVel;   // per-bone clip dθ/dt scratch for the Jacobian
     // Per-solve context the residual closure reads (set just before each Minimize call).
     private AnimationDocument _solveClip;
     private float             _solvePhi;
     private Affine2           _solveRoot;
+    private bool              _haveCorr;          // a Δθ-correction solve ran this frame
 
     // Cached bone indices (resolved once).
     private readonly int _hip, _chest;
@@ -130,6 +171,103 @@ public sealed class CharacterAnimator
     public Skeleton           Skeleton => _skeleton;
     public SkeletonPose       Pose     => _pose;
     public CharacterAnimState State    => _state;
+
+    // Per-bone angle correction Δθ (radians) the solver applied this frame, by bone
+    // index — the IK channel on top of the authored blend. Zero on the golden path and
+    // on frames with no cadence solve (flight / non-locomotion). Diagnostic + tests.
+    public float AngleCorrection(int bone)
+        => _haveCorr && bone >= 0 && bone < _skeleton.Count ? _solveVars[2 + bone] : 0f;
+
+    // Solved vertical root offset δ (world px) to add on top of the host's baseline
+    // placement (RigRoot) — the body's bob that keeps the planted foot grounded. Zero on
+    // the golden path and on flight / non-locomotion frames (→ host baseline = com anchor).
+    public float VerticalOffset => _haveCorr ? _solveVars[1] : 0f;
+
+    // TEST HOOK: the largest absolute discrepancy between the analytic cadence Jacobian
+    // (CadenceJacobian) and a central finite difference of CadenceResiduals, evaluated at
+    // the live solve point of the last frame. ~0 confirms every analytic column. Returns
+    // -1 when no cadence solve ran this frame (flight / non-locomotion / golden path).
+    internal float MaxJacobianError()
+    {
+        if (!_haveCorr || _ls == null) return -1f;
+        int bones = _skeleton.Count;
+        int n = 2 + bones;
+        int m = _contacts.Count * 2 + 2 + bones;
+
+        // The body may be far from the world origin (it has walked many units), so a residual
+        // tip.x − target.x is a tiny difference of large coordinates and a float32 finite
+        // difference of tip.x loses it to catastrophic cancellation. The Jacobian is
+        // translation-invariant, so shift the whole solve to the origin (zero the root
+        // translation; subtract it from each captured target) for the oracle, then restore.
+        float ox = _solveRoot.Tx, oy = _solveRoot.Ty;
+        var savedRoot = _solveRoot;
+        _solveRoot = new Affine2(_solveRoot.M11, _solveRoot.M12, _solveRoot.M21, _solveRoot.M22, 0f, 0f);
+        for (int i = 0; i < _contacts.Count; i++)
+        { var c = _contacts[i]; c.Target = new Vector2(c.Target.X - ox, c.Target.Y - oy); _contacts[i] = c; }
+
+        var x = new float[n];
+        Array.Copy(_solveVars, x, n);
+        var anal = new float[m * n];
+        CadenceJacobian(x, anal, n);             // dense fill (we cleared by fresh alloc)
+
+        var rp = new float[m];
+        var rm = new float[m];
+        float worst = 0f;
+        for (int j = 0; j < n; j++)
+        {
+            // Per-column FD step: Δφ (col 0) runs through the Hermite sample, whose cubic has
+            // high curvature inside the short keyframe intervals, so it needs a SMALL h to
+            // keep central-difference truncation (O(h²·f‴)) down; δ/Δθ are low-curvature but
+            // their residuals are differences of large world coordinates, so they need a
+            // LARGER h to clear the float32 cancellation floor.
+            float h = j == 0 ? 1e-3f : 1e-2f;
+            // The C1 spline makes ∂/∂φ CONTINUOUS (the analytic column is exact everywhere),
+            // but acceleration still jumps at a keyframe boundary (C1, not C2), so a central
+            // difference that STRADDLES one carries O(h) error and can't serve as the oracle
+            // there. Validate the Δφ column only when the ±h step stays inside one interval
+            // (incl. the loop seam, which the wrap maps to a different interval) — by
+            // continuity the analytic value is then correct at the boundaries too.
+            if (j == 0)
+            {
+                int i0 = IntervalAt(_solveClip, Wrap01(_solvePhi + x[0]));
+                if (IntervalAt(_solveClip, Wrap01(_solvePhi + x[0] + h)) != i0 ||
+                    IntervalAt(_solveClip, Wrap01(_solvePhi + x[0] - h)) != i0) continue;
+            }
+            float save = x[j];
+            x[j] = save + h; CadenceResiduals(x, rp);
+            x[j] = save - h; CadenceResiduals(x, rm);
+            x[j] = save;
+            for (int i = 0; i < m; i++)
+            {
+                float a  = anal[i * n + j];
+                float fd = (rp[i] - rm[i]) / (2f * h);
+                // Relative metric: the float32 oracle carries ~0.1% truncation/cancellation
+                // noise on large entries, while any STRUCTURAL Jacobian error (sign, wrong
+                // lever, missing term) is O(10–100%). Normalizing by the magnitude separates
+                // the two cleanly. (+1 keeps small-entry columns from blowing up on noise.)
+                float e = MathF.Abs(fd - a) / (1f + MathF.Abs(a));
+                if (e > worst) { worst = e; DbgWorstCol = j; DbgWorstRow = i; DbgFd = fd; DbgAnal = a; }
+            }
+        }
+
+        _solveRoot = savedRoot;            // restore the shifted solve context
+        for (int i = 0; i < _contacts.Count; i++)
+        { var c = _contacts[i]; c.Target = new Vector2(c.Target.X + ox, c.Target.Y + oy); _contacts[i] = c; }
+        return worst;
+    }
+    internal int DbgWorstCol, DbgWorstRow; internal float DbgFd, DbgAnal;
+
+    // Keyframe interval index of normalized time t (for the FD oracle's boundary guard): the
+    // bracketing interval [i, i+1], or -2 in a non-cyclic clamped end region (held pose).
+    private static int IntervalAt(AnimationDocument doc, float t)
+    {
+        var ks = doc?.Keyframes;
+        if (ks == null || ks.Count < 2) return -1;
+        if (t <= ks[0].Time || t >= ks[ks.Count - 1].Time) return -2;
+        int i = 0;
+        while (i < ks.Count - 1 && ks[i + 1].Time < t) i++;
+        return i;
+    }
 
     // Lowest point (max local Y; Y is down) of the *current* eased pose, in skeleton-
     // local units — the live "sole" line. A host places the rig so this rests on the
@@ -164,14 +302,18 @@ public sealed class CharacterAnimator
         _target   = rig.CreatePose();
         _kfA      = rig.CreatePose();
         _kfB      = rig.CreatePose();
+        _kfC      = rig.CreatePose();
+        _kfD      = rig.CreatePose();
         _scratch  = rig.CreatePose();
-        _actionPose = rig.CreatePose();
 
         _regionMasks = new bool[3][];
         foreach (AnimRegion r in Enum.GetValues<AnimRegion>())
             _regionMasks[(int)r] = BoneMask.Resolve(rig, r);
         _upperMask = _regionMasks[(int)AnimRegion.UpperBody];
         _blend     = new float[rig.Count];
+        _baseBlend = new float[rig.Count];
+        _slots = new OverlaySlot[OverlaySlotCount];
+        for (int i = 0; i < _slots.Length; i++) _slots[i] = new OverlaySlot(rig);
 
         int I(string n) => rig.IndexOf(n);
         _hip = I("hip"); _chest = I("chest");
@@ -182,11 +324,18 @@ public sealed class CharacterAnimator
         _useSolver = useSolver;
         if (_useSolver)
         {
-            _ls = new LeastSquaresSolver(maxVars: 16, maxRes: 16);
-            _solveVars = new float[16];
-            _solveLo   = new float[16];
-            _solveHi   = new float[16];
+            // Variables: Δφ (1) + δ vertical offset (1) + per-bone Δθ (rig.Count), with a
+            // little headroom. Residuals: two rows per contact (H no-slip + V ground) +
+            // continuity + com + one prior per bone. Sized to the rig once; solver path only.
+            int nv = 2 + rig.Count + 2;
+            int nr = 2 * 4 + 2 + rig.Count + 2;
+            _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
+            _solveVars = new float[nv];
+            _solveLo   = new float[nv];
+            _solveHi   = new float[nv];
+            _angVel    = new float[rig.Count];
             _cadenceResiduals = CadenceResiduals;
+            _cadenceJacobian  = CadenceJacobian;
         }
 
         // Bind each clip category to the first authored animation whose Type matches
@@ -211,6 +360,7 @@ public sealed class CharacterAnimator
     public void Update(in CharacterAnimSample s)
     {
         float dt = s.Dt;
+        _haveCorr = false;   // cleared until a cadence solve produces Δθ this frame
 
         // 0. Use the previous frame's state: detect a touchdown (was airborne, now
         //    grounded) and arm a landing squash that decays over the next frames.
@@ -232,16 +382,87 @@ public sealed class CharacterAnimator
         bool hasClip  = _clips.TryGetValue(clip, out var anim);
         bool locomotion = clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run;
 
+        // 1.5 Resolve the action overlay NOW, before the cadence solve, so the solve
+        //     optimizes the POST-BLEND skeleton — the feet of the composed pose, not the
+        //     bare locomotion clip. An overlay is a second motion sampled at its pinned τ
+        //     (= action progress, §9 Q1) with a per-bone opacity = Region mask × eased
+        //     ActionWeight. Both are CONSTANT w.r.t. the solve vars, so we sample once here
+        //     and the residual just re-applies the same linear blend (ComposeOverlays)
+        //     before FK; the Jacobian likewise scales each base-layer column by (1−w). The
+        //     same _actionPose/_overlayWeight feed the draw in step 3.5, so the skeleton the
+        //     solver optimized is bit-identical to the one rendered.
+        // -- slot 0: the Action-FSM overlay. τ = action progress, time-remapped onto the
+        //    declared ActionDuration (sweeps once over the swing, holds past the end) or the
+        //    clip's own seconds when no length is declared. --
+        string actKey = IsOverlayAction(s.Action) ? s.Action : null;
+        AnimationDocument actClip =
+            actKey != null && _actionClips.TryGetValue(actKey, out var ac) ? ac : null;
+        BindSlot(ActionSlot, actKey, actClip);
+        float actTau = actClip == null ? 0f
+            : s.ActionDuration > 1e-4f ? MathHelper.Clamp(s.ActionTime / s.ActionDuration, 0f, 1f)
+            : AnimationSampler.NormalizedTime(actClip, s.ActionTime);
+        EaseSlot(ActionSlot, actClip, actTau, dt);
+
+        // -- slots 1+: movement-sourced overlays (parkour hands, …), resolved animation-side
+        //    from the MovementState. Matched to slots by key so an in-progress fade stays on
+        //    its own slot; a slot with no request fades out holding its last pose/mask. --
+        _ovBuf.Clear();
+        ResolveMovementOverlays(in s, _ovBuf);
+        Array.Clear(_ovClaimed, 0, _ovClaimed.Length);
+        for (int si = 1; si < _slots.Length; si++)
+        {
+            int req = -1;
+            // prefer the request already on this slot (key match) to keep the weight continuous
+            for (int k = 0; k < _ovBuf.Count && k < _ovClaimed.Length; k++)
+                if (!_ovClaimed[k] && string.Equals(_ovBuf[k].key, _slots[si].Key, StringComparison.Ordinal))
+                { req = k; break; }
+            if (req < 0 && _slots[si].Weight <= OverlayWeightEps)   // else adopt a new request on an idle slot
+                for (int k = 0; k < _ovBuf.Count && k < _ovClaimed.Length; k++)
+                    if (!_ovClaimed[k]) { req = k; break; }
+            if (req >= 0)
+            {
+                _ovClaimed[req] = true;
+                BindSlot(_slots[si], _ovBuf[req].key, _ovBuf[req].clip);
+                EaseSlot(_slots[si], _ovBuf[req].clip, _ovBuf[req].tau, dt);
+            }
+            else
+            {
+                BindSlot(_slots[si], _slots[si].Key, null);   // fade out (holds mask/pose)
+                EaseSlot(_slots[si], null, 0f, dt);
+            }
+        }
+
+        // The Action slot's eased weight is the public ActionWeight (upper-body stiffness ramp
+        // + tests). Then cache the per-bone base-layer survival Π(1−w) and the any-overlay flag
+        // that ComposeOverlays / the Jacobian read this frame.
+        _state.ActionWeight = ActionSlot.Weight;
+        _anyOverlay = false;
+        for (int i = 0; i < _skeleton.Count; i++) _baseBlend[i] = 1f;
+        foreach (var slot in _slots)
+        {
+            if (!slot.Active) continue;
+            _anyOverlay = true;
+            for (int i = 0; i < _skeleton.Count; i++)
+                if (slot.Mask[i]) _baseBlend[i] *= 1f - slot.Weight;
+        }
+
         // 2. Advance the locomotion phase. A Walk/WalkBack clip with contact labels is
         //    cadence-driven: the solver picks Δφ so the planted foot doesn't slip
         //    against the body's real motion. Everything else keeps the old rate.
         if (locomotion && hasClip && HasContacts(anim))
         {
             int dir = s.Facing == 0 ? 1 : s.Facing;
-            // Solve-root: hip at the body center. The constant ground offset Draw adds
-            // is irrelevant here (it cancels in foot − target); scale and facing must
+            // Solve-root: hip placed at the body center, plus — on the solver path — the
+            // com baseline Draw uses (rootY = BodyY − com.Y·scale), so contact targets are
+            // captured at the SAME height the pose is drawn and the solved δ perturbs about
+            // it. The horizontal no-slip is unaffected by the Y shift, and the golden path
+            // ignores target.Y, so this changes nothing for the legacy path. scale/facing
             // match Draw so foot travel and body motion share world units.
-            var root = Affine2.FromTRS(s.Position, 0f, new Vector2(dir * _scale, _scale));
+            float comBaseY = 0f;
+            if (_useSolver && SampleNamedPoint(anim, _state.Phase, "com", out var comL))
+                comBaseY = -comL.Y * _scale;
+            var root = Affine2.FromTRS(new Vector2(s.Position.X, s.Position.Y + comBaseY), 0f,
+                                       new Vector2(dir * _scale, _scale));
             RefreshContacts(anim, _state.Phase, root);
             if (_contacts.Count > 0)
             {
@@ -281,51 +502,27 @@ public sealed class CharacterAnimator
                                        : AnimationSampler.NormalizedTime(anim, _state.ClipTime);
 
         if (IsPhaseDriven(clip))
-            AnimationSampler.SampleNormalized(anim, _state.Phase, _kfA, _kfB, _target);
+            AnimationSampler.SampleSmooth(anim, _state.Phase, _kfA, _kfB, _kfC, _kfD, _target);
         else
-            AnimationSampler.SampleAtTime(anim, _state.ClipTime, _kfA, _kfB, _target);
+            AnimationSampler.SampleSmooth(anim, AnimationSampler.NormalizedTime(anim, _state.ClipTime),
+                                          _kfA, _kfB, _kfC, _kfD, _target);
 
-        // 3.5 Action overlay: lerp the action clip over the base on the clip's region
-        //     mask, gated by the eased ActionWeight. Sampled at deterministic sim time
-        //     (s.ActionTime) so the pose tracks the hitbox windows. Runs BEFORE lean/
-        //     squash — those are additive deltas and must stay continuous in the weight
-        //     (run-slash keeps its lean; landing mid-air-slash still squashes).
-        if (!string.Equals(s.Action, _boundAction, StringComparison.Ordinal))
-        {
-            _boundAction = s.Action;
-            _boundActionClip = IsOverlayAction(s.Action)
-                && _actionClips.TryGetValue(s.Action, out var ac) ? ac : null;
-            // When the clip goes null, keep the previous mask and _actionPose: the
-            // fade-out must blend away from the last sampled overlay, not garbage.
-            if (_boundActionClip != null)
-                _actionMask = _regionMasks[(int)_boundActionClip.Region];
-        }
-        bool overlayActive = _boundActionClip != null;
-        if (overlayActive)
-        {
-            // Time-remap: when the action declares a length, stretch/compress the clip's
-            // whole [0,1] timeline onto the action's [0, ActionDuration] so it sweeps
-            // exactly once over the swing (ignoring the clip's own Duration/Loop). Clamp
-            // past the end so it holds the final pose through recovery. No declared
-            // length → fall back to the clip's authored seconds.
-            if (s.ActionDuration > 1e-4f)
-                AnimationSampler.SampleNormalized(
-                    _boundActionClip, MathHelper.Clamp(s.ActionTime / s.ActionDuration, 0f, 1f),
-                    _kfA, _kfB, _actionPose);
-            else
-                AnimationSampler.SampleAtTime(_boundActionClip, s.ActionTime, _kfA, _kfB, _actionPose);
-        }
-        float wRate = overlayActive ? ActionEaseIn : ActionEaseOut;
-        _state.ActionWeight += ((overlayActive ? 1f : 0f) - _state.ActionWeight)
-                             * (1f - MathF.Exp(-wRate * dt));
-        if (_state.ActionWeight > 1e-3f && _actionMask != null)
-        {
+        // Apply the solver's per-bone angle corrections onto the authored base pose
+        // (the "base_pose(x*)" the plan emits). The solve sampled the same phase, so the
+        // corrections line up; while only the Tikhonov prior touches Δθ they're ≈ 0 and
+        // this is a no-op — it wires the IK channel through for the constraint phases.
+        if (_haveCorr)
             for (int i = 0; i < _skeleton.Count; i++)
-                if (_actionMask[i])
-                    _target.Local[i] = BoneTransform.Lerp(
-                        _target.Local[i], _actionPose.Local[i], _state.ActionWeight);
-        }
-        else if (!overlayActive) _state.ActionWeight = 0f;   // snap the fade tail
+                _target.Local[i].Rotation += _solveVars[2 + i];
+
+        // 3.5 Paint the resolved action overlay onto the base pose (Phase 4 motion layer).
+        //     The overlay was resolved in step 1.5 — bound clip, sampled _actionPose at its
+        //     pinned τ, eased ActionWeight, per-bone opacity _overlayWeight — and composed
+        //     identically inside the cadence solve (ComposeOverlays), so the skeleton the
+        //     solver optimized is the one drawn. Runs BEFORE lean/squash so those additive
+        //     deltas stay continuous in the weight (run-slash keeps its lean; landing
+        //     mid-air-slash still squashes).
+        ComposeOverlays(_target);
 
         // 3b. Directional lean for locomotion — applied on top of the base pose
         //     (authored OR procedural) so forward/backpedal read distinctly: lean
@@ -384,7 +581,7 @@ public sealed class CharacterAnimator
     }
 
     // Whether an action overlay clip is currently bound and playing (vs faded out).
-    public bool OverlayActive => _boundActionClip != null;
+    public bool OverlayActive => ActionSlot.Clip != null;
 
     // World position of a named bone's origin under the same root Draw() uses, WITHOUT
     // drawing the rig — lets a host anchor a render effect (e.g. the slash glow) to an
@@ -400,7 +597,7 @@ public sealed class CharacterAnimator
         if (b < 0) { origin = worldPos; return false; }
         int dir = facing == 0 ? 1 : facing;
         var root = Affine2.FromTRS(worldPos, 0f, new Vector2(dir * _scale, _scale));
-        var pose = (fromOverlay && _boundActionClip != null) ? _actionPose : _pose;
+        var pose = (fromOverlay && ActionSlot.Clip != null) ? ActionSlot.Pose : _pose;
         origin = pose.ComputeWorld(root)[b].Translation;
         return true;
     }
@@ -561,7 +758,8 @@ public sealed class CharacterAnimator
             if (w > 1e-3f && ActiveIndex(bone) < 0) { needWorld = true; break; }
         if (needWorld)
         {
-            AnimationSampler.SampleNormalized(clip, phase, _kfA, _kfB, _scratch);
+            AnimationSampler.SampleSmooth(clip, phase, _kfA, _kfB, _kfC, _kfD, _scratch);
+            ComposeOverlays(_scratch);   // capture the target on the COMPOSED pose (= what we measure)
             _scratch.ComputeWorld(root);
         }
 
@@ -590,7 +788,8 @@ public sealed class CharacterAnimator
         var r = root;   // capture by value for the closure
         float Loss(float dphi)
         {
-            AnimationSampler.SampleNormalized(clip, Wrap01(phi + dphi), _kfA, _kfB, _scratch);
+            AnimationSampler.SampleSmooth(clip, Wrap01(phi + dphi), _kfA, _kfB, _kfC, _kfD, _scratch);
+            ComposeOverlays(_scratch);   // measure slip on the post-blend pose, matching capture
             _scratch.ComputeWorld(r);
             float e = 0f;
             foreach (var c in _contacts)
@@ -620,7 +819,12 @@ public sealed class CharacterAnimator
     private float SolvePhaseStepLm(AnimationDocument clip, float phi, in Affine2 root)
     {
         _solveClip = clip; _solvePhi = phi; _solveRoot = root;
-        _solveLo[0] = 0f; _solveHi[0] = MaxPhaseStep;
+        int n = 2 + _skeleton.Count;          // x[0]=Δφ; x[1]=δ (vertical); x[2+i]=Δθ_i
+
+        _solveLo[0] = 0f;               _solveHi[0] = MaxPhaseStep;
+        _solveLo[1] = -VertOffsetLimit; _solveHi[1] = VertOffsetLimit;
+        for (int i = 2; i < n; i++) { _solveLo[i] = -AngleCorrLimit; _solveHi[i] = AngleCorrLimit; }
+        Array.Clear(_solveVars, 0, n);        // δ, Δθ start at 0 (baseline pose); Δφ seeded below
 
         // The cadence objective is NON-CONVEX in Δφ: a planted foot's horizontal track
         // is non-monotonic over a stance arc (it can drift forward before sweeping back),
@@ -628,48 +832,153 @@ public sealed class CharacterAnimator
         // sits further inside the bracket. A purely local descent stalls there. Globalize
         // with a cheap coarse seed search (1-D only), keeping the momentum warm-start
         // (Δφ_prev) as a candidate so steady-state locomotion stays smooth, then let LM
-        // refine. The full multi-DOF solver can't grid-search — it leans on temporal
-        // warm-starting from the previous frame instead (ANIMATION_SOLVER_PLAN §3.5).
+        // refine. δ and the Δθ corrections need no seeding — under their (com / Tikhonov)
+        // priors they are convex about 0 — so they ride along at 0 while we pick the Δφ
+        // basin, then LM refines the whole vector jointly (ANIMATION_SOLVER_PLAN §3.5).
         float best     = MathHelper.Clamp(_prevPhaseStep, 0f, MaxPhaseStep);
-        float bestCost = CadenceCostAt(best);
+        float bestCost = CadenceCostAt(best, n);
         const int seeds = 9;
         for (int k = 0; k <= seeds; k++)
         {
             float s = MaxPhaseStep * k / seeds;
-            float c = CadenceCostAt(s);
+            float c = CadenceCostAt(s, n);
             if (c < bestCost) { bestCost = c; best = s; }
         }
 
         _solveVars[0] = best;
-        _ls.Minimize(_cadenceResiduals,
-                     _solveVars.AsSpan(0, 1), _solveLo.AsSpan(0, 1), _solveHi.AsSpan(0, 1));
+        _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
+                     _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n));
+        _haveCorr = true;
         return _solveVars[0];
     }
 
-    private float CadenceCostAt(float dphi)
+    // Cost at a candidate Δφ with δ and the angle corrections held at 0 (Δφ seed search).
+    private float CadenceCostAt(float dphi, int n)
     {
-        Span<float> s = stackalloc float[1];
+        Span<float> s = stackalloc float[80];   // ≥ 2 + rig bone count; δ/Δθ entries stay 0
+        s.Clear();
         s[0] = dphi;
-        return _ls.Cost(_cadenceResiduals, s);
+        return _ls.Cost(_cadenceResiduals, s.Slice(0, n));
     }
 
-    // r(Δφ): one row per planted contact (√weight · horizontal slip of its tip at phase
-    // φ+Δφ) plus one playback-continuity row (√PhaseStepPrior · (Δφ − Δφ_prev)). The sum
-    // of squares is exactly the golden-section Loss, so the two paths share a minimum.
+    // The cadence solve's forward pass: build the COMPOSED, corrected world pose for a
+    // candidate x = [Δφ, δ, Δθ…] and leave it in _scratch (world buffer valid under
+    // _solveRoot). One place so the residual and the (coming) analytic Jacobian evaluate
+    // the SAME skeleton. Order mirrors Update's draw exactly: sample the base clip at
+    // φ+Δφ, add the per-bone Δθ, then paint the action overlay on top (the linear blend).
+    //
+    // Jacobian note (next step, ANIMATION_SOLVER_PLAN): the analytic columns read straight
+    // off the buffer this leaves behind — for a contact tip p on bone b, ∂p/∂Δθ_j is the
+    // 2D lever arm perp(p − origin_j) for each ancestor joint j (0 otherwise), scaled by
+    // the blend's (1−_overlayWeight[j]); ∂p/∂Δφ chains the same FK over a d-sample-by-φ
+    // companion; δ and the priors are constant columns. So this method is the substrate
+    // both paths share — keep the FK/compose/sample ordering here authoritative.
+    private void BuildSolvePose(ReadOnlySpan<float> x)
+    {
+        AnimationSampler.SampleSmooth(_solveClip, Wrap01(_solvePhi + x[0]), _kfA, _kfB, _kfC, _kfD, _scratch);
+        int bones = _skeleton.Count;
+        for (int i = 0; i < bones; i++) _scratch.Local[i].Rotation += x[2 + i];   // Δθ corrections
+        ComposeOverlays(_scratch);                                                // post-blend (linear)
+        _scratch.ComputeWorld(_solveRoot);
+    }
+
+    // Residuals over x = [Δφ, δ, Δθ_0 … Δθ_{N-1}]:
+    //   • two rows per planted contact — √weight · {horizontal slip, vertical (footY+δ −
+    //     targetY)} of its tip at φ+Δφ on the corrected pose. The H row is the cadence pin
+    //     (Δφ); the V row holds the foot at its plant height via δ (the body bobs).
+    //   • one playback-continuity row — √PhaseStepPrior · (Δφ − Δφ_prev);
+    //   • one soft com row — √ComWeightY · δ — pulling the body back to the baseline so a
+    //     no-contact flight frame settles to the com anchor;
+    //   • one Tikhonov row per bone — √PosePrior · Δθ_i — keeping corrections minimal.
     private int CadenceResiduals(ReadOnlySpan<float> x, Span<float> r)
     {
-        float dphi = x[0];
-        AnimationSampler.SampleNormalized(_solveClip, Wrap01(_solvePhi + dphi), _kfA, _kfB, _scratch);
-        _scratch.ComputeWorld(_solveRoot);
+        BuildSolvePose(x);            // _scratch world is now the composed, corrected pose at φ+Δφ
+        float dy = x[1];
+        int bones = _skeleton.Count;
 
         int n = 0;
         foreach (var c in _contacts)
         {
             Vector2 tip = _scratch.WorldOf(c.Bone).TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
-            r[n++] = MathF.Sqrt(c.Weight) * (tip.X - c.Target.X);          // horizontal no-slip
+            float sw = MathF.Sqrt(c.Weight);
+            r[n++] = sw * (tip.X - c.Target.X);            // horizontal no-slip (cadence, drives Δφ)
+            r[n++] = sw * (tip.Y + dy - c.Target.Y);       // vertical ground hold (drives δ)
         }
-        r[n++] = MathF.Sqrt(PhaseStepPrior) * (dphi - _prevPhaseStep);     // playback continuity
+        r[n++] = MathF.Sqrt(PhaseStepPrior) * (x[0] - _prevPhaseStep);     // playback continuity
+        r[n++] = MathF.Sqrt(ComWeightY) * dy;                              // soft com → baseline
+        float sqrtLam = MathF.Sqrt(PosePrior);
+        for (int i = 0; i < bones; i++) r[n++] = sqrtLam * x[2 + i];       // Tikhonov pose prior
         return n;
+    }
+
+    // Analytic Jacobian of CadenceResiduals — the §3.3 closed form, replacing the
+    // finite-difference fallback. Because rotation is the ONLY animated channel (PoseData)
+    // and the overlay blend is a per-bone linear premultiply, the whole pose is driven by
+    // per-bone rotations, so every contact-row column is a rotation lever arm × (blend) ×
+    // (clip ω for Δφ). Same forward pass and row order as the residual.
+    //
+    //   contact tip p on bone b, for each ancestor joint j of b (incl. b itself):
+    //     L_j(p) = ∂p/∂θ_j          — Lever(): the world lever arm about j's parent joint
+    //     blend_j = 1 − overlayWeight[j]  — the action overlay's linear (1−w) factor
+    //     ∂p/∂Δθ_j = blend_j · L_j(p)                       (0 for non-ancestors)
+    //     ∂p/∂Δφ   = Σ_j blend_j · ω_j · L_j(p)             (ω_j = base clip dθ/dt)
+    //   H row = √w·(p.x − tx):  ∂/∂Δφ, ∂/∂Δθ_j from the x components; ∂/∂δ = 0
+    //   V row = √w·(p.y+δ − ty): the y components; ∂/∂δ = √w
+    //   priors: continuity ∂/∂Δφ=√λ_c; com ∂/∂δ=√λ_com; Tikhonov_i ∂/∂Δθ_i=√λ_θ (constants)
+    private void CadenceJacobian(ReadOnlySpan<float> x, Span<float> jac, int stride)
+    {
+        BuildSolvePose(x);                       // _scratch world = composed pose at φ+Δφ
+        int bones = _skeleton.Count;
+        // ω_j: per-bone angular velocity of the BASE clip at φ+Δφ (the Δφ channel).
+        AnimationSampler.SampleAngularVelocity(_solveClip, Wrap01(_solvePhi + x[0]),
+                                               _kfA, _kfB, _kfC, _kfD, _angVel.AsSpan(0, bones));
+
+        int row = 0;
+        foreach (var c in _contacts)
+        {
+            Vector2 tip = _scratch.WorldOf(c.Bone).TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
+            float sw = MathF.Sqrt(c.Weight);
+            int hRow = row, vRow = row + 1;
+
+            float dphiX = 0f, dphiY = 0f;
+            for (int j = c.Bone; j >= 0; j = _skeleton.Bones[j].Parent)
+            {
+                int par = _skeleton.Bones[j].Parent;
+                Affine2 wp = par < 0 ? _solveRoot : _scratch.WorldOf(par);   // θ_j pivots about j's parent joint
+                Vector2 lev = Lever(wp, tip);                                // ∂tip/∂θ_j (exact, handles facing flip + shear)
+                float blend = _baseBlend[j];   // Π(1−w) over the active overlay slots masking j
+                jac[hRow * stride + (2 + j)] = sw * blend * lev.X;           // ∂H/∂Δθ_j
+                jac[vRow * stride + (2 + j)] = sw * blend * lev.Y;           // ∂V/∂Δθ_j
+                dphiX += blend * _angVel[j] * lev.X;                         // ∂tip/∂Δφ accumulation
+                dphiY += blend * _angVel[j] * lev.Y;
+            }
+            jac[hRow * stride + 0] = sw * dphiX;     // ∂H/∂Δφ
+            jac[vRow * stride + 0] = sw * dphiY;     // ∂V/∂Δφ
+            jac[vRow * stride + 1] = sw;             // ∂V/∂δ
+            row += 2;
+        }
+
+        jac[row * stride + 0] = MathF.Sqrt(PhaseStepPrior); row++;          // continuity vs Δφ
+        jac[row * stride + 1] = MathF.Sqrt(ComWeightY);     row++;          // soft com vs δ
+        float sqrtLam = MathF.Sqrt(PosePrior);
+        for (int i = 0; i < bones; i++) { jac[row * stride + (2 + i)] = sqrtLam; row++; }  // Tikhonov
+    }
+
+    // The 2D rotation lever arm ∂p/∂θ for a joint whose rotation pivots in the world frame
+    // `wp` (its parent's world transform), evaluated at world point `p`. Exactly
+    // A·J·A⁻¹·(p − wp.translation) where A is wp's linear part and J the 90° rotation — so it
+    // is correct under the facing-flip reflection and any bind shear/squash (it reduces to
+    // the bare perp(p − origin) when A is a pure rotation). Returns 0 if wp is singular.
+    private static Vector2 Lever(in Affine2 wp, Vector2 p)
+    {
+        float dx = p.X - wp.Tx, dy = p.Y - wp.Ty;
+        float det = wp.M11 * wp.M22 - wp.M12 * wp.M21;
+        if (MathF.Abs(det) < 1e-12f) return Vector2.Zero;
+        float inv = 1f / det;
+        float wx = ( wp.M22 * dx - wp.M12 * dy) * inv;     // A⁻¹·(p − o)
+        float wy = (-wp.M21 * dx + wp.M11 * dy) * inv;
+        float jx = -wy, jy = wx;                            // J·(…)
+        return new Vector2(wp.M11 * jx + wp.M12 * jy, wp.M21 * jx + wp.M22 * jy);   // A·(…)
     }
 
     private int ActiveIndex(int bone)
@@ -685,6 +994,85 @@ public sealed class CharacterAnimator
     }
 
     // --- helpers -------------------------------------------------------------
+
+    // Paint a motion layer onto the accumulator pose: per bone, blend toward the layer by
+    // its opacity weight (0 keeps the accumulator, 1 takes the layer; shortest-path angle
+    // lerp via BoneTransform.Lerp). Ordered application = layer opacity, the general form
+    // of the action overlay's "override my region, gated by the eased weight". This is the
+    // one composition primitive for all motions (Phase 4); allocation-free.
+    private void PaintMotionLayer(SkeletonPose acc, SkeletonPose layer, float[] weight)
+    {
+        for (int i = 0; i < _skeleton.Count; i++)
+        {
+            float w = weight[i];
+            if (w > 0f) acc.Local[i] = BoneTransform.Lerp(acc.Local[i], layer.Local[i], w);
+        }
+    }
+
+    // Compose this frame's resolved action overlay onto a pose — the single point the solve
+    // and the draw share, so both evaluate the SAME post-blend skeleton. No-op when no
+    // overlay is active this frame (resolved in step 1.5). The overlay pose + weights are
+    // constant w.r.t. the solve vars, so the blend is a per-bone linear pre-multiply on the
+    // base layer: the residual's gradient w.r.t. a base-driven var is just scaled by (1−w),
+    // which the (coming) analytic Jacobian applies directly and the FD path captures for free.
+    private void ComposeOverlays(SkeletonPose pose)
+    {
+        if (!_anyOverlay) return;
+        // Paint slots foreground-LAST (slot 0, the Action overlay, wins a shared bone over a
+        // movement overlay). _baseBlend is a product → order-independent, so the analytic
+        // Jacobian stays consistent regardless of this paint order.
+        for (int si = _slots.Length - 1; si >= 0; si--)
+            if (_slots[si].Active) PaintMotionLayer(pose, _slots[si].Pose, _slots[si].BoneWeight);
+    }
+
+    // Point a slot at a target overlay (key + clip). On a KEY change rebind the clip and (when
+    // non-null) its Region mask; a null clip keeps the prior mask/pose so a fade-out blends away
+    // from the last sample, not garbage. Weight is NOT reset → a combo rebind keeps the arm up.
+    private void BindSlot(OverlaySlot slot, string key, AnimationDocument clip)
+    {
+        if (!string.Equals(key, slot.Key, StringComparison.Ordinal))
+        {
+            slot.Key = key;
+            slot.Clip = clip;
+            if (clip != null) slot.Mask = _regionMasks[(int)clip.Region];
+        }
+        else slot.Clip = clip;
+    }
+
+    // Ease a slot's opacity toward 1 (clip bound) or 0 (fading), sample its pose at τ when
+    // bound, and refresh its per-bone compose weights / Active flag. A fully faded, unbound slot
+    // snaps to 0 and frees its key for reuse. Mirrors the old single-overlay ease exactly.
+    private void EaseSlot(OverlaySlot slot, AnimationDocument clip, float tau, float dt)
+    {
+        bool bound = clip != null;
+        float wRate = bound ? ActionEaseIn : ActionEaseOut;
+        slot.Weight += ((bound ? 1f : 0f) - slot.Weight) * (1f - MathF.Exp(-wRate * dt));
+        if (bound)
+            AnimationSampler.SampleSmooth(clip, tau, _kfA, _kfB, _kfC, _kfD, slot.Pose);
+        slot.Active = slot.Weight > OverlayWeightEps && slot.Mask != null;
+        if (slot.Active)
+            for (int i = 0; i < _skeleton.Count; i++)
+                slot.BoneWeight[i] = slot.Mask[i] ? slot.Weight : 0f;
+        else if (!bound) { slot.Weight = 0f; slot.Key = null; }   // snap the fade tail, free the slot
+    }
+
+    // Animation-side policy: the overlay layers a MovementState contributes, BEYOND the Action
+    // overlay (slot 0). Owns the lookup (name convention against _actionClips, like SelectClip
+    // owns base-clip policy) and derives each overlay's τ from MOVEMENT DATA in the sample —
+    // movement progress is input-driven (a vault advances by body position vs. the corner, not
+    // elapsed time), so τ can't come from a clock. Push at most OverlaySlotCount-1 entries.
+    // Empty until the parkour clips exist (Phase B).
+    private void ResolveMovementOverlays(in CharacterAnimSample s,
+                                         List<(string key, AnimationDocument clip, float tau)> dst)
+    {
+        // Parkour vault: an UpperBody "hands" overlay (reach for the ledge → push off), bound by
+        // name convention and timed by the vault's SPATIAL progress (body vs. corner), not a
+        // clock. The legs/body come from the Vault base clip; this owns the upper body while the
+        // maneuver runs. Disjoint from the Action slot (a co-occurring slash → the other arm).
+        if (s.MovementState != null && s.MovementState.Contains("Parkour")
+            && _actionClips.TryGetValue("VaultHands", out var hands))
+            dst.Add(("VaultHands", hands, MathHelper.Clamp(s.MovementProgress, 0f, 1f)));
+    }
 
     private void Rot(int bone, float delta)       { if (bone >= 0) _target.Local[bone].Rotation    += delta; }
     private void Translate(int bone, Vector2 d)    { if (bone >= 0) _target.Local[bone].Translation += d;     }

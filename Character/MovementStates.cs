@@ -662,7 +662,15 @@ public class ParkourState : MovementState
     private SteeringRamp _overRamp;    // from an exposed upper corner (vault), or null
     private SteeringRamp _underRamp;   // from an exposed lower corner (overcrop/duck), or null
 
-    public override void ResetTransient() { _overRamp = null; _underRamp = null; }
+    private Vector2 _entryPos;         // body pos at Enter — the spatial origin for AnimationProgress
+    private float   _vaultProgress;    // [0,1]: body's advance from entry toward the vaulted corner
+
+    // Spatial vault progress for the hands overlay (animation): the body's projected travel from
+    // where the maneuver began toward the ledge corner. Input-driven (a held climb advances it),
+    // not a clock — exactly what the overlay's clip time needs. 0 for the duck-under-only case.
+    public override float AnimationProgress => _vaultProgress;
+
+    public override void ResetTransient() { _overRamp = null; _underRamp = null; _vaultProgress = 0f; }
     // _entrySpeed (preserved entry speed) now lives in MovementVars.EntrySpeed.
 
     public ParkourState(int wallDir) => _wallDir = wallDir;
@@ -699,6 +707,8 @@ public class ParkourState : MovementState
         // Preserve whatever horizontal speed the body came in with (floored at walking speed so a
         // from-rest / flush-against-the-obstacle entry still has a target to drive toward).
         vars.EntrySpeed = MathF.Max(MathF.Abs(ctx.Body.Velocity.X), MovementConfig.Current.MaxWalkSpeed);
+        _entryPos = ctx.Body.Position;   // spatial origin for the hands-overlay progress
+        _vaultProgress = 0f;
         Reconcile(ctx);
     }
 
@@ -712,6 +722,15 @@ public class ParkourState : MovementState
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         Reconcile(ctx);
+        // Spatial vault progress (for the hands overlay): the body's projected travel from the
+        // entry point toward the live ledge corner. Over-ramp only (a duck-under has no reach).
+        if (_overRamp != null)
+        {
+            Vector2 toCorner = _overRamp.Corner - _entryPos;
+            float denom = toCorner.LengthSquared();
+            _vaultProgress = denom < 1e-3f ? 0f
+                : Math.Clamp(Vector2.Dot(ctx.Body.Position - _entryPos, toCorner) / denom, 0f, 1f);
+        }
         ctx.Body.AppliedForce = Vector2.Zero;   // ParkourState never writes raw force — all routing goes through the ramps.
         if (_overRamp == null && _underRamp == null) return;
 

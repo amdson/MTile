@@ -4,8 +4,8 @@
     {
       "Name": "hip",
       "Parent": null,
-      "Tx": 2.600006,
-      "Ty": 3.9200058,
+      "Tx": -3.5999908,
+      "Ty": -12.879993,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
@@ -34,8 +34,8 @@
     {
       "Name": "arm_l_upper",
       "Parent": "chest",
-      "Tx": -10.348786,
-      "Ty": -2.9567971,
+      "Tx": 0,
+      "Ty": 10,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
@@ -44,8 +44,8 @@
     {
       "Name": "arm_l_lower",
       "Parent": "arm_l_upper",
-      "Tx": -10,
-      "Ty": 0,
+      "Tx": 0,
+      "Ty": 10,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
@@ -54,8 +54,8 @@
     {
       "Name": "arm_r_upper",
       "Parent": "chest",
-      "Tx": 9.972739,
-      "Ty": -2.849355,
+      "Tx": 0,
+      "Ty": 10,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
@@ -64,8 +64,8 @@
     {
       "Name": "arm_r_lower",
       "Parent": "arm_r_upper",
-      "Tx": 10,
-      "Ty": 0,
+      "Tx": 0,
+      "Ty": 10,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
@@ -74,22 +74,22 @@
     {
       "Name": "leg_l_upper",
       "Parent": "hip",
-      "Tx": -12.354759,
-      "Ty": 4.9419036,
+      "Tx": 0,
+      "Ty": 9.5,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
-      "Length": 12
+      "Length": 9.5
     },
     {
       "Name": "leg_l_lower",
       "Parent": "leg_l_upper",
-      "Tx": -1,
-      "Ty": 14,
+      "Tx": 0,
+      "Ty": 9.5,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
-      "Length": 12
+      "Length": 9.5
     },
     {
       "Name": "foot_l",
@@ -104,22 +104,22 @@
     {
       "Name": "leg_r_upper",
       "Parent": "hip",
-      "Tx": 13.979735,
-      "Ty": 5.591894,
+      "Tx": 0,
+      "Ty": 9.5,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
-      "Length": 12
+      "Length": 9.5
     },
     {
       "Name": "leg_r_lower",
       "Parent": "leg_r_upper",
-      "Tx": 1,
-      "Ty": 14,
+      "Tx": 0,
+      "Ty": 9.5,
       "Rotation": 0,
       "Sx": 1,
       "Sy": 1,
-      "Length": 12
+      "Length": 9.5
     },
     {
       "Name": "foot_r",

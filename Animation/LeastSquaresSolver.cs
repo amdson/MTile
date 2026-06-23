@@ -27,6 +27,13 @@ public sealed class LeastSquaresSolver
     // be STABLE for the duration of one Minimize call (the Jacobian assumes fixed rows).
     public delegate int ResidualFn(ReadOnlySpan<float> x, Span<float> residuals);
 
+    // Optional ANALYTIC Jacobian: fill `jac` (row-major, the given `stride` per row — i.e.
+    // J[i,j] = jac[i*stride + j] = ∂r_i/∂x_j) for the m residual rows and n variables at x.
+    // The solver zeroes the active m×n block before calling, so only the nonzero entries
+    // need be written. Rows MUST be in the same order the ResidualFn emits them. When no
+    // JacobianFn is supplied the solver falls back to finite differences (below).
+    public delegate void JacobianFn(ReadOnlySpan<float> x, Span<float> jac, int stride);
+
     private readonly int _maxVars, _maxRes;
     private readonly float[] _r, _rTrial;      // [maxRes]   residuals at x / at trial
     private readonly float[] _jac;             // [maxRes*maxVars]  J, row-major  (i*maxVars + j)
@@ -45,8 +52,15 @@ public sealed class LeastSquaresSolver
         _step = new float[maxVars]; _xTrial = new float[maxVars];
     }
 
-    // Minimize in place from the starting x. Returns the final sum-of-squares cost.
+    // Minimize in place from the starting x (finite-difference Jacobian). Returns the
+    // final sum-of-squares cost.
     public float Minimize(ResidualFn fn, Span<float> x, ReadOnlySpan<float> lo,
+                          ReadOnlySpan<float> hi, int iters = 12)
+        => Minimize(fn, null, x, lo, hi, iters);
+
+    // Minimize in place using an ANALYTIC Jacobian `jac` (null → finite differences).
+    // Returns the final sum-of-squares cost.
+    public float Minimize(ResidualFn fn, JacobianFn jac, Span<float> x, ReadOnlySpan<float> lo,
                           ReadOnlySpan<float> hi, int iters = 12)
     {
         int n = x.Length;
@@ -56,8 +70,14 @@ public sealed class LeastSquaresSolver
 
         for (int it = 0; it < iters && cost > 1e-12f; it++)
         {
-            // --- finite-difference Jacobian  J[i,j] = ∂r_i/∂x_j ---
-            for (int j = 0; j < n; j++)
+            // --- Jacobian  J[i,j] = ∂r_i/∂x_j : analytic if supplied, else finite diff ---
+            if (jac != null)
+            {
+                for (int i = 0; i < m; i++)
+                    for (int j = 0; j < n; j++) _jac[i * _maxVars + j] = 0f;
+                jac(x, _jac, _maxVars);
+            }
+            else for (int j = 0; j < n; j++)
             {
                 float xj = x[j];
                 // Step relative to the variable's box width, not just its magnitude: a

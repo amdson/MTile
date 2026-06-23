@@ -81,6 +81,12 @@ public sealed class AnimationDocument
 
     [JsonIgnore] public string FilePath { get; set; }
 
+    // Lazily-computed by AnimationSampler.IsCyclic: true iff the clip is a seamless loop
+    // (Loop set AND the first/last keyframe poses match, as locomotion cycles duplicate the
+    // seam). Drives whether C1 interpolation wraps tangents across the seam (cyclic) or zeros
+    // them at the ends (one-shot). Null = not yet determined. Not serialized.
+    [JsonIgnore] internal bool? CyclicCache;
+
     public void SortKeyframes() => Keyframes.Sort((a, b) => a.Time.CompareTo(b.Time));
 }
 

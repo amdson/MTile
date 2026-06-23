@@ -17,6 +17,11 @@
     <Compile Remove="MTile.Demo\**" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The test project validates internal solver hooks (e.g. CharacterAnimator's analytic
+         Jacobian vs. finite differences). Core only; the KNI web build has its own csproj. -->
+    <InternalsVisibleTo Include="MTile.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- Phase 3 will conditionally swap this for the KNI Blazor backend on the
          web host. The library compiles against the DesktopGL API surface for now. -->
     <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />

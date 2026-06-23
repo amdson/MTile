@@ -14,42 +14,50 @@
         },
         {
           "Bone": "chest",
-          "Rotation": 0
+          "Rotation": -0.14889099
         },
         {
           "Bone": "head",
-          "Rotation": 0
+          "Rotation": 0.3217487
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": 0
+          "Rotation": -0.9706334
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": 0
+          "Rotation": -0.82200867
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 0
+          "Rotation": 1.3435156
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": 0
+          "Rotation": -1.3611519
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 0
+          "Rotation": -0.81252205
         },
         {
           "Bone": "leg_l_lower",
+          "Rotation": 1.0591986
+        },
+        {
+          "Bone": "foot_l",
           "Rotation": 0
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 0
+          "Rotation": 0.7149474
         },
         {
           "Bone": "leg_r_lower",
+          "Rotation": -1.1075422
+        },
+        {
+          "Bone": "foot_r",
           "Rotation": 0
         }
       ]

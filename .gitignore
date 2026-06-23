@@ -21,3 +21,6 @@ MTile.Tests/*.csv
 # Dev screenshots (F12 / MTILE_SCREENSHOT capture).
 screenshot_*.png
 _shot_*.png
+
+# Motion-probe inspection output (dev tool)
+.probe/

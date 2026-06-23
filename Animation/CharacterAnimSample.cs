@@ -25,15 +25,19 @@ public readonly struct CharacterAnimSample
     // through once over the action's lifetime. 0 = no fixed length → the animator uses
     // the clip's own Duration instead.
     public readonly float   ActionDuration;
+    // Normalized progress [0,1] of a guided maneuver (CurrentState.AnimationProgress) — drives a
+    // movement overlay whose clip time is SPATIAL, not a clock (a vault's hands track body-vs-
+    // corner). 0 for states with no natural progress. See CharacterAnimator.ResolveMovementOverlays.
+    public readonly float   MovementProgress;
 
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
         string movementState, string action, float dt, float actionTime = 0f,
-        float actionDuration = 0f)
+        float actionDuration = 0f, float movementProgress = 0f)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
-        ActionDuration = actionDuration;
+        ActionDuration = actionDuration; MovementProgress = movementProgress;
     }
 
     // Pull the sample from a live character through its public surface only. The
@@ -42,5 +46,6 @@ public readonly struct CharacterAnimSample
         => new(p.Body.Position, p.Body.Velocity, p.Facing, p.IsGrounded,
                p.CurrentStateName, p.CurrentActionName, dt,
                p.CurrentActionVars.TimeInState,
-               p.CurrentAction?.OverlayDuration ?? 0f);
+               p.CurrentAction?.OverlayDuration ?? 0f,
+               p.CurrentState?.AnimationProgress ?? 0f);
 }

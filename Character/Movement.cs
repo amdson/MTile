@@ -42,6 +42,13 @@ public abstract class MovementState
     // contact on the next Update from the restored body pose. No-op for stateless
     // states (Falling, Stunned, jumps without a source cache).
     public virtual void ResetTransient() { }
+
+    // Normalized progress [0,1] of a guided maneuver, exposed to the animation layer for
+    // overlays whose clip time is driven by SPATIAL progress rather than a clock — a vault
+    // advances by body position vs. the ledge corner, not elapsed time, so its hand overlay
+    // can't be timed off ActionTime. Default 0 (states with no natural progress). Render-only:
+    // the sim never reads it; it is derived from deterministic body/world data each Update.
+    public virtual float AnimationProgress => 0f;
 }
 
 // Heavy-hit lock-out. Preempts Standing/Crouched/WallSliding/Falling so the

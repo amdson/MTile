@@ -86,8 +86,14 @@ public sealed class DemoGame : Game
     private int W => GraphicsDevice.Viewport.Width;
     private int H => GraphicsDevice.Viewport.Height;
 
-    public DemoGame()
+    // Name of the clip to open on launch (case-insensitive, matches AnimationDocument.Name),
+    // or null to open the first. Lets you jump straight to a clip when the sidebar has more
+    // entries than fit on screen.
+    private readonly string _openClip;
+
+    public DemoGame(string openClip = null)
     {
+        _openClip = openClip;
         _graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth  = 1040,
@@ -136,7 +142,19 @@ public sealed class DemoGame : Game
 
         _typeOptions = BuildTypeOptions();
         _docs = AnimationStore.LoadAll(_dir);
-        if (_docs.Count > 0) SelectAnimation(0);
+        if (_docs.Count > 0)
+        {
+            int open = 0;
+            if (!string.IsNullOrEmpty(_openClip))
+            {
+                int found = _docs.FindIndex(d =>
+                    string.Equals(d.Name, _openClip, StringComparison.OrdinalIgnoreCase));
+                if (found >= 0) open = found;
+                else Console.WriteLine($"clip '{_openClip}' not found; opening '{_docs[0].Name}'. " +
+                                       $"Available: {string.Join(", ", _docs.ConvertAll(d => d.Name))}");
+            }
+            SelectAnimation(open);
+        }
 
         Console.WriteLine($"Animation editor - states in: {_dir}");
         Console.WriteLine("Controls cheatsheet: MTile.Demo/CONTROLS.md");

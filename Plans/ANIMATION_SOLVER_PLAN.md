@@ -238,16 +238,171 @@ implementations, `AnimEnv`, `PoseSolver` (variable layout, residual+Jacobian ass
    grid-search, so it must lean hard on temporal warm-starting (previous frame) plus the
    `PlaybackContinuity`/pose-prior regularizers to stay in a good basin, with a globalizer
    only for cold starts / large state changes.
-2. **Add `Δθ` + PosePrior.** Introduce angle corrections and the Tikhonov prior. Verify the
-   solve is a no-op (corrections ≈ 0) when no hard constraint pushes — proves well-posedness.
-3. **Add `d` + ComOffset.** Move vertical placement into the solve; delete the host
-   `CurrentSoleY` path. Confirm flight still reads (NoSlip vs soft ComOffset trade-off).
-4. **Multi-motion blend.** Fold the action overlay into a weighted `Motion`; retire the
-   masked-blend special case. Add the action **clip-time-tracks-progress** constraint.
-5. **FixedPoint** (External contacts) for ledge/vault hand pins.
-6. **Env + NoPenetration.** Extend the sample to carry local tiles, build the per-frame local
+
+   **Follow-up finding (parity test retired).** Per-frame logging of both paths showed
+   they agree exactly for the first cycle, then diverge ONLY at the once-per-stride
+   contact handoff, where the objective is **bimodal**: a global min at small Δφ (foot
+   stays planted, cost ≈ 0.006) and a spurious local min at large Δφ (cost ≈ 0.27, 45×
+   worse — the "next foot plants at its target" alias, mostly continuity-penalty). The LM
+   path (seed search + local refine) finds the **global** min; **golden-section, assuming
+   unimodality, lands in the wrong basin** and takes a ~0.18 catch-up jump every stride.
+   So the "parity gap" (solver advanced ~0.80–0.83× golden) was **golden over-advancing
+   via a unimodality violation, not the solver under-advancing** — the general solver is
+   the *better* minimizer of the stated objective. The brittle `0.85–1.15` parity test
+   (which treated golden as ground truth, and won't apply once more variables are added
+   anyway) was **removed**. Open question it surfaces: the NoSlip objective only pins the
+   *planted* foot, so cadence rate vs body speed is under-constrained — a body-speed /
+   stride-length coupling term may be wanted later (relates to §4.4 ComOffset).
+2. **Add `Δθ` + PosePrior. — DONE.** `SolvePhaseStepLm` now solves over the full vector
+   `x = [Δφ, Δθ_0 … Δθ_N]`: the clip is sampled at φ+Δφ, each bone's rotation gets its Δθ
+   before FK, and the residuals add one Tikhonov row `√PosePrior · Δθ_i` per bone. The
+   solved corrections are applied onto the authored base pose in `Update` (the IK channel,
+   wired through but inert). Δφ alone still carries the cadence, so the only thing on most
+   Δθ is the prior. **Well-posedness proof** (`Solver_AngleCorrections_StayNegligible`):
+   bones with no contact in their subtree (chest/head/arms) have zero slip-coupling → the
+   normal equations decouple them (JᵀJ diagonal = λ) → they collapse to **exactly 0**
+   (< 1e-4, λ-independently); leg/foot bones carry only a small bounded IK trim of the
+   residual slip (peak ~0.05 rad on walk, well inside the ±`AngleCorrLimit` box). Constants:
+   `PosePrior = 25`, `AngleCorrLimit = 0.6`. **Note (tier system, §9.5 open):** the contact
+   no-slip weight is only 1 while `PosePrior = 25` — the "hard" pin is not yet hard relative
+   to the priors. It doesn't bite now (Δφ handles cadence), but a real hard constraint that
+   *requires* Δθ (NoPenetration, FixedPoint) will need a proper weight tier so it can
+   override the prior. Decide the named tiers before Phase 5/6.
+3. **Add `d` + ComOffset. — DONE (vertical; horizontal deferred).** The solve gained a
+   vertical root offset **δ** (`x = [Δφ, δ, Δθ…]`): a HARD per-contact ground row
+   `√w·(footY + δ − target.Y)` holds the planted foot at the height it planted (so the
+   body bobs to keep it down instead of the foot sinking through the pose), and a SOFT
+   `√ComWeightY·δ` row pulls δ→0 so a no-contact **flight** frame settles back to the com
+   baseline (both feet free to leave the ground — §4.4's "soft com lets NoSlip win
+   vertically"). The solver-path root bakes in the com baseline (`rootY = BodyY −
+   com.Y·scale`) so capture/solve/draw share one frame; the host (`AttackGlowSystem.
+   RigRoot`, com branch) adds the solved `CharacterAnimator.VerticalOffset` on top. Golden
+   path and flight frames → δ = 0 → exactly today's com anchor (zero-risk). Constants
+   `ComWeightY = 0.05` (≪ contact weight 1), `VertOffsetLimit = 24px`. Test
+   `Solver_VerticalOffset_EngagesInStance_ReleasesInFlight`: over a run, δ both engages in
+   stance and releases to exactly 0 in flight, bounded well inside the box. To see it live:
+   `"AnimSolver": true` in `game_config.json` (the MTile.Demo editor plays raw clips, no δ).
+   **Deferred:** (a) the horizontal `d.x` — left out to avoid a Δφ/d.x cadence redundancy
+   (a free d.x could absorb horizontal no-slip and stall the leg cycle); add it with a
+   strong horizontal ComOffset when there's a reason (lean, non-locomotion). (b) Removing
+   the `CurrentSoleY` sole-hack for *no-com* clips needs an absolute ground line
+   (`BodyY + 2·Radius`) in the solve — i.e. env/`groundY` on the sample (Phase 6 territory);
+   δ is only wired through the com branch for now. **Caveat:** the run's small *visual*
+   foot clearance is a clip/rig limit (no heel-tuck DOF), not a placement bug — δ changes
+   the bob, not the authored foot heights; revisit via IK (Δθ) or re-authoring.
+4. **Multi-motion blend. — DONE.** The pose is now composed from ordered MOTIONS: motion 0
+   is the full-body base (locomotion/idle/one-shot + Δθ), and overlays are painted on top
+   by per-bone opacity via the one reusable primitive `PaintMotionLayer(acc, layer,
+   weight[])`. The action overlay became "just another motion with per-bone weights" — its
+   opacity is `Region mask × eased ActionWeight` — retiring the hard-coded masked-lerp
+   special case. The action **clip time is pinned** (τ = ActionTime/Duration, sampled at
+   deterministic sim time), per the §9 Q1 lean toward pinned-not-DOF, so no new solve
+   variable. Behavior-preserving refactor: all of `ActionOverlayTests` (incl. the
+   bit-identical-lower-body guard) and the solver/cadence suites stay green. Base is kept
+   as the accumulator (motion 0 implicit, no per-frame copy); the multi-motion generality
+   is scaffolded but only exercised once there's a 2nd overlay or a locomotion-clip
+   cross-fade (walk↔run transitions — future, not in this phase's scope).
+4.5. **Solve the POST-BLEND skeleton. — DONE.** The cadence solve now optimizes the
+   *composed* pose (base + Δθ + action overlay), not the bare locomotion clip. The overlay
+   is resolved BEFORE the solve (new Update "step 1.5": bind clip, sample `_actionPose` at
+   pinned τ, ease `ActionWeight`, fill `_overlayWeight`), then composed inside the forward
+   pass via one shared primitive `ComposeOverlays(pose)` — called from the contact-target
+   capture (`RefreshContacts`), the LM residual, and the golden `Loss`, so capture and
+   measurement live in the *same* composed frame (else a constant offset). The forward pass
+   itself is factored into `BuildSolvePose(x)` (sample φ+Δφ → +Δθ → compose → FK), the single
+   substrate the residual and the coming analytic Jacobian share. **Behavior-preserving today**
+   because every overlay is UpperBody-masked (`w=0` on the feet) so the composed feet ≡ base
+   feet — all of `ActionOverlayTests` + the solver suites stay green. It becomes load-bearing
+   the moment an overlay moves a constrained bone (a kick): the planted foot then stays pinned
+   as the overlay blends in. **Why linearity matters:** overlay pose + weights are constant
+   w.r.t. the solve vars, so the blend is a per-bone linear pre-multiply `(1−w_i)` on the base
+   layer — exactly the `w_{m,i}` factor §3.3 already carries in `∂p/∂τ_m`. (No test yet
+   exercises a leg-affecting overlay — none exists; add one with the first such clip.)
+4.6. **Overlay STACK (1 base + N overlays). — Phase A DONE (mechanism); Phase B DONE
+   (first movement overlay: parkour hands).** Co-occurring actions (parkour hands + a slash) need more than one
+   overlay, but there is only one Action FSM, so the single `_boundAction*` overlay generalized
+   to an ordered `OverlaySlot[]` (cap 3): **slot 0 is PRIVILEGED** — the Action-FSM overlay that
+   still drives `ActionWeight`/`OverlayActive`/the knife pose (so the glow + the 6
+   `ActionOverlayTests` + the upper-body stiffness ramp are bit-identical) — and slots 1+ are
+   movement-sourced. Composition is **absolute blend + disjoint masks** (the chosen strategy):
+   `ComposeOverlays` paints active slots foreground-last (slot 0 wins a shared bone); disjoint
+   masks compose trivially, a shared bone resolves by paint order × weight (design the
+   contending bones — e.g. the two arms — to be separable; let weights handle the rest). The key
+   property that keeps the analytic Jacobian intact: sequential lerps leave the base layer's
+   coefficient as the per-bone **product** `Π(1−w)` over the slots masking it, cached each frame
+   in `_baseBlend[j]` — order-independent, so `CadenceJacobian` just reads it instead of the old
+   scalar `1−_overlayWeight[j]`. With disjoint masks at most one factor is <1 per bone, reducing
+   to the single-overlay case. Each slot eases its own weight and samples its own pose at its own
+   τ; slots are matched to requests by key so an in-progress fade stays put. **Phase A** (this
+   refactor) is behavior-preserving — `ResolveMovementOverlays` returns nothing yet, so only slot
+   0 is ever active; full suite + KNI build green. **Phase B** (when parkour clips exist): fill
+   `ResolveMovementOverlays` — animation-side policy, name-convention lookup against
+   `_actionClips`, τ derived from MOVEMENT DATA (vault progress is input-driven — body-vs-corner,
+   not a clock), carried via a proposed generic `float MovementProgress ∈ [0,1]` the guided state
+   fills from its own geometry. Parkour then exports two clips: a Lower/FullBody locomotion base
+   (φ-driven, cadence-synced) + an UpperBody hands overlay (slot 1, τ = MovementProgress).
+   INVARIANT for the constraint phases: a pinned/constrained bone (the parkour planted hand →
+   FixedPoint, Phase 6) must be owned by exactly ONE slot, else its `(1−w)` is ambiguous —
+   naturally satisfied since a co-occurring slash uses the OTHER arm.
+   **Phase B (parkour, DONE):** `ResolveMovementOverlays` binds a `VaultHands` UpperBody clip by
+   name when `MovementState` contains "Parkour", τ = `s.MovementProgress`. The τ is SPATIAL, not
+   a clock: `MovementState.AnimationProgress` (new virtual, default 0) is overridden by
+   `ParkourState` to the body's projected travel from the entry point toward the live ledge
+   corner (`_overRamp.Corner`) — input-driven, derived from deterministic body/world data each
+   `Update`, render-read-only (the sim never branches on it). `CharacterAnimSample` gained
+   `MovementProgress` (= `CurrentState.AnimationProgress`). Clips: `SkeletonStates/vaulthands.json`
+   (UpperBody reach→push) + a rewritten `vault.json` legs base (the old one was a corrupted
+   capture). Both are FIRST-DRAFT poses authored blind — tune in the editor. NOTE the editor still
+   samples linearly (Animation/TODO.md), and the legs base plays by ClipTime while the hands play
+   by spatial progress (the two timelines are intentionally independent).
+5. **Analytic Jacobian (replace finite differences). — DONE.** `LeastSquaresSolver.Minimize`
+   gained an optional `JacobianFn(x, jac, stride)`; when supplied it fills `_jac` (after the
+   solver zeroes the active m×n block) instead of the per-variable FD loop, which stays as the
+   fallback/oracle. The cadence solve passes `CadenceJacobian`, the closed form of §3.3. **The
+   key simplification** (verified in the data): rotation is the ONLY authored channel
+   (`PoseData` — translation/scale are rig-bind constants) and the overlay blend is a per-bone
+   linear premultiply, so the whole composed pose is driven by per-bone rotations — every
+   contact-row column is a rotation lever arm. `CadenceJacobian` reuses `BuildSolvePose(x)`'s
+   world buffer for joint origins and, per ancestor joint `j` of a contact bone: `∂tip/∂Δθ_j =
+   (1−w_j)·L_j` and `∂tip/∂Δφ = Σ_j (1−w_j)·ω_j·L_j`, where `L_j = ∂tip/∂θ_j` is the EXACT 2D
+   lever `A_p·J·A_p⁻¹·(tip − o_p)` (`Lever()`; `A_p`/`o_p` = the joint's parent world linear
+   part/origin — exact under the facing-flip reflection and any bind shear, reduces to
+   `perp(tip − o)` for a pure rotation) and `ω_j` is the base clip's per-bone angular velocity
+   from the new `AnimationSampler.SampleAngularVelocity` (keyframe-interval `WrapAngle(B−A)/span`).
+   `∂/∂δ` and the three priors are constant columns. **Validation** (`Solver_AnalyticJacobian_
+   MatchesFiniteDifference`, walk/run × both facings): analytic vs central-difference agree to
+   the float32 oracle floor (~0.1% relative; the oracle needs an origin-shift to dodge
+   catastrophic cancellation in `tip − target` far from the world origin, and a relative metric
+   since a real structural error would be O(10–100%)). The well-posedness and vertical-offset
+   tests still pass with analytic `J` driving LM. **Keyframe-kink (§3.5):** `ω` is piecewise-
+   constant and jumps at keyframe boundaries; for now LM's accept/reject damping + the Δφ seed
+   search absorb cross-boundary steps (as FD did) — the explicit trust-region clamp / C1
+   sampling is deferred until cadence feel demands it (the validation simply skips the Δφ column
+   at a boundary). FD stays in as the permanent cross-check oracle.
+
+   **Follow-up — keyframe kink FIXED via C1 sampling (the §3.5 "C1 sampling" option, done).**
+   Rather than the trust-region clamp, the rotation channel is now interpolated with a cubic
+   **Hermite/Catmull-Rom** spline (`AnimationSampler.SampleSmooth` + the matching exact
+   derivative `SampleAngularVelocity`), tangents = the AVERAGE of the adjacent secant slopes
+   (non-uniform Catmull-Rom). ω is now continuous, so the analytic Jacobian is exact across
+   boundaries and the cadence has no per-keyframe velocity step. Boundary policy keyed on
+   `IsCyclic` (cached: `Loop` AND first==last keyframe pose — locomotion duplicates the seam;
+   action clips default `Loop=true` but start≠end so read as one-shots): a **cyclic** clip
+   WRAPS tangents across the seam (velocity continuous through φ:1→0 — the one-shot zero-clamp
+   in `SampleAngularVelocity` is gated off for cyclic, else the seam read 0); a **one-shot**
+   ZEROS its end tangents (ease in/out, continuous with the held clamp). Only the rotation
+   channel splines (translation/scale are bind constants); four scratch poses for the keyframe
+   quad. Visual effect: smoother in-betweens for ALL clips, keyframes unchanged (Catmull-Rom
+   can mildly overshoot a sharply-keyed bone). The FD-vs-analytic test now passes WITHOUT a
+   boundary skip in spirit — it keeps a per-column FD step (small h for Δφ through the
+   high-curvature spline, larger h for δ/Δθ to clear cancellation) and still skips only where
+   the ±h step straddles a boundary, since there acceleration jumps (C1, not C2) make the FD
+   *oracle* unreliable though the analytic stays exact. NOTE: the editor still samples linearly
+   (`SampleNormalized` unchanged) — a WYSIWYG gap to close if it matters.
+6. **FixedPoint** (External contacts) for ledge/vault hand pins.
+7. **Env + NoPenetration.** Extend the sample to carry local tiles, build the per-frame local
    SDF, add the limb no-penetration constraint. Heaviest phase; do last.
-7. **JointLimits**, polish, C1 sampling if needed.
+8. **JointLimits**, polish, C1 sampling if needed.
 
 ---
 
