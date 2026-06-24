@@ -23,8 +23,8 @@ public static class MotionProbe
 {
     public readonly struct JointSample
     {
-        public readonly Vector2 Joint;    // the bone's origin (its joint with its parent)
-        public readonly Vector2 Tip;      // origin + Length along local +X (the foot/hand "contact" end)
+        public readonly Vector2 Joint;    // the bone's NEAR joint = its parent's tip (= parent's world translation)
+        public readonly Vector2 Tip;      // the bone's FAR tip = its world translation (where its children attach)
         public readonly Vector2 TipVel;   // d(Tip)/d(phase), central finite difference
         public JointSample(Vector2 joint, Vector2 tip, Vector2 tipVel)
         { Joint = joint; Tip = tip; TipVel = tipVel; }
@@ -42,23 +42,26 @@ public static class MotionProbe
         var a = rig.CreatePose(); var bk = rig.CreatePose(); var c = rig.CreatePose();
         var d = rig.CreatePose(); var dst = rig.CreatePose();
         var root = Root(scale, facing);
-        float len = rig.Bones[b].Length;
 
-        var (joint, tip) = Eval(clip, rig, b, len, phase, root, a, bk, c, d, dst);
+        var (joint, tip) = Eval(clip, rig, b, phase, root, a, bk, c, d, dst);
         const float e = 1e-3f;
-        var (_, tipPlus)  = Eval(clip, rig, b, len, phase + e, root, a, bk, c, d, dst);
-        var (_, tipMinus) = Eval(clip, rig, b, len, phase - e, root, a, bk, c, d, dst);
+        var (_, tipPlus)  = Eval(clip, rig, b, phase + e, root, a, bk, c, d, dst);
+        var (_, tipMinus) = Eval(clip, rig, b, phase - e, root, a, bk, c, d, dst);
         return new JointSample(joint, tip, (tipPlus - tipMinus) / (2f * e));
     }
 
     private static (Vector2 joint, Vector2 tip) Eval(
-        AnimationDocument clip, Skeleton rig, int b, float len, float phase, in Affine2 root,
+        AnimationDocument clip, Skeleton rig, int b, float phase, in Affine2 root,
         SkeletonPose a, SkeletonPose bk, SkeletonPose c, SkeletonPose d, SkeletonPose dst)
     {
         float p = phase - MathF.Floor(phase);                    // wrap into [0,1) for looping clips
         AnimationSampler.SampleSmooth(clip, p, a, bk, c, d, dst); // C1 spline — matches the game
         var w = dst.ComputeWorld(root);
-        return (w[b].Translation, w[b].TransformPoint(new Vector2(len, 0f)));
+        // R·T·S joint chain: a bone's far tip IS its world translation; its near joint is its
+        // parent's tip (parent's translation). Do NOT add Length along +X — that overshoots a bone.
+        int par = rig.Bones[b].Parent;
+        Vector2 joint = par >= 0 ? w[par].Translation : w[b].Translation;
+        return (joint, w[b].Translation);
     }
 
     private static readonly string[] DefaultJoints =
@@ -246,8 +249,8 @@ public static class MotionProbe
             {
                 int bi = rig.IndexOf(bones[i]);
                 if (bi < 0) continue;
-                var off = new Vector2(rig.Bones[bi].Length, 0f);
-                Vector2 dc = wc[bi].TransformPoint(off) - wr[bi].TransformPoint(off);
+                // tip = world translation (headTop/chestTop/hand/toe are these bones' far ends).
+                Vector2 dc = wc[bi].Translation - wr[bi].Translation;
                 string note = dc.Length() < 1.0f ? "~same"
                     : MathF.Abs(dc.X) > MathF.Abs(dc.Y) ? (dc.X > 0 ? "forward" : "back")
                                                         : (dc.Y > 0 ? "lower" : "higher");

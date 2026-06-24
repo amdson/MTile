@@ -19,19 +19,29 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
 
 ## How the batch runs
 
-- **One worker per clip**, in its **own git worktree** (each runs `MotionProbeTests`,
-  which rebuilds the test dll and writes `.probe/` — they would race in a shared tree).
-- Each worker follows the **[anim-probe skill](../.claude/skills/anim-probe/SKILL.md)**
-  loop verbatim: probe → author → re-probe digest → iterate until the acceptance gate
-  is green. The skill is the how-to (rig conventions, FK measurement, contact/cadence
-  gotchas); this doc is the *what* (per-clip intent).
-- After the fan-out, a **verify+merge pass** collects every `.json` back onto one
-  branch and runs the full suite once (`dotnet test MTile.Tests`).
+- **One worker per clip**, in its **own git worktree** (isolates each worker's build + edits so
+  parallel workers don't race).
+- Each worker follows the **[anim-probe skill](../.claude/skills/anim-probe/SKILL.md)** loop:
+  probe → author → re-probe → iterate until the acceptance gate is green. The skill is the how-to
+  (rig conventions, FK measurement, contact/cadence gotchas); this doc is the *what* (per-clip intent).
+- **Use the FAST probe for the edit→verify loop** — `dotnet build MTile.Probe` once, then
+  `dotnet run --project MTile.Probe --no-build -- digest <clip>` (~1–3s, prints to stdout, NO rebuild —
+  clips load at runtime). Do **NOT** run `dotnet test …MotionProbeTests` every iteration (it rebuilds the
+  whole test project — the main cost sink in the first batch). Reserve a `Zzz` test harness only for
+  custom IK measurement (one build), not for verification.
+- **Iteration budget:** hit the gate within ~6 edit→digest cycles. If a clip isn't green by then,
+  return your best version + a one-line note on what's off — don't churn; one hard clip shouldn't
+  dominate the batch.
+- After the fan-out, a **verify+merge pass** writes every returned clip JSON back to `SkeletonStates/`,
+  regenerates digests, and runs the full suite once. **If running unattended, have each worker COMMIT
+  its own clip** so a mid-run stall preserves finished work instead of re-running everything (the first
+  batch stalled overnight and lost an entire run to this).
 
 ## Authoring reference (recap — skill has the full set)
 
-- **Pure joint chain, T·R·S.** A bone attaches at its parent's tip; authored
-  `Rotation` is the **full local angle** (`bindRot` + swing), NOT a deviation.
+- **Pure joint chain (FK = `R·T·S` per local).** A bone attaches at its parent's tip; authored
+  `Rotation` is the **full local angle** (`bindRot` + swing), NOT a deviation. **`world[i].Translation`
+  IS the bone's far tip** (children attach there) — never add `Length` along +X to "get a tip".
 - **Bind orientations** (rest `Rotation`, rad): chest `-π/2`, head `0`, arms `+π`
   (hang), legs `+π/2` (down), `*_lower` `0`, foot `≈-1.33`. Forward swing = toward +X.
   **Measure every sign with the digest** — don't trust remembered signs.
@@ -43,7 +53,18 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
   - `FullBody` — base locomotion / movement clips (own the legs).
   - `UpperBody` — combat overlays composited over a locomotion base; **legs/hip are
     masked, so their stored values don't render.** Author a *neutral* leg pose anyway
-    so `.probe/<clip>.digest.md` reads clean (no false recurvatum flag).
+    so `.probe/<clip>.digest.md` reads clean (no false recurvatum flag). **Paste this
+    idle lower-body block verbatim into every keyframe** — it's already flag-free, so the
+    legs cost ZERO iteration (don't re-derive them):
+    ```json
+    { "Bone": "hip",         "Rotation": 0 },
+    { "Bone": "leg_l_upper", "Rotation": 1.18 },
+    { "Bone": "leg_l_lower", "Rotation": 0.62 },
+    { "Bone": "foot_l",      "Rotation": -1.3258 },
+    { "Bone": "leg_r_upper", "Rotation": 1.62 },
+    { "Bone": "leg_r_lower", "Rotation": 0.2 },
+    { "Bone": "foot_r",      "Rotation": -1.3258 }
+    ```
   - **`OffRegionWeight` (0..1, default 0)** — graded weight for bones OUTSIDE the
     clip's Region. 0 = hard mask (legacy). >0 lets a "whole-body" overlay lightly
     drive its off-region bones: a Pulse cast authored `Region=UpperBody` +
