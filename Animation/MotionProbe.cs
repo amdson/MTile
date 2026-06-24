@@ -151,27 +151,25 @@ public static class MotionProbe
     // signed cross test, planted/clearance) and each arm (hand height bucket + front/back).
     private static void DigestPose(StringBuilder sb, Skeleton rig, Affine2[] w)
     {
-        Vector2 J(string n) { int i = rig.IndexOf(n); return i < 0 ? Vector2.Zero : w[i].Translation; }
-        Vector2 T(string n) { int i = rig.IndexOf(n); return i < 0 ? Vector2.Zero
-                                  : w[i].TransformPoint(new Vector2(rig.Bones[i].Length, 0f)); }
+        // Under the R·T·S joint chain, world[i].Translation is bone i's FAR end — which is exactly
+        // an anatomical landmark: leg_upper→KNEE, leg_lower→ANKLE, foot→TOE, chest→shoulders,
+        // head→crown, arm_lower→HAND. A bone's near joint is its parent's far end.
+        Vector2 P(string n) { int i = rig.IndexOf(n); return i < 0 ? Vector2.Zero : w[i].Translation; }
 
         float ground = float.NegativeInfinity;
         for (int i = 0; i < rig.Count; i++)
-        {
             ground = MathF.Max(ground, w[i].Translation.Y);
-            ground = MathF.Max(ground, w[i].TransformPoint(new Vector2(rig.Bones[i].Length, 0f)).Y);
-        }
 
-        Vector2 hip = J("hip"), chestTop = T("chest"), headTop = T("head");
+        Vector2 hip = P("hip"), chestTop = P("chest"), headTop = P("head");
         sb.AppendLine($"  ground(y)={ground,6:0.0}   hip=({hip.X,5:0.0},{hip.Y,5:0.0})"
                     + $"   lean(chestTop.x-hip.x)={chestTop.X - hip.X,5:0.0}   headTop.y={headTop.Y,5:0.0}");
 
         var flags = new List<string>();
         foreach (var s in new[] { "l", "r" })
         {
-            // Joint-chain rig: joints now align with anatomy — leg_*_upper.joint = hip,
-            // leg_*_lower.joint = KNEE, foot_*.joint = ANKLE, foot_*.tip = TOE.
-            Vector2 knee = J($"leg_{s}_lower"), ankle = J($"foot_{s}"), toe = T($"foot_{s}");
+            // Anatomical landmarks are bone far ends: knee = leg_upper tip, ankle = leg_lower tip,
+            // toe = foot tip.
+            Vector2 knee = P($"leg_{s}_upper"), ankle = P($"leg_{s}_lower"), toe = P($"foot_{s}");
             Vector2 dd = ankle - hip; float L = dd.Length();
             // signed cross (knee-hip)×(ankle-hip): + = knee on the front side (correct), - = recurvatum.
             float side = L > 1e-4f ? ((knee.X - hip.X) * dd.Y - (knee.Y - hip.Y) * dd.X) / L : 0f;
@@ -183,7 +181,7 @@ public static class MotionProbe
         }
         foreach (var s in new[] { "l", "r" })
         {
-            Vector2 hand = T($"arm_{s}_lower");
+            Vector2 hand = P($"arm_{s}_lower");
             string lvl = hand.Y < headTop.Y ? "above-head" : hand.Y < chestTop.Y ? "head/chest"
                        : hand.Y < hip.Y ? "torso" : "below-hip";
             string fb = hand.X > hip.X + 1f ? "front" : hand.X < hip.X - 1f ? "back" : "center";
@@ -199,7 +197,6 @@ public static class MotionProbe
                                           in Affine2 root, int samples)
     {
         int fl = rig.IndexOf("foot_l"), fr = rig.IndexOf("foot_r");
-        float lenL = fl >= 0 ? rig.Bones[fl].Length : 0f, lenR = fr >= 0 ? rig.Bones[fr].Length : 0f;
         float lyMin = 1e9f, lyMax = -1e9f, lxMin = 1e9f, lxMax = -1e9f;
         float ryMin = 1e9f, ryMax = -1e9f, rxMin = 1e9f, rxMax = -1e9f;
         float groundMax = -1e9f, groundPhase = 0f;
@@ -207,18 +204,15 @@ public static class MotionProbe
         {
             float ph = (float)k / samples;
             var w = World(clip, rig, ph, root);
-            if (fl >= 0) { var toe = w[fl].TransformPoint(new Vector2(lenL, 0f));
+            if (fl >= 0) { var toe = w[fl].Translation;
                 lyMin = MathF.Min(lyMin, toe.Y); lyMax = MathF.Max(lyMax, toe.Y);
                 lxMin = MathF.Min(lxMin, toe.X); lxMax = MathF.Max(lxMax, toe.X); }
-            if (fr >= 0) { var toe = w[fr].TransformPoint(new Vector2(lenR, 0f));
+            if (fr >= 0) { var toe = w[fr].Translation;
                 ryMin = MathF.Min(ryMin, toe.Y); ryMax = MathF.Max(ryMax, toe.Y);
                 rxMin = MathF.Min(rxMin, toe.X); rxMax = MathF.Max(rxMax, toe.X); }
             float g = -1e9f;
             for (int i = 0; i < rig.Count; i++)
-            {
                 g = MathF.Max(g, w[i].Translation.Y);
-                g = MathF.Max(g, w[i].TransformPoint(new Vector2(rig.Bones[i].Length, 0f)).Y);
-            }
             if (g > groundMax) { groundMax = g; groundPhase = ph; }
         }
         sb.AppendLine($"  foot_l toe: y[{lyMin,5:0.0}..{lyMax,5:0.0}] (bob {lyMax - lyMin,4:0.0})  "

@@ -12,7 +12,7 @@
       "Bones": [
         {
           "Bone": "hip",
-          "Rotation": 0.0
+          "Rotation": 0
         },
         {
           "Bone": "chest",
@@ -69,7 +69,7 @@
       "Bones": [
         {
           "Bone": "hip",
-          "Rotation": 0.0
+          "Rotation": 0
         },
         {
           "Bone": "chest",
@@ -126,7 +126,7 @@
       "Bones": [
         {
           "Bone": "hip",
-          "Rotation": 0.0
+          "Rotation": 0
         },
         {
           "Bone": "chest",
@@ -146,7 +146,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 0.0
+          "Rotation": 0
         },
         {
           "Bone": "arm_r_lower",
@@ -183,7 +183,7 @@
       "Bones": [
         {
           "Bone": "hip",
-          "Rotation": 0.0
+          "Rotation": 0
         },
         {
           "Bone": "chest",
@@ -240,7 +240,7 @@
       "Bones": [
         {
           "Bone": "hip",
-          "Rotation": 0.0
+          "Rotation": 0
         },
         {
           "Bone": "chest",

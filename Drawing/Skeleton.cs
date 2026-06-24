@@ -5,18 +5,17 @@ namespace MTile;
 
 // Static structure of a rig: one entry per bone, parents always stored before
 // their children (topological order) so a single forward pass resolves world
-// transforms. Immutable once built — the per-frame moving parts live in
-// SkeletonPose. Render-only.
+// transforms. Render-only.
 public readonly struct Bone
 {
     public readonly string        Name;
     public readonly int           Parent;   // index into Skeleton.Bones, or -1 for a root
-    public readonly BoneTransform Bind;     // rest-pose local transform
+    public readonly float         Rotation; // rest-pose local rotation
     public readonly float         Length;   // drawn length along local +X (leaf orientation ticks)
 
-    public Bone(string name, int parent, BoneTransform bind, float length)
+    public Bone(string name, int parent, float rotation, float length)
     {
-        Name = name; Parent = parent; Bind = bind; Length = length;
+        Name = name; Parent = parent; Rotation = rotation; Length = length; 
     }
 
     public bool IsRoot => Parent < 0;
@@ -59,13 +58,13 @@ public sealed class Skeleton
     // array is readonly, so growing the rig means building a fresh Skeleton. Existing
     // poses must be recreated against the result (they're sized to the old bone count);
     // clips reference bones by name, so they're unaffected (the new bone sits at bind).
-    public Skeleton WithBone(string name, int parentIndex, BoneTransform bind, float length = 0f)
+    public Skeleton WithBone(string name, int parentIndex, float rotation, float length = 0f)
     {
         if (parentIndex >= Bones.Length)
             throw new ArgumentOutOfRangeException(nameof(parentIndex), "Parent must be an existing bone.");
         var arr = new Bone[Bones.Length + 1];
         Array.Copy(Bones, arr, Bones.Length);
-        arr[Bones.Length] = new Bone(name, parentIndex, bind, length);
+        arr[Bones.Length] = new Bone(name, parentIndex, rotation, length);
         return new Skeleton(Name, arr);
     }
 }
@@ -79,18 +78,18 @@ public sealed class SkeletonBuilder
 
     public SkeletonBuilder(string name) { _name = name; }
 
-    public int Add(string name, int parent, BoneTransform bind, float length = 0f)
+    public int Add(string name, int parent, float rotation, float length = 0f)
     {
         if (parent >= _bones.Count)
             throw new ArgumentOutOfRangeException(nameof(parent),
                 "A parent bone must be added before its children.");
-        _bones.Add(new Bone(name, parent, bind, length));
+        _bones.Add(new Bone(name, parent, rotation, length));
         return _bones.Count - 1;
     }
 
     // A root bone (no parent).
-    public int AddRoot(string name, BoneTransform bind, float length = 0f)
-        => Add(name, -1, bind, length);
+    public int AddRoot(string name, float rotation, float length = 0f)
+        => Add(name, -1, rotation, length);
 
     public Skeleton Build() => new(_name, _bones.ToArray());
 }

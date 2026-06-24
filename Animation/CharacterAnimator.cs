@@ -279,11 +279,10 @@ public sealed class CharacterAnimator
     {
         var w = _pose.ComputeWorld(Affine2.Identity);
         float sole = 0f;
+        // world[i].Translation is each bone's far end (and every joint) under the R·T·S chain,
+        // so the sole is simply the lowest of those — no +Length tip term (it overshoots a bone).
         for (int i = 0; i < _skeleton.Count; i++)
-        {
             sole = MathF.Max(sole, w[i].Translation.Y);
-            sole = MathF.Max(sole, w[i].TransformPoint(new Vector2(_skeleton.Bones[i].Length, 0f)).Y);
-        }
         return sole;
     }
 
@@ -580,8 +579,7 @@ public sealed class CharacterAnimator
         if (highlightPlantFoot)
             foreach (var c in _contacts)
             {
-                Vector2 tip = _pose.WorldOf(c.Bone)
-                                   .TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
+                Vector2 tip = _pose.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
                 ctx.Disc(tip, PlantFootMarkerRadius, PlantFootMarkerColor);
             }
     }
@@ -781,7 +779,7 @@ public sealed class CharacterAnimator
             }
             else
             {
-                Vector2 tip = _scratch.WorldOf(bone).TransformPoint(new Vector2(_skeleton.Bones[bone].Length, 0f));
+                Vector2 tip = _scratch.WorldOf(bone).Translation;   // bone's far end = contact tip
                 _contacts.Add(new ActiveContact { Bone = bone, Target = tip, Weight = w, Source = ContactSource.SelfPlant });
             }
         }
@@ -800,7 +798,7 @@ public sealed class CharacterAnimator
             float e = 0f;
             foreach (var c in _contacts)
             {
-                Vector2 tip = _scratch.WorldOf(c.Bone).TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
+                Vector2 tip = _scratch.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
                 // Penalize only HORIZONTAL (along-ground) slip. The planted foot must not
                 // slide across the ground, but its vertical arc (lift over the stance) is
                 // intrinsic to the cadence and is reconciled by the ground/COM anchor — not
@@ -905,7 +903,7 @@ public sealed class CharacterAnimator
         int n = 0;
         foreach (var c in _contacts)
         {
-            Vector2 tip = _scratch.WorldOf(c.Bone).TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
+            Vector2 tip = _scratch.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
             float sw = MathF.Sqrt(c.Weight);
             r[n++] = sw * (tip.X - c.Target.X);            // horizontal no-slip (cadence, drives Δφ)
             r[n++] = sw * (tip.Y + dy - c.Target.Y);       // vertical ground hold (drives δ)
@@ -942,7 +940,7 @@ public sealed class CharacterAnimator
         int row = 0;
         foreach (var c in _contacts)
         {
-            Vector2 tip = _scratch.WorldOf(c.Bone).TransformPoint(new Vector2(_skeleton.Bones[c.Bone].Length, 0f));
+            Vector2 tip = _scratch.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
             float sw = MathF.Sqrt(c.Weight);
             int hRow = row, vRow = row + 1;
 
@@ -950,11 +948,11 @@ public sealed class CharacterAnimator
             for (int j = c.Bone; j >= 0; j = _skeleton.Bones[j].Parent)
             {
                 int par = _skeleton.Bones[j].Parent;
-                // T·R·S: θ_j pivots about j's OWN joint (= parent's tip, a point fixed under θ_j),
-                // and the rotation acts in the parent's linear frame A_p. (Was R·T·S: pivot = parent
-                // origin — that's the rewrite that moved the pivot from the parent to this joint.)
+                // R·T·S: θ_j is the OUTERMOST factor of L_j (world[j] = world[par]·R(θ_j)·T·S), so it
+                // pivots about world[par]'s origin (the PARENT's joint) and acts in the parent's linear
+                // frame A_p. (Under the old T·R·S the pivot was j's own joint = the attach point.)
                 Affine2 wp = par < 0 ? _solveRoot : _scratch.WorldOf(par);   // A_p: parent linear frame
-                Vector2 pivot = _scratch.WorldOf(j).Translation;            // j's own joint
+                Vector2 pivot = wp.Translation;                             // parent's joint = θ_j's pivot
                 Vector2 lev = Lever(wp, pivot, tip);                         // ∂tip/∂θ_j (exact; facing flip + scale)
                 float blend = _baseBlend[j];   // Π(1−w) over the active overlay slots masking j
                 jac[hRow * stride + (2 + j)] = sw * blend * lev.X;           // ∂H/∂Δθ_j
@@ -975,8 +973,8 @@ public sealed class CharacterAnimator
     }
 
     // The 2D rotation lever arm ∂p/∂θ for a joint whose rotation acts in the linear frame `wp`
-    // (its parent's world transform) and pivots about `pivot` (the joint's own world origin under
-    // T·R·S), evaluated at world point `p`. Exactly A·J·A⁻¹·(p − pivot) where A is wp's linear part
+    // (its parent's world transform) and pivots about `pivot` (under R·T·S, the parent's joint =
+    // wp.Translation), evaluated at world point `p`. Exactly A·J·A⁻¹·(p − pivot) where A is wp's linear part
     // and J the 90° rotation — correct under the facing-flip reflection and any scale/squash
     // (reduces to the bare perp(p − pivot) when A is a pure rotation). Returns 0 if wp is singular.
     private static Vector2 Lever(in Affine2 wp, Vector2 pivot, Vector2 p)

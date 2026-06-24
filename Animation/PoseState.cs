@@ -32,20 +32,20 @@ public static class PoseData
         return list;
     }
 
-    // Apply onto a pose (resets to bind first; bones absent from the list stay at
-    // bind). Rotation comes from the keyframe; translation and scale always come
-    // from the shared skeleton's bind — the rig is the single source of truth for
-    // proportions, so a rig edit shows in every clip.
+    // Apply onto a pose (resets to default first; bones absent from the list stay at
+    // their rest pose). Rotation comes from the keyframe; the bone's length (its local
+    // +X offset) comes from the shared skeleton — the rig is the single source of truth
+    // for proportions, so a rig edit shows in every clip.
     public static void Apply(List<PoseBoneEntry> bones, SkeletonPose pose)
     {
-        pose.SetToBind();
+        pose.SetToDefault();
         if (bones == null) return;
         foreach (var e in bones)
         {
             int i = pose.Skeleton.IndexOf(e.Bone);
             if (i < 0) continue;
-            var bind = pose.Skeleton.Bones[i].Bind;
-            pose.SetLocal(i, new BoneTransform(bind.Translation, e.Rotation, bind.Scale));
+            float length = pose.Skeleton.Bones[i].Length;
+            pose.SetLocal(i, new BoneTransform(Vector2.UnitX * length, e.Rotation, Vector2.One));
         }
     }
 }

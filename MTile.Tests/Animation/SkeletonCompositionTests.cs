@@ -10,7 +10,7 @@ public class SkeletonCompositionTests
 {
     private static SkeletonBoneRecord Knife() => new()
     {
-        Name = "knife", Parent = "arm_r_lower", Tx = 0.03f, Ty = -4.5f, Length = 0f,
+        Name = "knife", Parent = "arm_r_lower", Rotation = -1.5707964f, Length = 0f,
     };
 
     [Fact]

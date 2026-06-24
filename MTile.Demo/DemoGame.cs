@@ -54,7 +54,7 @@ public sealed class DemoGame : Game
     private int           _dragBone = -1, _hoverBone = -1;
     private int           _dragBar  = -1;     // keyframe bar being moved
     private bool          _dragPlayhead;
-    private enum EditMode { Rotate, Translate, Resize }
+    private enum EditMode { Rotate, Resize }
     private EditMode      _editMode = EditMode.Rotate;   // Tab cycles
     private bool          _playing;           // timeline playback
     private float         _playTime;          // seconds into playback
@@ -159,6 +159,12 @@ public sealed class DemoGame : Game
         Console.WriteLine($"Animation editor - states in: {_dir}");
         Console.WriteLine("Controls cheatsheet: MTile.Demo/CONTROLS.md");
         Console.WriteLine("Tab cycle edit mode | M+click mark | F flip | K sample | Space play | Del | [ ] dur | L loop | Ctrl-S | N new | C clone");
+        Console.WriteLine("Skeleton Bones");
+        for (int i = 0; i < _skeleton.Count; i++)
+        {
+            var b = _skeleton.Bones[i];
+            Console.WriteLine($"  {i}: {b.Name} (parent={b.Parent}, rot={b.Rotation:F2}, len={b.Length:F2})");
+        }
     }
 
     protected override void Update(GameTime gameTime)
@@ -193,7 +199,7 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.N)) NewAnimation();
         if (Pressed(kb, Keys.C)) CloneAnimation();
         if (Pressed(kb, Keys.K)) SampleKeyframe();
-        if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 3);
+        if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 2);
         if (Pressed(kb, Keys.F)) FlipAnimation();
         if (Pressed(kb, Keys.Space)) TogglePlay();
         if (Pressed(kb, Keys.Delete)) { if (_selectedAdd >= 0) RemoveSelectedAddition(); else DeleteActiveKeyframe(); }
@@ -305,73 +311,51 @@ public sealed class DemoGame : Game
     [System.Flags]
     private enum EditTouched { None = 0, Pose = 1, Rig = 2 }
 
-    // Edit-mode write split:
-    //   • Rotate    — pose only. Pivots the bone around its parent joint; the
-    //                 keyframe absorbs the rotation. The bind position is unchanged.
-    //   • Translate — rig only. Moves the joint in the parent frame; rewrites the
-    //                 bone's bind translation, which every keyframe re-reads via
-    //                 SetToBind(). No pose channel touched.
-    //   • Resize    — split. Same joint-move as Translate goes to the rig, AND the
-    //                 angle the move subtends rolls the pose rotation so the subtree
-    //                 visibly follows the cursor.
+    // Edit-mode write split (both drag the clicked joint toward the cursor):
+    //   • Rotate — pose only. Pivots the bone (and its subtree) about its joint; the
+    //              keyframe absorbs the rotation. The bone's rest length is unchanged.
+    //   • Resize — split. The angular part rolls the pose rotation (as in Rotate); the
+    //              radial part scales the bone's rest Length on the rig so its tip
+    //              reaches the cursor.
     private EditTouched EditBone(Affine2[] world, int bone, Vector2 mp)
     {
         int parent = _skeleton.Bones[bone].Parent;
-        Affine2 pw  = parent < 0 ? _root : world[parent];
+        if (parent < 0) return EditTouched.None;   // the root joint is whole-rig placement, not editable here
+
+        Vector2 pivot     = world[parent].Translation;          // parent's tip = this bone's joint
+        Vector2 boneVec   = world[bone].Translation - pivot;    // current bone direction (drawn in screen space)
+        Vector2 cursorVec = mp - pivot;
+
+        if (boneVec.LengthSquared() < 1e-4f || cursorVec.LengthSquared() < 1e-4f)
+            return EditTouched.None;
+
+        // The angular delta from where the bone currently points to the cursor. Common to
+        // both modes; self-stabilizing — once the bone tracks the cursor, next frame's δ ≈ 0.
+        // Since the pure-chain rig has no bind orientation, Local[bone].Rotation IS the
+        // parent-relative angle, so adding this delta points the bone straight at the cursor.
+        _pose.Local[bone].Rotation += SignedAngle(boneVec, cursorVec);
 
         if (_editMode == EditMode.Resize)
         {
-            // R*T splits the gesture cleanly: the angular delta to the cursor is the
-            // pose rotation change; the radial delta is the bind length change.
-            //   rotation roll  → pose   (matches the Rotate mode's contribution)
-            //   length scale   → rig    (|bind| is the bone's rest length)
-            // Joint lands at the cursor: R(θ+δ) × (oldBind × scale) traces out a
-            // direct line to mp in parent's frame.
-            Vector2 pivot     = pw.Translation;
-            Vector2 boneVec   = world[bone].Translation - pivot;
-            Vector2 cursorVec = mp - pivot;
-            if (boneVec.LengthSquared() < 1e-4f || cursorVec.LengthSquared() < 1e-4f)
-                return EditTouched.None;
-            _pose.Local[bone].Rotation += SignedAngle(boneVec, cursorVec);
+            // Radial part → rig: scale the bone's rest Length so its tip lands on the cursor.
+            // boneVec already carries the root scale, so the screen-space ratio is the
+            // length ratio. Mirror it into the pose (whose local +X offset is the length).
             float scale = cursorVec.Length() / boneVec.Length();
-            SetBoneBindTranslation(bone, _skeleton.Bones[bone].Bind.Translation * scale);
+            SetBoneLength(bone, _skeleton.Bones[bone].Length * scale);
             return EditTouched.Pose | EditTouched.Rig;
         }
-        if (_editMode == EditMode.Rotate && parent >= 0)
-        {
-            // Drag the clicked joint around its parent. Under the R*T composition,
-            // bone.Rotation orbits the joint around world[parent].Translation on its
-            // bind radius and drags the subtree along — siblings are unaffected
-            // because each sibling's translation is rotated by its own θ, not this
-            // one's. Self-stabilizing: after the edit the joint sits at the cursor's
-            // angle, so next frame's δ ≈ 0.
-            Vector2 pivot     = world[parent].Translation;
-            Vector2 boneVec   = world[bone].Translation - pivot;
-            Vector2 cursorVec = mp - pivot;
-            if (boneVec.LengthSquared() < 1e-4f || cursorVec.LengthSquared() < 1e-4f)
-                return EditTouched.None;
-            _pose.Local[bone].Rotation += SignedAngle(boneVec, cursorVec);
-            return EditTouched.Pose;
-        }
-        // Translate — pure rig edit. R|T|S: the joint sits at R(θ_pose)|t_bind in the
-        // parent frame, so the bind that puts the joint under the cursor is the cursor
-        // un-rotated by the bone's own pose rotation (skipping this made any bone with
-        // a nonzero keyframe rotation leap to the rotated cursor position).
-        SetBoneBindTranslation(bone,
-            Rotate(pw.Inverse().TransformPoint(mp), -_pose.Local[bone].Rotation));
-        return EditTouched.Rig;
+        return EditTouched.Pose;
     }
 
-    // Replace a bone's bind translation on the live rig, and mirror it into the
-    // working pose so the on-screen figure reflects the change immediately. Every
-    // other keyframe picks the new bind up on its next SetToBind() (i.e. the next
-    // time it's selected or sampled). Persisted on Ctrl-S via SaveAll().
-    private void SetBoneBindTranslation(int i, Vector2 t)
+    // Replace a bone's rest Length on the live rig, and mirror it into the working pose
+    // (whose local +X offset is the length) so the on-screen figure reflects the change
+    // immediately. Every other keyframe picks the new length up on its next SetToDefault()
+    // (i.e. the next time it's selected or sampled). Persisted on Ctrl-S via SaveAll().
+    private void SetBoneLength(int i, float length)
     {
         var old = _skeleton.Bones[i];
-        var newBind = new BoneTransform(t, old.Bind.Rotation, old.Bind.Scale);
-        _skeleton.Bones[i] = new Bone(old.Name, old.Parent, newBind, old.Length);
-        _pose.Local[i].Translation = t;
+        _skeleton.Bones[i] = new Bone(old.Name, old.Parent, old.Rotation, length);
+        _pose.Local[i].Translation = Vector2.UnitX * length;
 
         // Mirror into the backing store so the edit survives a recompose / save. A base
         // bone writes back to the base rig; a clip-local bone updates its ExtraBones
@@ -380,13 +364,12 @@ public sealed class DemoGame : Game
         if (bi >= 0)
         {
             var b = _baseSkeleton.Bones[bi];
-            _baseSkeleton.Bones[bi] = new Bone(b.Name, b.Parent,
-                new BoneTransform(t, b.Bind.Rotation, b.Bind.Scale), b.Length);
+            _baseSkeleton.Bones[bi] = new Bone(b.Name, b.Parent, b.Rotation, length);
         }
         else
         {
             var rec = Doc?.ExtraBones?.Find(r => r.Name == old.Name);
-            if (rec != null) { rec.Tx = t.X; rec.Ty = t.Y; }
+            if (rec != null) rec.Length = length;
         }
     }
 
@@ -399,11 +382,11 @@ public sealed class DemoGame : Game
     {
         var bindWorld = _skeleton.CreatePose().ComputeWorld(Affine2.Identity);
         _floorLocalY = 0f;
+        // Each bone's far end (and every joint) is exactly world[i].Translation under the R·T·S
+        // chain, so the sole is the lowest of those — no separate +Length tip term (that would
+        // overshoot a whole bone past the real silhouette).
         for (int i = 0; i < _skeleton.Count; i++)
-        {
             _floorLocalY = MathF.Max(_floorLocalY, bindWorld[i].Translation.Y);
-            _floorLocalY = MathF.Max(_floorLocalY, bindWorld[i].TransformPoint(new Vector2(_skeleton.Bones[i].Length, 0f)).Y);
-        }
     }
 
     // Rig placement in the editor: centered in the working area, scaled. Recomputed
@@ -736,11 +719,18 @@ public sealed class DemoGame : Game
         if (_skeleton.IndexOf(name) >= 0) name = UniqueBoneName(name);
         string parentName = _skeleton.Bones[parent].Name;
 
+        // Pure-chain placement: the new bone attaches at the parent's tip and is described
+        // by an angle + length. Convert the click (in the parent's local frame) into the
+        // rotation/length whose tip lands on the cursor — d is the click relative to the tip.
+        Vector2 d      = local - new Vector2(_skeleton.Bones[parent].Length, 0f);
+        float rotation = MathF.Atan2(d.Y, d.X);
+        float length   = d.Length();
+
         if (toBase || Doc == null)
         {
             int p = _baseSkeleton.IndexOf(parentName);
             if (p < 0) return;   // can't parent a base bone to a clip-local one
-            _baseSkeleton = _baseSkeleton.WithBone(name, p, new BoneTransform(local, 0f, Vector2.One), 0f);
+            _baseSkeleton = _baseSkeleton.WithBone(name, p, rotation, length);
             _skelDirty = true;
         }
         else
@@ -748,8 +738,7 @@ public sealed class DemoGame : Game
             Doc.ExtraBones ??= new List<SkeletonBoneRecord>();
             Doc.ExtraBones.Add(new SkeletonBoneRecord
             {
-                Name = name, Parent = parentName,
-                Tx = local.X, Ty = local.Y, Rotation = 0f, Sx = 1f, Sy = 1f, Length = 0f,
+                Name = name, Parent = parentName, Rotation = rotation, Length = length,
             });
             _dirty = true;
         }
@@ -906,7 +895,7 @@ public sealed class DemoGame : Game
     private static readonly (string Group, string Keys)[] HelpRows =
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
-        ("Edit",     "Tab mode (rotate/translate/resize)    drag joint    M+click contact    F flip"),
+        ("Edit",     "Tab mode (rotate/resize)    drag joint    M+click contact    F flip"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
         ("File",     "Ctrl-S save  (writes clips + rig)"),
@@ -968,10 +957,12 @@ public sealed class DemoGame : Game
 
     private int PickJoint(Affine2[] world, Vector2 mp)
     {
-        int best = -1; float bestD = PickR * PickR;
+        int best = -1; float bestD = PickR * PickR; 
         for (int i = 0; i < world.Length; i++)
         {
-            float d = Vector2.DistanceSquared(world[i].Translation, mp);
+            Vector2 endpoint = world[i].Translation;
+            // world[i].TransformPoint(Vector2.UnitX * _skeleton.Bones[i].Length);
+            float d = Vector2.DistanceSquared(endpoint, mp);
             if (d < bestD) { bestD = d; best = i; }
         }
         return best;
@@ -1022,7 +1013,7 @@ public sealed class DemoGame : Game
 
     private void SamplePose(float t)
     {
-        if (Doc == null) { _pose.SetToBind(); return; }
+        if (Doc == null) { _pose.SetToDefault(); return; }
         AnimationSampler.SampleNormalized(Doc, t, _kfA, _kfB, _pose);
     }
 

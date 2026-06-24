@@ -28,8 +28,7 @@ public static class SkeletonComposition
             if (r.Parent == null) continue;
             int parent = rig.IndexOf(r.Parent);
             if (parent < 0) continue;
-            var bind = r.ResolveBind(rig.Bones[parent].Length);
-            rig = rig.WithBone(r.Name, parent, bind, r.Length);
+            rig = rig.WithBone(r.Name, parent, r.Rotation, r.Length);
         }
         return rig;
     }

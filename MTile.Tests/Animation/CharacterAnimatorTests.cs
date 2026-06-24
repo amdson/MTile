@@ -294,7 +294,7 @@ public class CharacterAnimatorTests
         // Bind-relative: `rot` is a swing from the bone's rest orientation. The joint-chain rig
         // gives legs a non-zero bind rotation (≈π/2, pointing down), so a synthetic clip that
         // means "swing the thigh ±rot from vertical" must add it (was absolute under the old rig).
-        t.Rotation = skel.Bones[i].Bind.Rotation + rot;
+        t.Rotation = skel.Bones[i].Rotation + rot;
         p.SetLocal(i, t);
     }
 }

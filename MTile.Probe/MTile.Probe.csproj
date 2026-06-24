@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <AssemblyName>MTile.Probe</AssemblyName>
+    <RootNamespace>MTileProbe</RootNamespace>
+    <Nullable>disable</Nullable>
+    <MonoGamePlatform>DesktopGL</MonoGamePlatform>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Reuse the game library. MotionProbe / CharacterAnimator are pure managed math
+         (Vector2 / Affine2) — no GraphicsDevice — so this runs headless. -->
+    <ProjectReference Include="..\MTile.Core.csproj" />
+  </ItemGroup>
+</Project>

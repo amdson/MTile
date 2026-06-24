@@ -9,11 +9,7 @@
     {
       "Name": "knife",
       "Parent": "arm_r_lower",
-      "Tx": -4.547424,
-      "Ty": -0.025818387,
       "Rotation": -1.5707964,
-      "Sx": 1,
-      "Sy": 1,
       "Length": 0
     }
   ],

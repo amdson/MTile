@@ -9,11 +9,7 @@
     {
       "Name": "knife",
       "Parent": "arm_r_lower",
-      "Tx": -4.547424,
-      "Ty": -0.025818387,
       "Rotation": -1.5707964,
-      "Sx": 1,
-      "Sy": 1,
       "Length": 0
     }
   ],
@@ -31,7 +27,7 @@
         },
         {
           "Bone": "head",
-          "Rotation": -1.1920929e-07
+          "Rotation": -1.1920929E-07
         },
         {
           "Bone": "arm_l_upper",
@@ -92,7 +88,7 @@
         },
         {
           "Bone": "head",
-          "Rotation": 1.1920929e-07
+          "Rotation": 1.1920929E-07
         },
         {
           "Bone": "arm_l_upper",

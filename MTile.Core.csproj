@@ -15,6 +15,7 @@
     <Compile Remove="MTile.Web\**" />
     <Compile Remove="MTile.Rtc\**" />
     <Compile Remove="MTile.Demo\**" />
+    <Compile Remove="MTile.Probe\**" />
   </ItemGroup>
   <ItemGroup>
     <!-- The test project validates internal solver hooks (e.g. CharacterAnimator's analytic

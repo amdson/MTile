@@ -24,7 +24,7 @@ public readonly struct Affine2
 
     public static readonly Affine2 Identity = new(1f, 0f, 0f, 1f, 0f, 0f);
 
-    // Local bone transform composed as R * T * S (apply S, then T, then R). The
+    // Transform composed as R * T * S (apply S, then T, then R). The
     // outer R rotates the translation along with the linear part, so a bone's local
     // Rotation rotates its joint position around the parent — the standard skeletal-
     // animation convention. Under this composition, pose.Rotation literally means
@@ -80,13 +80,6 @@ public readonly struct Affine2
     public float Angle => MathF.Atan2(M21, M11);
 }
 
-// A single bone's *local* transform relative to its parent — the unit of a pose.
-// Kept as TRS (not a baked matrix) because that's what interpolates cleanly:
-// rotation must be angle-lerped, and squash/stretch lives in Scale. Convert to
-// Affine2 only when composing world transforms for drawing.
-//
-// NOTE: default(BoneTransform) has Scale (0,0). Always start from Identity or a
-// constructor so Scale defaults to (1,1).
 public struct BoneTransform
 {
     public Vector2 Translation;
@@ -103,15 +96,13 @@ public struct BoneTransform
 
     public static BoneTransform Identity => new(Vector2.Zero, 0f, Vector2.One);
 
-    // Local bone transform as T · R · S (apply S, then R, then T): the bone's joint sits at a
-    // FIXED point `Translation` in the parent's frame (its attach = the parent's tip), and
-    // Rotation pivots the bone + its subtree about that joint — the joint-chain convention.
-    // Translation is NOT rotated (contrast Affine2.FromTRS, R·T·S, still used for the root
-    // placement where Rotation is 0, so the two orderings coincide there).
+    // Local bone transform as R · T · S (apply S, then T, then R) 
     public Affine2 ToAffine()
     {
         float c = MathF.Cos(Rotation), s = MathF.Sin(Rotation);
-        return new Affine2(c * Scale.X, -s * Scale.Y, s * Scale.X, c * Scale.Y, Translation.X, Translation.Y);
+        float dx = Translation.X, dy = Translation.Y;
+        float rot_dx = c * dx - s * dy, rot_dy = s * dx + c * dy;
+        return new Affine2(c * Scale.X, -s * Scale.Y, s * Scale.X, c * Scale.Y, rot_dx, rot_dy);
     }
 
     // Per-component blend; rotation takes the shortest angular path.
@@ -120,7 +111,7 @@ public struct BoneTransform
             Vector2.Lerp(a.Translation, b.Translation, t),
             LerpAngle(a.Rotation, b.Rotation, t),
             Vector2.Lerp(a.Scale, b.Scale, t));
-
+            
     // Shortest-path angular interpolation (WrapAngle keeps the delta in [-pi, pi]).
     public static float LerpAngle(float a, float b, float t)
         => a + MathHelper.WrapAngle(b - a) * t;

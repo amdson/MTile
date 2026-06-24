@@ -109,7 +109,7 @@ public class AnimAdditionTests
     {
         var s = SkeletonExamples.Biped();
         int hand = s.IndexOf("arm_r_lower");
-        var s2 = s.WithBone("weapon", hand, new BoneTransform(new Vector2(5f, 0f), 0f, Vector2.One), 3f);
+        var s2 = s.WithBone("weapon", hand, 0f, 3f);
 
         Assert.Equal(s.Count + 1, s2.Count);
         int w = s2.IndexOf("weapon");

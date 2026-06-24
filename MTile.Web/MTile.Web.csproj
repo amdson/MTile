@@ -22,7 +22,7 @@
          from KNI's nkast.Xna.Framework. Simpler to compile twice than to
          multi-target the library. -->
     <Compile Include="..\**\*.cs"
-             Exclude="..\MTile.Tests\**;..\MTile.Desktop\**;..\MTile.Web\**;..\MTile.Rtc\**;..\MTile.Demo\**;..\**\obj\**;..\**\bin\**;..\.claude\**" />
+             Exclude="..\MTile.Tests\**;..\MTile.Desktop\**;..\MTile.Web\**;..\MTile.Rtc\**;..\MTile.Demo\**;..\MTile.Probe\**;..\**\obj\**;..\**\bin\**;..\.claude\**" />
   </ItemGroup>
 
   <ItemGroup>

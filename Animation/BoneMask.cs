@@ -4,6 +4,7 @@ namespace MTile;
 // Construction-time only (allocates the bool[]); callers cache the result — the
 // CharacterAnimator builds one mask per region at construction and indexes them
 // by (int)region per frame.
+
 public static class BoneMask
 {
     // bool[skeleton.Count]; true = bone owned by the region.
@@ -30,7 +31,7 @@ public static class BoneMask
             int parent = s.Bones[i].Parent;
             upper[i] = i == chest || (parent >= 0 && upper[parent]);
         }
-
+        
         bool want = region == AnimRegion.UpperBody;
         for (int i = 0; i < mask.Length; i++) mask[i] = upper[i] == want;
         return mask;

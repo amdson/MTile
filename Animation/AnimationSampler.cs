@@ -22,7 +22,7 @@ public static class AnimationSampler
                                         SkeletonPose a, SkeletonPose b, SkeletonPose dest)
     {
         var ks = doc?.Keyframes;
-        if (ks == null || ks.Count == 0) { dest.SetToBind(); return; }
+        if (ks == null || ks.Count == 0) { dest.SetToDefault(); return; }
         if (ks.Count == 1 || t <= ks[0].Time)    { PoseData.Apply(ks[0].Bones, dest); return; }
         if (t >= ks[ks.Count - 1].Time)           { PoseData.Apply(ks[ks.Count - 1].Bones, dest); return; }
 
@@ -109,7 +109,7 @@ public static class AnimationSampler
                                     SkeletonPose dest)
     {
         var ks = doc?.Keyframes;
-        if (ks == null || ks.Count == 0) { dest.SetToBind(); return; }
+        if (ks == null || ks.Count == 0) { dest.SetToDefault(); return; }
         if (ks.Count == 1 || t <= ks[0].Time)        { PoseData.Apply(ks[0].Bones, dest); return; }
         if (t >= ks[ks.Count - 1].Time)              { PoseData.Apply(ks[ks.Count - 1].Bones, dest); return; }
 

@@ -14,6 +14,7 @@ public sealed class SkeletonPose
 {
     public readonly Skeleton        Skeleton;
     public readonly BoneTransform[] Local;    // editable per-bone local transforms
+    // public readonly Affine2 Root = Affine2.Identity; // world placement of the whole skeleton (root bone is local to this)
     private readonly Affine2[]      _world;    // resolved by ComputeWorld
     private bool _worldValid;
 
@@ -22,16 +23,21 @@ public sealed class SkeletonPose
         Skeleton = skeleton ?? throw new ArgumentNullException(nameof(skeleton));
         Local  = new BoneTransform[skeleton.Count];
         _world = new Affine2[skeleton.Count];
-        SetToBind();
+        SetToDefault();
     }
 
     public int Count => Local.Length;
 
     // ---- pose setup / editing ------------------------------------------------
-
-    public void SetToBind()
+    // set to default theta from skeleton bone rotations
+    public void SetToDefault()
     {
-        for (int i = 0; i < Local.Length; i++) Local[i] = Skeleton.Bones[i].Bind;
+        for (int i = 0; i < Local.Length; i++)
+        {
+            float rotation = Skeleton.Bones[i].Rotation;
+            float length  = Skeleton.Bones[i].Length;
+            Local[i] = new BoneTransform(Vector2.UnitX*length, rotation, Vector2.One);
+        }
         _worldValid = false;
     }
 
