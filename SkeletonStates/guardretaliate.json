@@ -2,7 +2,7 @@
   "Name": "guardretaliate",
   "Type": "GuardRetaliateAction",
   "Skeleton": "biped",
-  "Duration": 0.14,
+  "Duration": 0.1,
   "Loop": true,
   "Region": "UpperBody",
   "ExtraBones": [
@@ -17,306 +17,96 @@
     {
       "Time": 0.0014084507,
       "Bones": [
-        {
-          "Bone": "hip",
-          "Rotation": 0
-        },
-        {
-          "Bone": "chest",
-          "Rotation": -1.4207963
-        },
-        {
-          "Bone": "head",
-          "Rotation": -1.1920929E-07
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 1.958549
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -0.90496296
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": -2.0808477
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -1.607152
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "knife",
-          "Rotation": -5.4657664
-        }
+        { "Bone": "hip", "Rotation": 0 },
+        { "Bone": "chest", "Rotation": -1.5 },
+        { "Bone": "head", "Rotation": 0 },
+        { "Bone": "arm_l_upper", "Rotation": 2.2 },
+        { "Bone": "arm_l_lower", "Rotation": -0.9 },
+        { "Bone": "arm_r_upper", "Rotation": 1.88 },
+        { "Bone": "arm_r_lower", "Rotation": -1.86 },
+        { "Bone": "leg_l_upper", "Rotation": 1.18 },
+        { "Bone": "leg_l_lower", "Rotation": 0.62 },
+        { "Bone": "foot_l", "Rotation": -1.3258 },
+        { "Bone": "leg_r_upper", "Rotation": 1.62 },
+        { "Bone": "leg_r_lower", "Rotation": 0.2 },
+        { "Bone": "foot_r", "Rotation": -1.3258 },
+        { "Bone": "knife", "Rotation": -1.5707964 }
       ]
     },
     {
-      "Time": 0.29859155,
+      "Time": 0.2,
       "Bones": [
-        {
-          "Bone": "hip",
-          "Rotation": 0
-        },
-        {
-          "Bone": "chest",
-          "Rotation": -1.2610945
-        },
-        {
-          "Bone": "head",
-          "Rotation": 1.1920929E-07
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 2.0299492
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -0.8582437
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": -1.846008
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -0.8458295
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "knife",
-          "Rotation": -5.55266
-        }
+        { "Bone": "hip", "Rotation": 0 },
+        { "Bone": "chest", "Rotation": -1.45 },
+        { "Bone": "head", "Rotation": 0 },
+        { "Bone": "arm_l_upper", "Rotation": 2.2 },
+        { "Bone": "arm_l_lower", "Rotation": -0.9 },
+        { "Bone": "arm_r_upper", "Rotation": 1.66 },
+        { "Bone": "arm_r_lower", "Rotation": -2.1 },
+        { "Bone": "leg_l_upper", "Rotation": 1.18 },
+        { "Bone": "leg_l_lower", "Rotation": 0.62 },
+        { "Bone": "foot_l", "Rotation": -1.3258 },
+        { "Bone": "leg_r_upper", "Rotation": 1.62 },
+        { "Bone": "leg_r_lower", "Rotation": 0.2 },
+        { "Bone": "foot_r", "Rotation": -1.3258 },
+        { "Bone": "knife", "Rotation": -1.5707964 }
       ]
     },
     {
-      "Time": 0.52394366,
+      "Time": 0.45,
       "Bones": [
-        {
-          "Bone": "hip",
-          "Rotation": 0
-        },
-        {
-          "Bone": "chest",
-          "Rotation": -1.0760709
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 2.222334
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -0.7323615
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": -2.9951444
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -0.9868665
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "knife",
-          "Rotation": -5.3692627
-        }
+        { "Bone": "hip", "Rotation": 0 },
+        { "Bone": "chest", "Rotation": -1.1 },
+        { "Bone": "head", "Rotation": 0 },
+        { "Bone": "arm_l_upper", "Rotation": 2.2 },
+        { "Bone": "arm_l_lower", "Rotation": -0.9 },
+        { "Bone": "arm_r_upper", "Rotation": 1.82 },
+        { "Bone": "arm_r_lower", "Rotation": -0.64 },
+        { "Bone": "leg_l_upper", "Rotation": 1.18 },
+        { "Bone": "leg_l_lower", "Rotation": 0.62 },
+        { "Bone": "foot_l", "Rotation": -1.3258 },
+        { "Bone": "leg_r_upper", "Rotation": 1.62 },
+        { "Bone": "leg_r_lower", "Rotation": 0.2 },
+        { "Bone": "foot_r", "Rotation": -1.3258 },
+        { "Bone": "knife", "Rotation": -1.5707964 }
       ]
     },
     {
-      "Time": 0.73802817,
+      "Time": 0.7,
       "Bones": [
-        {
-          "Bone": "hip",
-          "Rotation": 0
-        },
-        {
-          "Bone": "chest",
-          "Rotation": -1.4303328
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 2.2223344
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -0.7323616
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": -2.8494601
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -1.0736904
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "knife",
-          "Rotation": -5.78679
-        }
+        { "Bone": "hip", "Rotation": 0 },
+        { "Bone": "chest", "Rotation": -1.35 },
+        { "Bone": "head", "Rotation": 0 },
+        { "Bone": "arm_l_upper", "Rotation": 2.2 },
+        { "Bone": "arm_l_lower", "Rotation": -0.9 },
+        { "Bone": "arm_r_upper", "Rotation": 1.84 },
+        { "Bone": "arm_r_lower", "Rotation": -1.58 },
+        { "Bone": "leg_l_upper", "Rotation": 1.18 },
+        { "Bone": "leg_l_lower", "Rotation": 0.62 },
+        { "Bone": "foot_l", "Rotation": -1.3258 },
+        { "Bone": "leg_r_upper", "Rotation": 1.62 },
+        { "Bone": "leg_r_lower", "Rotation": 0.2 },
+        { "Bone": "foot_r", "Rotation": -1.3258 },
+        { "Bone": "knife", "Rotation": -1.5707964 }
       ]
     },
     {
       "Time": 1,
       "Bones": [
-        {
-          "Bone": "hip",
-          "Rotation": 0
-        },
-        {
-          "Bone": "chest",
-          "Rotation": -1.4303327
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 2.222334
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -0.7323615
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": -1.9249463
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -2.33429
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 1.4
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.35
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
-        },
-        {
-          "Bone": "knife",
-          "Rotation": -5.78679
-        }
+        { "Bone": "hip", "Rotation": 0 },
+        { "Bone": "chest", "Rotation": -1.5 },
+        { "Bone": "head", "Rotation": 0 },
+        { "Bone": "arm_l_upper", "Rotation": 2.2 },
+        { "Bone": "arm_l_lower", "Rotation": -0.9 },
+        { "Bone": "arm_r_upper", "Rotation": 1.88 },
+        { "Bone": "arm_r_lower", "Rotation": -1.86 },
+        { "Bone": "leg_l_upper", "Rotation": 1.18 },
+        { "Bone": "leg_l_lower", "Rotation": 0.62 },
+        { "Bone": "foot_l", "Rotation": -1.3258 },
+        { "Bone": "leg_r_upper", "Rotation": 1.62 },
+        { "Bone": "leg_r_lower", "Rotation": 0.2 },
+        { "Bone": "foot_r", "Rotation": -1.3258 },
+        { "Bone": "knife", "Rotation": -1.5707964 }
       ]
     }
   ]
