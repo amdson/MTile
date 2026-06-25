@@ -19,8 +19,12 @@ public sealed partial class CharacterAnimator
     // The one reusable gradient primitive (§11.2): the sensitivity of a world point `p` on
     // bone `b` to the solve variables, written into colX[v]/colY[v] (x/y component of ∂p/∂x_v).
     // Every geometric constraint's Jacobian is (∂r/∂p)·this. Covers the FK-driven channels:
-    //   ∂p/∂Δθ_j = baseBlend_j · Lever(j, p)        for each ancestor j of b
+    //   ∂p/∂Δθ_j = Lever(j, p)                       for each ancestor j of b
     //   ∂p/∂Δφ   = Σ_j baseBlend_j · ω_j · Lever(j, p)
+    // Δθ is applied to the COMPOSED pose (BuildSolvePose), so its lever is UNATTENUATED — an
+    // overlay-owned bone (a vault hand) still bends under a pin. Δφ moves the BASE clip, which the
+    // overlay attenuates per bone, so it keeps the baseBlend_j = Π(1−w) factor. (No overlay ⇒
+    // baseBlend_j = 1 ⇒ the two channels coincide, so locomotion is unchanged.)
     // δ (IdxDy) does NOT move p in the current model — it is a residual-side vertical shift
     // (tip.Y + δ), so colX/Y[IdxDy] stay 0 and the constraints that use δ add that column
     // themselves. Requires _scratch's world buffer + _angVel current (BuildSolvePose +
@@ -38,9 +42,9 @@ public sealed partial class CharacterAnimator
             Affine2 wp = par < 0 ? _solveRoot : _scratch.WorldOf(par);   // A_p: parent linear frame
             Vector2 lev = Lever(wp, wp.Translation, p);                   // ∂p/∂θ_j (exact; facing flip + scale)
             float blend = _baseBlend[j];   // Π(1−w) over the active overlay slots masking j
-            colX[IdxTheta0 + j] = blend * lev.X;                          // ∂p/∂Δθ_j
-            colY[IdxTheta0 + j] = blend * lev.Y;
-            dphiX += blend * _angVel[j] * lev.X;                          // ∂p/∂Δφ accumulation
+            colX[IdxTheta0 + j] = lev.X;                                  // ∂p/∂Δθ_j (post-compose → unattenuated)
+            colY[IdxTheta0 + j] = lev.Y;
+            dphiX += blend * _angVel[j] * lev.X;                          // ∂p/∂Δφ (base clip, overlay-attenuated)
             dphiY += blend * _angVel[j] * lev.Y;
         }
         colX[IdxPhi] = dphiX; colY[IdxPhi] = dphiY;

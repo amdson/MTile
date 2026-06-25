@@ -593,6 +593,7 @@ public sealed partial class CharacterAnimator
                 int b = _skeleton.IndexOf(pin.Bone);
                 if (b >= 0) _pins.Add((b, pin.Target));
             }
+        ResolveMovementPins(in s);
         _surfaces.Clear();
         if (s.Surfaces != null)
             foreach (var srf in s.Surfaces)
@@ -673,14 +674,6 @@ public sealed partial class CharacterAnimator
             AnimationSampler.SampleSmooth(anim, AnimationSampler.NormalizedTime(anim, _state.ClipTime),
                                           _kfA, _kfB, _kfC, _kfD, _target);
 
-        // Apply the solver's per-bone angle corrections onto the authored base pose
-        // (the "base_pose(x*)" the plan emits). The solve sampled the same phase, so the
-        // corrections line up; while only the Tikhonov prior touches Δθ they're ≈ 0 and
-        // this is a no-op — it wires the IK channel through for the constraint phases.
-        if (_haveCorr)
-            for (int i = 0; i < _skeleton.Count; i++)
-                _target.Local[i].Rotation += _solveVars[2 + i];
-
         // 3.5 Paint the resolved action overlay onto the base pose (Phase 4 motion layer).
         //     The overlay was resolved in step 1.5 — bound clip, sampled _actionPose at its
         //     pinned τ, eased ActionWeight, per-bone opacity _overlayWeight — and composed
@@ -689,6 +682,14 @@ public sealed partial class CharacterAnimator
         //     deltas stay continuous in the weight (run-slash keeps its lean; landing
         //     mid-air-slash still squashes).
         ComposeOverlays(_target);
+
+        // Apply the solver's per-bone angle corrections onto the COMPOSED pose (matching
+        // BuildSolvePose's order, so the drawn skeleton is the one the solver optimized). Δθ
+        // post-compose means a pin can bend an overlay-owned bone (the vault hand). While only
+        // the Tikhonov prior touches Δθ they're ≈ 0 and this is a no-op.
+        if (_haveCorr)
+            for (int i = 0; i < _skeleton.Count; i++)
+                _target.Local[i].Rotation += _solveVars[2 + i];
 
         // 3b. Directional lean for locomotion — applied on top of the base pose
         //     (authored OR procedural) so forward/backpedal read distinctly: lean
@@ -825,8 +826,9 @@ public sealed partial class CharacterAnimator
         if (s.MovementState != null && s.MovementState.Contains("Parkour")) return AnimClip.Vault;
         if (s.MovementState != null && s.MovementState.Contains("Crouch")) return AnimClip.Crouch;
         // Wall cling/slide (WallSlidingState): airborne but pinned to a wall, so it must
-        // win over the generic Vy → Jump/Fall below. Facing holds its last grounded value
-        // = the wall direction (you run into the wall), so the rig faces the wall (+X).
+        // win over the generic Vy → Jump/Fall below. WallSlidingState pins Facing = wallDir for
+        // the whole slide, so the rig reliably faces the wall (+X) — and the no-penetration
+        // half-plane (CharacterAnimSample.From) sits on that same +X side.
         if (s.MovementState != null && s.MovementState.Contains("WallSlid")) return AnimClip.WallSlide;
         // LedgeGrab pins the body with a spring + damper; the resulting Vy oscillates
         // sign every frame as it rings down (e.g. −30, 0, −20, 0, ...). The generic
@@ -1082,9 +1084,12 @@ public sealed partial class CharacterAnimator
     private void BuildSolvePose(ReadOnlySpan<float> x)
     {
         AnimationSampler.SampleSmooth(_solveClip, Wrap01(_solvePhi + x[0]), _kfA, _kfB, _kfC, _kfD, _scratch);
+        ComposeOverlays(_scratch);                                                // overlay first (linear)
         int bones = _skeleton.Count;
-        for (int i = 0; i < bones; i++) _scratch.Local[i].Rotation += x[2 + i];   // Δθ corrections
-        ComposeOverlays(_scratch);                                                // post-blend (linear)
+        // Δθ is applied onto the COMPOSED pose, not the base — so the IK correction survives an
+        // overlay that fully owns a bone (a vault hand owned by the VaultHands overlay). Pre-compose
+        // Δθ would be overwritten by PaintMotionLayer's lerp and the pin couldn't bend that limb.
+        for (int i = 0; i < bones; i++) _scratch.Local[i].Rotation += x[2 + i];   // post-compose IK
         _scratch.ComputeWorld(_solveRoot);
     }
 
@@ -1204,6 +1209,28 @@ public sealed partial class CharacterAnimator
         if (s.MovementState != null && s.MovementState.Contains("Parkour")
             && _actionClips.TryGetValue("VaultHands", out var hands))
             dst.Add(("VaultHands", hands, MathHelper.Clamp(s.MovementProgress, 0f, 1f)));
+    }
+
+    // Animation-side policy for FIXED-POINT pins a MovementState contributes (the geometric
+    // counterpart of ResolveMovementOverlays): the sample carries the grip TARGET (geometry),
+    // and this owns which BONE pins to it and WHEN. Adds to _pins, respecting the MaxPins cap.
+    private const string VaultGripBone  = "arm_l_lower";   // the lead reaching hand the VaultHands clip drives
+    private const float  VaultGripStart = 0.45f;           // engage once the clip hand is near the corner…
+    private const float  VaultGripEnd   = 0.85f;           // …release before the push-off over the top
+    private void ResolveMovementPins(in CharacterAnimSample s)
+    {
+        // Vault: pin the lead hand to the ledge corner over the GRAB WINDOW. Before the window the
+        // hand swings up via the clip; a both-axis hard pin from progress 0 would snap it to the
+        // corner. Gating where the clip already brings the hand near the corner keeps the lock
+        // smooth (a small Δθ correction). The pinned hand is owned solely by the VaultHands overlay
+        // slot — the plan invariant — so its post-compose Δθ bends it freely onto the corner.
+        if (_pins.Count < MaxPins && s.HasGrip
+            && s.MovementState != null && s.MovementState.Contains("Parkour")
+            && s.MovementProgress >= VaultGripStart && s.MovementProgress <= VaultGripEnd)
+        {
+            int b = _skeleton.IndexOf(VaultGripBone);
+            if (b >= 0) _pins.Add((b, s.GripTarget));
+        }
     }
 
     private void Rot(int bone, float delta)       { if (bone >= 0) _target.Local[bone].Rotation    += delta; }

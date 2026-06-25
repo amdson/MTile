@@ -257,7 +257,15 @@ public class WallSlidingState : MovementState
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-        => EnsureContacts(ctx);
+    {
+        EnsureContacts(ctx);
+        // Face the wall while clinging. Facing is otherwise only refreshed while grounded
+        // (PlayerCharacter.Update), so airborne it holds the last-grounded value — which can
+        // point AWAY from the wall, leaving the rig facing outward. Entering a wall-slide always
+        // means pressing into the wall (CheckConditions), so facing the wall direction matches
+        // the held input. Snapshot-safe sim state (PlayerAbilityState.Facing).
+        abilities.Facing = _wallDir;
+    }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
@@ -288,6 +296,7 @@ public class WallSlidingState : MovementState
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         EnsureContacts(ctx);
+        abilities.Facing = _wallDir;   // hold the rig facing the wall for the whole slide
 
         if (ctx.TryGetWall(_wallDir, out var refreshed))
         {
@@ -358,6 +367,10 @@ public class WallJumpingState : MovementState
 
         int dirAwayFromWall = _wallDir == 1 ? -1 : 1;
         ctx.Body.Velocity = new Vector2(dirAwayFromWall * MovementConfig.Current.WallJumpInitialVelX, MovementConfig.Current.WallJumpInitialVelY);
+        // Turn to face the launch direction. A wall-slide leaves Facing pointed at the wall
+        // (WallSlidingState), so without this the rig would moonwalk — drift away while still
+        // facing the wall — through the airborne jump until it next lands.
+        abilities.Facing = dirAwayFromWall;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -669,6 +682,15 @@ public class ParkourState : MovementState
     // where the maneuver began toward the ledge corner. Input-driven (a held climb advances it),
     // not a clock — exactly what the overlay's clip time needs. 0 for the duck-under-only case.
     public override float AnimationProgress => _vaultProgress;
+
+    // The ledge corner the lead hand grips during a vault (the over-ramp's corner). The animation
+    // layer pins a hand to it over the grab window (gated by AnimationProgress) so the hand lands
+    // on the actual edge, not an approximate clip pose. Null for a duck-under (no over-ramp/reach).
+    public override bool TryAnimationGrip(out Vector2 target)
+    {
+        if (_overRamp != null) { target = _overRamp.Corner; return true; }
+        target = default; return false;
+    }
 
     public override void ResetTransient() { _overRamp = null; _underRamp = null; _vaultProgress = 0f; }
     // _entrySpeed (preserved entry speed) now lives in MovementVars.EntrySpeed.

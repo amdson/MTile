@@ -49,6 +49,13 @@ public abstract class MovementState
     // can't be timed off ActionTime. Default 0 (states with no natural progress). Render-only:
     // the sim never reads it; it is derived from deterministic body/world data each Update.
     public virtual float AnimationProgress => 0f;
+
+    // A world point a limb should GRIP during a guided maneuver — the ledge corner a vault hand
+    // reaches for. The animation layer turns this into a FixedPoint pin (which bone is animation
+    // policy, see CharacterAnimator) so the hand lands exactly on the feature instead of just
+    // playing an approximate canned reach. Default none. Render-only, same contract as
+    // AnimationProgress: derived from deterministic body/world data, the sim never reads it.
+    public virtual bool TryAnimationGrip(out Vector2 target) { target = default; return false; }
 }
 
 // Heavy-hit lock-out. Preempts Standing/Crouched/WallSliding/Falling so the

@@ -63,17 +63,22 @@ public readonly struct CharacterAnimSample
     // rig's limbs on the free side. Host-supplied from already-resolved surfaces (wall-slide
     // wall, ground); only read by the solver path, so zero-cost when the solver is off.
     public readonly SolverSurface[] Surfaces;
+    // A world point a limb should grip during a guided maneuver (a vault's ledge corner), from
+    // CurrentState.TryAnimationGrip. The animator decides WHICH bone pins to it (naming is
+    // animation policy) and WHEN (gated by MovementProgress). HasGrip false ⇒ GripTarget unused.
+    public readonly bool    HasGrip;
+    public readonly Vector2 GripTarget;
 
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
         string movementState, string action, float dt, float actionTime = 0f,
         float actionDuration = 0f, float movementProgress = 0f, ExternalPin[] pins = null,
-        SolverSurface[] surfaces = null)
+        SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
         ActionDuration = actionDuration; MovementProgress = movementProgress; Pins = pins;
-        Surfaces = surfaces;
+        Surfaces = surfaces; HasGrip = hasGrip; GripTarget = gripTarget;
     }
 
     // Pull the sample from a live character through its public surface only. The
@@ -97,11 +102,16 @@ public readonly struct CharacterAnimSample
             surfaces = new[] { new SolverSurface(wallPoint, wallNormal, 1.5f) };
         }
 
+        // A guided maneuver may expose a grip target (the vault ledge corner) — geometry only;
+        // the animator turns it into a hand pin. Render-only, same as AnimationProgress.
+        bool hasGrip = false; Vector2 gripTarget = default;
+        if (p.CurrentState != null) hasGrip = p.CurrentState.TryAnimationGrip(out gripTarget);
+
         return new(pos, p.Body.Velocity, facing, p.IsGrounded,
                state, p.CurrentActionName, dt,
                p.CurrentActionVars.TimeInState,
                p.CurrentAction?.OverlayDuration ?? 0f,
                p.CurrentState?.AnimationProgress ?? 0f,
-               surfaces: surfaces);
+               surfaces: surfaces, hasGrip: hasGrip, gripTarget: gripTarget);
     }
 }

@@ -553,6 +553,23 @@ PointJacobian(b, q)`. The full local-SDF version (§4.5, arbitrary terrain) is a
    Test `NoPenetrationSolverTests`: off-locomotion solve runs, the wall pushes the hand ~2px out
    of the solid via a bounded arm Δθ, and the new block's Jacobian is exact. `TierNoPen` is in
    `anim_solver_config.json` (defaults to the hard tier, 10).
+3.5. **Δθ-post-compose + vault GRIP PINS — DONE.** The payoff of Phase 2 (FixedPoint) + Phase 3
+   (off-locomotion trigger): a parkour vault's lead hand pins to the ledge corner so it lands on
+   the real edge, not an approximate canned reach. ENABLING CHANGE: Δθ is now applied to the
+   COMPOSED pose (after `ComposeOverlays`), not the base — because the vault hand is owned by the
+   `VaultHands` OVERLAY (slot 1) at weight≈1, and pre-compose Δθ was overwritten by the overlay's
+   lerp, so a pin couldn't bend an overlay-owned limb. Consequently `PointJacobianColumns` drops
+   the `baseBlend` factor on the Δθ columns (unattenuated — Δθ corrects the final pose) while Δφ
+   KEEPS it (it moves the base clip, which the overlay attenuates). Behaviour-preserving where
+   Δθ≈0 and on no-overlay locomotion (baseBlend=1 ⇒ the two channels coincide) — full suite green.
+   PLUMBING: `MovementState.TryAnimationGrip(out target)` (render-only virtual, like
+   `AnimationProgress`) → `ParkourState` returns `_overRamp.Corner`; rides `CharacterAnimSample`
+   `{HasGrip, GripTarget}` (geometry only); the animator's `ResolveMovementPins` owns the bone
+   (`arm_l_lower`, the hand `VaultHands` drives) and the GRAB WINDOW (`MovementProgress ∈
+   [0.45, 0.85]` — engage once the clip hand is near the corner so the lock is a small Δθ; release
+   before push-off). Test `VaultGripSolverTests`: the overlay-owned hand reaches the corner
+   (reach <0.05px) via a bounded arm Δθ with the torso steady, and the analytic Jacobian is exact
+   WITH an overlay active (jacErr ≈ 1e-4 — a case the locomotion FD-vs-analytic test never hit).
 4. **(later)** d.x + horizontal ComOffset · local-SDF NoPenetration (arbitrary terrain, §4.5) ·
    JointLimits · wire NoPenetration surfaces for ground/ledge beyond the wall-slide wall.
 
