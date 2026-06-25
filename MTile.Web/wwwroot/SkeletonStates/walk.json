@@ -67,6 +67,16 @@
           "Weight": 1,
           "Source": "SelfPlant"
         }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -13.793827,
+          "Dx": 0,
+          "Dy": 0
+        }
       ]
     },
     {
@@ -130,6 +140,16 @@
           "Node": "foot_l",
           "Weight": 1,
           "Source": "SelfPlant"
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -13.793827,
+          "Dx": 0,
+          "Dy": 0
         }
       ]
     },
@@ -195,6 +215,16 @@
           "Weight": 1,
           "Source": "SelfPlant"
         }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -13.793827,
+          "Dx": 0,
+          "Dy": 0
+        }
       ]
     },
     {
@@ -259,6 +289,16 @@
           "Weight": 1,
           "Source": "SelfPlant"
         }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -13.793827,
+          "Dx": 0,
+          "Dy": 0
+        }
       ]
     },
     {
@@ -322,6 +362,16 @@
           "Node": "foot_l",
           "Weight": 1,
           "Source": "SelfPlant"
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -13.793827,
+          "Dx": 0,
+          "Dy": 0
         }
       ]
     }

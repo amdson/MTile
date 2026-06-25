@@ -126,8 +126,11 @@ derivative-free (`GoldenSection`). Two acceptable fixes, pick one early:
 - **C1 sampling**: interpolate keyframe angles with Catmull–Rom instead of linear, so
   `clipAngle′` is continuous. Cleaner gradients; mild change to the sampler, no re-authoring.
 
-Recommendation: ship with the trust-region clamp (no data change), add C1 sampling later if
-the cadence still feels notchy.
+Recommendation (original): ship the trust-region clamp first. **UPDATE — SHIPPED THE C1
+SAMPLING instead** (`AnimationSampler.SampleSmooth` + `SampleAngularVelocity`, non-uniform
+Catmull-Rom; see §5 Phase-5 follow-up): ω is now continuous, so the analytic Jacobian is exact
+across keyframe boundaries and no trust-region clamp is needed. The runtime samples this
+spline everywhere; only the **editor** still samples linearly (a WYSIWYG gap, not a solver one).
 
 ---
 
@@ -399,10 +402,12 @@ implementations, `AnimEnv`, `PoseSolver` (variable layout, residual+Jacobian ass
    the ±h step straddles a boundary, since there acceleration jumps (C1, not C2) make the FD
    *oracle* unreliable though the analytic stays exact. NOTE: the editor still samples linearly
    (`SampleNormalized` unchanged) — a WYSIWYG gap to close if it matters.
-6. **FixedPoint** (External contacts) for ledge/vault hand pins.
-7. **Env + NoPenetration.** Extend the sample to carry local tiles, build the per-frame local
-   SDF, add the limb no-penetration constraint. Heaviest phase; do last.
-8. **JointLimits**, polish, C1 sampling if needed.
+6. **FixedPoint** (External contacts) for ledge/vault hand pins. — **DONE** (§11.6 Phase 2).
+7. **Env + NoPenetration.** — **v1 DONE** (§11.6 Phase 3): HALF-PLANE no-penetration from
+   already-resolved surfaces on the sample (`SolverSurface`), wall-slide wall wired. STILL TO DO:
+   the general version — carry local tiles, build the per-frame local SDF, no-penetration vs
+   arbitrary terrain. Heaviest piece; last.
+8. **JointLimits**, polish. (C1 Catmull-Rom sampling already shipped — §5 follow-up; not pending.)
 
 ---
 
@@ -426,12 +431,14 @@ Mirror `MTile.Tests/Animation/CharacterAnimatorTests` — headless, deterministi
    (uniform, per the notes) vs simply *pinned* (`τ = ActionTime/Duration`, not a DOF)? Pinned
    is simpler and exact; constrained is more uniform. Leaning pinned for v1.
 2. **`Δθ` scope**: all bones, or only an IK-relevant subset (legs/feet/arms) to shrink the
-   system and keep the torso glued to the authored blend?
-3. **Keyframe kink**: trust-region clamp (no data change) vs C1 Catmull-Rom sampling. Leaning
-   clamp first.
-4. **rigCoM definition**: authored `"com"` point vs computed bone-mass centroid?
+   system and keep the torso glued to the authored blend? — **RESOLVED: all bones** (the
+   Tikhonov prior + JᵀJ decoupling already pin untouched bones to 0; see §2 Phase 2, §11.1).
+3. **Keyframe kink**: trust-region clamp (no data change) vs C1 Catmull-Rom sampling. —
+   **RESOLVED: C1 sampling, done** (§5 follow-up).
+4. **rigCoM definition**: authored `"com"` point vs computed bone-mass centroid? — **RESOLVED:
+   authored `"com"` point** (§4.4; every clip now carries one — see project COM-anchor notes).
 5. **Constraint weights**: a small named tier system (hard ≫ soft ≫ prior) — agree the tiers
-   up front so tuning is legible.
+   up front so tuning is legible. — **RESOLVED: named tiers in §11.4.**
 
 ---
 
@@ -445,4 +452,110 @@ Mirror `MTile.Tests/Animation/CharacterAnimatorTests` — headless, deterministi
   against it.
 - **Scope/refactor size**: the phases are ordered so each is independently shippable behind a
   flag and A/B-comparable to the current animator, so we never have a long red period.
+
+---
+
+## 11. Composite-constraint refactor — concrete plan (decisions locked 2026-06-24)
+
+The "big change": finish the solver by (a) making the **Δθ** and **d** channels *load-bearing*
+under real constraints, and (b) replacing the two monolithic `CadenceResiduals` /
+`CadenceJacobian` methods with a **composable constraint library**. (a) is the two extra
+variable-sets — "deviation of the skeleton from the com point" (= `d`) and "deviation of the
+skeleton angles from the cadence pose" (= `Δθ`); (b) is the "composite of sub-functions +
+better gradient machinery". Both channels already EXIST in `x` with exact analytic Jacobian
+columns — today they're just inert (only the Tikhonov prior touches Δθ; δ is the only live `d`
+component). This phase gives them constraints that demand them and a library to express those.
+
+### 11.1 Variable layout
+`x = [Δφ, d.y, Δθ_0 … Δθ_{N-1}]` — unchanged from today (δ ≡ d.y). **d.x is DEFERRED**
+(decision): the fixed-point / no-penetration goals are met by Δθ + the vertical δ, and a free
+d.x reintroduces the d.x↔Δφ no-slip redundancy (§3 Phase 3) that stalls the leg cycle. Add d.x
++ a strong horizontal ComOffset only when a whole-body horizontal shift is needed (lean,
+wall push-off).
+
+### 11.2 The one gradient primitive (the "better gradient machinery")
+Factor the ancestor-walk currently inlined in `CadenceJacobian` into a reusable routine — the
+sensitivity of a world point `p` on bone `b` to the solve vars:
 ```
+PointJacobian(bone b, world point p) :
+    ∂p/∂Δθ_j = baseBlend_j · Lever(j, p)         (each ancestor j of b; 0 otherwise)
+    ∂p/∂Δφ   = Σ_j baseBlend_j · ω_j · Lever(j, p)
+    ∂p/∂d.y  = (0, 1)
+```
+Every geometric constraint is a function of world points, so its Jacobian factors by the chain
+rule as `(∂r/∂p) · PointJacobian(b, p)`: NoSlip = the x-row; FixedPoint = both rows;
+NoPenetration = `−n·(…)` (half-plane normal) / `−∇sdf·(…)`; ComOffset = `∂rigCoM/∂x`. No
+constraint re-derives FK gradients. `Lever()` + `SampleAngularVelocity` (ω) stay as the shared
+kernels they already are.
+
+### 11.3 Constraint API (decision: IConstraint instances)
+```
+interface IConstraint {
+    int  PrepareRows(...);                         // stable count for THIS solve (frozen before Minimize)
+    void Residuals(in SolveCtx, Span<float> r);
+    void Jacobian (in SolveCtx, Span<float> jac, int stride, int rowBase);
+}
+```
+Preallocated, mutated per frame (same lifecycle as today's `_contacts` → zero per-frame alloc,
+KNI/WASM-clean). Orchestrator per solve: one shared `BuildSolvePose(x)` → expose the world
+buffer + `baseBlend` + `ω` via a `SolveCtx` → walk the constraint list to assemble the m×n
+system. `LeastSquaresSolver` is untouched. Inequality constraints (NoPenetration) freeze their
+*active* row set in `PrepareRows` (before `Minimize`) to honor the stable-row-count contract.
+Today's `CadenceResiduals`/`CadenceJacobian` become the assembly loop over the list.
+
+### 11.4 Weight tiers (resolves §9.5)
+Named tiers, rescaled so a hard pin beats the priors (today INVERTED: NoSlip=1 < PosePrior=25,
+fine while Δφ carries cadence but fatal once a hard constraint needs Δθ):
+`HARD ~1e3 (FixedPoint, active NoPenetration) ≫ CONTACT ~1 (NoSlip, ground) ≫ SOFT ~0.05
+(ComOffset) ≫ PRIOR ~λ (Tikhonov, JointLimits)`.
+
+### 11.5 NoPenetration v1 (decision: half-planes from known contacts)
+v1 emits one-sided HALF-PLANE residuals from surfaces the movement layer ALREADY resolved
+(wall-slide wall normal+pos via `EnvironmentContext`/`WallSlidingState`; the ground line). The
+only plumbing is passing those few already-computed surfaces onto `CharacterAnimSample` (a
+handful of scalars/vectors) — NOT the `ChunkMap`/local-SDF geometry the general version needs.
+For a few sample points `q` along each limb segment:
+`r = √w · max(0, margin − n·(q − p0))`, active rows frozen per solve, Jacobian `−√w · n ·
+PointJacobian(b, q)`. The full local-SDF version (§4.5, arbitrary terrain) is a later phase.
+
+### 11.6 Phase order (each behind `AnimSolver`, A/B-able)
+1. **Refactor — DONE.** Monolith → `IConstraint` blocks + the shared `PointJacobianColumns`
+   primitive, all in the partial `CharacterAnimator.Constraints.cs`. Behavior-identical; FD-vs-
+   analytic + vertical-offset tests green.
+2. **Tiers + FixedPoint — DONE.** `ExternalPin` on the sample → `FixedPointConstraint` (both-axis
+   HARD pin); Δθ is now load-bearing (the pinned hand reaches via limb bend). **Two findings that
+   reshaped the weights** (all weights are EMPIRICAL — read `SolveScaleReport`, tune, don't derive):
+   (a) a single 2D pin under-determines the 3-bone limb chain, so a UNIFORM Tikhonov lets the
+   redundant **proximal** joint (chest) drift to the box at any prior size → fix = **per-bone prior**
+   (`_isCore`: stiff torso λ≈60, loose limbs λ≈4) so the arm does the IK and the torso stays put;
+   (b) the 2-link arm still has a near-singular **flat DOF** that re-solves to a new spot each frame
+   → fix = a **temporal Δθ-smoothness prior** `√λ·(Δθ−Δθ_prev)` (`ThetaSmoothnessConstraint`). All
+   solver weights/limits moved to **`AnimSolverConfig`** ← `anim_solver_config.json` (hot-reloaded;
+   render-only so no determinism gate). Test `FixedPointSolverTests`: reach, **torso-stable**, arm
+   engaged + bounded. NOTE the solve still only runs on the locomotion+contact path — Phase 3 must
+   broaden the trigger so pins engage off-locomotion (wall slide).
+3. **NoPenetration v1 (half-planes) — DONE.** Two pieces: (i) the **solve trigger broadened**
+   off the locomotion+contact path — a new `SolveStaticPose` runs whenever a non-cadence frame
+   has external pins OR surfaces to satisfy (Δφ LOCKED to [0,0], only δ + Δθ move), so the
+   load-bearing constraints engage on any clip (wall slide). Behaviour-preserving: normal
+   locomotion already has `_haveCorr` set by the cadence solve, and plain flight/idle has no
+   pins/surfaces, so the static path is skipped there. (ii) `NoPenetrationConstraint` — one
+   one-sided HALF-PLANE row per (surface × bone tip), `√TierNoPen·max(0, margin − n·(q − p0))`,
+   pushing any limb tip that crosses a surface back out along `n` (q.Y rides δ). Surfaces ride
+   the new `SolverSurface` on the sample (`{Point, Normal, Margin}`); `CharacterAnimSample.From`
+   derives the wall-slide half-plane from public `Position`/`Facing`/`Radius` (a render-only
+   read — no `ChunkMap`/SDF, per §11.5). INACTIVE rows emit 0 residual AND 0 Jacobian, so the
+   row count is stable across a Minimize without a separate active-set pass — only WHICH rows
+   are nonzero changes. **Key test subtlety:** the `max(0,·)` knee makes the FD oracle mute for
+   any tip within ~one step of `gap == margin` (exactly the Δφ keyframe-boundary situation), so
+   `MaxJacobianError` now skips no-pen rows with `|margin − gap| < 0.5px`; away from the knee the
+   analytic Jacobian `−√w·n·PointJacobian(b,q)` matches FD to the float floor (`jacErr ≈ 0`).
+   Test `NoPenetrationSolverTests`: off-locomotion solve runs, the wall pushes the hand ~2px out
+   of the solid via a bounded arm Δθ, and the new block's Jacobian is exact. `TierNoPen` is in
+   `anim_solver_config.json` (defaults to the hard tier, 10).
+4. **(later)** d.x + horizontal ComOffset · local-SDF NoPenetration (arbitrary terrain, §4.5) ·
+   JointLimits · wire NoPenetration surfaces for ground/ledge beyond the wall-slide wall.
+
+Per-constraint **finite-difference Jacobian check** is the headline test for each new block
+(template: `Solver_AnalyticJacobian_MatchesFiniteDifference`) — the single highest-value test
+for a hand-rolled solver.

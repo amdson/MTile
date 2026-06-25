@@ -1,135 +1,18 @@
 {
   "Name": "biped",
   "Bones": [
-    {
-      "Name": "hip",
-      "Parent": null,
-      "Tx": -3.5999908,
-      "Ty": -12.879993,
-      "Rotation": 0,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 0
-    },
-    {
-      "Name": "chest",
-      "Parent": "hip",
-      "Tx": 0,
-      "Ty": 0,
-      "Rotation": -1.5707964,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 16
-    },
-    {
-      "Name": "head",
-      "Parent": "chest",
-      "Tx": 16,
-      "Ty": 0,
-      "Rotation": 0,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 10
-    },
-    {
-      "Name": "arm_l_upper",
-      "Parent": "chest",
-      "Tx": 16,
-      "Ty": 0,
-      "Rotation": 3.1415927,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 10
-    },
-    {
-      "Name": "arm_l_lower",
-      "Parent": "arm_l_upper",
-      "Tx": 10,
-      "Ty": 0,
-      "Rotation": 0,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 10
-    },
-    {
-      "Name": "arm_r_upper",
-      "Parent": "chest",
-      "Tx": 16,
-      "Ty": 0,
-      "Rotation": 3.1415927,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 10
-    },
-    {
-      "Name": "arm_r_lower",
-      "Parent": "arm_r_upper",
-      "Tx": 10,
-      "Ty": 0,
-      "Rotation": 0,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 10
-    },
-    {
-      "Name": "leg_l_upper",
-      "Parent": "hip",
-      "Tx": 0,
-      "Ty": 0,
-      "Rotation": 1.5707964,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 9.5
-    },
-    {
-      "Name": "leg_l_lower",
-      "Parent": "leg_l_upper",
-      "Tx": 9.5,
-      "Ty": 0,
-      "Rotation": 0,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 9.5
-    },
-    {
-      "Name": "foot_l",
-      "Parent": "leg_l_lower",
-      "Tx": 9.5,
-      "Ty": 0,
-      "Rotation": -1.3258177,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 8.246211
-    },
-    {
-      "Name": "leg_r_upper",
-      "Parent": "hip",
-      "Tx": 0,
-      "Ty": 0,
-      "Rotation": 1.5707964,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 9.5
-    },
-    {
-      "Name": "leg_r_lower",
-      "Parent": "leg_r_upper",
-      "Tx": 9.5,
-      "Ty": 0,
-      "Rotation": 0,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 9.5
-    },
-    {
-      "Name": "foot_r",
-      "Parent": "leg_r_lower",
-      "Tx": 9.5,
-      "Ty": 0,
-      "Rotation": -1.3258177,
-      "Sx": 1,
-      "Sy": 1,
-      "Length": 8.246211
-    }
+    { "Name": "hip",         "Parent": null,          "Rotation": 0,          "Length": 0 },
+    { "Name": "chest",       "Parent": "hip",         "Rotation": -1.5707964, "Length": 16 },
+    { "Name": "head",        "Parent": "chest",       "Rotation": 0,          "Length": 10 },
+    { "Name": "arm_l_upper", "Parent": "chest",       "Rotation": 3.1415927,  "Length": 10 },
+    { "Name": "arm_l_lower", "Parent": "arm_l_upper", "Rotation": 0,          "Length": 10 },
+    { "Name": "arm_r_upper", "Parent": "chest",       "Rotation": 3.1415927,  "Length": 10 },
+    { "Name": "arm_r_lower", "Parent": "arm_r_upper", "Rotation": 0,          "Length": 10 },
+    { "Name": "leg_l_upper", "Parent": "hip",         "Rotation": 1.5707964,  "Length": 9.5 },
+    { "Name": "leg_l_lower", "Parent": "leg_l_upper", "Rotation": 0,          "Length": 9.5 },
+    { "Name": "foot_l",      "Parent": "leg_l_lower", "Rotation": -1.3258177, "Length": 0.246211 },
+    { "Name": "leg_r_upper", "Parent": "hip",         "Rotation": 1.5707964,  "Length": 9.5 },
+    { "Name": "leg_r_lower", "Parent": "leg_r_upper", "Rotation": 0,          "Length": 9.5 },
+    { "Name": "foot_r",      "Parent": "leg_r_lower", "Rotation": -1.3258177, "Length": 0.246211 }
   ]
 }

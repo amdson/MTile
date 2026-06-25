@@ -30,6 +30,9 @@
     <None Include="..\movement_config.json" Link="movement_config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\anim_solver_config.json" Link="anim_solver_config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="..\impact_profiles.json" Link="impact_profiles.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

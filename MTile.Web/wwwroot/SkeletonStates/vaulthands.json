@@ -33,6 +33,16 @@
           "Bone": "arm_r_lower",
           "Rotation": 0.5
         }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -12.606951,
+          "Dx": 0,
+          "Dy": 0
+        }
       ]
     },
     {
@@ -61,6 +71,16 @@
         {
           "Bone": "arm_r_lower",
           "Rotation": 0.20000005
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -12.606951,
+          "Dx": 0,
+          "Dy": 0
         }
       ]
     }

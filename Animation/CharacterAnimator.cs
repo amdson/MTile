@@ -10,7 +10,7 @@ namespace MTile;
 // (forward stride vs backpedal). Run is forward locomotion above a speed threshold
 // (a longer-stride clip — same cadence machinery). Air is split into Jump (rising)
 // and Fall. Vault covers the guided ParkourState traversal.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, Jump, Fall, Vault, Run }
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, Jump, Fall, Vault, Run, WallSlide }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -28,7 +28,10 @@ public struct CharacterAnimState
 // render-only: Update() reads a CharacterAnimSample, evolves the animation state,
 // builds a target pose, and eases the live pose toward it. It NEVER writes back to
 // the character — movement/action stay agnostic to animation entirely.
-public sealed class CharacterAnimator
+// The least-squares solver's residual/Jacobian machinery — the constraint library
+// (ISolveConstraint + the blocks), the shared point-Jacobian primitive, and the rotation
+// lever arm — lives in the partial CharacterAnimator.Constraints.cs.
+public sealed partial class CharacterAnimator
 {
     // --- tuning (first-draft constants; no real velocity matching yet) ---
     private const float WalkSpeedThreshold = 12f;    // px/s before Idle -> Walk
@@ -46,22 +49,10 @@ public sealed class CharacterAnimator
     private const float WalkLean            = 0.25f;  // torso lean at full walk speed
     private const float WalkLeanRefSpeed    = 160f;   // px/s at which lean reaches max
 
-    // --- cadence solver ---
-    private const float MaxPhaseStep   = 0.25f;  // max Δφ/frame; < one stance window (§5.2)
-    private const float PhaseStepPrior = 8f;     // λ — momentum prior weight (tune by eye, §12.2)
-    private const float FeatherWidth   = 0.12f;  // phase span of the foot-swap crossover (§5.2)
-    // Phase 2 (ANIMATION_SOLVER_PLAN): per-bone angle corrections Δθ on top of the
-    // authored blend, kept minimal by a Tikhonov prior so the solve is a structural
-    // no-op until a hard constraint (later phases) actually needs to bend a joint.
-    private const float PosePrior      = 25f;    // λ_θ — Tikhonov weight on each Δθ (rad⁻²)
-    private const float AngleCorrLimit = 0.6f;   // box on each Δθ (rad); the prior keeps |Δθ|≪this
-    // Phase 3: a solved vertical root offset δ (world px) around the com/sole baseline.
-    // A hard per-contact ground row pins the planted foot to its plant height (body bobs
-    // to hold it); a SOFT ComOffset row pulls δ→0 (back to the baseline) so a no-contact
-    // flight frame settles to the com anchor. ComWeightY ≪ contact weight so the foot
-    // wins during stance (§4.4: soft com lets NoSlip win vertically → body rises in flight).
-    private const float ComWeightY     = 0.05f;  // soft tier on δ (vs contact weight ≈ 1)
-    private const float VertOffsetLimit = 24f;   // box on δ (world px)
+    // --- cadence / IK solver ---
+    // All solver weights + box limits live in AnimSolverConfig (hot-reloadable; the solve is
+    // render-only so there's no determinism risk). Read as AnimSolverConfig.Current.X. See the
+    // weight TIERS / per-region pose-prior rationale documented there and in §11.4.
 
     // --- action overlay ---
     // Asymmetric on purpose: GroundSlash1 lasts ~0.14s, so the overlay must register
@@ -91,6 +82,14 @@ public sealed class CharacterAnimator
         public ContactSource Source;
     }
     private readonly List<ActiveContact> _contacts = new();
+    // External fixed-point pins resolved from this frame's sample (bone index + world target).
+    // Held at the HARD tier by FixedPointConstraint; frozen for the duration of one solve.
+    private readonly List<(int bone, Vector2 target)> _pins = new();
+    private const int MaxPins = 4;   // sizes the residual scratch; excess pins are dropped
+    // No-penetration half-planes resolved from this frame's sample. Frozen for one solve; each
+    // emits one row per rig bone (NoPenetrationConstraint) — the limbs the solver pushes out.
+    private readonly List<SolverSurface> _surfaces = new();
+    private const int MaxSurfaces = 4;   // sizes the residual scratch; excess surfaces are dropped
     private readonly List<(int bone, float weight)> _weightBuf = new();   // scratch for feathered weights
     private float _prevPhaseStep;   // Δφ_prev for the momentum prior
 
@@ -160,6 +159,10 @@ public sealed class CharacterAnimator
     private readonly LeastSquaresSolver.ResidualFn _cadenceResiduals;
     private readonly LeastSquaresSolver.JacobianFn _cadenceJacobian;   // analytic J (replaces FD)
     private readonly float[]             _angVel;   // per-bone clip dθ/dt scratch for the Jacobian
+    private readonly float[]             _colX, _colY;   // ∂p/∂x column scratch for the point Jacobian
+    private readonly bool[]              _isCore;        // bone is torso (hip/chest/head) → stiff Tikhonov λ_θ
+    private readonly float[]             _prevTheta;     // last frame's solved Δθ (temporal smoothness target)
+    private readonly ISolveConstraint[]  _constraints;   // the composite objective, assembled in order
     // Per-solve context the residual closure reads (set just before each Minimize call).
     private AnimationDocument _solveClip;
     private float             _solvePhi;
@@ -193,7 +196,8 @@ public sealed class CharacterAnimator
         if (!_haveCorr || _ls == null) return -1f;
         int bones = _skeleton.Count;
         int n = 2 + bones;
-        int m = _contacts.Count * 2 + 2 + bones;
+        // 2/contact + 2/pin + bones/surface (no-penetration) + continuity + com + bones×2 priors.
+        int m = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + 2 + 2 * bones;
 
         // The body may be far from the world origin (it has walked many units), so a residual
         // tip.x − target.x is a tiny difference of large coordinates and a float32 finite
@@ -205,6 +209,10 @@ public sealed class CharacterAnimator
         _solveRoot = new Affine2(_solveRoot.M11, _solveRoot.M12, _solveRoot.M21, _solveRoot.M22, 0f, 0f);
         for (int i = 0; i < _contacts.Count; i++)
         { var c = _contacts[i]; c.Target = new Vector2(c.Target.X - ox, c.Target.Y - oy); _contacts[i] = c; }
+        for (int i = 0; i < _pins.Count; i++)
+        { var p = _pins[i]; _pins[i] = (p.bone, new Vector2(p.target.X - ox, p.target.Y - oy)); }
+        for (int i = 0; i < _surfaces.Count; i++)
+        { var sf = _surfaces[i]; _surfaces[i] = new SolverSurface(new Vector2(sf.Point.X - ox, sf.Point.Y - oy), sf.Normal, sf.Margin); }
 
         var x = new float[n];
         Array.Copy(_solveVars, x, n);
@@ -213,6 +221,27 @@ public sealed class CharacterAnimator
 
         var rp = new float[m];
         var rm = new float[m];
+
+        // The no-penetration rows carry a one-sided max(0, margin − gap): smooth where active,
+        // but with a KNEE at gap == margin. A central difference that straddles that knee (the
+        // tip sits within ~one FD step of the boundary) sees only half the slope and is NOT a
+        // valid oracle there — exactly the keyframe-boundary situation for Δφ. So mark every
+        // no-pen row whose penetration is within a band of 0 and skip it below; the analytic
+        // value is still exact, we just can't judge it by FD at the corner. Rows comfortably
+        // active or inactive (|pen| ≥ band) stay valid (a single-column ±h step can't flip them).
+        var skipRow = new bool[m];
+        int npStart = (_contacts.Count + _pins.Count) * 2;
+        int b0 = _skeleton.Count;
+        const float kneeBand = 0.5f;   // > any single-column FD tip displacement (lever × h)
+        int npRow = npStart;
+        foreach (var s in _surfaces)
+            for (int b = 0; b < b0; b++, npRow++)
+            {
+                Vector2 tip = _scratch.WorldOf(b).Translation;   // _scratch left at x by CadenceJacobian
+                float gap = s.Normal.X * (tip.X - s.Point.X) + s.Normal.Y * (tip.Y + x[IdxDy] - s.Point.Y);
+                if (MathF.Abs(s.Margin - gap) < kneeBand) skipRow[npRow] = true;
+            }
+
         float worst = 0f;
         for (int j = 0; j < n; j++)
         {
@@ -240,6 +269,7 @@ public sealed class CharacterAnimator
             x[j] = save;
             for (int i = 0; i < m; i++)
             {
+                if (skipRow[i]) continue;   // no-pen row at its activation knee — FD oracle is mute here
                 float a  = anal[i * n + j];
                 float fd = (rp[i] - rm[i]) / (2f * h);
                 // Relative metric: the float32 oracle carries ~0.1% truncation/cancellation
@@ -254,9 +284,83 @@ public sealed class CharacterAnimator
         _solveRoot = savedRoot;            // restore the shifted solve context
         for (int i = 0; i < _contacts.Count; i++)
         { var c = _contacts[i]; c.Target = new Vector2(c.Target.X + ox, c.Target.Y + oy); _contacts[i] = c; }
+        for (int i = 0; i < _pins.Count; i++)
+        { var p = _pins[i]; _pins[i] = (p.bone, new Vector2(p.target.X + ox, p.target.Y + oy)); }
+        for (int i = 0; i < _surfaces.Count; i++)
+        { var sf = _surfaces[i]; _surfaces[i] = new SolverSurface(new Vector2(sf.Point.X + ox, sf.Point.Y + oy), sf.Normal, sf.Margin); }
         return worst;
     }
     internal int DbgWorstCol, DbgWorstRow; internal float DbgFd, DbgAnal;
+
+    // DIAGNOSTIC (tests/tuning only): at the last frame's solve point, report the magnitudes
+    // that set the weight tiers (§11.4) — the relative gradient/column scales the priors must
+    // balance, plus the solved values and the pin reach error. The weights are chosen from
+    // THIS, not from first principles. Returns "(no solve)" on a frame where no LM solve ran.
+    //
+    // For each solve variable v, ‖J[:,v]‖ over the GEOMETRIC rows (contacts + pins) measures how
+    // strongly v moves the pinned points — i.e. its natural gradient scale. Δθ is reported as the
+    // max over bones (and which bone). Also: the cost gradient g=Jᵀr per block, the solved
+    // Δφ/δ/max|Δθ|, and ‖tip − target‖ for each pin (did the hard pin actually reach?).
+    internal string SolveScaleReport()
+    {
+        if (!_haveCorr || _ls == null) return "(no solve)";
+        int bones = _skeleton.Count, n = IdxTheta0 + bones;
+        int geom = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones;
+        int m = geom + 2 + 2 * bones;
+
+        var x = new float[n];
+        Array.Copy(_solveVars, x, n);
+        var jac = new float[m * n];          // zeroed by fresh alloc; CadenceJacobian fills it
+        CadenceJacobian(x, jac, n);          // also leaves _scratch world at the solved x
+        var r = new float[m];
+        CadenceResiduals(x, r);
+
+        // Column L2 norms over the geometric rows only (the FK-coupled sensitivity).
+        float ColNorm(int v) { float s = 0f; for (int i = 0; i < geom; i++) { float e = jac[i * n + v]; s += e * e; } return MathF.Sqrt(s); }
+        float gradPhi = 0f, gradDy = 0f, gradTh = 0f;
+        for (int i = 0; i < m; i++) { gradPhi += jac[i * n + IdxPhi] * r[i]; gradDy += jac[i * n + IdxDy] * r[i]; }
+        float colTheMax = 0f; int colTheBone = -1;
+        for (int b = 0; b < bones; b++) { float c = ColNorm(IdxTheta0 + b); if (c > colTheMax) { colTheMax = c; colTheBone = b; } float g = 0f; for (int i = 0; i < m; i++) g += jac[i * n + IdxTheta0 + b] * r[i]; gradTh = MathF.Max(gradTh, MathF.Abs(g)); }
+
+        float maxTheta = 0f; int maxThetaBone = -1;
+        for (int b = 0; b < bones; b++) { float a = MathF.Abs(_solveVars[IdxTheta0 + b]); if (a > maxTheta) { maxTheta = a; maxThetaBone = b; } }
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"contacts={_contacts.Count} pins={_pins.Count} surfaces={_surfaces.Count}  |  ");
+        sb.Append($"colNorm[Δφ]={ColNorm(IdxPhi),7:0.000} δ={ColNorm(IdxDy),6:0.000} Δθmax={colTheMax,6:0.000}({Name(colTheBone)})  |  ");
+        sb.Append($"grad[Δφ]={gradPhi,8:0.000} δ={gradDy,7:0.000} Δθ={gradTh,7:0.000}  |  ");
+        sb.Append($"solved Δφ={_solveVars[IdxPhi],6:0.000} δ={_solveVars[IdxDy],6:0.00} |Δθ|max={maxTheta,5:0.000}({Name(maxThetaBone)})");
+        for (int i = 0; i < _pins.Count; i++)
+        {
+            var (bone, target) = _pins[i];
+            Vector2 tip = _scratch.WorldOf(bone).Translation; tip.Y += _solveVars[IdxDy];
+            sb.Append($"  | pin[{Name(bone)}] reach={(tip - target).Length(),5:0.00}px");
+        }
+        if (_surfaces.Count > 0)
+        {
+            // Largest residual remaining over the no-penetration rows (= worst √w·penetration
+            // the solve couldn't push out). The rows sit right after contacts+pins in `r`.
+            float maxPen = 0f;
+            int s0 = (_contacts.Count + _pins.Count) * 2, sN = s0 + _surfaces.Count * bones;
+            for (int i = s0; i < sN && i < m; i++) maxPen = MathF.Max(maxPen, MathF.Abs(r[i]));
+            sb.Append($"  | nopen maxResid={maxPen,5:0.00}");
+        }
+        return sb.ToString();
+
+        string Name(int b) => b >= 0 && b < bones ? _skeleton.Bones[b].Name : "-";
+    }
+
+    // DIAGNOSTIC (tests/tuning): the world far-tip of `bone` at the accepted solve point of the
+    // last frame, including the body bob δ — i.e. where the solver actually placed that tip.
+    // Rebuilds the pose at _solveVars under the last solve root. Vector2.Zero if no solve ran.
+    internal Vector2 SolvedBoneTipWorld(int bone)
+    {
+        if (!_haveCorr) return Vector2.Zero;
+        BuildSolvePose(_solveVars.AsSpan(0, IdxTheta0 + _skeleton.Count));
+        Vector2 tip = _scratch.WorldOf(bone).Translation;
+        tip.Y += _solveVars[IdxDy];
+        return tip;
+    }
 
     // Keyframe interval index of normalized time t (for the FD oracle's boundary guard): the
     // bracketing interval [i, i+1], or -2 in a non-cyclic clamped end region (held pose).
@@ -325,17 +429,43 @@ public sealed class CharacterAnimator
         if (_useSolver)
         {
             // Variables: Δφ (1) + δ vertical offset (1) + per-bone Δθ (rig.Count), with a
-            // little headroom. Residuals: two rows per contact (H no-slip + V ground) +
-            // continuity + com + one prior per bone. Sized to the rig once; solver path only.
+            // little headroom. Residuals: two rows per contact (H no-slip + V ground) + two per
+            // external pin + continuity + com + one prior per bone. Sized to the rig once.
             int nv = 2 + rig.Count + 2;
-            int nr = 2 * 4 + 2 + rig.Count + 2;
+            // 2/contact + 2/pin + (MaxSurfaces × bones) no-penetration + continuity + com
+            // + bones Tikhonov + bones Δθ-smoothness.
+            int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 2 + 2 * rig.Count + 2;
             _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
             _solveVars = new float[nv];
             _solveLo   = new float[nv];
             _solveHi   = new float[nv];
             _angVel    = new float[rig.Count];
+            _colX      = new float[nv];
+            _colY      = new float[nv];
+            // Which bones are torso (stiff Tikhonov λ_θ from config) vs limb (loose). Structural —
+            // the WEIGHTS live in AnimSolverConfig so they hot-reload; this just tags the bones.
+            _isCore = new bool[rig.Count];
+            for (int i = 0; i < rig.Count; i++)
+            {
+                string nm = rig.Bones[i].Name;
+                _isCore[i] = nm == "hip" || nm == "chest" || nm == "head";
+            }
+            _prevTheta = new float[rig.Count];
             _cadenceResiduals = CadenceResiduals;
             _cadenceJacobian  = CadenceJacobian;
+            // The composite objective as an ordered list of constraints (§11). The order is
+            // load-bearing: it IS the residual/Jacobian row order the LM core and the
+            // FD-vs-analytic oracle assume. Preallocated once → zero per-frame allocation.
+            _constraints = new ISolveConstraint[]
+            {
+                new PlantedContactsConstraint(this),   // 2 rows/contact: H no-slip (Δφ) + V ground hold (δ)
+                new FixedPointConstraint(this),        // 2 rows/pin: both-axis hard external pin (Δθ IK)
+                new NoPenetrationConstraint(this),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
+                new PlaybackContinuityConstraint(this),// 1 row: Δφ momentum prior
+                new ComOffsetConstraint(this),         // 1 row: soft com pulls δ→baseline
+                new PosePriorConstraint(this),         // N rows: Tikhonov on each Δθ (toward 0)
+                new ThetaSmoothnessConstraint(this),   // N rows: pull each Δθ toward last frame (temporal)
+            };
         }
 
         // Bind each clip category to the first authored animation whose Type matches
@@ -375,6 +505,7 @@ public sealed class CharacterAnimator
             _state.ClipTime = 0f;
             _contacts.Clear();        // contacts belong to the clip that just ended
             _prevPhaseStep = 0f;
+            if (_prevTheta != null) Array.Clear(_prevTheta, 0, _prevTheta.Length);   // no Δθ history across a clip switch
         }
         else _state.ClipTime += dt;
 
@@ -451,6 +582,25 @@ public sealed class CharacterAnimator
                 _baseBlend[i] *= 1f - slot.BoneWeight[i];
         }
 
+        // 1.7 Resolve this frame's external pins (sample → bone-index targets) so the solve's
+        //     FixedPointConstraint can read them. Frozen here for the whole solve. Unknown bone
+        //     names and excess pins (> MaxPins) are dropped rather than reallocating the scratch.
+        _pins.Clear();
+        if (s.Pins != null)
+            foreach (var pin in s.Pins)
+            {
+                if (_pins.Count >= MaxPins) break;
+                int b = _skeleton.IndexOf(pin.Bone);
+                if (b >= 0) _pins.Add((b, pin.Target));
+            }
+        _surfaces.Clear();
+        if (s.Surfaces != null)
+            foreach (var srf in s.Surfaces)
+            {
+                if (_surfaces.Count >= MaxSurfaces) break;
+                _surfaces.Add(srf);
+            }
+
         // 2. Advance the locomotion phase. A Walk/WalkBack clip with contact labels is
         //    cadence-driven: the solver picks Δφ so the planted foot doesn't slip
         //    against the body's real motion. Everything else keeps the old rate.
@@ -493,6 +643,17 @@ public sealed class CharacterAnimator
             if (locomotion)            _state.Phase = Wrap01(_state.Phase + speed * dt * PhasePerPixel);
             else if (clip == AnimClip.Idle) _state.Phase = Wrap01(_state.Phase + dt * IdleBobHz);
         }
+
+        // 2.5 Off-locomotion solve (Phase 3): the cadence path above only runs the LM solve
+        //     for a locomotion clip with planted contacts. But external pins and no-penetration
+        //     surfaces (wall-slide grip/limbs) must engage on ANY clip. So when no cadence solve
+        //     ran this frame yet there IS something external to satisfy, run a STATIC solve —
+        //     Δφ locked (no cadence here), only δ + the per-bone Δθ move, bending the limbs to
+        //     respect the pins/surfaces while the body bob settles. Behaviour-preserving for
+        //     normal locomotion: there _haveCorr is already true (cadence solved), and during
+        //     plain flight/idle there are no pins/surfaces, so this is skipped.
+        if (_useSolver && !_haveCorr && hasClip && (_pins.Count > 0 || _surfaces.Count > 0))
+            SolveStaticPose(anim, clip, in s);
 
         // 3. Build the target pose. Locomotion + idle sample by phase (so cadence
         //    drives the pose); one-shot clips sample by ClipTime. Every clip category
@@ -663,6 +824,10 @@ public sealed class CharacterAnimator
         // Guided traversal wins over the generic ground/air clips while active.
         if (s.MovementState != null && s.MovementState.Contains("Parkour")) return AnimClip.Vault;
         if (s.MovementState != null && s.MovementState.Contains("Crouch")) return AnimClip.Crouch;
+        // Wall cling/slide (WallSlidingState): airborne but pinned to a wall, so it must
+        // win over the generic Vy → Jump/Fall below. Facing holds its last grounded value
+        // = the wall direction (you run into the wall), so the rig faces the wall (+X).
+        if (s.MovementState != null && s.MovementState.Contains("WallSlid")) return AnimClip.WallSlide;
         // LedgeGrab pins the body with a spring + damper; the resulting Vy oscillates
         // sign every frame as it rings down (e.g. −30, 0, −20, 0, ...). The generic
         // `Vy < 0 ? Jump : Fall` heuristic below would flip the clip every frame and
@@ -722,9 +887,10 @@ public sealed class CharacterAnimator
         for (int k = 0; k < ks.Count; k++) { if (ks[k].Time > phase) break; i = k; }
         int j = Math.Min(i + 1, ks.Count - 1);
 
-        float featherStart = ks[j].Time - FeatherWidth;
+        float feather = AnimSolverConfig.Current.FeatherWidth;
+        float featherStart = ks[j].Time - feather;
         float u = (j != i && phase > featherStart)
-                ? MathHelper.Clamp((phase - featherStart) / FeatherWidth, 0f, 1f) : 0f;
+                ? MathHelper.Clamp((phase - featherStart) / feather, 0f, 1f) : 0f;
 
         AddWeighted(ks[i].Contacts, 1f - u);
         if (u > 0f) AddWeighted(ks[j].Contacts, u);
@@ -809,9 +975,9 @@ public sealed class CharacterAnimator
                 e += c.Weight * dx * dx;
             }
             float d = dphi - _prevPhaseStep;
-            return e + PhaseStepPrior * d * d;
+            return e + AnimSolverConfig.Current.PhaseStepPrior * d * d;
         }
-        return GoldenSection.Minimize(Loss, 0f, MaxPhaseStep);
+        return GoldenSection.Minimize(Loss, 0f, AnimSolverConfig.Current.MaxPhaseStep);
     }
 
     // Solver-path equivalent of SolvePhaseStep: the SAME objective (horizontal foot
@@ -823,11 +989,12 @@ public sealed class CharacterAnimator
     private float SolvePhaseStepLm(AnimationDocument clip, float phi, in Affine2 root)
     {
         _solveClip = clip; _solvePhi = phi; _solveRoot = root;
+        var cfg = AnimSolverConfig.Current;
         int n = 2 + _skeleton.Count;          // x[0]=Δφ; x[1]=δ (vertical); x[2+i]=Δθ_i
 
-        _solveLo[0] = 0f;               _solveHi[0] = MaxPhaseStep;
-        _solveLo[1] = -VertOffsetLimit; _solveHi[1] = VertOffsetLimit;
-        for (int i = 2; i < n; i++) { _solveLo[i] = -AngleCorrLimit; _solveHi[i] = AngleCorrLimit; }
+        _solveLo[0] = 0f;                   _solveHi[0] = cfg.MaxPhaseStep;
+        _solveLo[1] = -cfg.VertOffsetLimit; _solveHi[1] = cfg.VertOffsetLimit;
+        for (int i = 2; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
         Array.Clear(_solveVars, 0, n);        // δ, Δθ start at 0 (baseline pose); Δφ seeded below
 
         // The cadence objective is NON-CONVEX in Δφ: a planted foot's horizontal track
@@ -839,21 +1006,56 @@ public sealed class CharacterAnimator
         // refine. δ and the Δθ corrections need no seeding — under their (com / Tikhonov)
         // priors they are convex about 0 — so they ride along at 0 while we pick the Δφ
         // basin, then LM refines the whole vector jointly (ANIMATION_SOLVER_PLAN §3.5).
-        float best     = MathHelper.Clamp(_prevPhaseStep, 0f, MaxPhaseStep);
+        float best     = MathHelper.Clamp(_prevPhaseStep, 0f, cfg.MaxPhaseStep);
         float bestCost = CadenceCostAt(best, n);
         const int seeds = 9;
         for (int k = 0; k <= seeds; k++)
         {
-            float s = MaxPhaseStep * k / seeds;
+            float s = cfg.MaxPhaseStep * k / seeds;
             float c = CadenceCostAt(s, n);
             if (c < bestCost) { bestCost = c; best = s; }
         }
 
         _solveVars[0] = best;
+        // Δθ starts at 0 (not warm-started from _prevTheta): the θ-smoothness prior supplies the
+        // temporal continuity from the COST side, and a box-clamped _prevTheta seed would stick
+        // the solution at the wall. _prevTheta is only the smoothness TARGET, set after the solve.
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n));
+        for (int i = 0; i < _skeleton.Count; i++) _prevTheta[i] = _solveVars[2 + i];
         _haveCorr = true;
         return _solveVars[0];
+    }
+
+    // Off-locomotion solve (Phase 3): satisfy this frame's external pins + no-penetration
+    // surfaces on a clip with no cadence to drive. Δφ is LOCKED (box [0,0]) — there is no
+    // planted-foot no-slip here — so only δ (the body bob) and the per-bone Δθ (the IK that
+    // bends limbs off a wall / onto a pin) move. The base pose is sampled at the SAME phase /
+    // clip-time step 3 draws at, so the solved Δθ line up when applied there. Mirrors
+    // SolvePhaseStepLm's root construction (com baseline so capture/solve/draw share a frame).
+    private void SolveStaticPose(AnimationDocument anim, AnimClip clip, in CharacterAnimSample s)
+    {
+        var cfg = AnimSolverConfig.Current;
+        int dir = s.Facing == 0 ? 1 : s.Facing;
+        float phi = IsPhaseDriven(clip) ? _state.Phase
+                                        : AnimationSampler.NormalizedTime(anim, _state.ClipTime);
+        float comBaseY = 0f;
+        if (SampleNamedPoint(anim, phi, "com", out var comL)) comBaseY = -comL.Y * _scale;
+        var root = Affine2.FromTRS(new Vector2(s.Position.X, s.Position.Y + comBaseY), 0f,
+                                   new Vector2(dir * _scale, _scale));
+
+        _contacts.Clear();                  // no planted contacts on this path
+        _solveClip = anim; _solvePhi = phi; _solveRoot = root;
+        int n = 2 + _skeleton.Count;
+        _solveLo[0] = 0f;                   _solveHi[0] = 0f;   // Δφ locked — no cadence here
+        _solveLo[1] = -cfg.VertOffsetLimit; _solveHi[1] = cfg.VertOffsetLimit;
+        for (int i = 2; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
+        Array.Clear(_solveVars, 0, n);
+
+        _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
+                     _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n));
+        for (int i = 0; i < _skeleton.Count; i++) _prevTheta[i] = _solveVars[2 + i];
+        _haveCorr = true;
     }
 
     // Cost at a candidate Δφ with δ and the angle corrections held at 0 (Δφ seed search).
@@ -886,107 +1088,29 @@ public sealed class CharacterAnimator
         _scratch.ComputeWorld(_solveRoot);
     }
 
-    // Residuals over x = [Δφ, δ, Δθ_0 … Δθ_{N-1}]:
-    //   • two rows per planted contact — √weight · {horizontal slip, vertical (footY+δ −
-    //     targetY)} of its tip at φ+Δφ on the corrected pose. The H row is the cadence pin
-    //     (Δφ); the V row holds the foot at its plant height via δ (the body bobs).
-    //   • one playback-continuity row — √PhaseStepPrior · (Δφ − Δφ_prev);
-    //   • one soft com row — √ComWeightY · δ — pulling the body back to the baseline so a
-    //     no-contact flight frame settles to the com anchor;
-    //   • one Tikhonov row per bone — √PosePrior · Δθ_i — keeping corrections minimal.
+    // The composite objective (§11.3). The residual/Jacobian are now ASSEMBLED from the
+    // ordered `_constraints` list rather than hand-inlined: one shared forward pass
+    // (BuildSolvePose) leaves _scratch's world buffer valid, then each constraint emits its
+    // rows. Row order = list order (load-bearing: the LM core and the FD-vs-analytic oracle
+    // assume a fixed row order). Behaviour is bit-identical to the old monolith — the four
+    // blocks below emit exactly the old rows in the old order.
     private int CadenceResiduals(ReadOnlySpan<float> x, Span<float> r)
     {
         BuildSolvePose(x);            // _scratch world is now the composed, corrected pose at φ+Δφ
-        float dy = x[1];
-        int bones = _skeleton.Count;
-
-        int n = 0;
-        foreach (var c in _contacts)
-        {
-            Vector2 tip = _scratch.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
-            float sw = MathF.Sqrt(c.Weight);
-            r[n++] = sw * (tip.X - c.Target.X);            // horizontal no-slip (cadence, drives Δφ)
-            r[n++] = sw * (tip.Y + dy - c.Target.Y);       // vertical ground hold (drives δ)
-        }
-        r[n++] = MathF.Sqrt(PhaseStepPrior) * (x[0] - _prevPhaseStep);     // playback continuity
-        r[n++] = MathF.Sqrt(ComWeightY) * dy;                              // soft com → baseline
-        float sqrtLam = MathF.Sqrt(PosePrior);
-        for (int i = 0; i < bones; i++) r[n++] = sqrtLam * x[2 + i];       // Tikhonov pose prior
-        return n;
+        int row = 0;
+        foreach (var c in _constraints) row += c.Residuals(x, r.Slice(row));
+        return row;
     }
 
-    // Analytic Jacobian of CadenceResiduals — the §3.3 closed form, replacing the
-    // finite-difference fallback. Because rotation is the ONLY animated channel (PoseData)
-    // and the overlay blend is a per-bone linear premultiply, the whole pose is driven by
-    // per-bone rotations, so every contact-row column is a rotation lever arm × (blend) ×
-    // (clip ω for Δφ). Same forward pass and row order as the residual.
-    //
-    //   contact tip p on bone b, for each ancestor joint j of b (incl. b itself):
-    //     L_j(p) = ∂p/∂θ_j          — Lever(): the world lever arm about j's parent joint
-    //     blend_j = 1 − overlayWeight[j]  — the action overlay's linear (1−w) factor
-    //     ∂p/∂Δθ_j = blend_j · L_j(p)                       (0 for non-ancestors)
-    //     ∂p/∂Δφ   = Σ_j blend_j · ω_j · L_j(p)             (ω_j = base clip dθ/dt)
-    //   H row = √w·(p.x − tx):  ∂/∂Δφ, ∂/∂Δθ_j from the x components; ∂/∂δ = 0
-    //   V row = √w·(p.y+δ − ty): the y components; ∂/∂δ = √w
-    //   priors: continuity ∂/∂Δφ=√λ_c; com ∂/∂δ=√λ_com; Tikhonov_i ∂/∂Δθ_i=√λ_θ (constants)
     private void CadenceJacobian(ReadOnlySpan<float> x, Span<float> jac, int stride)
     {
         BuildSolvePose(x);                       // _scratch world = composed pose at φ+Δφ
-        int bones = _skeleton.Count;
-        // ω_j: per-bone angular velocity of the BASE clip at φ+Δφ (the Δφ channel).
-        AnimationSampler.SampleAngularVelocity(_solveClip, Wrap01(_solvePhi + x[0]),
-                                               _kfA, _kfB, _kfC, _kfD, _angVel.AsSpan(0, bones));
-
+        // ω_j: per-bone angular velocity of the BASE clip at φ+Δφ — the Δφ channel, read by
+        // PointJacobianColumns. Sampled once here so every constraint shares it.
+        AnimationSampler.SampleAngularVelocity(_solveClip, Wrap01(_solvePhi + x[IdxPhi]),
+                                               _kfA, _kfB, _kfC, _kfD, _angVel.AsSpan(0, _skeleton.Count));
         int row = 0;
-        foreach (var c in _contacts)
-        {
-            Vector2 tip = _scratch.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
-            float sw = MathF.Sqrt(c.Weight);
-            int hRow = row, vRow = row + 1;
-
-            float dphiX = 0f, dphiY = 0f;
-            for (int j = c.Bone; j >= 0; j = _skeleton.Bones[j].Parent)
-            {
-                int par = _skeleton.Bones[j].Parent;
-                // R·T·S: θ_j is the OUTERMOST factor of L_j (world[j] = world[par]·R(θ_j)·T·S), so it
-                // pivots about world[par]'s origin (the PARENT's joint) and acts in the parent's linear
-                // frame A_p. (Under the old T·R·S the pivot was j's own joint = the attach point.)
-                Affine2 wp = par < 0 ? _solveRoot : _scratch.WorldOf(par);   // A_p: parent linear frame
-                Vector2 pivot = wp.Translation;                             // parent's joint = θ_j's pivot
-                Vector2 lev = Lever(wp, pivot, tip);                         // ∂tip/∂θ_j (exact; facing flip + scale)
-                float blend = _baseBlend[j];   // Π(1−w) over the active overlay slots masking j
-                jac[hRow * stride + (2 + j)] = sw * blend * lev.X;           // ∂H/∂Δθ_j
-                jac[vRow * stride + (2 + j)] = sw * blend * lev.Y;           // ∂V/∂Δθ_j
-                dphiX += blend * _angVel[j] * lev.X;                         // ∂tip/∂Δφ accumulation
-                dphiY += blend * _angVel[j] * lev.Y;
-            }
-            jac[hRow * stride + 0] = sw * dphiX;     // ∂H/∂Δφ
-            jac[vRow * stride + 0] = sw * dphiY;     // ∂V/∂Δφ
-            jac[vRow * stride + 1] = sw;             // ∂V/∂δ
-            row += 2;
-        }
-
-        jac[row * stride + 0] = MathF.Sqrt(PhaseStepPrior); row++;          // continuity vs Δφ
-        jac[row * stride + 1] = MathF.Sqrt(ComWeightY);     row++;          // soft com vs δ
-        float sqrtLam = MathF.Sqrt(PosePrior);
-        for (int i = 0; i < bones; i++) { jac[row * stride + (2 + i)] = sqrtLam; row++; }  // Tikhonov
-    }
-
-    // The 2D rotation lever arm ∂p/∂θ for a joint whose rotation acts in the linear frame `wp`
-    // (its parent's world transform) and pivots about `pivot` (under R·T·S, the parent's joint =
-    // wp.Translation), evaluated at world point `p`. Exactly A·J·A⁻¹·(p − pivot) where A is wp's linear part
-    // and J the 90° rotation — correct under the facing-flip reflection and any scale/squash
-    // (reduces to the bare perp(p − pivot) when A is a pure rotation). Returns 0 if wp is singular.
-    private static Vector2 Lever(in Affine2 wp, Vector2 pivot, Vector2 p)
-    {
-        float dx = p.X - pivot.X, dy = p.Y - pivot.Y;
-        float det = wp.M11 * wp.M22 - wp.M12 * wp.M21;
-        if (MathF.Abs(det) < 1e-12f) return Vector2.Zero;
-        float inv = 1f / det;
-        float wx = ( wp.M22 * dx - wp.M12 * dy) * inv;     // A⁻¹·(p − o)
-        float wy = (-wp.M21 * dx + wp.M11 * dy) * inv;
-        float jx = -wy, jy = wx;                            // J·(…)
-        return new Vector2(wp.M11 * jx + wp.M12 * jy, wp.M21 * jx + wp.M22 * jy);   // A·(…)
+        foreach (var c in _constraints) row += c.Jacobian(x, jac, stride, row);
     }
 
     private int ActiveIndex(int bone)

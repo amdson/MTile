@@ -59,6 +59,7 @@ public class Game1 : Game
     private CosmeticUpdateSystem _cosmetics;
 
     private FileSystemWatcher _movementConfigWatcher;
+    private FileSystemWatcher _animConfigWatcher;
 
     // Procedural skeleton animation for the primary player. Render-only, pull-model
     // (reads sim state via CharacterAnimSample; never writes back). Scale fits the
@@ -71,7 +72,9 @@ public class Game1 : Game
     // The authored clip set, kept so secondary animators built after LoadContent
     // bind the same animations as the primary's.
     private List<AnimationDocument> _skeletonAnims = new();
-    private const float SkeletonScale = 0.6f;
+    // Rig→world scale. Public so offline tooling (MTile.Probe `addcom`) bakes COM
+    // anchors against the same value the renderer places the rig with.
+    public const float SkeletonScale = 0.6f;
     private float _simAccum;   // fixed-step accumulator for GameConfig.TimeScale (slow-mo)
     // Viewport center, recomputed once at the top of Update and reused in Draw — the
     // camera transform's pivot. Consistent within a frame.
@@ -122,6 +125,7 @@ public class Game1 : Game
         if (OperatingSystem.IsBrowser())
         {
             MovementConfig.Load("movement_config.json");
+            AnimSolverConfig.Load("anim_solver_config.json");
         }
         else
         {
@@ -144,6 +148,22 @@ public class Game1 : Game
                     MovementConfig.Load(movementCfgPath);
                 };
             }
+
+            // The animation solver weights (anim_solver_config.json). The solver is RENDER-ONLY
+            // (never feeds the sim), so hot-reloading it is always safe — no multiplayer gate.
+            string animCfgPath = Path.GetFullPath("anim_solver_config.json");
+            AnimSolverConfig.Load(animCfgPath);
+            _animConfigWatcher = new FileSystemWatcher(Path.GetDirectoryName(animCfgPath))
+            {
+                Filter = Path.GetFileName(animCfgPath),
+                NotifyFilter = NotifyFilters.LastWrite,
+                EnableRaisingEvents = true
+            };
+            _animConfigWatcher.Changed += (s, e) =>
+            {
+                System.Threading.Thread.Sleep(50);
+                AnimSolverConfig.Load(animCfgPath);
+            };
         }
 
         // One-shot config loads for impact tuning. No hot-reload (unlike

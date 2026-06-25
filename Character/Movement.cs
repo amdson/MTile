@@ -196,12 +196,31 @@ public class StandingState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        return ctx.TryGetGround(out _);
+        return IsStandingGround(ctx);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        // Stay-active uses plain ground detection — only ENTRY is gated (below). An
+        // already-standing body that's briefly flung up (e.g. a sprout growing up
+        // under it) must keep Standing so its spring tracks the lift; kicking it to
+        // Falling for a frame would slam its velocity. The launch case the entry gate
+        // guards against never has Standing as the current state (the jump does).
         return ctx.TryGetGround(out _);
+    }
+
+    // GroundChecker's 20px ProbeSlack reports "grounded" for a body up to ~20px above
+    // rest height — which, with the slow JumpVelocity launch, holds for the whole jump
+    // window. So a quick jump-release would drop JumpingState and let Standing re-grab
+    // the still-ascending body, subjecting it to ground friction + the anti-pop rise
+    // clamp below ("hit a ceiling" dead-end). Refuse to grab a body rising faster than
+    // the spring would ever push it (SpringMaxRiseSpeed): that's a launch, not standing.
+    // Landing bodies descend (riseSpeed ≤ 0), so the soft-landing catch zone is untouched.
+    private static bool IsStandingGround(EnvironmentContext ctx)
+    {
+        if (!ctx.TryGetGround(out var ground)) return false;
+        float riseSpeed = Vector2.Dot(ctx.Body.Velocity - ground.SurfaceVelocity, ground.Normal);
+        return riseSpeed <= MovementConfig.Current.SpringMaxRiseSpeed;
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -255,8 +274,13 @@ public class StandingState : MovementState
         float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
         if (gap > 0f)
             force += _ground.Normal * (gap * cfg.SpringK - velAlongNormal * cfg.SpringDamping);
+        // Anti-pop clamp: cap the rise only while at/below float height (gap > 0), where
+        // the spring above could be flinging the body up. Once it's risen above rest
+        // height (gap < 0 — e.g. an early jump-release leaving Standing momentarily in
+        // charge of an ascending body), braking the ascent would dead-end it like a
+        // ceiling, so leave it alone.
         float velExcess = velAlongNormal - cfg.SpringMaxRiseSpeed;
-        if (velExcess > 0f && ctx.Dt > 0f)
+        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f)
             force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
@@ -349,8 +373,9 @@ public class CrouchedState : MovementState
         float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
         if (gap > 0f)
             force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
+        // Anti-pop clamp gated on gap > 0 — see StandingState.Update.
         float velExcess = velAlongNormal - MovementConfig.Current.SpringMaxRiseSpeed;
-        if (velExcess > 0f && ctx.Dt > 0f)
+        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f)
             force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);

@@ -1,0 +1,17 @@
+{
+  "_comment": "Weights/limits for the per-frame animation IK solve (render-only; hot-reloaded on desktop). Empirical — tweak by feel. See Plans/ANIMATION_SOLVER_PLAN.md 11.4. Rough tiers: hard pins >= contacts >= priors, kept a MODEST spread so the solve stays well-conditioned. Pose priors are per-region: stiff torso, loose limbs.",
+
+  "TierHard": 10,
+  "TierNoPen": 10,
+  "TierContact": 1,
+  "CorePosePrior": 60,
+  "LimbPosePrior": 4,
+  "ThetaSmooth": 40,
+  "PhaseStepPrior": 8,
+  "ComWeightY": 0.05,
+
+  "AngleCorrLimit": 0.6,
+  "VertOffsetLimit": 24,
+  "MaxPhaseStep": 0.25,
+  "FeatherWidth": 0.12
+}

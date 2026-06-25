@@ -54,6 +54,7 @@
   <Target Name="StageGameAssetsToWwwroot" BeforeTargets="BeforeBuild">
     <Copy SourceFiles="..\game_config.json"       DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
     <Copy SourceFiles="..\movement_config.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\anim_solver_config.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
     <Copy SourceFiles="..\impact_profiles.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
     <Copy SourceFiles="..\material_strengths.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
     <ItemGroup>

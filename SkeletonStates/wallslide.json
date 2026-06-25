@@ -1,0 +1,51 @@
+{
+  "Name": "wallslide",
+  "Type": "WallSlide",
+  "Skeleton": "biped",
+  "Duration": 0.6,
+  "Loop": true,
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        { "Bone": "hip",         "Rotation": 0 },
+        { "Bone": "chest",       "Rotation": -1.40 },
+        { "Bone": "head",        "Rotation": 0.15 },
+        { "Bone": "arm_l_upper", "Rotation": 0.9 },
+        { "Bone": "arm_l_lower", "Rotation": -0.55 },
+        { "Bone": "arm_r_upper", "Rotation": 3.6 },
+        { "Bone": "arm_r_lower", "Rotation": -0.8 },
+        { "Bone": "leg_l_upper", "Rotation": 1.7 },
+        { "Bone": "leg_l_lower", "Rotation": 0.2 },
+        { "Bone": "foot_l",      "Rotation": -1.3258 },
+        { "Bone": "leg_r_upper", "Rotation": 0.25 },
+        { "Bone": "leg_r_lower", "Rotation": 0.7 },
+        { "Bone": "foot_r",      "Rotation": -0.7 }
+      ],
+      "Additions": [
+        { "Name": "com", "Kind": "Point", "Px": 0, "Py": -12.85, "Dx": 0, "Dy": 0 }
+      ]
+    },
+    {
+      "Time": 1,
+      "Bones": [
+        { "Bone": "hip",         "Rotation": 0 },
+        { "Bone": "chest",       "Rotation": -1.40 },
+        { "Bone": "head",        "Rotation": 0.15 },
+        { "Bone": "arm_l_upper", "Rotation": 0.9 },
+        { "Bone": "arm_l_lower", "Rotation": -0.55 },
+        { "Bone": "arm_r_upper", "Rotation": 3.6 },
+        { "Bone": "arm_r_lower", "Rotation": -0.8 },
+        { "Bone": "leg_l_upper", "Rotation": 1.7 },
+        { "Bone": "leg_l_lower", "Rotation": 0.2 },
+        { "Bone": "foot_l",      "Rotation": -1.3258 },
+        { "Bone": "leg_r_upper", "Rotation": 0.25 },
+        { "Bone": "leg_r_lower", "Rotation": 0.7 },
+        { "Bone": "foot_r",      "Rotation": -0.7 }
+      ],
+      "Additions": [
+        { "Name": "com", "Kind": "Point", "Px": 0, "Py": -12.85, "Dx": 0, "Dy": 0 }
+      ]
+    }
+  ]
+}

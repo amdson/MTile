@@ -60,6 +60,16 @@
           "Bone": "foot_r",
           "Rotation": -1.3258177
         }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -12.606951,
+          "Dx": 0,
+          "Dy": 0
+        }
       ]
     },
     {
@@ -116,6 +126,16 @@
         {
           "Bone": "foot_r",
           "Rotation": -1.3258177
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -12.606951,
+          "Dx": 0,
+          "Dy": 0
         }
       ]
     }

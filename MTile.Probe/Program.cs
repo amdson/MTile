@@ -14,6 +14,7 @@ using MTile;
 //   dotnet run --project MTile.Probe -- diff   <clip> <ref>
 //   dotnet run --project MTile.Probe -- report <clip>
 //   dotnet run --project MTile.Probe -- anim   <base> [Action]   base=idle|walk|run|walkback|jump|fall|crouch|vault
+//   dotnet run --project MTile.Probe -- addcom [clip] [--dry]    stamp grounded COM anchors (all clips, or one)
 
 static class Probe
 {
@@ -37,8 +38,9 @@ static class Probe
                 case "diff":   return Diff(Arg(args, 1), Arg(args, 2, "idle"));
                 case "report": return Report(Arg(args, 1));
                 case "anim":   return Anim(Arg(args, 1, "idle"), args.Length > 2 ? args[2] : null);
+                case "addcom": return AddCom(FirstNonFlag(args, 1), HasFlag(args, "--dry"));
                 default:
-                    Console.Error.WriteLine($"unknown command '{cmd}'. try: list | digest | diff | report | anim");
+                    Console.Error.WriteLine($"unknown command '{cmd}'. try: list | digest | diff | report | anim | addcom");
                     return 2;
             }
         }
@@ -131,6 +133,43 @@ static class Probe
         return 0;
     }
 
+    // Stamp a "com" Point addition onto every keyframe of each clip, computed so the
+    // clip's standing feet rest on the ground line when the host anchors com onto the
+    // body centroid (AttackGlowSystem.RigRoot). Replaces any existing "com" (e.g. run's
+    // stale -23 that buried the feet). Other additions on a keyframe are preserved.
+    //
+    //   ground line (world)   = Body.Y + 2*Radius          (bottom of the player hexagon)
+    //   foot world Y          = Body.Y + (soleLocal - com.Y) * scale
+    //   feet on ground  =>     com.Y = soleLocal - 2*Radius / scale
+    // soleLocal = the lower foot's toe (local +y is DOWN) at the first keyframe; com.X = 0
+    // keeps the hip over the body center, matching the legacy placement.
+    static int AddCom(string only, bool dryRun)
+    {
+        const float scale = Game1.SkeletonScale;
+        const float worldGround = 2f * PlayerCharacter.Radius;   // centroid → hexagon bottom
+        int n = 0;
+        foreach (var clip in _all)
+        {
+            if (only != null && !string.Equals(clip.Name, only, StringComparison.OrdinalIgnoreCase)) continue;
+            float toeL = MotionProbe.Sample(clip, _rig, "foot_l", 0f).Tip.Y;
+            float toeR = MotionProbe.Sample(clip, _rig, "foot_r", 0f).Tip.Y;
+            float sole = MathF.Max(toeL, toeR);                  // lower foot (Y-down → larger Y)
+            float comY = sole - worldGround / scale;
+            foreach (var kf in clip.Keyframes)
+            {
+                kf.Additions ??= new List<AnimAddition>();
+                kf.Additions.RemoveAll(a => string.Equals(a.Name, "com", StringComparison.Ordinal));
+                kf.Additions.Add(new AnimAddition { Name = "com", Kind = AnimAdditionKind.Point, Px = 0f, Py = comY });
+            }
+            Console.WriteLine($"{clip.Name,-18} sole={sole,6:0.0}  com=(0.0,{comY,8:0.00})  {(dryRun ? "(dry)" : "written")}");
+            if (!dryRun) AnimationStore.Save(clip, _statesDir);
+            n++;
+        }
+        if (only != null && n == 0) { Console.Error.WriteLine($"no clip '{only}'. run `list` to see clips."); return 2; }
+        Console.WriteLine($"# {(dryRun ? "would update" : "updated")} {n} clip(s)");
+        return 0;
+    }
+
     // base selector → a sample that makes SelectClip pick that locomotion clip.
     static (Vector2 vel, bool grounded, string move) BaseSample(string sel) => sel.ToLowerInvariant() switch
     {
@@ -188,6 +227,20 @@ static class Probe
 
     static string Arg(string[] a, int i, string fallback = null)
         => i < a.Length ? a[i] : (fallback ?? throw new ArgumentException($"missing argument #{i}"));
+
+    // First non-flag token at or after index `from` (flags start with '-'); null if none.
+    static string FirstNonFlag(string[] a, int from)
+    {
+        for (int i = from; i < a.Length; i++)
+            if (!a[i].StartsWith("-", StringComparison.Ordinal)) return a[i];
+        return null;
+    }
+
+    static bool HasFlag(string[] a, string flag)
+    {
+        foreach (var s in a) if (string.Equals(s, flag, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
 
     static string Safe(string s)
     {
