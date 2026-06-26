@@ -17,8 +17,6 @@ namespace MTile;
 //   • BlockEruptionAction._pen (SmoothPen) + _samples (List<PathSample>) — genuine
 //     accumulating gesture buffers, neither value-copyable nor cheaply re-derivable.
 //     They stay as instance fields and get a deep-copy at snapshot time (goal 6).
-// Polygon BlockPoly IS stored here: Polygon is immutable, so the shallow struct-copy
-// of its reference is snapshot-safe.
 //
 // Fields are reused across states where the meaning matches (TimeInState, HitId,
 // IsGrounded, ChargeTime), since actions are mutually exclusive in time.
@@ -37,10 +35,9 @@ public struct ActionVars
 
     public Vector2 StabDir;           // Stab / AirSpinStab
     public float   InitialStabAngle;  // Stab
-    public float   Boost;             // Stab
-    public float   BlockReach;        // Stab
-    public Polygon BlockPoly;         // Stab (immutable ref — see note above)
-    public float   TipExt;            // Stab (cached tip extension, read back by Draw)
+    public float   Boost;             // Stab (air-dive multiplier on damage + block box size)
+    public float   TipExt;            // Stab — live tip extension; drives the per-frame
+                                      // hitbox lengths (sim) AND the glow tip (render)
 
     public Vector2 OriginCell;        // BlockReady
     public Vector2 CursorPosition;     // BlockReady

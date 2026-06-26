@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Standalone effect sandbox. Deliberately self-contained: it does NOT reference
+       MTile.Core, so it compiles in isolation and stays dead-simple to hack. Just a
+       window + additive vertex-color primitives + one effect to tune. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <Nullable>disable</Nullable>
+    <AssemblyName>MTile.FxLab</AssemblyName>
+    <RootNamespace>MTile.FxLab</RootNamespace>
+    <MonoGamePlatform>DesktopGL</MonoGamePlatform>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
+  </ItemGroup>
+</Project>

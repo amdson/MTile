@@ -64,9 +64,9 @@ public sealed class GameConfig
 
     // Route the primary player's attack glow through GlowTrailField — the persistent
     // reaction–diffusion accumulation buffer (decay + reproject + blur + stamp) — so
-    // the slash/stab leaves a soft world-anchored streak instead of the primitive
-    // GlowRenderer triangle/sphere. Off → the old per-frame primitive glow. Render-only.
-    public bool GlowTrailField { get; set; } = true;
+    // the slash/stab leaves a soft world-anchored streak. Off (default) → the spline
+    // glow ribbon that follows the knife path (GlowRenderer.DrawTrailRibbon). Render-only.
+    public bool GlowTrailField { get; set; } = false;
 
     // Route the locomotion cadence (the per-frame phase advance Δφ) through the new
     // generalized least-squares animation solver instead of the legacy 1-D golden-

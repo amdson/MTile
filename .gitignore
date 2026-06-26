@@ -2,6 +2,7 @@
 .config
 .claude
 
+/reference_art
 # Build output — every project's bin/obj, plus Content's intermediate obj/
 **/bin/
 **/obj/

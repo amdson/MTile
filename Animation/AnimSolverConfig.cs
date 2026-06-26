@@ -22,6 +22,7 @@ public class AnimSolverConfig
     // --- constraint weight tiers ---
     public float TierHard      { get; set; } = 10f;   // FixedPoint external pins (both axes)
     public float TierNoPen     { get; set; } = 10f;   // active no-penetration half-plane push-out (hard tier, like a pin)
+    public float TierAim       { get; set; } = 60f;   // action aim: rotate the overlay's L→R-hand vector onto the input dir
     public float TierContact   { get; set; } = 1f;    // planted-foot no-slip (Δφ) + ground hold (δ), × feathered label weight
     public float CorePosePrior { get; set; } = 60f;   // λ_θ on hip/chest/head — stiff torso
     public float LimbPosePrior { get; set; } = 4f;    // λ_θ on arms/legs/feet — loose, they bend for IK

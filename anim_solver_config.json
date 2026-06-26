@@ -3,6 +3,7 @@
 
   "TierHard": 10,
   "TierNoPen": 10,
+  "TierAim": 60,
   "TierContact": 1,
   "CorePosePrior": 60,
   "LimbPosePrior": 4,

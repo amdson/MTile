@@ -2,7 +2,7 @@
   "Stage": "training",
   "WindowWidth": 900,
   "WindowHeight": 700,
-  "Fullscreen": false,
+  "Fullscreen": true,
   "DebugDrawHitboxes":          false,
   "DebugDrawHurtboxes":         false,
   "DebugDrawPlayerOrientation": false,
@@ -22,6 +22,6 @@
   "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
   "SecondPlayerOffsetY": 0,
-  "TimeScale": 0.2,
+  "TimeScale": 1.0,
   "AnimSolver": true
 }

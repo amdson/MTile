@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -18,6 +19,7 @@ public sealed class AttackGlowSystem
     private readonly float             _skeletonScale;
 
     private Trail   _knifeTrail;
+    private bool    _knifeTrailActive;   // was an attack feeding the trail last frame?
     // Previous-frame knife world position + whether last frame stamped, so the field
     // can stamp the swept SEGMENT (prev→cur) rather than isolated dabs.
     private Vector2 _knifeFieldPrev;
@@ -41,8 +43,17 @@ public sealed class AttackGlowSystem
     {
         _knifeTrail ??= new Trail(24, 10.0f);
         _knifeTrail.Tick(dt);
-        if (TryAttackKnifePos(player, out var knife))
-            _knifeTrail.Push(knife);
+        if (TryAttackTipPos(player, out var tip))
+        {
+            // On the first frame of a new attack, drop any leftover samples from the
+            // previous swing — otherwise the ribbon's first frame stretches from this
+            // move's start point back to wherever the knife last was. Cleared, the trail
+            // grows out from the start point as the move progresses.
+            if (!_knifeTrailActive) _knifeTrail.Clear();
+            _knifeTrail.Push(tip);
+            _knifeTrailActive = true;
+        }
+        else _knifeTrailActive = false;
     }
 
     // The glowing-shape pass (world space): the slash apex renders as a glowing triangle +
@@ -57,12 +68,12 @@ public sealed class AttackGlowSystem
             // decaying/blurring into a lingering world-anchored mark); stamp the swept
             // knife segment while an attack clip is playing.
             _glowField.BeginFrame(cam, fdt);
-            if (TryAttackKnifePos(player, out var knifeNow))
+            if (TryAttackTipPos(player, out var tipNow))
             {
-                Vector2 from = _knifeFieldActive ? _knifeFieldPrev : knifeNow;
-                _glowField.StampSweep(from, knifeNow,
+                Vector2 from = _knifeFieldActive ? _knifeFieldPrev : tipNow;
+                _glowField.StampSweep(from, tipNow,
                                       AttackGlowColor(player.CurrentAction, player.CurrentActionVars));
-                _knifeFieldPrev = knifeNow;
+                _knifeFieldPrev = tipNow;
                 _knifeFieldActive = true;
             }
             else _knifeFieldActive = false;
@@ -80,18 +91,33 @@ public sealed class AttackGlowSystem
         }
     }
 
-    // The animated knife bone's world position during an authored slash/stab overlay,
-    // or false when no attack clip is easing in. Same rig root the Draw path uses: drop
-    // the rig so the current pose's sole rests on the ground line under the body center,
-    // and read the LIVE pose so the glow stays welded to the rendered hand (the upper
-    // body stiffens during the overlay, so the live rig keeps most of the authored sweep).
-    private bool TryAttackKnifePos(PlayerCharacter player, out Vector2 knife)
+    // The world position the attack glow chases this frame, or false when no attack clip
+    // is easing in. Render-only: reads sim action state + the live pose, writes nothing.
+    //   • Stab: the SIM thrust tip (body + StabDir · TipExt) — the SAME point the hurtbox
+    //     now extends to — so the glowing sphere leads the spear out PAST the hand. The
+    //     knife bone only travels a fraction of the reach, so welding to it (as a slash
+    //     does) left the glow stalling short; tracking the tip shoots it to full reach in
+    //     lock-step with the dig. Clamped to ≥0 so it never dips behind the body during
+    //     the wind-up draw.
+    //   • Slash: the animated knife bone, read from the LIVE pose so the streak follows
+    //     the authored arc (upper body stiffens during the overlay, so the live rig keeps
+    //     most of the sweep). Same rig root the Draw path uses (com-anchored sole drop).
+    private bool TryAttackTipPos(PlayerCharacter player, out Vector2 tip)
     {
-        knife = default;
-        if (!(player.CurrentAction is SlashLikeAction or StabAction) || !_animator.OverlayActive)
-            return false;
-        return _animator.TryBoneOrigin(KnifeBone, RigRoot(player, _animator, _skeletonScale),
-                                       player.Facing, out knife, fromOverlay: false);
+        tip = default;
+        if (!_animator.OverlayActive) return false;
+
+        if (player.CurrentAction is StabAction)
+        {
+            var v = player.CurrentActionVars;
+            if (v.StabDir.LengthSquared() < 1e-6f) return false;
+            tip = player.Body.Position + v.StabDir * MathF.Max(v.TipExt, 0f);
+            return true;
+        }
+        if (player.CurrentAction is SlashLikeAction)
+            return _animator.TryBoneOrigin(KnifeBone, RigRoot(player, _animator, _skeletonScale),
+                                           player.Facing, out tip, fromOverlay: false);
+        return false;
     }
 
     // World position to place a rig's root so the drawn pose lines up with the player's
@@ -131,19 +157,16 @@ public sealed class AttackGlowSystem
     {
         if (action is SlashLikeAction slash)
         {
-            Trail t = (knifeTrail != null && knifeTrail.Count >= 1) ? knifeTrail : slash.SlashTrail;
-            if (t.Count >= 1)
-                _glow.DrawTrailGlow(cam, t, slash.SlashGlowColor,
-                                    auraRadius: 13f, coreSize: 5f, intensity: 0.8f);
+            Trail t = (knifeTrail != null && knifeTrail.Count >= 2) ? knifeTrail : slash.SlashTrail;
+            _glow.DrawTrailRibbon(cam, t, slash.SlashGlowColor, headWidth: 24f, intensity: 0.85f);
         }
-        else if (action is StabAction stab)
+        else if (action is StabAction stab) 
         {
             // Prefer the animated knife path (so the streak follows the authored thrust);
             // fall back to the sim's hitbox-driven tip when there's no clip / knife trail.
-            Trail t = (knifeTrail != null && knifeTrail.Count >= 1) ? knifeTrail : stab.TipTrail;
-            if (t.Count >= 1)
-                _glow.DrawTrailGlow(cam, t, stab.StabColorFor(vars.IsGrounded),
-                                    auraRadius: 14f, coreSize: 6f, intensity: 0.8f, core: GlowCore.Sphere);
+            Trail t = (knifeTrail != null && knifeTrail.Count >= 2) ? knifeTrail : stab.TipTrail;
+            _glow.DrawTrailRibbon(cam, t, stab.StabColorFor(vars.IsGrounded),
+                                  headWidth: 19f, intensity: 0.85f, widthTaper: 0.9f);
         }
     }
 }

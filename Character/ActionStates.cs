@@ -49,6 +49,12 @@ public abstract class ActionState
     // independent of how long the authored clip's own timeline is. 0 = no fixed length;
     // the animator falls back to the clip's own Duration. See CharacterAnimSample.
     public virtual float OverlayDuration => 0f;
+
+    // The world AIM direction of an input-parametrized action (a stab's StabDir), exposed to the
+    // animation layer so it can re-aim the authored (horizontal) overlay pose along the actual
+    // input direction. Render-only, same contract as OverlayDuration — derived from ActionVars,
+    // never read by the sim. Default none. The animator owns WHICH bones re-aim (see CharacterAnimator).
+    public virtual bool TryAnimationAim(in ActionVars vars, out Vector2 dir) { dir = default; return false; }
 }
 
 // Always-on fallback. Mirrors FallingState's role in the movement FSM.
@@ -597,15 +603,21 @@ public class AirTurnSlash : SlashLikeAction
 public class StabAction : ActionState
 {
     private const float Duration              = 0.60f;
-    // Active window timed to the strike phase of the visual curve (Draw): the box
-    // opens just as the tip starts whipping forward out of the wind-up, and stays
-    // alive through the snap into the hold. In normalized state-time that's
-    // ≈ 0.20–0.50 of Duration, matching WindupEnd → mid-hold.
+    // Active window spans the strike + hold of the visual curve (TipExtension): the
+    // box opens as the tip starts whipping forward out of the wind-up, SWEEPS OUTWARD
+    // with the tip (each box's length tracks vars.TipExt below) through the strike,
+    // then dwells at full reach through the early hold. In normalized state-time that's
+    // ≈ 0.18–0.55 of Duration (WindupEnd → mid-hold). The hold tail matters now that
+    // the boxes grow: the far cells are only covered late in the sweep, so the window
+    // has to stay open long enough (≥ TileMaxHP/DamagePerFrame frames at full reach)
+    // for them to break — otherwise the proportional box would dig only the near cells.
     // Startup bumped 0.12 → 0.18 s (≈11 frames at 60 fps) as part of the Phase 3
     // commitment spectrum: the stab is now a launcher (3× knockback below), so it
     // earns a real wind-up — whiffing it is punishable, landing it is a kill move.
+    // (Entities are HitId-deduped, so the longer window doesn't multi-hit them; it
+    // only gives tiles more frames to break and makes a point-blank connect easier.)
     private const float HurtboxStartTime      = 0.18f;
-    private const float HurtboxActiveDuration = 0.18f;
+    private const float HurtboxActiveDuration = 0.37f;
 
     // Lunge window: a short forward-glide phase AFTER the hitbox active window
     // (0.25–0.40) and BEFORE the settle (0.55–0.60). During this window the
@@ -627,11 +639,19 @@ public class StabAction : ActionState
     // like a homing missile.
     private const float MaxSteerSpeed = 1.8f;     // rad/s
     private const float MaxTotalSteer = 0.55f;    // rad (~31°)
-    // Tile-shockwave reach — significantly longer + wider than the entity-hitbox.
-    // Lets stab dig through several tiles at once without hitting balloons/enemies
-    // beyond its visible thrust extent.
-    private const float BlockReach            = PlayerCharacter.Radius * 6.0f * 1.75f;
+    // Tile-shockwave box — wider than the entity-hitbox (digs a channel rather than a
+    // thin slot) and extended past the visible tip by BlockReachFactor, so it ploughs
+    // a little deeper than the entity reach. Both boxes' LENGTHS now track the live tip
+    // extension (vars.TipExt) per frame rather than springing to a fixed reach, so the
+    // dig propagates outward in sync with the thrust instead of detonating at once.
     private const float BlockHalfWidth        = PlayerCharacter.Radius * 0.9f * 1.75f;
+    // Block tip overshoot past the primary (entity) tip — "35% deeper". Was an absolute
+    // BlockReach ≈ 1.82× Reach; now relative to the live tip so it sweeps in lock-step.
+    private const float BlockReachFactor      = 1.35f;
+    // Floor on each box's length during the active window so a point-blank stab still
+    // connects while the tip is still near the body (vars.TipExt dips slightly negative
+    // at the wind-up tail) and the per-frame polygons never go degenerate.
+    private const float MinHitLength          = PlayerCharacter.Radius * 2f;
     // Phase 3 power spectrum: 3× the old 380. At Mass 2.5 that's ~456 px/s of
     // launch — well over the 350 stun threshold, so a clean stab launches AND
     // stuns (→ TumbleState in the air). The payoff that justifies the longer
@@ -664,12 +684,6 @@ public class StabAction : ActionState
     private const float BoostReferenceSpeed = 400f;
 
 
-    // Static rectangle polygons in local space — long axis along +X. Rotation applied
-    // at publish time via Polygon.GetVertices(pos, rotation) so the actual hit shape
-    // tracks _stabDir, not just the loose AABB.
-    private static readonly Polygon PrimaryPoly = Polygon.CreateRectangle(Reach,      PrimaryHalfWidth * 2f);
-    private static readonly Polygon BlockPoly   = Polygon.CreateRectangle(BlockReach, BlockHalfWidth   * 2f);
-
     // Tip ribbon — short lifetime so the trail snaps with the strike rather than
     // lingering past the retract. Render-only; not part of ActionVars.
     private readonly Trail _tipTrail = new(capacity: 10, lifetime: 0.14f);
@@ -685,6 +699,11 @@ public class StabAction : ActionState
     // Remap the overlay clip onto the stab's [0, Duration] so the authored thrust sweeps
     // once over the swing — windup/strike/hold/retract stay synced to the hitbox windows.
     public override float OverlayDuration => Duration;
+
+    // The stab's live aim (captured at commit, steered toward the cursor within MaxTotalSteer).
+    // The animator rotates the authored horizontal thrust onto this so an up/diagonal stab reads.
+    public override bool TryAnimationAim(in ActionVars vars, out Vector2 dir)
+    { dir = vars.StabDir; return dir.LengthSquared() > 1e-6f; }
 
     private static Color ColorFor(bool isGrounded) => isGrounded ? Color.Goldenrod : Color.MediumPurple;
 
@@ -731,33 +750,21 @@ public class StabAction : ActionState
         }
         vars.InitialStabAngle = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
 
-        // Air-stab dive boost: project velocity onto the captured stab direction
-        // at the instant of commit. Ground stab + negative projection (velocity
-        // opposite to stab) collapse to MinBoost; high-speed aligned dives saturate
-        // at MaxBoost. Length × boost, width × √boost so the tile box gets visibly
-        // longer without becoming a giant rectangle.
+        // Air-stab dive boost: project velocity onto the captured stab direction at the
+        // instant of commit. Ground stab + negative projection (velocity opposite to
+        // stab) collapse to MinBoost; high-speed aligned dives saturate at MaxBoost.
+        // Boost feeds the per-frame publish below: damage × boost on both boxes, and the
+        // block box's length × boost / width × √boost so a clean dive digs deeper and a
+        // bit wider without ballooning into a giant rectangle.
         if (vars.IsGrounded)
         {
-            vars.Boost      = 1f;
-            vars.BlockPoly  = BlockPoly;
-            vars.BlockReach = BlockReach;
+            vars.Boost = 1f;
         }
         else
         {
             float velAlongStab = MathF.Max(0f, Vector2.Dot(vars.StabDir, ctx.Body.Velocity));
             float t = MathHelper.Clamp(velAlongStab / BoostReferenceSpeed, 0f, 1f);
             vars.Boost = MathHelper.Lerp(MinBoost, MaxBoost, t);
-            if (vars.Boost > 1.001f)
-            {
-                vars.BlockReach = BlockReach * vars.Boost;
-                float halfW = BlockHalfWidth * MathF.Sqrt(vars.Boost);
-                vars.BlockPoly  = Polygon.CreateRectangle(vars.BlockReach, halfW * 2f);
-            }
-            else
-            {
-                vars.BlockPoly  = BlockPoly;
-                vars.BlockReach = BlockReach;
-            }
         }
     }
 
@@ -858,24 +865,37 @@ public class StabAction : ActionState
             float rotation = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
             float dmg = DamagePerFrame * vars.Boost;
 
-            // Primary thrust — entity + tile damage along the thrust line.
-            var primaryCenter = ctx.Body.Position + vars.StabDir * (Reach * 0.5f);
-            var primaryAABB   = PrimaryPoly.GetBoundingBox(primaryCenter, rotation);
+            // Each box grows from the body out to the LIVE tip (vars.TipExt, the same
+            // curve that drives the visible thrust + glow), floored so a point-blank
+            // connect still lands and the polygon never degenerates. A box of length L
+            // centered at Body + dir*(L/2) spans Body → Body + dir*L, so its leading
+            // edge sits exactly on the tip and the dig carves outward in sync with the
+            // animation instead of detonating the whole reach at once. Built per frame
+            // (varying length) instead of from a cached static polygon.
+            float primaryLen = MathHelper.Clamp(vars.TipExt, MinHitLength, Reach);
+            float blockLen   = MathF.Max(vars.TipExt * BlockReachFactor, MinHitLength) * vars.Boost;
+            float blockHalfW = BlockHalfWidth * MathF.Sqrt(vars.Boost);
+
+            // Primary thrust — entity + tile damage along the thrust line, body → tip.
+            var primaryPoly   = Polygon.CreateRectangle(primaryLen, PrimaryHalfWidth * 2f);
+            var primaryCenter = ctx.Body.Position + vars.StabDir * (primaryLen * 0.5f);
+            var primaryAABB   = primaryPoly.GetBoundingBox(primaryCenter, rotation);
             ctx.Hitboxes.Publish(new Hitbox(
                 primaryAABB, vars.HitId, dmg,
                 vars.StabDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, ColorFor(vars.IsGrounded),
-                shape: PrimaryPoly, shapePos: primaryCenter, shapeRotation: rotation,
+                shape: primaryPoly, shapePos: primaryCenter, shapeRotation: rotation,
                 recoilScale: RecoilScale, recoilBreakProtected: true,
                 recoilMinMaterialHP: RecoilMinMaterialHP));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No
             // knockback (knockback comes from the primary box). Tiles only — passes
-            // cleanly past entities along the thrust axis. Polygon + reach are pre-scaled
-            // by _boost at Enter; a well-aligned air dive gets a substantially longer
-            // and slightly wider box plus the damage multiplier.
-            var blockCenter = ctx.Body.Position + vars.StabDir * (vars.BlockReach * 0.5f);
-            var blockAABB   = vars.BlockPoly.GetBoundingBox(blockCenter, rotation);
+            // cleanly past entities along the thrust axis. Tracks the tip like the primary
+            // box but BlockReachFactor longer and boost-scaled in length×boost / width×√boost,
+            // so a well-aligned air dive digs a substantially deeper + slightly wider channel.
+            var blockPoly   = Polygon.CreateRectangle(blockLen, blockHalfW * 2f);
+            var blockCenter = ctx.Body.Position + vars.StabDir * (blockLen * 0.5f);
+            var blockAABB   = blockPoly.GetBoundingBox(blockCenter, rotation);
             // Brighten the debug color in proportion to boost so the bigger box reads
             // visually distinct from a baseline stab when DebugDrawHitboxes is on.
             float boostT = (vars.Boost - MinBoost) / (MaxBoost - MinBoost);
@@ -886,7 +906,7 @@ public class StabAction : ActionState
                 ctx.Faction, ctx.SelfId,
                 blockColor,
                 HitTargets.TilesOnly,
-                shape: vars.BlockPoly, shapePos: blockCenter, shapeRotation: rotation));
+                shape: blockPoly, shapePos: blockCenter, shapeRotation: rotation));
         }
     }
 

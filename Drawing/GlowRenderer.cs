@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 
@@ -17,6 +18,7 @@ public enum GlowCore { Triangle, Sphere }
 public sealed class GlowRenderer
 {
     private readonly PrimitiveBatch _prims;
+    private readonly List<Vector2>  _ribbonPts = new(256);   // reused ribbon centerline buffer
 
     public GlowRenderer(GraphicsDevice gd) => _prims = new PrimitiveBatch(gd, capacity: 16384);
 
@@ -53,6 +55,104 @@ public sealed class GlowRenderer
     {
         GlowDisc(center, size, color);
         GlowDisc(center, size * 0.5f, color);   // double-up the center for a hot core
+    }
+
+    // Render `trail` as a glowing RIBBON that follows the motion path: a soft strip
+    // centered on the trail's spline, bright along its mid-line and fading to transparent
+    // at both edges, tapering in width + brightness toward the tail, with a rounded cap on
+    // the fat head (the blade's current position). Reads as a clean slash/stab streak —
+    // the in-game port of the FxLab spline-swoosh. `headWidth` is the ribbon width at the
+    // head (world px); `intensity` scales brightness. `cam` is the world→screen matrix.
+    public void DrawTrailRibbon(Matrix cam, Trail trail, Color glowColor,
+                                float headWidth, float intensity = 0.8f,
+                                int subdivisions = 6, float widthTaper = 0.85f, float alphaTaper = 1.1f)
+    {
+        if (trail == null || trail.Count < 2) return;
+
+        // Centerline: Catmull-Rom through the trail samples (newest = head → oldest = tail),
+        // sampled to a smooth polyline. Endpoints clamp their phantom neighbors so the curve
+        // passes through the first/last sample instead of spiraling off.
+        _ribbonPts.Clear();
+        int cp = trail.Count;
+        for (int s = 0; s < cp - 1; s++)
+        {
+            Vector2 p0 = trail.PositionFromNewest(Math.Max(s - 1, 0));
+            Vector2 p1 = trail.PositionFromNewest(s);
+            Vector2 p2 = trail.PositionFromNewest(s + 1);
+            Vector2 p3 = trail.PositionFromNewest(Math.Min(s + 2, cp - 1));
+            for (int k = 0; k < subdivisions; k++)
+                _ribbonPts.Add(CatmullRom(p0, p1, p2, p3, k / (float)subdivisions));
+        }
+        _ribbonPts.Add(trail.PositionFromNewest(cp - 1));
+
+        _prims.Begin(cam, PrimitiveType.TriangleList, BlendState.Additive);
+        SplineRibbon(_ribbonPts, headWidth, glowColor, intensity, widthTaper, alphaTaper);
+        _prims.End();
+    }
+
+    // Skin a glowing ribbon along an arbitrary centerline polyline `pts` (head = pts[0]).
+    // Two soft falloffs make it read as light, not a solid strip:
+    //   • across the width — bright mid-line, alpha 0 at both rims,
+    //   • along the length — alpha (and width, via `narrow`) tapering head → tail.
+    // The head gets a rounded half-disc cap bulging in the direction of travel.
+    private void SplineRibbon(List<Vector2> pts, float thick, Color hue, float alpha,
+                              float narrow, float alphaTaper)
+    {
+        int n = pts.Count;
+        if (n < 2) return;
+        Color rim = hue * 0f;                                 // same hue, alpha 0
+
+        Vector2 pIn = default, pMid = default, pOut = default;
+        Color   pCol = default;
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)(n - 1);                     // 0 = head, 1 = tail
+            // Path tangent from neighbors → normal is the ribbon's width direction.
+            Vector2 fwd = pts[Math.Min(i + 1, n - 1)] - pts[Math.Max(i - 1, 0)];
+            if (fwd.LengthSquared() < 1e-6f) fwd = new Vector2(1f, 0f);
+            fwd.Normalize();
+            var nrm = new Vector2(-fwd.Y, fwd.X);
+
+            float w   = thick * 0.5f * (1f - narrow * t);
+            float aA  = MathF.Pow(1f - t, alphaTaper);        // 1 at head → 0 at tail
+            Color col = hue * (alpha * aA);
+            Vector2 mid = pts[i], vIn = mid - nrm * w, vOut = mid + nrm * w;
+            if (i > 0)
+            {
+                _prims.Quad(pIn, vIn, mid, pMid, rim, rim, col, pCol);   // rim → mid-line
+                _prims.Quad(pMid, mid, vOut, pOut, pCol, col, rim, rim); // mid-line → rim
+            }
+            pIn = vIn; pMid = mid; pOut = vOut; pCol = col;
+        }
+
+        // Rounded cap at the head: half-disc of radius thick/2 on the head cross-section,
+        // bulging in the direction of travel (−tangent at the head).
+        Vector2 h0 = pts[0], fwd0 = pts[1] - pts[0];
+        if (fwd0.LengthSquared() < 1e-6f) fwd0 = new Vector2(1f, 0f);
+        fwd0.Normalize();
+        var   nrm0 = new Vector2(-fwd0.Y, fwd0.X);            // cap diameter axis
+        var   outward = -fwd0;                                // bulge ahead of the head
+        float cr = thick * 0.5f;
+        Color capCol = hue * alpha;
+        const int cseg = 14;
+        Vector2 pr = default;
+        for (int i = 0; i <= cseg; i++)
+        {
+            float phi = MathF.PI * i / cseg;
+            var   dir = nrm0 * MathF.Cos(phi) + outward * MathF.Sin(phi);
+            Vector2 rimP = h0 + dir * cr;
+            if (i > 0) _prims.Triangle(h0, pr, rimP, capCol, rim, rim);
+            pr = rimP;
+        }
+    }
+
+    private static Vector2 CatmullRom(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3, float t)
+    {
+        float t2 = t * t, t3 = t2 * t;
+        return 0.5f * (2f * p1
+                       + (-p0 + p2) * t
+                       + (2f * p0 - 5f * p1 + 4f * p2 - p3) * t2
+                       + (-p0 + 3f * p1 - 3f * p2 + p3) * t3);
     }
 
     // Render a glowing triangle trailing along `trail`: an aura disc at each trail sample

@@ -68,17 +68,24 @@ public readonly struct CharacterAnimSample
     // animation policy) and WHEN (gated by MovementProgress). HasGrip false ⇒ GripTarget unused.
     public readonly bool    HasGrip;
     public readonly Vector2 GripTarget;
+    // World AIM direction of the current input-parametrized action (a stab's StabDir), from
+    // CurrentAction.TryAnimationAim. The animator rotates the authored horizontal overlay onto it.
+    // HasAim false ⇒ AimDir unused. Render-only.
+    public readonly bool    HasAim;
+    public readonly Vector2 AimDir;
 
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
         string movementState, string action, float dt, float actionTime = 0f,
         float actionDuration = 0f, float movementProgress = 0f, ExternalPin[] pins = null,
-        SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default)
+        SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default,
+        bool hasAim = false, Vector2 aimDir = default)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
         ActionDuration = actionDuration; MovementProgress = movementProgress; Pins = pins;
         Surfaces = surfaces; HasGrip = hasGrip; GripTarget = gripTarget;
+        HasAim = hasAim; AimDir = aimDir;
     }
 
     // Pull the sample from a live character through its public surface only. The
@@ -107,11 +114,17 @@ public readonly struct CharacterAnimSample
         bool hasGrip = false; Vector2 gripTarget = default;
         if (p.CurrentState != null) hasGrip = p.CurrentState.TryAnimationGrip(out gripTarget);
 
+        // An input-parametrized action may expose an aim direction (a stab's StabDir) — the
+        // animator re-aims the authored horizontal overlay onto it. Render-only.
+        bool hasAim = false; Vector2 aimDir = default;
+        if (p.CurrentAction != null) hasAim = p.CurrentAction.TryAnimationAim(p.CurrentActionVars, out aimDir);
+
         return new(pos, p.Body.Velocity, facing, p.IsGrounded,
                state, p.CurrentActionName, dt,
                p.CurrentActionVars.TimeInState,
                p.CurrentAction?.OverlayDuration ?? 0f,
                p.CurrentState?.AnimationProgress ?? 0f,
-               surfaces: surfaces, hasGrip: hasGrip, gripTarget: gripTarget);
+               surfaces: surfaces, hasGrip: hasGrip, gripTarget: gripTarget,
+               hasAim: hasAim, aimDir: aimDir);
     }
 }

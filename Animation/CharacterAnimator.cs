@@ -160,6 +160,7 @@ public sealed partial class CharacterAnimator
     private readonly LeastSquaresSolver.JacobianFn _cadenceJacobian;   // analytic J (replaces FD)
     private readonly float[]             _angVel;   // per-bone clip dθ/dt scratch for the Jacobian
     private readonly float[]             _colX, _colY;   // ∂p/∂x column scratch for the point Jacobian
+    private readonly float[]             _colX2, _colY2;  // second point-Jacobian scratch (the aim's other hand)
     private readonly bool[]              _isCore;        // bone is torso (hip/chest/head) → stiff Tikhonov λ_θ
     private readonly float[]             _prevTheta;     // last frame's solved Δθ (temporal smoothness target)
     private readonly ISolveConstraint[]  _constraints;   // the composite objective, assembled in order
@@ -168,6 +169,14 @@ public sealed partial class CharacterAnimator
     private float             _solvePhi;
     private Affine2           _solveRoot;
     private bool              _haveCorr;          // a Δθ-correction solve ran this frame
+
+    // Action-aim state (the stab re-aim, §STAB_AIM_PLAN), resolved each frame in step 1.7 and
+    // frozen for the solve. _aimTarget (û*) is captured once at solve start from the Δθ=0 pose.
+    private bool    _aimActive;
+    private Vector2 _aimDir;       // world input aim direction (unit) this frame
+    private Vector2 _aimTarget;    // frozen target unit vector û* the live aim vector is driven onto
+    private int     _aimFacing;    // facing the reference rotation is measured from
+    private readonly int _aimBoneL, _aimBoneR;   // the L→R hand pair whose vector encodes the aim
 
     // Cached bone indices (resolved once).
     private readonly int _hip, _chest;
@@ -196,8 +205,8 @@ public sealed partial class CharacterAnimator
         if (!_haveCorr || _ls == null) return -1f;
         int bones = _skeleton.Count;
         int n = 2 + bones;
-        // 2/contact + 2/pin + bones/surface (no-penetration) + continuity + com + bones×2 priors.
-        int m = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + 2 + 2 * bones;
+        // 2/contact + 2/pin + bones/surface (no-penetration) + 1 aim + continuity + com + bones×2 priors.
+        int m = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0) + 2 + 2 * bones;
 
         // The body may be far from the world origin (it has walked many units), so a residual
         // tip.x − target.x is a tiny difference of large coordinates and a float32 finite
@@ -305,7 +314,7 @@ public sealed partial class CharacterAnimator
     {
         if (!_haveCorr || _ls == null) return "(no solve)";
         int bones = _skeleton.Count, n = IdxTheta0 + bones;
-        int geom = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones;
+        int geom = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0);
         int m = geom + 2 + 2 * bones;
 
         var x = new float[n];
@@ -345,6 +354,13 @@ public sealed partial class CharacterAnimator
             for (int i = s0; i < sN && i < m; i++) maxPen = MathF.Max(maxPen, MathF.Abs(r[i]));
             sb.Append($"  | nopen maxResid={maxPen,5:0.00}");
         }
+        if (_aimActive)
+        {
+            // The solved aim vector vs the target û* — the angle error left after the solve.
+            Vector2 v = _scratch.WorldOf(_aimBoneR).Translation - _scratch.WorldOf(_aimBoneL).Translation;
+            float ang = MathF.Atan2(v.X * _aimTarget.Y - v.Y * _aimTarget.X, v.X * _aimTarget.X + v.Y * _aimTarget.Y);
+            sb.Append($"  | aim errDeg={ang * 180f / MathF.PI,6:0.0}");
+        }
         return sb.ToString();
 
         string Name(int b) => b >= 0 && b < bones ? _skeleton.Bones[b].Name : "-";
@@ -360,6 +376,17 @@ public sealed partial class CharacterAnimator
         Vector2 tip = _scratch.WorldOf(bone).Translation;
         tip.Y += _solveVars[IdxDy];
         return tip;
+    }
+
+    // TEST/DIAGNOSTIC: the signed angle (radians) between the solved aim vector (right hand − left
+    // hand at the accepted solve point) and the frozen target û* — i.e. how far off the re-aim
+    // landed. ~0 means the aim constraint reached its target. NaN when no aim solve ran this frame.
+    internal float AimAngleError()
+    {
+        if (!_haveCorr || !_aimActive) return float.NaN;
+        Vector2 v = SolvedBoneTipWorld(_aimBoneR) - SolvedBoneTipWorld(_aimBoneL);   // δ cancels in the difference
+        Vector2 u = _aimTarget;
+        return MathF.Atan2(v.X * u.Y - v.Y * u.X, v.X * u.X + v.Y * u.Y);
     }
 
     // Keyframe interval index of normalized time t (for the FD oracle's boundary guard): the
@@ -421,6 +448,7 @@ public sealed partial class CharacterAnimator
 
         int I(string n) => rig.IndexOf(n);
         _hip = I("hip"); _chest = I("chest");
+        _aimBoneL = I("arm_l_lower"); _aimBoneR = I("arm_r_lower");   // the stab-aim hand pair
 
         // Sized for Phase 1 (one Δφ variable) with headroom for later phases (joint
         // corrections, a 2-D CoM offset → ~16 variables; a handful of contact residuals
@@ -432,9 +460,9 @@ public sealed partial class CharacterAnimator
             // little headroom. Residuals: two rows per contact (H no-slip + V ground) + two per
             // external pin + continuity + com + one prior per bone. Sized to the rig once.
             int nv = 2 + rig.Count + 2;
-            // 2/contact + 2/pin + (MaxSurfaces × bones) no-penetration + continuity + com
+            // 2/contact + 2/pin + (MaxSurfaces × bones) no-penetration + 1 aim + continuity + com
             // + bones Tikhonov + bones Δθ-smoothness.
-            int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 2 + 2 * rig.Count + 2;
+            int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 1 + 2 + 2 * rig.Count + 2;
             _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
             _solveVars = new float[nv];
             _solveLo   = new float[nv];
@@ -442,6 +470,8 @@ public sealed partial class CharacterAnimator
             _angVel    = new float[rig.Count];
             _colX      = new float[nv];
             _colY      = new float[nv];
+            _colX2     = new float[nv];
+            _colY2     = new float[nv];
             // Which bones are torso (stiff Tikhonov λ_θ from config) vs limb (loose). Structural —
             // the WEIGHTS live in AnimSolverConfig so they hot-reload; this just tags the bones.
             _isCore = new bool[rig.Count];
@@ -461,6 +491,7 @@ public sealed partial class CharacterAnimator
                 new PlantedContactsConstraint(this),   // 2 rows/contact: H no-slip (Δφ) + V ground hold (δ)
                 new FixedPointConstraint(this),        // 2 rows/pin: both-axis hard external pin (Δθ IK)
                 new NoPenetrationConstraint(this),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
+                new ActionAimConstraint(this),         // 1 row: re-aim the action overlay along the input dir (Δθ)
                 new PlaybackContinuityConstraint(this),// 1 row: Δφ momentum prior
                 new ComOffsetConstraint(this),         // 1 row: soft com pulls δ→baseline
                 new PosePriorConstraint(this),         // N rows: Tikhonov on each Δθ (toward 0)
@@ -601,6 +632,7 @@ public sealed partial class CharacterAnimator
                 if (_surfaces.Count >= MaxSurfaces) break;
                 _surfaces.Add(srf);
             }
+        ResolveActionAim(in s);
 
         // 2. Advance the locomotion phase. A Walk/WalkBack clip with contact labels is
         //    cadence-driven: the solver picks Δφ so the planted foot doesn't slip
@@ -653,7 +685,7 @@ public sealed partial class CharacterAnimator
         //     respect the pins/surfaces while the body bob settles. Behaviour-preserving for
         //     normal locomotion: there _haveCorr is already true (cadence solved), and during
         //     plain flight/idle there are no pins/surfaces, so this is skipped.
-        if (_useSolver && !_haveCorr && hasClip && (_pins.Count > 0 || _surfaces.Count > 0))
+        if (_useSolver && !_haveCorr && hasClip && (_pins.Count > 0 || _surfaces.Count > 0 || _aimActive))
             SolveStaticPose(anim, clip, in s);
 
         // 3. Build the target pose. Locomotion + idle sample by phase (so cadence
@@ -998,6 +1030,7 @@ public sealed partial class CharacterAnimator
         _solveLo[1] = -cfg.VertOffsetLimit; _solveHi[1] = cfg.VertOffsetLimit;
         for (int i = 2; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
         Array.Clear(_solveVars, 0, n);        // δ, Δθ start at 0 (baseline pose); Δφ seeded below
+        CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
 
         // The cadence objective is NON-CONVEX in Δφ: a planted foot's horizontal track
         // is non-monotonic over a stance arc (it can drift forward before sweeping back),
@@ -1053,6 +1086,7 @@ public sealed partial class CharacterAnimator
         _solveLo[1] = -cfg.VertOffsetLimit; _solveHi[1] = cfg.VertOffsetLimit;
         for (int i = 2; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
         Array.Clear(_solveVars, 0, n);
+        CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
 
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n));
@@ -1231,6 +1265,38 @@ public sealed partial class CharacterAnimator
             int b = _skeleton.IndexOf(VaultGripBone);
             if (b >= 0) _pins.Add((b, s.GripTarget));
         }
+    }
+
+    // Resolve this frame's action aim (§STAB_AIM_PLAN). The sample carries the world aim direction
+    // (a stab's StabDir); the animator owns which bones encode the aim (the L→R hand pair) and so
+    // freezes _aimActive/_aimDir/_aimFacing for the solve. The target û* is captured at solve start
+    // (CaptureAimTarget) once the reference pose is built. HasAim is only set for aimed actions.
+    private void ResolveActionAim(in CharacterAnimSample s)
+    {
+        _aimActive = false;
+        if (!_useSolver || !s.HasAim || _aimBoneL < 0 || _aimBoneR < 0) return;
+        if (s.AimDir.LengthSquared() < 1e-6f) return;
+        _aimDir    = Vector2.Normalize(s.AimDir);
+        _aimFacing = s.Facing == 0 ? 1 : s.Facing;
+        _aimActive = true;
+    }
+
+    // Freeze the aim target û* for this frame's solve: the authored reference aim (the L→R hand
+    // vector of the Δθ=0 composed pose) ROTATED by the stab's deviation from horizontal-forward
+    // f=(facing,0). Rotating the reference (rather than aiming a fixed vector) preserves the clip's
+    // windup→thrust dynamics. Called at solve start, when _solveVars is all-zero (the reference).
+    private void CaptureAimTarget(int n)
+    {
+        if (!_aimActive) return;
+        BuildSolvePose(_solveVars.AsSpan(0, n));   // _solveVars == 0 here ⇒ Δθ=0, Δφ=0 reference pose
+        Vector2 pL = _scratch.WorldOf(_aimBoneL).Translation;
+        Vector2 pR = _scratch.WorldOf(_aimBoneR).Translation;
+        Vector2 aRef = pR - pL;
+        // R takes f=(facing,0) → _aimDir: cosθ = f·d = facing·d.x, sinθ = f×d = facing·d.y (both unit).
+        float c = _aimFacing * _aimDir.X, sgn = _aimFacing * _aimDir.Y;
+        Vector2 rot = new Vector2(aRef.X * c - aRef.Y * sgn, aRef.X * sgn + aRef.Y * c);
+        float len = rot.Length();
+        _aimTarget = len > 1e-6f ? rot / len : new Vector2(_aimFacing, 0f);
     }
 
     private void Rot(int bone, float delta)       { if (bone >= 0) _target.Local[bone].Rotation    += delta; }

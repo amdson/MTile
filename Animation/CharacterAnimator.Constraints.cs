@@ -210,6 +210,61 @@ public sealed partial class CharacterAnimator
         }
     }
 
+    // One row: aim an input-parametrized action (a stab) along its direction. The residual is the
+    // SIGNED ANGLE √w·atan2(v × û*, v · û*) between the live aim vector v = (right hand − left hand)
+    // and the frozen target unit direction û*. The angle (not the bare cross) is used so the cost
+    // angle² has its ONLY minimum at v ∥ û* (parallel) — antiparallel is a *maximum*, not a second
+    // zero, so the solve can't fall into the wrong basin (the bare cross v×û* zeroes at both). û* is
+    // the authored (Δθ=0) reference aim ROTATED by the stab's deviation from horizontal-forward
+    // (captured once per frame, §2 of STAB_AIM_PLAN), so it preserves the clip's windup→thrust
+    // dynamics while turning the whole aim onto the input direction. The solver bends the
+    // (overlay-owned, post-compose) arm via Δθ. δ cancels (shifts both hands equally → drops out of
+    // pR − pL), so the aim row has no δ column.
+    private sealed class ActionAimConstraint : ISolveConstraint
+    {
+        private readonly CharacterAnimator _a;
+        public ActionAimConstraint(CharacterAnimator a) => _a = a;
+
+        public int Residuals(ReadOnlySpan<float> x, Span<float> r)
+        {
+            if (!_a._aimActive) return 0;
+            Vector2 pL = _a._scratch.WorldOf(_a._aimBoneL).Translation;
+            Vector2 pR = _a._scratch.WorldOf(_a._aimBoneR).Translation;
+            Vector2 v = pR - pL, u = _a._aimTarget;
+            float c = v.X * u.Y - v.Y * u.X;   // cross
+            float d = v.X * u.X + v.Y * u.Y;   // dot
+            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierAim);
+            r[0] = sw * MathF.Atan2(c, d);     // signed angle(v, û*); 0 ⇔ parallel, ±π ⇔ antiparallel (a max)
+            return 1;
+        }
+
+        public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
+        {
+            if (!_a._aimActive) return 0;
+            int nv = IdxTheta0 + _a._skeleton.Count;
+            var cxR = _a._colX.AsSpan(0, nv);  var cyR = _a._colY.AsSpan(0, nv);
+            var cxL = _a._colX2.AsSpan(0, nv); var cyL = _a._colY2.AsSpan(0, nv);
+            Vector2 pR = _a._scratch.WorldOf(_a._aimBoneR).Translation;
+            Vector2 pL = _a._scratch.WorldOf(_a._aimBoneL).Translation;
+            _a.PointJacobianColumns(_a._aimBoneR, pR, cxR, cyR);   // ∂pR/∂x
+            _a.PointJacobianColumns(_a._aimBoneL, pL, cxL, cyL);   // ∂pL/∂x
+            Vector2 v = pR - pL, u = _a._aimTarget;
+            float c = v.X * u.Y - v.Y * u.X, d = v.X * u.X + v.Y * u.Y;
+            float denom = c * c + d * d;       // = |v|² (û* unit); the d(atan2) normalizer
+            if (denom < 1e-9f) return 1;        // hands coincident — leave the row at 0
+            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierAim) / denom;
+            // θ = atan2(c, d) ⇒ ∂θ/∂x_k = (d·∂c − c·∂d)/(c²+d²), with ∂v = ∂pR − ∂pL.
+            for (int k = 0; k < nv; k++)
+            {
+                float dvx = cxR[k] - cxL[k], dvy = cyR[k] - cyL[k];
+                float dc = dvx * u.Y - dvy * u.X;   // ∂(cross)
+                float dd = dvx * u.X + dvy * u.Y;   // ∂(dot)
+                jac[row0 * stride + k] = sw * (d * dc - c * dd);
+            }
+            return 1;
+        }
+    }
+
     // One row: √PhaseStepPrior · (Δφ − Δφ_prev) — the playback-continuity / momentum prior.
     private sealed class PlaybackContinuityConstraint : ISolveConstraint
     {

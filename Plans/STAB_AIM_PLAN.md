@@ -118,18 +118,25 @@ do the right things here: arm leads, torso steadies, mid-attack steering re-aims
 
 ## 7. Phases
 
-1. **Plumb the aim signal.** `TryAnimationAim` on `ActionState`/`StabAction`, `{HasAim, AimDir}` on
-   the sample + `From`, animator resolves `_aimActive`/`_aimDir`. No solver change yet; assert the
-   signal reaches the animator (test).
-2. **`ActionAimConstraint` + trigger.** Add the 1-row cross-product constraint (unnormalized v1) and
-   the `_aimActive` trigger branch. Headline test: **FD-vs-analytic** on the aim row
-   (`MaxJacobianError`) across several stab angles, plus an aim-reaches test (live `v` parallel to
-   `û*` within tolerance) on a standing stab — exercising the solve-during-stab trigger.
-3. **Tune + feel.** Set `TierAim`, decide the engagement window/ramp, eyeball in the editor /
-   in-game. Confirm: up/down/diagonal stabs read correctly, mid-attack steering re-aims smoothly
-   (θ-smoothness), the off-hand stays plausible, the knife/glow tracks the new aim.
+1. **Plumb the aim signal — DONE.** `ActionState.TryAnimationAim(in ActionVars, out dir)` (render-only
+   virtual) → `StabAction` returns `vars.StabDir`; rides `CharacterAnimSample.{HasAim, AimDir}` (set in
+   `From`); the animator's `ResolveActionAim` (step 1.7) freezes `_aimActive`/`_aimDir`/`_aimFacing`
+   and owns the `arm_l_lower`/`arm_r_lower` pair.
+2. **`ActionAimConstraint` + trigger — DONE.** One row, `_aimActive` added to the off-locomotion solve
+   trigger, `û*` frozen per frame by `CaptureAimTarget` (reference pose at Δθ=0, rotated by the stab
+   deviation). **KEY FINDING — use the signed ANGLE, not the bare cross.** The plan's first cut
+   (`v × û*`) zeroes at *both* parallel and antiparallel, and an up-aim fell into the antiparallel
+   basin (the arm slammed the box, ~174° off). Switching the residual to `atan2(v×û*, v·û*)` (angle²
+   has a unique min at parallel; antiparallel is a *maximum*) fixed it — clean 1-row analytic Jacobian
+   `√w·(d·∂c − c·∂d)/(c²+d²)`. Test `ActionAimSolverTests` (standing stab, ±35°, both facings):
+   re-aims to <2.1°, bounded arm Δθ (~0.26–0.33, torso steady), FD-vs-analytic ~1e-4.
+3. **Tune + feel — partly done; needs in-game.** `TierAim = 60` (the angle residual is radian-scale,
+   so it needs a far higher tier than the px-scale geometric rows; tuned via the test from the
+   converged error vs the limb prior — 8 left ~5–11° of slack, 60 closes to <2°). STILL TO DO:
+   eyeball in-game — engagement window/ramp (currently always-on during the overlay), whether L→R
+   reads as well as the knife axis (§8 Q1), mid-attack steering smoothness, knife/glow tracking.
 4. **(Generalize, later.)** Reuse for slashes (aim toward the mouse `ComputeSlashDir`) — same
-   constraint, different aim source + bone pair.
+   constraint, different aim source + bone pair (`SlashDir` is already on `ActionVars`).
 
 ## 8. Open questions / decisions
 

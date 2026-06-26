@@ -16,6 +16,7 @@
     <Compile Remove="MTile.Rtc\**" />
     <Compile Remove="MTile.Demo\**" />
     <Compile Remove="MTile.Probe\**" />
+    <Compile Remove="MTile.FxLab\**" />
   </ItemGroup>
   <ItemGroup>
     <!-- The test project validates internal solver hooks (e.g. CharacterAnimator's analytic
