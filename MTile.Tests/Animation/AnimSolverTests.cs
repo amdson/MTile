@@ -47,52 +47,57 @@ public class AnimSolverTests
 
     // --- Phase 2: angle corrections + pose prior -----------------------------
 
-    // The solver now carries a per-bone angle correction Δθ regularized by the Tikhonov
-    // PosePrior. The well-posedness / no-op proof has two parts:
-    //
-    //  • A bone with NO contact in its subtree (chest, head, arms) has zero slip-coupling,
-    //    so its only residual is the prior row √λ·Δθ. The normal equations then DECOUPLE
-    //    that variable (JᵀJ diagonal = λ, off-diagonals 0) and drive it to exactly 0 from
-    //    the 0 start — λ-independently. If it drifted, the system would be ill-posed.
-    //  • Leg/foot bones (in the active contact chain) may carry a SMALL IK correction that
-    //    trims the residual no-slip, but it must stay well inside the box (no blow-up, no
-    //    pinning to the AngleCorrLimit wall) — the pose stays on the authored blend.
+    // Well-posedness of the Δθ channel under in-solve smoothing (polish item 1 changed this
+    // test's premise). Δθ is no longer ~0 on unconstrained bones: the smoothness rows use it
+    // to EASE every bone's deviation — in particular it BRIDGES the once-per-stride Δφ hop
+    // (the pose no longer teleports at a foot-swap; Δθ spans the jump, then decays under the
+    // Tikhonov/smoothness balance). So the proof is now: corrections stay BOUNDED (well inside
+    // the box — no drift to the wall = still well-posed) and DECAY (a bridge is transient:
+    // between hops the steady-state Δθ returns to ~the smoothing lag, not a growing offset).
     [Theory]
     [InlineData("walk", 25f, +1)]
     [InlineData("walk", 25f, -1)]
     [InlineData("run",  90f, +1)]
     [InlineData("run",  90f, -1)]
-    public void Solver_AngleCorrections_StayNegligible_InSteadyLocomotion(string clipName, float speed, int facing)
+    public void Solver_AngleCorrections_StayBoundedAndDecay_InSteadyLocomotion(string clipName, float speed, int facing)
     {
         var clip = AnimationStore.LoadAll(StatesDir()).Find(d => d.Name == clipName);
         Assert.True(clip != null, $"{clipName}.json not found");
         var skel = SkeletonExamples.Biped();
-        var anim = new CharacterAnimator(skel, 0.6f, new[] { clip }, useSolver: true);
+        var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
 
-        // Bones with no foot contact below them — their Δθ is driven purely by the prior.
-        var upperBody = new[] { "chest", "head", "arm_l_upper", "arm_l_lower", "arm_r_upper", "arm_r_lower" };
-        int[] upper = Array.ConvertAll(upperBody, n => anim.Skeleton.IndexOf(n));
-
-        float dt = 1f / 30f, vx = speed * facing, x = 0f, maxUpper = 0f, maxAll = 0f;
+        float dt = 1f / 30f, vx = speed * facing, x = 0f, maxAll = 0f;
         float prev = anim.State.Phase, totalPhase = 0f;
+        int decayFrames = 0, sampleFrames = 0;
+        float prevMaxTheta = 0f;
         for (int i = 0; i < 60; i++)
         {
             x += vx * dt;
             anim.Update(new CharacterAnimSample(
                 new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState", "", dt));
-            foreach (int b in upper) maxUpper = MathF.Max(maxUpper, MathF.Abs(anim.AngleCorrection(b)));
+            float frameMax = 0f;
             for (int b = 0; b < anim.Skeleton.Count; b++)
-                maxAll = MathF.Max(maxAll, MathF.Abs(anim.AngleCorrection(b)));
+                frameMax = MathF.Max(frameMax, MathF.Abs(anim.AngleCorrection(b)));
+            maxAll = MathF.Max(maxAll, frameMax);
+            if (i > 5)
+            {
+                sampleFrames++;
+                if (frameMax <= prevMaxTheta + 1e-4f) decayFrames++;   // shrinking or flat
+            }
+            prevMaxTheta = frameMax;
             float p = anim.State.Phase, d = p - prev; if (d < -0.5f) d += 1f;
             totalPhase += d; prev = p;
         }
 
         // The cadence path actually ran (phase advanced — not a vacuous all-flight pass)...
         Assert.True(totalPhase > 0.2f, $"cadence didn't advance ({totalPhase:0.000})");
-        // ...unconstrained bones collapse to exactly 0 (the structural no-op)...
-        Assert.True(maxUpper < 1e-4f, $"upper-body |Δθ| = {maxUpper:0.000000} rad — should be ~0");
-        // ...and even the IK-trimmed leg/foot corrections stay a small fraction of the box.
-        Assert.True(maxAll < 0.25f, $"max |Δθ| = {maxAll:0.0000} rad — corrections not minimal");
+        // ...corrections stay well inside the box (no drift to the wall — well-posed)...
+        float box = AnimSolverConfig.Current.AngleCorrLimit;
+        Assert.True(maxAll < 0.5f * box, $"max |Δθ| = {maxAll:0.0000} rad — approaching the box ({box})");
+        // ...and they DECAY on most frames (bridges are transient spikes, not accumulation:
+        // a hop bridge grows |Δθ| for a frame, then the smoothing releases it over the next few).
+        Assert.True(decayFrames > sampleFrames / 2,
+            $"|Δθ| grew on {sampleFrames - decayFrames}/{sampleFrames} frames — corrections accumulating?");
     }
 
     // --- Phase 3: solved vertical offset δ (ComOffset + vertical ground) -----
@@ -110,7 +115,7 @@ public class AnimSolverTests
         var clip = AnimationStore.LoadAll(StatesDir()).Find(d => d.Name == clipName);
         Assert.True(clip != null, $"{clipName}.json not found");
         var skel = SkeletonExamples.Biped();
-        var anim = new CharacterAnimator(skel, 0.6f, new[] { clip }, useSolver: true);
+        var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
 
         float dt = 1f / 30f, vx = speed * facing, x = 0f, maxAbs = 0f;
         int flightFrames = 0, stanceBobFrames = 0;
@@ -148,7 +153,7 @@ public class AnimSolverTests
         var clip = AnimationStore.LoadAll(StatesDir()).Find(d => d.Name == clipName);
         Assert.True(clip != null, $"{clipName}.json not found");
         var skel = SkeletonExamples.Biped();
-        var anim = new CharacterAnimator(skel, 0.6f, new[] { clip }, useSolver: true);
+        var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
 
         float dt = 1f / 30f, vx = speed * facing, x = 0f, worst = 0f;
         int checks = 0, wc = -1, wr = -1; float wfd = 0f, wan = 0f;

@@ -503,11 +503,30 @@ system. `LeastSquaresSolver` is untouched. Inequality constraints (NoPenetration
 *active* row set in `PrepareRows` (before `Minimize`) to honor the stable-row-count contract.
 Today's `CadenceResiduals`/`CadenceJacobian` become the assembly loop over the list.
 
-### 11.4 Weight tiers (resolves §9.5)
-Named tiers, rescaled so a hard pin beats the priors (today INVERTED: NoSlip=1 < PosePrior=25,
-fine while Δφ carries cadence but fatal once a hard constraint needs Δθ):
-`HARD ~1e3 (FixedPoint, active NoPenetration) ≫ CONTACT ~1 (NoSlip, ground) ≫ SOFT ~0.05
-(ComOffset) ≫ PRIOR ~λ (Tikhonov, JointLimits)`.
+### 11.4 Weight tiers (resolves §9.5) — UPDATED 2026-07-14: dimensionless units
+
+Every residual is now DIMENSIONLESS: pixel rows (contacts, pins, no-penetration, the com
+ties) are divided by the rig's REACH (longest root→tip chain × scale ≈ 21.6px for the biped
+at 0.6 — `CharacterAnimator._invCharLen`); angle rows are radians. Through the lever arms,
+1 rad of joint error ≈ 1 reach of tip error, so the config numbers compare honestly across
+both kinds of row. The live tier table (AnimSolverConfig defaults; behavior identical to the
+pre-normalization tuning — px tiers carry the ×reach² rescale):
+
+| tier | rows | value |
+|---|---|---|
+| HARD | TierHard (pins), TierNoPen | 4700 |
+| CONTACT | TierContact (no-slip + ground hold, × label weight) | 470 |
+| COM-X | ComWeightX (d.x → 0, the anti-absorption tie) | 230 |
+| AIM / CORE | TierAim, CorePosePrior | 60 |
+| SMOOTH | ThetaSmooth (Δθ toward prev) | 40 |
+| COM-Y | ComWeightY (δ → baseline) | 23 |
+| CADENCE | PhaseStepPrior (Δφ momentum; phase units) | 8 |
+| LIMB | LimbPosePrior (loose limbs do the IK) | 4 |
+
+So the original tier intent (`HARD ~1e3 ≫ CONTACT ≫ priors`) was in fact what the tuned
+weights implemented all along — the old config numerals (TierHard 10 vs CorePosePrior 60)
+only LOOKED inverted because px and radian rows were in different units. Weights remain
+empirical: read `SolveScaleReport`, tune by feel, hot-reload `anim_solver_config.json`.
 
 ### 11.5 NoPenetration v1 (decision: half-planes from known contacts)
 v1 emits one-sided HALF-PLANE residuals from surfaces the movement layer ALREADY resolved

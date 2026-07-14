@@ -15,11 +15,13 @@ public class FixedPointSolverTests
     private readonly ITestOutputHelper _o;
     public FixedPointSolverTests(ITestOutputHelper o) => _o = o;
 
-    // A SHADOW animator runs the same walk WITHOUT pins → gives the natural (uncorrected) hand
-    // each frame; the main animator pins its hand a small fixed offset off that. So the required
-    // correction is small and steady (not fighting the clip's own arm swing): a clean read of
-    // whether the hard pin reaches via a MINIMAL, bounded Δθ (the IK working), and the magnitudes
-    // the tiers are set from. The hand bone is arm_l_lower (the wrist/hand tip).
+    // The pin target is BODY-RELATIVE, captured once from the animator's OWN natural hand
+    // after warm-up (a "carried lantern": the hand holds a fixed point relative to the body
+    // while the walk swings underneath). Self-contained on purpose — an earlier version used a
+    // phase-locked SHADOW animator as the oracle, but the pin legitimately shifts the knife-edge
+    // foot-swap hop by a frame, the two walks desync, and the shadow-derived target then fights
+    // the main walk's own swing in a feedback loop that manufactures the very arm spike the test
+    // meant to bound. A body-relative target has no second timeline to desync from.
     [Theory]
     [InlineData("walk", 25f, +1)]
     [InlineData("walk", 25f, -1)]
@@ -28,37 +30,49 @@ public class FixedPointSolverTests
         var clip = AnimationStore.LoadAll(StatesDir()).Find(d => d.Name == clipName);
         Assert.True(clip != null, $"{clipName}.json not found");
         var skel = SkeletonExamples.Biped();
-        var main   = new CharacterAnimator(skel, 0.6f, new[] { clip }, useSolver: true);
-        var shadow = new CharacterAnimator(skel, 0.6f, new[] { clip }, useSolver: true);
+        var main  = new CharacterAnimator(skel, 0.6f, new[] { clip });
         int hand  = main.Skeleton.IndexOf("arm_l_lower");
         int up    = main.Skeleton.IndexOf("arm_l_upper");
         int chest = main.Skeleton.IndexOf("chest");
-        var offset = new Vector2(2f, -1.5f);   // hold the hand a touch forward + up of natural
 
         float dt = 1f / 30f, vx = speed * facing, x = 0f;
         float maxReach = 0f, maxArm = 0f, maxChest = 0f; int solves = 0;
-        for (int i = 0; i < 48; i++)
+        // Warm-up (frames 0..39, unpinned): track the natural hand's min/max relative to the
+        // body across the arm swing, then pin at the swing MIDPOINT (+ a touch of lift) — so
+        // the required correction is ~half the swing amplitude each way, comfortably inside
+        // the box, rather than a full amplitude off one extreme.
+        const int PinFrom = 40, AssertFrom = 52, Frames = 90;
+        Vector2 relMin = new(float.MaxValue, float.MaxValue), relMax = new(float.MinValue, float.MinValue);
+        Vector2 rel = default;
+        for (int i = 0; i < Frames; i++)
         {
             x += vx * dt;
-            var sample = new CharacterAnimSample(new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState", "", dt);
-            shadow.Update(sample);
-            Vector2 natural = shadow.SolvedBoneTipWorld(hand);
-            if (natural == Vector2.Zero) { main.Update(sample); continue; }   // no shadow solve yet
-
-            var pins = new[] { new ExternalPin("arm_l_lower", natural + offset) };
-            main.Update(new CharacterAnimSample(new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState", "", dt, pins: pins));
+            var body = new Vector2(x, 0f);
+            ExternalPin[] pins = i >= PinFrom ? new[] { new ExternalPin("arm_l_lower", body + rel) } : null;
+            main.Update(new CharacterAnimSample(body, new Vector2(vx, 0f), facing, true, "WalkState", "", dt, pins: pins));
+            if (i < PinFrom)
+            {
+                Vector2 natural = main.SolvedBoneTipWorld(hand);
+                if (natural != Vector2.Zero)
+                {
+                    Vector2 r0 = natural - body;
+                    relMin = Vector2.Min(relMin, r0); relMax = Vector2.Max(relMax, r0);
+                }
+                if (i == PinFrom - 1) rel = (relMin + relMax) * 0.5f + new Vector2(0f, -1.5f);
+                continue;
+            }
 
             string rep = main.SolveScaleReport();
             if (rep == "(no solve)") continue;
             solves++;
-            if (i >= 24)   // after warm-up, in steady state
+            if (i >= AssertFrom)   // after the pin ease-in, in steady state
             {
                 Vector2 tip = main.SolvedBoneTipWorld(hand);
-                maxReach = MathF.Max(maxReach, (tip - (natural + offset)).Length());
+                maxReach = MathF.Max(maxReach, (tip - (body + rel)).Length());
                 maxArm   = MathF.Max(maxArm, MathF.Max(MathF.Abs(main.AngleCorrection(hand)),
-                                                       MathF.Abs(main.AngleCorrection(main.Skeleton.IndexOf("arm_l_upper")))));
+                                                       MathF.Abs(main.AngleCorrection(up))));
                 maxChest = MathF.Max(maxChest, MathF.Abs(main.AngleCorrection(chest)));
-                if (i % 4 == 0) _o.WriteLine($"f{i,2}: armΔθ up={main.AngleCorrection(up):0.000} lo={main.AngleCorrection(hand):0.000} chest={main.AngleCorrection(chest):0.000} reach={(main.SolvedBoneTipWorld(hand)-(natural+offset)).Length():0.00}");
+                if (i % 2 == 0) _o.WriteLine($"f{i,2}: armΔθ up={main.AngleCorrection(up):0.000} lo={main.AngleCorrection(hand):0.000} chest={main.AngleCorrection(chest):0.000} reach={(main.SolvedBoneTipWorld(hand)-(body+rel)).Length():0.00} ph={main.State.Phase:0.000}");
             }
         }
 
@@ -71,8 +85,11 @@ public class FixedPointSolverTests
         // ...the arm does the work, NOT the torso (stiff-core prior keeps the body from swinging
         // to satisfy a hand pin — the key conditioning win)...
         Assert.True(maxChest < 0.2f, $"torso swung to reach a hand pin (chest Δθ {maxChest:0.000}) — core not stiff enough");
-        // ...and the arm correction stays inside the box (not slammed — smoothness/priors keep it sane).
-        Assert.True(maxArm < 0.55f, $"arm Δθ slammed the box ({maxArm:0.000}) — prior/smoothness too weak");
+        // ...and the arm correction stays sane — holding a body-relative point against the walk's
+        // full arm swing legitimately needs ~half the swing amplitude at the extremes (≈0.75 rad
+        // since smoothing moved in-solve and stopped double-damping the follow), but it must stay
+        // well inside the (now wide, clip-switch-sized) box rather than drift to it.
+        Assert.True(maxArm < 1.0f, $"arm Δθ unexpectedly large ({maxArm:0.000}) — priors too weak?");
     }
 
     private static string StatesDir()

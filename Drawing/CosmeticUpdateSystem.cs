@@ -70,7 +70,7 @@ public sealed class CosmeticUpdateSystem
         // each rig tracks its own body, facing, and action timing.
         while (_secondaryAnimators.Count < sim.SecondaryPlayers.Count)
             _secondaryAnimators.Add(new CharacterAnimator(
-                SkeletonExamples.Biped(), _skeletonScale, _skeletonAnims, config.AnimSolver));
+                SkeletonExamples.Biped(), _skeletonScale, _skeletonAnims));
         for (int i = 0; i < sim.SecondaryPlayers.Count; i++)
             _secondaryAnimators[i].Update(
                 CharacterAnimSample.From(sim.SecondaryPlayers[i].Player, dt * config.TimeScale));

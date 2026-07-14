@@ -38,8 +38,13 @@ public sealed partial class CharacterAnimator
     private const float RunSpeedThreshold  = 40f;    // px/s before Walk -> Run (MaxWalkSpeed is 100)
     private const float PhasePerPixel       = 0.010f; // legacy fallback: cycles/sec per px/s
     private const float IdleBobHz           = 0.30f;  // breathing cycles/sec
-    private const float Stiffness           = 20f;    // pose-follow rate (1/sec)
-    // Upper body (chest subtree: arms + knife) eases far faster *while an action
+    // Pose-follow rate (1/sec). No longer a BlendToward ease — the smoothing lives INSIDE the
+    // solve (polish item 1): each frame these rates become the per-bone smoothness weights
+    // λs_i = λp_i·(1−b_i)/b_i with b_i = 1−exp(−k_i·dt) (_lambdaSmooth/_easeB), chosen so an
+    // UNCONSTRAINED bone follows its blend target with exactly the old exponential ease while
+    // a constrained bone (pin/contact/no-pen) satisfies its constraint on the RENDERED pose.
+    private const float Stiffness           = 20f;
+    // Upper body (chest subtree: arms + knife) smooths far faster *while an action
     // overlay is active*, ramped in by ActionWeight. A slash is ~0.14s with sub-20ms
     // swing segments; the base 20/s (50ms τ) low-passes ~70% of that authored range
     // away. ~90/s (≈11ms τ) passes ~90% so the rendered hand — and the knife glow
@@ -67,10 +72,27 @@ public sealed partial class CharacterAnimator
 
     private readonly Skeleton     _skeleton;
     private readonly float        _scale;   // rig→world scale; the solve needs it, not just Draw
+    // 1 / characteristic length (the rig's REACH: longest root→tip chain × scale, world px).
+    // Every PIXEL residual (contacts, pins, no-penetration, the com ties) is multiplied by
+    // this, making it DIMENSIONLESS — "fraction of a body-reach of error" — so the config
+    // tiers are commensurable with the radian-scale rows (aim, pose priors): through the
+    // lever arms, 1 rad of joint error ≈ 1 reach of tip error, so weight numbers now compare
+    // honestly across both kinds of row (§11.4). The px tiers in AnimSolverConfig carry the
+    // matching ×reach² rescale, so effective behavior is unchanged.
+    private readonly float        _invCharLen;
     private readonly SkeletonPose _pose;    // live output, eased each frame
     private readonly SkeletonPose _target;  // target assembled this frame
     private readonly SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
-    private readonly SkeletonPose _scratch;     // scratch for the cadence loss evaluation
+    private readonly SkeletonPose _scratch;     // solve scratch: the composed, Δθ-corrected pose
+    // DESIGN INVARIANT (decision 2026-07-14): every constraint evaluates the FINAL composed,
+    // Δθ-corrected pose — the one that gets drawn. No constraint reads an intermediate pose,
+    // and there is exactly ONE solve per frame over the full objective; conflicts between
+    // constraints (a pin bending a planted leg, no-pen pushing a foot) are resolved by their
+    // WEIGHTS, not by structure. Two structural alternatives were tried and rejected: contacts
+    // on a Δθ-free pose (the drawn foot then slips by the Δθ contribution the constraint never
+    // sees) and a two-stage cadence/IK split (hides objective misspecification instead of
+    // surfacing it as a weight problem). The foot-swap stall that motivated them is fixed at
+    // its actual root — contact RELEASE bookkeeping (see RefreshContacts' time fade).
 
     // A planted contact the cadence solver pins this frame: a bone whose tip should
     // stay at Target (world). Captured when the label appears, held until it drops.
@@ -90,7 +112,11 @@ public sealed partial class CharacterAnimator
     // emits one row per rig bone (NoPenetrationConstraint) — the limbs the solver pushes out.
     private readonly List<SolverSurface> _surfaces = new();
     private const int MaxSurfaces = 4;   // sizes the residual scratch; excess surfaces are dropped
-    private readonly List<(int bone, float weight)> _weightBuf = new();   // scratch for feathered weights
+    // Scratch for feathered contact weights: (bone, w, dw/dφ) at some phase. Filled by
+    // WeightedContactsAtPhase — at the entry phase for RefreshContacts' capture/release
+    // bookkeeping, then at each candidate φ+Δφ inside the solve (BuildSolvePose) so the
+    // contact rows read a LIVE weight (§4.2).
+    private readonly List<(int bone, float weight, float dweight)> _weightBuf = new();
     private float _prevPhaseStep;   // Δφ_prev for the momentum prior
 
     // Authored clips keyed by category, matched from the loaded animations' Type.
@@ -106,7 +132,23 @@ public sealed partial class CharacterAnimator
     private readonly Dictionary<string, AnimationDocument> _actionClips = new(StringComparer.Ordinal);
     private readonly bool[][]     _regionMasks;   // per-AnimRegion bone masks, resolved once
     private readonly bool[]       _upperMask;     // chest subtree — bones that snap during attacks
-    private readonly float[]      _blend;         // scratch: per-bone ease factor each frame
+    // In-solve smoothing state (polish item 1 — replaces the BlendToward ease):
+    //   _thetaEmitted — each bone's FINAL local rotation actually emitted last frame, captured
+    //     pre-lean/squash (lean captured in would feed back: the solver would learn the lean
+    //     into Δθ and it would be applied twice). PERSISTS across clip switches — that's what
+    //     bridges them. The smoothness target for both the LM solve and the fast path.
+    //   _lambdaSmooth — per-bone λs_i = λp_i·(1−b_i)/b_i, derived each frame from Stiffness/dt.
+    //   _easeB — per-bone b_i = 1−exp(−k_i·dt), the closed-form fast-path blend factor.
+    private readonly float[]      _thetaEmitted;
+    private readonly float[]      _lambdaSmooth;
+    private readonly float[]      _easeB;
+    // Per-solve smoothness targets t_i = wrapAngle(emitted_i − composedEntry_i): last frame's
+    // deviation from THIS frame's composed base at the entry phase. Filled at each solve start
+    // (FillSmoothTargets, after BuildSolvePose at x = 0); constant for the whole Minimize.
+    private readonly float[]      _smoothTarget;
+    private bool                  _haveEmitted;   // false until the first frame has been drawn
+    private float                 _leanEase;      // eased locomotion lean (post-solve additive)
+    private float                 _squashEase;    // eased landing-squash amount (post-solve additive)
 
     // Overlay motion layers composed onto the base pose (Phase 4), generalized from a single
     // Action overlay into an ordered STACK so a movement-sourced overlay (e.g. parkour hands)
@@ -147,13 +189,13 @@ public sealed partial class CharacterAnimator
     private AnimationDocument _curDoc;
     private float             _curComT;
 
-    // Generalized cadence solver (Plans/ANIMATION_SOLVER_PLAN.md, Phase 1). When on,
-    // the phase advance Δφ comes from a Levenberg–Marquardt least-squares solve over
-    // the SAME objective the golden-section path minimizes (horizontal foot no-slip +
-    // playback continuity), proving the general machinery at parity before later phases
-    // add joint corrections, a CoM offset, and more constraints. Off → the legacy 1-D
-    // golden-section solve. Render-only either way.
-    private readonly bool                _useSolver;
+    // Generalized cadence solver (Plans/ANIMATION_SOLVER_PLAN.md). The phase advance Δφ,
+    // the vertical body offset δ, and the per-bone IK corrections Δθ all come from a
+    // Levenberg–Marquardt least-squares solve over the composite constraint objective
+    // (horizontal foot no-slip, ground hold, pins, no-penetration, aim, priors). This is
+    // THE animator path (the legacy 1-D golden-section cadence was retired after the LM
+    // path was shown to be the better minimizer of the same objective — see
+    // ANIMATION_SOLVER_PLAN §7 Phase 1 follow-up). Render-only.
     private readonly LeastSquaresSolver  _ls;
     private readonly float[]             _solveVars, _solveLo, _solveHi;
     private readonly LeastSquaresSolver.ResidualFn _cadenceResiduals;
@@ -162,7 +204,6 @@ public sealed partial class CharacterAnimator
     private readonly float[]             _colX, _colY;   // ∂p/∂x column scratch for the point Jacobian
     private readonly float[]             _colX2, _colY2;  // second point-Jacobian scratch (the aim's other hand)
     private readonly bool[]              _isCore;        // bone is torso (hip/chest/head) → stiff Tikhonov λ_θ
-    private readonly float[]             _prevTheta;     // last frame's solved Δθ (temporal smoothness target)
     private readonly ISolveConstraint[]  _constraints;   // the composite objective, assembled in order
     // Per-solve context the residual closure reads (set just before each Minimize call).
     private AnimationDocument _solveClip;
@@ -186,27 +227,32 @@ public sealed partial class CharacterAnimator
     public CharacterAnimState State    => _state;
 
     // Per-bone angle correction Δθ (radians) the solver applied this frame, by bone
-    // index — the IK channel on top of the authored blend. Zero on the golden path and
-    // on frames with no cadence solve (flight / non-locomotion). Diagnostic + tests.
+    // index — the IK channel on top of the authored blend. Zero on frames with no
+    // solve (flight / non-locomotion without pins). Diagnostic + tests.
     public float AngleCorrection(int bone)
-        => _haveCorr && bone >= 0 && bone < _skeleton.Count ? _solveVars[2 + bone] : 0f;
+        => _haveCorr && bone >= 0 && bone < _skeleton.Count ? _solveVars[IdxTheta0 + bone] : 0f;
 
     // Solved vertical root offset δ (world px) to add on top of the host's baseline
     // placement (RigRoot) — the body's bob that keeps the planted foot grounded. Zero on
-    // the golden path and on flight / non-locomotion frames (→ host baseline = com anchor).
-    public float VerticalOffset => _haveCorr ? _solveVars[1] : 0f;
+    // flight / non-locomotion frames with no solve (→ host baseline = com anchor).
+    public float VerticalOffset => _haveCorr ? _solveVars[IdxDy] : 0f;
+
+    // Solved horizontal root offset d.x (world px) — the body's slight fore-aft sway that
+    // soaks the no-slip residual at a planted foot's horizontal turning point (where cadence
+    // alone can't track the body). Added by the host beside VerticalOffset. Zero with no solve.
+    public float HorizontalOffset => _haveCorr ? _solveVars[IdxDx] : 0f;
 
     // TEST HOOK: the largest absolute discrepancy between the analytic cadence Jacobian
     // (CadenceJacobian) and a central finite difference of CadenceResiduals, evaluated at
     // the live solve point of the last frame. ~0 confirms every analytic column. Returns
-    // -1 when no cadence solve ran this frame (flight / non-locomotion / golden path).
+    // -1 when no cadence solve ran this frame (flight / non-locomotion, no pins).
     internal float MaxJacobianError()
     {
         if (!_haveCorr || _ls == null) return -1f;
         int bones = _skeleton.Count;
-        int n = 2 + bones;
-        // 2/contact + 2/pin + bones/surface (no-penetration) + 1 aim + continuity + com + bones×2 priors.
-        int m = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0) + 2 + 2 * bones;
+        int n = IdxTheta0 + bones;
+        // 2/contact + 2/pin + bones/surface (no-penetration) + 1 aim + continuity + com(2) + bones×2 priors.
+        int m = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0) + 3 + 2 * bones;
 
         // The body may be far from the world origin (it has walked many units), so a residual
         // tip.x − target.x is a tiny difference of large coordinates and a float32 finite
@@ -247,7 +293,8 @@ public sealed partial class CharacterAnimator
             for (int b = 0; b < b0; b++, npRow++)
             {
                 Vector2 tip = _scratch.WorldOf(b).Translation;   // _scratch left at x by CadenceJacobian
-                float gap = s.Normal.X * (tip.X - s.Point.X) + s.Normal.Y * (tip.Y + x[IdxDy] - s.Point.Y);
+                float gap = s.Normal.X * (tip.X + x[IdxDx] - s.Point.X)
+                          + s.Normal.Y * (tip.Y + x[IdxDy] - s.Point.Y);
                 if (MathF.Abs(s.Margin - gap) < kneeBand) skipRow[npRow] = true;
             }
 
@@ -315,7 +362,7 @@ public sealed partial class CharacterAnimator
         if (!_haveCorr || _ls == null) return "(no solve)";
         int bones = _skeleton.Count, n = IdxTheta0 + bones;
         int geom = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0);
-        int m = geom + 2 + 2 * bones;
+        int m = geom + 3 + 2 * bones;   // + continuity + com(δ, d.x) + bones×2 priors
 
         var x = new float[n];
         Array.Copy(_solveVars, x, n);
@@ -338,11 +385,12 @@ public sealed partial class CharacterAnimator
         sb.Append($"contacts={_contacts.Count} pins={_pins.Count} surfaces={_surfaces.Count}  |  ");
         sb.Append($"colNorm[Δφ]={ColNorm(IdxPhi),7:0.000} δ={ColNorm(IdxDy),6:0.000} Δθmax={colTheMax,6:0.000}({Name(colTheBone)})  |  ");
         sb.Append($"grad[Δφ]={gradPhi,8:0.000} δ={gradDy,7:0.000} Δθ={gradTh,7:0.000}  |  ");
-        sb.Append($"solved Δφ={_solveVars[IdxPhi],6:0.000} δ={_solveVars[IdxDy],6:0.00} |Δθ|max={maxTheta,5:0.000}({Name(maxThetaBone)})");
+        sb.Append($"solved Δφ={_solveVars[IdxPhi],6:0.000} δ={_solveVars[IdxDy],6:0.00} dx={_solveVars[IdxDx],5:0.00} |Δθ|max={maxTheta,5:0.000}({Name(maxThetaBone)})");
         for (int i = 0; i < _pins.Count; i++)
         {
             var (bone, target) = _pins[i];
-            Vector2 tip = _scratch.WorldOf(bone).Translation; tip.Y += _solveVars[IdxDy];
+            Vector2 tip = _scratch.WorldOf(bone).Translation;
+            tip.X += _solveVars[IdxDx]; tip.Y += _solveVars[IdxDy];
             sb.Append($"  | pin[{Name(bone)}] reach={(tip - target).Length(),5:0.00}px");
         }
         if (_surfaces.Count > 0)
@@ -367,13 +415,14 @@ public sealed partial class CharacterAnimator
     }
 
     // DIAGNOSTIC (tests/tuning): the world far-tip of `bone` at the accepted solve point of the
-    // last frame, including the body bob δ — i.e. where the solver actually placed that tip.
-    // Rebuilds the pose at _solveVars under the last solve root. Vector2.Zero if no solve ran.
+    // last frame, including the body offset d = (d.x, δ) — i.e. where the solver actually placed
+    // that tip. Rebuilds the pose at _solveVars under the last solve root. Vector2.Zero if no solve ran.
     internal Vector2 SolvedBoneTipWorld(int bone)
     {
         if (!_haveCorr) return Vector2.Zero;
         BuildSolvePose(_solveVars.AsSpan(0, IdxTheta0 + _skeleton.Count));
         Vector2 tip = _scratch.WorldOf(bone).Translation;
+        tip.X += _solveVars[IdxDx];
         tip.Y += _solveVars[IdxDy];
         return tip;
     }
@@ -417,8 +466,7 @@ public sealed partial class CharacterAnimator
         return sole;
     }
 
-    public CharacterAnimator(Skeleton skeleton, float scale, IEnumerable<AnimationDocument> animations = null,
-                             bool useSolver = false)
+    public CharacterAnimator(Skeleton skeleton, float scale, IEnumerable<AnimationDocument> animations = null)
     {
         // Materialize once: the list is walked twice (compose the rig, then bind clips).
         var anims = animations == null ? null
@@ -441,7 +489,10 @@ public sealed partial class CharacterAnimator
         foreach (AnimRegion r in Enum.GetValues<AnimRegion>())
             _regionMasks[(int)r] = BoneMask.Resolve(rig, r);
         _upperMask = _regionMasks[(int)AnimRegion.UpperBody];
-        _blend     = new float[rig.Count];
+        _thetaEmitted = new float[rig.Count];
+        _lambdaSmooth = new float[rig.Count];
+        _easeB        = new float[rig.Count];
+        _smoothTarget = new float[rig.Count];
         _baseBlend = new float[rig.Count];
         _slots = new OverlaySlot[OverlaySlotCount];
         for (int i = 0; i < _slots.Length; i++) _slots[i] = new OverlaySlot(rig);
@@ -450,54 +501,60 @@ public sealed partial class CharacterAnimator
         _hip = I("hip"); _chest = I("chest");
         _aimBoneL = I("arm_l_lower"); _aimBoneR = I("arm_r_lower");   // the stab-aim hand pair
 
-        // Sized for Phase 1 (one Δφ variable) with headroom for later phases (joint
-        // corrections, a 2-D CoM offset → ~16 variables; a handful of contact residuals
-        // + regularizers → ~16 rows). Allocated only when the solver path is active.
-        _useSolver = useSolver;
-        if (_useSolver)
+        // Variables: Δφ + the root offset d = (δ, d.x) + per-bone Δθ (rig.Count), with a
+        // little headroom. Residuals: two rows per contact (H no-slip + V ground) + two per
+        // external pin + continuity + com + one prior per bone. Sized to the rig once.
+        int nv = IdxTheta0 + rig.Count + 2;
+        // 2/contact + 2/pin + (MaxSurfaces × bones) no-penetration + 1 aim + continuity
+        // + com(δ, d.x) + bones Tikhonov + bones Δθ-smoothness.
+        int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 1 + 3 + 2 * rig.Count + 2;
+        _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
+        _solveVars = new float[nv];
+        _solveLo   = new float[nv];
+        _solveHi   = new float[nv];
+        _angVel    = new float[rig.Count];
+        _colX      = new float[nv];
+        _colY      = new float[nv];
+        _colX2     = new float[nv];
+        _colY2     = new float[nv];
+        // The rig's REACH: longest root→tip cumulative bone length, in world px. The unit the
+        // pixel residuals are expressed in (see _invCharLen). Computed once; topological bone
+        // order (parents precede children) makes this a single pass.
         {
-            // Variables: Δφ (1) + δ vertical offset (1) + per-bone Δθ (rig.Count), with a
-            // little headroom. Residuals: two rows per contact (H no-slip + V ground) + two per
-            // external pin + continuity + com + one prior per bone. Sized to the rig once.
-            int nv = 2 + rig.Count + 2;
-            // 2/contact + 2/pin + (MaxSurfaces × bones) no-penetration + 1 aim + continuity + com
-            // + bones Tikhonov + bones Δθ-smoothness.
-            int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 1 + 2 + 2 * rig.Count + 2;
-            _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
-            _solveVars = new float[nv];
-            _solveLo   = new float[nv];
-            _solveHi   = new float[nv];
-            _angVel    = new float[rig.Count];
-            _colX      = new float[nv];
-            _colY      = new float[nv];
-            _colX2     = new float[nv];
-            _colY2     = new float[nv];
-            // Which bones are torso (stiff Tikhonov λ_θ from config) vs limb (loose). Structural —
-            // the WEIGHTS live in AnimSolverConfig so they hot-reload; this just tags the bones.
-            _isCore = new bool[rig.Count];
+            var cum = new float[rig.Count];
+            float reach = 0f;
             for (int i = 0; i < rig.Count; i++)
             {
-                string nm = rig.Bones[i].Name;
-                _isCore[i] = nm == "hip" || nm == "chest" || nm == "head";
+                int par = rig.Bones[i].Parent;
+                cum[i] = (par < 0 ? 0f : cum[par]) + rig.Bones[i].Length;
+                reach = MathF.Max(reach, cum[i]);
             }
-            _prevTheta = new float[rig.Count];
-            _cadenceResiduals = CadenceResiduals;
-            _cadenceJacobian  = CadenceJacobian;
-            // The composite objective as an ordered list of constraints (§11). The order is
-            // load-bearing: it IS the residual/Jacobian row order the LM core and the
-            // FD-vs-analytic oracle assume. Preallocated once → zero per-frame allocation.
-            _constraints = new ISolveConstraint[]
-            {
-                new PlantedContactsConstraint(this),   // 2 rows/contact: H no-slip (Δφ) + V ground hold (δ)
-                new FixedPointConstraint(this),        // 2 rows/pin: both-axis hard external pin (Δθ IK)
-                new NoPenetrationConstraint(this),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
-                new ActionAimConstraint(this),         // 1 row: re-aim the action overlay along the input dir (Δθ)
-                new PlaybackContinuityConstraint(this),// 1 row: Δφ momentum prior
-                new ComOffsetConstraint(this),         // 1 row: soft com pulls δ→baseline
-                new PosePriorConstraint(this),         // N rows: Tikhonov on each Δθ (toward 0)
-                new ThetaSmoothnessConstraint(this),   // N rows: pull each Δθ toward last frame (temporal)
-            };
+            _invCharLen = 1f / MathF.Max(reach * MathF.Abs(scale), 1e-3f);
         }
+        // Which bones are torso (stiff Tikhonov λ_θ from config) vs limb (loose). Structural —
+        // the WEIGHTS live in AnimSolverConfig so they hot-reload; this just tags the bones.
+        _isCore = new bool[rig.Count];
+        for (int i = 0; i < rig.Count; i++)
+        {
+            string nm = rig.Bones[i].Name;
+            _isCore[i] = nm == "hip" || nm == "chest" || nm == "head";
+        }
+        _cadenceResiduals = CadenceResiduals;
+        _cadenceJacobian  = CadenceJacobian;
+        // The composite objective as an ordered list of constraints (§11). The order is
+        // load-bearing: it IS the residual/Jacobian row order the LM core and the
+        // FD-vs-analytic oracle assume. Preallocated once → zero per-frame allocation.
+        _constraints = new ISolveConstraint[]
+        {
+            new PlantedContactsConstraint(this),   // 2 rows/contact: H no-slip (Δφ) + V ground hold (δ)
+            new FixedPointConstraint(this),        // 2 rows/pin: both-axis hard external pin (Δθ IK)
+            new NoPenetrationConstraint(this),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
+            new ActionAimConstraint(this),         // 1 row: re-aim the action overlay along the input dir (Δθ)
+            new PlaybackContinuityConstraint(this),// 1 row: Δφ momentum prior
+            new ComOffsetConstraint(this),         // 1 row: soft com pulls δ→baseline
+            new PosePriorConstraint(this),         // N rows: Tikhonov on each Δθ (toward 0)
+            new ThetaSmoothnessConstraint(this),   // N rows: final angle toward last EMITTED (the in-solve ease)
+        };
 
         // Bind each clip category to the first authored animation whose Type matches
         // the enum name (case-insensitive) AND whose Skeleton matches this rig.
@@ -536,7 +593,9 @@ public sealed partial class CharacterAnimator
             _state.ClipTime = 0f;
             _contacts.Clear();        // contacts belong to the clip that just ended
             _prevPhaseStep = 0f;
-            if (_prevTheta != null) Array.Clear(_prevTheta, 0, _prevTheta.Length);   // no Δθ history across a clip switch
+            // _thetaEmitted deliberately PERSISTS across the switch — the smoothness prior
+            // measures the final angle against it, which is exactly what crossfades the pose
+            // gap between the old and new clip (the retired ease's snap-then-follow, in-solve).
         }
         else _state.ClipTime += dt;
 
@@ -613,6 +672,27 @@ public sealed partial class CharacterAnimator
                 _baseBlend[i] *= 1f - slot.BoneWeight[i];
         }
 
+        // 1.6 Per-bone smoothing weights for THIS frame (the in-solve ease — polish item 1).
+        //     b_i = 1−exp(−k_i·dt) is the old framerate-independent ease factor; the upper-body
+        //     rate ramps with ActionWeight so attacks snap, exactly as the retired BlendToward
+        //     did. λs_i = λp_i·(1−b_i)/b_i makes the UNCONSTRAINED optimum of (Tikhonov +
+        //     smoothness) equal that ease exactly — the per-region λp cancels, so torso and
+        //     limbs follow at the same rate unless constrained. Computed before the solves so
+        //     the LM path and the fast path share identical smoothing this frame.
+        {
+            var cfg0 = AnimSolverConfig.Current;
+            float bBase  = 1f - MathF.Exp(-Stiffness * dt);
+            float upperK = Stiffness + (UpperBodyStiffness - Stiffness) * _state.ActionWeight;
+            float bUpper = 1f - MathF.Exp(-upperK * dt);
+            for (int i = 0; i < _skeleton.Count; i++)
+            {
+                float b  = MathF.Max(_upperMask[i] ? bUpper : bBase, 1e-4f);   // dt→0 guard
+                float lp = _isCore[i] ? cfg0.CorePosePrior : cfg0.LimbPosePrior;
+                _easeB[i]        = b;
+                _lambdaSmooth[i] = lp * (1f - b) / b;
+            }
+        }
+
         // 1.7 Resolve this frame's external pins (sample → bone-index targets) so the solve's
         //     FixedPointConstraint can read them. Frozen here for the whole solve. Unknown bone
         //     names and excess pins (> MaxPins) are dropped rather than reallocating the scratch.
@@ -640,22 +720,20 @@ public sealed partial class CharacterAnimator
         if (locomotion && hasClip && HasContacts(anim))
         {
             int dir = s.Facing == 0 ? 1 : s.Facing;
-            // Solve-root: hip placed at the body center, plus — on the solver path — the
-            // com baseline Draw uses (rootY = BodyY − com.Y·scale), so contact targets are
-            // captured at the SAME height the pose is drawn and the solved δ perturbs about
-            // it. The horizontal no-slip is unaffected by the Y shift, and the golden path
-            // ignores target.Y, so this changes nothing for the legacy path. scale/facing
-            // match Draw so foot travel and body motion share world units.
+            // Solve-root: hip placed at the body center, plus the com baseline Draw uses
+            // (rootY = BodyY − com.Y·scale), so contact targets are captured at the SAME
+            // height the pose is drawn and the solved δ perturbs about it. The horizontal
+            // no-slip is unaffected by the Y shift. scale/facing match Draw so foot travel
+            // and body motion share world units.
             float comBaseY = 0f;
-            if (_useSolver && SampleNamedPoint(anim, _state.Phase, "com", out var comL))
+            if (SampleNamedPoint(anim, _state.Phase, "com", out var comL))
                 comBaseY = -comL.Y * _scale;
             var root = Affine2.FromTRS(new Vector2(s.Position.X, s.Position.Y + comBaseY), 0f,
                                        new Vector2(dir * _scale, _scale));
-            RefreshContacts(anim, _state.Phase, root);
+            RefreshContacts(anim, _state.Phase, dt, root);
             if (_contacts.Count > 0)
             {
-                float dphi = _useSolver ? SolvePhaseStepLm(anim, _state.Phase, root)
-                                        : SolvePhaseStep(anim, _state.Phase, root);
+                float dphi = SolvePhaseStepLm(anim, _state.Phase, root);
                 _state.Phase   = Wrap01(_state.Phase + dphi);
                 _prevPhaseStep = dphi;
             }
@@ -678,14 +756,13 @@ public sealed partial class CharacterAnimator
         }
 
         // 2.5 Off-locomotion solve (Phase 3): the cadence path above only runs the LM solve
-        //     for a locomotion clip with planted contacts. But external pins and no-penetration
-        //     surfaces (wall-slide grip/limbs) must engage on ANY clip. So when no cadence solve
-        //     ran this frame yet there IS something external to satisfy, run a STATIC solve —
-        //     Δφ locked (no cadence here), only δ + the per-bone Δθ move, bending the limbs to
-        //     respect the pins/surfaces while the body bob settles. Behaviour-preserving for
-        //     normal locomotion: there _haveCorr is already true (cadence solved), and during
-        //     plain flight/idle there are no pins/surfaces, so this is skipped.
-        if (_useSolver && !_haveCorr && hasClip && (_pins.Count > 0 || _surfaces.Count > 0 || _aimActive))
+        //     for a locomotion clip with planted contacts (pins/surfaces/aim ride that SAME
+        //     single solve there — one objective over the final pose, conflicts resolved by
+        //     weights). But those external constraints must also engage on clips with no
+        //     cadence to drive (wall slide, vault, an aimed stab from idle), so when no solve
+        //     ran this frame and there IS something external to satisfy, run a STATIC solve —
+        //     Δφ locked (no cadence here), only δ + the per-bone Δθ move.
+        if (!_haveCorr && hasClip && (_pins.Count > 0 || _surfaces.Count > 0 || _aimActive))
             SolveStaticPose(anim, clip, in s);
 
         // 3. Build the target pose. Locomotion + idle sample by phase (so cadence
@@ -715,42 +792,58 @@ public sealed partial class CharacterAnimator
         //     mid-air-slash still squashes).
         ComposeOverlays(_target);
 
-        // Apply the solver's per-bone angle corrections onto the COMPOSED pose (matching
-        // BuildSolvePose's order, so the drawn skeleton is the one the solver optimized). Δθ
-        // post-compose means a pin can bend an overlay-owned bone (the vault hand). While only
-        // the Tikhonov prior touches Δθ they're ≈ 0 and this is a no-op.
+        // 3.6 The smoothing/correction channel — ONE of two mutually exclusive paths, both
+        //     minimizing the same objective (polish item 1):
+        //     · An LM solve ran (_haveCorr): its Δθ already balances the geometric rows against
+        //       the smoothness prior; apply it onto the COMPOSED pose (matching BuildSolvePose's
+        //       order, so the drawn skeleton is the one the solver optimized; post-compose means
+        //       a pin can bend an overlay-owned bone — the vault hand).
+        //     · No geometric rows this frame: the objective is diagonal per bone and its optimum
+        //       is closed-form — exactly the old exponential ease of the blend target from the
+        //       last EMITTED pose: θ = emitted + b·wrap(target − emitted). This is the fast path
+        //       (idle, flight, plain one-shots); no LM needed.
         if (_haveCorr)
             for (int i = 0; i < _skeleton.Count; i++)
-                _target.Local[i].Rotation += _solveVars[2 + i];
+                _target.Local[i].Rotation += _solveVars[IdxTheta0 + i];
+        else if (_haveEmitted)
+            for (int i = 0; i < _skeleton.Count; i++)
+            {
+                float g = MathHelper.WrapAngle(_target.Local[i].Rotation - _thetaEmitted[i]);
+                _target.Local[i].Rotation = _thetaEmitted[i] + _easeB[i] * g;
+            }
 
-        // 3b. Directional lean for locomotion — applied on top of the base pose
-        //     (authored OR procedural) so forward/backpedal read distinctly: lean
-        //     into travel when walking forward, lean back when backpedaling.
+        // Capture the EMITTED angles — the smoothness target for next frame's solve/fast path.
+        // Captured BEFORE lean/squash: those are post-solve additive layers, and folding them
+        // into the target would feed back (the solver would learn the lean into Δθ and the lean
+        // would then be applied twice). Persists across clip switches (that's the crossfade).
+        for (int i = 0; i < _skeleton.Count; i++) _thetaEmitted[i] = _target.Local[i].Rotation;
+        _haveEmitted = true;
+
+        // 3b. Directional lean for locomotion — an eased scalar layered OUTSIDE the smoothing
+        //     loop (see the capture note above). The ease covers both the speed ramp and the
+        //     clip-switch drop (walk→jump used to be smoothed by the global pose ease).
+        float leanTarget = 0f;
         if (clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run)
-        {
-            float lean = (clip == AnimClip.WalkBack ? -1f : 1f)
+            leanTarget = (clip == AnimClip.WalkBack ? -1f : 1f)
                        * WalkLean * MathHelper.Clamp(speed / WalkLeanRefSpeed, 0f, 1f);
-            Rot(_chest, lean);
-        }
+        _leanEase += (leanTarget - _leanEase) * (1f - MathF.Exp(-Stiffness * dt));
+        if (MathF.Abs(_leanEase) > 1e-4f) Rot(_chest, _leanEase);
 
-        // 3c. Landing squash on top of any clip: flatten + sink briefly on touchdown.
-        if (_state.LandSquash > 0f)
+        // 3c. Landing squash on top of any clip: flatten + sink briefly on touchdown. The
+        //     applied amount is eased (the global pose ease used to soften the touchdown snap
+        //     to 1; now the envelope carries its own attack ramp).
+        _squashEase += (_state.LandSquash - _squashEase) * (1f - MathF.Exp(-Stiffness * dt));
+        if (_squashEase > 1e-4f)
         {
-            float k = _state.LandSquash;
+            float k = _squashEase;
             Scale(_hip, new Vector2(0.35f * k, -0.35f * k));
             Translate(_hip, new Vector2(0f, 3f * k));
         }
 
-        // 4. Ease the live pose toward the target (framerate-independent). Per-bone:
-        //    the upper-body subtree stiffens with ActionWeight so an attack's fast swing
-        //    isn't low-passed away (and the knife glow, read from this live pose, stays
-        //    welded to the rendered hand); everything else keeps the soft locomotion rate.
-        float baseB  = 1f - MathF.Exp(-Stiffness * dt);
-        float upperK = Stiffness + (UpperBodyStiffness - Stiffness) * _state.ActionWeight;
-        float upperB = 1f - MathF.Exp(-upperK * dt);
-        for (int i = 0; i < _skeleton.Count; i++)
-            _blend[i] = _upperMask[i] ? upperB : baseB;
-        _pose.BlendToward(_target, _blend);
+        // 4. Emit. The target IS the pose now — smoothing already happened inside the solve /
+        //    fast path (the retired BlendToward is the closed form of that objective), so a
+        //    constrained tip (pin, planted foot) is satisfied on the RENDERED skeleton.
+        _pose.CopyFrom(_target);
 
         _prev = s;
         _hasPrev = true;
@@ -908,10 +1001,12 @@ public sealed partial class CharacterAnimator
         return false;
     }
 
-    // Feathered contact weights at `phase`, written into _weightBuf as (bone, weight)
-    // merged by bone (§5.2). The keyframe interval's contacts hold full weight, then
-    // crossfade to the next interval's over FeatherWidth before the change — so a foot
-    // swap is a smooth crossover instead of a hard switch.
+    // Feathered contact weights at `phase`, written into _weightBuf as (bone, weight, dweight)
+    // merged by bone (§5.2), where dweight = dw/dφ. The keyframe interval's contacts hold full
+    // weight, then crossfade to the next interval's over FeatherWidth before the change — so a
+    // foot swap is a smooth crossover instead of a hard switch. The derivative's SIGN tells
+    // RefreshContacts which side of a crossover a contact is on (dw/dφ < 0 = release has begun
+    // → the time-fade floor engages; see RefreshContacts / the foot-swap deadlock).
     private void WeightedContactsAtPhase(AnimationDocument clip, float phase)
     {
         _weightBuf.Clear();
@@ -923,25 +1018,29 @@ public sealed partial class CharacterAnimator
 
         float feather = AnimSolverConfig.Current.FeatherWidth;
         float featherStart = ks[j].Time - feather;
-        float u = (j != i && phase > featherStart)
-                ? MathHelper.Clamp((phase - featherStart) / feather, 0f, 1f) : 0f;
+        bool inWindow = j != i && phase > featherStart;
+        float u  = inWindow ? MathHelper.Clamp((phase - featherStart) / feather, 0f, 1f) : 0f;
+        // du/dφ: 1/feather strictly inside the ramp, 0 outside / at the clamps (a kink the
+        // FD-vs-analytic oracle must skip, like the keyframe boundary — see FeatherRegionAt).
+        float du = inWindow && u > 0f && u < 1f ? 1f / feather : 0f;
 
-        AddWeighted(ks[i].Contacts, 1f - u);
-        if (u > 0f) AddWeighted(ks[j].Contacts, u);
+        AddWeighted(ks[i].Contacts, 1f - u, -du);
+        if (u > 0f) AddWeighted(ks[j].Contacts, u, du);
     }
 
-    private void AddWeighted(List<ContactLabel> labels, float scale)
+    private void AddWeighted(List<ContactLabel> labels, float scale, float dscale)
     {
         if (labels == null || scale <= 0f) return;
         foreach (var l in labels)
         {
             int b = _skeleton.IndexOf(l.Node);
             if (b < 0) continue;
-            float w = l.Weight * scale;
+            float w  = l.Weight * scale;
+            float dw = l.Weight * dscale;
             int at = -1;
             for (int k = 0; k < _weightBuf.Count; k++) if (_weightBuf[k].bone == b) { at = k; break; }
-            if (at >= 0) _weightBuf[at] = (b, _weightBuf[at].weight + w);
-            else         _weightBuf.Add((b, w));
+            if (at >= 0) _weightBuf[at] = (b, _weightBuf[at].weight + w, _weightBuf[at].dweight + dw);
+            else         _weightBuf.Add((b, w, dw));
         }
     }
 
@@ -949,16 +1048,33 @@ public sealed partial class CharacterAnimator
     // update held ones' weights, and lazily capture newly-appearing ones (world tip at
     // the current phase, while their weight is still small — §5.2). SelfPlant only for
     // now (External = Phase 5).
-    private void RefreshContacts(AnimationDocument clip, float phase, in Affine2 root)
+    private void RefreshContacts(AnimationDocument clip, float phase, float dt, in Affine2 root)
     {
         WeightedContactsAtPhase(clip, phase);
 
+        // Held contacts: weight = the phase-feathered value — except once RELEASE has begun
+        // (the contact sits on the FADING side of a crossover, dw/dφ < 0), the fade also
+        // advances by TIME, taking the smaller of the two. This breaks the FOOT-SWAP
+        // DEADLOCK: at low walk speed the solve can park mid-feather (advancing φ is locally
+        // uphill against the old foot's slip, and the momentum prior pins Δφ=0), and since
+        // the weight only faded with φ, the old contact then held its grip forever — legs
+        // frozen. Time continues the release the feather already started, the old foot lets
+        // go within ContactReleaseTime, and the new foot's no-slip pulls the cycle forward
+        // again. At healthy cadence the phase fade is faster and the time floor never bites.
+        // (The weight must stay FROZEN inside the solve itself — see PlantedContactsConstraint.)
+        float timeFade = dt / MathF.Max(1e-3f, AnimSolverConfig.Current.ContactReleaseTime);
         for (int i = _contacts.Count - 1; i >= 0; i--)
-            if (WeightOf(_contacts[i].Bone) <= 1e-3f)
-                _contacts.RemoveAt(i);
+        {
+            var c = _contacts[i];
+            float w = WeightOf(c.Bone);
+            if (DWeightOf(c.Bone) < 0f) w = MathF.Min(w, c.Weight - timeFade);
+            if (w <= 1e-3f) { _contacts.RemoveAt(i); continue; }
+            c.Weight = w;
+            _contacts[i] = c;
+        }
 
         bool needWorld = false;
-        foreach (var (bone, w) in _weightBuf)
+        foreach (var (bone, w, _) in _weightBuf)
             if (w > 1e-3f && ActiveIndex(bone) < 0) { needWorld = true; break; }
         if (needWorld)
         {
@@ -967,69 +1083,33 @@ public sealed partial class CharacterAnimator
             _scratch.ComputeWorld(root);
         }
 
-        foreach (var (bone, w) in _weightBuf)
+        foreach (var (bone, w, _) in _weightBuf)
         {
-            if (w <= 1e-3f) continue;
-            int idx = ActiveIndex(bone);
-            if (idx >= 0)
-            {
-                var c = _contacts[idx];
-                c.Weight = w;
-                _contacts[idx] = c;
-            }
-            else
-            {
-                Vector2 tip = _scratch.WorldOf(bone).Translation;   // bone's far end = contact tip
-                _contacts.Add(new ActiveContact { Bone = bone, Target = tip, Weight = w, Source = ContactSource.SelfPlant });
-            }
+            if (w <= 1e-3f || ActiveIndex(bone) >= 0) continue;   // held ones updated above
+            Vector2 tip = _scratch.WorldOf(bone).Translation;     // bone's far end = contact tip
+            _contacts.Add(new ActiveContact { Bone = bone, Target = tip, Weight = w, Source = ContactSource.SelfPlant });
         }
     }
 
-    // Pick Δφ ∈ [0, MaxPhaseStep] minimizing planted-contact slip plus a momentum
-    // prior, via the derivative-free golden-section search.
-    private float SolvePhaseStep(AnimationDocument clip, float phi, in Affine2 root)
-    {
-        var r = root;   // capture by value for the closure
-        float Loss(float dphi)
-        {
-            AnimationSampler.SampleSmooth(clip, Wrap01(phi + dphi), _kfA, _kfB, _kfC, _kfD, _scratch);
-            ComposeOverlays(_scratch);   // measure slip on the post-blend pose, matching capture
-            _scratch.ComputeWorld(r);
-            float e = 0f;
-            foreach (var c in _contacts)
-            {
-                Vector2 tip = _scratch.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
-                // Penalize only HORIZONTAL (along-ground) slip. The planted foot must not
-                // slide across the ground, but its vertical arc (lift over the stance) is
-                // intrinsic to the cadence and is reconciled by the ground/COM anchor — not
-                // something Δφ should fight. Penalizing the Y component made the vertical
-                // arc dominate the loss at walk speed (small horizontal drift), pinning Δφ
-                // to ~0 every frame: the cadence froze below the run-speed band.
-                float dx = tip.X - c.Target.X;
-                e += c.Weight * dx * dx;
-            }
-            float d = dphi - _prevPhaseStep;
-            return e + AnimSolverConfig.Current.PhaseStepPrior * d * d;
-        }
-        return GoldenSection.Minimize(Loss, 0f, AnimSolverConfig.Current.MaxPhaseStep);
-    }
-
-    // Solver-path equivalent of SolvePhaseStep: the SAME objective (horizontal foot
-    // no-slip + a playback-continuity prior) cast as least-squares residuals and
-    // minimized over the single variable Δφ ∈ [0, MaxPhaseStep] by the general LM core.
-    // At parity this lands on the same Δφ the golden-section search finds; it exists so
-    // the solver framework is exercised end-to-end before later phases add variables
-    // (joint corrections, CoM offset) and constraints. See ANIMATION_SOLVER_PLAN Phase 1.
+    // The cadence solve: horizontal foot no-slip + a playback-continuity prior (plus the
+    // full composite objective — pins, surfaces, aim, priors), minimized over
+    // x = [Δφ, δ, Δθ…] by the general LM core. Δφ ∈ [0, MaxPhaseStep].
+    // NOTE (historical): only the HORIZONTAL component of a planted contact drives Δφ.
+    // The foot's vertical arc (lift over the stance) is intrinsic to the cadence and is
+    // reconciled by the ground-hold row + δ — penalizing it in the no-slip term made the
+    // arc dominate at walk speed and froze the cadence (see PlantedContactsConstraint).
     private float SolvePhaseStepLm(AnimationDocument clip, float phi, in Affine2 root)
     {
         _solveClip = clip; _solvePhi = phi; _solveRoot = root;
         var cfg = AnimSolverConfig.Current;
-        int n = 2 + _skeleton.Count;          // x[0]=Δφ; x[1]=δ (vertical); x[2+i]=Δθ_i
+        int n = IdxTheta0 + _skeleton.Count;  // x = [Δφ, δ, d.x, Δθ_0…]
 
-        _solveLo[0] = 0f;                   _solveHi[0] = cfg.MaxPhaseStep;
-        _solveLo[1] = -cfg.VertOffsetLimit; _solveHi[1] = cfg.VertOffsetLimit;
-        for (int i = 2; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
-        Array.Clear(_solveVars, 0, n);        // δ, Δθ start at 0 (baseline pose); Δφ seeded below
+        _solveLo[IdxPhi] = 0f;                    _solveHi[IdxPhi] = cfg.MaxPhaseStep;
+        _solveLo[IdxDy]  = -cfg.VertOffsetLimit;  _solveHi[IdxDy]  = cfg.VertOffsetLimit;
+        _solveLo[IdxDx]  = -cfg.HorizOffsetLimit; _solveHi[IdxDx]  = cfg.HorizOffsetLimit;
+        for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
+        Array.Clear(_solveVars, 0, n);        // d, Δθ start at 0 (baseline pose); Δφ seeded below
+        FillSmoothTargets(n);                 // freeze t_i (emitted deviation) before any residual eval
         CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
 
         // The cadence objective is NON-CONVEX in Δφ: a planted foot's horizontal track
@@ -1052,12 +1132,11 @@ public sealed partial class CharacterAnimator
         }
 
         _solveVars[0] = best;
-        // Δθ starts at 0 (not warm-started from _prevTheta): the θ-smoothness prior supplies the
-        // temporal continuity from the COST side, and a box-clamped _prevTheta seed would stick
-        // the solution at the wall. _prevTheta is only the smoothness TARGET, set after the solve.
+        // Δθ starts at 0 (not warm-started): the θ-smoothness prior supplies the temporal
+        // continuity from the COST side (its target is last frame's EMITTED pose), and a
+        // box-clamped warm seed would stick the solution at the wall.
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n));
-        for (int i = 0; i < _skeleton.Count; i++) _prevTheta[i] = _solveVars[2 + i];
         _haveCorr = true;
         return _solveVars[0];
     }
@@ -1081,23 +1160,25 @@ public sealed partial class CharacterAnimator
 
         _contacts.Clear();                  // no planted contacts on this path
         _solveClip = anim; _solvePhi = phi; _solveRoot = root;
-        int n = 2 + _skeleton.Count;
-        _solveLo[0] = 0f;                   _solveHi[0] = 0f;   // Δφ locked — no cadence here
-        _solveLo[1] = -cfg.VertOffsetLimit; _solveHi[1] = cfg.VertOffsetLimit;
-        for (int i = 2; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
+        int n = IdxTheta0 + _skeleton.Count;
+        _solveLo[IdxPhi] = 0f;                    _solveHi[IdxPhi] = 0f;   // Δφ locked — no cadence here
+        _solveLo[IdxDy]  = -cfg.VertOffsetLimit;  _solveHi[IdxDy]  = cfg.VertOffsetLimit;
+        _solveLo[IdxDx]  = -cfg.HorizOffsetLimit; _solveHi[IdxDx]  = cfg.HorizOffsetLimit;
+        for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
         Array.Clear(_solveVars, 0, n);
+        FillSmoothTargets(n);                 // freeze t_i (emitted deviation) before any residual eval
         CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
 
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n));
-        for (int i = 0; i < _skeleton.Count; i++) _prevTheta[i] = _solveVars[2 + i];
         _haveCorr = true;
     }
 
-    // Cost at a candidate Δφ with δ and the angle corrections held at 0 (Δφ seed search).
+    // Cost at a candidate Δφ with d and the angle corrections held at 0 (Δφ seed search).
     private float CadenceCostAt(float dphi, int n)
     {
-        Span<float> s = stackalloc float[80];   // ≥ 2 + rig bone count; δ/Δθ entries stay 0
+        System.Diagnostics.Debug.Assert(n <= 80, "CadenceCostAt scratch undersized for this rig");
+        Span<float> s = stackalloc float[80];   // ≥ IdxTheta0 + rig bone count; d/Δθ entries stay 0
         s.Clear();
         s[0] = dphi;
         return _ls.Cost(_cadenceResiduals, s.Slice(0, n));
@@ -1123,7 +1204,7 @@ public sealed partial class CharacterAnimator
         // Δθ is applied onto the COMPOSED pose, not the base — so the IK correction survives an
         // overlay that fully owns a bone (a vault hand owned by the VaultHands overlay). Pre-compose
         // Δθ would be overwritten by PaintMotionLayer's lerp and the pin couldn't bend that limb.
-        for (int i = 0; i < bones; i++) _scratch.Local[i].Rotation += x[2 + i];   // post-compose IK
+        for (int i = 0; i < bones; i++) _scratch.Local[i].Rotation += x[IdxTheta0 + i];   // post-compose IK
         _scratch.ComputeWorld(_solveRoot);
     }
 
@@ -1161,6 +1242,14 @@ public sealed partial class CharacterAnimator
     private float WeightOf(int bone)
     {
         foreach (var e in _weightBuf) if (e.bone == bone) return e.weight;
+        return 0f;
+    }
+
+    // dw/dφ companion of WeightOf — the sign tells RefreshContacts whether a contact is on
+    // the FADING side of a feather crossover (release has begun).
+    private float DWeightOf(int bone)
+    {
+        foreach (var e in _weightBuf) if (e.bone == bone) return e.dweight;
         return 0f;
     }
 
@@ -1274,11 +1363,27 @@ public sealed partial class CharacterAnimator
     private void ResolveActionAim(in CharacterAnimSample s)
     {
         _aimActive = false;
-        if (!_useSolver || !s.HasAim || _aimBoneL < 0 || _aimBoneR < 0) return;
+        if (!s.HasAim || _aimBoneL < 0 || _aimBoneR < 0) return;
         if (s.AimDir.LengthSquared() < 1e-6f) return;
         _aimDir    = Vector2.Normalize(s.AimDir);
         _aimFacing = s.Facing == 0 ? 1 : s.Facing;
         _aimActive = true;
+    }
+
+    // Freeze this solve's smoothness targets t_i = wrapAngle(emitted_i − composedEntry_i): the
+    // deviation of last frame's EMITTED pose from THIS frame's composed base at the entry phase
+    // (Δφ = Δθ = 0 — BuildSolvePose at the zeroed vars leaves that base in _scratch.Local).
+    // The ThetaSmoothnessConstraint pulls each Δθ_i toward t_i, which is exactly the retired
+    // ease's "follow from where you were" — measured in DEVIATION space so clip playback is
+    // free (see the constraint's comment). Before the first drawn frame the targets are 0
+    // (rows degrade to an extra Tikhonov — harmless for one solve). Must run while _solveVars
+    // is all-zero, before the Δφ seed search evaluates any residual.
+    private void FillSmoothTargets(int n)
+    {
+        if (!_haveEmitted) { Array.Clear(_smoothTarget, 0, _skeleton.Count); return; }
+        BuildSolvePose(_solveVars.AsSpan(0, n));   // all-zero ⇒ composed base at the entry phase
+        for (int i = 0; i < _skeleton.Count; i++)
+            _smoothTarget[i] = MathHelper.WrapAngle(_thetaEmitted[i] - _scratch.Local[i].Rotation);
     }
 
     // Freeze the aim target û* for this frame's solve: the authored reference aim (the L→R hand

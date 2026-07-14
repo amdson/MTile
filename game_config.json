@@ -22,6 +22,5 @@
   "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
   "SecondPlayerOffsetY": 0,
-  "TimeScale": 1.0,
-  "AnimSolver": true
+  "TimeScale": 1.0
 }

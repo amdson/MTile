@@ -382,11 +382,19 @@ public class ActionOverlayTests
         return new AnimationKeyframe { Time = t, Bones = PoseData.Capture(p) };
     }
 
+    // BIND-RELATIVE leg swings (matching CharacterAnimatorTests.SetRot): under the joint-chain
+    // rig the legs' bind rotation points them DOWN (~π/2), so a swing must add it — an absolute
+    // ±1 leaves the legs near-horizontal, where the "planted" foot sweeps FORWARD at stance
+    // start and the forward-only cadence correctly freezes (the degenerate wrong-stance-foot
+    // case). The golden-section path's basin-jumping bug used to mask this; the LM solver
+    // doesn't. The other helpers in this file stay absolute on purpose (their assertions
+    // compare local rotations to the authored values directly).
     private static AnimationKeyframe LocoKf(Skeleton skel, float t, float legL, float legR, string plant)
     {
         var p = skel.CreatePose();
-        SetRot(skel, p, "leg_l_upper", legL);
-        SetRot(skel, p, "leg_r_upper", legR);
+        int li = skel.IndexOf("leg_l_upper"), ri = skel.IndexOf("leg_r_upper");
+        SetRot(skel, p, "leg_l_upper", skel.Bones[li].Rotation + legL);
+        SetRot(skel, p, "leg_r_upper", skel.Bones[ri].Rotation + legR);
         return new AnimationKeyframe
         {
             Time = t,

@@ -100,7 +100,7 @@ static class Probe
     // the sample; `action` (optional) names an overlay Type to composite on top.
     static int Anim(string baseSel, string action)
     {
-        var anim = new CharacterAnimator(_rig, scale: 1f, animations: _all, useSolver: false);
+        var anim = new CharacterAnimator(_rig, scale: 1f, animations: _all);
         var overlay = action != null ? _all.Find(c => string.Equals(c.Type, action, StringComparison.OrdinalIgnoreCase)) : null;
         float actDur = overlay?.Duration ?? 0.2f;
         string actType = overlay?.Type;   // exact Type string the animator keys on

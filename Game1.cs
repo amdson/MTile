@@ -234,7 +234,7 @@ public class Game1 : Game
         // Load authored skeleton animations (copied next to the binary). Empty on
         // platforms without a readable filesystem (e.g. WASM) → procedural fallback.
         _skeletonAnims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
-        _animator = new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims, _config.AnimSolver);
+        _animator = new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims);
         _attackGlow = new AttackGlowSystem(_animator, _glow, _glowField, SkeletonScale);
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
                                               _camera, _particles, _cursorTrail, _attackGlow);

@@ -13,8 +13,15 @@ namespace MTile;
 // stays in CharacterAnimator.cs — this file is purely the constraint + Jacobian math.
 public sealed partial class CharacterAnimator
 {
-    // Variable layout of x (§11.1). δ ≡ d.y; d.x deferred.
-    private const int IdxPhi = 0, IdxDy = 1, IdxTheta0 = 2;
+    // Variable layout of x (§11.1). d = (d.x, δ≡d.y) is the solved rig-root offset from the
+    // host's baseline placement, RESIDUAL-SIDE (tip + d in the geometric rows; the FK never
+    // sees it, so its Jacobian columns are constants). d.x was un-deferred 2026-07-14: at a
+    // planted foot's horizontal turning point ∂slipX/∂Δφ = 0, so the no-slip row is locally
+    // unsatisfiable by cadence alone — d.x is the well-conditioned escape (slight fore-aft
+    // body sway, which is also physically real). The §11.1 absorption trap (d.x eating ALL
+    // body travel and stalling the cycle) is guarded twice: the ABSOLUTE com row √λx·d.x
+    // charges sustained absorption quadratically, and the HorizOffsetLimit box hard-caps it.
+    private const int IdxPhi = 0, IdxDy = 1, IdxDx = 2, IdxTheta0 = 3;
 
     // The one reusable gradient primitive (§11.2): the sensitivity of a world point `p` on
     // bone `b` to the solve variables, written into colX[v]/colY[v] (x/y component of ∂p/∂x_v).
@@ -61,9 +68,17 @@ public sealed partial class CharacterAnimator
         int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0);
     }
 
-    // Two rows per planted contact: √w·(tipX − targetX) horizontal no-slip (the cadence pin,
-    // drives Δφ) then √w·(tipY + δ − targetY) vertical ground hold (drives δ, body bobs). The
-    // Jacobian is the point primitive scaled by √w, plus √w on the V row's δ column.
+    // Two rows per planted contact: √w·(tipX + d.x − targetX) horizontal no-slip (the cadence
+    // pin, drives Δφ, with d.x as the escape at the foot's horizontal turning point) then
+    // √w·(tipY + δ − targetY) vertical ground hold (drives δ, body bobs). The
+    // tips are read from the FINAL composed, Δθ-corrected pose (the design invariant — see
+    // _scratch's declaration), so the Jacobian is the full point primitive scaled by √w, plus
+    // √w on the V row's δ column. Δθ CAN trade against contact slip here (a small stance-leg
+    // trim that plants the drawn foot exactly is a feature); the weights keep it minimal.
+    // The weight is FROZEN per solve (c.Weight, from RefreshContacts) — deliberately NOT the
+    // live feathered w(φ+Δφ): a Δφ-dependent weight lets the solver DELETE its own constraint
+    // by advancing into a no-contact window (a run free-ran at constant Δφ with zero grip when
+    // this was tried). Release-under-stall is handled time-side in RefreshContacts instead.
     private sealed class PlantedContactsConstraint : ISolveConstraint
     {
         private readonly CharacterAnimator _a;
@@ -71,13 +86,13 @@ public sealed partial class CharacterAnimator
 
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
-            float dy = x[IdxDy];
+            float dy = x[IdxDy], dx = x[IdxDx];
             int n = 0;
             foreach (var c in _a._contacts)
             {
                 Vector2 tip = _a._scratch.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
-                float sw = MathF.Sqrt(AnimSolverConfig.Current.TierContact * c.Weight);
-                r[n++] = sw * (tip.X - c.Target.X);          // horizontal no-slip (drives Δφ)
+                float sw = MathF.Sqrt(AnimSolverConfig.Current.TierContact * c.Weight) * _a._invCharLen;
+                r[n++] = sw * (tip.X + dx - c.Target.X);     // horizontal no-slip (drives Δφ + d.x sway)
                 r[n++] = sw * (tip.Y + dy - c.Target.Y);     // vertical ground hold (drives δ)
             }
             return n;
@@ -92,7 +107,7 @@ public sealed partial class CharacterAnimator
             foreach (var c in _a._contacts)
             {
                 Vector2 tip = _a._scratch.WorldOf(c.Bone).Translation;
-                float sw = MathF.Sqrt(AnimSolverConfig.Current.TierContact * c.Weight);
+                float sw = MathF.Sqrt(AnimSolverConfig.Current.TierContact * c.Weight) * _a._invCharLen;
                 _a.PointJacobianColumns(c.Bone, tip, colX, colY);
                 int hRow = row, vRow = row + 1;
                 for (int v = 0; v < nv; v++)
@@ -100,6 +115,7 @@ public sealed partial class CharacterAnimator
                     jac[hRow * stride + v] = sw * colX[v];   // ∂H/∂x_v from the x component
                     jac[vRow * stride + v] = sw * colY[v];   // ∂V/∂x_v from the y component
                 }
+                jac[hRow * stride + IdxDx] += sw;            // ∂H/∂d.x (colX[IdxDx]==0, so this is √w)
                 jac[vRow * stride + IdxDy] += sw;            // ∂V/∂δ (colY[IdxDy]==0, so this is √w)
                 row += 2;
             }
@@ -119,13 +135,13 @@ public sealed partial class CharacterAnimator
 
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
-            float dy = x[IdxDy];
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierHard);
+            float dy = x[IdxDy], dx = x[IdxDx];
+            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierHard) * _a._invCharLen;
             int n = 0;
             foreach (var (bone, target) in _a._pins)
             {
                 Vector2 tip = _a._scratch.WorldOf(bone).Translation;
-                r[n++] = sw * (tip.X - target.X);            // pin X
+                r[n++] = sw * (tip.X + dx - target.X);       // pin X (rides the body sway d.x)
                 r[n++] = sw * (tip.Y + dy - target.Y);       // pin Y (rides the body bob δ)
             }
             return n;
@@ -136,7 +152,7 @@ public sealed partial class CharacterAnimator
             int nv = IdxTheta0 + _a._skeleton.Count;
             var colX = _a._colX.AsSpan(0, nv);
             var colY = _a._colY.AsSpan(0, nv);
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierHard);
+            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierHard) * _a._invCharLen;
             int row = row0;
             foreach (var (bone, _) in _a._pins)
             {
@@ -148,6 +164,7 @@ public sealed partial class CharacterAnimator
                     jac[xRow * stride + v] = sw * colX[v];   // ∂(pinX)/∂x_v
                     jac[yRow * stride + v] = sw * colY[v];   // ∂(pinY)/∂x_v
                 }
+                jac[xRow * stride + IdxDx] += sw;            // ∂(pinX)/∂d.x
                 jac[yRow * stride + IdxDy] += sw;            // ∂(pinY)/∂δ
                 row += 2;
             }
@@ -172,14 +189,14 @@ public sealed partial class CharacterAnimator
 
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
-            float dy = x[IdxDy];
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierNoPen);
+            float dy = x[IdxDy], dx = x[IdxDx];
+            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierNoPen) * _a._invCharLen;
             int bones = _a._skeleton.Count, n = 0;
             foreach (var s in _a._surfaces)
                 for (int b = 0; b < bones; b++)
                 {
                     Vector2 tip = _a._scratch.WorldOf(b).Translation;
-                    float gap = s.Normal.X * (tip.X - s.Point.X) + s.Normal.Y * (tip.Y + dy - s.Point.Y);
+                    float gap = s.Normal.X * (tip.X + dx - s.Point.X) + s.Normal.Y * (tip.Y + dy - s.Point.Y);
                     float pen = s.Margin - gap;                  // >0 ⇒ inside the margin (penetrating)
                     r[n++] = pen > 0f ? sw * pen : 0f;
                 }
@@ -188,8 +205,8 @@ public sealed partial class CharacterAnimator
 
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
         {
-            float dy = x[IdxDy];
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierNoPen);
+            float dy = x[IdxDy], dx = x[IdxDx];
+            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierNoPen) * _a._invCharLen;
             int nv = IdxTheta0 + _a._skeleton.Count, bones = _a._skeleton.Count;
             var colX = _a._colX.AsSpan(0, nv);
             var colY = _a._colY.AsSpan(0, nv);
@@ -198,12 +215,13 @@ public sealed partial class CharacterAnimator
                 for (int b = 0; b < bones; b++, row++)
                 {
                     Vector2 tip = _a._scratch.WorldOf(b).Translation;
-                    float gap = s.Normal.X * (tip.X - s.Point.X) + s.Normal.Y * (tip.Y + dy - s.Point.Y);
+                    float gap = s.Normal.X * (tip.X + dx - s.Point.X) + s.Normal.Y * (tip.Y + dy - s.Point.Y);
                     if (s.Margin - gap <= 0f) continue;          // inactive → zero row (solver pre-zeroes)
-                    _a.PointJacobianColumns(b, tip, colX, colY); // ∂(world tip)/∂x (δ added below)
+                    _a.PointJacobianColumns(b, tip, colX, colY); // ∂(world tip)/∂x (d added below)
                     // r = √w·(margin − n·q) ⇒ ∂r/∂x = −√w · n·(∂q/∂x)
                     for (int v = 0; v < nv; v++)
                         jac[row * stride + v] = -sw * (s.Normal.X * colX[v] + s.Normal.Y * colY[v]);
+                    jac[row * stride + IdxDx] += -sw * s.Normal.X;   // q.X rides d.x ⇒ ∂(n·q)/∂d.x = n.X
                     jac[row * stride + IdxDy] += -sw * s.Normal.Y;   // q.Y rides δ ⇒ ∂(n·q)/∂δ = n.Y
                 }
             return row - row0;
@@ -218,8 +236,8 @@ public sealed partial class CharacterAnimator
     // the authored (Δθ=0) reference aim ROTATED by the stab's deviation from horizontal-forward
     // (captured once per frame, §2 of STAB_AIM_PLAN), so it preserves the clip's windup→thrust
     // dynamics while turning the whole aim onto the input direction. The solver bends the
-    // (overlay-owned, post-compose) arm via Δθ. δ cancels (shifts both hands equally → drops out of
-    // pR − pL), so the aim row has no δ column.
+    // (overlay-owned, post-compose) arm via Δθ. d = (d.x, δ) cancels (shifts both hands equally →
+    // drops out of pR − pL), so the aim row has no d columns.
     private sealed class ActionAimConstraint : ISolveConstraint
     {
         private readonly CharacterAnimator _a;
@@ -276,16 +294,28 @@ public sealed partial class CharacterAnimator
         { jac[row0 * stride + IdxPhi] = MathF.Sqrt(AnimSolverConfig.Current.PhaseStepPrior); return 1; }
     }
 
-    // One row: √ComWeightY · δ — the soft com tie pulling δ→baseline so a no-contact flight
-    // frame settles to the com anchor (both feet free to leave the ground).
+    // Two rows: √ComWeightY · δ and √ComWeightX · d.x — the soft com ties pulling the root
+    // offset d → baseline. The Y row lets a no-contact flight frame settle to the com anchor
+    // (both feet free to leave the ground). The X row is the ABSOLUTE anti-absorption guard on
+    // the body sway: pulling toward 0 (not toward last frame) charges sustained travel
+    // absorption quadratically, so d.x can soak the turning-point singularity's residual but
+    // can never carry the cadence. ComWeightX ≫ ComWeightY on purpose.
     private sealed class ComOffsetConstraint : ISolveConstraint
     {
         private readonly CharacterAnimator _a;
         public ComOffsetConstraint(CharacterAnimator a) => _a = a;
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
-        { r[0] = MathF.Sqrt(AnimSolverConfig.Current.ComWeightY) * x[IdxDy]; return 1; }
+        {
+            r[0] = MathF.Sqrt(AnimSolverConfig.Current.ComWeightY) * _a._invCharLen * x[IdxDy];
+            r[1] = MathF.Sqrt(AnimSolverConfig.Current.ComWeightX) * _a._invCharLen * x[IdxDx];
+            return 2;
+        }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
-        { jac[row0 * stride + IdxDy] = MathF.Sqrt(AnimSolverConfig.Current.ComWeightY); return 1; }
+        {
+            jac[row0 * stride + IdxDy]       = MathF.Sqrt(AnimSolverConfig.Current.ComWeightY) * _a._invCharLen;
+            jac[(row0 + 1) * stride + IdxDx] = MathF.Sqrt(AnimSolverConfig.Current.ComWeightX) * _a._invCharLen;
+            return 2;
+        }
     }
 
     // N rows: √λ_θ(i) · Δθ_i — the per-bone Tikhonov prior (_posePrior: stiff torso, loose
@@ -313,27 +343,35 @@ public sealed partial class CharacterAnimator
         }
     }
 
-    // N rows: √ThetaSmoothPrior · (Δθ_i − Δθ_i,prev) — the TEMPORAL smoothness prior. Unlike the
-    // Tikhonov (toward 0), this pulls each correction toward LAST frame's solved value, pinning the
-    // near-singular/flat limb DOF that a single 2D pin leaves under-determined — so it stops landing
-    // somewhere new each frame (jitter) without biasing the reach (cost → 0 once Δθ settles). The
-    // Jacobian is the same constant √λ on the diagonal as the Tikhonov (the −Δθ_prev is a constant).
+    // N rows: √λs_i · (Δθ_i − t_i), t_i = wrapAngle(θ_emitted,i − composedEntry_i) — TEMPORAL
+    // smoothness of the pose's DEVIATION FROM THE BASE CLIP against the deviation actually
+    // emitted last frame (both measured from this frame's composed base at the ENTRY phase, a
+    // per-solve constant — _smoothTarget, filled at solve start). This row IS the retired
+    // BlendToward ease, moved inside the objective (polish item 1): λs_i is derived from the
+    // Stiffness constants + dt (_lambdaSmooth) so an UNCONSTRAINED bone's optimum is exactly
+    // the old exponential ease of its deviation, while a constrained bone trades smoothing
+    // against pins/contacts in ONE objective (no ease-induced pin lag on the rendered tip).
+    // Measuring the DEVIATION — not the absolute angle — is load-bearing: an absolute-pose
+    // smoothness charges clip playback itself (Δφ advancing the walk IS pose change), which
+    // measurably dragged the run cadence to a crawl when tried. Deviation smoothness makes
+    // playback free, still bridges clip switches (right after a switch, emitted − newBase is
+    // the whole pose gap → Δθ spans it and then decays), and is diagonal + Δφ-free.
     private sealed class ThetaSmoothnessConstraint : ISolveConstraint
     {
         private readonly CharacterAnimator _a;
         public ThetaSmoothnessConstraint(CharacterAnimator a) => _a = a;
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
-            float sq = MathF.Sqrt(AnimSolverConfig.Current.ThetaSmooth);
             int bones = _a._skeleton.Count;
-            for (int i = 0; i < bones; i++) r[i] = sq * (x[IdxTheta0 + i] - _a._prevTheta[i]);
+            for (int i = 0; i < bones; i++)
+                r[i] = MathF.Sqrt(_a._lambdaSmooth[i]) * (x[IdxTheta0 + i] - _a._smoothTarget[i]);
             return bones;
         }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
         {
-            float sq = MathF.Sqrt(AnimSolverConfig.Current.ThetaSmooth);
             int bones = _a._skeleton.Count;
-            for (int i = 0; i < bones; i++) jac[(row0 + i) * stride + (IdxTheta0 + i)] = sq;
+            for (int i = 0; i < bones; i++)
+                jac[(row0 + i) * stride + (IdxTheta0 + i)] = MathF.Sqrt(_a._lambdaSmooth[i]);
             return bones;
         }
     }

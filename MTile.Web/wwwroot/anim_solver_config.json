@@ -1,18 +1,21 @@
 {
-  "_comment": "Weights/limits for the per-frame animation IK solve (render-only; hot-reloaded on desktop). Empirical — tweak by feel. See Plans/ANIMATION_SOLVER_PLAN.md 11.4. Rough tiers: hard pins >= contacts >= priors, kept a MODEST spread so the solve stays well-conditioned. Pose priors are per-region: stiff torso, loose limbs.",
+  "_comment": "Weights/limits for the per-frame animation IK solve (render-only; hot-reloaded on desktop). Empirical — tweak by feel. See Plans/ANIMATION_SOLVER_PLAN.md 11.4. UNITS: all residuals are dimensionless (px rows divided by the rig reach ~21.6px), so these numbers compare honestly across pixel and radian rows; the spread IS the priority. Tiers: HARD (pins/no-pen) >> CONTACT >> aim/priors. Pose priors are per-region: stiff torso, loose limbs.",
 
-  "TierHard": 10,
-  "TierNoPen": 10,
+  "TierHard": 4700,
+  "TierNoPen": 4700,
   "TierAim": 60,
-  "TierContact": 1,
+  "TierContact": 470,
   "CorePosePrior": 60,
   "LimbPosePrior": 4,
   "ThetaSmooth": 40,
   "PhaseStepPrior": 8,
-  "ComWeightY": 0.05,
+  "ComWeightY": 23,
+  "ComWeightX": 230,
 
   "AngleCorrLimit": 0.6,
   "VertOffsetLimit": 24,
+  "HorizOffsetLimit": 4,
   "MaxPhaseStep": 0.25,
-  "FeatherWidth": 0.12
+  "FeatherWidth": 0.12,
+  "ContactReleaseTime": 0.1
 }

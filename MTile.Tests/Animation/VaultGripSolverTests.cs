@@ -21,7 +21,7 @@ public class VaultGripSolverTests
     {
         var clips = AnimationStore.LoadAll(StatesDir());
         var skel  = SkeletonExamples.Biped();
-        var anim  = new CharacterAnimator(skel, 0.6f, clips, useSolver: true);
+        var anim  = new CharacterAnimator(skel, 0.6f, clips);
         int hand  = anim.Skeleton.IndexOf("arm_l_lower");
         int up    = anim.Skeleton.IndexOf("arm_l_upper");
         int chest = anim.Skeleton.IndexOf("chest");
@@ -45,7 +45,7 @@ public class VaultGripSolverTests
         var corner = natHand + new Vector2(1.5f, -1.5f);
         _o.WriteLine($"natHand=({natHand.X:0.00},{natHand.Y:0.00}) corner=({corner.X:0.00},{corner.Y:0.00})");
 
-        float maxReach = 0f, maxArm = 0f, maxChest = 0f, maxJacErr = 0f; int solves = 0;
+        float maxReach = 0f, maxArm = 0f, maxChest = 0f, maxJacErr = 0f, maxRendered = 0f; int solves = 0;
         for (int i = 0; i < 24; i++)
         {
             anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ParkourState", "", dt,
@@ -55,19 +55,34 @@ public class VaultGripSolverTests
             solves++;
             Vector2 tip = anim.SolvedBoneTipWorld(hand);
             maxReach  = MathF.Max(maxReach, (tip - corner).Length());
+            // The RENDERED hand — the acceptance gate for the in-solve smoothing (polish item 1):
+            // the drawn pose must satisfy the pin, not just the solved pose (the retired
+            // BlendToward ease diluted the correction ~50%/frame and the rendered hand lagged).
+            // Root mirrors the host's RigRoot (com anchor + the solved d offsets).
+            anim.TryComReference(out var comDraw);
+            var drawRoot = Affine2.FromTRS(
+                new Vector2(pos.X - facing * comDraw.X * 0.6f + anim.HorizontalOffset,
+                            pos.Y - comDraw.Y * 0.6f + anim.VerticalOffset),
+                0f, new Vector2(facing * 0.6f, 0.6f));
+            Vector2 rendered = anim.Pose.ComputeWorld(drawRoot)[hand].Translation;
+            if (i >= 4)   // allow the pin's own ease-in (the smoothness prior releasing toward it)
+                maxRendered = MathF.Max(maxRendered, (rendered - corner).Length());
             maxArm    = MathF.Max(maxArm, MathF.Max(MathF.Abs(anim.AngleCorrection(hand)), MathF.Abs(anim.AngleCorrection(up))));
             maxChest  = MathF.Max(maxChest, MathF.Abs(anim.AngleCorrection(chest)));
             maxJacErr = MathF.Max(maxJacErr, anim.MaxJacobianError());
-            if (i % 6 == 0) _o.WriteLine($"f{i,2}: reach={(tip - corner).Length():0.00} armΔθ={maxArm:0.000} chestΔθ={maxChest:0.000} jacErr={anim.MaxJacobianError():0.0000}  {rep}");
+            if (i % 6 == 0) _o.WriteLine($"f{i,2}: reach={(tip - corner).Length():0.00} rendered={(rendered - corner).Length():0.00} armΔθ={maxArm:0.000} chestΔθ={maxChest:0.000} jacErr={anim.MaxJacobianError():0.0000}  {rep}");
         }
 
-        _o.WriteLine($"=> solves={solves} maxReach={maxReach:0.00}px maxArmΔθ={maxArm:0.000} maxChestΔθ={maxChest:0.000} maxJacErr={maxJacErr:0.0000}");
+        _o.WriteLine($"=> solves={solves} maxReach={maxReach:0.00}px rendered={maxRendered:0.00}px maxArmΔθ={maxArm:0.000} maxChestΔθ={maxChest:0.000} maxJacErr={maxJacErr:0.0000}");
 
         // The off-locomotion solve ran during the vault (the trigger fires on a pin, not contacts).
         Assert.True(solves > 0, "no vault-grip solve ran");
         // The hand reaches the ledge corner — DESPITE the VaultHands overlay fully owning the arm
         // (this is the Δθ-post-compose enabling change working; pre-compose Δθ couldn't move it).
         Assert.True(maxReach < 1.5f, $"hand didn't reach the corner ({maxReach:0.00}px) — pin not driving the overlay-owned arm");
+        // The RENDERED hand holds the corner too — the polish-item-1 acceptance gate. (Body is
+        // stationary here; a moving body allows ~a frame of smoothness lag on top, by design.)
+        Assert.True(maxRendered < 1.0f, $"RENDERED hand off the corner ({maxRendered:0.00}px) — smoothing diluting the pin again?");
         // ...via a real, nonzero arm correction...
         Assert.True(maxArm > 0.02f, $"arm Δθ never engaged ({maxArm:0.000})");
         // ...the arm does the work, not the torso (stiff core keeps the body steady)...

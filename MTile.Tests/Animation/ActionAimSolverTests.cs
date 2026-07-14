@@ -25,7 +25,7 @@ public class ActionAimSolverTests
     {
         var clips = AnimationStore.LoadAll(StatesDir());
         var skel  = SkeletonExamples.Biped();
-        var anim  = new CharacterAnimator(skel, 0.6f, clips, useSolver: true);
+        var anim  = new CharacterAnimator(skel, 0.6f, clips);
         int hand  = anim.Skeleton.IndexOf("arm_r_lower");
         int up    = anim.Skeleton.IndexOf("arm_r_upper");
         int chest = anim.Skeleton.IndexOf("chest");

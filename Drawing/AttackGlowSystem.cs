@@ -130,10 +130,12 @@ public sealed class AttackGlowSystem
     {
         int dir = player.Facing == 0 ? 1 : player.Facing;
         if (anim.TryComReference(out var com))
-            // The com anchor is the baseline; the solver (when active) adds VerticalOffset
-            // δ — the body's bob that keeps the planted foot grounded during stance and
-            // returns to the baseline in flight. δ is 0 on the golden path / flight frames.
-            return new Vector2(player.Body.Position.X - dir * com.X * scale,
+            // The com anchor is the baseline; the solver adds its solved root offset on top —
+            // VerticalOffset δ (the body's bob that keeps the planted foot grounded during
+            // stance, back to baseline in flight) and HorizontalOffset d.x (the slight fore-aft
+            // sway that absorbs no-slip at a planted foot's horizontal turning point). Both are
+            // 0 on frames with no solve.
+            return new Vector2(player.Body.Position.X - dir * com.X * scale + anim.HorizontalOffset,
                                player.Body.Position.Y -       com.Y * scale + anim.VerticalOffset);
 
         float groundY = player.Body.Position.Y + 2f * PlayerCharacter.Radius;
