@@ -7,12 +7,11 @@
   "TierContact": 470,
   "CorePosePrior": 60,
   "LimbPosePrior": 4,
-  "ThetaSmooth": 40,
   "PhaseStepPrior": 8,
   "ComWeightY": 23,
   "ComWeightX": 230,
 
-  "AngleCorrLimit": 0.6,
+  "AngleCorrLimit": 3.2,
   "VertOffsetLimit": 24,
   "HorizOffsetLimit": 4,
   "MaxPhaseStep": 0.25,
