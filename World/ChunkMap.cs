@@ -366,4 +366,68 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         t.Type   = prevType;
         t.Sprout = null;   // re-linked in RestoreTerrain step 3 if this cell is Sprouting
     }
+
+    // ── Full dense capture (in-game recorder) ───────────────────────────────────
+    // The journal-based snapshot above can't support free back-and-forth scrubbing
+    // (RewindTo truncates history), so the recorder captures the whole dense grid each
+    // frame instead. See DenseTerrainCapture for the rationale; these bypass the journal
+    // entirely (the recorder never re-simulates, so no inverse-delta is needed).
+    public DenseTerrainCapture CaptureDense()
+    {
+        var chunks = new DenseTerrainCapture.ChunkCells[_dict.Count];
+        int idx = 0;
+        foreach (var kv in _dict)
+        {
+            var tiles = kv.Value.Tiles;
+            var state = new TileState[Chunk.Size * Chunk.Size];
+            var type  = new TileType[Chunk.Size * Chunk.Size];
+            for (int tx = 0; tx < Chunk.Size; tx++)
+                for (int ty = 0; ty < Chunk.Size; ty++)
+                {
+                    int i = tx * Chunk.Size + ty;
+                    state[i] = tiles[tx, ty].State;
+                    type[i]  = tiles[tx, ty].Type;
+                }
+            chunks[idx++] = new DenseTerrainCapture.ChunkCells { Pos = kv.Key, State = state, Type = type };
+        }
+        return new DenseTerrainCapture { Chunks = chunks };
+    }
+
+    // Overwrite the dense grid to exactly match a captured frame, in any order. Direct
+    // writes — no journaling. Call AFTER the sparse structures are restored (i.e. after
+    // Simulation.Restore → RestoreTerrain) so the sprout-ref relink points at the
+    // correct Graph.Growing nodes for this frame.
+    public void RestoreDense(DenseTerrainCapture cap)
+    {
+        // Drop chunks that don't exist in the captured frame (created later).
+        var present = new HashSet<Point>();
+        foreach (var cc in cap.Chunks) present.Add(cc.Pos);
+        var prune = new List<Point>();
+        foreach (var pos in _dict.Keys) if (!present.Contains(pos)) prune.Add(pos);
+        foreach (var pos in prune) _dict.Remove(pos);
+
+        // Overwrite (or materialize) each captured chunk's cells.
+        foreach (var cc in cap.Chunks)
+        {
+            if (!_dict.TryGetValue(cc.Pos, out var chunk))
+            {
+                chunk = new Chunk { ChunkPos = cc.Pos };
+                _dict[cc.Pos] = chunk;
+            }
+            for (int tx = 0; tx < Chunk.Size; tx++)
+                for (int ty = 0; ty < Chunk.Size; ty++)
+                {
+                    int i = tx * Chunk.Size + ty;
+                    ref var t = ref chunk.Tiles[tx, ty];
+                    t.State  = cc.State[i];
+                    t.Type   = cc.Type[i];
+                    t.Sprout = null;
+                }
+        }
+
+        // Re-link tile→sprout refs from the restored graph (same as RestoreTerrain step 3).
+        foreach (var n in Graph.Growing)
+            if (_dict.TryGetValue(n.ChunkPos, out var chunk))
+                chunk.Tiles[n.Tx, n.Ty].Sprout = n;
+    }
 }

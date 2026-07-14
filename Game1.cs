@@ -84,6 +84,10 @@ public class Game1 : Game
     // auto-capture, threaded through Initialize/Update/Draw. See ScreenshotSystem.
     private readonly ScreenshotSystem _screenshots = new();
 
+    // In-game animation recorder (offline dev tool). Ctrl+R record, Ctrl+P scrub. Captures
+    // the sim + the exact drawn pose per frame so a take can be reviewed frame-by-frame.
+    private readonly GameRecorder _recorder = new();
+
     public Game1()
     {
         // Load game config before the GraphicsDeviceManager finalizes so window
@@ -266,36 +270,50 @@ public class Game1 : Game
         // can consult it without taking GameConfig as a dependency. Debug-draw only.
         EruptionPlanner.DebugDrawMassBall = _config.DebugDrawMassBall;
 
-        // Gather this frame's input and advance the simulation by one fixed step.
-        var input = Controller.Poll(mouseWorldPos);
+        float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+
         if (_session != null)
         {
             // Networked: feed the local sample to the session, drain remote arrivals,
             // then advance one rollback step (which may predict, roll back, or stall).
+            // The recorder is an offline-only dev tool and stays out of the netcode path.
+            var input = Controller.Poll(mouseWorldPos);
             _localInput = input;
             while (_net.TryReceive(out var bytes))
                 if (MTile.Net.InputCodec.TryDecode(bytes, out var pkt))
                     _session.Receive(in pkt);
             _session.TryStep();
+            _cosmetics.Update(_sim, _config, dt, mouseWorldPos, _screenCenter, LocalPlayer);
         }
         else
         {
-            // Slow-/fast-motion (offline only): accumulate TimeScale and run that many
-            // fixed steps this frame — <1 skips frames (slow-mo), >1 runs extra, 0 pauses.
-            _simAccum += MathF.Max(0f, _config.TimeScale);
-            while (_simAccum >= 1f)
+            // Dev recorder: handle Ctrl+R / Ctrl+P and any playback scrubbing. Returns
+            // false while in playback (sim frozen) — we skip the normal step + cosmetics.
+            bool live = _recorder.HandleInput(keyboardState, _sim, _camera, _animator,
+                                              _secondaryAnimators, SkeletonScale);
+            if (live)
             {
-                _simAccum -= 1f;
-                // With a second player present offline, the bot spoofs its input (P2).
-                if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
-                else                   _sim.Step(input);
+                // Gather this frame's input and advance the simulation by fixed steps.
+                var input = Controller.Poll(mouseWorldPos);
+                // Slow-/fast-motion: accumulate TimeScale and run that many fixed steps
+                // this frame — <1 skips frames (slow-mo), >1 runs extra, 0 pauses.
+                _simAccum += MathF.Max(0f, _config.TimeScale);
+                while (_simAccum >= 1f)
+                {
+                    _simAccum -= 1f;
+                    // With a second player present offline, the bot spoofs its input (P2).
+                    if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
+                    else                   _sim.Step(input);
+                }
+
+                // Cosmetic-only pass: sprite sync, skeleton animators, knife trail,
+                // particles, landing puff, camera tracking — reads sim state, never writes.
+                _cosmetics.Update(_sim, _config, dt, mouseWorldPos, _screenCenter, LocalPlayer);
+
+                // Record AFTER cosmetics so the captured pose + RigRoot reflect this frame.
+                _recorder.CaptureFrame(_sim, _camera, _animator, _secondaryAnimators, SkeletonScale);
             }
         }
-
-        // Cosmetic-only pass: sprite sync, skeleton animators, knife trail, particles,
-        // landing puff, and camera tracking — reads sim state, never writes it.
-        float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
-        _cosmetics.Update(_sim, _config, dt, mouseWorldPos, _screenCenter, LocalPlayer);
 
         base.Update(gameTime);
     }
@@ -329,7 +347,13 @@ public class Game1 : Game
         }
         if (_config.DebugDrawSkeleton)
         {
-            _animator.Draw(_draw, AttackGlowSystem.RigRoot(player, _animator, SkeletonScale), player.Facing,
+            // In playback the rig is drawn from the recorder's captured pose (already
+            // loaded into the animator) at the captured root — RigRoot reads animator
+            // clip/δ state the snapshot doesn't restore, so the live recompute would drift.
+            Vector2 primRoot; int primFacing;
+            if (_recorder.TryPlaybackPrimary(out var pc)) { primRoot = pc.RootWorldPos; primFacing = pc.Facing; }
+            else { primRoot = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); primFacing = player.Facing; }
+            _animator.Draw(_draw, primRoot, primFacing,
                            _config.DebugDrawSkeletonJoints, _config.DebugHighlightPlantFoot);
 
             // Secondary players' rigs — same anchoring, each from its own animator.
@@ -337,7 +361,10 @@ public class Game1 : Game
             {
                 var p = _sim.SecondaryPlayers[i].Player;
                 var anim = _secondaryAnimators[i];
-                anim.Draw(_draw, AttackGlowSystem.RigRoot(p, anim, SkeletonScale), p.Facing,
+                Vector2 root; int facing;
+                if (_recorder.TryPlaybackSecondary(i, out var sc)) { root = sc.RootWorldPos; facing = sc.Facing; }
+                else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = p.Facing; }
+                anim.Draw(_draw, root, facing,
                           _config.DebugDrawSkeletonJoints, _config.DebugHighlightPlantFoot);
             }
         }
@@ -426,13 +453,17 @@ public class Game1 : Game
         // Glowing-shape pass (world space): the slash apex renders as a glowing triangle +
         // trail here, since the glow renderers need their own pass outside the SpriteBatch.
         var camTransform = _camera.GetTransform(_screenCenter);
-        _attackGlow.Draw(camTransform, _sim, _config, (float)gameTime.ElapsedGameTime.TotalSeconds);
+        // Frozen during playback: the glow advances its own trail state from dt and reads
+        // a live RigRoot, neither of which is valid while scrubbing a recorded take.
+        if (!_recorder.IsPlayback)
+            _attackGlow.Draw(camTransform, _sim, _config, (float)gameTime.ElapsedGameTime.TotalSeconds);
 
         if (_config.DebugDrawGlowDemo)
             _devDemos.DrawGlowDemo(camTransform,
                          new Vector2(player.Body.Position.X, player.Body.Position.Y - 70f));
 
         _hud.Draw(_sim, _animator, _config);
+        _recorder.DrawHud(_spriteBatch, _debugFont);
 
         if (shotTarget != null && _screenshots.EndCapture(shotTarget, _spriteBatch, GraphicsDevice))
             Exit();

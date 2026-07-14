@@ -39,6 +39,9 @@ public sealed class DemoGame : Game
     private SkeletonPose _pose;          // rendered / working pose
     private SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
     private Affine2      _root;
+    private Vector2      _playerOffset;   // global player-position offset folded into _root, so the
+                                          // skeleton AND root-parented additions (e.g. "com") move together.
+                                          // Drag the root joint to move, arrows nudge, Home resets.
     private float        _floorLocalY;   // bind-pose sole height (skeleton-local), the floor line
 
     private string                   _dir;
@@ -54,6 +57,9 @@ public sealed class DemoGame : Game
     private int           _dragBone = -1, _hoverBone = -1;
     private int           _dragBar  = -1;     // keyframe bar being moved
     private bool          _dragPlayhead;
+    private bool          _dragRoot;          // dragging the root joint = moving the whole player (_playerOffset)
+    private Vector2       _vaultBlockOffset;  // skeleton-local offset added to the vault reference block's base placement
+    private bool          _dragVaultBlock;    // dragging the vault reference block
     private enum EditMode { Rotate, Resize }
     private EditMode      _editMode = EditMode.Rotate;   // Tab cycles
     private bool          _playing;           // timeline playback
@@ -211,6 +217,14 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.V)) BeginAddAddition(AnimAdditionKind.Vector, mp);
         if (Pressed(kb, Keys.B)) BeginAddBone(mp, toBase: kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift));
         if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
+
+        // Move the whole player (skeleton + com): arrows nudge (Shift = faster), Home recenters.
+        float nudge = (kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift)) ? 6f : 1.5f;
+        if (kb.IsKeyDown(Keys.Left))  _playerOffset.X -= nudge;
+        if (kb.IsKeyDown(Keys.Right)) _playerOffset.X += nudge;
+        if (kb.IsKeyDown(Keys.Up))    _playerOffset.Y -= nudge;
+        if (kb.IsKeyDown(Keys.Down))  _playerOffset.Y += nudge;
+        if (Pressed(kb, Keys.Home))   _playerOffset = Vector2.Zero;
         if (Doc != null)
         {
             bool shift = kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift);
@@ -253,17 +267,35 @@ public sealed class DemoGame : Game
                 {
                     _selectedAdd = ai; _dragAdd = ai; _dragAddTip = tip;
                 }
+                // Grabbing the root joint moves the whole player (skeleton + com), independent of
+                // the active keyframe — root drag is otherwise a no-op (EditBone skips the root).
+                else if (PickJoint(world, mp) is int rb && rb >= 0 && _skeleton.Bones[rb].IsRoot)
+                {
+                    _dragRoot = true; _selectedAdd = -1;
+                }
                 else
                 {
                     int bone = _activeKey >= 0 ? PickJoint(world, mp) : -1;
                     if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
-                    else _dragBone = bone;
+                    else if (bone >= 0) _dragBone = bone;
+                    // No joint under the cursor: grab the vault reference block if the click is on it.
+                    else if (TryGetVaultBlockRect(out var vb) && vb.Contains((int)mp.X, (int)mp.Y)) _dragVaultBlock = true;
                     _selectedAdd = -1;
                 }
             }
         }
 
-        if (leftDown && _dragBar >= 0)
+        if (leftDown && _dragRoot)
+        {
+            // Move the player by the mouse delta (screen space); folded into _root next UpdateRoot.
+            _playerOffset += mp - new Vector2(_prevMs.X, _prevMs.Y);
+        }
+        else if (leftDown && _dragVaultBlock)
+        {
+            // Block offset is skeleton-local; _root is uniform-scaled (no rotation), so undo the scale.
+            _vaultBlockOffset += (mp - new Vector2(_prevMs.X, _prevMs.Y)) / RigScale;
+        }
+        else if (leftDown && _dragBar >= 0)
         {
             // Move the keyframe in time; re-sort and follow it (selection by identity).
             var kf = Doc.Keyframes[_dragBar];
@@ -300,7 +332,7 @@ public sealed class DemoGame : Game
             }
         }
 
-        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; }
+        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragVaultBlock = false; }
 
         _prevMs = ms;
         _prevKb = kb;
@@ -397,7 +429,7 @@ public sealed class DemoGame : Game
     {
         float cx = SidebarW + (W - SidebarW) / 2f;
         float cy = H * 0.48f;
-        _root = Affine2.FromTRS(new Vector2(cx, cy), 0f, new Vector2(RigScale, RigScale));
+        _root = Affine2.FromTRS(new Vector2(cx, cy) + _playerOffset, 0f, new Vector2(RigScale, RigScale));
     }
 
     // === draw ================================================================
@@ -552,14 +584,25 @@ public sealed class DemoGame : Game
     // Reference obstacle drawn under the rig only while authoring a Vault clip. Sized
     // in skeleton-local units (the rig's natural frame) so it scales with RigScale.
     // ~one game-tile wide, knee-ish tall — tune to taste; nothing reads this geometry.
+    // Skeleton-local geometry of the vault reference block: ~one game-tile wide, knee-ish tall,
+    // a hair ahead of the rig in +X. _vaultBlockOffset (drag / arrows) shifts it from there.
+    private const float VaultBlockW = 18f, VaultBlockH = 14f, VaultBlockX = 8f;
+
+    // Screen-space rect of the vault block, false when no block is shown (non-Vault clip).
+    // Shared by the renderer and the drag hit-test so they never disagree.
+    private bool TryGetVaultBlockRect(out Rectangle rect)
+    {
+        rect = default;
+        if (Doc?.Type != "Vault") return false;
+        Vector2 tl = _root.TransformPoint(new Vector2(VaultBlockX,               _floorLocalY - VaultBlockH) + _vaultBlockOffset);
+        Vector2 br = _root.TransformPoint(new Vector2(VaultBlockX + VaultBlockW, _floorLocalY)               + _vaultBlockOffset);
+        rect = new Rectangle((int)tl.X, (int)tl.Y, (int)(br.X - tl.X), (int)(br.Y - tl.Y));
+        return true;
+    }
+
     private void DrawVaultBlock()
     {
-        if (Doc?.Type != "Vault") return;
-        const float W_ = 18f, H_ = 14f, OffsetX = 8f;
-
-        Vector2 tl = _root.TransformPoint(new Vector2(OffsetX,      _floorLocalY - H_));
-        Vector2 br = _root.TransformPoint(new Vector2(OffsetX + W_, _floorLocalY));
-        var rect = new Rectangle((int)tl.X, (int)tl.Y, (int)(br.X - tl.X), (int)(br.Y - tl.Y));
+        if (!TryGetVaultBlockRect(out var rect)) return;
 
         Fill(rect, new Color(82, 64, 48));
         _draw.Line(new Vector2(rect.Left,  rect.Top),    new Vector2(rect.Right, rect.Top),    new Color(150, 118, 88), 2f);
@@ -900,6 +943,8 @@ public sealed class DemoGame : Game
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
         ("Edit",     "Tab mode (rotate/resize)    drag joint    M+click contact    F flip"),
+        ("Move",     "drag root joint = move player    arrows nudge (Shift faster)    Home recenter"),
+        ("Vault",    "drag the brown block to reposition the obstacle (Vault clips only)"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
         ("File",     "Ctrl-S save  (writes clips + rig)"),
@@ -1018,7 +1063,7 @@ public sealed class DemoGame : Game
     private void SamplePose(float t)
     {
         if (Doc == null) { _pose.SetToDefault(); return; }
-        // C1 Catmull-Rom - the SAME spline the runtime plays (AnimationSampler.SampleSmooth),
+        // C1 Catmull-Rom — the SAME spline the runtime plays (AnimationSampler.SampleSmooth),
         // closing the WYSIWYG gap: scrubbed in-betweens now match what ships. Keyframes are
         // exact on the spline, so keyframe editing is unaffected.
         AnimationSampler.SampleSmooth(Doc, t, _kfA, _kfB, _kfC, _kfD, _pose);

@@ -48,6 +48,20 @@ public sealed class SkeletonPose
         _worldValid = false;
     }
 
+    // ---- recorder capture (render-only) --------------------------------------
+    // Value-copy of just the local bone transforms — enough to redraw this exact pose
+    // later (ComputeWorld re-derives world from a root). Used by the in-game animation
+    // recorder to store the composed pose per frame for stable back-and-forth scrubbing.
+    public BoneTransform[] CloneLocal() => (BoneTransform[])Local.Clone();
+
+    // Overwrite the local transforms from a CloneLocal() capture and invalidate world.
+    public void LoadLocal(BoneTransform[] src)
+    {
+        if (src.Length != Count) throw new ArgumentException("Pose bone count mismatch.");
+        Array.Copy(src, Local, Count);
+        _worldValid = false;
+    }
+
     public void SetLocal(int bone, in BoneTransform t)
     {
         Local[bone] = t;
