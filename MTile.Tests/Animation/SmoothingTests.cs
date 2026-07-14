@@ -50,7 +50,7 @@ public class SmoothingTests
         float prevGap = MathF.Abs(anim.Pose.Local[leg].Rotation - target);
         for (int i = 0; i < 8; i++)
         {
-            anim.Update(new CharacterAnimSample(Vector2.Zero, Vector2.Zero, +1, true, "CrouchedState", "", Dt));
+            anim.Update(new CharacterAnimSample(Vector2.Zero, Vector2.Zero, +1, true, "CrouchedState", "", Dt, tag: AnimTag.Crouch));
             float gap = MathF.Abs(anim.Pose.Local[leg].Rotation - target);
             float ratio = gap / MathF.Max(prevGap, 1e-6f);
             _o.WriteLine($"f{i}: gap={gap:0.0000} ratio={ratio:0.0000} (expected {expectedRatio:0.0000})");

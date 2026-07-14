@@ -107,7 +107,7 @@ static class Probe
         if (action != null && overlay == null)
             Console.WriteLine($"# (no clip with Type='{action}' — overlay inactive)");
 
-        var (vel, grounded, move) = BaseSample(baseSel);
+        var (vel, grounded, moveTag) = BaseSample(baseSel);
         var pos = Vector2.Zero;
         const float dt = 1f / 30f;
         int frames = 30;
@@ -118,9 +118,9 @@ static class Probe
             float t = f * dt;
             var s = new CharacterAnimSample(
                 position: pos, velocity: vel, facing: 1, grounded: grounded,
-                movementState: move, action: actType ?? "None", dt: dt,
+                movementState: moveTag.ToString(), action: actType ?? "None", dt: dt,
                 actionTime: t, actionDuration: actType != null ? actDur : 0f,
-                movementProgress: MathHelper.Clamp(t / 0.6f, 0f, 1f));
+                movementProgress: MathHelper.Clamp(t / 0.6f, 0f, 1f), tag: moveTag);
             anim.Update(s);
             pos += vel * dt;
             if (f == 0 || f == frames / 2 || f == frames)
@@ -171,16 +171,16 @@ static class Probe
     }
 
     // base selector → a sample that makes SelectClip pick that locomotion clip.
-    static (Vector2 vel, bool grounded, string move) BaseSample(string sel) => sel.ToLowerInvariant() switch
+    static (Vector2 vel, bool grounded, AnimTag tag) BaseSample(string sel) => sel.ToLowerInvariant() switch
     {
-        "walk"     => (new Vector2(20f, 0f), true,  null),
-        "run"      => (new Vector2(60f, 0f), true,  null),
-        "walkback" => (new Vector2(-20f, 0f), true, null),     // moving against facing=+1
-        "jump"     => (new Vector2(0f, -120f), false, null),
-        "fall"     => (new Vector2(0f, 120f), false, null),
-        "crouch"   => (Vector2.Zero, true, "CrouchState"),
-        "vault"    => (new Vector2(40f, -40f), false, "ParkourState"),
-        _          => (Vector2.Zero, true, null),               // idle
+        "walk"     => (new Vector2(20f, 0f), true,  AnimTag.None),
+        "run"      => (new Vector2(60f, 0f), true,  AnimTag.None),
+        "walkback" => (new Vector2(-20f, 0f), true, AnimTag.None),   // moving against facing=+1
+        "jump"     => (new Vector2(0f, -120f), false, AnimTag.None),
+        "fall"     => (new Vector2(0f, 120f), false, AnimTag.None),
+        "crouch"   => (Vector2.Zero, true, AnimTag.Crouch),
+        "vault"    => (new Vector2(40f, -40f), false, AnimTag.Parkour),
+        _          => (Vector2.Zero, true, AnimTag.None),            // idle
     };
 
     // --- a compact live-pose digest (mirrors MotionProbe's per-pose block) ---

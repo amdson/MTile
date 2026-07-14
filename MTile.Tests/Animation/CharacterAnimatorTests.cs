@@ -180,7 +180,7 @@ public class CharacterAnimatorTests
                 velocity: new Vector2(0f, vy),
                 facing: +1,
                 grounded: false,
-                movementState: "LedgeGrabState",
+                movementState: "LedgeGrabState", tag: AnimTag.LedgeGrab,
                 action: "",
                 dt: dt));
             clips.Add(anim.State.Clip);
@@ -217,7 +217,7 @@ public class CharacterAnimatorTests
                 velocity: new Vector2(0f, vy),
                 facing: +1,
                 grounded: false,
-                movementState: "LedgePullState",
+                movementState: "LedgePullState", tag: AnimTag.LedgePull,
                 action: "",
                 dt: dt));
             clips.Add(anim.State.Clip);

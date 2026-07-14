@@ -43,6 +43,12 @@ public abstract class MovementState
     // states (Falling, Stunned, jumps without a source cache).
     public virtual void ResetTransient() { }
 
+    // The animation-facing CATEGORY of this state (AnimTag.None = generic: the animator picks
+    // by grounded/velocity). Replaces substring matching on state class names, which silently
+    // broke on renames and false-matched future states. Same render-only contract as the
+    // virtuals below: the sim never reads it.
+    public virtual AnimTag AnimationTag => AnimTag.None;
+
     // Normalized progress [0,1] of a guided maneuver, exposed to the animation layer for
     // overlays whose clip time is driven by SPATIAL progress rather than a clock — a vault
     // advances by body position vs. the ledge corner, not elapsed time, so its hand overlay
@@ -320,6 +326,7 @@ public class StandingState : MovementState
 
 public class CrouchedState : MovementState
 {
+    public override AnimTag AnimationTag => AnimTag.Crouch;
     public override int ActivePriority => MovementPriorities.CrouchedActive;
     public override int PassivePriority => MovementPriorities.CrouchedPassive;
 

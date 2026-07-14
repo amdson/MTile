@@ -28,6 +28,15 @@ public readonly struct SolverSurface
     public SolverSurface(Vector2 point, Vector2 normal, float margin) { Point = point; Normal = normal; Margin = margin; }
 }
 
+// The movement-state categories the animation layer keys behavior on — clip selection,
+// movement overlays, grip-pin gating, the wall-slide no-pen surface. A MovementState
+// declares its tag via the AnimationTag virtual (default None = "nothing special: pick by
+// grounded/velocity"). This replaces substring matching on state CLASS NAMES, which was
+// fragile to renames and to future states whose names happen to contain a match (e.g. a
+// ParkourRoll would have read as a vault). Add a value here + an override when a new state
+// needs distinct animation policy.
+public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull }
+
 // A read-only snapshot of everything the animation layer is allowed to look at,
 // gathered once per render frame. This is the *one-way* boundary between the sim
 // and animation: the animator reads this; movement/action code never produces it
@@ -39,7 +48,10 @@ public readonly struct CharacterAnimSample
     public readonly Vector2 Velocity;       // body velocity (px/s)
     public readonly int     Facing;         // -1 / +1
     public readonly bool    Grounded;
-    public readonly string  MovementState;  // PlayerCharacter.CurrentStateName
+    public readonly string  MovementState;  // PlayerCharacter.CurrentStateName — DEBUG/display only
+    // The state's animation category (MovementState.AnimationTag) — what the animator actually
+    // keys on (clip selection, overlays, grip pins, the wall surface). Never string-matched.
+    public readonly AnimTag Tag;
     public readonly string  Action;         // PlayerCharacter.CurrentActionName
     public readonly float   Dt;             // render delta time (NOT the sim fixed dt)
     // Seconds since the current action entered (ActionVars.TimeInState). Deterministic
@@ -79,14 +91,19 @@ public readonly struct CharacterAnimSample
         string movementState, string action, float dt, float actionTime = 0f,
         float actionDuration = 0f, float movementProgress = 0f, ExternalPin[] pins = null,
         SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default,
-        bool hasAim = false, Vector2 aimDir = default)
+        bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
         ActionDuration = actionDuration; MovementProgress = movementProgress; Pins = pins;
         Surfaces = surfaces; HasGrip = hasGrip; GripTarget = gripTarget;
-        HasAim = hasAim; AimDir = aimDir;
+        HasAim = hasAim; AimDir = aimDir; Tag = tag;
     }
+
+    // Scratch for the wall-slide half-plane, reused every frame instead of allocating a
+    // fresh array (render-only + single-threaded: samples are built and consumed one
+    // character at a time within the same Update, so reuse is safe).
+    private static readonly SolverSurface[] _wallSurfaceScratch = new SolverSurface[1];
 
     // Pull the sample from a live character through its public surface only. The
     // direction of the dependency is animation -> character, never the reverse.
@@ -94,7 +111,7 @@ public readonly struct CharacterAnimSample
     {
         var pos = p.Body.Position;
         int facing = p.Facing;
-        string state = p.CurrentStateName;
+        AnimTag tag = p.CurrentState?.AnimationTag ?? AnimTag.None;
 
         // While wall-sliding the rig faces the wall (+X = the wall direction). The wall the
         // slide resolved sits at the body's leading edge; its outward normal points back into
@@ -102,11 +119,12 @@ public readonly struct CharacterAnimSample
         // public, so this is a render-only read — §11.5) so the trailing limbs don't clip into
         // the wall. The braced grip hand/foot rest ON the surface (gap ≈ 0, just inside Margin).
         SolverSurface[] surfaces = null;
-        if (state != null && state.Contains("WallSlid") && facing != 0)
+        if (tag == AnimTag.WallSlide && facing != 0)
         {
             var wallPoint  = new Vector2(pos.X + facing * PlayerCharacter.Radius, pos.Y);
             var wallNormal = new Vector2(-facing, 0f);
-            surfaces = new[] { new SolverSurface(wallPoint, wallNormal, 1.5f) };
+            _wallSurfaceScratch[0] = new SolverSurface(wallPoint, wallNormal, 1.5f);
+            surfaces = _wallSurfaceScratch;
         }
 
         // A guided maneuver may expose a grip target (the vault ledge corner) — geometry only;
@@ -120,11 +138,11 @@ public readonly struct CharacterAnimSample
         if (p.CurrentAction != null) hasAim = p.CurrentAction.TryAnimationAim(p.CurrentActionVars, out aimDir);
 
         return new(pos, p.Body.Velocity, facing, p.IsGrounded,
-               state, p.CurrentActionName, dt,
+               p.CurrentStateName, p.CurrentActionName, dt,
                p.CurrentActionVars.TimeInState,
                p.CurrentAction?.OverlayDuration ?? 0f,
                p.CurrentState?.AnimationProgress ?? 0f,
                surfaces: surfaces, hasGrip: hasGrip, gripTarget: gripTarget,
-               hasAim: hasAim, aimDir: aimDir);
+               hasAim: hasAim, aimDir: aimDir, tag: tag);
     }
 }

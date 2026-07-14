@@ -213,6 +213,8 @@ public class RunningJumpState : MovementState
 
 public class WallSlidingState : MovementState
 {
+    public override AnimTag AnimationTag => AnimTag.WallSlide;
+
     private readonly int _wallDir;
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _ground;
@@ -667,6 +669,8 @@ public class CoveredJumpState : MovementState
 // from-rest entry). Phase: one-block obstacles. See STEERING_RAMP_IMPL.md / STEERING_RAMPS.md.
 public class ParkourState : MovementState
 {
+    public override AnimTag AnimationTag => AnimTag.Parkour;
+
     // Caps the along-ramp speed target at entrySpeed / MinClimbCos (≈ 4×) on near-vertical sections,
     // so a steep climb happens fast instead of stalling the body's forward progress for several frames.
     private const float MinClimbCos = 0.25f;
@@ -830,6 +834,8 @@ public class ParkourState : MovementState
 // or pulls up (Up just pressed → transitions to LedgePullState).
 public class LedgeGrabState : MovementState
 {
+    public override AnimTag AnimationTag => AnimTag.LedgeGrab;
+
     private readonly int _wallDir;
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _floor;
@@ -1007,6 +1013,8 @@ public class LedgeGrabState : MovementState
 // Releasing Up during the pull interrupts it.
 public class LedgePullState : MovementState
 {
+    public override AnimTag AnimationTag => AnimTag.LedgePull;
+
     private readonly int _wallDir;
     private PointForceContact _spring;
     private FloatingSurfaceDistance _ramp;

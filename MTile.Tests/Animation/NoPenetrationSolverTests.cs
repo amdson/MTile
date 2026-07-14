@@ -32,7 +32,7 @@ public class NoPenetrationSolverTests
 
         // Warm up the wall-slide pose with NO surface so it settles (eased pose → target).
         for (int i = 0; i < 20; i++)
-            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "WallSlidingState", "", dt));
+            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "WallSlidingState", "", dt, tag: AnimTag.WallSlide));
 
         // Reconstruct the animator's internal solve root (Position + com baseline) to read where
         // the hand naturally sits, then place the wall plane 1.5px INTO the solid past it so the
@@ -49,7 +49,7 @@ public class NoPenetrationSolverTests
         float maxArm = 0f, maxJacErr = 0f, lastSolvedHandX = natHandX; int solves = 0;
         for (int i = 0; i < 30; i++)
         {
-            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "WallSlidingState", "", dt,
+            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "WallSlidingState", "", dt, tag: AnimTag.WallSlide,
                 surfaces: new[] { surf }));
             string rep = anim.SolveScaleReport();
             if (rep == "(no solve)") continue;

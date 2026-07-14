@@ -37,7 +37,7 @@ public sealed class DemoGame : Game
     private Skeleton     _baseSkeleton;
     private Skeleton     _skeleton;
     private SkeletonPose _pose;          // rendered / working pose
-    private SkeletonPose _kfA, _kfB;     // scratch for interpolation
+    private SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
     private Affine2      _root;
     private float        _floorLocalY;   // bind-pose sole height (skeleton-local), the floor line
 
@@ -132,6 +132,8 @@ public sealed class DemoGame : Game
         _pose = _skeleton.CreatePose();
         _kfA  = _skeleton.CreatePose();
         _kfB  = _skeleton.CreatePose();
+        _kfC  = _skeleton.CreatePose();
+        _kfD  = _skeleton.CreatePose();
 
         // Floor line = the bind-pose sole (lowest joint/tip), so authored feet have a
         // ground reference to plant against. Matches CharacterAnimator's sole logic.
@@ -762,6 +764,8 @@ public sealed class DemoGame : Game
         _pose = _skeleton.CreatePose();
         _kfA  = _skeleton.CreatePose();
         _kfB  = _skeleton.CreatePose();
+        _kfC  = _skeleton.CreatePose();
+        _kfD  = _skeleton.CreatePose();
         if (Doc != null && _activeKey >= 0) PoseData.Apply(Doc.Keyframes[_activeKey].Bones, _pose);
         else SamplePose(_scrubT);
         RecomputeFloorLine();
@@ -1014,7 +1018,10 @@ public sealed class DemoGame : Game
     private void SamplePose(float t)
     {
         if (Doc == null) { _pose.SetToDefault(); return; }
-        AnimationSampler.SampleNormalized(Doc, t, _kfA, _kfB, _pose);
+        // C1 Catmull-Rom - the SAME spline the runtime plays (AnimationSampler.SampleSmooth),
+        // closing the WYSIWYG gap: scrubbed in-betweens now match what ships. Keyframes are
+        // exact on the spline, so keyframe editing is unaffected.
+        AnimationSampler.SampleSmooth(Doc, t, _kfA, _kfB, _kfC, _kfD, _pose);
     }
 
     // Turn the current (possibly interpolated) pose into a new editable keyframe,

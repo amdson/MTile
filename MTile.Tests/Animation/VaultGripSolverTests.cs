@@ -36,7 +36,7 @@ public class VaultGripSolverTests
         // it, so the required correction is small and steady — a clean read of whether the pin
         // reaches an overlay-owned bone at all.
         for (int i = 0; i < 24; i++)
-            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ParkourState", "", dt,
+            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ParkourState", "", dt, tag: AnimTag.Parkour,
                 movementProgress: progress));
 
         anim.TryComReference(out var comL);
@@ -48,7 +48,7 @@ public class VaultGripSolverTests
         float maxReach = 0f, maxArm = 0f, maxChest = 0f, maxJacErr = 0f, maxRendered = 0f; int solves = 0;
         for (int i = 0; i < 24; i++)
         {
-            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ParkourState", "", dt,
+            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ParkourState", "", dt, tag: AnimTag.Parkour,
                 movementProgress: progress, hasGrip: true, gripTarget: corner));
             string rep = anim.SolveScaleReport();
             if (rep == "(no solve)") continue;
