@@ -129,6 +129,9 @@ public readonly struct CharacterAnimSample
 
     // Pull the sample from a live character through its public surface only. The
     // direction of the dependency is animation -> character, never the reverse.
+    // Signals that need WORLD state (terrain surfaces, ceiling queries) are passed IN by
+    // the host (`surfaceBuf`, `chunks`) — PlayerCharacter doesn't store the world, and
+    // the sample must stay buildable without one (recorder/tests pass null).
     // `surfaceBuf`/`surfaceCount`: optional caller-owned scratch pre-filled with terrain
     // half-planes (TerrainSurfaces.Extract); the wall-slide plane is appended into the
     // same buffer's spare capacity so the sample carries one combined list.
