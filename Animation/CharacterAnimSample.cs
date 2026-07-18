@@ -40,7 +40,7 @@ public readonly struct SolverSurface
 // fragile to renames and to future states whose names happen to contain a match (e.g. a
 // ParkourRoll would have read as a vault). Add a value here + an override when a new state
 // needs distinct animation policy.
-public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble }
+public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump }
 
 // A read-only snapshot of everything the animation layer is allowed to look at,
 // gathered once per render frame. This is the *one-way* boundary between the sim

@@ -1,0 +1,76 @@
+{
+  "Name": "runturn",
+  "Type": "RunTurn",
+  "Skeleton": "biped",
+  "Duration": 0.25,
+  "Loop": true,
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.5707964
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.120000005
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -2.5055788
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -1.8880184
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 2.9848826
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.3443391
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 0.6207963
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.7258177
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.5707964
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.6999999
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.4758177
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -17.9,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    }
+  ]
+}

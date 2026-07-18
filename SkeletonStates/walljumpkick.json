@@ -1,0 +1,76 @@
+{
+  "Name": "walljumpkick",
+  "Type": "WallJumpKick",
+  "Skeleton": "biped",
+  "Duration": 0.35,
+  "Loop": true,
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.45
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 3.3
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0.1
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 2.95
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -0.1
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1.05
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0.85
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.3258
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.5
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.4
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.3258
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -13.066881,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    }
+  ]
+}

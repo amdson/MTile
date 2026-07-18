@@ -10,7 +10,7 @@ namespace MTile;
 // (forward stride vs backpedal). Run is forward locomotion above a speed threshold
 // (a longer-stride clip — same cadence machinery). Air is split into Jump (rising)
 // and Fall. Vault covers the guided ParkourState traversal.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun, Tumble }
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun, Tumble, WallJumpKick, DoubleJumpFlip, RunTurn }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -795,13 +795,22 @@ public sealed partial class CharacterAnimator
         // air branch at all), Tumble's condition is a STRICT SUBSET of `!s.Grounded`, so
         // ordering here is load-bearing, not just documentation.
         if (s.Tag == AnimTag.Tumble) return AnimClip.Tumble;
+        // Wall-jump kickoff / double-jump flip: like Tumble, both states are strictly
+        // airborne, so these must precede the generic !Grounded return to be reachable.
+        // Each state is brief; when it hands off, the generic Jump/Fall resumes.
+        if (s.Tag == AnimTag.WallJump) return AnimClip.WallJumpKick;
+        if (s.Tag == AnimTag.DoubleJump) return AnimClip.DoubleJumpFlip;
         if (!s.Grounded) return s.Velocity.Y < 0f ? AnimClip.Jump : AnimClip.Fall;
         float speed = MathF.Abs(s.Velocity.X);
         if (speed > WalkSpeedThreshold)
         {
-            // Moving against facing = backpedal; with facing = forward, escalating to
-            // Run past the run threshold.
-            if (Math.Sign(s.Velocity.X) != s.Facing) return AnimClip.WalkBack;
+            // Moving against facing = backpedal at walk speeds, but ABOVE run speed it's a
+            // direction-reversal skid (facing mirrors instantly on input; momentum still
+            // carries the old way): play the RunTurn one-shot until velocity crosses zero
+            // (→ Idle band) or realigns with facing (→ Run). Below run speed it's a
+            // deliberate backpedal, which keeps WalkBack.
+            if (Math.Sign(s.Velocity.X) != s.Facing)
+                return speed > RunSpeedThreshold ? AnimClip.RunTurn : AnimClip.WalkBack;
             return speed > RunSpeedThreshold ? AnimClip.Run : AnimClip.Walk;
         }
         return AnimClip.Idle;
