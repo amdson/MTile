@@ -338,6 +338,7 @@ public class WallJumpingState : MovementState
     public override int ActivePriority => MovementPriorities.WallJumpActive;
     public override int PassivePriority => MovementPriorities.WallJumpPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
+    public override AnimTag AnimationTag => AnimTag.WallJump;
 
     // Read by LedgePullState.Suppresses to decide whether a mid-pull wall jump is an
     // away-press bail-out (allowed) or an inward press (suppressed → queues for LedgeJump).
@@ -411,6 +412,7 @@ public class DoubleJumpingState : MovementState
     public override int ActivePriority => MovementPriorities.DoubleJumpActive;
     public override int PassivePriority => MovementPriorities.DoubleJumpPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
+    public override AnimTag AnimationTag => AnimTag.DoubleJump;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
