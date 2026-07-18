@@ -53,15 +53,18 @@ gcloud compute ssh mtile-dev
 
 ```bash
 mkdir -p ~/.ssh && mv ~/mtile_deploy ~/.ssh/mtile_deploy && chmod 600 ~/.ssh/mtile_deploy
-curl -fsSL https://raw.githubusercontent.com/amdson/MTile/main/scripts/vm-bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/amdson/MTile/main/scripts/vm-bootstrap.sh | sudo bash
 ```
+
+(`sudo` is required in the piped form — a piped script can't re-exec itself.
+`bash ~/vm-bootstrap.sh` from a file works without it.)
 
 If the instance already has a private key whose pub side is registered with
 GitHub (e.g. `~/.ssh/id_rsa`), point the script at it instead of copying one:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/amdson/MTile/main/scripts/vm-bootstrap.sh \
-  | DEPLOY_KEY_PATH=$HOME/.ssh/id_rsa bash
+  | sudo DEPLOY_KEY_PATH=$HOME/.ssh/id_rsa bash
 ```
 
 The script sudo-elevates itself, installs the .NET 8 SDK, wires the deploy key
@@ -116,7 +119,7 @@ file copy). The web console + plain `ssh`/`scp` replace all three:
    ```bash
    ssh-keygen -t ed25519 -f ~/.ssh/mtile_deploy -N "" -C "mtile-gcp-vm"
    cat ~/.ssh/mtile_deploy.pub   # → GitHub repo Settings → Deploy keys (read-only)
-   curl -fsSL https://raw.githubusercontent.com/amdson/MTile/main/scripts/vm-bootstrap.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/amdson/MTile/main/scripts/vm-bootstrap.sh | sudo bash
    ```
 
 Zero-local-tooling variant: the **SSH** button next to the instance in the

@@ -45,8 +45,12 @@ DEPLOY_KEY_B64="${DEPLOY_KEY_B64:-}"
 log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
-# Re-exec under sudo if we aren't root (package installs need it).
+# Re-exec under sudo if we aren't root (package installs need it). Only
+# possible when running from a real file — under `curl | bash` $0 is the bash
+# binary itself, so there's nothing to re-exec; ask for `curl | sudo bash`.
 if [[ "$(id -u)" -ne 0 ]]; then
+  [[ -f "$0" && "$0" != /usr/bin/bash && "$0" != /bin/bash ]] \
+    || die "not root and running from a pipe — use: curl -fsSL <url> | sudo bash"
   exec sudo -E bash "$0" "$@"
 fi
 
