@@ -1,6 +1,8 @@
 .vscode
 .config
-.claude
+# Claude Code: share skills with the repo, keep local settings/worktrees out
+.claude/*
+!.claude/skills/
 
 /reference_art
 # Build output — every project's bin/obj, plus Content's intermediate obj/
