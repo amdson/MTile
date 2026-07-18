@@ -51,12 +51,18 @@
     <None Include="..\Skeletons\**\*" Link="Skeletons\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Sprite skins: PNG + binding json (authored via the MTile.Demo bind mode).
+         Optional: SpriteSkin.TryLoad no-ops when absent. -->
+    <None Include="..\SpriteBindings\**\*" Link="SpriteBindings\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <!-- Content pipeline lives with the executable so .xnb output lands next to
          the binary. The shared .mgcb at the repo root is referenced via a link. -->
     <MonoGameContentReference Include="..\Content\Content.mgcb" Link="Content\Content.mgcb" />
-    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.*" />
+    <!-- Pinned to match the mgcb tool in .config/dotnet-tools.json — see MTile.Core.csproj. -->
+    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.4.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\MTile.Core.csproj" />

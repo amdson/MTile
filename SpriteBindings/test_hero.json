@@ -1,0 +1,32 @@
+{
+  "Skeleton": "biped",
+  "Image": "test_hero.png",
+  "ImageToRigScale": 0.1,
+  "ImageToRigTx": -12.1,
+  "ImageToRigTy": -26.5,
+  "MeshStep": 10,
+  "AlphaThreshold": 8,
+  "Mask": "test_hero_mask.png",
+  "Layers": [
+    { "Name": "arm_l", "Color": "#FF0000", "Bones": ["arm_l_*"] },
+    { "Name": "arm_r", "Color": "#0000FF", "Bones": ["arm_r_*"] },
+    { "Name": "leg_l", "Color": "#00FF00", "Bones": ["leg_l_*", "foot_l"] },
+    { "Name": "leg_r", "Color": "#FFFF00", "Bones": ["leg_r_*", "foot_r"] },
+    { "Name": "body",  "Bones": ["hip", "chest", "head"] }
+  ],
+  "BindPose": [
+    { "Bone": "hip",         "Rotation": 0.0,        "Length": 0.0 },
+    { "Bone": "chest",       "Rotation": -1.5707964, "Length": 14.0 },
+    { "Bone": "head",        "Rotation": 0.0,        "Length": 6.5 },
+    { "Bone": "arm_l_upper", "Rotation": -2.5702,    "Length": 8.32 },
+    { "Bone": "arm_l_lower", "Rotation": -0.5712,    "Length": 5.5 },
+    { "Bone": "arm_r_upper", "Rotation": 2.5702,     "Length": 8.32 },
+    { "Bone": "arm_r_lower", "Rotation": 0.5712,     "Length": 5.5 },
+    { "Bone": "leg_l_upper", "Rotation": 1.7681,     "Length": 7.14 },
+    { "Bone": "leg_l_lower", "Rotation": -0.1973,    "Length": 6.5 },
+    { "Bone": "foot_l",      "Rotation": -0.5880,    "Length": 1.8 },
+    { "Bone": "leg_r_upper", "Rotation": 1.3734,     "Length": 7.14 },
+    { "Bone": "leg_r_lower", "Rotation": 0.1973,     "Length": 6.5 },
+    { "Bone": "foot_r",      "Rotation": -0.5880,    "Length": 1.8 }
+  ]
+}

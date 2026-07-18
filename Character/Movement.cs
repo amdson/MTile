@@ -84,6 +84,10 @@ public class StunnedState : MovementState
     public override int ActivePriority  => MovementPriorities.StunnedActive;
     public override int PassivePriority => MovementPriorities.StunnedPassive;
 
+    // Recoil flinch, not the generic ground clips: without this the muted-control window
+    // is invisible (a stunned body sliding under knockback reads as a walk cycle).
+    public override AnimTag AnimationTag => AnimTag.Stunned;
+
     // Grounded-only since Phase 4: an airborne heavy hit goes to TumbleState (launch
     // band) instead, so a launched body can't be rescued by terrain. A grounded
     // stun (horizontal hit, body stays on the floor) still lands here. When a

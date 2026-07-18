@@ -22,16 +22,23 @@ public class Camera
     {
         float halfW = screenCenter.X / Zoom;
         float halfH = screenCenter.Y / Zoom;
+        // Buffer is world-units, but the visible half-extents shrink with zoom; cap the
+        // margin so the dead zone can't invert (halfExtent < Buffer would pin the camera
+        // OFF-center — vertically it parked above the player at high zoom, horizontally
+        // it jittered between the two crossed clamps). At the cap the zone is a point:
+        // the camera locks to the target, the right behavior for a tight zoom.
+        float bufX = MathF.Min(Buffer, halfW);
+        float bufY = MathF.Min(Buffer, halfH);
 
-        if (target.X < Position.X - halfW + Buffer)
-            Position.X = target.X + halfW - Buffer;
-        else if (target.X > Position.X + halfW - Buffer)
-            Position.X = target.X - halfW + Buffer;
+        if (target.X < Position.X - halfW + bufX)
+            Position.X = target.X + halfW - bufX;
+        else if (target.X > Position.X + halfW - bufX)
+            Position.X = target.X - halfW + bufX;
 
-        if (target.Y < Position.Y - halfH + Buffer)
-            Position.Y = target.Y + halfH - Buffer;
-        else if (target.Y > Position.Y + halfH - Buffer)
-            Position.Y = target.Y - halfH + Buffer;
+        if (target.Y < Position.Y - halfH + bufY)
+            Position.Y = target.Y + halfH - bufY;
+        else if (target.Y > Position.Y + halfH - bufY)
+            Position.Y = target.Y - halfH + bufY;
 
         if (dt > 0f && VerticalRelaxRate > 0f)
         {

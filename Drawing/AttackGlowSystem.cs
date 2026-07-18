@@ -127,19 +127,24 @@ public sealed class AttackGlowSystem
     // leaves the ground). Clips that don't author a COM fall back to the legacy rule:
     // drop the rig until the current pose's lowest point rests on the ground line.
     public static Vector2 RigRoot(PlayerCharacter player, CharacterAnimator anim, float scale)
+        => RigRoot(player.Body.Position, player.Facing, anim, scale);
+
+    // Overload for hosts without a live PlayerCharacter (the offline take viewer replays
+    // recorded samples): same anchoring math from just the body position + facing.
+    public static Vector2 RigRoot(Vector2 bodyPos, int facing, CharacterAnimator anim, float scale)
     {
-        int dir = player.Facing == 0 ? 1 : player.Facing;
+        int dir = facing == 0 ? 1 : facing;
         if (anim.TryComReference(out var com))
             // The com anchor is the baseline; the solver adds its solved root offset on top —
             // VerticalOffset δ (the body's bob that keeps the planted foot grounded during
             // stance, back to baseline in flight) and HorizontalOffset d.x (the slight fore-aft
             // sway that absorbs no-slip at a planted foot's horizontal turning point). Both are
             // 0 on frames with no solve.
-            return new Vector2(player.Body.Position.X - dir * com.X * scale + anim.HorizontalOffset,
-                               player.Body.Position.Y -       com.Y * scale + anim.VerticalOffset);
+            return new Vector2(bodyPos.X - dir * com.X * scale + anim.HorizontalOffset,
+                               bodyPos.Y -       com.Y * scale + anim.VerticalOffset);
 
-        float groundY = player.Body.Position.Y + 2f * PlayerCharacter.Radius;
-        return new Vector2(player.Body.Position.X, groundY - anim.CurrentSoleY() * scale);
+        float groundY = bodyPos.Y + 2f * PlayerCharacter.Radius;
+        return new Vector2(bodyPos.X, groundY - anim.CurrentSoleY() * scale);
     }
 
     // The glow color for an attack: per-action (slash hue, stab gold/purple by stance).

@@ -1,3 +1,5 @@
+using Microsoft.Xna.Framework;
+
 namespace MTile;
 
 // Common surface for anything that can receive damage — player, future enemies,
@@ -9,7 +11,12 @@ public interface IHittable
 {
     Faction Faction { get; }
     void PublishHurtboxes(HurtboxWorld world);
-    void OnHit(in Hitbox hit, in Hurtbox myHurtbox);
+    // Returns the impulse actually delivered to this target (HitResult.Impulse) —
+    // CombatSystem negates and scales it into the attacker's recoil inbox, so
+    // Newton's third law reflects what really happened, not the authored number.
+    // Implementations that ignore knockback (deflects, parries) should still
+    // return hit.KnockbackImpulse so impulse-mode recoil behaves as before.
+    Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox);
 
     // Stable value identity. The combat dedupe table (HitId → set of already-hit
     // targets) keys on this, and it's what snapshots record so the table survives a

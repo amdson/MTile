@@ -46,10 +46,72 @@ public class CharacterAnimatorTests
         Assert.True(RunRealClip(skel, run, -1, 90f) > 0.5f, "run froze walking left");
     }
 
+    // The authored SkeletonStates/crouchwalk.json: a crouched sample moving in the
+    // crouch-walk band (12 < v < CrouchMaxWalkSpeed 50) must select CrouchWalk and
+    // advance the cadence both ways, like Walk/Run.
+    [Fact]
+    public void RealCrouchWalkJson_AdvancesPhase_BothDirections()
+    {
+        string dir = FindStatesDir();
+        var cw = AnimationStore.LoadAll(dir).Find(d => d.Name == "crouchwalk");
+        Assert.True(cw != null, $"crouchwalk.json not found under {dir}");
+
+        var skel = SkeletonExamples.Biped();
+        Assert.True(RunRealClip(skel, cw, +1, 30f, AnimTag.Crouch) > 0.15f, "crouch-walk froze moving right");
+        Assert.True(RunRealClip(skel, cw, -1, 30f, AnimTag.Crouch) > 0.15f, "crouch-walk froze moving left");
+    }
+
+    // AnimTag.LedgeGrab must resolve to the authored hang.json. Before it existed the tag
+    // fell through to AnimClip.Fall (an explicit placeholder in SelectClip), so this pins
+    // the wiring: tag -> Hang -> a clip that is actually bound. An unbound AnimClip throws
+    // in SampleClip, so reaching the assert at all is most of the test.
+    [Fact]
+    public void LedgeGrabTag_SelectsAuthoredHangClip()
+    {
+        var anim = RealAnimator();
+        // Vy oscillates as the hang spring rings down — the pre-Hang failure mode was the
+        // generic `Vy < 0 ? Jump : Fall` flipping the clip every frame. Hang must be stable
+        // across the sign change.
+        for (int i = 0; i < 8; i++)
+        {
+            float vy = (i % 2 == 0) ? -30f : 20f;
+            anim.Update(new CharacterAnimSample(
+                Vector2.Zero, new Vector2(0f, vy), 1, false, "LedgeGrabState", "", 1f / 60f,
+                tag: AnimTag.LedgeGrab));
+            Assert.Equal(AnimClip.Hang, anim.State.Clip);
+        }
+    }
+
+    // AnimTag.Stunned must resolve to the authored hitstun.json, and must WIN over the
+    // grounded speed checks: knockback leaves the body sliding in the walk band while
+    // stunned, which would otherwise pick Walk/WalkBack and hide the flinch entirely.
+    [Fact]
+    public void StunnedTag_SelectsHitstunClip_EvenWhileSlidingAtWalkSpeed()
+    {
+        var anim = RealAnimator();
+        foreach (float vx in new[] { 0f, 25f, -25f })
+        {
+            anim.Update(new CharacterAnimSample(
+                Vector2.Zero, new Vector2(vx, 0f), 1, true, "StunnedState", "", 1f / 60f,
+                tag: AnimTag.Stunned));
+            Assert.Equal(AnimClip.Hitstun, anim.State.Clip);
+        }
+    }
+
+    // An animator bound to every authored clip, as the game builds it.
+    private static CharacterAnimator RealAnimator()
+    {
+        string dir = FindStatesDir();
+        var clips = AnimationStore.LoadAll(dir);
+        Assert.NotEmpty(clips);
+        return new CharacterAnimator(SkeletonExamples.Biped(), 0.6f, clips);
+    }
+
     // Simulate moving in `facing` direction at `speed` px/s for 40 frames; return the
     // unwrapped phase total. The clip is bound by its Type, so SelectClip must resolve
     // to that clip for the speed used.
-    private static float RunRealClip(Skeleton skel, AnimationDocument clip, int facing, float speed)
+    private static float RunRealClip(Skeleton skel, AnimationDocument clip, int facing, float speed,
+                                     AnimTag tag = AnimTag.None)
     {
         var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
         float dt = 1f / 30f, vx = speed * facing, x = 0f, prev = anim.State.Phase, total = 0f;
@@ -57,7 +119,7 @@ public class CharacterAnimatorTests
         {
             x += vx * dt;
             anim.Update(new CharacterAnimSample(
-                new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState", "", dt));
+                new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState", "", dt, tag: tag));
             float p = anim.State.Phase, d = p - prev;
             if (d < -0.5f) d += 1f;
             total += d;
@@ -167,6 +229,7 @@ public class CharacterAnimatorTests
             BuildDummyClip(skel, "fall", "Fall"),
             BuildDummyClip(skel, "jump", "Jump"),
             BuildDummyClip(skel, "vault", "Vault"),
+            BuildDummyClip(skel, "hang", "Hang"),
         });
 
         // 12 frames of the trace from a real grab-settle, alternating Vy < 0 and Vy = 0.
@@ -190,8 +253,9 @@ public class CharacterAnimatorTests
         Assert.True(clips.TrueForAll(c => c == clips[0]),
             $"LedgeGrabState clip flipped during Vy ring-down: {string.Join(",", clips)}");
         // And it must not be the raw airborne Jump/Fall decision (that's the bug we
-        // just fixed). Fall is the current placeholder for "hanging on a ledge".
-        Assert.Equal(AnimClip.Fall, clips[0]);
+        // just fixed) — it's the dedicated Hang clip (Fall was the placeholder before
+        // hang.json was authored).
+        Assert.Equal(AnimClip.Hang, clips[0]);
     }
 
     // Same regression for the pull-up: LedgePull is the active pull-up after grab and

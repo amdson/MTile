@@ -18,14 +18,19 @@ public readonly struct ExternalPin
 // fills the side BEHIND `Point` (against `Normal`); the free space is where `Normal·(q − Point)`
 // is positive. The solve pushes any limb sample point that crosses it back out to `Margin` along
 // `Normal` (residual √w·max(0, Margin − Normal·(q − Point))). Supplied by the host from a surface
-// the movement layer already resolved (wall-slide wall, ground line — Plans/ANIMATION_SOLVER_PLAN
-// §11.5); NOT the full local-SDF terrain query (a later phase). Render-only, `Normal` is unit.
+// the movement layer already resolved (the wall-slide wall) or extracted from nearby exposed
+// tile faces (TerrainSurfaces). Render-only, `Normal` is unit.
 public readonly struct SolverSurface
 {
     public readonly Vector2 Point;   // a point on the surface (world)
     public readonly Vector2 Normal;  // unit outward normal — points into the free half-space
     public readonly float   Margin;  // keep limb points at least this far out along Normal (world px)
-    public SolverSurface(Vector2 point, Vector2 normal, float margin) { Point = point; Normal = normal; Margin = margin; }
+    // Which rig bones this surface constrains, as a bitmask over skeleton bone indices
+    // (bit b = bone b). -1 = all bones (the wall-slide wall). Terrain surfaces carry only
+    // the tip bones they were extracted FOR, so a plane near a hand never pushes a foot.
+    public readonly int     BoneMask;
+    public SolverSurface(Vector2 point, Vector2 normal, float margin, int boneMask = -1)
+    { Point = point; Normal = normal; Margin = margin; BoneMask = boneMask; }
 }
 
 // The movement-state categories the animation layer keys behavior on — clip selection,
@@ -35,7 +40,7 @@ public readonly struct SolverSurface
 // fragile to renames and to future states whose names happen to contain a match (e.g. a
 // ParkourRoll would have read as a vault). Add a value here + an override when a new state
 // needs distinct animation policy.
-public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull }
+public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned }
 
 // A read-only snapshot of everything the animation layer is allowed to look at,
 // gathered once per render frame. This is the *one-way* boundary between the sim
@@ -73,8 +78,17 @@ public readonly struct CharacterAnimSample
     public readonly ExternalPin[] Pins;
     // No-penetration half-planes active this frame (null/empty = none) — the solver keeps the
     // rig's limbs on the free side. Host-supplied from already-resolved surfaces (wall-slide
-    // wall, ground); only read by the solver path, so zero-cost when the solver is off.
+    // wall) and/or extracted terrain faces; only read by the solver path.
     public readonly SolverSurface[] Surfaces;
+    // Logical count of valid entries in Surfaces — the array may be a reused oversized
+    // scratch buffer. -1 (default) = use the full array length.
+    public readonly int SurfaceCount;
+    // Whether any surface is close enough to a limb tip to plausibly engage this frame.
+    // Terrain planes exist near-permanently (feet live next to the ground) but at margin 0
+    // they are inactive until something penetrates — this flag keeps the off-locomotion
+    // STATIC solve from running every idle/flight frame for provably-dormant planes.
+    // (The cadence solve carries all surfaces regardless — it runs anyway.)
+    public readonly bool SurfacesNear;
     // A world point a limb should grip during a guided maneuver (a vault's ledge corner), from
     // CurrentState.TryAnimationGrip. The animator decides WHICH bone pins to it (naming is
     // animation policy) and WHEN (gated by MovementProgress). HasGrip false ⇒ GripTarget unused.
@@ -91,13 +105,16 @@ public readonly struct CharacterAnimSample
         string movementState, string action, float dt, float actionTime = 0f,
         float actionDuration = 0f, float movementProgress = 0f, ExternalPin[] pins = null,
         SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default,
-        bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None)
+        bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None,
+        int surfaceCount = -1, bool? surfacesNear = null)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
         ActionDuration = actionDuration; MovementProgress = movementProgress; Pins = pins;
-        Surfaces = surfaces; HasGrip = hasGrip; GripTarget = gripTarget;
+        Surfaces = surfaces; SurfaceCount = surfaceCount; HasGrip = hasGrip; GripTarget = gripTarget;
         HasAim = hasAim; AimDir = aimDir; Tag = tag;
+        // Default (hand-built samples, tests): surfaces present ⇒ near — the pre-terrain behavior.
+        SurfacesNear = surfacesNear ?? (surfaces != null && (surfaceCount < 0 ? surfaces.Length : surfaceCount) > 0);
     }
 
     // Scratch for the wall-slide half-plane, reused every frame instead of allocating a
@@ -107,24 +124,36 @@ public readonly struct CharacterAnimSample
 
     // Pull the sample from a live character through its public surface only. The
     // direction of the dependency is animation -> character, never the reverse.
-    public static CharacterAnimSample From(PlayerCharacter p, float dt)
+    // `surfaceBuf`/`surfaceCount`: optional caller-owned scratch pre-filled with terrain
+    // half-planes (TerrainSurfaces.Extract); the wall-slide plane is appended into the
+    // same buffer's spare capacity so the sample carries one combined list.
+    public static CharacterAnimSample From(PlayerCharacter p, float dt,
+                                           SolverSurface[] surfaceBuf = null, int surfaceCount = 0,
+                                           bool terrainNear = false)
     {
         var pos = p.Body.Position;
         int facing = p.Facing;
         AnimTag tag = p.CurrentState?.AnimationTag ?? AnimTag.None;
+
+        SolverSurface[] surfaces = null;
+        int count = 0;
+        bool near = terrainNear;
+        if (surfaceBuf != null && surfaceCount > 0) { surfaces = surfaceBuf; count = surfaceCount; }
 
         // While wall-sliding the rig faces the wall (+X = the wall direction). The wall the
         // slide resolved sits at the body's leading edge; its outward normal points back into
         // open space. Hand it to the solver as a no-penetration half-plane (Position/Radius are
         // public, so this is a render-only read — §11.5) so the trailing limbs don't clip into
         // the wall. The braced grip hand/foot rest ON the surface (gap ≈ 0, just inside Margin).
-        SolverSurface[] surfaces = null;
+        // Applies to ALL bones (BoneMask -1), unlike per-tip terrain planes.
         if (tag == AnimTag.WallSlide && facing != 0)
         {
             var wallPoint  = new Vector2(pos.X + facing * PlayerCharacter.Radius, pos.Y);
             var wallNormal = new Vector2(-facing, 0f);
-            _wallSurfaceScratch[0] = new SolverSurface(wallPoint, wallNormal, 1.5f);
-            surfaces = _wallSurfaceScratch;
+            var wall = new SolverSurface(wallPoint, wallNormal, 1.5f);
+            if (surfaces == null) { _wallSurfaceScratch[0] = wall; surfaces = _wallSurfaceScratch; count = 1; }
+            else if (count < surfaces.Length) surfaces[count++] = wall;
+            near = true;   // the braced limbs rest on the wall — always engageable
         }
 
         // A guided maneuver may expose a grip target (the vault ledge corner) — geometry only;
@@ -142,7 +171,8 @@ public readonly struct CharacterAnimSample
                p.CurrentActionVars.TimeInState,
                p.CurrentAction?.OverlayDuration ?? 0f,
                p.CurrentState?.AnimationProgress ?? 0f,
-               surfaces: surfaces, hasGrip: hasGrip, gripTarget: gripTarget,
+               surfaces: surfaces, surfaceCount: count, surfacesNear: near,
+               hasGrip: hasGrip, gripTarget: gripTarget,
                hasAim: hasAim, aimDir: aimDir, tag: tag);
     }
 }

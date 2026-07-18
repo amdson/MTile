@@ -42,6 +42,15 @@ public sealed class GameConfig
     // The player's vector sprite (the placeholder hexagon body). Turn off to view
     // the skeleton on its own. Independent of DebugDrawBodies (the physics polygon).
     public bool DrawPlayerSprites          { get; set; } = true;
+    // MLS-deformed sprite skin over the rig. No effect until the named binding exists;
+    // independent of DebugDrawSkeleton (stick figure).
+    public bool DrawPlayerSpriteSkin       { get; set; } = true;
+    // Which binding to skin the players with: SpriteBindings/<name>.json (authored via
+    // MTile.Demo bind mode). Empty/missing name → no skin.
+    public string PlayerSpriteBinding      { get; set; } = "player";
+    // World→screen camera zoom (Camera.Zoom). >1 magnifies; the default matches the
+    // long-standing hardcoded value.
+    public float CameraZoom                { get; set; } = 1.55f;
 
     // Cosmetic: tiny particle trail under the cursor so it's easier to spot
     // against busy terrain. Set false to disable; toggle independently of debug overlays.

@@ -23,6 +23,11 @@ public sealed class CosmeticUpdateSystem
     // air→ground transition.
     private bool _wasGroundedLastFrame;
 
+    // Reused scratch for terrain no-penetration half-planes (TerrainSurfaces.Extract).
+    // Safe to share across characters: each sample is built and consumed by its
+    // animator's Update before the next extraction overwrites it.
+    private readonly SolverSurface[] _terrainScratch = new SolverSurface[8];
+
     public CosmeticUpdateSystem(CharacterAnimator animator, List<CharacterAnimator> secondaryAnimators,
                                 List<AnimationDocument> skeletonAnims, float skeletonScale,
                                 Camera camera, ParticleSystem particles, Trail cursorTrail,
@@ -41,7 +46,13 @@ public sealed class CosmeticUpdateSystem
     // Cosmetic-only systems; they read sim state but never write it. Call once per frame
     // after the sim has stepped. `localPlayer` is the camera/landing-puff target (the
     // joiner controls P2), `mouseWorldPos`/`screenCenter` come from the input pass.
-    public void Update(Simulation sim, GameConfig config, float dt,
+    // `dt` is RENDER time (drives screen-space feel: cursor ribbon, particles, camera);
+    // `simDt` is the SIM time advanced this frame (stepsRun × FixedDt; 0 when the sim
+    // didn't step, e.g. 9 of 10 frames under TimeScale 0.1) — the animators tick on it
+    // so animation and physics share one timeline. Feeding the animator render-dt while
+    // the body moves in sim steps made the cadence solver see stop-jump-stop body motion:
+    // phase stalls + MaxPhaseStep catch-up snaps under slow-mo (manual_183352 trace).
+    public void Update(Simulation sim, GameConfig config, float dt, float simDt,
                        Vector2 mouseWorldPos, Vector2 screenCenter, PlayerCharacter localPlayer)
     {
         // Cursor ribbon in world-space from the residue of the cursor's recent motion.
@@ -61,19 +72,32 @@ public sealed class CosmeticUpdateSystem
         }
 
         // Procedural skeleton: pull a read-only sample of the player and advance the
-        // animator every frame. One-way — the sim is unaware this happens. The rig is
-        // drawn only under DebugDrawSkeleton, but the pose runs always so render effects
-        // (the knife-anchored slash glow) can read animated bone positions.
-        // Scale the animator's dt too so easing/idle slow with the sim under TimeScale.
-        _animator.Update(CharacterAnimSample.From(player, dt * config.TimeScale));
-        // Secondary players (training dummy, P2) get their own animators so
-        // each rig tracks its own body, facing, and action timing.
+        // animator in LOCKSTEP WITH THE SIM — only on frames the sim stepped, by the sim
+        // time it advanced. One-way — the sim is unaware this happens. The rig is drawn
+        // only under DebugDrawSkeleton, but the pose runs always so render effects (the
+        // knife-anchored slash glow) can read animated bone positions.
         while (_secondaryAnimators.Count < sim.SecondaryPlayers.Count)
             _secondaryAnimators.Add(new CharacterAnimator(
                 SkeletonExamples.Biped(), _skeletonScale, _skeletonAnims));
-        for (int i = 0; i < sim.SecondaryPlayers.Count; i++)
-            _secondaryAnimators[i].Update(
-                CharacterAnimSample.From(sim.SecondaryPlayers[i].Player, dt * config.TimeScale));
+        if (simDt > 0f)
+        {
+            // Terrain no-penetration: extract nearby exposed tile faces around LAST frame's
+            // pose (must run before this animator's Update) and ride them into the sample.
+            int tc = TerrainSurfaces.Extract(sim.Chunks, _animator, player.Body.Position,
+                                             player.Facing, _skeletonScale, _terrainScratch,
+                                             out bool near);
+            _animator.Update(CharacterAnimSample.From(player, simDt, _terrainScratch, tc, near));
+            // Secondary players (training dummy, P2) get their own animators so
+            // each rig tracks its own body, facing, and action timing.
+            for (int i = 0; i < sim.SecondaryPlayers.Count; i++)
+            {
+                var sp = sim.SecondaryPlayers[i].Player;
+                tc = TerrainSurfaces.Extract(sim.Chunks, _secondaryAnimators[i], sp.Body.Position,
+                                             sp.Facing, _skeletonScale, _terrainScratch, out near);
+                _secondaryAnimators[i].Update(
+                    CharacterAnimSample.From(sp, simDt, _terrainScratch, tc, near));
+            }
+        }
         _attackGlow.Update(player, dt);
         foreach (var (p, _) in sim.SecondaryPlayers)
         {

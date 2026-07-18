@@ -57,7 +57,7 @@ public class BulletProjectile : Projectile
         Sprite        = Sprites.Bullet(3f);
     }
 
-    public override void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
+    public override Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
         // Player slash/stab/pulse → deflect rather than absorb. Direction comes
         // from the hitbox's KnockbackImpulse (the slash's swing vector / stab
@@ -81,11 +81,12 @@ public class BulletProjectile : Projectile
             // post-deflect overlaps as a new attack — without this, any enemy
             // the bullet had already brushed pre-deflect would be immune.
             _hitId = _hitIds.Next();
-            return;
+            return hit.KnockbackImpulse;
         }
 
         // Anything else (a tile crash, a stray friendly pulse) kills the bullet.
         Health = 0f;
+        return hit.KnockbackImpulse;
     }
 
     protected override void ProjectileUpdate(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)

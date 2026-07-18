@@ -25,3 +25,6 @@ _shot_*.png
 
 # Motion-probe inspection output (dev tool)
 .probe/
+
+# Recorded gameplay takes (Ctrl+S in the recorder; opened via MTile.Demo -- --load)
+Takes/

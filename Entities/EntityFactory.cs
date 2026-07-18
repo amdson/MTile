@@ -19,6 +19,9 @@ public static class EntityFactory
 
     public static Entity Ball(Vector2 pos) => MakeBall(pos, gravityScale: 1f, Color.SteelBlue);
 
+    // Juggling drill target — see PracticeBall (breaks on tile contact, respawns).
+    public static PracticeBall Practice(Vector2 spawn) => new(spawn);
+
     // First active NPC. Walks toward the player on the ground and commits to a
     // telegraph→lunge attack when in range. See StalkerEnemy for the AI.
     public static StalkerEnemy Stalker(Vector2 pos) => new(pos);
@@ -69,6 +72,9 @@ public static class EntityFactory
             EntityKind.StickyGrenade => new StickyGrenadeProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.LobbedArea    => new LobbedAreaProjectile(body.Position, body.Velocity, d.Budget, d.TileType, d.Mode, d.HitId, d.Faction),
             EntityKind.Brute         => new BruteEnemy(body.Position),
+            // Spawn-point placeholder — RestoreState's ReadState overwrites it from
+            // the snapshotted Aim slot right after construction.
+            EntityKind.PracticeBall  => new PracticeBall(body.Position),
             _ when EnemyFactory.IsRegistered(d.Kind) => EnemyFactory.Create(d.Kind, body.Position),
             _                        => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
         };

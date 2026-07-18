@@ -59,13 +59,13 @@ public class TurretEnemy : Entity
         Sprite       = Sprites.Turret(Radius);
     }
 
-    public override void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
+    public override Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
-        base.OnHit(hit, myHurtbox);
-        if (IsDead) return;
+        var delivered = base.OnHit(hit, myHurtbox);
         // Interrupted mid-charge — drop the build-up and stagger briefly so the
         // player gets a clear feedback that they cancelled the shot.
-        Transition(AIState.Stagger);
+        if (!IsDead) Transition(AIState.Stagger);
+        return delivered;
     }
 
     public override void Update(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)

@@ -65,11 +65,11 @@ public abstract class EnemyEntity : Entity
     // transitioning into a stagger state — if the concrete enemy registered
     // one — gives the impulse a window to actually play out, mirroring how
     // StalkerEnemy.OnHit kicks itself into AIState.Stagger.
-    public override void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
+    public override Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
-        base.OnHit(hit, myHurtbox);
-        if (IsDead) return;
-        TriggerStagger();
+        var delivered = base.OnHit(hit, myHurtbox);
+        if (!IsDead) TriggerStagger();
+        return delivered;
     }
 
     // Force-transition the movement FSM into a stagger state (if registered).

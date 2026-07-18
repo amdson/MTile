@@ -70,8 +70,9 @@ public class CoveredJumpStunGateTests(ITestOutputHelper output)
             // Refresh stun before each step so StunActive stays true through the whole run.
             // OnHitRegistered sets StunExpireFrame = currentFrame + StunSeconds at this dt;
             // passing the frame about to be processed (player.Frame + 1) keeps it ahead.
-            // Impulse 400 > StunImpulseThreshold (350) so StunActive (not just hitstun) flips.
-            player.Combat.OnHitRegistered(player.Frame + 1, 400f, Dt);
+            // Strength 500 (a Slash3-grade hit) > StunImpulseThreshold (440) so
+            // StunActive (not just hitstun) flips.
+            player.Combat.OnHitRegistered(player.Frame + 1, 500f, Dt);
 
             ctrl.InjectInput(SpaceLeft);
             terrain.TickSprouts(Dt);

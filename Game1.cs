@@ -65,6 +65,9 @@ public class Game1 : Game
     // (reads sim state via CharacterAnimSample; never writes back). Scale fits the
     // ~62px-tall rig to the player's ~19px body.
     private CharacterAnimator _animator;
+    // MLS-deformed artwork drawn over the skeleton (SpriteBindings/player.json).
+    // Null when no binding exists — the game falls back to the stick figure.
+    private SpriteSkin _spriteSkin;
     // One animator per secondary player (training dummy, second local player, …),
     // same pull-model. Grown lazily in Update to match the sim's secondary count;
     // index i animates SecondaryPlayers[i].
@@ -88,12 +91,18 @@ public class Game1 : Game
     // the sim + the exact drawn pose per frame so a take can be reviewed frame-by-frame.
     private readonly GameRecorder _recorder = new();
 
+    // Per-frame animator trace logging during manual play (offline dev tool). Ctrl+L
+    // toggles; stop writes .probe/traces/manual_*.csv (TraceExportTests schema — the
+    // anim_traces notebook plots it directly).
+    private readonly AnimTraceLogger _animTrace = new();
+
     public Game1()
     {
         // Load game config before the GraphicsDeviceManager finalizes so window
         // prefs take effect on the first frame. Title-relative path resolved via
         // TitleContent → TitleContainer (works on DesktopGL and the Blazor/WASM build).
         _config = GameConfig.Load("game_config.json");
+        _camera.Zoom = _config.CameraZoom;
 
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -101,6 +110,18 @@ public class Game1 : Game
             PreferredBackBufferHeight = _config.WindowHeight,
             IsFullScreen              = _config.Fullscreen,
         };
+        if (_config.Fullscreen)
+        {
+            // Borderless fullscreen at the desktop resolution. The default (hardware
+            // mode switch) tries to change the MONITOR to the backbuffer size; arbitrary
+            // window sizes aren't real display modes, so the driver falls back to the
+            // nearest legacy one (1024x768) — stretched, blurry, and it rearranges the
+            // desktop on exit. Borderless keeps native pixels and alt-tabs instantly.
+            var dm = GraphicsAdapter.DefaultAdapter.CurrentDisplayMode;
+            _graphics.PreferredBackBufferWidth  = dm.Width;
+            _graphics.PreferredBackBufferHeight = dm.Height;
+            _graphics.HardwareModeSwitch        = false;
+        }
         // The glow/metaball passes bind an offscreen RenderTarget mid-frame and then
         // rebind the backbuffer. RenderTargets default to DiscardContents, which would
         // wipe the already-drawn scene on rebind — preserve it so the scene survives.
@@ -239,6 +260,13 @@ public class Game1 : Game
         // platforms without a readable filesystem (e.g. WASM) → procedural fallback.
         _skeletonAnims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
         _animator = new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims);
+        // Optional sprite skin over the rig, named by config; absent/disabled → null →
+        // stick figure only.
+        _spriteSkin = _config.DrawPlayerSpriteSkin && !string.IsNullOrEmpty(_config.PlayerSpriteBinding)
+            ? SpriteSkin.TryLoad(GraphicsDevice,
+                Path.Combine(AppContext.BaseDirectory, "SpriteBindings", _config.PlayerSpriteBinding + ".json"),
+                _animator.Skeleton)
+            : null;
         _attackGlow = new AttackGlowSystem(_animator, _glow, _glowField, SkeletonScale);
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
                                               _camera, _particles, _cursorTrail, _attackGlow);
@@ -282,8 +310,9 @@ public class Game1 : Game
             while (_net.TryReceive(out var bytes))
                 if (MTile.Net.InputCodec.TryDecode(bytes, out var pkt))
                     _session.Receive(in pkt);
-            _session.TryStep();
-            _cosmetics.Update(_sim, _config, dt, mouseWorldPos, _screenCenter, LocalPlayer);
+            bool stepped = _session.TryStep();
+            _cosmetics.Update(_sim, _config, dt, stepped ? Simulation.FixedDt : 0f,
+                              mouseWorldPos, _screenCenter, LocalPlayer);
         }
         else
         {
@@ -298,21 +327,30 @@ public class Game1 : Game
                 // Slow-/fast-motion: accumulate TimeScale and run that many fixed steps
                 // this frame — <1 skips frames (slow-mo), >1 runs extra, 0 pauses.
                 _simAccum += MathF.Max(0f, _config.TimeScale);
+                int stepsRun = 0;
                 while (_simAccum >= 1f)
                 {
                     _simAccum -= 1f;
                     // With a second player present offline, the bot spoofs its input (P2).
                     if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
                     else                   _sim.Step(input);
+                    stepsRun++;
                 }
+                float simDt = stepsRun * Simulation.FixedDt;
 
                 // Cosmetic-only pass: sprite sync, skeleton animators, knife trail,
                 // particles, landing puff, camera tracking — reads sim state, never writes.
-                _cosmetics.Update(_sim, _config, dt, mouseWorldPos, _screenCenter, LocalPlayer);
+                // Animators tick on simDt (lockstep with physics, incl. slow-mo).
+                _cosmetics.Update(_sim, _config, dt, simDt, mouseWorldPos, _screenCenter, LocalPlayer);
 
                 // Record AFTER cosmetics so the captured pose + RigRoot reflect this frame.
-                _recorder.CaptureFrame(_sim, _camera, _animator, _secondaryAnimators, SkeletonScale);
+                _recorder.CaptureFrame(_sim, _camera, _animator, _secondaryAnimators, SkeletonScale, dt);
+
+                // Trace log AFTER cosmetics for the same reason (this frame's solved pose);
+                // rows only on frames the animator ticked, timestamped in sim time.
+                _animTrace.Capture(_animator, _sim.Player, simDt);
             }
+            _animTrace.HandleInput(keyboardState);
         }
 
         base.Update(gameTime);
@@ -344,6 +382,34 @@ public class Game1 : Game
             if (player.Sprite != null) player.Sprite.Draw(_draw);
             foreach (var (p, _) in _sim.SecondaryPlayers)
                 if (p.Sprite != null) p.Sprite.Draw(_draw);
+        }
+        // Sprite skin: the bound PNG deformed over each rig's live pose. Drawn between
+        // the placeholder sprites and the debug skeleton, outside the SpriteBatch pass
+        // (it issues its own device draw) — split the batch around it.
+        if (_spriteSkin != null && _config.DrawPlayerSpriteSkin)
+        {
+            var cam = _camera.GetTransform(_screenCenter);
+            _spriteBatch.End();
+            {
+                Vector2 root; int facing;
+                if (_recorder.TryPlaybackPrimary(out var pc)) { root = pc.RootWorldPos; facing = pc.Facing; }
+                else { root = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); facing = player.Facing; }
+                int dir = facing == 0 ? 1 : facing;
+                _spriteSkin.Draw(cam, _animator.Pose,
+                    Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)));
+            }
+            for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
+            {
+                var p = _sim.SecondaryPlayers[i].Player;
+                var anim = _secondaryAnimators[i];
+                Vector2 root; int facing;
+                if (_recorder.TryPlaybackSecondary(i, out var sc)) { root = sc.RootWorldPos; facing = sc.Facing; }
+                else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = p.Facing; }
+                int dir = facing == 0 ? 1 : facing;
+                _spriteSkin.Draw(cam, anim.Pose,
+                    Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)));
+            }
+            _spriteBatch.Begin(transformMatrix: cam);
         }
         if (_config.DebugDrawSkeleton)
         {
@@ -464,6 +530,16 @@ public class Game1 : Game
 
         _hud.Draw(_sim, _animator, _config);
         _recorder.DrawHud(_spriteBatch, _debugFont);
+        if (_animTrace.Active)
+        {
+            var tracePos = new Vector2(8, 76);   // below the recorder's HUD line
+            _spriteBatch.Begin();
+            _spriteBatch.DrawString(_debugFont, "[TRACE]  Ctrl+L stop+save",
+                                    tracePos + new Vector2(1, 1), Color.Black);
+            _spriteBatch.DrawString(_debugFont, "[TRACE]  Ctrl+L stop+save",
+                                    tracePos, new Color(255, 90, 70));
+            _spriteBatch.End();
+        }
 
         if (shotTarget != null && _screenshots.EndCapture(shotTarget, _spriteBatch, GraphicsDevice))
             Exit();
@@ -473,6 +549,7 @@ public class Game1 : Game
 
     protected override void UnloadContent()
     {
+        _animTrace.Stop();   // flush a trace left running at exit
         _pixel?.Dispose();
         _density?.Dispose();
         _metaballs?.Dispose();

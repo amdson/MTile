@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A 2D platformer in C#/MonoGame built around "the terrain IS the weapon": the player slashes, stabs, pulses, and erupts blocks to reshape a chunked tile world while moving through it. Fixed timestep of 30 fps.
+A 2D platformer in C#/MonoGame built around "the terrain IS the weapon": the player slashes, stabs, pulses, and erupts blocks to reshape a chunked tile world while moving through it. Fixed timestep of 60 fps (`Simulation.FixedDt`).
 
 **Read [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md) first** — it is the authoritative architecture doc (physics, character FSMs, combat, world/tiles, drawing). This file covers only build/run/test mechanics, project layout, and the in-flight refactor that the overview predates. Design notes and roadmaps live in [Plans/](Plans/).
 
@@ -58,7 +58,7 @@ Each host copies these from the repo root into its own output (Desktop: alongsid
 
 A large uncommitted refactor is extracting the deterministic game world out of `Game1` so it can be snapshotted and replayed for GGPO-style rollback multiplayer. **This is the most important thing the overview doesn't yet describe.**
 
-- **`Simulation.cs`** is now the deterministic core: it owns players, entities, chunks, combat registries, and platforms, and advances them with a single `Step(PlayerInput)` on a fixed `Simulation.FixedDt` (1/30). `Game1` is becoming a thin shell (gather hardware input → `Step` → render); particles, trail, camera, and sprites are **render-only and must never feed back into the sim**.
+- **`Simulation.cs`** is now the deterministic core: it owns players, entities, chunks, combat registries, and platforms, and advances them with a single `Step(PlayerInput)` on a fixed `Simulation.FixedDt` (1/60). `Game1` is becoming a thin shell (gather hardware input → `Step` → render); particles, trail, camera, and sprites are **render-only and must never feed back into the sim**.
 - `Stage`/`Stages` (`Stage.cs`) describe a match (`TerrainConfig`, `PlayerSpawn`, `Populate`). `Simulation` consumes a `Stage`.
 - `Snapshot()`/`Restore()` capture/restore players, entities, combat dedupe, platforms, and terrain. Terrain uses an inverse-delta **journal** (`World/TerrainJournal.cs`) rather than full copies; sparse per-tile structures are value-snapshotted (`*Snapshot.cs`, `*State` types, `BodyState.cs`). Verified by `MTile.Tests/Sim/SnapshotRoundTripTests.cs`.
 - **Determinism rules** when touching sim code: no sim-affecting `static` mutable state (HitIds flow through `World/HitIdAllocator.cs` and `EnvironmentContext.HitIds`); no polling hardware mid-step (all input must arrive via `PlayerInput`); same iteration order on restore. See `Plans/ROLLBACK_ROADMAP.md` (status checklist), `Plans/STATE_SNAPSHOT_PLAN.md`, and `Plans/GGPO_PLAN.md`.

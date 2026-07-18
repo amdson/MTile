@@ -16,6 +16,7 @@ public enum EntityKind
     StickyGrenade,
     LobbedArea,
     Brute,          // MVP EnemyEntity subtype (see Plans/ENEMY_CAPABILITY_FRAMEWORK.md)
+    PracticeBall,   // juggling target — breaks on tile contact, respawns at its spawn point
 
     // Factory-built enemy variants. Each blueprint registered with
     // EnemyFactory owns its own EntityKind so Rehydrate can dispatch to it.

@@ -49,10 +49,12 @@ public class Entity : IHittable
     public void PublishHurtboxes(HurtboxWorld world)
         => world.Publish(new Hurtbox(Body.Bounds, Faction, Id));
 
-    public virtual void OnHit(in Hitbox hit, in Hurtbox _)
+    public virtual Vector2 OnHit(in Hitbox hit, in Hurtbox _)
     {
         Health -= hit.Damage;
-        if (Mass > 0f) Body.Velocity += hit.KnockbackImpulse / Mass;
+        var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
+        Body.Velocity += res.TargetDeltaV;
+        return res.Impulse;
     }
 
     // Called before PhysicsWorld.StepSwept. Cancels (or amplifies) the global

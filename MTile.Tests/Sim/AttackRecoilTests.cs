@@ -195,12 +195,112 @@ public class AttackRecoilTests(ITestOutputHelper output)
         Assert.Equal(Vector2.Zero, combat.PeekRecoil(5));
     }
 
+    // ──────────────── Collision-mode tile recoil (per-surface) ────────────────
+
+    private static Hitbox MakeCollisionHitbox(BoundingBox region, int hitId, float damage,
+                                              Vector2 dir, Vector2 strikeVel, float recoilScale,
+                                              bool breakProtected = true)
+        => new Hitbox(region, hitId, damage,
+                      knockbackImpulse: dir * 1000f,   // direction hint; unused for momentum
+                      owner: Faction.Player1, source: EntityId.None,
+                      recoilScale: recoilScale, recoilBreakProtected: breakProtected,
+                      mode: KnockbackMode.Collision, strikeDir: dir,
+                      strikeVelocity: strikeVel, strikeMass: 2.5f);
+
+    // A stone surface reflects the approach: recoil = -(1+e_stone)·u·scale, NOT the
+    // authored knockback vector (which stays a direction hint in collision mode).
+    [Fact]
+    public void CollisionMode_StoneCell_ReflectsApproachSpeed()
+    {
+        var chunks = SimTerrain.FromAscii("X");
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+
+        var region = new BoundingBox(0f, 0f, 16f, 16f);
+        hitboxes.Publish(MakeCollisionHitbox(region, hitId: 11, damage: 0.25f,
+            dir: new Vector2(1f, 0f), strikeVel: new Vector2(400f, 0f), recoilScale: 0.5f));
+
+        combat.Apply(chunks, hitboxes, hurtboxes, _ => null);
+
+        // Stone restitution defaults to 0.7 ⇒ -(1.7 · 400 · 0.5) = -340.
+        Assert.Equal(-340f, combat.PeekRecoil(11).X, precision: 2);
+    }
+
+    // A wall face of two cells is ONE surface — collision recoil must not double
+    // with contact area (unlike the legacy per-cell impulse accumulation).
+    [Fact]
+    public void CollisionMode_TwoStoneCells_OneSurfaceOneBounce()
+    {
+        var chunks = SimTerrain.FromAscii("XX");
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+
+        var region = new BoundingBox(0f, 0f, 32f, 16f);
+        hitboxes.Publish(MakeCollisionHitbox(region, hitId: 12, damage: 0.25f,
+            dir: new Vector2(1f, 0f), strikeVel: new Vector2(400f, 0f), recoilScale: 0.5f));
+
+        combat.Apply(chunks, hitboxes, hurtboxes, _ => null);
+
+        Assert.Equal(-340f, combat.PeekRecoil(12).X, precision: 2);   // same as one cell
+    }
+
+    // A multi-frame hitbox (same HitId re-published every frame, like the stab's
+    // active window) bounces ONCE per attack — the swing speed baked into
+    // StrikeVelocity would otherwise re-fire the floor every frame.
+    [Fact]
+    public void CollisionMode_MultiFrameOverlap_BouncesOncePerAttack()
+    {
+        var chunks = SimTerrain.FromAscii("X");
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+
+        var region = new BoundingBox(0f, 0f, 16f, 16f);
+        Hitbox Box() => MakeCollisionHitbox(region, hitId: 14, damage: 0.01f,
+            dir: new Vector2(1f, 0f), strikeVel: new Vector2(400f, 0f), recoilScale: 0.5f);
+
+        hitboxes.Publish(Box());
+        combat.Apply(chunks, hitboxes, hurtboxes, _ => null);
+        Assert.Equal(-340f, combat.PeekRecoil(14).X, precision: 2);   // frame 1: bounce
+
+        hitboxes.Clear();
+        hitboxes.Publish(Box());                                       // frame 2: still overlapping
+        combat.Apply(chunks, hitboxes, hurtboxes, _ => null);
+        Assert.Equal(Vector2.Zero, combat.PeekRecoil(14));             // latched — no re-fire
+    }
+
+    // The existing gates still apply in collision mode: a break-protected cell that
+    // shatters this frame contributes no surface, so no bounce at all.
+    [Fact]
+    public void CollisionMode_BrokenCell_BreakProtected_NoRecoil()
+    {
+        var chunks = SimTerrain.FromAscii("X");
+        chunks.TryGet(new Point(0, 0), out var chunk);
+        chunk.Tiles[0, 0].Type = TileType.Sand;
+
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+
+        var region = new BoundingBox(0f, 0f, 16f, 16f);
+        hitboxes.Publish(MakeCollisionHitbox(region, hitId: 13, damage: 1.0f,   // breaks sand
+            dir: new Vector2(1f, 0f), strikeVel: new Vector2(400f, 0f), recoilScale: 0.5f));
+
+        combat.Apply(chunks, hitboxes, hurtboxes, _ => null);
+
+        Assert.Equal(Vector2.Zero, combat.PeekRecoil(13));
+    }
+
     // ──────────────── Integration: StabAction pogo through SimRunner.RunMulti ──
 
     // Drive a real stab into a Stone wall; assert the attacker's Vx flips sign
-    // (forward → backward), confirming StabAction's RecoilScale wiring + the
-    // CombatSystem inbox + ApplyActionForces all hook up end-to-end.
-    [Fact(Skip = "Wall-stab pogo behavior is being retuned — reactivate when the recoil feel is settled.")]
+    // (forward → backward), confirming the collision-mode wiring end-to-end:
+    // StabAction publishes a Collision hitbox → CombatSystem resolves one bounce
+    // off the stone surface (HitResolver.TileRecoil, floored at MinRecoilSpeed)
+    // → the attacker applies it via PeekRecoil in ApplyActionForces.
+    [Fact]
     public void StabIntoStoneWall_PlayerPogosBackward()
     {
         // Flat ground, with a 3-tile-tall stone wall just to the right of the
@@ -251,9 +351,9 @@ public class AttackRecoilTests(ITestOutputHelper output)
             });
 
         // The stab's LungeSpeed (90 px/s) drives Vx positive during the active
-        // window. Stone cells each deliver -380 px/s of recoil per active frame,
-        // easily flipping Vx negative. Asserting < 0 (rather than a specific
-        // magnitude) keeps the test robust to tuning RecoilScale.
+        // window. The stone bounce is ≥ MinRecoilSpeed (380 px/s), easily
+        // flipping Vx negative. Asserting < 0 (rather than a specific magnitude)
+        // keeps the test robust to tuning RecoilScale / restitution.
         output.WriteLine($"min Vx observed = {minVxObserved}");
         Assert.True(minVxObserved < 0f,
             $"Expected stab into stone wall to recoil player backward (Vx < 0); observed min Vx = {minVxObserved}");
@@ -263,7 +363,7 @@ public class AttackRecoilTests(ITestOutputHelper output)
     // (0.25 × Boost per frame, accumulating across active frames) breaks sand
     // in 2 frames; with BreakProtected on the primary, broken cells don't
     // contribute recoil. Player should NOT recoil backward.
-    [Fact(Skip = "Wall-stab pogo behavior is being retuned — reactivate when the recoil feel is settled.")]
+    [Fact]
     public void StabIntoSandWall_NoBackwardPogo()
     {
         var terrain = SimTerrain.FromAscii(@"

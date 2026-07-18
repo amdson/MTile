@@ -39,10 +39,22 @@ public sealed class DemoGame : Game
     private SkeletonPose _pose;          // rendered / working pose
     private SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
     private Affine2      _root;
-    private Vector2      _playerOffset;   // global player-position offset folded into _root, so the
-                                          // skeleton AND root-parented additions (e.g. "com") move together.
-                                          // Drag the root joint to move, arrows nudge, Home resets.
-    private float        _floorLocalY;   // bind-pose sole height (skeleton-local), the floor line
+    private Vector2      _playerOffset;   // view pan (whole scene: rig + com + floor). Arrows nudge, Home resets.
+    private float        _floorLocalY;   // bind-pose sole height (skeleton-local), the legacy floor line
+
+    // COM-ANCHORED placement (clips that author a "com" track — all of them, post addcom):
+    // the rig is drawn exactly the way the game places it — root = anchor − com·scale — so the
+    // com marker sits at a FIXED screen point (_anchor) and the ground line sits a fixed
+    // 2·Radius/SkeletonScale rig-units below it (the addcom stamp convention: com.Y = sole −
+    // 2R/scale ⇒ a planted sole rests on the line). Dragging the ROOT joint then edits the
+    // active keyframe's com INVERSELY: the skeleton follows the cursor while com marker and
+    // ground stay put — which is exactly "place the body against the ground", the intuitive
+    // control for authoring the com arc (airtime). Scrub/playback previews the body bobbing
+    // over the fixed ground, matching the in-game read. Clips with no com keep the old
+    // fixed-root placement (_comAnchored false).
+    private Vector2 _anchor;         // where the com point lands on screen (the "body position")
+    private bool    _comAnchored;
+    private const float GroundBelowComRig = 2f * PlayerCharacter.Radius / Game1.SkeletonScale;
 
     private string                   _dir;
     private List<AnimationDocument>  _docs = new();
@@ -97,9 +109,21 @@ public sealed class DemoGame : Game
     // entries than fit on screen.
     private readonly string _openClip;
 
-    public DemoGame(string openClip = null)
+    // --usebind <binding>: superimpose a sprite skin (SpriteBindings/<name>.json) on the
+    // rig through every scrubbed/played pose. G toggles the sprite, W the mesh wireframe.
+    // The skin is baked against a pristine copy of the base rig (_skinRig) and fed a pose
+    // synced by bone NAME each frame, so clip-local ExtraBones and live rig edits in the
+    // editor can't desync it.
+    private readonly string _bindingArg;
+    private SpriteSkin   _skin;
+    private Skeleton     _skinRig;
+    private SkeletonPose _skinPose;
+    private bool _showSkin = true, _skinWire, _showRig = true;
+
+    public DemoGame(string openClip = null, string binding = null)
     {
         _openClip = openClip;
+        _bindingArg = binding;
         _graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth  = 1040,
@@ -128,12 +152,22 @@ public sealed class DemoGame : Game
 
         _shotPath = Environment.GetEnvironmentVariable("MTILE_SHOT");
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_HELP") != null) _showHelp = true;
+        if (Environment.GetEnvironmentVariable("MTILE_SHOT_WIRE") != null) _skinWire = true;
+        if (Environment.GetEnvironmentVariable("MTILE_SHOT_NOSKEL") != null) _showRig = false;
 
         _dir = FindStatesDir();
         // Authored-only content: the rig comes from Skeletons/biped.json and throws
         // if missing (no procedural fallback), and the clip list is exactly what's
         // on disk in SkeletonStates/ (no seed autogeneration). N / C create clips.
         _baseSkeleton = SkeletonExamples.Biped();
+        if (_bindingArg != null)
+        {
+            _skinRig = SkeletonExamples.Biped();   // pristine copy — editor rig edits mutate _baseSkeleton in place
+            string path = ResolveBindingPath(_bindingArg);
+            _skin = path != null ? SpriteSkin.TryLoad(GraphicsDevice, path, _skinRig) : null;
+            if (_skin != null) { _skinPose = _skinRig.CreatePose(); Console.WriteLine($"sprite skin: {path} (G sprite, W wireframe)"); }
+            else Console.WriteLine($"sprite skin: could not load binding '{_bindingArg}' (looked at {path ?? "SpriteBindings/"})");
+        }
         _skeleton = _baseSkeleton;
         _pose = _skeleton.CreatePose();
         _kfA  = _skeleton.CreatePose();
@@ -217,8 +251,12 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.V)) BeginAddAddition(AnimAdditionKind.Vector, mp);
         if (Pressed(kb, Keys.B)) BeginAddBone(mp, toBase: kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift));
         if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
+        if (_skin != null && Pressed(kb, Keys.G)) _showSkin = !_showSkin;
+        if (_skin != null && Pressed(kb, Keys.W)) _skinWire = !_skinWire;
+        if (_skin != null && Pressed(kb, Keys.X)) _showRig  = !_showRig;
 
-        // Move the whole player (skeleton + com): arrows nudge (Shift = faster), Home recenters.
+        // Pan the whole VIEW (rig + com + floor together): arrows nudge (Shift = faster), Home
+        // recenters. Placing the BODY against the ground is the root-joint drag (edits com).
         float nudge = (kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift)) ? 6f : 1.5f;
         if (kb.IsKeyDown(Keys.Left))  _playerOffset.X -= nudge;
         if (kb.IsKeyDown(Keys.Right)) _playerOffset.X += nudge;
@@ -287,8 +325,24 @@ public sealed class DemoGame : Game
 
         if (leftDown && _dragRoot)
         {
-            // Move the player by the mouse delta (screen space); folded into _root next UpdateRoot.
-            _playerOffset += mp - new Vector2(_prevMs.X, _prevMs.Y);
+            var dm = mp - new Vector2(_prevMs.X, _prevMs.Y);
+            var comAdd = _comAnchored ? ActiveKeyCom() : null;
+            if (comAdd != null)
+            {
+                // COM-ANCHORED: dragging the root moves the BODY against the fixed ground/com —
+                // implemented as the INVERSE edit of the active keyframe's com (root = anchor −
+                // com·scale, so com -= Δ/scale draws the skeleton +Δ under the cursor while the
+                // com marker and floor hold still). This is the com-arc authoring control:
+                // scrub to a keyframe, drag the base node to where the body should be.
+                comAdd.Px -= dm.X / RigScale;
+                comAdd.Py -= dm.Y / RigScale;
+                _dirty = true;
+            }
+            else
+            {
+                // No com on the active keyframe (or a legacy no-com clip): plain view pan.
+                _playerOffset += dm;
+            }
         }
         else if (leftDown && _dragVaultBlock)
         {
@@ -423,14 +477,72 @@ public sealed class DemoGame : Game
             _floorLocalY = MathF.Max(_floorLocalY, bindWorld[i].Translation.Y);
     }
 
-    // Rig placement in the editor: centered in the working area, scaled. Recomputed
-    // each frame so it tracks window size.
+    // Rig placement in the editor: centered in the working area, scaled, and — when the clip
+    // authors a com track — COM-ANCHORED like the game (root = anchor − com·scale), so the com
+    // marker and the ground line hold still while the BODY moves per keyframe. Recomputed each
+    // frame so it tracks window size and the com value at the playhead.
     private void UpdateRoot()
     {
         float cx = SidebarW + (W - SidebarW) / 2f;
         float cy = H * 0.48f;
-        _root = Affine2.FromTRS(new Vector2(cx, cy) + _playerOffset, 0f, new Vector2(RigScale, RigScale));
+        _anchor = new Vector2(cx, cy) + _playerOffset;
+        _comAnchored = TryComAt(_scrubT, out var com);
+        Vector2 rootT = _comAnchored ? _anchor - com * RigScale : _anchor;
+        _root = Affine2.FromTRS(rootT, 0f, new Vector2(RigScale, RigScale));
     }
+
+    // The com track value at normalized time t: lerp of the root-space "com" Point addition
+    // across the bracketing keyframes (mirrors the runtime's SampleNamedPoint — hold the value
+    // where only one side authors it). False if the clip has no com at all.
+    private bool TryComAt(float t, out Vector2 com)
+    {
+        com = default;
+        var ks = Doc?.Keyframes;
+        if (ks == null || ks.Count == 0) return false;
+        t = MathHelper.Clamp(t, ks[0].Time, ks[ks.Count - 1].Time);
+        int i = 0;
+        while (i < ks.Count - 1 && ks[i + 1].Time < t) i++;
+        int j = Math.Min(i + 1, ks.Count - 1);
+        bool ha = TryComOf(ks[i], out var pa);
+        bool hb = TryComOf(ks[j], out var pb);
+        if (ha && hb)
+        {
+            float span = ks[j].Time - ks[i].Time;
+            float u = span <= 1e-6f ? 0f : (t - ks[i].Time) / span;
+            com = Vector2.Lerp(pa, pb, u);
+            return true;
+        }
+        if (ha) { com = pa; return true; }
+        if (hb) { com = pb; return true; }
+        return false;
+    }
+
+    private static bool TryComOf(AnimationKeyframe k, out Vector2 p)
+    {
+        p = default;
+        if (k.Additions == null) return false;
+        foreach (var a in k.Additions)
+            if (a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
+            { p = new Vector2(a.Px, a.Py); return true; }
+        return false;
+    }
+
+    // The active keyframe's com addition, if it has one (the thing a root drag edits).
+    private AnimAddition ActiveKeyCom()
+    {
+        if (Doc == null || _activeKey < 0 || _activeKey >= Doc.Keyframes.Count) return null;
+        var adds = Doc.Keyframes[_activeKey].Additions;
+        if (adds == null) return null;
+        foreach (var a in adds)
+            if (a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null) return a;
+        return null;
+    }
+
+    // The scene frame the GROUND-RELATIVE references (floor line, vault block) live in: fixed
+    // at the anchor when com-anchored (they must NOT follow the body), the rig root otherwise.
+    private (Affine2 frame, float floorLocalY) SceneFrame()
+        => _comAnchored ? (Affine2.FromTRS(_anchor, 0f, new Vector2(RigScale, RigScale)), GroundBelowComRig)
+                        : (_root, _floorLocalY);
 
     // === draw ================================================================
 
@@ -450,6 +562,16 @@ public sealed class DemoGame : Game
         }
 
         GraphicsDevice.Clear(new Color(22, 24, 30));
+
+        // Sprite skin under the rig overlay: deform to the current working pose (its own
+        // device draw, so it must run outside the SpriteBatch pass). fill:false still
+        // deforms so the wireframe overlay (drawn inside the batch) has fresh positions.
+        if (_skin != null && (_showSkin || _skinWire))
+        {
+            SyncSkinPose();
+            _skin.Draw(Matrix.Identity, _skinPose, _root, fill: _showSkin);
+        }
+
         _spriteBatch.Begin();
         DrawSidebar();
         DrawEditor();
@@ -475,6 +597,36 @@ public sealed class DemoGame : Game
     private string _shotPath;
     private int _shotFrame;
 
+    // Copy the working pose onto the skin's pristine base rig BY NAME, so the skin
+    // follows scrub/playback regardless of clip-local ExtraBones (absent from _skinRig)
+    // or bones added to the base rig this session (left at bind on the skin).
+    private void SyncSkinPose()
+    {
+        for (int i = 0; i < _skinRig.Count; i++)
+        {
+            int wi = _skeleton.IndexOf(_skinRig.Bones[i].Name);
+            if (wi >= 0) _skinPose.Local[i] = _pose.Local[wi];
+        }
+    }
+
+    // --usebind argument → SpriteBindings/<name>.json (accepts a bare name, a .png/.json
+    // name, or an existing path). Null when nothing plausible exists.
+    private static string ResolveBindingPath(string arg)
+    {
+        if (File.Exists(arg) && arg.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            return Path.GetFullPath(arg);
+        string name = Path.HasExtension(arg) ? Path.ChangeExtension(arg, ".json") : arg + ".json";
+        var d = new DirectoryInfo(AppContext.BaseDirectory);
+        while (d != null)
+        {
+            string c = Path.Combine(d.FullName, "SpriteBindings", name);
+            if (File.Exists(c)) return c;
+            if (File.Exists(Path.Combine(d.FullName, "MTile.sln"))) break;
+            d = d.Parent;
+        }
+        return null;
+    }
+
     private void DrawSidebar()
     {
         Fill(new Rectangle(0, 0, SidebarW, H), new Color(30, 33, 42));
@@ -495,8 +647,11 @@ public sealed class DemoGame : Game
 
     private void DrawEditor()
     {
-        // Floor reference: a dashed horizontal line at the bind-pose sole height.
-        float floorY = _root.TransformPoint(new Vector2(0f, _floorLocalY)).Y;
+        // Floor reference: a dashed horizontal line. Com-anchored clips draw it FIXED below the
+        // com anchor (the in-game ground: 2·Radius under the body position) so the body can be
+        // authored moving against it; legacy clips keep the bind-pose sole height under _root.
+        var (scene, floorLocal) = SceneFrame();
+        float floorY = scene.TransformPoint(new Vector2(0f, floorLocal)).Y;
         DrawDashedH(floorY, SidebarW + 20, W - 20, new Color(90, 110, 95), 9f, 7f);
         _spriteBatch.DrawString(_font, "floor", new Vector2(SidebarW + 20, floorY + 3), new Color(90, 110, 95));
 
@@ -506,14 +661,24 @@ public sealed class DemoGame : Game
         // forward side here regardless of the player's in-game facing.
         DrawVaultBlock();
 
-        var style = SkeletonDrawStyle.Default;
-        style.BoneThickness = 3f;
-        style.JointRadius   = 0f;
-        // Dim the figure when on an interpolated (non-editable) frame.
-        style.BoneColor = _activeKey >= 0 ? Color.White : new Color(150, 150, 160);
-        SkeletonRenderer.Draw(_draw, _pose, _root, style);
+        // The rig overlay (bones + joint markers + additions) hides when toggled off
+        // (X, skin-view only) so the sprite can be judged unobstructed. Editing still
+        // works while hidden — picking is position-based, not marker-based.
+        bool showRig = _showRig || _skin == null;
+        if (showRig)
+        {
+            var style = SkeletonDrawStyle.Default;
+            style.BoneThickness = 3f;
+            style.JointRadius   = 0f;
+            // Dim the figure when on an interpolated (non-editable) frame.
+            style.BoneColor = _activeKey >= 0 ? Color.White : new Color(150, 150, 160);
+            SkeletonRenderer.Draw(_draw, _pose, _root, style);
+        }
+        if (_skin != null && _skinWire)
+            _skin.DrawWireframe(_draw, new Color(90, 220, 230) * 0.5f);
 
         var world = _pose.ComputeWorld(_root);
+        if (!showRig) return;
         var contacts = _activeKey >= 0 ? Doc.Keyframes[_activeKey].Contacts : null;
         for (int i = 0; i < world.Length; i++)
         {
@@ -594,8 +759,11 @@ public sealed class DemoGame : Game
     {
         rect = default;
         if (Doc?.Type != "Vault") return false;
-        Vector2 tl = _root.TransformPoint(new Vector2(VaultBlockX,               _floorLocalY - VaultBlockH) + _vaultBlockOffset);
-        Vector2 br = _root.TransformPoint(new Vector2(VaultBlockX + VaultBlockW, _floorLocalY)               + _vaultBlockOffset);
+        // The block is a GROUND feature: it lives in the scene frame (fixed at the anchor when
+        // com-anchored) so it doesn't ride along as the body is placed against it.
+        var (scene, floorLocal) = SceneFrame();
+        Vector2 tl = scene.TransformPoint(new Vector2(VaultBlockX,               floorLocal - VaultBlockH) + _vaultBlockOffset);
+        Vector2 br = scene.TransformPoint(new Vector2(VaultBlockX + VaultBlockW, floorLocal)               + _vaultBlockOffset);
         rect = new Rectangle((int)tl.X, (int)tl.Y, (int)(br.X - tl.X), (int)(br.Y - tl.Y));
         return true;
     }
@@ -843,6 +1011,11 @@ public sealed class DemoGame : Game
         for (int i = 0; i < adds.Count; i++)
         {
             var a = adds[i];
+            // On a com-anchored clip the com point is not directly draggable: the placement
+            // re-anchors on it every frame, so a direct drag would snap the marker back and
+            // shove the body inversely — the root-joint drag IS the com control there.
+            if (_comAnchored && a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
+                continue;
             if (a.Kind == AnimAdditionKind.Vector)
             {
                 float dt = Vector2.DistanceSquared(AdditionTipWorld(a, world), mp);
@@ -935,6 +1108,16 @@ public sealed class DemoGame : Game
 
         _spriteBatch.DrawString(_font, "H controls   |   Ctrl-S save   |   K sample keyframe",
             new Vector2(SidebarW + 16, 64), new Color(130, 140, 155));
+
+        // Loop-seam guard: a looping locomotion clip whose first/last poses drifted apart
+        // silently degrades to one-shot seam sampling in-game (pose pop + cadence stall
+        // every stride — the run.json incident). Warn LIVE while editing; fix by making
+        // the last keyframe an exact copy of the first.
+        if (doc != null && AnimationSampler.SeamMismatch(doc, out string seamBone, out float seamDelta))
+            _spriteBatch.DrawString(_font,
+                $"!! LOOP SEAM MISMATCH: {seamBone} differs {seamDelta:0.000} rad between first & last keyframe " +
+                "- copy the first pose onto the last (loop pops + stalls until fixed)",
+                new Vector2(SidebarW + 16, 82), new Color(255, 90, 70));
     }
 
     // Grouped key cheatsheet, toggled by H. Sections so related controls cluster instead
@@ -943,10 +1126,11 @@ public sealed class DemoGame : Game
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
         ("Edit",     "Tab mode (rotate/resize)    drag joint    M+click contact    F flip"),
-        ("Move",     "drag root joint = move player    arrows nudge (Shift faster)    Home recenter"),
+        ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
         ("Vault",    "drag the brown block to reposition the obstacle (Vault clips only)"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
+        ("Skin",     "G sprite skin on/off    W mesh wireframe    X skeleton on/off    (launch with --usebind <binding>)"),
         ("File",     "Ctrl-S save  (writes clips + rig)"),
     };
 

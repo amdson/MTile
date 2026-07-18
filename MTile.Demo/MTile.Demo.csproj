@@ -19,6 +19,7 @@
     <!-- Shares the game's content project so the editor can load DebugFont for the
          sidebar / header text. .xnb output lands next to the binary. -->
     <MonoGameContentReference Include="..\Content\Content.mgcb" Link="Content\Content.mgcb" />
-    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.*" />
+    <!-- Pinned to match the mgcb tool in .config/dotnet-tools.json — see MTile.Core.csproj. -->
+    <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.4.1" />
   </ItemGroup>
 </Project>

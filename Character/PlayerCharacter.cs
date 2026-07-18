@@ -94,17 +94,19 @@ public class PlayerCharacter : IHittable
         world.Publish(new Hurtbox(Body.Bounds, Faction, Id));
     }
 
-    public void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
+    public Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
         // Tech i-frames (Phase 4): a freshly-teched player no-ops incoming hits for
         // a short window so the tech recovery isn't immediately re-punished.
-        if (_abilities.Combat.IsInvulnerable(_frame)) return;
+        // Early-outs still return the authored impulse so a stab that pogoes off a
+        // parrying/invulnerable player recoils the attacker exactly as before.
+        if (_abilities.Combat.IsInvulnerable(_frame)) return hit.KnockbackImpulse;
 
         // Guard parry — roadmap §1.5. If GuardActive and the hit lands in the
         // front-cone, absorb completely: no damage, no knockback, no hitstun.
         // Weak in-cone hits additionally charge GuardRetaliate (see CombatState.TryParry).
         if (_abilities.Combat.TryParry(hit.KnockbackImpulse, hit.Damage, _abilities.Facing, _frame, _dt))
-            return;
+            return hit.KnockbackImpulse;
 
         // Struggle / grab-break (COMBAT_FEEL_PLAN Phase 6). A grabbed victim's exempt
         // slash erodes THIS player's grab strength instead of dealing knockback/percent/
@@ -114,7 +116,7 @@ public class PlayerCharacter : IHittable
         if (hit.GrabStrengthDamage > 0f)
         {
             _abilities.Combat.ErodeGrab(hit.GrabStrengthDamage);
-            return;
+            return hit.KnockbackImpulse;
         }
 
         // Escalation model (COMBAT_FEEL_PLAN Phase 5): a direct combat hit does NOT
@@ -126,14 +128,18 @@ public class PlayerCharacter : IHittable
         // is now its percent contribution; tile damage still uses it on the tile path.
         _abilities.Combat.AddPercent(hit.Damage);
         float kbScale = _abilities.Combat.KnockbackScale;
-        if (Mass > 0f) Body.Velocity += hit.KnockbackImpulse * kbScale / Mass;
+        var res = HitResolver.Resolve(in hit, Mass, Body.Velocity, kbScale);
+        Body.Velocity += res.TargetDeltaV;
 
-        // Register the hit for hitstun (every hit) + the stun-threshold check, using
-        // the percent-scaled impulse so high-% hits stun longer and cross the stun /
-        // Tumble threshold. Raw magnitude (pre-mass) so strength reads consistently
-        // across masses. Hold-slashes still carry an explicit HitstunSecondsOverride.
-        _abilities.Combat.OnHitRegistered(_frame, hit.KnockbackImpulse.Length() * kbScale, _dt,
+        // Register the hit for hitstun (every hit) + the stun-threshold check.
+        // HitResult.Strength is the percent-scaled impulse magnitude (Impulse mode)
+        // or the scaled closing speed (Collision mode) — pre-mass either way, so
+        // strength reads consistently across masses and high-% hits stun longer /
+        // cross the stun / Tumble threshold. Hold-slashes still carry an explicit
+        // HitstunSecondsOverride.
+        _abilities.Combat.OnHitRegistered(_frame, res.Strength, _dt,
                                           hit.HitstunSecondsOverride);
+        return res.Impulse;
     }
 
     // Called by Game1 on Health <= 0 to reset to a clean starting state. Cheaper
@@ -382,6 +388,7 @@ public class PlayerCharacter : IHittable
             CurrentFrame   = _frame,
             Dt             = dt,
             Body           = Body,
+            Mass           = Mass,
             Intent         = InputIntent.From(controller),
             Modifiers      = MovementModifiers.Identity,
         };

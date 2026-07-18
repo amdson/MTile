@@ -78,14 +78,52 @@ public readonly struct Hitbox
     // knockback / percent / hitstun — PlayerCharacter.OnHit branches on it and returns
     // early. Default 0 ⇒ a normal hit. Only the exempt GrabbedSlash sets it.
     public readonly float       GrabStrengthDamage;
+    // ── Knockback model (Plans/HIT_MOMENTUM_PLAN.md) ────────────────────────────
+    // Impulse (default): KnockbackImpulse above is applied directly — right for AoE /
+    // field hits. Collision: the hit resolves as a 1D partially-elastic collision
+    // between a virtual striker and the target (HitResolver.Resolve); the fields
+    // below describe the striker and KnockbackImpulse is unused for momentum (keep
+    // it authored as a direction hint — BulletProjectile deflection reads it).
+    public readonly KnockbackMode Mode;
+    public readonly Vector2     StrikeDir;         // unit launch direction n (authored, a feel knob)
+    // Full striker world velocity, computed at publish: attackerVel + StrikeDir·strikeSpeed.
+    // Carrying the composed vector (not the parts) keeps the resolver attacker-blind.
+    public readonly Vector2     StrikeVelocity;
+    public readonly float       StrikeMass;        // attackerMass · per-move scale
+    public readonly float       Restitution;       // e ∈ [0,1]: 0 = dead thud, 1 = full bounce
+    // Floor on the target's Δv (px/s) so a landed hit always visibly connects even
+    // when the closing speed is ~0 (target retreating with the swing). Collision only.
+    public readonly float       MinLaunch;
+    // Floor on collision-mode TILE recoil (px/s of attacker Δv): however slow the
+    // approach, bouncing off an eligible surface always pushes back at least this
+    // hard — pogo stays a reliable movement tool, not a speed-dependent gamble.
+    // Only applies while the approach speed is positive (no floor-powered pull on
+    // a retreating swing); CombatSystem additionally latches the bounce to fire
+    // once per attack, so a multi-frame overlap can't machine-gun the floor.
+    public readonly float       MinRecoilSpeed;
 
+    // Input cheat-sheet (details on the fields above):
+    //   Identity   region (broad AABB) · hitId (dedupe key) · owner/source · targets
+    //              · shape/shapePos/shapeRotation (optional narrow-phase polygon)
+    //   Effect     damage · knockbackImpulse (Impulse-mode Δv·mass; in Collision
+    //              mode a direction hint only — parry cone, bullet deflect)
+    //              · hitstunSecondsOverride · grabStrengthDamage (struggle channel)
+    //   Recoil     recoilScale (0 = off) · recoilBreakProtected · recoilMinMaterialHP
+    //   Collision  mode + strikeDir (launch axis n) · strikeVelocity (attackerVel
+    //              + n·strikeSpeed) · strikeMass · restitution (vs entities;
+    //              tiles use their material's) · minLaunch (target Δv floor)
+    //              · minRecoilSpeed (tile-pogo floor)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
                   Color? debugColor = null, HitTargets targets = HitTargets.All,
                   Polygon shape = null, Vector2 shapePos = default, float shapeRotation = 0f,
                   float recoilScale = 0f, bool recoilBreakProtected = false,
                   float recoilMinMaterialHP = 0f, float hitstunSecondsOverride = -1f,
-                  float grabStrengthDamage = 0f)
+                  float grabStrengthDamage = 0f,
+                  KnockbackMode mode = KnockbackMode.Impulse,
+                  Vector2 strikeDir = default, Vector2 strikeVelocity = default,
+                  float strikeMass = 0f, float restitution = 0.5f, float minLaunch = 0f,
+                  float minRecoilSpeed = 0f)
     {
         Region               = region;
         HitId                = hitId;
@@ -103,5 +141,12 @@ public readonly struct Hitbox
         RecoilMinMaterialHP  = recoilMinMaterialHP;
         HitstunSecondsOverride = hitstunSecondsOverride;
         GrabStrengthDamage     = grabStrengthDamage;
+        Mode                 = mode;
+        StrikeDir            = strikeDir;
+        StrikeVelocity       = strikeVelocity;
+        StrikeMass           = strikeMass;
+        Restitution          = restitution;
+        MinLaunch            = minLaunch;
+        MinRecoilSpeed       = minRecoilSpeed;
     }
 }

@@ -187,6 +187,27 @@ public sealed partial class CharacterAnimator
         private readonly CharacterAnimator _a;
         public NoPenetrationConstraint(CharacterAnimator a) => _a = a;
 
+        // A (surface, bone) pair that never emits a live row — its row slot stays a
+        // permanent zero (residual AND Jacobian), so the fixed surfaces×bones layout is
+        // preserved. Two reasons:
+        //  - BoneMask: terrain planes constrain only the tips they were extracted for
+        //    (-1 = all bones, the wall-slide plane).
+        //  - Planted-foot exemption: the cadence solve sweeps a PLANTED foot along its
+        //    support plane at gap ≈ 0, exactly on the one-sided knee — the contact's
+        //    V-row already owns "foot sits on ground", so its own upward support plane
+        //    must not flicker against it.
+        private bool SkipPair(in SolverSurface s, int b)
+        {
+            if (((s.BoneMask >> b) & 1) == 0) return true;
+            if (s.Normal.Y < -0.7f)                        // upward-facing plane (y-down)
+                foreach (var c in _a._contacts)
+                    if (c.Bone == b &&
+                        MathF.Abs(s.Normal.X * (c.Target.X - s.Point.X)
+                                + s.Normal.Y * (c.Target.Y - s.Point.Y)) < 8f)
+                        return true;                       // this plane supports the plant
+            return false;
+        }
+
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
             float dy = x[IdxDy], dx = x[IdxDx];
@@ -195,6 +216,7 @@ public sealed partial class CharacterAnimator
             foreach (var s in _a._surfaces)
                 for (int b = 0; b < bones; b++)
                 {
+                    if (SkipPair(in s, b)) { r[n++] = 0f; continue; }
                     Vector2 tip = _a._scratch.WorldOf(b).Translation;
                     float gap = s.Normal.X * (tip.X + dx - s.Point.X) + s.Normal.Y * (tip.Y + dy - s.Point.Y);
                     float pen = s.Margin - gap;                  // >0 ⇒ inside the margin (penetrating)
@@ -214,6 +236,7 @@ public sealed partial class CharacterAnimator
             foreach (var s in _a._surfaces)
                 for (int b = 0; b < bones; b++, row++)
                 {
+                    if (SkipPair(in s, b)) continue;             // permanent zero row
                     Vector2 tip = _a._scratch.WorldOf(b).Translation;
                     float gap = s.Normal.X * (tip.X + dx - s.Point.X) + s.Normal.Y * (tip.Y + dy - s.Point.Y);
                     if (s.Margin - gap <= 0f) continue;          // inactive → zero row (solver pre-zeroes)

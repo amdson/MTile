@@ -26,6 +26,12 @@
   <ItemGroup>
     <!-- Phase 3 will conditionally swap this for the KNI Blazor backend on the
          web host. The library compiles against the DesktopGL API surface for now. -->
-    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.*" />
+    <!-- PINNED, not floating. A "3.8.*" float silently re-resolves on any restore, and
+         because each host project restores independently they can land on DIFFERENT
+         versions: Core compiles against the new one while a host still copies the old
+         framework dll, and the game dies at runtime with a FileNotFoundException for
+         MonoGame.Framework. Keep this in lockstep with the mgcb tool pin in
+         .config/dotnet-tools.json and with MTile.FxLab. -->
+    <PackageReference Include="MonoGame.Framework.DesktopGL" Version="3.8.4.1" />
   </ItemGroup>
 </Project>

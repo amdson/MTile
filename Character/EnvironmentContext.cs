@@ -45,6 +45,9 @@ public class EnvironmentContext
     // (IntentBuffer.JumpBufferSeconds) is rate-independent.
     public int JumpBufferFrames => SimFrames.FromSeconds(IntentBuffer.JumpBufferSeconds, Dt);
     public PhysicsBody Body;
+    // Owning player's mass — collision-mode attacks stamp Hitbox.StrikeMass from it
+    // (PhysicsBody itself is massless). Set by PlayerCharacter.Update.
+    public float Mass;
     public InputIntent Intent;
     // Multiplicative scalars on movement knobs (WalkAccel, MaxAirSpeed, GroundFriction, …).
     // Reset to Identity each frame in PlayerCharacter.Update, populated by the current

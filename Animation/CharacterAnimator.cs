@@ -10,7 +10,7 @@ namespace MTile;
 // (forward stride vs backpedal). Run is forward locomotion above a speed threshold
 // (a longer-stride clip — same cadence machinery). Air is split into Jump (rising)
 // and Fall. Vault covers the guided ParkourState traversal.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, Jump, Fall, Vault, Run, WallSlide }
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -111,7 +111,11 @@ public sealed partial class CharacterAnimator
     // No-penetration half-planes resolved from this frame's sample. Frozen for one solve; each
     // emits one row per rig bone (NoPenetrationConstraint) — the limbs the solver pushes out.
     private readonly List<SolverSurface> _surfaces = new();
-    private const int MaxSurfaces = 4;   // sizes the residual scratch; excess surfaces are dropped
+    private const int MaxSurfaces = 8;   // sizes the residual scratch; excess surfaces are dropped
+                                         // (terrain extraction emits a handful + the wall plane)
+    // Whether any surface can plausibly engage this frame (sample.SurfacesNear) — gates the
+    // off-locomotion static solve so dormant terrain planes don't defeat the fast path.
+    private bool _surfacesNear;
     // Scratch for feathered contact weights: (bone, w, dw/dφ) at some phase. Filled by
     // WeightedContactsAtPhase — at the entry phase for RefreshContacts' capture/release
     // bookkeeping, then at each candidate φ+Δφ inside the solve (BuildSolvePose) so the
@@ -393,7 +397,8 @@ public sealed partial class CharacterAnimator
 
         float speed   = MathF.Abs(s.Velocity.X);
         bool hasClip  = _clips.TryGetValue(clip, out var anim);
-        bool locomotion = clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run;
+        bool locomotion = clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run
+                       || clip == AnimClip.CrouchWalk;
 
         // 1.5 Resolve the action overlay NOW, before the cadence solve, so the solve
         //     optimizes the POST-BLEND skeleton — the feet of the composed pose, not the
@@ -499,11 +504,14 @@ public sealed partial class CharacterAnimator
         ResolveMovementPins(in s);
         _surfaces.Clear();
         if (s.Surfaces != null)
-            foreach (var srf in s.Surfaces)
-            {
-                if (_surfaces.Count >= MaxSurfaces) break;
-                _surfaces.Add(srf);
-            }
+        {
+            // The sample's Surfaces may be an oversized reused scratch — SurfaceCount is the
+            // logical count (-1 = whole array, the hand-built/test path).
+            int srfCount = s.SurfaceCount < 0 ? s.Surfaces.Length : s.SurfaceCount;
+            for (int i = 0; i < srfCount && _surfaces.Count < MaxSurfaces; i++)
+                _surfaces.Add(s.Surfaces[i]);
+        }
+        _surfacesNear = s.SurfacesNear && _surfaces.Count > 0;
         ResolveActionAim(in s);
 
         // 2. Advance the locomotion phase. A Walk/WalkBack clip with contact labels is
@@ -554,7 +562,10 @@ public sealed partial class CharacterAnimator
         //     cadence to drive (wall slide, vault, an aimed stab from idle), so when no solve
         //     ran this frame and there IS something external to satisfy, run a STATIC solve —
         //     Δφ locked (no cadence here), only δ + the per-bone Δθ move.
-        if (!_haveCorr && hasClip && (_pins.Count > 0 || _surfaces.Count > 0 || _aimActive))
+        //     Gated on _surfacesNear, not raw surface presence: terrain planes exist near-
+        //     permanently at margin 0 and are dormant until something is within the engage
+        //     band — idle/flight frames keep the closed-form fast path.
+        if (!_haveCorr && hasClip && (_pins.Count > 0 || _surfacesNear || _aimActive))
             SolveStaticPose(anim, clip, in s);
 
         // 3. Build the target pose. Locomotion + idle sample by phase (so cadence
@@ -615,7 +626,8 @@ public sealed partial class CharacterAnimator
         //     loop (see the capture note above). The ease covers both the speed ramp and the
         //     clip-switch drop (walk→jump used to be smoothed by the global pose ease).
         float leanTarget = 0f;
-        if (clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run)
+        if (clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run
+            || clip == AnimClip.CrouchWalk)
             leanTarget = (clip == AnimClip.WalkBack ? -1f : 1f)
                        * WalkLean * MathHelper.Clamp(speed / WalkLeanRefSpeed, 0f, 1f);
         _leanEase += (leanTarget - _leanEase) * (1f - MathF.Exp(-Stiffness * dt));
@@ -742,7 +754,11 @@ public sealed partial class CharacterAnimator
         // Guided traversal wins over the generic ground/air clips while active. Keyed on the
         // state's declared AnimTag (MovementState.AnimationTag) — never on its class name.
         if (s.Tag == AnimTag.Parkour) return AnimClip.Vault;
-        if (s.Tag == AnimTag.Crouch)  return AnimClip.Crouch;
+        // Crouch splits on speed like the standing clips: a moving crouch plays the
+        // CrouchWalk shuffle cycle (same cadence machinery as Walk), a still one holds
+        // the static Crouch pose.
+        if (s.Tag == AnimTag.Crouch)
+            return MathF.Abs(s.Velocity.X) > WalkSpeedThreshold ? AnimClip.CrouchWalk : AnimClip.Crouch;
         // Wall cling/slide: airborne but pinned to a wall, so it must win over the generic
         // Vy → Jump/Fall below. WallSlidingState pins Facing = wallDir for the whole slide,
         // so the rig reliably faces the wall (+X) — and the no-penetration half-plane
@@ -754,9 +770,15 @@ public sealed partial class CharacterAnimator
         // produce a per-frame Jump/Fall animation flicker even though the movement
         // state is stable. Map ledge holds to a stable clip instead — LedgePull plays
         // Vault (it's the same "guided pull" shape as ParkourState), LedgeGrab plays
-        // Fall (a placeholder until a Hang clip exists; doesn't depend on Vy sign).
+        // Hang (authored to grip the corner; doesn't depend on Vy sign).
         if (s.Tag == AnimTag.LedgePull) return AnimClip.Vault;
-        if (s.Tag == AnimTag.LedgeGrab) return AnimClip.Fall;
+        if (s.Tag == AnimTag.LedgeGrab) return AnimClip.Hang;
+        // Grounded hitstun: a recoil flinch that must win over the Idle/Walk speed checks
+        // below, since knockback leaves the body sliding at walk speed while stunned and
+        // the generic picker would play a walk cycle through the flinch. StunnedState is
+        // grounded-only (an airborne heavy hit goes to TumbleState), so this can't collide
+        // with the air branch.
+        if (s.Tag == AnimTag.Stunned) return AnimClip.Hitstun;
         if (!s.Grounded) return s.Velocity.Y < 0f ? AnimClip.Jump : AnimClip.Fall;
         float speed = MathF.Abs(s.Velocity.X);
         if (speed > WalkSpeedThreshold)
@@ -781,7 +803,8 @@ public sealed partial class CharacterAnimator
 
     // Locomotion + idle play off the wrapped phase; one-shots play off ClipTime.
     private static bool IsPhaseDriven(AnimClip clip)
-        => clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run || clip == AnimClip.Idle;
+        => clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run || clip == AnimClip.Idle
+        || clip == AnimClip.CrouchWalk;
 
     // --- cadence solver ------------------------------------------------------
 
@@ -808,9 +831,20 @@ public sealed partial class CharacterAnimator
         int i = 0;
         for (int k = 0; k < ks.Count; k++) { if (ks[k].Time > phase) break; i = k; }
         int j = Math.Min(i + 1, ks.Count - 1);
+        float jTime = ks[j].Time;
+        // Open-tail loop, phase in the wrap gap: the interval is [last, first+1], so the
+        // last keyframe's contacts hold and crossfade into the FIRST keyframe's before the
+        // seam — same feathered crossover as any interior keyframe change.
+        if (AnimationSampler.IsCyclic(clip) && AnimationSampler.HasOpenTail(clip)
+            && (phase >= ks[ks.Count - 1].Time || phase < ks[0].Time))
+        {
+            i = ks.Count - 1; j = 0;
+            jTime = ks[0].Time + 1f;
+            if (phase < ks[0].Time) phase += 1f;
+        }
 
         float feather = AnimSolverConfig.Current.FeatherWidth;
-        float featherStart = ks[j].Time - feather;
+        float featherStart = jTime - feather;
         bool inWindow = j != i && phase > featherStart;
         float u  = inWindow ? MathHelper.Clamp((phase - featherStart) / feather, 0f, 1f) : 0f;
         // du/dφ: 1/feather strictly inside the ramp, 0 outside / at the clamps (a kink the

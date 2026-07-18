@@ -23,8 +23,21 @@ public static class AnimationSampler
     {
         var ks = doc?.Keyframes;
         if (ks == null || ks.Count == 0) { dest.SetToDefault(); return; }
-        if (ks.Count == 1 || t <= ks[0].Time)    { PoseData.Apply(ks[0].Bones, dest); return; }
-        if (t >= ks[ks.Count - 1].Time)           { PoseData.Apply(ks[ks.Count - 1].Bones, dest); return; }
+        if (ks.Count == 1) { PoseData.Apply(ks[0].Bones, dest); return; }
+        if (IsCyclic(doc) && HasOpenTail(doc) && (t < ks[0].Time || t > ks[ks.Count - 1].Time))
+        {
+            // Open-tail loop: interpolate the wrap segment [lastTime, firstTime+1] (period 1).
+            float last = ks[ks.Count - 1].Time;
+            float h = ks[0].Time + 1f - last;
+            float dt = t >= last ? t - last : t + 1f - last;
+            float uw = h <= 1e-6f ? 0f : MathHelper.Clamp(dt / h, 0f, 1f);
+            PoseData.Apply(ks[ks.Count - 1].Bones, a);
+            PoseData.Apply(ks[0].Bones,            b);
+            SkeletonPose.Lerp(a, b, uw, dest);
+            return;
+        }
+        if (t <= ks[0].Time)            { PoseData.Apply(ks[0].Bones, dest); return; }
+        if (t >= ks[ks.Count - 1].Time) { PoseData.Apply(ks[ks.Count - 1].Bones, dest); return; }
 
         int i = 0;
         while (i < ks.Count - 1 && ks[i + 1].Time < t) i++;
@@ -70,6 +83,21 @@ public static class AnimationSampler
         br = default;
         var ks = doc.Keyframes;
         int N = ks.Count;
+        bool cyc  = IsCyclic(doc);
+        bool open = cyc && HasOpenTail(doc);
+
+        // Open-tail loop, t in the wrap gap: the segment IS [last, first+1] (period 1).
+        if (open && (t < ks[0].Time || t > ks[N - 1].Time))
+        {
+            float wrapH = ks[0].Time + 1f - ks[N - 1].Time;
+            float dt = t >= ks[N - 1].Time ? t - ks[N - 1].Time : t + 1f - ks[N - 1].Time;
+            br.i0 = N - 1; br.i1 = 0; br.h = wrapH;
+            br.u  = wrapH <= 1e-6f ? 0f : MathHelper.Clamp(dt / wrapH, 0f, 1f);
+            br.iL = N - 2; br.hL = ks[N - 1].Time - ks[N - 2].Time; br.haveL = true;
+            br.iR = 1;     br.hR = ks[1].Time - ks[0].Time;         br.haveR = true;
+            return true;
+        }
+
         int i = 0;
         while (i < N - 1 && ks[i + 1].Time < t) i++;
         if (i > N - 2) i = N - 2;
@@ -77,12 +105,17 @@ public static class AnimationSampler
         br.i0 = i; br.i1 = i + 1; br.h = h;
         br.u = h <= 1e-6f ? 0f : MathHelper.Clamp((t - ks[i].Time) / h, 0f, 1f);
 
-        bool cyc = IsCyclic(doc);
+        // Cyclic neighbor across the seam: an open-tail loop's neighbor is the wrap segment
+        // itself (last↔first, span to the NEXT cycle); a duplicate-seam loop skips the
+        // duplicated endpoint keyframe (period = last−first).
+        float seamH  = open ? ks[0].Time + 1f - ks[N - 1].Time : 0f;
         float period = ks[N - 1].Time - ks[0].Time;
         if (i - 1 >= 0)      { br.iL = i - 1; br.hL = ks[i].Time - ks[i - 1].Time;            br.haveL = true; }
+        else if (open)       { br.iL = N - 1; br.hL = seamH;                                  br.haveL = true; }
         else if (cyc)        { br.iL = N - 2; br.hL = ks[0].Time - ks[N - 2].Time + period;   br.haveL = true; }
         else                 { br.iL = i;     br.hL = 1f;                                     br.haveL = false; }
         if (i + 2 <= N - 1)  { br.iR = i + 2; br.hR = ks[i + 2].Time - ks[i + 1].Time;        br.haveR = true; }
+        else if (open)       { br.iR = 0;     br.hR = seamH;                                  br.haveR = true; }
         else if (cyc)        { br.iR = 1;     br.hR = ks[1].Time - ks[0].Time;                br.haveR = true; }
         else                 { br.iR = i + 1; br.hR = 1f;                                     br.haveR = false; }
         return true;
@@ -96,9 +129,15 @@ public static class AnimationSampler
     {
         float t1 = b.Local[k].Rotation, t2 = c.Local[k].Rotation;
         dCurr = MathHelper.WrapAngle(t2 - t1);
-        float slopeCurr = dCurr / br.h;
-        si  = br.haveL ? 0.5f * (MathHelper.WrapAngle(t1 - a.Local[k].Rotation) / br.hL + slopeCurr) : 0f;
-        si1 = br.haveR ? 0.5f * (slopeCurr + MathHelper.WrapAngle(d.Local[k].Rotation - t2) / br.hR) : 0f;
+        // Zero-width intervals (two keyframes sampled at the same editor playhead) must
+        // degrade to a step, not divide to NaN — a NaN here poisons the pose for every
+        // frame whose C1 bracket touches the duplicate (seen as the rig vanishing for
+        // ~2 frames per cycle in run.json). Guard every interval width the same way.
+        float slopeCurr = br.h  <= 1e-6f ? 0f : dCurr / br.h;
+        float slopeL    = br.hL <= 1e-6f ? 0f : MathHelper.WrapAngle(t1 - a.Local[k].Rotation) / br.hL;
+        float slopeR    = br.hR <= 1e-6f ? 0f : MathHelper.WrapAngle(d.Local[k].Rotation - t2) / br.hR;
+        si  = br.haveL ? 0.5f * (slopeL + slopeCurr) : 0f;
+        si1 = br.haveR ? 0.5f * (slopeCurr + slopeR) : 0f;
     }
 
     // C1 sample at normalized time t into `dest` (rotation = Hermite spline; translation/scale
@@ -110,8 +149,14 @@ public static class AnimationSampler
     {
         var ks = doc?.Keyframes;
         if (ks == null || ks.Count == 0) { dest.SetToDefault(); return; }
-        if (ks.Count == 1 || t <= ks[0].Time)        { PoseData.Apply(ks[0].Bones, dest); return; }
-        if (t >= ks[ks.Count - 1].Time)              { PoseData.Apply(ks[ks.Count - 1].Bones, dest); return; }
+        if (ks.Count == 1) { PoseData.Apply(ks[0].Bones, dest); return; }
+        // An open-tail loop has no held clamp region: times outside [first,last] are the
+        // wrap segment, which TryBracket resolves. Only clamp for everything else.
+        if (!(IsCyclic(doc) && HasOpenTail(doc)))
+        {
+            if (t <= ks[0].Time)            { PoseData.Apply(ks[0].Bones, dest); return; }
+            if (t >= ks[ks.Count - 1].Time) { PoseData.Apply(ks[ks.Count - 1].Bones, dest); return; }
+        }
 
         TryBracket(doc, t, out var br);
         PoseData.Apply(ks[br.iL].Bones, a);
@@ -163,16 +208,79 @@ public static class AnimationSampler
         }
     }
 
-    // Whether a clip is a seamless cycle (Loop set AND first/last keyframe poses match —
-    // locomotion duplicates the seam pose; action clips default Loop=true but start≠end, so
-    // they read as one-shots). Cached on the doc. Decides the C1 boundary-tangent policy.
+    // Whether a clip is a seamless cycle. Two authoring styles qualify:
+    //  - ENDPOINT SEAM: the last keyframe sits at t≈1 and duplicates the first pose
+    //    (the legacy convention; SeamMismatch guards the duplicate).
+    //  - OPEN TAIL: a looping phase-driven clip whose last keyframe ends BEFORE t=1.
+    //    The cycle period is exactly 1 and the sampler interpolates the wrap segment
+    //    [lastTime, firstTime+1] back to the first keyframe — no duplicate needed.
+    // Action clips default Loop=true but start≠end at the endpoint, so they still read as
+    // one-shots (the open-tail rule is gated to locomotion types to keep it that way).
+    // Cached on the doc. Decides the C1 boundary-tangent policy.
     internal static bool IsCyclic(AnimationDocument doc)
     {
         if (doc.CyclicCache.HasValue) return doc.CyclicCache.Value;
         var ks = doc.Keyframes;
-        bool cyc = doc.Loop && ks != null && ks.Count >= 3 && SamePose(ks[0], ks[ks.Count - 1]);
+        bool cyc = doc.Loop && ks != null && ks.Count >= 3 &&
+                   (SamePose(ks[0], ks[ks.Count - 1]) ||
+                    (HasOpenTail(doc) && IsPhaseLoopType(doc)));
         doc.CyclicCache = cyc;
         return cyc;
+    }
+
+    // The last keyframe ends before the 1-unit cycle endpoint, leaving a real wrap segment.
+    internal static bool HasOpenTail(AnimationDocument doc)
+    {
+        var ks = doc?.Keyframes;
+        return ks != null && ks.Count > 0 && ks[ks.Count - 1].Time < 1f - EndpointEps;
+    }
+
+    // The clip categories that loop through the phase seam (same gate as SeamMismatch).
+    private static bool IsPhaseLoopType(AnimationDocument doc)
+        => Enum.TryParse<AnimClip>(doc.Type, ignoreCase: true, out var c) &&
+           (c == AnimClip.Walk || c == AnimClip.WalkBack || c == AnimClip.Run || c == AnimClip.Idle
+            || c == AnimClip.CrouchWalk);
+
+    private const float EndpointEps = 1e-3f;
+
+    // AUTHORING GUARD: a looping phase-driven clip (Walk/WalkBack/Run/Idle) whose last
+    // keyframe sits AT the cycle endpoint (t≈1) must make it a duplicate of the FIRST —
+    // otherwise the clip silently degrades to one-shot seam semantics (held pose + zero ω
+    // at the seam) ⇒ a per-stride pose pop and a cadence stall/hop (this exact failure
+    // shipped in run.json once). A clip whose last keyframe ends BEFORE t=1 is an OPEN-TAIL
+    // loop instead — the sampler interpolates the wrap segment back to the first keyframe,
+    // no duplicate required — so it is exempt. Returns true on an endpoint drift and reports
+    // the worst bone + wrapped delta. Recomputes fresh (ignores CyclicCache) so the animation
+    // editor can warn live while the clip is being edited; also drops the stale cache so
+    // sampling picks edits up.
+    public static bool SeamMismatch(AnimationDocument doc, out string bone, out float deltaRad)
+    {
+        bone = null; deltaRad = 0f;
+        var ks = doc?.Keyframes;
+        if (ks == null || ks.Count < 3 || !doc.Loop) return false;
+        // Only phase-driven categories loop through the seam; action clips declare Loop=true
+        // with start≠end on purpose (they play once over the action window).
+        if (!IsPhaseLoopType(doc)) return false;
+        // Open-tail loop: the wrap segment supplies the seam — nothing to match.
+        if (HasOpenTail(doc)) { doc.CyclicCache = null; return false; }
+
+        var first = ks[0].Bones; var last = ks[ks.Count - 1].Bones;
+        if (first == null || last == null) return false;
+        foreach (var e in first)
+        {
+            if (e.Bone == null) continue;
+            bool found = false;
+            foreach (var f in last)
+                if (f.Bone == e.Bone)
+                {
+                    float d = MathF.Abs(MathHelper.WrapAngle(f.Rotation - e.Rotation));
+                    if (d > deltaRad) { deltaRad = d; bone = e.Bone; }
+                    found = true; break;
+                }
+            if (!found && deltaRad < MathF.PI) { deltaRad = MathF.PI; bone = e.Bone + " (missing)"; }
+        }
+        doc.CyclicCache = null;   // edits may have changed cyclicity — let sampling re-derive
+        return deltaRad > 1e-3f;
     }
 
     private static bool SamePose(AnimationKeyframe ka, AnimationKeyframe kb)

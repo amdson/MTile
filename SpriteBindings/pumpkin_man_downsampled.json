@@ -1,0 +1,87 @@
+{
+  "Skeleton": "biped",
+  "Image": "pumpkin_man_downsampled.png",
+  "ImageToRigScale": 0.20339951,
+  "ImageToRigTx": -24.8387,
+  "ImageToRigTy": -40.021812,
+  "MeshStep": 10,
+  "AlphaThreshold": 8,
+  "WeightAlpha": 2,
+  "HandleStep": 0.25,
+  "MaxHandles": 8,
+  "Mask": "pumpkin_man_downsampled_mask.png",
+  "Layers": [
+    { "Name": "arm_left",  "Color": "#FFFF00", "Bones": ["arm_l_*"] },
+    { "Name": "arm_right", "Color": "#FF0000", "Bones": ["arm_r_*"] },
+    { "Name": "body",                           "Bones": ["hip", "chest", "head"] },
+    { "Name": "leg_left",  "Color": "#00FF00", "Bones": ["leg_r_*", "foot_r"] },
+    { "Name": "leg_right", "Color": "#0000FF", "Bones": ["leg_l_*", "foot_l"] }
+  ],
+  "BindPose": [
+    {
+      "Bone": "hip",
+      "Rotation": 0,
+      "Length": 0
+    },
+    {
+      "Bone": "chest",
+      "Rotation": -1.5694331,
+      "Length": 16
+    },
+    {
+      "Bone": "head",
+      "Rotation": -0.00030480573,
+      "Length": 10
+    },
+    {
+      "Bone": "arm_l_upper",
+      "Rotation": 3.698145,
+      "Length": 10
+    },
+    {
+      "Bone": "arm_l_lower",
+      "Rotation": -0.6551553,
+      "Length": 10
+    },
+    {
+      "Bone": "arm_r_upper",
+      "Rotation": 2.5652452,
+      "Length": 10
+    },
+    {
+      "Bone": "arm_r_lower",
+      "Rotation": 0.6793563,
+      "Length": 10
+    },
+    {
+      "Bone": "leg_l_upper",
+      "Rotation": 1.0744873,
+      "Length": 9.5
+    },
+    {
+      "Bone": "leg_l_lower",
+      "Rotation": 0.4330998,
+      "Length": 9.5
+    },
+    {
+      "Bone": "foot_l",
+      "Rotation": -1.3258177,
+      "Length": 0.246211
+    },
+    {
+      "Bone": "leg_r_upper",
+      "Rotation": 1.9587963,
+      "Length": 9.5
+    },
+    {
+      "Bone": "leg_r_lower",
+      "Rotation": 0,
+      "Length": 9.5
+    },
+    {
+      "Bone": "foot_r",
+      "Rotation": -1.3258177,
+      "Length": 0.246211
+    }
+  ]
+}

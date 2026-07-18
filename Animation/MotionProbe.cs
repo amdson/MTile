@@ -132,6 +132,46 @@ public static class MotionProbe
                     + $"{clip.Keyframes.Count} keyframes  Loop={clip.Loop}");
         sb.AppendLine("# +x = forward, +y = DOWN.  ground = lowest point of the pose; "
                     + "'planted' = a tip within 1.0 of it.  C1 sampling (matches the game).");
+        if (AnimationSampler.SeamMismatch(clip, out string seamBone, out float seamDelta))
+            sb.AppendLine($"# FLAGS: SEAM MISMATCH — looping {clip.Type} clip's first/last keyframe poses "
+                        + $"differ ({seamBone} by {seamDelta:0.000} rad). The loop degrades to one-shot seam "
+                        + "semantics: pose pop + cadence stall every stride. Make the last keyframe an exact "
+                        + "copy of the first, OR move it before t=1 (open-tail loop: the sampler wraps "
+                        + "last→first over the remaining phase).");
+
+        // STEEP intervals: |Δrotation| / interval-width far above a natural swing rate reads
+        // as a single-frame limb snap at locomotion phase rates (~0.07 phase/frame ⇒ a
+        // 15 rad/phase ramp is ~1 rad in ONE frame). Walk's steepest authored interval is
+        // ~4 rad/phase; flag anything ≥ 8 so staircased keyframes (hold → whip) get retimed.
+        // For an open-tail loop the wrap segment [last, first+1] is a real interval too —
+        // include it in the scan (i = count-1 pairs last with first at +1 cycle).
+        bool openTail = AnimationSampler.IsCyclic(clip) && AnimationSampler.HasOpenTail(clip);
+        int pairs = clip.Keyframes.Count - 1 + (openTail ? 1 : 0);
+        for (int i = 0; i < pairs; i++)
+        {
+            var ka = clip.Keyframes[i];
+            bool wrap = i + 1 == clip.Keyframes.Count;
+            var kb = wrap ? clip.Keyframes[0] : clip.Keyframes[i + 1];
+            float w = wrap ? kb.Time + 1f - ka.Time : kb.Time - ka.Time;
+            if (w <= 1e-5f || ka.Bones == null || kb.Bones == null) continue;
+            float maxD = 0f; string worst = null;
+            foreach (var ea in ka.Bones)
+            {
+                if (ea.Bone == null) continue;
+                foreach (var eb in kb.Bones)
+                    if (eb.Bone == ea.Bone)
+                    {
+                        float d = MathF.Abs(MathHelper.WrapAngle(eb.Rotation - ea.Rotation));
+                        if (d > maxD) { maxD = d; worst = ea.Bone; }
+                        break;
+                    }
+            }
+            float slope = maxD / w;
+            if (slope >= 8f)
+                sb.AppendLine($"# FLAGS: STEEP interval t={ka.Time:0.000}-{(wrap ? kb.Time + 1f : kb.Time):0.000}{(wrap ? " (wrap)" : "")} — {worst} moves "
+                            + $"{maxD:0.000} rad over {w:0.000} phase ({slope:0.0} rad/phase; walk max ≈ 4). "
+                            + "Reads as a limb snap at locomotion rates — spread the motion over more phase.");
+        }
         var root = Root(scale, facing);
 
         foreach (var kf in clip.Keyframes)

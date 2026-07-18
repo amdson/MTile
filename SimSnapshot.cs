@@ -37,6 +37,10 @@ public sealed class SimSnapshot
     // (CombatSystem.PeekHits); must round-trip so a replay can't miss a connection.
     public Dictionary<int, int> HitConfirm;
 
+    // Recoil inbox — same frame-N→N+1 message shape as HitConfirm, carrying the
+    // Newton's-third-law bounce the attacker applies next frame (PeekRecoil).
+    public Dictionary<int, Microsoft.Xna.Framework.Vector2> Recoil;
+
     // Moving-platform poses, in registration order. Position+velocity is enough since
     // the tickers re-derive motion purely from Elapsed.
     public PlatformState[] Platforms;

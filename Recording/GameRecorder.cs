@@ -53,6 +53,11 @@ public sealed class GameRecorder
         public PoseCapture         Primary;
         public PoseCapture[]       Secondaries;
         public CameraState         Camera;
+        // The animator input of this frame (pins/surfaces arrays cloned — the live
+        // sample shares scratch arrays). This is what Ctrl+S persists: the take file
+        // stores the sample STREAM and the offline viewer re-runs the animator over it
+        // (Plans/ANIM_TAKE_VIEWER_PLAN.md).
+        public CharacterAnimSample Sample;
     }
 
     private readonly List<Frame> _frames = new();
@@ -91,6 +96,11 @@ public sealed class GameRecorder
             if (State == Mode.Playback) ExitPlayback(sim, cam);
             else if (_frames.Count > 0) EnterPlayback(sim, cam, primary, secondaries, scale);
         }
+        else if (ctrl && Pressed(kb, Keys.S) && State != Mode.Recording && _frames.Count > 0)
+        {
+            SaveTake();   // Idle-with-take or mid-playback: persist for the offline viewer
+        }
+        if (_noticeFrames > 0) _noticeFrames--;
 
         if (State == Mode.Playback)
             ScrubAndApply(kb, sim, cam, primary, secondaries);
@@ -101,17 +111,21 @@ public sealed class GameRecorder
 
     // ── recording ───────────────────────────────────────────────────────────────
     // Append a frame. Call once per rendered frame while IsRecording, AFTER the cosmetic
-    // pass (so the animator pose + RigRoot reflect this frame).
+    // pass (so the animator pose + RigRoot reflect this frame). `dt` is the render delta
+    // the cosmetic pass fed the animators — recorded so an offline replay ticks the
+    // animator with the exact same steps.
     public void CaptureFrame(Simulation sim, Camera cam,
-                             CharacterAnimator primary, List<CharacterAnimator> secondaries, float scale)
+                             CharacterAnimator primary, List<CharacterAnimator> secondaries,
+                             float scale, float dt)
     {
         if (State != Mode.Recording) return;
-        _frames.Add(BuildFrame(sim, cam, primary, secondaries, scale));
+        _frames.Add(BuildFrame(sim, cam, primary, secondaries, scale, dt));
         if (_frames.Count >= MaxFrames) State = Mode.Idle;   // auto-stop at the cap
     }
 
     private static Frame BuildFrame(Simulation sim, Camera cam,
-                                    CharacterAnimator primary, List<CharacterAnimator> secondaries, float scale)
+                                    CharacterAnimator primary, List<CharacterAnimator> secondaries,
+                                    float scale, float dt)
     {
         var secs = new PoseCapture[sim.SecondaryPlayers.Count];
         for (int i = 0; i < secs.Length && i < secondaries.Count; i++)
@@ -125,6 +139,17 @@ public sealed class GameRecorder
             };
         }
 
+        // Rebuild the primary's animator input for this frame — a pure read of the same
+        // state the cosmetic pass just consumed, so it matches what the animator saw.
+        // Pins/surfaces are cloned: the live sample reuses shared scratch arrays.
+        var s = CharacterAnimSample.From(sim.Player, dt);
+        var sample = new CharacterAnimSample(
+            s.Position, s.Velocity, s.Facing, s.Grounded, s.MovementState, s.Action, s.Dt,
+            s.ActionTime, s.ActionDuration, s.MovementProgress,
+            s.Pins is { Length: > 0 } ? (ExternalPin[])s.Pins.Clone() : null,
+            s.Surfaces is { Length: > 0 } ? (SolverSurface[])s.Surfaces.Clone() : null,
+            s.HasGrip, s.GripTarget, s.HasAim, s.AimDir, s.Tag);
+
         return new Frame
         {
             Sim     = sim.Snapshot(),
@@ -137,14 +162,41 @@ public sealed class GameRecorder
             },
             Secondaries = secs,
             Camera      = new CameraState { Position = cam.Position, Zoom = cam.Zoom },
+            Sample      = sample,
         };
+    }
+
+    // ── save to disk (Ctrl+S) ───────────────────────────────────────────────────
+    // Persist the take for the offline viewer: the sample stream + deduped terrain
+    // states (AnimTake). Poses/sim are NOT saved — the viewer re-runs the animator.
+    private void SaveTake()
+    {
+        var take = new AnimTake
+        {
+            SkeletonScale = Game1.SkeletonScale,
+            PlayerRadius  = PlayerCharacter.Radius,
+        };
+        foreach (var f in _frames)
+            take.AddFrame(f.Sample, f.Terrain);
+
+        string path = System.IO.Path.Combine(
+            AnimTake.DefaultDir(), $"take_{System.DateTime.Now:yyyyMMdd_HHmmss}.take.json");
+        try
+        {
+            take.Save(path);
+            Notice($"saved {_frames.Count} frames -> {path}");
+        }
+        catch (System.Exception ex)
+        {
+            Notice($"save FAILED: {ex.Message}");
+        }
     }
 
     // ── playback ────────────────────────────────────────────────────────────────
     private void EnterPlayback(Simulation sim, Camera cam,
                                CharacterAnimator primary, List<CharacterAnimator> secondaries, float scale)
     {
-        _resume  = BuildFrame(sim, cam, primary, secondaries, scale);
+        _resume  = BuildFrame(sim, cam, primary, secondaries, scale, 1f / 60f);
         State    = Mode.Playback;
         _cursor  = 0;
         _applied = -1;
@@ -235,15 +287,23 @@ public sealed class GameRecorder
         sec = default; return false;
     }
 
+    // Transient HUD notice (e.g. "saved ... -> Takes/...json"), shown for a few seconds.
+    private string _notice;
+    private int    _noticeFrames;
+    private void Notice(string text) { _notice = text; _noticeFrames = 240; }
+
     public void DrawHud(SpriteBatch sb, SpriteFont font)
     {
         string text = State switch
         {
             Mode.Recording => $"[REC]  {_frames.Count} frames   (Ctrl+R stop)",
             Mode.Playback  => $"[PLAY {(_playDir > 0 ? ">>" : _playDir < 0 ? "<<" : "||")}]  {_cursor + 1}/{_frames.Count}"
-                              + "   <-/-> step, Shift x10, J/K/L, Home/End, Ctrl+P exit",
+                              + "   <-/-> step, Shift x10, J/K/L, Home/End, Ctrl+S save, Ctrl+P exit",
+            _ when _frames.Count > 0 => $"[TAKE]  {_frames.Count} frames held   (Ctrl+P scrub, Ctrl+S save, Ctrl+R re-record)",
             _ => null,
         };
+        if (_noticeFrames > 0 && _notice != null)
+            text = text == null ? _notice : text + "\n" + _notice;
         if (text == null) return;
 
         var color = State == Mode.Recording ? Color.OrangeRed : Color.Aqua;

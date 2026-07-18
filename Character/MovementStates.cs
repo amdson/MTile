@@ -930,6 +930,11 @@ public class LedgeGrabState : MovementState
         abilities.IsLedgeGrabbing  = true;
         abilities.GrabWallDir      = _wallDir;
         abilities.HasDoubleJumped  = false;
+        // Face the ledge for the whole hang, same reason WallSlidingState pins facing: the
+        // Hang clip reaches BOTH hands to the corner at +X·Radius, so a drop-in grab (path B,
+        // which can enter facing away) would otherwise clutch at empty air behind the body.
+        // Facing is snapshot-safe sim state and isn't otherwise refreshed while airborne.
+        abilities.Facing           = _wallDir;
 
         EnsureContacts(ctx, abilities);
     }

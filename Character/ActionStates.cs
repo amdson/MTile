@@ -206,12 +206,30 @@ public abstract class SlashLikeAction : ActionState
     private const float TrailLifetime         = 0.12f;
 
 
+    // Collision-mode strike parameters (HIT_MOMENTUM_PLAN). Slashes deliberately
+    // strike LIGHTER than the player's body mass (2.5): they're quick arm arcs,
+    // not full-body thrusts like the stab — so equal-or-heavier targets shrug
+    // more and light targets still ping. MinLaunch keeps repeat juggle hits
+    // alive: a ball already flying away faster than the swing (u ≤ 0) still
+    // visibly pops instead of a dead connect.
+    private   const   float    SlashStrikeMass     = 2.5f;
+    private   const   float    SlashRestitution    = 0.5f;
+    private   const   float    SlashMinLaunch      = 180f;
+
     // ----- per-variant knobs ------------------------------------------------
     protected abstract float   Duration            { get; }   // seconds
     protected abstract float   ArcRadiusScale      { get; }   // multiplier on BaseArcRadius
     protected abstract float   SweepAngleDeg       { get; }   // total sweep (90, 150, …)
     protected abstract float   SweepDirection      { get; }   // +1 CCW, -1 CW (mirror)
     protected abstract float   KnockbackMagnitude  { get; }
+    // Collision-mode strike speed (px/s), stacked on the attacker's velocity at
+    // publish. 0 (default) ⇒ the variant publishes legacy Impulse mode: the
+    // hold-slashes (S1/S2) keep their designed tap so the hold field isn't
+    // fighting a launch, and GrabbedSlash stays out of momentum entirely.
+    // Launcher parity mapping from the old impulse numbers: vs a mass-1 target
+    // the impulse Δv was KnockbackMagnitude; collision Δv = (1+e)·μ·u ≈ 0.75·u
+    // at strike mass 1 ⇒ StrikeSpeed ≈ 1.33 × old magnitude.
+    protected virtual  float   StrikeSpeed         => 1f;
     protected abstract Color   SlashColor          { get; }
     protected abstract bool    RequireGround       { get; }
     protected abstract bool    RequireAir          { get; }
@@ -322,12 +340,22 @@ public abstract class SlashLikeAction : ActionState
             var region = new BoundingBox(
                 apex.X - ArcRadius * 0.5f, apex.Y - ArcRadius * 0.5f,
                 apex.X + ArcRadius * 0.5f, apex.Y + ArcRadius * 0.5f);
+            // Launcher variants (StrikeSpeed > 0) publish Collision mode; the
+            // strike fields are ignored under Impulse, so one call covers both.
+            // KnockbackImpulse stays authored either way — parry cone, bullet
+            // deflect, and the OnHit early-outs read it as the swing direction.
             ctx.Hitboxes.Publish(new Hitbox(
                 region, vars.HitId, SlashDamagePerFrame,
                 vars.SlashDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, SlashColor,
                 hitstunSecondsOverride: HitstunSecondsOverride,
-                grabStrengthDamage: GrabStrengthDamage));
+                grabStrengthDamage: GrabStrengthDamage,
+                mode: StrikeSpeed > 0f ? KnockbackMode.Collision : KnockbackMode.Impulse,
+                strikeDir: vars.SlashDir,
+                strikeVelocity: ctx.Body.Velocity + vars.SlashDir * StrikeSpeed,
+                strikeMass: SlashStrikeMass,
+                restitution: SlashRestitution,
+                minLaunch: SlashMinLaunch));
         }
 
         // Holding slashes broadcast their pull field for the WHOLE slash (not just
@@ -444,6 +472,7 @@ public class GroundSlash3 : SlashLikeAction
     protected override float SweepAngleDeg       => 160f;
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 380f;
+    protected override float StrikeSpeed         => 500f;    // launcher — 1.33 × the old 380
     protected override Color SlashColor          => Color.OrangeRed;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -474,6 +503,7 @@ public class CrouchSlash : SlashLikeAction
     protected override float SweepAngleDeg       => 90f;
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 240f;
+    protected override float StrikeSpeed         => 320f;
     protected override Color SlashColor          => Color.Goldenrod;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -512,6 +542,7 @@ public class AirSlash1 : SlashLikeAction
     protected override float SweepAngleDeg       => 110f;
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 180f;
+    protected override float StrikeSpeed         => 240f;
     protected override Color SlashColor          => Color.DeepSkyBlue;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
@@ -531,6 +562,7 @@ public class AirSlash2 : SlashLikeAction
     protected override float SweepAngleDeg       => 140f;
     protected override float SweepDirection      => -1f;
     protected override float KnockbackMagnitude  => 280f;
+    protected override float StrikeSpeed         => 375f;
     protected override Color SlashColor          => Color.DeepSkyBlue;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
@@ -561,6 +593,7 @@ public class AirTurnSlash : SlashLikeAction
     protected override float SweepAngleDeg       => 60f;     // narrow
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 240f;
+    protected override float StrikeSpeed         => 320f;
     protected override Color SlashColor          => Color.Violet;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
@@ -652,20 +685,37 @@ public class StabAction : ActionState
     // connects while the tip is still near the body (vars.TipExt dips slightly negative
     // at the wind-up tail) and the per-frame polygons never go degenerate.
     private const float MinHitLength          = PlayerCharacter.Radius * 2f;
-    // Phase 3 power spectrum: 3× the old 380. At Mass 2.5 that's ~456 px/s of
-    // launch — well over the 350 stun threshold, so a clean stab launches AND
-    // stuns (→ TumbleState in the air). The payoff that justifies the longer
-    // startup + recovery and the commitment of the long swipe gesture.
+    // Direction-hint magnitude only (HIT_MOMENTUM_PLAN): the stab is the first
+    // Collision-mode move, so momentum comes from StrikeSpeed below, not this.
+    // KnockbackImpulse stays authored because the parry cone (CombatState.TryParry)
+    // and bullet deflection (BulletProjectile.OnHit) read it as the attack's
+    // direction, and the parry/invuln early-outs echo it back as recoil.
     private const float KnockbackMagnitude    = 1140f;
     private const float DamagePerFrame        = TileDamage.TileMaxHP / 4f;
-    // Recoil per connecting entity/cell, scaled against KnockbackImpulse and
-    // negated when applied to the attacker. BreakProtected ⇒ cells that the
-    // stab destroys this frame don't contribute (so ploughing through sand /
-    // dirt remains thrust-positive). Survivors (e.g. stone tiles) do — pogo.
-    // Tuned at 1.0: a single connecting stone cell delivers -380 px/s of
-    // recoil per active frame, easily overwhelming the lunge (+90) and ground
-    // friction, so the stab clearly pogos off hard surfaces.
-    private const float RecoilScale           = 0.0f;
+    // Collision-mode striker (HitResolver.Resolve): the stab is a virtual body
+    // flying at StrikeSpeed along the thrust, on top of the attacker's real
+    // velocity — so a dive stab genuinely hits (and pogos) harder than a
+    // standing poke. 650 keeps parity with the old tuned PvP launch: a
+    // stationary player target takes (1+e)·u/2 ≈ 488 px/s ≈ the old
+    // 1140/2.5 = 456, and Strength = u clears the 440 stun threshold, so a
+    // clean stab still launches AND stuns (→ Tumble). (First pass used 950 —
+    // 1.56× the old player launch, way too hot.)
+    private const float StrikeSpeed           = 650f;
+    // Entity-collision restitution + minimum visible launch for a connect on a
+    // fleeing target.
+    private const float Restitution           = 0.5f;
+    private const float MinLaunch             = 120f;
+    // Tile recoil (HitResolver.TileRecoil): bounce = (1+e_material)·approach·RecoilScale,
+    // fired ONCE PER ATTACK (CombatSystem latches on the dedupe set) against the
+    // bounciest surviving surface, floored at MinRecoilSpeed. Tuned so the
+    // DEFAULT stab-into-ground pogo is exactly a jump's worth of upward momentum
+    // (full-hop launch ≈ -100 initial + -1500·0.12 hold ≈ 280 px/s): a standing
+    // stab into stone computes 1.7·650·0.2 ≈ 221 and rides the 280 floor. Speed
+    // earns more — a 400 px/s dive → 1.7·1050·0.2 ≈ 357, terminal ~700 → ≈ 459.
+    // BreakProtected ⇒ cells the stab destroys don't contribute (ploughing
+    // through sand / dirt stays thrust-positive); survivors (stone) pogo.
+    private const float RecoilScale           = 0.2f;
+    private const float MinRecoilSpeed        = 280f;
     // Hardness floor: sand (MaxHP 0.5) doesn't pogo even on its first contact
     // frame (when BreakProtected can't yet save us — sand takes 2 hits to
     // break). Dirt (1.0) and stone (2.0) still pogo.
@@ -886,7 +936,14 @@ public class StabAction : ActionState
                 ctx.Faction, ctx.SelfId, ColorFor(vars.IsGrounded),
                 shape: primaryPoly, shapePos: primaryCenter, shapeRotation: rotation,
                 recoilScale: RecoilScale, recoilBreakProtected: true,
-                recoilMinMaterialHP: RecoilMinMaterialHP));
+                recoilMinMaterialHP: RecoilMinMaterialHP,
+                mode: KnockbackMode.Collision,
+                strikeDir: vars.StabDir,
+                strikeVelocity: ctx.Body.Velocity + vars.StabDir * StrikeSpeed,
+                strikeMass: ctx.Mass,
+                restitution: Restitution,
+                minLaunch: MinLaunch,
+                minRecoilSpeed: MinRecoilSpeed));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No
             // knockback (knockback comes from the primary box). Tiles only — passes
@@ -1072,6 +1129,7 @@ public class GuardRetaliateAction : SlashLikeAction
     protected override float SweepAngleDeg       => 70f;
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 420f;     // top-end — counters reward heavily
+    protected override float StrikeSpeed         => 560f;
     protected override Color SlashColor          => Color.Cyan;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => false;

@@ -140,13 +140,17 @@ public class CombatState
     private const float MaxHitstunSeconds        = 0.70f;
     private const float HitstunExtensionScale    = 0.5f;
 
-    // Stun tuning. Threshold compares against the incoming Hitbox.KnockbackImpulse
-    // magnitude (pre-mass-division) so attack strength controls stun-vs-not
-    // independent of player Mass. At 350f, hold-slashes (S1/S2, now 60–80),
-    // CrouchSlash (240), AirSlash1/2 (180/280) all fall short of stunning — they
-    // only land hitstun. Slash3 (380), Stab (380), GuardRetaliate (420), Pulse
-    // (450), and Bullet (1200) cross the threshold and flag StunActive on top.
-    private const float StunImpulseThreshold = 350f;
+    // Stun tuning. Threshold compares against HitResult.Strength (pre-mass): the
+    // authored impulse magnitude for Impulse-mode hits, the closing speed u for
+    // Collision-mode hits — so attack strength controls stun-vs-not independent
+    // of target Mass either way. Collision u runs ≈ 1.33× the old impulse
+    // numbers (the parity mapping), so the threshold moved 350 → 440 to keep the
+    // designed spectrum: hold-slashes (60–80), CrouchSlash/AirTurn (u 320+vel),
+    // AirSlash1/2 (u 240/375) stay hitstun-only at baseline — though a fast dive
+    // can push a swing over the line, which is speed earning the stun. Slash3
+    // (u 500), GuardRetaliate (u 560), Stab (u 950), Pulse (impulse 450), and
+    // Bullet (1200) cross and flag StunActive on top.
+    private const float StunImpulseThreshold = 440f;
     private const float StunSeconds          = 0.6f;
 
     // While hitstunned, the victim's self-control is muted so knockback actually

@@ -178,6 +178,12 @@ public static class Stages
 
         var (dummy, ctrl) = g.AddSecondaryPlayer(home);
 
+        // Juggling drill: a ball that breaks on any tile contact and reappears at
+        // its spawn point, five tiles above the plateau floor (floor top world
+        // y = 96, so 96 − 5·16 = 16). Off to the player-spawn side so the rally
+        // has open air away from the dummy's attack cycle.
+        g.SpawnEntity(EntityFactory.Practice(new Vector2(-60f, 16f)));
+
         // Dummy attack script, driven as a pure function of the sim clock + sim
         // state (positions, facing) — deterministic and rollback-safe for the same
         // reason entity AI is: it reads only sim state and is re-derived on replay.

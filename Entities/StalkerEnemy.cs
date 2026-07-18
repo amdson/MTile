@@ -91,13 +91,14 @@ public class StalkerEnemy : Entity
         Sprite       = Sprites.Stalker(9f);
     }
 
-    public override void OnHit(in Hitbox hit, in Hurtbox myHurtbox)
+    public override Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
         // Base applies damage + knockback impulse to velocity. We pile a brief
         // stagger on top so the AI doesn't immediately overwrite Velocity.X
         // and erase the visible knock-back next frame.
-        base.OnHit(hit, myHurtbox);
+        var delivered = base.OnHit(hit, myHurtbox);
         if (!IsDead) Transition(AIState.Stagger);
+        return delivered;
     }
 
     public override void Update(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)

@@ -25,12 +25,12 @@ public sealed class CombatSystem
     private readonly Dictionary<int, HashSet<EntityId>> _hitDedupe = new();
     private readonly HashSet<int> _liveHitIds = new();
     private readonly List<int> _scratchPrune = new();
-    // Per-frame recoil tally — accumulated impulse to apply to each hitbox's
-    // attacker, keyed by HitId. Cleared at the start of every Apply (per-step
-    // transient; not snapshotted). Attackers read via PeekRecoil in their
-    // ApplyActionForces hook — that runs in frame N+1 before frame N+1's Apply
-    // clears the dict, so the tally is effectively a 1-frame inbox from
-    // CombatSystem to the action layer.
+    // Per-frame recoil tally — accumulated Δv to apply to each hitbox's
+    // attacker, keyed by HitId. Cleared at the start of every Apply. Attackers
+    // read via PeekRecoil in their ApplyActionForces hook — that runs in frame
+    // N+1 before frame N+1's Apply clears the dict, so the tally is effectively
+    // a 1-frame inbox from CombatSystem to the action layer. Snapshotted
+    // (CaptureRecoil) like the hit-confirm inbox — it's a pending N→N+1 message.
     private readonly Dictionary<int, Vector2> _recoilByHitId = new();
     // Per-frame hit-confirm tally — count of ENTITIES a hitbox connected with this
     // frame, keyed by HitId. Same 1-frame-inbox lifecycle as _recoilByHitId: cleared
@@ -75,9 +75,25 @@ public sealed class CombatSystem
                 hitAxes  = hit.Shape.GetAxes(hitVerts);
             }
 
+            // Per-attack dedupe set, shared by the entity path AND the tile-recoil
+            // latch below (fetched up here so both can see it). Persists across the
+            // attack's broadcast window; pruned when the HitId stops broadcasting.
+            if (!_hitDedupe.TryGetValue(hit.HitId, out var alreadyHit))
+            {
+                alreadyHit = new HashSet<EntityId>();
+                _hitDedupe[hit.HitId] = alreadyHit;
+            }
+
             // --- Tile path (cumulative; same as the old DamageSystem) -----------
             if (hit.Targets != HitTargets.EntitiesOnly)
             {
+                // Collision-mode tile recoil resolves ONCE per hitbox per frame —
+                // a wall face of N cells is one surface, not N collisions. The
+                // cell loop only records the bounciest eligible material here;
+                // TileRecoil below turns it into a single reflected bounce.
+                // (< 0 ⇒ no eligible surface contacted this frame.)
+                float surfaceRestitution = -1f;
+
                 int gtx0 = (int)MathF.Floor(hit.Region.Left   / Chunk.TileSize);
                 int gtx1 = (int)MathF.Floor(hit.Region.Right  / Chunk.TileSize);
                 int gty0 = (int)MathF.Floor(hit.Region.Top    / Chunk.TileSize);
@@ -106,20 +122,35 @@ public sealed class CombatSystem
                         //                    hardness floor (e.g. sand under a stab).
                         bool breakAllows = !hit.RecoilBreakProtected || !broke;
                         bool hardEnough  = TileDamage.MaxHPFor(typeBefore) > hit.RecoilMinMaterialHP;
-                        if (breakAllows && hardEnough)
+                        if (!breakAllows || !hardEnough) continue;
+                        if (hit.Mode == KnockbackMode.Collision)
+                        {
+                            float e = MaterialStrengths.RestitutionFor(typeBefore);
+                            if (e > surfaceRestitution) surfaceRestitution = e;
+                        }
+                        else
+                            // Legacy impulse recoil: authored vector, per cell, per frame.
                             AccumulateRecoil(hit.HitId, -hit.KnockbackImpulse * hit.RecoilScale);
                     }
                 }
+
+                // One pogo per ATTACK, not per frame: the authored swing speed in
+                // StrikeVelocity re-adds every frame the hitbox re-publishes, so
+                // closing speed alone can't self-limit a multi-frame overlap (the
+                // bounce only subtracts the attacker's body velocity). Latch on the
+                // attack's dedupe set using EntityId.None as the "tile surface"
+                // pseudo-target — None never collides with a live entity, and the
+                // latch snapshot/restores for free with the Dedupe table.
+                if (surfaceRestitution >= 0f && !alreadyHit.Contains(EntityId.None))
+                {
+                    AccumulateRecoil(hit.HitId, HitResolver.TileRecoil(in hit, surfaceRestitution));
+                    alreadyHit.Add(EntityId.None);
+                }
             }
 
-            // --- Entity path (deduped per (HitId, Target)) ----------------------
+            // --- Entity path (deduped per (HitId, Target) via `alreadyHit`) ------
             if (hit.Targets != HitTargets.TilesOnly)
             {
-                if (!_hitDedupe.TryGetValue(hit.HitId, out var alreadyHit))
-                {
-                    alreadyHit = new HashSet<EntityId>();
-                    _hitDedupe[hit.HitId] = alreadyHit;
-                }
                 foreach (var hb in hurtboxes.All)
                 {
                     if (hit.Owner == hb.Owner) continue;
@@ -128,16 +159,21 @@ public sealed class CombatSystem
                     if (hit.Shape != null && !OverlapsPolyAABB(hitVerts, hitAxes, hb.Region)) continue;
                     var target = resolve(hb.Target);
                     if (target == null) continue;   // owner despawned this frame — skip
-                    target.OnHit(hit, hb);
+                    // OnHit returns the impulse actually delivered (HitResolver) —
+                    // Impulse-mode targets echo back the authored KnockbackImpulse,
+                    // so recoil there is unchanged; Collision-mode targets return the
+                    // resolved J·n, so a heavy target that barely moved kicks the
+                    // attacker back hard (Newton's third law for real this time).
+                    var delivered = target.OnHit(hit, hb);
                     alreadyHit.Add(hb.Target);
                     _entityHitsByHitId.TryGetValue(hit.HitId, out var prevHits);
                     _entityHitsByHitId[hit.HitId] = prevHits + 1;
                     if (hit.RecoilScale > 0f)
-                        AccumulateRecoil(hit.HitId, -hit.KnockbackImpulse * hit.RecoilScale);
+                        AccumulateRecoil(hit.HitId, -delivered * hit.RecoilScale);
                 }
             }
         }
-
+        
         // Prune dedupe entries for HitIds that didn't broadcast this frame —
         // their attack is over, future hitboxes will use fresh HitIds anyway.
         _scratchPrune.Clear();
@@ -178,9 +214,18 @@ public sealed class CombatSystem
     // the frame after the hit lands — see PeekHits / SlashLikeAction). A snapshot
     // taken between the hit's Apply and the attacker's next read must carry it, or the
     // replayed run would miss a connection and diverge (the combo gate latches off it).
-    // _recoilByHitId is the same kind of inbox but is currently always empty
-    // (RecoilScale = 0 everywhere); if that changes it needs the same treatment.
+    // _recoilByHitId is the same kind of inbox and carries real data now that the
+    // stab's tile recoil is live — so it gets the same treatment below.
     public Dictionary<int, int> CaptureHitConfirm() => new(_entityHitsByHitId);
+
+    public Dictionary<int, Vector2> CaptureRecoil() => new(_recoilByHitId);
+
+    public void RestoreRecoil(Dictionary<int, Vector2> data)
+    {
+        _recoilByHitId.Clear();
+        if (data == null) return;
+        foreach (var (hitId, v) in data) _recoilByHitId[hitId] = v;
+    }
 
     public void RestoreHitConfirm(Dictionary<int, int> data)
     {

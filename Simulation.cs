@@ -396,6 +396,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             SecondaryControllers = secCtrls,
             Dedupe               = _combat.CaptureDedupe(),
             HitConfirm           = _combat.CaptureHitConfirm(),
+            Recoil               = _combat.CaptureRecoil(),
             Platforms            = platforms,
             Terrain              = _chunks.CaptureTerrain(),
         };
@@ -468,7 +469,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
 
         // Combat dedupe — keyed on EntityId now, so it's a direct value restore.
         _combat.RestoreDedupe(snap.Dedupe);
-        // Hit-confirm inbox — pending message for the frame after the snapshot.
+        // Hit-confirm + recoil inboxes — pending messages for the frame after the
+        // snapshot (the attacker reads both in its next ApplyActionForces).
         _combat.RestoreHitConfirm(snap.HitConfirm);
+        _combat.RestoreRecoil(snap.Recoil);
     }
 }

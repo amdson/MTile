@@ -1,13 +1,17 @@
-{
+﻿{
   "Stage": "training",
-  "WindowWidth": 900,
-  "WindowHeight": 700,
-  "Fullscreen": true,
+  "WindowWidth": 1000,
+  "WindowHeight": 900,
+  "Fullscreen": false,
   "DebugDrawHitboxes":          false,
   "DebugDrawHurtboxes":         false,
   "DebugDrawPlayerOrientation": false,
   "DebugDrawBodies":            false,
   "DrawPlayerSprites":          false,
+  "DrawPlayerSpriteSkin":       true,
+  "PlayerSpriteBinding":        "pumpkin_man_downsampled",
+  "DebugDrawSkeleton":          false,
+  "CameraZoom":                 1.5,
   "DebugDrawConstraints":       false,
   "DebugDrawSteeringRamps":     true,
   "DebugDrawGuidedPath":        false,
@@ -24,3 +28,8 @@
   "SecondPlayerOffsetY": 0,
   "TimeScale": 1.0
 }
+
+
+
+
+

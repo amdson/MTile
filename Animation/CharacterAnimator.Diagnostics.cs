@@ -72,11 +72,12 @@ public sealed partial class CharacterAnimator
         for (int j = 0; j < n; j++)
         {
             // Per-column FD step: Δφ (col 0) runs through the Hermite sample, whose cubic has
-            // high curvature inside the short keyframe intervals, so it needs a SMALL h to
-            // keep central-difference truncation (O(h²·f‴)) down; δ/Δθ are low-curvature but
-            // their residuals are differences of large world coordinates, so they need a
-            // LARGER h to clear the float32 cancellation floor.
-            float h = j == 0 ? 1e-3f : 1e-2f;
+            // high curvature inside the short keyframe intervals (f‴ ~ 1/width³), so its step
+            // must SCALE WITH the bracketing interval — a fixed step's O(h²·f‴) truncation
+            // blows past the oracle tolerance in legitimately-authored ~0.01-phase intervals.
+            // δ/Δθ are low-curvature but their residuals are differences of large world
+            // coordinates, so they need a LARGER h to clear the float32 cancellation floor.
+            float h = j == 0 ? PhiFdStep(_solveClip, Wrap01(_solvePhi + x[0])) : 1e-2f;
             // The C1 spline makes ∂/∂φ CONTINUOUS (the analytic column is exact everywhere),
             // but acceleration still jumps at a keyframe boundary (C1, not C2), so a central
             // difference that STRADDLES one carries O(h) error and can't serve as the oracle
@@ -208,8 +209,74 @@ public sealed partial class CharacterAnimator
         return MathF.Atan2(v.X * u.Y - v.Y * u.X, v.X * u.X + v.Y * u.Y);
     }
 
+    // A per-frame snapshot of the solve for external inspection tools (the offline take
+    // viewer draws these as overlays: contact markers scaled by weight, pin targets,
+    // no-pen surfaces, the solved offsets). Everything is copied out — safe to hold
+    // across frames while the animator keeps running.
+    public sealed class AnimFrameDebug
+    {
+        public struct ContactDbg { public string Bone; public Vector2 Target; public float Weight; }
+        public struct PinDbg     { public string Bone; public Vector2 Target; }
+
+        public bool         Solved;          // an LM solve ran this frame (offsets/Δθ valid)
+        public string       Clip;            // locomotion clip of the solve (null when none)
+        public float        Phase;           // entry phase φ of the solve
+        public float        DPhi, Dy, Dx;    // solved Δφ, δ (vertical), d.x (horizontal)
+        public float        MaxDTheta;       // largest |Δθ| over bones
+        public string       MaxDThetaBone;
+        public ContactDbg[] Contacts;        // planted contacts with their FROZEN solve weights
+        public PinDbg[]     Pins;            // external fixed-point pins
+        public SolverSurface[] Surfaces;     // no-penetration half-planes
+        public bool         AimActive;
+        public Vector2      AimTarget;       // frozen û* of the aim row
+        public float        AimErrDeg;       // solved aim error, degrees (0 when inactive)
+    }
+
+    public AnimFrameDebug CaptureDebug()
+    {
+        var d = new AnimFrameDebug
+        {
+            Solved   = _haveCorr,
+            Clip     = _solveClip?.Name,
+            Phase    = _solvePhi,
+            Contacts = new AnimFrameDebug.ContactDbg[_contacts.Count],
+            Pins     = new AnimFrameDebug.PinDbg[_pins.Count],
+            Surfaces = _surfaces.ToArray(),
+        };
+        for (int i = 0; i < _contacts.Count; i++)
+            d.Contacts[i] = new AnimFrameDebug.ContactDbg
+            { Bone = BoneName(_contacts[i].Bone), Target = _contacts[i].Target, Weight = _contacts[i].Weight };
+        for (int i = 0; i < _pins.Count; i++)
+            d.Pins[i] = new AnimFrameDebug.PinDbg
+            { Bone = BoneName(_pins[i].bone), Target = _pins[i].target };
+
+        if (_haveCorr)
+        {
+            d.DPhi = _solveVars[IdxPhi];
+            d.Dy   = _solveVars[IdxDy];
+            d.Dx   = _solveVars[IdxDx];
+            for (int b = 0; b < _skeleton.Count; b++)
+            {
+                float a = MathF.Abs(_solveVars[IdxTheta0 + b]);
+                if (a > d.MaxDTheta) { d.MaxDTheta = a; d.MaxDThetaBone = BoneName(b); }
+            }
+            d.AimActive = _aimActive;
+            if (_aimActive)
+            {
+                d.AimTarget = _aimTarget;
+                float err = AimAngleError();
+                d.AimErrDeg = float.IsNaN(err) ? 0f : err * 180f / MathF.PI;
+            }
+        }
+        return d;
+
+        string BoneName(int b) => b >= 0 && b < _skeleton.Count ? _skeleton.Bones[b].Name : "?";
+    }
+
     // Keyframe interval index of normalized time t (for the FD oracle's boundary guard): the
-    // bracketing interval [i, i+1], or -2 in a non-cyclic clamped end region (held pose).
+    // bracketing interval [i, i+1], or -2 outside [first,last] — a non-cyclic clamped end
+    // region (held pose) or an open-tail loop's wrap segment (one region either way, so the
+    // straddle guard still catches probes crossing into/out of it).
     private static int IntervalAt(AnimationDocument doc, float t)
     {
         var ks = doc?.Keyframes;
@@ -218,6 +285,24 @@ public sealed partial class CharacterAnimator
         int i = 0;
         while (i < ks.Count - 1 && ks[i + 1].Time < t) i++;
         return i;
+    }
+
+    // Central-difference step for the Δφ column, scaled to the interval bracketing t: 2% of
+    // the interval width keeps the cubic's relative truncation ~0.04% while the floor stays
+    // above float32 cancellation noise. Held clamp regions (and docs with no interval to
+    // measure) keep the legacy 1e-3 (the pose is flat there anyway).
+    private static float PhiFdStep(AnimationDocument doc, float t)
+    {
+        var ks = doc?.Keyframes;
+        float w = 1f;
+        if (ks != null && ks.Count >= 2)
+        {
+            int i = IntervalAt(doc, t);
+            if (i >= 0) w = ks[i + 1].Time - ks[i].Time;
+            else if (i == -2 && AnimationSampler.IsCyclic(doc) && AnimationSampler.HasOpenTail(doc))
+                w = ks[0].Time + 1f - ks[ks.Count - 1].Time;   // the wrap segment
+        }
+        return MathHelper.Clamp(0.02f * w, 1e-4f, 1e-3f);
     }
 
 }
