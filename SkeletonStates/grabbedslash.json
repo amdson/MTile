@@ -23,7 +23,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.42
+          "Rotation": -1.45
         },
         {
           "Bone": "head",
@@ -39,11 +39,11 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 0.78
+          "Rotation": 1.169
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -2.21
+          "Rotation": -3.33
         },
         {
           "Bone": "leg_l_upper",
@@ -94,7 +94,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.46
+          "Rotation": -1.55
         },
         {
           "Bone": "head",
@@ -110,11 +110,11 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 0.5
+          "Rotation": 1.169
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -2.32
+          "Rotation": -3.6
         },
         {
           "Bone": "leg_l_upper",
@@ -165,7 +165,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.3
+          "Rotation": -1.35
         },
         {
           "Bone": "head",
@@ -181,11 +181,11 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.81
+          "Rotation": 1.169
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -1.72
+          "Rotation": -2.2
         },
         {
           "Bone": "leg_l_upper",
@@ -236,7 +236,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.4
+          "Rotation": -1.42
         },
         {
           "Bone": "head",
@@ -252,11 +252,11 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 2.99
+          "Rotation": 1.169
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -2.09
+          "Rotation": -2.8
         },
         {
           "Bone": "leg_l_upper",
@@ -307,7 +307,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.42
+          "Rotation": -1.45
         },
         {
           "Bone": "head",
@@ -323,11 +323,11 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 0.78
+          "Rotation": 1.169
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -2.21
+          "Rotation": -3.33
         },
         {
           "Bone": "leg_l_upper",
