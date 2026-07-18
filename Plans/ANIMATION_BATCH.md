@@ -111,11 +111,15 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
 > (`airslash1`, `airturnslash`, `crouchslash`, `grabbedslash`, `groundslash1`,
 > `groundslash3`, `slash1`) currently FLAG.
 >
-> 👁 **Human review note (amdson, 2026-07-18): a clean digest is NOT sign-off.** `jump`,
-> `fall`, and `idle` should be checked in the viewer/game and possibly recreated even
-> though they digest clean — the gate catches geometry errors, not "reads wrong."
-> Confirmed-bad from play: **`run`** (also FLAGS; and see the CLIP_BACKLOG note: the
-> stride wants a more pronounced jump mid-run). Suspected: **`wallslide`**.
+> 👁 **Human review note (amdson, 2026-07-18): the digest is not the last word — in
+> either direction.** `jump`, `fall`, and `idle` should be checked in the viewer/game
+> and possibly recreated even though they digest clean (the gate catches geometry
+> errors, not "reads wrong"). Conversely, **`run` and `wallslide` are confirmed GOOD
+> from play — treat them as exemplar clips** (reference/diff targets, style guides for
+> new FullBody work) even though `run` currently FLAGS (the known, accepted rig-limit
+> swing-foot graze — do NOT re-author `run` to chase that flag). `run`'s only open item
+> is the polish edit in CLIP_BACKLOG (more pronounced jump mid-stride), which should
+> preserve its current feel.
 
 | clip | status | ref-diff |
 |---|---|---|
