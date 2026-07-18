@@ -110,6 +110,12 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
 > CLEAN (the fix rows below are done), while `run`, `stab`, `pulse`, and most slashes
 > (`airslash1`, `airturnslash`, `crouchslash`, `grabbedslash`, `groundslash1`,
 > `groundslash3`, `slash1`) currently FLAG.
+>
+> 👁 **Human review note (amdson, 2026-07-18): a clean digest is NOT sign-off.** `jump`,
+> `fall`, and `idle` should be checked in the viewer/game and possibly recreated even
+> though they digest clean — the gate catches geometry errors, not "reads wrong."
+> Confirmed-bad from play: **`run`** (also FLAGS; and see the CLIP_BACKLOG note: the
+> stride wants a more pronounced jump mid-run). Suspected: **`wallslide`**.
 
 | clip | status | ref-diff |
 |---|---|---|
