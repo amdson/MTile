@@ -10,7 +10,7 @@ namespace MTile;
 // (forward stride vs backpedal). Run is forward locomotion above a speed threshold
 // (a longer-stride clip — same cadence machinery). Air is split into Jump (rising)
 // and Fall. Vault covers the guided ParkourState traversal.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun, Tumble }
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun, Tumble }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -758,7 +758,15 @@ public sealed partial class CharacterAnimator
         // CrouchWalk shuffle cycle (same cadence machinery as Walk), a still one holds
         // the static Crouch pose.
         if (s.Tag == AnimTag.Crouch)
-            return MathF.Abs(s.Velocity.X) > WalkSpeedThreshold ? AnimClip.CrouchWalk : AnimClip.Crouch;
+        {
+            if (MathF.Abs(s.Velocity.X) > WalkSpeedThreshold) return AnimClip.CrouchWalk;
+            // Still crouch under a solid ceiling right overhead (squeezing through a low gap):
+            // the DuckUnder variant tucks the head harder, flattens the torso, and raises the
+            // free hand to brace the ceiling. Without a low ceiling a still crouch is the
+            // generic Crouch. LowCeiling comes from the SAME CeilingChecker query the CrouchedState
+            // uses to stay crouched without Down held — read-only, never fed back into the sim.
+            return s.LowCeiling ? AnimClip.DuckUnder : AnimClip.Crouch;
+        }
         // Wall cling/slide: airborne but pinned to a wall, so it must win over the generic
         // Vy → Jump/Fall below. WallSlidingState pins Facing = wallDir for the whole slide,
         // so the rig reliably faces the wall (+X) — and the no-penetration half-plane

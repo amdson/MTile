@@ -99,6 +99,11 @@ public readonly struct CharacterAnimSample
     // HasAim false ⇒ AimDir unused. Render-only.
     public readonly bool    HasAim;
     public readonly Vector2 AimDir;
+    // A solid ceiling sits right above the (crouched) body this frame — the SAME signal
+    // CrouchedState uses to stay crouched with Down released (CeilingChecker.TryFind). When
+    // set on a still crouch it selects the DuckUnder clip (head tucked, torso flat, free hand
+    // braced) so squeezing through a low gap reads as "under something". Render-only.
+    public readonly bool    LowCeiling;
 
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
@@ -106,13 +111,13 @@ public readonly struct CharacterAnimSample
         float actionDuration = 0f, float movementProgress = 0f, ExternalPin[] pins = null,
         SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default,
         bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None,
-        int surfaceCount = -1, bool? surfacesNear = null)
+        int surfaceCount = -1, bool? surfacesNear = null, bool lowCeiling = false)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
         ActionDuration = actionDuration; MovementProgress = movementProgress; Pins = pins;
         Surfaces = surfaces; SurfaceCount = surfaceCount; HasGrip = hasGrip; GripTarget = gripTarget;
-        HasAim = hasAim; AimDir = aimDir; Tag = tag;
+        HasAim = hasAim; AimDir = aimDir; Tag = tag; LowCeiling = lowCeiling;
         // Default (hand-built samples, tests): surfaces present ⇒ near — the pre-terrain behavior.
         SurfacesNear = surfacesNear ?? (surfaces != null && (surfaceCount < 0 ? surfaces.Length : surfaceCount) > 0);
     }
@@ -129,11 +134,18 @@ public readonly struct CharacterAnimSample
     // same buffer's spare capacity so the sample carries one combined list.
     public static CharacterAnimSample From(PlayerCharacter p, float dt,
                                            SolverSurface[] surfaceBuf = null, int surfaceCount = 0,
-                                           bool terrainNear = false)
+                                           bool terrainNear = false, ChunkMap chunks = null)
     {
         var pos = p.Body.Position;
         int facing = p.Facing;
         AnimTag tag = p.CurrentState?.AnimationTag ?? AnimTag.None;
+
+        // Is there a solid ceiling right overhead while crouched? Reuse CeilingChecker.TryFind —
+        // the exact query CrouchedState.CheckConditions uses to stay crouched with Down released.
+        // Only meaningful for a crouch, so skip the tile query otherwise. Render-only read of the
+        // public body + chunks; nothing flows back into the sim.
+        bool lowCeiling = tag == AnimTag.Crouch && chunks != null
+                          && CeilingChecker.TryFind(p.Body, chunks, out _);
 
         SolverSurface[] surfaces = null;
         int count = 0;
@@ -173,6 +185,6 @@ public readonly struct CharacterAnimSample
                p.CurrentState?.AnimationProgress ?? 0f,
                surfaces: surfaces, surfaceCount: count, surfacesNear: near,
                hasGrip: hasGrip, gripTarget: gripTarget,
-               hasAim: hasAim, aimDir: aimDir, tag: tag);
+               hasAim: hasAim, aimDir: aimDir, tag: tag, lowCeiling: lowCeiling);
     }
 }
