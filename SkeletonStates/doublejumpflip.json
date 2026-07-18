@@ -1,6 +1,6 @@
 {
   "Name": "doublejumpflip",
-  "Type": "DoubleJump",
+  "Type": "DoubleJumpFlip",
   "Skeleton": "biped",
   "Duration": 0.4,
   "Loop": false,
