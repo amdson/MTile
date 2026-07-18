@@ -85,8 +85,11 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
     locomotion still owns 70% + keeps cadence). Off-region legs at any weight DO show,
     so pose them deliberately (and flag-free).
 - **Overlay time is remapped** to span the action's `OverlayDuration` ([0,1] over the
-  move's lifetime). The clip's own `Duration` matters only for editor playback; align
-  pose *phase fractions* (windup/active/recovery) to the listed hitbox window.
+  move's lifetime). The clip's own `Duration` matters only for editor playback — EXCEPT
+  for actions with no `OverlayDuration` override (e.g. `BlockEruptionAction`), where the
+  animator falls back to the clip's `Duration`, which then paces real gameplay: check
+  the action class before assuming Duration is cosmetic. Align pose *phase fractions*
+  (windup/active/recovery) to the listed hitbox window.
 
 ## Global acceptance gate (every clip)
 
@@ -133,8 +136,9 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
 | `vault` | corrupted/both knees back → **rebuild** | run |
 
 - **idle** — weight centered over both feet, soft forward knees, arms hang near
-  `bindRot`. Tiny breathing bob (hip/chest ≤ ~1px, ~0.5 Hz via IdleBobHz). Both feet
-  planted, no sweep. Fix: legs currently recurvatum — set `leg_*_lower` so the knee
+  `bindRot`. ~~Tiny breathing bob~~ (NOT AUTHORABLE: bones only rotate — a vertical bob
+  cannot be expressed in clip keyframes on this rig, and IdleBobHz on a 1-kf clip is a
+  no-op; the single static keyframe is correct). Both feet planted, no sweep. Fix: legs currently recurvatum — set `leg_*_lower` so the knee
   cross is positive (see skill knee test).
 - **walk** — KEEP current (clean): half-cycle-offset legs, single planted contact per
   keyframe, gentle contralateral arm swing (±~0.4). Polish only if digest bob > ~0.5.

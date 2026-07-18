@@ -36,28 +36,21 @@ workflow (`.claude/skills/anim-probe/SKILL.md`).
 
 ## Medium — actions that currently play with no overlay
 
-- [ ] **blockready** — `BlockReadyAction` (terrain-block cast windup). UpperBody.
-- [ ] **blockeruption** — `BlockEruptionAction` (the eruption release). UpperBody,
-  big gesture; pairs with blockready.
-- [ ] **beam** — `BeamAction`. UpperBody sustained aim pose (the STAB AIM constraint
-  can re-aim it along input like stab does).
+- [x] **blockready** — done (batch). 4-key building gesture, brace 0.3.
+- [x] **blockeruption** — done (batch). Two-hand gesture sweep + erupt, brace 0.3. NOTE: BlockEruptionAction has no OverlayDuration override, so this clip's Duration (0.6) paces real gameplay.
+- [x] **beam** — done (batch). Charge gather -> right-arm extend-and-lock hold.
 - [x] **grenade** — done (calibration batch). Raised overhand lob, 5 keys phased like
   `energyball` (a true over-shoulder cock-back trips the STEEP digest flag on this rig).
-- [ ] **lobbedarea** — `LobbedAreaAction`. UpperBody lob/toss (could share the
-  grenade clip if the throws should read the same).
-- [ ] **grab** — `GrabAction`. UpperBody reach/clutch; `grabbedslash` already exists
-  for the follow-up, so the grab itself is the missing beat.
+- [x] **lobbedarea** — done (batch). Heavy raised-overhand charge + ballistic release, 10 keys over the 1.8s charge.
+- [x] **grab** — done (batch). Two-arm seize hold + throw fling.
 
 ## Low — polish on movement that currently reuses Jump/Fall
 
-- [ ] **walljump kickoff** ⚙ — `WallJumpingState` plays generic Jump; a legs-coiled
-  push-off away from the wall would read much better leaving a slide.
-- [ ] **doublejump flip** ⚙ — `DoubleJumpingState` plays Jump; a tuck/half-flip is the
-  classic differentiator. Needs a state signal (tag or state-name channel).
-- [ ] **run turn / skid** ⚙ — direction reversal at speed currently just mirrors
-  instantly; a 2–3 key skid one-shot would cover it. Needs a velocity-vs-facing trigger.
-- [ ] **run (edit)** — existing `run` clip: give the stride a more pronounced jump
-  mid-run (bigger vertical pop between footfalls). Edit only, no wiring needed.
+- [x] **walljump kickoff** ⚙ — done (batch): `walljumpkick.json`, AnimTag.WallJump wired.
+- [x] **doublejump flip** ⚙ — done (batch): `doublejumpflip.json` (hip-lever tuck), AnimTag.DoubleJump wired.
+- [x] **run turn / skid** ⚙ — done (batch): `runturn.json` one-shot; SelectClip plays it when grounded, speed > RunSpeedThreshold, velocity opposes facing.
+- [x] **run (edit)** — done (batch): per-keyframe com.Y profile raised at the two flight
+  apexes (zero bone edits — choreography/cadence untouched, RealRunJson passes).
 - [ ] **land** ⚙ — touchdown is procedural squash only; an authored crouch-touch
   one-shot could replace/augment it (low value while the squash reads fine).
 - [ ] **ledgejump / dropdown** — `LedgeJumpState` / `DropdownState` reuse Jump/Fall;
