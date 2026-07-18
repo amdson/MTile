@@ -69,8 +69,9 @@ log "Installing system prerequisites"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 # libicu + libssl: .NET runtime deps. git/curl/ca-certificates: clone + installer.
+# tmux: keep long agent/build sessions alive across SSH drops.
 apt-get install -y --no-install-recommends \
-  git curl ca-certificates libicu-dev openssh-client
+  git curl ca-certificates libicu-dev openssh-client tmux
 
 # ---------------------------------------------------------------------------
 log "Installing the .NET ${DOTNET_CHANNEL} SDK"

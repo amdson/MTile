@@ -129,6 +129,43 @@ whole setup. Stop/start/delete are buttons in the same console list.
 Caveat: only the `default` VPC network ships with an allow-SSH firewall rule;
 on a custom network, add one for inbound TCP 22 first.
 
+## Claude Code on the instance (full autonomy)
+
+A disposable VM is the right place to run Claude Code with permissions off —
+the blast radius is the box itself. Install + authenticate (one time):
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+claude        # prints a login URL; open locally, paste the code back
+```
+
+Run long sessions under tmux (installed by the bootstrap) so they survive SSH
+drops:
+
+```bash
+tmux new -s dev
+claude --dangerously-skip-permissions
+# Ctrl-B D to detach; `tmux attach -t dev` to rejoin
+```
+
+Blast-radius checklist before going hands-off:
+
+- **GitHub** — the deploy key is read-only, so the repo can't be damaged. To
+  let Claude push, use a write deploy key + branch protection on `main`
+  (require PRs) so autonomous work lands on branches.
+- **GCP project** — the instance can mint tokens for its attached service
+  account via the metadata server. Set the instance to **No service account**
+  (console → instance → API and identity management; requires a stop/start)
+  so nothing on the box can touch other GCP resources.
+- **Secrets** — keep only the read-only deploy key on the box; never your
+  personal `id_rsa`. Anything readable on the box should be assumed leakable.
+- **sudo** — GCP login users have passwordless sudo, so unattended Claude
+  effectively has root. Acceptable on a disposable box (rebuild = the
+  bootstrap one-liner); create a second no-sudo user if you want a hard wall.
+- **Session token** — `~/.claude` on the box holds your Claude login; deleting
+  the instance doesn't revoke it. Sign out via account settings if the box is
+  ever exposed.
+
 ## Optional: bootstrap at boot instead
 
 GCP's equivalent of EC2 user-data is `--metadata-from-file startup-script=...`.
