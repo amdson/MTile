@@ -21,10 +21,18 @@ workflow (`.claude/skills/anim-probe/SKILL.md`).
   0.35s): idle → torso/head thrown back with arms flung behind (lean −5.5) → forward settle
   → idle. Feet stay planted — the rig's leg reach (19.25) can't step the brace foot further
   back than idle's while staying on the ground, so the flinch is torso/arm-driven.
-- [ ] **tumble** ⚙ — `TumbleState` (knockdown/ragdoll-ish) also falls through to
-  generic clips. FullBody loop while airborne-tumbling; sells heavy hits.
-- [ ] **guard** — `GuardAction` has no clip: blocking shows nothing. UpperBody hold
-  pose (knife raised defensively); auto-binds as Type `GuardAction`.
+- [x] **tumble** ⚙ — done (calibration batch). FullBody 5-key loop, hip-rotation wobble
+  (partial, since raw radians can't loop a full 2π spin) + windmilling arms. Wiring:
+  `AnimTag.Tumble` + `TumbleState.AnimationTag` + a `SelectClip` branch that MUST precede
+  the generic `!Grounded → Jump/Fall` return (Tumble is a strict subset of airborne).
+- [x] **guard** — done (calibration batch). `guard.json` UpperBody `OffRegionWeight=0.4`,
+  2s near-static loop, both hands raised head/chest-front, staggered (knife arm higher).
+- [x] **duckunder** ⚙ — done (calibration batch; new, was not in this backlog). Still
+  crouch under a low ceiling: head tucked, back near-horizontal, free hand braced
+  overhead. Wired via `CharacterAnimSample.LowCeiling` (reuses the `CeilingChecker` query
+  CrouchedState already does) + `SelectClip` branch under `AnimTag.Crouch`. Moving
+  variant (`duckwalk`) deliberately out of scope; bracing hand is authored, not
+  IK-pinned to the real ceiling height — both noted as future polish.
 
 ## Medium — actions that currently play with no overlay
 
@@ -33,7 +41,8 @@ workflow (`.claude/skills/anim-probe/SKILL.md`).
   big gesture; pairs with blockready.
 - [ ] **beam** — `BeamAction`. UpperBody sustained aim pose (the STAB AIM constraint
   can re-aim it along input like stab does).
-- [ ] **grenade** — `GrenadeAction`. UpperBody overhand throw.
+- [x] **grenade** — done (calibration batch). Raised overhand lob, 5 keys phased like
+  `energyball` (a true over-shoulder cock-back trips the STEEP digest flag on this rig).
 - [ ] **lobbedarea** — `LobbedAreaAction`. UpperBody lob/toss (could share the
   grenade clip if the throws should read the same).
 - [ ] **grab** — `GrabAction`. UpperBody reach/clutch; `grabbedslash` already exists
@@ -47,6 +56,8 @@ workflow (`.claude/skills/anim-probe/SKILL.md`).
   classic differentiator. Needs a state signal (tag or state-name channel).
 - [ ] **run turn / skid** ⚙ — direction reversal at speed currently just mirrors
   instantly; a 2–3 key skid one-shot would cover it. Needs a velocity-vs-facing trigger.
+- [ ] **run (edit)** — existing `run` clip: give the stride a more pronounced jump
+  mid-run (bigger vertical pop between footfalls). Edit only, no wiring needed.
 - [ ] **land** ⚙ — touchdown is procedural squash only; an authored crouch-touch
   one-shot could replace/augment it (low value while the squash reads fine).
 - [ ] **ledgejump / dropdown** — `LedgeJumpState` / `DropdownState` reuse Jump/Fall;

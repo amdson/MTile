@@ -24,11 +24,24 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
 - Each worker follows the **[anim-probe skill](../.claude/skills/anim-probe/SKILL.md)** loop:
   probe → author → re-probe → iterate until the acceptance gate is green. The skill is the how-to
   (rig conventions, FK measurement, contact/cadence gotchas); this doc is the *what* (per-clip intent).
+- **Build the probe INSIDE your worktree and invoke that DLL.** The probe reads/writes the
+  `SkeletonStates/` of the checkout its DLL lives in, NOT your cwd — running the main
+  checkout's probe binary silently authors your clip outside the worktree (this bit a
+  calibration worker; the clip nearly missed its commit).
+- **⚙ wiring clips: pre-wire before fan-out.** Two calibration workers adding `AnimClip`/
+  `AnimTag` values + `SelectClip` branches in parallel produced a guaranteed merge conflict
+  on the enum line. For the batch: land ALL enum values and `SelectClip` branches in one
+  commit up front, then workers only author clip JSON (which never conflicts).
 - **Use the FAST probe for the edit→verify loop** — `dotnet build MTile.Probe` once, then
   `dotnet run --project MTile.Probe --no-build -- digest <clip>` (~1–3s, prints to stdout, NO rebuild —
   clips load at runtime). Do **NOT** run `dotnet test …MotionProbeTests` every iteration (it rebuilds the
   whole test project — the main cost sink in the first batch). Reserve a `Zzz` test harness only for
   custom IK measurement (one build), not for verification.
+- **Model assignment (calibrated 2026-07-18, n=1 per cell — directional):** spec'd overlay
+  clips → **Sonnet** (guard: green in 5/6 cycles, fastest+cheapest of the four). ⚙ wiring /
+  FullBody / unspecced clips → **Opus** (both Opus tasks landed in-budget with the deepest
+  doc feedback; Sonnet *did* succeed on the tumble wiring — correct load-bearing branch
+  ordering — but ran ~50% over the iteration budget on the clip geometry).
 - **Iteration budget:** hit the gate within ~6 edit→digest cycles. If a clip isn't green by then,
   return your best version + a one-line note on what's off — don't churn; one hard clip shouldn't
   dominate the batch.
@@ -77,7 +90,10 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
 
 ## Global acceptance gate (every clip)
 
-1. `.probe/<clip>.digest.md` has **no FLAGS** (no recurvatum; knees forward).
+1. `.probe/<clip>.digest.md` has **no FLAGS** — neither recurvatum NOR **STEEP-interval**
+   (bone travel ≥ 8 rad/phase between adjacent keys; the digest's "walk max ≈ 4" is a
+   reference stat, not the threshold). STEEP is the usual blocker on fast overlays —
+   budget angular travel across keys; `energyball` (≈ 6.3 max) is the ceiling to match.
 2. Knife/hand reaches the intended apex at the **active-window phase** (diff vs the
    ref clip shows a clear departure — not "reads like idle").
 3. **FullBody clips:** planted foot bob ≈ 0; swing foot clears; for `walk/run/walkback`
@@ -88,6 +104,12 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
 ---
 
 ## Group A — base locomotion (FullBody, re-author / polish)
+
+> ⚠️ The status column below is a stale snapshot — **run `MTile.Probe -- list` for live
+> flags before assigning workers.** As of 2026-07-18: `idle`/`jump`/`fall`/`vault` digest
+> CLEAN (the fix rows below are done), while `run`, `stab`, `pulse`, and most slashes
+> (`airslash1`, `airturnslash`, `crouchslash`, `grabbedslash`, `groundslash1`,
+> `groundslash3`, `slash1`) currently FLAG.
 
 | clip | status | ref-diff |
 |---|---|---|
@@ -151,10 +173,10 @@ Default `Region=UpperBody` unless marked FullBody (whole-body cast/stance). Legs
 | `groundslash2` | GroundSlash2 | 0.13 | **CW** ~110°, tighter than S1 | ground, slight lunge; combo mid-step — reverse sweep so S1→S2→S3 alternates direction | UpperBody |
 | `airspinstab` | AirSpinStab | 0.60 | linear thrust + **facing flip**, backward swipe variant of stab | airborne dive along stab vector | UpperBody |
 | `pulse` | PulseAction | 0.70 | both arms sweep out into an **expanding ring** cast; active 0.15–0.55 | hovering planted stance (low-gravity "cast"); no lunge | UpperBody +brace≈0.3 |
-| `guard` | GuardAction | held | static **shield stance**, both forearms raised across body | grounded, braced, slight crouch; held indefinitely (loop a near-static pose) | UpperBody +brace≈0.4 |
+| `guard` | GuardAction | held | ~~static shield stance~~ **DONE** (calibration run) | both forearms raised, brace 0.4, 2s micro-sway loop | UpperBody +brace≈0.4 |
 | `grab` | GrabAction | 1.2 hold + 0.12 throw | both arms reach forward to **seize**, then a throw fling | rooted heavy stance during hold; throw = sharp arm extension along grab dir | UpperBody |
 | `energyball` | EnergyBallAction | 0.15 | quick right-arm **throw** toward aim, instant release | no lunge; brief wind + toss | UpperBody |
-| `grenade` | GrenadeAction | 0.15 | right-arm **lob/toss** (overhand), instant | no lunge; quick over-shoulder throw | UpperBody |
+| `grenade` | GrenadeAction | 0.15 | ~~right-arm lob/toss~~ **DONE** (calibration run) | raised overhand lob — a true "over-shoulder" cock-back is geometrically STEEP-flagged on this rig | UpperBody |
 | `beam` | BeamAction | 0.35 charge + ≤0.55 fire | right arm **extends and locks** toward aim; charge gather → steady beam-emit hold | planted; direction locks at fire | UpperBody |
 | `lobbedarea` | LobbedAreaAction | ≤1.8 charge + release | right-arm **overhand charge** then ballistic launch (upward arc) | heavy charge stance → release | UpperBody |
 | `blockready` | BlockReadyAction | charge 0–2.0+ | both hands **building gesture**, palms shaping at place-range; grows with charge | light paint stance → committed brace past ~1.0s | UpperBody +brace≈0.3 |
@@ -164,7 +186,9 @@ Default `Region=UpperBody` unless marked FullBody (whole-body cast/stance). Legs
 1. **Handedness on combo S2 / AirSlash2** — I assumed knife stays on the right arm and
    only the *sweep direction* reverses (CW). Correct, or do these visually cross to a
    left-hand grip?
-2. **`slash1` legacy clip** — retire it, or repurpose the file as `groundslash2`?
+2. ~~**`slash1` legacy clip**~~ — **RESOLVED (found done in repo):** `slash1.json` already
+   carries `Type: GroundSlash2`, so the Group C `groundslash2` row is covered by
+   re-authoring `slash1` (it currently FLAGS).
 3. ~~**`pulse` / `guard` / `block*` as FullBody**~~ — **RESOLVED:** graded
    `OffRegionWeight` is now wired, so these become `Region=UpperBody` overlays with a
    partial lower-body brace (e.g. `pulse` OffRegionWeight≈0.3) instead of FullBody clips

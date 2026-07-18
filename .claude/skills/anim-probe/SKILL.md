@@ -72,6 +72,11 @@ These are the lessons that cost the most time. They generalize beyond any one cl
    # FULL SWEEP (slow, rebuilds the test project): regenerates EVERY .probe/*.md incl. raw tables.
    dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName~MotionProbeTests"
    ```
+   **Parallel/worktree workers: build and run the probe from YOUR OWN checkout.** The probe
+   reads and writes `SkeletonStates/` relative to its own DLL's checkout, not your cwd —
+   running another checkout's DLL silently authors your clip into that other tree (a real
+   calibration-run bug: a worker's clip landed in the main checkout and nearly missed its commit).
+
    Use the fast `MTile.Probe -- digest <clip>` for every iteration; only fall back to the test sweep
    when you need the raw `.probe/<clip>.md` tables or a batch refresh. Read the digest output (whether
    from stdout or `.probe/<clip>.digest.md`) first:
@@ -81,7 +86,12 @@ These are the lessons that cost the most time. They generalize beyond any one cl
      (recurvatum). It is the verification checklist below, computed — so you rarely read raw
      coordinates anymore.
    - `.probe/<clip>.md` — the raw joint/tip world table for the locomotion subset, for deep
-     dives: `+x = forward, +y = DOWN`, `vel = d(tip)/d(phase)`.
+     dives: `+x = forward, +y = DOWN`, `vel = d(tip)/d(phase)`. NOTE: `report` on a
+     NON-locomotion clip prints headers with no rows — for a static/overlay pose use
+     `digest` + `diff` (or a Zzz harness), not `report`.
+   - `anim <clip> <Type>` (runtime compose smoke) prints only frames 0/15/30 over a ~1s run
+     and clamps a short action to its rest pose — it verifies binding/masking/ease/no-crash,
+     NOT what a ≤0.2s overlay looks like mid-swing. Judge the pose from `digest`/`diff`.
    - `.probe/<clip>.vs-<ref>.md` — `MotionProbe.Diff`: per-keyframe tip deltas vs a reference
      clip. Use it to confirm a pose actually **departs** from a baseline (the classic blind miss:
      "this reads the same as idle / rest"). +Δy = lower, +Δx = forward.
@@ -157,6 +167,15 @@ here explain what its labels/flags mean and how to fix a bad one.
 - **Knees forward:** for each leg, signed cross of (knee − hip) × (ankle − hip)
   should be **positive** (knee on the +x/front side of the hip→ankle line).
   Negative = recurvatum — flip the `leg_*_lower` sign / make it positive.
+- **STEEP-interval flag** — the *other* auto-FLAG, and the usual gate blocker for fast
+  overlays (throws/slashes): a bone whose angle travels ≥ **8 rad/phase** between adjacent
+  keyframes (`MotionProbe.cs`). The digest's "walk max ≈ 4" line is a reference stat, NOT
+  the threshold — don't burn iterations chasing 4. STEEP counts as a gate FLAG. Fix by
+  widening the phase gap between keys or splitting the travel across an extra key; the
+  shipping snappy overlay `energyball` tops out ≈ 6.3 and is a good ceiling to match.
+  Rig reality: a hand cocked truly *behind* the shoulder needs a deep elbow fold whose
+  unwind trips STEEP on short clips — author "over-shoulder" throws as raised overhand
+  lobs (clearly up, only marginally back, elbow fold carrying the cocked read).
 
 ## Authoring quality — what an attack/pose clip should read like
 
@@ -185,6 +204,14 @@ look *good*. Aim for all of them, and prefer measuring (IK harness below) over e
   rest after) adds weight; keep the `hip` stable.
 - **Only move what the action needs.** A one-arm slash = the other arm held at a constant pose
   and the legs in a held stance, so the acting limb reads clearly against a calm body.
+- **Whole-body rotation reads through the `hip`** (Length 0: it rotates chest+legs as a unit
+  without translating, and the knee cross-test is rotation-invariant so the digest stays
+  meaningful). Partial wobbles only — angles don't wrap, so a full 2π spin can never
+  loop-seam; author e.g. `0.35→1.3→0.31→−0.6→0.35` for a tumbling read.
+- **Steal signs and magnitudes from shipping clips instead of deriving them.** Unsure which
+  way a chest lean or arm swing goes? `digest` 2–3 existing clips that do the move
+  (`crouch`, `stab`, `guardretaliate`) and interpolate from their authored values — faster
+  and safer than bind math.
 
 **IK by target — use the built-in `ik` command, don't guess angles.** To place a toe/hand at a
 point, nudge it from wherever the keyframe currently puts it:
@@ -201,6 +228,20 @@ recurvatum and on solved angles jumping > 1.2 rad from the neighboring keyframes
 Workflow: `digest` to read positions → `ik` with a delta → `--write` → `digest` to verify.
 (`Animation/PoseIk.cs` is the callable core if a harness needs it, e.g. sweeping an arc of
 targets across keyframes the way the slash was authored.)
+
+Three solver gotchas (each cost a calibration worker real iterations):
+- **Per-call clamp:** every invocation clamps solved joints to **±2.5 rad from the current
+  pose** (`PoseIk` `range`) — this applies to `--to` absolute targets too, so a long reach
+  can undershoot with a large reported miss. **Reissue the identical `ik` call**: it reseeds
+  from the new pose and converges the rest of the way.
+- **The fold branch is inherited from the seed and sticky.** Nudging a hand keeps the current
+  elbow/knee fold. To *change* the fold — an overhead reach from a folded crouch arm, or
+  shallowing a deep fold — first `rot` the `*_lower` toward straight (or re-seed the
+  keyframe: `delkey` + `addkey --from idle`), then IK; the re-solve lands on the intended
+  branch.
+- **Torso before limbs.** The default chain stops at hip/chest, so a later `rot` of
+  `hip`/`chest` on a keyframe moves every already-solved limb target without re-solving
+  them. Set hip/chest rotation for a keyframe FIRST, then IK the limbs.
 
 ## Cadence gotchas (CharacterAnimator solver)
 
