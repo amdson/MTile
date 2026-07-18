@@ -153,6 +153,11 @@ public class TumbleState : MovementState
     // No reflex assists while launched — same reasoning as StunnedState.
     public override RampPolicy RampPolicy => RampPolicy.Off;
 
+    // Airborne out-of-control tumble, distinct from StunnedState's grounded recoil flinch
+    // (AnimTag.Stunned): without this the launch plays the generic Jump/Fall clip and the
+    // heavy hit doesn't read.
+    public override AnimTag AnimationTag => AnimTag.Tumble;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
 
