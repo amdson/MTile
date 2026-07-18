@@ -86,7 +86,7 @@ public sealed class CosmeticUpdateSystem
             int tc = TerrainSurfaces.Extract(sim.Chunks, _animator, player.Body.Position,
                                              player.Facing, _skeletonScale, _terrainScratch,
                                              out bool near);
-            _animator.Update(CharacterAnimSample.From(player, simDt, _terrainScratch, tc, near));
+            _animator.Update(CharacterAnimSample.From(player, simDt, _terrainScratch, tc, near, sim.Chunks));
             // Secondary players (training dummy, P2) get their own animators so
             // each rig tracks its own body, facing, and action timing.
             for (int i = 0; i < sim.SecondaryPlayers.Count; i++)
@@ -95,7 +95,7 @@ public sealed class CosmeticUpdateSystem
                 tc = TerrainSurfaces.Extract(sim.Chunks, _secondaryAnimators[i], sp.Body.Position,
                                              sp.Facing, _skeletonScale, _terrainScratch, out near);
                 _secondaryAnimators[i].Update(
-                    CharacterAnimSample.From(sp, simDt, _terrainScratch, tc, near));
+                    CharacterAnimSample.From(sp, simDt, _terrainScratch, tc, near, sim.Chunks));
             }
         }
         _attackGlow.Update(player, dt);
