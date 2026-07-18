@@ -181,11 +181,11 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.01
+          "Rotation": 1.5548575
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -0.44
+          "Rotation": -0.0110528795
         },
         {
           "Bone": "leg_l_upper",
@@ -252,11 +252,11 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 2.49
+          "Rotation": 2.0727212
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -1.28
+          "Rotation": -1.2659173
         },
         {
           "Bone": "leg_l_upper",
