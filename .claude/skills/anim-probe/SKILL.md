@@ -120,6 +120,25 @@ These are the lessons that cost the most time. They generalize beyond any one cl
    dotnet $P retime <clip> 0.5 0.6 | delkey <clip> 0.5 | dur <clip> 0.9
    dotnet $P addcom <clip>                                  # stamp the grounded com anchor LAST
    ```
+   Command semantics that cost batch workers cycles (learn them here instead):
+   - **Keyframe `Time` args are normalized [0,1]** fractions of the clip, NOT seconds —
+     `Duration` is seconds, but `addkey <clip> 0.25` means quarter-phase.
+   - **`new --from <clip>` copies only that clip's t=0 pose** (one keyframe), and
+     `addkey` with no `--from` seeds from the clip's OWN current C1 sample at that time —
+     neither walks the reference clip's later keys; use `addkey <clip> <t> --from ref@t`
+     per key if you want the reference's timeline.
+   - **`rot` sets ANY bone** (legs and arms included) — the "torso/head" wording is about
+     typical use, not a restriction. Iterating `rot` + digest is a legitimate fully
+     measurement-driven fallback when IK fights you.
+   - **The probe rig has NO knife bone** (`ExtraBones` are clip-local and never composed
+     into the probe's rig), so `new`/`addkey` silently DROP the knife entry from copied
+     keyframes and `rot`/`ik` can't touch it. Every knife-carrying keyframe needs its
+     constant knife entry hand-pasted via direct JSON edit — this is an ALLOWED direct
+     edit, alongside Region/OffRegionWeight/Loop/Type/Duration and per-keyframe
+     `com` Additions (`addcom` only stamps one constant from kf0; a per-key com profile —
+     e.g. run's vertical pop — is a direct edit, and being a render offset it is
+     INVISIBLE to the FK digest, so verify it by reasoning/tests instead).
+
    The proven recipe (how crouchwalk was authored end-to-end without computing one leg angle):
    copy a base pose into each key (`new --from` / `addkey --from`), read the reference clip's
    digest for choreography numbers (stride, plant depth, contact pattern), then `ik --to` every
@@ -160,6 +179,10 @@ vs forward) is auto-flagged in `.probe/<clip>.digest.md` — read it.
 The `.probe/<clip>.digest.md` already classifies each of these per keyframe; the definitions
 here explain what its labels/flags mean and how to fix a bad one.
 
+- **Airborne / no-contact clips** (jump, fall, tumble, …): the digest still prints
+  PLANTED/swing labels (relative to the pose's lowest point) and the "planted-foot bob
+  ≈ 0" trajectory hint — for a clip with zero Contact labels these are NOISE, not gate
+  items. The planted/bob criteria below apply only to clips with authored Contacts.
 - **Planted foot** (the keyframe's Contact node): toe/ankle `y` ≈ constant across
   the stance keyframes (no bob), and `tipX` sweeps **monotonically backward**
   (the body moves forward over a fixed foot).
@@ -176,6 +199,25 @@ here explain what its labels/flags mean and how to fix a bad one.
   Rig reality: a hand cocked truly *behind* the shoulder needs a deep elbow fold whose
   unwind trips STEEP on short clips — author "over-shoulder" throws as raised overhand
   lobs (clearly up, only marginally back, elbow fold carrying the cocked read).
+  **How STEEP is computed and what actually fixes it** (five batch workers burned cycles
+  on this): rate = WrapAngle(Δauthored-rotation) / Δkeyframe-Time between ADJACENT keys
+  (keyframe `Time` is normalized [0,1]; clip `Duration` plays no role). Therefore:
+  - **Adding keyframes does NOT help.** Subdividing an interval splits Δrot and Δt
+    proportionally — the rate survives (measured: 16.3 → {16, 17.5}). Pigeonhole: if
+    total swing > 8 × window width, no key count fixes it.
+  - What works: **`retime` the boundary key outward** (widen the real budget — one worker
+    cleared a flag with a single retime and zero pose edits), **shrink the swing** (reduce
+    the pose's angular distance), or fix a **2π-wrapped joint**: a solved angle far
+    outside ±π (e.g. −5.1 instead of +1.18) is positionally identical but blows up the
+    rate vs neighbors — reset it via `rot` to the wrapped-equivalent value.
+  - If the interval is pinned by the action's real phase timing (hitbox window), only a
+    smaller swing works.
+  - The `ik` command's per-call "steep interval" WARN fires at >1.2 rad vs a neighbor —
+    far below the digest's 8 rad/phase FLAG. During deliberate big pose changes those
+    WARNs are noise; the digest is the gate, not the WARN.
+  - Because WrapAngle is per-interval, hip-lever rotations are STEEP-safe as long as
+    each interval's wrapped delta stays under the ceiling, even if the cumulative spin
+    passes π.
 
 ## Authoring quality — what an attack/pose clip should read like
 
@@ -188,6 +230,9 @@ look *good*. Aim for all of them, and prefer measuring (IK harness below) over e
 - **Differentiate the stance — don't mirror both legs (or arms) identically.** Equal left/right
   angles look flat and posed. Stagger them like idle: one leg forward, one back
   (`leg_l_upper 1.18` fwd / `leg_r_upper 1.62` back, with different `_lower`/foot too).
+  For overlay legs, the batch doc's verbatim idle lower-body block is CANONICAL — live
+  `idle.json` has drifted from it (1.064/1.813; both flag-free), so paste the block
+  rather than trusting `--from idle` to match the documented numbers.
 - **Blend from the locomotion pose.** An overlay attack should START (and, for a looping clip,
   END) close to the idle/run pose so it eases in/out without a pop: make the first keyframe ≈
   idle (or run), and the last keyframe == the first for a seamless loop. Hold the locomotion
@@ -241,7 +286,20 @@ Three solver gotchas (each cost a calibration worker real iterations):
   branch.
 - **Torso before limbs.** The default chain stops at hip/chest, so a later `rot` of
   `hip`/`chest` on a keyframe moves every already-solved limb target without re-solving
-  them. Set hip/chest rotation for a keyframe FIRST, then IK the limbs.
+  them — this is not just ordering guidance: a chest `rot` AFTER `ik --write` silently
+  detaches the already-written hands from their solved targets (large lever arm). Set
+  hip/chest rotation for a keyframe FIRST, then IK the limbs.
+- **Cross-keyframe fold coherence.** Solving each keyframe's arm independently toward
+  nearby targets can pick visually-different elbow folds per key (e.g. upper −0.06 at
+  one key, +3.39 at the next) — each key digests fine but the deltas STEEP-flag. Recipes
+  that work: (a) before re-solving a drifted key, reset its chain angles to the
+  NEIGHBOR keyframe's values via `rot`, then `ik`; (b) for cramped/short overlays, lock
+  the proximal joint via `rot` and solve only the distal bone (`ik --chain arm_r_lower`)
+  — sidesteps the ambiguity entirely; (c) keep the hand's distance-from-shoulder roughly
+  constant across an arc — a mid-path dip toward the shoulder passes near the fold
+  singularity and inflates deltas even with fine subdivision.
+- **Tip-bone naming is asymmetric:** the arm's IK tip is `arm_*_lower` (hand = its tip);
+  the foot's is `foot_*` (toe). There is no `arm_l` bone.
 
 ## Cadence gotchas (CharacterAnimator solver)
 
