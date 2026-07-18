@@ -141,6 +141,11 @@ public class TumbleState : MovementState
     public override int ActivePriority  => MovementPriorities.TumbleActive;
     public override int PassivePriority => MovementPriorities.TumblePassive;
 
+    // Airborne out-of-control tumble, distinct from StunnedState's grounded recoil flinch
+    // (AnimTag.Stunned): without this the launch plays the generic Jump/Fall clip and the
+    // heavy hit doesn't read.
+    public override AnimTag AnimationTag => AnimTag.Tumble;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
 

@@ -10,7 +10,7 @@ namespace MTile;
 // (forward stride vs backpedal). Run is forward locomotion above a speed threshold
 // (a longer-stride clip — same cadence machinery). Air is split into Jump (rising)
 // and Fall. Vault covers the guided ParkourState traversal.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun }
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun, Tumble }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -779,6 +779,14 @@ public sealed partial class CharacterAnimator
         // grounded-only (an airborne heavy hit goes to TumbleState), so this can't collide
         // with the air branch.
         if (s.Tag == AnimTag.Stunned) return AnimClip.Hitstun;
+        // Airborne heavy-hit launch: must be checked BEFORE the generic `!s.Grounded`
+        // branch below, not after — TumbleState is itself airborne (CheckPreConditions
+        // requires no ground), so the generic Jump/Fall fallback would also match and,
+        // being an earlier `return` in this if-chain, would win first and this branch
+        // would never be reached. Unlike Stunned (grounded, so it can't collide with the
+        // air branch at all), Tumble's condition is a STRICT SUBSET of `!s.Grounded`, so
+        // ordering here is load-bearing, not just documentation.
+        if (s.Tag == AnimTag.Tumble) return AnimClip.Tumble;
         if (!s.Grounded) return s.Velocity.Y < 0f ? AnimClip.Jump : AnimClip.Fall;
         float speed = MathF.Abs(s.Velocity.X);
         if (speed > WalkSpeedThreshold)
