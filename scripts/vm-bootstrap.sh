@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 #
-# ec2-bootstrap.sh — bootstrap MTile for headless build + test on a fresh
-# Ubuntu/Debian EC2 instance (.NET 8 + xUnit). No display required.
+# vm-bootstrap.sh — bootstrap MTile for headless build + test on a fresh
+# Ubuntu/Debian cloud VM (GCP Compute Engine, EC2, ...). .NET 8 + xUnit,
+# no display required.
 #
-# Designed to run once from EC2 user-data (which executes as root on first
-# boot) but is idempotent, so re-running it by hand to update the box is fine.
+# Designed to be run by hand right after SSH-ing in (it sudo-elevates
+# itself), and is idempotent, so re-running it to update the box is fine.
+# It also works from boot-time automation (GCP startup-script / EC2
+# user-data) — those run as root, so set TARGET_USER explicitly there.
 #
 # What it does:
 #   1. Installs prerequisites (git, curl, libicu) + the .NET 8 SDK.
@@ -18,13 +21,18 @@
 #
 # ---------------------------------------------------------------------------
 # Configuration — override any of these via the environment in user-data, e.g.
-#   DEPLOY_KEY_B64="$(base64 -w0 deploy_key)" GIT_BRANCH=anim-clip-batch ./ec2-bootstrap.sh
+#   DEPLOY_KEY_B64="$(base64 -w0 deploy_key)" GIT_BRANCH=anim-clip-batch ./vm-bootstrap.sh
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 REPO_SSH="${REPO_SSH:-git@github.com:amdson/MTile.git}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
-TARGET_USER="${TARGET_USER:-ubuntu}"            # who owns the checkout / runs dev
+# Who owns the checkout / runs dev. Defaults to whoever invoked the script
+# (surviving the sudo re-exec below). On GCP this is your Google-account user,
+# on stock EC2 Ubuntu it's "ubuntu" — either way the default just works when
+# you run this after SSH-ing in. Boot-time automation runs as root, so set
+# TARGET_USER explicitly there.
+TARGET_USER="${TARGET_USER:-${SUDO_USER:-$(id -un)}}"
 CHECKOUT_DIR="${CHECKOUT_DIR:-/home/${TARGET_USER}/MTile}"
 DOTNET_CHANNEL="${DOTNET_CHANNEL:-8.0}"
 
@@ -41,6 +49,8 @@ die() { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 if [[ "$(id -u)" -ne 0 ]]; then
   exec sudo -E bash "$0" "$@"
 fi
+
+[[ "$TARGET_USER" != "root" ]] || die "TARGET_USER resolved to root — set TARGET_USER=<login user> (required when run from boot-time automation)"
 
 USER_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 [[ -n "$USER_HOME" ]] || die "user '$TARGET_USER' does not exist on this box"
