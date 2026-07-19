@@ -138,6 +138,17 @@ These are the lessons that cost the most time. They generalize beyond any one cl
      `com` Additions (`addcom` only stamps one constant from kf0; a per-key com profile —
      e.g. run's vertical pop — is a direct edit, and being a render offset it is
      INVISIBLE to the FK digest, so verify it by reasoning/tests instead).
+   - **The com IS the vertical anchor when authored** (`AttackGlowSystem.RigRoot`:
+     `rootY = bodyPos.Y − com.Y·scale`; only a com-less clip falls back to sole-grounding).
+     So for a "body sinks, feet stay planted" clip (landing, crouch-dip): author a
+     PER-KEY com profile with `com.Y = thatKey'sSoleY − K`, where K ≈ 31.64 (2·Radius/scale;
+     derive it from any grounded clip as `sole − com.Y`). A constant com under a sinking
+     pose makes the drawn feet float/descend instead of staying planted.
+   - **Worktree workers: your checkout may be STALE** (worktrees can fork from an older
+     HEAD than the merge target). `git log -1` first; confirm your clip's placeholder,
+     wiring, and especially any HANDOFF/reference clip (jump/fall/idle) match the merge
+     target before converging poses to them — pull the current file from the main
+     checkout for reference if not, but commit only your own clip.
 
    The proven recipe (how crouchwalk was authored end-to-end without computing one leg angle):
    copy a base pose into each key (`new --from` / `addkey --from`), read the reference clip's
