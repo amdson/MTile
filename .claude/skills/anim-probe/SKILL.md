@@ -218,6 +218,9 @@ here explain what its labels/flags mean and how to fix a bad one.
   - Because WrapAngle is per-interval, hip-lever rotations are STEEP-safe as long as
     each interval's wrapped delta stays under the ceiling, even if the cumulative spin
     passes π.
+  - The runtime spline WRAPS too: `SampleSmooth`'s tangents use `MathHelper.WrapAngle`
+    (`Animation/AnimationSampler.cs:131`), so the render takes the same shortest path
+    the digest measures — the gate and the drawn motion cannot disagree about wrap.
 
 ## Authoring quality — what an attack/pose clip should read like
 
