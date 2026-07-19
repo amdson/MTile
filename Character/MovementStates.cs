@@ -1165,6 +1165,7 @@ public class LedgeJumpState : MovementState
     public override int ActivePriority  => MovementPriorities.LedgeJumpActive;
     public override int PassivePriority => MovementPriorities.LedgeJumpPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
+    public override AnimTag AnimationTag => AnimTag.LedgeJump;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -1221,6 +1222,7 @@ public class DropdownState : MovementState
 
     public override int ActivePriority  => MovementPriorities.DropdownActive;
     public override int PassivePriority => MovementPriorities.DropdownPassive;
+    public override AnimTag AnimationTag => AnimTag.Dropdown;
 
     // Same pattern as CoveredJumpState.TryPickOpenDir: honor input direction strictly when held,
     // closer edge from a standstill, never flip to the opposite side. Edge from GroundChecker.
