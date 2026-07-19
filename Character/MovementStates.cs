@@ -1443,6 +1443,7 @@ public class LedgeJumpState : MovementState
     // Launch off the pull is a committed arc past the very corner an ambient ramp
     // would try to steer around — keep the layer out for the launch frames.
     public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AnimTag AnimationTag => AnimTag.LedgeJump;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -1501,6 +1502,7 @@ public class DropdownState : MovementState
     public override int PassivePriority => MovementPriorities.DropdownPassive;
     // Owns its own Over ramp on the drop edge (EnsureRamp) — no ambient duplicates.
     public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AnimTag AnimationTag => AnimTag.Dropdown;
 
     // Same pattern as CoveredJumpState.TryPickOpenDir: honor input direction strictly when held,
     // closer edge from a standstill, never flip to the opposite side. Edge from GroundChecker.

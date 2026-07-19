@@ -1,0 +1,76 @@
+{
+  "Name": "land",
+  "Type": "Land",
+  "Skeleton": "biped",
+  "Duration": 0.25,
+  "Loop": false,
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.5195593
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 2.2009196
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.86834997
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -1.8151178
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": -1.18836
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 0.5436026
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 2.1103716
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -2.6763842
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.5951812
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.17897403
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -2.5500536
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -13.037685,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    }
+  ]
+}

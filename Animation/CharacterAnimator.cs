@@ -10,7 +10,7 @@ namespace MTile;
 // (forward stride vs backpedal). Run is forward locomotion above a speed threshold
 // (a longer-stride clip — same cadence machinery). Air is split into Jump (rising)
 // and Fall. Vault covers the guided ParkourState traversal.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun, Tumble, WallJumpKick, DoubleJumpFlip, RunTurn }
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun, Tumble, WallJumpKick, DoubleJumpFlip, RunTurn, Land, LedgeJump, Dropdown }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -20,7 +20,9 @@ public struct CharacterAnimState
     public AnimClip Clip;         // currently-selected clip
     public float    ClipTime;     // seconds spent in the current clip
     public float    Phase;        // locomotion cycle phase, wrapped to [0,1)
-    public float    LandSquash;   // 1 on touchdown, decays to 0 — drives a landing squash
+    public float    LandTime;     // counts down from LandClipTime after a touchdown — while
+                                  // positive, a near-idle landing plays the authored Land
+                                  // one-shot (replaced the old procedural hip squash)
     public float    ActionWeight; // eased 0..1 blend of the action overlay layer
 }
 
@@ -36,6 +38,8 @@ public sealed partial class CharacterAnimator
     // --- tuning (first-draft constants; no real velocity matching yet) ---
     private const float WalkSpeedThreshold = 12f;    // px/s before Idle -> Walk
     private const float RunSpeedThreshold  = 40f;    // px/s before Walk -> Run (MaxWalkSpeed is 100)
+    private const float LandClipTime       = 0.25f;  // s the Land one-shot owns Idle after touchdown
+                                                     // (keep == land.json Duration)
     private const float PhasePerPixel       = 0.010f; // legacy fallback: cycles/sec per px/s
     private const float IdleBobHz           = 0.30f;  // breathing cycles/sec
     // Pose-follow rate (1/sec). No longer a BlendToward ease — the smoothing lives INSIDE the
@@ -152,7 +156,6 @@ public sealed partial class CharacterAnimator
     private readonly float[]      _smoothTarget;
     private bool                  _haveEmitted;   // false until the first frame has been drawn
     private float                 _leanEase;      // eased locomotion lean (post-solve additive)
-    private float                 _squashEase;    // eased landing-squash amount (post-solve additive)
 
     // Overlay motion layers composed onto the base pose (Phase 4), generalized from a single
     // Action overlay into an ordered STACK so a movement-sourced overlay (e.g. parkour hands)
@@ -377,12 +380,18 @@ public sealed partial class CharacterAnimator
         _haveCorr = false;   // cleared until a cadence solve produces Δθ this frame
 
         // 0. Use the previous frame's state: detect a touchdown (was airborne, now
-        //    grounded) and arm a landing squash that decays over the next frames.
-        if (_hasPrev && !_prev.Grounded && s.Grounded) _state.LandSquash = 1f;
-        _state.LandSquash = MathF.Max(0f, _state.LandSquash - dt * 4f);
+        //    grounded) and arm the authored Land one-shot window.
+        if (_hasPrev && !_prev.Grounded && s.Grounded) _state.LandTime = LandClipTime;
+        _state.LandTime = MathF.Max(0f, _state.LandTime - dt);
 
         // 1. Select a clip from observed state only.
         AnimClip clip = SelectClip(in s);
+        // Landing one-shot (replaced the procedural squash): a touchdown that settles into
+        // the Idle band plays the authored crouch-touch instead. Only Idle is overridden —
+        // landing into a run/walk keeps the locomotion cycle (a static land pose under a
+        // moving body reads worse than no land at all), and any tagged state wins outright.
+        // Re-evaluated per frame, so speeding up or leaving the ground cancels it naturally.
+        if (_state.LandTime > 0f && clip == AnimClip.Idle) clip = AnimClip.Land;
         if (clip != _state.Clip)
         {
             _state.Clip = clip;
@@ -633,16 +642,8 @@ public sealed partial class CharacterAnimator
         _leanEase += (leanTarget - _leanEase) * (1f - MathF.Exp(-Stiffness * dt));
         if (MathF.Abs(_leanEase) > 1e-4f) Rot(_chest, _leanEase);
 
-        // 3c. Landing squash on top of any clip: flatten + sink briefly on touchdown. The
-        //     applied amount is eased (the global pose ease used to soften the touchdown snap
-        //     to 1; now the envelope carries its own attack ramp).
-        _squashEase += (_state.LandSquash - _squashEase) * (1f - MathF.Exp(-Stiffness * dt));
-        if (_squashEase > 1e-4f)
-        {
-            float k = _squashEase;
-            Scale(_hip, new Vector2(0.35f * k, -0.35f * k));
-            Translate(_hip, new Vector2(0f, 3f * k));
-        }
+        // (3c retired: the procedural landing squash is replaced by the authored Land
+        //  one-shot selected in step 1 — pose-driven, no post-solve scale/translate hack.)
 
         // 4. Emit. The target IS the pose now — smoothing already happened inside the solve /
         //    fast path (the retired BlendToward is the closed form of that objective), so a
@@ -781,6 +782,11 @@ public sealed partial class CharacterAnimator
         // Hang (authored to grip the corner; doesn't depend on Vy sign).
         if (s.Tag == AnimTag.LedgePull) return AnimClip.Vault;
         if (s.Tag == AnimTag.LedgeGrab) return AnimClip.Hang;
+        // Ledge-jump leap and platform dropdown: dedicated one-shots instead of the generic
+        // Jump/Fall they used to fall through to. Both states straddle grounded/airborne
+        // transitions, so like all tag branches they sit before the generic checks.
+        if (s.Tag == AnimTag.LedgeJump) return AnimClip.LedgeJump;
+        if (s.Tag == AnimTag.Dropdown) return AnimClip.Dropdown;
         // Grounded hitstun: a recoil flinch that must win over the Idle/Walk speed checks
         // below, since knockback leaves the body sliding at walk speed while stunned and
         // the generic picker would play a walk cycle through the flinch. StunnedState is
