@@ -51,10 +51,14 @@ workflow (`.claude/skills/anim-probe/SKILL.md`).
 - [x] **run turn / skid** ⚙ — done (batch): `runturn.json` one-shot; SelectClip plays it when grounded, speed > RunSpeedThreshold, velocity opposes facing.
 - [x] **run (edit)** — done (batch): per-keyframe com.Y profile raised at the two flight
   apexes (zero bone edits — choreography/cadence untouched, RealRunJson passes).
-- [ ] **land** ⚙ — touchdown is procedural squash only; an authored crouch-touch
-  one-shot could replace/augment it (low value while the squash reads fine).
-- [ ] **ledgejump / dropdown** — `LedgeJumpState` / `DropdownState` reuse Jump/Fall;
-  probably fine, revisit only if they look wrong in play.
+- [x] **land** ⚙ — done. Procedural squash RETIRED (was a hack): touchdown arms a
+  0.25s `LandTime` window; a landing settling into the Idle band plays `land.json`
+  (deep absorb → rise, final key == idle exactly). Moving landings keep their
+  locomotion cycle by design — a run-land stumble clip would be a future add, not a
+  squash revival. Uses a per-key com profile to sink the body with feet planted.
+- [x] **ledgejump / dropdown** — done. `ledgejump.json` (coiled load → forward-driving
+  spring off the lip, 4 keys) + `dropdown.json` (deliberate compact slip-off, final key
+  == fall@0 for a popless handoff), AnimTag wiring for both.
 
 ## Already covered (no work)
 

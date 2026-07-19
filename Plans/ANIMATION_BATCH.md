@@ -28,6 +28,12 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
   `SkeletonStates/` of the checkout its DLL lives in, NOT your cwd — running the main
   checkout's probe binary silently authors your clip outside the worktree (this bit a
   calibration worker; the clip nearly missed its commit).
+- **Worker worktrees fork from a STALE HEAD, not current main** (observed both batch
+  rounds: forks at commits hours old). Consequences the orchestrator must plan for:
+  expect add/add conflicts on pre-seeded placeholder files at merge (resolve with the
+  worker's version), re-verify clip `Type` fields at merge (one worker re-created a
+  placeholder with the wrong Type), and prompt workers to check their handoff-reference
+  clips against the merge target (see the skill's stale-worktree note).
 - **⚙ wiring clips: pre-wire before fan-out.** Two calibration workers adding `AnimClip`/
   `AnimTag` values + `SelectClip` branches in parallel produced a guaranteed merge conflict
   on the enum line. For the batch: land ALL enum values and `SelectClip` branches in one
