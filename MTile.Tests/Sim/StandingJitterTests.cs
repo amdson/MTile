@@ -53,6 +53,13 @@ public class StandingJitterTests
 
     private record FrameSample(int Frame, float PosY, float VelY, string State, int GrowingSprouts);
 
+    // Standing rest: body center sits floatHeight (= R) + hexagon bottom extent (R·sin60°)
+    // above the floor. Spawning here (instead of a stale magic offset tuned for the old
+    // radius) means the spring starts at equilibrium and the flatness windows aren't
+    // polluted by settle ringing.
+    private static readonly float RestOffset =
+        PlayerCharacter.Radius * (1f + MathF.Sin(MathF.PI / 3f));
+
     private List<FrameSample> RunWithLog(
         ChunkMap terrain, PlayerCharacter player, int frames,
         Action<int, ChunkMap> beforeFrame = null)
@@ -98,7 +105,7 @@ public class StandingJitterTests
     {
         var terrain = WidePlatform();
         const float spawnX = 10 * 16f + 8f;
-        var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - 12f));
+        var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - RestOffset));
 
         var samples = RunWithLog(terrain, player, 40);
         LogSamples("standing, no sprouts", samples);
@@ -126,7 +133,7 @@ public class StandingJitterTests
         var terrain = WidePlatform();
         const int playerCol = 10;
         float spawnX = playerCol * 16f + 8f;
-        var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - 12f));
+        var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - RestOffset));
 
         // Frame 8: player has settled standing on the floor. Request a sprout
         // at (10, 19) — the cell directly above the floor cell the player is
@@ -189,7 +196,7 @@ public class StandingJitterTests
         var terrain = WidePlatform();
         const int playerCol = 10;
         float spawnX = playerCol * 16f + 8f;
-        var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - 12f));
+        var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - RestOffset));
 
         const int requestFrame = 8;
         bool requested = false;
@@ -249,11 +256,12 @@ public class StandingJitterTests
         Assert.True(chainEndFrame > requestFrame, "expected the sprout chain to finalize within the run");
 
         // Settled y after the full chain — body should be standing on row 17.
-        // Expected: floor top at row 17 = 17·16 = 272; settle gap = 2 below
-        // MinDistance ⇒ y ≈ 272 - 19 + 2 = 255.
+        // Expected: floor top at row 17 = 17·16 = 272, minus the standing rest offset
+        // (R·(1+sin60°) ≈ 22.4 at R=12), with a little settle-gap slack either side.
+        float expected = 17 * 16f - RestOffset;
         float settledAfter = samples[^1].PosY;
-        _out.WriteLine($"settled y after stacked chain: {settledAfter:F3} (expected ~255)");
-        Assert.InRange(settledAfter, 252f, 258f);
+        _out.WriteLine($"settled y after stacked chain: {settledAfter:F3} (expected ~{expected:F1})");
+        Assert.InRange(settledAfter, expected - 3f, expected + 3f);
 
         // THE JITTER ASSERTION — mid-chain phase only.
         //
@@ -306,7 +314,7 @@ public class StandingJitterTests
         var terrain = WidePlatform();
         const int playerCol = 10;
         float spawnX = playerCol * 16f + 8f;
-        var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - 12f));
+        var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - RestOffset));
 
         const int requestFrame = 8;
         bool requested = false;

@@ -24,15 +24,15 @@ public class LedgePullExitTests(ITestOutputHelper output)
     private static ChunkMap BuildLedgeTerrain() => SimTerrain.FromAscii(@"
             ..........
             ..........
-            ..........
+            .........X
             .........X
             .........X
             XXXXXXXXXX", originTileX: 0, originTileY: 0);
 
     private const float GroundTop    = 5 * TS;   // 80
     private const float WallLeft     = 9 * TS;   // 144
-    private const float CornerTopY   = 3 * TS;   // 48
-    private const float HalfW        = 8.227f;
+    private const float CornerTopY   = 2 * TS;   // 32 (3-tall wall: lip at the R=12 head line)
+    private const float HalfW        = 10.392f;  // R·sin60° at R=12
     private static float StandingLineY => CornerTopY - 2f * PlayerCharacter.Radius; // ~29
 
     // Settle → tap Up (grab) → hang → press Up again (pull). Callers append the
@@ -107,14 +107,14 @@ public class LedgePullExitTests(ITestOutputHelper output)
     [Fact]
     public void PullTimeout_RegrabsInsteadOfFallingOut()
     {
-        // Floating overhang one tile above the lip (row 1, directly in the body's
+        // Floating overhang one tile above the lip (row 0, directly in the body's
         // mantle path) so the pull physically can't crest the corner — the body
         // stalls under it until MaxVaultTime expires, then sags back to the hang.
-        // (Two tiles up, as before, left enough room to stand on the 1-wide pillar.)
+        // (Lip is row 2 with the 3-tall R=12 wall; same one-tile gap as before.)
         var terrain = SimTerrain.FromAscii(@"
-            ..........
             .........X
             ..........
+            .........X
             .........X
             .........X
             XXXXXXXXXX", originTileX: 0, originTileY: 0);
@@ -229,11 +229,11 @@ public class LedgePullExitTests(ITestOutputHelper output)
     public void JumpPlusInwardMidPull_QueuesAndLandsOnTop()
     {
         // Same ledge but with a wide platform on top, so landing inward has
-        // somewhere to stand.
+        // somewhere to stand. (3-tall like BuildLedgeTerrain — lip at the R=12 head line.)
         var terrain = SimTerrain.FromAscii(@"
             .........................
             .........................
-            .........................
+            .........XXXXXXXXXXXXXXXX
             .........XXXXXXXXXXXXXXXX
             .........XXXXXXXXXXXXXXXX
             XXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);

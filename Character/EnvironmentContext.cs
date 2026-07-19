@@ -98,6 +98,9 @@ public class EnvironmentContext
     private bool _hasCeiling;
     private FloatingSurfaceDistance _ceilingContact;
 
+    private Corridor _corridor1;
+    private Corridor _corridorMinus1;
+
     public bool TryGetGround(out FloatingSurfaceDistance ground) =>
         TryGetGroundAt(PlayerCharacter.Radius, ref _groundSearched, ref _hasGround, ref _groundContact, out ground);
 
@@ -202,6 +205,17 @@ public class EnvironmentContext
         }
         corner = default;
         return false;
+    }
+
+    // Local-geometry corridor ahead of the body (Plans/CORRIDOR_MANEUVER_PLAN.md). Unlike the
+    // TryGetX queries there is no "absent" case — a scan always yields a Corridor (possibly with
+    // ColumnCount == 0 when the very first column is a wall). Cached per frame per direction;
+    // the Corridor itself is pure derived data and never snapshot state.
+    public Corridor GetCorridor(int dir)
+    {
+        if (dir == 1)  return _corridor1      ??= CorridorProbe.Scan(Body, Chunks, 1);
+        if (dir == -1) return _corridorMinus1 ??= CorridorProbe.Scan(Body, Chunks, -1);
+        return null;
     }
 
     public bool TryGetCeiling(out FloatingSurfaceDistance ceiling)

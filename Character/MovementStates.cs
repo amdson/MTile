@@ -471,11 +471,16 @@ public class CoveredJumpState : MovementState
     // JumpHoldTime, JumpReleased) lives in MovementVars now; only the soft-contact
     // refs stay as transient instance caches (rebuilt by EnsureContacts).
     private SteeringRamp _ramp;
-    public override void ResetTransient() { _ramp = null; _ground = null; }
-    private FloatingSurfaceDistance _ground;  // held through phase 1: the body keeps its standing
-                                              // float height so the ceiling probe (anchored on the
+    public override void ResetTransient() { _ramp = null; _ground = null; _groundIsCrouch = false; }
+    private FloatingSurfaceDistance _ground;  // held through phase 1: the body keeps its rest
+                                              // height so the ceiling probe (anchored on the
                                               // head) doesn't slip off the overhead slab and fire
                                               // phase 2 prematurely. Removed on the phase-2 transition.
+    private bool _groundIsCrouch;             // which float height _ground was acquired at: standing
+                                              // only fits under tall ceilings — under a sub-standing
+                                              // slab (2-high tunnels at R=12) the slide holds CROUCH
+                                              // height, else the head jams into the ceiling and the
+                                              // launch dies. Update's refresh must query the same kind.
 
     public override int ActivePriority  => MovementPriorities.CoveredJumpActive;
     public override int PassivePriority => MovementPriorities.CoveredJumpPassive;
@@ -566,10 +571,15 @@ public class CoveredJumpState : MovementState
             _ramp = new SteeringRamp { Sense = SteeringSense.Under, ForwardDir = vars.OpenDir, Corner = corner };
             ctx.Body.Constraints.Add(_ramp);
         }
-        if (_ground == null && ctx.TryGetGround(out var ground))
+        if (_ground == null)
         {
-            _ground = ground;
-            ctx.Body.Constraints.Add(_ground);
+            _groundIsCrouch = ctx.TryGetGround(out var stand) && ctx.TryGetCeiling(out var ceil)
+                && stand.Position.Y - ceil.Position.Y < PlayerCharacter.StandingHeight + 1f;
+            if (_groundIsCrouch ? ctx.TryGetCrouchGround(out var ground) : ctx.TryGetGround(out ground))
+            {
+                _ground = ground;
+                ctx.Body.Constraints.Add(_ground);
+            }
         }
     }
 
@@ -612,17 +622,21 @@ public class CoveredJumpState : MovementState
             if (CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, vars.OpenDir, out var freshCorner))
                 _ramp.Corner = freshCorner;
 
-            // Refresh the ground constraint's pose so a sloped/stepped floor doesn't fight the spring.
-            if (_ground != null && ctx.TryGetGround(out var refreshedGround))
+            // Refresh the ground constraint's pose so a sloped/stepped floor doesn't fight the
+            // spring — from the SAME query kind the contact was acquired at (see _groundIsCrouch).
+            if (_ground != null
+                && (_groundIsCrouch ? ctx.TryGetCrouchGround(out var refreshedGround)
+                                    : ctx.TryGetGround(out refreshedGround)))
             {
                 _ground.Position    = refreshedGround.Position;
                 _ground.Normal      = refreshedGround.Normal;
                 _ground.MinDistance = refreshedGround.MinDistance;
             }
 
-            // Spring force toward float height (mirrors StandingState) so the body holds standing
-            // height through the slide. Without this, gravity pulls the head down and the ceiling
-            // probe slips off the overhead slab, firing phase 2 mid-tunnel.
+            // Spring force toward the held float height (standing under tall ceilings, crouch
+            // under a sub-standing slab) so the body holds its rest height through the slide.
+            // Without this, gravity pulls the head down and the ceiling probe slips off the
+            // overhead slab, firing phase 2 mid-tunnel.
             var slideForce = Vector2.Zero;
             if (_ground != null)
             {
@@ -788,7 +802,13 @@ public class ParkourState : MovementState
             _overRamp.HasTarget      = _overRamp.Weight  > SteeringRamp.WeightEpsilon;
             _overRamp.TargetVelocity = targetVelocity;
             _overRamp.MaxSpeed       = float.PositiveInfinity;   // target mode supersedes MaxSpeed
-            _overRamp.MaxRedirectVy  = MovementConfig.Current.ParkourRampMaxVy;
+            // Ballistic crest cap: never carry more upward speed than a free-fall arc needs to
+            // coast the binding vertex's remaining rise (√(2g·rise)). As the body nears the lift
+            // point the allowance tapers to 0, so it crests at ~zero vy and settles instead of
+            // popping ballistic and floating down. The config cap remains the ceiling early in
+            // the climb when the remaining rise is large.
+            float crestVy = MathF.Sqrt(2f * Simulation.WorldGravityY * MathF.Max(0f, _overRamp.BindClearance));
+            _overRamp.MaxRedirectVy  = MathF.Min(MovementConfig.Current.ParkourRampMaxVy, crestVy);
             _overRamp.MaxForce       = MovementConfig.Current.ParkourRampMaxForce;
         }
         if (_underRamp != null)
@@ -827,6 +847,136 @@ public class ParkourState : MovementState
             _underRamp.Corner = lo.InnerEdge;
         }
         else if (_underRamp != null) { ctx.Body.Constraints.Remove(_underRamp); _underRamp = null; }
+    }
+}
+
+// Deliberate climb of a flush 1-block step — the maneuver-layer companion to ParkourState's
+// reflex vault (Plans/CORRIDOR_MANEUVER_PLAN.md). The steering ramps' steep-angle taper
+// abstains when the body is flush against a step (θ* → π/2 would be a winch, not a graze);
+// this state claims exactly that vacated case: grounded, slow, pressing into a 1-block-band
+// rise directly ahead. Geometry comes from the corridor probe; the climb delivers the body
+// into the landing GATE (crouch-height if the landing has a low roof — gates, not poses),
+// with the same ballistic vy envelope the reflex crest cap uses, so there is no pop.
+// Motion is the LedgePull servo idiom: lift + into-wall hold below the crest, brake + push
+// over at the crest. Cancel by releasing the direction; jumps preempt (Active 46 < 50).
+public class MantleState : MovementState
+{
+    public override AnimTag AnimationTag => AnimTag.Parkour;   // reuse the vault clip family
+
+    private readonly int _wallDir;
+    public MantleState(int wallDir) => _wallDir = wallDir;
+
+    public override int ActivePriority  => MovementPriorities.MantleActive;
+    public override int PassivePriority => MovementPriorities.MantlePassive;
+    // Climb family — blocked during hitstun/stun like the ledge grab/pull.
+    public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
+
+    // Height-fraction progress for the hands overlay; pure function of MovementVars so it
+    // survives a rollback restore (unlike ParkourState's transient entry pos).
+    private float _progress;
+    public override float AnimationProgress => _progress;
+
+    private Vector2 _gripCorner;   // transient mirror of vars.MantleCorner for TryAnimationGrip
+    private bool    _hasGrip;
+    public override void ResetTransient() { _gripCorner = default; _hasGrip = false; _progress = 0f; }
+
+    public override bool TryAnimationGrip(out Vector2 target)
+    {
+        target = _gripCorner;
+        return _hasGrip;
+    }
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+    {
+        var cfg = MovementConfig.Current;
+        if (ctx.Intent.HeldHorizontal != _wallDir || !ctx.TryGetGround(out _)) return false;
+        // Speed gate: at running speed the reflex ramps own the vault; the mantle only
+        // claims stalled/deliberate entries (including a failed at-speed approach that
+        // bonked and slowed).
+        if (MathF.Abs(ctx.Body.Velocity.X) > cfg.MantleMaxEntrySpeed) return false;
+
+        var corridor = ctx.GetCorridor(_wallDir);
+        if (!corridor.TryFirstRise(out var rise)) return false;
+        if (rise.Delta < cfg.MantleMinRise || rise.Delta > cfg.MantleMaxRise) return false;
+        // Landing-gate feasibility is implicit: had the landing column pinched, the probe
+        // would have truncated before the rise and TryFirstRise would have found nothing.
+
+        // Flush: the body's leading face is essentially at the lip.
+        float dist = _wallDir == 1
+            ? rise.Pos.X - ctx.Body.Bounds.Right
+            : ctx.Body.Bounds.Left - rise.Pos.X;
+        return dist <= cfg.MantleFlushDistance;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        if (ctx.Intent.CurrentHorizontal != _wallDir) return false;               // release cancels
+        if (vars.TimeInState >= MovementConfig.Current.MaxVaultTime) return false; // stuck → bail
+        return !Completed(ctx, ref vars);
+    }
+
+    // Delivered: at gate height and horizontally past the lip. On completion the state just
+    // ends; whichever state's preconditions match the landing (Standing, or Underpass once it
+    // exists for low gates) claims the next frame — handoffs are arbitration, not code.
+    private bool Completed(EnvironmentContext ctx, ref MovementVars vars)
+    {
+        bool atHeight = ctx.Body.Position.Y <= vars.MantleTargetY + 1f;
+        bool past = _wallDir == 1
+            ? ctx.Body.Position.X > vars.MantleCorner.X + PlayerCharacter.Radius * 0.5f
+            : ctx.Body.Position.X < vars.MantleCorner.X - PlayerCharacter.Radius * 0.5f;
+        return atHeight && past;
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        vars.TimeInState = 0f;
+        var corridor = ctx.GetCorridor(_wallDir);
+        corridor.TryFirstRise(out var rise);   // precondition just verified it exists
+        vars.MantleCorner = rise.Pos;
+        // Deliver into the landing gate: standing height on the new floor, raised (= body
+        // arrives lower/crouched) if the landing's ceiling demands it.
+        float targetY = corridor.FloorY[rise.Column] - 2f * PlayerCharacter.Radius;
+        if (!float.IsNegativeInfinity(corridor.CeilY[rise.Column]))
+            targetY = MathF.Max(targetY, corridor.CeilY[rise.Column] + PlayerCharacter.Radius + 2f);
+        vars.MantleTargetY = targetY;
+        vars.MantleEntryY  = ctx.Body.Position.Y;
+        abilities.Facing = _wallDir;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        vars.TimeInState += ctx.Dt;
+        _gripCorner = vars.MantleCorner;
+        _hasGrip = true;
+        float span = vars.MantleEntryY - vars.MantleTargetY;
+        _progress = span > 1f
+            ? Math.Clamp((vars.MantleEntryY - ctx.Body.Position.Y) / span, 0f, 1f)
+            : 0f;
+
+        var cfg   = MovementConfig.Current;
+        var force = Vector2.Zero;
+        float remaining = ctx.Body.Position.Y - vars.MantleTargetY;   // >0 while below the gate
+
+        if (remaining > 1f)
+        {
+            force.Y = -cfg.VaultLiftForce;
+            // Ballistic envelope (same as the reflex crest cap): never carry more upward
+            // speed than free-fall needs to coast the remaining rise — crest at ~zero vy.
+            float vyAllow = MathF.Sqrt(2f * Simulation.WorldGravityY * remaining);
+            if (ctx.Body.Velocity.Y < -vyAllow && ctx.Dt > 0f)
+                force.Y = (-vyAllow - ctx.Body.Velocity.Y) / ctx.Dt;   // brake replaces lift
+            // Light into-wall hold so the climb hugs the step face.
+            force.X = _wallDir * cfg.VaultPushForce * 0.5f;
+        }
+        else
+        {
+            // Crest: kill residual rise (saturated brake, LedgePull idiom) and push over.
+            if (ctx.Body.Velocity.Y < 0f && ctx.Dt > 0f)
+                force.Y = MathF.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.VaultLiftForce);
+            force.X = _wallDir * cfg.VaultPushForce;
+        }
+
+        ctx.Body.AppliedForce = force;
     }
 }
 
@@ -1051,7 +1201,9 @@ public class LedgePullState : MovementState
         // hold satisfies ParkourState's preconditions and its GuidedPassive (45) would
         // steal the maneuver from the pull (43). The pull completes/exits on its own terms
         // and a queued jump routes to LedgeJumpState (LEDGE_PULL_INPUT_MATRIX.md rows B, K).
-        if (candidate is ParkourState) return true;
+        // MantleState (passive 46) reads the same mid-pull pose — flush, slow, grounded on
+        // the lip — so it gets the same suppression for the same reason.
+        if (candidate is ParkourState or MantleState) return true;
         // Mid-pull, only an *away* press reads as "kick off the wall and bail". An inward
         // press means "jump up onto the ledge" — suppress WallJump so the intent stays
         // queued for LedgeJumpState at the top (row K). Use the candidate's own wall side,

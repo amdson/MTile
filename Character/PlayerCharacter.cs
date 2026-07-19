@@ -7,7 +7,18 @@ namespace MTile;
 
 public class PlayerCharacter : IHittable
 {
-    public const float Radius = 9.5f;
+    // CORE GAMEPLAY CONSTANT — do not change without an explicit decision from the project
+    // owner. 12 is the original size (restored 2026-07-18 after an unnoticed 9.5 detour in
+    // c7e110a): standing head height ≈ R·(1+2·sin60°) ≈ 32.8px, deliberately JUST over two
+    // tiles so 2-high corridors force a crouch. Ripple surfaces if this ever moves again:
+    // animation COM stamps in SkeletonStates/*.json, checker bands, corridor/mantle config,
+    // test fixture geometry.
+    public const float Radius = 12f;
+
+    // Standing head height above the floor: float height (= Radius) + the hexagon body's
+    // full vertical extent (2 · R·sin60°). Used by auto-crouch to decide whether standing
+    // fits under a ceiling.
+    public static readonly float StandingHeight = Radius + 2f * Radius * MathF.Sin(MathF.PI / 3f);
 
     // Stable identity for snapshot/restore (IHittable.Id). Assigned by
     // Simulation from its deterministic id counter, shared with entities.
@@ -292,6 +303,8 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new CoveredJumpState());
         _stateRegistry.Add(new ParkourState(1));
         _stateRegistry.Add(new ParkourState(-1));
+        _stateRegistry.Add(new MantleState(1));
+        _stateRegistry.Add(new MantleState(-1));
         _stateRegistry.Add(new DropdownState());
         _stateRegistry.Add(new LedgeGrabState(1));
         _stateRegistry.Add(new LedgeGrabState(-1));

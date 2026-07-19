@@ -1,3 +1,5 @@
+using Microsoft.Xna.Framework;
+
 namespace MTile;
 
 // Two-phase progression for CoveredJumpState. Lifted to namespace scope (was a
@@ -28,4 +30,7 @@ public struct MovementVars
     public float EntrySpeed;        // Parkour
     public bool  ExitingAirborne;   // Dropdown
     public CoveredJumpPhase CoveredPhase;  // CoveredJump
+    public Vector2 MantleCorner;    // Mantle: the step lip being climbed (from the corridor probe)
+    public float MantleTargetY;     // Mantle: body-center Y to deliver into the landing gate
+    public float MantleEntryY;      // Mantle: body-center Y at entry (for AnimationProgress)
 }

@@ -155,6 +155,36 @@ public class MovementConfig
     // px/s² equivalent) overshoots the cap and reaches the underlying tile.
     public float ParkourRampMaxForce { get; set; } = 3500f;
 
+    // Corridor probe (shared local-geometry sensing for the maneuver layer —
+    // see Plans/CORRIDOR_MANEUVER_PLAN.md and Character/CorridorProbe.cs).
+    // Columns of tiles scanned ahead of the body's leading face (capped at
+    // Corridor.MaxColumns). Deliberately short: ~2 blocks reads as character
+    // reflexes; more reads as autopilot.
+    public int   CorridorHorizonColumns { get; set; } = 4;
+    // Vertical search window around the standing base (px). Up must cover the
+    // tallest measurable rise (CorridorMaxRise) plus headroom above it; down
+    // bounds how deep a drop still counts as "floor" rather than NoFloor.
+    public float CorridorWindowUp   { get; set; } = 64f;
+    public float CorridorWindowDown { get; set; } = 40f;
+    // Minimum floor-to-ceiling gap (px) a column must offer to be traversable.
+    // Between 1 tile (16 — impassable) and 2 tiles (32 — tight standing fit).
+    public float CorridorMinGap { get; set; } = 24f;
+    // Largest single-column floor rise (px) that is still maneuver territory
+    // (mantle/arc-jump envelope, ~2.6 tiles). Above this the column is a wall.
+    public float CorridorMaxRise { get; set; } = 42f;
+
+    // Mantle (deliberate flush-step climb — see MantleState, Plans/CORRIDOR_MANEUVER_PLAN.md).
+    // Rise band in px the mantle accepts (the 1-block vault band: 0.5..1.2 tiles, matching
+    // ExposedUpperCornerChecker's). Steeper is arc-jump territory; shallower is a walk-over.
+    public float MantleMinRise { get; set; } = 8f;
+    public float MantleMaxRise { get; set; } = 20f;
+    // Body face must be within this many px of the step lip — the mantle is the flush/slow
+    // fallback for the case the ramps' steep-angle taper refuses, not a running maneuver.
+    public float MantleFlushDistance { get; set; } = 6f;
+    // |vx| gate: above this the body is mid-run and the reflex ramps own the vault; the
+    // mantle only claims stalled/deliberate entries. Below MaxWalkSpeed by a wide margin.
+    public float MantleMaxEntrySpeed { get; set; } = 60f;
+
     // Covered Jump (jump initiated while partially under an overhang — see CoveredJumpState)
     // Hard cap on the slide-out phase so a degenerate "can't actually get clear" position bails to
     // Falling instead of hanging. The slide itself reuses WalkAccel / MaxWalkSpeed.

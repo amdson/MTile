@@ -63,6 +63,15 @@ public static class MovementPriorities
     public const int GuidedActive   = 25;
     public const int GuidedPassive  = 45;
 
+    // Mantle: deliberate climb of a flush 1-block step — the case the steering ramps'
+    // steep-angle taper refuses (Plans/CORRIDOR_MANEUVER_PLAN.md). Passive 46 > GuidedPassive
+    // so it takes over from a stalled ParkourState (whose ramps abstained and left the body
+    // flush and slowed); Active 46 > GuidedPassive so Parkour can't steal it back mid-climb;
+    // both < 50 so jumps preempt. The speed gate in its precondition keeps it out of
+    // at-speed vaults, so the reflex path is otherwise untouched.
+    public const int MantleActive   = 46;
+    public const int MantlePassive  = 46;
+
     // Holds.
     public const int LedgeGrabActive  = 42;
     public const int LedgeGrabPassive = 42;

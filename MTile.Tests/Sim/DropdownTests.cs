@@ -27,10 +27,11 @@ public class DropdownTests(ITestOutputHelper output)
         OOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXX";
 
-    // body.Bounds.Right = startX + 8.23; edge x=160; hanging ↔ body.Right > 160 ↔ startX > 151.77.
+    // body.Bounds.Right = startX + R·sin60° ≈ startX + 10.39 (R=12); edge x=160;
+    // hanging ↔ body.Right > 160 ↔ startX > 149.61.
     [Theory]
-    [InlineData(152.0f)]  // body.Right ≈ 160.23 — barely hanging (~0.2 px)
-    [InlineData(156.0f)]  // body.Right ≈ 164.23 — ~4 px hanging
+    [InlineData(152.0f)]  // body.Right ≈ 162.39 — ~2.4 px hanging
+    [InlineData(156.0f)]  // body.Right ≈ 166.39 — ~6.4 px hanging
     [InlineData(160.0f)]  // body center at edge; half hanging
     [InlineData(165.0f)]  // body center 5 px past edge; mostly hanging
     public void HoldDown_HangingOverRightEdge_FiresDropdown(float startX)
@@ -66,8 +67,8 @@ public class DropdownTests(ITestOutputHelper output)
         }
 
         Assert.True(fired,
-            $"startX={startX} (body.Right≈{startX+8.23f:F2}, edge=160): body has " +
-            $"{startX+8.23f-160f:F2} px hanging over edge — DropdownState should fire.");
+            $"startX={startX} (body.Right≈{startX+10.39f:F2}, edge=160): body has " +
+            $"{startX+10.39f-160f:F2} px hanging over edge — DropdownState should fire.");
     }
 
     // Body fully on the platform (no portion past the drop edge): DropdownState must NOT
@@ -75,8 +76,8 @@ public class DropdownTests(ITestOutputHelper output)
     [Theory]
     [InlineData(80.0f)]   // way back on platform
     [InlineData(120.0f)]  // middle of platform
-    [InlineData(144.0f)]  // body center on col 9 (last solid col), body.Right ≈ 152.23 < 160
-    [InlineData(151.0f)]  // body.Right ≈ 159.23 — just barely still on the platform
+    [InlineData(144.0f)]  // body center on col 9 (last solid col), body.Right ≈ 154.39 < 160
+    [InlineData(149.0f)]  // body.Right ≈ 159.39 — just barely still on the platform
     public void HoldDown_FullyOnPlatform_DoesNotFireDropdown(float startX)
     {
         var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
@@ -109,7 +110,7 @@ public class DropdownTests(ITestOutputHelper output)
         }
 
         Assert.False(fired,
-            $"startX={startX} (body.Right≈{startX+8.23f:F2}, edge=160): body is fully on " +
+            $"startX={startX} (body.Right≈{startX+10.39f:F2}, edge=160): body is fully on " +
             $"the platform — DropdownState must not fire.");
     }
 

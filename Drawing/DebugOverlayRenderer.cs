@@ -106,6 +106,65 @@ public sealed class DebugOverlayRenderer
         _draw.Ring(ramp.Corner, 5f, color, 12, 1f);
     }
 
+    // Corridor probe overlay (Plans/CORRIDOR_MANEUVER_PLAN.md): per-column floor gates
+    // (white) and ceiling gates (violet), corner markers (rise: lime, drop: sky blue,
+    // ceiling lip: orange), and a red truncation post with the reason initial when the
+    // scan stopped on infeasible geometry. Render-only — callers Scan() fresh; nothing
+    // here touches the sim.
+    public void DrawCorridor(Corridor c)
+    {
+        if (c == null) return;
+
+        for (int i = 0; i < c.ColumnCount; i++)
+        {
+            float x0 = c.ColumnEdgeX(i);
+            float x1 = x0 + c.Dir * Chunk.TileSize;
+            DrawLine(new Vector2(x0, c.FloorY[i]), new Vector2(x1, c.FloorY[i]), Color.White * 0.75f, 2);
+            if (!float.IsNegativeInfinity(c.CeilY[i]))
+                DrawLine(new Vector2(x0, c.CeilY[i]), new Vector2(x1, c.CeilY[i]), Color.Violet * 0.8f, 2);
+        }
+
+        for (int i = 0; i < c.FloorCornerCount; i++)
+        {
+            var corner = c.FloorCorners[i];
+            var color  = corner.Delta > 0f ? Color.LimeGreen : Color.DeepSkyBlue;
+            _draw.Disc(corner.Pos, 3f, color);
+            _draw.Ring(corner.Pos, 5f, color, 12, 1f);
+        }
+        for (int i = 0; i < c.CeilCornerCount; i++)
+        {
+            _draw.Disc(c.CeilCorners[i].Pos, 3f, Color.Orange);
+            _draw.Ring(c.CeilCorners[i].Pos, 5f, Color.Orange, 12, 1f);
+        }
+
+        if (c.Truncation != CorridorTruncation.Horizon)
+        {
+            float x = c.ColumnEdgeX(c.TruncationColumn);
+            // Post spans the local gate band so it reads against the geometry that killed the scan.
+            float yTop = c.WindowTop, yBot = c.WindowBottom;
+            if (c.ColumnCount > 0)
+            {
+                int last = c.ColumnCount - 1;
+                yBot = c.FloorY[last] + 8f;
+                yTop = float.IsNegativeInfinity(c.CeilY[last]) ? c.FloorY[last] - 40f : c.CeilY[last] - 8f;
+            }
+            DrawLine(new Vector2(x, yTop), new Vector2(x, yBot), Color.Red * 0.85f, 2);
+            // Reason tick: one short stub per truncation kind (P/T/N have 1/2/3 stubs — cheap
+            // to read without text rendering).
+            int stubs = c.Truncation switch
+            {
+                CorridorTruncation.Pinch    => 1,
+                CorridorTruncation.TallRise => 2,
+                _                           => 3,   // NoFloor
+            };
+            for (int s = 0; s < stubs; s++)
+            {
+                float y = yTop + 4f + s * 5f;
+                DrawLine(new Vector2(x, y), new Vector2(x + c.Dir * 7f, y), Color.Red * 0.85f, 2);
+            }
+        }
+    }
+
     // Translucent fill + crisp outline. Color owned by the publisher (Hitbox.DebugColor).
     public void DrawHitbox(Hitbox hb)
     {

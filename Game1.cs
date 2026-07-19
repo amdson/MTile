@@ -496,6 +496,11 @@ public class Game1 : Game
                 foreach (var c in body.Constraints)
                     if (c is SteeringRamp ramp) _debugOverlay.DrawSteeringRamp(ramp);
 
+        // Corridor probe ahead of the primary player, in their facing direction. The scan is
+        // pure and render-local — this call never feeds back into the sim.
+        if (_config.DebugDrawCorridor)
+            _debugOverlay.DrawCorridor(CorridorProbe.Scan(player.Body, _sim.Chunks, player.Facing));
+
         // Enemy health bars in world space, drawn just above each wounded body.
         foreach (var e in _sim.Entities)
             if (_config.DebugDrawHealthBars && e.Health < e.MaxHealth) _debugOverlay.DrawEntityHealthBar(e);

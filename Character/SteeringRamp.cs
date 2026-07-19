@@ -24,7 +24,12 @@ public sealed class SteeringRamp : PhysicsContact
     public float   ThetaStar;     // [0, π/2]: the binding angle off "forward". 0 ⇒ inert this step.
     public Vector2 SurfaceDir;    // d*, unit: the shallowest clearing trajectory (the implicit ramp tangent)
     public Vector2 BannedDir;     // b, unit: d* rotated 90° toward the solid
-    public float   Weight;        // [0,1]: Smoothstep(0, ThetaBand, ThetaStar)
+    public float   Weight;        // [0,1]: Smoothstep(0, ThetaBand, ThetaStar), faded back to 0 as
+                                  // ThetaStar approaches π/2 (see SteepFadeStart) — near-vertical
+                                  // "clearing trajectories" are outside the ramp's physical regime.
+    public float   BindClearance; // clearance distance (px) still owed by the binding vertex — its rc
+                                  // at ThetaStar. 0 when inert. Owner states use it for the ballistic
+                                  // crest cap: vy needed to coast the remaining rise = √(2g·BindClearance).
 
     // Optional ceiling on |velocity| after the redirect — the owner state sets this so the climb
     // force can't blow the speed up through the rescale. Default = no cap.
@@ -62,6 +67,15 @@ public sealed class SteeringRamp : PhysicsContact
     public Vector2 TargetVelocity;
 
     private const float ThetaBand      = 0.15f;   // radians: width of the Weight fade near ThetaStar = 0
+    // Steep-angle authority taper: the ramp is a graze assist, not a winch. Past SteepFadeStart the
+    // "shallowest clearing trajectory" is so steep that redirecting onto it means hauling the body
+    // near-vertically — unphysical-looking, and the 1/cos speed compensation in owner states blows
+    // up. Weight fades to 0 across [SteepFadeStart, SteepFadeEnd]; a body flush against a step
+    // (θ* → π/2) gets NO assist and honestly bumps the wall. That case belongs to a deliberate
+    // mantle maneuver, not the reflex layer. Normal running approaches bind at θ* ≈ 40–55°, safely
+    // below the fade.
+    private const float SteepFadeStart = 1.1f;    // radians (~63°): full authority below this
+    private const float SteepFadeEnd   = 1.35f;   // radians (~77°): zero authority above this
     private const float BindEpsilon    = 1e-3f;   // a vertex binds iff rf > eps && rc > eps
     private const float SpeedEpsilon   = 1e-2f;   // below this speed there is nothing to redistribute
     private const float CombineLambda  = 0.1f;    // multi-ramp regularizer, as a fraction of max ramp weight
@@ -88,6 +102,7 @@ public sealed class SteeringRamp : PhysicsContact
         Vector2 c = Corner + (-ForwardDir * Clearance) * fwd + vc * clr;
 
         float thetaMax = 0f;
+        float rcBind   = 0f;
         foreach (var v in worldVertices)
         {
             Vector2 r = c - v;
@@ -95,14 +110,16 @@ public sealed class SteeringRamp : PhysicsContact
             float rc = Vector2.Dot(r, clr);   // clearance extent; >0 ⇒ vertex is still on the blocked side
             if (rf <= BindEpsilon || rc <= BindEpsilon) continue;
             float theta = MathF.Atan2(rc, rf);   // in (0, π/2)
-            if (theta > thetaMax) thetaMax = theta;
+            if (theta > thetaMax) { thetaMax = theta; rcBind = rc; }
         }
 
-        ThetaStar = thetaMax;
+        ThetaStar     = thetaMax;
+        BindClearance = rcBind;
         float ct = MathF.Cos(ThetaStar), st = MathF.Sin(ThetaStar);
         SurfaceDir = ct * fwd + st * clr;        // unit
         BannedDir  = st * fwd - ct * clr;        // unit: d* rotated 90° toward the solid interior (fwd & anti-clr)
-        Weight     = Smoothstep(0f, ThetaBand, ThetaStar);
+        Weight     = Smoothstep(0f, ThetaBand, ThetaStar)
+                   * (1f - Smoothstep(SteepFadeStart, SteepFadeEnd, ThetaStar));
     }
 
     // PhysicsWorld hook: recompute every steering ramp on the body from the current polygon, drop the
@@ -203,6 +220,17 @@ public sealed class SteeringRamp : PhysicsContact
         }
 
         Vector2 dv = vIdeal - vBefore;
+        // In target mode the ideal is a state-authored velocity, not a geometric rotation, so the
+        // Weight taper (θ*→0 inert band + steep-angle fade) must be applied here: scale the drive
+        // by the strongest engaged ramp's weight so authority fades smoothly at both ends of the
+        // ramp's regime instead of switching at WeightEpsilon. (Legacy mode already folds Weight
+        // into the rotation itself.)
+        if (useTargetMode)
+        {
+            float wMax = 0f;
+            foreach (var r in ramps) if (r.HasTarget && r.Weight > wMax) wMax = r.Weight;
+            dv *= wMax;
+        }
         if (forceCap < float.PositiveInfinity && dt > 0f)
         {
             float maxDv = forceCap * dt;

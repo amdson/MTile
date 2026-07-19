@@ -338,10 +338,16 @@ public class CrouchedState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        // return (ctx.Input.Down || ctx.TryGetCeiling(out _)) && ctx.TryGetCrouchGround(out _);
-        return ctx.Input.Down && ctx.TryGetCrouchGround(out _);
-
-    }   
+        if (!ctx.TryGetCrouchGround(out _)) return false;
+        if (ctx.Input.Down) return true;
+        // Auto-crouch: standing doesn't FIT here — the floor-to-ceiling gap is below the
+        // standing head height (2-high corridors: ~32px vs StandingHeight ≈ 32.8). This is
+        // deliberately narrower than the earlier commented-out `|| TryGetCeiling` attempt,
+        // which over-triggered under any detected ceiling regardless of headroom.
+        return ctx.TryGetGround(out var ground)
+            && ctx.TryGetCeiling(out var ceiling)
+            && ground.Position.Y - ceiling.Position.Y < PlayerCharacter.StandingHeight + 1f;
+    }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {

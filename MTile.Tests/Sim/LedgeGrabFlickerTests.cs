@@ -36,12 +36,13 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
             ..........
             XXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-    // 2-tile-tall wall whose TOP sits at the grounded body's head — the canonical
-    // "graspable ledge" geometry.
+    // 3-tile-tall wall whose TOP sits at the grounded body's head — the canonical
+    // "graspable ledge" geometry. (2 tiles at R=9.5; the R=12 body's head line is a
+    // row higher: standing head ≈ groundTop − 34, i.e. row 2 here.)
     private static ChunkMap BuildTallLedgeTerrain() => SimTerrain.FromAscii(@"
             ..........
             ..........
-            ..........
+            .........X
             .........X
             .........X
             XXXXXXXXXX", originTileX: 0, originTileY: 0);
@@ -98,7 +99,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildShortLedgeTerrain();
         const float groundTop = 3 * TS;
         const float wallLeft  = 9 * TS;
-        float halfW = 8.227f;
+        float halfW = 10.392f;   // R·sin60° at R=12
         var script = new InputScript()
             .For(15, new PlayerInput { Right = true })
             .Forever(new PlayerInput { Right = true, Up = true });
@@ -126,7 +127,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildTallLedgeTerrain();
         const float groundTop = 5 * TS;
         const float wallLeft  = 9 * TS;
-        float halfW = 8.227f;
+        float halfW = 10.392f;   // R·sin60° at R=12
         var script = new InputScript()
             .For(30, new PlayerInput { })
             .Forever(new PlayerInput { Up = true });
@@ -174,7 +175,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildTallPillarTerrain();
         const float pillarTop = 5 * TS;     // 80
         const float pillarLeft = 9 * TS;    // 144
-        float halfW = 8.227f;
+        float halfW = 10.392f;   // R·sin60° at R=12
 
         // Body just left of the pillar's left face, two tiles above the lip,
         // falling straight down with Up held the whole run — the natural "drop
@@ -201,7 +202,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildTallPillarTerrain();
         const float pillarTop = 5 * TS;
         const float pillarLeft = 9 * TS;
-        float halfW = 8.227f;
+        float halfW = 10.392f;   // R·sin60° at R=12
 
         var cfg = new SimConfig
         {
@@ -227,7 +228,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildTallPillarTerrain();
         const float pillarTop = 5 * TS;
         const float pillarLeft = 9 * TS;
-        float halfW = 8.227f;
+        float halfW = 10.392f;   // R·sin60° at R=12
 
         var cfg = new SimConfig
         {

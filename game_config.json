@@ -1,5 +1,5 @@
 ﻿{
-  "Stage": "training",
+  "Stage": "start",
   "WindowWidth": 1000,
   "WindowHeight": 900,
   "Fullscreen": false,
@@ -11,7 +11,7 @@
   "DrawPlayerSpriteSkin":       true,
   "PlayerSpriteBinding":        "pumpkin_man_downsampled",
   "DebugDrawSkeleton":          false,
-  "CameraZoom":                 1.5,
+  "CameraZoom":                 2.5,
   "DebugDrawConstraints":       false,
   "DebugDrawSteeringRamps":     true,
   "DebugDrawGuidedPath":        false,

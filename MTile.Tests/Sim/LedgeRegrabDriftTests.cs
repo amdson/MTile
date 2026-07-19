@@ -18,20 +18,20 @@ public class LedgeRegrabDriftTests(ITestOutputHelper output)
     private const float Gravity = 600f;
     private const float TS = Chunk.TileSize;
 
-    // 2-tile wall on the right; top at the grounded body's head. Corner inner edge
-    // X ≈ 144; the body hangs against the left face at X ≈ 135.
+    // 3-tile wall on the right; top at the grounded R=12 body's head. Corner inner edge
+    // X ≈ 144; the body hangs against the left face at X ≈ 133.6 (144 − R·sin60°).
     private static ChunkMap BuildLedgeTerrain() => SimTerrain.FromAscii(@"
             ..........
             ..........
-            ..........
+            .........X
             .........X
             .........X
             XXXXXXXXXX", originTileX: 0, originTileY: 0);
 
     private const float GroundTop = 5 * TS;
     private const float WallLeft  = 9 * TS;   // 144
-    private const float HalfW     = 8.227f;
-    private const float HangX     = 135f;     // approx resting X against the wall face
+    private const float HalfW     = 10.392f;  // R·sin60° at R=12
+    private const float HangX     = 133.6f;   // approx resting X against the wall face
 
     // Sweep how long Up is held before release — short pulls release low, long pulls
     // release high (near/above the lip) where the body has picked up the most

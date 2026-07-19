@@ -25,6 +25,10 @@ public sealed class GameConfig
     // active SteeringRamp's corner, surface tangent (the trajectory the body skims to),
     // and banned direction (into the solid). Colored by Sense: Over = green, Under = orange.
     public bool DebugDrawSteeringRamps     { get; set; } = true;
+    // Corridor probe (Plans/CORRIDOR_MANEUVER_PLAN.md): per-column floor/ceiling gates ahead
+    // of the primary player in their facing direction, corner markers, and a red truncation
+    // post (stubs: 1 = Pinch, 2 = TallRise, 3 = NoFloor). Render-only scan.
+    public bool DebugDrawCorridor          { get; set; } = true;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
     // Force fields (hold / grab / throw) — on by default so the otherwise-invisible

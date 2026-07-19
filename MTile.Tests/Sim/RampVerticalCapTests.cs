@@ -17,20 +17,22 @@ namespace MTile.Tests;
 // hide whether the cap itself is doing its job.
 public class RampVerticalCapTests(ITestOutputHelper output)
 {
-    // Build a ramp whose corner is far above the body so the binding vertex yields
-    // a near-vertical SurfaceDir (large θ*). Without the vy cap a fast horizontal
-    // inbound velocity would emerge as ~equally fast upward velocity.
+    // Build a ramp whose corner sits high enough that the binding vertex yields a
+    // steep-but-in-regime SurfaceDir (θ* ≈ 55°, inside the ramp's authority band —
+    // the steep-angle Weight taper zeroes anything past ~77°). Without the vy cap
+    // a fast horizontal inbound velocity emerges with vy ≈ |v|·sin θ* ≈ 0.82·|v|.
     private static (PhysicsBody body, SteeringRamp ramp) BuildHighCornerRamp(float vyCap)
     {
         var body = new PhysicsBody(Polygon.CreateRegular(8f, 6), new Vector2(0f, 0f));
-        // Place a corner far above and slightly to the right (forward = +X, body must
-        // pass OVER the corner). Body at origin, corner at (16, -200) ⇒ all body
-        // vertices are far below and behind the corner ⇒ θ* very close to π/2.
+        // Forward = +X, body must pass OVER the corner. Body at origin, corner at
+        // (45, -40): with the Clearance/OverVertLift offsets the binding vertex sees
+        // θ* ≈ 55° — steep enough to exercise the vy cap, shallow enough that the
+        // steep-angle taper leaves the ramp at full weight.
         var ramp = new SteeringRamp
         {
             Sense = SteeringSense.Over,
             ForwardDir = +1,
-            Corner = new Vector2(16f, -200f),
+            Corner = new Vector2(45f, -40f),
             MaxRedirectVy = vyCap,
         };
         body.Constraints.Add(ramp);
@@ -50,6 +52,36 @@ public class RampVerticalCapTests(ITestOutputHelper output)
         // Sanity-check the fixture: redirect should have produced a strong upward kick.
         Assert.True(body.Velocity.Y < -100f,
             $"Fixture sanity: expected strong upward redirect with no cap, got vy={body.Velocity.Y:F2}");
+    }
+
+    // ── Steep-angle authority taper ────────────────────────────────────────
+    // A corner so high that the "shallowest clearing trajectory" is near-vertical
+    // (θ* → π/2) is outside the ramp's physical regime — redirecting onto it is a
+    // winch, not a graze assist. The Weight taper (fading over ~63°..77°) makes
+    // the ramp abstain entirely: velocity passes through untouched and the body
+    // meets the wall as a real collision. (This fixture — corner at (16, -200),
+    // θ* ≈ 86° — was the original vy-cap fixture before the taper existed.)
+    [Fact]
+    public void NearVerticalCorner_RampAbstains_VelocityUntouched()
+    {
+        var body = new PhysicsBody(Polygon.CreateRegular(8f, 6), new Vector2(0f, 0f));
+        var ramp = new SteeringRamp
+        {
+            Sense = SteeringSense.Over,
+            ForwardDir = +1,
+            Corner = new Vector2(16f, -200f),
+        };
+        body.Constraints.Add(ramp);
+        body.Velocity = new Vector2(300f, 0f);
+        Vector2 vBefore = body.Velocity;
+
+        SteeringRamp.ApplyRedirect(body, 1f / 30f);
+
+        ramp.Recompute(body.Polygon.GetVertices(body.Position));
+        output.WriteLine($"θ* = {ramp.ThetaStar:F3} rad, Weight = {ramp.Weight:F5}, v = ({body.Velocity.X:F2}, {body.Velocity.Y:F2})");
+        Assert.True(ramp.Weight <= SteeringRamp.WeightEpsilon,
+            $"Expected steep-angle taper to zero the weight, got {ramp.Weight:F5} at θ*={ramp.ThetaStar:F3}");
+        Assert.Equal(vBefore, body.Velocity);
     }
 
     [Theory]
@@ -170,5 +202,20 @@ public class RampVerticalCapTests(ITestOutputHelper output)
         const float Headroom = 25f;
         Assert.True(-peakUp <= cap + Headroom,
             $"Peak upward vy during Parkour = {-peakUp:F2}, exceeds cap {cap} + headroom {Headroom}");
+
+        // Ballistic crest cap: the redirect may never carry more upward speed than a
+        // free-fall arc needs to coast the remaining rise, so the body crests at ~zero
+        // vy and settles — no ballistic pop above the step. Assert the apex of the whole
+        // traversal barely exceeds the final resting height on top of the block.
+        float apexY  = float.MaxValue;                 // y-down: min Y = highest point
+        foreach (var f in frames) if (f.Y < apexY) apexY = f.Y;
+        // Standing rest height on top of the block: block top is row 2, body center
+        // floats 2·Radius above the surface it stands on. (Not frames[^1] — by frame
+        // 120 the body has run off the right edge of the fixture and is falling.)
+        float restY  = 2 * Chunk.TileSize - 2f * PlayerCharacter.Radius;
+        const float OvershootMargin = 6f;
+        output.WriteLine($"apexY={apexY:F2}, restY={restY:F2}, overshoot={restY - apexY:F2}");
+        Assert.True(restY - apexY <= OvershootMargin,
+            $"Vault overshoots its landing height by {restY - apexY:F2}px (allowed {OvershootMargin})");
     }
 }
