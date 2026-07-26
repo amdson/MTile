@@ -21,10 +21,11 @@ public sealed class CorrectorScratch
     };
 }
 
-// The corrector-driven running vault (BALLISTIC_CORRECTOR_PLAN build step 4): the
-// at-speed 1-block climb ParkourState's reflex ramps used to own. Behind
-// MovementConfig.CorrectorVaultEnabled for A/B; named so the vault-family sim
-// fixtures (which match on "Parkour") exercise it.
+// Corrector-driven climb family (BALLISTIC_CORRECTOR_PLAN steps 4 + 6): the
+// at-speed 1-block vault (ParkourCorrectorState) and the taller arc-jump band
+// (ArcJumpCorrectorState) share this machinery; each subclass owns only its rise
+// band and entry-speed gate. Behind MovementConfig.CorrectorVaultEnabled for A/B;
+// subclass names match the vault-family sim fixtures ("Parkour" / "ArcJump").
 //
 // Shape: intent generates the reference (a one-shot entry hop sized to clear the
 // lip with margin + a guided drive that preserves entry speed); the solver only
@@ -39,13 +40,19 @@ public sealed class CorrectorScratch
 // the flush/slow climb belongs to the mantle; above it this state claims the
 // approach inside its trigger window. Cancel-on-release and MaxVaultTime liveness
 // as everywhere in the climb family. RampPolicy.Off while ReflexSystem coexists.
-public class ParkourCorrectorState : MovementState
+public abstract class CorrectorClimbBase : MovementState
 {
     private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
     private const float HingeWeight     = 1e6f;    // stiffness constant, not a feel knob
 
-    private readonly int _dir;
-    public ParkourCorrectorState(int dir) => _dir = dir;
+    protected readonly int _dir;
+    protected CorrectorClimbBase(int dir) => _dir = dir;
+
+    // The rise band this maneuver claims (px) and whether the body must arrive
+    // at speed (the running/flush split against MantleState).
+    protected abstract float RiseBandMin { get; }
+    protected abstract float RiseBandMax { get; }
+    protected abstract bool  RequiresRunningEntry { get; }
 
     public override AnimTag AnimationTag => AnimTag.Parkour;   // the vault clip family
 
@@ -68,12 +75,13 @@ public class ParkourCorrectorState : MovementState
         var cfg = MovementConfig.Current;
         if (!cfg.CorrectorVaultEnabled) return false;
         if (ctx.Intent.HeldHorizontal != _dir || !ctx.TryGetGround(out _)) return false;
-        // The running half of the 1-block split — MantleState owns at/below the gate.
-        if (_dir * ctx.Body.Velocity.X <= cfg.MantleMaxEntrySpeed) return false;
+        // Running/flush split: the 1-block state leaves at-or-below-gate entries to
+        // MantleState; the taller band has no mantle partner and fires at any speed.
+        if (RequiresRunningEntry && _dir * ctx.Body.Velocity.X <= cfg.MantleMaxEntrySpeed) return false;
 
         var corridor = ctx.GetCorridor(_dir);
         if (!corridor.TryFirstRise(out var rise)) return false;
-        if (rise.Delta < cfg.MantleMinRise || rise.Delta > cfg.MantleMaxRise) return false;
+        if (rise.Delta < RiseBandMin || rise.Delta > RiseBandMax) return false;
 
         float dist = _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir));
         if (dist > cfg.CorrectorVaultTriggerDistance) return false;
@@ -124,10 +132,18 @@ public class ParkourCorrectorState : MovementState
         // early-fire case: a shallow apex far from the step is no use).
         float needH = MathF.Max(0f, ctx.Body.Position.Y - vars.MantleTargetY) + cfg.ArcJumpApexMargin;
         float vyApex = SteeringRamp.BallisticVy(needH);
-        float dist   = MathF.Max(1f, _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir)));
-        float tLip   = dist / MathF.Max(1f, _dir * ctx.Body.Velocity.X);
-        float vyLip  = needH / tLip + 0.5f * Simulation.WorldGravityY * tLip;
-        float vy0    = MathF.Max(vyApex, vyLip);
+        float vy0    = vyApex;
+        float vx     = _dir * ctx.Body.Velocity.X;
+        if (vx > cfg.MantleMaxEntrySpeed)
+        {
+            // At speed the pure-ballistic apex can sit past the lip — also require
+            // clearance at the moment the face reaches the lip at current speed.
+            // Meaningless for flush/slow entries (tLip blows up), hence the gate.
+            float dist  = MathF.Max(1f, _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir)));
+            float tLip  = dist / vx;
+            float vyLip = needH / tLip + 0.5f * Simulation.WorldGravityY * tLip;
+            vy0 = MathF.Max(vyApex, vyLip);
+        }
         ctx.Body.Velocity.Y = MathF.Min(ctx.Body.Velocity.Y, -vy0);
     }
 
@@ -217,4 +233,25 @@ public class ParkourCorrectorState : MovementState
             vars.CorrectorPrevDv = Vector2.Zero;
         }
     }
+}
+
+// The at-speed 1-block vault (build step 4) — the case the benched ParkourState's
+// reflex ramps vacated. Slow/flush 1-block entries belong to MantleState.
+public class ParkourCorrectorState : CorrectorClimbBase
+{
+    public ParkourCorrectorState(int dir) : base(dir) { }
+    protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
+    protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
+    protected override bool  RequiresRunningEntry => true;
+}
+
+// The taller climb band (build step 6): rises above the mantle band up to the
+// corridor's maneuver envelope (~2 blocks). No mantle partner ⇒ fires at any
+// entry speed, including flush-from-rest against the step.
+public class ArcJumpCorrectorState : CorrectorClimbBase
+{
+    public ArcJumpCorrectorState(int dir) : base(dir) { }
+    protected override float RiseBandMin => MovementConfig.Current.MantleMaxRise;
+    protected override float RiseBandMax => MovementConfig.Current.CorridorMaxRise;
+    protected override bool  RequiresRunningEntry => false;
 }

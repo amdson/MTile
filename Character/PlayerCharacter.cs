@@ -328,6 +328,8 @@ public class PlayerCharacter : IHittable
         // is unconditional.
         _stateRegistry.Add(new ParkourCorrectorState(1));
         _stateRegistry.Add(new ParkourCorrectorState(-1));
+        _stateRegistry.Add(new ArcJumpCorrectorState(1));
+        _stateRegistry.Add(new ArcJumpCorrectorState(-1));
         _stateRegistry.Add(new MantleState(1));
         _stateRegistry.Add(new MantleState(-1));
         // _stateRegistry.Add(new ArcJumpState(1));
