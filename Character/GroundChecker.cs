@@ -147,7 +147,7 @@ public static class GroundChecker
     // direction — the platform edge the player would drop off. Returns the corner (edgeX, floorTopY):
     // edgeX is the boundary between the last solid tile column and the first empty one. Mirrors
     // CeilingChecker.TryFindExitEdge but probes the floor instead. Used by DropdownState to anchor
-    // its Over SteeringRamp.
+    // its slip-off.
     public static bool TryFindDropEdge(PhysicsBody body, ChunkMap chunks, int dir, out Vector2 corner)
     {
         corner = default;

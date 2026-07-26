@@ -501,11 +501,6 @@ public class Game1 : Game
                         _debugOverlay.DrawConstraintArrow(sc.Position, sc.Normal,
                             c is FloatingSurfaceDistance ? Color.Cyan : Color.Yellow);
 
-        if (_config.DebugDrawSteeringRamps)
-            foreach (var body in _sim.Bodies)
-                foreach (var c in body.Constraints)
-                    if (c is SteeringRamp ramp) _debugOverlay.DrawSteeringRamp(ramp);
-
         // Corridor probe ahead of the primary player, in their facing direction. The scan is
         // pure and render-local — this call never feeds back into the sim.
         if (_config.DebugDrawCorridor)

@@ -1,16 +1,24 @@
 # Ballistic Correction Solver (direct-transcription QP)
 
-Status (2026-07-26, branch `corrector`): build steps 1-6 and 9 SHIPPED — predictor
-(+ parity suite), constraint builder (+ fixtures), CorrectionSolver (+ oracles),
-ParkourCorrectorState/ArcJumpCorrectorState behind CorrectorVaultEnabled,
-trigger-by-feasibility (refusal on the true corrected rollout), mid-maneuver
-snapshot round-trip green, ~40 µs/tick on a vault-heavy course. All 8 formerly
-failing vault-family sim specs pass; operations suites (vault chain, staircase,
-duck, tunnel run, drop-in) green. NOT built: steps 7-8 (ambient mode + removal
-pass) — the tight-tunnel-mouth Skip spec in CorrectorOperationsTests marks the
-first ambient target. Deviation from the spec below: CorrectionProblem carries a
-per-call fixed InnerIterations (4 per tick, 128 at entry feasibility) — opposed-row
-schedules need the deeper fixed budget; determinism unaffected.
+Status (2026-07-27, branch `corrector`): ALL build steps SHIPPED, including 7-8 —
+the ramp stack is GONE. Predictor (+ parity suite), constraint builder (+
+fixtures), CorrectionSolver (+ oracles), the corrector climb family
+(Parkour/ArcJump/Mantle on CorrectorClimbBase) behind CorrectorVaultEnabled,
+trigger-by-feasibility (refusal on the true corrected rollout), AmbientCorrector
+(free-coast redirect-only, passable-feature rows, feasible-plans-only
+anti-autopilot, greedy shallower-sense homotopy pick) behind
+AmbientCorrectorEnabled, mid-maneuver snapshot round-trip green. Removal pass:
+SteeringRamp (+ StepSwept redirect hook), ReflexSystem, old
+ParkourState/ClimbStateBase/MantleState/ArcJumpState, CoveredJump/Dropdown ramp
+insurance, ramp config knobs and overlay all deleted; RampPolicy became
+AmbientPolicy (per-state ambient gate); BallisticVy lives on BallisticPredictor;
+the anti-pop exemption reads MovementVars.AmbientLiftActive. Deviations:
+per-problem fixed InnerIterations (4 per tick, 128 at entry — opposed-row
+schedules need the deeper fixed budget); ambient implements the appendix's
+anti-autopilot rules as "feasible plans only + vertical-face row emission".
+Remaining: the StandServo hover root (the tight-tunnel-mouth Skip spec in
+CorrectorOperationsTests is its acceptance test), fidelity terms / authored
+HermiteClip references, shift-warm-start.
 
 Original design (steps 1-6, 9 now reflect implementation): **This is the successor architecture for movement
 correction generally, not a maneuver-state add-on.** It supersedes CORRIDOR_MANEUVER_PLAN's

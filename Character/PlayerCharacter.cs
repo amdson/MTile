@@ -320,17 +320,10 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new WallJumpingState(1));
         _stateRegistry.Add(new WallJumpingState(-1));
         _stateRegistry.Add(new CoveredJumpState());
-        // ParkourState + ArcJumpState benched while the ambient reflex layer (ReflexSystem)
-        // is evaluated as the owner of the at-speed corner case: registered, they claim the
-        // approach (passive 45/46) before an ambient ramp ever shows its effect. Re-add to
-        // restore the state-driven vault/arc. MantleState stays — it is the flush/slow
-        // fallback for exactly the case the ramps' steep cutoff refuses.
-        // _stateRegistry.Add(new ParkourState(1));
-        // _stateRegistry.Add(new ParkourState(-1));
-        // Corrector-driven running vault (BALLISTIC_CORRECTOR_PLAN step 4) — owns the
-        // at-speed 1-block case the benched ParkourState/ramps vacated. Gated per frame
-        // by MovementConfig.CorrectorVaultEnabled (hot-reloadable A/B), so registration
-        // is unconditional.
+        // Corrector-driven climb family (BALLISTIC_CORRECTOR_PLAN steps 4/6 + the
+        // removal pass): Parkour = at-speed 1-block, ArcJump = 2-block band, Mantle =
+        // slow/flush 1-block. Gated per frame by MovementConfig.CorrectorVaultEnabled
+        // (hot-reloadable A/B), so registration is unconditional.
         _stateRegistry.Add(new ParkourCorrectorState(1));
         _stateRegistry.Add(new ParkourCorrectorState(-1));
         _stateRegistry.Add(new ArcJumpCorrectorState(1));
@@ -558,7 +551,7 @@ public class PlayerCharacter : IHittable
         // + forces are final for the frame), before the physics step reads AppliedForce.
         // Hitstun forces the policy off — knockback must hit corners honestly, whatever
         // free state is nominally active.
-        var rampPolicy = _abilities.Combat.HitstunActive ? RampPolicy.Off : _currentState.RampPolicy;
+        var rampPolicy = _abilities.Combat.HitstunActive ? AmbientPolicy.Off : _currentState.AmbientPolicy;
         _ambient.Apply(ctx, rampPolicy, IsGrounded, ref _moveVars);
 
         // Action gets to augment the body's force AFTER movement has written it but

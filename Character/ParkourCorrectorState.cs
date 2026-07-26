@@ -63,7 +63,8 @@ public sealed class CorrectorScratch
 // Split with MantleState is the existing speed gate: at or below MantleMaxEntrySpeed
 // the flush/slow climb belongs to the mantle; above it this state claims the
 // approach inside its trigger window. Cancel-on-release and MaxVaultTime liveness
-// as everywhere in the climb family. RampPolicy.Off while ReflexSystem coexists.
+// as everywhere in the climb family. AmbientPolicy.Off — the ambient corrector
+// must never fight an owned maneuver.
 public abstract class CorrectorClimbBase : MovementState
 {
     private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
@@ -87,7 +88,7 @@ public abstract class CorrectorClimbBase : MovementState
     public override int ActivePriority  => MovementPriorities.ArcJumpActive;
     public override int PassivePriority => MovementPriorities.ArcJumpPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
-    public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     // Height-fraction progress + lip grip for the hands overlay — pure functions
     // of MovementVars/body, so a restore rebuilds them (ClimbStateBase idiom).
@@ -213,7 +214,7 @@ public abstract class CorrectorClimbBase : MovementState
     {
         var cfg = MovementConfig.Current;
         float needH = MathF.Max(0f, ctx.Body.Position.Y - targetY) + cfg.ArcJumpApexMargin;
-        float vyApex = SteeringRamp.BallisticVy(needH);
+        float vyApex = BallisticPredictor.BallisticVy(needH);
         float vy0    = vyApex;
         float vx     = _dir * ctx.Body.Velocity.X;
         if (vx > cfg.MantleMaxEntrySpeed)
@@ -247,7 +248,7 @@ public abstract class CorrectorClimbBase : MovementState
         {
             // Ballistic honesty: gravity owns the ascent; brake only past the
             // free-fall envelope, lift only if the rollout went under-budget.
-            float vyAllow = SteeringRamp.BallisticVy(remaining);
+            float vyAllow = BallisticPredictor.BallisticVy(remaining);
             if (ctx.Body.Velocity.Y < -vyAllow && ctx.Dt > 0f)
                 force.Y = (-vyAllow - ctx.Body.Velocity.Y) / ctx.Dt;
             else if (ctx.Body.Velocity.Y > -0.25f * vyAllow)

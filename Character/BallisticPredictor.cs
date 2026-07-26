@@ -34,6 +34,12 @@ public static class BallisticPredictor
 {
     public const int MaxHorizon = 24;   // ≥ any CorrectorHorizon a config will ask for
 
+    // Free-fall launch speed that coasts exactly `rise` px upward — the shared
+    // ballistic-envelope primitive (hop sizing, crest caps). Formerly
+    // SteeringRamp.BallisticVy; the ramp stack is gone, the math stays.
+    public static float BallisticVy(float rise)
+        => MathF.Sqrt(2f * Simulation.WorldGravityY * MathF.Max(0f, rise));
+
     // Predicts `steps` ticks from (pos, vel), writing samples[0 .. steps-1].
     // Returns the number of samples written (== steps; truncation at deep
     // violations is the constraint builder's call, not the predictor's).
@@ -83,7 +89,7 @@ public static class BallisticPredictor
                     inputDirX,
                     cfg.WalkAccel    * modifiers.WalkAccel,
                     cfg.MaxWalkSpeed * modifiers.MaxWalkSpeed,
-                    modifiers.PreserveExternalVelocity, overRampEngaged: false,
+                    modifiers.PreserveExternalVelocity, ambientLiftActive: false,
                     cfg.SpringK, cfg.SpringDamping, cfg.SpringMaxRiseSpeed, dt);
             }
             else
@@ -205,7 +211,7 @@ public static class BallisticPredictor
                 var spring = BaselineFeedforward.Ground(
                     pos, vel, groundPos, groundNormal, Vector2.Zero, minDistance,
                     inputX: 0f, walkAccel: 0f, maxWalkSpeed: 0f,
-                    preserveExternalVelocity: false, overRampEngaged: false,
+                    preserveExternalVelocity: false, ambientLiftActive: false,
                     cfg.SpringK, cfg.SpringDamping, cfg.SpringMaxRiseSpeed, dt);
                 force.Y += spring.Y;
             }

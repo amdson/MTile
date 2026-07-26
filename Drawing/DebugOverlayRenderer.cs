@@ -5,7 +5,7 @@ using Microsoft.Xna.Framework.Graphics;
 namespace MTile;
 
 // World-space debug visualizations: hit/hurt/force-field regions, physics
-// constraints, steering ramps, body polygons, and entity health bars. Each draw
+// constraints, corrector trajectories, body polygons, and entity health bars. Each draw
 // is gated by a GameConfig.DebugDraw* flag at the call site; this type just
 // renders. Runs inside Game1's world-space SpriteBatch pass — Begin/End is the
 // caller's responsibility.
@@ -74,35 +74,6 @@ public sealed class DebugOverlayRenderer
         DrawLine(position, tip, color);
         DrawLine(tip, tip + (-normal + perp) * headLength * 0.707f, color);
         DrawLine(tip, tip + (-normal - perp) * headLength * 0.707f, color);
-    }
-
-    // Visualize one SteeringRamp at its corner: the surface tangent (the "ramp" the
-    // body skims along), the banned direction (into the solid), and the corner dot.
-    // Color = Sense (Over: lime / Under: orange); disengaged ramps appear ghosted.
-    public void DrawSteeringRamp(SteeringRamp ramp)
-    {
-        var baseColor = ramp.Sense == SteeringSense.Over ? Color.LimeGreen : Color.Orange;
-        float alpha = ramp.Engaged ? 1f : 0.25f;
-        var color   = baseColor * alpha;
-        var banned  = baseColor * (alpha * 0.45f);
-
-        // Tangent line through the corner (the implicit ramp surface, on both sides).
-        const float Tangent = 28f;
-        var tan = ramp.SurfaceDir * Tangent;
-        DrawLine(ramp.Corner - tan, ramp.Corner + tan, color, 2);
-
-        // Arrowhead at the leading tip so the travel direction reads.
-        var lead = ramp.Corner + tan;
-        var perp = new Vector2(-ramp.SurfaceDir.Y, ramp.SurfaceDir.X) * 6f;
-        DrawLine(lead, lead - tan * 0.25f + perp, color, 1);
-        DrawLine(lead, lead - tan * 0.25f - perp, color, 1);
-
-        // Banned direction (into the solid) — a short ghosted stub from the corner.
-        DrawLine(ramp.Corner, ramp.Corner + ramp.BannedDir * 14f, banned, 1);
-
-        // Corner marker.
-        _draw.Disc(ramp.Corner, 3f, color);
-        _draw.Ring(ramp.Corner, 5f, color, 12, 1f);
     }
 
     // Corridor probe overlay (Plans/CORRIDOR_MANEUVER_PLAN.md): per-column floor gates

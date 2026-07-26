@@ -184,10 +184,6 @@ public static class PhysicsWorld
                 ApplyContactFriction(body, sc, savedForce, dt);
             }
 
-            // Steering ramps: rotate velocity onto the shallowest trajectory that clears the corner
-            // (derived from the polygon each step). Position is still resolved by the real tile sweep below.
-            SteeringRamp.ApplyRedirect(body, dt);
-
             // Depenetration pre-pass. The swept solver only ejects by Epsilon per bounce
             // when the body starts overlapping a shape — fine for static tiles the body
             // never enters, but a TileSprout that flipped to Solid mid-overlap can leave

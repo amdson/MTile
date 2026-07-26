@@ -12,7 +12,7 @@ namespace MTile;
 //     FrictionScale — all value types, trivially copied.
 //   • Maintained constraints only (the resting SurfaceDistance hard contacts the
 //     collision solver persists). Soft state-owned contacts (FloatingSurfaceDistance,
-//     SteeringRamp, PointForceContact) leave Maintained == false; they are NOT
+//     PointForceContact) leave Maintained == false; they are NOT
 //     captured — the owning movement state rebuilds them idempotently after a
 //     restore (see PhysicsContact.Maintained + the per-state Ensure… methods).
 //
@@ -91,7 +91,7 @@ public struct BodyState
         FloatingSurfaceDistance f => new FloatingSurfaceDistance(f.Position, f.Normal, f.MinDistance)
             { SurfaceVelocity = f.SurfaceVelocity, Friction = f.Friction, Maintained = f.Maintained },
         PointForceContact p => new PointForceContact(p.Position) { Maintained = p.Maintained },
-        // SteeringRamp is always a soft (non-Maintained) contact, so it never reaches
+        // Soft (non-Maintained) contacts never reach
         // capture/clone — no branch needed. Any other type would be a bug.
         _ => null,
     };

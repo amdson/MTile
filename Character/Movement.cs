@@ -43,11 +43,11 @@ public abstract class MovementState
     // states (Falling, Stunned, jumps without a source cache).
     public virtual void ResetTransient() { }
 
-    // What the ambient reflex layer (ReflexSystem) may do while this state is active.
-    // Published per frame, MovementModifiers-style. Default: both assists on. Override
-    // to Off in states that own their own ramps or servo the body against fixed
-    // contacts — an ambient redirect would fight the maneuver or duplicate a corner.
-    public virtual RampPolicy RampPolicy => RampPolicy.Default;
+    // What the ambient corrector may do while this state is active. Published per
+    // frame, MovementModifiers-style. Default: both assists on. Override to Off in
+    // states that servo the body against fixed contacts — an ambient redirect
+    // would fight the owned maneuver.
+    public virtual AmbientPolicy AmbientPolicy => AmbientPolicy.Default;
 
     // The animation-facing CATEGORY of this state (AnimTag.None = generic: the animator picks
     // by grounded/velocity). Replaces substring matching on state class names, which silently
@@ -91,7 +91,7 @@ public class StunnedState : MovementState
     public override int PassivePriority => MovementPriorities.StunnedPassive;
 
     // No reflex assists while stunned — knockback must plow into corners honestly.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     // Recoil flinch, not the generic ground clips: without this the muted-control window
     // is invisible (a stunned body sliding under knockback reads as a walk cycle).
@@ -151,7 +151,7 @@ public class TumbleState : MovementState
     public override int PassivePriority => MovementPriorities.TumblePassive;
 
     // No reflex assists while launched — same reasoning as StunnedState.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     // Airborne out-of-control tumble, distinct from StunnedState's grounded recoil flinch
     // (AnimTag.Stunned): without this the launch plays the generic Jump/Fall clip and the

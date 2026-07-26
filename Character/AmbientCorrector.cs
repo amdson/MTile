@@ -3,6 +3,21 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
+// What the active movement state allows the ambient corrector to do this frame.
+// Published fresh every frame on the MovementModifiers pattern — a per-frame
+// channel, not a lifecycle. Default = both assists on (plain run/jump/fall get
+// the reflex layer); states that servo the body against fixed contacts (the
+// climb family, the ledge family, launches) publish Off so the ambient layer
+// never fights an owned maneuver.
+public struct AmbientPolicy
+{
+    public bool Over;    // corner-lift assist (upward rows)
+    public bool Under;   // head-tuck assist (downward rows)
+
+    public static AmbientPolicy Default => new() { Over = true, Under = true };
+    public static AmbientPolicy Off     => default;
+}
+
 // Ambient corrector mode (BALLISTIC_CORRECTOR_PLAN step 7) — the corrector run
 // during FREE movement, replacing ReflexSystem + SteeringRamps. The "reference"
 // is the coast prediction itself (no authored arc, no fidelity term): predict the
@@ -35,7 +50,7 @@ public sealed class AmbientCorrector
 
     // Runs after the movement state's Update (its policy + forces are final),
     // before the physics step reads AppliedForce — the slot Reconcile had.
-    public void Apply(EnvironmentContext ctx, RampPolicy policy, bool startGrounded, ref MovementVars vars)
+    public void Apply(EnvironmentContext ctx, AmbientPolicy policy, bool startGrounded, ref MovementVars vars)
     {
         var cfg = MovementConfig.Current;
         var s = ctx.Corrector;
@@ -61,7 +76,7 @@ public sealed class AmbientCorrector
             s.Rows, out _, verticalFacesOnly: true);
 
         // Per-sense policy: Over gates upward rows (corner-vault assist), Under
-        // gates downward rows (head-tuck assist) — same split RampPolicy always had.
+        // gates downward rows (head-tuck assist) — same split AmbientPolicy always had.
         int kept = 0;
         for (int j = 0; j < rowCount; j++)
         {

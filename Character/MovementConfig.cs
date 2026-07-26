@@ -124,37 +124,6 @@ public class MovementConfig
     public float VaultKickForward     { get; set; } = 0f;
     public float VaultKickUp          { get; set; } = -40f;
 
-    // Phantom safety ramps near corners during ParkourState. Originally a
-    // belt-and-suspenders against the path-tracking PD slipping into the
-    // corner geometry. Off by default — the multi-segment path + apex clamp
-    // should keep the body clear without needing the constraint.
-    public bool  ParkourSafetyRamps   { get; set; } = false;
-
-    // Steering Ramps (ParkourState — see Character/STEERING_RAMP_IMPL.md)
-    // Force (px/s²) the vault state applies straight up, scaled by the ramp's weight; should match
-    // gravity so the climb is gravity-neutral while the ramp is fully engaged.
-    public float RampAntiGravForce { get; set; } = 600f;
-
-    // Hard cap on the magnitude of the upward velocity the parkour redirect may
-    // produce (px/s, y-down convention so the cap is on |negative vy|). On top of
-    // the existing MaxSpeed cap: a steep redirect on a tall ledge converts
-    // horizontal speed into a fast vertical kick that magnitude alone allows. Set
-    // slightly above |JumpVelocity| so a one-block vault still feels punchy.
-    public float ParkourRampMaxVy { get; set; } = 200f;
-
-    // Per-step impulse magnitude the parkour ramp may deliver (px/s² ⇒ Δv
-    // cap = ParkourRampMaxForce · dt). With a finite cap the ramp becomes a
-    // soft constraint: it drives velocity toward its target *up to* this
-    // strength per step, and stronger external forces (knockback, gravity
-    // overrun) keep velocity into the tile so the swept resolver picks up
-    // the impact normally.
-    //
-    // Default matches WalkAccel (3000) so a normal parkour entry reaches
-    // target velocity over ~2-3 frames — matches the legacy SoftClampVelocity
-    // ramp-up — while typical knockback Δv (~200-400 px/s, ie ~6000-12000
-    // px/s² equivalent) overshoots the cap and reaches the underlying tile.
-    public float ParkourRampMaxForce { get; set; } = 3500f;
-
     // Corridor probe (shared local-geometry sensing for the maneuver layer —
     // see Plans/CORRIDOR_MANEUVER_PLAN.md and Character/CorridorProbe.cs).
     // Columns of tiles scanned ahead of the body's leading face (capped at
@@ -172,21 +141,6 @@ public class MovementConfig
     // Largest single-column floor rise (px) that is still maneuver territory
     // (mantle/arc-jump envelope, ~2.6 tiles). Above this the column is a wall.
     public float CorridorMaxRise { get; set; } = 42f;
-
-    // Ambient reflex ramps (ReflexSystem — automatic corner ramps stamped from the corridor
-    // probe every frame, owned by no movement state; see Character/ReflexSystem.cs).
-    public bool  AmbientRampsEnabled { get; set; } = true;
-    // Corner must be within this many px of the body's leading face for a ramp to exist.
-    // ~1.75 tiles: enough run-up for the redirect to bend the approach, short enough to
-    // stay "reflex" rather than autopilot.
-    public float AmbientRampRange { get; set; } = 28f;
-    // Largest floor rise the ambient over-ramp assists (the 1-block band, = MantleMaxRise).
-    // Taller rises are honest walls.
-    public float AmbientRampMaxRise { get; set; } = 20f;
-    // Per-step impulse cap (px/s²) and upward-velocity cap (px/s) for ambient ramps —
-    // same roles as ParkourRampMaxForce / ParkourRampMaxVy.
-    public float AmbientRampMaxForce { get; set; } = 3500f;
-    public float AmbientRampMaxVy    { get; set; } = 200f;
 
     // Mantle (deliberate flush-step climb — see MantleState, Plans/CORRIDOR_MANEUVER_PLAN.md).
     // Rise band in px the mantle accepts (the 1-block vault band: 0.5..1.2 tiles, matching

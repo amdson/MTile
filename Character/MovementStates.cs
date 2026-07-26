@@ -462,7 +462,8 @@ public class DoubleJumpingState : MovementState
 
 // Jump initiated while partially under an overhang. Phase 1 (SlidingOut): the jump impulse is
 // withheld — the body stays grounded (just gravity + tile collision, so at its natural low resting
-// height, which is what fits under a low slab) and walks toward the open side, an Under SteeringRamp
+// height, which is what fits under a low slab) and walks toward the open side (the ambient
+// corrector's head-tuck rows are the clearance insurance the old Under ramp provided),
 // stamped on the overhang's bottom corner keeping the head from clipping it. The instant nothing's
 // overhead (!TryGetCeiling) it flips to phase 2 (Jumping): a verbatim ground jump (JumpVelocity +
 // JumpHoldForce) that does NOT consume the double jump. Held-jump only for now (a tapped-jump
@@ -472,8 +473,7 @@ public class CoveredJumpState : MovementState
     // Scalar per-activation state (OpenDir, SlideSpeed, CoveredPhase, SlideTime,
     // JumpHoldTime, JumpReleased) lives in MovementVars now; only the soft-contact
     // refs stay as transient instance caches (rebuilt by EnsureContacts).
-    private SteeringRamp _ramp;
-    public override void ResetTransient() { _ramp = null; _ground = null; _groundIsCrouch = false; }
+    public override void ResetTransient() { _ground = null; _groundIsCrouch = false; }
     private FloatingSurfaceDistance _ground;  // held through phase 1: the body keeps its rest
                                               // height so the ceiling probe (anchored on the
                                               // head) doesn't slip off the overhead slab and fire
@@ -487,7 +487,7 @@ public class CoveredJumpState : MovementState
     public override int ActivePriority  => MovementPriorities.CoveredJumpActive;
     public override int PassivePriority => MovementPriorities.CoveredJumpPassive;
     // Owns its own Under ramp for the slide-out (EnsureContacts) — no ambient duplicates.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
     // Like the rest of the jump family, the hitstun/stun lock-out applies — a stunned
     // player under an overhang can't covered-jump out. (Previously missing: the inline
     // BlocksJump gate the other jumps carried was never added here.)
@@ -563,18 +563,12 @@ public class CoveredJumpState : MovementState
         // HasDoubleJumped intentionally left untouched (already false from being grounded) — this jump is "free".
     }
 
-    // Idempotent contact acquisition for the slide-out phase. The ramp's corner is
-    // re-derived from vars.OpenDir (same source TryPickOpenDir used), and the ground
-    // contact is held through phase 1 — see _ground. No-op once phase 2 (Jumping)
-    // has dropped both. Rebuilds after a restore drops the soft contacts.
+    // Idempotent contact acquisition for the slide-out phase: the ground contact
+    // held through phase 1 — see _ground. No-op once phase 2 (Jumping) has dropped
+    // it. Rebuilds after a restore drops the soft contacts.
     private void EnsureContacts(EnvironmentContext ctx, ref MovementVars vars)
     {
         if (vars.CoveredPhase != CoveredJumpPhase.SlidingOut) return;
-        if (_ramp == null && CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, vars.OpenDir, out var corner))
-        {
-            _ramp = new SteeringRamp { Sense = SteeringSense.Under, ForwardDir = vars.OpenDir, Corner = corner };
-            ctx.Body.Constraints.Add(_ramp);
-        }
         if (_ground == null)
         {
             _groundIsCrouch = ctx.TryGetGround(out var stand) && ctx.TryGetCeiling(out var ceil)
@@ -589,9 +583,7 @@ public class CoveredJumpState : MovementState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        if (_ramp   != null) ctx.Body.Constraints.Remove(_ramp);
         if (_ground != null) ctx.Body.Constraints.Remove(_ground);
-        _ramp = null;
         _ground = null;
     }
 
@@ -608,10 +600,6 @@ public class CoveredJumpState : MovementState
             if (!ctx.TryGetCeiling(out _))
             {
                 if (_ground != null) { ctx.Body.Constraints.Remove(_ground); _ground = null; }
-                // Drop the ramp too: with the Clearance shift it can spuriously catch a left-edge
-                // vertex that's still 1-2px inside the slab's x-range right after clearing it, and
-                // rotate the launch's upward velocity sideways. The slide is over — no more insurance.
-                if (_ramp   != null) { ctx.Body.Constraints.Remove(_ramp);   _ramp   = null; }
                 // Add (don't overwrite) so a moving floor's vertical velocity carries
                 // into the launch — see JumpingState.Enter.
                 ctx.Body.Velocity.Y += cfg.JumpVelocity;
@@ -621,10 +609,6 @@ public class CoveredJumpState : MovementState
                 ctx.Body.AppliedForce = Vector2.Zero;
                 return;
             }
-
-            // Keep the ramp anchored on the ceiling's exit edge (it'll go inert on its own once the body's past it).
-            if (CeilingChecker.TryFindExitEdge(ctx.Body, ctx.Chunks, vars.OpenDir, out var freshCorner))
-                _ramp.Corner = freshCorner;
 
             // Refresh the ground constraint's pose so a sloped/stepped floor doesn't fight the
             // spring — from the SAME query kind the contact was acquired at (see _groundIsCrouch).
@@ -677,430 +661,6 @@ public class CoveredJumpState : MovementState
     }
 }
 
-// Steers the body over a low step (an exposed upper corner — a "vault") and/or under a low ceiling
-// (an exposed lower corner — an "overcrop"/duck), using one SteeringRamp per corner. The redirect
-// (in PhysicsWorld.StepSwept) rotates velocity onto the shallowest trajectory that clears the
-// corner(s); when both are present (a step with a slab right above it) the redirect's multi-ramp
-// combine threads the body through the gap. This state owns the ramps' lifecycle, cancels gravity
-// in proportion to ramp weight (so a walking-speed climb doesn't stall at the apex), and pushes
-// along the surface toward the entry speed (so the maneuver preserves momentum and bootstraps a
-// from-rest entry). Phase: one-block obstacles. See STEERING_RAMP_IMPL.md / STEERING_RAMPS.md.
-public class ParkourState : MovementState
-{
-    public override AnimTag AnimationTag => AnimTag.Parkour;
-
-    // Caps the along-ramp speed target at entrySpeed / MinClimbCos (≈ 4×) on near-vertical sections,
-    // so a steep climb happens fast instead of stalling the body's forward progress for several frames.
-    private const float MinClimbCos = 0.25f;
-
-    private readonly int _wallDir;
-    private SteeringRamp _overRamp;    // from an exposed upper corner (vault), or null
-    private SteeringRamp _underRamp;   // from an exposed lower corner (overcrop/duck), or null
-
-    private Vector2 _entryPos;         // body pos at Enter — the spatial origin for AnimationProgress
-    private float   _vaultProgress;    // [0,1]: body's advance from entry toward the vaulted corner
-
-    // Spatial vault progress for the hands overlay (animation): the body's projected travel from
-    // where the maneuver began toward the ledge corner. Input-driven (a held climb advances it),
-    // not a clock — exactly what the overlay's clip time needs. 0 for the duck-under-only case.
-    public override float AnimationProgress => _vaultProgress;
-
-    // The ledge corner the lead hand grips during a vault (the over-ramp's corner). The animation
-    // layer pins a hand to it over the grab window (gated by AnimationProgress) so the hand lands
-    // on the actual edge, not an approximate clip pose. Null for a duck-under (no over-ramp/reach).
-    public override bool TryAnimationGrip(out Vector2 target)
-    {
-        if (_overRamp != null) { target = _overRamp.Corner; return true; }
-        target = default; return false;
-    }
-
-    public override void ResetTransient() { _overRamp = null; _underRamp = null; _vaultProgress = 0f; }
-    // _entrySpeed (preserved entry speed) now lives in MovementVars.EntrySpeed.
-
-    public ParkourState(int wallDir) => _wallDir = wallDir;
-
-    public override int ActivePriority  => MovementPriorities.GuidedActive;   // below the jumps ⇒ a jump preempts the maneuver
-    public override int PassivePriority => MovementPriorities.GuidedPassive;   // above free air/ground ⇒ triggers automatically
-
-    // Owns its own ramp lifecycle (Reconcile below) — the ambient layer must not duplicate them.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        // Deliberate hold into the obstacle, from the ground, with a vault-range upper corner OR an
-        // overcrop lower corner ahead. The lower-corner case is suppressed when jump was just
-        // pressed, so "press jump near an overhang" goes to a jump state, not a duck (interim D2).
-        // (An in-progress ledge pull suppresses this vault — see LedgePullState.Suppresses — so
-        // the lip reading as ground mid-pull can't steal the maneuver.)
-        if (ctx.Intent.HeldHorizontal != _wallDir || !ctx.TryGetGround(out _)) return false;
-        return ctx.TryGetExposedCorner(_wallDir, out _)
-            || (ctx.TryGetExposedLowerCorner(_wallDir, out _) && !ctx.Intent.JumpJustPressed);
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        // Releasing direction interrupts cleanly (velocity was never snapped, so it just falls through).
-        if (ctx.Intent.CurrentHorizontal != _wallDir) return false;
-        // Stay alive while a corner is still detected, or a ramp is still doing something — the
-        // checker drops the corner a frame or two before the ramp goes inert at the crest/clear point.
-        if (ctx.TryGetExposedCorner(_wallDir, out _) || ctx.TryGetExposedLowerCorner(_wallDir, out _)) return true;
-        return (_overRamp != null && _overRamp.Engaged) || (_underRamp != null && _underRamp.Engaged);
-    }
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        abilities.HasDoubleJumped = false;
-        // Preserve whatever horizontal speed the body came in with (floored at walking speed so a
-        // from-rest / flush-against-the-obstacle entry still has a target to drive toward).
-        vars.EntrySpeed = MathF.Max(MathF.Abs(ctx.Body.Velocity.X), MovementConfig.Current.MaxWalkSpeed);
-        _entryPos = ctx.Body.Position;   // spatial origin for the hands-overlay progress
-        _vaultProgress = 0f;
-        Reconcile(ctx);
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (_overRamp  != null) ctx.Body.Constraints.Remove(_overRamp);
-        if (_underRamp != null) ctx.Body.Constraints.Remove(_underRamp);
-        _overRamp = _underRamp = null;
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        Reconcile(ctx);
-        // Spatial vault progress (for the hands overlay): the body's projected travel from the
-        // entry point toward the live ledge corner. Over-ramp only (a duck-under has no reach).
-        if (_overRamp != null)
-        {
-            Vector2 toCorner = _overRamp.Corner - _entryPos;
-            float denom = toCorner.LengthSquared();
-            _vaultProgress = denom < 1e-3f ? 0f
-                : Math.Clamp(Vector2.Dot(ctx.Body.Position - _entryPos, toCorner) / denom, 0f, 1f);
-        }
-        ctx.Body.AppliedForce = Vector2.Zero;   // ramp-routed drive by default; baseline fallback below when no ramp engages.
-
-        SteeringRamp solo = null; int engaged = 0;
-        if (_overRamp != null || _underRamp != null)
-        {
-            var verts = ctx.Body.Polygon.GetVertices(ctx.Body.Position);
-            _overRamp?.Recompute(verts);
-            _underRamp?.Recompute(verts);
-            if (_overRamp  != null && _overRamp.Engaged)  { engaged++; solo = _overRamp; }
-            if (_underRamp != null && _underRamp.Engaged) { engaged++; solo = _underRamp; }
-        }
-
-        // No ramp has authority — either none spawned yet, or the steep-angle taper zeroed the
-        // weight (flush/near-vertical corner: deliberately NOT the reflex layer's case). The
-        // corner stays detected so CheckConditions keeps this state alive; without a drive here
-        // the body would sit at zero force forever (held direction, no walk force, no exit).
-        // Supply the baseline walk drive the free states would have given: the reflex layer
-        // redirects motion the player already has — when it abstains it must not eat it. This
-        // also carries the body flush to the obstacle, where MantleState's gate can claim it.
-        if (engaged == 0)
-        {
-            var cfg0  = MovementConfig.Current;
-            var mods  = ctx.Modifiers;
-            float along = _wallDir * ctx.Body.Velocity.X;
-            // Never negative: this fallback accelerates a stalled body toward walk speed but must
-            // not brake carried momentum (e.g. crest frames where the ramp goes weightless while
-            // the body still moves at vault speed — momentum preservation is this state's job).
-            float drive = MathF.Max(0f,
-                AirControl.SoftClampVelocity(along, cfg0.MaxWalkSpeed * mods.MaxWalkSpeed,
-                                             cfg0.WalkAccel * mods.WalkAccel, ctx.Dt));
-            ctx.Body.AppliedForce = new Vector2(_wallDir * drive, 0f);
-            if (_overRamp == null && _underRamp == null) return;
-        }
-
-        // Pick target direction: with exactly one ramp engaged, drive along its implicit surface and
-        // scale the target by 1/cos(θ*) so the horizontal component stays near the entry speed even
-        // on a steep section. Otherwise (none engaged yet, or both — a "jump and duck" gap) drive
-        // straight forward and let the redirect's combine do the steering.
-
-        Vector2 dir  = engaged == 1 ? solo.SurfaceDir : new Vector2(_wallDir, 0f);
-        float   cosT = engaged == 1 ? MathF.Max(MathF.Cos(solo.ThetaStar), MinClimbCos) : 1f;
-        float   targetAlong = vars.EntrySpeed / cosT;
-        Vector2 targetVelocity = dir * targetAlong;
-
-        // Write the target onto each ramp so SteeringRamp.ResolveVelocity drives the body
-        // toward it (subject to MaxForce·dt clipping). The same target goes on both engaged
-        // ramps in the multi-ramp case — averaging in ResolveVelocity then collapses to that
-        // target. The anti-gravity term ParkourState used to add explicitly is now absorbed
-        // into the drive: each frame the ramp computes dv = target − vBefore, and that
-        // delta naturally counteracts whatever gravity·dt was just added to vBefore.
-        if (_overRamp  != null)
-        {
-            _overRamp.HasTarget      = _overRamp.Engaged;
-            _overRamp.TargetVelocity = targetVelocity;
-            _overRamp.MaxSpeed       = float.PositiveInfinity;   // target mode supersedes MaxSpeed
-            // Ballistic crest cap: never carry more upward speed than a free-fall arc needs to
-            // coast the binding vertex's remaining rise (√(2g·rise)). As the body nears the lift
-            // point the allowance tapers to 0, so it crests at ~zero vy and settles instead of
-            // popping ballistic and floating down. The config cap remains the ceiling early in
-            // the climb when the remaining rise is large.
-            float crestVy = SteeringRamp.BallisticVy(_overRamp.BindClearance);
-            _overRamp.MaxRedirectVy  = MathF.Min(MovementConfig.Current.ParkourRampMaxVy, crestVy);
-            _overRamp.MaxForce       = MovementConfig.Current.ParkourRampMaxForce;
-        }
-        if (_underRamp != null)
-        {
-            _underRamp.HasTarget      = _underRamp.Engaged;
-            _underRamp.TargetVelocity = targetVelocity;
-            _underRamp.MaxSpeed       = float.PositiveInfinity;
-            _underRamp.MaxRedirectVy  = MovementConfig.Current.ParkourRampMaxVy;
-            _underRamp.MaxForce       = MovementConfig.Current.ParkourRampMaxForce;
-        }
-    }
-
-    // Add/remove the Over and Under SteeringRamps to match the corners currently detected ahead,
-    // and keep their Corner anchors fresh. Idempotent; runs every frame so a staircase or a chain
-    // of obstacles is handled without a one-frame gap where the ramps blink out.
-    private void Reconcile(EnvironmentContext ctx)
-    {
-        if (ctx.TryGetExposedCorner(_wallDir, out var up))
-        {
-            if (_overRamp == null)
-            {
-                _overRamp = new SteeringRamp { Sense = SteeringSense.Over, ForwardDir = _wallDir };
-                ctx.Body.Constraints.Add(_overRamp);
-            }
-            _overRamp.Corner = up.InnerEdge;
-        }
-        else if (_overRamp != null) { ctx.Body.Constraints.Remove(_overRamp); _overRamp = null; }
-
-        if (ctx.TryGetExposedLowerCorner(_wallDir, out var lo))
-        {
-            if (_underRamp == null)
-            {
-                _underRamp = new SteeringRamp { Sense = SteeringSense.Under, ForwardDir = _wallDir };
-                ctx.Body.Constraints.Add(_underRamp);
-            }
-            _underRamp.Corner = lo.InnerEdge;
-        }
-        else if (_underRamp != null) { ctx.Body.Constraints.Remove(_underRamp); _underRamp = null; }
-    }
-}
-
-// Shared machinery for the two 1-block climb maneuvers (MantleState's flush servo climb and
-// ArcJumpState's ballistic arc): the Mantle* vars stamping, height-fraction progress + grip
-// mirror for the hands overlay, release/timeout liveness, the landing-gate completion test,
-// and the rollout shepherd (ballistic vy envelope + crest brake + push-over). The two states
-// are mutually exclusive activations of the same climb FSM over the same MovementVars fields,
-// split by entry speed; only the entry impulse (OnClimbEnter) and the below-crest lift policy
-// (AscentLiftY) differ.
-public abstract class ClimbStateBase : MovementState
-{
-    public override AnimTag AnimationTag => AnimTag.Parkour;   // reuse the vault clip family
-
-    protected readonly int WallDir;
-    protected ClimbStateBase(int wallDir) => WallDir = wallDir;
-
-    // Climb family — blocked during hitstun/stun like the ledge grab/pull.
-    public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
-    // The climb owns the body against the step face — an ambient redirect would fight it.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
-
-    // Height-fraction progress for the hands overlay; pure function of MovementVars so it
-    // survives a rollback restore (unlike ParkourState's transient entry pos).
-    private float _progress;
-    public override float AnimationProgress => _progress;
-
-    private Vector2 _gripCorner;   // transient mirror of vars.MantleCorner for TryAnimationGrip
-    private bool    _hasGrip;
-    public override void ResetTransient() { _gripCorner = default; _hasGrip = false; _progress = 0f; }
-
-    public override bool TryAnimationGrip(out Vector2 target)
-    {
-        target = _gripCorner;
-        return _hasGrip;
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (ctx.Intent.CurrentHorizontal != WallDir) return false;               // release cancels
-        if (vars.TimeInState >= MovementConfig.Current.MaxVaultTime) return false; // stuck → bail
-        return !Completed(ctx, ref vars);
-    }
-
-    // Delivered: at gate height and horizontally past the lip. On completion the state just
-    // ends; whichever state's preconditions match the landing (Standing, or Underpass once it
-    // exists for low gates) claims the next frame — handoffs are arbitration, not code.
-    private bool Completed(EnvironmentContext ctx, ref MovementVars vars)
-    {
-        bool atHeight = ctx.Body.Position.Y <= vars.MantleTargetY + 1f;
-        bool past = WallDir == 1
-            ? ctx.Body.Position.X > vars.MantleCorner.X + PlayerCharacter.Radius * 0.5f
-            : ctx.Body.Position.X < vars.MantleCorner.X - PlayerCharacter.Radius * 0.5f;
-        return atHeight && past;
-    }
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        vars.TimeInState = 0f;
-        var corridor = ctx.GetCorridor(WallDir);
-        corridor.TryFirstRise(out var rise);   // precondition just verified it exists
-        vars.MantleCorner  = rise.Pos;
-        vars.MantleTargetY = corridor.ClimbTargetY(rise.Column);
-        vars.MantleEntryY  = ctx.Body.Position.Y;
-        abilities.Facing = WallDir;
-        OnClimbEnter(ctx, ref vars);
-    }
-
-    // Entry impulse hook, called after the Mantle* vars are stamped — ArcJumpState pops its
-    // one-shot hop here; the mantle adds nothing.
-    protected virtual void OnClimbEnter(EnvironmentContext ctx, ref MovementVars vars) { }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        vars.TimeInState += ctx.Dt;
-        _gripCorner = vars.MantleCorner;
-        _hasGrip = true;
-        float span = vars.MantleEntryY - vars.MantleTargetY;
-        _progress = span > 1f
-            ? Math.Clamp((vars.MantleEntryY - ctx.Body.Position.Y) / span, 0f, 1f)
-            : 0f;
-
-        var cfg   = MovementConfig.Current;
-        var force = Vector2.Zero;
-        float remaining = ctx.Body.Position.Y - vars.MantleTargetY;   // >0 while below the gate
-
-        if (remaining > 1f)
-        {
-            // Ballistic envelope (same as the reflex crest cap): never carry more upward
-            // speed than free-fall needs to coast the remaining rise — crest at ~zero vy.
-            float vyAllow = SteeringRamp.BallisticVy(remaining);
-            if (ctx.Body.Velocity.Y < -vyAllow && ctx.Dt > 0f)
-                force.Y = (-vyAllow - ctx.Body.Velocity.Y) / ctx.Dt;   // brake replaces lift
-            else
-                force.Y = AscentLiftY(ctx, cfg, vyAllow);
-            // Light into-wall hold so the climb hugs the step face.
-            force.X = WallDir * cfg.VaultPushForce * 0.5f;
-        }
-        else
-        {
-            // Crest: kill residual rise (saturated brake, LedgePull idiom) and push over.
-            if (ctx.Body.Velocity.Y < 0f && ctx.Dt > 0f)
-                force.Y = MathF.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.VaultLiftForce);
-            force.X = WallDir * cfg.VaultPushForce;
-        }
-
-        ctx.Body.AppliedForce = force;
-    }
-
-    // Vertical drive while below the crest and inside the vy envelope (the envelope brake
-    // above supersedes whatever this returns when the body carries excess upward speed).
-    protected abstract float AscentLiftY(EnvironmentContext ctx, MovementConfig cfg, float vyAllow);
-}
-
-// Deliberate climb of a flush 1-block step — the maneuver-layer companion to ParkourState's
-// reflex vault (Plans/CORRIDOR_MANEUVER_PLAN.md). The steering ramps' steep-angle taper
-// abstains when the body is flush against a step (θ* → π/2 would be a winch, not a graze);
-// this state claims exactly that vacated case: grounded, slow, pressing into a 1-block-band
-// rise directly ahead. Geometry comes from the corridor probe; the climb delivers the body
-// into the landing GATE (crouch-height if the landing has a low roof — gates, not poses),
-// with the same ballistic vy envelope the reflex crest cap uses, so there is no pop.
-// Motion is the LedgePull servo idiom: lift + into-wall hold below the crest, brake + push
-// over at the crest. Cancel by releasing the direction; jumps preempt (Active 46 < 50).
-public class MantleState : ClimbStateBase
-{
-    public MantleState(int wallDir) : base(wallDir) { }
-
-    public override int ActivePriority  => MovementPriorities.MantleActive;
-    public override int PassivePriority => MovementPriorities.MantlePassive;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        var cfg = MovementConfig.Current;
-        if (ctx.Intent.HeldHorizontal != WallDir || !ctx.TryGetGround(out _)) return false;
-        // Speed gate: at running speed the reflex ramps own the vault; the mantle only
-        // claims stalled/deliberate entries (including a failed at-speed approach that
-        // bonked and slowed).
-        if (MathF.Abs(ctx.Body.Velocity.X) > cfg.MantleMaxEntrySpeed) return false;
-
-        var corridor = ctx.GetCorridor(WallDir);
-        if (!corridor.TryFirstRise(out var rise)) return false;
-        if (rise.Delta < cfg.MantleMinRise || rise.Delta > cfg.MantleMaxRise) return false;
-        // Landing-gate feasibility is implicit: had the landing column pinched, the probe
-        // would have truncated before the rise and TryFirstRise would have found nothing.
-
-        // Flush: the body's leading face is essentially at the lip.
-        float dist = WallDir * (rise.Pos.X - ctx.Body.Bounds.Side(WallDir));
-        return dist <= cfg.MantleFlushDistance;
-    }
-
-    // Constant servo lift toward the gate; the base's envelope brake bounds it.
-    protected override float AscentLiftY(EnvironmentContext ctx, MovementConfig cfg, float vyAllow)
-        => -cfg.VaultLiftForce;
-}
-
-// Automatic ballistic arc over a 1-block rise hit AT SPEED — the running companion to
-// MantleState's flush servo climb, reproducing the old ramp-vault feel with honest physics.
-// Same rise band as the mantle, split by entry speed: running into a step pops a single
-// ballistic hop at Enter (vy sized so free-fall alone crests the landing gate + margin,
-// horizontal momentum untouched — the arc-y feel IS the carried vx) and then merely
-// shepherds the rollout: the ballistic vy envelope caps any excess, and the crest brake +
-// push-over deliver the body into the landing GATE (crouch height under a low roof). No
-// continuous lift while below the crest — if the hop was honest, none is needed; a light
-// recovery lift only tops up losses from scraping the wall face. Cancel by releasing the
-// direction; jumps preempt.
-public class ArcJumpState : ClimbStateBase
-{
-    public ArcJumpState(int wallDir) : base(wallDir) { }
-
-    public override int ActivePriority  => MovementPriorities.ArcJumpActive;
-    public override int PassivePriority => MovementPriorities.ArcJumpPassive;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        var cfg = MovementConfig.Current;
-        if (ctx.Intent.HeldHorizontal != WallDir || !ctx.TryGetGround(out _)) return false;
-        // Speed gate: the arc is the RUNNING half of the 1-block split — a body at/below the
-        // mantle's entry speed (stalled, flush, deliberate) belongs to MantleState instead.
-        if (WallDir * ctx.Body.Velocity.X <= cfg.MantleMaxEntrySpeed) return false;
-
-        var corridor = ctx.GetCorridor(WallDir);
-        if (!corridor.TryFirstRise(out var rise)) return false;
-        // The 1-block band — the same rises the mantle accepts. Taller is a wall (honest bonk).
-        if (rise.Delta < cfg.MantleMinRise || rise.Delta > cfg.MantleMaxRise) return false;
-
-        float dist = WallDir * (rise.Pos.X - ctx.Body.Bounds.Side(WallDir));
-        if (dist > cfg.ArcJumpTriggerDistance) return false;
-
-        // Headroom feasibility: the hop must lift the body's FULL width to the landing gate,
-        // and the corridor probe only sees columns ahead of the leading face — a low lip over
-        // the body's trailing half (e.g. a stalactite hanging just behind the rise) blocks the
-        // climb volume invisibly. Refuse when any tile over the body's occupied columns sits
-        // inside the vertical span the climb sweeps; firing anyway wedges the body into the
-        // corner and the state thrashes on its timeout.
-        return ClimbHeadroomClear(ctx, corridor.ClimbTargetY(rise.Column));
-    }
-
-    private static bool ClimbHeadroomClear(EnvironmentContext ctx, float targetY)
-    {
-        var bounds = ctx.Body.Bounds;
-        foreach (var _ in TileQuery.SolidTilesInRect(ctx.Chunks,
-            bounds.Left + 0.5f, targetY - PlayerCharacter.Radius,
-            bounds.Right - 0.5f, bounds.Top - 0.5f))
-            return false;
-        return true;
-    }
-
-    protected override void OnClimbEnter(EnvironmentContext ctx, ref MovementVars vars)
-    {
-        // One-shot entry hop: all the maneuver's energy, injected once. Sized so the
-        // ballistic rollout's apex reaches the landing gate plus a small clearance margin.
-        float needH = MathF.Max(0f, ctx.Body.Position.Y - vars.MantleTargetY)
-                    + MovementConfig.Current.ArcJumpApexMargin;
-        float vy0 = SteeringRamp.BallisticVy(needH);
-        ctx.Body.Velocity.Y = MathF.Min(ctx.Body.Velocity.Y, -vy0);
-    }
-
-    // Recovery lift ONLY when the rollout has gone under-budget (apex passed while still
-    // below the gate — wall scrape ate some energy). Ballistic honesty: while ascent
-    // tracks the envelope, gravity is the only vertical authority.
-    protected override float AscentLiftY(EnvironmentContext ctx, MovementConfig cfg, float vyAllow)
-        => ctx.Body.Velocity.Y > -0.25f * vyAllow ? -cfg.VaultLiftForce : 0f;
-}
-
 // Attaches the player to a ledge. Stays active until the player drops (Down/away)
 // or pulls up (Up just pressed → transitions to LedgePullState).
 public class LedgeGrabState : MovementState
@@ -1118,7 +678,7 @@ public class LedgeGrabState : MovementState
     public override int ActivePriority  => MovementPriorities.LedgeGrabActive;
     public override int PassivePriority => MovementPriorities.LedgeGrabPassive;
     // Body is pinned to the corner — an ambient redirect would fight the hang contacts.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
     // Blocked during combat hitstun/stun (Phase 4) — a launch past a ledge can't be
     // cancelled by catching it. The pull (LedgePullState) is entered FROM a grab, so
     // gating the grab already prevents the pull; it carries the flag too for clarity.
@@ -1309,7 +869,7 @@ public class LedgePullState : MovementState
     public override int PassivePriority => MovementPriorities.LedgePullPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
     // Servo pull along its own path — no ambient redirect on top.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => abilities.UpJustPressed
@@ -1323,12 +883,10 @@ public class LedgePullState : MovementState
     public override bool Suppresses(MovementState candidate, EnvironmentContext ctx)
     {
         // Once the body rises beside the lip the ledge top reads as ground, so an inward
-        // hold satisfies ParkourState's preconditions and its GuidedPassive (45) would
+        // hold satisfies the climb family's preconditions and its passive (46) would
         // steal the maneuver from the pull (43). The pull completes/exits on its own terms
         // and a queued jump routes to LedgeJumpState (LEDGE_PULL_INPUT_MATRIX.md rows B, K).
-        // MantleState (passive 46) reads the same mid-pull pose — flush, slow, grounded on
-        // the lip — so it gets the same suppression for the same reason.
-        if (candidate is ParkourState or MantleState or ArcJumpState) return true;
+        if (candidate is CorrectorClimbBase) return true;
         // Mid-pull, only an *away* press reads as "kick off the wall and bail". An inward
         // press means "jump up onto the ledge" — suppress WallJump so the intent stays
         // queued for LedgeJumpState at the top (row K). Use the candidate's own wall side,
@@ -1442,7 +1000,7 @@ public class LedgeJumpState : MovementState
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
     // Launch off the pull is a committed arc past the very corner an ambient ramp
     // would try to steer around — keep the layer out for the launch frames.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
     public override AnimTag AnimationTag => AnimTag.LedgeJump;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -1488,20 +1046,15 @@ public class LedgeJumpState : MovementState
 // constraint so the body's no longer spring-held above the surface (gravity + tile collision keep
 // it on the platform until its center clears the edge), applies a horizontal slide force in the
 // chosen direction (so a crouched/sunken body actually gets pushed out from over the platform —
-// same idiom as CoveredJumpState's phase 1), and stamps an Over SteeringRamp on the platform's edge
-// corner as insurance against clipping the corner mid-slip. Exits to FallingState the instant the
+// same idiom as CoveredJumpState's phase 1). The ambient corrector's corner rows are the
+// insurance against clipping the drop edge mid-slip. Exits to FallingState the instant the
 // body's no longer over any floor.
 public class DropdownState : MovementState
 {
-    private SteeringRamp _ramp;
     // DropDir, SlideSpeed, SlideTime, ExitingAirborne now live in MovementVars.
-
-    public override void ResetTransient() => _ramp = null;
 
     public override int ActivePriority  => MovementPriorities.DropdownActive;
     public override int PassivePriority => MovementPriorities.DropdownPassive;
-    // Owns its own Over ramp on the drop edge (EnsureRamp) — no ambient duplicates.
-    public override RampPolicy RampPolicy => RampPolicy.Off;
     public override AnimTag AnimationTag => AnimTag.Dropdown;
 
     // Same pattern as CoveredJumpState.TryPickOpenDir: honor input direction strictly when held,
@@ -1561,27 +1114,12 @@ public class DropdownState : MovementState
         vars.SlideSpeed = MovementConfig.Current.MaxWalkSpeed;
         vars.SlideTime = 0f;
         vars.ExitingAirborne = false;
-        EnsureRamp(ctx, vars.DropDir);
         // No FloatingSurfaceDistance: the body's leaving the surface, so don't spring it back up.
         // StandingState/CrouchedState's ground constraint was already removed on their Exit.
     }
 
-    // Idempotent Over-ramp acquisition; corner re-derived from dropDir (same source
-    // TryPickDropDir used). No-op in normal play; rebuilds after a restore drops it.
-    private void EnsureRamp(EnvironmentContext ctx, int dropDir)
-    {
-        if (_ramp != null) return;
-        if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, dropDir, out var corner))
-        {
-            _ramp = new SteeringRamp { Sense = SteeringSense.Over, ForwardDir = dropDir, Corner = corner };
-            ctx.Body.Constraints.Add(_ramp);
-        }
-    }
-
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        if (_ramp != null) ctx.Body.Constraints.Remove(_ramp);
-        _ramp = null;
         // Soften the horizontal velocity on the slip-off so the drop lands close to the wall rather
         // than flinging the body forward at the full slide speed. Only apply when we exited via going
         // airborne (not on cancel via !Down or timeout).
@@ -1591,13 +1129,8 @@ public class DropdownState : MovementState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        EnsureRamp(ctx, vars.DropDir);
         vars.SlideTime += ctx.Dt;
         var cfg = MovementConfig.Current;
-
-        // Refresh ramp anchor (the corner may shift slightly as the body crosses tile boundaries).
-        if (GroundChecker.TryFindDropEdge(ctx.Body, ctx.Chunks, vars.DropDir, out var freshCorner))
-            _ramp.Corner = freshCorner;
 
         // Slide toward the edge, but never brake a faster-than-target body — a running entry should
         // keep its momentum through the slide. Gravity does the vertical work.

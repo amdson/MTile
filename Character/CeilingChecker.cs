@@ -28,7 +28,7 @@ public static class CeilingChecker
     // Given the body is under a ceiling, locate where that ceiling slab's bottom row stops being
     // solid in the given direction. Returns the slab's far edge — the "lower corner" the player
     // will pass under when exiting — as (edgeX, ceilingBottomY). edgeX is the boundary between the
-    // last solid tile column and the first empty one, so a SteeringRamp { Sense=Under, ForwardDir=dir,
+    // last solid tile column and the first empty one — the exit lip a slide-out steers past,
     // Corner=edgeX } sees the corner ahead-and-up while the body is still under the slab, and behind
     // (⇒ inert) once it has passed. Returns false if the slab doesn't end within MaxScanTiles (so
     // CoveredJumpState's "slide out and jump" wouldn't help — the player is too deep under to exit).
