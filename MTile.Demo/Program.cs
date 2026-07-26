@@ -13,17 +13,26 @@ using MTileDemo;
 // Take viewer:           dotnet run --project MTile.Demo -- --load Takes/<name>.take.json
 //   (scrub a recorded gameplay take with solver overlays; record in-game with
 //    Ctrl+R, save with Ctrl+S. See Plans/ANIM_TAKE_VIEWER_PLAN.md.)
+// Reference-clip editor: dotnet run --project MTile.Demo -- --ref vault
+//   (authors a maneuver's y(x) Hermite reference arc in the normalized frame;
+//    loads/saves ReferenceClips/<name>.json. See Plans/BALLISTIC_CORRECTOR_PLAN.md §1.)
 
-string bindPng = null, useBind = null, clip = null, takePath = null;
+string bindPng = null, useBind = null, clip = null, takePath = null, refClip = null;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--bind" && i + 1 < args.Length)         bindPng = args[++i];
     else if (args[i] == "--usebind" && i + 1 < args.Length) useBind = args[++i];
     else if (args[i] == "--load" && i + 1 < args.Length)    takePath = args[++i];
+    else if (args[i] == "--ref" && i + 1 < args.Length)     refClip = args[++i];
     else clip ??= args[i];
 }
 
-if (takePath != null)
+if (refClip != null)
+{
+    using var hermite = new HermiteClipGame(refClip);
+    hermite.Run();
+}
+else if (takePath != null)
 {
     using var viewer = new ViewerGame(takePath);
     viewer.Run();
