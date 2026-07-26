@@ -100,6 +100,20 @@ public sealed class Corridor
 
     // Total floor height change over the recorded prefix (+ = net climb).
     public float TotalRise() => ColumnCount == 0 ? 0f : StandingBaseY - FloorY[ColumnCount - 1];
+
+    // Landing gate for a climb onto this column's floor: standing float height (2·Radius
+    // above the floor top). The single definition of the gate — the reflex crest cap and
+    // both climb states size their delivery against it.
+    public float LandingGateY(int column) => FloorY[column] - 2f * PlayerCharacter.Radius;
+
+    // The gate, raised (= body arrives lower/crouched) if the landing's ceiling demands it.
+    public float ClimbTargetY(int column)
+    {
+        float targetY = LandingGateY(column);
+        if (!float.IsNegativeInfinity(CeilY[column]))
+            targetY = MathF.Max(targetY, CeilY[column] + PlayerCharacter.Radius + 2f);
+        return targetY;
+    }
 }
 
 // Column-scan sensing for the maneuver layer (Plans/CORRIDOR_MANEUVER_PLAN.md piece 1).
@@ -173,10 +187,19 @@ public static class CorridorProbe
     }
 
     public static Corridor Scan(PhysicsBody body, ChunkMap chunks, int dir)
+        => ScanInto(new Corridor(dir), body, chunks);
+
+    // Fill-in-place variant so a long-lived Corridor (e.g. PlayerCharacter's per-direction
+    // scratch) can be re-scanned every frame without allocating. Every scalar and count is
+    // rewritten below; array slots beyond the counts are stale but never read.
+    public static Corridor ScanInto(Corridor c, PhysicsBody body, ChunkMap chunks)
     {
         var cfg = MovementConfig.Current;
+        int dir = c.Dir;
         int columns = Math.Clamp(cfg.CorridorHorizonColumns, 1, Corridor.MaxColumns);
-        var c = new Corridor(dir);
+        c.ColumnCount = 0;
+        c.FloorCornerCount = 0;
+        c.CeilCornerCount = 0;
 
         var bounds = body.Bounds;
         float face = bounds.Side(dir);

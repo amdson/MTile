@@ -101,6 +101,12 @@ public class EnvironmentContext
     private Corridor _corridor1;
     private Corridor _corridorMinus1;
 
+    // Optional long-lived scratch corridors (owned by PlayerCharacter) so the per-frame
+    // corridor cache above doesn't allocate; a scan fully rewrites them before any read.
+    // Null (e.g. a hand-built test context) falls back to allocating per scan.
+    public Corridor CorridorScratch1;
+    public Corridor CorridorScratchMinus1;
+
     public bool TryGetGround(out FloatingSurfaceDistance ground) =>
         TryGetGroundAt(PlayerCharacter.Radius, ref _groundSearched, ref _hasGround, ref _groundContact, out ground);
 
@@ -213,8 +219,8 @@ public class EnvironmentContext
     // the Corridor itself is pure derived data and never snapshot state.
     public Corridor GetCorridor(int dir)
     {
-        if (dir == 1)  return _corridor1      ??= CorridorProbe.Scan(Body, Chunks, 1);
-        if (dir == -1) return _corridorMinus1 ??= CorridorProbe.Scan(Body, Chunks, -1);
+        if (dir == 1)  return _corridor1      ??= CorridorProbe.ScanInto(CorridorScratch1      ?? new Corridor(1),  Body, Chunks);
+        if (dir == -1) return _corridorMinus1 ??= CorridorProbe.ScanInto(CorridorScratchMinus1 ?? new Corridor(-1), Body, Chunks);
         return null;
     }
 

@@ -72,6 +72,14 @@ public static class MovementPriorities
     public const int MantleActive   = 46;
     public const int MantlePassive  = 46;
 
+    // ArcJump: automatic ballistic arc over a 1-block rise hit at speed — the running half
+    // of the 1-block split (MantleState owns the slow/flush half; the two are disjoint by
+    // entry speed). Passive 46 > GuidedPassive so it takes the approach over from a ramp-
+    // riding ParkourState inside its trigger distance; < 50 keeps the player's own jumps
+    // preemptive.
+    public const int ArcJumpActive  = 46;
+    public const int ArcJumpPassive = 46;
+
     // Holds.
     public const int LedgeGrabActive  = 42;
     public const int LedgeGrabPassive = 42;

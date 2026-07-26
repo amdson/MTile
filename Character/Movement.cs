@@ -43,6 +43,12 @@ public abstract class MovementState
     // states (Falling, Stunned, jumps without a source cache).
     public virtual void ResetTransient() { }
 
+    // What the ambient reflex layer (ReflexSystem) may do while this state is active.
+    // Published per frame, MovementModifiers-style. Default: both assists on. Override
+    // to Off in states that own their own ramps or servo the body against fixed
+    // contacts — an ambient redirect would fight the maneuver or duplicate a corner.
+    public virtual RampPolicy RampPolicy => RampPolicy.Default;
+
     // The animation-facing CATEGORY of this state (AnimTag.None = generic: the animator picks
     // by grounded/velocity). Replaces substring matching on state class names, which silently
     // broke on renames and false-matched future states. Same render-only contract as the
@@ -83,6 +89,9 @@ public class StunnedState : MovementState
 {
     public override int ActivePriority  => MovementPriorities.StunnedActive;
     public override int PassivePriority => MovementPriorities.StunnedPassive;
+
+    // No reflex assists while stunned — knockback must plow into corners honestly.
+    public override RampPolicy RampPolicy => RampPolicy.Off;
 
     // Recoil flinch, not the generic ground clips: without this the muted-control window
     // is invisible (a stunned body sliding under knockback reads as a walk cycle).
@@ -140,6 +149,9 @@ public class TumbleState : MovementState
 
     public override int ActivePriority  => MovementPriorities.TumbleActive;
     public override int PassivePriority => MovementPriorities.TumblePassive;
+
+    // No reflex assists while launched — same reasoning as StunnedState.
+    public override RampPolicy RampPolicy => RampPolicy.Off;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
@@ -296,8 +308,12 @@ public class StandingState : MovementState
         // height (gap < 0 — e.g. an early jump-release leaving Standing momentarily in
         // charge of an ascending body), braking the ascent would dead-end it like a
         // ceiling, so leave it alone.
+        // ...and skipped while an ambient over-ramp is engaged: the ramp's redirect rises
+        // faster than the spring would ever push, and clamping it here would cancel the
+        // reflex vault the frame after it starts.
         float velExcess = velAlongNormal - cfg.SpringMaxRiseSpeed;
-        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f)
+        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f
+            && !SteeringRamp.AnyEngaged(ctx.Body, SteeringSense.Over))
             force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
@@ -397,9 +413,11 @@ public class CrouchedState : MovementState
         float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
         if (gap > 0f)
             force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
-        // Anti-pop clamp gated on gap > 0 — see StandingState.Update.
+        // Anti-pop clamp gated on gap > 0, exempted during an engaged ambient over-ramp —
+        // see StandingState.Update.
         float velExcess = velAlongNormal - MovementConfig.Current.SpringMaxRiseSpeed;
-        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f)
+        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f
+            && !SteeringRamp.AnyEngaged(ctx.Body, SteeringSense.Over))
             force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);

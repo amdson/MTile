@@ -173,6 +173,21 @@ public class MovementConfig
     // (mantle/arc-jump envelope, ~2.6 tiles). Above this the column is a wall.
     public float CorridorMaxRise { get; set; } = 42f;
 
+    // Ambient reflex ramps (ReflexSystem — automatic corner ramps stamped from the corridor
+    // probe every frame, owned by no movement state; see Character/ReflexSystem.cs).
+    public bool  AmbientRampsEnabled { get; set; } = true;
+    // Corner must be within this many px of the body's leading face for a ramp to exist.
+    // ~1.75 tiles: enough run-up for the redirect to bend the approach, short enough to
+    // stay "reflex" rather than autopilot.
+    public float AmbientRampRange { get; set; } = 28f;
+    // Largest floor rise the ambient over-ramp assists (the 1-block band, = MantleMaxRise).
+    // Taller rises are honest walls.
+    public float AmbientRampMaxRise { get; set; } = 20f;
+    // Per-step impulse cap (px/s²) and upward-velocity cap (px/s) for ambient ramps —
+    // same roles as ParkourRampMaxForce / ParkourRampMaxVy.
+    public float AmbientRampMaxForce { get; set; } = 3500f;
+    public float AmbientRampMaxVy    { get; set; } = 200f;
+
     // Mantle (deliberate flush-step climb — see MantleState, Plans/CORRIDOR_MANEUVER_PLAN.md).
     // Rise band in px the mantle accepts (the 1-block vault band: 0.5..1.2 tiles, matching
     // ExposedUpperCornerChecker's). Steeper is arc-jump territory; shallower is a walk-over.
@@ -184,6 +199,19 @@ public class MovementConfig
     // |vx| gate: above this the body is mid-run and the reflex ramps own the vault; the
     // mantle only claims stalled/deliberate entries. Below MaxWalkSpeed by a wide margin.
     public float MantleMaxEntrySpeed { get; set; } = 60f;
+
+    // Arc jump (automatic ballistic arc over a 1-block rise hit AT SPEED — see ArcJumpState).
+    // The running companion to the mantle: same rise band (MantleMinRise..MantleMaxRise), split
+    // by entry speed at MantleMaxEntrySpeed (a single shared threshold so the bands always
+    // tile) — above it the body pops an honest hop and arcs over, reproducing the old
+    // ramp-vault feel with real ballistics; at or below it the flush/slow approach belongs
+    // to MantleState.
+    // Body face may be up to this many px from the lip when the hop fires — unlike the
+    // mantle's flush gate, the arc wants a little run-up room so entry speed carries over.
+    public float ArcJumpTriggerDistance { get; set; } = 20f;
+    // Extra apex height (px) above the landing gate the entry hop budgets for, so the
+    // ballistic rollout crosses the lip with a small clearance instead of grazing it.
+    public float ArcJumpApexMargin { get; set; } = 4f;
 
     // Covered Jump (jump initiated while partially under an overhang — see CoveredJumpState)
     // Hard cap on the slide-out phase so a degenerate "can't actually get clear" position bails to

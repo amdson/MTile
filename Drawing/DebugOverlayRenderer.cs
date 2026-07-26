@@ -78,12 +78,11 @@ public sealed class DebugOverlayRenderer
 
     // Visualize one SteeringRamp at its corner: the surface tangent (the "ramp" the
     // body skims along), the banned direction (into the solid), and the corner dot.
-    // Color = Sense (Over: lime / Under: orange); opacity fades with Weight so inert
-    // ramps appear ghosted.
+    // Color = Sense (Over: lime / Under: orange); disengaged ramps appear ghosted.
     public void DrawSteeringRamp(SteeringRamp ramp)
     {
         var baseColor = ramp.Sense == SteeringSense.Over ? Color.LimeGreen : Color.Orange;
-        float alpha = 0.25f + 0.75f * MathHelper.Clamp(ramp.Weight, 0f, 1f);
+        float alpha = ramp.Engaged ? 1f : 0.25f;
         var color   = baseColor * alpha;
         var banned  = baseColor * (alpha * 0.45f);
 

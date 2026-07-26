@@ -174,6 +174,16 @@ public class PlayerCharacter : IHittable
 
     private readonly List<MovementState> _stateRegistry = new();
 
+    // Ambient reflex layer — per-frame reconciled automatic corner ramps (no snapshot
+    // state; self-heals after a restore, see ReflexSystem).
+    private readonly ReflexSystem _reflexes = new();
+
+    // Long-lived per-direction corridor scratch for EnvironmentContext.GetCorridor — pure
+    // derived data, fully rewritten by every scan (never snapshot state); pooled here only
+    // so the per-frame reflex probe doesn't allocate.
+    private readonly Corridor _corridorScratch1      = new(1);
+    private readonly Corridor _corridorScratchMinus1 = new(-1);
+
     private const int HistorySize = 32;
     private readonly MovementState[] _stateHistory = new MovementState[HistorySize];
     private int _historyHead = 0;
@@ -301,10 +311,17 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new WallJumpingState(1));
         _stateRegistry.Add(new WallJumpingState(-1));
         _stateRegistry.Add(new CoveredJumpState());
-        _stateRegistry.Add(new ParkourState(1));
-        _stateRegistry.Add(new ParkourState(-1));
+        // ParkourState + ArcJumpState benched while the ambient reflex layer (ReflexSystem)
+        // is evaluated as the owner of the at-speed corner case: registered, they claim the
+        // approach (passive 45/46) before an ambient ramp ever shows its effect. Re-add to
+        // restore the state-driven vault/arc. MantleState stays — it is the flush/slow
+        // fallback for exactly the case the ramps' steep cutoff refuses.
+        // _stateRegistry.Add(new ParkourState(1));
+        // _stateRegistry.Add(new ParkourState(-1));
         _stateRegistry.Add(new MantleState(1));
         _stateRegistry.Add(new MantleState(-1));
+        // _stateRegistry.Add(new ArcJumpState(1));
+        // _stateRegistry.Add(new ArcJumpState(-1));
         _stateRegistry.Add(new DropdownState());
         _stateRegistry.Add(new LedgeGrabState(1));
         _stateRegistry.Add(new LedgeGrabState(-1));
@@ -404,6 +421,8 @@ public class PlayerCharacter : IHittable
             Mass           = Mass,
             Intent         = InputIntent.From(controller),
             Modifiers      = MovementModifiers.Identity,
+            CorridorScratch1      = _corridorScratch1,
+            CorridorScratchMinus1 = _corridorScratchMinus1,
         };
 
         // Facing tracks the last non-zero horizontal input so standstill actions
@@ -510,6 +529,14 @@ public class PlayerCharacter : IHittable
         }
 
         _currentState.Update(ctx, _abilities, ref _moveVars);
+
+        // Ambient reflex reconciliation (Character/ReflexSystem.cs): stamp/refresh/remove the
+        // automatic corner ramps from the corridor probe, under the state's published policy.
+        // After Movement.Update (the state's policy + forces are final for the frame), before
+        // the physics step reads the constraints. Hitstun forces the policy off — knockback
+        // must hit corners honestly, whatever free state is nominally active.
+        var rampPolicy = _abilities.Combat.HitstunActive ? RampPolicy.Off : _currentState.RampPolicy;
+        _reflexes.Reconcile(ctx, rampPolicy);
 
         // Action gets to augment the body's force AFTER movement has written it but
         // BEFORE Action.Update — keeps Update free for FSM logic, lets the physics

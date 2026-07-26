@@ -54,13 +54,13 @@ public class RampVerticalCapTests(ITestOutputHelper output)
             $"Fixture sanity: expected strong upward redirect with no cap, got vy={body.Velocity.Y:F2}");
     }
 
-    // ── Steep-angle authority taper ────────────────────────────────────────
+    // ── Steep-angle cutoff ─────────────────────────────────────────────────
     // A corner so high that the "shallowest clearing trajectory" is near-vertical
     // (θ* → π/2) is outside the ramp's physical regime — redirecting onto it is a
-    // winch, not a graze assist. The Weight taper (fading over ~63°..77°) makes
-    // the ramp abstain entirely: velocity passes through untouched and the body
-    // meets the wall as a real collision. (This fixture — corner at (16, -200),
-    // θ* ≈ 86° — was the original vy-cap fixture before the taper existed.)
+    // winch, not a graze assist. Past the binary steep cutoff (~72°) the ramp
+    // disengages entirely: velocity passes through untouched and the body meets
+    // the wall as a real collision. (This fixture — corner at (16, -200),
+    // θ* ≈ 86° — was the original vy-cap fixture before the cutoff existed.)
     [Fact]
     public void NearVerticalCorner_RampAbstains_VelocityUntouched()
     {
@@ -78,9 +78,9 @@ public class RampVerticalCapTests(ITestOutputHelper output)
         SteeringRamp.ApplyRedirect(body, 1f / 30f);
 
         ramp.Recompute(body.Polygon.GetVertices(body.Position));
-        output.WriteLine($"θ* = {ramp.ThetaStar:F3} rad, Weight = {ramp.Weight:F5}, v = ({body.Velocity.X:F2}, {body.Velocity.Y:F2})");
-        Assert.True(ramp.Weight <= SteeringRamp.WeightEpsilon,
-            $"Expected steep-angle taper to zero the weight, got {ramp.Weight:F5} at θ*={ramp.ThetaStar:F3}");
+        output.WriteLine($"θ* = {ramp.ThetaStar:F3} rad, Engaged = {ramp.Engaged}, v = ({body.Velocity.X:F2}, {body.Velocity.Y:F2})");
+        Assert.False(ramp.Engaged,
+            $"Expected the steep cutoff to disengage the ramp at θ*={ramp.ThetaStar:F3}");
         Assert.Equal(vBefore, body.Velocity);
     }
 

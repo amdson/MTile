@@ -24,9 +24,11 @@ public sealed class SteeringRamp : PhysicsContact
     public float   ThetaStar;     // [0, π/2]: the binding angle off "forward". 0 ⇒ inert this step.
     public Vector2 SurfaceDir;    // d*, unit: the shallowest clearing trajectory (the implicit ramp tangent)
     public Vector2 BannedDir;     // b, unit: d* rotated 90° toward the solid
-    public float   Weight;        // [0,1]: Smoothstep(0, ThetaBand, ThetaStar), faded back to 0 as
-                                  // ThetaStar approaches π/2 (see SteepFadeStart) — near-vertical
-                                  // "clearing trajectories" are outside the ramp's physical regime.
+    public bool    Engaged;       // binary authority: a vertex binds AND ThetaStar is below the steep
+                                  // cutoff. When engaged the ramp enforces its invariant FULLY (no
+                                  // velocity into BannedDir, up to the energy caps below); when not,
+                                  // it does nothing at all. A partially-enforced redirect is a failed
+                                  // one plus noise — the guarantee is the whole point of the ramp.
     public float   BindClearance; // clearance distance (px) still owed by the binding vertex — its rc
                                   // at ThetaStar. 0 when inert. Owner states use it for the ballistic
                                   // crest cap: vy needed to coast the remaining rise = √(2g·BindClearance).
@@ -66,19 +68,19 @@ public sealed class SteeringRamp : PhysicsContact
     public bool    HasTarget;
     public Vector2 TargetVelocity;
 
-    private const float ThetaBand      = 0.15f;   // radians: width of the Weight fade near ThetaStar = 0
-    // Steep-angle authority taper: the ramp is a graze assist, not a winch. Past SteepFadeStart the
-    // "shallowest clearing trajectory" is so steep that redirecting onto it means hauling the body
-    // near-vertically — unphysical-looking, and the 1/cos speed compensation in owner states blows
-    // up. Weight fades to 0 across [SteepFadeStart, SteepFadeEnd]; a body flush against a step
-    // (θ* → π/2) gets NO assist and honestly bumps the wall. That case belongs to a deliberate
-    // mantle maneuver, not the reflex layer. Normal running approaches bind at θ* ≈ 40–55°, safely
-    // below the fade.
-    private const float SteepFadeStart = 1.1f;    // radians (~63°): full authority below this
-    private const float SteepFadeEnd   = 1.35f;   // radians (~77°): zero authority above this
+    // Steep-angle cutoff: the ramp is a graze assist, not a winch. Past this angle the "shallowest
+    // clearing trajectory" is so steep that redirecting onto it means hauling the body near-
+    // vertically — unphysical-looking, and the 1/cos speed compensation in owner states blows up.
+    // Engagement is BINARY at the cutoff (a fade would give partial enforcement, which still
+    // collides — see Engaged): below it full authority, above it none — a body flush against a
+    // step (θ* → π/2) honestly bumps the wall, and that case belongs to a deliberate mantle/arc
+    // maneuver, not the reflex layer. Normal running approaches bind at θ* ≈ 40–55°, safely below.
+    // Pure function of geometry (no hysteresis state) so Recompute stays snapshot-safe; add
+    // hysteresis + snapshot support only if boundary chatter shows up in play.
+    private const float SteepCutoff    = 1.25f;   // radians (~72°)
     private const float BindEpsilon    = 1e-3f;   // a vertex binds iff rf > eps && rc > eps
     private const float SpeedEpsilon   = 1e-2f;   // below this speed there is nothing to redistribute
-    private const float CombineLambda  = 0.1f;    // multi-ramp regularizer, as a fraction of max ramp weight
+    private const float CombineLambda  = 0.1f;    // multi-ramp regularizer (directional prior toward v̂)
     private const float Clearance      = 1.5f;    // small graze-safety nudge toward the open side of the corner
     private const float OverVertLift   = PlayerCharacter.Radius;  // Over only: also lift the binding vertex a body-radius
                                                   // onto the clear side ⇒ the vault delivers the body at standing float
@@ -86,8 +88,6 @@ public sealed class SteeringRamp : PhysicsContact
                                                   // not crouched-low. (For Under there is no "float" below a ceiling —
                                                   // the body just needs to not intersect the slab — so it gets only the
                                                   // graze nudge: the ramp stays inert whenever the body actually fits.)
-    public  const float WeightEpsilon  = 1e-3f;   // ramps weaker than this are treated as inert
-
     // Derive ThetaStar / SurfaceDir / BannedDir / Weight from the body's world-space polygon vertices.
     public void Recompute(Vector2[] worldVertices)
     {
@@ -118,8 +118,23 @@ public sealed class SteeringRamp : PhysicsContact
         float ct = MathF.Cos(ThetaStar), st = MathF.Sin(ThetaStar);
         SurfaceDir = ct * fwd + st * clr;        // unit
         BannedDir  = st * fwd - ct * clr;        // unit: d* rotated 90° toward the solid interior (fwd & anti-clr)
-        Weight     = Smoothstep(0f, ThetaBand, ThetaStar)
-                   * (1f - Smoothstep(SteepFadeStart, SteepFadeEnd, ThetaStar));
+        Engaged    = ThetaStar > 0f && ThetaStar < SteepCutoff;
+    }
+
+    // Upward speed (px/s, positive magnitude) a free-fall arc needs to coast `rise` px up:
+    // √(2g·rise). The single definition of the ballistic crest budget — the reflex crest
+    // cap, the climb states' vy envelope, and the arc jump's entry hop all size against it.
+    public static float BallisticVy(float rise)
+        => MathF.Sqrt(2f * Simulation.WorldGravityY * MathF.Max(0f, rise));
+
+    // True when any ramp of the given sense on the body was Engaged as of its last Recompute
+    // (i.e. the previous physics step — one frame stale, which is fine for gating). Used by
+    // the ground states to exempt an ambient ramp's climb from the anti-pop rise clamp.
+    public static bool AnyEngaged(PhysicsBody body, SteeringSense sense)
+    {
+        foreach (var c in body.Constraints)
+            if (c is SteeringRamp r && r.Engaged && r.Sense == sense) return true;
+        return false;
     }
 
     // PhysicsWorld hook: recompute every steering ramp on the body from the current polygon, drop the
@@ -137,7 +152,7 @@ public sealed class SteeringRamp : PhysicsContact
         {
             if (c is not SteeringRamp ramp) continue;
             ramp.Recompute(verts);
-            if (ramp.Weight <= WeightEpsilon) continue;
+            if (!ramp.Engaged) continue;
             (active ??= new List<SteeringRamp>()).Add(ramp);
         }
         if (active != null) ResolveVelocity(body, active, dt);
@@ -190,17 +205,15 @@ public sealed class SteeringRamp : PhysicsContact
             {
                 var ramp = ramps[0];
                 float into = MathF.Max(0f, Vector2.Dot(vBefore, ramp.BannedDir));
-                Vector2 vRem = vBefore - ramp.Weight * into * ramp.BannedDir;
+                Vector2 vRem = vBefore - into * ramp.BannedDir;   // full projection: no residual velocity into the corner
                 float remLen = vRem.Length();
                 vIdeal = remLen > SpeedEpsilon ? vRem * (s / remLen) : s * ramp.SurfaceDir;
             }
             else
             {
-                // û* = argmin over unit û of [ Σ wᵢ·max(0, û·bᵢ)  +  λ·(1 − û·v̂) ].
+                // û* = argmin over unit û of [ Σ max(0, û·bᵢ)  +  λ·(1 − û·v̂) ].
                 // (Phase 1: 64-sample scan, no Newton refine — one-block-step ParkourState never reaches this path.)
-                float maxW = 0f;
-                foreach (var r in ramps) if (r.Weight > maxW) maxW = r.Weight;
-                float lambda = CombineLambda * maxW;
+                float lambda = CombineLambda;
                 Vector2 vHat = Vector2.Normalize(vBefore);
                 float baseAngle = MathF.Atan2(vHat.Y, vHat.X);
 
@@ -212,7 +225,7 @@ public sealed class SteeringRamp : PhysicsContact
                     float ang = baseAngle + (MathHelper.TwoPi * i) / Samples;
                     Vector2 u = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
                     float cost = lambda * (1f - Vector2.Dot(u, vHat));
-                    foreach (var r in ramps) cost += r.Weight * MathF.Max(0f, Vector2.Dot(u, r.BannedDir));
+                    foreach (var r in ramps) cost += MathF.Max(0f, Vector2.Dot(u, r.BannedDir));
                     if (cost < bestCost) { bestCost = cost; bestAngle = ang; }
                 }
                 vIdeal = new Vector2(MathF.Cos(bestAngle), MathF.Sin(bestAngle)) * s;
@@ -220,17 +233,9 @@ public sealed class SteeringRamp : PhysicsContact
         }
 
         Vector2 dv = vIdeal - vBefore;
-        // In target mode the ideal is a state-authored velocity, not a geometric rotation, so the
-        // Weight taper (θ*→0 inert band + steep-angle fade) must be applied here: scale the drive
-        // by the strongest engaged ramp's weight so authority fades smoothly at both ends of the
-        // ramp's regime instead of switching at WeightEpsilon. (Legacy mode already folds Weight
-        // into the rotation itself.)
-        if (useTargetMode)
-        {
-            float wMax = 0f;
-            foreach (var r in ramps) if (r.HasTarget && r.Weight > wMax) wMax = r.Weight;
-            dv *= wMax;
-        }
+        // Only ENGAGED ramps reach this method (ApplyRedirect filters), so both modes drive at
+        // full authority; MaxForce/MaxRedirectVy below are the honest limits on what a ramp may
+        // deliver. Authority is binary by design — see Engaged.
         if (forceCap < float.PositiveInfinity && dt > 0f)
         {
             float maxDv = forceCap * dt;
@@ -253,17 +258,8 @@ public sealed class SteeringRamp : PhysicsContact
         }
         else
         {
-            float wSum = 0f;
-            foreach (var r in ramps) wSum += r.Weight;
-            if (wSum > 0f)
-                foreach (var r in ramps) r.LastImpulse += actualDv * (r.Weight / wSum);
+            // Equal split — engaged ramps all have full authority.
+            foreach (var r in ramps) r.LastImpulse += actualDv / ramps.Count;
         }
-    }
-
-    private static float Smoothstep(float edge0, float edge1, float x)
-    {
-        if (edge1 <= edge0) return x >= edge1 ? 1f : 0f;
-        float t = Math.Clamp((x - edge0) / (edge1 - edge0), 0f, 1f);
-        return t * t * (3f - 2f * t);
     }
 }

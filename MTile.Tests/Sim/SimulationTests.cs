@@ -429,12 +429,25 @@ public class SimulationTests(ITestOutputHelper output)
     // chains vault/duck transitions and is the canonical "feels miserable" case
     // — running through it should feel close to flat-ground speed if state
     // transitions don't bleed off momentum.
-    // DEAD (2026-07-18): broken since the 2bf3abb corner-checker overhaul — vaults now
-    // exit with downward Vy, so the hold-right body drops into the pit at cols 10-11 and
-    // stalls against the 2-high wall. Re-enable once the in-progress movement rewrite
-    // settles vault-exit behavior (then also stop the trace running off the map edge,
-    // which inflated the old average with 200 frames of free-fall).
-    [Fact(Skip = "Dead pending movement rewrite — vault exit lost upward carry, body traps in the pit (see comment)")]
+    // BENCHMARK (user-designated 2026-07-18): the automated twin of the start-stage corridor.
+    // Diagnosis as of the maneuver-layer work (ArcJump landed, corner-jam + zero-drive
+    // ParkourState stall fixed):
+    //   1. The reflex vault is BLIND WHILE CROUCHED — ExposedUpperCornerChecker bands corners
+    //      off body.Position.Y + 2R (the STANDING base); a crouched body sits ~10px lower, so
+    //      real 1-block rises fall out of the band and every step in this crouch-height
+    //      corridor costs a bonk + MantleState (~1s each) instead of an at-speed vault.
+    //      Fix = plan step 3: migrate ParkourState preconditions onto CorridorProbe (floor
+    //      deltas are pose-independent).
+    //   2. The pit at cols 10-11 is a SPEED TRAP: crossing requires arriving fast; once in,
+    //      the stalactite (col 10, bottom y=192) vs pillar lip (192,208) diagonal channel is
+    //      22.6px vs the hexagon's ~23.2px support width — geometrically impassable rightward.
+    //      Escaping forward from a slow entry is impossible by design; not falling in needs
+    //      the crouch-vault fix above plus air reflexes (plan step 3½, ReflexSystem).
+    // Re-enable after step 3/3½; then also stop the trace running off the map edge, which
+    // inflates the average with free-fall frames. (Verified unchanged under the binary ramp
+    // engagement rework — the corridor's ramps never engage at all while crouched, so the
+    // blend-vs-binary distinction is moot here until the step-3 migration.)
+    [Fact(Skip = "Benchmark not yet passable: crouched reflex-vault band bug (plan step 3) + pit needs at-speed crossing (step 3.5); see comment")]
     public void HoldRight_CourseCorridor_RunsThrough()
     {
         // Mirrors Levels/course.txt:
