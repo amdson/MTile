@@ -44,6 +44,8 @@ public class Game1 : Game
 
     private DrawContext _draw;
     private DebugOverlayRenderer _debugOverlay;
+    // Render-side scratch for the DebugDrawCoast overlay's predictor rollout.
+    private readonly CoastSample[] _coastScratch = new CoastSample[BallisticPredictor.MaxHorizon];
     private HudRenderer _hud;
     private PrimitiveBatch _prims;
     private DensityField _density;
@@ -500,6 +502,20 @@ public class Game1 : Game
         // pure and render-local — this call never feeds back into the sim.
         if (_config.DebugDrawCorridor)
             _debugOverlay.DrawCorridor(CorridorProbe.Scan(player.Body, _sim.Chunks, player.Facing));
+
+        // Predicted coast (BallisticPredictor) from the player's current state under the
+        // currently-held input. Pure render-local rollout — identity modifiers (action
+        // modifiers aren't reproduced here; the overlay approximates the baseline coast).
+        if (_config.DebugDrawCoast)
+        {
+            var inp = _sim.CurrentInput;
+            int dirX = (inp.Right ? 1 : 0) - (inp.Left ? 1 : 0);
+            int n = BallisticPredictor.Predict(
+                player.Body, _sim.Chunks, dirX, inp.Down, player.IsGrounded,
+                MovementModifiers.Identity, player.Gravity,
+                Simulation.FixedDt, 20, _coastScratch);
+            _debugOverlay.DrawCoast(player.Body.Position, _coastScratch, n);
+        }
 
         // Enemy health bars in world space, drawn just above each wounded body.
         foreach (var e in _sim.Entities)

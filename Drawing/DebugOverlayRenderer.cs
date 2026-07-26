@@ -164,6 +164,25 @@ public sealed class DebugOverlayRenderer
         }
     }
 
+    // BallisticPredictor coast overlay (Plans/BALLISTIC_CORRECTOR_PLAN.md step 1): the
+    // predicted correction-free trajectory from the body's current state. Polyline from
+    // the body through each sample; grounded samples get a small tick down to their
+    // floor so the spring-supported stretch reads apart from free flight. Render-only.
+    public void DrawCoast(Vector2 from, CoastSample[] samples, int count)
+    {
+        var prev = from;
+        for (int k = 0; k < count; k++)
+        {
+            var p = samples[k].Pos;
+            var color = samples[k].Grounded ? Color.LimeGreen * 0.8f : Color.Aqua * 0.8f;
+            DrawLine(prev, p, color, 1);
+            if (samples[k].Grounded)
+                DrawLine(p, new Vector2(p.X, samples[k].FloorY), Color.LimeGreen * 0.25f, 1);
+            prev = p;
+        }
+        if (count > 0) _draw.Disc(samples[count - 1].Pos, 2.5f, Color.Aqua);
+    }
+
     // Translucent fill + crisp outline. Color owned by the publisher (Hitbox.DebugColor).
     public void DrawHitbox(Hitbox hb)
     {

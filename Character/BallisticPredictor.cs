@@ -1,0 +1,189 @@
+using System;
+using Microsoft.Xna.Framework;
+
+namespace MTile;
+
+// One predicted tick of the correction-free coast (Plans/BALLISTIC_CORRECTOR_PLAN.md §2).
+public struct CoastSample
+{
+    public Vector2 Pos;       // body position at the END of the predicted tick
+    public Vector2 Vel;       // body velocity at the END of the predicted tick
+    public bool    Grounded;  // the standing spring was engaged for this tick
+    public float   FloorY;    // floor top under the body when Grounded (else +∞)
+}
+
+// Forward-simulates the coast — baseline feedforward + gravity, NO corrections —
+// H steps from a body state, mirroring PhysicsWorld.StepSwept's exact order for a
+// body whose only contact is the state-owned ground FSD:
+//
+//   probe/classify → feedforward force → v += F·dt → v += g·dt
+//   → FSD normal-velocity zeroing (dist < MinDistance)
+//   → FSD plane sweep (crossing MinDistance from above) → p += v·dt
+//
+// Deliberately thin (NOT a second physics engine): tile collision RESPONSE,
+// friction bookkeeping, steering ramps, sprouts/moving providers, and the FSM are
+// all excluded. Penetration detection is the constraint builder's job — samples
+// that fly into terrain are exactly the violations the corrector exists to see.
+// Prediction is the only place dynamics are evaluated; the feedforward is the
+// purified BaselineFeedforward shared with (mirroring, until step 4+) the live
+// states, so drag/modifier changes are respected automatically.
+//
+// Determinism: plain loops, no statics, no allocation — output goes into the
+// caller's CoastSample[] (pooled on PlayerCharacter when wired; see plan §6).
+public static class BallisticPredictor
+{
+    public const int MaxHorizon = 24;   // ≥ any CorrectorHorizon a config will ask for
+
+    // Predicts `steps` ticks from (pos, vel), writing samples[0 .. steps-1].
+    // Returns the number of samples written (== steps; truncation at deep
+    // violations is the constraint builder's call, not the predictor's).
+    //
+    // inputDirX ∈ {-1, 0, +1} and inputDown are the frozen input for the horizon.
+    // startGrounded = is the CURRENT movement state a grounded one (Standing/
+    // Crouched)? It seeds the entry-vs-continuation asymmetry of the ground
+    // classification: entry additionally requires the rise-speed gate
+    // (StandingState.IsStandingGround); continuation is the plain probe.
+    public static int Predict(
+        PhysicsBody body, ChunkMap chunks,
+        int inputDirX, bool inputDown, bool startGrounded,
+        in MovementModifiers modifiers, Vector2 gravity,
+        float dt, int steps, CoastSample[] samples)
+    {
+        var cfg = MovementConfig.Current;
+        steps = Math.Min(steps, samples.Length);
+
+        Vector2 pos = body.Position;
+        Vector2 vel = body.Velocity;
+        var polygon = body.Polygon;
+        bool prevGrounded = startGrounded;
+
+        float halfHeight  = PlayerCharacter.Radius;
+        float floatHeight = PlayerCharacter.Radius;
+        float minDistance = halfHeight + floatHeight;
+        var   groundNormal = new Vector2(0f, -1f);
+
+        for (int k = 0; k < steps; k++)
+        {
+            // 1. Ground probe + classification at the tick-top pose (mirrors
+            //    ctx.TryGetGround feeding the FSM before the state Update).
+            var bounds = polygon.GetBoundingBox(pos);
+            bool haveFloor = TryProbeFloor(chunks, bounds, floatHeight, out float floorY);
+            bool grounded = haveFloor
+                && MathF.Abs(vel.Y) <= cfg.MaxGroundEngageVnRel
+                && (prevGrounded || -vel.Y <= cfg.SpringMaxRiseSpeed);
+
+            var groundPos = new Vector2(pos.X, floorY);
+
+            // 2. Baseline feedforward (the frozen-input drive).
+            Vector2 force;
+            if (grounded)
+            {
+                force = BaselineFeedforward.Ground(
+                    pos, vel, groundPos, groundNormal, Vector2.Zero, minDistance,
+                    inputDirX,
+                    cfg.WalkAccel    * modifiers.WalkAccel,
+                    cfg.MaxWalkSpeed * modifiers.MaxWalkSpeed,
+                    modifiers.PreserveExternalVelocity, overRampEngaged: false,
+                    cfg.SpringK, cfg.SpringDamping, cfg.SpringMaxRiseSpeed, dt);
+            }
+            else
+            {
+                force = Vector2.Zero;
+                force.X = BaselineFeedforward.Air(
+                    inputDirX, vel.X,
+                    cfg.AirAccel    * modifiers.AirAccel,
+                    cfg.MaxAirSpeed * modifiers.MaxAirSpeed,
+                    cfg.AirDrag     * modifiers.AirDrag,
+                    modifiers.PreserveExternalVelocity, dt);
+                if (inputDown)
+                    force.Y += cfg.FastFallForce;
+            }
+
+            // Gravity-scale modifier as a counter-force (PlayerCharacter.Update's shape).
+            if (modifiers.GravityScale != 1f)
+                force += gravity * (modifiers.GravityScale - 1f);
+
+            // 3. Integrate exactly as StepSwept does.
+            vel += force * dt;
+            vel += gravity * dt;
+
+            if (grounded)
+            {
+                float dist = Vector2.Dot(pos - groundPos, groundNormal);
+
+                // FSD constraint: below rest height, inbound normal velocity is zeroed.
+                if (dist < minDistance)
+                {
+                    float vnRel = Vector2.Dot(vel, groundNormal);
+                    if (vnRel < 0f) vel -= vnRel * groundNormal;
+                }
+
+                // FSD plane sweep: crossing MinDistance from above within the step
+                // (the landing catch). Mirrors ResolveChunkCollisionsSwept's
+                // FloatingSurfaceDistance branch: clip, carry-zero, slide the rest.
+                // displacement is (pos + v·dt) − pos, NOT v·dt: StepSwept computes it
+                // from the target position, and the different float rounding decides
+                // marginal sweep hits (the hover limit cycle rides exactly on t = 1).
+                var disp = (pos + vel * dt) - pos;
+                float dn = Vector2.Dot(disp, groundNormal);
+                if (dn < 0f && dist >= minDistance)
+                {
+                    float t = (minDistance - dist) / dn;
+                    if (t >= 0f && t <= 1f)
+                    {
+                        pos += disp * t + groundNormal * PhysicsWorld.Epsilon;
+                        disp *= 1f - t;
+                        float vnRel = Vector2.Dot(vel, groundNormal);
+                        if (vnRel < 0f) vel -= vnRel * groundNormal;
+                        float dn2 = Vector2.Dot(disp, groundNormal);
+                        if (dn2 < 0f) disp -= dn2 * groundNormal;
+                    }
+                }
+                pos += disp;
+            }
+            else
+            {
+                // Same displacement rounding as the grounded branch — see above.
+                pos += (pos + vel * dt) - pos;
+            }
+
+            samples[k].Pos      = pos;
+            samples[k].Vel      = vel;
+            samples[k].Grounded = grounded;
+            samples[k].FloorY   = grounded ? floorY : float.PositiveInfinity;
+            prevGrounded = grounded;
+        }
+
+        return steps;
+    }
+
+    // Static-tile floor probe under the body — mirror of GroundChecker.TryFind's
+    // tile branch (strip below the horizontally-inset bounds, highest tile top
+    // that starts within the strip). Sprouts and external shape providers are
+    // deliberately out of scope: the coast is predicted against static terrain.
+    private static bool TryProbeFloor(ChunkMap chunks, BoundingBox bounds, float floatHeight, out float floorY)
+    {
+        const float HorizontalInset = 2f;   // = GroundChecker.HorizontalInset
+        var probe = bounds.InsetHorizontal(HorizontalInset).StripBelow(floatHeight + GroundChecker.ProbeSlack);
+
+        floorY = float.MaxValue;
+        int ts = Chunk.TileSize;
+        int colMin = (int)MathF.Floor(probe.Left / ts);
+        int colMax = (int)MathF.Floor(probe.Right / ts);
+        int rowMin = (int)MathF.Floor(probe.Top / ts);
+        int rowMax = (int)MathF.Floor(probe.Bottom / ts);
+        // Inclusive floor bounds on all four edges — the exact tile set
+        // TileQuery.SolidTilesInRect enumerates for this rect (edge-flush
+        // tiles included), which is what GroundChecker's fluent probe sees.
+
+        for (int gtx = colMin; gtx <= colMax; gtx++)
+        for (int gty = rowMin; gty <= rowMax; gty++)
+        {
+            if (!TileQuery.IsSolidAt(chunks, gtx * ts + ts * 0.5f, gty * ts + ts * 0.5f)) continue;
+            float top = gty * ts;
+            if (top < probe.Top - 1f) continue;   // wall rising through the strip, not a floor
+            if (top < floorY) floorY = top;
+        }
+        return floorY != float.MaxValue;
+    }
+}

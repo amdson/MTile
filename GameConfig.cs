@@ -29,6 +29,10 @@ public sealed class GameConfig
     // of the primary player in their facing direction, corner markers, and a red truncation
     // post (stubs: 1 = Pinch, 2 = TallRise, 3 = NoFloor). Render-only scan.
     public bool DebugDrawCorridor          { get; set; } = true;
+    // BallisticPredictor coast ahead of the primary player (Plans/BALLISTIC_CORRECTOR_PLAN.md
+    // step 1): predicted correction-free trajectory as a polyline, grounded samples marked.
+    // Render-only rollout each frame; never feeds back into the sim.
+    public bool DebugDrawCoast             { get; set; } = true;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
     // Force fields (hold / grab / throw) — on by default so the otherwise-invisible
