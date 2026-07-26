@@ -334,8 +334,8 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new ParkourCorrectorState(-1));
         _stateRegistry.Add(new ArcJumpCorrectorState(1));
         _stateRegistry.Add(new ArcJumpCorrectorState(-1));
-        _stateRegistry.Add(new MantleState(1));
-        _stateRegistry.Add(new MantleState(-1));
+        _stateRegistry.Add(new MantleCorrectorState(1));
+        _stateRegistry.Add(new MantleCorrectorState(-1));
         // _stateRegistry.Add(new ArcJumpState(1));
         // _stateRegistry.Add(new ArcJumpState(-1));
         _stateRegistry.Add(new DropdownState());

@@ -346,13 +346,31 @@ public abstract class CorrectorClimbBase : MovementState
 }
 
 // The at-speed 1-block vault (build step 4) — the case the benched ParkourState's
-// reflex ramps vacated. Slow/flush 1-block entries belong to MantleState.
+// reflex ramps vacated. Slow/flush 1-block entries belong to MantleCorrectorState.
 public class ParkourCorrectorState : CorrectorClimbBase
 {
     public ParkourCorrectorState(int dir) : base(dir) { }
     protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
     protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
     protected override bool  RequiresRunningEntry => true;
+}
+
+// The slow/flush 1-block climb (removal-pass port of the old ClimbStateBase
+// MantleState onto the corrector loop): same band as the Parkour vault, claiming
+// the entries AT or below the speed gate — the deliberate walk-up/stalled case.
+// Same hop-plus-envelope motion; from near-rest the hop is the pure-apex
+// ballistic, which reads as the old servo climb without the bespoke shepherd.
+public class MantleCorrectorState : CorrectorClimbBase
+{
+    public MantleCorrectorState(int dir) : base(dir) { }
+    protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
+    protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
+    protected override bool  RequiresRunningEntry => false;
+
+    // Complement of the Parkour gate so exactly one of the pair bids per frame.
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+        => _dir * ctx.Body.Velocity.X <= MovementConfig.Current.MantleMaxEntrySpeed
+           && base.CheckPreConditions(ctx, abilities);
 }
 
 // The taller climb band (build step 6): rises above the mantle band up to the
