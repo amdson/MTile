@@ -225,6 +225,12 @@ public class MovementConfig
     // than ArcJumpTriggerDistance because the corrector plans the whole arc (2 tiles,
     // the corridor plan's reflex-vs-autopilot boundary).
     public float CorrectorVaultTriggerDistance  { get; set; } = 32f;
+    // Trigger-by-feasibility gate tolerance (px): the final corrected rollout must
+    // reach within this of the landing gate line, past the lip, before any
+    // unavoided impact — otherwise the maneuver refuses. Per-maneuver knob by
+    // design (plan §1: refusal calibrates against the maneuver's NORMAL tracking
+    // level, not ≈0 — the spring settles a couple px shy of the exact gate).
+    public float CorrectorRefusalResidual       { get; set; } = 4f;
 
     // Covered Jump (jump initiated while partially under an overhang — see CoveredJumpState)
     // Hard cap on the slide-out phase so a degenerate "can't actually get clear" position bails to

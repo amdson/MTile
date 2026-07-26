@@ -19,6 +19,12 @@ public sealed class CorrectorScratch
         Channels    = new ChannelDef[1],
         PrevApplied = new Vector2[1],
     };
+    // Hypothetical-state probe for feasibility-as-trigger: CheckPreConditions
+    // rolls the WOULD-BE maneuver (post-hop state) through the same predict →
+    // rows → solve loop without touching the real body. Polygon is re-pointed at
+    // the owning body's before every use.
+    public readonly PhysicsBody ProbeBody =
+        new(Polygon.CreateRegular(PlayerCharacter.Radius, 6), Vector2.Zero);
 }
 
 // Corrector-driven climb family (BALLISTIC_CORRECTOR_PLAN steps 4 + 6): the
@@ -44,6 +50,10 @@ public abstract class CorrectorClimbBase : MovementState
 {
     private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
     private const float HingeWeight     = 1e6f;    // stiffness constant, not a feel knob
+    // Entry feasibility solves the FULL arc once per candidate frame and can afford
+    // a deeper fixed iteration budget than the per-tick re-solve (opposed-row
+    // schedules — the slalom class — need the extra sweeps; see the anchor tests).
+    private const int FeasibilityIterations = 128;
 
     protected readonly int _dir;
     protected CorrectorClimbBase(int dir) => _dir = dir;
@@ -86,17 +96,46 @@ public abstract class CorrectorClimbBase : MovementState
         float dist = _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir));
         if (dist > cfg.CorrectorVaultTriggerDistance) return false;
 
-        // Climb-volume headroom over the body's OWN columns (the corridor only sees
-        // ahead of the leading face): a low lip over the trailing half blocks the
-        // hop invisibly — refuse rather than wedge (ArcJumpState's lesson).
-        float targetY = corridor.ClimbTargetY(rise.Column);
-        var bounds = ctx.Body.Bounds;
-        foreach (var _ in TileQuery.SolidTilesInRect(ctx.Chunks,
-            bounds.Left + 0.5f, targetY - PlayerCharacter.Radius,
-            bounds.Right - 0.5f, bounds.Top - 0.5f))
-            return false;
+        // Trigger-by-feasibility (plan step 5): the same solve that will run every
+        // Update, run at entry over the full arc — a maneuver may fire iff its
+        // corrected arc is feasible. Refusal is measured on the final TRUE corrected
+        // rollout, never on the surrogate residual: normal wall-scrape rows carry a
+        // nonzero tracking residual by design (feel > model purity), so the honest
+        // question is "does the corrected arc DELIVER into the gate before any
+        // unavoided impact", not "is the residual ≈ 0".
+        var s = ctx.Corrector;
+        if (s == null) return true;   // hand-built test contexts: cheap gates only
 
-        return true;
+        float targetY = corridor.ClimbTargetY(rise.Column);
+        var probe = s.ProbeBody;
+        probe.Polygon  = ctx.Body.Polygon;
+        probe.Position = ctx.Body.Position;
+        float vy0 = HopVy(ctx, rise, targetY);
+        probe.Velocity = new Vector2(ctx.Body.Velocity.X,
+                                     MathF.Min(ctx.Body.Velocity.Y, -vy0));
+        float entrySpeed = MathF.Max(_dir * ctx.Body.Velocity.X, cfg.MaxWalkSpeed);
+
+        RunCorrector(ctx, probe, entrySpeed, Vector2.Zero, out int rowCount,
+                     FeasibilityIterations);
+        int H = Math.Min(cfg.CorrectorHorizon, BallisticPredictor.MaxHorizon);
+        int n = BallisticPredictor.PredictGuided(
+            probe, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
+            ctx.Gravity, ctx.Dt, H, s.Samples, rowCount > 0 ? s.TickDv : null);
+        ClearanceConstraintBuilder.Build(
+            ctx.Chunks, probe.Polygon, s.Samples, n,
+            cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation,
+            s.Rows, out int truncatedAt);
+        // Delivered: some sample BEFORE any unavoided impact reaches the gate band
+        // past the lip. CorrectorRefusalResidual is the gate tolerance — the spring
+        // settles a couple px below the exact gate line.
+        int usable = Math.Min(truncatedAt, n);
+        for (int k = 0; k < usable; k++)
+        {
+            if (s.Samples[k].Pos.Y <= targetY + cfg.CorrectorRefusalResidual
+                && _dir * (s.Samples[k].Pos.X - rise.Pos.X) > 0f)
+                return true;
+        }
+        return false;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -126,25 +165,31 @@ public abstract class CorrectorClimbBase : MovementState
         abilities.Facing = _dir;
         abilities.HasDoubleJumped = false;
 
-        // One-shot entry hop — all the maneuver's injected energy. vy sized so the
-        // arc clears the gate + margin BOTH at apex (the pure-ballistic floor) and
-        // at the moment the body's face reaches the lip at current speed (the
-        // early-fire case: a shallow apex far from the step is no use).
-        float needH = MathF.Max(0f, ctx.Body.Position.Y - vars.MantleTargetY) + cfg.ArcJumpApexMargin;
+        // One-shot entry hop — all the maneuver's injected energy (same sizing the
+        // feasibility probe planned with).
+        float vy0 = HopVy(ctx, rise, vars.MantleTargetY);
+        ctx.Body.Velocity.Y = MathF.Min(ctx.Body.Velocity.Y, -vy0);
+    }
+
+    // Hop sizing: vy so the arc clears the gate + margin BOTH at apex (the
+    // pure-ballistic floor) and at the moment the body's face reaches the lip at
+    // current speed. The lip term only applies to running entries — for flush/slow
+    // starts tLip blows up and the pure apex hop is the honest arc.
+    protected float HopVy(EnvironmentContext ctx, in CorridorCorner rise, float targetY)
+    {
+        var cfg = MovementConfig.Current;
+        float needH = MathF.Max(0f, ctx.Body.Position.Y - targetY) + cfg.ArcJumpApexMargin;
         float vyApex = SteeringRamp.BallisticVy(needH);
         float vy0    = vyApex;
         float vx     = _dir * ctx.Body.Velocity.X;
         if (vx > cfg.MantleMaxEntrySpeed)
         {
-            // At speed the pure-ballistic apex can sit past the lip — also require
-            // clearance at the moment the face reaches the lip at current speed.
-            // Meaningless for flush/slow entries (tLip blows up), hence the gate.
             float dist  = MathF.Max(1f, _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir)));
             float tLip  = dist / vx;
             float vyLip = needH / tLip + 0.5f * Simulation.WorldGravityY * tLip;
             vy0 = MathF.Max(vyApex, vyLip);
         }
-        ctx.Body.Velocity.Y = MathF.Min(ctx.Body.Velocity.Y, -vy0);
+        return vy0;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -187,38 +232,7 @@ public abstract class CorrectorClimbBase : MovementState
         var s = ctx.Corrector;
         if (s == null) return;   // hand-built test contexts without scratch: authored arc only
 
-        int H = Math.Min(cfg.CorrectorHorizon, BallisticPredictor.MaxHorizon);
-        float residual = 0f;
-        int rowCount = 0;
-        for (int pass = 0; pass < 2; pass++)
-        {
-            int n = BallisticPredictor.PredictGuided(
-                ctx.Body, ctx.Chunks, _dir, vars.EntrySpeed, startGrounded: false,
-                ctx.Gravity, ctx.Dt, H, s.Samples, pass == 0 ? null : s.TickDv);
-            rowCount = ClearanceConstraintBuilder.Build(
-                ctx.Chunks, ctx.Body.Polygon, s.Samples, n,
-                cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation,
-                s.Rows, out _);
-            if (rowCount == 0 && pass == 0) { residual = 0f; break; }   // provably silent coast
-
-            for (int k = 0; k < n; k++) s.CoastVel[k] = s.Samples[k].Vel;
-            var p = s.Problem;
-            p.H = n; p.Dt = ctx.Dt;
-            p.CoastVel = s.CoastVel;
-            p.Rows = s.Rows; p.RowCount = rowCount;
-            p.ChannelCount = 1;
-            p.Channels[0] = new ChannelDef
-            {
-                Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon,
-                Redirect = true, ActiveFrom = 0, ActiveTo = n,
-            };
-            p.PrevApplied[0] = vars.CorrectorPrevDv;
-            p.DeltaWeight = cfg.CorrectorDeltaWeight;
-            p.HingeWeight = HingeWeight;
-
-            residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
-            for (int k = 0; k < n; k++) s.TickDv[k] = s.Z[k];
-        }
+        RunCorrector(ctx, ctx.Body, vars.EntrySpeed, vars.CorrectorPrevDv, out int rowCount);
 
         if (rowCount > 0)
         {
@@ -232,6 +246,53 @@ public abstract class CorrectorClimbBase : MovementState
         {
             vars.CorrectorPrevDv = Vector2.Zero;
         }
+    }
+
+    // The two outer sequential-convexification passes over `body`'s state (the real
+    // body during Update; the pooled probe during trigger feasibility): predict the
+    // guided coast → build rows → solve; re-rollout WITH the corrections → rebuild →
+    // re-solve. Leaves s.Z holding the plan and returns the linear-model residual of
+    // the last pass (0 when the coast is provably silent — no rows on pass 1).
+    private float RunCorrector(EnvironmentContext ctx, PhysicsBody body,
+                               float entrySpeed, Vector2 prevDv, out int rowCount,
+                               int iterations = CorrectionSolver.DefaultInnerIterations)
+    {
+        var cfg = MovementConfig.Current;
+        var s = ctx.Corrector;
+        int H = Math.Min(cfg.CorrectorHorizon, BallisticPredictor.MaxHorizon);
+        float residual = 0f;
+        rowCount = 0;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            int n = BallisticPredictor.PredictGuided(
+                body, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
+                ctx.Gravity, ctx.Dt, H, s.Samples, pass == 0 ? null : s.TickDv);
+            rowCount = ClearanceConstraintBuilder.Build(
+                ctx.Chunks, body.Polygon, s.Samples, n,
+                cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation,
+                s.Rows, out _);
+            if (rowCount == 0 && pass == 0) return 0f;   // provably silent coast
+
+            for (int k = 0; k < n; k++) s.CoastVel[k] = s.Samples[k].Vel;
+            var p = s.Problem;
+            p.H = n; p.Dt = ctx.Dt;
+            p.CoastVel = s.CoastVel;
+            p.Rows = s.Rows; p.RowCount = rowCount;
+            p.ChannelCount = 1;
+            p.Channels[0] = new ChannelDef
+            {
+                Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon,
+                Redirect = true, ActiveFrom = 0, ActiveTo = n,
+            };
+            p.PrevApplied[0] = prevDv;
+            p.DeltaWeight = cfg.CorrectorDeltaWeight;
+            p.HingeWeight = HingeWeight;
+            p.InnerIterations = iterations;
+
+            residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
+            for (int k = 0; k < n; k++) s.TickDv[k] = s.Z[k];
+        }
+        return residual;
     }
 }
 

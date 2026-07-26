@@ -54,11 +54,16 @@ public sealed class CorrectionProblem
     public Vector2[] PrevApplied;   // z₋₁ anchor per channel
     public float DeltaWeight;       // wΔ
     public float HingeWeight;       // stiff, fixed — a stiffness constant, not a feel knob
+    // Fixed PG iteration count for THIS problem (determinism requires it be fixed
+    // per call site, not adaptive). The per-tick budget is DefaultInnerIterations;
+    // an entry-feasibility solve over a full arc may afford more (opposed-row
+    // schedules need the extra sweeps to unzigzag).
+    public int   InnerIterations = CorrectionSolver.DefaultInnerIterations;
 }
 
 public static class CorrectionSolver
 {
-    public const int InnerIterations = 4;
+    public const int DefaultInnerIterations = 4;
 
     // Solves the frozen subproblem into z (layout: z[c*H + k]); zScratch is a
     // same-size buffer for the synchronous gradient step. Returns the linear-model
@@ -95,7 +100,7 @@ public static class CorrectionSolver
         if (L <= 0f) return ComputeResidual(p, z);
         float eta = 1f / L;
 
-        for (int it = 0; it < InnerIterations; it++)
+        for (int it = 0; it < p.InnerIterations; it++)
         {
             // Row slacks s_j = m_j − Σ lever·(z·n̂) from the CURRENT iterate.
             Span<float> slack = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
