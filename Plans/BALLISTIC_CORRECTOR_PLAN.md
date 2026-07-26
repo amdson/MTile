@@ -8,6 +8,14 @@ movement states (Parkour first) — is subject to rewrite or removal as the corr
 parity. Migration is incremental behind config flags (see build order), but nothing in the
 current correction stack is load-bearing for the end state.
 
+**Correction (2026-07-26):** earlier drafts treated the ambient reflex stack as the runnable
+A/B baseline. It is not — vault/mantle engagement regressed when the ambient layer landed
+(3412cd9: ArcJump/Mantle/VaultOneBlock/RunningOver* sim tests fail from that commit onward;
+they last pass at b086912) and the reflex system does not work today. That breakage is the
+main motive for this plan. Read every A/B-against-ReflexSystem reference below (bootstrap,
+build steps 4/7, migration discipline) accordingly: the failing sim fixtures are the spec
+the corrector must satisfy, not a parity target to match.
+
 ## Problem statement
 
 Each tick during an authored maneuver, given the current body state, a clear-terrain
@@ -104,6 +112,9 @@ is involved in building it.
   magnitudes modulate local speed around that. Authored in the dedicated editor
   (`dotnet run --project MTile.Demo -- --ref <name>` → `ReferenceClips/<name>.json`;
   format + eval in `Character/HermiteClip.cs`, KNI-safe).
+  `ReferenceClips/` is empty as of 2026-07-26 — expect to author new clips in the editor
+  as each maneuver is wired (build steps 4 and 6, and any later maneuver). Clip authoring
+  is recurring per-maneuver work, not one-time setup.
 - Retargeted at Enter: entry endpoint + tangent bind to the **actual entry state** (the
   entry tangent IS the incoming velocity, so entry-speed parametrization is automatic and
   continuous); exit endpoint + tangent bind to measured corridor geometry — the target
@@ -263,8 +274,9 @@ bit-identically.
 
 This is a **fresh reimplementation on a dedicated branch**, not an in-place refactor:
 
-- Commit the current in-flight work on main first (ambient reflex system etc. — it is the
-  A/B baseline and must stay runnable), then branch (suggested name: `corrector`).
+- Commit the current in-flight work on main first, then branch (suggested name: `corrector`).
+  (Done 2026-07-26. Note: the ambient reflex system is NOT a working baseline — see the
+  correction at the top; the vault/mantle fixtures fail on main.)
 - New core classes are written fresh (BallisticPredictor, constraint builder,
   CorrectionSolver, ReferencePath) **together with their test classes from day one**:
   predictor-parity tests (matches SimRunner rollout sample-for-sample), constraint-builder
@@ -293,7 +305,8 @@ This is a **fresh reimplementation on a dedicated branch**, not an in-place refa
    closed forms are the permanent debugging oracle for the QP.
 4. **Wire ONE maneuver** — the 1-block vault family (ClimbStateBase's shepherd is replaced
    by predict/solve/apply) — behind a config flag for A/B against current behavior. Fixtures:
-   the existing vault/mantle sim tests must pass with the flag on.
+   the existing vault/mantle sim tests must pass with the flag on. (They currently FAIL with
+   the flag off — passing them is the corrector's success criterion, not a parity check.)
 5. **Trigger-by-feasibility.** Entry gates (speed bands, flush distances) become "solver
    residual ≤ threshold". Fixtures: tunnel-vault (two-corner squeeze — flattened arc, no
    clip), infeasible tunnel (state refuses, body never enters), slalom (opposed corrections
