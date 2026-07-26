@@ -325,6 +325,13 @@ public class Game1 : Game
                                               _secondaryAnimators, SkeletonScale);
             if (live)
             {
+                // Corrector trajectory capture follows the draw flags (write-only
+                // diagnostics inside the sim; the buffers are read in Draw below).
+                _sim.Player.CorrectorDebug.CaptureTrajectories =
+                    _config.DebugDrawCorrectorReference
+                    || _config.DebugDrawCorrectorBallistic
+                    || _config.DebugDrawCorrectorSolved;
+
                 // Gather this frame's input and advance the simulation by fixed steps.
                 var input = Controller.Poll(mouseWorldPos);
                 // Slow-/fast-motion: accumulate TimeScale and run that many fixed steps
@@ -524,6 +531,19 @@ public class Game1 : Game
                 margin: 2f, ClearanceConstraintBuilder.DefaultDeepViolation,
                 _rowScratch, out _);
             _debugOverlay.DrawClearanceRows(_coastScratch, _rowScratch, nRows);
+        }
+
+        // Corrector maneuver trajectories, exactly as the active state computed
+        // them this timestep (captured in CorrectorScratch): reference (gold,
+        // frozen at entry), ballistic coast (aqua), solved/corrected (magenta).
+        {
+            var cd = player.CorrectorDebug;
+            if (_config.DebugDrawCorrectorReference && cd.ReferenceCount > 0)
+                _debugOverlay.DrawTrajectory(cd.ReferenceTrajectory, cd.ReferenceCount, Color.Gold);
+            if (_config.DebugDrawCorrectorBallistic && cd.BallisticCount > 0)
+                _debugOverlay.DrawTrajectory(cd.BallisticTrajectory, cd.BallisticCount, Color.Aqua);
+            if (_config.DebugDrawCorrectorSolved && cd.SolvedCount > 0)
+                _debugOverlay.DrawTrajectory(cd.SolvedTrajectory, cd.SolvedCount, Color.Magenta);
         }
 
         // Enemy health bars in world space, drawn just above each wounded body.

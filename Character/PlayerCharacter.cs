@@ -187,6 +187,10 @@ public class PlayerCharacter : IHittable
     // Pooled corrector scratch (BALLISTIC_CORRECTOR_PLAN): predict/rows/solve buffers
     // for the corrector-driven maneuver states. Derived data only — never snapshotted.
     private readonly CorrectorScratch _correctorScratch = new();
+    // Render-side access to the corrector's captured trajectories (reference /
+    // ballistic / solved). The host sets CaptureTrajectories from its draw flags
+    // and reads the buffers after stepping; sim logic never reads them.
+    public CorrectorScratch CorrectorDebug => _correctorScratch;
 
     private const int HistorySize = 32;
     private readonly MovementState[] _stateHistory = new MovementState[HistorySize];
@@ -406,6 +410,10 @@ public class PlayerCharacter : IHittable
         // Edge-detect input gestures and enqueue intents. Done BEFORE the FSMs so
         // freshly-released clicks are visible to action preconditions this frame.
         _inputParser.Detect(controller, _intents, _frame, dt);
+
+        // Per-tick corrector trajectory captures expire every frame — the overlay
+        // only ever shows what THIS timestep computed (see CorrectorScratch).
+        _correctorScratch.BeginFrame();
 
         var ctx = new EnvironmentContext
         {

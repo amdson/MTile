@@ -183,6 +183,22 @@ public sealed class DebugOverlayRenderer
         if (count > 0) _draw.Disc(samples[count - 1].Pos, 2.5f, Color.Aqua);
     }
 
+    // A captured corrector trajectory (reference / ballistic / solved) as a plain
+    // polyline with an endpoint dot. Grounded samples get a short floor tick so
+    // the supported stretch reads apart from flight. Render-only.
+    public void DrawTrajectory(CoastSample[] samples, int count, Color color)
+    {
+        for (int k = 1; k < count; k++)
+            DrawLine(samples[k - 1].Pos, samples[k].Pos, color * 0.85f, 1);
+        if (count > 0)
+        {
+            _draw.Disc(samples[count - 1].Pos, 2f, color);
+            for (int k = 0; k < count; k++)
+                if (samples[k].Grounded)
+                    DrawLine(samples[k].Pos, new Vector2(samples[k].Pos.X, samples[k].FloorY), color * 0.2f, 1);
+        }
+    }
+
     // Clearance rows from the constraint builder: at each event's predicted sample,
     // the violated support plane's outward normal scaled by the required depth.
     // Red = the push the corrector must schedule by that tick. Render-only.

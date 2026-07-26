@@ -33,6 +33,15 @@ public sealed class GameConfig
     // step 1): predicted correction-free trajectory as a polyline, grounded samples marked.
     // Render-only rollout each frame; never feeds back into the sim.
     public bool DebugDrawCoast             { get; set; } = true;
+    // Corrector maneuver trajectories, captured from what the ACTIVE maneuver state
+    // actually computed this timestep (not a render-side re-simulation):
+    //   Reference  — the authored arc planned at maneuver entry (gold, frozen)
+    //   Ballistic  — this tick's uncorrected coast prediction (aqua)
+    //   Solved     — this tick's coast with the final corrections applied (magenta)
+    // Any flag on enables capture in the sim (write-only diagnostics; never read back).
+    public bool DebugDrawCorrectorReference { get; set; } = true;
+    public bool DebugDrawCorrectorBallistic { get; set; } = true;
+    public bool DebugDrawCorrectorSolved    { get; set; } = true;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
     // Force fields (hold / grab / throw) — on by default so the otherwise-invisible

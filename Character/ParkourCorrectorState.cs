@@ -25,6 +25,24 @@ public sealed class CorrectorScratch
     // the owning body's before every use.
     public readonly PhysicsBody ProbeBody =
         new(Polygon.CreateRegular(PlayerCharacter.Radius, 6), Vector2.Zero);
+
+    // ── Trajectory capture for the debug overlay (render-only diagnostics) ──
+    // CaptureTrajectories is set by the HOST from its draw flags; the sim only
+    // gates capture WORK on it — the captured buffers are never read by sim
+    // logic, so the flag cannot affect simulation state. Reference = the arc
+    // planned at Enter (frozen for the maneuver); Ballistic = this tick's
+    // uncorrected coast; Solved = this tick's coast with the final corrections
+    // applied. Ballistic/Solved are cleared every frame (BeginFrame) so the
+    // renderer only ever sees trajectories computed THIS timestep.
+    public bool CaptureTrajectories;
+    public readonly CoastSample[] ReferenceTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
+    public int ReferenceCount;
+    public readonly CoastSample[] BallisticTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
+    public int BallisticCount;
+    public readonly CoastSample[] SolvedTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
+    public int SolvedCount;
+
+    public void BeginFrame() { BallisticCount = 0; SolvedCount = 0; }
 }
 
 // Corrector-driven climb family (BALLISTIC_CORRECTOR_PLAN steps 4 + 6): the
@@ -169,6 +187,22 @@ public abstract class CorrectorClimbBase : MovementState
         // feasibility probe planned with).
         float vy0 = HopVy(ctx, rise, vars.MantleTargetY);
         ctx.Body.Velocity.Y = MathF.Min(ctx.Body.Velocity.Y, -vy0);
+
+        // Reference capture (render-only): the authored arc as planned from the
+        // post-hop entry state, uncorrected — frozen for the maneuver's duration.
+        if (ctx.Corrector is { CaptureTrajectories: true } cap)
+            cap.ReferenceCount = BallisticPredictor.PredictGuided(
+                ctx.Body, ctx.Chunks, _dir, vars.EntrySpeed, startGrounded: false,
+                ctx.Gravity, ctx.Dt,
+                Math.Min(cfg.CorrectorHorizon, BallisticPredictor.MaxHorizon),
+                cap.ReferenceTrajectory);
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        // Drop captured trajectories with the maneuver — the overlay must not keep
+        // drawing a stale plan after the state hands the body off.
+        if (ctx.Corrector is { } s) { s.ReferenceCount = 0; s.BeginFrame(); }
     }
 
     // Hop sizing: vy so the arc clears the gate + margin BOTH at apex (the
@@ -232,7 +266,8 @@ public abstract class CorrectorClimbBase : MovementState
         var s = ctx.Corrector;
         if (s == null) return;   // hand-built test contexts without scratch: authored arc only
 
-        RunCorrector(ctx, ctx.Body, vars.EntrySpeed, vars.CorrectorPrevDv, out int rowCount);
+        RunCorrector(ctx, ctx.Body, vars.EntrySpeed, vars.CorrectorPrevDv, out int rowCount,
+                     capture: s.CaptureTrajectories);
 
         if (rowCount > 0)
         {
@@ -255,7 +290,8 @@ public abstract class CorrectorClimbBase : MovementState
     // the last pass (0 when the coast is provably silent — no rows on pass 1).
     private float RunCorrector(EnvironmentContext ctx, PhysicsBody body,
                                float entrySpeed, Vector2 prevDv, out int rowCount,
-                               int iterations = CorrectionSolver.DefaultInnerIterations)
+                               int iterations = CorrectionSolver.DefaultInnerIterations,
+                               bool capture = false)
     {
         var cfg = MovementConfig.Current;
         var s = ctx.Corrector;
@@ -267,6 +303,11 @@ public abstract class CorrectorClimbBase : MovementState
             int n = BallisticPredictor.PredictGuided(
                 body, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
                 ctx.Gravity, ctx.Dt, H, s.Samples, pass == 0 ? null : s.TickDv);
+            if (capture && pass == 0)
+            {
+                Array.Copy(s.Samples, s.BallisticTrajectory, n);
+                s.BallisticCount = n;
+            }
             rowCount = ClearanceConstraintBuilder.Build(
                 ctx.Chunks, body.Polygon, s.Samples, n,
                 cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation,
@@ -291,6 +332,14 @@ public abstract class CorrectorClimbBase : MovementState
 
             residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
             for (int k = 0; k < n; k++) s.TickDv[k] = s.Z[k];
+        }
+        if (capture && rowCount > 0)
+        {
+            // Solved capture (render-only): one extra rollout with the FINAL plan
+            // applied — the corrected trajectory the residual story is about.
+            s.SolvedCount = BallisticPredictor.PredictGuided(
+                body, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
+                ctx.Gravity, ctx.Dt, H, s.SolvedTrajectory, s.TickDv);
         }
         return residual;
     }
