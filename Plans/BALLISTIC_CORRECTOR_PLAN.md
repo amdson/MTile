@@ -1,6 +1,18 @@
 # Ballistic Correction Solver (direct-transcription QP)
 
-Status: design agreed, nothing built. **This is the successor architecture for movement
+Status (2026-07-26, branch `corrector`): build steps 1-6 and 9 SHIPPED — predictor
+(+ parity suite), constraint builder (+ fixtures), CorrectionSolver (+ oracles),
+ParkourCorrectorState/ArcJumpCorrectorState behind CorrectorVaultEnabled,
+trigger-by-feasibility (refusal on the true corrected rollout), mid-maneuver
+snapshot round-trip green, ~40 µs/tick on a vault-heavy course. All 8 formerly
+failing vault-family sim specs pass; operations suites (vault chain, staircase,
+duck, tunnel run, drop-in) green. NOT built: steps 7-8 (ambient mode + removal
+pass) — the tight-tunnel-mouth Skip spec in CorrectorOperationsTests marks the
+first ambient target. Deviation from the spec below: CorrectionProblem carries a
+per-call fixed InnerIterations (4 per tick, 128 at entry feasibility) — opposed-row
+schedules need the deeper fixed budget; determinism unaffected.
+
+Original design (steps 1-6, 9 now reflect implementation): **This is the successor architecture for movement
 correction generally, not a maneuver-state add-on.** It supersedes CORRIDOR_MANEUVER_PLAN's
 reflex/maneuver split: most of the current movement-handling code — ReflexSystem, RampPolicy,
 SteeringRamp, the ClimbStateBase brake/lift shepherd, crest-cap plumbing, and likely several
