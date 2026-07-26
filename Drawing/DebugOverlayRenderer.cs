@@ -183,6 +183,20 @@ public sealed class DebugOverlayRenderer
         if (count > 0) _draw.Disc(samples[count - 1].Pos, 2.5f, Color.Aqua);
     }
 
+    // Clearance rows from the constraint builder: at each event's predicted sample,
+    // the violated support plane's outward normal scaled by the required depth.
+    // Red = the push the corrector must schedule by that tick. Render-only.
+    public void DrawClearanceRows(CoastSample[] samples, ClearanceRow[] rows, int rowCount)
+    {
+        for (int j = 0; j < rowCount; j++)
+        {
+            var r = rows[j];
+            var at = samples[r.Tick].Pos;
+            _draw.Disc(at, 2.5f, Color.Red);
+            DrawLine(at, at + r.Normal * MathF.Max(r.Depth * 3f, 8f), Color.Red, 2);
+        }
+    }
+
     // Translucent fill + crisp outline. Color owned by the publisher (Hitbox.DebugColor).
     public void DrawHitbox(Hitbox hb)
     {

@@ -44,8 +44,9 @@ public class Game1 : Game
 
     private DrawContext _draw;
     private DebugOverlayRenderer _debugOverlay;
-    // Render-side scratch for the DebugDrawCoast overlay's predictor rollout.
+    // Render-side scratch for the DebugDrawCoast overlay's predictor rollout + rows.
     private readonly CoastSample[] _coastScratch = new CoastSample[BallisticPredictor.MaxHorizon];
+    private readonly ClearanceRow[] _rowScratch  = new ClearanceRow[ClearanceConstraintBuilder.MaxEvents];
     private HudRenderer _hud;
     private PrimitiveBatch _prims;
     private DensityField _density;
@@ -515,6 +516,14 @@ public class Game1 : Game
                 MovementModifiers.Identity, player.Gravity,
                 Simulation.FixedDt, 20, _coastScratch);
             _debugOverlay.DrawCoast(player.Body.Position, _coastScratch, n);
+
+            // Clearance rows the coast implies (constraint builder, step 2) —
+            // the violations the corrector will exist to resolve.
+            int nRows = ClearanceConstraintBuilder.Build(
+                _sim.Chunks, player.Body.Polygon, _coastScratch, n,
+                margin: 2f, ClearanceConstraintBuilder.DefaultDeepViolation,
+                _rowScratch, out _);
+            _debugOverlay.DrawClearanceRows(_coastScratch, _rowScratch, nRows);
         }
 
         // Enemy health bars in world space, drawn just above each wounded body.
