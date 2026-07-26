@@ -174,9 +174,10 @@ public class PlayerCharacter : IHittable
 
     private readonly List<MovementState> _stateRegistry = new();
 
-    // Ambient reflex layer — per-frame reconciled automatic corner ramps (no snapshot
-    // state; self-heals after a restore, see ReflexSystem).
-    private readonly ReflexSystem _reflexes = new();
+    // Ambient corrector layer (BALLISTIC_CORRECTOR_PLAN step 7) — per-frame free-coast
+    // predict/solve replacing the old ReflexSystem ramps. Cross-frame state lives in
+    // MovementVars (AmbientPrevDv / AmbientLiftActive); everything else is scratch.
+    private readonly AmbientCorrector _ambient = new();
 
     // Long-lived per-direction corridor scratch for EnvironmentContext.GetCorridor — pure
     // derived data, fully rewritten by every scan (never snapshot state); pooled here only
@@ -552,13 +553,13 @@ public class PlayerCharacter : IHittable
 
         _currentState.Update(ctx, _abilities, ref _moveVars);
 
-        // Ambient reflex reconciliation (Character/ReflexSystem.cs): stamp/refresh/remove the
-        // automatic corner ramps from the corridor probe, under the state's published policy.
-        // After Movement.Update (the state's policy + forces are final for the frame), before
-        // the physics step reads the constraints. Hitstun forces the policy off — knockback
-        // must hit corners honestly, whatever free state is nominally active.
+        // Ambient corrector (Character/AmbientCorrector.cs): free-coast predict/solve
+        // under the state's published policy. After Movement.Update (the state's policy
+        // + forces are final for the frame), before the physics step reads AppliedForce.
+        // Hitstun forces the policy off — knockback must hit corners honestly, whatever
+        // free state is nominally active.
         var rampPolicy = _abilities.Combat.HitstunActive ? RampPolicy.Off : _currentState.RampPolicy;
-        _reflexes.Reconcile(ctx, rampPolicy);
+        _ambient.Apply(ctx, rampPolicy, IsGrounded, ref _moveVars);
 
         // Action gets to augment the body's force AFTER movement has written it but
         // BEFORE Action.Update — keeps Update free for FSM logic, lets the physics

@@ -313,12 +313,12 @@ public class StandingState : MovementState
         // height (gap < 0 — e.g. an early jump-release leaving Standing momentarily in
         // charge of an ascending body), braking the ascent would dead-end it like a
         // ceiling, so leave it alone.
-        // ...and skipped while an ambient over-ramp is engaged: the ramp's redirect rises
-        // faster than the spring would ever push, and clamping it here would cancel the
-        // reflex vault the frame after it starts.
+        // ...and skipped the frame after an ambient upward correction: the corrector's
+        // lift rises faster than the spring would ever push, and clamping it here would
+        // cancel the reflex assist the frame after it starts (the role the old ramps'
+        // Engaged bit had — one frame stale, same as then).
         float velExcess = velAlongNormal - cfg.SpringMaxRiseSpeed;
-        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f
-            && !SteeringRamp.AnyEngaged(ctx.Body, SteeringSense.Over))
+        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f && !vars.AmbientLiftActive)
             force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
@@ -418,11 +418,10 @@ public class CrouchedState : MovementState
         float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
         if (gap > 0f)
             force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
-        // Anti-pop clamp gated on gap > 0, exempted during an engaged ambient over-ramp —
-        // see StandingState.Update.
+        // Anti-pop clamp gated on gap > 0, exempted the frame after an ambient upward
+        // correction — see StandingState.Update.
         float velExcess = velAlongNormal - MovementConfig.Current.SpringMaxRiseSpeed;
-        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f
-            && !SteeringRamp.AnyEngaged(ctx.Body, SteeringSense.Over))
+        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f && !vars.AmbientLiftActive)
             force -= _ground.Normal * velExcess / ctx.Dt;
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);

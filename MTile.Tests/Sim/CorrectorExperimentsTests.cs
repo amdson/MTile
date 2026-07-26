@@ -70,6 +70,38 @@ public class CorrectorExperimentsTests(ITestOutputHelper output)
         Assert.True(delivered, $"not delivered on top at entry speed {entrySpeed}");
     }
 
+    // ── Ambient air-graze: the case the ramps never covered ──
+    // An airborne arc that clips a platform corner: without the ambient corrector
+    // the bonk zeroes horizontal speed; with it the body is deflected around
+    // whichever side it grazed (greedy, no route planning) and keeps its speed.
+    [Fact]
+    public void AmbientAirGraze_PreservesSpeedThroughCorner()
+    {
+        var cfg = MovementConfig.Current;
+        bool saved = cfg.AmbientCorrectorEnabled;
+        try
+        {
+            var terrain = SimTerrain.FromAscii(@"
+                OOOOOOOOOOXXXXXXXXXXXX
+                OOOOOOOOOOXXXXXXXXXXXX
+                OOOOOOOOOOOOOOOOOOOOOO
+                OOOOOOOOOOOOOOOOOOOOOO
+                OOOOOOOOOOOOOOOOOOOOOO
+                XXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 4);
+            SimFrame[] Arc() => Run(terrain, new Vector2(90f, 130f), new Vector2(150f, -200f), 60, 1f / 30f);
+
+            cfg.AmbientCorrectorEnabled = false;
+            float minVxOff = Arc().Where(f => f.X > 130f && f.X < 175f).Min(f => f.Vx);
+            cfg.AmbientCorrectorEnabled = true;
+            float minVxOn = Arc().Where(f => f.X > 130f && f.X < 175f).Min(f => f.Vx);
+
+            output.WriteLine($"minVx near corner: ambient off={minVxOff:F0}, on={minVxOn:F0}");
+            Assert.True(minVxOff < 40f, $"baseline should bonk the corner: minVx={minVxOff:F0}");
+            Assert.True(minVxOn > 150f, $"ambient should preserve speed through the graze: minVx={minVxOn:F0}");
+        }
+        finally { cfg.AmbientCorrectorEnabled = saved; }
+    }
+
     // ── Frame-rate: the same verb at 30 and 60 fps lands in the same place ──
     [Theory]
     [InlineData(1f / 30f)]

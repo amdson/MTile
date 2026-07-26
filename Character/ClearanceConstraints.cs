@@ -49,11 +49,22 @@ public static class ClearanceConstraintBuilder
 
     // Builds rows[0..return) from samples[0..count). truncatedAt == count when the
     // whole coast was scanned; otherwise the tick of the first deep violation.
+    //
+    // verticalFacesOnly is the AMBIENT-mode emission filter (the anti-autopilot
+    // rule): a cell may only emit its up/down faces — a lip's underside, a
+    // corner's top — because those are clearable by a passive deflection that
+    // preserves progress along the held direction. A blocking wall face emits
+    // NOTHING; the coast just deep-truncates at the impact and the ambient layer
+    // stays silent (full-speed honest bonk). Cells whose only exposed faces are
+    // side faces contribute no row at all under the filter — which is also what
+    // band-limits ambient assists for free: a tall wall's stacked cells have no
+    // exposed vertical faces except the far-away top, whose depth is deep.
     public static int Build(
         ChunkMap chunks, Polygon body,
         CoastSample[] samples, int count,
         float margin, float deepViolation,
-        ClearanceRow[] rows, out int truncatedAt)
+        ClearanceRow[] rows, out int truncatedAt,
+        bool verticalFacesOnly = false)
     {
         // Body support extents along the four axis directions (the AABB of the
         // local polygon — exact supports for axis normals).
@@ -78,8 +89,13 @@ public static class ClearanceConstraintBuilder
             float infT = pos.Y + bb.Top    - margin;
             float infB = pos.Y + bb.Bottom + margin;
 
-            // This tick's violation per axis normal (max depth across cells).
+            // This tick's violation per axis normal (max depth across cells), plus
+            // the raw penetration measure (min exposed-face depth per cell, ANY
+            // face) — deep truncation keys on penetration, not on emission, so a
+            // filtered-out wall impact still kills the scan instead of letting the
+            // coast plan through the wall.
             Span<float> tickDepth = stackalloc float[4] { 0f, 0f, 0f, 0f };
+            float tickPenetration = 0f;
 
             int cMin = (int)MathF.Floor(infL / ts), cMax = (int)MathF.Floor(infR / ts);
             int rMin = (int)MathF.Floor(infT / ts), rMax = (int)MathF.Floor(infB / ts);
@@ -101,31 +117,38 @@ public static class ClearanceConstraintBuilder
 
                 int   bestAxis  = -1;
                 float bestDepth = float.MaxValue;
+                float rawBest   = float.MaxValue;   // min over ALL exposed faces
 
                 // Up (tile top face, push body up = (0,-1))
                 if (!TileQuery.IsSolidAt(chunks, cx, cy - ts))
                 {
                     float m = infB - y0;
+                    if (m < rawBest) rawBest = m;
                     if (m < bestDepth) { bestDepth = m; bestAxis = 0; }
                 }
                 // Down (tile bottom face, push body down = (0,1))
                 if (!TileQuery.IsSolidAt(chunks, cx, cy + ts))
                 {
                     float m = y1 - infT;
+                    if (m < rawBest) rawBest = m;
                     if (m < bestDepth) { bestDepth = m; bestAxis = 1; }
                 }
                 // Left (tile left face, push body left = (-1,0))
                 if (!TileQuery.IsSolidAt(chunks, cx - ts, cy))
                 {
                     float m = infR - x0;
-                    if (m < bestDepth) { bestDepth = m; bestAxis = 2; }
+                    if (m < rawBest) rawBest = m;
+                    if (!verticalFacesOnly && m < bestDepth) { bestDepth = m; bestAxis = 2; }
                 }
                 // Right (tile right face, push body right = (1,0))
                 if (!TileQuery.IsSolidAt(chunks, cx + ts, cy))
                 {
                     float m = x1 - infL;
-                    if (m < bestDepth) { bestDepth = m; bestAxis = 3; }
+                    if (m < rawBest) rawBest = m;
+                    if (!verticalFacesOnly && m < bestDepth) { bestDepth = m; bestAxis = 3; }
                 }
+                if (rawBest != float.MaxValue && rawBest > tickPenetration)
+                    tickPenetration = rawBest;
 
                 // A fully-enclosed cell (no exposed faces) contributes nothing —
                 // a shallower row exists at whatever surface cell the coast
@@ -134,14 +157,13 @@ public static class ClearanceConstraintBuilder
                     tickDepth[bestAxis] = bestDepth;
             }
 
-            bool deep = false;
+            bool deep = tickPenetration >= deepViolation;
             for (int a = 0; a < 4; a++)
             {
                 if (tickDepth[a] > 0f)
                 {
                     if (!runActive[a]) { runActive[a] = true; runDepth[a] = tickDepth[a]; runTick[a] = k; }
                     else if (tickDepth[a] > runDepth[a]) { runDepth[a] = tickDepth[a]; runTick[a] = k; }
-                    if (tickDepth[a] >= deepViolation) deep = true;
                 }
                 else if (runActive[a])
                 {

@@ -184,7 +184,7 @@ public class CorrectorOperationsTests(ITestOutputHelper output)
     // bonks the mouth lip and wedges on the lower floor in front of it (the
     // passable-lip case the anti-autopilot rules explicitly allow assisting).
     // Un-skip when ambient mode lands.
-    [Fact(Skip = "ambient preemptive-duck not built (BALLISTIC_CORRECTOR_PLAN step 7) — body wedges at the mouth lip")]
+    [Fact(Skip = "needs the StandServo root (plan §7 baseline-posture): threading a 2-col mouth at speed requires shedding ~130px/s of drop budget in ~0.16s, and grounded frames contribute nothing (the spring zeroes downward vy) — redirect-only ambient is structurally insufficient")]
     public void DropIntoTunnelMouth_TightMouth_RequiresAnticipatoryTuck()
     {
         var terrain = SimTerrain.FromAscii(@"

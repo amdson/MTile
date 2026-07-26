@@ -225,6 +225,16 @@ public class MovementConfig
     // than ArcJumpTriggerDistance because the corrector plans the whole arc (2 tiles,
     // the corridor plan's reflex-vs-autopilot boundary).
     public float CorrectorVaultTriggerDistance  { get; set; } = 32f;
+    // Ambient corrector mode (plan step 7 — replaces the ambient reflex ramps).
+    // Runs during free movement under a held direction: free-coast predict over a
+    // short horizon, passable-feature rows only, redirect-only solve, applied iff
+    // fully feasible (anti-autopilot: infeasible plans are discarded whole).
+    public bool  AmbientCorrectorEnabled        { get; set; } = true;
+    public int   AmbientHorizon                 { get; set; } = 10;
+    // Max unresolved clearance residual (px) an ambient plan may carry and still
+    // be applied. Small: ambient assists are grazes, not commitments.
+    public float AmbientRefusalResidual         { get; set; } = 1f;
+
     // Trigger-by-feasibility gate tolerance (px): the final corrected rollout must
     // reach within this of the landing gate line, past the lip, before any
     // unavoided impact — otherwise the maneuver refuses. Per-maneuver knob by

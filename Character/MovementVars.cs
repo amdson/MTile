@@ -36,4 +36,7 @@ public struct MovementVars
     public Vector2 CorrectorPrevDv; // ParkourCorrector: last tick's APPLIED correction — the
                                     // solver's Δu anchor (the one Vector2 of corrector snapshot
                                     // state; everything else in CorrectorScratch is derived)
+    public Vector2 AmbientPrevDv;   // AmbientCorrector: the ambient Δu anchor (same role)
+    public bool AmbientLiftActive;  // AmbientCorrector applied an upward correction last frame —
+                                    // the ground states' anti-pop exemption (was AnyEngaged(Over))
 }
