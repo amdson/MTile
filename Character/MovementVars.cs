@@ -33,4 +33,7 @@ public struct MovementVars
     public Vector2 MantleCorner;    // Mantle: the step lip being climbed (from the corridor probe)
     public float MantleTargetY;     // Mantle: body-center Y to deliver into the landing gate
     public float MantleEntryY;      // Mantle: body-center Y at entry (for AnimationProgress)
+    public Vector2 CorrectorPrevDv; // ParkourCorrector: last tick's APPLIED correction — the
+                                    // solver's Δu anchor (the one Vector2 of corrector snapshot
+                                    // state; everything else in CorrectorScratch is derived)
 }

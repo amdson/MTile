@@ -107,6 +107,14 @@ public class EnvironmentContext
     public Corridor CorridorScratch1;
     public Corridor CorridorScratchMinus1;
 
+    // Pooled corrector scratch (predict → rows → solve buffers), owned by
+    // PlayerCharacter. Pure derived data, never snapshot state. Null in hand-built
+    // test contexts — corrector states degrade to their authored feedforward.
+    public CorrectorScratch Corrector;
+    // World gravity as the owning sim applies it (PlayerCharacter.Gravity) — the
+    // corrector's predictor integrates against the same field the physics step uses.
+    public Vector2 Gravity;
+
     public bool TryGetGround(out FloatingSurfaceDistance ground) =>
         TryGetGroundAt(PlayerCharacter.Radius, ref _groundSearched, ref _hasGround, ref _groundContact, out ground);
 

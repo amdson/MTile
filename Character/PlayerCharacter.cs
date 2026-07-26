@@ -184,6 +184,10 @@ public class PlayerCharacter : IHittable
     private readonly Corridor _corridorScratch1      = new(1);
     private readonly Corridor _corridorScratchMinus1 = new(-1);
 
+    // Pooled corrector scratch (BALLISTIC_CORRECTOR_PLAN): predict/rows/solve buffers
+    // for the corrector-driven maneuver states. Derived data only — never snapshotted.
+    private readonly CorrectorScratch _correctorScratch = new();
+
     private const int HistorySize = 32;
     private readonly MovementState[] _stateHistory = new MovementState[HistorySize];
     private int _historyHead = 0;
@@ -318,6 +322,12 @@ public class PlayerCharacter : IHittable
         // fallback for exactly the case the ramps' steep cutoff refuses.
         // _stateRegistry.Add(new ParkourState(1));
         // _stateRegistry.Add(new ParkourState(-1));
+        // Corrector-driven running vault (BALLISTIC_CORRECTOR_PLAN step 4) — owns the
+        // at-speed 1-block case the benched ParkourState/ramps vacated. Gated per frame
+        // by MovementConfig.CorrectorVaultEnabled (hot-reloadable A/B), so registration
+        // is unconditional.
+        _stateRegistry.Add(new ParkourCorrectorState(1));
+        _stateRegistry.Add(new ParkourCorrectorState(-1));
         _stateRegistry.Add(new MantleState(1));
         _stateRegistry.Add(new MantleState(-1));
         // _stateRegistry.Add(new ArcJumpState(1));
@@ -423,6 +433,8 @@ public class PlayerCharacter : IHittable
             Modifiers      = MovementModifiers.Identity,
             CorridorScratch1      = _corridorScratch1,
             CorridorScratchMinus1 = _corridorScratchMinus1,
+            Corrector             = _correctorScratch,
+            Gravity               = Gravity,
         };
 
         // Facing tracks the last non-zero horizontal input so standstill actions

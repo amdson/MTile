@@ -213,6 +213,19 @@ public class MovementConfig
     // ballistic rollout crosses the lip with a small clearance instead of grazing it.
     public float ArcJumpApexMargin { get; set; } = 4f;
 
+    // Ballistic corrector (Plans/BALLISTIC_CORRECTOR_PLAN.md). CorrectorVaultEnabled
+    // gates ParkourCorrectorState (the corrector-driven running vault) for A/B against
+    // the ramp stack; the rest tune the predict → rows → solve loop. Iteration counts
+    // and the hinge/ε weights are deliberately NOT here — fixed constants, not knobs.
+    public bool  CorrectorVaultEnabled          { get; set; } = true;
+    public int   CorrectorHorizon               { get; set; } = 18;
+    public float CorrectorMargin                { get; set; } = 2f;
+    public float CorrectorDeltaWeight           { get; set; } = 5f;
+    // Body face within this many px of the rise lip before the vault fires — larger
+    // than ArcJumpTriggerDistance because the corrector plans the whole arc (2 tiles,
+    // the corridor plan's reflex-vs-autopilot boundary).
+    public float CorrectorVaultTriggerDistance  { get; set; } = 32f;
+
     // Covered Jump (jump initiated while partially under an overhang — see CoveredJumpState)
     // Hard cap on the slide-out phase so a degenerate "can't actually get clear" position bails to
     // Falling instead of hanging. The slide itself reuses WalkAccel / MaxWalkSpeed.

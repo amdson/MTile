@@ -157,6 +157,103 @@ public static class BallisticPredictor
         return steps;
     }
 
+    // Maneuver-mode coast: the baseline is the MANEUVER's own feedforward — a
+    // guided horizontal drive toward dir·targetSpeed (the vault's entry-speed
+    // preservation) instead of the free run/air input drive. Vertical dynamics are
+    // unchanged: gravity, plus the standing spring whenever the per-sample ground
+    // probe engages (so the landing settles in prediction, not as a violation).
+    //
+    // tickDv (optional): per-tick velocity-lever corrections z_k from a prior
+    // solver pass, applied after gravity like the live redirect would be — this is
+    // the outer sequential-convexification pass's "re-rollout WITH the planned
+    // corrections applied".
+    public static int PredictGuided(
+        PhysicsBody body, ChunkMap chunks,
+        int dir, float targetSpeed, bool startGrounded,
+        Vector2 gravity, float dt, int steps,
+        CoastSample[] samples, Vector2[] tickDv = null)
+    {
+        var cfg = MovementConfig.Current;
+        steps = Math.Min(steps, samples.Length);
+
+        Vector2 pos = body.Position;
+        Vector2 vel = body.Velocity;
+        var polygon = body.Polygon;
+        bool prevGrounded = startGrounded;
+
+        float halfHeight  = PlayerCharacter.Radius;
+        float floatHeight = PlayerCharacter.Radius;
+        float minDistance = halfHeight + floatHeight;
+        var   groundNormal = new Vector2(0f, -1f);
+
+        for (int k = 0; k < steps; k++)
+        {
+            var bounds = polygon.GetBoundingBox(pos);
+            bool haveFloor = TryProbeFloor(chunks, bounds, floatHeight, out float floorY);
+            bool grounded = haveFloor
+                && MathF.Abs(vel.Y) <= cfg.MaxGroundEngageVnRel
+                && (prevGrounded || -vel.Y <= cfg.SpringMaxRiseSpeed);
+
+            var groundPos = new Vector2(pos.X, floorY);
+
+            // Guided drive: two-sided servo toward dir·targetSpeed, force-capped
+            // at WalkAccel — the same SoftClampVelocity the guided states use.
+            var force = Vector2.Zero;
+            force.X = AirControl.SoftClampVelocity(vel.X, dir * targetSpeed, cfg.WalkAccel, dt);
+            if (grounded)
+            {
+                var spring = BaselineFeedforward.Ground(
+                    pos, vel, groundPos, groundNormal, Vector2.Zero, minDistance,
+                    inputX: 0f, walkAccel: 0f, maxWalkSpeed: 0f,
+                    preserveExternalVelocity: false, overRampEngaged: false,
+                    cfg.SpringK, cfg.SpringDamping, cfg.SpringMaxRiseSpeed, dt);
+                force.Y += spring.Y;
+            }
+
+            vel += force * dt;
+            vel += gravity * dt;
+            if (tickDv != null) vel += tickDv[k];
+
+            if (grounded)
+            {
+                float dist = Vector2.Dot(pos - groundPos, groundNormal);
+                if (dist < minDistance)
+                {
+                    float vnRel = Vector2.Dot(vel, groundNormal);
+                    if (vnRel < 0f) vel -= vnRel * groundNormal;
+                }
+                var disp = (pos + vel * dt) - pos;
+                float dn = Vector2.Dot(disp, groundNormal);
+                if (dn < 0f && dist >= minDistance)
+                {
+                    float t = (minDistance - dist) / dn;
+                    if (t >= 0f && t <= 1f)
+                    {
+                        pos += disp * t + groundNormal * PhysicsWorld.Epsilon;
+                        disp *= 1f - t;
+                        float vnRel = Vector2.Dot(vel, groundNormal);
+                        if (vnRel < 0f) vel -= vnRel * groundNormal;
+                        float dn2 = Vector2.Dot(disp, groundNormal);
+                        if (dn2 < 0f) disp -= dn2 * groundNormal;
+                    }
+                }
+                pos += disp;
+            }
+            else
+            {
+                pos += (pos + vel * dt) - pos;
+            }
+
+            samples[k].Pos      = pos;
+            samples[k].Vel      = vel;
+            samples[k].Grounded = grounded;
+            samples[k].FloorY   = grounded ? floorY : float.PositiveInfinity;
+            prevGrounded = grounded;
+        }
+
+        return steps;
+    }
+
     // Static-tile floor probe under the body — mirror of GroundChecker.TryFind's
     // tile branch (strip below the horizontally-inset bounds, highest tile top
     // that starts within the strip). Sprouts and external shape providers are
