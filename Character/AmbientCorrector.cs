@@ -215,9 +215,10 @@ public sealed class AmbientCorrector
         bool elective = false;
         CObstacleTemplate template = null;
         int lim = 0;
-        float target = 0f, x0 = 0f, anchorY = 0f;
+        float target = 0f, x0 = 0f, anchorY = 0f, downAnchorY = 0f;
         bool anchored = false, trackProgress = false;
 
+        if (!fold.Fold || launched) vars.FoldDownAnchorValid = false;
         if (fold.Fold && !launched)
         {
             template = CObstacleTemplate.For(ctx.Body.Polygon);
@@ -234,6 +235,33 @@ public sealed class AmbientCorrector
             // two-high (32) never does, whatever the mid-scramble pose.
             anchorY = FloorEnvelope(ctx.Chunks, template, x0,
                                     y0 - 2f, y0 + BallisticPredictor.SupportReach, out anchored);
+
+            // Down-side anchor: the binding limit the DOWN rows measure from.
+            // The true anchor re-binds from a SupportReach-deep band every
+            // frame, so at a lip it snaps to the next floor down the moment
+            // the ledge leaves horizontal reach — and an anchor-relative
+            // unbind lasts zero frames (the pull-down drag). The down side
+            // instead tracks a rate-limited copy: it rises with the anchor
+            // instantly (climbs, sprouts — a floor can push), but FALLS
+            // toward a lower anchor only at gravity (a floor cannot pull;
+            // the reference descends exactly as fast as the body could fall
+            // to it). Steady anchors (the duck-under-a-slab hover ride) are
+            // untouched.
+            if (!anchored) vars.FoldDownAnchorValid = false;
+            else if (!vars.FoldDownAnchorValid || anchorY <= vars.FoldDownAnchorY)
+            {
+                vars.FoldDownAnchorY = anchorY;
+                vars.FoldDownAnchorVy = 0f;
+                vars.FoldDownAnchorValid = true;
+            }
+            else
+            {
+                vars.FoldDownAnchorVy += ctx.Gravity.Y * ctx.Dt;
+                vars.FoldDownAnchorY = MathF.Min(
+                    anchorY, vars.FoldDownAnchorY + vars.FoldDownAnchorVy * ctx.Dt);
+                if (vars.FoldDownAnchorY >= anchorY) vars.FoldDownAnchorVy = 0f;
+            }
+            downAnchorY = vars.FoldDownAnchorValid ? vars.FoldDownAnchorY : anchorY;
 
             // The whole envelope is anchored: unanchored (airborne beyond leg
             // reach) means free flight — no hover request, and no x-progress
@@ -253,7 +281,7 @@ public sealed class AmbientCorrector
                 : fold.ClimbReachUp;
 
             elective = EmitEnvelope(ctx, s, fold, template, n, lim, target, x0,
-                                    anchorY, anchored, trackProgress, dir, climbReach, ref rowCount);
+                                    anchorY, downAnchorY, anchored, trackProgress, dir, climbReach, ref rowCount);
         }
 
         if (rowCount == 0)
@@ -345,7 +373,7 @@ public sealed class AmbientCorrector
             {
                 rowCount = obstacleRowCount;
                 EmitEnvelope(ctx, s, fold, template, n, lim, target, x0,
-                             anchorY, anchored, trackProgress, dir,
+                             anchorY, downAnchorY, anchored, trackProgress, dir,
                              MathF.Min(fold.ClimbReachUp, ElectiveR0Reach), ref rowCount);
                 p.RowCount = rowCount;
                 CorrectionSolver.Solve(p, s.Z, s.ZScratch);
@@ -407,7 +435,7 @@ public sealed class AmbientCorrector
     private static bool EmitEnvelope(
         EnvironmentContext ctx, CorrectorScratch s, in FoldProfile fold,
         CObstacleTemplate template, int n, int lim, float target, float x0,
-        float anchorY, bool anchored, bool trackProgress, int dir,
+        float anchorY, float downAnchorY, bool anchored, bool trackProgress, int dir,
         float climbReach, ref int rowCount)
     {
         var cfg = MovementConfig.Current;
@@ -427,9 +455,9 @@ public sealed class AmbientCorrector
 
             if (s.Samples[k].Vel.Y > cfg.MaxGroundEngageVnRel) continue;
             float envY = FloorEnvelope(ctx.Chunks, template, xRef,
-                                       anchorY - climbReach, anchorY + BallisticPredictor.SupportReach, out bool found);
+                                       anchorY - climbReach, anchorY + BallisticPredictor.SupportReach,
+                                       out bool found);
             if (!found) continue;
-            if (envY > anchorY + TuckReachDown) continue;   // lip: unbind, fall naturally
             float yRef = envY - fold.HoverOffset;
             if (envY < anchorY - ElectiveRiseDetect)
             {
@@ -438,6 +466,15 @@ public sealed class AmbientCorrector
                 s.RefY[k] = yRef;
             }
             float errY = yRef - s.Samples[k].Pos.Y;   // >0: need down, <0: need up
+            // Down-pull honesty, the other half of TuckReachDown: down rows
+            // bind at most TuckReachDown below the DOWN-SIDE anchor — the
+            // rate-limited copy that falls toward a lower true anchor at
+            // gravity (see Apply). A walk-off lip (bevel-follow or the
+            // anchor's snap to the next floor down) descends no faster than
+            // the body could fall to it; steady and rising anchors (hover,
+            // ducks, climb-ramp arc shaping, a sprout carrying the body) keep
+            // the full two-sided tracking.
+            if (errY > 0.01f && envY > downAnchorY + TuckReachDown) continue;
             if (MathF.Abs(errY) > 0.01f)
                 s.Rows[rowCount++] = new ClearanceRow
                 {

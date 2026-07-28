@@ -79,4 +79,10 @@ public struct MovementVars
     public sbyte AmbientElectiveLatch; // Elective-refusal hysteresis (AmbientCorrector):
                                     // >0 = committed to the R1 climb for n frames,
                                     // <0 = refusal window (R0) counting back to 0
+    public float FoldDownAnchorY;   // AmbientCorrector fold: the down-side binding limit —
+                                    // rises with the true anchor instantly, FALLS toward a
+                                    // lower one at gravity (the lip "falling reference";
+                                    // rollback-critical like the Δ anchors)
+    public float FoldDownAnchorVy;  // its virtual fall speed (px/s)
+    public bool  FoldDownAnchorValid;
 }
