@@ -67,6 +67,18 @@
 > (The Debug-build ~667 µs/tick cost-gate number in CorrectorSnapshotTests is
 > ~22× the Release cost; the gate is a regression tripwire, not a budget.)
 >
+> **Climb arbitration fixed** (playtest feedback, first session): the climb
+> family is an automatic assist and now behaves like one — HopVy caps its arc
+> under the corridor's scanned ceiling; a narrow PEDESTAL under a ceiling
+> (tunnel floor bumps) refuses so the fold crosses it (a low-ceiling PLATEAU
+> still vaults via the crouch-raised gate); climb Passive dropped 46 → 29 so
+> every deliberate launch wins the same-frame race at a lip (the old comment
+> claimed "jumps preempt" but compared the wrong number — climbs were
+> unbeatable). Auto-crouch threshold recalibrated to the fold's hover-standing
+> envelope (~30.8px, not the FSD-era 32.8) — 32px corridors thread upright.
+> Full-registry bumpy corridor: 51 px/s with head bonks → 76.5 px/s, pure
+> Standing, zero climbs (ClimbArbitrationTests pins it).
+>
 > Remaining (deliberately): lever-normalized hinge weighting (§6 open
 > problem); corridor worst-bucket spike investigation if min-spec profiling
 > ever flags it.

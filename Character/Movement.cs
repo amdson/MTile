@@ -348,13 +348,18 @@ public class CrouchedState : MovementState
     {
         if (!ctx.TryGetCrouchGround(out _)) return false;
         if (ctx.Input.Down) return true;
-        // Auto-crouch: standing doesn't FIT here — the floor-to-ceiling gap is below the
-        // standing head height (2-high corridors: ~32px vs StandingHeight ≈ 32.8). This is
-        // deliberately narrower than the earlier commented-out `|| TryGetCeiling` attempt,
-        // which over-triggered under any detected ceiling regardless of headroom.
+        // Auto-crouch: STANDING AT FOLD HOVER doesn't fit here. The fold-era
+        // standing envelope is hover offset + body height ≈ 30.8px — lower than
+        // the old FSD StandingHeight (32.8, float height + body), which made
+        // 2-high/32px corridors auto-crouch even though the hover-held body
+        // threads them upright with ~1px to spare (the restricted corridor
+        // harness proves it at full walk speed). Crouch only when the gap is
+        // genuinely below the hover-standing envelope.
+        float standingClearance = MovementConfig.Current.FoldHoverOffset
+            + (PlayerCharacter.StandingHeight - PlayerCharacter.Radius);
         return ctx.TryGetGround(out var ground)
             && ctx.TryGetCeiling(out var ceiling)
-            && ground.Position.Y - ceiling.Position.Y < PlayerCharacter.StandingHeight + 1f;
+            && ground.Position.Y - ceiling.Position.Y < standingClearance + 0.5f;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)

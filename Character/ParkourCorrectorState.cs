@@ -150,6 +150,24 @@ public abstract class CorrectorClimbBase : MovementState
         if (!corridor.TryFirstRise(out var rise)) return false;
         if (rise.Delta < RiseBandMin || rise.Delta > RiseBandMax) return false;
 
+        // A climb lands to STAY. A landing under a low ceiling is fine when it
+        // is a PLATEAU (the corridor's crouch-raised gate exists for exactly
+        // that — the flattened tunnel vault), but a narrow PEDESTAL under a
+        // ceiling — the tunnel floor bump — is terrain to CROSS: delivering on
+        // top parks the body head-high a stride away from the next ceiling
+        // feature, and the exit carry eats the bonk. Crossing bumps is the
+        // ambient fold's job; refuse and stay out of its way.
+        if (rise.Column < corridor.ColumnCount
+            && !float.IsNegativeInfinity(corridor.CeilY[rise.Column])
+            && corridor.FloorY[rise.Column] - corridor.CeilY[rise.Column]
+               < PlayerCharacter.StandingHeight)
+        {
+            int look = Math.Min(rise.Column + 2, corridor.ColumnCount - 1);
+            for (int i = rise.Column + 1; i <= look; i++)
+                if (corridor.FloorY[i] > corridor.FloorY[rise.Column] + rise.Delta * 0.5f)
+                    return false;   // floor drops back off: a bump, not a landing
+        }
+
         float dist = _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir));
         if (dist > cfg.CorrectorVaultTriggerDistance) return false;
 
@@ -248,6 +266,14 @@ public abstract class CorrectorClimbBase : MovementState
     // pure-ballistic floor) and at the moment the body's face reaches the lip at
     // current speed. The lip term only applies to running entries — for flush/slow
     // starts tLip blows up and the pure apex hop is the honest arc.
+    //
+    // CEILING CAP: the hop is sized for open sky, but the corridor scan knows
+    // the ceiling over the whole approach — an arc whose apex would put the
+    // head into it is a head-bonk, not a climb. Cap vy so the apex keeps head
+    // clearance under the LOWEST ceiling across the arc's columns; if the
+    // capped arc can't deliver, the feasibility gate refuses and the ambient
+    // fold (which hops tunnel bumps within its own ceiling budget) keeps the
+    // body. This is what keeps the climb family out of tight tunnels.
     protected float HopVy(EnvironmentContext ctx, in CorridorCorner rise, float targetY)
     {
         var cfg = MovementConfig.Current;
@@ -262,8 +288,24 @@ public abstract class CorrectorClimbBase : MovementState
             float vyLip = needH / tLip + 0.5f * Simulation.WorldGravityY * tLip;
             vy0 = MathF.Max(vyApex, vyLip);
         }
+
+        var corridor = ctx.GetCorridor(_dir);
+        float ceil = float.NegativeInfinity;   // y-down: larger = lower = more restrictive
+        int lastCol = Math.Min(rise.Column + 2, corridor.ColumnCount - 1);
+        for (int i = 0; i <= lastCol; i++)
+            if (!float.IsNegativeInfinity(corridor.CeilY[i]) && corridor.CeilY[i] > ceil)
+                ceil = corridor.CeilY[i];
+        if (!float.IsNegativeInfinity(ceil))
+        {
+            float halfHeight = (PlayerCharacter.StandingHeight - PlayerCharacter.Radius) * 0.5f;
+            float apexCenterMin = ceil + halfHeight + CeilingClearMargin;
+            float vyCap = BallisticPredictor.BallisticVy(MathF.Max(0f, ctx.Body.Position.Y - apexCenterMin));
+            vy0 = MathF.Min(vy0, vyCap);
+        }
         return vy0;
     }
+
+    private const float CeilingClearMargin = 2f;   // px of head clearance the hop must keep
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {

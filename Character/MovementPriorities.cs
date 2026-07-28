@@ -63,22 +63,24 @@ public static class MovementPriorities
     public const int GuidedActive   = 25;
     public const int GuidedPassive  = 45;
 
-    // Mantle: deliberate climb of a flush 1-block step — the case the steering ramps'
-    // steep-angle taper refuses (Plans/CORRIDOR_MANEUVER_PLAN.md). Passive 46 > GuidedPassive
-    // so it takes over from a stalled ParkourState (whose ramps abstained and left the body
-    // flush and slowed); Active 46 > GuidedPassive so Parkour can't steal it back mid-climb;
-    // both < 50 so jumps preempt. The speed gate in its precondition keeps it out of
-    // at-speed vaults, so the reflex path is otherwise untouched.
+    // The corrector climb family (Parkour/ArcJump/Mantle) — AUTOMATIC maneuvers,
+    // triggered by feasibility, never by a button. Their Passive (29) sits below
+    // every deliberate launch's Passive (Jump 30, RunningJump 35, DoubleJump 40,
+    // WallJump 45, CoveredJump 48) so a player's own input ALWAYS wins the
+    // same-frame race at a lip: press jump at a step and you jump, the assist
+    // yields. (The old 46/46 values claimed "< 50 so jumps preempt" — but
+    // preemption compares the candidate's PASSIVE to the current ACTIVE, and
+    // the jump family's passives are 30–48: climbs were in fact unbeatable.)
+    // Passive 29 still outbids every free state (Standing 10, Crouched 15,
+    // WallSlide/Dropdown 20) and the stun band's passives (25/26). Active stays
+    // 46: once committed, only a genuinely deliberate higher bid (CoveredJump
+    // 48) could steal the body mid-arc — the launch family can't bid airborne
+    // anyway (their preconditions need ground).
     public const int MantleActive   = 46;
-    public const int MantlePassive  = 46;
+    public const int MantlePassive  = 29;
 
-    // ArcJump: automatic ballistic arc over a 1-block rise hit at speed — the running half
-    // of the 1-block split (MantleState owns the slow/flush half; the two are disjoint by
-    // entry speed). Passive 46 > GuidedPassive so it takes the approach over from a ramp-
-    // riding ParkourState inside its trigger distance; < 50 keeps the player's own jumps
-    // preemptive.
     public const int ArcJumpActive  = 46;
-    public const int ArcJumpPassive = 46;
+    public const int ArcJumpPassive = 29;
 
     // Holds.
     public const int LedgeGrabActive  = 42;
