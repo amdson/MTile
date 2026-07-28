@@ -42,7 +42,7 @@ correctors must not push vx significantly past `MaxRunSpeed`.
 - Keep exceptions explicit and listed in the test (e.g. external launches:
   eruptions, knockback — those are combat, not moves).
 
-## M2 — Contract tests: stairs + cave mouth (todo 1 + 2)
+## M2 — Contract tests: stairs + cave mouth (todo 1 + 2) `[x] done`
 
 Two new behavior contracts, written as tests first; fix whatever they expose.
 
@@ -128,8 +128,40 @@ reference-clip system (`b1d4486`, editor via `--ref`).
 - If a milestone dead-ends, write findings under its section here, commit the
   partial work behind a green suite, and move to the next milestone.
 
+## Decisions needed
+
+- **Ambient corner-plant: default on or off?** (`FoldCornerPlantEnabled`,
+  hot-reloadable, currently FALSE.) The full plant machinery is built and
+  pinned by CaveMouthTests: convex-corner scan (descending, sub-plunge,
+  airborne ticks only), PlantOnly wall-face rows servable solely by the
+  plant redirect, budget-gated emission. Trade discovered: the bumpy
+  corridor is structurally a chain of cave mouths — with plants on, the fold
+  micro-plants every ceiling bump and corridor speed drops 76.5 → 72 px/s
+  (~6%), while a real cave entry improves only ~0.1s (envelope trim +
+  hand-catch already threads it at ~frame 103 vs 96). Default-off preserves
+  the corridor bars; flip on in movement_config.json to feel both.
+- **Seamless (no-hand-catch) cave entry needs a longer AmbientHorizon.**
+  The last ~7px of duck arrives late because the fold only sees one body
+  length ahead — the authored reflex/autopilot boundary. Extending it is a
+  design call (and a perf cost); current behavior is duck-most + brief
+  hand-catch on the lip + walk-in, which reads physical.
+
 ## Campaign log
 
+- M2 — stairs + cave + corner-plant: DONE. StairClimbTests: 45° staircase
+  passes on the existing stack first try — chained Standing/Parkour/Mantle,
+  10 steps in 3.07s, zero backslide frames. CaveMouthTests: fixture
+  calibration found the real physics (falls >20px build vy>110 —
+  unsalvageable by tiny trims, correctly; the honest trim-sized shape is a
+  low step outside the mouth). Near-miss ducks via envelope trim (down-push
+  beyond gravity) + brief hand-catch on the lip; aimed-high bonks and
+  wall-slides in honestly. Corner-plant redirect implemented end-to-end:
+  MarkCornerPlants convex-corner scan, PlantOnly face rows (the ambient
+  verticalFacesOnly veto now emits the true nearest face as a plant-only
+  recruiter), PlantServes on the redirect only, plunge + rising + budget
+  gates (sand-break impact honesty and corridor row crowding both caught by
+  the suite and fixed). Feature default-off behind FoldCornerPlantEnabled —
+  see Decisions needed. Suite 432/0, KNI clean.
 - M1 — speed-cap invariants: DONE. Bound derivation corrected mid-milestone:
   "max-jump speed" = what a HELD jump achieves (launch + hold-force window,
   ≈208), not the launch constant (a bare 120 impulse only reaches 12px; the

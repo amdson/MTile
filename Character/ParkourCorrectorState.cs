@@ -22,6 +22,10 @@ public sealed class CorrectorScratch
     // live in MovementVars.AmbientChannelPrev (snapshot-covered), NOT here.
     public readonly bool[][]  ChannelMask = MakeMasks();
     public readonly float[][] ChannelCap  = MakeCaps();
+    // Convex-corner plant ticks (CorrectorChannels.MarkCornerPlants) — filled
+    // from the coast by the integration layers (AmbientCorrector.Apply /
+    // RunCorrector) before the channel build; pure derived data.
+    public readonly bool[] CornerPlant = new bool[BallisticPredictor.MaxHorizon];
     private static bool[][] MakeMasks()
     {
         var m = new bool[CorrectionSolver.MaxChannels][];
@@ -411,6 +415,7 @@ public abstract class CorrectorClimbBase : MovementState
             int n = BallisticPredictor.PredictGuided(
                 body, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
                 ctx.Gravity, ctx.Dt, H, s.Samples, pass == 0 ? null : s.TickDv);
+            CorrectorChannels.MarkCornerPlants(ctx.Chunks, s.Samples, n, s.CornerPlant);
             if (capture && pass == 0)
             {
                 Array.Copy(s.Samples, s.BallisticTrajectory, n);

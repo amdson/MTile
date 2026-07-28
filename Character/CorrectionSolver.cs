@@ -37,6 +37,10 @@ public struct ChannelDef
     // it arrived with but the deflector won't grow it past the cap. 0 = off.
     public Vector2   ForwardAxis;
     public float     ForwardCap;
+    // May serve PlantOnly rows (ambient wall faces near a convex corner) —
+    // true only on the corner-plant redirect; every other channel takes no
+    // hinge gradient from them (walls recruit nothing but a hand-plant).
+    public bool      PlantServes;
     // Row-class compatibility: a SkipSoftHorizontal channel takes no hinge
     // gradient from soft rows (HingeScale < 1) whose normal is horizontal —
     // the x-progress reference. A free deflector serving a soft x row is an
@@ -103,7 +107,8 @@ public static class CorrectionSolver
         => ch.CapPerTick != null ? ch.CapPerTick[k] : ch.Cap;
 
     private static bool Skips(in ChannelDef ch, in ClearanceRow row)
-        => ch.SkipSoftHorizontal && row.HingeScale < 1f && MathF.Abs(row.Normal.X) > 0.7f;
+        => (row.PlantOnly && !ch.PlantServes)
+           || (ch.SkipSoftHorizontal && row.HingeScale < 1f && MathF.Abs(row.Normal.X) > 0.7f);
 
     // Solves the frozen subproblem into z (layout: z[c*H + k]); zScratch is a
     // same-size buffer for the synchronous gradient step. Returns the linear-model

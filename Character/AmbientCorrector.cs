@@ -167,10 +167,14 @@ public sealed class AmbientCorrector
         int n = BallisticPredictor.Predict(
             ctx.Body, ctx.Chunks, dir, ctx.Input.Down, startGrounded,
             ctx.Modifiers, ctx.Gravity, ctx.Dt, H, s.Samples);
+        if (cfg.FoldCornerPlantEnabled)
+            CorrectorChannels.MarkCornerPlants(ctx.Chunks, s.Samples, n, s.CornerPlant);
+        else
+            Array.Clear(s.CornerPlant, 0, n);
         int rowCount = ClearanceConstraintBuilder.Build(
             ctx.Chunks, ctx.Body.Polygon, s.Samples, n,
             cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation,
-            s.Rows, out int truncatedAt, verticalFacesOnly: true);
+            s.Rows, out int truncatedAt, verticalFacesOnly: true, plantTicks: s.CornerPlant);
 
         // Per-sense policy: Over gates upward rows (corner-vault assist), Under
         // gates downward rows (head-tuck assist) — same split AmbientPolicy always
@@ -184,6 +188,12 @@ public sealed class AmbientCorrector
         {
             bool up = s.Rows[j].Normal.Y < 0f;
             if (up && s.Samples[s.Rows[j].Tick].Vel.Y > cfg.MaxGroundEngageVnRel) continue;
+            // PlantOnly (wall-face) rows die at plunging ticks for the same
+            // impact-honesty reason as up-rows: a body past the engagement
+            // gate hits raw — a hand-plant deflection there would silently
+            // shed the impact speed the bounce/break materials are tuned on.
+            if (s.Rows[j].PlantOnly
+                && s.Samples[s.Rows[j].Tick].Vel.Y > cfg.MaxGroundEngageVnRel) continue;
             if (up ? policy.Over : policy.Under)
                 s.Rows[kept++] = s.Rows[j];
         }

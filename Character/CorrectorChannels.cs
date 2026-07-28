@@ -115,8 +115,9 @@ public static class CorrectorChannels
             // plant-and-deflect: it needs ground to push against (no redirect
             // in flight) but must not serve steady SUPPORTED ticks (rotating a
             // supported walk's speed into rise is the leg servo's job done
-            // wrong — it eats vx to climb).
-            s.ChannelMask[3][k] = near[k] && !s.Samples[k].Grounded;
+            // wrong — it eats vx to climb). A convex corner within hand reach
+            // (MarkCornerPlants) is a plant anchor too — the cave-mouth lip.
+            s.ChannelMask[3][k] = (near[k] || s.CornerPlant[k]) && !s.Samples[k].Grounded;
             s.ChannelMask[4][k] = near[k];    // Tuck: legs pulling the body down
                                               // onto the floor (ducks, drop-below-
                                               // hover) — a ground verb too
@@ -148,6 +149,23 @@ public static class CorrectorChannels
             for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
                 s.ChannelMask[2][k] = true;
         }
+        // Feature-anchored redirect (cave-mouth entry): a reachable OBSTACLE
+        // surface is a plantable anchor too — floors aren't special. Any
+        // hard row except a floor's (row normals are axis-aligned tile
+        // faces: walls push ±x, lip undersides push +y, floors push −y and
+        // stay the near-mask's business) marks a surface the body can plant
+        // against; airborne ticks adjacent to one get the plant-and-deflect
+        // disc even with no floor underfoot, so the body can hand-plant a
+        // lip corner or wall face and deflect down-along-face into an
+        // opening. Supported ticks stay masked off (the hover ride under a
+        // slab is Grounded), and SkipSoftHorizontal still bars soft-x
+        // service — this adds plant surfaces, not autopilot.
+        for (int j = 0; j < rowCount; j++)
+        {
+            if (s.Rows[j].HingeScale < 1f || s.Rows[j].Normal.Y < -0.3f) continue;
+            for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
+                if (!s.Samples[k].Grounded) s.ChannelMask[3][k] = true;
+        }
 
         var intent = dir == 0 ? new Vector2(1f, 0f) : new Vector2(dir, 0f);
         ch[0] = new ChannelDef {   // LegServo: strong, up-only, near ground
@@ -164,8 +182,11 @@ public static class CorrectorChannels
                                    // Serves hard rows and soft VERTICAL references
                                    // (ducks, catches); never the soft x-progress
                                    // rows (a passive air-brake along intent).
+                                   // PlantServes: the ONLY channel wall-face
+                                   // (PlantOnly) rows may recruit — and only at
+                                   // corner-plant/near ticks per its mask.
             Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon, Redirect = true,
-            ActiveMask = s.ChannelMask[3], SkipSoftHorizontal = true };
+            ActiveMask = s.ChannelMask[3], SkipSoftHorizontal = true, PlantServes = true };
         ch[4] = new ChannelDef {   // Tuck: down-only, near ground (legs pull down)
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, 1f), Cap = TuckForce, ActiveMask = s.ChannelMask[4] };
@@ -205,8 +226,8 @@ public static class CorrectorChannels
             bool near = !float.IsPositiveInfinity(s.Samples[k].FloorY)
                         && s.Samples[k].FloorY - s.Samples[k].Pos.Y <= LegReach;
             s.ChannelMask[0][k] = near;    // LegServo
-            // Redirect: near ground + dynamic (see BuildFold's mask note).
-            s.ChannelMask[2][k] = near && !s.Samples[k].Grounded;
+            // Redirect: near ground + dynamic, or corner-plant (BuildFold's note).
+            s.ChannelMask[2][k] = (near || s.CornerPlant[k]) && !s.Samples[k].Grounded;
             s.ChannelMask[3][k] = near;    // Tuck
             s.ChannelMask[4][k] = !near;   // AirLateral forward (fade-capped)
             s.ChannelMask[5][k] = !near;   // AirLateral backward (damping)
@@ -225,6 +246,15 @@ public static class CorrectorChannels
             for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
                 s.ChannelMask[1][k] = true;
         }
+        // Feature-anchored redirect: same rule as BuildFold — any non-floor
+        // hard row (wall face, lip underside) is a plantable anchor for
+        // airborne ticks.
+        for (int j = 0; j < rowCount; j++)
+        {
+            if (s.Rows[j].HingeScale < 1f || s.Rows[j].Normal.Y < -0.3f) continue;
+            for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
+                if (!s.Samples[k].Grounded) s.ChannelMask[2][k] = true;
+        }
 
         ch[0] = new ChannelDef {   // LegServo
             Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
@@ -240,7 +270,7 @@ public static class CorrectorChannels
             // hop energy. Fold redirects stay unbounded (redirect-traction is
             // the ambient layer's feature, pinned by its own scenarios).
             ForwardAxis = new Vector2(dir, 0f), ForwardCap = vxCap,
-            ActiveMask = s.ChannelMask[2] };
+            ActiveMask = s.ChannelMask[2], PlantServes = true };
         ch[3] = new ChannelDef {   // Tuck (near ground)
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldTuckForce, ActiveMask = s.ChannelMask[3] };
@@ -254,6 +284,56 @@ public static class CorrectorChannels
             Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6] };
         return 7;
+    }
+
+    // Hand-plant reach for convex-corner redirect anchors (body center →
+    // corner point). Half-height ~10.4 + a forearm; deliberately shorter
+    // than LegReach — a plant is a touch, not a stride.
+    public const float CornerPlantReach = 26f;
+
+    // Convex-corner plant scan (cave-mouth entry, movement_todo #2): the
+    // ambient row build is verticalFacesOnly BY DESIGN (the fold must never
+    // steer around walls — bonks stay honest), so lip corners are invisible
+    // to the solver's row set. This scan marks airborne predicted ticks
+    // within hand reach of a CONVEX tile corner — a solid tile whose
+    // underside, one side, and that diagonal are all open (the lip's
+    // lower-left/right corner; never a flat wall face, never a slab run) —
+    // as plantable: BuildFold/BuildManeuver expose the Redirect disc there.
+    // Corners become anchors; walls stay invisible.
+    public static void MarkCornerPlants(ChunkMap chunks, CoastSample[] samples, int n,
+                                        bool[] outMask)
+    {
+        const float R = CornerPlantReach;
+        float plunge = MovementConfig.Current.MaxGroundEngageVnRel;
+        for (int k = 0; k < n; k++)
+        {
+            outMask[k] = false;
+            // A hand-plant is a DESCENDING maneuver: rising ticks are climb
+            // work (LegServo's domain — corridor bump-hops must not shed vx
+            // into micro-plants), and plunging ticks can't plant at all
+            // (impact honesty — the sand-break spec is tuned against raw
+            // plunges; a plant would silently soften terrain damage).
+            if (samples[k].Grounded || samples[k].Vel.Y <= 0f || samples[k].Vel.Y > plunge)
+                continue;
+            var pos = samples[k].Pos;
+            int gx0 = (int)MathF.Floor((pos.X - R) / 16f), gx1 = (int)MathF.Floor((pos.X + R) / 16f);
+            int gy0 = (int)MathF.Floor((pos.Y - R) / 16f), gy1 = (int)MathF.Floor((pos.Y + R) / 16f);
+            for (int gy = gy0; gy <= gy1 && !outMask[k]; gy++)
+            for (int gx = gx0; gx <= gx1 && !outMask[k]; gx++)
+            {
+                float cx = gx * 16f + 8f, cy = gy * 16f + 8f, below = cy + 16f;
+                if (!TileQuery.IsSolidAt(chunks, cx, cy)) continue;
+                if (TileQuery.IsSolidAt(chunks, cx, below)) continue;   // underside must be open
+                bool leftOpen = !TileQuery.IsSolidAt(chunks, cx - 16f, cy)
+                                && !TileQuery.IsSolidAt(chunks, cx - 16f, below);
+                bool rightOpen = !TileQuery.IsSolidAt(chunks, cx + 16f, cy)
+                                 && !TileQuery.IsSolidAt(chunks, cx + 16f, below);
+                if (leftOpen && Vector2.DistanceSquared(pos, new Vector2(gx * 16f, gy * 16f + 16f)) <= R * R)
+                    outMask[k] = true;
+                else if (rightOpen && Vector2.DistanceSquared(pos, new Vector2(gx * 16f + 16f, gy * 16f + 16f)) <= R * R)
+                    outMask[k] = true;
+            }
+        }
     }
 
     // Cross-frame Δ-anchor leak shared by every corrector loop: continuity

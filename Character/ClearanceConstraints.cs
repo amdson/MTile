@@ -16,6 +16,13 @@ public struct ClearanceRow
     // can overpower them — that yielding IS the duck/crest mechanic. Soft rows
     // are excluded from the refusal residual.
     public float   HingeScale;
+    // Servable ONLY by plant channels (ChannelDef.PlantServes — the corner-
+    // plant redirect). Ambient-mode wall-face rows carry this: the fold must
+    // never dodge or brake for a wall (anti-autopilot), but a face row near a
+    // CONVEX corner may recruit a hand-plant deflection (the cave-mouth
+    // duck-in). With no plant tick in reach the row sits unserved in the
+    // residual — the bonk stays honest.
+    public bool    PlantOnly;
 }
 
 // Sweeps the margin-inflated body along a predicted coast polyline directly against
@@ -51,6 +58,17 @@ public static class ClearanceConstraintBuilder
     // Facet-count ceiling for the C-obstacle template (hexagon body ⇒ ~8).
     public const int MaxFacets = 16;
 
+    // A face (PlantOnly) row is worth a row-budget slot only if a plant tick
+    // could serve it — otherwise it would sit unserved AND crowd out the
+    // envelope's per-tick hover rows (the bumpy-corridor regression).
+    private static bool NearPlantTick(bool[] plantTicks, int tick, int count)
+    {
+        if (plantTicks == null) return false;
+        for (int k = Math.Max(0, tick - 2); k <= Math.Min(count - 1, tick + 2); k++)
+            if (plantTicks[k]) return true;
+        return false;
+    }
+
     // Builds rows[0..return) from samples[0..count). truncatedAt == count when the
     // whole coast was scanned; otherwise the tick of the first deep violation.
     //
@@ -72,7 +90,7 @@ public static class ClearanceConstraintBuilder
         CoastSample[] samples, int count,
         float margin, float deepViolation,
         ClearanceRow[] rows, out int truncatedAt,
-        bool verticalFacesOnly = false)
+        bool verticalFacesOnly = false, bool[] plantTicks = null)
     {
         var template = CObstacleTemplate.For(body);
         var facets = template.Facets;
@@ -133,15 +151,14 @@ public static class ClearanceConstraintBuilder
                 if (rawBest != float.MaxValue && rawBest > tickPenetration)
                     tickPenetration = rawBest;
 
-                // The emission filter is a VETO on the true nearest exit, never a
-                // preference among exits: if the shallowest exposed facet is a
-                // filtered wall face, the cell emits NOTHING and the coast bonks
-                // via deep truncation — it is not steered to a deeper "climb
-                // over the top" facet (that autopilot rule is how sideways wall
-                // hits used to read as climb commands).
-                if (bestFacet >= 0 && verticalFacesOnly
-                    && MathF.Abs(facets[bestFacet].Normal.Y) < 0.3f)
-                    bestFacet = -1;
+                // Ambient-mode wall faces: the TRUE nearest exit is kept (never
+                // a preference among exits — steering to a deeper "climb over
+                // the top" facet is how sideways wall hits used to read as
+                // climb commands), but the row it produces is PlantOnly:
+                // servable solely by the corner-plant redirect. A flat wall
+                // with no convex corner in reach leaves the row unserved and
+                // the coast bonks via deep truncation exactly as when these
+                // rows were vetoed outright.
 
                 // A fully-enclosed cell (no exposed facets) contributes nothing —
                 // a shallower row exists at whatever surface cell the coast
@@ -162,7 +179,12 @@ public static class ClearanceConstraintBuilder
                 {
                     runActive[f] = false;
                     if (rowCount < MaxEvents)
-                        rows[rowCount++] = new ClearanceRow { Tick = runTick[f], Normal = facets[f].Normal, Depth = runDepth[f], HingeScale = 1f };
+                        {
+                        bool faceRow = verticalFacesOnly && MathF.Abs(facets[f].Normal.Y) < 0.3f;
+                        if (!faceRow || NearPlantTick(plantTicks, runTick[f], count))
+                            rows[rowCount++] = new ClearanceRow { Tick = runTick[f], Normal = facets[f].Normal,
+                                                                  Depth = runDepth[f], HingeScale = 1f, PlantOnly = faceRow };
+                    }
                 }
             }
 
@@ -176,7 +198,12 @@ public static class ClearanceConstraintBuilder
         // Finalize runs still open at the horizon / truncation point.
         for (int f = 0; f < F; f++)
             if (runActive[f] && rowCount < MaxEvents)
-                rows[rowCount++] = new ClearanceRow { Tick = runTick[f], Normal = facets[f].Normal, Depth = runDepth[f], HingeScale = 1f };
+                {
+                        bool faceRow = verticalFacesOnly && MathF.Abs(facets[f].Normal.Y) < 0.3f;
+                        if (!faceRow || NearPlantTick(plantTicks, runTick[f], count))
+                            rows[rowCount++] = new ClearanceRow { Tick = runTick[f], Normal = facets[f].Normal,
+                                                                  Depth = runDepth[f], HingeScale = 1f, PlantOnly = faceRow };
+                    }
 
         return rowCount;
     }

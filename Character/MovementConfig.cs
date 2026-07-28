@@ -210,6 +210,16 @@ public class MovementConfig
     // Hot-reloadable: edit movement_config.json while the game runs to switch
     // live. Anything but "full" deliberately cripples locomotion.
     public string CorrectorScenario             { get; set; } = "full";
+    // Ambient corner-plant redirect (cave-mouth duck-in): airborne descending
+    // ticks near a convex corner may hand-plant it, and wall-face rows near
+    // those ticks enter the solve as PlantOnly recruiters. DEFAULT OFF: the
+    // bumpy corridor is structurally a chain of cave mouths, and micro-plants
+    // on every ceiling bump shed ~6% corridor speed (76.5 → 72 px/s) while
+    // buying only ~0.1s on a real cave entry (the envelope trim + hand-catch
+    // already threads it). Flip on to playtest the trade — CaveMouthTests
+    // pins the enabled behavior either way. Maneuver plants are always on
+    // (their face rows were never filtered).
+    public bool FoldCornerPlantEnabled          { get; set; } = false;
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
     public int   AmbientHorizon                 { get; set; } = 10;
     // ── Fold tuning surface (CONSOLIDATION_PLAN §6) — hot-reloadable feel knobs.
