@@ -298,6 +298,12 @@ public abstract class CorrectorClimbBase : MovementState
             float tLip  = dist / vx;
             float vyLip = needH / tLip + 0.5f * Simulation.WorldGravityY * tLip;
             vy0 = MathF.Max(vyApex, vyLip);
+            // Assist cap (movement_todo #3): the lip term is a demand, not an
+            // entitlement — an automatic hop never exceeds what a deliberate
+            // ground jump could author. If the capped arc can't make the
+            // timing, the feasibility gate (which plans with this same
+            // sizing) refuses and the player jumps it themselves.
+            vy0 = MathF.Min(vy0, cfg.MaxAssistRiseSpeed);
         }
 
         var corridor = ctx.GetCorridor(_dir);
@@ -347,10 +353,16 @@ public abstract class CorrectorClimbBase : MovementState
         }
         else
         {
-            // Crest: kill residual rise, push over the lip.
+            // Crest: kill residual rise, push over the lip. The push is a
+            // CLAMP toward entry speed, not an open throttle (movement_todo
+            // #5): a stalled crest gets the full shove up to EntrySpeed, a
+            // fast one gets nothing — the vault keeps the speed it arrived
+            // with, it doesn't mint more (this line was +500 unconditional
+            // and pushed a 150 px/s entry to 175 over the lip).
             if (ctx.Body.Velocity.Y < 0f && ctx.Dt > 0f)
                 force.Y = MathF.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.VaultLiftForce);
-            force.X = _dir * cfg.VaultPushForce;
+            force.X = AirControl.SoftClampVelocity(ctx.Body.Velocity.X, _dir * vars.EntrySpeed,
+                                                   cfg.VaultPushForce, ctx.Dt);
         }
         ctx.Body.AppliedForce = force;
 
@@ -420,7 +432,7 @@ public abstract class CorrectorClimbBase : MovementState
             // hop still injects the maneuver's launch energy; the stack
             // corrects the committed arc around it, with leaky per-channel Δ
             // anchors carrying continuity across frames.
-            p.ChannelCount = CorrectorChannels.BuildManeuver(s, n, rowCount, _dir);
+            p.ChannelCount = CorrectorChannels.BuildManeuver(s, n, rowCount, _dir, entrySpeed);
             for (int c = 0; c < p.ChannelCount; c++)
                 p.PrevApplied[c] = prevAnchors[c] * CorrectorChannels.AnchorLeak;
             p.DeltaWeight = cfg.CorrectorDeltaWeight;

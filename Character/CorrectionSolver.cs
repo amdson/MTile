@@ -30,6 +30,13 @@ public struct ChannelDef
     public float[]   CapPerTick;   // per-tick cap override (velocity-conditioned sets,
                                    // frozen from the last rollout); null = use Cap
     public bool[]    ActiveMask;   // per-tick activation predicate; null = [ActiveFrom, ActiveTo)
+    // Redirect forward bound (maneuvers): the disc never ADDS speed, but it
+    // can CONVERT vertical into forward. When ForwardCap > 0, the projection
+    // clamps the post-deflection forward component (along ForwardAxis) at
+    // max(coast forward, ForwardCap) — a maneuver may keep the forward speed
+    // it arrived with but the deflector won't grow it past the cap. 0 = off.
+    public Vector2   ForwardAxis;
+    public float     ForwardCap;
     // Row-class compatibility: a SkipSoftHorizontal channel takes no hinge
     // gradient from soft rows (HingeScale < 1) whose normal is horizontal —
     // the x-progress reference. A free deflector serving a soft x row is an
@@ -252,8 +259,18 @@ public static class CorrectionSolver
             float radius = coastVel.Length() * 0.5f;
             var d = v - center;
             float len = d.Length();
-            if (len <= radius) return v;
-            return len > 0f ? center + d * (radius / len) : center;
+            var z = len <= radius ? v : (len > 0f ? center + d * (radius / len) : center);
+            // Forward bound: clamp only engages when v′·axis exceeds both the
+            // coast forward speed and the cap, so it moves v′ toward the disc
+            // center's forward component — the result stays inside the disc
+            // (still speed-non-increasing), just no longer forward-growing.
+            if (ch.ForwardCap > 0f)
+            {
+                float fwd = Vector2.Dot(coastVel + z, ch.ForwardAxis);
+                float bound = MathF.Max(Vector2.Dot(coastVel, ch.ForwardAxis), ch.ForwardCap);
+                if (fwd > bound) z -= (fwd - bound) * ch.ForwardAxis;
+            }
+            return z;
         }
 
         float cap = CapAt(ch, k);

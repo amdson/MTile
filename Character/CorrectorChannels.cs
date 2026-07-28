@@ -187,10 +187,19 @@ public static class CorrectorChannels
     // mid-commitment is the maneuver contract — plus the tiny vertical nudge).
     // No Drive: the maneuver's authored guided feedforward owns x propulsion;
     // the solver corrects around it.
-    public static int BuildManeuver(CorrectorScratch s, int n, int rowCount, int dir)
+    public static int BuildManeuver(CorrectorScratch s, int n, int rowCount, int dir,
+                                    float entrySpeed)
     {
         var cfg = MovementConfig.Current;
         var ch = s.Problem.Channels;
+        // Speed-cap principle (movement_todo #5): a committed maneuver may
+        // MAINTAIN its entry speed but never add beyond it — forward lateral
+        // authority fades to zero as vx-along-dir approaches the cap
+        // (velocity-conditioned per-tick caps frozen from the coast, the
+        // LegServo idiom). Backward (damping toward the reference) stays
+        // unrestricted — slowing an overshoot is always legal.
+        float vxCap = MathF.Max(cfg.MaxWalkSpeed, entrySpeed);
+        const float VxFadeBand = 25f;
         for (int k = 0; k < n; k++)
         {
             bool near = !float.IsPositiveInfinity(s.Samples[k].FloorY)
@@ -199,10 +208,14 @@ public static class CorrectorChannels
             // Redirect: near ground + dynamic (see BuildFold's mask note).
             s.ChannelMask[2][k] = near && !s.Samples[k].Grounded;
             s.ChannelMask[3][k] = near;    // Tuck
-            s.ChannelMask[4][k] = !near;   // AirLateral
-            s.ChannelMask[5][k] = !near;   // AirVertical
+            s.ChannelMask[4][k] = !near;   // AirLateral forward (fade-capped)
+            s.ChannelMask[5][k] = !near;   // AirLateral backward (damping)
+            s.ChannelMask[6][k] = !near;   // AirVertical
             float sep = MathF.Max(0f, -s.Samples[k].Vel.Y);
             s.ChannelCap[0][k] = cfg.FoldLegForce * Math.Clamp(1f - sep / cfg.FoldLegPushFadeSpeed, 0f, 1f);
+            float vAlong = dir * s.Samples[k].Vel.X;
+            s.ChannelCap[4][k] = cfg.FoldAirLateralForce
+                * Math.Clamp((vxCap - vAlong) / VxFadeBand, 0f, 1f);
         }
         // CornerAssist: near hard rows (the lip) — lift-only.
         for (int k = 0; k < n; k++) s.ChannelMask[1][k] = false;
@@ -221,17 +234,26 @@ public static class CorrectorChannels
             Axis = new Vector2(0f, -1f), Cap = cfg.FoldCornerForce, ActiveMask = s.ChannelMask[1] };
         ch[2] = new ChannelDef {   // Redirect (plant-and-deflect, near ground)
             Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon, Redirect = true,
+            // Forward-bounded (movement_todo #5): a deflection may keep the
+            // speed the maneuver arrived with but never grow forward speed
+            // past the cap — that's how the disc was minting 175 px/s vx from
+            // hop energy. Fold redirects stay unbounded (redirect-traction is
+            // the ambient layer's feature, pinned by its own scenarios).
+            ForwardAxis = new Vector2(dir, 0f), ForwardCap = vxCap,
             ActiveMask = s.ChannelMask[2] };
         ch[3] = new ChannelDef {   // Tuck (near ground)
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldTuckForce, ActiveMask = s.ChannelMask[3] };
-        ch[4] = new ChannelDef {   // AirLateral: two-sided mid-commitment steering
-            Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true,
-            Axis = new Vector2(1f, 0f), Cap = cfg.FoldAirLateralForce, ActiveMask = s.ChannelMask[4] };
-        ch[5] = new ChannelDef {   // AirVertical: tiny two-sided nudge in flight
+        ch[4] = new ChannelDef {   // AirLateral forward: fades out at the vx cap
+            Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(dir, 0f), CapPerTick = s.ChannelCap[4], ActiveMask = s.ChannelMask[4] };
+        ch[5] = new ChannelDef {   // AirLateral backward: unrestricted damping
+            Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(-dir, 0f), Cap = cfg.FoldAirLateralForce, ActiveMask = s.ChannelMask[5] };
+        ch[6] = new ChannelDef {   // AirVertical: tiny two-sided nudge in flight
             Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
-            Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[5] };
-        return 6;
+            Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6] };
+        return 7;
     }
 
     // Cross-frame Δ-anchor leak shared by every corrector loop: continuity

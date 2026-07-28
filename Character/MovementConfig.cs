@@ -14,6 +14,28 @@ public class MovementConfig
 
     // Jumping
     public float JumpVelocity { get; set; } = -100f;
+
+    // The speed-cap principle (movement_todo #3): no AUTOMATIC move — vault
+    // hops, corrector channels, any assist — may push the body upward faster
+    // than the fastest deliberate ground jump ACHIEVES. That's the launch
+    // impulse plus the hold force sustained over the full hold window (a bare
+    // 120 impulse only reaches 12px — jumps get their height from the hold),
+    // ≈208 at default tuning. Derived, not authored: retuning the jump
+    // family moves the assist ceiling with it. The combat band (tech bounce
+    // -260, knockback) is ImpactDamage's domain, outside this principle;
+    // the invariant is pinned by SpeedInvariantTests.
+    public float MaxAssistRiseSpeed
+    {
+        get
+        {
+            float g = Simulation.WorldGravityY;
+            float jump = -JumpVelocity
+                + MathF.Max(0f, (-JumpHoldForce - g) * MaxJumpHoldTime);
+            float run = -RunJumpVelocity
+                + MathF.Max(0f, (-RunJumpHoldForce - g) * MaxJumpHoldTime);
+            return MathF.Max(jump, MathF.Max(run, -DoubleJumpVelocity));
+        }
+    }
     public float JumpHoldForce { get; set; } = -1500f;
     public float JumpInitForce { get; set; } = 0f;
     public float MaxJumpHoldTime { get; set; } = 0.12f;
