@@ -91,6 +91,20 @@ public sealed class AmbientCorrector
     private const float ProgressHingeScale = 0.02f;
     private const int   FoldIterations  = 16;
     private const float AnchorLeak      = 0.7f;
+    // Elective refusal (Plans/ELECTIVE_REFUSAL_NOTE.md): the climb binding is
+    // ALL-OR-NOTHING. R1 = envelope with the state's climb band; R0 = envelope
+    // restricted to the anchor's own surface (roughness only). R1 applies iff
+    // the TRUE corrected rollout tracks its stepped reference within tolerance
+    // — otherwise the whole elective set is dropped and progress runs straight
+    // into the wall (physics delivers the stop; bimodal outcomes are what
+    // "predictable dynamics" means — the L2-graceful half-scramble is exactly
+    // ungraceful in feel). The decision LATCHES with hysteresis in both
+    // directions so it can't flicker at the margin.
+    private const float ElectiveRiseDetect   = 6f;   // px above anchor ⇒ the reference is climbing
+    private const float ElectiveR0Reach      = 4f;   // R0 band: surface roughness only
+    private const float ElectiveTol          = 6f;   // px rollout-below-reference ⇒ undeliverable
+    private const sbyte ElectiveCommitFrames = 8;
+    private const sbyte ElectiveRefuseFrames = 8;
     // Per-direction actuator honesty: the envelope may excursion BELOW the
     // anchor surface only within the tuck's authority (tiny standing-height
     // adjustments). A bigger drop (a lip) unbinds the reference — no down
@@ -189,12 +203,25 @@ public sealed class AmbientCorrector
         // re-binds on descent through the anchor query below.
         bool launched = -ctx.Body.Velocity.Y > cfg.SpringMaxRiseSpeed;
 
+        // Elective latch bookkeeping: a positive latch (committed R1 climb)
+        // decays each frame and is refreshed by an accepted climb; a negative
+        // latch (refusal window) counts back toward zero before R1 is retried.
+        if (vars.AmbientElectiveLatch > 0) vars.AmbientElectiveLatch--;
+        else if (vars.AmbientElectiveLatch < 0) vars.AmbientElectiveLatch++;
+
+        int obstacleRowCount = rowCount;
+        bool elective = false;
+        CObstacleTemplate template = null;
+        int lim = 0;
+        float target = 0f, x0 = 0f, anchorY = 0f;
+        bool anchored = false, trackProgress = false;
+
         if (fold.Fold && !launched)
         {
-            var template = CObstacleTemplate.For(ctx.Body.Polygon);
-            int lim = Math.Min(n, truncatedAt);
-            float target = dir * fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
-            float x0 = ctx.Body.Position.X;
+            template = CObstacleTemplate.For(ctx.Body.Polygon);
+            lim = Math.Min(n, truncatedAt);
+            target = dir * fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
+            x0 = ctx.Body.Position.X;
             float y0 = ctx.Body.Position.Y;
 
             // Support anchor: the surface the body is ACTUALLY standing on (the
@@ -203,8 +230,8 @@ public sealed class AmbientCorrector
             // own height — so a transient rise cannot re-bind higher floors and
             // ladder the reference up a wall. One-high (16 ≤ ClimbReachUp) binds;
             // two-high (32) never does, whatever the mid-scramble pose.
-            float anchorY = FloorEnvelope(ctx.Chunks, template, x0,
-                                          y0 - 2f, y0 + BallisticPredictor.SupportReach, out bool anchored);
+            anchorY = FloorEnvelope(ctx.Chunks, template, x0,
+                                    y0 - 2f, y0 + BallisticPredictor.SupportReach, out anchored);
 
             // The whole envelope is anchored: unanchored (airborne beyond leg
             // reach) means free flight — no hover request, and no x-progress
@@ -214,51 +241,17 @@ public sealed class AmbientCorrector
             // preserve external velocity (hitstun/launch windows), progress
             // tracking is suppressed — support rows still hold the body up,
             // but the solver must not fight the knockback horizontally.
-            bool trackProgress = anchored && !ctx.Modifiers.PreserveExternalVelocity;
+            trackProgress = anchored && !ctx.Modifiers.PreserveExternalVelocity;
 
-            for (int k = 0; anchored && k < lim && rowCount < ClearanceConstraintBuilder.MaxEvents - 1; k++)
-            {
-                float xRef = x0 + target * (k + 1) * ctx.Dt;
+            // R1 unless inside a refusal window (negative latch): R0 restricts
+            // the climb band to surface roughness — progress then runs straight
+            // into the obstacle and physics delivers the stop.
+            float climbReach = vars.AmbientElectiveLatch < 0
+                ? MathF.Min(fold.ClimbReachUp, ElectiveR0Reach)
+                : fold.ClimbReachUp;
 
-                // x-progress tracking (two-sided, dir ≠ 0 only). The forward
-                // side is served by Drive; the backward side has NO channel
-                // that can serve it (Drive is unilateral along intent) — its
-                // one effect is damping Drive's Δ-anchor: without a counter-
-                // gradient the cross-frame smoothness chain sustains thrust
-                // with no demand and the walk ratchets past its target
-                // (one-sided emission ran away to 4× walk speed). Momentum
-                // is still never actively braked. dir 0 emits NO x rows:
-                // station-keeping is baseline friction (FoldBaseline), and
-                // rows here would let hard clearance rows recruit x-channels
-                // to dodge.
-                float errX = xRef - s.Samples[k].Pos.X;
-                if (trackProgress && dir != 0 && MathF.Abs(errX) > 0.01f)
-                    s.Rows[rowCount++] = new ClearanceRow
-                    {
-                        Tick = k, Normal = new Vector2(MathF.Sign(errX), 0f),
-                        Depth = MathF.Abs(errX), HingeScale = ProgressHingeScale,
-                    };
-
-                // y tracking of the floor envelope at the reference x, bound to
-                // the anchor's climb band. The reference does NOT bind against
-                // a plunging tick: past the FSD-era engagement gate the landing
-                // belongs to the raw swept-impact path (the impact-materials
-                // spec is tuned against raw contact speeds) — emitting catch
-                // rows there would let the redirect disc air-brake the fall.
-                if (s.Samples[k].Vel.Y > cfg.MaxGroundEngageVnRel) continue;
-                float envY = FloorEnvelope(ctx.Chunks, template, xRef,
-                                           anchorY - fold.ClimbReachUp, anchorY + BallisticPredictor.SupportReach, out bool found);
-                if (!found) continue;
-                if (envY > anchorY + TuckReachDown) continue;   // lip: unbind, fall naturally
-                float yRef = envY - fold.HoverOffset;
-                float errY = yRef - s.Samples[k].Pos.Y;   // >0: need down, <0: need up
-                if (MathF.Abs(errY) > 0.01f)
-                    s.Rows[rowCount++] = new ClearanceRow
-                    {
-                        Tick = k, Normal = new Vector2(0f, MathF.Sign(errY)),
-                        Depth = MathF.Abs(errY), HingeScale = HoverHingeScale,
-                    };
-            }
+            elective = EmitEnvelope(ctx, s, fold, template, n, lim, target, x0,
+                                    anchorY, anchored, trackProgress, dir, climbReach, ref rowCount);
         }
 
         if (rowCount == 0)
@@ -325,6 +318,43 @@ public sealed class AmbientCorrector
         p.RowPush = s.CaptureTrajectories ? s.RowPush : null;
 
         float residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
+        ComputeTickDv(s, p, n, ctx.Dt);
+
+        // ── Elective deliverability (Plans/ELECTIVE_REFUSAL_NOTE.md) ─────────
+        // The R1 climb binding applies AS A SET iff the TRUE corrected rollout
+        // reaches the stepped reference — measured on the rollout, never the
+        // surrogate residual (the half-scramble is precisely where the frozen
+        // linear model and reality diverge). A committed latch loosens the
+        // tolerance (3×) so an accepted climb isn't re-litigated at the margin;
+        // rejection swaps in R0 (anchor-surface envelope), re-solves, and
+        // opens a refusal window so the decision can't flicker.
+        if (fold.Fold && elective && dir != 0)
+        {
+            int nd = BallisticPredictor.Predict(
+                ctx.Body, ctx.Chunks, dir, ctx.Input.Down, startGrounded,
+                ctx.Modifiers, ctx.Gravity, ctx.Dt, n, s.DeliverySamples, s.TickDv);
+            float err = 0f;
+            for (int k = 0; k < nd; k++)
+                if (s.RefClimb[k])
+                    err = MathF.Max(err, s.DeliverySamples[k].Pos.Y - s.RefY[k]);
+
+            float tol = vars.AmbientElectiveLatch > 0 ? 3f * ElectiveTol : ElectiveTol;
+            if (err > tol)
+            {
+                rowCount = obstacleRowCount;
+                EmitEnvelope(ctx, s, fold, template, n, lim, target, x0,
+                             anchorY, anchored, trackProgress, dir,
+                             MathF.Min(fold.ClimbReachUp, ElectiveR0Reach), ref rowCount);
+                p.RowCount = rowCount;
+                CorrectionSolver.Solve(p, s.Z, s.ZScratch);
+                ComputeTickDv(s, p, n, ctx.Dt);
+                vars.AmbientElectiveLatch = (sbyte)(-ElectiveRefuseFrames);
+            }
+            else
+            {
+                vars.AmbientElectiveLatch = ElectiveCommitFrames;
+            }
+        }
 
         // Feasible-only refusal survives ONLY outside the fold: a fold plan
         // carries hover support and must always apply.
@@ -335,22 +365,13 @@ public sealed class AmbientCorrector
             return;
         }
 
-        // Apply the summed tick-0 perturbation of every channel (VelocityUpdate
-        // z is a δv → force δv/dt; Force z is already an acceleration). TickDv
-        // accumulates the per-tick total δv for the solved-rollout capture.
-        var applied = Vector2.Zero;
-        for (int k = 0; k < n; k++) s.TickDv[k] = Vector2.Zero;
+        // Apply the summed tick-0 perturbation of every channel (TickDv[0] is
+        // the per-tick total δv; a velocity-update δv applies as δv/dt, a force
+        // z contributed z·dt to TickDv — dividing back by dt restores it).
         if (!fold.Fold) vars.AmbientChannelPrev = default;   // fold anchors die with the fold
         for (int c = 0; c < p.ChannelCount; c++)
-        {
-            var z0 = s.Z[c * n];
-            if (fold.Fold) vars.AmbientChannelPrev[c] = z0;
-            bool vu = p.Channels[c].Lever == LeverKind.VelocityUpdate;
-            applied += vu && ctx.Dt > 0f ? z0 / ctx.Dt : z0;
-            for (int k = 0; k < n; k++)
-                s.TickDv[k] += vu ? s.Z[c * n + k] : s.Z[c * n + k] * ctx.Dt;
-        }
-        ctx.Body.AppliedForce += applied;
+            if (fold.Fold) vars.AmbientChannelPrev[c] = s.Z[c * n];
+        if (ctx.Dt > 0f) ctx.Body.AppliedForce += s.TickDv[0] / ctx.Dt;
         vars.AmbientPrevDv = s.TickDv[0];
 
         if (s.CaptureTrajectories)
@@ -369,4 +390,72 @@ public sealed class AmbientCorrector
         }
     }
 
+    // Per-tick total δv of the solved plan (velocity-update z is a δv; force z
+    // contributes z·dt), summed across channels into s.TickDv.
+    private static void ComputeTickDv(CorrectorScratch s, CorrectionProblem p, int n, float dt)
+    {
+        for (int k = 0; k < n; k++) s.TickDv[k] = Vector2.Zero;
+        for (int c = 0; c < p.ChannelCount; c++)
+        {
+            bool vu = p.Channels[c].Lever == LeverKind.VelocityUpdate;
+            for (int k = 0; k < n; k++)
+                s.TickDv[k] += vu ? s.Z[c * n + k] : s.Z[c * n + k] * dt;
+        }
+    }
+
+    // Appends the envelope's soft reference rows for the given climb band and
+    // records the stepped reference (RefY/RefClimb) for the deliverability
+    // check. Returns whether the reference CLIMBS (binds a floor meaningfully
+    // above the anchor — the elective part). Row semantics:
+    //  - x-progress rows: two-sided, dir ≠ 0 only. The forward side is served
+    //    by Drive; the backward side has no channel that can serve it (Drive
+    //    is unilateral along intent) — its one effect is damping Drive's
+    //    Δ-anchor (without a counter-gradient the smoothness chain sustains
+    //    thrust and the walk ratchets past its target). dir 0 emits NO x rows:
+    //    station-keeping is baseline friction (FoldBaseline).
+    //  - y rows skip plunging ticks (impact honesty — the landing belongs to
+    //    the raw swept-impact path) and unbind at lips (TuckReachDown).
+    private static bool EmitEnvelope(
+        EnvironmentContext ctx, CorrectorScratch s, in FoldProfile fold,
+        CObstacleTemplate template, int n, int lim, float target, float x0,
+        float anchorY, bool anchored, bool trackProgress, int dir,
+        float climbReach, ref int rowCount)
+    {
+        var cfg = MovementConfig.Current;
+        bool climbing = false;
+        for (int k = 0; k < n; k++) s.RefClimb[k] = false;
+        for (int k = 0; anchored && k < lim && rowCount < ClearanceConstraintBuilder.MaxEvents - 1; k++)
+        {
+            float xRef = x0 + target * (k + 1) * ctx.Dt;
+
+            float errX = xRef - s.Samples[k].Pos.X;
+            if (trackProgress && dir != 0 && MathF.Abs(errX) > 0.01f)
+                s.Rows[rowCount++] = new ClearanceRow
+                {
+                    Tick = k, Normal = new Vector2(MathF.Sign(errX), 0f),
+                    Depth = MathF.Abs(errX), HingeScale = ProgressHingeScale,
+                };
+
+            if (s.Samples[k].Vel.Y > cfg.MaxGroundEngageVnRel) continue;
+            float envY = FloorEnvelope(ctx.Chunks, template, xRef,
+                                       anchorY - climbReach, anchorY + BallisticPredictor.SupportReach, out bool found);
+            if (!found) continue;
+            if (envY > anchorY + TuckReachDown) continue;   // lip: unbind, fall naturally
+            float yRef = envY - fold.HoverOffset;
+            if (envY < anchorY - ElectiveRiseDetect)
+            {
+                climbing = true;
+                s.RefClimb[k] = true;
+                s.RefY[k] = yRef;
+            }
+            float errY = yRef - s.Samples[k].Pos.Y;   // >0: need down, <0: need up
+            if (MathF.Abs(errY) > 0.01f)
+                s.Rows[rowCount++] = new ClearanceRow
+                {
+                    Tick = k, Normal = new Vector2(0f, MathF.Sign(errY)),
+                    Depth = MathF.Abs(errY), HingeScale = HoverHingeScale,
+                };
+        }
+        return climbing;
+    }
 }

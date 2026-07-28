@@ -67,6 +67,13 @@ public sealed class CorrectorScratch
     // contact position (body center at the row's tick) and the δv it shoved into
     // the applied tick-0 correction (CorrectionProblem.RowPush; force = δv/dt).
     // Cleared every frame; empty whenever nothing was applied.
+    // Elective-deliverability scratch (AmbientCorrector): the corrected rollout
+    // and the R1 stepped-reference record it is checked against. Pure per-frame
+    // derived data, never snapshot state.
+    public readonly CoastSample[] DeliverySamples = new CoastSample[BallisticPredictor.MaxHorizon];
+    public readonly float[] RefY     = new float[BallisticPredictor.MaxHorizon];
+    public readonly bool[]  RefClimb = new bool[BallisticPredictor.MaxHorizon];
+
     public readonly Vector2[] RowPush    = new Vector2[ClearanceConstraintBuilder.MaxEvents];
     public readonly Vector2[] ContactPos = new Vector2[ClearanceConstraintBuilder.MaxEvents];
     public readonly Vector2[] ContactDv  = new Vector2[ClearanceConstraintBuilder.MaxEvents];
