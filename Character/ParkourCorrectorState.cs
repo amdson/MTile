@@ -4,8 +4,10 @@ using Microsoft.Xna.Framework;
 namespace MTile;
 
 // Pooled per-player scratch for the corrector's predict → build → solve loop.
-// Pure derived data, fully rewritten every solve — never snapshot state. The only
-// cross-frame corrector state is MovementVars.CorrectorPrevDv (the Δu anchor).
+// Pure derived data, fully rewritten every solve — never snapshot state. The
+// only cross-frame corrector state lives in MovementVars: CorrectorPrevDv (the
+// maneuver Δu anchor), AmbientPrevDv, and AmbientChannelPrev (the fold's
+// per-channel Δu anchors).
 public sealed class CorrectorScratch
 {
     public readonly CoastSample[]  Samples  = new CoastSample[BallisticPredictor.MaxHorizon];
@@ -15,13 +17,11 @@ public sealed class CorrectorScratch
     public readonly Vector2[]      Z        = new Vector2[CorrectionSolver.MaxChannels * BallisticPredictor.MaxHorizon];
     public readonly Vector2[]      ZScratch = new Vector2[CorrectionSolver.MaxChannels * BallisticPredictor.MaxHorizon];
     public readonly Vector2[]      TickDv   = new Vector2[BallisticPredictor.MaxHorizon];
-    // Per-channel per-tick activation masks + velocity-conditioned caps (frozen
-    // from the coast each solve), and cross-frame Δ anchors (last applied z per
-    // channel). TEMP EXPERIMENT: ChannelPrev is cross-frame state that is NOT
-    // snapshotted — rollback determinism is suspended for the stack experiment.
+    // Per-channel per-tick activation masks + velocity-conditioned caps — frozen
+    // from the coast each solve, pure derived data. The cross-frame Δ anchors
+    // live in MovementVars.AmbientChannelPrev (snapshot-covered), NOT here.
     public readonly bool[][]  ChannelMask = MakeMasks();
     public readonly float[][] ChannelCap  = MakeCaps();
-    public readonly Vector2[] ChannelPrev = new Vector2[CorrectionSolver.MaxChannels];
     private static bool[][] MakeMasks()
     {
         var m = new bool[CorrectionSolver.MaxChannels][];

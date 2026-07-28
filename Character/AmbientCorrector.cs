@@ -113,6 +113,7 @@ public sealed class AmbientCorrector
             || (!policy.Over && !policy.Under && !solverStand))
         {
             vars.AmbientPrevDv = Vector2.Zero;
+            vars.AmbientChannelPrev = default;
             return;
         }
 
@@ -197,6 +198,7 @@ public sealed class AmbientCorrector
         if (rowCount == 0)
         {
             vars.AmbientPrevDv = Vector2.Zero;
+            vars.AmbientChannelPrev = default;
             return;
         }
 
@@ -219,10 +221,12 @@ public sealed class AmbientCorrector
 
         if (solverStand)
         {
-            // TEMP EXPERIMENT (channel stack): the restricted channels, solved
-            // jointly — every channel contributes perturbations to one plan.
+            // The restricted channel stack, solved jointly — every channel
+            // contributes perturbations to one plan. Δ anchors live in
+            // MovementVars (snapshot-covered), not scratch: rollback restore
+            // must reproduce the smoothness chain exactly.
             p.ChannelCount = BuildStandChannels(s, n, rowCount);
-            for (int c = 0; c < p.ChannelCount; c++) p.PrevApplied[c] = s.ChannelPrev[c];
+            for (int c = 0; c < p.ChannelCount; c++) p.PrevApplied[c] = vars.AmbientChannelPrev[c];
         }
         else
         {
@@ -254,6 +258,7 @@ public sealed class AmbientCorrector
         if (!solverStand && residual > cfg.AmbientRefusalResidual)
         {
             vars.AmbientPrevDv = Vector2.Zero;
+            vars.AmbientChannelPrev = default;
             return;
         }
 
@@ -262,10 +267,11 @@ public sealed class AmbientCorrector
         // accumulates the per-tick total δv for the solved-rollout capture.
         var applied = Vector2.Zero;
         for (int k = 0; k < n; k++) s.TickDv[k] = Vector2.Zero;
+        if (!solverStand) vars.AmbientChannelPrev = default;   // fold anchors die with the fold
         for (int c = 0; c < p.ChannelCount; c++)
         {
             var z0 = s.Z[c * n];
-            s.ChannelPrev[c] = z0;
+            if (solverStand) vars.AmbientChannelPrev[c] = z0;
             bool vu = p.Channels[c].Lever == LeverKind.VelocityUpdate;
             applied += vu && ctx.Dt > 0f ? z0 / ctx.Dt : z0;
             for (int k = 0; k < n; k++)

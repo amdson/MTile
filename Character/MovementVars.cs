@@ -1,6 +1,40 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
+
+// Per-channel Δu anchors for the ambient fold solve — the last APPLIED tick-0
+// correction of each channel in the stand-fold stack (CorrectionSolver's
+// Δ-smoothness chain is anchored here, so corrections stay continuous across
+// frames). A flat inline struct rather than an array so MovementVars stays a
+// plain value-copy snapshot blob (no reference-typed state to deep-copy).
+// Sized to CorrectionSolver.MaxChannels.
+public struct ChannelAnchors
+{
+    public Vector2 C0, C1, C2, C3, C4, C5;
+
+    public Vector2 this[int i]
+    {
+        readonly get => i switch
+        {
+            0 => C0, 1 => C1, 2 => C2, 3 => C3, 4 => C4, 5 => C5,
+            _ => throw new IndexOutOfRangeException(),
+        };
+        set
+        {
+            switch (i)
+            {
+                case 0: C0 = value; break;
+                case 1: C1 = value; break;
+                case 2: C2 = value; break;
+                case 3: C3 = value; break;
+                case 4: C4 = value; break;
+                case 5: C5 = value; break;
+                default: throw new IndexOutOfRangeException();
+            }
+        }
+    }
+}
 
 // Two-phase progression for CoveredJumpState. Lifted to namespace scope (was a
 // private nested enum) so it can live in MovementVars — the snapshot blob.
@@ -37,4 +71,7 @@ public struct MovementVars
                                     // solver's Δu anchor (the one Vector2 of corrector snapshot
                                     // state; everything else in CorrectorScratch is derived)
     public Vector2 AmbientPrevDv;   // AmbientCorrector: the ambient Δu anchor (same role)
+    public ChannelAnchors AmbientChannelPrev; // AmbientCorrector fold: per-channel Δu anchors
+                                    // (rollback-critical: an unsnapshotted anchor desyncs the
+                                    // Δ-smoothness chain on restore)
 }

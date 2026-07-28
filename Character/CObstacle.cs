@@ -50,20 +50,28 @@ public sealed class CObstacleTemplate
         return best;
     }
 
-    // Single-slot memo keyed on the polygon instance. Pure derived data (safe
-    // as a static: the result is a pure function of the polygon), rebuilt only
-    // when a different polygon reference queries.
-    private static Polygon _cachedFor;
-    private static CObstacleTemplate _cached;
+    // Small static memo keyed on the polygon instance. Determinism audit: the
+    // template is a PURE function of the polygon, so a hit and a rebuild return
+    // identical values — the cache can never make two runs (or a restore-replay)
+    // diverge, which is what exempts it from the "no sim-affecting static
+    // mutable state" rule. Four slots because up to three distinct polygons
+    // query per frame (two players + the feasibility probe); a single slot
+    // would thrash and reallocate on every alternation.
+    private const int MemoSlots = 4;
+    private static readonly Polygon[]           _memoKeys = new Polygon[MemoSlots];
+    private static readonly CObstacleTemplate[] _memoVals = new CObstacleTemplate[MemoSlots];
+    private static int _memoNext;
 
     public static CObstacleTemplate For(Polygon body)
     {
-        if (!ReferenceEquals(_cachedFor, body))
-        {
-            _cached = Build(body);
-            _cachedFor = body;
-        }
-        return _cached;
+        for (int i = 0; i < MemoSlots; i++)
+            if (ReferenceEquals(_memoKeys[i], body))
+                return _memoVals[i];
+        var built = Build(body);
+        _memoKeys[_memoNext] = body;
+        _memoVals[_memoNext] = built;
+        _memoNext = (_memoNext + 1) % MemoSlots;
+        return built;
     }
 
     public static CObstacleTemplate Build(Polygon body)

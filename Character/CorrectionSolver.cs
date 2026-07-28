@@ -125,10 +125,10 @@ public static class CorrectionSolver
         if (L <= 0f) return ComputeResidual(p, z);
         float eta = 1f / L;
 
+        Span<float> slack = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
         for (int it = 0; it < p.InnerIterations; it++)
         {
             // Row slacks s_j = m_j − Σ lever·(z·n̂) from the CURRENT iterate.
-            Span<float> slack = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
             for (int j = 0; j < p.RowCount; j++)
                 slack[j] = RowSlack(p, z, j);
 
