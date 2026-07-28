@@ -11,7 +11,7 @@ namespace MTile.Tests;
 
 // Corrector determinism + cost gates (BALLISTIC_CORRECTOR_PLAN step 9).
 // Snapshot/restore MID-MANEUVER: the corrector's only cross-frame state is
-// MovementVars.CorrectorPrevDv (the Δu anchor) plus the Mantle* scalars — the
+// MovementVars.ManeuverChannelPrev (the Δu anchors) plus the Mantle* scalars — the
 // scratch buffers are derived per tick. A restore inside the vault must replay
 // bit-identically; a missed field or a stale transient shows up as divergence.
 public class CorrectorSnapshotTests(ITestOutputHelper output)

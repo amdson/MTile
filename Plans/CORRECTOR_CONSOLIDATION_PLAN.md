@@ -38,9 +38,26 @@
 >   maneuver + fold solves + elective rollouts) — inside the test gate;
 >   rollback re-sim multiplies this, so Release profiling stays on the list.
 >
+> **Maneuver migration (§3.3) SHIPPED** in a follow-up commit: the climb
+> family solves on the full maneuver stack via CorrectorChannels.BuildManeuver
+> (per-channel Δ anchors in MovementVars.ManeuverChannelPrev; CorrectorPrevDv
+> retired). With it came a REVISED PHYSICAL CHANNEL SEMANTICS, uniform across
+> fold and maneuvers: actuation depends on what the body can push against —
+> near the ground (floor within LegReach): legs (LegServo/Tuck), Drive, and
+> the redirect disc gated to DYNAMIC ticks (near && !supported — a
+> plant-and-deflect needs ground under it but must not eat a supported walk's
+> speed); in flight: air control only (AirLateral along intent + a
+> deliberately tiny two-sided AirVertical; NO redirect — momentum cannot be
+> deflected against nothing). MaxChannels 8. PredictGuided now reports FloorY
+> whenever the probe sees a floor (informational, for masks) while Grounded
+> alone drives dynamics — lip crossings read as near-ground. Net effect:
+> bumpy-corridor traversal improved to full completion (~76 px/s avg) and the
+> air-graze preserves full entry speed (150/150).
+>
 > Remaining (deliberately): lever-normalized hinge weighting (§6 open
-> problem), maneuvers on the full channel stack, Release-build profiling
-> against the multiplayer rollback budget.
+> problem), Release-build profiling against the multiplayer rollback budget
+> (Debug cost after the migration: ~667 µs/tick on the vault-heavy course,
+> inside the test gate).
 
 Turning the `corrector_testing` experiments ("the solver IS the locomotion
 controller") into the game's real movement system. The experiments proved the

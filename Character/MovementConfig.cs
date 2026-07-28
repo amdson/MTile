@@ -212,6 +212,11 @@ public class MovementConfig
     public float FoldCornerForce                { get; set; } = 1500f;
     public float FoldTuckForce                  { get; set; } = 1200f;
     public float FoldLegPushFadeSpeed           { get; set; } = 200f;
+    // Flight authority (px/s²): lateral air steering along intent, and the
+    // deliberately TINY two-sided vertical nudge — in flight there is nothing
+    // to push against (no redirect, no legs), only air control.
+    public float FoldAirLateralForce            { get; set; } = 1500f;
+    public float FoldAirVerticalForce           { get; set; } = 300f;
     // Max unresolved clearance residual (px) an ambient plan may carry and still
     // be applied. Small: ambient assists are grazes, not commitments.
     public float AmbientRefusalResidual         { get; set; } = 1f;

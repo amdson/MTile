@@ -11,13 +11,13 @@ namespace MTile;
 // Sized to CorrectionSolver.MaxChannels.
 public struct ChannelAnchors
 {
-    public Vector2 C0, C1, C2, C3, C4, C5;
+    public Vector2 C0, C1, C2, C3, C4, C5, C6, C7;
 
     public Vector2 this[int i]
     {
         readonly get => i switch
         {
-            0 => C0, 1 => C1, 2 => C2, 3 => C3, 4 => C4, 5 => C5,
+            0 => C0, 1 => C1, 2 => C2, 3 => C3, 4 => C4, 5 => C5, 6 => C6, 7 => C7,
             _ => throw new IndexOutOfRangeException(),
         };
         set
@@ -30,6 +30,8 @@ public struct ChannelAnchors
                 case 3: C3 = value; break;
                 case 4: C4 = value; break;
                 case 5: C5 = value; break;
+                case 6: C6 = value; break;
+                case 7: C7 = value; break;
                 default: throw new IndexOutOfRangeException();
             }
         }
@@ -67,9 +69,9 @@ public struct MovementVars
     public Vector2 MantleCorner;    // Mantle: the step lip being climbed (from the corridor probe)
     public float MantleTargetY;     // Mantle: body-center Y to deliver into the landing gate
     public float MantleEntryY;      // Mantle: body-center Y at entry (for AnimationProgress)
-    public Vector2 CorrectorPrevDv; // ParkourCorrector: last tick's APPLIED correction — the
-                                    // solver's Δu anchor (the one Vector2 of corrector snapshot
-                                    // state; everything else in CorrectorScratch is derived)
+    public ChannelAnchors ManeuverChannelPrev; // Corrector climb family: per-channel Δu anchors
+                                    // of the maneuver stack (rollback-critical, like the
+                                    // ambient anchors below)
     public Vector2 AmbientPrevDv;   // AmbientCorrector: the ambient Δu anchor (same role)
     public ChannelAnchors AmbientChannelPrev; // AmbientCorrector fold: per-channel Δu anchors
                                     // (rollback-critical: an unsnapshotted anchor desyncs the

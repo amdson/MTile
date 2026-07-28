@@ -5,9 +5,9 @@ namespace MTile;
 
 // Pooled per-player scratch for the corrector's predict → build → solve loop.
 // Pure derived data, fully rewritten every solve — never snapshot state. The
-// only cross-frame corrector state lives in MovementVars: CorrectorPrevDv (the
-// maneuver Δu anchor), AmbientPrevDv, and AmbientChannelPrev (the fold's
-// per-channel Δu anchors).
+// only cross-frame corrector state lives in MovementVars: ManeuverChannelPrev
+// (the maneuver stack's Δu anchors), AmbientPrevDv, and AmbientChannelPrev
+// (the fold's).
 public sealed class CorrectorScratch
 {
     public readonly CoastSample[]  Samples  = new CoastSample[BallisticPredictor.MaxHorizon];
@@ -91,11 +91,13 @@ public sealed class CorrectorScratch
 // Shape: intent generates the reference (a one-shot entry hop sized to clear the
 // lip with margin + a guided drive that preserves entry speed); the solver only
 // deforms it. Each Update runs the two outer sequential-convexification passes:
-// predict the guided coast → build clearance rows → solve (Redirect channel only —
-// passive deflections; the hop already injected the maneuver's energy) →
-// re-predict WITH the corrections → rebuild → re-solve — then applies z₀ through
-// Body.AppliedForce (a velocity-update δv applies as force δv/dt). The ballistic
-// crest envelope + gate delivery are the authored feel, not solver output.
+// predict the guided coast → build clearance rows → solve on the MANEUVER
+// CHANNEL STACK (CorrectorChannels.BuildManeuver — legs/redirect near ground,
+// air control in flight; the hop still injects the maneuver's launch energy,
+// the stack corrects around the committed arc, best-effort mid-commitment) →
+// re-predict WITH the corrections → rebuild → re-solve — then applies the
+// summed tick-0 correction through Body.AppliedForce. The ballistic crest
+// envelope + gate delivery are the authored feel, not solver output.
 //
 // Split with MantleState is the existing speed gate: at or below MantleMaxEntrySpeed
 // the flush/slow climb belongs to the mantle; above it this state claims the
@@ -170,7 +172,7 @@ public abstract class CorrectorClimbBase : MovementState
                                      MathF.Min(ctx.Body.Velocity.Y, -vy0));
         float entrySpeed = MathF.Max(_dir * ctx.Body.Velocity.X, cfg.MaxWalkSpeed);
 
-        RunCorrector(ctx, probe, entrySpeed, Vector2.Zero, out int rowCount,
+        RunCorrector(ctx, probe, entrySpeed, default, out int rowCount,
                      FeasibilityIterations);
         int H = Math.Min(cfg.CorrectorHorizon, BallisticPredictor.MaxHorizon);
         int n = BallisticPredictor.PredictGuided(
@@ -216,7 +218,7 @@ public abstract class CorrectorClimbBase : MovementState
         vars.MantleTargetY   = corridor.ClimbTargetY(rise.Column);
         vars.MantleEntryY    = ctx.Body.Position.Y;
         vars.EntrySpeed      = MathF.Max(_dir * ctx.Body.Velocity.X, cfg.MaxWalkSpeed);
-        vars.CorrectorPrevDv = Vector2.Zero;
+        vars.ManeuverChannelPrev = default;
         abilities.Facing = _dir;
         abilities.HasDoubleJumped = false;
 
@@ -303,20 +305,24 @@ public abstract class CorrectorClimbBase : MovementState
         var s = ctx.Corrector;
         if (s == null) return;   // hand-built test contexts without scratch: authored arc only
 
-        RunCorrector(ctx, ctx.Body, vars.EntrySpeed, vars.CorrectorPrevDv, out int rowCount,
+        RunCorrector(ctx, ctx.Body, vars.EntrySpeed, vars.ManeuverChannelPrev, out int rowCount,
                      capture: s.CaptureTrajectories);
 
         if (rowCount > 0)
         {
-            // z₀ exits through AppliedForce: a velocity-update δv₀ applies as δv₀/dt
-            // (identical under semi-implicit Euler). Mid-commitment: least-violation
-            // best-effort — the residual is a signal, never a silent clip.
-            if (ctx.Dt > 0f) ctx.Body.AppliedForce += s.Z[0] / ctx.Dt;
-            vars.CorrectorPrevDv = s.Z[0];
+            // The summed tick-0 correction exits through AppliedForce (TickDv[0]
+            // is the per-tick total δv; dividing by dt restores forces exactly
+            // and converts velocity-update δv identically under semi-implicit
+            // Euler). Mid-commitment: least-violation best-effort — the residual
+            // is a signal, never a silent clip.
+            if (ctx.Dt > 0f) ctx.Body.AppliedForce += s.TickDv[0] / ctx.Dt;
+            int H = Math.Min(MovementConfig.Current.CorrectorHorizon, BallisticPredictor.MaxHorizon);
+            for (int c = 0; c < s.Problem.ChannelCount; c++)
+                vars.ManeuverChannelPrev[c] = s.Z[c * H];
         }
         else
         {
-            vars.CorrectorPrevDv = Vector2.Zero;
+            vars.ManeuverChannelPrev = default;
         }
     }
 
@@ -326,7 +332,7 @@ public abstract class CorrectorClimbBase : MovementState
     // re-solve. Leaves s.Z holding the plan and returns the linear-model residual of
     // the last pass (0 when the coast is provably silent — no rows on pass 1).
     private float RunCorrector(EnvironmentContext ctx, PhysicsBody body,
-                               float entrySpeed, Vector2 prevDv, out int rowCount,
+                               float entrySpeed, in ChannelAnchors prevAnchors, out int rowCount,
                                int iterations = CorrectionSolver.DefaultInnerIterations,
                                bool capture = false)
     {
@@ -356,14 +362,14 @@ public abstract class CorrectorClimbBase : MovementState
             p.H = n; p.Dt = ctx.Dt;
             p.CoastVel = s.CoastVel;
             p.Rows = s.Rows; p.RowCount = rowCount;
-            // Redirect disc (the maneuver channel set, CorrectorChannels):
-            // passive deflections only — the entry hop already injected all the
-            // maneuver's energy, so the solver may steer that momentum but never
-            // add speed. (An unbounded force channel stood in here during the
-            // stand-fold experiments; the disc is the energy-honesty story and
-            // is restored deliberately.)
-            p.ChannelCount = CorrectorChannels.BuildManeuver(p, n);
-            p.PrevApplied[0] = prevDv;
+            // The maneuver channel stack (CorrectorChannels.BuildManeuver):
+            // legs/redirect near the ground, air control in flight. The entry
+            // hop still injects the maneuver's launch energy; the stack
+            // corrects the committed arc around it, with leaky per-channel Δ
+            // anchors carrying continuity across frames.
+            p.ChannelCount = CorrectorChannels.BuildManeuver(s, n, rowCount, _dir);
+            for (int c = 0; c < p.ChannelCount; c++)
+                p.PrevApplied[c] = prevAnchors[c] * CorrectorChannels.AnchorLeak;
             p.DeltaWeight = cfg.CorrectorDeltaWeight;
             p.HingeWeight = HingeWeight;
             p.InnerIterations = iterations;
@@ -371,7 +377,7 @@ public abstract class CorrectorClimbBase : MovementState
             p.RowPush = capture && pass == 1 ? s.RowPush : null;
 
             residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
-            for (int k = 0; k < n; k++) s.TickDv[k] = s.Z[k];
+            CorrectorChannels.ComputeTickDv(s, p, n, ctx.Dt);
 
             if (capture && pass == 1)
             {

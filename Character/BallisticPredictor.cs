@@ -241,7 +241,10 @@ public static class BallisticPredictor
             samples[k].Pos      = pos;
             samples[k].Vel      = vel;
             samples[k].Grounded = grounded;
-            samples[k].FloorY   = grounded ? floorY : float.PositiveInfinity;
+            // FloorY is informational (channel masks key "near ground" off it —
+            // a lip crossing is near the step top even while unsupported);
+            // Grounded alone drives the dynamics above.
+            samples[k].FloorY   = haveFloor ? floorY : float.PositiveInfinity;
             prevGrounded = grounded;
         }
 

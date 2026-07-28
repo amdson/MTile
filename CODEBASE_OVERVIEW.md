@@ -170,8 +170,12 @@ Each `Update`:
 > deliverability and hysteresis (elective refusal — the honest bonk). The
 > corrector climb family (`ParkourCorrectorState`/`ArcJumpCorrectorState`/
 > `MantleCorrectorState`) owns bigger maneuvers on the same predict→rows→solve
-> loop with a redirect-disc-only channel. Non-fold states keep their owned
-> servo mechanics and gate ambient assists via `AmbientPolicy`.
+> loop with its own full channel stack (`BuildManeuver`). Channel semantics
+> are physical and uniform: legs + plant-and-deflect redirect near the ground
+> (redirect only on dynamic, unsupported ticks), air control only in flight
+> (lateral + tiny vertical — no redirect against nothing). Non-fold states
+> keep their owned servo mechanics and gate ambient assists via
+> `AmbientPolicy`.
 
 **Fold states**: `FallingState` (0/0, fallback), `StandingState` (10/10), `CrouchedState` (15/15) — support/locomotion via the ambient fold (above). **Wall**: `WallSlidingState(dir)` (owned; publishes `AmbientPolicy.Off`).
 **Stun**: `StunnedState` (25/25) — heavy-hit lockout; muted air control while `Combat.StunActive`. Preempts free/wall states but not active jumps. `TumbleState` — airborne launch variant.

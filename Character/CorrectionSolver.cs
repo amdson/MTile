@@ -87,7 +87,7 @@ public sealed class CorrectionProblem
 public static class CorrectionSolver
 {
     public const int DefaultInnerIterations = 4;
-    public const int MaxChannels = 6;
+    public const int MaxChannels = 8;
 
     private static bool Active(in ChannelDef ch, int k)
         => ch.ActiveMask != null ? ch.ActiveMask[k] : k >= ch.ActiveFrom && k < ch.ActiveTo;

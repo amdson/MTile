@@ -93,7 +93,6 @@ public sealed class AmbientCorrector
     // (further down = free fall) — one constant with the gravity-hold gate.
     private const float HoverHingeScale = 0.02f;
     private const float ProgressHingeScale = 0.02f;
-    private const float AnchorLeak      = 0.7f;
     // Elective refusal (Plans/ELECTIVE_REFUSAL_NOTE.md): the climb binding is
     // ALL-OR-NOTHING. R1 = envelope with the state's climb band; R0 = envelope
     // restricted to the anchor's own surface (roughness only). R1 applies iff
@@ -295,7 +294,7 @@ public sealed class AmbientCorrector
             // walk ratchets past its target); the leak keeps the anti-bang-bang
             // smoothing over a few frames while bleeding any sustained bias.
             for (int c = 0; c < p.ChannelCount; c++)
-                p.PrevApplied[c] = vars.AmbientChannelPrev[c] * AnchorLeak;
+                p.PrevApplied[c] = vars.AmbientChannelPrev[c] * CorrectorChannels.AnchorLeak;
         }
         else
         {
@@ -321,7 +320,7 @@ public sealed class AmbientCorrector
         p.RowPush = s.CaptureTrajectories ? s.RowPush : null;
 
         float residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
-        ComputeTickDv(s, p, n, ctx.Dt);
+        CorrectorChannels.ComputeTickDv(s, p, n, ctx.Dt);
 
         // ── Elective deliverability (Plans/ELECTIVE_REFUSAL_NOTE.md) ─────────
         // The R1 climb binding applies AS A SET iff the TRUE corrected rollout
@@ -350,7 +349,7 @@ public sealed class AmbientCorrector
                              MathF.Min(fold.ClimbReachUp, ElectiveR0Reach), ref rowCount);
                 p.RowCount = rowCount;
                 CorrectionSolver.Solve(p, s.Z, s.ZScratch);
-                ComputeTickDv(s, p, n, ctx.Dt);
+                CorrectorChannels.ComputeTickDv(s, p, n, ctx.Dt);
                 vars.AmbientElectiveLatch = (sbyte)(-ElectiveRefuseFrames);
             }
             else
@@ -390,19 +389,6 @@ public sealed class AmbientCorrector
             s.SolvedCount = BallisticPredictor.Predict(
                 ctx.Body, ctx.Chunks, dir, ctx.Input.Down, startGrounded,
                 ctx.Modifiers, ctx.Gravity, ctx.Dt, n, s.SolvedTrajectory, s.TickDv);
-        }
-    }
-
-    // Per-tick total δv of the solved plan (velocity-update z is a δv; force z
-    // contributes z·dt), summed across channels into s.TickDv.
-    private static void ComputeTickDv(CorrectorScratch s, CorrectionProblem p, int n, float dt)
-    {
-        for (int k = 0; k < n; k++) s.TickDv[k] = Vector2.Zero;
-        for (int c = 0; c < p.ChannelCount; c++)
-        {
-            bool vu = p.Channels[c].Lever == LeverKind.VelocityUpdate;
-            for (int k = 0; k < n; k++)
-                s.TickDv[k] += vu ? s.Z[c * n + k] : s.Z[c * n + k] * dt;
         }
     }
 
