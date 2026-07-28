@@ -72,14 +72,17 @@ public static class MovementPriorities
     // preemption compares the candidate's PASSIVE to the current ACTIVE, and
     // the jump family's passives are 30–48: climbs were in fact unbeatable.)
     // Passive 29 still outbids every free state (Standing 10, Crouched 15,
-    // WallSlide/Dropdown 20) and the stun band's passives (25/26). Active stays
-    // 46: once committed, only a genuinely deliberate higher bid (CoveredJump
-    // 48) could steal the body mid-arc — the launch family can't bid airborne
-    // anyway (their preconditions need ground).
-    public const int MantleActive   = 46;
+    // WallSlide/Dropdown 20) and the stun band's passives (25/26). Active 29
+    // too: a deliberate launch overrides a COMMITTED vault as well — mid-arc
+    // the contact context picks the jump (WallJump beside the step face,
+    // DoubleJump once airborne — vault entry re-arms it, CoveredJump under a
+    // low ceiling, the ground jumps while the probe still binds). The holds
+    // band (42–44) only bids on deliberate Up/Down edges, and the stun band
+    // (25/26) still cannot break a committed arc.
+    public const int MantleActive   = 29;
     public const int MantlePassive  = 29;
 
-    public const int ArcJumpActive  = 46;
+    public const int ArcJumpActive  = 29;
     public const int ArcJumpPassive = 29;
 
     // Holds.

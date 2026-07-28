@@ -603,10 +603,13 @@ public class CoveredJumpState : MovementState
             // Flip to the jump the instant nothing's overhead.
             if (!ctx.TryGetCeiling(out _))
             {
+                // vy is set relative to the source surface, never added — see
+                // JumpingState.Enter. A moving floor carries in through
+                // SurfaceVelocity; an additive write rockets whenever this
+                // state is entered mid-rise (e.g. stealing a vault's arc).
+                float sourceVy = _ground?.SurfaceVelocity.Y ?? 0f;
                 if (_ground != null) { ctx.Body.Constraints.Remove(_ground); _ground = null; }
-                // Add (don't overwrite) so a moving floor's vertical velocity carries
-                // into the launch — see JumpingState.Enter.
-                ctx.Body.Velocity.Y += cfg.JumpVelocity;
+                ctx.Body.Velocity.Y = sourceVy + cfg.JumpVelocity;
                 vars.CoveredPhase = CoveredJumpPhase.Jumping;
                 vars.JumpHoldTime = 0f;
                 vars.JumpReleased = !ctx.Input.Space;

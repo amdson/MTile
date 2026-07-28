@@ -142,6 +142,12 @@ public abstract class CorrectorClimbBase : MovementState
         var cfg = MovementConfig.Current;
         if (!cfg.CorrectorVaultEnabled) return false;
         if (ctx.Intent.HeldHorizontal != _dir || !ctx.TryGetGround(out _)) return false;
+        // Launch gate (StandingState's entry rule): a body rising faster than
+        // support could ever push it is ballistic — the ground probe merely
+        // SEEING a floor doesn't make it standable. Without this the vault
+        // re-triggers off a jump's ascent (the probe reaches ~SupportReach)
+        // and re-injects hop energy mid-launch.
+        if (-ctx.Body.Velocity.Y > cfg.SpringMaxRiseSpeed) return false;
         // Running/flush split: the 1-block state leaves at-or-below-gate entries to
         // MantleState; the taller band has no mantle partner and fires at any speed.
         if (RequiresRunningEntry && _dir * ctx.Body.Velocity.X <= cfg.MantleMaxEntrySpeed) return false;
@@ -281,9 +287,14 @@ public abstract class CorrectorClimbBase : MovementState
         float vyApex = BallisticPredictor.BallisticVy(needH);
         float vy0    = vyApex;
         float vx     = _dir * ctx.Body.Velocity.X;
-        if (vx > cfg.MantleMaxEntrySpeed)
+        float dist   = _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir));
+        // The lip term is a TIMING model — "clear the gate by the time the face
+        // arrives" — and only means something while the face is genuinely
+        // ahead. At dist → 0 it degenerates (tLip → 0, vyLip → ∞): a face
+        // already at the leading edge can't be beaten by any launch, so the
+        // apex hop is the honest arc there.
+        if (vx > cfg.MantleMaxEntrySpeed && dist > 2f)
         {
-            float dist  = MathF.Max(1f, _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir)));
             float tLip  = dist / vx;
             float vyLip = needH / tLip + 0.5f * Simulation.WorldGravityY * tLip;
             vy0 = MathF.Max(vyApex, vyLip);
