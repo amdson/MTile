@@ -1,6 +1,6 @@
 ﻿{
-  // options: "start" | "arena" | "plain" | "training" | "flat" | "corridor" (bumpy tunnel, fall/stand only) | "gym" (1-high ledges, fall/stand only, CorrectorScenario applies)
-  "Stage": "corridor",
+  // options: "start" | "arena" | "plain" | "training" | "flat" | "corridor" (bumpy tunnel) | "gym" (1-high ledges, CorrectorScenario applies)
+  "Stage": "start",
   "WindowWidth": 1000,
   "WindowHeight": 900,
   "Fullscreen": false,
@@ -33,7 +33,7 @@
   "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
   "SecondPlayerOffsetY": 0,
-  "TimeScale": 0.5
+  "TimeScale": 1.0
 }
 
 

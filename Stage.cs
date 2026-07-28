@@ -78,26 +78,26 @@ public static class Stages
         // Ambient-corrector stress harness: flat runway (floor tile y = 6) feeding
         // into a 64-tile bumpy tunnel (corridor.txt × 4 chunks, world x 256..1280):
         // 3-tile interior, floor bumps at col ≡ 1 (mod 4), ceiling bumps at
-        // col ≡ 3 (mod 4). The player is restricted to Falling + Standing ONLY —
-        // no jump/crouch/climb states — so traversal is a pure measure of what the
-        // ambient corrections can do through a bare movement state.
+        // col ≡ 3 (mod 4). Full state machine; the fall/stand-only acceptance
+        // traces apply RestrictToFallAndStand themselves (BumpyTunnelSpeedTests).
         Register(new Stage {
             Name          = "corridor",
             TerrainConfig = "corridor.json",
             PlayerSpawn   = new Vector2(0f, 60f),
-            Populate      = g => g.Player.RestrictToFallAndStand(),
+            Populate      = _ => { },
         });
 
         // ─── gym ──────────────────────────────────────────────────────────────
         // Channel-scenario proving ground: flat floor (tile y = 8) with a
         // repeating 1-high ledge (up at col 6, down at col 12, every 16 tiles).
-        // Fall/stand only, like the corridor. Pick the channel set via
-        // movement_config.json "CorrectorScenario" — hot-reloads live.
+        // Full state machine; scenario tests restrict to fall/stand themselves.
+        // Pick the channel set via movement_config.json "CorrectorScenario" —
+        // hot-reloads live.
         Register(new Stage {
             Name          = "gym",
             TerrainConfig = "gym.json",
             PlayerSpawn   = new Vector2(8f, 100f),
-            Populate      = g => g.Player.RestrictToFallAndStand(),
+            Populate      = _ => { },
         });
 
         // ─── flat ─────────────────────────────────────────────────────────────

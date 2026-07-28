@@ -99,8 +99,8 @@ public class BumpyTunnelSpeedTests(ITestOutputHelper output)
         output.WriteLine($"\n  avg forward speed: {avgVx:F1} px/s (flat-ground run ≈ 150), final x={last.X:F1} of {W * 16}");
     }
 
-    // Headless twin of the "corridor" STAGE: fall/stand only (the stage's own
-    // Populate restriction), flat runway feeding the offset-bump tunnel — the
+    // Headless twin of the "corridor" STAGE: fall/stand only (restricted here;
+    // the stage itself runs the full FSM), flat runway feeding the offset-bump tunnel — the
     // stand-fold experiment's acceptance trace. Standing has no spring/FSD here;
     // hover, bump crests, ceiling ducks, and landings are all the ambient
     // solve's applied corrections.
@@ -133,6 +133,7 @@ public class BumpyTunnelSpeedTests(ITestOutputHelper output)
 
         var sim = new Simulation(terrain, new Vector2(24f, 74f),
                                  Stages.Get("corridor").Populate);
+        sim.Player.RestrictToFallAndStand();
         sim.Player.CorrectorDebug.CaptureTrajectories = true;   // contact-push introspection
         var input = new PlayerInput { Right = true };
 
@@ -187,6 +188,7 @@ public class BumpyTunnelSpeedTests(ITestOutputHelper output)
             cfg.CorrectorScenario = "redirect-traction";
             var sim = new Simulation(terrain, new Vector2(8f, 100f),
                                      Stages.Get("gym").Populate);
+            sim.Player.RestrictToFallAndStand();
             var input = new PlayerInput { Right = true };
 
             output.WriteLine("  frame     t      x      y     vx     vy  state   (floor hover=106, ledge-top hover=90)");

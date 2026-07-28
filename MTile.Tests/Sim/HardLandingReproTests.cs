@@ -24,6 +24,7 @@ public class HardLandingReproTests(ITestOutputHelper output)
         // Floor top y=128; resting contact center ≈ 116; hover target ≈ 106.
         var sim = new Simulation(terrain, new Vector2(100f, 60f),
                                  Stages.Get("gym").Populate);
+        sim.Player.RestrictToFallAndStand();
         sim.Player.Body.Velocity = new Vector2(0f, 500f);   // beyond the catch envelope
         sim.Player.CorrectorDebug.CaptureTrajectories = true;
 
