@@ -508,4 +508,13 @@ public class ArcJumpCorrectorState : CorrectorClimbBase
     protected override float RiseBandMin => MovementConfig.Current.MantleMaxRise;
     protected override float RiseBandMax => MovementConfig.Current.CorridorMaxRise;
     protected override bool  RequiresRunningEntry => false;
+
+    // movement_todo #6: the 2-block arc is a DELIBERATE move — genuinely
+    // running in (≥ ArcJumpRunSpeed) with Up held. Standing/slow near a
+    // 2-block ledge with Up held routes to LedgeGrab instead (its Passive 42
+    // wins automatically once this precondition refuses the still case).
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+        => ctx.Input.Up
+           && _dir * ctx.Body.Velocity.X >= MovementConfig.Current.ArcJumpRunSpeed
+           && base.CheckPreConditions(ctx, abilities);
 }

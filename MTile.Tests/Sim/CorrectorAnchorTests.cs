@@ -83,9 +83,11 @@ public class CorrectorAnchorTests(ITestOutputHelper output)
 
         static bool Precondition(ChunkMap terrain)
         {
+            // Running + Up: the arc's deliberate-entry gate (movement_todo #6)
+            // must be satisfied so this test isolates the slab feasibility.
             var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6),
                                        new Vector2(116f, 26f))
-                       { Velocity = new Vector2(0f, 0f) };
+                       { Velocity = new Vector2(100f, 0f) };
             var ctx = new EnvironmentContext
             {
                 Chunks    = terrain,
@@ -94,6 +96,7 @@ public class CorrectorAnchorTests(ITestOutputHelper output)
                 Gravity   = new Vector2(0f, 600f),
                 Corrector = new CorrectorScratch(),
                 Intent    = new InputIntent { HeldHorizontal = 1, CurrentHorizontal = 1 },
+                Input     = new PlayerInput { Right = true, Up = true },
                 Modifiers = MovementModifiers.Identity,
             };
             return new ArcJumpCorrectorState(1).CheckPreConditions(ctx, new PlayerAbilityState());

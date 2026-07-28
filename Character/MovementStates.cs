@@ -19,7 +19,19 @@ public class JumpingState : MovementState
         // Buffered jump intent rather than a raw edge: a press up to
         // JumpBufferFrames before landing still fires. Consumed in Enter.
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
-        if (!ctx.TryGetGround(out var ground)) return false;
+        if (!ctx.TryGetGround(out var ground))
+        {
+            // Corner push-off (movement_todo #4): a gripped corner is a
+            // legal launch surface — jumping out of a hang (LedgeGrab
+            // releases on an inward/neutral jump press) or out of a
+            // committed vault at the lip, where no ground or wall binds and
+            // the steal would otherwise fizzle. Corners are static terrain:
+            // Enter's sourceVy is 0 and the hold window rides
+            // vars.JumpFromCorner instead of a source FSD.
+            if (!TryCornerLaunch(ctx, abilities, out _)) return false;
+            return !(ctx.TryGetCeiling(out var c)
+                     && ctx.Body.Position.Y - c.Position.Y <= 2 * Chunk.TileSize);
+        }
         // Hitstun/stun lock-out is enforced centrally via RequiredCapabilities.Jump
         // (the selection loop drops jump candidates while BlocksJump). Movement
         // otherwise stays free — it only blocks the cheap vertical-reset option.
@@ -29,13 +41,36 @@ public class JumpingState : MovementState
         return true;
     }
 
+    // A corner the body just gripped (hang, or a climb's animation grip) within
+    // arm's reach counts as a push-off point.
+    private const float CornerLaunchReach = 24f;
+    internal static bool TryCornerLaunch(EnvironmentContext ctx, PlayerAbilityState abilities,
+                                         out Vector2 corner)
+    {
+        corner = default;
+        switch (ctx.PreviousState(0))
+        {
+            case LedgeGrabState:
+                corner = abilities.GrabbedCorner;
+                break;
+            case CorrectorClimbBase climb when climb.TryAnimationGrip(out corner):
+                break;
+            default:
+                return false;
+        }
+        return Vector2.DistanceSquared(corner, ctx.Body.Position)
+               <= CornerLaunchReach * CornerLaunchReach;
+    }
+
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (vars.JumpReleased || vars.TimeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
         // The jump is anchored to its source surface. Once the body has risen out
         // of the (wider-than-Standing) probe window, the "relative-to-source" frame
         // no longer means anything — end the jump and let Falling take over.
-        return TryFindSource(ctx, out _);
+        // Corner launches have no source FSD at all: their frame is the static
+        // corner, valid for the whole hold window.
+        return vars.JumpFromCorner || TryFindSource(ctx, out _);
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -52,8 +87,11 @@ public class JumpingState : MovementState
         // Vertical velocity is set *relative* to the source surface, not added to
         // the body's current vy. Adding to the current velocity produces pathological
         // launches when the body enters with redirected vy (e.g. mid-Parkour ramp).
+        // With no source at all this is a corner launch — corners are static, so
+        // the frame is the world's.
         float sourceVy = _source?.SurfaceVelocity.Y ?? 0f;
         ctx.Body.Velocity.Y = sourceVy + MovementConfig.Current.JumpVelocity;
+        vars.JumpFromCorner = _source == null;
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -738,6 +776,12 @@ public class LedgeGrabState : MovementState
         if (vars.TimeInState < 0.1f) return true;
         bool pressingAway = (_wallDir == 1 && ctx.Input.Left) || (_wallDir == -1 && ctx.Input.Right);
         if (pressingAway) return false;
+        // movement_todo #4: an inward/neutral jump press launches OFF the
+        // corner — release the hang; JumpingState's corner branch binds in
+        // the same-frame reselection (away-presses exited above and go to
+        // WallJump as before, which outbids the fresh Jump anyway).
+        if (ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames))
+            return false;
         return !ctx.Input.Down;
     }
 

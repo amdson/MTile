@@ -75,7 +75,7 @@ Two new behavior contracts, written as tests first; fix whatever they expose.
 - Fixes stay within existing channel semantics (no new channels; no redirect
   in flight — near-ground only, per the standing design rule).
 
-## M3 — Trigger & arbitration edits (todo 4 + 6)
+## M3 — Trigger & arbitration edits (todo 4 + 6) `[x] done`
 
 - **Jump off ledge corners** (todo 4): extend the jump family's contact
   context so a ledge corner counts as a push-off point — covers jumping out
@@ -148,6 +148,17 @@ reference-clip system (`b1d4486`, editor via `--ref`).
 
 ## Campaign log
 
+- M3 — deliberate arc + corner push-off: DONE. ArcJumpCorrectorState now
+  requires Up held AND vx-along-dir ≥ ArcJumpRunSpeed (50, config); standing
+  at a 2-block ledge with Up grabs instead (LedgeGrab Passive 42 wins once
+  the arc refuses — no priority changes needed). Corner push-off: LedgeGrab
+  releases on an inward/neutral jump press; JumpingState gained a corner
+  branch (TryCornerLaunch — GrabbedCorner from hangs, TryAnimationGrip from
+  climbs, within 24px) with vars.JumpFromCorner keeping the hold window
+  alive sourceless (corners are static, sourceVy=0). Full held corner jump
+  reaches rise ~205. DeliberateClimbTests pins all four behaviors; two
+  legacy anytime-trigger tests updated to the deliberate contract. Suite
+  436/0, KNI clean.
 - M2 — stairs + cave + corner-plant: DONE. StairClimbTests: 45° staircase
   passes on the existing stack first try — chained Standing/Parkour/Mantle,
   10 steps in 3.07s, zero backslide frames. CaveMouthTests: fixture

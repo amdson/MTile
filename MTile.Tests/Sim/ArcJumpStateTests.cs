@@ -32,7 +32,8 @@ public class ArcJumpStateTests(ITestOutputHelper output)
         {
             Terrain       = terrain,
             StartPosition = start,
-            Script        = InputScript.Always(new PlayerInput { Right = true }),
+            // Up held: the 2-block arc is a deliberate move (movement_todo #6).
+            Script        = InputScript.Always(new PlayerInput { Right = true, Up = true }),
             Frames        = frames,
             Dt            = Dt,
             Gravity       = new Vector2(0f, 600f),

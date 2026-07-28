@@ -94,6 +94,12 @@ public class MovementConfig
     public float FastFallForce { get; set; } = 1000f;
     public float FastSlideTerminalSpeed { get; set; } = 200f;
 
+    // The 2-block arc (ArcJumpCorrectorState) only fires when genuinely
+    // running in — |vx along dir| at or above this — AND Up is held
+    // (movement_todo #6). Half of MaxWalkSpeed: moving with intent, without
+    // demanding a full-speed runway.
+    public float ArcJumpRunSpeed { get; set; } = 50f;
+
     // Running Jump
     public float RunJumpVelocity { get; set; } = -120f;
     public float RunJumpHoldForce { get; set; } = -1200f;

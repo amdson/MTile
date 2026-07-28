@@ -76,6 +76,9 @@ public struct MovementVars
     public ChannelAnchors AmbientChannelPrev; // AmbientCorrector fold: per-channel Δu anchors
                                     // (rollback-critical: an unsnapshotted anchor desyncs the
                                     // Δ-smoothness chain on restore)
+    public bool JumpFromCorner;     // JumpingState launched off a gripped corner (no
+                                    // source FSD exists) — keeps the hold window alive
+                                    // where TryFindSource would end the jump.
     public sbyte AmbientElectiveLatch; // Elective-refusal hysteresis (AmbientCorrector):
                                     // >0 = committed to the R1 climb for n frames,
                                     // <0 = refusal window (R0) counting back to 0
