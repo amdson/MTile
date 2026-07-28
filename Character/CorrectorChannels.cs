@@ -23,12 +23,9 @@ public static class CorrectorChannels
     // the old spring's engagement envelope.
     private const float HoverDist    = 2f * PlayerCharacter.Radius - 2f;
     private const float LegReach     = HoverDist + 20f;  // px — floor within leg range
-    private const float LegForce     = 6000f;            // ~10× gravity
-    private const float VPushMax     = 200f;             // px/s — servo fades out at this rise speed
-    private const float WalkForce    = 3000f;            // traction cap (≈ WalkAccel)
     private const float WeakTraction = 800f;             // scenario: deliberately underpowered legs-forward
-    private const float CornerForce  = 1500f;
-    private const float TuckForce    = 1200f;
+    // Channel authority caps live in MovementConfig (Fold*Force — the hot-
+    // reloadable tuning surface); the constants left here are structural.
     private const float CatchFadeBand = 60f;   // px/s — catch authority ramps out across
                                                // MaxGroundEngageVnRel ± this window
     private const float RedirectEpsilon = 1e-6f;         // uniqueness regularizer, not a knob
@@ -47,6 +44,10 @@ public static class CorrectorChannels
     // semantics (a deflection, like sliding along a wall).
     public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed)
     {
+        var cfg = MovementConfig.Current;
+        float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
+        float CornerForce = cfg.FoldCornerForce, TuckForce = cfg.FoldTuckForce;
+        float VPushMax = cfg.FoldLegPushFadeSpeed;
         Span<bool> near = stackalloc bool[BallisticPredictor.MaxHorizon];
         for (int k = 0; k < n; k++)
         {
@@ -57,7 +58,7 @@ public static class CorrectorChannels
 
         // Dev/test capability-probing harness: limited channel sets, hot-swapped
         // via movement_config.json "CorrectorScenario" (see MovementConfig).
-        switch (MovementConfig.Current.CorrectorScenario)
+        switch (cfg.CorrectorScenario)
         {
             // Redirect disc (all ticks, free) + weak forward traction, nothing
             // else: can momentum-steering alone deliver the body onto a ledge?
@@ -124,7 +125,7 @@ public static class CorrectorChannels
             //    damage as a side effect of locomotion.
             float sep = MathF.Max(0f, -s.Samples[k].Vel.Y);
             float catchScale = Math.Clamp(
-                (MovementConfig.Current.MaxGroundEngageVnRel + CatchFadeBand - s.Samples[k].Vel.Y)
+                (cfg.MaxGroundEngageVnRel + CatchFadeBand - s.Samples[k].Vel.Y)
                     / CatchFadeBand, 0f, 1f);
             s.ChannelCap[0][k] = LegForce * Math.Clamp(1f - sep / VPushMax, 0f, 1f) * catchScale;
         }

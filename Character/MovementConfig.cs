@@ -190,6 +190,28 @@ public class MovementConfig
     public string CorrectorScenario             { get; set; } = "full";
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
     public int   AmbientHorizon                 { get; set; } = 10;
+    // ── Fold tuning surface (CONSOLIDATION_PLAN §6) — hot-reloadable feel knobs.
+    // Structural constants (HingeWeight, hinge scales, anchor leak, SupportReach)
+    // stay in code: they are stability/semantics, not feel.
+    // Hover clearance above the C-obstacle top surface for the standing fold
+    // (≈ the old spring equilibrium) and for the crouch (0 = resting on it).
+    public float FoldHoverOffset                { get; set; } = 10f;
+    public float CrouchHoverOffset              { get; set; } = 0f;
+    // Climb band: how far above the support anchor the envelope may bind a
+    // floor. 1-high ledges (16) must bind for Standing; a crouch covers only
+    // surface roughness.
+    public float FoldClimbReachUp               { get; set; } = 20f;
+    public float CrouchClimbReachUp             { get; set; } = 4f;
+    // Fixed inner iteration budget of the per-tick fold solve (determinism
+    // requires it fixed; raise for convergence, costs linearly).
+    public int   FoldIterations                 { get; set; } = 16;
+    // Fold channel authority caps (px/s²) and the leg-servo push fade-out
+    // speed (px/s) — see CorrectorChannels for each channel's role.
+    public float FoldLegForce                   { get; set; } = 6000f;
+    public float FoldDriveForce                 { get; set; } = 3000f;
+    public float FoldCornerForce                { get; set; } = 1500f;
+    public float FoldTuckForce                  { get; set; } = 1200f;
+    public float FoldLegPushFadeSpeed           { get; set; } = 200f;
     // Max unresolved clearance residual (px) an ambient plan may carry and still
     // be applied. Small: ambient assists are grazes, not commitments.
     public float AmbientRefusalResidual         { get; set; } = 1f;

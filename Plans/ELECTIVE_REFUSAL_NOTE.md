@@ -1,5 +1,10 @@
 # Pin: graceful failure = mode selection (elective reference refusal)
 
+> **IMPLEMENTED (2026-07-28)** in `AmbientCorrector` (R1/R0 via EmitEnvelope's
+> climb band, deliverability on the true corrected rollout, hysteresis latch in
+> `MovementVars.AmbientElectiveLatch`); pinned by
+> `FoldScenarioTests.OneHighLedgeUnderCeiling_HoldRight_HonestBonk_NoHalfScramble`.
+
 Context (2026-07-27, stand-fold experiments on `corrector`): with the envelope
 reference + anchored climb band, a blocked climb produces a "half-scramble" —
 the soft tracking optimizer's best compromise is a physically meaningless hover

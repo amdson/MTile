@@ -1,5 +1,47 @@
 # Corrector Consolidation Plan
 
+> **STATUS (2026-07-28): Phases 1–5 SHIPPED; Phase 6 knobs+profiling done;**
+> **suite 419/0.** Commits: Phase 1 triage (850424f — hexagon promoted,
+> redirect disc restored, anti-pop killed), Phase 2 invariants (6e55adb —
+> fold Δ anchors snapshotted, rollback determinism back), Phase 3 FSM
+> reintegration (3de2b1c), Phases 4+5 elective refusal + scenario suite
+> (210ca23), Phase 6–7 tuning surface + docs (this commit).
+>
+> Notable deviations / discoveries beyond the plan text:
+> - **The solver needed per-variable preconditioning** (diagonal steps with
+>   Gershgorin row-sum bounds). A global step size starved force channels
+>   (dt² levers) against velocity channels (dt levers) ~10³× and soft rows
+>   against hard rows another 50× — the fold's mixed solves were numerically
+>   silent in exactly the mixed cases the design depends on. Side effect: the
+>   natural first step is the uniform profile on the constraint surface,
+>   which removed bang-bang structurally (oracles re-pinned).
+> - **Support semantics needed three mirrored gates** (live + coast share
+>   constants): the gravity hold fades across [HoldFullDist, SupportReach]
+>   and gates on rise speed; the envelope refuses to bind plunging ticks
+>   (descent > MaxGroundEngageVnRel) so plunge landings hit RAW — this alone
+>   restored the whole impact-materials spec on unchanged tuning; station-
+>   keeping is baseline FRICTION (feedforward), not solver rows.
+> - **Anti-autopilot is structural**: Drive unilateral along intent, no x
+>   channel at station, CornerAssist lift-only, Redirect/CornerAssist skip
+>   soft horizontal rows (SkipSoftHorizontal), leaky Δ anchors (0.7) so the
+>   smoothness chain can't act as thrust memory.
+> - **The walk-speed equilibrium quirk is retired** — the fold walks at the
+>   configured MaxWalkSpeed (pinned by test).
+> - Elective refusal shipped per ELECTIVE_REFUSAL_NOTE: R1/R0 references,
+>   deliverability on the true corrected rollout, ±8-frame hysteresis latch
+>   in MovementVars.AmbientElectiveLatch. The half-scramble is dead
+>   (FoldScenarioTests.OneHighLedgeUnderCeiling: stalled tail flat at hover).
+> - Phase 3.3 maneuver migration taken as the CHANNEL-TABLE pilot: the climb
+>   family builds its redirect-only set through CorrectorChannels; migrating
+>   maneuvers onto the full stack remains the long-term bet.
+> - Cost: ~457 µs/tick on the vault-heavy course (Debug build, includes
+>   maneuver + fold solves + elective rollouts) — inside the test gate;
+>   rollback re-sim multiplies this, so Release profiling stays on the list.
+>
+> Remaining (deliberately): lever-normalized hinge weighting (§6 open
+> problem), maneuvers on the full channel stack, Release-build profiling
+> against the multiplayer rollback budget.
+
 Turning the `corrector_testing` experiments ("the solver IS the locomotion
 controller") into the game's real movement system. The experiments proved the
 architecture on a fall+stand-only player in the gym/corridor stages; this plan

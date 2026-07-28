@@ -37,8 +37,10 @@ public struct FoldProfile
     // the reference (16 ≤ 20), 2-high walls never do (32 > 20).
     public static FoldProfile Stand => new()
     {
-        Fold = true, HoverOffset = 10f, ClimbReachUp = 20f,
-        MaxSpeed = MovementConfig.Current.MaxWalkSpeed,
+        Fold = true,
+        HoverOffset  = MovementConfig.Current.FoldHoverOffset,
+        ClimbReachUp = MovementConfig.Current.FoldClimbReachUp,
+        MaxSpeed     = MovementConfig.Current.MaxWalkSpeed,
     };
 
     // Crouched: same fold, lower reference — the crouch IS reference shaping,
@@ -47,8 +49,10 @@ public struct FoldProfile
     // covers surface roughness only (a crouch never mounts ledges); crawl speed.
     public static FoldProfile Crouch => new()
     {
-        Fold = true, HoverOffset = 0f, ClimbReachUp = 4f,
-        MaxSpeed = MovementConfig.Current.CrouchMaxWalkSpeed,
+        Fold = true,
+        HoverOffset  = MovementConfig.Current.CrouchHoverOffset,
+        ClimbReachUp = MovementConfig.Current.CrouchClimbReachUp,
+        MaxSpeed     = MovementConfig.Current.CrouchMaxWalkSpeed,
     };
 }
 
@@ -89,7 +93,6 @@ public sealed class AmbientCorrector
     // (further down = free fall) — one constant with the gravity-hold gate.
     private const float HoverHingeScale = 0.02f;
     private const float ProgressHingeScale = 0.02f;
-    private const int   FoldIterations  = 16;
     private const float AnchorLeak      = 0.7f;
     // Elective refusal (Plans/ELECTIVE_REFUSAL_NOTE.md): the climb binding is
     // ALL-OR-NOTHING. R1 = envelope with the state's climb band; R0 = envelope
@@ -312,7 +315,7 @@ public sealed class AmbientCorrector
         }
         p.DeltaWeight = cfg.CorrectorDeltaWeight;
         p.HingeWeight = HingeWeight;
-        p.InnerIterations = fold.Fold ? FoldIterations : CorrectionSolver.DefaultInnerIterations;
+        p.InnerIterations = fold.Fold ? cfg.FoldIterations : CorrectionSolver.DefaultInnerIterations;
         // Contact-push attribution (render-only; the pooled Problem is shared
         // with the maneuver states, so set it explicitly either way).
         p.RowPush = s.CaptureTrajectories ? s.RowPush : null;

@@ -152,12 +152,33 @@ Each `Update`:
 
 ### Movement FSM ([Character/Movement.cs](Character/Movement.cs), [MovementStates.cs](Character/MovementStates.cs))
 
-**Free states**: `FallingState` (0/0, fallback), `StandingState` (10/10, spring-held to ground), `CrouchedState` (15/15), `WallSlidingState(dir)`.
-**Stun**: `StunnedState` (25/25) — heavy-hit lockout; muted air control while `Combat.StunActive`. Preempts free/wall states but not active jumps.
-**Launch states**: `JumpingState`, `RunningJumpState`, `DoubleJumpingState`, `WallJumpingState(dir)`, `CoveredJumpState` (under low overhangs) — set vY once, hold while button held (priorities 50–60).
-**Guided traversals** (`MovementPriorities.GuidedActive/Passive`, band 25–45): `ParkourState(dir)` (vault/duck via `SteeringRamp`), `LedgeGrabState(dir)` + `LedgePullState(dir)` (wall corners via `FloatingSurfaceDistance` + ability flags), `DropdownState` (Down+platform-drop). These are now ordinary `MovementState`s — there is **no** shared `GuidedState` base or Hermite `GuidedPath` controller anymore (`GuidedState.cs` was removed; `GuidedPath.cs` is vestigial).
+> **The corrector era** (Plans/BALLISTIC_CORRECTOR_PLAN.md +
+> Plans/CORRECTOR_CONSOLIDATION_PLAN.md): free-state locomotion is now
+> solver-driven — "the solver IS the locomotion controller". The FOLD states
+> (Standing/Falling/Crouched) attach **no** ground constraint and no spring;
+> they apply only a gravity-hold + station-friction baseline
+> (`StandingState.FoldBaseline`) and publish a `FoldProfile` (hover offset,
+> climb reach, target speed). Each frame `AmbientCorrector.Apply` predicts a
+> correction-free coast (`BallisticPredictor`), emits clearance rows against
+> exact per-tile C-space geometry (`CObstacle`, `ClearanceConstraintBuilder`)
+> plus soft envelope-reference rows (hover/progress), and solves a restricted
+> channel stack (`CorrectorChannels`: LegServo/Drive/CornerAssist/Redirect/
+> Tuck — capability = channel restriction, never casework) with the
+> preconditioned projected-gradient `CorrectionSolver`. Hover, walking,
+> braking, landing catch, 1-high climbs, ducks, and graze deflections are all
+> solver output; climb bindings are ALL-OR-NOTHING with rollout-checked
+> deliverability and hysteresis (elective refusal — the honest bonk). The
+> corrector climb family (`ParkourCorrectorState`/`ArcJumpCorrectorState`/
+> `MantleCorrectorState`) owns bigger maneuvers on the same predict→rows→solve
+> loop with a redirect-disc-only channel. Non-fold states keep their owned
+> servo mechanics and gate ambient assists via `AmbientPolicy`.
 
-`MovementState` lifecycle methods take `ref MovementVars`; `ResetTransient()` nulls any soft-contact ref cache after a restore so the idempotent `Ensure…` rebuilds it next frame.
+**Fold states**: `FallingState` (0/0, fallback), `StandingState` (10/10), `CrouchedState` (15/15) — support/locomotion via the ambient fold (above). **Wall**: `WallSlidingState(dir)` (owned; publishes `AmbientPolicy.Off`).
+**Stun**: `StunnedState` (25/25) — heavy-hit lockout; muted air control while `Combat.StunActive`. Preempts free/wall states but not active jumps. `TumbleState` — airborne launch variant.
+**Launch states**: `JumpingState`, `RunningJumpState`, `DoubleJumpingState`, `WallJumpingState(dir)`, `CoveredJumpState` (under low overhangs) — set vY once, hold while button held (priorities 50–60).
+**Guided traversals** (band 25–46): the corrector climb family above (trigger-by-feasibility: a maneuver fires iff its corrected arc provably delivers), `LedgeGrabState(dir)` + `LedgePullState(dir)` (wall corners via `FloatingSurfaceDistance` + ability flags), `DropdownState` (Down+platform-drop).
+
+`MovementState` lifecycle methods take `ref MovementVars`; `ResetTransient()` nulls any soft-contact ref cache after a restore so the idempotent `Ensure…` rebuilds it next frame. Cross-frame corrector state (Δu anchors, elective latch) lives in `MovementVars` — snapshot-covered.
 
 ### Action FSM ([Character/ActionStates.cs](Character/ActionStates.cs))
 
