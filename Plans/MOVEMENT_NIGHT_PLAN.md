@@ -98,7 +98,7 @@ Two new behavior contracts, written as tests first; fix whatever they expose.
 - Re-run `ClimbArbitrationTests` + `VaultJumpAndLipReproTests` — this
   milestone touches the exact ground they pin.
 
-## M4 — Reference trajectories: ledge pull, then dropdown (todo 7 + 8)
+## M4 — Reference trajectories: ledge pull, then dropdown (todo 7 + 8) `[!] blocked — needs user`
 
 Migrate the two remaining hand-tuned kinematic moves onto the Hermite
 reference-clip system (`b1d4486`, editor via `--ref`).
@@ -129,6 +129,21 @@ reference-clip system (`b1d4486`, editor via `--ref`).
   partial work behind a green suite, and move to the next milestone.
 
 ## Decisions needed
+
+- **M4 blocked: the reference-clip system has no runtime half.** What exists
+  from b1d4486: `Character/HermiteClip.cs` (curve model, serialization) and
+  the interactive editor (`dotnet run --project MTile.Demo -- --ref <name>`).
+  What does NOT exist: `ReferencePath` (BALLISTIC_CORRECTOR_PLAN §1 — the
+  retarget-at-Enter runtime consumer), any `ReferenceClips/` assets, an
+  asset-pipeline story (repo-root JSON → both hosts, like the configs; NO
+  file IO mid-sim — load at startup for determinism + web parity), or a
+  snapshot story for playback phase. Migrating LedgePull/Dropdown tonight
+  would have meant hand-building all of that plus AUTHORING the pull-up and
+  slip-off arc shapes — game-feel work that needs you and the editor.
+  Recommended path: you author `ledge_pull` (grab pose → crest → standing)
+  and `dropdown` clips in the editor; next session implements ReferencePath
+  (retarget + time parametrization + startup loading) and wires the two
+  states to track it, pinned by before/after trace tests.
 
 - **Ambient corner-plant: default on or off?** (`FoldCornerPlantEnabled`,
   hot-reloadable, currently FALSE.) The full plant machinery is built and
