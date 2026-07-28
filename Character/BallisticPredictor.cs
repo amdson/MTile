@@ -67,11 +67,10 @@ public static class BallisticPredictor
         var polygon = body.Polygon;
         float floatHeight = PlayerCharacter.Radius;
 
-        // TEMP EXPERIMENT (stand fold): the standing spring + FSD zeroing/sweep
-        // are removed from this coast (as from the live StandingState) — vertical
-        // support is now the solver's job via soft hover rows. The grounded
-        // branch is just the walk drive; FloorY is reported whenever a floor is
-        // within probe reach so the ambient corrector can synthesize hover rows.
+        // The stand fold: no standing spring, no FSD zeroing/sweep in this coast
+        // (mirroring the live StandingState) — vertical support is the solver's
+        // job via soft hover rows. FloorY is reported whenever a floor is within
+        // probe reach so the ambient corrector can synthesize hover rows.
         for (int k = 0; k < steps; k++)
         {
             var bounds = polygon.GetBoundingBox(pos);
@@ -81,12 +80,12 @@ public static class BallisticPredictor
             var force = Vector2.Zero;
             if (grounded)
             {
-                // TEMP EXPERIMENT (walk fold): no ground drive in the coast —
-                // x-locomotion is requested from the solver via progress rows.
-                // Vertically, the stand baseline HOLDS AGAINST GRAVITY (mirrored
-                // by live StandingState): sustained support is feedforward, not
-                // a correction — channels act relative to the hold (LegServo =
-                // push beyond it, Tuck = release/press below it).
+                // No ground drive in the coast — x-locomotion is requested from
+                // the solver via progress rows. Vertically, the stand baseline
+                // HOLDS AGAINST GRAVITY (mirrored by live StandingState):
+                // sustained support is feedforward, not a correction — channels
+                // act relative to the hold (LegServo = push beyond it, Tuck =
+                // release/press below it).
                 force.Y -= gravity.Y;
             }
             else
@@ -167,7 +166,7 @@ public static class BallisticPredictor
                 var spring = BaselineFeedforward.Ground(
                     pos, vel, groundPos, groundNormal, Vector2.Zero, minDistance,
                     inputX: 0f, walkAccel: 0f, maxWalkSpeed: 0f,
-                    preserveExternalVelocity: false, ambientLiftActive: false,
+                    preserveExternalVelocity: false,
                     cfg.SpringK, cfg.SpringDamping, cfg.SpringMaxRiseSpeed, dt);
                 force.Y += spring.Y;
             }

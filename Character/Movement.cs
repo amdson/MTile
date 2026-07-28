@@ -255,21 +255,18 @@ public class StandingState : MovementState
         return riseSpeed <= MovementConfig.Current.SpringMaxRiseSpeed;
     }
 
-    // TEMP EXPERIMENT (stand fold): the ground FSD constraint + hover spring are
-    // REMOVED from Standing — vertical support is solved by the ambient corrector
-    // (soft hover rows, see AmbientCorrector). Standing keeps classification and
-    // the walk drive only. With no physics contact there is no contact friction,
-    // so no-input braking is applied explicitly (BrakingForce). Crouched and the
-    // climb family still run the old spring machinery.
+    // The stand fold (see AmbientCorrector): no ground FSD, no hover spring —
+    // vertical support, walk drive, braking, and the landing catch are all the
+    // ambient solve's job (soft envelope rows + the channel stack). Standing
+    // keeps classification only.
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        // TEMP EXPERIMENT (walk fold): walk drive + braking live in the ambient
-        // solve as x-progress rows. The one baseline Standing applies is the
-        // gravity hold — sustained support is feedforward (mirrored by the
-        // predictor's grounded branch); the solver's channels act relative to
-        // it. Without this the solver must win a tug-of-war against gravity at
-        // dt² leverage every frame, which it structurally cannot (the post-
-        // landing dead-rest bug).
+        // The one baseline Standing applies is the gravity hold — sustained
+        // support is feedforward (mirrored by the predictor's grounded branch);
+        // the solver's channels act relative to it. DC demands never belong in
+        // the solver's soft rows: without the hold it must win a tug-of-war
+        // against gravity at dt² leverage every frame, which it structurally
+        // cannot (the post-landing dead-rest bug).
         ctx.Body.AppliedForce = new Vector2(0f, -ctx.Gravity.Y);
     }
 }
@@ -343,7 +340,9 @@ public class CrouchedState : MovementState
         float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
         if (gap > 0f)
             force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
-        // TEMP EXPERIMENT (throwaway): anti-pop rise clamp removed — see StandingState.Update.
+        // No anti-pop rise clamp (killed with the stand fold): the two-sided
+        // envelope rows superseded it, and a hidden counter-force would fight
+        // solver corrections.
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
         if (inputX != 0f)

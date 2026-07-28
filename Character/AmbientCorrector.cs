@@ -25,28 +25,27 @@ public struct AmbientPolicy
 // corner tops; wall faces emit nothing and the coast deep-truncates), solve,
 // apply z₀.
 //
-// ── TEMP EXPERIMENT (stand fold) ──────────────────────────────────────────────
-// StandingState's hover spring + ground FSD are FOLDED INTO this solve:
-//  - While the current state is Standing/Falling (solverStand), soft per-tick
+// ── The stand fold (Plans/CORRECTOR_CONSOLIDATION_PLAN.md) ────────────────────
+// StandingState's hover spring + ground FSD are FOLDED INTO this solve — "the
+// solver IS the locomotion controller" for the free states:
+//  - While the current state is a fold state (Standing/Falling), soft per-tick
 //    hover-support rows (Normal up, HingeScale ≪ 1) are synthesized wherever the
 //    coast has a floor in reach below hover height. The solver's plan holds the
 //    body at hover — and YIELDS under hard obstacle rows, which is the duck /
 //    crest / landing-catch mechanic in one piece.
 //  - The solve runs unconditionally (no input gate — hover must hold at rest,
 //    which also removes the vx=0 liveness deadlock) and the plan is ALWAYS
-//    applied in solverStand mode (support is load-bearing; feasible-only gating
-//    would drop the body). Anti-autopilot refusal survives only for non-fold
-//    states.
-//  - The channel is the experiment's arbitrary-but-regularized force channel
-//    (redirect disc suspended); senses are solved JOINTLY (the old up/down
-//    homotopy partition would strip support rows from a down pass).
-// Original (pre-fold, redirect + refusal + sense partition) behavior is in git.
+//    applied in fold mode (support is load-bearing; feasible-only gating would
+//    drop the body). Anti-autopilot refusal survives for non-fold states, and
+//    returns for the fold's ELECTIVE tier via CORRECTOR_CONSOLIDATION_PLAN §4.
+//  - Actuation is the restricted channel stack (BuildStandChannels): LegServo /
+//    Traction / CornerAssist / Redirect / Tuck with per-tick masks and caps,
+//    solved JOINTLY — senses are never partitioned (an up/down homotopy split
+//    would strip support rows from a down pass).
 public sealed class AmbientCorrector
 {
     private const float HingeWeight     = 1e6f;    // stiffness constant, not a knob
-    // TEMP EXPERIMENT (throwaway): quadratic regularizer for the force channel
-    // that replaces the redirect disc — see the channel def.
-    private const float ForceRegWeight  = 1f;
+    private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
     // Stand-fold constants: hover target ≈ the old spring equilibrium
     // (minDistance 24 − gravity/SpringK 2), so the rest pose matches the old
     // look. Support rows are soft (HingeScale ≪ 1) so hard clearance rows can
@@ -114,7 +113,6 @@ public sealed class AmbientCorrector
             || (!policy.Over && !policy.Under && !solverStand))
         {
             vars.AmbientPrevDv = Vector2.Zero;
-            vars.AmbientLiftActive = false;
             return;
         }
 
@@ -199,7 +197,6 @@ public sealed class AmbientCorrector
         if (rowCount == 0)
         {
             vars.AmbientPrevDv = Vector2.Zero;
-            vars.AmbientLiftActive = false;
             return;
         }
 
@@ -229,13 +226,17 @@ public sealed class AmbientCorrector
         }
         else
         {
-            // Non-fold states keep the earlier single-channel experiment
-            // (unbounded regularized force; redirect disc suspended).
+            // Non-fold states get the original ambient channel: the redirect disc,
+            // feasible-only (refusal below). Energy honesty — the disc only rotates
+            // or sheds the velocity the body already has; ambient assists during an
+            // owned state's Default-policy window never inject speed. (An unbounded
+            // force channel stood in here during the stand-fold experiments; the
+            // disc is restored deliberately.)
             p.ChannelCount = 1;
             p.Channels[0] = new ChannelDef
             {
-                Lever = LeverKind.VelocityUpdate, Weight = ForceRegWeight,
-                Redirect = false, Cap = float.MaxValue, ActiveFrom = 0, ActiveTo = n,
+                Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon,
+                Redirect = true, ActiveFrom = 0, ActiveTo = n,
             };
             p.PrevApplied[0] = vars.AmbientPrevDv;
         }
@@ -253,7 +254,6 @@ public sealed class AmbientCorrector
         if (!solverStand && residual > cfg.AmbientRefusalResidual)
         {
             vars.AmbientPrevDv = Vector2.Zero;
-            vars.AmbientLiftActive = false;
             return;
         }
 
@@ -273,7 +273,6 @@ public sealed class AmbientCorrector
         }
         ctx.Body.AppliedForce += applied;
         vars.AmbientPrevDv = s.TickDv[0];
-        vars.AmbientLiftActive = s.TickDv[0].Y < -0.01f;
 
         if (s.CaptureTrajectories)
         {

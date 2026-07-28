@@ -117,8 +117,8 @@ public class CorrectorAnchorTests(ITestOutputHelper output)
             CoastVel = new Vector2[H],
             Rows = new[]
             {
-                new ClearanceRow { Tick = 4, Normal = new Vector2(0f, 1f), Depth = m },   // duck early
-                new ClearanceRow { Tick = 9, Normal = Up,                  Depth = m },   // rise late
+                new ClearanceRow { Tick = 4, Normal = new Vector2(0f, 1f), Depth = m, HingeScale = 1f },   // duck early
+                new ClearanceRow { Tick = 9, Normal = Up,                  Depth = m, HingeScale = 1f },   // rise late
             },
             RowCount = 2,
             Channels = new[] { new ChannelDef { Lever = LeverKind.Force, Weight = 1e-4f, Cap = 1e9f, ActiveFrom = 0, ActiveTo = H } },
@@ -150,7 +150,7 @@ public class CorrectorAnchorTests(ITestOutputHelper output)
         {
             H = H, Dt = 1f / 60f,
             CoastVel = new Vector2[H],
-            Rows = new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m } },
+            Rows = new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m, HingeScale = 1f } },
             RowCount = 1,
             Channels = new[] { new ChannelDef { Lever = LeverKind.Force, Weight = 1e-4f, Cap = 1e9f, ActiveFrom = 0, ActiveTo = H } },
             ChannelCount = 1,

@@ -47,7 +47,7 @@ public class CorrectionSolverTests
         const float m = 4f;
         var p = Problem(H,
             new[] { new ChannelDef { Lever = LeverKind.Force, Weight = 1e-4f, Cap = 1e9f, ActiveFrom = 0, ActiveTo = H } },
-            new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m } });
+            new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m, HingeScale = 1f } });
 
         var (z, residual) = Solve(p);
 
@@ -71,7 +71,7 @@ public class CorrectionSolverTests
         const float m = 2f;
         var p = Problem(H,
             new[] { new ChannelDef { Lever = LeverKind.VelocityUpdate, Weight = 1e-4f, Cap = 1e9f, ActiveFrom = 0, ActiveTo = 1 } },
-            new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m } });
+            new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m, HingeScale = 1f } });
 
         var (z, residual) = Solve(p);
 
@@ -92,7 +92,7 @@ public class CorrectionSolverTests
         const float m = 4f;
         var p = Problem(H,
             new[] { new ChannelDef { Lever = LeverKind.Force, Weight = 1e-4f, Cap = 1e9f, ActiveFrom = 0, ActiveTo = H } },
-            new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m } });
+            new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m, HingeScale = 1f } });
 
         var (z, _) = Solve(p);
 
@@ -115,7 +115,7 @@ public class CorrectionSolverTests
         var coast = new[] { new Vector2(10f, 0f), new Vector2(10f, 0f) };
         var p = Problem(H,
             new[] { new ChannelDef { Lever = LeverKind.VelocityUpdate, Weight = 1e-6f, Redirect = true, ActiveFrom = 0, ActiveTo = H } },
-            new[] { new ClearanceRow { Tick = 0, Normal = Up, Depth = 5f } },
+            new[] { new ClearanceRow { Tick = 0, Normal = Up, Depth = 5f, HingeScale = 1f } },
             coastVel: coast);
 
         var (z, residual) = Solve(p);
@@ -147,7 +147,7 @@ public class CorrectionSolverTests
         const int H = 10, T = 9;
         const float m = 4f, cap = 350f;
         ChannelDef Ch() => new() { Lever = LeverKind.Force, Weight = 1e-4f, Cap = cap, ActiveFrom = 0, ActiveTo = H };
-        var row = new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m } };
+        var row = new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = m, HingeScale = 1f } };
 
         var (zSharp, rSharp)    = Solve(Problem(H, new[] { Ch() }, row, deltaWeight: 0f));
         var (zSmooth, rSmooth)  = Solve(Problem(H, new[] { Ch() }, row, deltaWeight: 5f));
@@ -176,7 +176,7 @@ public class CorrectionSolverTests
         const float cap = 100f;
         var p = Problem(H,
             new[] { new ChannelDef { Lever = LeverKind.Force, Weight = 1e-4f, Cap = cap, ActiveFrom = 0, ActiveTo = H } },
-            new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = 50f } });   // far beyond reach
+            new[] { new ClearanceRow { Tick = T, Normal = Up, Depth = 50f, HingeScale = 1f } });   // far beyond reach
 
         var (z, residual) = Solve(p);
 
@@ -199,8 +199,8 @@ public class CorrectionSolverTests
             },
             new[]
             {
-                new ClearanceRow { Tick = 4, Normal = Up, Depth = 3f },
-                new ClearanceRow { Tick = 8, Normal = new Vector2(1f, 0f), Depth = 2f },
+                new ClearanceRow { Tick = 4, Normal = Up, Depth = 3f, HingeScale = 1f },
+                new ClearanceRow { Tick = 8, Normal = new Vector2(1f, 0f), Depth = 2f, HingeScale = 1f },
             },
             deltaWeight: 2f, coastVel: coast);
 

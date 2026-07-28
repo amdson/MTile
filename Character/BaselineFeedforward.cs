@@ -48,18 +48,18 @@ public static class BaselineFeedforward
         return 0f;
     }
 
-    // Grounded standing force: hover spring + walk drive. Mirror of
-    // StandingState.Update's force block against its refreshed ground FSD.
-    // walkAccel/maxWalkSpeed arrive pre-multiplied by modifiers.
-    // TEMP EXPERIMENT (throwaway): the anti-pop rise clamp (and its
-    // ambientLiftActive exemption gate) is removed here and in the live
-    // Standing/Crouched mirrors — corrector corrections must not be fought by
-    // hidden counter-forces while testing.
+    // Grounded spring force: hover spring + walk drive, the pre-fold standing
+    // baseline. The live Standing state no longer uses this (the stand fold —
+    // see AmbientCorrector); it survives as PredictGuided's landing-settle model
+    // and as the Crouched-family mirror until those states fold too.
+    // walkAccel/maxWalkSpeed arrive pre-multiplied by modifiers. There is
+    // deliberately NO anti-pop rise clamp: the fold's two-sided envelope rows
+    // superseded it, and a hidden counter-force would fight solver corrections.
     public static Vector2 Ground(
         Vector2 pos, Vector2 vel,
         Vector2 groundPos, Vector2 groundNormal, Vector2 groundSurfaceVel, float minDistance,
         float inputX, float walkAccel, float maxWalkSpeed,
-        bool preserveExternalVelocity, bool ambientLiftActive,
+        bool preserveExternalVelocity,
         float springK, float springDamping, float springMaxRiseSpeed,
         float dt)
     {

@@ -15,6 +15,19 @@ public class PlayerCharacter : IHittable
     // test fixture geometry.
     public const float Radius = 12f;
 
+    // Body silhouette: a regular hexagon squeezed to half width (twice as tall as
+    // wide). The slim profile is a core gameplay attribute — it threads 1-tile
+    // gaps and reads as a nimble runner; collision, the C-obstacle template, and
+    // the corrector's clearance geometry all derive from this one polygon.
+    public const float BodyWidthScale = 0.5f;
+
+    public static Polygon CreateBodyPolygon()
+    {
+        var verts = Polygon.CreateRegular(Radius, 6).GetVertices(Vector2.Zero);
+        for (int i = 0; i < verts.Length; i++) verts[i].X *= BodyWidthScale;
+        return new Polygon(verts);
+    }
+
     // Standing head height above the floor: float height (= Radius) + the hexagon body's
     // full vertical extent (2 · R·sin60°). Used by auto-crouch to decide whether standing
     // fits under a ceiling.
@@ -176,7 +189,7 @@ public class PlayerCharacter : IHittable
 
     // Ambient corrector layer (BALLISTIC_CORRECTOR_PLAN step 7) — per-frame free-coast
     // predict/solve replacing the old ReflexSystem ramps. Cross-frame state lives in
-    // MovementVars (AmbientPrevDv / AmbientLiftActive); everything else is scratch.
+    // MovementVars (AmbientPrevDv + the per-channel Δ anchors); everything else is scratch.
     private readonly AmbientCorrector _ambient = new();
 
     // Long-lived per-direction corridor scratch for EnvironmentContext.GetCorridor — pure
@@ -255,10 +268,7 @@ public class PlayerCharacter : IHittable
 
     public PlayerCharacter(Vector2 startPosition)
     {
-        // TEMP EXPERIMENT: hexagon squeezed to half width (twice as tall as wide).
-        var hexVerts = Polygon.CreateRegular(Radius, 6).GetVertices(Vector2.Zero);
-        for (int i = 0; i < hexVerts.Length; i++) hexVerts[i].X *= 0.5f;
-        Body = new PhysicsBody(new Polygon(hexVerts), startPosition);
+        Body = new PhysicsBody(CreateBodyPolygon(), startPosition);
         // Landing impact damage. PhysicsWorld dispatches this whenever a body
         // hits a surface (chunk OR floating-surface constraint) with vnRel < 0
         // and Impact != null. Tuning rationale:
@@ -569,9 +579,9 @@ public class PlayerCharacter : IHittable
         // Hitstun forces the policy off — knockback must hit corners honestly, whatever
         // free state is nominally active.
         var rampPolicy = _abilities.Combat.HitstunActive ? AmbientPolicy.Off : _currentState.AmbientPolicy;
-        // TEMP EXPERIMENT (stand fold): while Standing/Falling, hover support is
-        // the ambient solve's job (Standing no longer attaches an FSD/spring), so
-        // the corrector must run — and apply — even at zero input and in hitstun.
+        // The stand fold: while a fold state is active, hover support is the
+        // ambient solve's job (the state attaches no FSD/spring), so the
+        // corrector must run — and apply — even at zero input and in hitstun.
         bool solverStand = _currentState is StandingState or FallingState;
         _ambient.Apply(ctx, rampPolicy, IsGrounded, solverStand, ref _moveVars);
 

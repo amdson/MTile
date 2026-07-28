@@ -44,7 +44,7 @@ public sealed class CorrectorScratch
     // rows → solve loop without touching the real body. Polygon is re-pointed at
     // the owning body's before every use.
     public readonly PhysicsBody ProbeBody =
-        new(Polygon.CreateRegular(PlayerCharacter.Radius, 6), Vector2.Zero);
+        new(PlayerCharacter.CreateBodyPolygon(), Vector2.Zero);
 
     // ── Trajectory capture for the debug overlay (render-only diagnostics) ──
     // CaptureTrajectories is set by the HOST from its draw flags; the sim only
@@ -99,9 +99,6 @@ public abstract class CorrectorClimbBase : MovementState
 {
     private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
     private const float HingeWeight     = 1e6f;    // stiffness constant, not a feel knob
-    // TEMP EXPERIMENT (throwaway): see AmbientCorrector — force channel replaces
-    // the redirect disc in RunCorrector below.
-    private const float ForceRegWeight  = 1f;
     // Entry feasibility solves the FULL arc once per candidate frame and can afford
     // a deeper fixed iteration budget than the per-tick re-solve (opposed-row
     // schedules — the slalom class — need the extra sweeps; see the anchor tests).
@@ -354,13 +351,15 @@ public abstract class CorrectorClimbBase : MovementState
             p.CoastVel = s.CoastVel;
             p.Rows = s.Rows; p.RowCount = rowCount;
             p.ChannelCount = 1;
-            // TEMP EXPERIMENT (throwaway): force channel instead of the redirect
-            // disc — see AmbientCorrector. Original:
-            //   Lever = VelocityUpdate, Weight = RedirectEpsilon, Redirect = true
+            // Redirect disc (the maneuver channel): passive deflections only — the
+            // entry hop already injected all the maneuver's energy, so the solver
+            // may steer that momentum but never add speed. (An unbounded force
+            // channel stood in here during the stand-fold experiments; the disc is
+            // the energy-honesty story and is restored deliberately.)
             p.Channels[0] = new ChannelDef
             {
-                Lever = LeverKind.VelocityUpdate, Weight = ForceRegWeight,
-                Redirect = false, Cap = float.MaxValue, ActiveFrom = 0, ActiveTo = n,
+                Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon,
+                Redirect = true, ActiveFrom = 0, ActiveTo = n,
             };
             p.PrevApplied[0] = prevDv;
             p.DeltaWeight = cfg.CorrectorDeltaWeight;
