@@ -30,6 +30,15 @@ public struct ChannelDef
     public float[]   CapPerTick;   // per-tick cap override (velocity-conditioned sets,
                                    // frozen from the last rollout); null = use Cap
     public bool[]    ActiveMask;   // per-tick activation predicate; null = [ActiveFrom, ActiveTo)
+    // Row-class compatibility: a SkipSoftHorizontal channel takes no hinge
+    // gradient from soft rows (HingeScale < 1) whose normal is horizontal —
+    // the x-progress reference. A free deflector serving a soft x row is an
+    // air-brake (autopilot braking along held intent); soft VERTICAL rows
+    // (hover/envelope tracking — ducks, catches) are legitimate recruiters
+    // and never oppose horizontal intent. The channel's displacement still
+    // counts toward EVERY row's slack — physics moves the body regardless of
+    // which demand motivated the move; only the response is restricted.
+    public bool      SkipSoftHorizontal;
 }
 
 // One frozen convex subproblem of the sequential-convexification scheme: coast
@@ -86,6 +95,9 @@ public static class CorrectionSolver
     private static float CapAt(in ChannelDef ch, int k)
         => ch.CapPerTick != null ? ch.CapPerTick[k] : ch.Cap;
 
+    private static bool Skips(in ChannelDef ch, in ClearanceRow row)
+        => ch.SkipSoftHorizontal && row.HingeScale < 1f && MathF.Abs(row.Normal.X) > 0.7f;
+
     // Solves the frozen subproblem into z (layout: z[c*H + k]); zScratch is a
     // same-size buffer for the synchronous gradient step. Returns the linear-model
     // residual: max over rows of the remaining violation (0 = all rows cleared).
@@ -99,31 +111,35 @@ public static class CorrectionSolver
         if (p.RowPush != null)
             for (int j = 0; j < p.RowCount; j++) p.RowPush[j] = Vector2.Zero;
 
-        // Fixed step η = 1/L, L a Gershgorin-style Lipschitz bound of the
-        // quadratic+hinge surrogate: per-variable weight curvature + Δ-chain
-        // curvature + hinge curvature 2wH‖a_j‖² summed over rows.
-        float maxW = 0f;
-        for (int c = 0; c < C; c++) maxW = MathF.Max(maxW, p.Channels[c].Weight);
-        float hingeCurv = 0f;
+        // PER-VARIABLE step sizes η_ck = 1/L_ck (diagonal preconditioning with a
+        // Gershgorin row-sum bound). A single global η is set by the stiffest
+        // variable — and the fold mixes VelocityUpdate levers (∝ dt) with Force
+        // levers (∝ dt²) and hard rows (HingeScale 1) with soft references
+        // (0.02): the curvature disparity is ~10³–10⁴, so a shared step starves
+        // the force channels and soft demands to numerical silence under the
+        // fixed iteration budget. Per-variable: L_ck = 2w_c + 8wΔ (Δ-chain row
+        // sum) + Σ_j 2·wH·hs_j·lever_ckj·S_j, where S_j is row j's TOTAL
+        // compatible lever mass — the hinge Hessian's (c,k) row sum, so the
+        // preconditioned gradient step is a descent step on the quadratic
+        // surrogate. Compatibility (HardRowsOnly) shapes both gradient and
+        // bound identically.
+        Span<float> rowS = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
         for (int j = 0; j < p.RowCount; j++)
         {
-            float leverSq = 0f;
+            float sum = 0f;
             for (int c = 0; c < C; c++)
             {
                 var ch = p.Channels[c];
+                if (Skips(ch, p.Rows[j])) continue;
                 int kMax = Math.Min(p.Rows[j].Tick, H - 1);
                 for (int k = 0; k <= kMax; k++)
                 {
                     if (!Active(ch, k)) continue;
-                    float lever = Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
-                    leverSq += lever * lever;
+                    sum += Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
                 }
             }
-            hingeCurv += 2f * p.HingeWeight * p.Rows[j].HingeScale * leverSq;
+            rowS[j] = sum;
         }
-        float L = 2f * maxW + 8f * p.DeltaWeight + hingeCurv;
-        if (L <= 0f) return ComputeResidual(p, z);
-        float eta = 1f / L;
 
         Span<float> slack = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
         for (int it = 0; it < p.InnerIterations; it++)
@@ -142,6 +158,7 @@ public static class CorrectionSolver
                     if (!Active(ch, k)) { zScratch[i] = Vector2.Zero; continue; }
 
                     var g = 2f * ch.Weight * z[i];
+                    float L = 2f * ch.Weight + 8f * p.DeltaWeight;
 
                     if (p.DeltaWeight > 0f)
                     {
@@ -151,16 +168,31 @@ public static class CorrectionSolver
                             g -= 2f * p.DeltaWeight * (z[i + 1] - z[i]);
                     }
 
+                    // Curvature bound over the SAME (row, k) pairs the gradient
+                    // uses — the Hessian row sum of the terms this variable
+                    // actually feels. The bound uses the full hinge set (not
+                    // just currently-violated rows): conservative when a hinge
+                    // is inactive, never optimistic.
+                    for (int j = 0; j < p.RowCount; j++)
+                    {
+                        if (k > p.Rows[j].Tick) continue;
+                        if (Skips(ch, p.Rows[j])) continue;
+                        float lever = Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
+                        L += 2f * p.HingeWeight * p.Rows[j].HingeScale * lever * rowS[j];
+                    }
+                    if (L <= 0f) { zScratch[i] = z[i]; continue; }
+
                     for (int j = 0; j < p.RowCount; j++)
                     {
                         if (slack[j] <= 0f || k > p.Rows[j].Tick) continue;
+                        if (Skips(ch, p.Rows[j])) continue;
                         float lever = Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
                         var push = 2f * p.HingeWeight * p.Rows[j].HingeScale * slack[j] * lever * p.Rows[j].Normal;
                         g -= push;
-                        if (p.RowPush != null && k == 0) p.RowPush[j] += eta * push;
+                        if (p.RowPush != null && k == 0) p.RowPush[j] += push / L;
                     }
 
-                    zScratch[i] = Project(ch, k, p.CoastVel[k], z[i] - eta * g);
+                    zScratch[i] = Project(ch, k, p.CoastVel[k], z[i] - g / L);
                 }
             }
 

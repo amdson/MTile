@@ -8,7 +8,8 @@ namespace MTile.Tests;
 
 // DropdownState should only activate when some portion of the body's bounding box is
 // hanging over the edge — analogous to CoveredJump's "any portion sticking out" gate.
-// Hex body is ~16.46 wide (vertices at ±8.23 in X).
+// Half-width hex body: X extent ±6 (PlayerCharacter.BodyWidthScale), so
+// hanging over a right edge at x=160 ⇔ startX > 154.
 //
 // Terrain has a platform at row 5 cols 0..9, so the drop edge to the right is at x=160.
 public class DropdownTests(ITestOutputHelper output)
@@ -27,13 +28,13 @@ public class DropdownTests(ITestOutputHelper output)
         OOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXX";
 
-    // body.Bounds.Right = startX + R·sin60° ≈ startX + 10.39 (R=12); edge x=160;
-    // hanging ↔ body.Right > 160 ↔ startX > 149.61.
+    // body.Bounds.Right = startX + 6 (half-width hexagon); edge x=160;
+    // hanging ↔ body.Right > 160 ↔ startX > 154.
     [Theory]
-    [InlineData(152.0f)]  // body.Right ≈ 162.39 — ~2.4 px hanging
-    [InlineData(156.0f)]  // body.Right ≈ 166.39 — ~6.4 px hanging
+    [InlineData(155.5f)]  // body.Right ≈ 161.5 — ~1.5 px hanging
+    [InlineData(157.0f)]  // body.Right ≈ 163 — ~3 px hanging
     [InlineData(160.0f)]  // body center at edge; half hanging
-    [InlineData(165.0f)]  // body center 5 px past edge; mostly hanging
+    [InlineData(163.0f)]  // body center 3 px past edge; mostly hanging
     public void HoldDown_HangingOverRightEdge_FiresDropdown(float startX)
     {
         var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
@@ -67,8 +68,8 @@ public class DropdownTests(ITestOutputHelper output)
         }
 
         Assert.True(fired,
-            $"startX={startX} (body.Right≈{startX+10.39f:F2}, edge=160): body has " +
-            $"{startX+10.39f-160f:F2} px hanging over edge — DropdownState should fire.");
+            $"startX={startX} (body.Right≈{startX+6f:F2}, edge=160): body has " +
+            $"{startX+6f-160f:F2} px hanging over edge — DropdownState should fire.");
     }
 
     // Body fully on the platform (no portion past the drop edge): DropdownState must NOT
@@ -76,8 +77,8 @@ public class DropdownTests(ITestOutputHelper output)
     [Theory]
     [InlineData(80.0f)]   // way back on platform
     [InlineData(120.0f)]  // middle of platform
-    [InlineData(144.0f)]  // body center on col 9 (last solid col), body.Right ≈ 154.39 < 160
-    [InlineData(149.0f)]  // body.Right ≈ 159.39 — just barely still on the platform
+    [InlineData(148.0f)]  // body center on col 9 (last solid col), body.Right = 154 < 160
+    [InlineData(153.5f)]  // body.Right = 159.5 — just barely still on the platform
     public void HoldDown_FullyOnPlatform_DoesNotFireDropdown(float startX)
     {
         var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
@@ -110,7 +111,7 @@ public class DropdownTests(ITestOutputHelper output)
         }
 
         Assert.False(fired,
-            $"startX={startX} (body.Right≈{startX+10.39f:F2}, edge=160): body is fully on " +
+            $"startX={startX} (body.Right≈{startX+6f:F2}, edge=160): body is fully on " +
             $"the platform — DropdownState must not fire.");
     }
 
@@ -119,10 +120,10 @@ public class DropdownTests(ITestOutputHelper output)
     // bug: the body's column being empty made the algorithm report a spurious left edge,
     // and the closer-edge tiebreak could pick the wrong side.
     [Theory]
-    [InlineData(152.0f)]
-    [InlineData(156.0f)]
+    [InlineData(155.5f)]
+    [InlineData(157.0f)]
     [InlineData(160.0f)]
-    [InlineData(165.0f)]
+    [InlineData(163.0f)]
     public void HoldDown_HangingOverRightEdge_SlidesRight(float startX)
     {
         var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
@@ -162,10 +163,10 @@ public class DropdownTests(ITestOutputHelper output)
         XXXXXXXXXXXXXXXXXXXX";
 
     [Theory]
-    [InlineData(168.0f)]  // body.Left ≈ 159.77 — barely hanging (~0.2 px past edge)
-    [InlineData(164.0f)]  // body.Left ≈ 155.77 — ~4 px hanging
+    [InlineData(164.5f)]  // body.Left ≈ 158.5 — ~1.5 px hanging past edge
+    [InlineData(163.0f)]  // body.Left ≈ 157 — ~3 px hanging
     [InlineData(160.0f)]  // body center at edge
-    [InlineData(155.0f)]  // body mostly off (center 5 px past edge)
+    [InlineData(157.0f)]  // body mostly off (center 3 px past edge)
     public void HoldDown_HangingOverLeftEdge_SlidesLeft(float startX)
     {
         var terrain = SimTerrain.FromAscii(LeftEdgeTerrain, originTileX: 0, originTileY: 0);

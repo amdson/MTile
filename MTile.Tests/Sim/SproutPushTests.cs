@@ -69,8 +69,10 @@ public class SproutPushTests(ITestOutputHelper output)
         output.WriteLine($"final X={last.X:F2} (start 154.00)");
         // Sprout AABB ends at x:144..160. To be clear of it, body centre must
         // sit at x ≥ 160 + 8.23 ≈ 168.23. Allow a margin for friction settling.
-        Assert.True(last.X >= 168f,
-            $"Body was not pushed right by sprout — final X={last.X:F2} (expected ≥ 168)");
+        // Half-width hexagon: rest = sprout face + body half-width (6) + ε — the
+        // push-out ends ~4.4px nearer the face than the old full-width body.
+        Assert.True(last.X >= 163.5f,
+            $"Body was not pushed right by sprout — final X={last.X:F2} (expected ≥ 163.5)");
     }
 
     // ── Mirror: stack on the right, sprout grows leftward into the player ──
@@ -109,8 +111,9 @@ public class SproutPushTests(ITestOutputHelper output)
         var last = frames[^1];
         output.WriteLine($"final X={last.X:F2} (start 166.00)");
         // Sprout AABB ends at x:160..176. To be clear, body centre ≤ 160 - 8.23 ≈ 151.77.
-        Assert.True(last.X <= 152f,
-            $"Body was not pushed left by sprout — final X={last.X:F2} (expected ≤ 152)");
+        // Half-width hexagon rest position — see the right-push twin above.
+        Assert.True(last.X <= 156.5f,
+            $"Body was not pushed left by sprout — final X={last.X:F2} (expected ≤ 156.5)");
     }
 
     // ── Late-contact case ─────────────────────────────────────────────────
@@ -152,8 +155,9 @@ public class SproutPushTests(ITestOutputHelper output)
         var last = frames[^1];
         output.WriteLine($"final X={last.X:F2} (start 162.00)");
         // Body must end up clear of the finalised tile: centre ≥ 168.
-        Assert.True(last.X >= 168f,
-            $"Body was not pushed by late-contact sprout — final X={last.X:F2} (expected ≥ 168)");
+        // Half-width hexagon rest position — see the corner-stack twin above.
+        Assert.True(last.X >= 163.5f,
+            $"Body was not pushed by late-contact sprout — final X={last.X:F2} (expected ≥ 163.5)");
     }
 
     // ── Sprout opposes player's walk direction ────────────────────────────

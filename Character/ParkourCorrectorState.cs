@@ -97,7 +97,6 @@ public sealed class CorrectorScratch
 // must never fight an owned maneuver.
 public abstract class CorrectorClimbBase : MovementState
 {
-    private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
     private const float HingeWeight     = 1e6f;    // stiffness constant, not a feel knob
     // Entry feasibility solves the FULL arc once per candidate frame and can afford
     // a deeper fixed iteration budget than the per-tick re-solve (opposed-row
@@ -350,17 +349,13 @@ public abstract class CorrectorClimbBase : MovementState
             p.H = n; p.Dt = ctx.Dt;
             p.CoastVel = s.CoastVel;
             p.Rows = s.Rows; p.RowCount = rowCount;
-            p.ChannelCount = 1;
-            // Redirect disc (the maneuver channel): passive deflections only — the
-            // entry hop already injected all the maneuver's energy, so the solver
-            // may steer that momentum but never add speed. (An unbounded force
-            // channel stood in here during the stand-fold experiments; the disc is
-            // the energy-honesty story and is restored deliberately.)
-            p.Channels[0] = new ChannelDef
-            {
-                Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon,
-                Redirect = true, ActiveFrom = 0, ActiveTo = n,
-            };
+            // Redirect disc (the maneuver channel set, CorrectorChannels):
+            // passive deflections only — the entry hop already injected all the
+            // maneuver's energy, so the solver may steer that momentum but never
+            // add speed. (An unbounded force channel stood in here during the
+            // stand-fold experiments; the disc is the energy-honesty story and
+            // is restored deliberately.)
+            p.ChannelCount = CorrectorChannels.BuildManeuver(p, n);
             p.PrevApplied[0] = prevDv;
             p.DeltaWeight = cfg.CorrectorDeltaWeight;
             p.HingeWeight = HingeWeight;

@@ -213,6 +213,10 @@ public class RunningJumpState : MovementState
 
 public class WallSlidingState : MovementState
 {
+    // Owned state servoing against fixed contacts (wall FSD + optional ground
+    // FSD) — the ambient layer must never fight it (CONSOLIDATION_PLAN §3.4).
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
+
     public override AnimTag AnimationTag => AnimTag.WallSlide;
 
     private readonly int _wallDir;

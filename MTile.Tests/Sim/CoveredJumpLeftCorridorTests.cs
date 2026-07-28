@@ -8,9 +8,9 @@ namespace MTile.Tests;
 
 // Reproduces the "CoveredJump occasionally doesn't activate" bug for a left-facing corridor.
 // Spec from the user: the jump should fire any time a portion of the body's bounding box is
-// sticking out from under the overcrop. Hex body is ~16.46 wide (vertices at ±8.23 in X).
+// sticking out from under the overcrop. Half-width hex body: X extent ±6.
 // Corridor here has its left exit corner at x=80; "any portion sticking out" means
-// body.Bounds.Left < 80, i.e. body center X < 88.23.
+// body.Bounds.Left < 80, i.e. body center X < 86.
 public class CoveredJumpLeftCorridorTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
@@ -31,14 +31,16 @@ public class CoveredJumpLeftCorridorTests(ITestOutputHelper output)
     // body.Bounds.Left = startX − 8.23; corner is at x=80; sticking out ↔ body.Left < 80
     //                                                       ↔ startX < 88.23.
     [Theory]
-    [InlineData(88.0f)]   // body.Left ≈ 79.77 — barely sticking out (0.23 px)
-    [InlineData(85.0f)]   // body.Left ≈ 76.77 — ~3 px sticking out
-    [InlineData(82.0f)]   // body.Left ≈ 73.77 — ~6 px sticking out
+    [InlineData(85.5f)]   // body.Left = 79.5 — barely sticking out (0.5 px)
+    [InlineData(85.0f)]   // body.Left = 79 — 1 px sticking out
+    [InlineData(82.0f)]   // body.Left = 76 — 4 px sticking out
     [InlineData(80.0f)]   // body center at corner; half body sticking out
     [InlineData(79.5f)]   // body center just past corner into open air
     [InlineData(78.0f)]   // body center 2 px past corner
     [InlineData(75.0f)]   // body center 5 px past corner; most of body in open air
-    [InlineData(72.5f)]   // body.Right ≈ 80.73 — only ~0.7 px still under the slab
+    [InlineData(75.5f)]   // body.Right = 81.5 — ~1.5 px still under the slab (the ceiling
+                          // probe's 2px horizontal inset sets the detection floor; below
+                          // ~0.5px of probed overlap a plain jump is the correct read)
     public void HoldSpaceLeft_StickingOutOfLeftFacingCorridor_FiresCoveredJump(float startX)
     {
         var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
@@ -75,7 +77,7 @@ public class CoveredJumpLeftCorridorTests(ITestOutputHelper output)
 
         Assert.True(fired,
             $"startX={startX} (body.Left≈{startX-8.23f:F2}, corner=80.0): body has " +
-            $"{80f-(startX-8.23f):F2} px sticking out past corner — CoveredJump should fire.");
+            $"{80f-(startX-6f):F2} px sticking out past corner — CoveredJump should fire.");
     }
 
     // Pins the new precondition: CoveredJump requires a direction to be held.

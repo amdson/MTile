@@ -66,7 +66,7 @@ public class BallisticPredictorTests
         });
         Assert.All(frames, f => Assert.Equal("FallingState", f.State));
 
-        var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), start) { Velocity = vel };
+        var body = new PhysicsBody(PlayerCharacter.CreateBodyPolygon(), start) { Velocity = vel };
         var samples = Predict(body, FlatFloor(), dirX: 1, down: false, startGrounded: false, H);
 
         AssertParity(frames, samples, from: 0, count: H);
@@ -87,17 +87,26 @@ public class BallisticPredictorTests
         });
         Assert.All(frames, f => Assert.Equal("FallingState", f.State));
 
-        var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), start) { Velocity = vel };
+        var body = new PhysicsBody(PlayerCharacter.CreateBodyPolygon(), start) { Velocity = vel };
         var samples = Predict(body, FlatFloor(), dirX: 0, down: false, startGrounded: false, H);
 
         AssertParity(frames, samples, from: 0, count: H);
     }
 
+    // ── Fold-era ground contracts ────────────────────────────────────────────
+    // Grounded locomotion is now coast + SOLVER CORRECTIONS (the stand fold), so
+    // sample-for-sample parity of the correction-free coast against the live sim
+    // is unobservable by construction on the ground — the airborne tests above
+    // remain the strict mirror contract. What IS pinned here instead:
+    //  - the live steady run holds the hover band and walks at the TRUE
+    //    configured MaxWalkSpeed (the old over-cap equilibrium quirk is retired
+    //    with the walk fold's one-sided progress rows);
+    //  - the coast from a mid-run state stays NEAR the live rollout (the
+    //    corrected system's rest point is the coast's own fixed point — small
+    //    corrections, not a divergent baseline).
     [Fact]
-    public void GroundRun_SteadyState_MatchesSimRunner()
+    public void GroundRun_SteadyState_HoldsHoverBandAtWalkSpeed()
     {
-        // Let the live sim settle into a steady hover-run, then predict onward
-        // from a mid-trajectory state and compare against the continued rollout.
         const int Settle = 60, H = 20;
 
         var frames = SimRunner.Run(new SimConfig
@@ -110,24 +119,42 @@ public class BallisticPredictorTests
         Assert.Equal("StandingState", frames[Settle - 1].State);
         Assert.Equal("StandingState", frames[Settle + H - 1].State);
 
+        var cfg = MovementConfig.Current;
+        for (int f = Settle; f < Settle + H; f++)
+        {
+            Assert.True(MathF.Abs(frames[f].Vx - cfg.MaxWalkSpeed) < 2f,
+                $"f={f}: steady walk vx {frames[f].Vx:F2} vs configured {cfg.MaxWalkSpeed}");
+            Assert.True(MathF.Abs(frames[f].Y - frames[Settle - 1].Y) < 2.5f,
+                $"f={f}: hover drifted {frames[f].Y:F2} vs settled {frames[Settle - 1].Y:F2}");
+        }
+
+        // Coast-proximity: the correction-free coast from a settled state must
+        // track the corrected live rollout closely (corrections are trims).
         var mid = frames[Settle - 1];
-        var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6),
-                                   new Vector2(mid.X, mid.Y))
+        var body = new PhysicsBody(PlayerCharacter.CreateBodyPolygon(), new Vector2(mid.X, mid.Y))
                    { Velocity = new Vector2(mid.Vx, mid.Vy) };
         var samples = Predict(body, FlatFloor(), dirX: 1, down: false, startGrounded: true, H);
-
-        AssertParity(frames, samples, from: Settle, count: H);
+        for (int k = 0; k < H; k++)
+        {
+            var f = frames[Settle + k];
+            Assert.True(MathF.Abs(samples[k].Pos.Y - f.Y) < 4f,
+                $"k={k}: coast y {samples[k].Pos.Y:F2} diverged from live {f.Y:F2}");
+            Assert.True(MathF.Abs(samples[k].Vel.X - f.Vx) < 8f,
+                $"k={k}: coast vx {samples[k].Vel.X:F2} diverged from live {f.Vx:F2}");
+        }
     }
 
     [Fact]
-    public void Landing_FallOntoFlat_HoldRight_MatchesThroughTouchdown()
+    public void Landing_FallOntoFlat_HoldRight_SettlesToHover()
     {
-        // Start above rest height falling at a speed under MaxGroundEngageVnRel:
-        // the live sim catches via the standing FSD (spring + plane sweep), which
-        // is exactly the landing path the predictor models.
+        // Fold-era landing contract: a descent under MaxGroundEngageVnRel is the
+        // solver's catch (LegServo + envelope rows), not an FSD sweep — so the
+        // pin is the OUTCOME: touchdown happens, the body settles into the hover
+        // band without ever penetrating the floor, and horizontal speed is not
+        // eaten by the landing.
         var start = new Vector2(200f, RestY - 40f);
         var vel   = new Vector2(40f, 150f);
-        const int H = 24;   // = BallisticPredictor.MaxHorizon; touchdown lands well inside it
+        const int H = 60;
 
         var frames = SimRunner.Run(new SimConfig
         {
@@ -135,22 +162,33 @@ public class BallisticPredictorTests
             Script = InputScript.Always(new PlayerInput { Right = true }),
             Frames = H, Dt = Dt, Gravity = Gravity,
         });
-        Assert.Contains(frames[..H], f => f.State == "StandingState");   // touchdown happened
+        Assert.Contains(frames, f => f.State == "StandingState");   // touchdown happened
 
-        var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), start) { Velocity = vel };
-        var samples = Predict(body, FlatFloor(), dirX: 1, down: false, startGrounded: false, H);
+        // Never below physical rest (floor top − body half-height), small slack.
+        float floorRest = FloorTop - 10.39f;   // bottom-vertex rest height
+        Assert.All(frames, f => Assert.True(f.Y < floorRest + 1.5f,
+            $"body sank to y={f.Y:F2} (floor-contact rest ≈ {floorRest:F2})"));
 
-        AssertParity(frames, samples, from: 0, count: H);
+        // Settled: last 15 frames inside the hover band, gently moving.
+        for (int f = H - 15; f < H; f++)
+        {
+            Assert.True(MathF.Abs(frames[f].Y - (RestY + 1.6f)) < 3f,
+                $"f={f}: not settled at hover, y={frames[f].Y:F2}");
+            Assert.True(MathF.Abs(frames[f].Vy) < 20f,
+                $"f={f}: still bobbing, vy={frames[f].Vy:F2}");
+        }
+        // The landing must not eat the run: horizontal speed stays near the walk.
+        Assert.True(frames[^1].Vx > 30f, $"landing ate the run: vx={frames[^1].Vx:F2}");
     }
 
     [Fact]
-    public void GroundRun_ApproachingCap_MirrorsOverCapEquilibrium()
+    public void GroundRun_WalksAtConfiguredSpeed_QuirkRetired()
     {
-        // StandingState's over-cap brake subtracts only excess/dt, so ground
-        // steady state sits at MaxWalkSpeed + WalkAccel·dt (the same historical
-        // formulation AirControl's comment describes fixing for air). The
-        // predictor must mirror the live behavior, quirk included — this pins
-        // both the equilibrium value and sample-for-sample parity around it.
+        // The historical over-cap equilibrium (MaxWalkSpeed + WalkAccel·dt, from
+        // StandingState's excess/dt brake) is deliberately RETIRED by the walk
+        // fold: one-sided progress rows assist up to the target and no channel
+        // brakes held momentum, so the sustained walk speed is exactly the
+        // configured MaxWalkSpeed. This pins the quirk's absence.
         const int Settle = 90;
         var frames = SimRunner.Run(new SimConfig
         {
@@ -160,17 +198,10 @@ public class BallisticPredictorTests
             Frames = Settle, Dt = Dt, Gravity = Gravity,
         });
         var cfgNow = MovementConfig.Current;
-        float equilibrium = cfgNow.MaxWalkSpeed + cfgNow.WalkAccel * Dt;
-        Assert.True(MathF.Abs(frames[^1].Vx - equilibrium) < 1f,
-            $"live vx {frames[^1].Vx} vs cap+accel·dt {equilibrium}");
-
-        const int H = 20;
-        var mid = frames[Settle - H - 1];
-        var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6),
-                                   new Vector2(mid.X, mid.Y))
-                   { Velocity = new Vector2(mid.Vx, mid.Vy) };
-        var samples = Predict(body, FlatFloor(), dirX: 1, down: false, startGrounded: true, H);
-
-        AssertParity(frames, samples, from: Settle - H, count: H);
+        Assert.True(MathF.Abs(frames[^1].Vx - cfgNow.MaxWalkSpeed) < 1.5f,
+            $"live vx {frames[^1].Vx:F2} vs configured MaxWalkSpeed {cfgNow.MaxWalkSpeed}");
+        float quirk = cfgNow.MaxWalkSpeed + cfgNow.WalkAccel * Dt;
+        Assert.True(frames[^1].Vx < quirk - 10f,
+            $"over-cap quirk resurfaced: vx={frames[^1].Vx:F2} ≈ {quirk}");
     }
 }

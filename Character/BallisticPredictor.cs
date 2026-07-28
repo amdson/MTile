@@ -34,6 +34,20 @@ public static class BallisticPredictor
 {
     public const int MaxHorizon = 24;   // ≥ any CorrectorHorizon a config will ask for
 
+    // How far below the body a floor may be and still count as SUPPORT — the
+    // gravity-hold + envelope-anchor engagement reach (hover rest sits ~20px
+    // above the floor top; a ballistic pass-by 40px up must stay ballistic).
+    // One constant shared by the live fold states' gravity hold, this coast's
+    // grounded classification, and the ambient envelope's anchor band — the
+    // three MUST agree or the solver plans against a baseline the live tick
+    // doesn't apply (the zero-g floater bug).
+    public const float SupportReach = 30f;
+
+    // Inside this floor distance the gravity hold is FULL strength; it fades
+    // linearly to zero at SupportReach (≈ the old spring's zero-force length
+    // vs its rest length — a body floating above hover must feel gravity).
+    public const float HoldFullDist = 2f * PlayerCharacter.Radius;
+
     // Free-fall launch speed that coasts exactly `rise` px upward — the shared
     // ballistic-envelope primitive (hop sizing, crest caps). Formerly
     // SteeringRamp.BallisticVy; the ramp stack is gone, the math stays.
@@ -75,18 +89,37 @@ public static class BallisticPredictor
         {
             var bounds = polygon.GetBoundingBox(pos);
             bool haveFloor = TryProbeFloor(chunks, bounds, floatHeight, out float floorY);
-            bool grounded = haveFloor;
+            // Supported ≠ merely "probe sees a floor": the probe reaches ~40px
+            // down (float height + slack), but support engages only within
+            // SupportReach — a ballistic pass-by above that is honest free
+            // flight — and only below the FSD-era engagement speed gate: a
+            // plunge past MaxGroundEngageVnRel lands via the raw swept-impact
+            // path, never the hold (mirrors the live TryGetGround gate).
+            bool grounded = haveFloor && floorY - pos.Y <= SupportReach
+                && vel.Y <= cfg.MaxGroundEngageVnRel
+                && -vel.Y <= cfg.SpringMaxRiseSpeed;
 
             var force = Vector2.Zero;
             if (grounded)
             {
                 // No ground drive in the coast — x-locomotion is requested from
                 // the solver via progress rows. Vertically, the stand baseline
-                // HOLDS AGAINST GRAVITY (mirrored by live StandingState):
-                // sustained support is feedforward, not a correction — channels
-                // act relative to the hold (LegServo = push beyond it, Tuck =
-                // release/press below it).
-                force.Y -= gravity.Y;
+                // HOLDS AGAINST GRAVITY (mirrored by live FoldBaseline),
+                // fading across [HoldFullDist, SupportReach]: sustained support
+                // is feedforward, not a correction — channels act relative to
+                // the hold (LegServo = push beyond it, Tuck = release/press
+                // below it). At no input, ground FRICTION is also baseline
+                // (mirrored live): the fold body never physically touches the
+                // floor, so SurfaceContact.Friction can't brake it — this term
+                // is that friction, re-expressed as feedforward.
+                float holdScale = Math.Clamp(
+                    (SupportReach - (floorY - pos.Y)) / (SupportReach - HoldFullDist), 0f, 1f);
+                force.Y -= gravity.Y * holdScale;
+                if (inputDirX == 0 && dt > 0f)
+                {
+                    float frictionCap = cfg.GroundFriction * modifiers.GroundFriction;
+                    force.X = Math.Clamp(-vel.X / dt, -frictionCap, frictionCap) * holdScale;
+                }
             }
             else
             {

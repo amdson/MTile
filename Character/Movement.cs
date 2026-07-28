@@ -49,6 +49,12 @@ public abstract class MovementState
     // would fight the owned maneuver.
     public virtual AmbientPolicy AmbientPolicy => AmbientPolicy.Default;
 
+    // How this state participates in the stand fold (reference shaping — see
+    // FoldProfile). Default: not a fold state; the state owns its own support.
+    // Fold states delegate hover/walk/brake/landing-catch to the ambient solve
+    // and apply only the gravity-hold baseline themselves.
+    public virtual FoldProfile FoldProfile => FoldProfile.None;
+
     // The animation-facing CATEGORY of this state (AnimTag.None = generic: the animator picks
     // by grounded/velocity). Replaces substring matching on state class names, which silently
     // broke on renames and false-matched future states. Same render-only contract as the
@@ -201,6 +207,11 @@ public class FallingState : MovementState
     public override int ActivePriority => MovementPriorities.FallingActive;
     public override int PassivePriority => MovementPriorities.FallingPassive;
 
+    // Falling is a fold state: the landing catch (anchor re-binding on descent)
+    // and the graze/duck assists all run through the fold solve. High free fall
+    // is naturally unbound (anchor beyond leg reach ⇒ no envelope rows).
+    public override FoldProfile FoldProfile => FoldProfile.Stand;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) => true;
 
@@ -226,6 +237,8 @@ public class StandingState : MovementState
     public override int ActivePriority => MovementPriorities.StandingActive;
     public override int PassivePriority => MovementPriorities.StandingPassive;
 
+    public override FoldProfile FoldProfile => FoldProfile.Stand;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         return IsStandingGround(ctx);
@@ -244,15 +257,20 @@ public class StandingState : MovementState
     // GroundChecker's 20px ProbeSlack reports "grounded" for a body up to ~20px above
     // rest height — which, with the slow JumpVelocity launch, holds for the whole jump
     // window. So a quick jump-release would drop JumpingState and let Standing re-grab
-    // the still-ascending body, subjecting it to ground friction + the anti-pop rise
-    // clamp below ("hit a ceiling" dead-end). Refuse to grab a body rising faster than
-    // the spring would ever push it (SpringMaxRiseSpeed): that's a launch, not standing.
-    // Landing bodies descend (riseSpeed ≤ 0), so the soft-landing catch zone is untouched.
+    // the still-ascending body. Refuse to grab a body rising faster than support could
+    // ever push it (SpringMaxRiseSpeed): that's a launch, not standing. ENTRY also
+    // requires support proximity (SupportReach — the gravity-hold band): a body the
+    // probe merely SEES 40px up is still flying (a pass-by, or an inbound landing whose
+    // descent will cross the engagement gate and flicker the state) — it becomes
+    // Standing when support can actually bind it. Continuation (CheckConditions) stays
+    // the plain probe: states are sticky.
     private static bool IsStandingGround(EnvironmentContext ctx)
     {
         if (!ctx.TryGetGround(out var ground)) return false;
         float riseSpeed = Vector2.Dot(ctx.Body.Velocity - ground.SurfaceVelocity, ground.Normal);
-        return riseSpeed <= MovementConfig.Current.SpringMaxRiseSpeed;
+        if (riseSpeed > MovementConfig.Current.SpringMaxRiseSpeed) return false;
+        float dist = Vector2.Dot(ctx.Body.Position - ground.Position, ground.Normal);
+        return dist <= BallisticPredictor.SupportReach;
     }
 
     // The stand fold (see AmbientCorrector): no ground FSD, no hover spring —
@@ -267,17 +285,64 @@ public class StandingState : MovementState
         // the solver's soft rows: without the hold it must win a tug-of-war
         // against gravity at dt² leverage every frame, which it structurally
         // cannot (the post-landing dead-rest bug).
-        ctx.Body.AppliedForce = new Vector2(0f, -ctx.Gravity.Y);
+        //
+        // The hold engages only while the support anchor binds (floor within
+        // SupportReach below the center — same gate as the coast's grounded
+        // classification). The ground PROBE reaches ~40px down, and Standing can
+        // legitimately be active over that whole band; holding against gravity
+        // up there would turn a ballistic pass-by into a zero-g floater and
+        // hand the solver a coast the live tick contradicts.
+        ctx.Body.AppliedForce = FoldBaseline(ctx);
+    }
+
+    // Shared fold-state baseline, mirrored tick-for-tick by the predictor's
+    // grounded branch: gravity hold iff supported (see Update above), plus
+    // station friction at no input — the fold body never physically touches
+    // the floor, so SurfaceContact.Friction can't brake it; this term is that
+    // friction re-expressed as feedforward (the old "no-input → braking"
+    // role). Hitstun scales it down through Modifiers.GroundFriction exactly
+    // as it scaled the old contact friction.
+    internal static Vector2 FoldBaseline(EnvironmentContext ctx)
+    {
+        // Supported = floor within reach AND not rising beyond what support
+        // could push (SpringMaxRiseSpeed). Without the rise gate, a body flung
+        // upward while near a floor (a sprout growing under it, a pop-out)
+        // keeps the hold — zero gravity — and rides its launch indefinitely.
+        bool supported = ctx.TryGetGround(out var ground)
+            && -ctx.Body.Velocity.Y <= MovementConfig.Current.SpringMaxRiseSpeed;
+        if (!supported) return Vector2.Zero;
+        float dist = ground.Position.Y - ctx.Body.Position.Y;
+        // The hold FADES across the spring's old support range: full inside
+        // the rest band (2R ≈ the old FSD MinDistance), zero at SupportReach.
+        // A body floating above hover gets mostly-real gravity — the old
+        // spring gave nothing above its rest length, and a binary hold out to
+        // SupportReach let sprout-lifted bodies coast up in zero-g.
+        float holdScale = Math.Clamp(
+            (BallisticPredictor.SupportReach - dist)
+                / (BallisticPredictor.SupportReach - BallisticPredictor.HoldFullDist), 0f, 1f);
+        if (holdScale <= 0f) return Vector2.Zero;
+        var force = new Vector2(0f, -ctx.Gravity.Y * holdScale);
+        if (ctx.Intent.CurrentHorizontal == 0 && ctx.Dt > 0f)
+        {
+            float cap = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
+            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -cap, cap) * holdScale;
+        }
+        return force;
     }
 }
 
+// Crouched is a fold state (CORRECTOR_CONSOLIDATION_PLAN §3.1): same mechanism
+// as Standing, lower reference — FoldProfile.Crouch drops the hover target to
+// the C-obstacle surface and caps progress at crawl speed. No FSD, no spring,
+// no bespoke drive: the crouch IS reference shaping. The state keeps only
+// classification (when crouching applies) and the gravity-hold baseline.
 public class CrouchedState : MovementState
 {
     public override AnimTag AnimationTag => AnimTag.Crouch;
     public override int ActivePriority => MovementPriorities.CrouchedActive;
     public override int PassivePriority => MovementPriorities.CrouchedPassive;
 
-    private FloatingSurfaceDistance _ground;
+    public override FoldProfile FoldProfile => FoldProfile.Crouch;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -297,68 +362,9 @@ public class CrouchedState : MovementState
         return (ctx.Input.Down || ctx.TryGetCeiling(out _)) && ctx.TryGetCrouchGround(out _);
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-        => EnsureGround(ctx);
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (_ground != null)
-            ctx.Body.Constraints.Remove(_ground);
-        _ground = null;
-    }
-
-    // Idempotent crouch-ground acquisition — see StandingState.EnsureGround.
-    private void EnsureGround(EnvironmentContext ctx)
-    {
-        if (_ground != null) return;
-        if (ctx.TryGetCrouchGround(out var contact))
-        {
-            _ground = contact;
-            ctx.Body.Constraints.Add(_ground);
-        }
-    }
-
-    public override void ResetTransient() => _ground = null;
-
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        EnsureGround(ctx);
-        if (ctx.TryGetCrouchGround(out var refreshed))
-        {
-            _ground.Position        = refreshed.Position;
-            _ground.Normal          = refreshed.Normal;
-            _ground.MinDistance     = refreshed.MinDistance;
-            _ground.SurfaceVelocity = refreshed.SurfaceVelocity;
-        }
-        // Same per-frame friction refresh as Standing — see comment there.
-        _ground.Friction = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
-
-        var force = Vector2.Zero;
-
-        float dist           = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
-        float gap            = _ground.MinDistance - dist;
-        float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
-        if (gap > 0f)
-            force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
-        // No anti-pop rise clamp (killed with the stand fold): the two-sided
-        // envelope rows superseded it, and a hidden counter-force would fight
-        // solver corrections.
-
-        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
-        if (inputX != 0f)
-        {
-            force.X += inputX * MovementConfig.Current.CrouchWalkAccel;
-            float excess = MathF.Abs(ctx.Body.Velocity.X) - MovementConfig.Current.CrouchMaxWalkSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f
-                && !ctx.Modifiers.PreserveExternalVelocity)
-                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
-            // Walk-intent signal so the solver's friction doesn't brake an
-            // overspeed-coasting body — see StandingState.Update.
-            if (MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && MathF.Abs(force.X) < 2f)
-                force.X = inputX * 2f;
-        }
-        // No-input braking handled by SurfaceContact.Friction in the physics solver.
-        
-        ctx.Body.AppliedForce = force;
+        // The shared fold baseline (see StandingState.Update).
+        ctx.Body.AppliedForce = StandingState.FoldBaseline(ctx);
     }
 }

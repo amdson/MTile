@@ -18,6 +18,40 @@ public struct AmbientPolicy
     public static AmbientPolicy Off     => default;
 }
 
+// How the active movement state participates in the stand fold — the reference-
+// shaping half of the per-state membership table (CORRECTOR_CONSOLIDATION_PLAN
+// §3.5; the actuation half is CorrectorChannels, the assist gating half is
+// AmbientPolicy). Published fresh every frame like AmbientPolicy. Fold = false
+// (the default) means the state owns its own support — the ambient layer runs
+// only the non-fold graze assists under the state's policy.
+public struct FoldProfile
+{
+    public bool  Fold;          // support/locomotion delegated to the ambient solve
+    public float HoverOffset;   // hover clearance above the C-obstacle top surface (px)
+    public float ClimbReachUp;  // envelope may bind floors this far above the anchor (px)
+    public float MaxSpeed;      // progress-target speed (px/s, pre-modifier)
+
+    public static FoldProfile None => default;
+
+    // Standing/Falling: hover ≈ the old spring equilibrium; 1-high ledges ramp
+    // the reference (16 ≤ 20), 2-high walls never do (32 > 20).
+    public static FoldProfile Stand => new()
+    {
+        Fold = true, HoverOffset = 10f, ClimbReachUp = 20f,
+        MaxSpeed = MovementConfig.Current.MaxWalkSpeed,
+    };
+
+    // Crouched: same fold, lower reference — the crouch IS reference shaping,
+    // not a new mechanism. Hover 0 = center resting on the C-obstacle surface
+    // (≈ the old crouch spring equilibrium at float height 0); climb reach
+    // covers surface roughness only (a crouch never mounts ledges); crawl speed.
+    public static FoldProfile Crouch => new()
+    {
+        Fold = true, HoverOffset = 0f, ClimbReachUp = 4f,
+        MaxSpeed = MovementConfig.Current.CrouchMaxWalkSpeed,
+    };
+}
+
 // Ambient corrector mode (BALLISTIC_CORRECTOR_PLAN step 7) — the corrector run
 // during FREE movement. The "reference" is the coast prediction itself (no
 // authored arc, no fidelity term): predict the free coast under the current
@@ -38,7 +72,8 @@ public struct AmbientPolicy
 //    applied in fold mode (support is load-bearing; feasible-only gating would
 //    drop the body). Anti-autopilot refusal survives for non-fold states, and
 //    returns for the fold's ELECTIVE tier via CORRECTOR_CONSOLIDATION_PLAN §4.
-//  - Actuation is the restricted channel stack (BuildStandChannels): LegServo /
+//  - Actuation is the restricted channel stack (CorrectorChannels.BuildFold):
+//    LegServo /
 //    Traction / CornerAssist / Redirect / Tuck with per-tick masks and caps,
 //    solved JOINTLY — senses are never partitioned (an up/down homotopy split
 //    would strip support rows from a down pass).
@@ -46,23 +81,16 @@ public sealed class AmbientCorrector
 {
     private const float HingeWeight     = 1e6f;    // stiffness constant, not a knob
     private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
-    // Stand-fold constants: hover target ≈ the old spring equilibrium
-    // (minDistance 24 − gravity/SpringK 2), so the rest pose matches the old
-    // look. Support rows are soft (HingeScale ≪ 1) so hard clearance rows can
-    // overpower them; the deeper fixed iteration budget keeps the joint
-    // mixed-sense solve converged.
-    private const float HoverDist       = 2f * PlayerCharacter.Radius - 2f;
+    // Fold constants. Support/progress rows are soft (HingeScale ≪ 1) so hard
+    // clearance rows can overpower them; the deeper fixed iteration budget
+    // keeps the joint mixed-sense solve converged. Hover offset and climb
+    // reach are per-state (FoldProfile); BallisticPredictor.SupportReach is the band of floors
+    // the reference may bind BELOW the anchor is BallisticPredictor.SupportReach
+    // (further down = free fall) — one constant with the gravity-hold gate.
     private const float HoverHingeScale = 0.02f;
     private const float ProgressHingeScale = 0.02f;
     private const int   FoldIterations  = 16;
-    // Envelope reference: hover clearance above the C-obstacle top surface
-    // (center rests ON the surface at 0; 10 ≈ the old spring equilibrium), and
-    // the band of floors the reference may bind to — up to ClimbReachUp above
-    // the coast (a 1-high ledge ramps the reference; a 2-high wall does not)
-    // and LegReachDown below (further down = free fall, no hover request).
-    private const float HoverAboveSurface = 10f;
-    private const float ClimbReachUp      = 20f;
-    private const float LegReachDown      = 30f;
+    private const float AnchorLeak      = 0.7f;
     // Per-direction actuator honesty: the envelope may excursion BELOW the
     // anchor surface only within the tuck's authority (tiny standing-height
     // adjustments). A bigger drop (a lip) unbinds the reference — no down
@@ -100,17 +128,17 @@ public sealed class AmbientCorrector
 
     // Runs after the movement state's Update (its policy + forces are final),
     // before the physics step reads AppliedForce — the slot Reconcile had.
-    // solverStand = current state is Standing/Falling: hover support is this
-    // solve's job (see the fold note above).
+    // fold = the state's published FoldProfile: Fold set means hover support and
+    // locomotion are this solve's job (see the fold note above).
     public void Apply(EnvironmentContext ctx, AmbientPolicy policy, bool startGrounded,
-                      bool solverStand, ref MovementVars vars)
+                      in FoldProfile fold, ref MovementVars vars)
     {
         var cfg = MovementConfig.Current;
         var s = ctx.Corrector;
         int dir = ctx.Intent.CurrentHorizontal;
 
         if (s == null || !cfg.AmbientCorrectorEnabled
-            || (!policy.Over && !policy.Under && !solverStand))
+            || (!policy.Over && !policy.Under && !fold.Fold))
         {
             vars.AmbientPrevDv = Vector2.Zero;
             vars.AmbientChannelPrev = default;
@@ -129,11 +157,17 @@ public sealed class AmbientCorrector
             s.Rows, out int truncatedAt, verticalFacesOnly: true);
 
         // Per-sense policy: Over gates upward rows (corner-vault assist), Under
-        // gates downward rows (head-tuck assist) — same split AmbientPolicy always had.
+        // gates downward rows (head-tuck assist) — same split AmbientPolicy always
+        // had. Impact honesty: an UP row anchored at a plunging tick (descent past
+        // the FSD-era engagement gate) is a floor slam, not a catchable landing —
+        // it belongs to the raw swept-impact path (bounce/break tuning), and
+        // keeping it would let the redirect disc air-brake the fall. Dropped
+        // regardless of policy.
         int kept = 0;
         for (int j = 0; j < rowCount; j++)
         {
             bool up = s.Rows[j].Normal.Y < 0f;
+            if (up && s.Samples[s.Rows[j].Tick].Vel.Y > cfg.MaxGroundEngageVnRel) continue;
             if (up ? policy.Over : policy.Under)
                 s.Rows[kept++] = s.Rows[j];
         }
@@ -146,11 +180,20 @@ public sealed class AmbientCorrector
         // corner bevels), so climbing is tracking, overshoot above the reference
         // costs (the crest lands AT hover), and progress requests survive across
         // obstacles instead of dying at truncation.
-        if (solverStand)
+        // Launch unbind (CORRECTOR_CONSOLIDATION_PLAN §3.2): a body rising
+        // faster than any support could ever push it (SpringMaxRiseSpeed — the
+        // same gate StandingState's entry uses) is BALLISTIC. The envelope
+        // reference lets go entirely: no hover pull-down (an upward launch is
+        // not "overshoot"), no walk-speed tracking against launch momentum.
+        // Hard clearance rows still protect the arc, and the landing catch
+        // re-binds on descent through the anchor query below.
+        bool launched = -ctx.Body.Velocity.Y > cfg.SpringMaxRiseSpeed;
+
+        if (fold.Fold && !launched)
         {
             var template = CObstacleTemplate.For(ctx.Body.Polygon);
             int lim = Math.Min(n, truncatedAt);
-            float target = dir * cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed;
+            float target = dir * fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
             float x0 = ctx.Body.Position.X;
             float y0 = ctx.Body.Position.Y;
 
@@ -161,15 +204,35 @@ public sealed class AmbientCorrector
             // ladder the reference up a wall. One-high (16 ≤ ClimbReachUp) binds;
             // two-high (32) never does, whatever the mid-scramble pose.
             float anchorY = FloorEnvelope(ctx.Chunks, template, x0,
-                                          y0 - 2f, y0 + LegReachDown, out bool anchored);
+                                          y0 - 2f, y0 + BallisticPredictor.SupportReach, out bool anchored);
 
-            for (int k = 0; k < lim && rowCount < ClearanceConstraintBuilder.MaxEvents - 1; k++)
+            // The whole envelope is anchored: unanchored (airborne beyond leg
+            // reach) means free flight — no hover request, and no x-progress
+            // tracking either (air control is the baseline feedforward's job;
+            // solver-tracked walk speed in the air would brake legitimate
+            // over-walk-speed flight). Knockback exemption: while modifiers
+            // preserve external velocity (hitstun/launch windows), progress
+            // tracking is suppressed — support rows still hold the body up,
+            // but the solver must not fight the knockback horizontally.
+            bool trackProgress = anchored && !ctx.Modifiers.PreserveExternalVelocity;
+
+            for (int k = 0; anchored && k < lim && rowCount < ClearanceConstraintBuilder.MaxEvents - 1; k++)
             {
                 float xRef = x0 + target * (k + 1) * ctx.Dt;
 
-                // x-progress tracking (two-sided; dir 0 holds station = brake).
+                // x-progress tracking (two-sided, dir ≠ 0 only). The forward
+                // side is served by Drive; the backward side has NO channel
+                // that can serve it (Drive is unilateral along intent) — its
+                // one effect is damping Drive's Δ-anchor: without a counter-
+                // gradient the cross-frame smoothness chain sustains thrust
+                // with no demand and the walk ratchets past its target
+                // (one-sided emission ran away to 4× walk speed). Momentum
+                // is still never actively braked. dir 0 emits NO x rows:
+                // station-keeping is baseline friction (FoldBaseline), and
+                // rows here would let hard clearance rows recruit x-channels
+                // to dodge.
                 float errX = xRef - s.Samples[k].Pos.X;
-                if (MathF.Abs(errX) > 0.01f)
+                if (trackProgress && dir != 0 && MathF.Abs(errX) > 0.01f)
                     s.Rows[rowCount++] = new ClearanceRow
                     {
                         Tick = k, Normal = new Vector2(MathF.Sign(errX), 0f),
@@ -177,14 +240,17 @@ public sealed class AmbientCorrector
                     };
 
                 // y tracking of the floor envelope at the reference x, bound to
-                // the anchor's climb band. Unanchored (airborne beyond leg
-                // reach) ⇒ no hover request: free flight.
-                if (!anchored) continue;
+                // the anchor's climb band. The reference does NOT bind against
+                // a plunging tick: past the FSD-era engagement gate the landing
+                // belongs to the raw swept-impact path (the impact-materials
+                // spec is tuned against raw contact speeds) — emitting catch
+                // rows there would let the redirect disc air-brake the fall.
+                if (s.Samples[k].Vel.Y > cfg.MaxGroundEngageVnRel) continue;
                 float envY = FloorEnvelope(ctx.Chunks, template, xRef,
-                                           anchorY - ClimbReachUp, anchorY + LegReachDown, out bool found);
+                                           anchorY - fold.ClimbReachUp, anchorY + BallisticPredictor.SupportReach, out bool found);
                 if (!found) continue;
                 if (envY > anchorY + TuckReachDown) continue;   // lip: unbind, fall naturally
-                float yRef = envY - HoverAboveSurface;
+                float yRef = envY - fold.HoverOffset;
                 float errY = yRef - s.Samples[k].Pos.Y;   // >0: need down, <0: need up
                 if (MathF.Abs(errY) > 0.01f)
                     s.Rows[rowCount++] = new ClearanceRow
@@ -219,14 +285,21 @@ public sealed class AmbientCorrector
         p.CoastVel = s.CoastVel;
         p.Rows = s.Rows; p.RowCount = rowCount;
 
-        if (solverStand)
+        if (fold.Fold)
         {
             // The restricted channel stack, solved jointly — every channel
             // contributes perturbations to one plan. Δ anchors live in
             // MovementVars (snapshot-covered), not scratch: rollback restore
             // must reproduce the smoothness chain exactly.
-            p.ChannelCount = BuildStandChannels(s, n, rowCount);
-            for (int c = 0; c < p.ChannelCount; c++) p.PrevApplied[c] = vars.AmbientChannelPrev[c];
+            p.ChannelCount = CorrectorChannels.BuildFold(s, n, rowCount, dir,
+                fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed);
+            // LEAKY Δ anchors: continuity across frames without DC memory. A
+            // full-strength anchor lets a force channel sustain thrust with no
+            // remaining demand (the smoothness chain becomes momentum and the
+            // walk ratchets past its target); the leak keeps the anti-bang-bang
+            // smoothing over a few frames while bleeding any sustained bias.
+            for (int c = 0; c < p.ChannelCount; c++)
+                p.PrevApplied[c] = vars.AmbientChannelPrev[c] * AnchorLeak;
         }
         else
         {
@@ -246,16 +319,16 @@ public sealed class AmbientCorrector
         }
         p.DeltaWeight = cfg.CorrectorDeltaWeight;
         p.HingeWeight = HingeWeight;
-        p.InnerIterations = solverStand ? FoldIterations : CorrectionSolver.DefaultInnerIterations;
+        p.InnerIterations = fold.Fold ? FoldIterations : CorrectionSolver.DefaultInnerIterations;
         // Contact-push attribution (render-only; the pooled Problem is shared
         // with the maneuver states, so set it explicitly either way).
         p.RowPush = s.CaptureTrajectories ? s.RowPush : null;
 
         float residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
 
-        // Feasible-only refusal survives ONLY outside the fold: in solverStand
-        // mode the plan carries hover support and must always apply.
-        if (!solverStand && residual > cfg.AmbientRefusalResidual)
+        // Feasible-only refusal survives ONLY outside the fold: a fold plan
+        // carries hover support and must always apply.
+        if (!fold.Fold && residual > cfg.AmbientRefusalResidual)
         {
             vars.AmbientPrevDv = Vector2.Zero;
             vars.AmbientChannelPrev = default;
@@ -267,11 +340,11 @@ public sealed class AmbientCorrector
         // accumulates the per-tick total δv for the solved-rollout capture.
         var applied = Vector2.Zero;
         for (int k = 0; k < n; k++) s.TickDv[k] = Vector2.Zero;
-        if (!solverStand) vars.AmbientChannelPrev = default;   // fold anchors die with the fold
+        if (!fold.Fold) vars.AmbientChannelPrev = default;   // fold anchors die with the fold
         for (int c = 0; c < p.ChannelCount; c++)
         {
             var z0 = s.Z[c * n];
-            if (solverStand) vars.AmbientChannelPrev[c] = z0;
+            if (fold.Fold) vars.AmbientChannelPrev[c] = z0;
             bool vu = p.Channels[c].Lever == LeverKind.VelocityUpdate;
             applied += vu && ctx.Dt > 0f ? z0 / ctx.Dt : z0;
             for (int k = 0; k < n; k++)
@@ -296,105 +369,4 @@ public sealed class AmbientCorrector
         }
     }
 
-    // TEMP EXPERIMENT (channel stack): builds the restricted standing channels
-    // from the coast — masks and velocity-conditioned caps are frozen per solve
-    // (tick 0 uses the body's actual state, so applied perturbations are always
-    // truly admissible). Returns the channel count.
-    private static int BuildStandChannels(CorrectorScratch s, int n, int rowCount)
-    {
-        const float LegReach     = HoverDist + 20f;  // px — floor within leg range
-        const float LegForce     = 6000f;            // ~10× gravity
-        const float VPushMax     = 200f;             // px/s — servo fades out at this rise speed
-        const float WalkForce    = 3000f;            // traction cap (≈ WalkAccel)
-        const float WeakTraction = 800f;             // scenario: deliberately underpowered legs-forward
-        const float CornerForce  = 1500f;
-        const float TuckForce    = 1200f;
-
-        Span<bool> near = stackalloc bool[BallisticPredictor.MaxHorizon];
-        for (int k = 0; k < n; k++)
-        {
-            float dist = s.Samples[k].FloorY - s.Samples[k].Pos.Y;
-            near[k] = !float.IsPositiveInfinity(s.Samples[k].FloorY) && dist <= LegReach;
-        }
-        var ch = s.Problem.Channels;
-
-        // TEMP EXPERIMENT (scenario harness): limited channel sets for capability
-        // probing, hot-swapped via movement_config.json "CorrectorScenario".
-        switch (MovementConfig.Current.CorrectorScenario)
-        {
-            // Redirect disc (all ticks, free) + weak forward traction, nothing
-            // else: can momentum-steering alone deliver the body onto a ledge?
-            case "redirect-traction":
-                for (int k = 0; k < n; k++)
-                {
-                    s.ChannelMask[0][k] = near[k];
-                    s.ChannelMask[1][k] = true;
-                }
-                ch[0] = new ChannelDef {
-                    Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true,
-                    Axis = new Vector2(1f, 0f), Cap = WeakTraction, ActiveMask = s.ChannelMask[0] };
-                ch[1] = new ChannelDef {
-                    Lever = LeverKind.VelocityUpdate, Weight = 1e-6f, Redirect = true,
-                    ActiveMask = s.ChannelMask[1] };
-                return 2;
-
-            // Ground actuation only — no air authority at all: does pure leg
-            // servo + traction hold hover and refuse everything aerial?
-            case "legs-only":
-                for (int k = 0; k < n; k++)
-                {
-                    s.ChannelMask[0][k] = near[k];
-                    s.ChannelMask[1][k] = near[k];
-                    float sepL = MathF.Max(0f, -s.Samples[k].Vel.Y);
-                    s.ChannelCap[0][k] = LegForce * Math.Clamp(1f - sepL / VPushMax, 0f, 1f);
-                }
-                ch[0] = new ChannelDef {
-                    Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
-                    Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], ActiveMask = s.ChannelMask[0] };
-                ch[1] = new ChannelDef {
-                    Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true,
-                    Axis = new Vector2(1f, 0f), Cap = WalkForce, ActiveMask = s.ChannelMask[1] };
-                return 2;
-        }
-
-        // "full": the whole stack.
-        for (int k = 0; k < n; k++)
-        {
-            s.ChannelMask[0][k] = near[k];    // LegServo
-            s.ChannelMask[1][k] = near[k];    // Traction
-            s.ChannelMask[3][k] = !near[k];   // Redirect
-            s.ChannelMask[4][k] = true;       // Tuck — grounded too: with the gravity
-                                              // hold in the baseline, "release the
-                                              // floor" (ducks, drop-below-hover) is
-                                              // a down-channel job on ground ticks
-            // LegServo cap fades as separation (upward) speed rises — the servo
-            // can push, but never past VPushMax.
-            float sep = MathF.Max(0f, -s.Samples[k].Vel.Y);
-            s.ChannelCap[0][k] = LegForce * Math.Clamp(1f - sep / VPushMax, 0f, 1f);
-        }
-        // CornerAssist: active near obstacle features — ticks within ±2 of any
-        // HARD row (proxy for "close to the corner").
-        for (int k = 0; k < n; k++) s.ChannelMask[2][k] = false;
-        for (int j = 0; j < rowCount; j++)
-        {
-            if (s.Rows[j].HingeScale < 1f) continue;
-            for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
-                s.ChannelMask[2][k] = true;
-        }
-
-        ch[0] = new ChannelDef {   // LegServo: strong, up-only, near ground
-            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
-            Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], ActiveMask = s.ChannelMask[0] };
-        ch[1] = new ChannelDef {   // Traction: horizontal, capped, near ground
-            Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true,
-            Axis = new Vector2(1f, 0f), Cap = WalkForce, ActiveMask = s.ChannelMask[1] };
-        ch[2] = new ChannelDef {   // CornerAssist: weak, any direction, near features
-            Lever = LeverKind.Force, Weight = 0.5f, Cap = CornerForce, ActiveMask = s.ChannelMask[2] };
-        ch[3] = new ChannelDef {   // Redirect: Thales disc, airborne, free
-            Lever = LeverKind.VelocityUpdate, Weight = 1e-6f, Redirect = true, ActiveMask = s.ChannelMask[3] };
-        ch[4] = new ChannelDef {   // Tuck: down-only fast-fall, airborne
-            Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
-            Axis = new Vector2(0f, 1f), Cap = TuckForce, ActiveMask = s.ChannelMask[4] };
-        return 5;
-    }
 }

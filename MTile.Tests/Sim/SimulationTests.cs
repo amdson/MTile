@@ -578,8 +578,16 @@ public class SimulationTests(ITestOutputHelper output)
         // A vault should be roughly speed-preserving: no big dip during, no spike on exit.
         Assert.True(troughSpeed >= entrySpeed * 0.7f,
             $"Body slowed down during the vault: trough={troughSpeed:F1}, entry={entrySpeed:F1} (want ≥ {entrySpeed * 0.7f:F1})");
-        Assert.True(peakSpeed <= entrySpeed * 1.4f,
-            $"|v| spiked around the vault: peak={peakSpeed:F1}, entry={entrySpeed:F1} (want ≤ {entrySpeed * 1.4f:F1})");
+        // Peak bound: entry speed composed with the authored entry hop. The hop is
+        // sized ballistically to the actual climb (≈ rise + apex margin from hover)
+        // and is independent of approach speed — a fixed vy budget, not a ratio.
+        // (The old 1.4× ratio bar leaned on the pre-fold walk cap's overshoot
+        // equilibrium inflating the denominator; the fold walks at the true
+        // configured speed.)
+        float hopBudget = BallisticPredictor.BallisticVy(26f);   // rise 16 + margin 4 + hover/lip slack
+        float peakAllowed = MathF.Sqrt(entrySpeed * entrySpeed + hopBudget * hopBudget) + 5f;
+        Assert.True(peakSpeed <= peakAllowed,
+            $"|v| spiked past the authored hop: peak={peakSpeed:F1}, entry={entrySpeed:F1} (want ≤ {peakAllowed:F1})");
         Assert.True(exitSpeed >= entrySpeed * 0.8f && exitSpeed <= entrySpeed * 1.3f,
             $"Exit speed off: exit={exitSpeed:F1}, entry={entrySpeed:F1} (want {entrySpeed * 0.8f:F1}..{entrySpeed * 1.3f:F1})");
     }

@@ -257,11 +257,13 @@ public class StandingJitterTests
 
         // Settled y after the full chain — body should be standing on row 17.
         // Expected: floor top at row 17 = 17·16 = 272, minus the standing rest offset
-        // (R·(1+sin60°) ≈ 22.4 at R=12), with a little settle-gap slack either side.
+        // (R·(1+sin60°) ≈ 22.4 at R=12). The fold's hover rest sits ~1.5px lower
+        // than the old spring equilibrium (C-surface − 10 vs minDistance − sag),
+        // so the slack band is widened one px on the low side.
         float expected = 17 * 16f - RestOffset;
         float settledAfter = samples[^1].PosY;
         _out.WriteLine($"settled y after stacked chain: {settledAfter:F3} (expected ~{expected:F1})");
-        Assert.InRange(settledAfter, expected - 3f, expected + 3f);
+        Assert.InRange(settledAfter, expected - 3f, expected + 4f);
 
         // THE JITTER ASSERTION — mid-chain phase only.
         //

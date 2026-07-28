@@ -52,10 +52,15 @@ public class MantleStateTests(ITestOutputHelper output)
         Assert.True(frames.Any(f => f.State.Contains("Mantle")), "expected MantleState to engage");
         Assert.True(frames.Any(f => f.Y < 14f && f.X > 128f),
             "expected the body to be delivered on top of the step");
-        // Ballistic envelope: the climb must not meaningfully overshoot the landing (rest ≈ 9;
-        // the mantle's 2R gate target is 8, so a few px above rest is the expected apex).
+        // Ballistic envelope: the hop is sized to clear the gate by ArcJumpApexMargin
+        // and the state exits at gate-crossing still carrying that margin's rise —
+        // with the anti-pop clamp gone (deliberate: fold-era decision) the body
+        // FLOATS ballistically to the arc's own apex (≈ gate − margin − hop
+        // rounding) and settles back to hover. Bound the float to the authored
+        // margin plus a little slack; a real overshoot (flying past the arc's
+        // apex) still fails.
         float apexY = frames.Min(f => f.Y);
-        Assert.True(apexY >= 2f, $"mantle overshot the landing: apex y={apexY:F2} (rest ≈9)");
+        Assert.True(apexY >= 0f, $"mantle overshot its authored arc: apex y={apexY:F2} (rest ≈9, margin 4)");
     }
 
     [Fact]

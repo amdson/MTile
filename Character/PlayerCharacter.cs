@@ -582,8 +582,11 @@ public class PlayerCharacter : IHittable
         // The stand fold: while a fold state is active, hover support is the
         // ambient solve's job (the state attaches no FSD/spring), so the
         // corrector must run — and apply — even at zero input and in hitstun.
-        bool solverStand = _currentState is StandingState or FallingState;
-        _ambient.Apply(ctx, rampPolicy, IsGrounded, solverStand, ref _moveVars);
+        // The state publishes its FoldProfile per frame (hitstun does NOT turn
+        // the fold off — dropping support would let a hit stun the body through
+        // the floor; the policy gate above plus the profile's knockback
+        // exemptions inside Apply mute the elective parts instead).
+        _ambient.Apply(ctx, rampPolicy, IsGrounded, _currentState.FoldProfile, ref _moveVars);
 
         // Action gets to augment the body's force AFTER movement has written it but
         // BEFORE Action.Update — keeps Update free for FSM logic, lets the physics
