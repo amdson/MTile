@@ -23,6 +23,13 @@ public struct ChannelDef
                                    // reachable set of composed frictionless projections.
     public int       ActiveFrom;   // ticks [ActiveFrom, ActiveTo) may act; z = 0 outside
     public int       ActiveTo;
+    // Restricted-channel extensions (the stand-fold channel stack):
+    public Vector2   Axis;         // unit direction; used when AxisOnly
+    public bool      AxisOnly;     // z = λ·Axis; λ ∈ [0,cap] (Unilateral) or [−cap,cap]
+    public bool      Unilateral;
+    public float[]   CapPerTick;   // per-tick cap override (velocity-conditioned sets,
+                                   // frozen from the last rollout); null = use Cap
+    public bool[]    ActiveMask;   // per-tick activation predicate; null = [ActiveFrom, ActiveTo)
 }
 
 // One frozen convex subproblem of the sequential-convexification scheme: coast
@@ -59,11 +66,25 @@ public sealed class CorrectionProblem
     // an entry-feasibility solve over a full arc may afford more (opposed-row
     // schedules need the extra sweeps to unzigzag).
     public int   InnerIterations = CorrectionSolver.DefaultInnerIterations;
+    // Optional per-row debug attribution (length ≥ RowCount, caller-owned): each
+    // row's accumulated hinge push into the APPLIED tick-0 variable, summed across
+    // iterations/channels — "how hard did this contact shove the correction, and
+    // which way". Same units as z (a δv for VelocityUpdate channels); projections
+    // mean the entries need not sum exactly to z₀. Write-only diagnostics: null
+    // (the default) skips all work, and nothing in the solve reads it back.
+    public Vector2[] RowPush;
 }
 
 public static class CorrectionSolver
 {
     public const int DefaultInnerIterations = 4;
+    public const int MaxChannels = 6;
+
+    private static bool Active(in ChannelDef ch, int k)
+        => ch.ActiveMask != null ? ch.ActiveMask[k] : k >= ch.ActiveFrom && k < ch.ActiveTo;
+
+    private static float CapAt(in ChannelDef ch, int k)
+        => ch.CapPerTick != null ? ch.CapPerTick[k] : ch.Cap;
 
     // Solves the frozen subproblem into z (layout: z[c*H + k]); zScratch is a
     // same-size buffer for the synchronous gradient step. Returns the linear-model
@@ -74,6 +95,9 @@ public static class CorrectionSolver
 
         // Cold start at z = 0 every tick — the coast is the origin.
         for (int i = 0; i < C * H; i++) z[i] = Vector2.Zero;
+
+        if (p.RowPush != null)
+            for (int j = 0; j < p.RowCount; j++) p.RowPush[j] = Vector2.Zero;
 
         // Fixed step η = 1/L, L a Gershgorin-style Lipschitz bound of the
         // quadratic+hinge surrogate: per-variable weight curvature + Δ-chain
@@ -87,14 +111,15 @@ public static class CorrectionSolver
             for (int c = 0; c < C; c++)
             {
                 var ch = p.Channels[c];
-                int kMax = Math.Min(p.Rows[j].Tick, ch.ActiveTo - 1);
-                for (int k = ch.ActiveFrom; k <= kMax; k++)
+                int kMax = Math.Min(p.Rows[j].Tick, H - 1);
+                for (int k = 0; k <= kMax; k++)
                 {
+                    if (!Active(ch, k)) continue;
                     float lever = Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
                     leverSq += lever * lever;
                 }
             }
-            hingeCurv += 2f * p.HingeWeight * leverSq;
+            hingeCurv += 2f * p.HingeWeight * p.Rows[j].HingeScale * leverSq;
         }
         float L = 2f * maxW + 8f * p.DeltaWeight + hingeCurv;
         if (L <= 0f) return ComputeResidual(p, z);
@@ -114,7 +139,7 @@ public static class CorrectionSolver
                 for (int k = 0; k < H; k++)
                 {
                     int i = c * H + k;
-                    if (k < ch.ActiveFrom || k >= ch.ActiveTo) { zScratch[i] = Vector2.Zero; continue; }
+                    if (!Active(ch, k)) { zScratch[i] = Vector2.Zero; continue; }
 
                     var g = 2f * ch.Weight * z[i];
 
@@ -130,10 +155,12 @@ public static class CorrectionSolver
                     {
                         if (slack[j] <= 0f || k > p.Rows[j].Tick) continue;
                         float lever = Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
-                        g -= 2f * p.HingeWeight * slack[j] * lever * p.Rows[j].Normal;
+                        var push = 2f * p.HingeWeight * p.Rows[j].HingeScale * slack[j] * lever * p.Rows[j].Normal;
+                        g -= push;
+                        if (p.RowPush != null && k == 0) p.RowPush[j] += eta * push;
                     }
 
-                    zScratch[i] = Project(ch, p.CoastVel[k], z[i] - eta * g);
+                    zScratch[i] = Project(ch, k, p.CoastVel[k], z[i] - eta * g);
                 }
             }
 
@@ -152,19 +179,27 @@ public static class CorrectionSolver
         for (int c = 0; c < p.ChannelCount; c++)
         {
             var ch = p.Channels[c];
-            int kMax = Math.Min(row.Tick, ch.ActiveTo - 1);
-            for (int k = ch.ActiveFrom; k <= kMax; k++)
+            int kMax = Math.Min(row.Tick, p.H - 1);
+            for (int k = 0; k <= kMax; k++)
+            {
+                if (!Active(ch, k)) continue;
                 achieved += Lever(ch.Lever, row.Tick, k, p.Dt)
                           * Vector2.Dot(z[c * p.H + k], row.Normal);
+            }
         }
         return row.Depth - achieved;
     }
 
+    // Refusal residual counts HARD rows only (HingeScale ≥ 1): soft support rows
+    // are intentionally violated during ducks and must not trip the gate.
     public static float ComputeResidual(CorrectionProblem p, Vector2[] z)
     {
         float r = 0f;
         for (int j = 0; j < p.RowCount; j++)
+        {
+            if (p.Rows[j].HingeScale < 1f) continue;
             r = MathF.Max(r, MathF.Max(0f, RowSlack(p, z, j)));
+        }
         return r;
     }
 
@@ -175,7 +210,7 @@ public static class CorrectionSolver
     }
 
     // Closed-form projection onto the channel's admissible set.
-    private static Vector2 Project(in ChannelDef ch, Vector2 coastVel, Vector2 v)
+    private static Vector2 Project(in ChannelDef ch, int k, Vector2 coastVel, Vector2 v)
     {
         if (ch.Redirect)
         {
@@ -188,11 +223,17 @@ public static class CorrectionSolver
             if (len <= radius) return v;
             return len > 0f ? center + d * (radius / len) : center;
         }
-        else
+
+        float cap = CapAt(ch, k);
+        if (ch.AxisOnly)
         {
-            float len = v.Length();
-            if (len <= ch.Cap) return v;
-            return len > 0f ? v * (ch.Cap / len) : v;
+            float lam = Vector2.Dot(v, ch.Axis);
+            lam = ch.Unilateral ? Math.Clamp(lam, 0f, cap) : Math.Clamp(lam, -cap, cap);
+            return lam * ch.Axis;
         }
+
+        float vlen = v.Length();
+        if (vlen <= cap) return v;
+        return vlen > 0f ? v * (cap / vlen) : v;
     }
 }

@@ -1,4 +1,6 @@
 {
+  // options: "full" | "redirect-traction" | "legs-only"  (hot-reloads while running)
+  "CorrectorScenario": "full",
   "AirAccel": 1500,
   "MaxAirSpeed": 150,
   "AirDrag": 500,

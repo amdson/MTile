@@ -48,11 +48,13 @@ public static class BaselineFeedforward
         return 0f;
     }
 
-    // Grounded standing force: hover spring + anti-pop rise clamp + walk drive.
-    // Mirror of StandingState.Update's force block against its refreshed ground
-    // FSD. walkAccel/maxWalkSpeed arrive pre-multiplied by modifiers.
-    // ambientLiftActive mirrors the live gate (MovementVars.AmbientLiftActive) —
-    // the predictor passes false (the coast models no ambient corrections).
+    // Grounded standing force: hover spring + walk drive. Mirror of
+    // StandingState.Update's force block against its refreshed ground FSD.
+    // walkAccel/maxWalkSpeed arrive pre-multiplied by modifiers.
+    // TEMP EXPERIMENT (throwaway): the anti-pop rise clamp (and its
+    // ambientLiftActive exemption gate) is removed here and in the live
+    // Standing/Crouched mirrors — corrector corrections must not be fought by
+    // hidden counter-forces while testing.
     public static Vector2 Ground(
         Vector2 pos, Vector2 vel,
         Vector2 groundPos, Vector2 groundNormal, Vector2 groundSurfaceVel, float minDistance,
@@ -68,9 +70,6 @@ public static class BaselineFeedforward
         float velAlongNormal = Vector2.Dot(vel - groundSurfaceVel, groundNormal);
         if (gap > 0f)
             force += groundNormal * (gap * springK - velAlongNormal * springDamping);
-        float velExcess = velAlongNormal - springMaxRiseSpeed;
-        if (gap > 0f && velExcess > 0f && dt > 0f && !ambientLiftActive)
-            force -= groundNormal * velExcess / dt;
 
         if (inputX != 0f)
         {

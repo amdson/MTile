@@ -49,11 +49,15 @@ public static class BallisticPredictor
     // Crouched)? It seeds the entry-vs-continuation asymmetry of the ground
     // classification: entry additionally requires the rise-speed gate
     // (StandingState.IsStandingGround); continuation is the plain probe.
+    //
+    // tickDv (optional): per-tick velocity-lever corrections z_k applied after
+    // gravity, mirroring PredictGuided — used for the ambient mode's corrected
+    // ("solved") rollout capture.
     public static int Predict(
         PhysicsBody body, ChunkMap chunks,
         int inputDirX, bool inputDown, bool startGrounded,
         in MovementModifiers modifiers, Vector2 gravity,
-        float dt, int steps, CoastSample[] samples)
+        float dt, int steps, CoastSample[] samples, Vector2[] tickDv = null)
     {
         var cfg = MovementConfig.Current;
         steps = Math.Min(steps, samples.Length);
@@ -61,40 +65,32 @@ public static class BallisticPredictor
         Vector2 pos = body.Position;
         Vector2 vel = body.Velocity;
         var polygon = body.Polygon;
-        bool prevGrounded = startGrounded;
-
-        float halfHeight  = PlayerCharacter.Radius;
         float floatHeight = PlayerCharacter.Radius;
-        float minDistance = halfHeight + floatHeight;
-        var   groundNormal = new Vector2(0f, -1f);
 
+        // TEMP EXPERIMENT (stand fold): the standing spring + FSD zeroing/sweep
+        // are removed from this coast (as from the live StandingState) — vertical
+        // support is now the solver's job via soft hover rows. The grounded
+        // branch is just the walk drive; FloorY is reported whenever a floor is
+        // within probe reach so the ambient corrector can synthesize hover rows.
         for (int k = 0; k < steps; k++)
         {
-            // 1. Ground probe + classification at the tick-top pose (mirrors
-            //    ctx.TryGetGround feeding the FSM before the state Update).
             var bounds = polygon.GetBoundingBox(pos);
             bool haveFloor = TryProbeFloor(chunks, bounds, floatHeight, out float floorY);
-            bool grounded = haveFloor
-                && MathF.Abs(vel.Y) <= cfg.MaxGroundEngageVnRel
-                && (prevGrounded || -vel.Y <= cfg.SpringMaxRiseSpeed);
+            bool grounded = haveFloor;
 
-            var groundPos = new Vector2(pos.X, floorY);
-
-            // 2. Baseline feedforward (the frozen-input drive).
-            Vector2 force;
+            var force = Vector2.Zero;
             if (grounded)
             {
-                force = BaselineFeedforward.Ground(
-                    pos, vel, groundPos, groundNormal, Vector2.Zero, minDistance,
-                    inputDirX,
-                    cfg.WalkAccel    * modifiers.WalkAccel,
-                    cfg.MaxWalkSpeed * modifiers.MaxWalkSpeed,
-                    modifiers.PreserveExternalVelocity, ambientLiftActive: false,
-                    cfg.SpringK, cfg.SpringDamping, cfg.SpringMaxRiseSpeed, dt);
+                // TEMP EXPERIMENT (walk fold): no ground drive in the coast —
+                // x-locomotion is requested from the solver via progress rows.
+                // Vertically, the stand baseline HOLDS AGAINST GRAVITY (mirrored
+                // by live StandingState): sustained support is feedforward, not
+                // a correction — channels act relative to the hold (LegServo =
+                // push beyond it, Tuck = release/press below it).
+                force.Y -= gravity.Y;
             }
             else
             {
-                force = Vector2.Zero;
                 force.X = BaselineFeedforward.Air(
                     inputDirX, vel.X,
                     cfg.AirAccel    * modifiers.AirAccel,
@@ -109,55 +105,15 @@ public static class BallisticPredictor
             if (modifiers.GravityScale != 1f)
                 force += gravity * (modifiers.GravityScale - 1f);
 
-            // 3. Integrate exactly as StepSwept does.
             vel += force * dt;
             vel += gravity * dt;
-
-            if (grounded)
-            {
-                float dist = Vector2.Dot(pos - groundPos, groundNormal);
-
-                // FSD constraint: below rest height, inbound normal velocity is zeroed.
-                if (dist < minDistance)
-                {
-                    float vnRel = Vector2.Dot(vel, groundNormal);
-                    if (vnRel < 0f) vel -= vnRel * groundNormal;
-                }
-
-                // FSD plane sweep: crossing MinDistance from above within the step
-                // (the landing catch). Mirrors ResolveChunkCollisionsSwept's
-                // FloatingSurfaceDistance branch: clip, carry-zero, slide the rest.
-                // displacement is (pos + v·dt) − pos, NOT v·dt: StepSwept computes it
-                // from the target position, and the different float rounding decides
-                // marginal sweep hits (the hover limit cycle rides exactly on t = 1).
-                var disp = (pos + vel * dt) - pos;
-                float dn = Vector2.Dot(disp, groundNormal);
-                if (dn < 0f && dist >= minDistance)
-                {
-                    float t = (minDistance - dist) / dn;
-                    if (t >= 0f && t <= 1f)
-                    {
-                        pos += disp * t + groundNormal * PhysicsWorld.Epsilon;
-                        disp *= 1f - t;
-                        float vnRel = Vector2.Dot(vel, groundNormal);
-                        if (vnRel < 0f) vel -= vnRel * groundNormal;
-                        float dn2 = Vector2.Dot(disp, groundNormal);
-                        if (dn2 < 0f) disp -= dn2 * groundNormal;
-                    }
-                }
-                pos += disp;
-            }
-            else
-            {
-                // Same displacement rounding as the grounded branch — see above.
-                pos += (pos + vel * dt) - pos;
-            }
+            if (tickDv != null) vel += tickDv[k];
+            pos += (pos + vel * dt) - pos;   // StepSwept's displacement rounding
 
             samples[k].Pos      = pos;
             samples[k].Vel      = vel;
             samples[k].Grounded = grounded;
-            samples[k].FloorY   = grounded ? floorY : float.PositiveInfinity;
-            prevGrounded = grounded;
+            samples[k].FloorY   = haveFloor ? floorY : float.PositiveInfinity;
         }
 
         return steps;

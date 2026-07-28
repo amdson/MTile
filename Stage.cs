@@ -74,6 +74,32 @@ public static class Stages
             Populate      = PopulateTraining,
         });
 
+        // ─── corridor ─────────────────────────────────────────────────────────
+        // Ambient-corrector stress harness: flat runway (floor tile y = 6) feeding
+        // into a 64-tile bumpy tunnel (corridor.txt × 4 chunks, world x 256..1280):
+        // 3-tile interior, floor bumps at col ≡ 1 (mod 4), ceiling bumps at
+        // col ≡ 3 (mod 4). The player is restricted to Falling + Standing ONLY —
+        // no jump/crouch/climb states — so traversal is a pure measure of what the
+        // ambient corrections can do through a bare movement state.
+        Register(new Stage {
+            Name          = "corridor",
+            TerrainConfig = "corridor.json",
+            PlayerSpawn   = new Vector2(0f, 60f),
+            Populate      = g => g.Player.RestrictToFallAndStand(),
+        });
+
+        // ─── gym ──────────────────────────────────────────────────────────────
+        // Channel-scenario proving ground: flat floor (tile y = 8) with a
+        // repeating 1-high ledge (up at col 6, down at col 12, every 16 tiles).
+        // Fall/stand only, like the corridor. Pick the channel set via
+        // movement_config.json "CorrectorScenario" — hot-reloads live.
+        Register(new Stage {
+            Name          = "gym",
+            TerrainConfig = "gym.json",
+            PlayerSpawn   = new Vector2(8f, 100f),
+            Populate      = g => g.Player.RestrictToFallAndStand(),
+        });
+
         // ─── flat ─────────────────────────────────────────────────────────────
         // Empty, perfectly flat plain (floor at world tile y = 6, open sky, no
         // hills/chunk art, no entities or platforms). A clean testbed for the

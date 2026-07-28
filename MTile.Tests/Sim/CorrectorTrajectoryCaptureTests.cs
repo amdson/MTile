@@ -54,13 +54,15 @@ public class CorrectorTrajectoryCaptureTests(ITestOutputHelper output)
         Assert.True(sawBallistic, "ballistic trajectory never captured");
         Assert.True(sawSolved, "solved trajectory never captured (tunnel arc should carry rows)");
 
-        // After the maneuver ends the buffers expire (Exit + per-frame BeginFrame).
+        // After the maneuver ends the MANEUVER buffers expire (Exit + per-frame
+        // BeginFrame). Reference is maneuver-only, so it must be gone; ballistic/
+        // solved may legitimately be repopulated the same frame by the AMBIENT
+        // corrector (it captures whenever the held-input coast implies rows).
         var end = sim.Player.CorrectorDebug;
         Assert.False(sim.Player.CurrentStateName.Contains("Parkour"));
         Assert.Equal(0, end.ReferenceCount);
-        Assert.Equal(0, end.BallisticCount);
-        Assert.Equal(0, end.SolvedCount);
-        output.WriteLine($"capture verified through vault ending at frame {lastVaultFrame}");
+        output.WriteLine($"capture verified through vault ending at frame {lastVaultFrame}; " +
+                         $"post-maneuver ambient ballistic={end.BallisticCount} solved={end.SolvedCount}");
     }
 
     [Fact]

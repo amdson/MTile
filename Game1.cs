@@ -330,7 +330,8 @@ public class Game1 : Game
                 _sim.Player.CorrectorDebug.CaptureTrajectories =
                     _config.DebugDrawCorrectorReference
                     || _config.DebugDrawCorrectorBallistic
-                    || _config.DebugDrawCorrectorSolved;
+                    || _config.DebugDrawCorrectorSolved
+                    || _config.DebugDrawCorrectorContacts;
 
                 // Gather this frame's input and advance the simulation by fixed steps.
                 var input = Controller.Poll(mouseWorldPos);
@@ -506,6 +507,10 @@ public class Game1 : Game
         if (_config.DebugDrawCorridor)
             _debugOverlay.DrawCorridor(CorridorProbe.Scan(player.Body, _sim.Chunks, player.Facing));
 
+        // C-space obstacle boundary near the player — what the row builder plans against.
+        if (_config.DebugDrawCObstacles)
+            _debugOverlay.DrawCObstacles(_sim.Chunks, player.Body.Polygon, player.Body.Position, 160f);
+
         // Predicted coast (BallisticPredictor) from the player's current state under the
         // currently-held input. Pure render-local rollout — identity modifiers (action
         // modifiers aren't reproduced here; the overlay approximates the baseline coast).
@@ -539,6 +544,8 @@ public class Game1 : Game
                 _debugOverlay.DrawTrajectory(cd.BallisticTrajectory, cd.BallisticCount, Color.Aqua);
             if (_config.DebugDrawCorrectorSolved && cd.SolvedCount > 0)
                 _debugOverlay.DrawTrajectory(cd.SolvedTrajectory, cd.SolvedCount, Color.Magenta);
+            if (_config.DebugDrawCorrectorContacts && cd.ContactCount > 0)
+                _debugOverlay.DrawContactForces(cd.ContactPos, cd.ContactDv, cd.ContactCount);
         }
 
         // Enemy health bars in world space, drawn just above each wounded body.

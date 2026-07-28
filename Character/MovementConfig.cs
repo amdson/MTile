@@ -183,6 +183,10 @@ public class MovementConfig
     // Runs during free movement under a held direction: free-coast predict over a
     // short horizon, passable-feature rows only, redirect-only solve, applied iff
     // fully feasible (anti-autopilot: infeasible plans are discarded whole).
+    // TEMP EXPERIMENT (scenario harness): which channel set the stand-fold solve
+    // uses — "full", "redirect-traction", "legs-only". Hot-reloadable: edit
+    // movement_config.json while the game runs to switch live.
+    public string CorrectorScenario             { get; set; } = "full";
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
     public int   AmbientHorizon                 { get; set; } = 10;
     // Max unresolved clearance residual (px) an ambient plan may carry and still

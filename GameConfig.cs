@@ -38,6 +38,12 @@ public sealed class GameConfig
     public bool DebugDrawCorrectorReference { get; set; } = true;
     public bool DebugDrawCorrectorBallistic { get; set; } = true;
     public bool DebugDrawCorrectorSolved    { get; set; } = true;
+    //   Contacts   — per-clearance-row push arrows: the δv each contact shoved
+    //                into the correction applied this frame (orange-red)
+    public bool DebugDrawCorrectorContacts  { get; set; } = true;
+    // C-space obstacle boundary near the player (exposed template facets: axis
+    // faces steel blue, corner bevels orange) — what the row builder plans against.
+    public bool DebugDrawCObstacles         { get; set; } = false;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
     // Force fields (hold / grab / throw) — on by default so the otherwise-invisible
@@ -121,7 +127,12 @@ public sealed class GameConfig
         {
             using var stream = TitleContent.TryOpenRead(path);
             if (stream == null) return new GameConfig();
-            var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var opts = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                ReadCommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            };
             return JsonSerializer.Deserialize<GameConfig>(stream, opts) ?? new GameConfig();
         }
         catch (Exception)

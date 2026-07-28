@@ -226,8 +226,6 @@ public class StandingState : MovementState
     public override int ActivePriority => MovementPriorities.StandingActive;
     public override int PassivePriority => MovementPriorities.StandingPassive;
 
-    private FloatingSurfaceDistance _ground;
-
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         return IsStandingGround(ctx);
@@ -257,95 +255,22 @@ public class StandingState : MovementState
         return riseSpeed <= MovementConfig.Current.SpringMaxRiseSpeed;
     }
 
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-        => EnsureGround(ctx);
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (_ground != null)
-            ctx.Body.Constraints.Remove(_ground);
-        _ground = null;
-    }
-
-    // Idempotent ground-contact acquisition. Called from Enter and the top of Update
-    // so the (non-snapshotted) soft contact self-heals after a restore drops it.
-    // No-op in normal play, where Enter already established it.
-    private void EnsureGround(EnvironmentContext ctx)
-    {
-        if (_ground != null) return;
-        if (ctx.TryGetGround(out var contact))
-        {
-            _ground = contact;
-            ctx.Body.Constraints.Add(_ground);
-        }
-    }
-
-    public override void ResetTransient() => _ground = null;
-
+    // TEMP EXPERIMENT (stand fold): the ground FSD constraint + hover spring are
+    // REMOVED from Standing — vertical support is solved by the ambient corrector
+    // (soft hover rows, see AmbientCorrector). Standing keeps classification and
+    // the walk drive only. With no physics contact there is no contact friction,
+    // so no-input braking is applied explicitly (BrakingForce). Crouched and the
+    // climb family still run the old spring machinery.
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        EnsureGround(ctx);
-        if (ctx.TryGetGround(out var refreshed))
-        {
-            _ground.Position        = refreshed.Position;
-            _ground.Normal          = refreshed.Normal;
-            _ground.MinDistance     = refreshed.MinDistance;
-            _ground.SurfaceVelocity = refreshed.SurfaceVelocity;
-        }
-        // Refresh friction every frame so action-driven modifiers (e.g. Stab's
-        // lunge dip) take effect immediately without needing a state re-entry.
-        _ground.Friction = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
-
-        var force = Vector2.Zero;
-        var cfg = MovementConfig.Current;
-        var m   = ctx.Modifiers;
-
-        // Spring damping uses *relative* normal velocity so the body's
-        // surface-matched motion (carried by a moving platform) isn't damped
-        // back to zero — only deviations from the surface are.
-        float dist           = Vector2.Dot(ctx.Body.Position - _ground.Position, _ground.Normal);
-        float gap            = _ground.MinDistance - dist;
-        float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
-        if (gap > 0f)
-            force += _ground.Normal * (gap * cfg.SpringK - velAlongNormal * cfg.SpringDamping);
-        // Anti-pop clamp: cap the rise only while at/below float height (gap > 0), where
-        // the spring above could be flinging the body up. Once it's risen above rest
-        // height (gap < 0 — e.g. an early jump-release leaving Standing momentarily in
-        // charge of an ascending body), braking the ascent would dead-end it like a
-        // ceiling, so leave it alone.
-        // ...and skipped the frame after an ambient upward correction: the corrector's
-        // lift rises faster than the spring would ever push, and clamping it here would
-        // cancel the reflex assist the frame after it starts (the role the old ramps'
-        // Engaged bit had — one frame stale, same as then).
-        float velExcess = velAlongNormal - cfg.SpringMaxRiseSpeed;
-        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f && !vars.AmbientLiftActive)
-            force -= _ground.Normal * velExcess / ctx.Dt;
-
-        float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
-        if (inputX != 0f)
-        {
-            float walkAccel    = cfg.WalkAccel    * m.WalkAccel;
-            float maxWalkSpeed = cfg.MaxWalkSpeed * m.MaxWalkSpeed;
-            force.X += inputX * walkAccel;
-            // Over-cap brake skipped during hitstun so horizontal knockback on a
-            // grounded victim isn't clipped back to walk speed in one frame — see
-            // MovementModifiers.PreserveExternalVelocity.
-            float excess = MathF.Abs(ctx.Body.Velocity.X) - maxWalkSpeed;
-            if (excess > 0f && MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && ctx.Dt > 0f
-                && !m.PreserveExternalVelocity)
-                force.X -= MathF.Sign(ctx.Body.Velocity.X) * excess / ctx.Dt;
-            // Excess correction can zero out the walk force when the body is already
-            // moving faster than MaxWalkSpeed in the input direction (e.g. just exited
-            // a vault). Without a residual tangential force here, the physics solver's
-            // friction would brake the body back down to MaxWalkSpeed. Keep a tiny
-            // walk-intent signal so friction recognizes the state is still driving.
-            if (MathF.Sign(ctx.Body.Velocity.X) == MathF.Sign(inputX) && MathF.Abs(force.X) < 2f)
-                force.X = inputX * 2f;
-        }
-        // No-input braking: handled by SurfaceContact.Friction in the physics solver
-        // now — applying tangential force here would just suppress that friction.
-
-        ctx.Body.AppliedForce = force;
+        // TEMP EXPERIMENT (walk fold): walk drive + braking live in the ambient
+        // solve as x-progress rows. The one baseline Standing applies is the
+        // gravity hold — sustained support is feedforward (mirrored by the
+        // predictor's grounded branch); the solver's channels act relative to
+        // it. Without this the solver must win a tug-of-war against gravity at
+        // dt² leverage every frame, which it structurally cannot (the post-
+        // landing dead-rest bug).
+        ctx.Body.AppliedForce = new Vector2(0f, -ctx.Gravity.Y);
     }
 }
 
@@ -418,11 +343,7 @@ public class CrouchedState : MovementState
         float velAlongNormal = Vector2.Dot(ctx.Body.Velocity - _ground.SurfaceVelocity, _ground.Normal);
         if (gap > 0f)
             force += _ground.Normal * (gap * MovementConfig.Current.SpringK - velAlongNormal * MovementConfig.Current.SpringDamping);
-        // Anti-pop clamp gated on gap > 0, exempted the frame after an ambient upward
-        // correction — see StandingState.Update.
-        float velExcess = velAlongNormal - MovementConfig.Current.SpringMaxRiseSpeed;
-        if (gap > 0f && velExcess > 0f && ctx.Dt > 0f && !vars.AmbientLiftActive)
-            force -= _ground.Normal * velExcess / ctx.Dt;
+        // TEMP EXPERIMENT (throwaway): anti-pop rise clamp removed — see StandingState.Update.
 
         float inputX = (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f);
         if (inputX != 0f)

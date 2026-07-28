@@ -1,0 +1,12 @@
+{
+  "Extents": 5,
+  "ChunkFiles": {
+    "1,0": "corridor.txt",
+    "2,0": "corridor.txt",
+    "3,0": "corridor.txt",
+    "4,0": "corridor.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 6", "IsSolid": true }
+  ]
+}

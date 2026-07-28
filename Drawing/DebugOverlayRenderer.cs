@@ -173,6 +173,86 @@ public sealed class DebugOverlayRenderer
     // Clearance rows from the constraint builder: at each event's predicted sample,
     // the violated support plane's outward normal scaled by the required depth.
     // Red = the push the corrector must schedule by that tick. Render-only.
+    // C-space obstacle boundary (CObstacle.cs): the exposed facets of each solid
+    // tile's template (tile ⊕ reflected body) near `center` — the exact "the body
+    // center may not enter here" region the row builder plans against. Axis
+    // facets steel blue, corner bevels orange. Render-only.
+    public void DrawCObstacles(ChunkMap chunks, Polygon body, Vector2 center, float radius)
+    {
+        var template = CObstacleTemplate.For(body);
+        var f = template.Facets;
+        int F = Math.Min(f.Length, 16);
+
+        // Facets in angular order so adjacent half-plane intersections are the
+        // boundary polygon's vertices.
+        Span<int> order = stackalloc int[16];
+        for (int i = 0; i < F; i++) order[i] = i;
+        for (int i = 1; i < F; i++)
+            for (int j = i; j > 0 && Angle(f[order[j - 1]]) > Angle(f[order[j]]); j--)
+                (order[j], order[j - 1]) = (order[j - 1], order[j]);
+
+        int ts = Chunk.TileSize;
+        float half = ts * 0.5f;
+        int cMin = (int)MathF.Floor((center.X - radius) / ts), cMax = (int)MathF.Floor((center.X + radius) / ts);
+        int rMin = (int)MathF.Floor((center.Y - radius) / ts), rMax = (int)MathF.Floor((center.Y + radius) / ts);
+
+        for (int gtx = cMin; gtx <= cMax; gtx++)
+        for (int gty = rMin; gty <= rMax; gty++)
+        {
+            float cx = gtx * ts + half, cy = gty * ts + half;
+            if (!TileQuery.IsSolidAt(chunks, cx, cy)) continue;
+            var tileCenter = new Vector2(cx, cy);
+
+            for (int idx = 0; idx < F; idx++)
+            {
+                var fc = f[order[idx]];
+                if (TileQuery.IsSolidAt(chunks, cx + fc.MaskDx1 * ts, cy + fc.MaskDy1 * ts)) continue;
+                if (fc.TwoMasks && TileQuery.IsSolidAt(chunks, cx + fc.MaskDx2 * ts, cy + fc.MaskDy2 * ts)) continue;
+
+                var a = Intersect(fc, f[order[(idx - 1 + F) % F]]);
+                var b = Intersect(fc, f[order[(idx + 1) % F]]);
+                var color = fc.TwoMasks ? Color.Orange * 0.7f : Color.SteelBlue * 0.7f;
+                DrawLine(tileCenter + a, tileCenter + b, color, 1);
+            }
+        }
+
+        static float Angle(in CFacet fc) => MathF.Atan2(fc.Normal.Y, fc.Normal.X);
+        static Vector2 Intersect(in CFacet p, in CFacet q)
+        {
+            float det = p.Normal.X * q.Normal.Y - p.Normal.Y * q.Normal.X;
+            if (MathF.Abs(det) < 1e-6f) return p.Normal * p.Offset;
+            return new Vector2(
+                (p.Offset * q.Normal.Y - q.Offset * p.Normal.Y) / det,
+                (p.Normal.X * q.Offset - q.Normal.X * p.Offset) / det);
+        }
+    }
+
+    // Per-contact corrector push (CorrectorScratch.ContactPos/ContactDv): one arrow
+    // per clearance row at its predicted contact point, along the δv that row shoved
+    // into the applied correction. Length scales with magnitude (clamped — direction
+    // and relative size are the signal, not absolute px). Render-only.
+    public void DrawContactForces(Vector2[] pos, Vector2[] dv, int count)
+    {
+        for (int j = 0; j < count; j++)
+        {
+            var d = dv[j];
+            float len = d.Length();
+            if (len < 1e-3f)
+            {
+                // Row present but contributed nothing — mark it so silence is visible.
+                _draw.Disc(pos[j], 2f, Color.OrangeRed * 0.4f);
+                continue;
+            }
+            var dir = d / len;
+            float shaft = MathHelper.Clamp(len * 0.4f, 6f, 60f);
+            var tip = pos[j] + dir * shaft;
+            var perp = new Vector2(-dir.Y, dir.X);
+            DrawLine(pos[j], tip, Color.OrangeRed, 2);
+            DrawLine(tip, tip + (-dir + perp) * 4f, Color.OrangeRed, 2);
+            DrawLine(tip, tip + (-dir - perp) * 4f, Color.OrangeRed, 2);
+        }
+    }
+
     public void DrawClearanceRows(CoastSample[] samples, ClearanceRow[] rows, int rowCount)
     {
         for (int j = 0; j < rowCount; j++)

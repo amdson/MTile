@@ -11,6 +11,11 @@ public struct ClearanceRow
     public int     Tick;    // predicted tick index the requirement anchors to
     public Vector2 Normal;  // outward clearance normal (axis-aligned: a tile face)
     public float   Depth;   // required outward displacement (px) — margin-inflated
+    // Per-row multiplier on the solver's HingeWeight. Tile clearance rows are 1
+    // (hard). The stand-fold's hover-support rows are soft (≪1) so obstacle rows
+    // can overpower them — that yielding IS the duck/crest mechanic. Soft rows
+    // are excluded from the refusal residual.
+    public float   HingeScale;
 }
 
 // Sweeps the margin-inflated body along a predicted coast polyline directly against
@@ -38,27 +43,30 @@ public struct ClearanceRow
 // derivation per call (hoisted into pooled scratch when wired onto PlayerCharacter).
 public static class ClearanceConstraintBuilder
 {
-    public const int   MaxEvents            = 4;
+    // Raised 4 → 32 for the stand fold: hover-support rows are per-tick (up to a
+    // full horizon of them) and must not crowd out real obstacle rows.
+    public const int   MaxEvents            = 32;
     public const float DefaultDeepViolation = 8f;   // px — half a tile reads as "impact", not "graze"
 
-    // Axis normal slots, fixed order: 0 = up (0,-1), 1 = down (0,1), 2 = left (-1,0), 3 = right (1,0).
-    private static readonly Vector2[] AxisNormals =
-    {
-        new(0f, -1f), new(0f, 1f), new(-1f, 0f), new(1f, 0f),
-    };
+    // Facet-count ceiling for the C-obstacle template (hexagon body ⇒ ~8).
+    public const int MaxFacets = 16;
 
     // Builds rows[0..return) from samples[0..count). truncatedAt == count when the
     // whole coast was scanned; otherwise the tick of the first deep violation.
     //
+    // Geometry comes from the exact C-space obstacle template (CObstacle.cs):
+    // per solid cell, the body center is tested against the template's facets
+    // (tile ⊕ reflected body — axis faces PLUS the corner bevels, which is how
+    // lips and corners are visible to planning as real geometry). The shallowest
+    // EXPOSED facet is the cell's pop-out; exposure masks prune facets interior
+    // to the C-space union (neighbor solidity).
+    //
     // verticalFacesOnly is the AMBIENT-mode emission filter (the anti-autopilot
-    // rule): a cell may only emit its up/down faces — a lip's underside, a
-    // corner's top — because those are clearable by a passive deflection that
-    // preserves progress along the held direction. A blocking wall face emits
-    // NOTHING; the coast just deep-truncates at the impact and the ambient layer
-    // stays silent (full-speed honest bonk). Cells whose only exposed faces are
-    // side faces contribute no row at all under the filter — which is also what
-    // band-limits ambient assists for free: a tall wall's stacked cells have no
-    // exposed vertical faces except the far-away top, whose depth is deep.
+    // rule): only facets with a significant vertical component may emit rows —
+    // pure wall faces emit NOTHING and the coast deep-truncates at the impact
+    // (full-speed honest bonk). Corner bevels count as vertical-ish, so grazes
+    // and lips stay actionable. Deep truncation keys on penetration regardless
+    // of the filter, so a filtered wall impact still kills the scan.
     public static int Build(
         ChunkMap chunks, Polygon body,
         CoastSample[] samples, int count,
@@ -66,110 +74,95 @@ public static class ClearanceConstraintBuilder
         ClearanceRow[] rows, out int truncatedAt,
         bool verticalFacesOnly = false)
     {
-        // Body support extents along the four axis directions (the AABB of the
-        // local polygon — exact supports for axis normals).
-        var bb = body.GetBoundingBox(Vector2.Zero);
+        var template = CObstacleTemplate.For(body);
+        var facets = template.Facets;
+        int F = Math.Min(facets.Length, MaxFacets);
+        float reach = template.Reach + margin;
 
         int rowCount = 0;
         truncatedAt = count;
 
-        // Per-normal run state: depth/tick of the worst violation in the current
+        // Per-facet run state: depth/tick of the worst violation in the current
         // contiguous violated stretch; runActive marks a stretch in progress.
-        Span<bool>  runActive = stackalloc bool[4];
-        Span<float> runDepth  = stackalloc float[4];
-        Span<int>   runTick   = stackalloc int[4];
+        Span<bool>  runActive = stackalloc bool[MaxFacets];
+        Span<float> runDepth  = stackalloc float[MaxFacets];
+        Span<int>   runTick   = stackalloc int[MaxFacets];
+        Span<float> tickDepth = stackalloc float[MaxFacets];
+        Span<float> cellDepth = stackalloc float[MaxFacets];
 
         int ts = Chunk.TileSize;
+        float half = ts * 0.5f;
 
         for (int k = 0; k < count; k++)
         {
             var pos = samples[k].Pos;
-            float infL = pos.X + bb.Left  - margin;
-            float infR = pos.X + bb.Right + margin;
-            float infT = pos.Y + bb.Top    - margin;
-            float infB = pos.Y + bb.Bottom + margin;
-
-            // This tick's violation per axis normal (max depth across cells), plus
-            // the raw penetration measure (min exposed-face depth per cell, ANY
-            // face) — deep truncation keys on penetration, not on emission, so a
-            // filtered-out wall impact still kills the scan instead of letting the
-            // coast plan through the wall.
-            Span<float> tickDepth = stackalloc float[4] { 0f, 0f, 0f, 0f };
+            for (int f = 0; f < F; f++) tickDepth[f] = 0f;
             float tickPenetration = 0f;
 
-            int cMin = (int)MathF.Floor(infL / ts), cMax = (int)MathF.Floor(infR / ts);
-            int rMin = (int)MathF.Floor(infT / ts), rMax = (int)MathF.Floor(infB / ts);
+            int cMin = (int)MathF.Floor((pos.X - reach) / ts), cMax = (int)MathF.Floor((pos.X + reach) / ts);
+            int rMin = (int)MathF.Floor((pos.Y - reach) / ts), rMax = (int)MathF.Floor((pos.Y + reach) / ts);
 
             for (int gtx = cMin; gtx <= cMax; gtx++)
             for (int gty = rMin; gty <= rMax; gty++)
             {
-                float cx = gtx * ts + ts * 0.5f, cy = gty * ts + ts * 0.5f;
+                float cx = gtx * ts + half, cy = gty * ts + half;
                 if (!TileQuery.IsSolidAt(chunks, cx, cy)) continue;
 
-                float x0 = gtx * ts, x1 = x0 + ts;
-                float y0 = gty * ts, y1 = y0 + ts;
-
-                // The inflated body must actually overlap the cell (strict, so
-                // flush edges don't count). Once it does, all four support-plane
-                // depths are positive; the EXPOSED face with the smallest depth
-                // is the pop-out face for this cell.
-                if (!(infR > x0 && infL < x1 && infB > y0 && infT < y1)) continue;
-
-                int   bestAxis  = -1;
-                float bestDepth = float.MaxValue;
-                float rawBest   = float.MaxValue;   // min over ALL exposed faces
-
-                // Up (tile top face, push body up = (0,-1))
-                if (!TileQuery.IsSolidAt(chunks, cx, cy - ts))
+                // Inside the margin-inflated C-obstacle iff EVERY facet is
+                // violated (convexity). Strict, so flush edges don't count.
+                var rel = new Vector2(pos.X - cx, pos.Y - cy);
+                bool inside = true;
+                for (int f = 0; f < F; f++)
                 {
-                    float m = infB - y0;
-                    if (m < rawBest) rawBest = m;
-                    if (m < bestDepth) { bestDepth = m; bestAxis = 0; }
+                    cellDepth[f] = facets[f].Offset + margin - Vector2.Dot(rel, facets[f].Normal);
+                    if (cellDepth[f] <= 0f) { inside = false; break; }
                 }
-                // Down (tile bottom face, push body down = (0,1))
-                if (!TileQuery.IsSolidAt(chunks, cx, cy + ts))
+                if (!inside) continue;
+
+                int   bestFacet = -1;
+                float rawBest   = float.MaxValue;   // min over ALL exposed facets
+
+                for (int f = 0; f < F; f++)
                 {
-                    float m = y1 - infT;
-                    if (m < rawBest) rawBest = m;
-                    if (m < bestDepth) { bestDepth = m; bestAxis = 1; }
-                }
-                // Left (tile left face, push body left = (-1,0))
-                if (!TileQuery.IsSolidAt(chunks, cx - ts, cy))
-                {
-                    float m = infR - x0;
-                    if (m < rawBest) rawBest = m;
-                    if (!verticalFacesOnly && m < bestDepth) { bestDepth = m; bestAxis = 2; }
-                }
-                // Right (tile right face, push body right = (1,0))
-                if (!TileQuery.IsSolidAt(chunks, cx + ts, cy))
-                {
-                    float m = x1 - infL;
-                    if (m < rawBest) rawBest = m;
-                    if (!verticalFacesOnly && m < bestDepth) { bestDepth = m; bestAxis = 3; }
+                    var fc = facets[f];
+                    if (TileQuery.IsSolidAt(chunks, cx + fc.MaskDx1 * ts, cy + fc.MaskDy1 * ts)) continue;
+                    if (fc.TwoMasks && TileQuery.IsSolidAt(chunks, cx + fc.MaskDx2 * ts, cy + fc.MaskDy2 * ts)) continue;
+
+                    if (cellDepth[f] < rawBest) { rawBest = cellDepth[f]; bestFacet = f; }
                 }
                 if (rawBest != float.MaxValue && rawBest > tickPenetration)
                     tickPenetration = rawBest;
 
-                // A fully-enclosed cell (no exposed faces) contributes nothing —
+                // The emission filter is a VETO on the true nearest exit, never a
+                // preference among exits: if the shallowest exposed facet is a
+                // filtered wall face, the cell emits NOTHING and the coast bonks
+                // via deep truncation — it is not steered to a deeper "climb
+                // over the top" facet (that autopilot rule is how sideways wall
+                // hits used to read as climb commands).
+                if (bestFacet >= 0 && verticalFacesOnly
+                    && MathF.Abs(facets[bestFacet].Normal.Y) < 0.3f)
+                    bestFacet = -1;
+
+                // A fully-enclosed cell (no exposed facets) contributes nothing —
                 // a shallower row exists at whatever surface cell the coast
                 // crossed to get here.
-                if (bestAxis >= 0 && tickDepth[bestAxis] < bestDepth)
-                    tickDepth[bestAxis] = bestDepth;
+                if (bestFacet >= 0 && tickDepth[bestFacet] < rawBest)
+                    tickDepth[bestFacet] = rawBest;
             }
 
             bool deep = tickPenetration >= deepViolation;
-            for (int a = 0; a < 4; a++)
+            for (int f = 0; f < F; f++)
             {
-                if (tickDepth[a] > 0f)
+                if (tickDepth[f] > 0f)
                 {
-                    if (!runActive[a]) { runActive[a] = true; runDepth[a] = tickDepth[a]; runTick[a] = k; }
-                    else if (tickDepth[a] > runDepth[a]) { runDepth[a] = tickDepth[a]; runTick[a] = k; }
+                    if (!runActive[f]) { runActive[f] = true; runDepth[f] = tickDepth[f]; runTick[f] = k; }
+                    else if (tickDepth[f] > runDepth[f]) { runDepth[f] = tickDepth[f]; runTick[f] = k; }
                 }
-                else if (runActive[a])
+                else if (runActive[f])
                 {
-                    runActive[a] = false;
+                    runActive[f] = false;
                     if (rowCount < MaxEvents)
-                        rows[rowCount++] = new ClearanceRow { Tick = runTick[a], Normal = AxisNormals[a], Depth = runDepth[a] };
+                        rows[rowCount++] = new ClearanceRow { Tick = runTick[f], Normal = facets[f].Normal, Depth = runDepth[f], HingeScale = 1f };
                 }
             }
 
@@ -181,9 +174,9 @@ public static class ClearanceConstraintBuilder
         }
 
         // Finalize runs still open at the horizon / truncation point.
-        for (int a = 0; a < 4; a++)
-            if (runActive[a] && rowCount < MaxEvents)
-                rows[rowCount++] = new ClearanceRow { Tick = runTick[a], Normal = AxisNormals[a], Depth = runDepth[a] };
+        for (int f = 0; f < F; f++)
+            if (runActive[f] && rowCount < MaxEvents)
+                rows[rowCount++] = new ClearanceRow { Tick = runTick[f], Normal = facets[f].Normal, Depth = runDepth[f], HingeScale = 1f };
 
         return rowCount;
     }

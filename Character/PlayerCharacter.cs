@@ -255,7 +255,10 @@ public class PlayerCharacter : IHittable
 
     public PlayerCharacter(Vector2 startPosition)
     {
-        Body = new PhysicsBody(Polygon.CreateRegular(Radius, 6), startPosition);
+        // TEMP EXPERIMENT: hexagon squeezed to half width (twice as tall as wide).
+        var hexVerts = Polygon.CreateRegular(Radius, 6).GetVertices(Vector2.Zero);
+        for (int i = 0; i < hexVerts.Length; i++) hexVerts[i].X *= 0.5f;
+        Body = new PhysicsBody(new Polygon(hexVerts), startPosition);
         // Landing impact damage. PhysicsWorld dispatches this whenever a body
         // hits a surface (chunk OR floating-surface constraint) with vnRel < 0
         // and Impact != null. Tuning rationale:
@@ -340,6 +343,20 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new LedgeJumpState(1));
         _stateRegistry.Add(new LedgeJumpState(-1));
 
+        _currentState = _stateRegistry[0]; // falling
+    }
+
+    // Corrector stress harness (the "corridor" stage): strip the movement registry
+    // down to the two free states, so everything between them — bump hops, head
+    // tucks, unsticking — must come from the ambient corrector's applied
+    // corrections. No jump, no crouch, no climb family, no ledges. Standing
+    // publishes AmbientPolicy.Default, so the ambient layer stays on. Call from a
+    // Stage.Populate before the first Step.
+    public void RestrictToFallAndStand()
+    {
+        _stateRegistry.Clear();
+        _stateRegistry.Add(new FallingState());
+        _stateRegistry.Add(new StandingState());
         _currentState = _stateRegistry[0]; // falling
     }
 
@@ -552,7 +569,11 @@ public class PlayerCharacter : IHittable
         // Hitstun forces the policy off — knockback must hit corners honestly, whatever
         // free state is nominally active.
         var rampPolicy = _abilities.Combat.HitstunActive ? AmbientPolicy.Off : _currentState.AmbientPolicy;
-        _ambient.Apply(ctx, rampPolicy, IsGrounded, ref _moveVars);
+        // TEMP EXPERIMENT (stand fold): while Standing/Falling, hover support is
+        // the ambient solve's job (Standing no longer attaches an FSD/spring), so
+        // the corrector must run — and apply — even at zero input and in hitstun.
+        bool solverStand = _currentState is StandingState or FallingState;
+        _ambient.Apply(ctx, rampPolicy, IsGrounded, solverStand, ref _moveVars);
 
         // Action gets to augment the body's force AFTER movement has written it but
         // BEFORE Action.Update — keeps Update free for FSM logic, lets the physics

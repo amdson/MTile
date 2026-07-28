@@ -11,13 +11,33 @@ public sealed class CorrectorScratch
     public readonly CoastSample[]  Samples  = new CoastSample[BallisticPredictor.MaxHorizon];
     public readonly ClearanceRow[] Rows     = new ClearanceRow[ClearanceConstraintBuilder.MaxEvents];
     public readonly Vector2[]      CoastVel = new Vector2[BallisticPredictor.MaxHorizon];
-    public readonly Vector2[]      Z        = new Vector2[BallisticPredictor.MaxHorizon];
-    public readonly Vector2[]      ZScratch = new Vector2[BallisticPredictor.MaxHorizon];
+    // Z layout is z[c·H + k] — sized for the full channel stack.
+    public readonly Vector2[]      Z        = new Vector2[CorrectionSolver.MaxChannels * BallisticPredictor.MaxHorizon];
+    public readonly Vector2[]      ZScratch = new Vector2[CorrectionSolver.MaxChannels * BallisticPredictor.MaxHorizon];
     public readonly Vector2[]      TickDv   = new Vector2[BallisticPredictor.MaxHorizon];
+    // Per-channel per-tick activation masks + velocity-conditioned caps (frozen
+    // from the coast each solve), and cross-frame Δ anchors (last applied z per
+    // channel). TEMP EXPERIMENT: ChannelPrev is cross-frame state that is NOT
+    // snapshotted — rollback determinism is suspended for the stack experiment.
+    public readonly bool[][]  ChannelMask = MakeMasks();
+    public readonly float[][] ChannelCap  = MakeCaps();
+    public readonly Vector2[] ChannelPrev = new Vector2[CorrectionSolver.MaxChannels];
+    private static bool[][] MakeMasks()
+    {
+        var m = new bool[CorrectionSolver.MaxChannels][];
+        for (int c = 0; c < m.Length; c++) m[c] = new bool[BallisticPredictor.MaxHorizon];
+        return m;
+    }
+    private static float[][] MakeCaps()
+    {
+        var m = new float[CorrectionSolver.MaxChannels][];
+        for (int c = 0; c < m.Length; c++) m[c] = new float[BallisticPredictor.MaxHorizon];
+        return m;
+    }
     public readonly CorrectionProblem Problem = new()
     {
-        Channels    = new ChannelDef[1],
-        PrevApplied = new Vector2[1],
+        Channels    = new ChannelDef[CorrectionSolver.MaxChannels],
+        PrevApplied = new Vector2[CorrectionSolver.MaxChannels],
     };
     // Hypothetical-state probe for feasibility-as-trigger: CheckPreConditions
     // rolls the WOULD-BE maneuver (post-hop state) through the same predict →
@@ -42,7 +62,17 @@ public sealed class CorrectorScratch
     public readonly CoastSample[] SolvedTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
     public int SolvedCount;
 
-    public void BeginFrame() { BallisticCount = 0; SolvedCount = 0; }
+    // Per-contact push attribution for the APPLIED solve this frame (ambient or
+    // maneuver — at most one applies per frame): each clearance row's predicted
+    // contact position (body center at the row's tick) and the δv it shoved into
+    // the applied tick-0 correction (CorrectionProblem.RowPush; force = δv/dt).
+    // Cleared every frame; empty whenever nothing was applied.
+    public readonly Vector2[] RowPush    = new Vector2[ClearanceConstraintBuilder.MaxEvents];
+    public readonly Vector2[] ContactPos = new Vector2[ClearanceConstraintBuilder.MaxEvents];
+    public readonly Vector2[] ContactDv  = new Vector2[ClearanceConstraintBuilder.MaxEvents];
+    public int ContactCount;
+
+    public void BeginFrame() { BallisticCount = 0; SolvedCount = 0; ContactCount = 0; }
 }
 
 // Corrector-driven climb family (BALLISTIC_CORRECTOR_PLAN steps 4 + 6): the
@@ -69,6 +99,9 @@ public abstract class CorrectorClimbBase : MovementState
 {
     private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
     private const float HingeWeight     = 1e6f;    // stiffness constant, not a feel knob
+    // TEMP EXPERIMENT (throwaway): see AmbientCorrector — force channel replaces
+    // the redirect disc in RunCorrector below.
+    private const float ForceRegWeight  = 1f;
     // Entry feasibility solves the FULL arc once per candidate frame and can afford
     // a deeper fixed iteration budget than the per-tick re-solve (opposed-row
     // schedules — the slalom class — need the extra sweeps; see the anchor tests).
@@ -321,18 +354,33 @@ public abstract class CorrectorClimbBase : MovementState
             p.CoastVel = s.CoastVel;
             p.Rows = s.Rows; p.RowCount = rowCount;
             p.ChannelCount = 1;
+            // TEMP EXPERIMENT (throwaway): force channel instead of the redirect
+            // disc — see AmbientCorrector. Original:
+            //   Lever = VelocityUpdate, Weight = RedirectEpsilon, Redirect = true
             p.Channels[0] = new ChannelDef
             {
-                Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon,
-                Redirect = true, ActiveFrom = 0, ActiveTo = n,
+                Lever = LeverKind.VelocityUpdate, Weight = ForceRegWeight,
+                Redirect = false, Cap = float.MaxValue, ActiveFrom = 0, ActiveTo = n,
             };
             p.PrevApplied[0] = prevDv;
             p.DeltaWeight = cfg.CorrectorDeltaWeight;
             p.HingeWeight = HingeWeight;
             p.InnerIterations = iterations;
+            // Contact-push attribution on the final pass only (the applied plan).
+            p.RowPush = capture && pass == 1 ? s.RowPush : null;
 
             residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
             for (int k = 0; k < n; k++) s.TickDv[k] = s.Z[k];
+
+            if (capture && pass == 1)
+            {
+                s.ContactCount = rowCount;
+                for (int j = 0; j < rowCount; j++)
+                {
+                    s.ContactPos[j] = s.Samples[s.Rows[j].Tick].Pos;
+                    s.ContactDv[j]  = s.RowPush[j];
+                }
+            }
         }
         if (capture && rowCount > 0)
         {
