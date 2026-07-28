@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MTile.Tests", "MTile.Tests\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MTile.Rtc", "MTile.Rtc\MTile.Rtc.csproj", "{166656E9-F81F-44D2-9F44-118F7B80AD30}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MTile.Bench", "MTile.Bench\MTile.Bench.csproj", "{EB679141-4F3F-4ED5-A230-080981180718}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -32,6 +34,10 @@ Global
 		{166656E9-F81F-44D2-9F44-118F7B80AD30}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{166656E9-F81F-44D2-9F44-118F7B80AD30}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{166656E9-F81F-44D2-9F44-118F7B80AD30}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EB679141-4F3F-4ED5-A230-080981180718}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EB679141-4F3F-4ED5-A230-080981180718}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EB679141-4F3F-4ED5-A230-080981180718}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EB679141-4F3F-4ED5-A230-080981180718}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

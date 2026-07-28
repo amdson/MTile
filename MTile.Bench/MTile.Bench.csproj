@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>MTile.Bench</RootNamespace>
+    <!-- Mirror the game's runtime JIT profile (Core sets TieredCompilation
+         false) so measured per-tick numbers transfer to the shipped loop. -->
+    <TieredCompilation>false</TieredCompilation>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\MTile.Core.csproj" />
+    <!-- Link the xunit-free sim harness sources from the test project (ascii
+         terrain + headless runner) rather than referencing the test assembly. -->
+    <Compile Include="..\MTile.Tests\Sim\SimTerrain.cs" Link="Harness\SimTerrain.cs" />
+    <Compile Include="..\MTile.Tests\Sim\SimRunner.cs" Link="Harness\SimRunner.cs" />
+    <Compile Include="..\MTile.Tests\Sim\InputScript.cs" Link="Harness\InputScript.cs" />
+  </ItemGroup>
+</Project>

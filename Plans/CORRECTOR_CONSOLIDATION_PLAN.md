@@ -54,10 +54,22 @@
 > bumpy-corridor traversal improved to full completion (~76 px/s avg) and the
 > air-graze preserves full entry speed (150/150).
 >
+> **Release profiling SHIPPED** (`dotnet run -c Release --project MTile.Bench`
+> — scenarios, snapshot/restore, and an amortized 8-frame GGPO rollback loop).
+> First numbers (dev machine, Release, tiered compilation off):
+>   flat rest 28 µs/tick · flat run 26 · vault-heavy course 30 ·
+>   bumpy corridor 89 (worst 60-tick bucket 503 — the fold's elective
+>   deliverability rollouts + FloorEnvelope scans spike in dense tunnels; the
+>   one number to watch) · snapshot+step 70 · restore 47 ·
+>   rollback visual frame (win=8, 1 player) 166.
+> Two players × 8-frame rollback ≈ 330 µs/visual frame ≈ 2% of the 16.7 ms
+> budget — comfortable, with the corridor worst-bucket as the min-spec risk.
+> (The Debug-build ~667 µs/tick cost-gate number in CorrectorSnapshotTests is
+> ~22× the Release cost; the gate is a regression tripwire, not a budget.)
+>
 > Remaining (deliberately): lever-normalized hinge weighting (§6 open
-> problem), Release-build profiling against the multiplayer rollback budget
-> (Debug cost after the migration: ~667 µs/tick on the vault-heavy course,
-> inside the test gate).
+> problem); corridor worst-bucket spike investigation if min-spec profiling
+> ever flags it.
 
 Turning the `corrector_testing` experiments ("the solver IS the locomotion
 controller") into the game's real movement system. The experiments proved the
