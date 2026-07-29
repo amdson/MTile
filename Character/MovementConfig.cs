@@ -176,20 +176,20 @@ public class MovementConfig
     // Vertical search window around the standing base (px). Up must cover the
     // tallest measurable rise (CorridorMaxRise) plus headroom above it; down
     // bounds how deep a drop still counts as "floor" rather than NoFloor.
-    public float CorridorWindowUp   { get; set; } = 64f;
-    public float CorridorWindowDown { get; set; } = 40f;
+    public float CorridorWindowUp   { get; set; } = 4f * Chunk.TileSize;
+    public float CorridorWindowDown { get; set; } = 2.5f * Chunk.TileSize;
     // Minimum floor-to-ceiling gap (px) a column must offer to be traversable.
-    // Between 1 tile (16 — impassable) and 2 tiles (32 — tight standing fit).
-    public float CorridorMinGap { get; set; } = 24f;
+    // Between 1 tile (impassable) and 2 tiles (tight standing fit).
+    public float CorridorMinGap { get; set; } = 1.5f * Chunk.TileSize;
     // Largest single-column floor rise (px) that is still maneuver territory
     // (mantle/arc-jump envelope, ~2.6 tiles). Above this the column is a wall.
-    public float CorridorMaxRise { get; set; } = 42f;
+    public float CorridorMaxRise { get; set; } = 2.625f * Chunk.TileSize;
 
     // Mantle (deliberate flush-step climb — see MantleState, Plans/CORRIDOR_MANEUVER_PLAN.md).
     // Rise band in px the mantle accepts (the 1-block vault band: 0.5..1.2 tiles, matching
     // ExposedUpperCornerChecker's). Steeper is arc-jump territory; shallower is a walk-over.
-    public float MantleMinRise { get; set; } = 8f;
-    public float MantleMaxRise { get; set; } = 20f;
+    public float MantleMinRise { get; set; } = 0.5f * Chunk.TileSize;
+    public float MantleMaxRise { get; set; } = 1.25f * Chunk.TileSize;
     // Body face must be within this many px of the step lip — the mantle is the flush/slow
     // fallback for the case the ramps' steep-angle taper refuses, not a running maneuver.
     public float MantleFlushDistance { get; set; } = 6f;
@@ -205,7 +205,7 @@ public class MovementConfig
     // to MantleState.
     // Body face may be up to this many px from the lip when the hop fires — unlike the
     // mantle's flush gate, the arc wants a little run-up room so entry speed carries over.
-    public float ArcJumpTriggerDistance { get; set; } = 20f;
+    public float ArcJumpTriggerDistance { get; set; } = 1.25f * Chunk.TileSize;
     // Extra apex height (px) above the landing gate the entry hop budgets for, so the
     // ballistic rollout crosses the lip with a small clearance instead of grazing it.
     public float ArcJumpApexMargin { get; set; } = 4f;
@@ -221,7 +221,7 @@ public class MovementConfig
     // Body face within this many px of the rise lip before the vault fires — larger
     // than ArcJumpTriggerDistance because the corrector plans the whole arc (2 tiles,
     // the corridor plan's reflex-vs-autopilot boundary).
-    public float CorrectorVaultTriggerDistance  { get; set; } = 32f;
+    public float CorrectorVaultTriggerDistance  { get; set; } = 2f * Chunk.TileSize;
     // Ambient corrector mode (plan step 7 — replaces the ambient reflex ramps).
     // Runs during free movement under a held direction: free-coast predict over a
     // short horizon, passable-feature rows only, redirect-only solve, applied iff
@@ -251,9 +251,10 @@ public class MovementConfig
     public float FoldHoverOffset                { get; set; } = 10f;
     public float CrouchHoverOffset              { get; set; } = 0f;
     // Climb band: how far above the support anchor the envelope may bind a
-    // floor. 1-high ledges (16) must bind for Standing; a crouch covers only
-    // surface roughness.
-    public float FoldClimbReachUp               { get; set; } = 20f;
+    // floor. 1-high ledges (1 tile) must bind for Standing; a crouch covers only
+    // surface roughness. NOTE: movement_config.json overrides this in px — keep
+    // it in sync (or delete the JSON key) when tweaking Chunk.TileSize.
+    public float FoldClimbReachUp               { get; set; } = 1.25f * Chunk.TileSize;
     public float CrouchClimbReachUp             { get; set; } = 4f;
     // Fixed inner iteration budget of the per-tick fold solve (determinism
     // requires it fixed; raise for convergence, costs linearly).

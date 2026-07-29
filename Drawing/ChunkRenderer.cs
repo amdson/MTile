@@ -15,6 +15,11 @@ public sealed class ChunkRenderer
     private readonly Camera         _camera;
     private readonly GraphicsDevice _graphicsDevice;
 
+    // Tile fills are inset by a gutter so the grid reads; scales with tile size
+    // (1px per 16px of tile, rounded up) instead of a fixed 1px.
+    private const int TileGutter   = (Chunk.TileSize + 15) / 16;
+    private const int TileDrawSize = Chunk.TileSize - TileGutter;
+
     public ChunkRenderer(SpriteBatch spriteBatch, Texture2D pixel, Camera camera,
                          GraphicsDevice graphicsDevice)
     {
@@ -44,7 +49,7 @@ public sealed class ChunkRenderer
             const float half = Chunk.TileSize * 0.5f;
             _spriteBatch.Draw(_pixel, new Rectangle(
                 (int)(c.X - half), (int)(c.Y - half),
-                Chunk.TileSize - 1, Chunk.TileSize - 1),
+                TileDrawSize, TileDrawSize),
                 Color.LightSkyBlue);
         }
 
@@ -58,7 +63,7 @@ public sealed class ChunkRenderer
             float cy = s.Gty * Chunk.TileSize + half;
             int left = (int)(cx - half);
             int top  = (int)(cy - half);
-            int size = Chunk.TileSize - 1;
+            int size = TileDrawSize;
             var ghost = Color.LightSkyBlue * 0.4f;
             _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            size, 1),    ghost);
             _spriteBatch.Draw(_pixel, new Rectangle(left,            top + size - 1, size, 1),    ghost);
@@ -94,7 +99,7 @@ public sealed class ChunkRenderer
                 _spriteBatch.Draw(_pixel, new Rectangle(
                     (int)(origin.X + tx * Chunk.TileSize),
                     (int)(origin.Y + ty * Chunk.TileSize),
-                    Chunk.TileSize - 1, Chunk.TileSize - 1), color);
+                    TileDrawSize, TileDrawSize), color);
             }
     }
 }

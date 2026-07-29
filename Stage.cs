@@ -124,7 +124,7 @@ public static class Stages
     {
         // Sinusoidal vertical bobber — tests landing on a vertically-moving surface.
         const float baseX = 180f, baseY = -140f, amp = 40f, period = 3f;
-        var movingRect = new MovingRectangle(new Vector2(baseX, baseY), 64f, 16f);
+        var movingRect = new MovingRectangle(new Vector2(baseX, baseY), 4f * Chunk.TileSize, Chunk.TileSize);
         g.AddPlatform(movingRect, Color.SteelBlue);
         // Ticker receives ABSOLUTE elapsed sim time (not dt) so platform motion is a
         // pure function of time — snapshot/restore just records the elapsed clock and
@@ -136,7 +136,7 @@ public static class Stages
 
         // Ferris-wheel cluster — four blocks rotating 90° apart around a shared
         // center. Each is its own provider so the solver sees them independently.
-        const float cx = -120f, cy = -150f, radius = 80f, fw = 32f, fh = 16f, fperiod = 6f;
+        const float cx = -120f, cy = -150f, radius = 80f, fw = 2f * Chunk.TileSize, fh = Chunk.TileSize, fperiod = 6f;
         const int count = 4;
         var blocks = new MovingRectangle[count];
         for (int i = 0; i < count; i++)
@@ -174,7 +174,8 @@ public static class Stages
         // Floor at world y ≈ 96 (tile y=6); player spawn (64,0) is mid-arena and
         // drops cleanly to the floor. Walls at world x ≈ -192 and 320, ceiling at
         // y ≈ -160. See arena.json for the exact rules.
-        const float floorY = 80f;   // body-center y when standing on the floor
+        const float floorTopY = 6 * Chunk.TileSize;          // arena floor surface (tile y = 6)
+        const float floorY = floorTopY - Chunk.TileSize;     // body-center y when standing on the floor
         g.SpawnEntity(EntityFactory.Stalker(new Vector2(-100f, floorY)));
         g.SpawnEntity(EntityFactory.Stalker(new Vector2(  64f, floorY)));
         g.SpawnEntity(EntityFactory.Stalker(new Vector2( 220f, floorY)));
@@ -205,10 +206,11 @@ public static class Stages
         var (dummy, ctrl) = g.AddSecondaryPlayer(home);
 
         // Juggling drill: a ball that breaks on any tile contact and reappears at
-        // its spawn point, five tiles above the plateau floor (floor top world
-        // y = 96, so 96 − 5·16 = 16). Off to the player-spawn side so the rally
-        // has open air away from the dummy's attack cycle.
-        g.SpawnEntity(EntityFactory.Practice(new Vector2(-60f, 16f)));
+        // its spawn point, five tiles above the plateau floor (floor top at tile
+        // y = 6). Off to the player-spawn side so the rally has open air away
+        // from the dummy's attack cycle.
+        const float floorTopY = 6 * Chunk.TileSize;
+        g.SpawnEntity(EntityFactory.Practice(new Vector2(-60f, floorTopY - 5 * Chunk.TileSize)));
 
         // Dummy attack script, driven as a pure function of the sim clock + sim
         // state (positions, facing) — deterministic and rollback-safe for the same
@@ -308,13 +310,13 @@ public static class Stages
 
     private static void PopulatePlain(Simulation g)
     {
-        // Floor sits at world tile y = 6 → world Y = 96; a body with radius ~12
-        // centers on Y ≈ 80 when standing on the floor. Skirmishers spawn on the
+        // Floor sits at world tile y = 6; a standing body centers roughly one
+        // tile above the floor surface. Skirmishers spawn on the
         // flat section, one to each side of the player so the engagement reads
         // immediately on stage load. Built via EnemyFactory so the blueprint
         // (radius / health / FSM lists) is the single source of truth — swap
         // EntityKind here to test other registered enemies.
-        const float floorY = 80f;
+        const float floorY = 6 * Chunk.TileSize - Chunk.TileSize;
         g.SpawnEntity(EnemyFactory.Create(EntityKind.Skirmisher, new Vector2(-100f, floorY)));
         g.SpawnEntity(EnemyFactory.Create(EntityKind.Skirmisher, new Vector2( 140f, floorY)));
 

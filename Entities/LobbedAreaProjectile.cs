@@ -20,7 +20,7 @@ public class LobbedAreaProjectile : Projectile
     private const float LifeSeconds       = 5.0f;
     private const float LandStopSpeed     = 30f;
     private const float ArmDelay          = 0.04f;
-    private const float ExplosionRadius   = 48f;
+    private const float ExplosionRadius   = 3f * Chunk.TileSize;
     private const int   ExplosionSegments = 10;
     private const float SegmentHalfSize   = 9f;
     private const float ExplosionKnockback = 520f;

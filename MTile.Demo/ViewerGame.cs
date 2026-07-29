@@ -25,6 +25,8 @@ namespace MTileDemo;
 public sealed class ViewerGame : Game
 {
     private const int TileSize = Chunk.TileSize;
+    // Grid gutter matching ChunkRenderer: 1px per 16px of tile, rounded up.
+    private const int TileDrawSize = TileSize - (TileSize + 15) / 16;
 
     private readonly string _takePath;
     private readonly GraphicsDeviceManager _graphics;
@@ -278,7 +280,7 @@ public sealed class ViewerGame : Game
             if (cx < x0 || cx > x1 || cy < y0 || cy > y1) continue;
             var c = _typeColors[Math.Min(t.T, (byte)(_typeColors.Length - 1))];
             if ((TileState)t.S == TileState.Sprouting) c *= 0.45f;
-            _draw.Rect(new Vector2(cx, cy), new Vector2(TileSize - 1, TileSize - 1), c);
+            _draw.Rect(new Vector2(cx, cy), new Vector2(TileDrawSize, TileDrawSize), c);
         }
     }
 

@@ -29,8 +29,8 @@ namespace MTile;
 // and trap the limb mid-block instead of releasing it.
 public static class TerrainSurfaces
 {
-    private const float TileSize   = 16f;
-    private const float HalfTile   = 8f;
+    private const float TileSize   = Chunk.TileSize;
+    private const float HalfTile   = TileSize * 0.5f;
     public  const float QueryRadius = 20f;  // ~1.25 tiles around a tip
     private const float CornerSlop  = 2f;   // lateral overhang that still counts as "over" a face
     private const float ExitTie     = 2f;   // buried tip: emit near-tied exit faces too (corners)

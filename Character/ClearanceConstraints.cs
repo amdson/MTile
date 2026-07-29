@@ -53,7 +53,7 @@ public static class ClearanceConstraintBuilder
     // Raised 4 → 32 for the stand fold: hover-support rows are per-tick (up to a
     // full horizon of them) and must not crowd out real obstacle rows.
     public const int   MaxEvents            = 32;
-    public const float DefaultDeepViolation = 8f;   // px — half a tile reads as "impact", not "graze"
+    public const float DefaultDeepViolation = Chunk.TileSize * 0.5f;   // px — half a tile reads as "impact", not "graze"
 
     // Facet-count ceiling for the C-obstacle template (hexagon body ⇒ ~8).
     public const int MaxFacets = 16;

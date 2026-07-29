@@ -6,7 +6,7 @@ namespace MTile;
 
 // Sub-tile-resolution segment sampling for drag-to-build. Yields the global
 // cell coords the segment (a, b) passes through, in path order, deduped against
-// the previous yielded cell. Sampling step defaults to 4 px (¼ of a tile),
+// the previous yielded cell. Sampling step defaults to ¼ of a tile,
 // which guarantees no cell is skipped at any realistic cursor speed.
 //
 // A zero-length segment (a == b) yields exactly one cell — the cell containing
@@ -14,7 +14,7 @@ namespace MTile;
 // segment crossing M cells yields exactly M tuples.
 public static class MouseSweep
 {
-    public static IEnumerable<(int gtx, int gty)> Cells(Vector2 a, Vector2 b, float step = 4f)
+    public static IEnumerable<(int gtx, int gty)> Cells(Vector2 a, Vector2 b, float step = Chunk.TileSize * 0.25f)
     {
         float len = (b - a).Length();
         int samples = Math.Max(1, (int)MathF.Ceiling(len / step));

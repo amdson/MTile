@@ -47,9 +47,9 @@ public static class EruptionPlanner
 
     // Per-sample base radius in pixels. Tuned so a stationary pen covers ~3 tiles
     // each direction, giving a wide mound; a fast pen shrinks to ~1-1.5 tiles.
-    private const float BaseRadius      = 48f;
-    private const float MinRadius       = 16f;
-    private const float MaxRadius       = 80f;
+    private const float BaseRadius      = 3f * Chunk.TileSize;
+    private const float MinRadius       = Chunk.TileSize;
+    private const float MaxRadius       = 5f * Chunk.TileSize;
     // Velocity at which radius is exactly BaseRadius. Slower → wider, faster → narrower.
     private const float RefSpeed        = 120f;
     private const float MinSpeed        = 20f;   // floor so a near-stationary sample doesn't blow radius up

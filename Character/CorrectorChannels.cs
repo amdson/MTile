@@ -316,21 +316,22 @@ public static class CorrectorChannels
             if (samples[k].Grounded || samples[k].Vel.Y <= 0f || samples[k].Vel.Y > plunge)
                 continue;
             var pos = samples[k].Pos;
-            int gx0 = (int)MathF.Floor((pos.X - R) / 16f), gx1 = (int)MathF.Floor((pos.X + R) / 16f);
-            int gy0 = (int)MathF.Floor((pos.Y - R) / 16f), gy1 = (int)MathF.Floor((pos.Y + R) / 16f);
+            const float ts = Chunk.TileSize, half = ts * 0.5f;
+            int gx0 = (int)MathF.Floor((pos.X - R) / ts), gx1 = (int)MathF.Floor((pos.X + R) / ts);
+            int gy0 = (int)MathF.Floor((pos.Y - R) / ts), gy1 = (int)MathF.Floor((pos.Y + R) / ts);
             for (int gy = gy0; gy <= gy1 && !outMask[k]; gy++)
             for (int gx = gx0; gx <= gx1 && !outMask[k]; gx++)
             {
-                float cx = gx * 16f + 8f, cy = gy * 16f + 8f, below = cy + 16f;
+                float cx = gx * ts + half, cy = gy * ts + half, below = cy + ts;
                 if (!TileQuery.IsSolidAt(chunks, cx, cy)) continue;
                 if (TileQuery.IsSolidAt(chunks, cx, below)) continue;   // underside must be open
-                bool leftOpen = !TileQuery.IsSolidAt(chunks, cx - 16f, cy)
-                                && !TileQuery.IsSolidAt(chunks, cx - 16f, below);
-                bool rightOpen = !TileQuery.IsSolidAt(chunks, cx + 16f, cy)
-                                 && !TileQuery.IsSolidAt(chunks, cx + 16f, below);
-                if (leftOpen && Vector2.DistanceSquared(pos, new Vector2(gx * 16f, gy * 16f + 16f)) <= R * R)
+                bool leftOpen = !TileQuery.IsSolidAt(chunks, cx - ts, cy)
+                                && !TileQuery.IsSolidAt(chunks, cx - ts, below);
+                bool rightOpen = !TileQuery.IsSolidAt(chunks, cx + ts, cy)
+                                 && !TileQuery.IsSolidAt(chunks, cx + ts, below);
+                if (leftOpen && Vector2.DistanceSquared(pos, new Vector2(gx * ts, gy * ts + ts)) <= R * R)
                     outMask[k] = true;
-                else if (rightOpen && Vector2.DistanceSquared(pos, new Vector2(gx * 16f + 16f, gy * 16f + 16f)) <= R * R)
+                else if (rightOpen && Vector2.DistanceSquared(pos, new Vector2(gx * ts + ts, gy * ts + ts)) <= R * R)
                     outMask[k] = true;
             }
         }
