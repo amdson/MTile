@@ -283,30 +283,10 @@ public abstract class ClimbManeuverBase : MovementState
         }
         ctx.Body.AppliedForce = force;
 
-        // ── Corrector: two outer passes of predict → rows → solve, apply z₀ ──
-        var s = ctx.Corrector;
-        if (s == null) return;   // hand-built test contexts without scratch: authored arc only
-
-        ManeuverCorrector.Run(ctx, ctx.Body, _dir, vars.EntrySpeed, vars.ManeuverChannelPrev,
-                              out int rowCount, capture: s.CaptureTrajectories);
-
-        if (rowCount > 0)
-        {
-            // The summed tick-0 correction exits through AppliedForce (TickDv[0]
-            // is the per-tick total δv; dividing by dt restores forces exactly
-            // and converts velocity-update δv identically under semi-implicit
-            // Euler). Mid-commitment: least-violation best-effort — the residual
-            // is a signal, never a silent clip.
-            if (ctx.Dt > 0f) ctx.Body.AppliedForce += s.TickDv[0] / ctx.Dt;
-            int H = Math.Min(MovementConfig.Current.CorrectorHorizon, BallisticPredictor.MaxHorizon);
-            for (int c = 0; c < s.Problem.ChannelCount; c++)
-                vars.ManeuverChannelPrev[c] = s.Z[c * H];
-            s.Ledger.Record(s.Problem, s.Z, s.RowPush, s.Samples, ctx.Dt);
-        }
-        else
-        {
-            vars.ManeuverChannelPrev = default;
-        }
+        // ── Corrector: two outer passes of predict → rows → solve, apply z₀
+        // (ManeuverCorrector.Apply: correction into AppliedForce, Δ anchors,
+        // ledger record). ──
+        ManeuverCorrector.Apply(ctx, _dir, vars.EntrySpeed, ref vars.ManeuverChannelPrev);
     }
 }
 

@@ -23,10 +23,41 @@ public static class ManeuverCorrector
 {
     private const float HingeWeight = 1e6f;   // stiffness constant, not a feel knob
 
+    // The one-call opt-in for a state's Update: run the loop on the real body and
+    // apply the plan — summed tick-0 correction into Body.AppliedForce (TickDv[0]
+    // is the per-tick total δv; dividing by dt restores forces exactly and
+    // converts velocity-update δv identically under semi-implicit Euler), leaky
+    // Δ anchors saved for next frame's continuity, ledger recorded. Mid-
+    // commitment: least-violation best-effort — the residual is a signal, never
+    // a silent clip. startGrounded: true for maneuvers that begin ON the surface
+    // (the dropdown slide), false for post-launch arcs (the climb family's hop).
+    public static void Apply(EnvironmentContext ctx, int dir, float targetSpeed,
+                             ref ChannelAnchors prevAnchors, bool startGrounded = false)
+    {
+        var s = ctx.Corrector;
+        if (s == null) return;   // hand-built test contexts without scratch: authored arc only
+
+        Run(ctx, ctx.Body, dir, targetSpeed, prevAnchors, out int rowCount,
+            capture: s.CaptureTrajectories, startGrounded: startGrounded);
+
+        if (rowCount > 0)
+        {
+            if (ctx.Dt > 0f) ctx.Body.AppliedForce += s.TickDv[0] / ctx.Dt;
+            int H = Math.Min(MovementConfig.Current.CorrectorHorizon, BallisticPredictor.MaxHorizon);
+            for (int c = 0; c < s.Problem.ChannelCount; c++)
+                prevAnchors[c] = s.Z[c * H];
+            s.Ledger.Record(s.Problem, s.Z, s.RowPush, s.Samples, ctx.Dt);
+        }
+        else
+        {
+            prevAnchors = default;
+        }
+    }
+
     public static float Run(EnvironmentContext ctx, PhysicsBody body, int dir,
                             float entrySpeed, in ChannelAnchors prevAnchors, out int rowCount,
                             int iterations = CorrectionSolver.DefaultInnerIterations,
-                            bool capture = false)
+                            bool capture = false, bool startGrounded = false)
     {
         var cfg = MovementConfig.Current;
         var s = ctx.Corrector;
@@ -36,7 +67,7 @@ public static class ManeuverCorrector
         for (int pass = 0; pass < 2; pass++)
         {
             int n = BallisticPredictor.PredictGuided(
-                body, ctx.Chunks, dir, entrySpeed, startGrounded: false,
+                body, ctx.Chunks, dir, entrySpeed, startGrounded,
                 ctx.Gravity, ctx.Dt, H, s.Samples, pass == 0 ? null : s.TickDv);
             CorrectorChannels.MarkCornerPlants(ctx.Chunks, s.Samples, n, s.CornerPlant);
             if (capture && pass == 0)
@@ -89,7 +120,7 @@ public static class ManeuverCorrector
             // Solved capture (render-only): one extra rollout with the FINAL plan
             // applied — the corrected trajectory the residual story is about.
             s.SolvedCount = BallisticPredictor.PredictGuided(
-                body, ctx.Chunks, dir, entrySpeed, startGrounded: false,
+                body, ctx.Chunks, dir, entrySpeed, startGrounded,
                 ctx.Gravity, ctx.Dt, H, s.SolvedTrajectory, s.TickDv);
         }
         return residual;

@@ -185,9 +185,10 @@ public class CrouchedState : MovementState
 // constraint so the body's no longer spring-held above the surface (gravity + tile collision keep
 // it on the platform until its center clears the edge), applies a horizontal slide force in the
 // chosen direction (so a crouched/sunken body actually gets pushed out from over the platform —
-// same idiom as CoveredJumpState's phase 1). The ambient corrector's corner rows are the
-// insurance against clipping the drop edge mid-slip. Exits to FallingState the instant the
-// body's no longer over any floor.
+// same idiom as CoveredJumpState's phase 1). The slip-off is a committed maneuver: it runs the
+// shared maneuver solve (ManeuverCorrector.Apply, grounded entry) around its authored slide, so
+// the drop-corner graze and the landing catch come from the same corrector the climb family
+// uses. Exits to FallingState the instant the body's no longer over any floor.
 public class DropdownState : MovementState
 {
     // DropDir, SlideSpeed, SlideTime, ExitingAirborne now live in MovementVars.
@@ -195,6 +196,9 @@ public class DropdownState : MovementState
     public override int ActivePriority  => MovementPriorities.DropdownActive;
     public override int PassivePriority => MovementPriorities.DropdownPassive;
     public override AnimTag AnimationTag => AnimTag.Dropdown;
+    // Owned maneuver with its own solve — the ambient layer must not stack a
+    // second correction on top (the climb family's rule).
+    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     // Same pattern as CoveredJumpState.TryPickOpenDir: honor input direction strictly when held,
     // closer edge from a standstill, never flip to the opposite side. Edge from GroundChecker.
@@ -253,6 +257,7 @@ public class DropdownState : MovementState
         vars.SlideSpeed = MovementConfig.Current.MaxWalkSpeed;
         vars.SlideTime = 0f;
         vars.ExitingAirborne = false;
+        vars.ManeuverChannelPrev = default;   // fresh Δ anchors for this maneuver's solve
         // No FloatingSurfaceDistance: the body's leaving the surface, so don't spring it back up.
         // StandingState/CrouchedState's ground constraint was already removed on their Exit.
 
@@ -295,6 +300,7 @@ public class DropdownState : MovementState
                 ctx.Body.AppliedForce = ReferencePath.TrackForce(clip,
                     new ReferenceFrame(vars.RefEntry, vars.RefGate),
                     vars.RefProgress, cfg.DropdownRefDuration, ctx.Body, ctx.Gravity, cfg);
+                ApplyCorrector(ctx, ref vars);
                 return;
             }
             vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
@@ -307,5 +313,13 @@ public class DropdownState : MovementState
         if (along < vars.SlideSpeed)
             fx = vars.DropDir * AirControl.SoftClampVelocity(along, vars.SlideSpeed, cfg.WalkAccel, ctx.Dt);
         ctx.Body.AppliedForce = new Vector2(fx, 0f);
+        ApplyCorrector(ctx, ref vars);
     }
+
+    // The shared maneuver solve around the committed slide-off (the drive the
+    // predictor mirrors is the slide's own dir·SlideSpeed servo). Grounded
+    // entry: the coast starts ON the platform, unlike the climbs' post-hop arc.
+    private static void ApplyCorrector(EnvironmentContext ctx, ref MovementVars vars)
+        => ManeuverCorrector.Apply(ctx, vars.DropDir, vars.SlideSpeed,
+                                   ref vars.ManeuverChannelPrev, startGrounded: true);
 }
