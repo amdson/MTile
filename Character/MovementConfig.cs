@@ -135,7 +135,8 @@ public class MovementConfig
     public float VaultPushForce  { get; set; } = 500f;
     public float MaxVaultTime    { get; set; } = 0.5f;
 
-    // Guided States (Parkour, LedgePull, LedgeDrop, CoveredJump — path-followed via PD control)
+    // Guided States (reference-clip tracking — ReferencePath.TrackForce PD servo,
+    // consumed by LedgePull/Dropdown when UseReferenceClips is on)
     // Stability condition for 30fps Euler integration: K·dt² + D·dt < 2
     // At dt=1/30: K·0.001 + D·0.033 < 2 → with K=200, D=40: 0.20+1.32=1.52 ✓
     public float GuidedSpringK        { get; set; } = 200f;
@@ -143,6 +144,20 @@ public class MovementConfig
     public float GuidedMaxForce       { get; set; } = 10000f;
     public float GuidedLookahead      { get; set; } = 0.05f;  // fraction of path to look ahead
     public float GuidedGravityCancel  { get; set; } = 600f;
+
+    // Reference clips (movement_todo 7+8): LedgePull/Dropdown track authored
+    // Hermite clips (ReferenceClips/<name>.json, baked defaults in
+    // ReferenceClipRegistry) instead of their legacy bespoke force logic.
+    // Hot-reloadable A/B toggle; durations are the nominal clip playback times
+    // (must stay under MaxVaultTime / MaxDropdownTime respectively — the state
+    // timeouts still govern).
+    public bool  UseReferenceClips    { get; set; } = true;
+    // 0.60 matches the bespoke pull's measured pace: the corner crossing (which
+    // is both the completion trigger and the end of the mid-pull re-grab window)
+    // sits at clip progress ≈ 0.72 → ~13 of the 15 frames MaxVaultTime allows at
+    // 1/30 — the same last-2-frames crest the legacy pull had.
+    public float LedgePullRefDuration { get; set; } = 0.60f;
+    public float DropdownRefDuration  { get; set; } = 0.30f;
     public float GuidedMinDuration    { get; set; } = 0.15f;
     public float GuidedMaxDuration    { get; set; } = 0.6f;
     public float GuidedRefSpeed       { get; set; } = 80f;    // fallback for duration estimate

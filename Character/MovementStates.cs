@@ -953,21 +953,41 @@ public class LedgePullState : MovementState
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (!ctx.Input.Up) return false;
-        if (_spring == null) return false;
         if (vars.TimeInState >= MovementConfig.Current.MaxVaultTime) return false;
 
-        float cornerTopY = _spring.Position.Y;
-        float cornerX    = _spring.Position.X;
-        bool atStandingHeight = ctx.Body.Position.Y < cornerTopY - 2f * PlayerCharacter.Radius;
+        // Completion is judged against the grabbed corner. Reference mode has no
+        // spring contact — the corner comes straight from abilities (the same
+        // value the bespoke spring was seeded with, and snapshot-covered).
+        Vector2 corner;
+        if (vars.RefActive) corner = abilities.GrabbedCorner;
+        else { if (_spring == null) return false; corner = _spring.Position; }
+
+        bool atStandingHeight = ctx.Body.Position.Y < corner.Y - 2f * PlayerCharacter.Radius;
         bool pastCorner       = _wallDir == 1
-            ? ctx.Body.Position.X > cornerX
-            : ctx.Body.Position.X < cornerX;
+            ? ctx.Body.Position.X > corner.X
+            : ctx.Body.Position.X < corner.X;
         return !(atStandingHeight && pastCorner);
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         vars.TimeInState = 0f;
+        var clip = MovementConfig.Current.UseReferenceClips
+            ? ReferenceClipRegistry.Get(ReferenceClipRegistry.LedgePull) : null;
+        vars.RefActive = clip != null;
+        if (vars.RefActive)
+        {
+            // Retarget at Enter (BALLISTIC_CORRECTOR_PLAN §1): clip (0,0) = the hang
+            // pose the body actually holds; clip (1,-1) = standing on top just past
+            // the corner, placed a few px beyond the completion test's thresholds so
+            // the servo carries the body through them rather than stalling on them.
+            var corner = abilities.GrabbedCorner;
+            vars.RefEntry    = ctx.Body.Position;
+            vars.RefGate     = new Vector2(corner.X + _wallDir * (PlayerCharacter.Radius + 2f),
+                                           corner.Y - (2f * PlayerCharacter.Radius + 4f));
+            vars.RefProgress = 0f;
+            return;
+        }
         EnsureContacts(ctx, abilities);
     }
 
@@ -1003,7 +1023,6 @@ public class LedgePullState : MovementState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        EnsureContacts(ctx, abilities);
         vars.TimeInState += ctx.Dt;
 
         // Keep a queued jump alive while committed to the pull: LedgeJumpState
@@ -1012,6 +1031,26 @@ public class LedgePullState : MovementState
         // on its normal window (e.g. after a release → re-grab).
         ctx.Intents.Refresh(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
 
+        if (vars.RefActive)
+        {
+            var clip = ReferenceClipRegistry.Get(ReferenceClipRegistry.LedgePull);
+            if (clip != null)
+            {
+                // A mid-pull hot-reload flip can leave bespoke contacts attached —
+                // the servo replaces them, so drop any strays.
+                if (_spring != null) { ctx.Body.Constraints.Remove(_spring); _spring = null; }
+                if (_ramp   != null) { ctx.Body.Constraints.Remove(_ramp);   _ramp   = null; }
+                var cfg2 = MovementConfig.Current;
+                vars.RefProgress += ctx.Dt / MathF.Max(cfg2.LedgePullRefDuration, 1e-4f);
+                ctx.Body.AppliedForce = ReferencePath.TrackForce(clip,
+                    new ReferenceFrame(vars.RefEntry, vars.RefGate),
+                    vars.RefProgress, cfg2.LedgePullRefDuration, ctx.Body, ctx.Gravity, cfg2);
+                return;
+            }
+            vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
+        }
+
+        EnsureContacts(ctx, abilities);
         float cornerTopY = _spring.Position.Y;
         var   cfg        = MovementConfig.Current;
         var   force      = Vector2.Zero;
@@ -1158,7 +1197,7 @@ public class DropdownState : MovementState
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        TryPickDropDir(ctx, out vars.DropDir, out _);
+        TryPickDropDir(ctx, out vars.DropDir, out var corner);
         // MaxWalkSpeed is the slide target — fast enough to clear the corner within MaxDropdownTime
         // from a standstill. Running entries keep their momentum since Update only applies force when
         // the body's slower than the target.
@@ -1167,6 +1206,21 @@ public class DropdownState : MovementState
         vars.ExitingAirborne = false;
         // No FloatingSurfaceDistance: the body's leaving the surface, so don't spring it back up.
         // StandingState/CrouchedState's ground constraint was already removed on their Exit.
+
+        var clip = MovementConfig.Current.UseReferenceClips
+            ? ReferenceClipRegistry.Get(ReferenceClipRegistry.Dropdown) : null;
+        vars.RefActive = clip != null && vars.DropDir != 0;
+        if (vars.RefActive)
+        {
+            // Retarget at Enter: clip (0,0) = where the slide starts; clip (1,-1) = past
+            // the drop corner and a body-height below it. Only the on-platform stretch
+            // plays (going airborne exits to Falling), so the clip shapes the slide-out
+            // speed profile and the velocity carried into the drop.
+            vars.RefEntry    = ctx.Body.Position;
+            vars.RefGate     = new Vector2(corner.X + vars.DropDir * (PlayerCharacter.Radius + 2f),
+                                           corner.Y + 2f * PlayerCharacter.Radius);
+            vars.RefProgress = 0f;
+        }
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -1182,6 +1236,20 @@ public class DropdownState : MovementState
     {
         vars.SlideTime += ctx.Dt;
         var cfg = MovementConfig.Current;
+
+        if (vars.RefActive)
+        {
+            var clip = ReferenceClipRegistry.Get(ReferenceClipRegistry.Dropdown);
+            if (clip != null)
+            {
+                vars.RefProgress += ctx.Dt / MathF.Max(cfg.DropdownRefDuration, 1e-4f);
+                ctx.Body.AppliedForce = ReferencePath.TrackForce(clip,
+                    new ReferenceFrame(vars.RefEntry, vars.RefGate),
+                    vars.RefProgress, cfg.DropdownRefDuration, ctx.Body, ctx.Gravity, cfg);
+                return;
+            }
+            vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
+        }
 
         // Slide toward the edge, but never brake a faster-than-target body — a running entry should
         // keep its momentum through the slide. Gravity does the vertical work.

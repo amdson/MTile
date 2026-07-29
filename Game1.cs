@@ -63,6 +63,7 @@ public class Game1 : Game
 
     private FileSystemWatcher _movementConfigWatcher;
     private FileSystemWatcher _animConfigWatcher;
+    private FileSystemWatcher _refClipWatcher;
 
     // Procedural skeleton animation for the primary player. Render-only, pull-model
     // (reads sim state via CharacterAnimSample; never writes back). Scale fits the
@@ -154,6 +155,7 @@ public class Game1 : Game
         {
             MovementConfig.Load("movement_config.json");
             AnimSolverConfig.Load("anim_solver_config.json");
+            ReferenceClipRegistry.LoadOverrides();
         }
         else
         {
@@ -174,6 +176,27 @@ public class Game1 : Game
                 {
                     System.Threading.Thread.Sleep(50);
                     MovementConfig.Load(movementCfgPath);
+                };
+            }
+
+            // Reference clips (LedgePull/Dropdown): baked defaults overridden by
+            // ReferenceClips/*.json. Prefer the repo-source copies (same CWD
+            // convention as movement_config.json above) so editor saves are what
+            // the game loads; fall back to the title-relative bin copies.
+            string refClipDir = Path.GetFullPath("ReferenceClips");
+            ReferenceClipRegistry.LoadOverrides(Directory.Exists(refClipDir) ? refClipDir : "ReferenceClips");
+            if (_config.HotReloadMovementConfig && Directory.Exists(refClipDir))
+            {
+                _refClipWatcher = new FileSystemWatcher(refClipDir)
+                {
+                    Filter = "*.json",
+                    NotifyFilter = NotifyFilters.LastWrite,
+                    EnableRaisingEvents = true
+                };
+                _refClipWatcher.Changed += (s, e) =>
+                {
+                    System.Threading.Thread.Sleep(50);
+                    ReferenceClipRegistry.LoadOverrides(refClipDir);
                 };
             }
 

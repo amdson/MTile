@@ -98,7 +98,7 @@ Two new behavior contracts, written as tests first; fix whatever they expose.
 - Re-run `ClimbArbitrationTests` + `VaultJumpAndLipReproTests` — this
   milestone touches the exact ground they pin.
 
-## M4 — Reference trajectories: ledge pull, then dropdown (todo 7 + 8) `[!] blocked — needs user`
+## M4 — Reference trajectories: ledge pull, then dropdown (todo 7 + 8) `[x] done (prototype — user authorized best-guess clips)`
 
 Migrate the two remaining hand-tuned kinematic moves onto the Hermite
 reference-clip system (`b1d4486`, editor via `--ref`).
@@ -130,20 +130,23 @@ reference-clip system (`b1d4486`, editor via `--ref`).
 
 ## Decisions needed
 
-- **M4 blocked: the reference-clip system has no runtime half.** What exists
-  from b1d4486: `Character/HermiteClip.cs` (curve model, serialization) and
-  the interactive editor (`dotnet run --project MTile.Demo -- --ref <name>`).
-  What does NOT exist: `ReferencePath` (BALLISTIC_CORRECTOR_PLAN §1 — the
-  retarget-at-Enter runtime consumer), any `ReferenceClips/` assets, an
-  asset-pipeline story (repo-root JSON → both hosts, like the configs; NO
-  file IO mid-sim — load at startup for determinism + web parity), or a
-  snapshot story for playback phase. Migrating LedgePull/Dropdown tonight
-  would have meant hand-building all of that plus AUTHORING the pull-up and
-  slip-off arc shapes — game-feel work that needs you and the editor.
-  Recommended path: you author `ledge_pull` (grab pose → crest → standing)
-  and `dropdown` clips in the editor; next session implements ReferencePath
-  (retarget + time parametrization + startup loading) and wires the two
-  states to track it, pinned by before/after trace tests.
+- **M4 shipped as a prototype on user authorization** ("take your best guess
+  at path curves for ledge pull etc — a prototype to build off of"). What to
+  iterate on: the two clip shapes (`ReferenceClips/ledge_pull.json`,
+  `dropdown.json` — edit live via the editor or any text editor; hot-reloads
+  in-game alongside movement_config), the pace knobs
+  (`LedgePullRefDuration` 0.60 / `DropdownRefDuration` 0.30), and the servo
+  gains (the previously-orphaned `GuidedSpringK/Damping/MaxForce` block now
+  drives `ReferencePath.TrackForce`). `UseReferenceClips` (hot-reloadable,
+  default TRUE) A/Bs against the legacy bespoke force logic, which is fully
+  preserved. CAUTION when reshaping ledge_pull: the wall-hugging x-profile is
+  load-bearing — the corner crossing at clip progress ≈0.72 is both the
+  completion trigger and the end of the mid-pull re-grab window
+  (LedgeRegrabDriftTests pins release-at-12-frames → re-grab; an early crest
+  breaks it). Deferred from the plan's full §1 contract: entry tangent bound
+  to incoming velocity and arc-length progress — both moves enter at
+  near-zero speed so the affine endpoint retarget suffices; revisit when a
+  fast-entry move (vault, arc) migrates.
 
 - **Ambient corner-plant: default on or off?** (`FoldCornerPlantEnabled`,
   hot-reloadable, currently FALSE.) The full plant machinery is built and
@@ -163,6 +166,24 @@ reference-clip system (`b1d4486`, editor via `--ref`).
 
 ## Campaign log
 
+- M4 — reference trajectories (prototype): DONE. Runtime half built:
+  `Character/ReferencePath.cs` — ReferenceFrame (affine endpoint retarget at
+  Enter: clip (0,0) → entry pose, (1,-1) → measured gate; mirror/descent fall
+  out of the scale signs), ReferencePath.TrackForce (critically-damped PD
+  servo + tangent velocity feedforward + gravity cancel, magnitude-capped),
+  ReferenceClipRegistry (baked code-authored defaults so tests/hosts always
+  have clips; `ReferenceClips/*.json` overrides at startup + desktop
+  hot-reload watcher; MovementConfig-style determinism contract).
+  LedgePull and Dropdown track clips when UseReferenceClips (default on);
+  bespoke logic intact as the off-toggle. Playback state = 3 MovementVars
+  fields (RefActive/RefProgress/RefEntry/RefGate) — snapshot-covered
+  wholesale, and ref mode needs NO constraint rebuild on restore (cleaner
+  rollback story than the bespoke spring/ramp). Ledge-pull clip reshaped
+  once against the pins: crest must come in the final ~2 frames (see
+  Decisions). Timing preserved: pull completes at 14-of-15 frames like the
+  bespoke path. ReferencePathTests (6: frame mapping, clip-driven pull
+  delivery + apex bound, clip-driven dropdown + no-fling landing, both
+  bespoke fallbacks). Suite 441/0, KNI clean.
 - M3 — deliberate arc + corner push-off: DONE. ArcJumpCorrectorState now
   requires Up held AND vx-along-dir ≥ ArcJumpRunSpeed (50, config); standing
   at a 2-block ledge with Up grabs instead (LedgeGrab Passive 42 wins once

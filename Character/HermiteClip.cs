@@ -112,11 +112,20 @@ public sealed class HermiteClipDocument
     public static HermiteClipDocument Load(string path)
     {
         if (!File.Exists(path)) return null;
-        var doc = JsonSerializer.Deserialize<HermiteClipDocument>(File.ReadAllText(path), Opts);
+        using var stream = File.OpenRead(path);
+        var doc = Load(stream);
+        if (doc != null) doc.FilePath = path;
+        return doc;
+    }
+
+    // Stream overload for host-portable loading (TitleContent — web builds have
+    // no direct file I/O). FilePath stays null; only the path overload sets it.
+    public static HermiteClipDocument Load(Stream stream)
+    {
+        var doc = JsonSerializer.Deserialize<HermiteClipDocument>(stream, Opts);
         if (doc == null) return null;
         doc.Keys ??= new List<HermiteClipKey>();
         doc.SortKeys();
-        doc.FilePath = path;
         return doc;
     }
 

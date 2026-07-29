@@ -67,7 +67,11 @@
     <Copy SourceFiles="..\material_strengths.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
     <ItemGroup>
       <_LevelAsset Include="..\Levels\**\*" />
+      <_RefClipAsset Include="..\ReferenceClips\**\*" />
     </ItemGroup>
+    <Copy SourceFiles="@(_RefClipAsset)"
+          DestinationFiles="@(_RefClipAsset->'$(MSBuildThisFileDirectory)wwwroot\ReferenceClips\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_LevelAsset)"
           DestinationFiles="@(_LevelAsset->'$(MSBuildThisFileDirectory)wwwroot\Levels\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />

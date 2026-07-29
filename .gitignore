@@ -16,6 +16,7 @@ MTile.Web/wwwroot/movement_config.json
 MTile.Web/wwwroot/impact_profiles.json
 MTile.Web/wwwroot/material_strengths.json
 MTile.Web/wwwroot/Levels/
+MTile.Web/wwwroot/ReferenceClips/
 MTile.Web/wwwroot/Content/
 
 # Local sim CSVs the tests dump on run — regenerated each test run.
