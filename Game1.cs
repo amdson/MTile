@@ -100,6 +100,15 @@ public class Game1 : Game
     // anim_traces notebook plots it directly).
     private readonly AnimTraceLogger _animTrace = new();
 
+    // Frame-time probe (GameConfig.DebugFrameTimings). Tracks the WORST cost of each
+    // frame section over a 60-frame window (hitches hide in averages), shown for the
+    // last completed window. Single stopwatch reused: Update and Draw run sequentially.
+    private readonly System.Diagnostics.Stopwatch _probeSw = new();
+    private double _probeSimMs, _probeCosMs, _probeDrawMs;
+    private double _shownSimMs, _shownCosMs, _shownDrawMs;
+    private bool _probeSlow, _shownSlow;
+    private int _probeFrames;
+
     public Game1()
     {
         // Load game config before the GraphicsDeviceManager finalizes so window
@@ -362,6 +371,7 @@ public class Game1 : Game
                 // this frame — <1 skips frames (slow-mo), >1 runs extra, 0 pauses.
                 _simAccum += MathF.Max(0f, _config.TimeScale);
                 int stepsRun = 0;
+                _probeSw.Restart();
                 while (_simAccum >= 1f)
                 {
                     _simAccum -= 1f;
@@ -370,12 +380,15 @@ public class Game1 : Game
                     else                   _sim.Step(input);
                     stepsRun++;
                 }
+                _probeSimMs = Math.Max(_probeSimMs, _probeSw.Elapsed.TotalMilliseconds);
                 float simDt = stepsRun * Simulation.FixedDt;
 
                 // Cosmetic-only pass: sprite sync, skeleton animators, knife trail,
                 // particles, landing puff, camera tracking — reads sim state, never writes.
                 // Animators tick on simDt (lockstep with physics, incl. slow-mo).
+                _probeSw.Restart();
                 _cosmetics.Update(_sim, _config, dt, simDt, mouseWorldPos, _screenCenter, LocalPlayer);
+                _probeCosMs = Math.Max(_probeCosMs, _probeSw.Elapsed.TotalMilliseconds);
 
                 // Record AFTER cosmetics so the captured pose + RigRoot reflect this frame.
                 _recorder.CaptureFrame(_sim, _camera, _animator, _secondaryAnimators, SkeletonScale, dt);
@@ -386,12 +399,14 @@ public class Game1 : Game
             }
             _animTrace.HandleInput(keyboardState);
         }
+        _probeSlow |= gameTime.IsRunningSlowly;
 
         base.Update(gameTime);
     }
 
     protected override void Draw(GameTime gameTime)
     {
+        _probeSw.Restart();
         // Capture this frame to an offscreen target (if a screenshot is pending), so the
         // save is immune to window focus/occlusion. Null when nothing is being captured.
         RenderTarget2D shotTarget = _screenshots.BeginCapture(GraphicsDevice);
@@ -613,6 +628,25 @@ public class Game1 : Game
                                     tracePos + new Vector2(1, 1), Color.Black);
             _spriteBatch.DrawString(_debugFont, "[TRACE]  Ctrl+L stop+save",
                                     tracePos, new Color(255, 90, 70));
+            _spriteBatch.End();
+        }
+
+        if (_config.DebugFrameTimings)
+        {
+            _probeDrawMs = Math.Max(_probeDrawMs, _probeSw.Elapsed.TotalMilliseconds);
+            if (++_probeFrames >= 60)
+            {
+                _shownSimMs = _probeSimMs; _shownCosMs = _probeCosMs; _shownDrawMs = _probeDrawMs;
+                _shownSlow  = _probeSlow;
+                _probeSimMs = _probeCosMs = _probeDrawMs = 0; _probeSlow = false; _probeFrames = 0;
+            }
+            string probe = $"worst/60f  sim {_shownSimMs:F2}ms  cosmetics {_shownCosMs:F2}ms  draw {_shownDrawMs:F2}ms" +
+                           $"  particles {_particles.Count}  entities {_sim.Entities.Count}" +
+                           (_shownSlow ? "  CATCH-UP" : "");
+            var probePos = new Vector2(8, 96);
+            _spriteBatch.Begin();
+            _spriteBatch.DrawString(_debugFont, probe, probePos + new Vector2(1, 1), Color.Black);
+            _spriteBatch.DrawString(_debugFont, probe, probePos, _shownSlow ? new Color(255, 90, 70) : Color.LimeGreen);
             _spriteBatch.End();
         }
 

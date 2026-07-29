@@ -1,6 +1,6 @@
 ﻿{
   // options: "start" | "arena" | "plain" | "training" | "flat" | "corridor" (bumpy tunnel) | "gym" (1-high ledges, CorrectorScenario applies)
-  "Stage": "start",
+  "Stage": "arena",
   "WindowWidth": 1000,
   "WindowHeight": 900,
   "Fullscreen": false,
@@ -12,6 +12,7 @@
   "DrawPlayerSpriteSkin":       false,
   "PlayerSpriteBinding":        "pumpkin_man_downsampled",
   "DebugDrawSkeleton":          false,
+  "RunAnimationSolver":         true,
   "CameraZoom":                 2.5,
   "DebugDrawConstraints":       false,
   "DebugDrawSteeringRamps":     false,

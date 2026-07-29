@@ -79,7 +79,7 @@ public sealed class CosmeticUpdateSystem
         while (_secondaryAnimators.Count < sim.SecondaryPlayers.Count)
             _secondaryAnimators.Add(new CharacterAnimator(
                 SkeletonExamples.Biped(), _skeletonScale, _skeletonAnims));
-        if (simDt > 0f)
+        if (config.RunAnimationSolver && simDt > 0f)
         {
             // Terrain no-penetration: extract nearby exposed tile faces around LAST frame's
             // pose (must run before this animator's Update) and ride them into the sample.

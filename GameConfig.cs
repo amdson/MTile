@@ -46,6 +46,16 @@ public sealed class GameConfig
     public bool DebugDrawCObstacles         { get; set; } = false;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
+    // Frame-time probe: worst CPU ms per section over the last 60 frames (sim step
+    // loop / cosmetics+animator / draw submit), particle + entity counts, and a
+    // CATCH-UP marker whenever MonoGame reports IsRunningSlowly (fixed-timestep
+    // debt — the classic cause of visible lag spirals).
+    public bool DebugFrameTimings          { get; set; } = true;
+    // Master switch for the skeletal animation solver (LM cadence solve + terrain
+    // surface extraction, CosmeticUpdateSystem). Off = animators never tick: the
+    // rig/sprite-skin/attack-glow read a frozen pose. Perf escape hatch — cosmetic
+    // only, the sim never reads the animator.
+    public bool RunAnimationSolver         { get; set; } = true;
     // Force fields (hold / grab / throw) — on by default so the otherwise-invisible
     // combat fields read while playtesting (COMBAT_FEEL_PLAN Phases 2/6).
     public bool DebugDrawForceFields       { get; set; } = true;
