@@ -76,10 +76,10 @@ public static class CorrectorChannels
                     s.ChannelMask[0][k] = near[k];
                     s.ChannelMask[1][k] = true;
                 }
-                ch[0] = new ChannelDef {
+                ch[0] = new ChannelDef { Id = CorrectionChannel.Drive,
                     Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true,
                     Axis = new Vector2(1f, 0f), Cap = WeakTraction, ActiveMask = s.ChannelMask[0] };
-                ch[1] = new ChannelDef {
+                ch[1] = new ChannelDef { Id = CorrectionChannel.Redirect,
                     Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon, Redirect = true,
                     ActiveMask = s.ChannelMask[1] };
                 return 2;
@@ -94,10 +94,10 @@ public static class CorrectorChannels
                     float sepL = MathF.Max(0f, -s.Samples[k].Vel.Y);
                     s.ChannelCap[0][k] = LegForce * Math.Clamp(1f - sepL / VPushMax, 0f, 1f);
                 }
-                ch[0] = new ChannelDef {
+                ch[0] = new ChannelDef { Id = CorrectionChannel.LegServo,
                     Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
                     Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], ActiveMask = s.ChannelMask[0] };
-                ch[1] = new ChannelDef {
+                ch[1] = new ChannelDef { Id = CorrectionChannel.Drive,
                     Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true,
                     Axis = new Vector2(1f, 0f), Cap = WalkForce, ActiveMask = s.ChannelMask[1] };
                 return 2;
@@ -169,12 +169,15 @@ public static class CorrectorChannels
 
         var intent = dir == 0 ? new Vector2(1f, 0f) : new Vector2(dir, 0f);
         ch[0] = new ChannelDef {   // LegServo: strong, up-only, near ground
+            Id = CorrectionChannel.LegServo,
             Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], ActiveMask = s.ChannelMask[0] };
         ch[1] = new ChannelDef {   // Drive: along intent only, capped, near ground
+            Id = CorrectionChannel.Drive,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = dir != 0,
             Axis = intent, Cap = WalkForce, ActiveMask = s.ChannelMask[1] };
         ch[2] = new ChannelDef {   // CornerAssist: weak LIFT near features (never x)
+            Id = CorrectionChannel.CornerAssist,
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, -1f), Cap = CornerForce, ActiveMask = s.ChannelMask[2],
             SkipSoftHorizontal = true };
@@ -185,15 +188,19 @@ public static class CorrectorChannels
                                    // PlantServes: the ONLY channel wall-face
                                    // (PlantOnly) rows may recruit — and only at
                                    // corner-plant/near ticks per its mask.
+            Id = CorrectionChannel.Redirect,
             Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon, Redirect = true,
             ActiveMask = s.ChannelMask[3], SkipSoftHorizontal = true, PlantServes = true };
         ch[4] = new ChannelDef {   // Tuck: down-only, near ground (legs pull down)
+            Id = CorrectionChannel.Tuck,
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, 1f), Cap = TuckForce, ActiveMask = s.ChannelMask[4] };
         ch[5] = new ChannelDef {   // AirLateral: flight steering along intent
+            Id = CorrectionChannel.AirLateral,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
             Axis = intent, Cap = cfg.FoldAirLateralForce, ActiveMask = s.ChannelMask[5] };
         ch[6] = new ChannelDef {   // AirVertical: tiny two-sided nudge in flight
+            Id = CorrectionChannel.AirVertical,
             Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6],
             SkipSoftHorizontal = true };
@@ -257,12 +264,15 @@ public static class CorrectorChannels
         }
 
         ch[0] = new ChannelDef {   // LegServo
+            Id = CorrectionChannel.LegServo,
             Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], ActiveMask = s.ChannelMask[0] };
         ch[1] = new ChannelDef {   // CornerAssist (lip lift)
+            Id = CorrectionChannel.CornerAssist,
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, -1f), Cap = cfg.FoldCornerForce, ActiveMask = s.ChannelMask[1] };
         ch[2] = new ChannelDef {   // Redirect (plant-and-deflect, near ground)
+            Id = CorrectionChannel.Redirect,
             Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon, Redirect = true,
             // Forward-bounded (movement_todo #5): a deflection may keep the
             // speed the maneuver arrived with but never grow forward speed
@@ -272,15 +282,19 @@ public static class CorrectorChannels
             ForwardAxis = new Vector2(dir, 0f), ForwardCap = vxCap,
             ActiveMask = s.ChannelMask[2], PlantServes = true };
         ch[3] = new ChannelDef {   // Tuck (near ground)
+            Id = CorrectionChannel.Tuck,
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldTuckForce, ActiveMask = s.ChannelMask[3] };
         ch[4] = new ChannelDef {   // AirLateral forward: fades out at the vx cap
+            Id = CorrectionChannel.AirLateral,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(dir, 0f), CapPerTick = s.ChannelCap[4], ActiveMask = s.ChannelMask[4] };
         ch[5] = new ChannelDef {   // AirLateral backward: unrestricted damping
+            Id = CorrectionChannel.AirLateralBack,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(-dir, 0f), Cap = cfg.FoldAirLateralForce, ActiveMask = s.ChannelMask[5] };
         ch[6] = new ChannelDef {   // AirVertical: tiny two-sided nudge in flight
+            Id = CorrectionChannel.AirVertical,
             Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6] };
         return 7;

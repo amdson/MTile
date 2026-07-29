@@ -22,9 +22,9 @@ namespace MTile;
 // Bands (Passive unless noted):
 //   free / ground     0–20   Falling, Standing, Crouched, WallSlide, Dropdown
 //   stun              25     StunnedState (preempts free air, NOT active jumps)
+//   climb band        29     Parkour/Mantle/ArcJump's feasibility-triggered bid
 //   jump passives     30–48  the launch family's bids (low — trigger-driven)
 //   holds             42–44  LedgeGrab / LedgePull / LedgeJump's bid
-//   guided passive    45     ParkourState's auto-trigger bid
 //   launch actives    50–60  jump family's resistance-while-active
 public static class MovementPriorities
 {
@@ -59,11 +59,7 @@ public static class MovementPriorities
     public const int TumbleActive  = 51;
     public const int TumblePassive = 26;
 
-    // Guided (path-followed) — preempts free air, preempted by jumps.
-    public const int GuidedActive   = 25;
-    public const int GuidedPassive  = 45;
-
-    // The corrector climb family (Parkour/ArcJump/Mantle) — AUTOMATIC maneuvers,
+    // The climb family (Parkour/ArcJump/Mantle) — AUTOMATIC maneuvers,
     // triggered by feasibility, never by a button. Their Passive (29) sits below
     // every deliberate launch's Passive (Jump 30, RunningJump 35, DoubleJump 40,
     // WallJump 45, CoveredJump 48) so a player's own input ALWAYS wins the
@@ -79,11 +75,8 @@ public static class MovementPriorities
     // low ceiling, the ground jumps while the probe still binds). The holds
     // band (42–44) only bids on deliberate Up/Down edges, and the stun band
     // (25/26) still cannot break a committed arc.
-    public const int MantleActive   = 29;
-    public const int MantlePassive  = 29;
-
-    public const int ArcJumpActive  = 29;
-    public const int ArcJumpPassive = 29;
+    public const int ClimbActive  = 29;
+    public const int ClimbPassive = 29;
 
     // Holds.
     public const int LedgeGrabActive  = 42;
@@ -103,7 +96,7 @@ public static class MovementPriorities
     public const int JumpPassive      = 30;
     public const int RunningJumpActive  = 55;
     public const int RunningJumpPassive = 35;
-    // Covered jump (partial-overhang exit). Passive sits above ParkourState's GuidedPassive (45) so
+    // Covered jump (partial-overhang exit). Passive sits above the climb band (29) so
     // that "hold jump + walk toward an overhang edge" goes to the covered jump rather than the duck,
     // and above RunningJump's 35 so a fast run into a low overhang slides out and then jumps rather
     // than jumping straight into the slab.

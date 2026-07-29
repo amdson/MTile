@@ -205,6 +205,11 @@ public class PlayerCharacter : IHittable
     // ballistic / solved). The host sets CaptureTrajectories from its draw flags
     // and reads the buffers after stepping; sim logic never reads them.
     public CorrectorScratch CorrectorDebug => _correctorScratch;
+    // What the applied corrector solve exerted THIS step, by channel and by
+    // contact tile (CorrectorLedger). Same-step derived data: sim consumers
+    // (block-breaking reactions) must read it inside the step that wrote it;
+    // never snapshot state.
+    public CorrectorLedger ForceLedger => _correctorScratch.Ledger;
 
     private const int HistorySize = 32;
     private readonly MovementState[] _stateHistory = new MovementState[HistorySize];
@@ -333,18 +338,16 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new WallJumpingState(1));
         _stateRegistry.Add(new WallJumpingState(-1));
         _stateRegistry.Add(new CoveredJumpState());
-        // Corrector-driven climb family (BALLISTIC_CORRECTOR_PLAN steps 4/6 + the
-        // removal pass): Parkour = at-speed 1-block, ArcJump = 2-block band, Mantle =
-        // slow/flush 1-block. Gated per frame by MovementConfig.CorrectorVaultEnabled
-        // (hot-reloadable A/B), so registration is unconditional.
-        _stateRegistry.Add(new ParkourCorrectorState(1));
-        _stateRegistry.Add(new ParkourCorrectorState(-1));
-        _stateRegistry.Add(new ArcJumpCorrectorState(1));
-        _stateRegistry.Add(new ArcJumpCorrectorState(-1));
-        _stateRegistry.Add(new MantleCorrectorState(1));
-        _stateRegistry.Add(new MantleCorrectorState(-1));
-        // _stateRegistry.Add(new ArcJumpState(1));
-        // _stateRegistry.Add(new ArcJumpState(-1));
+        // Climb family (ClimbStates.cs): Parkour = at-speed 1-block vault,
+        // ArcJump = 2-block band, Mantle = slow/flush 1-block. Gated per frame by
+        // MovementConfig.CorrectorVaultEnabled (hot-reloadable A/B), so
+        // registration is unconditional.
+        _stateRegistry.Add(new ParkourState(1));
+        _stateRegistry.Add(new ParkourState(-1));
+        _stateRegistry.Add(new ArcJumpState(1));
+        _stateRegistry.Add(new ArcJumpState(-1));
+        _stateRegistry.Add(new MantleState(1));
+        _stateRegistry.Add(new MantleState(-1));
         _stateRegistry.Add(new DropdownState());
         _stateRegistry.Add(new LedgeGrabState(1));
         _stateRegistry.Add(new LedgeGrabState(-1));

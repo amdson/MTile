@@ -345,6 +345,7 @@ public sealed class AmbientCorrector
             p.ChannelCount = 1;
             p.Channels[0] = new ChannelDef
             {
+                Id = CorrectionChannel.Redirect,
                 Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon,
                 Redirect = true, ActiveFrom = 0, ActiveTo = n,
             };
@@ -353,9 +354,11 @@ public sealed class AmbientCorrector
         p.DeltaWeight = cfg.CorrectorDeltaWeight;
         p.HingeWeight = HingeWeight;
         p.InnerIterations = fold.Fold ? cfg.FoldIterations : CorrectionSolver.DefaultInnerIterations;
-        // Contact-push attribution (render-only; the pooled Problem is shared
-        // with the maneuver states, so set it explicitly either way).
-        p.RowPush = s.CaptureTrajectories ? s.RowPush : null;
+        // Contact-push attribution: always on — it feeds the force ledger
+        // (per-tile reaction bookkeeping), not just the debug overlay. The
+        // pooled Problem is shared with the maneuver states, so set it
+        // explicitly every solve.
+        p.RowPush = s.RowPush;
 
         float residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
         CorrectorChannels.ComputeTickDv(s, p, n, ctx.Dt);
@@ -413,6 +416,7 @@ public sealed class AmbientCorrector
             if (fold.Fold) vars.AmbientChannelPrev[c] = s.Z[c * n];
         if (ctx.Dt > 0f) ctx.Body.AppliedForce += s.TickDv[0] / ctx.Dt;
         vars.AmbientPrevDv = s.TickDv[0];
+        s.Ledger.Record(p, s.Z, s.RowPush, s.Samples, ctx.Dt);
 
         if (s.CaptureTrajectories)
         {

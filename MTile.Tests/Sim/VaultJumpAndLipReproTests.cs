@@ -43,7 +43,7 @@ public class VaultJumpAndLipReproTests(ITestOutputHelper output)
         var terrain = SimTerrain.FromAscii(string.Join("\n", rows), originTileX: 0, originTileY: 0);
 
         static bool InVault(SimFrame f) =>
-            f.State is "ParkourCorrectorState" or "MantleCorrectorState" or "ArcJumpCorrectorState";
+            f.State is "ParkourState" or "MantleState" or "ArcJumpState";
 
         var script = new InputScript()
             .Until(new PlayerInput { Right = true }, InVault)

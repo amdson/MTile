@@ -3,137 +3,50 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-// Pooled per-player scratch for the corrector's predict → build → solve loop.
-// Pure derived data, fully rewritten every solve — never snapshot state. The
-// only cross-frame corrector state lives in MovementVars: ManeuverChannelPrev
-// (the maneuver stack's Δu anchors), AmbientPrevDv, and AmbientChannelPrev
-// (the fold's).
-public sealed class CorrectorScratch
-{
-    public readonly CoastSample[]  Samples  = new CoastSample[BallisticPredictor.MaxHorizon];
-    public readonly ClearanceRow[] Rows     = new ClearanceRow[ClearanceConstraintBuilder.MaxEvents];
-    public readonly Vector2[]      CoastVel = new Vector2[BallisticPredictor.MaxHorizon];
-    // Z layout is z[c·H + k] — sized for the full channel stack.
-    public readonly Vector2[]      Z        = new Vector2[CorrectionSolver.MaxChannels * BallisticPredictor.MaxHorizon];
-    public readonly Vector2[]      ZScratch = new Vector2[CorrectionSolver.MaxChannels * BallisticPredictor.MaxHorizon];
-    public readonly Vector2[]      TickDv   = new Vector2[BallisticPredictor.MaxHorizon];
-    // Per-channel per-tick activation masks + velocity-conditioned caps — frozen
-    // from the coast each solve, pure derived data. The cross-frame Δ anchors
-    // live in MovementVars.AmbientChannelPrev (snapshot-covered), NOT here.
-    public readonly bool[][]  ChannelMask = MakeMasks();
-    public readonly float[][] ChannelCap  = MakeCaps();
-    // Convex-corner plant ticks (CorrectorChannels.MarkCornerPlants) — filled
-    // from the coast by the integration layers (AmbientCorrector.Apply /
-    // RunCorrector) before the channel build; pure derived data.
-    public readonly bool[] CornerPlant = new bool[BallisticPredictor.MaxHorizon];
-    private static bool[][] MakeMasks()
-    {
-        var m = new bool[CorrectionSolver.MaxChannels][];
-        for (int c = 0; c < m.Length; c++) m[c] = new bool[BallisticPredictor.MaxHorizon];
-        return m;
-    }
-    private static float[][] MakeCaps()
-    {
-        var m = new float[CorrectionSolver.MaxChannels][];
-        for (int c = 0; c < m.Length; c++) m[c] = new float[BallisticPredictor.MaxHorizon];
-        return m;
-    }
-    public readonly CorrectionProblem Problem = new()
-    {
-        Channels    = new ChannelDef[CorrectionSolver.MaxChannels],
-        PrevApplied = new Vector2[CorrectionSolver.MaxChannels],
-    };
-    // Hypothetical-state probe for feasibility-as-trigger: CheckPreConditions
-    // rolls the WOULD-BE maneuver (post-hop state) through the same predict →
-    // rows → solve loop without touching the real body. Polygon is re-pointed at
-    // the owning body's before every use.
-    public readonly PhysicsBody ProbeBody =
-        new(PlayerCharacter.CreateBodyPolygon(), Vector2.Zero);
-
-    // ── Trajectory capture for the debug overlay (render-only diagnostics) ──
-    // CaptureTrajectories is set by the HOST from its draw flags; the sim only
-    // gates capture WORK on it — the captured buffers are never read by sim
-    // logic, so the flag cannot affect simulation state. Reference = the arc
-    // planned at Enter (frozen for the maneuver); Ballistic = this tick's
-    // uncorrected coast; Solved = this tick's coast with the final corrections
-    // applied. Ballistic/Solved are cleared every frame (BeginFrame) so the
-    // renderer only ever sees trajectories computed THIS timestep.
-    public bool CaptureTrajectories;
-    public readonly CoastSample[] ReferenceTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
-    public int ReferenceCount;
-    public readonly CoastSample[] BallisticTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
-    public int BallisticCount;
-    public readonly CoastSample[] SolvedTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
-    public int SolvedCount;
-
-    // Per-contact push attribution for the APPLIED solve this frame (ambient or
-    // maneuver — at most one applies per frame): each clearance row's predicted
-    // contact position (body center at the row's tick) and the δv it shoved into
-    // the applied tick-0 correction (CorrectionProblem.RowPush; force = δv/dt).
-    // Cleared every frame; empty whenever nothing was applied.
-    // Elective-deliverability scratch (AmbientCorrector): the corrected rollout
-    // and the R1 stepped-reference record it is checked against. Pure per-frame
-    // derived data, never snapshot state.
-    public readonly CoastSample[] DeliverySamples = new CoastSample[BallisticPredictor.MaxHorizon];
-    public readonly float[] RefY     = new float[BallisticPredictor.MaxHorizon];
-    public readonly bool[]  RefClimb = new bool[BallisticPredictor.MaxHorizon];
-
-    public readonly Vector2[] RowPush    = new Vector2[ClearanceConstraintBuilder.MaxEvents];
-    public readonly Vector2[] ContactPos = new Vector2[ClearanceConstraintBuilder.MaxEvents];
-    public readonly Vector2[] ContactDv  = new Vector2[ClearanceConstraintBuilder.MaxEvents];
-    public int ContactCount;
-
-    public void BeginFrame() { BallisticCount = 0; SolvedCount = 0; ContactCount = 0; }
-}
-
-// Corrector-driven climb family (BALLISTIC_CORRECTOR_PLAN steps 4 + 6): the
-// at-speed 1-block vault (ParkourCorrectorState) and the taller arc-jump band
-// (ArcJumpCorrectorState) share this machinery; each subclass owns only its rise
-// band and entry-speed gate. Behind MovementConfig.CorrectorVaultEnabled for A/B;
-// subclass names match the vault-family sim fixtures ("Parkour" / "ArcJump").
+// The climb family (BALLISTIC_CORRECTOR_PLAN steps 4 + 6): the at-speed 1-block
+// vault (ParkourState), the slow/flush 1-block climb (MantleState), and the
+// taller arc-jump band (ArcJumpState) share ClimbManeuverBase; each subclass
+// owns only its rise band and entry-speed gate. Behind
+// MovementConfig.CorrectorVaultEnabled for A/B; class names match the
+// vault-family sim fixtures ("Parkour" / "Mantle" / "ArcJump").
 //
 // Shape: intent generates the reference (a one-shot entry hop sized to clear the
-// lip with margin + a guided drive that preserves entry speed); the solver only
-// deforms it. Each Update runs the two outer sequential-convexification passes:
-// predict the guided coast → build clearance rows → solve on the MANEUVER
-// CHANNEL STACK (CorrectorChannels.BuildManeuver — legs/redirect near ground,
-// air control in flight; the hop still injects the maneuver's launch energy,
-// the stack corrects around the committed arc, best-effort mid-commitment) →
-// re-predict WITH the corrections → rebuild → re-solve — then applies the
-// summed tick-0 correction through Body.AppliedForce. The ballistic crest
-// envelope + gate delivery are the authored feel, not solver output.
+// lip with margin + a guided drive that preserves entry speed); the corrector
+// solve (ManeuverCorrector.Run — shared infrastructure, not this family's
+// private machinery) only deforms it. Each Update runs the two outer
+// sequential-convexification passes, then applies the summed tick-0 correction
+// through Body.AppliedForce. The ballistic crest envelope + gate delivery are
+// the authored feel, not solver output.
 //
-// Split with MantleState is the existing speed gate: at or below MantleMaxEntrySpeed
-// the flush/slow climb belongs to the mantle; above it this state claims the
-// approach inside its trigger window. Cancel-on-release and MaxVaultTime liveness
-// as everywhere in the climb family. AmbientPolicy.Off — the ambient corrector
+// Split between the vault and the mantle is the entry-speed gate
+// (MantleMaxEntrySpeed); cancel-on-release and MaxVaultTime liveness as
+// everywhere in the climb family. AmbientPolicy.Off — the ambient corrector
 // must never fight an owned maneuver.
-public abstract class CorrectorClimbBase : MovementState
+public abstract class ClimbManeuverBase : MovementState
 {
-    private const float HingeWeight     = 1e6f;    // stiffness constant, not a feel knob
     // Entry feasibility solves the FULL arc once per candidate frame and can afford
     // a deeper fixed iteration budget than the per-tick re-solve (opposed-row
     // schedules — the slalom class — need the extra sweeps; see the anchor tests).
     private const int FeasibilityIterations = 128;
 
     protected readonly int _dir;
-    protected CorrectorClimbBase(int dir) => _dir = dir;
+    protected ClimbManeuverBase(int dir) => _dir = dir;
 
     // The rise band this maneuver claims (px) and whether the body must arrive
-    // at speed (the running/flush split against MantleState).
+    // at speed (the running/flush split between the vault and the mantle).
     protected abstract float RiseBandMin { get; }
     protected abstract float RiseBandMax { get; }
     protected abstract bool  RequiresRunningEntry { get; }
 
     public override AnimTag AnimationTag => AnimTag.Parkour;   // the vault clip family
 
-    public override int ActivePriority  => MovementPriorities.ArcJumpActive;
-    public override int PassivePriority => MovementPriorities.ArcJumpPassive;
+    public override int ActivePriority  => MovementPriorities.ClimbActive;
+    public override int PassivePriority => MovementPriorities.ClimbPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
     public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     // Height-fraction progress + lip grip for the hands overlay — pure functions
-    // of MovementVars/body, so a restore rebuilds them (ClimbStateBase idiom).
+    // of MovementVars/body, so a restore rebuilds them (LedgeStates idiom).
     private float   _progress;
     private Vector2 _gripCorner;
     private bool    _hasGrip;
@@ -152,7 +65,7 @@ public abstract class CorrectorClimbBase : MovementState
         // re-triggers off a jump's ascent (the probe reaches ~SupportReach)
         // and re-injects hop energy mid-launch.
         if (-ctx.Body.Velocity.Y > cfg.SpringMaxRiseSpeed) return false;
-        // Running/flush split: the 1-block state leaves at-or-below-gate entries to
+        // Running/flush split: the 1-block vault leaves at-or-below-gate entries to
         // MantleState; the taller band has no mantle partner and fires at any speed.
         if (RequiresRunningEntry && _dir * ctx.Body.Velocity.X <= cfg.MantleMaxEntrySpeed) return false;
 
@@ -200,8 +113,8 @@ public abstract class CorrectorClimbBase : MovementState
                                      MathF.Min(ctx.Body.Velocity.Y, -vy0));
         float entrySpeed = MathF.Max(_dir * ctx.Body.Velocity.X, cfg.MaxWalkSpeed);
 
-        RunCorrector(ctx, probe, entrySpeed, default, out int rowCount,
-                     FeasibilityIterations);
+        ManeuverCorrector.Run(ctx, probe, _dir, entrySpeed, default, out int rowCount,
+                              FeasibilityIterations);
         int H = Math.Min(cfg.CorrectorHorizon, BallisticPredictor.MaxHorizon);
         int n = BallisticPredictor.PredictGuided(
             probe, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
@@ -374,8 +287,8 @@ public abstract class CorrectorClimbBase : MovementState
         var s = ctx.Corrector;
         if (s == null) return;   // hand-built test contexts without scratch: authored arc only
 
-        RunCorrector(ctx, ctx.Body, vars.EntrySpeed, vars.ManeuverChannelPrev, out int rowCount,
-                     capture: s.CaptureTrajectories);
+        ManeuverCorrector.Run(ctx, ctx.Body, _dir, vars.EntrySpeed, vars.ManeuverChannelPrev,
+                              out int rowCount, capture: s.CaptureTrajectories);
 
         if (rowCount > 0)
         {
@@ -388,107 +301,32 @@ public abstract class CorrectorClimbBase : MovementState
             int H = Math.Min(MovementConfig.Current.CorrectorHorizon, BallisticPredictor.MaxHorizon);
             for (int c = 0; c < s.Problem.ChannelCount; c++)
                 vars.ManeuverChannelPrev[c] = s.Z[c * H];
+            s.Ledger.Record(s.Problem, s.Z, s.RowPush, s.Samples, ctx.Dt);
         }
         else
         {
             vars.ManeuverChannelPrev = default;
         }
     }
-
-    // The two outer sequential-convexification passes over `body`'s state (the real
-    // body during Update; the pooled probe during trigger feasibility): predict the
-    // guided coast → build rows → solve; re-rollout WITH the corrections → rebuild →
-    // re-solve. Leaves s.Z holding the plan and returns the linear-model residual of
-    // the last pass (0 when the coast is provably silent — no rows on pass 1).
-    private float RunCorrector(EnvironmentContext ctx, PhysicsBody body,
-                               float entrySpeed, in ChannelAnchors prevAnchors, out int rowCount,
-                               int iterations = CorrectionSolver.DefaultInnerIterations,
-                               bool capture = false)
-    {
-        var cfg = MovementConfig.Current;
-        var s = ctx.Corrector;
-        int H = Math.Min(cfg.CorrectorHorizon, BallisticPredictor.MaxHorizon);
-        float residual = 0f;
-        rowCount = 0;
-        for (int pass = 0; pass < 2; pass++)
-        {
-            int n = BallisticPredictor.PredictGuided(
-                body, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
-                ctx.Gravity, ctx.Dt, H, s.Samples, pass == 0 ? null : s.TickDv);
-            CorrectorChannels.MarkCornerPlants(ctx.Chunks, s.Samples, n, s.CornerPlant);
-            if (capture && pass == 0)
-            {
-                Array.Copy(s.Samples, s.BallisticTrajectory, n);
-                s.BallisticCount = n;
-            }
-            rowCount = ClearanceConstraintBuilder.Build(
-                ctx.Chunks, body.Polygon, s.Samples, n,
-                cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation,
-                s.Rows, out _);
-            if (rowCount == 0 && pass == 0) return 0f;   // provably silent coast
-
-            for (int k = 0; k < n; k++) s.CoastVel[k] = s.Samples[k].Vel;
-            var p = s.Problem;
-            p.H = n; p.Dt = ctx.Dt;
-            p.CoastVel = s.CoastVel;
-            p.Rows = s.Rows; p.RowCount = rowCount;
-            // The maneuver channel stack (CorrectorChannels.BuildManeuver):
-            // legs/redirect near the ground, air control in flight. The entry
-            // hop still injects the maneuver's launch energy; the stack
-            // corrects the committed arc around it, with leaky per-channel Δ
-            // anchors carrying continuity across frames.
-            p.ChannelCount = CorrectorChannels.BuildManeuver(s, n, rowCount, _dir, entrySpeed);
-            for (int c = 0; c < p.ChannelCount; c++)
-                p.PrevApplied[c] = prevAnchors[c] * CorrectorChannels.AnchorLeak;
-            p.DeltaWeight = cfg.CorrectorDeltaWeight;
-            p.HingeWeight = HingeWeight;
-            p.InnerIterations = iterations;
-            // Contact-push attribution on the final pass only (the applied plan).
-            p.RowPush = capture && pass == 1 ? s.RowPush : null;
-
-            residual = CorrectionSolver.Solve(p, s.Z, s.ZScratch);
-            CorrectorChannels.ComputeTickDv(s, p, n, ctx.Dt);
-
-            if (capture && pass == 1)
-            {
-                s.ContactCount = rowCount;
-                for (int j = 0; j < rowCount; j++)
-                {
-                    s.ContactPos[j] = s.Samples[s.Rows[j].Tick].Pos;
-                    s.ContactDv[j]  = s.RowPush[j];
-                }
-            }
-        }
-        if (capture && rowCount > 0)
-        {
-            // Solved capture (render-only): one extra rollout with the FINAL plan
-            // applied — the corrected trajectory the residual story is about.
-            s.SolvedCount = BallisticPredictor.PredictGuided(
-                body, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
-                ctx.Gravity, ctx.Dt, H, s.SolvedTrajectory, s.TickDv);
-        }
-        return residual;
-    }
 }
 
-// The at-speed 1-block vault (build step 4) — the case the benched ParkourState's
-// reflex ramps vacated. Slow/flush 1-block entries belong to MantleCorrectorState.
-public class ParkourCorrectorState : CorrectorClimbBase
+// The at-speed 1-block vault (build step 4). Slow/flush 1-block entries belong
+// to MantleState.
+public class ParkourState : ClimbManeuverBase
 {
-    public ParkourCorrectorState(int dir) : base(dir) { }
+    public ParkourState(int dir) : base(dir) { }
     protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
     protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
     protected override bool  RequiresRunningEntry => true;
 }
 
-// The slow/flush 1-block climb (removal-pass port of the old ClimbStateBase
-// MantleState onto the corrector loop): same band as the Parkour vault, claiming
-// the entries AT or below the speed gate — the deliberate walk-up/stalled case.
+// The slow/flush 1-block climb: same band as the Parkour vault, claiming the
+// entries AT or below the speed gate — the deliberate walk-up/stalled case.
 // Same hop-plus-envelope motion; from near-rest the hop is the pure-apex
 // ballistic, which reads as the old servo climb without the bespoke shepherd.
-public class MantleCorrectorState : CorrectorClimbBase
+public class MantleState : ClimbManeuverBase
 {
-    public MantleCorrectorState(int dir) : base(dir) { }
+    public MantleState(int dir) : base(dir) { }
     protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
     protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
     protected override bool  RequiresRunningEntry => false;
@@ -502,9 +340,9 @@ public class MantleCorrectorState : CorrectorClimbBase
 // The taller climb band (build step 6): rises above the mantle band up to the
 // corridor's maneuver envelope (~2 blocks). No mantle partner ⇒ fires at any
 // entry speed, including flush-from-rest against the step.
-public class ArcJumpCorrectorState : CorrectorClimbBase
+public class ArcJumpState : ClimbManeuverBase
 {
-    public ArcJumpCorrectorState(int dir) : base(dir) { }
+    public ArcJumpState(int dir) : base(dir) { }
     protected override float RiseBandMin => MovementConfig.Current.MantleMaxRise;
     protected override float RiseBandMax => MovementConfig.Current.CorridorMaxRise;
     protected override bool  RequiresRunningEntry => false;

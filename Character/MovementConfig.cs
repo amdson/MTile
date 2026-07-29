@@ -94,7 +94,7 @@ public class MovementConfig
     public float FastFallForce { get; set; } = 1000f;
     public float FastSlideTerminalSpeed { get; set; } = 200f;
 
-    // The 2-block arc (ArcJumpCorrectorState) only fires when genuinely
+    // The 2-block arc (ArcJumpState) only fires when genuinely
     // running in — |vx along dir| at or above this — AND Up is held
     // (movement_todo #6). Half of MaxWalkSpeed: moving with intent, without
     // demanding a full-speed runway.
@@ -211,7 +211,7 @@ public class MovementConfig
     public float ArcJumpApexMargin { get; set; } = 4f;
 
     // Ballistic corrector (Plans/BALLISTIC_CORRECTOR_PLAN.md). CorrectorVaultEnabled
-    // gates ParkourCorrectorState (the corrector-driven running vault) for A/B against
+    // gates ParkourState (the corrector-driven running vault) for A/B against
     // the ramp stack; the rest tune the predict → rows → solve loop. Iteration counts
     // and the hinge/ε weights are deliberately NOT here — fixed constants, not knobs.
     public bool  CorrectorVaultEnabled          { get; set; } = true;

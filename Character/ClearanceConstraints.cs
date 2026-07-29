@@ -23,6 +23,13 @@ public struct ClearanceRow
     // duck-in). With no plant tick in reach the row sits unserved in the
     // residual — the bonk stays honest.
     public bool    PlantOnly;
+    // Source tile (gtx/gty) whose facet emitted this row — the cell at the
+    // run's max-depth tick when consecutive ticks merged. Valid iff HasCell;
+    // soft reference rows (hover/progress envelopes) have none. Bookkeeping
+    // for CorrectorLedger's contact→tile attribution (block-breaking input);
+    // never read by the solve.
+    public int     CellX, CellY;
+    public bool    HasCell;
 }
 
 // Sweeps the margin-inflated body along a predicted coast polyline directly against
@@ -102,10 +109,16 @@ public static class ClearanceConstraintBuilder
 
         // Per-facet run state: depth/tick of the worst violation in the current
         // contiguous violated stretch; runActive marks a stretch in progress.
+        // The run also carries the CELL that produced the worst violation, so
+        // the emitted row can name its source tile (CorrectorLedger).
         Span<bool>  runActive = stackalloc bool[MaxFacets];
         Span<float> runDepth  = stackalloc float[MaxFacets];
         Span<int>   runTick   = stackalloc int[MaxFacets];
+        Span<int>   runCellX  = stackalloc int[MaxFacets];
+        Span<int>   runCellY  = stackalloc int[MaxFacets];
         Span<float> tickDepth = stackalloc float[MaxFacets];
+        Span<int>   tickCellX = stackalloc int[MaxFacets];
+        Span<int>   tickCellY = stackalloc int[MaxFacets];
         Span<float> cellDepth = stackalloc float[MaxFacets];
 
         int ts = Chunk.TileSize;
@@ -164,7 +177,11 @@ public static class ClearanceConstraintBuilder
                 // a shallower row exists at whatever surface cell the coast
                 // crossed to get here.
                 if (bestFacet >= 0 && tickDepth[bestFacet] < rawBest)
+                {
                     tickDepth[bestFacet] = rawBest;
+                    tickCellX[bestFacet] = gtx;
+                    tickCellY[bestFacet] = gty;
+                }
             }
 
             bool deep = tickPenetration >= deepViolation;
@@ -172,8 +189,11 @@ public static class ClearanceConstraintBuilder
             {
                 if (tickDepth[f] > 0f)
                 {
-                    if (!runActive[f]) { runActive[f] = true; runDepth[f] = tickDepth[f]; runTick[f] = k; }
-                    else if (tickDepth[f] > runDepth[f]) { runDepth[f] = tickDepth[f]; runTick[f] = k; }
+                    if (!runActive[f] || tickDepth[f] > runDepth[f])
+                    {
+                        runActive[f] = true; runDepth[f] = tickDepth[f]; runTick[f] = k;
+                        runCellX[f] = tickCellX[f]; runCellY[f] = tickCellY[f];
+                    }
                 }
                 else if (runActive[f])
                 {
@@ -183,7 +203,8 @@ public static class ClearanceConstraintBuilder
                         bool faceRow = verticalFacesOnly && MathF.Abs(facets[f].Normal.Y) < 0.3f;
                         if (!faceRow || NearPlantTick(plantTicks, runTick[f], count))
                             rows[rowCount++] = new ClearanceRow { Tick = runTick[f], Normal = facets[f].Normal,
-                                                                  Depth = runDepth[f], HingeScale = 1f, PlantOnly = faceRow };
+                                                                  Depth = runDepth[f], HingeScale = 1f, PlantOnly = faceRow,
+                                                                  CellX = runCellX[f], CellY = runCellY[f], HasCell = true };
                     }
                 }
             }
@@ -202,7 +223,8 @@ public static class ClearanceConstraintBuilder
                         bool faceRow = verticalFacesOnly && MathF.Abs(facets[f].Normal.Y) < 0.3f;
                         if (!faceRow || NearPlantTick(plantTicks, runTick[f], count))
                             rows[rowCount++] = new ClearanceRow { Tick = runTick[f], Normal = facets[f].Normal,
-                                                                  Depth = runDepth[f], HingeScale = 1f, PlantOnly = faceRow };
+                                                                  Depth = runDepth[f], HingeScale = 1f, PlantOnly = faceRow,
+                                                                  CellX = runCellX[f], CellY = runCellY[f], HasCell = true };
                     }
 
         return rowCount;

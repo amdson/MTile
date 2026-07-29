@@ -3,6 +3,28 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
+// The movement-state contract. Concrete states are grouped by move type:
+//   LocomotionStates.cs — Standing, Crouched, Falling, Dropdown
+//   JumpStates.cs       — Jumping, RunningJump, DoubleJumping, CoveredJump
+//   WallStates.cs       — WallSliding, WallJumping
+//   LedgeStates.cs      — LedgeGrab, LedgePull, LedgeJump
+//   ClimbStates.cs      — Parkour (vault), Mantle, ArcJump (ClimbManeuverBase)
+//   ReactionStates.cs   — Stunned, Tumble
+//
+// The corrector solve is SHARED INFRASTRUCTURE, not a class of state — any
+// state opts into as much of it as fits its physics:
+//   - AmbientPolicy (default: on): the per-frame ambient layer assists around
+//     the state's own forces with the redirect disc (AmbientCorrector). Off
+//     for states that servo against fixed contacts — an ambient assist would
+//     fight the owned maneuver.
+//   - FoldProfile: fold states (Standing/Crouched/Falling) go further and
+//     delegate support/walk/brake/landing-catch to the ambient solve entirely;
+//     the profile shapes the reference (hover height, progress cap).
+//   - ManeuverCorrector.Run: a committed maneuver with an authored arc runs
+//     its own predict → rows → solve loop around that arc, both per-tick and
+//     as a trigger-by-feasibility probe (the climb family is the pattern).
+// Whatever path a state uses, the applied solve's output is bookkept in
+// CorrectorLedger (per-channel forces + per-contact tile attribution).
 public abstract class MovementState
 {
     public abstract int ActivePriority { get; }
@@ -74,302 +96,4 @@ public abstract class MovementState
     // playing an approximate canned reach. Default none. Render-only, same contract as
     // AnimationProgress: derived from deterministic body/world data, the sim never reads it.
     public virtual bool TryAnimationGrip(out Vector2 target) { target = default; return false; }
-}
-
-// Heavy-hit lock-out. Preempts Standing/Crouched/WallSliding/Falling so the
-// muted air-control profile applies as soon as a stun-flagged hit lands. Does
-// NOT preempt active jumps (50+) — a player hit mid-jump finishes the existing
-// arc and only enters StunnedState after Falling takes over.
-//
-// While stunned:
-//   - Horizontal accel × 0.4, max-air-speed × 0.7, air-drag × 1.5 — player can
-//     nudge but can't redirect the knockback trajectory.
-//   - Action FSM gates (Slash*, Stab) refuse to fire (gated on Combat.StunActive).
-//   - HitstunActive is also true throughout (every hit sets it), keeping the
-//     jump preconditions blocked even past the 8-frame hitstun base window.
-//
-// State holds no constraints — physics handles ground/wall contact through
-// the world's collision resolver. HasDoubleJumped is NOT reset on exit; a
-// player stunned out of a double-jump doesn't suddenly regain it.
-public class StunnedState : MovementState
-{
-    public override int ActivePriority  => MovementPriorities.StunnedActive;
-    public override int PassivePriority => MovementPriorities.StunnedPassive;
-
-    // No reflex assists while stunned — knockback must plow into corners honestly.
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
-
-    // Recoil flinch, not the generic ground clips: without this the muted-control window
-    // is invisible (a stunned body sliding under knockback reads as a walk cycle).
-    public override AnimTag AnimationTag => AnimTag.Stunned;
-
-    // Grounded-only since Phase 4: an airborne heavy hit goes to TumbleState (launch
-    // band) instead, so a launched body can't be rescued by terrain. A grounded
-    // stun (horizontal hit, body stays on the floor) still lands here. When a
-    // grounded stun gets knocked airborne mid-window, this CheckConditions drops
-    // (→ Falling) and TumbleState's higher passive grabs the body.
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-        => ctx.Combat?.StunActive == true && ctx.TryGetGround(out _);
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-        => ctx.Combat?.StunActive == true && ctx.TryGetGround(out _);
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        var force = Vector2.Zero;
-        var cfg = MovementConfig.Current;
-        var m   = ctx.Modifiers;
-        force.X = AirControl.Apply(ctx,
-            cfg.AirAccel    * m.AirAccel    * 0.4f,
-            cfg.MaxAirSpeed * m.MaxAirSpeed * 0.7f,
-            cfg.AirDrag     * m.AirDrag     * 1.5f);
-
-        ctx.Body.AppliedForce = force;
-    }
-}
-
-// Airborne heavy-hit launch (COMBAT_FEEL_PLAN Phase 4). A hit whose impulse crosses
-// the stun threshold sets StunActive; while the victim is airborne that becomes a
-// Tumble rather than a grounded Stun. Tumble lives in the launch band (Active 51) so
-// once launched the body stays tumbling until it lands or techs — combined with the
-// capability mask (which blocks WallCling/LedgeGrab during stun/hitstun) this is what
-// makes a knockback into a juggle/edgeguard instead of a free wall-cling reset.
-//
-// Control is muted air-control (DI only), like StunnedState. PreserveExternalVelocity
-// is forced on so the muted speed cap never brakes the launch even in the stun tail
-// after hitstun lapses.
-//
-// Tech (defensive option): a buffered Jump intent while a surface is within the tech
-// probe (just before landing) ends the launch early, grants brief i-frames, and pops
-// the body up — so a read launch can be survived with precise timing. Outside that
-// window the body just rides the tumble down and eats the landing.
-public class TumbleState : MovementState
-{
-    // Tech window: ground detected within this slack below the body (but the body
-    // isn't yet "grounded" by the normal 20px probe, which would exit Tumble) opens
-    // the tech window — roughly the last few frames of the descent.
-    private const float TechProbeSlack   = 60f;
-    private const float TechInvulnSeconds = 0.25f;
-    private const float TechBounceVy     = 260f;   // upward pop on a successful tech
-    private const float TechHorizKeep    = 0.3f;   // fraction of horizontal speed kept
-
-    public override int ActivePriority  => MovementPriorities.TumbleActive;
-    public override int PassivePriority => MovementPriorities.TumblePassive;
-
-    // No reflex assists while launched — same reasoning as StunnedState.
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
-
-    // Airborne out-of-control tumble, distinct from StunnedState's grounded recoil flinch
-    // (AnimTag.Stunned): without this the launch plays the generic Jump/Fall clip and the
-    // heavy hit doesn't read.
-    public override AnimTag AnimationTag => AnimTag.Tumble;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-        => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-        => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        // Tech: buffered jump + a surface within the tech probe ⇒ bail the launch.
-        if (ctx.Combat != null
-            && ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)
-            && GroundChecker.TryFind(ctx.Body, ctx.Chunks,
-                   PlayerCharacter.Radius, PlayerCharacter.Radius,
-                   TechProbeSlack, ctx.Dt, out _))
-        {
-            ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
-            ctx.Combat.Tech(ctx.CurrentFrame, ctx.Dt, TechInvulnSeconds);
-            ctx.Body.Velocity = new Vector2(ctx.Body.Velocity.X * TechHorizKeep, -TechBounceVy);
-            ctx.Body.AppliedForce = Vector2.Zero;
-            return;
-        }
-
-        // Launch must never be braked by the muted speed cap (the stun tail can
-        // outlive hitstun, which is what otherwise forces PreserveExternalVelocity).
-        ctx.Modifiers.PreserveExternalVelocity = true;
-
-        var force = Vector2.Zero;
-        var cfg = MovementConfig.Current;
-        var m   = ctx.Modifiers;
-        force.X = AirControl.Apply(ctx,
-            cfg.AirAccel    * m.AirAccel    * 0.4f,
-            cfg.MaxAirSpeed * m.MaxAirSpeed * 0.7f,
-            cfg.AirDrag     * m.AirDrag     * 1.5f);
-
-        ctx.Body.AppliedForce = force;
-    }
-}
-
-public class FallingState : MovementState
-{
-    public override int ActivePriority => MovementPriorities.FallingActive;
-    public override int PassivePriority => MovementPriorities.FallingPassive;
-
-    // Falling is a fold state: the landing catch (anchor re-binding on descent)
-    // and the graze/duck assists all run through the fold solve. High free fall
-    // is naturally unbound (anchor beyond leg reach ⇒ no envelope rows).
-    public override FoldProfile FoldProfile => FoldProfile.Stand;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) => true;
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        var force = Vector2.Zero;
-        var cfg = MovementConfig.Current;
-        var m   = ctx.Modifiers;
-        force.X = AirControl.Apply(ctx,
-            cfg.AirAccel    * m.AirAccel,
-            cfg.MaxAirSpeed * m.MaxAirSpeed,
-            cfg.AirDrag     * m.AirDrag);
-
-        if (ctx.Input.Down)
-            force.Y += cfg.FastFallForce;
-
-        ctx.Body.AppliedForce = force;
-    }
-}
-
-public class StandingState : MovementState
-{
-    public override int ActivePriority => MovementPriorities.StandingActive;
-    public override int PassivePriority => MovementPriorities.StandingPassive;
-
-    public override FoldProfile FoldProfile => FoldProfile.Stand;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        return IsStandingGround(ctx);
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        // Stay-active uses plain ground detection — only ENTRY is gated (below). An
-        // already-standing body that's briefly flung up (e.g. a sprout growing up
-        // under it) must keep Standing so its spring tracks the lift; kicking it to
-        // Falling for a frame would slam its velocity. The launch case the entry gate
-        // guards against never has Standing as the current state (the jump does).
-        return ctx.TryGetGround(out _);
-    }
-
-    // GroundChecker's 20px ProbeSlack reports "grounded" for a body up to ~20px above
-    // rest height — which, with the slow JumpVelocity launch, holds for the whole jump
-    // window. So a quick jump-release would drop JumpingState and let Standing re-grab
-    // the still-ascending body. Refuse to grab a body rising faster than support could
-    // ever push it (SpringMaxRiseSpeed): that's a launch, not standing. ENTRY also
-    // requires support proximity (SupportReach — the gravity-hold band): a body the
-    // probe merely SEES 40px up is still flying (a pass-by, or an inbound landing whose
-    // descent will cross the engagement gate and flicker the state) — it becomes
-    // Standing when support can actually bind it. Continuation (CheckConditions) stays
-    // the plain probe: states are sticky.
-    private static bool IsStandingGround(EnvironmentContext ctx)
-    {
-        if (!ctx.TryGetGround(out var ground)) return false;
-        float riseSpeed = Vector2.Dot(ctx.Body.Velocity - ground.SurfaceVelocity, ground.Normal);
-        if (riseSpeed > MovementConfig.Current.SpringMaxRiseSpeed) return false;
-        float dist = Vector2.Dot(ctx.Body.Position - ground.Position, ground.Normal);
-        return dist <= BallisticPredictor.SupportReach;
-    }
-
-    // The stand fold (see AmbientCorrector): no ground FSD, no hover spring —
-    // vertical support, walk drive, braking, and the landing catch are all the
-    // ambient solve's job (soft envelope rows + the channel stack). Standing
-    // keeps classification only.
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        // The one baseline Standing applies is the gravity hold — sustained
-        // support is feedforward (mirrored by the predictor's grounded branch);
-        // the solver's channels act relative to it. DC demands never belong in
-        // the solver's soft rows: without the hold it must win a tug-of-war
-        // against gravity at dt² leverage every frame, which it structurally
-        // cannot (the post-landing dead-rest bug).
-        //
-        // The hold engages only while the support anchor binds (floor within
-        // SupportReach below the center — same gate as the coast's grounded
-        // classification). The ground PROBE reaches ~40px down, and Standing can
-        // legitimately be active over that whole band; holding against gravity
-        // up there would turn a ballistic pass-by into a zero-g floater and
-        // hand the solver a coast the live tick contradicts.
-        ctx.Body.AppliedForce = FoldBaseline(ctx);
-    }
-
-    // Shared fold-state baseline, mirrored tick-for-tick by the predictor's
-    // grounded branch: gravity hold iff supported (see Update above), plus
-    // station friction at no input — the fold body never physically touches
-    // the floor, so SurfaceContact.Friction can't brake it; this term is that
-    // friction re-expressed as feedforward (the old "no-input → braking"
-    // role). Hitstun scales it down through Modifiers.GroundFriction exactly
-    // as it scaled the old contact friction.
-    internal static Vector2 FoldBaseline(EnvironmentContext ctx)
-    {
-        // Supported = floor within reach AND not rising beyond what support
-        // could push (SpringMaxRiseSpeed). Without the rise gate, a body flung
-        // upward while near a floor (a sprout growing under it, a pop-out)
-        // keeps the hold — zero gravity — and rides its launch indefinitely.
-        bool supported = ctx.TryGetGround(out var ground)
-            && -ctx.Body.Velocity.Y <= MovementConfig.Current.SpringMaxRiseSpeed;
-        if (!supported) return Vector2.Zero;
-        float dist = ground.Position.Y - ctx.Body.Position.Y;
-        // The hold FADES across the spring's old support range: full inside
-        // the rest band (2R ≈ the old FSD MinDistance), zero at SupportReach.
-        // A body floating above hover gets mostly-real gravity — the old
-        // spring gave nothing above its rest length, and a binary hold out to
-        // SupportReach let sprout-lifted bodies coast up in zero-g.
-        float holdScale = Math.Clamp(
-            (BallisticPredictor.SupportReach - dist)
-                / (BallisticPredictor.SupportReach - BallisticPredictor.HoldFullDist), 0f, 1f);
-        if (holdScale <= 0f) return Vector2.Zero;
-        var force = new Vector2(0f, -ctx.Gravity.Y * holdScale);
-        if (ctx.Intent.CurrentHorizontal == 0 && ctx.Dt > 0f)
-        {
-            float cap = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -cap, cap) * holdScale;
-        }
-        return force;
-    }
-}
-
-// Crouched is a fold state (CORRECTOR_CONSOLIDATION_PLAN §3.1): same mechanism
-// as Standing, lower reference — FoldProfile.Crouch drops the hover target to
-// the C-obstacle surface and caps progress at crawl speed. No FSD, no spring,
-// no bespoke drive: the crouch IS reference shaping. The state keeps only
-// classification (when crouching applies) and the gravity-hold baseline.
-public class CrouchedState : MovementState
-{
-    public override AnimTag AnimationTag => AnimTag.Crouch;
-    public override int ActivePriority => MovementPriorities.CrouchedActive;
-    public override int PassivePriority => MovementPriorities.CrouchedPassive;
-
-    public override FoldProfile FoldProfile => FoldProfile.Crouch;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        if (!ctx.TryGetCrouchGround(out _)) return false;
-        if (ctx.Input.Down) return true;
-        // Auto-crouch: STANDING AT FOLD HOVER doesn't fit here. The fold-era
-        // standing envelope is hover offset + body height ≈ 30.8px — lower than
-        // the old FSD StandingHeight (32.8, float height + body), which made
-        // 2-high/32px corridors auto-crouch even though the hover-held body
-        // threads them upright with ~1px to spare (the restricted corridor
-        // harness proves it at full walk speed). Crouch only when the gap is
-        // genuinely below the hover-standing envelope.
-        float standingClearance = MovementConfig.Current.FoldHoverOffset
-            + (PlayerCharacter.StandingHeight - PlayerCharacter.Radius);
-        return ctx.TryGetGround(out var ground)
-            && ctx.TryGetCeiling(out var ceiling)
-            && ground.Position.Y - ceiling.Position.Y < standingClearance + 0.5f;
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        return (ctx.Input.Down || ctx.TryGetCeiling(out _)) && ctx.TryGetCrouchGround(out _);
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        // The shared fold baseline (see StandingState.Update).
-        ctx.Body.AppliedForce = StandingState.FoldBaseline(ctx);
-    }
 }

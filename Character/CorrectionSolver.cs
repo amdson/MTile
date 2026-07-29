@@ -15,6 +15,9 @@ public enum LeverKind { VelocityUpdate, Force }
 // and knows no physics — anything not expressible as this triple is not a channel.
 public struct ChannelDef
 {
+    // Bookkeeping identity (CorrectorLedger): which physical actuator this
+    // channel is. Never read by the solve — attribution only.
+    public CorrectionChannel Id;
     public LeverKind Lever;
     public float     Weight;       // quadratic cost on ‖z_k‖² (Redirect: the ε regularizer)
     public float     Cap;          // Force: ‖z_k‖ ≤ Cap. Ignored for Redirect.
@@ -86,12 +89,15 @@ public sealed class CorrectionProblem
     // an entry-feasibility solve over a full arc may afford more (opposed-row
     // schedules need the extra sweeps to unzigzag).
     public int   InnerIterations = CorrectionSolver.DefaultInnerIterations;
-    // Optional per-row debug attribution (length ≥ RowCount, caller-owned): each
-    // row's accumulated hinge push into the APPLIED tick-0 variable, summed across
+    // Optional per-row attribution (length ≥ RowCount, caller-owned): each row's
+    // accumulated hinge push into the APPLIED tick-0 variable, summed across
     // iterations/channels — "how hard did this contact shove the correction, and
-    // which way". Same units as z (a δv for VelocityUpdate channels); projections
-    // mean the entries need not sum exactly to z₀. Write-only diagnostics: null
-    // (the default) skips all work, and nothing in the solve reads it back.
+    // which way". Uniform δv units regardless of lever kind (a Force channel's
+    // contribution is scaled by dt), so force-on-the-body = RowPush/dt;
+    // projections mean the entries need not sum exactly to z₀. Write-only —
+    // null (the default) skips all work, and nothing in the solve reads it back.
+    // Feeds the debug overlay's contact arrows and CorrectorLedger's per-contact
+    // reaction bookkeeping.
     public Vector2[] RowPush;
 }
 
@@ -201,7 +207,8 @@ public static class CorrectionSolver
                         float lever = Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
                         var push = 2f * p.HingeWeight * p.Rows[j].HingeScale * slack[j] * lever * p.Rows[j].Normal;
                         g -= push;
-                        if (p.RowPush != null && k == 0) p.RowPush[j] += push / L;
+                        if (p.RowPush != null && k == 0)
+                            p.RowPush[j] += (ch.Lever == LeverKind.Force ? p.Dt : 1f) * push / L;
                     }
 
                     zScratch[i] = Project(ch, k, p.CoastVel[k], z[i] - g / L);

@@ -99,7 +99,7 @@ public class CorrectorAnchorTests(ITestOutputHelper output)
                 Input     = new PlayerInput { Right = true, Up = true },
                 Modifiers = MovementModifiers.Identity,
             };
-            return new ArcJumpCorrectorState(1).CheckPreConditions(ctx, new PlayerAbilityState());
+            return new ArcJumpState(1).CheckPreConditions(ctx, new PlayerAbilityState());
         }
     }
 
