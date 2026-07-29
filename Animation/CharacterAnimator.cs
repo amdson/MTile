@@ -1005,6 +1005,11 @@ public sealed partial class CharacterAnimator
     // bends limbs off a wall / onto a pin) move. The base pose is sampled at the SAME phase /
     // clip-time step 3 draws at, so the solved Δθ line up when applied there. Mirrors
     // SolvePhaseStepLm's root construction (com baseline so capture/solve/draw share a frame).
+    // Dormancy slack for the static solve's pre-check: a masked tip must press past its
+    // plane by more than this (px) before the LM solve engages. Sub-pixel sink for one
+    // frame is invisible; the solve, once it runs, still resolves to the full margin.
+    private const float StaticSolveSlack = 0.75f;
+
     private void SolveStaticPose(AnimationDocument anim, AnimClip clip, in CharacterAnimSample s)
     {
         var cfg = AnimSolverConfig.Current;
@@ -1024,6 +1029,42 @@ public sealed partial class CharacterAnimator
         _solveLo[IdxDx]  = -cfg.HorizOffsetLimit; _solveHi[IdxDx]  = cfg.HorizOffsetLimit;
         for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
         Array.Clear(_solveVars, 0, n);
+        // Dormancy gate (perf). With no pins and no aim, the only geometric rows are the
+        // no-pen half-planes — and those are margin-0/inactive on almost every frame the
+        // body merely stands NEAR terrain (feet resting at gap ≈ 0 keep the engage band
+        // lit permanently). Running the LM solve then just re-derives the closed-form
+        // ease at ~40× the cost, every grounded frame — the per-frame hitch that made
+        // mass terrain destruction lag (a fresh crater puts every limb "near" a face).
+        // One forward pass decides: solve only when some masked tip actually presses
+        // past its plane; otherwise leave _haveCorr false → step 3.6's fast path.
+        if (_pins.Count == 0 && !_aimActive)
+        {
+            // Evaluate at the pose the FAST PATH would draw (sample → compose → ease
+            // toward emitted, step 3.6's else-branch) — not the raw x = 0 sample: the
+            // clip may plant tips slightly past a plane before the smoothness ease pulls
+            // them back to last frame's (already-solved, clear) emitted pose. Checking
+            // the drawn candidate makes skip ⇒ the drawn pose really is clear.
+            AnimationSampler.SampleSmooth(_solveClip, Wrap01(_solvePhi), _kfA, _kfB, _kfC, _kfD, _scratch);
+            ComposeOverlays(_scratch);
+            if (_haveEmitted)
+                for (int i = 0; i < _skeleton.Count; i++)
+                {
+                    float g = MathHelper.WrapAngle(_scratch.Local[i].Rotation - _thetaEmitted[i]);
+                    _scratch.Local[i].Rotation = _thetaEmitted[i] + _easeB[i] * g;
+                }
+            _scratch.ComputeWorld(_solveRoot);
+            float worst = float.MinValue;
+            foreach (var srf in _surfaces)
+                for (int b = 0; b < _skeleton.Count; b++)
+                {
+                    if (((srf.BoneMask >> b) & 1) == 0) continue;
+                    Vector2 tip = _scratch.WorldOf(b).Translation;
+                    float gap = srf.Normal.X * (tip.X - srf.Point.X)
+                              + srf.Normal.Y * (tip.Y - srf.Point.Y);
+                    worst = MathF.Max(worst, srf.Margin - gap);
+                }
+            if (worst <= StaticSolveSlack) return;   // all rows dormant — nothing to solve
+        }
         FillSmoothTargets(n);                 // freeze t_i (emitted deviation) before any residual eval
         CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
 
