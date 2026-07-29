@@ -1,0 +1,72 @@
+AMBIENT STEP (runs after state.Update, before physics reads AppliedForce)
+Apply(ctx, policy, startGrounded, solverStand):
+
+  if corrector disabled, or (policy all-off and not solverStand):
+      clear prev-dv;  return
+
+  # 1. COAST — predict H ticks of the uncorrected baseline
+  H = min(AmbientHorizon, MaxHorizon)
+  samples[0..H) = Predict(body, chunks, inputDirX, inputDown):
+      for each tick k:
+          haveFloor = tile floor probe under predicted bounds (reach = Radius + slack)
+          if haveFloor:  force = (0, -gravity)            # gravity hold (walk drive removed)
+          else:          force = (airControl(vx), fastFall?)
+          vel += (force + gravity + gravityScaleAdjust) * dt
+          pos += vel * dt
+          record (pos, vel, grounded=haveFloor, floorY)
+
+  # 2. HARD ROWS — C-space clearance violations along the coast
+  rows = ClearanceBuild(samples):
+      for each sample k, each solid cell near it:
+          facets = CObstacleTemplate(cell polygon ⊕ −body)   # axis faces + corner bevels,
+                                                             # exposure-masked by neighbors
+          depth[f] = facet offset + margin − dot(pos − cell, n)
+          if inside all facets: violation; keep least-depth EXPOSED facet
+              (verticalFacesOnly: skip near-horizontal pop-out facets)
+      deepest raw depth > DeepViolation ⇒ truncate horizon at that tick
+      merge per-facet runs ⇒ rows {Tick, Normal, Depth, HingeScale=1}
+  filter rows by policy (Over gates up-normals, Under gates down-normals)
+
+  # 3. SOFT ROWS (solverStand only) — the envelope reference
+  anchorY = FloorEnvelope(x0, band [y0−2, y0+LegReachDown])     # surface actually stood on
+  for each tick k (up to truncation):
+      xRef = x0 + dir·MaxWalkSpeed·(k+1)·dt                     # intent: walk at speed
+      errX = xRef − samples[k].x
+      emit row {Tick k, Normal (sign errX, 0), Depth |errX|, HingeScale 0.02}   # two-sided
+      if anchored:
+          envY = FloorEnvelope(xRef, band [anchorY−ClimbReachUp, anchorY+LegReachDown])
+                   # highest standable C-surface at xRef; bevels ramp it over lips;
+                   # 1-high in band, 2-high out of band
+          yRef = envY − HoverAboveSurface
+          errY = yRef − samples[k].y
+          emit row {Tick k, Normal (0, sign errY), Depth |errY|, HingeScale 0.02}  # two-sided
+
+  if no rows: clear prev-dv; return
+
+  # 4. CHANNELS
+  if solverStand:  BuildStandChannels(scenario):                # masks/caps frozen from coast
+      near[k]  = coast floor within LegReach
+      LegServo     Force  w=.01  up-only    cap 6000·fade(riseSpeed)   mask near[k]
+      Traction     Force  w=.05  ±x         cap 3000                   mask near[k]
+      CornerAssist Force  w=.5   any dir    cap 1500     mask ticks ±2 of hard rows
+      Redirect     VU     w=1e-6 Thales disc              mask !near[k]
+      Tuck         Force  w=.5   down-only  cap 1200     mask ALL ticks (release valve)
+      (scenarios "redirect-traction" / "legs-only" swap in subsets)
+  else:  single unbounded regularized VU channel (redirect suspended)
+
+  # 5. SOLVE — projected-gradient QP on z[c·H+k]
+      cost = Σ hinge(rows, scaled by HingeScale) · HingeWeight    # rows linearized on coast:
+           + Σ channelWeight·|z|²                                 #   slack_j = depth_j − Σ lever·z
+           + DeltaWeight·|Δz|²  (anchored at PrevApplied)         # Force lever (T−k+1)·dt², VU (T−k+1)·dt
+      project each z[c,k] into its channel set (axis clamp / unilateral / cap / disc)
+      16 iterations, Gershgorin step;  residual counts HARD rows only
+
+  # 6. APPLY
+  refusal (residual too high) only for non-fold states; solverStand always applies
+  AppliedForce += Σ_channels z₀   (VU channels as z₀/dt)
+  ChannelPrev[c] = z₀[c]                                          # Δ anchor for next frame
+  TickDv[k] = Σ_channels per-tick δv                              # (not snapshotted — TEMP)
+
+  # 7. CAPTURE (render/tests only)
+  ballistic arc = samples;  contacts = per-row push at tick 0 (RowPush)
+  solved arc = Predict(...) re-run with TickDv applied
