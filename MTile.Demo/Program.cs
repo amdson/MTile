@@ -10,6 +10,9 @@ using MTileDemo;
 // Sprite bind editor:    dotnet run --project MTile.Demo -- --bind hero.png
 //   (PNG resolved against SpriteBindings/ at the repo root; authors the
 //    skeleton↔artwork alignment the runtime SpriteSkin deforms.)
+// Art import:            dotnet run --project MTile.Demo -- --import SkeletonAssets/rabbit_and_badger [--out SpriteBindings] [--scale 0.25]
+//   (one-time intake of decomposed-limb art: crop/downscale each part PNG and
+//    generate first-pass multi-image bindings. See SPRITE_SKIN_PLAN.md §10.2.)
 // Take viewer:           dotnet run --project MTile.Demo -- --load Takes/<name>.take.json
 //   (scrub a recorded gameplay take with solver overlays; record in-game with
 //    Ctrl+R, save with Ctrl+S. See Plans/ANIM_TAKE_VIEWER_PLAN.md.)
@@ -18,16 +21,25 @@ using MTileDemo;
 //    loads/saves ReferenceClips/<name>.json. See Plans/BALLISTIC_CORRECTOR_PLAN.md §1.)
 
 string bindPng = null, useBind = null, clip = null, takePath = null, refClip = null;
+string importDir = null, importOut = "SpriteBindings"; float importScale = 0.25f;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--bind" && i + 1 < args.Length)         bindPng = args[++i];
     else if (args[i] == "--usebind" && i + 1 < args.Length) useBind = args[++i];
     else if (args[i] == "--load" && i + 1 < args.Length)    takePath = args[++i];
     else if (args[i] == "--ref" && i + 1 < args.Length)     refClip = args[++i];
+    else if (args[i] == "--import" && i + 1 < args.Length)  importDir = args[++i];
+    else if (args[i] == "--out" && i + 1 < args.Length)     importOut = args[++i];
+    else if (args[i] == "--scale" && i + 1 < args.Length)   importScale = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
     else clip ??= args[i];
 }
 
-if (refClip != null)
+if (importDir != null)
+{
+    using var import = new ImportGame(importDir, importOut, importScale);
+    import.Run();
+}
+else if (refClip != null)
 {
     using var hermite = new HermiteClipGame(refClip);
     hermite.Run();

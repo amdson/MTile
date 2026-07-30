@@ -1,0 +1,138 @@
+{
+  "Skeleton": "biped",
+  "ImageToRigScale": 0.09690262,
+  "ImageToRigTx": -21.974367,
+  "ImageToRigTy": -36.853092,
+  "MeshStep": 10,
+  "AlphaThreshold": 8,
+  "WeightAlpha": 2,
+  "HandleStep": 0.25,
+  "MaxHandles": 8,
+  "Layers": [
+    {
+      "Name": "arm_far",
+      "Image": "badger/arm_far.png",
+      "OffsetX": 86,
+      "OffsetY": 282,
+      "Bones": [
+        "arm_r_*"
+      ]
+    },
+    {
+      "Name": "leg_far",
+      "Image": "badger/leg_far.png",
+      "OffsetX": 161,
+      "OffsetY": 384,
+      "Bones": [
+        "leg_r_*",
+        "foot_r"
+      ]
+    },
+    {
+      "Name": "leg_near",
+      "Image": "badger/leg_near.png",
+      "OffsetX": 138,
+      "OffsetY": 376,
+      "Bones": [
+        "leg_l_*",
+        "foot_l"
+      ]
+    },
+    {
+      "Name": "torso",
+      "Image": "badger/torso.png",
+      "OffsetX": 96,
+      "OffsetY": 282,
+      "Bones": [
+        "chest",
+        "hip"
+      ]
+    },
+    {
+      "Name": "arm_near",
+      "Image": "badger/arm_near.png",
+      "OffsetX": 246,
+      "OffsetY": 280,
+      "Bones": [
+        "arm_l_*"
+      ]
+    },
+    {
+      "Name": "head",
+      "Image": "badger/head.png",
+      "OffsetX": 132,
+      "OffsetY": 112,
+      "Bones": [
+        "head"
+      ]
+    }
+  ],
+  "MaskTolerance": 90,
+  "BindPose": [
+    {
+      "Bone": "hip",
+      "Rotation": 0,
+      "Length": 0
+    },
+    {
+      "Bone": "chest",
+      "Rotation": -1.5707964,
+      "Length": 16
+    },
+    {
+      "Bone": "head",
+      "Rotation": 0,
+      "Length": 10
+    },
+    {
+      "Bone": "arm_l_upper",
+      "Rotation": 3.1415927,
+      "Length": 10
+    },
+    {
+      "Bone": "arm_l_lower",
+      "Rotation": 0,
+      "Length": 10
+    },
+    {
+      "Bone": "arm_r_upper",
+      "Rotation": 3.1415927,
+      "Length": 10
+    },
+    {
+      "Bone": "arm_r_lower",
+      "Rotation": 0,
+      "Length": 10
+    },
+    {
+      "Bone": "leg_l_upper",
+      "Rotation": 1.5707964,
+      "Length": 9.5
+    },
+    {
+      "Bone": "leg_l_lower",
+      "Rotation": 0,
+      "Length": 9.5
+    },
+    {
+      "Bone": "foot_l",
+      "Rotation": -1.3258177,
+      "Length": 0.246211
+    },
+    {
+      "Bone": "leg_r_upper",
+      "Rotation": 1.5707964,
+      "Length": 9.5
+    },
+    {
+      "Bone": "leg_r_lower",
+      "Rotation": 0,
+      "Length": 9.5
+    },
+    {
+      "Bone": "foot_r",
+      "Rotation": -1.3258177,
+      "Length": 0.246211
+    }
+  ]
+}

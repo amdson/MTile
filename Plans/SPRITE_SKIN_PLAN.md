@@ -186,7 +186,7 @@ Decisions made with user: P1=rabbit, P2=badger defaults with `player` as fallbac
 xvfb + Mesa installed on the box for headless GPU steps.
 
 - [x] M1 — Phase 1: format (`SpriteSkinLayer.Image/OffsetX/OffsetY`, optional doc `Image`) + round-trip test
-- [ ] M2 — Phase 0: import tool (`--import`), run on rabbit_and_badger → cropped PNGs + first-pass jsons
+- [x] M2 — Phase 0: import tool (`--import`), run on rabbit_and_badger → cropped PNGs + first-pass jsons
 - [ ] M3 — Phase 2: bake (per-layer textures/meshes in `SpriteSkin`) + KNI web build check
 - [ ] M4 — Phase 3: bind editor (composite backdrop, layer cycling, union-bbox fit)
 - [ ] M5 — Phase 4: wiring (per-player binding names, optional `Tint`)
@@ -195,6 +195,14 @@ xvfb + Mesa installed on the box for headless GPU steps.
 
 - M1 format: per-layer `Image`/`OffsetX`/`OffsetY`, doc `Image` optional (`HasValidImages`),
   `LayerImagePath` resolver; `SpriteBindingSerializationTests` 4/4 green.
+- M2 import: `ImportGame` (`--import/--out/--scale`), ran at scale 0.25 under xvfb —
+  12 parts cropped (rabbit assembles 254x507 px, badger 284x465; registration confirmed),
+  first-pass rabbit/badger.json generated with auto-fit ImageToRig + default bind pose.
+  Environment fixes rolled in: `.config/dotnet-tools.json` was GITIGNORED (root cause of
+  the long-standing content-build failure) — force-added; `Content.Demo.mgcb` gives the
+  Demo a font-only content build (game .fx shaders need Wine on Linux; Demo never used
+  them). Box also needed: xvfb+Mesa, fonts (Arial-named Liberation in ~/.fonts), disk
+  cleanup (/var/log + apt cache were filling the 10G root).
 
 Generalize the binding so a layer can bring its OWN PNG (decomposed-limb art) instead of
 being carved out of one shared image by the mask. The mask path stays; the two modes
