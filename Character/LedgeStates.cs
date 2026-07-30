@@ -201,7 +201,11 @@ public class LedgeGrabState : MovementState
 }
 
 // Executes the pull-up from a ledge grab. Activated by pressing Up while grabbed.
-// Releasing Up during the pull interrupts it.
+// Releasing Up during the pull interrupts it. Like DropdownState (its mirror —
+// down over an edge vs up over one), the pull is a committed maneuver on the
+// shared solve: ManeuverCorrector.Apply runs around the authored servo (clip or
+// bespoke), airborne entry, so the lip graze and the over-the-corner carry get
+// the same corrector treatment as the climb family.
 public class LedgePullState : MovementState
 {
     public override AnimTag AnimationTag => AnimTag.LedgePull;
@@ -274,6 +278,7 @@ public class LedgePullState : MovementState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         vars.TimeInState = 0f;
+        vars.ManeuverChannelPrev = default;   // fresh Δ anchors for this maneuver's solve
         var clip = MovementConfig.Current.UseReferenceClips
             ? ReferenceClipRegistry.Get(ReferenceClipRegistry.LedgePull) : null;
         vars.RefActive = clip != null;
@@ -347,6 +352,7 @@ public class LedgePullState : MovementState
                 ctx.Body.AppliedForce = ReferencePath.TrackForce(clip,
                     new ReferenceFrame(vars.RefEntry, vars.RefGate),
                     vars.RefProgress, cfg2.LedgePullRefDuration, ctx.Body, ctx.Gravity, cfg2);
+                ApplyCorrector(ctx, ref vars);
                 return;
             }
             vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
@@ -370,7 +376,15 @@ public class LedgePullState : MovementState
         }
 
         ctx.Body.AppliedForce = force;
+        ApplyCorrector(ctx, ref vars);
     }
+
+    // The shared maneuver solve around the committed pull (Dropdown's mirror):
+    // airborne entry — a hang is not a stand — with the guided drive mirroring
+    // the over-the-lip carry at walk speed toward the ledge side.
+    private void ApplyCorrector(EnvironmentContext ctx, ref MovementVars vars)
+        => ManeuverCorrector.Apply(ctx, _wallDir, MovementConfig.Current.MaxWalkSpeed,
+                                   ref vars.ManeuverChannelPrev);
 }
 
 // Jump executed at the top of a ledge pull — the natural jump point where the body
