@@ -345,10 +345,14 @@ public class Game1 : Game
             StampRadiusWorld = 5f,    // blade half-thickness
             StampSpacingWorld = 3f,
         };
-        // Load authored skeleton animations (copied next to the binary). Empty on
-        // platforms without a readable filesystem (e.g. WASM) → procedural fallback.
-        _skeletonAnims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
-        _animator = new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims);
+        // Load authored skeleton animations (copied next to the binary). Clips live in
+        // one dir per base rig — SkeletonStates/<rigName>/ — so the pool matches the
+        // animator's skeleton. Empty on platforms without a readable filesystem (e.g.
+        // WASM) → procedural fallback.
+        var animRig = SkeletonExamples.Biped();
+        _skeletonAnims = AnimationStore.LoadAll(
+            Path.Combine(AppContext.BaseDirectory, "SkeletonStates", animRig.Name));
+        _animator = new CharacterAnimator(animRig, SkeletonScale, _skeletonAnims);
         // Sprite skins load lazily per player in SkinForPlayer (secondary players may
         // not exist yet here).
         _spriteSkins.Clear();

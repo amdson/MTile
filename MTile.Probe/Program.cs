@@ -25,19 +25,36 @@ using MTile;
 //       solve the limb's angles to reach it; --to makes dx,dy an absolute root-local target.
 //       Prints solved angles + miss; unreachable targets report the closest reachable point.
 //       Dry-run by default — --write saves the solved angles back into the clip.
+//   dotnet run --project MTile.Probe -- retarget <dstRig> [--dry]   convert the pool to another rig
+//
+// Global: --rig <name> (default biped) picks the working rig AND its clip dir —
+// clips live one dir per base rig at SkeletonStates/<rigName>/.
 
 static class Probe
 {
     static Skeleton _rig;
     static List<AnimationDocument> _all;
-    static string _statesDir;
+    static string _statesRoot;   // SkeletonStates/ — one subdir per base rig
+    static string _statesDir;    // SkeletonStates/<rigName>/ — the working clip pool
 
     static int Main(string[] args)
     {
         try
         {
-            _rig = SkeletonExamples.Biped();
-            _statesDir = FindUp("SkeletonStates");
+            // Global `--rig <name>` (default biped) picks the rig AND its clip dir;
+            // stripped before dispatch so positional command args stay stable.
+            string rigName = SkeletonExamples.BipedName;
+            var argList = new List<string>(args);
+            int ri = argList.IndexOf("--rig");
+            if (ri >= 0 && ri + 1 < argList.Count)
+            {
+                rigName = argList[ri + 1];
+                argList.RemoveRange(ri, 2);
+                args = argList.ToArray();
+            }
+            _rig = SkeletonExamples.Load(rigName);
+            _statesRoot = FindUp("SkeletonStates");
+            _statesDir = Path.Combine(_statesRoot, _rig.Name);
             _all = AnimationStore.LoadAll(_statesDir);
 
             string cmd = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
@@ -57,9 +74,10 @@ static class Probe
                 case "retime": return Retime(args);
                 case "delkey": return DelKey(args);
                 case "dur":    return Dur(args);
+                case "retarget": return Retarget(Arg(args, 1), HasFlag(args, "--dry"));
                 default:
                     Console.Error.WriteLine($"unknown command '{cmd}'. try: list | digest | diff | report | anim | addcom | ik"
-                                          + " | new | addkey | contact | rot | retime | delkey | dur");
+                                          + " | new | addkey | contact | rot | retime | delkey | dur | retarget");
                     return 2;
             }
         }
@@ -279,8 +297,12 @@ static class Probe
             bool touches = false;
             foreach (int b in chain) touches |= _rig.Bones[b].Name.Contains($"_{s}");
             if (!touches || _rig.IndexOf($"leg_{s}_upper") < 0) continue;
-            Vector2 hip = w[_rig.IndexOf("hip")].Translation;
-            Vector2 knee = w[_rig.IndexOf($"leg_{s}_upper")].Translation;
+            // Hip socket = leg_*_upper's near joint (parent tip) — the root hip on the
+            // plain biped, the pelvis-strut tip on strutted rigs.
+            int upperIdx = _rig.IndexOf($"leg_{s}_upper");
+            int sockIdx = _rig.Bones[upperIdx].Parent;
+            Vector2 hip = sockIdx >= 0 ? w[sockIdx].Translation : Vector2.Zero;
+            Vector2 knee = w[upperIdx].Translation;
             Vector2 ankle = w[_rig.IndexOf($"leg_{s}_lower")].Translation;
             Vector2 d = ankle - hip; float L = d.Length();
             float side = L > 1e-4f ? ((knee.X - hip.X) * d.Y - (knee.Y - hip.Y) * d.X) / L : 0f;
@@ -464,6 +486,96 @@ static class Probe
         return 0;
     }
 
+    // retarget <dstRig> [--dry] — convert every clip in the CURRENT rig's pool (--rig,
+    // default biped) to a rig that INSERTS fixed bones (shoulder/pelvis struts) between
+    // existing parents and children, writing to SkeletonStates/<dstRig>/.
+    //
+    // Assumption: inserted bones are never animated — they hold their bind rotation.
+    // Authored rotations are FULL local angles, so a bone whose parent chain gained
+    // inserted ancestors re-authors as r_new = WrapAngle(r_old − Σ inserted bind
+    // rotations); every other channel (timing, contacts, com additions, ExtraBones)
+    // copies through untouched. Verified per keyframe by comparing every shared bone's
+    // world DIRECTION across the two rigs — positions legitimately shift by the strut
+    // geometry, directions must not.
+    static int Retarget(string dstName, bool dry)
+    {
+        var dst = SkeletonExamples.Load(dstName);
+        if (string.Equals(dst.Name, _rig.Name, StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("source and destination rig are the same — pass --rig <src> retarget <dst>");
+        string outDir = Path.Combine(_statesRoot, dst.Name);
+
+        // Per-dst-bone rotation offset: bind rotations of the inserted (dst-only)
+        // ancestors between the bone and its nearest ancestor that the source rig has.
+        var offsets = new float[dst.Count];
+        for (int i = 0; i < dst.Count; i++)
+        {
+            if (_rig.IndexOf(dst.Bones[i].Name) < 0) continue;   // new bone — clips never mention it
+            float off = 0f;
+            int p = dst.Bones[i].Parent;
+            while (p >= 0 && _rig.IndexOf(dst.Bones[p].Name) < 0)
+            {
+                off += dst.Bones[p].Rotation;
+                p = dst.Bones[p].Parent;
+            }
+            offsets[i] = off;
+            if (off != 0f)
+                Console.WriteLine($"# {dst.Bones[i].Name,-14} rotation offset {-off:+0.0000;-0.0000} rad");
+        }
+
+        var srcPose = _rig.CreatePose();
+        var dstPose = dst.CreatePose();
+        float worstDir = 0f; string worstAt = "-";
+        int n = 0;
+        foreach (var clip in _all)
+        {
+            // Keep the source-frame values for verification, then convert in place.
+            var orig = new Dictionary<AnimationKeyframe, List<PoseBoneEntry>>();
+            foreach (var kf in clip.Keyframes)
+            {
+                orig[kf] = kf.Bones?.ConvertAll(b => new PoseBoneEntry { Bone = b.Bone, Rotation = b.Rotation });
+                if (kf.Bones == null) continue;
+                foreach (var e in kf.Bones)
+                {
+                    int di = dst.IndexOf(e.Bone);
+                    if (di < 0 || offsets[di] == 0f) continue;
+                    e.Rotation = MathHelper.WrapAngle(e.Rotation - offsets[di]);
+                }
+            }
+
+            // Verify: same world direction for every shared bone at every keyframe.
+            float clipWorst = 0f;
+            foreach (var kf in clip.Keyframes)
+            {
+                PoseData.Apply(orig[kf], srcPose);
+                PoseData.Apply(kf.Bones, dstPose);
+                var ws = srcPose.ComputeWorld(Affine2.Identity);
+                var wd = dstPose.ComputeWorld(Affine2.Identity);
+                for (int i = 0; i < dst.Count; i++)
+                {
+                    int si = _rig.IndexOf(dst.Bones[i].Name);
+                    if (si < 0 || dst.Bones[i].Length < 0.01f) continue;
+                    Vector2 jointS = _rig.Bones[si].Parent >= 0 ? ws[_rig.Bones[si].Parent].Translation : Vector2.Zero;
+                    Vector2 jointD = dst.Bones[i].Parent >= 0 ? wd[dst.Bones[i].Parent].Translation : Vector2.Zero;
+                    Vector2 a = ws[si].Translation - jointS, b = wd[i].Translation - jointD;
+                    if (a.LengthSquared() < 1e-6f || b.LengthSquared() < 1e-6f) continue;
+                    float dev = MathF.Abs(MathF.Atan2(a.X * b.Y - a.Y * b.X, Vector2.Dot(a, b)));
+                    if (dev > clipWorst) clipWorst = dev;
+                    if (dev > worstDir) { worstDir = dev; worstAt = $"{clip.Name}@{kf.Time:0.00}/{dst.Bones[i].Name}"; }
+                }
+            }
+
+            clip.Skeleton = dst.Name;
+            clip.FilePath = null;               // Save() re-derives it under outDir
+            if (!dry) AnimationStore.Save(clip, outDir);
+            Console.WriteLine($"{clip.Name,-18} {clip.Keyframes.Count,3} keys  maxDirDev={clipWorst:0.000000} rad  {(dry ? "(dry)" : "written")}");
+            n++;
+        }
+        Console.WriteLine($"# {(dry ? "would write" : "wrote")} {n} clips to {outDir}");
+        Console.WriteLine($"# worst direction deviation: {worstDir:0.000000} rad at {worstAt}"
+                        + (worstDir > 1e-3f ? "  <-- NOT direction-preserving; inspect the rig diff" : "  (direction-preserving)"));
+        return worstDir > 1e-3f ? 1 : 0;
+    }
+
     // --- authoring helpers ---------------------------------------------------
 
     static (AnimationKeyframe kf, int idx) NearestKey(AnimationDocument clip, float t)
@@ -531,9 +643,13 @@ static class Probe
         Console.WriteLine($"  hip=({hip.X,5:0.0},{hip.Y,5:0.0})  lean(chestTop.x-hip.x)={chestTop.X - hip.X,5:0.0}");
         foreach (var s in new[] { "l", "r" })
         {
+            // Hip socket = the leg's near joint (parent tip), not the root — matches
+            // MotionProbe's strut-aware knee test.
+            int ui = rig.IndexOf($"leg_{s}_upper");
+            Vector2 sock = ui >= 0 && rig.Bones[ui].Parent >= 0 ? w[rig.Bones[ui].Parent].Translation : hip;
             Vector2 knee = P($"leg_{s}_upper"), ankle = P($"leg_{s}_lower"), toe = P($"foot_{s}");
-            Vector2 d = ankle - hip; float L = d.Length();
-            float side = L > 1e-4f ? ((knee.X - hip.X) * d.Y - (knee.Y - hip.Y) * d.X) / L : 0f;
+            Vector2 d = ankle - sock; float L = d.Length();
+            float side = L > 1e-4f ? ((knee.X - sock.X) * d.Y - (knee.Y - sock.Y) * d.X) / L : 0f;
             string dir = side > 0.2f ? "knee-FWD" : side < -0.2f ? "knee-RECURV" : "knee-straight";
             bool planted = toe.Y >= ground - 1.0f;
             Console.WriteLine($"  leg_{s}: {dir,-12} toe=({toe.X,5:0.0},{toe.Y,5:0.0})  {(planted ? "PLANTED" : "swing")}"

@@ -1,0 +1,22 @@
+{
+  "Name": "biped_rabbit",
+  "Bones": [
+    { "Name": "hip",         "Parent": null,          "Rotation": 0,          "Length": 0 },
+    { "Name": "chest",       "Parent": "hip",         "Rotation": -1.5707964, "Length": 16 },
+    { "Name": "head",        "Parent": "chest",       "Rotation": 0,          "Length": 10 },
+    { "Name": "shoulder_l",        "Parent": "chest",       "Rotation": -1.57,          "Length": 3.5 },
+    { "Name": "shoulder_r",        "Parent": "chest",       "Rotation": 1.57,          "Length": 3.5 },
+    { "Name": "arm_l_upper", "Parent": "shoulder_l",       "Rotation": -1.5715926,  "Length": 10 },
+    { "Name": "arm_l_lower", "Parent": "arm_l_upper", "Rotation": 0,          "Length": 10 },
+    { "Name": "arm_r_upper", "Parent": "shoulder_r",       "Rotation": 1.5715927,  "Length": 10 },
+    { "Name": "arm_r_lower", "Parent": "arm_r_upper", "Rotation": 0,          "Length": 10 },
+    { "Name": "hip_l", "Parent": "hip",         "Rotation": -3.14159,  "Length": 2.5 },
+    { "Name": "hip_r", "Parent": "hip",         "Rotation": 0,  "Length": 2.5 },
+    { "Name": "leg_l_upper", "Parent": "hip_l",         "Rotation": -1.5707989,  "Length": 9.5 },
+    { "Name": "leg_l_lower", "Parent": "leg_l_upper", "Rotation": 0,          "Length": 9.5 },
+    { "Name": "foot_l",      "Parent": "leg_l_lower", "Rotation": -1.3258177, "Length": 0.246211 },
+    { "Name": "leg_r_upper", "Parent": "hip_r",         "Rotation": 1.5707964,  "Length": 9.5 },
+    { "Name": "leg_r_lower", "Parent": "leg_r_upper", "Rotation": 0,          "Length": 9.5 },
+    { "Name": "foot_r",      "Parent": "leg_r_lower", "Rotation": -1.3258177, "Length": 0.246211 }
+  ]
+}

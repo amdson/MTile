@@ -74,6 +74,7 @@ public sealed class AnimTake
         public bool   HasAim { get; set; }
         public float  Ax { get; set; }
         public float  Ay { get; set; }
+        public float  GroundGap { get; set; }   // physical float above rest height (0 = supported)
         public int    Terrain { get; set; }   // index into TerrainStates
 
         public static SampleDto From(in CharacterAnimSample s, int terrainIndex)
@@ -87,6 +88,7 @@ public sealed class AnimTake
                 MoveProgress = s.MovementProgress,
                 HasGrip = s.HasGrip, Gx = s.GripTarget.X, Gy = s.GripTarget.Y,
                 HasAim = s.HasAim, Ax = s.AimDir.X, Ay = s.AimDir.Y,
+                GroundGap = s.GroundGap,
                 Terrain = terrainIndex,
             };
             if (s.Pins is { Length: > 0 })
@@ -124,7 +126,8 @@ public sealed class AnimTake
             return new CharacterAnimSample(
                 new Vector2(Px, Py), new Vector2(Vx, Vy), Facing, Grounded, State, Action, Dt,
                 ActionTime, ActionDuration, MoveProgress, pins, surfaces,
-                HasGrip, new Vector2(Gx, Gy), HasAim, new Vector2(Ax, Ay), (AnimTag)Tag);
+                HasGrip, new Vector2(Gx, Gy), HasAim, new Vector2(Ax, Ay), (AnimTag)Tag,
+                groundGap: GroundGap);
         }
     }
 

@@ -142,13 +142,14 @@ public sealed class GameRecorder
         // Rebuild the primary's animator input for this frame — a pure read of the same
         // state the cosmetic pass just consumed, so it matches what the animator saw.
         // Pins/surfaces are cloned: the live sample reuses shared scratch arrays.
-        var s = CharacterAnimSample.From(sim.Player, dt);
+        var s = CharacterAnimSample.From(sim.Player, dt, chunks: sim.Chunks);
         var sample = new CharacterAnimSample(
             s.Position, s.Velocity, s.Facing, s.Grounded, s.MovementState, s.Action, s.Dt,
             s.ActionTime, s.ActionDuration, s.MovementProgress,
             s.Pins is { Length: > 0 } ? (ExternalPin[])s.Pins.Clone() : null,
             s.Surfaces is { Length: > 0 } ? (SolverSurface[])s.Surfaces.Clone() : null,
-            s.HasGrip, s.GripTarget, s.HasAim, s.AimDir, s.Tag);
+            s.HasGrip, s.GripTarget, s.HasAim, s.AimDir, s.Tag,
+            groundGap: s.GroundGap);
 
         return new Frame
         {
