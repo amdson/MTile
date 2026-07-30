@@ -55,6 +55,12 @@ public class LedgeGrabState : MovementState
         if (ctx.PreviousState(0) is LedgePullState pull && pull.WallDir == _wallDir
             && !PullCompleted(ctx, abilities))
             return true;
+        // Path D: chain from a dropdown — Down released with the slide committed.
+        // Dropdown.Exit made the offer (DropChainDir + GrabbedCorner) because the
+        // corner checkers can't see the foot-level drop corner from the mid-slide
+        // pose; one-frame window, same Exit-before-scan idiom as path C.
+        if (ctx.PreviousState(0) is DropdownState && abilities.DropChainDir == _wallDir)
+            return true;
         return false;
     }
 
@@ -94,10 +100,14 @@ public class LedgeGrabState : MovementState
         // Re-grab (path C) keeps the corner the pull was working on — the checkers
         // can't see it from the risen pose — and keeps the body's velocity: the hang
         // spring/damper dissipates it through the hand contact rather than an
-        // impulsive write. Fresh grabs zero velocity (an impulsive catch) and read
+        // impulsive write. A dropdown chain (path D) is the same shape: corner came
+        // through abilities from Dropdown.Exit, and the hang damper absorbs the
+        // slide speed. Fresh grabs zero velocity (an impulsive catch) and read
         // the corner from the checkers as before.
         bool regrab = ctx.PreviousState(0) is LedgePullState;
-        if (!regrab)
+        bool chain  = ctx.PreviousState(0) is DropdownState && abilities.DropChainDir == _wallDir;
+        abilities.DropChainDir = 0;   // offer consumed (or moot) either way
+        if (!regrab && !chain)
         {
             // Prefer above-head corner (approach from side); fall back to foot-level (drop from above)
             Vector2 cornerEdge;

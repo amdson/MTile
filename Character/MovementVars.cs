@@ -62,6 +62,10 @@ public struct MovementVars
     public float SlideTime;         // CoveredJump, Dropdown
     public int   OpenDir;           // CoveredJump
     public int   DropDir;           // Dropdown
+    public Vector2 DropCorner;      // Dropdown: the drop edge (edgeX, platformTopY) from
+                                    // TryPickDropDir — handed to LedgeGrab on a late-release
+                                    // chain (the corner checkers can't see a foot-level
+                                    // corner from the mid-slide pose)
     public float JumpHoldTime;      // CoveredJump (phase 2)
     public float EntrySpeed;        // Parkour
     public bool  ExitingAirborne;   // Dropdown

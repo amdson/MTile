@@ -185,10 +185,12 @@ public class CrouchedState : MovementState
 // constraint so the body's no longer spring-held above the surface (gravity + tile collision keep
 // it on the platform until its center clears the edge), applies a horizontal slide force in the
 // chosen direction (so a crouched/sunken body actually gets pushed out from over the platform —
-// same idiom as CoveredJumpState's phase 1). The slip-off is a committed maneuver: it runs the
-// shared maneuver solve (ManeuverCorrector.Apply, grounded entry) around its authored slide, so
-// the drop-corner graze and the landing catch come from the same corrector the climb family
-// uses. Exits to FallingState the instant the body's no longer over any floor.
+// same idiom as CoveredJumpState's phase 1). Corrector: clip mode is a GUIDED move, so it feeds
+// the authored arc to ReferenceCorrector (no coast) and servos the deformed target; the bespoke
+// fallback's future is physics (slide at speed, fall), so it runs the maneuver solve
+// (ManeuverCorrector.Apply, grounded entry) around its slide force. Exits to FallingState the
+// instant the body's no longer over any floor — unless Down is RELEASED with the slide committed,
+// which offers the lip to LedgeGrab instead (the chain-to-hang, see Exit).
 public class DropdownState : MovementState
 {
     // DropDir, SlideSpeed, SlideTime, ExitingAirborne now live in MovementVars.
@@ -251,6 +253,7 @@ public class DropdownState : MovementState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         TryPickDropDir(ctx, out vars.DropDir, out var corner);
+        vars.DropCorner = corner;
         // MaxWalkSpeed is the slide target — fast enough to clear the corner within MaxDropdownTime
         // from a standstill. Running entries keep their momentum since Update only applies force when
         // the body's slower than the target.
@@ -279,6 +282,18 @@ public class DropdownState : MovementState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        // Chain-to-hang (QoL): releasing Down once the slide is COMMITTED (body
+        // center already past the drop corner) reads as "catch the lip", not
+        // "cancel the drop" — offer the corner to LedgeGrab (its path D), the
+        // same abilities handoff the pull's re-grab uses (the corner checkers
+        // can't see a foot-level corner from this pose). Always rewritten so a
+        // stale offer can't survive a non-qualifying exit (held-Down slide-off,
+        // timeout, or a steal). An early release stays a plain cancel.
+        bool chain = !ctx.Input.Down && vars.DropDir != 0
+            && vars.DropDir * (ctx.Body.Position.X - vars.DropCorner.X) > 0f;
+        abilities.DropChainDir = chain ? -vars.DropDir : 0;
+        if (chain) abilities.GrabbedCorner = vars.DropCorner;
+
         // Soften the horizontal velocity on the slip-off so the drop lands close to the wall rather
         // than flinging the body forward at the full slide speed. Only apply when we exited via going
         // airborne (not on cancel via !Down or timeout).
@@ -297,10 +312,14 @@ public class DropdownState : MovementState
             if (clip != null)
             {
                 vars.RefProgress += ctx.Dt / MathF.Max(cfg.DropdownRefDuration, 1e-4f);
-                ctx.Body.AppliedForce = ReferencePath.TrackForce(clip,
+                // Guided move: feed the authored arc to the corrector and servo
+                // the deformed target (no coast — see ReferenceCorrector).
+                ReferenceCorrector.DeformedTarget(ctx, clip,
                     new ReferenceFrame(vars.RefEntry, vars.RefGate),
-                    vars.RefProgress, cfg.DropdownRefDuration, ctx.Body, ctx.Gravity, cfg);
-                ApplyCorrector(ctx, ref vars);
+                    vars.RefProgress, cfg.DropdownRefDuration, ref vars.ManeuverChannelPrev,
+                    out var target, out var targetVel);
+                ctx.Body.AppliedForce = ReferencePath.TrackForce(
+                    target, targetVel, ctx.Body, ctx.Gravity, cfg);
                 return;
             }
             vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
@@ -316,7 +335,8 @@ public class DropdownState : MovementState
         ApplyCorrector(ctx, ref vars);
     }
 
-    // The shared maneuver solve around the committed slide-off (the drive the
+    // Bespoke fallback only (the clip path uses ReferenceCorrector above): the
+    // shared maneuver solve around the committed slide-off (the drive the
     // predictor mirrors is the slide's own dir·SlideSpeed servo). Grounded
     // entry: the coast starts ON the platform, unlike the climbs' post-hop arc.
     private static void ApplyCorrector(EnvironmentContext ctx, ref MovementVars vars)

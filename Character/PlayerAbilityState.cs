@@ -12,6 +12,11 @@ public class PlayerAbilityState
     public bool IsLedgeGrabbing;
     public int  GrabWallDir;
     public Vector2 GrabbedCorner;
+    // Dropdown → LedgeGrab chain offer (one frame): set by DropdownState.Exit when
+    // Down is released with the slide committed (±1 = wall side of the lip to
+    // grab, corner already in GrabbedCorner), 0 otherwise — Exit always rewrites
+    // it so a stale offer can't survive. Consumed by LedgeGrabState.Enter.
+    public int  DropChainDir;
 
     // -1 or +1. Last non-zero Intent.CurrentHorizontal; persisted across standstills
     // so a standstill slash still has a side to swing toward. Refreshed by
@@ -51,6 +56,7 @@ public class PlayerAbilityState
         IsLedgeGrabbing = o.IsLedgeGrabbing;
         GrabWallDir     = o.GrabWallDir;
         GrabbedCorner   = o.GrabbedCorner;
+        DropChainDir    = o.DropChainDir;
         Facing          = o.Facing;
         SlashInterrupted = o.SlashInterrupted;
         Condition.CopyFrom(o.Condition);

@@ -162,6 +162,119 @@ public class DropdownTests(ITestOutputHelper output)
         OOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXX";
 
+    // Dropdown → LedgeGrab chain: releasing Down once the slide is COMMITTED (body
+    // center past the drop edge) catches the lip instead of cancelling — Dropdown.Exit
+    // offers the corner through abilities (DropChainDir) and LedgeGrab's path D takes
+    // it the same frame. The body should end up hanging on the wall face below the
+    // edge, not standing back on the platform or falling away.
+    [Fact]
+    public void ReleaseDown_PastTheEdge_ChainsIntoLedgeGrab()
+    {
+        var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
+
+        var cfg = new SimConfig
+        {
+            Terrain       = terrain,
+            StartPosition = new Vector2(157f, 60.5f),
+            StartVelocity = Vector2.Zero,
+            // Hold Down until the body center is past the drop edge (x=160), then release.
+            Script        = new InputScript()
+                .Until(new PlayerInput { Down = true }, f => f.X > 161f)
+                .Forever(default),
+            Frames        = 90,
+            Dt            = Dt,
+            Gravity       = new Vector2(0f, Gravity),
+        };
+
+        var frames = SimRunner.Run(cfg);
+
+        bool grabbed = frames.Any(f => f.State.Contains("LedgeGrab"));
+        var last = frames[^1];
+
+        if (!grabbed || !last.State.Contains("LedgeGrab"))
+        {
+            string prev = "";
+            foreach (var f in frames)
+            {
+                if (f.State == prev) continue;
+                output.WriteLine($"  frame {f.Frame,3} x={f.X,7:F2} y={f.Y,6:F2}  {f.State}");
+                prev = f.State;
+            }
+        }
+
+        Assert.True(grabbed, "late Down release (center past the edge) should chain into LedgeGrab.");
+        Assert.True(last.State.Contains("LedgeGrab"),
+            $"the chained grab should hold (nothing pressed after release), but final state is {last.State}.");
+        // Hanging pose: on the wall face right of the edge, body dropped below standing height.
+        Assert.True(last.X > 160f, $"hang should be off the right face of the edge, but X={last.X:F2}.");
+        Assert.True(last.Y > 70f, $"hang should sit below the platform top, but Y={last.Y:F2}.");
+    }
+
+    // Early release — body center still short of the edge — stays a plain cancel:
+    // no grab; the body settles back on the platform. Runs at 1/60 (the clip-driven
+    // slide crosses the whole pre-lip stretch in a single 1/30 step) and releases on
+    // a position threshold safely short of x=160.
+    [Fact]
+    public void ReleaseDown_BeforeTheEdge_CancelsWithoutGrab()
+    {
+        var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
+
+        var cfg = new SimConfig
+        {
+            Terrain       = terrain,
+            StartPosition = new Vector2(155.5f, 60.5f),
+            StartVelocity = Vector2.Zero,
+            // Release as soon as the slide has visibly started, well before center
+            // crosses x=160 (Until reads the previous frame; the exit-frame check
+            // reads the pre-step position, so no overshoot past the lip).
+            Script        = new InputScript()
+                .Until(new PlayerInput { Down = true }, f => f.X > 156.5f)
+                .Forever(default),
+            Frames        = 120,
+            Dt            = 1f / 60f,
+            Gravity       = new Vector2(0f, Gravity),
+        };
+
+        var frames = SimRunner.Run(cfg);
+
+        if (frames.Any(f => f.State.Contains("LedgeGrab")))
+        {
+            string prev = "";
+            foreach (var f in frames)
+            {
+                if (f.State == prev) continue;
+                output.WriteLine($"  frame {f.Frame,3} x={f.X,7:F2} y={f.Y,6:F2}  {f.State}");
+                prev = f.State;
+            }
+        }
+
+        Assert.DoesNotContain(frames, f => f.State.Contains("LedgeGrab"));
+    }
+
+    // Held throughout: the classic slide-off. The chain must NOT fire — the offer
+    // requires Down to be RELEASED.
+    [Fact]
+    public void HoldDown_Throughout_NeverChainsIntoLedgeGrab()
+    {
+        var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
+
+        var cfg = new SimConfig
+        {
+            Terrain       = terrain,
+            StartPosition = new Vector2(157f, 60.5f),
+            StartVelocity = Vector2.Zero,
+            Script        = InputScript.Always(new PlayerInput { Down = true }),
+            Frames        = 60,
+            Dt            = Dt,
+            Gravity       = new Vector2(0f, Gravity),
+        };
+
+        var frames = SimRunner.Run(cfg);
+
+        Assert.Contains(frames, f => f.State.Contains("Dropdown"));
+        Assert.DoesNotContain(frames, f => f.State.Contains("LedgeGrab"));
+    }
+
     [Theory]
     [InlineData(164.5f)]  // body.Left ≈ 158.5 — ~1.5 px hanging past edge
     [InlineData(163.0f)]  // body.Left ≈ 157 — ~3 px hanging
