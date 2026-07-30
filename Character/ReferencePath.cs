@@ -43,6 +43,14 @@ public static class ReferencePath
         duration = MathF.Max(duration, 1e-4f);
         Vector2 target    = frame.Map(clip.Eval(progress));
         Vector2 targetVel = frame.MapTangent(clip.EvalTangent(progress)) / duration;
+        return TrackForce(target, targetVel, body, gravity, cfg);
+    }
+
+    // Explicit-target form: the servo core, for callers whose target has been
+    // adjusted after clip evaluation (ReferenceCorrector's terrain-deformed arc).
+    public static Vector2 TrackForce(Vector2 target, Vector2 targetVel,
+        PhysicsBody body, Vector2 gravity, MovementConfig cfg)
+    {
         Vector2 force = (target - body.Position) * cfg.GuidedSpringK
                       + (targetVel - body.Velocity) * cfg.GuidedDamping
                       - gravity;

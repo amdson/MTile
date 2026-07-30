@@ -18,6 +18,7 @@ public enum CorrectionChannel : byte
     AirLateral,     // flight steering along intent (maneuver: forward, fade-capped)
     AirLateralBack, // maneuver-only: unrestricted damping back toward the line
     AirVertical,    // tiny two-sided vertical nudge in flight
+    PathDeform,     // ReferenceCorrector: deforms an authored arc, not a body force
 }
 
 // Per-step bookkeeping of what the corrector solve actually exerted — the

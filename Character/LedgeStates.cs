@@ -201,11 +201,13 @@ public class LedgeGrabState : MovementState
 }
 
 // Executes the pull-up from a ledge grab. Activated by pressing Up while grabbed.
-// Releasing Up during the pull interrupts it. Like DropdownState (its mirror —
-// down over an edge vs up over one), the pull is a committed maneuver on the
-// shared solve: ManeuverCorrector.Apply runs around the authored servo (clip or
-// bespoke), airborne entry, so the lip graze and the over-the-corner carry get
-// the same corrector treatment as the climb family.
+// Releasing Up during the pull interrupts it. The pull is a GUIDED move: its
+// future is the authored clip arc, not physics — so it uses the reference-path
+// corrector (ReferenceCorrector, no coast phase): the retargeted clip is the
+// swept trajectory, the solve deforms the ARC around terrain, and the pull
+// servo (ReferencePath.TrackForce) tracks the deformed target. All actuation
+// stays with the servo. The bespoke fallback (UseReferenceClips=false) has no
+// authored arc and keeps its plain spring/ramp shape, uncorrected.
 public class LedgePullState : MovementState
 {
     public override AnimTag AnimationTag => AnimTag.LedgePull;
@@ -349,10 +351,13 @@ public class LedgePullState : MovementState
                 if (_ramp   != null) { ctx.Body.Constraints.Remove(_ramp);   _ramp   = null; }
                 var cfg2 = MovementConfig.Current;
                 vars.RefProgress += ctx.Dt / MathF.Max(cfg2.LedgePullRefDuration, 1e-4f);
-                ctx.Body.AppliedForce = ReferencePath.TrackForce(clip,
+                // Feed the intended arc to the corrector; servo the deformed target.
+                ReferenceCorrector.DeformedTarget(ctx, clip,
                     new ReferenceFrame(vars.RefEntry, vars.RefGate),
-                    vars.RefProgress, cfg2.LedgePullRefDuration, ctx.Body, ctx.Gravity, cfg2);
-                ApplyCorrector(ctx, ref vars);
+                    vars.RefProgress, cfg2.LedgePullRefDuration, ref vars.ManeuverChannelPrev,
+                    out var target, out var targetVel);
+                ctx.Body.AppliedForce = ReferencePath.TrackForce(
+                    target, targetVel, ctx.Body, ctx.Gravity, cfg2);
                 return;
             }
             vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
@@ -376,15 +381,7 @@ public class LedgePullState : MovementState
         }
 
         ctx.Body.AppliedForce = force;
-        ApplyCorrector(ctx, ref vars);
     }
-
-    // The shared maneuver solve around the committed pull (Dropdown's mirror):
-    // airborne entry — a hang is not a stand — with the guided drive mirroring
-    // the over-the-lip carry at walk speed toward the ledge side.
-    private void ApplyCorrector(EnvironmentContext ctx, ref MovementVars vars)
-        => ManeuverCorrector.Apply(ctx, _wallDir, MovementConfig.Current.MaxWalkSpeed,
-                                   ref vars.ManeuverChannelPrev);
 }
 
 // Jump executed at the top of a ledge pull — the natural jump point where the body
