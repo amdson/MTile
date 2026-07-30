@@ -28,12 +28,19 @@ namespace MTileDemo;
 //                         This is the real acceptance test: judge the binding on a walk.
 //   • [ ]               — cycle the selected layer (multi-layer bindings): other layers'
 //                         backdrops dim, the selection's deformed mesh outlines in preview.
+//   • B                 — toggle part styling (on by default): every part image draws with
+//                         a black silhouette outline and reduced opacity, so overlapping
+//                         limbs and their boundaries read while posing the rig.
 //   • Tab / H / Ctrl-S  — edit mode / help / save.
 //
 // `--bind rabbit` resolves SpriteBindings/rabbit.json FIRST (multi-image bindings have
 // no single PNG to name); a PNG argument keeps the legacy path, including creating a
 // brand-new binding. Multi-image backdrops composite every layer at its canvas offset —
 // the parts visibly reassembling IS the registration check (§10.5).
+//
+// The rig comes from the binding's Skeleton field (Skeletons/<name>.json; default
+// biped). `--rig <name>` overrides it — for a new binding it just picks the rig; for
+// an existing one it re-targets (bone-name matched, Ctrl-S persists the new name).
 public sealed class BindGame : Game
 {
     private readonly GraphicsDeviceManager _graphics;
@@ -43,6 +50,7 @@ public sealed class BindGame : Game
     private DrawContext _draw;
 
     private readonly string _imageArg;
+    private readonly string _rigArg;      // --rig override; null = binding's Skeleton field, then biped
     private string _pngPath, _jsonPath;
 
     private Skeleton              _skeleton;
@@ -55,9 +63,15 @@ public sealed class BindGame : Game
     // Backdrop composite: every image that participates in the binding, at its canvas
     // offset (the doc image at 0,0 plus each own-image layer). Spec is null for the doc
     // image. _canvasMin/Max is their union bbox in image px — the "canvas" all fits use.
-    private readonly List<(SpriteSkinLayer Spec, Texture2D Tex, Point Off)> _backdrops = new();
+    private readonly List<(SpriteSkinLayer Spec, Texture2D Tex, Texture2D Outline, Point Off)> _backdrops = new();
     private Vector2 _canvasMin, _canvasMax;
     private int     _selLayer = -1;               // index into _doc.Layers; -1 = all
+
+    // Part styling (B): each backdrop draws over its black silhouette ring at reduced
+    // opacity, so overlapping limbs and their boundaries stay readable while posing.
+    private bool _partStyle = true;
+    private const int   OutlinePx   = 3;      // ring thickness, image px (pre-zoom)
+    private const float PartOpacity = 0.55f;
 
     // View (image px → screen): screen = img * _zoom + _viewOff.
     private float   _zoom = 1f;
@@ -90,9 +104,10 @@ public sealed class BindGame : Game
     private int W => GraphicsDevice.Viewport.Width;
     private int H => GraphicsDevice.Viewport.Height;
 
-    public BindGame(string imageArg)
+    public BindGame(string imageArg, string rigArg = null)
     {
         _imageArg = imageArg;
+        _rigArg   = rigArg;
         _graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth  = 1200,
@@ -112,7 +127,6 @@ public sealed class BindGame : Game
         _draw = new DrawContext(_spriteBatch, _pixel);
 
         string root = FindRepoRoot();
-        _skeleton = SkeletonExamples.Biped();
 
         // Json-first: `--bind rabbit` opens SpriteBindings/rabbit.json when it exists
         // (multi-image bindings have no single PNG to name). Otherwise the legacy
@@ -130,8 +144,9 @@ public sealed class BindGame : Game
                 _texture = Texture2D.FromStream(GraphicsDevice, fs);
                 Premultiply(_texture);
             }
+            ResolveSkeleton();
             _pose = _doc.CreateBindPose(_skeleton);
-            Console.WriteLine($"Bind editor - loaded {_jsonPath}");
+            Console.WriteLine($"Bind editor - loaded {_jsonPath} (rig {_skeleton.Name})");
         }
         else
         {
@@ -144,11 +159,13 @@ public sealed class BindGame : Game
             _doc = SpriteBindingDocument.Load(_jsonPath);
             if (_doc != null)
             {
+                ResolveSkeleton();
                 _pose = _doc.CreateBindPose(_skeleton);
-                Console.WriteLine($"Bind editor - loaded {_jsonPath}");
+                Console.WriteLine($"Bind editor - loaded {_jsonPath} (rig {_skeleton.Name})");
             }
             else
             {
+                _skeleton = SkeletonExamples.Load(_rigArg ?? SkeletonExamples.BipedName);
                 _doc = new SpriteBindingDocument
                 {
                     Skeleton = _skeleton.Name,
@@ -173,7 +190,7 @@ public sealed class BindGame : Game
         _scratchA    = _skeleton.CreatePose();
         _scratchB    = _skeleton.CreatePose();
 
-        string statesDir = Path.Combine(root, "SkeletonStates");
+        string statesDir = Path.Combine(root, "SkeletonStates", _skeleton.Name);
         if (Directory.Exists(statesDir)) _clips = AnimationStore.LoadAll(statesDir);
         // Open on a locomotion clip if one exists — the binding is judged on a walk.
         _clipIndex = Math.Max(0, _clips.FindIndex(c =>
@@ -206,6 +223,24 @@ public sealed class BindGame : Game
     private string _shotPath;
     private int    _shotFrame;
 
+    // Rig resolution for an existing binding: --rig overrides, else the doc's Skeleton
+    // field, else biped (Skeletons/<name>.json, authored-only — Load throws if missing).
+    // Opening a binding under a DIFFERENT rig is a deliberate re-target: bind-pose
+    // entries match by bone name (unknown ones are skipped, new bones start at rest),
+    // and the doc's Skeleton field updates so Ctrl-S persists the switch.
+    private void ResolveSkeleton()
+    {
+        string name = _rigArg
+            ?? (string.IsNullOrWhiteSpace(_doc.Skeleton) ? SkeletonExamples.BipedName : _doc.Skeleton);
+        _skeleton = SkeletonExamples.Load(name);
+        if (!string.Equals(_doc.Skeleton, _skeleton.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"Bind editor - re-targeting rig '{_doc.Skeleton ?? "(none)"}' -> '{_skeleton.Name}' (Ctrl-S persists)");
+            _doc.Skeleton = _skeleton.Name;
+            _dirty = true;
+        }
+    }
+
     // The binding argument as a json: an explicit .json path, else
     // SpriteBindings/<name>.json at the repo root. Null when neither exists.
     private static string ResolveJson(string repoRoot, string arg)
@@ -224,7 +259,7 @@ public sealed class BindGame : Game
     {
         _backdrops.Clear();
         if (_texture != null)
-            _backdrops.Add((null, _texture, Point.Zero));
+            _backdrops.Add((null, _texture, BuildOutline(_texture), Point.Zero));
         if (_doc.Layers != null)
             foreach (var l in _doc.Layers)
             {
@@ -233,17 +268,58 @@ public sealed class BindGame : Game
                 using (var fs = File.OpenRead(_doc.LayerImagePath(l)))
                     tex = Texture2D.FromStream(GraphicsDevice, fs);
                 Premultiply(tex);
-                _backdrops.Add((l, tex, new Point(l.OffsetX, l.OffsetY)));
+                _backdrops.Add((l, tex, BuildOutline(tex), new Point(l.OffsetX, l.OffsetY)));
             }
         if (_backdrops.Count == 0)
             throw new InvalidOperationException("Binding has no images at all.");
 
         _canvasMin = new Vector2(float.MaxValue); _canvasMax = new Vector2(float.MinValue);
-        foreach (var (_, tex, off) in _backdrops)
+        foreach (var (_, tex, _, off) in _backdrops)
         {
             _canvasMin = Vector2.Min(_canvasMin, off.ToVector2());
             _canvasMax = Vector2.Max(_canvasMax, off.ToVector2() + new Vector2(tex.Width, tex.Height));
         }
+    }
+
+    // Black silhouette ring for a part image: alpha dilated by OutlinePx (separable
+    // max filter) and cleared inside the solid silhouette, so it only marks the rim.
+    // Drawn UNDER the translucent part, it keeps every limb's boundary readable even
+    // where parts overlap. Premultiplied black, so tints leave it black.
+    private Texture2D BuildOutline(Texture2D tex)
+    {
+        int w = tex.Width, h = tex.Height, r = OutlinePx;
+        var px = new Color[w * h];
+        tex.GetData(px);
+
+        var a   = new byte[w * h];
+        for (int i = 0; i < a.Length; i++) a[i] = px[i].A;
+        var tmp = new byte[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                byte m = 0;
+                for (int k = Math.Max(0, x - r); k <= Math.Min(w - 1, x + r); k++)
+                    m = Math.Max(m, a[y * w + k]);
+                tmp[y * w + x] = m;
+            }
+        var dil = new byte[w * h];
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++)
+            {
+                byte m = 0;
+                for (int k = Math.Max(0, y - r); k <= Math.Min(h - 1, y + r); k++)
+                    m = Math.Max(m, tmp[k * w + x]);
+                dil[y * w + x] = m;
+            }
+
+        for (int i = 0; i < px.Length; i++)
+        {
+            byte ring = a[i] >= 160 ? (byte)0 : dil[i];   // keep it under AA edges for crispness
+            px[i] = new Color((byte)0, (byte)0, (byte)0, ring);
+        }
+        var outline = new Texture2D(GraphicsDevice, w, h);
+        outline.SetData(px);
+        return outline;
     }
 
     // Default image→rig placement for a brand-new binding: the rig's default-pose
@@ -298,6 +374,7 @@ public sealed class BindGame : Game
         if (Pressed(kb, Keys.Home)) FitViewToImage();
         if (ctrl && Pressed(kb, Keys.S)) Save();
         if (Pressed(kb, Keys.G)) TogglePreview();
+        if (Pressed(kb, Keys.B)) _partStyle = !_partStyle;
         if (Pressed(kb, Keys.Space)) TogglePlay();
         if (_clips.Count > 0 && Pressed(kb, Keys.OemComma))  CycleClip(-1);
         if (_clips.Count > 0 && Pressed(kb, Keys.OemPeriod)) CycleClip(+1);
@@ -498,12 +575,19 @@ public sealed class BindGame : Game
         // (dimmed under the deformed preview so the skin reads on top; non-selected
         // layers dim slightly so the [ ] selection reads).
         _spriteBatch.Begin(samplerState: _zoom >= 2f ? SamplerState.PointClamp : SamplerState.LinearClamp);
-        foreach (var (spec, tex, off) in _backdrops)
+        foreach (var (spec, tex, outline, off) in _backdrops)
         {
             bool deselected = _selLayer >= 0 && spec != null && _doc.Layers[_selLayer] != spec;
             Color tint = _preview ? new Color(70, 70, 70, 255)
                        : deselected ? new Color(120, 120, 120, 255) : Color.White;
-            _spriteBatch.Draw(tex, _viewOff + off.ToVector2() * _zoom, null, tint,
+            Vector2 pos = _viewOff + off.ToVector2() * _zoom;
+            if (_partStyle)
+            {
+                _spriteBatch.Draw(outline, pos, null, Color.White * (tint.R / 255f),
+                                  0f, Vector2.Zero, _zoom, SpriteEffects.None, 0f);
+                tint *= PartOpacity;
+            }
+            _spriteBatch.Draw(tex, pos, null, tint,
                               0f, Vector2.Zero, _zoom, SpriteEffects.None, 0f);
         }
         _spriteBatch.End();
@@ -572,7 +656,7 @@ public sealed class BindGame : Game
                 : $"   |   layer {_doc.Layers[_selLayer].Name}: " +
                   $"{string.Join(" ", _doc.Layers[_selLayer].Bones ?? new List<string>())} ([ ])";
         _spriteBatch.DrawString(_font,
-            $"BIND {target}{(_dirty ? "  *unsaved*" : "")}{layer}",
+            $"BIND {target}  rig {_skeleton.Name}{(_dirty ? "  *unsaved*" : "")}{layer}",
             new Vector2(16, 10), _dirty ? Color.Orange : Color.White);
         _spriteBatch.DrawString(_font,
             $"{_editMode.ToString().ToUpperInvariant()} (Tab)   |   preview {(_preview ? "ON" : "off")} (G)   |   " +
@@ -592,6 +676,7 @@ public sealed class BindGame : Game
         ("View",    "wheel = zoom at cursor    right/middle-drag or arrows = pan    Home = fit"),
         ("Preview", "G = deformed skin on/off (bind pose = should match the art)    Space = play clip    , . = cycle clip"),
         ("Layers",  "[ ] = cycle selected layer (dims others, outlines its mesh in preview; header shows its bones)"),
+        ("Style",   "B = part styling on/off (black outline + translucent parts; on by default)"),
         ("File",    "Ctrl-S save binding json    Esc quit"),
     };
 

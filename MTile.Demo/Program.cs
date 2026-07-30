@@ -2,14 +2,16 @@ using MTileDemo;
 
 // Standalone skeleton tooling — entirely separate from the main game (Game1).
 //
-// Animation editor:      dotnet run --project MTile.Demo
+// Animation editor:      dotnet run --project MTile.Demo [-- --rig <skeleton>]
 // Open a clip by name:   dotnet run --project MTile.Demo -- walk
 // ... with sprite skin:  dotnet run --project MTile.Demo -- --usebind pumpkin_man_downsampled
 //   (superimposes the binding's sprite on the rig through scrub/playback;
 //    G toggles the sprite, W the deformed mesh wireframe.)
-// Sprite bind editor:    dotnet run --project MTile.Demo -- --bind hero.png
+// Sprite bind editor:    dotnet run --project MTile.Demo -- --bind hero.png [--rig <skeleton>]
 //   (PNG resolved against SpriteBindings/ at the repo root; authors the
-//    skeleton↔artwork alignment the runtime SpriteSkin deforms.)
+//    skeleton↔artwork alignment the runtime SpriteSkin deforms. --rig picks the
+//    rig from Skeletons/<name>.json — default: the binding's own Skeleton field,
+//    then biped. Passing a different rig re-targets the binding on Ctrl-S.)
 // Art import:            dotnet run --project MTile.Demo -- --import SkeletonAssets/rabbit_and_badger [--out SpriteBindings] [--scale 0.25]
 //   (one-time intake of decomposed-limb art: crop/downscale each part PNG and
 //    generate first-pass multi-image bindings. See SPRITE_SKIN_PLAN.md §10.2.)
@@ -20,11 +22,12 @@ using MTileDemo;
 //   (authors a maneuver's y(x) Hermite reference arc in the normalized frame;
 //    loads/saves ReferenceClips/<name>.json. See Plans/BALLISTIC_CORRECTOR_PLAN.md §1.)
 
-string bindPng = null, useBind = null, clip = null, takePath = null, refClip = null;
+string bindPng = null, useBind = null, clip = null, takePath = null, refClip = null, rig = null;
 string importDir = null, importOut = "SpriteBindings"; float importScale = 0.25f;
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--bind" && i + 1 < args.Length)         bindPng = args[++i];
+    else if (args[i] == "--rig" && i + 1 < args.Length)     rig = args[++i];
     else if (args[i] == "--usebind" && i + 1 < args.Length) useBind = args[++i];
     else if (args[i] == "--load" && i + 1 < args.Length)    takePath = args[++i];
     else if (args[i] == "--ref" && i + 1 < args.Length)     refClip = args[++i];
@@ -51,11 +54,11 @@ else if (takePath != null)
 }
 else if (bindPng != null)
 {
-    using var bind = new BindGame(bindPng);
+    using var bind = new BindGame(bindPng, rig);
     bind.Run();
 }
 else
 {
-    using var demo = new DemoGame(clip, useBind);
+    using var demo = new DemoGame(clip, useBind, rig);
     demo.Run();
 }

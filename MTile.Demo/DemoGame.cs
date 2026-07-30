@@ -120,10 +120,16 @@ public sealed class DemoGame : Game
     private SkeletonPose _skinPose;
     private bool _showSkin = true, _skinWire, _showRig = true;
 
-    public DemoGame(string openClip = null, string binding = null)
+    // --rig <name>: edit against Skeletons/<name>.json instead of biped. Clips apply by
+    // bone name (bones a clip doesn't mention stay at rest), and Ctrl-S rig saves write
+    // back to the rig's OWN file (keyed on its Name field), never biped.json.
+    private readonly string _rigArg;
+
+    public DemoGame(string openClip = null, string binding = null, string rig = null)
     {
         _openClip = openClip;
         _bindingArg = binding;
+        _rigArg = rig;
         _graphics = new GraphicsDeviceManager(this)
         {
             PreferredBackBufferWidth  = 1040,
@@ -155,15 +161,22 @@ public sealed class DemoGame : Game
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_WIRE") != null) _skinWire = true;
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_NOSKEL") != null) _showRig = false;
 
-        _dir = FindStatesDir();
-        // Authored-only content: the rig comes from Skeletons/biped.json and throws
+        // Authored-only content: the rig comes from Skeletons/<name>.json and throws
         // if missing (no procedural fallback), and the clip list is exactly what's
-        // on disk in SkeletonStates/ (no seed autogeneration). N / C create clips.
-        _baseSkeleton = SkeletonExamples.Biped();
+        // on disk in SkeletonStates/<rigName>/ — one dir per base rig (no seed
+        // autogeneration). N / C create clips there.
+        _baseSkeleton = SkeletonExamples.Load(_rigArg ?? SkeletonExamples.BipedName);
+        _dir = Path.Combine(FindStatesDir(), _baseSkeleton.Name);
         if (_bindingArg != null)
         {
-            _skinRig = SkeletonExamples.Biped();   // pristine copy — editor rig edits mutate _baseSkeleton in place
             string path = ResolveBindingPath(_bindingArg);
+            // The skin bakes against the BINDING's rig (its Skeleton field; default biped) —
+            // a fresh instance either way, so editor rig edits (which mutate _baseSkeleton
+            // in place) can't desync it. SyncSkinPose matches bones by name, so a skin rig
+            // with extra bones (e.g. a collarbone) rides along with them at bind rest.
+            string skinRigName = path != null ? SpriteBindingDocument.Load(path)?.Skeleton : null;
+            _skinRig = SkeletonExamples.Load(
+                string.IsNullOrWhiteSpace(skinRigName) ? SkeletonExamples.BipedName : skinRigName);
             _skin = path != null ? SpriteSkin.TryLoad(GraphicsDevice, path, _skinRig) : null;
             if (_skin != null) { _skinPose = _skinRig.CreatePose(); Console.WriteLine($"sprite skin: {path} (G sprite, W wireframe)"); }
             else Console.WriteLine($"sprite skin: could not load binding '{_bindingArg}' (looked at {path ?? "SpriteBindings/"})");
@@ -1411,9 +1424,12 @@ public sealed class DemoGame : Game
         return Path.Combine(Directory.GetCurrentDirectory(), "SkeletonStates");
     }
 
-    // Skeletons/ sits beside SkeletonStates/ at the repo root.
+    // Skeletons/ sits beside SkeletonStates/ at the repo root. `statesDir` is the
+    // rig-scoped SkeletonStates/<rigName>/, so walk up two levels.
     private static string SkeletonsDir(string statesDir)
-        => Path.Combine(Path.GetDirectoryName(statesDir) ?? Directory.GetCurrentDirectory(), "Skeletons");
+        => Path.Combine(
+            Path.GetDirectoryName(Path.GetDirectoryName(statesDir)) ?? Directory.GetCurrentDirectory(),
+            "Skeletons");
 
     // Every Type a clip can carry: the movement categories (AnimClip names) plus
     // every concrete action state's class name (the runtime maps action overlay

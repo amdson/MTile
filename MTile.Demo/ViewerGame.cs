@@ -93,7 +93,7 @@ public sealed class ViewerGame : Game
         // from the repo root so edits there are what R picks up.
         string repo = RepoRoot();
         _skel  = SkeletonExamples.Biped();
-        _clips = AnimationStore.LoadAll(Path.Combine(repo, "SkeletonStates"));
+        _clips = AnimationStore.LoadAll(Path.Combine(repo, "SkeletonStates", _skel.Name));
         _solverCfg = Path.Combine(repo, "anim_solver_config.json");
         AnimSolverConfig.Load(_solverCfg);
 
