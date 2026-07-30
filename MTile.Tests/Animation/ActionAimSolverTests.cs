@@ -76,10 +76,10 @@ public class ActionAimSolverTests
         var d = new DirectoryInfo(AppContext.BaseDirectory);
         while (d != null)
         {
-            string c = Path.Combine(d.FullName, "SkeletonStates");
+            string c = Path.Combine(d.FullName, "SkeletonStates", "biped");
             if (Directory.Exists(c)) return c;
             d = d.Parent;
         }
-        return "SkeletonStates";
+        return "SkeletonStates/biped";
     }
 }

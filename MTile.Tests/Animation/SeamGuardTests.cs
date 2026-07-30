@@ -64,10 +64,10 @@ public class SeamGuardTests
         var d = new System.IO.DirectoryInfo(System.AppContext.BaseDirectory);
         while (d != null)
         {
-            string c = System.IO.Path.Combine(d.FullName, "SkeletonStates");
+            string c = System.IO.Path.Combine(d.FullName, "SkeletonStates", "biped");
             if (System.IO.Directory.Exists(c)) return c;
             d = d.Parent;
         }
-        return "SkeletonStates";
+        return "SkeletonStates/biped";
     }
 }

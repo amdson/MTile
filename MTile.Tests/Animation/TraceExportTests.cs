@@ -78,7 +78,7 @@ public class TraceExportTests
     private static CharacterAnimator NewAnimator(out Skeleton skel)
     {
         skel = SkeletonExamples.Biped();
-        var clips = AnimationStore.LoadAll(Path.Combine(FindUp("MTile.sln"), "SkeletonStates"));
+        var clips = AnimationStore.LoadAll(Path.Combine(FindUp("MTile.sln"), "SkeletonStates", "biped"));
         return new CharacterAnimator(skel, Scale, clips);
     }
 

@@ -189,7 +189,7 @@ public class ZzzRunContinuity
     [Fact]
     public void JerkDecomposition_ConstantRun()
     {
-        var clips = AnimationStore.LoadAll(Path.Combine(FindUp("MTile.sln"), "SkeletonStates"));
+        var clips = AnimationStore.LoadAll(Path.Combine(FindUp("MTile.sln"), "SkeletonStates", "biped"));
         var run = clips.Find(d => d.Name == "run");
         Assert.True(run != null, "run.json not found");
         var skel = SkeletonExamples.Biped();
@@ -276,7 +276,7 @@ public class ZzzRunContinuity
 
     private static CharacterAnimator NewAnimator()
         => new(SkeletonExamples.Biped(), Scale,
-               AnimationStore.LoadAll(Path.Combine(FindUp("MTile.sln"), "SkeletonStates")));
+               AnimationStore.LoadAll(Path.Combine(FindUp("MTile.sln"), "SkeletonStates", "biped")));
 
     private static void Dump(string file, string content)
     {

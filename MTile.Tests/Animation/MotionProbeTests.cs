@@ -15,7 +15,7 @@ public class MotionProbeTests
     public void DumpLocomotionProbes()
     {
         var rig = SkeletonExamples.Biped();
-        string states = FindUp("SkeletonStates");
+        string states = Path.Combine(FindUp("SkeletonStates"), "biped");
         string outDir = Path.Combine(FindUp("MTile.sln", file: true), ".probe");
         Directory.CreateDirectory(outDir);
 
