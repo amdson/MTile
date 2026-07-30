@@ -70,9 +70,11 @@ public class Game1 : Game
     // (reads sim state via CharacterAnimSample; never writes back). Scale fits the
     // ~62px-tall rig to the player's ~19px body.
     private CharacterAnimator _animator;
-    // MLS-deformed artwork drawn over the skeleton (SpriteBindings/player.json).
-    // Null when no binding exists — the game falls back to the stick figure.
-    private SpriteSkin _spriteSkin;
+    // MLS-deformed artwork drawn over each player's skeleton, resolved per player via
+    // GameConfig.PlayerSpriteBindings (fallback: PlayerSpriteBinding). Lazily loaded and
+    // cached by binding name; a name whose binding fails to load caches null — the game
+    // falls back to the stick figure for that player.
+    private readonly Dictionary<string, SpriteSkin> _spriteSkins = new();
     // One animator per secondary player (training dummy, second local player, …),
     // same pull-model. Grown lazily in Update to match the sim's secondary count;
     // index i animates SecondaryPlayers[i].
@@ -347,13 +349,9 @@ public class Game1 : Game
         // platforms without a readable filesystem (e.g. WASM) → procedural fallback.
         _skeletonAnims = AnimationStore.LoadAll(Path.Combine(AppContext.BaseDirectory, "SkeletonStates"));
         _animator = new CharacterAnimator(SkeletonExamples.Biped(), SkeletonScale, _skeletonAnims);
-        // Optional sprite skin over the rig, named by config; absent/disabled → null →
-        // stick figure only.
-        _spriteSkin = _config.DrawPlayerSpriteSkin && !string.IsNullOrEmpty(_config.PlayerSpriteBinding)
-            ? SpriteSkin.TryLoad(GraphicsDevice,
-                Path.Combine(AppContext.BaseDirectory, "SpriteBindings", _config.PlayerSpriteBinding + ".json"),
-                _animator.Skeleton)
-            : null;
+        // Sprite skins load lazily per player in SkinForPlayer (secondary players may
+        // not exist yet here).
+        _spriteSkins.Clear();
         // Parallax backdrop — loaded straight from PNG (not the content pipeline) so it
         // works without an .mgcb rebuild; silently absent on hosts without the file.
         if (_config.DrawBackground)
@@ -495,6 +493,25 @@ public class Game1 : Game
         base.Update(gameTime);
     }
 
+    // Player index → binding name (PlayerSpriteBindings[i], else the fallback) → skin.
+    private SpriteSkin SkinForPlayer(int index)
+    {
+        string name = _config.PlayerSpriteBindings != null && index < _config.PlayerSpriteBindings.Count
+            ? _config.PlayerSpriteBindings[index] : null;
+        return SkinByName(name) ?? SkinByName(_config.PlayerSpriteBinding);
+    }
+
+    // Cached by name; a failed load caches null (TryLoad logs once) → stick figure.
+    private SpriteSkin SkinByName(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        if (!_spriteSkins.TryGetValue(name, out var skin))
+            _spriteSkins[name] = skin = SpriteSkin.TryLoad(GraphicsDevice,
+                Path.Combine(AppContext.BaseDirectory, "SpriteBindings", name + ".json"),
+                _animator.Skeleton);
+        return skin;
+    }
+
     protected override void Draw(GameTime gameTime)
     {
         _probeSw.Restart();
@@ -525,33 +542,40 @@ public class Game1 : Game
             foreach (var (p, _) in _sim.SecondaryPlayers)
                 if (p.Sprite != null) p.Sprite.Draw(_draw);
         }
-        // Sprite skin: the bound PNG deformed over each rig's live pose. Drawn between
-        // the placeholder sprites and the debug skeleton, outside the SpriteBatch pass
-        // (it issues its own device draw) — split the batch around it.
-        if (_spriteSkin != null && _config.DrawPlayerSpriteSkin)
+        // Sprite skins: each player's bound artwork deformed over its rig's live pose,
+        // resolved per player (P1/P2 can wear different bindings). Drawn between the
+        // placeholder sprites and the debug skeleton, outside the SpriteBatch pass
+        // (each skin issues its own device draw) — split the batch around them.
+        if (_config.DrawPlayerSpriteSkin)
         {
             var cam = _camera.GetTransform(_screenCenter);
-            _spriteBatch.End();
+            bool split = false;
+            var skin0 = SkinForPlayer(0);
+            if (skin0 != null)
             {
+                _spriteBatch.End(); split = true;
                 Vector2 root; int facing;
                 if (_recorder.TryPlaybackPrimary(out var pc)) { root = pc.RootWorldPos; facing = pc.Facing; }
                 else { root = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); facing = player.Facing; }
                 int dir = facing == 0 ? 1 : facing;
-                _spriteSkin.Draw(cam, _animator.Pose,
+                skin0.Draw(cam, _animator.Pose,
                     Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)));
             }
             for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
             {
+                var skin = SkinForPlayer(i + 1);
+                if (skin == null) continue;
+                if (!split) { _spriteBatch.End(); split = true; }
                 var p = _sim.SecondaryPlayers[i].Player;
                 var anim = _secondaryAnimators[i];
                 Vector2 root; int facing;
                 if (_recorder.TryPlaybackSecondary(i, out var sc)) { root = sc.RootWorldPos; facing = sc.Facing; }
                 else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = p.Facing; }
                 int dir = facing == 0 ? 1 : facing;
-                _spriteSkin.Draw(cam, anim.Pose,
+                skin.Draw(cam, anim.Pose,
                     Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)));
             }
-            _spriteBatch.Begin(transformMatrix: cam);
+            if (split) _spriteBatch.Begin(transformMatrix: cam);
         }
         if (_config.DebugDrawSkeleton)
         {
@@ -762,6 +786,8 @@ public class Game1 : Game
     protected override void UnloadContent()
     {
         _animTrace.Stop();   // flush a trace left running at exit
+        foreach (var skin in _spriteSkins.Values) skin?.Dispose();
+        _spriteSkins.Clear();
         _pixel?.Dispose();
         _density?.Dispose();
         _metaballs?.Dispose();

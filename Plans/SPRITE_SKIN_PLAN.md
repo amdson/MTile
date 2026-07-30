@@ -189,7 +189,12 @@ xvfb + Mesa installed on the box for headless GPU steps.
 - [x] M2 — Phase 0: import tool (`--import`), run on rabbit_and_badger → cropped PNGs + first-pass jsons
 - [x] M3 — Phase 2: bake (per-layer textures/meshes in `SpriteSkin`) + KNI web build check
 - [x] M4 — Phase 3: bind editor (composite backdrop, layer cycling, union-bbox fit)
-- [ ] M5 — Phase 4: wiring (per-player binding names, optional `Tint`)
+- [x] M5 — Phase 4: wiring (per-player binding names, optional `Tint`)
+
+**Campaign complete 2026-07-30.** All §10 phases implemented and verified headless.
+Remaining for the user (local, interactive): the bind-pose tuning session per character
+(`--bind rabbit` / `--bind badger`), plus reviewing the near/far + draw-order data
+guesses in the two jsons. §9 milestone 4 polish (alpha dilation, mipmaps) untouched.
 
 ### Campaign log
 
@@ -216,6 +221,13 @@ xvfb + Mesa installed on the box for headless GPU steps.
   + bones in header; fits use the union canvas bbox; `MTILE_SHOT_LAYER` added for
   headless verification. Screenshots confirm: assembly, walk-clip deformation, layer
   highlight.
+- M5 wiring: `GameConfig.PlayerSpriteBindings` (per-index names, default rabbit/badger)
+  over the `PlayerSpriteBinding` fallback; Game1 resolves skins lazily per player with a
+  name→skin cache (broken binding → stick figure for that player only). Per-layer
+  `Tint` ("#RRGGBB" vertex color at bake) added and applied to both characters' `*_far`
+  layers (#C8C8C8), also emitted by the import generator. Legacy
+  pumpkin_man_downsampled binding regression-checked visually. Core+KNI+Demo builds and
+  full test suite green.
 
 Generalize the binding so a layer can bring its OWN PNG (decomposed-limb art) instead of
 being carved out of one shared image by the mask. The mask path stays; the two modes

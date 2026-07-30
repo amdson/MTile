@@ -225,6 +225,8 @@ public sealed class ImportGame : Game
                 Name = part, Image = rec.Png,
                 OffsetX = rec.Off.X, OffsetY = rec.Off.Y,
                 Bones = new List<string>(PartBones[part]),
+                // Far limbs darken in data, not art (classic side-scroller depth cue).
+                Tint = part.EndsWith("_far", StringComparison.Ordinal) ? "#C8C8C8" : null,
             });
         }
         doc.CaptureBindPose(pose);

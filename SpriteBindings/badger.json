@@ -16,7 +16,8 @@
       "OffsetY": 282,
       "Bones": [
         "arm_r_*"
-      ]
+      ],
+      "Tint": "#C8C8C8"
     },
     {
       "Name": "leg_far",
@@ -26,7 +27,8 @@
       "Bones": [
         "leg_r_*",
         "foot_r"
-      ]
+      ],
+      "Tint": "#C8C8C8"
     },
     {
       "Name": "leg_near",

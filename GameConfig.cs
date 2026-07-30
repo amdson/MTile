@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -80,9 +81,13 @@ public sealed class GameConfig
     // MLS-deformed sprite skin over the rig. No effect until the named binding exists;
     // independent of DebugDrawSkeleton (stick figure).
     public bool DrawPlayerSpriteSkin       { get; set; } = true;
-    // Which binding to skin the players with: SpriteBindings/<name>.json (authored via
+    // Fallback binding to skin players with: SpriteBindings/<name>.json (authored via
     // MTile.Demo bind mode). Empty/missing name → no skin.
     public string PlayerSpriteBinding      { get; set; } = "player";
+    // Per-player binding names, indexed by player (0 = primary, 1+ = secondary). A
+    // player past the end of the list — or whose named binding fails to load — falls
+    // back to PlayerSpriteBinding.
+    public List<string> PlayerSpriteBindings { get; set; } = new() { "rabbit", "badger" };
     // World→screen camera zoom (Camera.Zoom). >1 magnifies; the default matches the
     // long-standing hardcoded value.
     public float CameraZoom                { get; set; } = 1.55f;

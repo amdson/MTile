@@ -46,6 +46,10 @@ public sealed class SpriteSkinLayer
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public int OffsetY { get; set; }
 
+    // Optional "#RRGGBB" multiplied into the layer at bake (vertex color). Lets data
+    // darken far limbs instead of baking the shading into the art. Null → white.
+    public string Tint { get; set; }
+
     // Bone names whose handles deform this layer. A trailing '*' is a prefix wildcard
     // ("arm_l_*" → arm_l_upper, arm_l_lower). Empty/null → all bones.
     public List<string> Bones { get; set; } = new();

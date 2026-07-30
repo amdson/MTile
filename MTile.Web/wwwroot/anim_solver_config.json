@@ -8,6 +8,7 @@
   "CorePosePrior": 60,
   "LimbPosePrior": 4,
   "PhaseStepPrior": 8,
+  "PhaseFloorPrior": 200,
   "ComWeightY": 23,
   "ComWeightX": 230,
 

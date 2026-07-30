@@ -77,7 +77,7 @@ public class SpriteBindingSerializationTests : IDisposable
             ImageToRigScale = 0.25f,
             Layers = new List<SpriteSkinLayer>
             {
-                new() { Name = "arm_far", Image = "rabbit/arm_far.png", OffsetX = 812, OffsetY = 340, Bones = { "arm_r_*" } },
+                new() { Name = "arm_far", Image = "rabbit/arm_far.png", OffsetX = 812, OffsetY = 340, Bones = { "arm_r_*" }, Tint = "#C8C8C8" },
                 new() { Name = "torso",   Image = "rabbit/torso.png",   OffsetX = 0,   OffsetY = 122, Bones = { "chest", "hip" } },
             },
         };
@@ -90,6 +90,8 @@ public class SpriteBindingSerializationTests : IDisposable
         Assert.Equal("rabbit/arm_far.png", again.Layers[0].Image);
         Assert.Equal(812, again.Layers[0].OffsetX);
         Assert.Equal(340, again.Layers[0].OffsetY);
+        Assert.Equal("#C8C8C8", again.Layers[0].Tint);
+        Assert.Null(again.Layers[1].Tint);
         Assert.Equal(0, again.Layers[1].OffsetX);
         Assert.Equal(122, again.Layers[1].OffsetY);
     }

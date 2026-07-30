@@ -306,10 +306,16 @@ public sealed class SpriteSkin : IDisposable
             Verts = new VertexPositionColorTexture[positions.Count],
             RigLocal = new Vector2[positions.Count],
         };
+        Color vertColor = Color.White;
+        if (!string.IsNullOrEmpty(spec.Tint))
+        {
+            var (tr, tg, tb) = ParseColor(spec.Tint);
+            vertColor = new Color(tr, tg, tb);
+        }
         var restRig = new Vector2[positions.Count];
         for (int i = 0; i < positions.Count; i++)
         {
-            layer.Verts[i].Color = Color.White;
+            layer.Verts[i].Color = vertColor;
             layer.Verts[i].TextureCoordinate = new Vector2(positions[i].X / w, positions[i].Y / h);
             restRig[i] = doc.ImageToRig(positions[i] + offset.ToVector2());
         }
