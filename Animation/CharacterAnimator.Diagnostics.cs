@@ -21,8 +21,6 @@ public sealed partial class CharacterAnimator
         if (!_haveCorr || _ls == null) return -1f;
         int bones = _skeleton.Count;
         int n = IdxTheta0 + bones;
-        // 2/contact + 2/pin + bones/surface (no-penetration) + 1 aim + continuity + rate floor + com(2) + bones×2 priors.
-        int m = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0) + 4 + 2 * bones;
 
         // The body may be far from the world origin (it has walked many units), so a residual
         // tip.x − target.x is a tiny difference of large coordinates and a float32 finite
@@ -41,6 +39,10 @@ public sealed partial class CharacterAnimator
 
         var x = new float[n];
         Array.Copy(_solveVars, x, n);
+        // Row layout derived by walking this frame's composite (no hand-maintained arithmetic —
+        // the old triple-kept row formulas were a recurring bug source, and driver-contributed
+        // blocks would invalidate them anyway).
+        int m = CompositeRowLayout(x, n, out int npStart, out int npCount, out int floorRow, out _);
         var anal = new float[m * n];
         CadenceJacobian(x, anal, n);             // dense fill (we cleared by fresh alloc)
 
@@ -55,7 +57,6 @@ public sealed partial class CharacterAnimator
         // value is still exact, we just can't judge it by FD at the corner. Rows comfortably
         // active or inactive (|pen| ≥ band) stay valid (a single-column ±h step can't flip them).
         var skipRow = new bool[m];
-        int npStart = (_contacts.Count + _pins.Count) * 2;
         int b0 = _skeleton.Count;
         const float kneeBand = 0.5f;   // > any single-column FD tip displacement (lever × h)
         int npRow = npStart;
@@ -68,13 +69,9 @@ public sealed partial class CharacterAnimator
                 if (MathF.Abs(s.Margin - gap) < kneeBand) skipRow[npRow] = true;
             }
         // The phase-rate floor row has the same one-sided knee, at Δφ == floor: an FD step in
-        // the Δφ column that straddles it sees half the slope. Row index = after the no-pen
-        // block, the aim row, and the continuity row. Band covers the largest φ FD step.
-        {
-            int floorRow = npStart + _surfaces.Count * b0 + (_aimActive ? 1 : 0) + 1;
-            if (_phaseFloor > 1e-5f && MathF.Abs(x[IdxPhi] - _phaseFloor) < 0.02f)
-                skipRow[floorRow] = true;
-        }
+        // the Δφ column that straddles it sees half the slope. Band covers the largest φ FD step.
+        if (floorRow >= 0 && _phaseFloor > 1e-5f && MathF.Abs(x[IdxPhi] - _phaseFloor) < 0.02f)
+            skipRow[floorRow] = true;
 
         float worst = 0f;
         for (int j = 0; j < n; j++)
@@ -140,11 +137,11 @@ public sealed partial class CharacterAnimator
     {
         if (!_haveCorr || _ls == null) return "(no solve)";
         int bones = _skeleton.Count, n = IdxTheta0 + bones;
-        int geom = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0);
-        int m = geom + 4 + 2 * bones;   // + continuity + rate floor + com(δ, d.x) + bones×2 priors
 
         var x = new float[n];
         Array.Copy(_solveVars, x, n);
+        // geom = rows before the prior tail (contacts + pins + no-pen + aim + contributed).
+        int m = CompositeRowLayout(x, n, out int npStart, out int npCount, out _, out int geom);
         var jac = new float[m * n];          // zeroed by fresh alloc; CadenceJacobian fills it
         CadenceJacobian(x, jac, n);          // also leaves _scratch world at the solved x
         var r = new float[m];
@@ -177,8 +174,7 @@ public sealed partial class CharacterAnimator
             // Largest residual remaining over the no-penetration rows (= worst √w·penetration
             // the solve couldn't push out). The rows sit right after contacts+pins in `r`.
             float maxPen = 0f;
-            int s0 = (_contacts.Count + _pins.Count) * 2, sN = s0 + _surfaces.Count * bones;
-            for (int i = s0; i < sN && i < m; i++) maxPen = MathF.Max(maxPen, MathF.Abs(r[i]));
+            for (int i = npStart; i < npStart + npCount && i < m; i++) maxPen = MathF.Max(maxPen, MathF.Abs(r[i]));
             sb.Append($"  | nopen maxResid={maxPen,5:0.00}");
         }
         if (_aimActive)
@@ -279,6 +275,33 @@ public sealed partial class CharacterAnimator
         return d;
 
         string BoneName(int b) => b >= 0 && b < _skeleton.Count ? _skeleton.Bones[b].Name : "?";
+    }
+
+    // Row layout of this frame's composite objective (diagnostics only — allocates): walks
+    // _frameComposite once, evaluating each block's residuals at x into a scratch, and
+    // records the offsets the oracle/report need. Replaces the old hand-maintained row
+    // arithmetic, which had to be kept in sync in three places and breaks the moment a move
+    // driver contributes a constraint block. Leaves _scratch at the pose for x.
+    //   npStart/npCount — the NoPenetrationConstraint block (knee-skip + maxResid report)
+    //   floorRow        — the PhaseRateFloorConstraint row (its knee-skip)
+    //   geomRows        — rows before the prior tail (= offset of PlaybackContinuityConstraint)
+    private int CompositeRowLayout(float[] x, int n, out int npStart, out int npCount,
+                                   out int floorRow, out int geomRows)
+    {
+        var xs = new ReadOnlySpan<float>(x, 0, n);
+        BuildSolvePose(xs);
+        var tmp = new float[_maxResiduals];
+        int m = 0; npStart = 0; npCount = 0; floorRow = -1; geomRows = -1;
+        foreach (var c in _frameComposite)
+        {
+            if (c is PlaybackContinuityConstraint && geomRows < 0) geomRows = m;
+            int cnt = c.Residuals(xs, tmp.AsSpan(m));
+            if      (c is NoPenetrationConstraint)  { npStart = m; npCount = cnt; }
+            else if (c is PhaseRateFloorConstraint) floorRow = m;
+            m += cnt;
+        }
+        if (geomRows < 0) geomRows = m;
+        return m;
     }
 
     // Keyframe interval index of normalized time t (for the FD oracle's boundary guard): the

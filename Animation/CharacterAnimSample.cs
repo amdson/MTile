@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -104,6 +105,14 @@ public readonly struct CharacterAnimSample
     // set on a still crouch it selects the DuckUnder clip (head tucked, torso flat, free hand
     // braced) so squeezing through a low gap reads as "under something". Render-only.
     public readonly bool    LowCeiling;
+    // PHYSICAL ground gap (world px): how far the body floats ABOVE its supported rest height,
+    // from the same GroundChecker probe the movement FSM uses. 0 = at/below rest (physically
+    // supported); large (no floor within the probe) = clearly airborne. Distinct from
+    // `Grounded`, which is FSM-derived and deliberately PERMISSIVE (StandingState engages with
+    // the floor up to ProbeSlack away) — the gap is what lets the animator hold an airborne
+    // pose instead of running in air during that window (GroundLocomotionDriver). Defaults to
+    // 0 (supported) for hand-built samples/tests.
+    public readonly float   GroundGap;
 
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
@@ -111,13 +120,14 @@ public readonly struct CharacterAnimSample
         float actionDuration = 0f, float movementProgress = 0f, ExternalPin[] pins = null,
         SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default,
         bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None,
-        int surfaceCount = -1, bool? surfacesNear = null, bool lowCeiling = false)
+        int surfaceCount = -1, bool? surfacesNear = null, bool lowCeiling = false,
+        float groundGap = 0f)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
         ActionDuration = actionDuration; MovementProgress = movementProgress; Pins = pins;
         Surfaces = surfaces; SurfaceCount = surfaceCount; HasGrip = hasGrip; GripTarget = gripTarget;
-        HasAim = hasAim; AimDir = aimDir; Tag = tag; LowCeiling = lowCeiling;
+        HasAim = hasAim; AimDir = aimDir; Tag = tag; LowCeiling = lowCeiling; GroundGap = groundGap;
         // Default (hand-built samples, tests): surfaces present ⇒ near — the pre-terrain behavior.
         SurfacesNear = surfacesNear ?? (surfaces != null && (surfaceCount < 0 ? surfaces.Length : surfaceCount) > 0);
     }
@@ -181,6 +191,19 @@ public readonly struct CharacterAnimSample
         bool hasAim = false; Vector2 aimDir = default;
         if (p.CurrentAction != null) hasAim = p.CurrentAction.TryAnimationAim(p.CurrentActionVars, out aimDir);
 
+        // Physical ground gap: the same probe the FSM's permissive precondition uses
+        // (EnvironmentContext.TryGetGround — halfHeight = floatHeight = Radius), reduced to
+        // "how far above the supported rest height is the body". 0 when at/below rest.
+        // Requires the world (chunks); without one, default 0 keeps the pre-gap behavior.
+        float groundGap = 0f;
+        if (chunks != null)
+        {
+            groundGap = 1e6f;   // no floor within the probe — clearly airborne
+            if (GroundChecker.TryFind(p.Body, chunks, PlayerCharacter.Radius, PlayerCharacter.Radius,
+                                      GroundChecker.ProbeSlack, dt, out var g))
+                groundGap = MathF.Max(0f, (g.Position.Y - pos.Y) - g.MinDistance);
+        }
+
         return new(pos, p.Body.Velocity, facing, p.IsGrounded,
                p.CurrentStateName, p.CurrentActionName, dt,
                p.CurrentActionVars.TimeInState,
@@ -188,6 +211,7 @@ public readonly struct CharacterAnimSample
                p.CurrentState?.AnimationProgress ?? 0f,
                surfaces: surfaces, surfaceCount: count, surfacesNear: near,
                hasGrip: hasGrip, gripTarget: gripTarget,
-               hasAim: hasAim, aimDir: aimDir, tag: tag, lowCeiling: lowCeiling);
+               hasAim: hasAim, aimDir: aimDir, tag: tag, lowCeiling: lowCeiling,
+               groundGap: groundGap);
     }
 }

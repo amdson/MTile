@@ -3,6 +3,18 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
+// A residual block of the composite solve objective: emits its rows into `r`/`jac` (starting
+// at row0) and returns the count. Both methods run AFTER the shared forward pass
+// (BuildSolvePose / SampleAngularVelocity), so implementations read the composed, corrected
+// world pose. The count MUST be stable across a single Minimize call (the LM core's fixed-row
+// contract) — freeze any varying inputs before the solve starts. Top-level (not nested) so a
+// move driver can contribute its own block via FrameInputs.Constraints.
+public interface ISolveConstraint
+{
+    int Residuals(ReadOnlySpan<float> x, Span<float> r);
+    int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0);
+}
+
 // The least-squares solve's residual/Jacobian machinery (Plans/ANIMATION_SOLVER_PLAN §11),
 // split out of CharacterAnimator for legibility: the solve-variable layout, the reusable
 // point-Jacobian primitive, the rotation lever arm, and the constraint library
@@ -57,16 +69,9 @@ public sealed partial class CharacterAnimator
         colX[IdxPhi] = dphiX; colY[IdxPhi] = dphiY;
     }
 
-    // A residual block: emits its rows into `r`/`jac` (starting at row0) and returns the count.
-    // Both methods run AFTER the shared forward pass (BuildSolvePose / SampleAngularVelocity),
-    // so they read _scratch's world buffer + _angVel directly. The count MUST be stable across a
-    // single Minimize call (the LM core's fixed-row contract) — it is, because the contact set is
-    // frozen by RefreshContacts before the solve.
-    private interface ISolveConstraint
-    {
-        int Residuals(ReadOnlySpan<float> x, Span<float> r);
-        int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0);
-    }
+    // The built-in blocks below read _scratch's world buffer + _angVel directly (they are
+    // nested `partial` members with private access). Their row counts are stable per solve
+    // because the contact/pin/surface sets are frozen by RefreshContacts / step 1.7.
 
     // Two rows per planted contact: √w·(tipX + d.x − targetX) horizontal no-slip (the cadence
     // pin, drives Δφ, with d.x as the escape at the foot's horizontal turning point) then

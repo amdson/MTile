@@ -207,15 +207,27 @@ public static class MotionProbe
         sb.AppendLine($"  ground(y)={ground,6:0.0}   hip=({hip.X,5:0.0},{hip.Y,5:0.0})"
                     + $"   lean(chestTop.x-hip.x)={chestTop.X - hip.X,5:0.0}   headTop.y={headTop.Y,5:0.0}");
 
+        // The leg's true hip socket is leg_*_upper's NEAR joint (its parent's far end).
+        // On the plain biped that's the root hip; on rigs with pelvis struts (hip_l/_r)
+        // it's the strut tip — measuring from the root there mislabels borderline knees.
+        Vector2 Socket(string upper)
+        {
+            int i = rig.IndexOf(upper);
+            if (i < 0) return hip;
+            int p = rig.Bones[i].Parent;
+            return p >= 0 ? w[p].Translation : hip;
+        }
+
         var flags = new List<string>();
         foreach (var s in new[] { "l", "r" })
         {
             // Anatomical landmarks are bone far ends: knee = leg_upper tip, ankle = leg_lower tip,
             // toe = foot tip.
+            Vector2 socket = Socket($"leg_{s}_upper");
             Vector2 knee = P($"leg_{s}_upper"), ankle = P($"leg_{s}_lower"), toe = P($"foot_{s}");
-            Vector2 dd = ankle - hip; float L = dd.Length();
-            // signed cross (knee-hip)×(ankle-hip): + = knee on the front side (correct), - = recurvatum.
-            float side = L > 1e-4f ? ((knee.X - hip.X) * dd.Y - (knee.Y - hip.Y) * dd.X) / L : 0f;
+            Vector2 dd = ankle - socket; float L = dd.Length();
+            // signed cross (knee-socket)×(ankle-socket): + = knee on the front side (correct), - = recurvatum.
+            float side = L > 1e-4f ? ((knee.X - socket.X) * dd.Y - (knee.Y - socket.Y) * dd.X) / L : 0f;
             string dir = side > 0.2f ? "knee-FWD" : side < -0.2f ? "knee-RECURV" : "knee-straight";
             if (side < -0.2f) flags.Add($"leg_{s} recurvatum (backward knee)");
             bool planted = toe.Y >= ground - 1.0f;
