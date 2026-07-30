@@ -21,14 +21,30 @@ public sealed class SpriteBindPoseEntry
 // deform independently (each by only its own bones) so topologically unrelated areas —
 // an arm drawn beside the torso — never share triangles or influence. Pixels are
 // assigned to layers by a color-coded MASK image (SpriteBindingDocument.Mask): each
-// opaque sprite pixel goes to the layer whose Color is nearest at that mask pixel.
+// opaque sprite pixel goes to the layer whose Color is nearest at that mask pixel — OR by the layer
+// bringing its OWN image (Image + OffsetX/Y): decomposed-limb art where each part is a
+// separate PNG placed on a shared canvas. The two modes coexist per layer.
 public sealed class SpriteSkinLayer
 {
     public string Name { get; set; }
 
     // "#RRGGBB" this layer is painted with in the mask. Null → the catch-all layer:
     // it receives every opaque pixel the mask doesn't cover (mask alpha < 128).
+    // Ignored when the layer has its own Image.
     public string Color { get; set; }
+
+    // Optional per-layer PNG (sibling-relative, like the document Image). When set, this
+    // layer's mesh and texture come from THIS file instead of being carved out of the
+    // document image by mask color.
+    public string Image { get; set; }
+
+    // Position of this layer's (cropped) image on the shared canvas, in the same
+    // image-px space ImageToRig consumes. Only meaningful with Image; a layer vertex's
+    // rig position is ImageToRig(pixelPos + Offset).
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public int OffsetX { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public int OffsetY { get; set; }
 
     // Bone names whose handles deform this layer. A trailing '*' is a prefix wildcard
     // ("arm_l_*" → arm_l_upper, arm_l_lower). Empty/null → all bones.
@@ -57,7 +73,10 @@ public sealed class SpriteSkinLayer
 public sealed class SpriteBindingDocument
 {
     public string Skeleton { get; set; } = "biped";
-    public string Image    { get; set; }            // sibling file next to the .json
+
+    // Sibling file next to the .json. Optional when every layer brings its own Image
+    // (multi-image bindings); required if any layer lacks one.
+    public string Image    { get; set; }
 
     // rigLocal = imagePx * ImageToRigScale + (ImageToRigTx, ImageToRigTy)
     public float ImageToRigScale { get; set; } = 1f;
@@ -109,7 +128,7 @@ public sealed class SpriteBindingDocument
         {
             if (!File.Exists(path)) return null;
             var doc = JsonSerializer.Deserialize<SpriteBindingDocument>(File.ReadAllText(path), Opts);
-            if (doc?.Image == null) return null;
+            if (doc == null || !doc.HasValidImages) return null;
             doc.FilePath = path;
             return doc;
         }
@@ -124,10 +143,33 @@ public sealed class SpriteBindingDocument
         FilePath = path;
     }
 
-    // Resolve the PNG path (Image is stored relative to the .json).
+    // Every layer needs a pixel source: its own Image, or the document Image to be
+    // carved by the mask. (No layers at all → the document Image is the whole sprite.)
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasValidImages
+    {
+        get
+        {
+            if (Image != null) return true;
+            if (Layers == null || Layers.Count == 0) return false;
+            foreach (var l in Layers)
+                if (string.IsNullOrEmpty(l.Image)) return false;
+            return true;
+        }
+    }
+
+    // Resolve the PNG path (Image is stored relative to the .json). Null for a
+    // multi-image binding with no shared image.
     [System.Text.Json.Serialization.JsonIgnore]
     public string ImagePath =>
-        FilePath == null ? Image : Path.Combine(Path.GetDirectoryName(FilePath), Image);
+        Image == null ? null
+        : FilePath == null ? Image : Path.Combine(Path.GetDirectoryName(FilePath), Image);
+
+    // Resolve a layer's own PNG path (sibling-relative like Image). Null when the layer
+    // has none (mask-carved layer).
+    public string LayerImagePath(SpriteSkinLayer layer) =>
+        string.IsNullOrEmpty(layer?.Image) ? null
+        : FilePath == null ? layer.Image : Path.Combine(Path.GetDirectoryName(FilePath), layer.Image);
 
     [System.Text.Json.Serialization.JsonIgnore]
     public string MaskPath =>
