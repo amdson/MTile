@@ -14,11 +14,14 @@ namespace MTile;
 // reflection). Built on DrawUserIndexedPrimitives + BasicEffect, same portable surface
 // as PrimitiveBatch (DesktopGL + KNI). Render-only; never touches the sim.
 //
-// LAYERS: when the binding declares a color-coded Mask + Layers, the sprite splits into
-// independent regions drawn back-to-front. Each layer gets its own texture (non-layer
-// pixels zeroed), its own mesh (so an arm and the torso never share triangles), and its
-// own bone-filtered handle set (so only the arm's bones ever move arm pixels). Without
-// layers the whole image is one region deformed by every bone.
+// LAYERS: when the binding declares Layers, the sprite splits into independent regions
+// drawn back-to-front. Each layer gets its own texture, its own mesh (so an arm and the
+// torso never share triangles), and its own bone-filtered handle set (so only the arm's
+// bones ever move arm pixels). A layer's pixels come from one of two sources, coexisting
+// per layer: carved out of the shared doc Image by the color-coded Mask (non-layer
+// pixels zeroed), or the layer's OWN Image placed on the shared canvas at OffsetX/Y
+// (decomposed-limb art — see SPRITE_SKIN_PLAN.md §10). Without layers the whole doc
+// image is one region deformed by every bone.
 public sealed class SpriteSkin : IDisposable
 {
     // One independently-deformed region of the sprite.
@@ -47,9 +50,9 @@ public sealed class SpriteSkin : IDisposable
     public int VertexCount   { get; private set; }
     public int TriangleCount { get; private set; }
 
-    // Load a binding + its PNG (and mask, if layered). Null (and silent) when the .json
-    // is absent; loud on a present-but-broken binding. `skel` must be the rig the
-    // binding was authored on.
+    // Load a binding + its PNG(s) (and mask, if mask-layered). Null (and silent) when
+    // the .json is absent; loud on a present-but-broken binding. `skel` must be the rig
+    // the binding was authored on.
     public static SpriteSkin TryLoad(GraphicsDevice gd, string bindingPath, Skeleton skel)
     {
         SpriteBindingDocument doc;
@@ -62,8 +65,12 @@ public sealed class SpriteSkin : IDisposable
 
         try
         {
-            using var fs = File.OpenRead(doc.ImagePath);
-            var tex = Texture2D.FromStream(gd, fs);
+            Texture2D tex = null;
+            if (doc.ImagePath != null)   // absent for all-own-image bindings
+            {
+                using var fs = File.OpenRead(doc.ImagePath);
+                tex = Texture2D.FromStream(gd, fs);
+            }
             return new SpriteSkin(gd, doc, skel, tex, ownsTexture: true);
         }
         catch (Exception e)
@@ -74,10 +81,12 @@ public sealed class SpriteSkin : IDisposable
     }
 
     // Bakes everything up front: layer assignment from the mask, per-layer meshes from
-    // the (masked) image alpha, MLS weights from the bind pose. `premultiply` converts
-    // the texture's alpha in place (SpriteBatch/AlphaBlend convention — raw
+    // each layer's image alpha, MLS weights from the bind pose. `texture` is the doc's
+    // shared image — null when every layer brings its own. `premultiply` converts the
+    // shared texture's alpha in place (SpriteBatch/AlphaBlend convention — raw
     // Texture2D.FromStream data is straight-alpha); pass false when the caller already
-    // premultiplied it (e.g. the bind editor rebaking a preview).
+    // premultiplied it (e.g. the bind editor rebaking a preview). Per-layer images are
+    // loaded here and always premultiplied.
     public SpriteSkin(GraphicsDevice gd, SpriteBindingDocument doc, Skeleton skel,
                       Texture2D texture, bool ownsTexture, bool premultiply = true)
     {
@@ -86,14 +95,19 @@ public sealed class SpriteSkin : IDisposable
             throw new ArgumentException(
                 $"Binding is for rig '{doc.Skeleton}', got '{skel.Name}'.");
 
-        int w = texture.Width, h = texture.Height;
-        var pixels = new Color[w * h];
-        texture.GetData(pixels);
-        if (premultiply)
+        int w = 0, h = 0;
+        Color[] pixels = null;
+        if (texture != null)
         {
-            for (int i = 0; i < pixels.Length; i++)
-                pixels[i] = Color.FromNonPremultiplied(pixels[i].R, pixels[i].G, pixels[i].B, pixels[i].A);
-            texture.SetData(pixels);
+            w = texture.Width; h = texture.Height;
+            pixels = new Color[w * h];
+            texture.GetData(pixels);
+            if (premultiply)
+            {
+                for (int i = 0; i < pixels.Length; i++)
+                    pixels[i] = Color.FromNonPremultiplied(pixels[i].R, pixels[i].G, pixels[i].B, pixels[i].A);
+                texture.SetData(pixels);
+            }
         }
 
         // --- shared bind-pose world (bind handles are sampled per layer from this) ----
@@ -103,32 +117,58 @@ public sealed class SpriteSkin : IDisposable
 
         int  step   = Math.Max(2, doc.MeshStep);
         byte thresh = (byte)Math.Clamp(doc.AlphaThreshold, 1, 255);
-        bool layered = doc.Layers != null && doc.Layers.Count > 0 && doc.Mask != null;
 
-        if (!layered)
+        if (doc.Layers == null || doc.Layers.Count == 0)
         {
+            if (texture == null)
+                throw new InvalidOperationException("SpriteSkin: binding has no Image and no layers.");
             var all = new SpriteSkinLayer { Name = "all" };   // no Bones → every bone
-            BuildLayer(doc, all, texture, ownsLayerTexture: false, pixels, w, h, step, thresh);
+            BuildLayer(doc, all, texture, ownsLayerTexture: false, pixels, w, h, Point.Zero, step, thresh);
         }
         else
         {
-            int[] assign = AssignPixels(gd, doc, pixels, w, h);
-            var masked = new Color[w * h];
+            int[]   assign = null;   // mask assignment, computed on first carved layer
+            Color[] masked = null;
             for (int li = 0; li < doc.Layers.Count; li++)
             {
+                var spec = doc.Layers[li];
+                if (!string.IsNullOrEmpty(spec.Image))
+                {
+                    // The layer's own PNG, placed on the shared canvas at its offset.
+                    Texture2D layerTex;
+                    using (var fs = File.OpenRead(doc.LayerImagePath(spec)))
+                        layerTex = Texture2D.FromStream(gd, fs);
+                    int lw = layerTex.Width, lh = layerTex.Height;
+                    var lpx = new Color[lw * lh];
+                    layerTex.GetData(lpx);
+                    for (int i = 0; i < lpx.Length; i++)
+                        lpx[i] = Color.FromNonPremultiplied(lpx[i].R, lpx[i].G, lpx[i].B, lpx[i].A);
+                    layerTex.SetData(lpx);
+                    BuildLayer(doc, spec, layerTex, ownsLayerTexture: true, lpx, lw, lh,
+                               new Point(spec.OffsetX, spec.OffsetY), step, thresh);
+                    continue;
+                }
+
+                // Carved out of the shared image by mask color.
+                if (texture == null || doc.Mask == null)
+                    throw new InvalidOperationException(
+                        $"SpriteSkin: layer '{spec.Name}' has no Image of its own and the " +
+                        "binding has no doc Image + Mask to carve it from.");
+                assign ??= AssignPixels(gd, doc, pixels, w, h);
+                masked ??= new Color[w * h];
                 Array.Clear(masked, 0, masked.Length);
                 int count = 0;
                 for (int i = 0; i < pixels.Length; i++)
                     if (assign[i] == li) { masked[i] = pixels[i]; count++; }
                 if (count == 0)
                 {
-                    Console.WriteLine($"SpriteSkin: layer '{doc.Layers[li].Name}' has no pixels " +
+                    Console.WriteLine($"SpriteSkin: layer '{spec.Name}' has no pixels " +
                                       "(mask color unused?) — skipped.");
                     continue;
                 }
-                var layerTex = new Texture2D(gd, w, h);
-                layerTex.SetData(masked);
-                BuildLayer(doc, doc.Layers[li], layerTex, ownsLayerTexture: true, masked, w, h, step, thresh);
+                var carvedTex = new Texture2D(gd, w, h);
+                carvedTex.SetData(masked);
+                BuildLayer(doc, spec, carvedTex, ownsLayerTexture: true, masked, w, h, Point.Zero, step, thresh);
             }
             if (_layers.Count == 0)
                 throw new InvalidOperationException("SpriteSkin: no layer produced any mesh.");
@@ -162,15 +202,17 @@ public sealed class SpriteSkin : IDisposable
         }
 
         var colors = new (int r, int g, int b, bool has)[doc.Layers.Count];
-        int catchAll = -1;
+        int catchAll = -1, firstCarved = -1;
         for (int li = 0; li < doc.Layers.Count; li++)
         {
+            if (!string.IsNullOrEmpty(doc.Layers[li].Image)) continue;   // own-image layer:
+            if (firstCarved < 0) firstCarved = li;                       // not mask-assigned
             string c = doc.Layers[li].Color;
             if (string.IsNullOrEmpty(c)) { catchAll = li; continue; }
             var (r, g, b) = ParseColor(c);
             colors[li] = (r, g, b, true);
         }
-        if (catchAll < 0) catchAll = 0;
+        if (catchAll < 0) catchAll = firstCarved;
 
         // A layer color claims a pixel only within MaskTolerance — mask pixels matching
         // nothing (unpainted areas, or the artwork itself when the mask was painted on a
@@ -211,11 +253,14 @@ public sealed class SpriteSkin : IDisposable
                 Convert.ToInt32(s.Substring(4, 2), 16));
     }
 
-    // Mesh one layer over its (masked) pixels and bake its MLS deformer against the
-    // layer's bone subset. Requires the bind-pose _world to be resolved already.
+    // Mesh one layer over its pixels and bake its MLS deformer against the layer's bone
+    // subset. `w`/`h` are the layer image's own dimensions; `offset` places it on the
+    // shared canvas (zero for carved layers, whose image IS the canvas). UVs stay in the
+    // layer's own texture space — the offset shifts only the rig-space positions.
+    // Requires the bind-pose _world to be resolved already.
     private void BuildLayer(SpriteBindingDocument doc, SpriteSkinLayer spec,
                             Texture2D layerTex, bool ownsLayerTexture,
-                            Color[] px, int w, int h, int step, byte thresh)
+                            Color[] px, int w, int h, Point offset, int step, byte thresh)
     {
         int cols = (w + step - 1) / step, rows = (h + step - 1) / step;
         var cornerIndex = new int[(cols + 1) * (rows + 1)];
@@ -266,7 +311,7 @@ public sealed class SpriteSkin : IDisposable
         {
             layer.Verts[i].Color = Color.White;
             layer.Verts[i].TextureCoordinate = new Vector2(positions[i].X / w, positions[i].Y / h);
-            restRig[i] = doc.ImageToRig(positions[i]);
+            restRig[i] = doc.ImageToRig(positions[i] + offset.ToVector2());
         }
 
         layer.Handles = SkinHandleLayout.Create(_skeleton, step: doc.HandleStep, includeBone: spec.IncludesBone);
@@ -367,6 +412,6 @@ public sealed class SpriteSkin : IDisposable
         _effect.Dispose();
         foreach (var layer in _layers)
             if (layer.OwnsTexture) layer.Texture.Dispose();
-        if (_ownsBaseTexture) _baseTexture.Dispose();
+        if (_ownsBaseTexture) _baseTexture?.Dispose();
     }
 }

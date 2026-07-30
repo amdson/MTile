@@ -187,7 +187,7 @@ xvfb + Mesa installed on the box for headless GPU steps.
 
 - [x] M1 — Phase 1: format (`SpriteSkinLayer.Image/OffsetX/OffsetY`, optional doc `Image`) + round-trip test
 - [x] M2 — Phase 0: import tool (`--import`), run on rabbit_and_badger → cropped PNGs + first-pass jsons
-- [ ] M3 — Phase 2: bake (per-layer textures/meshes in `SpriteSkin`) + KNI web build check
+- [x] M3 — Phase 2: bake (per-layer textures/meshes in `SpriteSkin`) + KNI web build check
 - [ ] M4 — Phase 3: bind editor (composite backdrop, layer cycling, union-bbox fit)
 - [ ] M5 — Phase 4: wiring (per-player binding names, optional `Tint`)
 
@@ -203,6 +203,13 @@ xvfb + Mesa installed on the box for headless GPU steps.
   Demo a font-only content build (game .fx shaders need Wine on Linux; Demo never used
   them). Box also needed: xvfb+Mesa, fonts (Arial-named Liberation in ~/.fonts), disk
   cleanup (/var/log + apt cache were filling the 10G root).
+- M3 bake: per-layer Image branch in the `SpriteSkin` ctor (own texture, always
+  premultiplied, mesh in layer-local px, rig pos = ImageToRig(pos + offset), UVs
+  layer-local); mask carving now lazy + mixed-mode safe (own-image layers excluded from
+  mask color table / catch-all). Core + KNI compile clean, 454 tests pass. Visual smoke:
+  `--usebind rabbit` MTILE_SHOT under xvfb shows the assembled rabbit deforming on walk.
+  NOTE: KNI web CONTENT step can't run on this box (MGCB.exe, exit 127) — verified via
+  `/t:Compile`, same C# surface; full web build unaffected on Windows.
 
 Generalize the binding so a layer can bring its OWN PNG (decomposed-limb art) instead of
 being carved out of one shared image by the mask. The mask path stays; the two modes
