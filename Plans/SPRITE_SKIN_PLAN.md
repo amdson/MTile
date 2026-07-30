@@ -188,7 +188,7 @@ xvfb + Mesa installed on the box for headless GPU steps.
 - [x] M1 — Phase 1: format (`SpriteSkinLayer.Image/OffsetX/OffsetY`, optional doc `Image`) + round-trip test
 - [x] M2 — Phase 0: import tool (`--import`), run on rabbit_and_badger → cropped PNGs + first-pass jsons
 - [x] M3 — Phase 2: bake (per-layer textures/meshes in `SpriteSkin`) + KNI web build check
-- [ ] M4 — Phase 3: bind editor (composite backdrop, layer cycling, union-bbox fit)
+- [x] M4 — Phase 3: bind editor (composite backdrop, layer cycling, union-bbox fit)
 - [ ] M5 — Phase 4: wiring (per-player binding names, optional `Tint`)
 
 ### Campaign log
@@ -210,6 +210,12 @@ xvfb + Mesa installed on the box for headless GPU steps.
   `--usebind rabbit` MTILE_SHOT under xvfb shows the assembled rabbit deforming on walk.
   NOTE: KNI web CONTENT step can't run on this box (MGCB.exe, exit 127) — verified via
   `/t:Compile`, same C# surface; full web build unaffected on Windows.
+- M4 editor: `--bind rabbit` json-first; backdrop composites all layer images at offsets
+  (registration verified visually for BOTH characters — badger boots hide behind the
+  cloak as planned); `[`/`]` layer cycling with dimmed deselection + yellow mesh outline
+  + bones in header; fits use the union canvas bbox; `MTILE_SHOT_LAYER` added for
+  headless verification. Screenshots confirm: assembly, walk-clip deformation, layer
+  highlight.
 
 Generalize the binding so a layer can bring its OWN PNG (decomposed-limb art) instead of
 being carved out of one shared image by the mask. The mask path stays; the two modes

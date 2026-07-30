@@ -26,7 +26,14 @@ namespace MTileDemo;
 //                         reproduce the artwork almost exactly — the alignment sanity check).
 //   • Space , .         — play / pause a clip through the deformation; , / . cycle clips.
 //                         This is the real acceptance test: judge the binding on a walk.
+//   • [ ]               — cycle the selected layer (multi-layer bindings): other layers'
+//                         backdrops dim, the selection's deformed mesh outlines in preview.
 //   • Tab / H / Ctrl-S  — edit mode / help / save.
+//
+// `--bind rabbit` resolves SpriteBindings/rabbit.json FIRST (multi-image bindings have
+// no single PNG to name); a PNG argument keeps the legacy path, including creating a
+// brand-new binding. Multi-image backdrops composite every layer at its canvas offset —
+// the parts visibly reassembling IS the registration check (§10.5).
 public sealed class BindGame : Game
 {
     private readonly GraphicsDeviceManager _graphics;
@@ -41,8 +48,16 @@ public sealed class BindGame : Game
     private Skeleton              _skeleton;
     private SkeletonPose          _pose;          // the bind pose being authored
     private SpriteBindingDocument _doc;
-    private Texture2D             _texture;       // premultiplied at load
+    private Texture2D             _texture;       // doc-level image, premultiplied; null when
+                                                  // every layer brings its own PNG
     private SkinHandleLayout      _handles;
+
+    // Backdrop composite: every image that participates in the binding, at its canvas
+    // offset (the doc image at 0,0 plus each own-image layer). Spec is null for the doc
+    // image. _canvasMin/Max is their union bbox in image px — the "canvas" all fits use.
+    private readonly List<(SpriteSkinLayer Spec, Texture2D Tex, Point Off)> _backdrops = new();
+    private Vector2 _canvasMin, _canvasMax;
+    private int     _selLayer = -1;               // index into _doc.Layers; -1 = all
 
     // View (image px → screen): screen = img * _zoom + _viewOff.
     private float   _zoom = 1f;
@@ -97,30 +112,56 @@ public sealed class BindGame : Game
         _draw = new DrawContext(_spriteBatch, _pixel);
 
         string root = FindRepoRoot();
-        _pngPath = ResolvePng(root, _imageArg);
-        _jsonPath = Path.ChangeExtension(_pngPath, ".json");
-
-        using (var fs = File.OpenRead(_pngPath))
-            _texture = Texture2D.FromStream(GraphicsDevice, fs);
-        Premultiply(_texture);
-
         _skeleton = SkeletonExamples.Biped();
 
-        _doc = SpriteBindingDocument.Load(_jsonPath);
-        if (_doc != null)
+        // Json-first: `--bind rabbit` opens SpriteBindings/rabbit.json when it exists
+        // (multi-image bindings have no single PNG to name). Otherwise the legacy
+        // png-first path, which is also how a brand-new binding is created.
+        string jsonCandidate = ResolveJson(root, _imageArg);
+        if (jsonCandidate != null)
         {
+            _jsonPath = jsonCandidate;
+            _doc = SpriteBindingDocument.Load(_jsonPath)
+                ?? throw new InvalidOperationException($"Binding exists but failed to load: {_jsonPath}");
+            _pngPath = _doc.ImagePath;
+            if (_pngPath != null)
+            {
+                using var fs = File.OpenRead(_pngPath);
+                _texture = Texture2D.FromStream(GraphicsDevice, fs);
+                Premultiply(_texture);
+            }
             _pose = _doc.CreateBindPose(_skeleton);
             Console.WriteLine($"Bind editor - loaded {_jsonPath}");
         }
         else
         {
-            _doc = new SpriteBindingDocument
+            _pngPath = ResolvePng(root, _imageArg);
+            _jsonPath = Path.ChangeExtension(_pngPath, ".json");
+            using (var fs = File.OpenRead(_pngPath))
+                _texture = Texture2D.FromStream(GraphicsDevice, fs);
+            Premultiply(_texture);
+
+            _doc = SpriteBindingDocument.Load(_jsonPath);
+            if (_doc != null)
             {
-                Skeleton = _skeleton.Name,
-                Image    = Path.GetFileName(_pngPath),
-                FilePath = _jsonPath,
-            };
-            _pose = _skeleton.CreatePose();
+                _pose = _doc.CreateBindPose(_skeleton);
+                Console.WriteLine($"Bind editor - loaded {_jsonPath}");
+            }
+            else
+            {
+                _doc = new SpriteBindingDocument
+                {
+                    Skeleton = _skeleton.Name,
+                    Image    = Path.GetFileName(_pngPath),
+                    FilePath = _jsonPath,
+                };
+                _pose = _skeleton.CreatePose();
+            }
+        }
+
+        LoadBackdrops();
+        if (jsonCandidate == null && _doc.BindPose.Count == 0)
+        {
             FitRigToImage();
             _dirty = true;
             Console.WriteLine($"Bind editor - NEW binding for {_pngPath} (Ctrl-S writes {_jsonPath})");
@@ -145,6 +186,11 @@ public sealed class BindGame : Game
         // MTILE_SHOT_CLIP plays the named clip's first frame through the deformation.
         _shotPath = Environment.GetEnvironmentVariable("MTILE_SHOT");
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_PREVIEW") != null) _preview = true;
+        // MTILE_SHOT_LAYER=<name> selects a layer for the capture (as [ ] would).
+        string shotLayer = Environment.GetEnvironmentVariable("MTILE_SHOT_LAYER");
+        if (shotLayer != null && _doc.Layers != null)
+            _selLayer = _doc.Layers.FindIndex(l =>
+                string.Equals(l.Name, shotLayer, StringComparison.OrdinalIgnoreCase));
         string shotClip = Environment.GetEnvironmentVariable("MTILE_SHOT_CLIP");
         if (shotClip != null)
         {
@@ -160,8 +206,48 @@ public sealed class BindGame : Game
     private string _shotPath;
     private int    _shotFrame;
 
+    // The binding argument as a json: an explicit .json path, else
+    // SpriteBindings/<name>.json at the repo root. Null when neither exists.
+    private static string ResolveJson(string repoRoot, string arg)
+    {
+        if (arg.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            return File.Exists(arg) ? Path.GetFullPath(arg) : null;
+        string candidate = Path.Combine(repoRoot, "SpriteBindings",
+            Path.GetFileNameWithoutExtension(arg) + ".json");
+        return File.Exists(candidate) ? candidate : null;
+    }
+
+    // Collect every image participating in the binding — the doc image at (0,0) plus
+    // each own-image layer at its offset — and their union bbox (the shared canvas).
+    // The composited figure visibly reassembling is the §10.5 registration check.
+    private void LoadBackdrops()
+    {
+        _backdrops.Clear();
+        if (_texture != null)
+            _backdrops.Add((null, _texture, Point.Zero));
+        if (_doc.Layers != null)
+            foreach (var l in _doc.Layers)
+            {
+                if (string.IsNullOrEmpty(l.Image)) continue;
+                Texture2D tex;
+                using (var fs = File.OpenRead(_doc.LayerImagePath(l)))
+                    tex = Texture2D.FromStream(GraphicsDevice, fs);
+                Premultiply(tex);
+                _backdrops.Add((l, tex, new Point(l.OffsetX, l.OffsetY)));
+            }
+        if (_backdrops.Count == 0)
+            throw new InvalidOperationException("Binding has no images at all.");
+
+        _canvasMin = new Vector2(float.MaxValue); _canvasMax = new Vector2(float.MinValue);
+        foreach (var (_, tex, off) in _backdrops)
+        {
+            _canvasMin = Vector2.Min(_canvasMin, off.ToVector2());
+            _canvasMax = Vector2.Max(_canvasMax, off.ToVector2() + new Vector2(tex.Width, tex.Height));
+        }
+    }
+
     // Default image→rig placement for a brand-new binding: the rig's default-pose
-    // joint bounds scaled onto the image's height, centers aligned.
+    // joint bounds scaled onto the canvas bbox height, centers aligned.
     private void FitRigToImage()
     {
         var world = _pose.ComputeWorld(Affine2.Identity);
@@ -172,9 +258,9 @@ public sealed class BindGame : Game
             min = Vector2.Min(min, p); max = Vector2.Max(max, p);
         }
         float rigH = MathF.Max(max.Y - min.Y, 1f);
-        float s = rigH / _texture.Height;
+        float s = rigH / MathF.Max(_canvasMax.Y - _canvasMin.Y, 1f);
         Vector2 rigC = (min + max) * 0.5f;
-        Vector2 imgC = new Vector2(_texture.Width, _texture.Height) * 0.5f;
+        Vector2 imgC = (_canvasMin + _canvasMax) * 0.5f;
         _doc.ImageToRigScale = s;
         _doc.ImageToRigTx = rigC.X - imgC.X * s;
         _doc.ImageToRigTy = rigC.Y - imgC.Y * s;
@@ -182,9 +268,10 @@ public sealed class BindGame : Game
 
     private void FitViewToImage()
     {
-        _zoom = MathF.Min((W - 80f) / _texture.Width, (H - 120f) / _texture.Height) * 0.95f;
+        Vector2 size = Vector2.Max(_canvasMax - _canvasMin, Vector2.One);
+        _zoom = MathF.Min((W - 80f) / size.X, (H - 120f) / size.Y) * 0.95f;
         _zoom = MathF.Max(_zoom, 0.05f);
-        _viewOff = new Vector2(W - _texture.Width * _zoom, H - _texture.Height * _zoom) * 0.5f;
+        _viewOff = new Vector2(W, H) * 0.5f - (_canvasMin + _canvasMax) * 0.5f * _zoom;
     }
 
     // === coordinate frames ====================================================
@@ -214,6 +301,11 @@ public sealed class BindGame : Game
         if (Pressed(kb, Keys.Space)) TogglePlay();
         if (_clips.Count > 0 && Pressed(kb, Keys.OemComma))  CycleClip(-1);
         if (_clips.Count > 0 && Pressed(kb, Keys.OemPeriod)) CycleClip(+1);
+        if (_doc.Layers != null && _doc.Layers.Count > 0)
+        {
+            if (Pressed(kb, Keys.OemOpenBrackets))  CycleLayer(-1);
+            if (Pressed(kb, Keys.OemCloseBrackets)) CycleLayer(+1);
+        }
 
         float nudge = shift ? 8f : 2f;
         if (kb.IsKeyDown(Keys.Left))  _viewOff.X += nudge;
@@ -353,6 +445,15 @@ public sealed class BindGame : Game
         _playTime = 0f;
     }
 
+    // Selected layer cycles through -1 (all) then each of _doc.Layers in order.
+    private void CycleLayer(int step)
+    {
+        int n = _doc.Layers.Count;
+        _selLayer += step;
+        if (_selLayer >= n) _selLayer = -1;
+        else if (_selLayer < -1) _selLayer = n - 1;
+    }
+
     private void RebakeSkinIfNeeded()
     {
         if (_skin != null && !_skinDirty) return;
@@ -393,10 +494,18 @@ public sealed class BindGame : Game
         GraphicsDevice.Clear(new Color(22, 24, 30));
         var rigRoot = RigToScreen();
 
-        // Pass 1: backdrop (dimmed under the deformed preview so the skin reads on top).
+        // Pass 1: backdrop composite — every participating image at its canvas offset
+        // (dimmed under the deformed preview so the skin reads on top; non-selected
+        // layers dim slightly so the [ ] selection reads).
         _spriteBatch.Begin(samplerState: _zoom >= 2f ? SamplerState.PointClamp : SamplerState.LinearClamp);
-        Color tint = _preview ? new Color(70, 70, 70, 255) : Color.White;
-        _spriteBatch.Draw(_texture, _viewOff, null, tint, 0f, Vector2.Zero, _zoom, SpriteEffects.None, 0f);
+        foreach (var (spec, tex, off) in _backdrops)
+        {
+            bool deselected = _selLayer >= 0 && spec != null && _doc.Layers[_selLayer] != spec;
+            Color tint = _preview ? new Color(70, 70, 70, 255)
+                       : deselected ? new Color(120, 120, 120, 255) : Color.White;
+            _spriteBatch.Draw(tex, _viewOff + off.ToVector2() * _zoom, null, tint,
+                              0f, Vector2.Zero, _zoom, SpriteEffects.None, 0f);
+        }
         _spriteBatch.End();
 
         // Deformed skin (its own device draw, outside any SpriteBatch pass).
@@ -409,6 +518,9 @@ public sealed class BindGame : Game
 
         // Pass 2: rig overlay + text.
         _spriteBatch.Begin();
+        // Selected layer's deformed mesh outline (positions come from the skin Draw above).
+        if (_preview && _selLayer >= 0 && _skin != null)
+            _skin.DrawWireframe(_draw, new Color(255, 220, 80), 1f, _doc.Layers[_selLayer].Name);
         var overlayPose = _playing ? _previewPose : _pose;
         var style = SkeletonDrawStyle.Default;
         style.BoneThickness = 2f;
@@ -452,8 +564,15 @@ public sealed class BindGame : Game
     private void DrawHeader()
     {
         string clip = _clips.Count > 0 ? _clips[_clipIndex].Name : "(no clips)";
+        string target = Path.GetFileName(_pngPath ?? _jsonPath);
+        string layer = "";
+        if (_doc.Layers != null && _doc.Layers.Count > 0)
+            layer = _selLayer < 0
+                ? $"   |   layer ALL of {_doc.Layers.Count} ([ ])"
+                : $"   |   layer {_doc.Layers[_selLayer].Name}: " +
+                  $"{string.Join(" ", _doc.Layers[_selLayer].Bones ?? new List<string>())} ([ ])";
         _spriteBatch.DrawString(_font,
-            $"BIND {Path.GetFileName(_pngPath)}{(_dirty ? "  *unsaved*" : "")}",
+            $"BIND {target}{(_dirty ? "  *unsaved*" : "")}{layer}",
             new Vector2(16, 10), _dirty ? Color.Orange : Color.White);
         _spriteBatch.DrawString(_font,
             $"{_editMode.ToString().ToUpperInvariant()} (Tab)   |   preview {(_preview ? "ON" : "off")} (G)   |   " +
@@ -472,6 +591,7 @@ public sealed class BindGame : Game
         ("Place",   "drag root joint = move rig over image    Shift+wheel = scale rig"),
         ("View",    "wheel = zoom at cursor    right/middle-drag or arrows = pan    Home = fit"),
         ("Preview", "G = deformed skin on/off (bind pose = should match the art)    Space = play clip    , . = cycle clip"),
+        ("Layers",  "[ ] = cycle selected layer (dims others, outlines its mesh in preview; header shows its bones)"),
         ("File",    "Ctrl-S save binding json    Esc quit"),
     };
 

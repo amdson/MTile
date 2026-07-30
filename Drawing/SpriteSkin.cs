@@ -388,13 +388,17 @@ public sealed class SpriteSkin : IDisposable
         }
     }
 
-    // Overlay every layer's triangle edges as SpriteBatch lines (editor debug view —
-    // shows exactly which triangles twist, and that layers are truly disconnected).
+    // Overlay layer triangle edges as SpriteBatch lines (editor debug view — shows
+    // exactly which triangles twist, and that layers are truly disconnected).
     // Positions come from the LAST Draw call this frame, so call Draw first (fill:false
     // for wireframe-only). Interior edges draw twice; irrelevant at editor scale.
-    public void DrawWireframe(DrawContext ctx, Color color, float thickness = 1f)
+    // `onlyLayer` restricts to one layer by name (the editor's selected-layer highlight).
+    public void DrawWireframe(DrawContext ctx, Color color, float thickness = 1f, string onlyLayer = null)
     {
         foreach (var layer in _layers)
+        {
+            if (onlyLayer != null && !string.Equals(layer.Name, onlyLayer, StringComparison.OrdinalIgnoreCase))
+                continue;
             for (int t = 0; t < layer.Indices.Length; t += 3)
             {
                 var pa = layer.Verts[layer.Indices[t]].Position;
@@ -405,6 +409,7 @@ public sealed class SpriteSkin : IDisposable
                 ctx.Line(b, c, color, thickness);
                 ctx.Line(c, a, color, thickness);
             }
+        }
     }
 
     public void Dispose()
