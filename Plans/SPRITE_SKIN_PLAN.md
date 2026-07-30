@@ -175,3 +175,137 @@ because handles from both grab the same pixels (see §8).
    and `HandleStep` (handle density along bones, default 0.25); editor `--usebind` skin
    preview with G/W/X (sprite / wireframe / skeleton) toggles.
 6. **v3 ideas**: per-vertex tint (team colors), per-layer z tweaks by facing.
+
+---
+
+## 10. Multi-image bindings (rabbit & badger) — execution plan
+
+Generalize the binding so a layer can bring its OWN PNG (decomposed-limb art) instead of
+being carved out of one shared image by the mask. The mask path stays; the two modes
+coexist per layer. Everything here is render-only — none of it touches the sim.
+
+### 10.1 The assets (verified facts, 2026-07-29)
+
+`SkeletonAssets/rabbit_and_badger/` — 12 PNGs, **all 3800×2400, all colorType 6 (real
+RGBA alpha; no matting needed)**, one body part per file, two characters. Commit the
+PNGs (~6.8 MB total); do NOT commit the sibling `.zip`. Inventory (near/far limb
+assignment is a GUESS — resolve visually in the bind editor and fix by reordering json):
+
+| File | Character | Part (best guess) |
+|---|---|---|
+| IMG_4367 | rabbit | head (helmet + ears) |
+| IMG_4368 | rabbit | leg, green trouser + paw |
+| IMG_4369 | rabbit | leg, green trouser + paw (other) |
+| IMG_4370 | rabbit | arm, pauldron + bracer + paw |
+| IMG_4371 | rabbit | torso: cross surcoat + red scarf collar |
+| IMG_4372 | rabbit | arm (other) |
+| IMG_4373 | badger | arm, gray fur + claws |
+| IMG_4374 | badger | leg: boot + UNFILLED white thigh outline |
+| IMG_4375 | badger | leg: boot + unfilled thigh (other) |
+| IMG_4376 | badger | torso: blue cloak + knife + rope belt |
+| IMG_4377 | badger | arm/leg, gray fur + claws (other) |
+| IMG_4378 | badger | head (hood) |
+
+Key property: the parts appear to be **layer exports in registration** — each part sits at
+its drawn position on the shared canvas (rabbit assembles around canvas center, badger at
+left), so ONE shared `ImageToRig` + one bind pose covers every part. The editor's
+composited backdrop (10.5) verifies this in seconds. If it ever fails, the per-layer
+`OffsetX/Y` (10.3) is the escape hatch: parts get individual offsets from the import
+manifest instead of a shared origin.
+
+Badger gotcha: the white thigh outlines are opaque pixels — they WILL mesh and render.
+Intended to sit under the cloak, so boots go BEHIND the cloak in draw order.
+
+Memory math (why import must crop): 12 × 3800×2400 RGBA ≈ 435 MB decoded. Never load raw.
+
+### 10.2 Phase 0 — import tool (`MTile.Demo -- --import`)
+
+One-time intake, desktop-only (Demo has the GraphicsDevice for PNG decode/encode — no new
+deps; Demo is not part of the web build so KNI portability doesn't constrain it).
+
+`dotnet run --project MTile.Demo -- --import SkeletonAssets/rabbit_and_badger --out SpriteBindings --scale 0.25`
+
+Per source PNG: crop to alpha bounding box (+2 px margin), downscale by the shared
+`--scale`, write `SpriteBindings/<char>/<part>.png`, and record `OffsetX/Y` = crop origin
+× scale (canvas-space, post-scale) in a generated first-pass `<char>.json`. Also log per
+file: alpha coverage % (verifies transparency held), cropped size. A hardcoded (or
+sidecar) manifest maps IMG numbers → character/part names per the table above. Pick
+`--scale` so the assembled character stands a few hundred px tall (≈2× max in-game draw
+height); it's one number, re-runnable.
+
+### 10.3 Phase 1 — format (`Drawing/SpriteBinding.cs`)
+
+`SpriteSkinLayer` gains: `Image` (optional per-layer PNG, sibling-relative like doc
+`Image`), `OffsetX`, `OffsetY` (int, position of this layer's cropped image on the shared
+canvas, in the same image-px space `ImageToRig` consumes). Back-compat rules:
+- Layer has `Image` → mesh/texture from that file; `Color`/mask ignored for it.
+- Layer has no `Image` → carved from doc-level `Image` by mask color, exactly as today.
+- Doc-level `Image` becomes optional; required only if some layer lacks its own.
+Existing bindings (`test_hero`, `player`) must keep loading byte-identically — add a
+round-trip serialization test (pure logic, no GraphicsDevice needed).
+
+### 10.4 Phase 2 — bake (`Drawing/SpriteSkin.cs`)
+
+Touch points, all in the constructor path:
+- Per-layer texture load (`Texture2D.FromStream` + premultiply per texture — the current
+  single premultiply pass moves into the per-layer branch).
+- `BuildLayer` meshes from the layer's own pixel array/dimensions (w/h become per-layer),
+  and vertex rig-positions become `doc.ImageToRig(pos + layerOffset)`.
+- UVs stay relative to the layer's OWN texture (pos / layerW) — offset applies only to
+  the rig-space transform, not the UV.
+- Dispose already per-layer; `OwnsTexture` = true for per-image layers.
+- Handle filtering, MLS bake, per-frame deform, draw loop: UNCHANGED.
+- Dual-target rule applies (this file compiles under KNI too): stick to the API surface
+  already used (FromStream/GetData/SetData/DrawUserIndexedPrimitives).
+- Elbows/knees need nothing special: an arm layer listing `arm_l_*` spans both bones and
+  MLS bends it; `HandleStep` 0.25 keeps joints tight. Heads/torso ride near-rigid.
+
+### 10.5 Phase 3 — bind editor (`MTile.Demo/BindGame.cs`)
+
+`--bind rabbit` resolves `SpriteBindings/rabbit.json` (json-first; current png-first path
+stays for legacy single-image bindings). Changes:
+- Backdrop composites ALL layer images at their offsets (this is the registration check —
+  the figure must assemble). Draw dimmed as today when preview is on.
+- Layer cycling (Tab is taken by edit mode — use `[`/`]` or number keys): highlight the
+  selected layer's mesh outline, dim other layers' backdrops slightly.
+- `FitRigToImage` fits over the union bbox of all layers (composite bounds), not one
+  texture's bounds.
+- Bone assignment per layer stays hand-edited json (written once per character); the
+  editor only needs to SHOW which bones a layer owns (header line is enough).
+- Pose drag / root drag / Shift+wheel scale / G preview / Space clip playback: unchanged.
+- `MTILE_SHOT` screenshot contract already works for headless visual verification.
+
+### 10.6 Phase 4 — wiring
+
+Two bindings: `SpriteBindings/rabbit.json`, `badger.json`. `GameConfig` gets a per-player
+binding name (current hardcoded `player.json` becomes the default). Optional cheap add
+while there: per-layer `Tint` (far-limb darkening lives in data, not art).
+
+First-pass layer order per character, back-to-front (guesses; fix = reorder the json):
+far arm → far leg → torso → near leg → near arm → head. Bones: `arm_r_*` / `leg_r_*` /
+`chest,hip` / `leg_l_*` / `arm_l_*` / `head`. Badger: BOTH boots before (behind) the
+cloak so the white thigh outlines hide. Rabbit scarf-collar: try torso first; if it should
+move with the head, that's a mask-split of the torso image later — don't block on it.
+
+### 10.7 Judgment calls already made (don't re-litigate)
+
+- Shared canvas + shared `ImageToRig` (registration) over per-part placement authoring.
+- Import crops/downscales offline; runtime never sees the 3800×2400 originals.
+- Near/far + draw order + scarf ownership are DATA guesses, corrected in json after a
+  visual pass — not blockers, not code.
+- The bind pose itself is authored interactively (local machine) — ship a rough auto-fit
+  so the session starts from "adjust", not zero.
+
+### 10.8 Remote / headless notes (GCP dev box)
+
+- Code phases (10.2–10.4, 10.6) + serialization tests: fully headless-safe, `dotnet
+  build MTile.sln` + `dotnet test`. The web-build check (`dotnet build
+  MTile.Web/MTile.Web.csproj`) also matters here since SpriteSkin/SpriteBinding compile
+  under KNI.
+- GPU steps (import tool, bind editor, `MTILE_SHOT` screenshots) need a display: on the
+  Debian box use `xvfb-run` with Mesa/llvmpipe (`apt install xvfb libgl1-mesa-dri`).
+  DesktopGL under xvfb works for offscreen capture; if it fights, run import locally on
+  Windows and push the outputs — it's one-shot.
+- The INTERACTIVE binding session (dragging joints over the art) is local-only by nature.
+- Source assets must be pushed for the remote box (repo is public; PNGs ~6.8 MB, fine).
+  Exclude `rabbit_and_badger.zip`.
