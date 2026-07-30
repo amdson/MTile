@@ -100,6 +100,15 @@ public class Game1 : Game
     // anim_traces notebook plots it directly).
     private readonly AnimTraceLogger _animTrace = new();
 
+    // Stage save/reload dev tool (desktop, offline only). Ctrl+M captures the player
+    // position + nearby chunks into Levels/saved/ as a new stage (StageSaver); F5
+    // rebuilds the sim from _activeStage for a pristine re-entry of the scenario.
+    // _activeStage starts as the config stage and switches to each new save.
+    private string _activeStage;
+    private KeyboardState _prevKeys;
+    private string _toast;
+    private float  _toastTtl;
+
     // Frame-time probe (GameConfig.DebugFrameTimings). Tracks the WORST cost of each
     // frame section over a 60-frame window (hitches hide in averages), shown for the
     // last completed window. Single stopwatch reused: Update and Draw run sequentially.
@@ -150,6 +159,12 @@ public class Game1 : Game
     protected override void Initialize()
     {
         _screenshots.Initialize();
+
+        // Stages captured in-game (Ctrl+M → Levels/saved/) register before the config
+        // lookup so "Stage": "saved_NNN" works across restarts. Desktop only: the
+        // registration walks the real filesystem.
+        if (!OperatingSystem.IsBrowser())
+            StageSaver.RegisterSavedStages(Path.GetFullPath(Path.Combine("Levels", "saved")));
 
         var stage = Stages.Get(_config.Stage);
 
@@ -238,7 +253,7 @@ public class Game1 : Game
         // second player on regardless of config.
         if (_net != null) _config.SpawnSecondPlayer = true;
 
-        _sim = new Simulation(_config, stage);
+        LoadStage(stage);
 
         if (_net != null)
         {
@@ -249,19 +264,37 @@ public class Game1 : Game
                 _ => _localInput,
                 pkt => _net.Send(MTile.Net.InputCodec.Encode(in pkt)));
         }
+
+        base.Initialize();
+    }
+
+    // Transient HUD line for the stage save/reload hotkeys (drawn in Draw, gold).
+    private void Toast(string msg)
+    {
+        _toast = msg;
+        _toastTtl = 4f;
+        Console.WriteLine("[stage] " + msg);
+    }
+
+    // (Re)build the deterministic sim from a stage. Called at startup and by the F5
+    // stage-reload hotkey (offline only — a RollbackSession holds a sim reference,
+    // so reload/save hotkeys are gated off when _session exists).
+    private void LoadStage(Stage stage)
+    {
+        _sim = new Simulation(_config, stage);
+        _activeStage = stage.Name;
+        _simAccum = 0f;
+
         // Offline only: if the stage spawned a second player, spoof its input with a bot.
-        else if (_sim.SecondaryPlayers.Count > 0)
-        {
-            _botInput = new MTile.Net.BotInputSource(seed: 1234);
-        }
+        _botInput = _net == null && _sim.SecondaryPlayers.Count > 0
+            ? new MTile.Net.BotInputSource(seed: 1234)
+            : null;
 
         // Cosmetic feedback hooks. The sim raises these during Step; Game1 turns
         // them into particles. ChunkMap tints the tile-break burst by material.
         _sim.OnPlayerRespawn += pos => Effects.Puff(_particles, pos, Color.LimeGreen);
         _sim.Chunks.OnTileBroken += (pos, type) =>
             Effects.TileBreak(_particles, pos, TilePalette.BaseColor(type));
-
-        base.Initialize();
     }
 
     protected override void LoadContent()
@@ -270,6 +303,9 @@ public class Game1 : Game
         _pixel = new Texture2D(GraphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
         _debugFont = Content.Load<SpriteFont>("DebugFont");
+        // Never let a HUD string crash the game: glyphs missing from the font atlas
+        // render as '?' instead of throwing from DrawString mid-Draw.
+        _debugFont.DefaultCharacter ??= '?';
         _draw = new DrawContext(_spriteBatch, _pixel);
         _debugOverlay = new DebugOverlayRenderer(_draw);
         _hud = new HudRenderer(_spriteBatch, _pixel, _debugFont, GraphicsDevice);
@@ -323,6 +359,31 @@ public class Game1 : Game
             Exit();
 
         _screenshots.Update(keyboardState);
+
+        // Stage save/reload (desktop dev tool, offline only — see LoadStage).
+        // Ctrl+M: capture player pos + nearby chunks to Levels/saved/ as a new stage
+        // and make it F5's target. F5: rebuild the sim from the active stage.
+        if (_session == null && !OperatingSystem.IsBrowser())
+        {
+            bool ctrl = keyboardState.IsKeyDown(Keys.LeftControl) || keyboardState.IsKeyDown(Keys.RightControl);
+            if (ctrl && keyboardState.IsKeyDown(Keys.M) && !_prevKeys.IsKeyDown(Keys.M))
+            {
+                try
+                {
+                    string dir = Path.GetFullPath(Path.Combine("Levels", "saved"));
+                    string name = StageSaver.Save(_sim, _config.StageSaveChunkRadius, dir);
+                    _activeStage = name;
+                    Toast($"saved stage '{name}' - F5 re-enters it; persist via game_config \"Stage\": \"{name}\"");
+                }
+                catch (Exception ex) { Toast($"stage save FAILED: {ex.Message}"); }
+            }
+            if (keyboardState.IsKeyDown(Keys.F5) && !_prevKeys.IsKeyDown(Keys.F5))
+            {
+                LoadStage(Stages.Get(_activeStage));
+                Toast($"reloaded stage '{_activeStage}'");
+            }
+        }
+        _prevKeys = keyboardState;
 
         var mouseState = Mouse.GetState();
         var viewport = GraphicsDevice.Viewport;
@@ -400,6 +461,7 @@ public class Game1 : Game
             _animTrace.HandleInput(keyboardState);
         }
         _probeSlow |= gameTime.IsRunningSlowly;
+        _toastTtl -= dt;
 
         base.Update(gameTime);
     }
@@ -647,6 +709,16 @@ public class Game1 : Game
             _spriteBatch.Begin();
             _spriteBatch.DrawString(_debugFont, probe, probePos + new Vector2(1, 1), Color.Black);
             _spriteBatch.DrawString(_debugFont, probe, probePos, _shownSlow ? new Color(255, 90, 70) : Color.LimeGreen);
+            _spriteBatch.End();
+        }
+
+        // Stage save/reload feedback line (Ctrl+M / F5), below the frame-time probe.
+        if (_toastTtl > 0f && _toast != null)
+        {
+            var toastPos = new Vector2(8, 116);
+            _spriteBatch.Begin();
+            _spriteBatch.DrawString(_debugFont, _toast, toastPos + new Vector2(1, 1), Color.Black);
+            _spriteBatch.DrawString(_debugFont, _toast, toastPos, Color.Gold);
             _spriteBatch.End();
         }
 

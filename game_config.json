@@ -1,6 +1,6 @@
 ﻿{
   // options: "start" | "arena" | "plain" | "training" | "flat" | "corridor" (bumpy tunnel) | "gym" (1-high ledges, CorrectorScenario applies)
-  "Stage": "arena",
+  "Stage": "flat",
   "WindowWidth": 1000,
   "WindowHeight": 900,
   "Fullscreen": false,
@@ -11,18 +11,18 @@
   "DrawPlayerSprites":          false,
   "DrawPlayerSpriteSkin":       false,
   "PlayerSpriteBinding":        "pumpkin_man_downsampled",
-  "DebugDrawSkeleton":          false,
+  "DebugDrawSkeleton":          true,
   "RunAnimationSolver":         true,
   "CameraZoom":                 2.5,
   "DebugDrawConstraints":       false,
   "DebugDrawSteeringRamps":     false,
   "DebugDrawGuidedPath":        false,
-  "DebugDrawCorrectorReference": true,
-  "DebugDrawCorrectorBallistic": true,
-  "DebugDrawCorrectorSolved":    true,
+  "DebugDrawCorrectorReference": false,
+  "DebugDrawCorrectorBallistic": false,
+  "DebugDrawCorrectorSolved":    false,
   "DebugDrawCoast":              false, 
   "DebugDrawCorrectorContacts":  false,
-  "DebugDrawCObstacles":         true,
+  "DebugDrawCObstacles":         false,
   "DebugDrawHealthBars":        false,
   "DebugDrawForceFields":       false,
   "DebugDrawMassBall":          true,
@@ -34,10 +34,5 @@
   "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
   "SecondPlayerOffsetY": 0,
-  "TimeScale": 1.0
+  "TimeScale": 0.25
 }
-
-
-
-
-

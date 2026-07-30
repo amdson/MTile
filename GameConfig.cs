@@ -56,6 +56,9 @@ public sealed class GameConfig
     // rig/sprite-skin/attack-glow read a frozen pose. Perf escape hatch — cosmetic
     // only, the sim never reads the animator.
     public bool RunAnimationSolver         { get; set; } = true;
+    // Ctrl+M stage capture (StageSaver): chunks within this Chebyshev radius (in
+    // chunks) of the player's chunk are saved. 2 → a 5×5 chunk neighborhood.
+    public int StageSaveChunkRadius        { get; set; } = 2;
     // Force fields (hold / grab / throw) — on by default so the otherwise-invisible
     // combat fields read while playtesting (COMBAT_FEEL_PLAN Phases 2/6).
     public bool DebugDrawForceFields       { get; set; } = true;

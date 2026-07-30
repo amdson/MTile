@@ -164,8 +164,14 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     public Simulation(GameConfig config, Stage stage)
     {
         _chunks = new ChunkMap();
-        // Title-relative; chunk files referenced by the config resolve next to it.
-        TerrainLoader.Load($"Levels/{stage.TerrainConfig}", _chunks);
+        // Title-relative ("Levels/<file>"); chunk files referenced by the config resolve
+        // next to it. Stages captured in-game (StageSaver) carry an ABSOLUTE path instead
+        // — TitleContent reads those via direct file I/O, so a stage saved this session
+        // loads without a rebuild.
+        string cfgPath = System.IO.Path.IsPathRooted(stage.TerrainConfig)
+            ? stage.TerrainConfig
+            : $"Levels/{stage.TerrainConfig}";
+        TerrainLoader.Load(cfgPath, _chunks);
 
         _playerSpawn = stage.PlayerSpawn;
         MarkWorldStores();

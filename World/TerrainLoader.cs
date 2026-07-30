@@ -23,6 +23,9 @@ public class TerrainConfig
     public Dictionary<string, string> ChunkFiles { get; set; } = new();
     public List<TerrainRule> Rules { get; set; } = new();
     public PerlinConfig Perlin { get; set; } = null; // when set, replaces Rules for unassigned chunks
+    // Player position (world px) for stages captured in-game (StageSaver). Read by the
+    // saved-stage registration, ignored by the terrain loader itself.
+    public float[] PlayerSpawn { get; set; } = null;
 }
 
 public class TerrainRule
@@ -80,7 +83,17 @@ public static class TerrainLoader
             for (int tx = 0; tx < Chunk.Size; tx++)
             {
                 if (tx >= line.Length) break;
-                chunk.Tiles[tx, ty].IsSolid = line[tx] == 'X' || line[tx] == 'x';
+                // Material chars (StageSaver.TileChar writes the same map). 'X' is the
+                // legacy solid char — Stone, matching the old default-type behavior.
+                ref var t = ref chunk.Tiles[tx, ty];
+                switch (line[tx])
+                {
+                    case 'X': case 'x': t.IsSolid = true; t.Type = TileType.Stone; break;
+                    case 'D': case 'd': t.IsSolid = true; t.Type = TileType.Dirt;  break;
+                    case 'S': case 's': t.IsSolid = true; t.Type = TileType.Sand;  break;
+                    case 'F': case 'f': t.IsSolid = true; t.Type = TileType.Foam;  break;
+                    default:            t.IsSolid = false; break;
+                }
             }
         }
     }
