@@ -7,11 +7,12 @@
   "DebugDrawHitboxes":          false,
   "DebugDrawHurtboxes":         false,
   "DebugDrawPlayerOrientation": false,
-  "DebugDrawBodies":            true,
+  "DebugDrawBodies":            false,
+  "DrawBackground":             true,
   "DrawPlayerSprites":          false,
-  "DrawPlayerSpriteSkin":       false,
+  "DrawPlayerSpriteSkin":       true,
   "PlayerSpriteBinding":        "pumpkin_man_downsampled",
-  "DebugDrawSkeleton":          true,
+  "DebugDrawSkeleton":          false,
   "RunAnimationSolver":         true,
   "CameraZoom":                 2.5,
   "DebugDrawConstraints":       false,
@@ -34,5 +35,5 @@
   "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
   "SecondPlayerOffsetY": 0,
-  "TimeScale": 0.25
+  "TimeScale": 1.0
 }

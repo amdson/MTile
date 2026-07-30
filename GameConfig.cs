@@ -71,6 +71,9 @@ public sealed class GameConfig
     public bool DebugDrawSkeletonJoints    { get; set; } = false;
     // Highlight the foot the cadence solver is currently pinning (the plant foot).
     public bool DebugHighlightPlantFoot    { get; set; } = true;
+    // Parallax mountain backdrop (Assets/mountain_background.png). No effect if the
+    // file is missing (e.g. WASM).
+    public bool DrawBackground             { get; set; } = true;
     // The player's vector sprite (the placeholder hexagon body). Turn off to view
     // the skeleton on its own. Independent of DebugDrawBodies (the physics polygon).
     public bool DrawPlayerSprites          { get; set; } = true;

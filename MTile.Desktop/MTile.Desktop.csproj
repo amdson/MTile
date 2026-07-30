@@ -42,6 +42,10 @@
     <None Include="..\ReferenceClips\**\*" Link="ReferenceClips\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Backdrop art loaded at runtime via Texture2D.FromStream (not the content pipeline). -->
+    <None Include="..\Assets\**\*" Link="Assets\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="..\Levels\**\*" Link="Levels\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

@@ -14,6 +14,8 @@ public sealed class ChunkRenderer
     private readonly Texture2D      _pixel;
     private readonly Camera         _camera;
     private readonly GraphicsDevice _graphicsDevice;
+    // Optional grain atlas for tile fills; null → flat palette fills.
+    public TileTextureAtlas Atlas;
 
     // Tile fills are inset by a gutter so the grid reads; scales with tile size
     // (1px per 16px of tile, rounded up) instead of a fixed 1px.
@@ -84,6 +86,21 @@ public sealed class ChunkRenderer
             origin.Y > _camera.Position.Y + halfH || origin.Y + chunkPixelSize < _camera.Position.Y - halfH)
             return;
 
+        // Pass 1: black underlay covering each solid tile's full cell — the inset
+        // fill on top leaves the gutter showing through as a thin border line.
+        // Separate from the fill pass so the batch switches texture once per chunk,
+        // not once per tile.
+        for (int tx = 0; tx < Chunk.Size; tx++)
+            for (int ty = 0; ty < Chunk.Size; ty++)
+            {
+                if (!chunk.Tiles[tx, ty].IsSolid) continue;
+                _spriteBatch.Draw(_pixel, new Rectangle(
+                    (int)(origin.X + tx * Chunk.TileSize),
+                    (int)(origin.Y + ty * Chunk.TileSize),
+                    Chunk.TileSize, Chunk.TileSize), Color.Black);
+            }
+
+        // Pass 2: palette-tinted fills, modulated by the rock grain atlas when present.
         for (int tx = 0; tx < Chunk.Size; tx++)
             for (int ty = 0; ty < Chunk.Size; ty++)
             {
@@ -96,10 +113,15 @@ public sealed class ChunkRenderer
                 var color = dmgFrac > 0f
                     ? Color.Lerp(baseColor, Color.Black, dmgFrac * 0.7f)
                     : baseColor;
-                _spriteBatch.Draw(_pixel, new Rectangle(
+                var dest = new Rectangle(
                     (int)(origin.X + tx * Chunk.TileSize),
                     (int)(origin.Y + ty * Chunk.TileSize),
-                    TileDrawSize, TileDrawSize), color);
+                    TileDrawSize, TileDrawSize);
+                if (Atlas != null)
+                    _spriteBatch.Draw(Atlas.Texture, dest,
+                        Atlas.SourceFor(type, gtx, gty, TileDrawSize), color);
+                else
+                    _spriteBatch.Draw(_pixel, dest, color);
             }
     }
 }

@@ -41,6 +41,7 @@ public class Game1 : Game
     }
 
     private readonly Camera _camera = new();
+    private ParallaxBackground _background;
 
     private DrawContext _draw;
     private DebugOverlayRenderer _debugOverlay;
@@ -319,6 +320,21 @@ public class Game1 : Game
         _glow = new GlowRenderer(GraphicsDevice);
         _devDemos = new DevDemoRenderer(_prims, _density, _metaballs, _glow);
         _chunkRenderer = new ChunkRenderer(_spriteBatch, _pixel, _camera, GraphicsDevice);
+        // Rock grain for tile fills — same raw-PNG loading rules as the backdrop below.
+        try
+        {
+            string r1 = Path.Combine(AppContext.BaseDirectory, "Assets", "rock1.png");
+            string r2 = Path.Combine(AppContext.BaseDirectory, "Assets", "rock2.png");
+            if (File.Exists(r1) && File.Exists(r2))
+            {
+                using var fs1 = File.OpenRead(r1);
+                using var fs2 = File.OpenRead(r2);
+                _chunkRenderer.Atlas = TileTextureAtlas.Build(GraphicsDevice,
+                    Texture2D.FromStream(GraphicsDevice, fs1),
+                    Texture2D.FromStream(GraphicsDevice, fs2));
+            }
+        }
+        catch (Exception) { /* cosmetic only — flat fills without it */ }
         _glowField = new GlowTrailField(GraphicsDevice, downscale: 2)
         {
             Lambda           = 6f,    // ~0.8s visible streak
@@ -338,6 +354,19 @@ public class Game1 : Game
                 Path.Combine(AppContext.BaseDirectory, "SpriteBindings", _config.PlayerSpriteBinding + ".json"),
                 _animator.Skeleton)
             : null;
+        // Parallax backdrop — loaded straight from PNG (not the content pipeline) so it
+        // works without an .mgcb rebuild; silently absent on hosts without the file.
+        if (_config.DrawBackground)
+        {
+            var bgPath = Path.Combine(AppContext.BaseDirectory, "Assets", "mountain_background.png");
+            try
+            {
+                if (File.Exists(bgPath))
+                    using (var fs = File.OpenRead(bgPath))
+                        _background = new ParallaxBackground(Texture2D.FromStream(GraphicsDevice, fs), _pixel);
+            }
+            catch (Exception) { _background = null; }
+        }
         _attackGlow = new AttackGlowSystem(_animator, _glow, _glowField, SkeletonScale);
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
                                               _camera, _particles, _cursorTrail, _attackGlow);
@@ -474,6 +503,8 @@ public class Game1 : Game
         RenderTarget2D shotTarget = _screenshots.BeginCapture(GraphicsDevice);
 
         GraphicsDevice.Clear(Color.Black);
+
+        _background?.Draw(_spriteBatch, _camera, _screenCenter);
 
         _spriteBatch.Begin(transformMatrix: _camera.GetTransform(_screenCenter));
 
