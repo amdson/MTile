@@ -317,6 +317,33 @@ public sealed partial class CharacterAnimator
         { jac[row0 * stride + IdxPhi] = MathF.Sqrt(AnimSolverConfig.Current.PhaseStepPrior); return 1; }
     }
 
+    // One row: √PhaseFloorPrior · max(0, 1 − Δφ/floor) — the one-sided phase-rate floor.
+    // A hinge (NoPen-style knee: inactive ⇒ 0 residual AND 0 Jacobian, count stays 1) that
+    // props the solved step up toward the speed-derived floor when nothing else drives it —
+    // a weak-weight contact (feather fade / fresh zero-residual capture) otherwise lets Δφ
+    // collapse, and the flight coast then replays that collapsed value for the whole
+    // no-contact window. Deficit is normalized by the floor so the row is O(1) like the
+    // other dimensionless rows. floor ≤ ~1e-5 (standstill / static solve) disables the row.
+    private sealed class PhaseRateFloorConstraint : ISolveConstraint
+    {
+        private readonly CharacterAnimator _a;
+        public PhaseRateFloorConstraint(CharacterAnimator a) => _a = a;
+        public int Residuals(ReadOnlySpan<float> x, Span<float> r)
+        {
+            float fl = _a._phaseFloor;
+            float def = fl > 1e-5f ? 1f - x[IdxPhi] / fl : 0f;
+            r[0] = def > 0f ? MathF.Sqrt(AnimSolverConfig.Current.PhaseFloorPrior) * def : 0f;
+            return 1;
+        }
+        public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
+        {
+            float fl = _a._phaseFloor;
+            if (fl > 1e-5f && x[IdxPhi] < fl)
+                jac[row0 * stride + IdxPhi] = -MathF.Sqrt(AnimSolverConfig.Current.PhaseFloorPrior) / fl;
+            return 1;
+        }
+    }
+
     // Two rows: √ComWeightY · δ and √ComWeightX · d.x — the soft com ties pulling the root
     // offset d → baseline. The Y row lets a no-contact flight frame settle to the com anchor
     // (both feet free to leave the ground). The X row is the ABSOLUTE anti-absorption guard on

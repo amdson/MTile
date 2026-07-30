@@ -21,8 +21,8 @@ public sealed partial class CharacterAnimator
         if (!_haveCorr || _ls == null) return -1f;
         int bones = _skeleton.Count;
         int n = IdxTheta0 + bones;
-        // 2/contact + 2/pin + bones/surface (no-penetration) + 1 aim + continuity + com(2) + bones×2 priors.
-        int m = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0) + 3 + 2 * bones;
+        // 2/contact + 2/pin + bones/surface (no-penetration) + 1 aim + continuity + rate floor + com(2) + bones×2 priors.
+        int m = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0) + 4 + 2 * bones;
 
         // The body may be far from the world origin (it has walked many units), so a residual
         // tip.x − target.x is a tiny difference of large coordinates and a float32 finite
@@ -67,6 +67,14 @@ public sealed partial class CharacterAnimator
                           + s.Normal.Y * (tip.Y + x[IdxDy] - s.Point.Y);
                 if (MathF.Abs(s.Margin - gap) < kneeBand) skipRow[npRow] = true;
             }
+        // The phase-rate floor row has the same one-sided knee, at Δφ == floor: an FD step in
+        // the Δφ column that straddles it sees half the slope. Row index = after the no-pen
+        // block, the aim row, and the continuity row. Band covers the largest φ FD step.
+        {
+            int floorRow = npStart + _surfaces.Count * b0 + (_aimActive ? 1 : 0) + 1;
+            if (_phaseFloor > 1e-5f && MathF.Abs(x[IdxPhi] - _phaseFloor) < 0.02f)
+                skipRow[floorRow] = true;
+        }
 
         float worst = 0f;
         for (int j = 0; j < n; j++)
@@ -133,7 +141,7 @@ public sealed partial class CharacterAnimator
         if (!_haveCorr || _ls == null) return "(no solve)";
         int bones = _skeleton.Count, n = IdxTheta0 + bones;
         int geom = (_contacts.Count + _pins.Count) * 2 + _surfaces.Count * bones + (_aimActive ? 1 : 0);
-        int m = geom + 3 + 2 * bones;   // + continuity + com(δ, d.x) + bones×2 priors
+        int m = geom + 4 + 2 * bones;   // + continuity + rate floor + com(δ, d.x) + bones×2 priors
 
         var x = new float[n];
         Array.Copy(_solveVars, x, n);

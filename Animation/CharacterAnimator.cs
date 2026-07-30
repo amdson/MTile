@@ -216,6 +216,7 @@ public sealed partial class CharacterAnimator
     private AnimationDocument _solveClip;
     private float             _solvePhi;
     private Affine2           _solveRoot;
+    private float             _phaseFloor;        // speed-derived Δφ floor for PhaseRateFloorConstraint (0 = inert)
     private bool              _haveCorr;          // a Δθ-correction solve ran this frame
 
     // Action-aim state (the stab re-aim, §STAB_AIM_PLAN), resolved each frame in step 1.7 and
@@ -305,8 +306,8 @@ public sealed partial class CharacterAnimator
         // external pin + continuity + com + one prior per bone. Sized to the rig once.
         int nv = IdxTheta0 + rig.Count + 2;
         // 2/contact + 2/pin + (MaxSurfaces × bones) no-penetration + 1 aim + continuity
-        // + com(δ, d.x) + bones Tikhonov + bones Δθ-smoothness.
-        int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 1 + 3 + 2 * rig.Count + 2;
+        // + phase-rate floor + com(δ, d.x) + bones Tikhonov + bones Δθ-smoothness.
+        int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 1 + 4 + 2 * rig.Count + 2;
         _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
         _solveVars = new float[nv];
         _solveLo   = new float[nv];
@@ -350,6 +351,7 @@ public sealed partial class CharacterAnimator
             new NoPenetrationConstraint(this),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
             new ActionAimConstraint(this),         // 1 row: re-aim the action overlay along the input dir (Δθ)
             new PlaybackContinuityConstraint(this),// 1 row: Δφ momentum prior
+            new PhaseRateFloorConstraint(this),    // 1 row: one-sided Δφ ≥ speed-derived floor (anti-collapse)
             new ComOffsetConstraint(this),         // 1 row: soft com pulls δ→baseline
             new PosePriorConstraint(this),         // N rows: Tikhonov on each Δθ (toward 0)
             new ThetaSmoothnessConstraint(this),   // N rows: final angle toward last EMITTED (the in-solve ease)
@@ -526,6 +528,14 @@ public sealed partial class CharacterAnimator
         // 2. Advance the locomotion phase. A Walk/WalkBack clip with contact labels is
         //    cadence-driven: the solver picks Δφ so the planted foot doesn't slip
         //    against the body's real motion. Everything else keeps the old rate.
+        // Speed-derived Δφ floor for this frame's solve (PhaseRateFloorConstraint) and the
+        // flight coast below. 0.5 × the legacy distance rate: well under any legitimate
+        // cadence (authored sweeps run ≲ 100 px/phase ⇒ solved steps ≥ the full legacy rate),
+        // so it only catches collapse — a weak-weight contact frame solving Δφ ≈ 0, which the
+        // coast would then replay for a whole no-contact window (the mid-flight phase lock).
+        // Scales with |vx|, so stopping/decelerating legitimately drops the floor to 0.
+        _phaseFloor = 0.5f * speed * dt * PhasePerPixel;
+
         if (locomotion && hasClip && HasContacts(anim))
         {
             int dir = s.Facing == 0 ? 1 : s.Facing;
@@ -550,11 +560,15 @@ public sealed partial class CharacterAnimator
             {
                 // Flight: a run's no-contact window has no planted foot to pin against,
                 // so there's nothing for the cadence solver to do. Coast the cycle at the
-                // last solved step's momentum (falling back to the distance-based rate on
-                // a cold entry) so the swing keeps moving until the next foot plants and
-                // the solver re-engages — otherwise the phase would freeze mid-air.
-                _state.Phase = Wrap01(_state.Phase +
-                    (_prevPhaseStep > 1e-5f ? _prevPhaseStep : speed * dt * PhasePerPixel));
+                // last solved step's momentum, floored at the speed-derived rate — the last
+                // solved step can be both COLLAPSED (a weak fade/capture frame solved ≈ 0;
+                // replaying it locks the phase mid-flight until the next contact's feather,
+                // which a crawling phase may never reach) and STALE (speed changed since it
+                // was solved; no solve runs in flight to notice). The floor tracks current
+                // |vx| each frame and is stored back so the momentum survives the window.
+                float coast = MathF.Max(_prevPhaseStep, _phaseFloor);
+                _state.Phase   = Wrap01(_state.Phase + coast);
+                _prevPhaseStep = coast;
             }
         }
         else
@@ -1023,6 +1037,7 @@ public sealed partial class CharacterAnimator
 
         _contacts.Clear();                  // no planted contacts on this path
         _solveClip = anim; _solvePhi = phi; _solveRoot = root;
+        _phaseFloor = 0f;                   // Δφ locked below — the rate-floor row must stay inert
         int n = IdxTheta0 + _skeleton.Count;
         _solveLo[IdxPhi] = 0f;                    _solveHi[IdxPhi] = 0f;   // Δφ locked — no cadence here
         _solveLo[IdxDy]  = -cfg.VertOffsetLimit;  _solveHi[IdxDy]  = cfg.VertOffsetLimit;

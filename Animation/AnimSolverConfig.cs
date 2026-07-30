@@ -40,6 +40,13 @@ public class AnimSolverConfig
     // in-solve smoothing reproduces the retired BlendToward ease exactly on unconstrained
     // bones. Tune the FEEL via CharacterAnimator.Stiffness / UpperBodyStiffness.
     public float PhaseStepPrior { get; set; } = 8f;   // λ on (Δφ − Δφ_prev) — cadence momentum / playback continuity
+    // λ on the one-sided phase-rate floor max(0, 1 − Δφ/floor): a hinge that keeps a solved
+    // step from collapsing toward 0 when a weak-weight contact (feather fade, fresh capture)
+    // stops driving Δφ — the collapsed value would then be replayed by the flight coast for a
+    // whole no-contact window (the "locked mid-flight" bug). The floor itself is speed-derived
+    // (CharacterAnimator, 0.5 × speed·dt·PhasePerPixel — well below any legitimate cadence),
+    // so the row is inert in steady locomotion and at a stop. 0 disables.
+    public float PhaseFloorPrior { get; set; } = 60f;
     public float ComWeightY    { get; set; } = 23f;   // soft λ pulling δ → com baseline (so flight frames release)
     // λ pulling the horizontal body sway d.x → 0. Deliberately STIFFER than ComWeightY: d.x
     // exists to soak the no-slip residual at a planted foot's horizontal turning point

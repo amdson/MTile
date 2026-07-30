@@ -1,0 +1,4 @@
+1. Build an additional animation clip for run for the case where they're technically not in contact with the ground. One foot forward, prepared to run on contact. Add machinery for transitioning from this state to a specific phase in the current run clip when the run clip is activated. 
+2. Work on transitions from running into vaulting / mantling
+3. Visibly show knees going from bent to straight in jump. To a reasonable extent, parametrize jump to keep feet in contact with ground while jump servo active
+4. 
