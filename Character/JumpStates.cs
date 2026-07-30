@@ -148,6 +148,8 @@ public class JumpingState : MovementState
             cfg.AirDrag     * m.AirDrag);
 
         ctx.Body.AppliedForce = force;
+
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
     }
 
     private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
@@ -243,6 +245,8 @@ public class RunningJumpState : MovementState
             cfg.AirDrag     * m.AirDrag);
 
         ctx.Body.AppliedForce = force;
+
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
     }
 
     private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
@@ -304,6 +308,8 @@ public class DoubleJumpingState : MovementState
             cfg.AirDrag     * m.AirDrag);
 
         ctx.Body.AppliedForce = force;
+
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
     }
 }
 
@@ -333,8 +339,6 @@ public class CoveredJumpState : MovementState
 
     public override int ActivePriority  => MovementPriorities.CoveredJumpActive;
     public override int PassivePriority => MovementPriorities.CoveredJumpPassive;
-    // Owns its own Under ramp for the slide-out (EnsureContacts) — no ambient duplicates.
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
     // Like the rest of the jump family, the hitstun/stun lock-out applies — a stunned
     // player under an overhang can't covered-jump out. (Previously missing: the inline
     // BlocksJump gate the other jumps carried was never added here.)
@@ -457,6 +461,9 @@ public class CoveredJumpState : MovementState
                 vars.JumpHoldTime = 0f;
                 vars.JumpReleased = !ctx.Input.Space;
                 ctx.Body.AppliedForce = Vector2.Zero;
+                // Off: owns its own Under ramp for the slide-out (EnsureContacts) — no
+                // ambient duplicates. Still called so stale cross-frame anchor state clears.
+                ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
                 return;
             }
 
@@ -494,6 +501,7 @@ public class CoveredJumpState : MovementState
             float along = vars.OpenDir * ctx.Body.Velocity.X;
             slideForce.X += vars.OpenDir * AirControl.SoftClampVelocity(along, vars.SlideSpeed, cfg.WalkAccel, ctx.Dt);
             ctx.Body.AppliedForce = slideForce;
+            ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
             return;
         }
 
@@ -508,5 +516,7 @@ public class CoveredJumpState : MovementState
         force.X += AirControl.Apply(ctx, cfg.AirAccel, cfg.MaxAirSpeed, cfg.AirDrag);
 
         ctx.Body.AppliedForce = force;
+
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 }

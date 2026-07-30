@@ -9,10 +9,6 @@ namespace MTile;
 
 public class WallSlidingState : MovementState
 {
-    // Owned state servoing against fixed contacts (wall FSD + optional ground
-    // FSD) — the ambient layer must never fight it (CONSOLIDATION_PLAN §3.4).
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
-
     public override AnimTag AnimationTag => AnimTag.WallSlide;
 
     private readonly int _wallDir;
@@ -123,6 +119,11 @@ public class WallSlidingState : MovementState
             : Vector2.Zero;
         // Restore double jump
         abilities.HasDoubleJumped = false;
+
+        // Off: owned state servoing against fixed contacts (wall FSD + optional ground
+        // FSD) — the ambient layer must never fight it (CONSOLIDATION_PLAN §3.4).
+        // Still called so Apply's early-out clears cross-frame anchor state.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 }
 
@@ -204,5 +205,7 @@ public class WallJumpingState : MovementState
         }
 
         ctx.Body.AppliedForce = force;
+
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
     }
 }

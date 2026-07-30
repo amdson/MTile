@@ -13,13 +13,15 @@ namespace MTile;
 //
 // The corrector solve is SHARED INFRASTRUCTURE, not a class of state — any
 // state opts into as much of it as fits its physics:
-//   - AmbientPolicy (default: on): the per-frame ambient layer assists around
-//     the state's own forces with the redirect disc (AmbientCorrector). Off
-//     for states that servo against fixed contacts — an ambient assist would
-//     fight the owned maneuver.
+//   - ApplyAmbient (every Update ends with one, on every return path): the
+//     per-frame ambient layer assists around the state's own forces with the
+//     redirect disc (AmbientCorrector). The state passes the policy it wants —
+//     Off for states that servo against fixed contacts, where an ambient
+//     assist would fight the owned maneuver.
 //   - FoldProfile: fold states (Standing/Crouched/Falling) go further and
-//     delegate support/walk/brake/landing-catch to the ambient solve entirely;
-//     the profile shapes the reference (hover height, progress cap).
+//     delegate support/walk/brake/landing-catch to the ambient solve entirely,
+//     passing a fold profile to the same call; the profile shapes the
+//     reference (hover height, progress cap).
 //   - ManeuverCorrector.Apply: a committed maneuver whose future is PHYSICS
 //     (a launch arc, a slide) predicts its guided coast and solves body-force
 //     corrections around it, per-tick and as a trigger-by-feasibility probe
@@ -71,17 +73,23 @@ public abstract class MovementState
     // states (Falling, Stunned, jumps without a source cache).
     public virtual void ResetTransient() { }
 
-    // What the ambient corrector may do while this state is active. Published per
-    // frame, MovementModifiers-style. Default: both assists on. Override to Off in
-    // states that servo the body against fixed contacts — an ambient redirect
-    // would fight the owned maneuver.
-    public virtual AmbientPolicy AmbientPolicy => AmbientPolicy.Default;
-
-    // How this state participates in the stand fold (reference shaping — see
-    // FoldProfile). Default: not a fold state; the state owns its own support.
-    // Fold states delegate hover/walk/brake/landing-catch to the ambient solve
-    // and apply only the gravity-hold baseline themselves.
-    public virtual FoldProfile FoldProfile => FoldProfile.None;
+    // The ambient corrector is a force the state APPLIES, not a shell pass over
+    // it: every concrete Update ends — on every return path — with exactly one
+    // ApplyAmbient call, choosing this frame's assist policy and fold profile
+    // explicitly. It must run even at Off/None: the early-out inside Apply
+    // clears the cross-frame ambient anchors (AmbientPrevDv/AmbientChannelPrev),
+    // and skipping it would hand a stale anchor to the next state's solve.
+    // Hitstun forces the assists off — knockback must hit corners honestly —
+    // but never the fold: dropping support would let a hit stun the body
+    // through the floor (the profile's knockback exemptions inside Apply mute
+    // the elective parts instead). startGrounded seeds the coast prediction;
+    // true only for the grounded fold states (Standing/Crouched).
+    protected static void ApplyAmbient(EnvironmentContext ctx, PlayerAbilityState abilities,
+        ref MovementVars vars, AmbientPolicy policy, in FoldProfile fold, bool startGrounded = false)
+    {
+        if (abilities.Combat.HitstunActive) policy = AmbientPolicy.Off;
+        AmbientCorrector.Apply(ctx, policy, startGrounded, fold, ref vars);
+    }
 
     // The animation-facing CATEGORY of this state (AnimTag.None = generic: the animator picks
     // by grounded/velocity). Replaces substring matching on state class names, which silently

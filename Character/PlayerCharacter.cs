@@ -187,11 +187,6 @@ public class PlayerCharacter : IHittable
 
     private readonly List<MovementState> _stateRegistry = new();
 
-    // Ambient corrector layer (BALLISTIC_CORRECTOR_PLAN step 7) — per-frame free-coast
-    // predict/solve replacing the old ReflexSystem ramps. Cross-frame state lives in
-    // MovementVars (AmbientPrevDv + the per-channel Δ anchors); everything else is scratch.
-    private readonly AmbientCorrector _ambient = new();
-
     // Long-lived per-direction corridor scratch for EnvironmentContext.GetCorridor — pure
     // derived data, fully rewritten by every scan (never snapshot state); pooled here only
     // so the per-frame reflex probe doesn't allocate.
@@ -362,9 +357,9 @@ public class PlayerCharacter : IHittable
     // Corrector stress harness (the "corridor" stage): strip the movement registry
     // down to the two free states, so everything between them — bump hops, head
     // tucks, unsticking — must come from the ambient corrector's applied
-    // corrections. No jump, no crouch, no climb family, no ledges. Standing
-    // publishes AmbientPolicy.Default, so the ambient layer stays on. Call from a
-    // Stage.Populate before the first Step.
+    // corrections. No jump, no crouch, no climb family, no ledges. Standing's
+    // Update runs the ambient layer (Default policy + Stand fold), so it stays
+    // on. Call from a Stage.Populate before the first Step.
     public void RestrictToFallAndStand()
     {
         _stateRegistry.Clear();
@@ -574,22 +569,11 @@ public class PlayerCharacter : IHittable
             ctx.Modifiers.PreserveExternalVelocity = true;
         }
 
+        // The ambient corrector (Character/AmbientCorrector.cs) runs INSIDE the
+        // state's Update — every state ends its Update with an ApplyAmbient call
+        // (see MovementState.ApplyAmbient), so the active forces (redirect,
+        // fold support) are the state's own, not a shell pass over it.
         _currentState.Update(ctx, _abilities, ref _moveVars);
-
-        // Ambient corrector (Character/AmbientCorrector.cs): free-coast predict/solve
-        // under the state's published policy. After Movement.Update (the state's policy
-        // + forces are final for the frame), before the physics step reads AppliedForce.
-        // Hitstun forces the policy off — knockback must hit corners honestly, whatever
-        // free state is nominally active.
-        var rampPolicy = _abilities.Combat.HitstunActive ? AmbientPolicy.Off : _currentState.AmbientPolicy;
-        // The stand fold: while a fold state is active, hover support is the
-        // ambient solve's job (the state attaches no FSD/spring), so the
-        // corrector must run — and apply — even at zero input and in hitstun.
-        // The state publishes its FoldProfile per frame (hitstun does NOT turn
-        // the fold off — dropping support would let a hit stun the body through
-        // the floor; the policy gate above plus the profile's knockback
-        // exemptions inside Apply mute the elective parts instead).
-        _ambient.Apply(ctx, rampPolicy, IsGrounded, _currentState.FoldProfile, ref _moveVars);
 
         // Action gets to augment the body's force AFTER movement has written it but
         // BEFORE Action.Update — keeps Update free for FSM logic, lets the physics

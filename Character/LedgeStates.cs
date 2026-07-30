@@ -24,8 +24,6 @@ public class LedgeGrabState : MovementState
 
     public override int ActivePriority  => MovementPriorities.LedgeGrabActive;
     public override int PassivePriority => MovementPriorities.LedgeGrabPassive;
-    // Body is pinned to the corner — an ambient redirect would fight the hang contacts.
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
     // Blocked during combat hitstun/stun (Phase 4) — a launch past a ledge can't be
     // cancelled by catching it. The pull (LedgePullState) is entered FROM a grab, so
     // gating the grab already prevents the pull; it carries the flag too for clarity.
@@ -191,6 +189,10 @@ public class LedgeGrabState : MovementState
         force.Y = -cfg.GrabGravityCancel
                 + SpringDampForce(ctx.Body.Position.Y - hangY, ctx.Body.Velocity.Y, cfg, ctx.Dt);
         ctx.Body.AppliedForce = force;
+
+        // Ambient Off: body is pinned to the corner — an ambient redirect would fight
+        // the hang contacts. Still called so cross-frame anchor state is cleared.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 
     // Spring toward an anchor with a saturated damper. The raw linear damping term
@@ -237,8 +239,6 @@ public class LedgePullState : MovementState
     public override int ActivePriority  => MovementPriorities.LedgePullActive;
     public override int PassivePriority => MovementPriorities.LedgePullPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
-    // Servo pull along its own path — no ambient redirect on top.
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => abilities.UpJustPressed
@@ -368,6 +368,9 @@ public class LedgePullState : MovementState
                     out var target, out var targetVel);
                 ctx.Body.AppliedForce = ReferencePath.TrackForce(
                     target, targetVel, ctx.Body, ctx.Gravity, cfg2);
+                // Ambient Off: servo pull along its own path — no ambient redirect on
+                // top. Still called so cross-frame anchor state is cleared.
+                ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
                 return;
             }
             vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
@@ -391,6 +394,7 @@ public class LedgePullState : MovementState
         }
 
         ctx.Body.AppliedForce = force;
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 }
 
@@ -411,9 +415,6 @@ public class LedgeJumpState : MovementState
     public override int ActivePriority  => MovementPriorities.LedgeJumpActive;
     public override int PassivePriority => MovementPriorities.LedgeJumpPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
-    // Launch off the pull is a committed arc past the very corner an ambient ramp
-    // would try to steer around — keep the layer out for the launch frames.
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
     public override AnimTag AnimationTag => AnimTag.LedgeJump;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -452,5 +453,10 @@ public class LedgeJumpState : MovementState
             cfg.AirDrag     * m.AirDrag);
 
         ctx.Body.AppliedForce = force;
+
+        // Ambient Off: the launch off the pull is a committed arc past the very corner
+        // an ambient ramp would try to steer around — keep the layer out for the launch
+        // frames. Still called so cross-frame anchor state is cleared.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 }

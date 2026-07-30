@@ -20,8 +20,8 @@ namespace MTile;
 //
 // Split between the vault and the mantle is the entry-speed gate
 // (MantleMaxEntrySpeed); cancel-on-release and MaxVaultTime liveness as
-// everywhere in the climb family. AmbientPolicy.Off — the ambient corrector
-// must never fight an owned maneuver.
+// everywhere in the climb family. Update passes AmbientPolicy.Off — the
+// ambient corrector must never fight an owned maneuver.
 public abstract class ClimbManeuverBase : MovementState
 {
     // Entry feasibility solves the FULL arc once per candidate frame and can afford
@@ -43,7 +43,6 @@ public abstract class ClimbManeuverBase : MovementState
     public override int ActivePriority  => MovementPriorities.ClimbActive;
     public override int PassivePriority => MovementPriorities.ClimbPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     // Height-fraction progress + lip grip for the hands overlay — pure functions
     // of MovementVars/body, so a restore rebuilds them (LedgeStates idiom).
@@ -287,6 +286,11 @@ public abstract class ClimbManeuverBase : MovementState
         // (ManeuverCorrector.Apply: correction into AppliedForce, Δ anchors,
         // ledger record). ──
         ManeuverCorrector.Apply(ctx, _dir, vars.EntrySpeed, ref vars.ManeuverChannelPrev);
+
+        // Ambient stays Off: the maneuver solve owns correction, and an ambient
+        // assist would fight the owned arc. The call still runs every frame so
+        // Apply's early-out clears the cross-frame anchor state.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 }
 

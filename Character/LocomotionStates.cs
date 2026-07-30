@@ -14,11 +14,6 @@ public class FallingState : MovementState
     public override int ActivePriority => MovementPriorities.FallingActive;
     public override int PassivePriority => MovementPriorities.FallingPassive;
 
-    // Falling is a fold state: the landing catch (anchor re-binding on descent)
-    // and the graze/duck assists all run through the fold solve. High free fall
-    // is naturally unbound (anchor beyond leg reach ⇒ no envelope rows).
-    public override FoldProfile FoldProfile => FoldProfile.Stand;
-
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) => true;
 
@@ -36,6 +31,12 @@ public class FallingState : MovementState
             force.Y += cfg.FastFallForce;
 
         ctx.Body.AppliedForce = force;
+
+        // Falling is a fold state: the landing catch (anchor re-binding on
+        // descent) and the graze/duck assists all run through the fold solve.
+        // High free fall is naturally unbound (anchor beyond leg reach ⇒ no
+        // envelope rows).
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Stand);
     }
 }
 
@@ -43,8 +44,6 @@ public class StandingState : MovementState
 {
     public override int ActivePriority => MovementPriorities.StandingActive;
     public override int PassivePriority => MovementPriorities.StandingPassive;
-
-    public override FoldProfile FoldProfile => FoldProfile.Stand;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -100,6 +99,10 @@ public class StandingState : MovementState
         // up there would turn a ballistic pass-by into a zero-g floater and
         // hand the solver a coast the live tick contradicts.
         ctx.Body.AppliedForce = FoldBaseline(ctx);
+
+        // Fold: support, walk drive, braking, and the landing catch are all
+        // delegated to the ambient solve (see the class comment above Update).
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Stand, startGrounded: true);
     }
 
     // Shared fold-state baseline, mirrored tick-for-tick by the predictor's
@@ -149,8 +152,6 @@ public class CrouchedState : MovementState
     public override int ActivePriority => MovementPriorities.CrouchedActive;
     public override int PassivePriority => MovementPriorities.CrouchedPassive;
 
-    public override FoldProfile FoldProfile => FoldProfile.Crouch;
-
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (!ctx.TryGetCrouchGround(out _)) return false;
@@ -178,6 +179,10 @@ public class CrouchedState : MovementState
     {
         // The shared fold baseline (see StandingState.Update).
         ctx.Body.AppliedForce = StandingState.FoldBaseline(ctx);
+
+        // Fold: the crouch IS reference shaping (see the class comment) —
+        // support and crawl-speed drive are the ambient solve's job.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Crouch, startGrounded: true);
     }
 }
 
@@ -198,9 +203,6 @@ public class DropdownState : MovementState
     public override int ActivePriority  => MovementPriorities.DropdownActive;
     public override int PassivePriority => MovementPriorities.DropdownPassive;
     public override AnimTag AnimationTag => AnimTag.Dropdown;
-    // Owned maneuver with its own solve — the ambient layer must not stack a
-    // second correction on top (the climb family's rule).
-    public override AmbientPolicy AmbientPolicy => AmbientPolicy.Off;
 
     // Same pattern as CoveredJumpState.TryPickOpenDir: honor input direction strictly when held,
     // closer edge from a standstill, never flip to the opposite side. Edge from GroundChecker.
@@ -320,6 +322,11 @@ public class DropdownState : MovementState
                     out var target, out var targetVel);
                 ctx.Body.AppliedForce = ReferencePath.TrackForce(
                     target, targetVel, ctx.Body, ctx.Gravity, cfg);
+                // Ambient Off: owned maneuver with its own solve (clip servo /
+                // maneuver solve below) — the ambient layer must not stack a
+                // second correction on top (the climb family's rule). Still
+                // called so Apply's early-out clears cross-frame anchor state.
+                ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
                 return;
             }
             vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
@@ -333,6 +340,7 @@ public class DropdownState : MovementState
             fx = vars.DropDir * AirControl.SoftClampVelocity(along, vars.SlideSpeed, cfg.WalkAccel, ctx.Dt);
         ctx.Body.AppliedForce = new Vector2(fx, 0f);
         ApplyCorrector(ctx, ref vars);
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 
     // Bespoke fallback only (the clip path uses ReferenceCorrector above): the

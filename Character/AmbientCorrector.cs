@@ -4,10 +4,10 @@ using Microsoft.Xna.Framework;
 namespace MTile;
 
 // What the active movement state allows the ambient corrector to do this frame.
-// Published fresh every frame on the MovementModifiers pattern — a per-frame
+// Passed fresh every frame by the state's own ApplyAmbient call — a per-frame
 // channel, not a lifecycle. Default = both assists on (plain run/jump/fall get
 // the reflex layer); states that servo the body against fixed contacts (the
-// climb family, the ledge family, launches) publish Off so the ambient layer
+// climb family, the ledge family, launches) pass Off so the ambient layer
 // never fights an owned maneuver.
 public struct AmbientPolicy
 {
@@ -81,7 +81,7 @@ public struct FoldProfile
 //    Traction / CornerAssist / Redirect / Tuck with per-tick masks and caps,
 //    solved JOINTLY — senses are never partitioned (an up/down homotopy split
 //    would strip support rows from a down pass).
-public sealed class AmbientCorrector
+public static class AmbientCorrector
 {
     private const float HingeWeight     = 1e6f;    // stiffness constant, not a knob
     private const float RedirectEpsilon = 1e-6f;   // uniqueness regularizer, not a knob
@@ -142,11 +142,14 @@ public sealed class AmbientCorrector
         return env;
     }
 
-    // Runs after the movement state's Update (its policy + forces are final),
-    // before the physics step reads AppliedForce — the slot Reconcile had.
-    // fold = the state's published FoldProfile: Fold set means hover support and
-    // locomotion are this solve's job (see the fold note above).
-    public void Apply(EnvironmentContext ctx, AmbientPolicy policy, bool startGrounded,
+    // Runs at the END of the movement state's Update (its own forces are final),
+    // before the physics step reads AppliedForce — the slot Reconcile had. Every
+    // state calls this once per Update via MovementState.ApplyAmbient; stateless
+    // by design (cross-frame state lives in MovementVars, scratch in
+    // ctx.Corrector), so any state can drive it. fold = the state's FoldProfile:
+    // Fold set means hover support and locomotion are this solve's job (see the
+    // fold note above).
+    public static void Apply(EnvironmentContext ctx, AmbientPolicy policy, bool startGrounded,
                       in FoldProfile fold, ref MovementVars vars)
     {
         var cfg = MovementConfig.Current;
