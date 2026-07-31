@@ -11,11 +11,12 @@
   "DrawBackground":             true,
   "DrawPlayerSprites":          false,
   "DrawPlayerSpriteSkin":       true,
-  "PlayerSpriteBinding":        "pumpkin_man_downsampled",
+  "AnimationRig":               "biped_rabbit",
+  // "PlayerSpriteBinding":        "pumpkin_man_downsampled",
   "PlayerSpriteBindings":       ["rabbit", "badger"],
   "DebugDrawSkeleton":          false,
   "RunAnimationSolver":         true,
-  "CameraZoom":                 2.5,
+  "CameraZoom":                 4.5,
   "DebugDrawConstraints":       false,
   "DebugDrawSteeringRamps":     false,
   "DebugDrawGuidedPath":        false,
@@ -36,5 +37,5 @@
   "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
   "SecondPlayerOffsetY": 0,
-  "TimeScale": 1.0
+  "TimeScale": 0.2
 }

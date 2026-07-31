@@ -347,9 +347,10 @@ public class Game1 : Game
         };
         // Load authored skeleton animations (copied next to the binary). Clips live in
         // one dir per base rig — SkeletonStates/<rigName>/ — so the pool matches the
-        // animator's skeleton. Empty on platforms without a readable filesystem (e.g.
-        // WASM) → procedural fallback.
-        var animRig = SkeletonExamples.Biped();
+        // animator's skeleton (GameConfig.AnimationRig). Empty on platforms without a
+        // readable filesystem (e.g. WASM) → procedural fallback.
+        var animRig = SkeletonExamples.Load(
+            string.IsNullOrEmpty(_config.AnimationRig) ? SkeletonExamples.BipedName : _config.AnimationRig);
         _skeletonAnims = AnimationStore.LoadAll(
             Path.Combine(AppContext.BaseDirectory, "SkeletonStates", animRig.Name));
         _animator = new CharacterAnimator(animRig, SkeletonScale, _skeletonAnims);

@@ -1,8 +1,8 @@
 {
-  "Skeleton": "biped",
-  "ImageToRigScale": 0.088875175,
-  "ImageToRigTx": -53.4723,
-  "ImageToRigTy": -29.021755,
+  "Skeleton": "biped_rabbit",
+  "ImageToRigScale": 0.12735337,
+  "ImageToRigTx": -73.57942,
+  "ImageToRigTy": -50.5597,
   "MeshStep": 10,
   "AlphaThreshold": 8,
   "WeightAlpha": 2,
@@ -10,25 +10,25 @@
   "MaxHandles": 8,
   "Layers": [
     {
-      "Name": "arm_far",
-      "Image": "rabbit/arm_far.png",
-      "OffsetX": 476,
-      "OffsetY": 284,
-      "Bones": [
-        "arm_r_*"
-      ],
-      "Tint": "#C8C8C8"
-    },
-    {
       "Name": "leg_far",
       "Image": "rabbit/leg_far.png",
       "OffsetX": 502,
       "OffsetY": 365,
+      "Tint": "#C8C8C8",
+      "Bones": [
+        "leg_l_*",
+        "foot_l"
+      ]
+    },
+    {
+      "Name": "leg_near",
+      "Image": "rabbit/leg_near.png",
+      "OffsetX": 566,
+      "OffsetY": 371,
       "Bones": [
         "leg_r_*",
         "foot_r"
-      ],
-      "Tint": "#C8C8C8"
+      ]
     },
     {
       "Name": "torso",
@@ -41,13 +41,13 @@
       ]
     },
     {
-      "Name": "leg_near",
-      "Image": "rabbit/leg_near.png",
-      "OffsetX": 566,
-      "OffsetY": 371,
+      "Name": "arm_far",
+      "Image": "rabbit/arm_far.png",
+      "OffsetX": 476,
+      "OffsetY": 284,
+      "Tint": "#C8C8C8",
       "Bones": [
-        "leg_l_*",
-        "foot_l"
+        "arm_l_*"
       ]
     },
     {
@@ -56,7 +56,7 @@
       "OffsetX": 607,
       "OffsetY": 278,
       "Bones": [
-        "arm_l_*"
+        "arm_r_*"
       ]
     },
     {
@@ -78,53 +78,73 @@
     },
     {
       "Bone": "chest",
-      "Rotation": -1.5707964,
-      "Length": 16
+      "Rotation": -1.6037542,
+      "Length": 12.772023
     },
     {
       "Bone": "head",
-      "Rotation": 0,
-      "Length": 10
+      "Rotation": 0.103547506,
+      "Length": 8.8047695
+    },
+    {
+      "Bone": "shoulder_l",
+      "Rotation": -1.7093773,
+      "Length": 7.015266
+    },
+    {
+      "Bone": "shoulder_r",
+      "Rotation": 1.6191653,
+      "Length": 6.7633653
     },
     {
       "Bone": "arm_l_upper",
-      "Rotation": 3.1415927,
-      "Length": 10
+      "Rotation": 5.211606,
+      "Length": 8.29273
     },
     {
       "Bone": "arm_l_lower",
-      "Rotation": 0,
-      "Length": 10
+      "Rotation": -0.15377738,
+      "Length": 6.665487
     },
     {
       "Bone": "arm_r_upper",
-      "Rotation": 3.1415927,
-      "Length": 10
+      "Rotation": 1.3695015,
+      "Length": 9.011282
     },
     {
       "Bone": "arm_r_lower",
-      "Rotation": 0,
-      "Length": 10
+      "Rotation": 0.052557595,
+      "Length": 6.8884673
+    },
+    {
+      "Bone": "hip_l",
+      "Rotation": -3.204107,
+      "Length": 2.9994748
+    },
+    {
+      "Bone": "hip_r",
+      "Rotation": 0.09331253,
+      "Length": 2.9632223
     },
     {
       "Bone": "leg_l_upper",
-      "Rotation": 1.5707964,
-      "Length": 9.5
+      "Rotation": -1.1552918,
+      "Length": 7.185416
     },
     {
       "Bone": "leg_l_lower",
-      "Rotation": 0,
-      "Length": 9.5
+      "Rotation": -0.25753644,
+      "Length": 8.377399
     },
     {
       "Bone": "foot_l",
-      "Rotation": -1.3258177,
-      "Length": 0.246211
+      "Rotation": -1.7569731,
+      "Length": 0.8114258
     },
     {
       "Bone": "leg_r_upper",
-      "Rotation": 1.5707964,
-      "Length": 9.5
+      "Rotation": 1.0673561,
+      "Length": 6.674928
     },
     {
       "Bone": "leg_r_lower",

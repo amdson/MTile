@@ -78,7 +78,7 @@ public sealed class CosmeticUpdateSystem
         // knife-anchored slash glow) can read animated bone positions.
         while (_secondaryAnimators.Count < sim.SecondaryPlayers.Count)
             _secondaryAnimators.Add(new CharacterAnimator(
-                SkeletonExamples.Biped(), _skeletonScale, _skeletonAnims));
+                SkeletonExamples.Load(_animator.Skeleton.Name), _skeletonScale, _skeletonAnims));
         if (config.RunAnimationSolver && simDt > 0f)
         {
             // Terrain no-penetration: extract nearby exposed tile faces around LAST frame's

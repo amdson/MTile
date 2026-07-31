@@ -81,6 +81,10 @@ public sealed class GameConfig
     // MLS-deformed sprite skin over the rig. No effect until the named binding exists;
     // independent of DebugDrawSkeleton (stick figure).
     public bool DrawPlayerSpriteSkin       { get; set; } = true;
+    // Base rig the in-game animator runs: Skeletons/<name>.json, with its clip pool at
+    // SkeletonStates/<name>/. Sprite skins bake against THIS rig, so a binding authored
+    // on another skeleton needs this switched (render-only — the sim never sees it).
+    public string AnimationRig             { get; set; } = "biped";
     // Fallback binding to skin players with: SpriteBindings/<name>.json (authored via
     // MTile.Demo bind mode). Empty/missing name → no skin.
     public string PlayerSpriteBinding      { get; set; } = "player";
