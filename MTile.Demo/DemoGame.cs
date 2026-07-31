@@ -39,7 +39,19 @@ public sealed class DemoGame : Game
     private SkeletonPose _pose;          // rendered / working pose
     private SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
     private Affine2      _root;
-    private Vector2      _playerOffset;   // view pan (whole scene: rig + com + floor). Arrows nudge, Home resets.
+    private Vector2      _playerOffset;   // view pan (whole scene: rig + com + floor + refs). Arrows nudge, Home resets.
+    // PER-KEYFRAME reference placement: a root-space "edref" Point addition (rig units,
+    // scene frame) authored by dragging the com marker — the PLAYER ensemble (com marker +
+    // skeleton) offsets from the scene anchor by its interpolated value, while the ground
+    // references (floor line, vault block) stay put. Scrubbing shows the body arcing over
+    // the fixed scenery (e.g. a vault clearing its block). Editor-only visualization: it
+    // saves with the clip and rides the additions machinery (K inherits, retime follows),
+    // but the runtime reads additions by name and ignores this one.
+    private const string EdRefName = "edref";
+    // The clip's reference trajectory (Doc.ReferenceArc), loaded on clip select: the
+    // authored maneuver arc (ReferenceClips/<name>.json, else the baked registry default)
+    // that drives the body's scene placement while scrubbing. Null = no arc.
+    private HermiteClipDocument _refArc;
     private float        _floorLocalY;   // bind-pose sole height (skeleton-local), the legacy floor line
 
     // COM-ANCHORED placement (clips that author a "com" track — all of them, post addcom):
@@ -53,6 +65,7 @@ public sealed class DemoGame : Game
     // over the fixed ground, matching the in-game read. Clips with no com keep the old
     // fixed-root placement (_comAnchored false).
     private Vector2 _anchor;         // where the com point lands on screen (the "body position")
+    private Vector2 _sceneAnchor;    // scene-frame origin for ground refs — _anchor minus the com-drag offset
     private bool    _comAnchored;
     private const float GroundBelowComRig = 2f * PlayerCharacter.Radius / Game1.SkeletonScale;
 
@@ -72,8 +85,10 @@ public sealed class DemoGame : Game
     private bool          _dragRoot;          // dragging the root joint = moving the whole player (_playerOffset)
     private Vector2       _vaultBlockOffset;  // skeleton-local offset added to the vault reference block's base placement
     private bool          _dragVaultBlock;    // dragging the vault reference block
-    private enum EditMode { Rotate, Resize }
+    private enum EditMode { Rotate, Resize, Stretch }
     private EditMode      _editMode = EditMode.Rotate;   // Tab cycles
+    private float         _sidebarScroll;                // clip-list scroll offset, px (0 = top)
+    private bool          _dragSidebarThumb;             // dragging the sidebar scrollbar thumb
     private bool          _playing;           // timeline playback
     private float         _playTime;          // seconds into playback
     private MouseState    _prevMs;
@@ -167,6 +182,7 @@ public sealed class DemoGame : Game
         // autogeneration). N / C create clips there.
         _baseSkeleton = SkeletonExamples.Load(_rigArg ?? SkeletonExamples.BipedName);
         _dir = Path.Combine(FindStatesDir(), _baseSkeleton.Name);
+        LoadViewState();
         if (_bindingArg != null)
         {
             string path = ResolveBindingPath(_bindingArg);
@@ -254,7 +270,7 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.N)) NewAnimation();
         if (Pressed(kb, Keys.C)) CloneAnimation();
         if (Pressed(kb, Keys.K)) SampleKeyframe();
-        if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 2);
+        if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 3);
         if (Pressed(kb, Keys.F)) FlipAnimation();
         if (Pressed(kb, Keys.Space)) TogglePlay();
         if (Pressed(kb, Keys.Delete)) { if (_selectedAdd >= 0) RemoveSelectedAddition(); else DeleteActiveKeyframe(); }
@@ -298,12 +314,28 @@ public sealed class DemoGame : Game
         var world = _pose.ComputeWorld(_root);
         _hoverBone = (!_playing && mp.X >= SidebarW && !InSlider(mp) && _dragBone < 0) ? PickJoint(world, mp) : _dragBone;
 
+        // Clip-list scrolling: wheel over the sidebar (2 rows per notch), or drag the thumb.
+        int wheel = ms.ScrollWheelValue - _prevMs.ScrollWheelValue;
+        if (wheel != 0 && mp.X < SidebarW)
+            _sidebarScroll = ClampSidebarScroll(_sidebarScroll - wheel / 120f * RowH * 2f);
+        if (_dragSidebarThumb) _sidebarScroll = ScrollFromThumbY(mp.Y);
+
         if (leftPressed)
         {
             if (mp.X < SidebarW)
             {
-                int row = (int)((mp.Y - PadTop) / RowH);
-                if (row >= 0 && row < _docs.Count) SelectAnimation(row);
+                // The scrollbar strip owns the sidebar's right edge when the list overflows;
+                // clicking it jumps the thumb there and starts a drag.
+                if (SidebarMaxScroll > 0f && mp.X >= SidebarW - ScrollbarW - 6)
+                {
+                    _dragSidebarThumb = true;
+                    _sidebarScroll = ScrollFromThumbY(mp.Y);
+                }
+                else
+                {
+                    int row = (int)MathF.Floor((mp.Y - PadTop + _sidebarScroll) / RowH);
+                    if (row >= 0 && row < _docs.Count) SelectAnimation(row);
+                }
             }
             else if (!_playing && InSlider(mp))
             {
@@ -399,7 +431,7 @@ public sealed class DemoGame : Game
             }
         }
 
-        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragVaultBlock = false; }
+        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragVaultBlock = false; _dragSidebarThumb = false; }
 
         _prevMs = ms;
         _prevKb = kb;
@@ -412,12 +444,17 @@ public sealed class DemoGame : Game
     [System.Flags]
     private enum EditTouched { None = 0, Pose = 1, Rig = 2 }
 
-    // Edit-mode write split (both drag the clicked joint toward the cursor):
-    //   • Rotate — pose only. Pivots the bone (and its subtree) about its joint; the
-    //              keyframe absorbs the rotation. The bone's rest length is unchanged.
-    //   • Resize — split. The angular part rolls the pose rotation (as in Rotate); the
-    //              radial part scales the bone's rest Length on the rig so its tip
-    //              reaches the cursor.
+    // Edit-mode write split (all drag the clicked joint toward the cursor):
+    //   • Rotate  — pose only. Pivots the bone (and its subtree) about its joint; the
+    //               keyframe absorbs the rotation. The bone's rest length is unchanged.
+    //   • Resize  — split. The angular part rolls the pose rotation (as in Rotate); the
+    //               radial part scales the bone's rest Length on the rig so its tip
+    //               reaches the cursor.
+    //   • Stretch — pose only, PER-KEYFRAME. Projects the cursor onto the bone's axis
+    //               and writes the ratio as this keyframe's length Stretch (pseudo-3D
+    //               foreshortening; see bakeyaw). Signed — dragging past the joint
+    //               flips the bone slightly negative. Rotation is untouched, the rig
+    //               is untouched, and other keyframes keep their own stretch.
     private EditTouched EditBone(Affine2[] world, int bone, Vector2 mp)
     {
         int parent = _skeleton.Bones[bone].Parent;
@@ -426,6 +463,19 @@ public sealed class DemoGame : Game
         Vector2 pivot     = world[parent].Translation;          // parent's tip = this bone's joint
         Vector2 boneVec   = world[bone].Translation - pivot;    // current bone direction (drawn in screen space)
         Vector2 cursorVec = mp - pivot;
+
+        if (_editMode == EditMode.Stretch)
+        {
+            // Axis from the bone's world +X (magnitude = root scale) — NOT from boneVec,
+            // which collapses at stretch 0 and would block dragging through the flip.
+            float restLen = _skeleton.Bones[bone].Length;
+            Vector2 axis  = world[bone].TransformVector(Vector2.UnitX);
+            float axisSq  = axis.LengthSquared();
+            if (restLen < 1e-3f || axisSq < 1e-6f) return EditTouched.None;
+            float s = Vector2.Dot(cursorVec, axis) / (axisSq * restLen);
+            _pose.Local[bone].Translation = Vector2.UnitX * (restLen * s);
+            return EditTouched.Pose;
+        }
 
         if (boneVec.LengthSquared() < 1e-4f || cursorVec.LengthSquared() < 1e-4f)
             return EditTouched.None;
@@ -498,63 +548,115 @@ public sealed class DemoGame : Game
     {
         float cx = SidebarW + (W - SidebarW) / 2f;
         float cy = H * 0.48f;
-        _anchor = new Vector2(cx, cy) + _playerOffset;
+        _sceneAnchor = new Vector2(cx, cy) + _playerOffset;   // ground refs live here
+        // Player ensemble rides the clip's reference arc (Doc.ReferenceArc — the maneuver's
+        // authored trajectory) plus the interpolated edref track (per-keyframe hand placement
+        // authored by dragging the com marker; an additive nudge when an arc is present).
+        Vector2 refOff = TryPointAt(_scrubT, EdRefName, out var r) ? r * RigScale : Vector2.Zero;
+        if (_refArc != null) refOff += ArcOffset(_scrubT) * RigScale;
+        _anchor = _sceneAnchor + refOff;
         _comAnchored = TryComAt(_scrubT, out var com);
         Vector2 rootT = _comAnchored ? _anchor - com * RigScale : _anchor;
         _root = Affine2.FromTRS(rootT, 0f, new Vector2(RigScale, RigScale));
     }
 
-    // The com track value at normalized time t: lerp of the root-space "com" Point addition
-    // across the bracketing keyframes (mirrors the runtime's SampleNamedPoint — hold the value
-    // where only one side authors it). False if the clip has no com at all.
-    private bool TryComAt(float t, out Vector2 com)
+    // Resolve a clip's ReferenceArc name: the editable file at ReferenceClips/<name>.json
+    // (repo root — the same file `--ref <name>` edits) wins; the baked registry default
+    // covers names with no file yet. Null name / nothing found → no arc.
+    private HermiteClipDocument LoadRefArc(string name)
     {
-        com = default;
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        string root = Path.GetDirectoryName(FindStatesDir());
+        var doc = root != null
+            ? HermiteClipDocument.Load(Path.Combine(root, "ReferenceClips", name + ".json"))
+            : null;
+        doc ??= ReferenceClipRegistry.Get(name);
+        if (doc == null) Console.WriteLine($"ReferenceArc '{name}': no file or baked default — ignoring.");
+        return doc;
+    }
+
+    // The arc's editor retarget frame: normalized clip units → rig units. x: entry→gate
+    // horizontal run; y: gate height — clip y is authored with −1 = "toward the gate",
+    // and the WORLD direction of the gate comes from the measured maneuver at runtime
+    // (ReferenceFrame's signed scale), so the editor guesses it per clip Type: a Vault
+    // gate is on top of the reference block (dragging the block rescales the ride live),
+    // a Dropdown's gate is a ledge-drop below, anything else rises a generic maneuver
+    // height. Editor visualization only — tune the constants to taste.
+    private Vector2 ArcOffset(float t)
+    {
+        Vector2 p = _refArc.Eval(MathHelper.Clamp(t, 0f, 1f));
+        float gx, gy;
+        switch (Doc?.Type)
+        {
+            case "Vault":
+                gx = VaultBlockX + _vaultBlockOffset.X + VaultBlockW * 0.5f;
+                gy = VaultBlockH - _vaultBlockOffset.Y;
+                break;
+            case "Dropdown":
+                gx = 24f; gy = -30f;   // descent: clip −1 maps DOWN a ledge height
+                break;
+            default:
+                gx = 24f; gy = 30f;    // ascent (ledge pull, mantle): clip −1 maps UP
+                break;
+        }
+        return new Vector2(p.X * gx, p.Y * gy);
+    }
+
+    private bool TryComAt(float t, out Vector2 com) => TryPointAt(t, "com", out com);
+
+    // A named root-space Point track's value at normalized time t: lerp across the
+    // bracketing keyframes (mirrors the runtime's SampleNamedPoint — hold the value
+    // where only one side authors it). False if the clip never authors the point.
+    private bool TryPointAt(float t, string name, out Vector2 p)
+    {
+        p = default;
         var ks = Doc?.Keyframes;
         if (ks == null || ks.Count == 0) return false;
         t = MathHelper.Clamp(t, ks[0].Time, ks[ks.Count - 1].Time);
         int i = 0;
         while (i < ks.Count - 1 && ks[i + 1].Time < t) i++;
         int j = Math.Min(i + 1, ks.Count - 1);
-        bool ha = TryComOf(ks[i], out var pa);
-        bool hb = TryComOf(ks[j], out var pb);
+        bool ha = TryPointOf(ks[i], name, out var pa);
+        bool hb = TryPointOf(ks[j], name, out var pb);
         if (ha && hb)
         {
             float span = ks[j].Time - ks[i].Time;
             float u = span <= 1e-6f ? 0f : (t - ks[i].Time) / span;
-            com = Vector2.Lerp(pa, pb, u);
+            p = Vector2.Lerp(pa, pb, u);
             return true;
         }
-        if (ha) { com = pa; return true; }
-        if (hb) { com = pb; return true; }
+        if (ha) { p = pa; return true; }
+        if (hb) { p = pb; return true; }
         return false;
     }
 
-    private static bool TryComOf(AnimationKeyframe k, out Vector2 p)
+    private static bool TryPointOf(AnimationKeyframe k, string name, out Vector2 p)
     {
         p = default;
         if (k.Additions == null) return false;
         foreach (var a in k.Additions)
-            if (a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
+            if (a.Kind == AnimAdditionKind.Point && a.Name == name && a.Parent == null)
             { p = new Vector2(a.Px, a.Py); return true; }
         return false;
     }
 
     // The active keyframe's com addition, if it has one (the thing a root drag edits).
-    private AnimAddition ActiveKeyCom()
+    private AnimAddition ActiveKeyCom() => ActiveKeyPoint("com");
+
+    private AnimAddition ActiveKeyPoint(string name)
     {
         if (Doc == null || _activeKey < 0 || _activeKey >= Doc.Keyframes.Count) return null;
         var adds = Doc.Keyframes[_activeKey].Additions;
         if (adds == null) return null;
         foreach (var a in adds)
-            if (a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null) return a;
+            if (a.Kind == AnimAdditionKind.Point && a.Name == name && a.Parent == null) return a;
         return null;
     }
 
     // The scene frame the GROUND-RELATIVE references (floor line, vault block) live in: fixed
     // at the anchor when com-anchored (they must NOT follow the body), the rig root otherwise.
     private (Affine2 frame, float floorLocalY) SceneFrame()
-        => _comAnchored ? (Affine2.FromTRS(_anchor, 0f, new Vector2(RigScale, RigScale)), GroundBelowComRig)
+        => _comAnchored ? (Affine2.FromTRS(_sceneAnchor, 0f, new Vector2(RigScale, RigScale)), GroundBelowComRig)
                         : (_root, _floorLocalY);
 
     // === draw ================================================================
@@ -643,11 +745,13 @@ public sealed class DemoGame : Game
     private void DrawSidebar()
     {
         Fill(new Rectangle(0, 0, SidebarW, H), new Color(30, 33, 42));
+        int scroll = (int)_sidebarScroll;
         string lastType = null;
         for (int i = 0; i < _docs.Count; i++)
         {
             var d = _docs[i];
-            int y = PadTop + i * RowH;
+            int y = PadTop + i * RowH - scroll;
+            if (y < -RowH || y > H) { lastType = d.Type; continue; }   // culled; keep header grouping
             if (i == _selected) Fill(new Rectangle(0, y - 2, SidebarW, RowH), new Color(60, 90, 140));
 
             Color typeColor = d.Type != lastType ? new Color(150, 200, 255) : new Color(110, 120, 140);
@@ -656,7 +760,27 @@ public sealed class DemoGame : Game
                 i == _selected ? Color.White : new Color(200, 205, 215));
             lastType = d.Type;
         }
+
+        // Scrollbar — only when the list overflows: thin track on the sidebar's right
+        // edge, proportional thumb. Wheel scrolls; click/drag on the strip jumps.
+        if (SidebarMaxScroll > 0f)
+        {
+            Fill(new Rectangle(SidebarW - ScrollbarW - 2, 0, ScrollbarW, H), new Color(22, 24, 30));
+            int thumbY = (int)((H - ThumbH) * (_sidebarScroll / SidebarMaxScroll));
+            Fill(new Rectangle(SidebarW - ScrollbarW - 2, thumbY, ScrollbarW, ThumbH),
+                 _dragSidebarThumb ? new Color(140, 155, 185) : new Color(90, 100, 120));
+        }
     }
+
+    // --- sidebar scroll geometry ---------------------------------------------
+    private const int ScrollbarW = 6;
+    private float SidebarContentH => PadTop * 2 + _docs.Count * RowH;
+    private float SidebarMaxScroll => MathF.Max(0f, SidebarContentH - H);
+    private int   ThumbH => Math.Max(24, (int)(H * H / SidebarContentH));
+    private float ClampSidebarScroll(float s) => MathHelper.Clamp(s, 0f, SidebarMaxScroll);
+    // Map a cursor y to a scroll offset with the thumb centered under the cursor.
+    private float ScrollFromThumbY(float y)
+        => ClampSidebarScroll((y - ThumbH / 2f) / MathF.Max(1f, H - ThumbH) * SidebarMaxScroll);
 
     private void DrawEditor()
     {
@@ -731,6 +855,7 @@ public sealed class DemoGame : Game
         for (int i = 0; i < adds.Count; i++)
         {
             var a = adds[i];
+            if (a.Name == EdRefName) continue;   // hidden channel — placement, not a marker
             Vector2 o = AdditionOriginWorld(a, world);
             Color col = !editable             ? new Color(90, 140, 130)
                       : i == _selectedAdd     ? Color.White
@@ -1024,11 +1149,7 @@ public sealed class DemoGame : Game
         for (int i = 0; i < adds.Count; i++)
         {
             var a = adds[i];
-            // On a com-anchored clip the com point is not directly draggable: the placement
-            // re-anchors on it every frame, so a direct drag would snap the marker back and
-            // shove the body inversely — the root-joint drag IS the com control there.
-            if (_comAnchored && a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
-                continue;
+            if (a.Name == EdRefName) continue;   // hidden channel — the com marker is its proxy
             if (a.Kind == AnimAdditionKind.Vector)
             {
                 float dt = Vector2.DistanceSquared(AdditionTipWorld(a, world), mp);
@@ -1043,6 +1164,34 @@ public sealed class DemoGame : Game
     private void DragAddition(Affine2[] world, Vector2 mp)
     {
         var a = Doc.Keyframes[_activeKey].Additions[_dragAdd];
+        // The com is the player's BASE FRAME (the sim body anchor). Dragging it places the
+        // PLAYER ensemble — com marker + skeleton — against the fixed scenery (floor line,
+        // vault block) PER KEYFRAME: the drag writes this keyframe's "edref" placement,
+        // and scrubbing interpolates the track so the body visibly arcs over the refs.
+        // Editor-only visualization data (saved with the clip; runtime ignores it).
+        // Moving the body WITHIN the com frame (the keyframe's com channel) is the
+        // root-joint drag; panning everything together is the arrow keys.
+        if (_comAnchored && a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
+        {
+            var refAdd = ActiveKeyPoint(EdRefName);
+            if (refAdd == null)
+            {
+                // Seed from the value currently displayed (the sampled/held track, or zero)
+                // so the first drag continues smoothly instead of jumping.
+                TryPointAt(_scrubT, EdRefName, out var seed);
+                var kf = Doc.Keyframes[_activeKey];
+                kf.Additions ??= new List<AnimAddition>();
+                kf.Additions.Add(refAdd = new AnimAddition
+                {
+                    Name = EdRefName, Kind = AnimAdditionKind.Point, Px = seed.X, Py = seed.Y,
+                });
+            }
+            var dm = (mp - new Vector2(_prevMs.X, _prevMs.Y)) / RigScale;
+            refAdd.Px += dm.X;
+            refAdd.Py += dm.Y;
+            _dirty = true;
+            return;
+        }
         Vector2 local = AdditionParentTransform(a, world).Inverse().TransformPoint(mp);
         if (_dragAddTip && a.Kind == AnimAdditionKind.Vector) { a.Dx = local.X - a.Px; a.Dy = local.Y - a.Py; }
         else                                                  { a.Px = local.X;        a.Py = local.Y; }
@@ -1116,7 +1265,8 @@ public sealed class DemoGame : Game
 
         if (doc != null)
             _spriteBatch.DrawString(_font,
-                $"dur {doc.Duration:0.0}s  |  loop {(doc.Loop ? "on" : "off")}  |  region {doc.Region}",
+                $"dur {doc.Duration:0.0}s  |  loop {(doc.Loop ? "on" : "off")}  |  region {doc.Region}"
+                + (doc.ReferenceArc != null ? $"  |  arc {doc.ReferenceArc}{(_refArc == null ? " (missing)" : "")}" : ""),
                 new Vector2(SidebarW + 16, 46), new Color(160, 170, 185));
 
         _spriteBatch.DrawString(_font, "H controls   |   Ctrl-S save   |   K sample keyframe",
@@ -1138,7 +1288,7 @@ public sealed class DemoGame : Game
     private static readonly (string Group, string Keys)[] HelpRows =
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
-        ("Edit",     "Tab mode (rotate/resize)    drag joint    M+click contact    F flip"),
+        ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip"),
         ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
         ("Vault",    "drag the brown block to reposition the obstacle (Vault clips only)"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
@@ -1220,8 +1370,14 @@ public sealed class DemoGame : Game
     {
         _playing = false;
         _selected = i;
+        // Keep the selected row on screen (positions the initial open-by-name jump and
+        // N/C appends at the list's end; a plain click is already visible → no-op).
+        float rowTop = PadTop + i * RowH;
+        if (rowTop - _sidebarScroll < 0f)            _sidebarScroll = ClampSidebarScroll(rowTop);
+        else if (rowTop + RowH - _sidebarScroll > H) _sidebarScroll = ClampSidebarScroll(rowTop + RowH - H);
         _activeKey = -1;            // stale index from the previous clip; SelectKeyframe resets it
         var doc = _docs[i];
+        _refArc = LoadRefArc(doc.ReferenceArc);
         RebuildWorkingRig();        // compose base + THIS clip's ExtraBones
         if (doc.Keyframes.Count == 0)
             doc.Keyframes.Add(new AnimationKeyframe { Time = 0f, Bones = PoseData.Capture(_skeleton.CreatePose()) });
@@ -1368,7 +1524,7 @@ public sealed class DemoGame : Game
         if (src == null) return new List<PoseBoneEntry>();
         var copy = new List<PoseBoneEntry>(src.Count);
         foreach (var b in src)
-            copy.Add(new PoseBoneEntry { Bone = b.Bone, Rotation = b.Rotation });
+            copy.Add(new PoseBoneEntry { Bone = b.Bone, Rotation = b.Rotation, Stretch = b.Stretch });
         return copy;
     }
 
@@ -1383,6 +1539,7 @@ public sealed class DemoGame : Game
     private void SaveAll()
     {
         foreach (var d in _docs) AnimationStore.Save(d, _dir);
+        SaveViewState();
         _dirty = false;
         Console.WriteLine($"Saved {_docs.Count} animations to {_dir}");
 
@@ -1396,6 +1553,47 @@ public sealed class DemoGame : Game
             _skelDirty = false;
             Console.WriteLine($"Saved rig '{_baseSkeleton.Name}' to {skelDir}");
         }
+    }
+
+    // Editor view-state sidecar: the vault block's scene placement persists across sessions
+    // so the obstacle reference stays where you left it. (The per-keyframe player placement
+    // — the "edref" track — saves with each clip itself, not here.) Convenience view state,
+    // not clip data — lives beside the rig dirs at SkeletonStates/.editor_view.json
+    // (AnimationStore only reads inside SkeletonStates/<rig>/, so it can never be mistaken
+    // for a clip). Loaded on startup; written on Ctrl-S and on exit; never blocks on failure.
+    private string ViewStatePath => Path.Combine(FindStatesDir(), ".editor_view.json");
+
+    private sealed class ViewState
+    {
+        public float BlockX { get; set; }
+        public float BlockY { get; set; }
+    }
+
+    private void LoadViewState()
+    {
+        try
+        {
+            if (!File.Exists(ViewStatePath)) return;
+            var v = System.Text.Json.JsonSerializer.Deserialize<ViewState>(File.ReadAllText(ViewStatePath));
+            if (v != null) _vaultBlockOffset = new Vector2(v.BlockX, v.BlockY);
+        }
+        catch { /* view state is a convenience — never block startup on it */ }
+    }
+
+    private void SaveViewState()
+    {
+        try
+        {
+            var v = new ViewState { BlockX = _vaultBlockOffset.X, BlockY = _vaultBlockOffset.Y };
+            File.WriteAllText(ViewStatePath, System.Text.Json.JsonSerializer.Serialize(v));
+        }
+        catch { /* best-effort */ }
+    }
+
+    protected override void OnExiting(object sender, ExitingEventArgs args)
+    {
+        SaveViewState();
+        base.OnExiting(sender, args);
     }
 
     // === helpers =============================================================

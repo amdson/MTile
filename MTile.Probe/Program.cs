@@ -26,6 +26,12 @@ using MTile;
 //       Prints solved angles + miss; unreachable targets report the closest reachable point.
 //       Dry-run by default — --write saves the solved angles back into the clip.
 //   dotnet run --project MTile.Probe -- retarget <dstRig> [--dry]   convert the pool to another rig
+//   dotnet run --project MTile.Probe -- stretch <clip> <t> <bone> <s>   set one bone's length stretch on a keyframe
+//   dotnet run --project MTile.Probe -- refarc <clip> <arcName|none>    bind a ReferenceClips arc for editor placement
+//   dotnet run --project MTile.Probe -- bakeyaw [clip] [--view deg] [--swap s] [--ref rad] [--shoulderamp f] [--dry]
+//       bake pelvis/shoulder yaw foreshortening: per keyframe, derive the leg (arm) scissor
+//       and write hip_l/hip_r (shoulder_l/shoulder_r) Stretch from the projected-yaw law.
+//       No clip → every clip in the pool. Needs a strutted rig (--rig biped_rabbit).
 //
 // Global: --rig <name> (default biped) picks the working rig AND its clip dir —
 // clips live one dir per base rig at SkeletonStates/<rigName>/.
@@ -75,9 +81,12 @@ static class Probe
                 case "delkey": return DelKey(args);
                 case "dur":    return Dur(args);
                 case "retarget": return Retarget(Arg(args, 1), HasFlag(args, "--dry"));
+                case "stretch": return StretchCmd(args);
+                case "bakeyaw": return BakeYaw(args);
+                case "refarc": return RefArc(args);
                 default:
                     Console.Error.WriteLine($"unknown command '{cmd}'. try: list | digest | diff | report | anim | addcom | ik"
-                                          + " | new | addkey | contact | rot | retime | delkey | dur | retarget");
+                                          + " | new | addkey | contact | rot | retime | delkey | dur | retarget | stretch | bakeyaw");
                     return 2;
             }
         }
@@ -532,7 +541,7 @@ static class Probe
             var orig = new Dictionary<AnimationKeyframe, List<PoseBoneEntry>>();
             foreach (var kf in clip.Keyframes)
             {
-                orig[kf] = kf.Bones?.ConvertAll(b => new PoseBoneEntry { Bone = b.Bone, Rotation = b.Rotation });
+                orig[kf] = kf.Bones?.ConvertAll(b => new PoseBoneEntry { Bone = b.Bone, Rotation = b.Rotation, Stretch = b.Stretch });
                 if (kf.Bones == null) continue;
                 foreach (var e in kf.Bones)
                 {
@@ -574,6 +583,136 @@ static class Probe
         Console.WriteLine($"# worst direction deviation: {worstDir:0.000000} rad at {worstAt}"
                         + (worstDir > 1e-3f ? "  <-- NOT direction-preserving; inspect the rig diff" : "  (direction-preserving)"));
         return worstDir > 1e-3f ? 1 : 0;
+    }
+
+    // stretch <clip> <t> <bone> <s> — set one bone's per-keyframe length stretch
+    // (multiplier on the rig Length; 1 clears the channel). The manual escape hatch
+    // next to bakeyaw's law-driven baking.
+    static int StretchCmd(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        var (kf, _) = NearestKey(clip, ParseF(Arg(args, 2)));
+        string bone = Arg(args, 3);
+        int bi = _rig.IndexOf(bone);
+        if (bi < 0) throw new ArgumentException($"no bone '{bone}' in rig");
+        float v = ParseF(Arg(args, 4));
+        SetStretch(kf, bone, v);
+        AnimationStore.Save(clip, _statesDir);
+        Console.WriteLine($"key t={kf.Time:0.000} {bone} stretch = {v:0.###}");
+        return 0;
+    }
+
+    // refarc <clip> <arcName|none> — bind (or clear) the clip's ReferenceArc: the maneuver
+    // trajectory (ReferenceClips/<arcName>.json / registry default) the Demo editor rides
+    // the body along while scrubbing. Editor visualization only; the runtime ignores it.
+    static int RefArc(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        string name = Arg(args, 2);
+        clip.ReferenceArc = string.Equals(name, "none", StringComparison.OrdinalIgnoreCase) ? null : name;
+        AnimationStore.Save(clip, _statesDir);
+        Console.WriteLine($"{clip.Name} ReferenceArc = {clip.ReferenceArc ?? "none"}");
+        return 0;
+    }
+
+    // bakeyaw [clip] [--view deg] [--swap s] [--ref rad] [--noshoulders] [--dry]
+    //
+    // Pseudo-3D pelvis rotation: as the legs scissor, the pelvis yaws about the implicit
+    // depth axis, so in side view the hip sockets (strut tips) slide toward the centerline
+    // and slightly past it. Model: rigid yaw ⇒ BOTH struts share one projection factor
+    //     s(χ̂) = cos(ψ0 − ψa·χ̂) / cos(ψ0)
+    // where χ̂ ∈ [−1,1] is the leg scissor (thigh world-angle difference r−l, normalized by
+    // the FIXED --ref amplitude — per-clip normalization would blow idle's micro-scissor up
+    // to full flips), ψ0 = the art's base "slightly facing the viewer" yaw (--view, deg),
+    // and ψa is solved from the pin s(−1) = --swap (default −0.2: at full leg swap the
+    // struts flip a touch past the depth axis, keeping the 3/4 read). Dividing by cos ψ0
+    // makes the authored strut length the neutral-scissor length, so idle is a near-no-op.
+    // Shoulders take the same law driven by the ARM scissor (naturally counter-phased in
+    // the data, so no sign flip), scaled by --shoulderamp (default 0.5) — torso counter-
+    // rotation is much smaller than pelvis yaw, so shoulders foreshorten gently and never
+    // approach the flip. Writes Stretch onto hip_l/hip_r (+ shoulder_l/r); re-runnable —
+    // each run overwrites from the law, so knob changes re-bake cleanly.
+    static int BakeYaw(string[] args)
+    {
+        if (_rig.IndexOf("hip_l") < 0 || _rig.IndexOf("hip_r") < 0)
+            throw new ArgumentException($"rig '{_rig.Name}' has no hip_l/hip_r struts — pass --rig biped_rabbit");
+        bool dry        = HasFlag(args, "--dry");
+        bool shoulders  = !HasFlag(args, "--noshoulders")
+                          && _rig.IndexOf("shoulder_l") >= 0 && _rig.IndexOf("shoulder_r") >= 0;
+        float viewDeg   = FlagValue(args, "--view") is string v ? ParseF(v) : 18f;
+        float swap      = FlagValue(args, "--swap") is string s ? ParseF(s) : -0.2f;
+        float refAmp    = FlagValue(args, "--ref")  is string r ? ParseF(r) : 1.0f;
+        float shAmp     = FlagValue(args, "--shoulderamp") is string sa ? ParseF(sa) : 0.5f;
+        float psi0      = MathHelper.ToRadians(viewDeg);
+        float psiA      = MathF.Acos(MathHelper.Clamp(swap * MathF.Cos(psi0), -1f, 1f)) - psi0;
+        float Project(float chiHat) => MathF.Cos(psi0 - psiA * chiHat) / MathF.Cos(psi0);
+
+        string only = null;
+        for (int ai = 1; ai < args.Length; ai++)
+        {
+            if (args[ai] is "--view" or "--swap" or "--ref" or "--shoulderamp") { ai++; continue; }   // skip flag + value
+            if (args[ai].StartsWith("-", StringComparison.Ordinal)) continue;
+            only = args[ai]; break;
+        }
+        var clips = only != null ? new List<AnimationDocument> { Find(only) } : _all;
+        Console.WriteLine($"# bakeyaw: view={viewDeg:0.#}° swing={MathHelper.ToDegrees(psiA):0.#}° "
+                        + $"swap={swap:0.###} ref={refAmp:0.###} rad "
+                        + $"shoulders={(shoulders ? $"on ×{shAmp:0.##}" : "off")}");
+
+        var pose = _rig.CreatePose();
+        foreach (var clip in clips)
+        {
+            var line = new StringBuilder($"{clip.Name,-18}");
+            foreach (var kf in clip.Keyframes)
+            {
+                PoseData.Apply(kf.Bones, pose);
+                var w = pose.ComputeWorld(Affine2.Identity);
+                float chiLeg = MathHelper.Clamp((Alpha(w, "leg_r_upper") - Alpha(w, "leg_l_upper")) / refAmp, -1f, 1f);
+                float sHip = Project(chiLeg);
+                SetStretch(kf, "hip_l", sHip);
+                SetStretch(kf, "hip_r", sHip);
+                line.Append($"  {kf.Time:0.00}:χ{chiLeg,5:+0.00;-0.00}→{sHip,5:+0.00;-0.00}");
+                if (shoulders)
+                {
+                    float chiArm = MathHelper.Clamp((Alpha(w, "arm_r_upper") - Alpha(w, "arm_l_upper")) / refAmp, -1f, 1f);
+                    float sSh = Project(chiArm * shAmp);
+                    SetStretch(kf, "shoulder_l", sSh);
+                    SetStretch(kf, "shoulder_r", sSh);
+                    line.Append($"/sh{sSh,5:+0.00;-0.00}");
+                }
+            }
+            if (!dry) AnimationStore.Save(clip, _statesDir);
+            Console.WriteLine(line.Append(dry ? "  (dry)" : "").ToString());
+        }
+        return 0;
+    }
+
+    // World swing angle of an upper-limb bone: its direction from its socket (the parent's
+    // tip), measured from straight down (+y), positive toward +x/forward.
+    static float Alpha(Affine2[] world, string upper)
+    {
+        int i = _rig.IndexOf(upper);
+        if (i < 0) return 0f;
+        int p = _rig.Bones[i].Parent;
+        Vector2 socket = p >= 0 ? world[p].Translation : Vector2.Zero;
+        Vector2 d = world[i].Translation - socket;
+        return MathF.Atan2(d.X, d.Y);
+    }
+
+    // Write (or clear) a bone's Stretch on a keyframe. Creates the entry at the bind
+    // rotation when absent — struts are fixed bones clips never otherwise mention.
+    static void SetStretch(AnimationKeyframe kf, string bone, float s)
+    {
+        int i = _rig.IndexOf(bone);
+        if (i < 0) return;
+        bool noop = MathF.Abs(s - 1f) < 1e-3f;
+        var e = kf.Bones.Find(b => b.Bone == bone);
+        if (e == null)
+        {
+            if (noop) return;
+            kf.Bones.Add(e = new PoseBoneEntry { Bone = bone, Rotation = _rig.Bones[i].Rotation });
+        }
+        e.Stretch = noop ? (float?)null : s;
     }
 
     // --- authoring helpers ---------------------------------------------------

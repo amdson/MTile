@@ -1,9 +1,10 @@
 # MTile.Demo — Skeleton Animation Editor
 
 A standalone tool for authoring the skeletal animations the game plays (walk, idle,
-jump, …). It edits `AnimationDocument` JSON files in the repo's `SkeletonStates/`
-folder — the same files [CharacterAnimator](../Animation/CharacterAnimator.cs) loads
-at runtime. The editor never touches the simulation.
+jump, …). It edits `AnimationDocument` JSON files in the repo's
+`SkeletonStates/<rigName>/` folder (one dir per base rig) — the same files
+[CharacterAnimator](../Animation/CharacterAnimator.cs) loads at runtime. The editor
+never touches the simulation.
 
 Run it:
 
@@ -12,10 +13,60 @@ dotnet run --project MTile.Demo
 ```
 
 Content is **authored-only**: on launch the editor loads the rig from
-`Skeletons/biped.json` (and **fails fast with a clear error if it's missing** — no
-procedural fallback, no autogeneration) plus every `SkeletonStates/*.json` exactly as
-it exists on disk. New clips are created explicitly with `N` (new) or `C` (clone);
-restoring lost content means restoring the files from git.
+`Skeletons/<name>.json` (and **fails fast with a clear error if it's missing** — no
+procedural fallback, no autogeneration) plus every json in that rig's
+`SkeletonStates/<name>/` dir exactly as it exists on disk. New clips are created
+explicitly with `N` (new) or `C` (clone); restoring lost content means restoring the
+files from git.
+
+---
+
+## Command line
+
+One executable, five modes. The **first matching mode flag wins**, in this order:
+`--import` → `--ref` → `--load` → `--bind` → animation editor (the default when no
+mode flag is given). Any bare argument is taken as a clip name for the editor.
+
+```bash
+# Animation editor (default mode)
+dotnet run --project MTile.Demo                          # open on the first clip
+dotnet run --project MTile.Demo -- walk                  # open a clip by name
+dotnet run --project MTile.Demo -- --rig biped_rabbit    # edit another rig's clip pool
+dotnet run --project MTile.Demo -- walk --rig biped_rabbit --usebind rabbit
+
+# Sprite bind editor
+dotnet run --project MTile.Demo -- --bind rabbit                     # SpriteBindings/rabbit.json
+dotnet run --project MTile.Demo -- --bind hero.png                   # legacy: create/edit from a PNG
+dotnet run --project MTile.Demo -- --bind rabbit --rig biped_rabbit  # pick / re-target the rig
+
+# Art import (decomposed-limb intake, SPRITE_SKIN_PLAN.md §10.2)
+dotnet run --project MTile.Demo -- --import SkeletonAssets/rabbit_and_badger
+dotnet run --project MTile.Demo -- --import <dir> --out SpriteBindings --scale 0.25
+
+# Take viewer (scrub an in-game recording with solver overlays)
+dotnet run --project MTile.Demo -- --load Takes/<name>.take.json
+
+# Reference-clip editor (maneuver y(x) Hermite arcs)
+dotnet run --project MTile.Demo -- --ref vault
+```
+
+| Flag | Modes it applies to | Meaning |
+|---|---|---|
+| `<clip>` (bare arg) | editor | Clip name to open (sidebar jumps there). Ignored by other modes |
+| `--rig <name>` | editor, `--bind` | Rig from `Skeletons/<name>.json`. **Editor**: also selects the clip pool `SkeletonStates/<name>/`; Ctrl-S rig edits write back to that rig's own file. **Bind editor**: default is the binding's `Skeleton` field (then `biped`); passing a *different* rig re-targets the binding — bones match by name, new bones start at rest, Ctrl-S persists the new rig name. Other modes ignore it (viewer/ref are biped-tied) |
+| `--usebind <binding>` | editor | Superimpose a sprite skin on the rig through scrub/playback. The skin bakes against the **binding's** own `Skeleton` rig; keys: `G` sprite, `W` wireframe, `X` skeleton |
+| `--bind <name\|png\|json>` | mode flag | Open the sprite bind editor. A bare name resolves `SpriteBindings/<name>.json` first (multi-image bindings have no single PNG); a `.png` argument is the legacy path and also creates brand-new bindings |
+| `--import <dir>` | mode flag | One-time intake of decomposed part art: alpha-crop + downscale each PNG, write `SpriteBindings/<char>/<part>.png` + first-pass binding jsons |
+| `--out <dir>` | `--import` | Output root for imported art (default `SpriteBindings`) |
+| `--scale <f>` | `--import` | Downscale factor for imported art (default `0.25`) |
+| `--load <path>` | mode flag | Take viewer for a `.take.json` recorded in-game (Ctrl+R / Ctrl+S) |
+| `--ref <clip>` | mode flag | Hermite reference-arc editor; loads/saves `ReferenceClips/<name>.json` |
+
+Screenshot env vars (dev captures; the window renders a few frames, saves a PNG, and
+exits): `MTILE_SHOT=<path>` works in **every** mode. Modifiers — editor:
+`MTILE_SHOT_HELP`, `MTILE_SHOT_WIRE`, `MTILE_SHOT_NOSKEL`; bind editor:
+`MTILE_SHOT_PREVIEW`, `MTILE_SHOT_CLIP=<clip>`, `MTILE_SHOT_LAYER=<layer>`;
+take viewer: `MTILE_SHOT_HELP`, `MTILE_SHOT_FRAME=<n>`.
 
 ---
 
@@ -53,11 +104,20 @@ current **edit mode**, cycled with one key:
 
 | Input | Action |
 |---|---|
-| **Tab** | Cycle edit mode: **ROTATE → TRANSLATE → RESIZE** |
+| **Tab** | Cycle edit mode: **ROTATE → RESIZE → STRETCH** |
 | **F** | Flip the animation across a vertical axis — mirrors the **data** (persists on save). Press again to flip back. Use it to make a clip face the game's canonical direction (the runtime mirrors by player facing) |
 | Drag joint (ROTATE) | Rotate the bone about its parent, preserving limb length; the subtree carries along |
-| Drag joint (TRANSLATE) | Move the joint freely in the parent frame (children keep their orientation) |
-| Drag joint (RESIZE) | Move the joint to the cursor — changing the limb's **length** and angle — rolling the bone's rotation so the subtree follows |
+| Drag joint (RESIZE) | Move the joint to the cursor — changing the limb's rest **Length on the rig** (persists to `Skeletons/<name>.json`, affects every clip) — rolling the bone's rotation so the subtree follows |
+| Drag joint (STRETCH) | Slide the joint along the bone's axis — writes the ratio as this **keyframe's `Stretch`** (pseudo-3D foreshortening; rotation and rig untouched). Signed: dragging past the parent joint flips the bone slightly negative, e.g. a hip strut at full leg swap |
+| Drag **com marker** | Place the player against the fixed scenery **per keyframe**: com and skeleton travel with the cursor while the floor line and vault block stay put; the drag writes the active keyframe's `edref` placement, and scrubbing interpolates it — so the body visibly arcs over the refs (e.g. a vault clearing its block). Editor-only visualization, saved with the clip (`edref` additions; the runtime ignores them). Arrow keys pan everything together |
+
+A clip can also ride the maneuver's **authored reference trajectory**: set `"ReferenceArc": "<name>"`
+in the clip json (or `MTile.Probe -- refarc <clip> <name>`) to drive the body's scene placement
+from `ReferenceClips/<name>.json` (falling back to the baked registry defaults) while scrubbing —
+the header shows `arc <name>`. The editor maps the normalized arc per clip Type (Vault: onto the
+reference block; Dropdown: down a ledge; else: up a maneuver height), and any hand-dragged `edref`
+placement adds on top as a nudge. Editor visualization only; the runtime ignores it.
+| Drag **root joint** | Move the body **within** the com frame — the inverse edit of the active keyframe's `com` (the game's vertical anchor): the skeleton follows the cursor while the com marker and floor line hold still, exactly as the game will place it |
 
 The active mode is shown in the top header.
 

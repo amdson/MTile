@@ -77,6 +77,15 @@ public sealed class AnimationDocument
     // 30% without taking them over. Omitted on save when 0 so legacy files round-trip clean.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public float                   OffRegionWeight { get; set; } = 0f;
+    // Name of a reference trajectory (ReferenceClips/<name>.json, falling back to the
+    // baked ReferenceClipRegistry defaults) this clip rides for EDITOR visualization:
+    // while scrubbing, the Demo editor drives the body's placement against the fixed
+    // scenery (floor line, vault block) from the arc, so poses are authored in the
+    // context of the maneuver's real path. Authoring aid only — the runtime ignores it
+    // (the sim follows the arc through ReferencePath, never through the animation).
+    // Null/omitted on ordinary clips.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string                  ReferenceArc { get; set; }
     // Clip-local bones layered onto the base rig (named by Skeleton) for THIS clip
     // only — e.g. a "knife" held in the hand during a slash, which shouldn't bloat the
     // shared biped rig that walk/idle draw against. Each must Parent an existing base

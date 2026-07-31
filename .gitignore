@@ -31,3 +31,4 @@ _shot_*.png
 
 # Recorded gameplay takes (Ctrl+S in the recorder; opened via MTile.Demo -- --load)
 Takes/
+SkeletonStates/.editor_view.json

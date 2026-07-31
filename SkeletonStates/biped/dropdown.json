@@ -4,6 +4,7 @@
   "Skeleton": "biped",
   "Duration": 0.4,
   "Loop": false,
+  "ReferenceArc": "dropdown",
   "Keyframes": [
     {
       "Time": 0,
