@@ -59,6 +59,26 @@
         {
           "Bone": "foot_r",
           "Rotation": -1.3591703
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": 0.39658678
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": 0.39658678
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.8633935
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.8633935
         }
       ],
       "Additions": [
@@ -126,6 +146,26 @@
         {
           "Bone": "foot_r",
           "Rotation": -1.2930707
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": 0.61484176
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": 0.61484176
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.5339331
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.5339331
         }
       ],
       "Additions": [
@@ -193,6 +233,26 @@
         {
           "Bone": "foot_r",
           "Rotation": -0.12303956
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": 0.91842663
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": 0.91842663
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.9643816
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.9643816
         }
       ],
       "Additions": [
@@ -260,6 +320,26 @@
         {
           "Bone": "foot_r",
           "Rotation": -1.3554894
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": 0.72577095
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": 0.72577095
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.5339331
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.5339331
         }
       ],
       "Additions": [

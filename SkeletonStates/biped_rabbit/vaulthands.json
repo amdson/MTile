@@ -32,6 +32,16 @@
         {
           "Bone": "arm_r_lower",
           "Rotation": 0.5
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.5339331
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.5339331
         }
       ],
       "Additions": [
@@ -71,6 +81,16 @@
         {
           "Bone": "arm_r_lower",
           "Rotation": 0.20000005
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.9643816
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.9643816
         }
       ],
       "Additions": [

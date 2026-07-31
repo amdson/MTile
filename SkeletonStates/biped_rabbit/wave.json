@@ -126,6 +126,16 @@
         {
           "Bone": "foot_r",
           "Rotation": -1.3258177
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.5339331
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.5339331
         }
       ],
       "Additions": [

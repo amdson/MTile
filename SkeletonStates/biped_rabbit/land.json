@@ -59,6 +59,26 @@
         {
           "Bone": "foot_r",
           "Rotation": -1.3640796
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": -0.05487217
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": -0.05487217
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 1.0472895
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 1.0472895
         }
       ],
       "Additions": [
@@ -126,6 +146,26 @@
         {
           "Bone": "foot_r",
           "Rotation": -1.3621202
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": 0.101040825
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": 0.101040825
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.9643816
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.9643816
         }
       ],
       "Additions": [
@@ -193,6 +233,26 @@
         {
           "Bone": "foot_r",
           "Rotation": -1.3258
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": 0.18017352
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": 0.18017352
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.9643816
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.9643816
         }
       ],
       "Additions": [

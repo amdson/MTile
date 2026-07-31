@@ -141,8 +141,9 @@ public static class AnimationSampler
     }
 
     // C1 sample at normalized time t into `dest` (rotation = Hermite spline; translation/scale
-    // = rig bind, as authored). a/b/c/d are scratch poses for the keyframe quad. Drop-in for
-    // SampleNormalized where smooth interpolation is wanted.
+    // = smoothstep between the bracketing keys, carrying the per-key Stretch channel). a/b/c/d
+    // are scratch poses for the keyframe quad. Drop-in for SampleNormalized where smooth
+    // interpolation is wanted.
     public static void SampleSmooth(AnimationDocument doc, float t,
                                     SkeletonPose a, SkeletonPose b, SkeletonPose c, SkeletonPose d,
                                     SkeletonPose dest)
@@ -171,7 +172,13 @@ public static class AnimationSampler
         {
             Tangents(br, a, b, c, d, k, out float dCurr, out float si, out float si1);
             float rot = b.Local[k].Rotation + h01 * dCurr + br.h * (h10 * si + h11 * si1);
-            dest.Local[k] = new BoneTransform(b.Local[k].Translation, rot, b.Local[k].Scale);
+            // Translation/scale carry the per-keyframe Stretch channel (bone length
+            // distortion). Smoothstep (h01) blend: C1 at the keys with zero tangent —
+            // stretch extremes are authored ON keys, so a flat tangent there is the
+            // intended shape, and no neighbor bookkeeping is needed.
+            var trans = Vector2.Lerp(b.Local[k].Translation, c.Local[k].Translation, h01);
+            var scale = Vector2.Lerp(b.Local[k].Scale,       c.Local[k].Scale,       h01);
+            dest.Local[k] = new BoneTransform(trans, rot, scale);
         }
     }
 
@@ -291,7 +298,12 @@ public static class AnimationSampler
         {
             bool found = false;
             foreach (var f in bb)
-                if (f.Bone == e.Bone) { if (MathF.Abs(MathHelper.WrapAngle(f.Rotation - e.Rotation)) > 1e-3f) return false; found = true; break; }
+                if (f.Bone == e.Bone)
+                {
+                    if (MathF.Abs(MathHelper.WrapAngle(f.Rotation - e.Rotation)) > 1e-3f) return false;
+                    if (MathF.Abs((f.Stretch ?? 1f) - (e.Stretch ?? 1f)) > 1e-3f) return false;
+                    found = true; break;
+                }
             if (!found) return false;
         }
         return true;
