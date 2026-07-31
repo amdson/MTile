@@ -711,46 +711,12 @@ public sealed partial class CharacterAnimator
     public bool TryComReference(out Vector2 comLocal)
         => SampleNamedPoint(_curDoc, _curComT, "com", out comLocal);
 
-    // Non-allocating lerp of a named root-space Point addition across the keyframes
-    // bracketing normalized time t (cf. AnimAdditionSampler.Sample, which allocates a
-    // list every call). Holds the value when only one bracketing keyframe defines it.
+    // Named root-space Point track at normalized time t — the shared sparse-channel C1
+    // sampler (AnimAdditionSampler.SamplePoint): only keyframes that author the point are
+    // its keys, so gaps bridge smoothly instead of hold-then-snap, and motion between
+    // authored keys is Catmull-Rom like the pose spline. Allocation-free.
     private static bool SampleNamedPoint(AnimationDocument doc, float t, string name, out Vector2 p)
-    {
-        p = default;
-        var ks = doc?.Keyframes;
-        if (ks == null || ks.Count == 0) return false;
-        t = MathHelper.Clamp(t, ks[0].Time, ks[ks.Count - 1].Time);
-
-        int i = 0;
-        while (i < ks.Count - 1 && ks[i + 1].Time < t) i++;
-        int j = Math.Min(i + 1, ks.Count - 1);
-
-        bool ha = TryPointAt(ks[i], name, out var pa);
-        bool hb = TryPointAt(ks[j], name, out var pb);
-        if (ha && hb)
-        {
-            float span = ks[j].Time - ks[i].Time;
-            float u = span <= 1e-6f ? 0f : (t - ks[i].Time) / span;
-            p = Vector2.Lerp(pa, pb, u);
-            return true;
-        }
-        if (ha) { p = pa; return true; }
-        if (hb) { p = pb; return true; }
-        return false;
-    }
-
-    private static bool TryPointAt(AnimationKeyframe k, string name, out Vector2 p)
-    {
-        p = default;
-        if (k.Additions == null) return false;
-        foreach (var a in k.Additions)
-            if (a.Kind == AnimAdditionKind.Point && a.Name == name)
-            {
-                p = new Vector2(a.Px, a.Py);
-                return true;
-            }
-        return false;
-    }
+        => AnimAdditionSampler.SamplePoint(doc, t, name, out p);
 
     // --- clip selection ------------------------------------------------------
     // (Clip selection policy lives in the move drivers — Animation/MoveDriver.cs. The old

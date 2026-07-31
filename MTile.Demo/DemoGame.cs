@@ -604,41 +604,12 @@ public sealed class DemoGame : Game
 
     private bool TryComAt(float t, out Vector2 com) => TryPointAt(t, "com", out com);
 
-    // A named root-space Point track's value at normalized time t: lerp across the
-    // bracketing keyframes (mirrors the runtime's SampleNamedPoint — hold the value
-    // where only one side authors it). False if the clip never authors the point.
+    // A named root-space Point track at normalized time t — the shared sparse-channel C1
+    // sampler (same one the runtime uses, so the editor preview matches the game): only
+    // keyframes that author the point are its keys, gaps bridge smoothly, and motion
+    // between authored keys is Catmull-Rom like the pose spline.
     private bool TryPointAt(float t, string name, out Vector2 p)
-    {
-        p = default;
-        var ks = Doc?.Keyframes;
-        if (ks == null || ks.Count == 0) return false;
-        t = MathHelper.Clamp(t, ks[0].Time, ks[ks.Count - 1].Time);
-        int i = 0;
-        while (i < ks.Count - 1 && ks[i + 1].Time < t) i++;
-        int j = Math.Min(i + 1, ks.Count - 1);
-        bool ha = TryPointOf(ks[i], name, out var pa);
-        bool hb = TryPointOf(ks[j], name, out var pb);
-        if (ha && hb)
-        {
-            float span = ks[j].Time - ks[i].Time;
-            float u = span <= 1e-6f ? 0f : (t - ks[i].Time) / span;
-            p = Vector2.Lerp(pa, pb, u);
-            return true;
-        }
-        if (ha) { p = pa; return true; }
-        if (hb) { p = pb; return true; }
-        return false;
-    }
-
-    private static bool TryPointOf(AnimationKeyframe k, string name, out Vector2 p)
-    {
-        p = default;
-        if (k.Additions == null) return false;
-        foreach (var a in k.Additions)
-            if (a.Kind == AnimAdditionKind.Point && a.Name == name && a.Parent == null)
-            { p = new Vector2(a.Px, a.Py); return true; }
-        return false;
-    }
+        => AnimAdditionSampler.SamplePoint(Doc, t, name, out p);
 
     // The active keyframe's com addition, if it has one (the thing a root drag edits).
     private AnimAddition ActiveKeyCom() => ActiveKeyPoint("com");

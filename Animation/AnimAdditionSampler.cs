@@ -40,6 +40,63 @@ public static class AnimAdditionSampler
         return CloneList(src);
     }
 
+    // C1 sample of a named ROOT-SPACE Point track at normalized time t. Unlike Sample
+    // (adjacent-keyframe lerp + hold), this treats the point as a SPARSE channel: its keys
+    // are only the keyframes that author it, so an unauthored keyframe between two authored
+    // ones is bridged smoothly instead of held-then-snapped, and motion between authored
+    // keys uses the same non-uniform Catmull-Rom the pose spline does (tangent = average of
+    // adjacent secant slopes; zero tangents at the track's ends — no cyclic wrap: com/edref
+    // arcs are one-shots, and a constant track is unaffected). Holds the nearest end value
+    // outside the authored range. Allocation-free. False if nothing authors the point.
+    public static bool SamplePoint(AnimationDocument doc, float t, string name, out Vector2 p)
+    {
+        p = default;
+        var ks = doc?.Keyframes;
+        if (ks == null || ks.Count == 0) return false;
+
+        // Collect the up-to-4 authored keys around t: (tL,pL) (t0,p0) | t | (t1,p1) (tR,pR).
+        bool hasL = false, has0 = false, has1 = false, hasR = false;
+        float tL = 0f, t0 = 0f, t1 = 0f, tR = 0f;
+        Vector2 pL = default, p0 = default, p1 = default, pR = default;
+        foreach (var k in ks)
+        {
+            if (!TryAuthoredPoint(k, name, out var v)) continue;
+            if (k.Time <= t)
+            {
+                hasL = has0; tL = t0; pL = p0;
+                has0 = true; t0 = k.Time; p0 = v;
+            }
+            else if (!has1) { has1 = true; t1 = k.Time; p1 = v; }
+            else            { hasR = true; tR = k.Time; pR = v; break; }
+        }
+
+        if (!has0 && !has1) return false;
+        if (!has1) { p = p0; return true; }   // past the last authored key → hold
+        if (!has0) { p = p1; return true; }   // before the first authored key → hold
+
+        float h = t1 - t0;
+        if (h <= 1e-6f) { p = p1; return true; }
+        float u = MathHelper.Clamp((t - t0) / h, 0f, 1f);
+        Vector2 sC = (p1 - p0) / h;
+        Vector2 m0 = hasL && t0 - tL > 1e-6f ? 0.5f * ((p0 - pL) / (t0 - tL) + sC) : Vector2.Zero;
+        Vector2 m1 = hasR && tR - t1 > 1e-6f ? 0.5f * (sC + (pR - p1) / (tR - t1)) : Vector2.Zero;
+        float u2 = u * u, u3 = u2 * u;
+        float h00 = 2f * u3 - 3f * u2 + 1f, h10 = u3 - 2f * u2 + u;
+        float h01 = -2f * u3 + 3f * u2,     h11 = u3 - u2;
+        p = h00 * p0 + h * h10 * m0 + h01 * p1 + h * h11 * m1;
+        return true;
+    }
+
+    private static bool TryAuthoredPoint(AnimationKeyframe k, string name, out Vector2 p)
+    {
+        p = default;
+        if (k.Additions == null) return false;
+        foreach (var a in k.Additions)
+            if (a.Kind == AnimAdditionKind.Point && a.Name == name && a.Parent == null)
+            { p = new Vector2(a.Px, a.Py); return true; }
+        return false;
+    }
+
     private static List<AnimAddition> Lerp(List<AnimAddition> a, List<AnimAddition> b, float u)
     {
         if ((a == null || a.Count == 0) && (b == null || b.Count == 0)) return null;
