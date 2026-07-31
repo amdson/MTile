@@ -119,6 +119,11 @@ These are the lessons that cost the most time. They generalize beyond any one cl
    dotnet $P rot <clip> 0 chest -1.25                       # raw-angle escape hatch (torso/head only; --deg)
    dotnet $P retime <clip> 0.5 0.6 | delkey <clip> 0.5 | dur <clip> 0.9
    dotnet $P addcom <clip>                                  # stamp the grounded com anchor LAST
+   dotnet $P stretch <clip> 0.25 hip_r 0.4                  # per-keyframe bone-length Stretch (1 clears)
+   dotnet $P bakeyaw [clip] [--view 18] [--swap -0.2] [--ref 1.0] [--shoulderamp 0.5] [--dry]
+   #   bake pelvis/shoulder yaw foreshortening from the leg/arm scissor (strutted rigs
+   #   only, e.g. --rig biped_rabbit); re-runnable. See Plans/ANIMATION_STRETCH_AND_REFERENCE.md
+   dotnet $P refarc <clip> <arcName|none>                   # bind a ReferenceClips arc (editor placement aid)
    ```
    Command semantics that cost batch workers cycles (learn them here instead):
    - **Keyframe `Time` args are normalized [0,1]** fractions of the clip, NOT seconds —
