@@ -87,5 +87,10 @@ public sealed class CorrectorScratch
     // (CorrectorLedger doc) — always-on bookkeeping, unlike the capture buffers.
     public readonly CorrectorLedger Ledger = new();
 
+    // Nonlinear fold engine (MovementConfig.FoldEngine "lm") — pooled per
+    // player like everything here; stateless between solves (seed is always
+    // the straight line at current velocity), so never snapshot state.
+    public readonly TrajectoryLm Lm = new();
+
     public void BeginFrame() { BallisticCount = 0; SolvedCount = 0; ContactCount = 0; Ledger.Clear(); }
 }

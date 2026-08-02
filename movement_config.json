@@ -1,11 +1,22 @@
 {
   // options: "full" | "redirect-traction" | "legs-only"  (hot-reloads while running)
   "CorrectorScenario": "full",
+  // Stand-fold engine: "qp" (linearized channel solve) | "ref" (terrain-
+  // generated carry reference + PathDeform + servo) | "lm" (nonlinear
+  // oracle, heavy). Hot-reloads — flip mid-game to A/B.
+  "FoldEngine": "ref",
+  "FoldLmIterations": 12,
+  "FoldLmPenWeight": 10,
+  "FoldLmHoverWeight": 0.5,
+  "FoldLmProgressWeight": 0.2,
+  "FoldLmEffortWeight": 0.02,
+  "FoldLmMaxForce": 8000,
   // Fold tuning surface (see MovementConfig for each knob's role) — hot-reloads.
   "FoldHoverOffset": 10,
   "CrouchHoverOffset": 0,
   "FoldClimbReachUp": 20,
   "CrouchClimbReachUp": 4,
+  "FoldDuckReach": 16,
   "FoldIterations": 16,
   "FoldLegForce": 6000,
   "FoldDriveForce": 3000,

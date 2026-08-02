@@ -92,17 +92,28 @@ public static class ClearanceConstraintBuilder
     // (full-speed honest bonk). Corner bevels count as vertical-ish, so grazes
     // and lips stay actionable. Deep truncation keys on penetration regardless
     // of the filter, so a filtered wall impact still kills the scan.
+    // wallEscapeUp/Down (≥ 0 activates wall CLASSIFICATION, the fold-ref mode):
+    // a cell whose nearest exit is a pure wall face is REDIRECTED to its
+    // cheapest exposed vertical escape when that escape fits the budget
+    // (step-up ≤ wallEscapeUp, duck-down ≤ wallEscapeDown) — the row demands
+    // the full step/duck, not the shallow graze. No vertical escape in budget
+    // ⇒ the obstacle is unservable and the scan truncates there (the caller's
+    // give-up: no rows behind the wall, the approach rides the raw reference
+    // and bonks honestly). Deep truncation still keys on TRUE penetration
+    // (the nearest exit), never the redirected demand.
     public static int Build(
         ChunkMap chunks, Polygon body,
         CoastSample[] samples, int count,
         float margin, float deepViolation,
         ClearanceRow[] rows, out int truncatedAt,
-        bool verticalFacesOnly = false, bool[] plantTicks = null)
+        bool verticalFacesOnly = false, bool[] plantTicks = null,
+        float wallEscapeUp = -1f, float wallEscapeDown = -1f)
     {
         var template = CObstacleTemplate.For(body);
         var facets = template.Facets;
         int F = Math.Min(facets.Length, MaxFacets);
         float reach = template.Reach + margin;
+        bool classify = wallEscapeUp >= 0f || wallEscapeDown >= 0f;
 
         int rowCount = 0;
         truncatedAt = count;
@@ -129,6 +140,7 @@ public static class ClearanceConstraintBuilder
             var pos = samples[k].Pos;
             for (int f = 0; f < F; f++) tickDepth[f] = 0f;
             float tickPenetration = 0f;
+            bool wallBlocked = false;
 
             int cMin = (int)MathF.Floor((pos.X - reach) / ts), cMax = (int)MathF.Floor((pos.X + reach) / ts);
             int rMin = (int)MathF.Floor((pos.Y - reach) / ts), rMax = (int)MathF.Floor((pos.Y + reach) / ts);
@@ -173,6 +185,30 @@ public static class ClearanceConstraintBuilder
                 // the coast bonks via deep truncation exactly as when these
                 // rows were vetoed outright.
 
+                // Wall classification (fold-ref mode): the nearest exit being a
+                // wall face means "obstacle ahead" — decide duck/step/give-up
+                // HERE, where the escape direction is committed, not in the
+                // solver (rows are conjunctive; a mis-directed row can only be
+                // violated, never reconsidered).
+                if (classify && bestFacet >= 0 && MathF.Abs(facets[bestFacet].Normal.Y) < 0.3f)
+                {
+                    int vf = -1; float vBest = float.MaxValue;
+                    for (int f = 0; f < F; f++)
+                    {
+                        float ny = facets[f].Normal.Y;
+                        bool isUp = ny <= -0.7f, isDown = ny >= 0.7f;
+                        if (!isUp && !isDown) continue;
+                        var fc = facets[f];
+                        if (TileQuery.IsSolidAt(chunks, cx + fc.MaskDx1 * ts, cy + fc.MaskDy1 * ts)) continue;
+                        if (fc.TwoMasks && TileQuery.IsSolidAt(chunks, cx + fc.MaskDx2 * ts, cy + fc.MaskDy2 * ts)) continue;
+                        float budget = isUp ? wallEscapeUp : wallEscapeDown;
+                        if (budget < 0f || cellDepth[f] > budget) continue;
+                        if (cellDepth[f] < vBest) { vBest = cellDepth[f]; vf = f; }
+                    }
+                    if (vf >= 0) { bestFacet = vf; rawBest = vBest; }
+                    else wallBlocked = true;
+                }
+
                 // A fully-enclosed cell (no exposed facets) contributes nothing —
                 // a shallower row exists at whatever surface cell the coast
                 // crossed to get here.
@@ -185,7 +221,19 @@ public static class ClearanceConstraintBuilder
             }
 
             bool deep = tickPenetration >= deepViolation;
-            for (int f = 0; f < F; f++)
+            if (classify)
+            {
+                // Per-tick emission: a position-offset deform only moves the
+                // tick a row names — merged runs would leave every other tick
+                // of the stretch free to pop back into the obstacle. One row
+                // per (violated facet, tick); budget-capped, nearest first.
+                for (int f = 0; f < F; f++)
+                    if (tickDepth[f] > 0f && rowCount < MaxEvents)
+                        rows[rowCount++] = new ClearanceRow { Tick = k, Normal = facets[f].Normal,
+                                                              Depth = tickDepth[f], HingeScale = 1f,
+                                                              CellX = tickCellX[f], CellY = tickCellY[f], HasCell = true };
+            }
+            else for (int f = 0; f < F; f++)
             {
                 if (tickDepth[f] > 0f)
                 {
@@ -209,7 +257,7 @@ public static class ClearanceConstraintBuilder
                 }
             }
 
-            if (deep)
+            if (deep || wallBlocked)
             {
                 truncatedAt = k;
                 break;

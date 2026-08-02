@@ -117,7 +117,7 @@ public static class AmbientCorrector
     // Highest (min-y) C-obstacle top surface at horizontal position x, among
     // solid standable tiles (open above) whose surface lies within the vertical
     // band [bandMinY, bandMaxY]. The bevel facets ramp this smoothly over lips.
-    private static float FloorEnvelope(ChunkMap chunks, CObstacleTemplate t, float x,
+    internal static float FloorEnvelope(ChunkMap chunks, CObstacleTemplate t, float x,
                                        float bandMinY, float bandMaxY, out bool found)
     {
         int ts = Chunk.TileSize;
@@ -163,6 +163,25 @@ public static class AmbientCorrector
             vars.AmbientChannelPrev = default;
             return;
         }
+
+        // Nonlinear fold engine (MovementConfig.FoldEngine "lm"): the whole
+        // fold — support, progress, clearance — is one trajectory
+        // optimization (TrajectoryLm); everything below (coast prediction,
+        // row building, channels, elective refusal) is the QP path and is
+        // bypassed. Non-fold ambient assists and the maneuver stack stay QP.
+        if (fold.Fold && cfg.FoldEngine == "lm")
+        {
+            ApplyLm(ctx, s, fold, dir, ref vars);
+            return;
+        }
+
+        // Reference-rollout engine ("ref", FoldReference): the anchored
+        // standing regime rides a terrain-generated carry reference deformed
+        // around obstacles; launched/plunging/airborne/knockback regimes fall
+        // through to the ballistic-qp flow below.
+        if (fold.Fold && cfg.FoldEngine == "ref"
+            && FoldReference.TryApply(ctx, s, fold, policy, dir, ref vars))
+            return;
 
         // Short horizon — within a body length reads as reflexes, beyond reads as
         // autopilot (the corridor plan's boundary, carried over unchanged).
@@ -434,6 +453,54 @@ public static class AmbientCorrector
             s.SolvedCount = BallisticPredictor.Predict(
                 ctx.Body, ctx.Chunks, dir, ctx.Input.Down, startGrounded,
                 ctx.Modifiers, ctx.Gravity, ctx.Dt, n, s.SolvedTrajectory, s.TickDv);
+        }
+    }
+
+    // The "lm" fold engine's apply site: run TrajectoryLm from the live body
+    // state, then correct the next integrated velocity toward the plan's
+    // tick-0 velocity. The correction is measured against what AppliedForce
+    // ALREADY holds (state baseline + any action forces), so nothing
+    // double-counts; it is capped at FoldLmMaxForce — the LM path's one
+    // actuation bound. QP-only cross-frame anchors are cleared so switching
+    // engines mid-session (hot reload) can't leak a stale smoothness chain.
+    private static void ApplyLm(EnvironmentContext ctx, CorrectorScratch s,
+                                in FoldProfile fold, int dir, ref MovementVars vars)
+    {
+        var cfg = MovementConfig.Current;
+        vars.AmbientPrevDv = Vector2.Zero;
+        vars.AmbientChannelPrev = default;
+
+        int H = Math.Min(cfg.AmbientHorizon, BallisticPredictor.MaxHorizon);
+        int n = s.Lm.Solve(
+            ctx.Chunks, ctx.Body.Polygon, ctx.Body.Position, ctx.Body.Velocity,
+            dir, fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed,
+            trackProgress: !ctx.Modifiers.PreserveExternalVelocity,
+            fold.HoverOffset, fold.ClimbReachUp,
+            ctx.Gravity, ctx.Dt, H, cfg.FoldLmIterations,
+            s.Samples, out _);
+        if (n == 0 || ctx.Dt <= 0f) return;
+
+        Vector2 v1Cur = ctx.Body.Velocity + (ctx.Body.AppliedForce + ctx.Gravity) * ctx.Dt;
+        Vector2 dF = (s.Samples[0].Vel - v1Cur) / ctx.Dt;
+        float mag = dF.Length();
+        if (mag > cfg.FoldLmMaxForce && mag > 0f) dF *= cfg.FoldLmMaxForce / mag;
+        ctx.Body.AppliedForce += dF;
+        vars.AmbientPrevDv = dF * ctx.Dt;
+
+        if (s.CaptureTrajectories)
+        {
+            // Solved = the plan; "ballistic" = the straight-line seed the
+            // optimizer started from (there is no coast on this path).
+            Array.Copy(s.Samples, s.SolvedTrajectory, n);
+            s.SolvedCount = n;
+            for (int k = 0; k < n; k++)
+            {
+                s.BallisticTrajectory[k].Pos = ctx.Body.Position + ctx.Body.Velocity * (k + 1) * ctx.Dt;
+                s.BallisticTrajectory[k].Vel = ctx.Body.Velocity;
+                s.BallisticTrajectory[k].Grounded = false;
+                s.BallisticTrajectory[k].FloorY = float.PositiveInfinity;
+            }
+            s.BallisticCount = n;
         }
     }
 

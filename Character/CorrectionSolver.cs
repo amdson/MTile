@@ -8,7 +8,12 @@ namespace MTile;
 //   it moves position at row tick T by (T − k + 1)·dt along z.
 // Force: z is an acceleration held for tick k — Δv = z·dt, moving position at
 //   row tick T by (T − k + 1)·dt².
-public enum LeverKind { VelocityUpdate, Force }
+// PositionOffset: z is the path's position deviation AT tick k (px) — it moves
+//   position at row tick T by z iff k == T, else nothing. Rows become diagonal
+//   in the variables (no cross-tick coupling — the conditioning fix for
+//   opposed-row schedules); dynamic honesty comes from ChannelDef.SlewCap
+//   bounding adjacent-offset differences (= the deviation's implied velocity).
+public enum LeverKind { VelocityUpdate, Force, PositionOffset }
 
 // A solver channel: per-tick convex admissible set with a closed-form projection,
 // a lever kind, and a quadratic cost weight. The solver is one loop over channels
@@ -44,6 +49,13 @@ public struct ChannelDef
     // true only on the corner-plant redirect; every other channel takes no
     // hinge gradient from them (walls recruit nothing but a hand-plant).
     public bool      PlantServes;
+    // PositionOffset channels only: bound on the implied deviation VELOCITY,
+    // |z_k − z_{k−1}| ≤ SlewCap·dt, anchored at z_{ActiveFrom−1} ≡ 0 (the path
+    // starts AT the body — deformation builds over ticks, never teleports).
+    // 0 = off. Enforced as a projection against the previous iterate's
+    // neighbor (approximate mid-chain, exact at the k = ActiveFrom seam,
+    // which is the tick the servo actually tracks).
+    public float     SlewCap;
     // Row-class compatibility: a SkipSoftHorizontal channel takes no hinge
     // gradient from soft rows (HingeScale < 1) whose normal is horizontal —
     // the x-progress reference. A free deflector serving a soft x row is an
@@ -208,10 +220,29 @@ public static class CorrectionSolver
                         var push = 2f * p.HingeWeight * p.Rows[j].HingeScale * slack[j] * lever * p.Rows[j].Normal;
                         g -= push;
                         if (p.RowPush != null && k == 0)
-                            p.RowPush[j] += (ch.Lever == LeverKind.Force ? p.Dt : 1f) * push / L;
+                            p.RowPush[j] += (ch.Lever switch
+                            {
+                                LeverKind.Force => p.Dt,            // accel → δv
+                                LeverKind.PositionOffset => 1f / p.Dt,   // px → δv
+                                _ => 1f,
+                            }) * push / L;
                     }
 
                     zScratch[i] = Project(ch, k, p.CoastVel[k], z[i] - g / L);
+
+                    // Slew clamp (PositionOffset dynamics honesty): pull the
+                    // offset into reach of its predecessor. Mid-chain uses the
+                    // PREVIOUS iterate's neighbor (synchronous sweep) so pairs
+                    // of new values can transiently exceed the bound by one
+                    // sweep's movement; the seam anchor (0) is exact.
+                    if (ch.SlewCap > 0f)
+                    {
+                        float slew = ch.SlewCap * p.Dt;
+                        var anchor = k == ch.ActiveFrom ? Vector2.Zero : z[i - 1];
+                        var dd = zScratch[i] - anchor;
+                        float dl = dd.Length();
+                        if (dl > slew) zScratch[i] = anchor + dd * (slew / dl);
+                    }
                 }
             }
 
@@ -256,6 +287,7 @@ public static class CorrectionSolver
 
     private static float Lever(LeverKind kind, int rowTick, int k, float dt)
     {
+        if (kind == LeverKind.PositionOffset) return k == rowTick ? 1f : 0f;
         float steps = (rowTick - k + 1) * dt;
         return kind == LeverKind.VelocityUpdate ? steps : steps * dt;
     }

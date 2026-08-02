@@ -242,7 +242,7 @@ public class MovementConfig
     // (their face rows were never filtered).
     public bool FoldCornerPlantEnabled          { get; set; } = false;
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
-    public int   AmbientHorizon                 { get; set; } = 10;
+    public int   AmbientHorizon                 { get; set; } = 24;
     // ── Fold tuning surface (CONSOLIDATION_PLAN §6) — hot-reloadable feel knobs.
     // Structural constants (HingeWeight, hinge scales, anchor leak, SupportReach)
     // stay in code: they are stability/semantics, not feel.
@@ -256,6 +256,11 @@ public class MovementConfig
     // it in sync (or delete the JSON key) when tweaking Chunk.TileSize.
     public float FoldClimbReachUp               { get; set; } = 1.25f * Chunk.TileSize;
     public float CrouchClimbReachUp             { get; set; } = 4f;
+    // Duck budget — FoldClimbReachUp's downward mirror for the ref engine's
+    // wall classification: a frontal obstacle whose duck-under needs at most
+    // this much descent is entered by ducking; anything deeper is a give-up
+    // (raw carry into an honest bonk). px, same TileSize caveat as above.
+    public float FoldDuckReach                  { get; set; } = 1.0f * Chunk.TileSize;
     // Fixed inner iteration budget of the per-tick fold solve (determinism
     // requires it fixed; raise for convergence, costs linearly).
     public int   FoldIterations                 { get; set; } = 16;
@@ -271,6 +276,26 @@ public class MovementConfig
     // to push against (no redirect, no legs), only air control.
     public float FoldAirLateralForce            { get; set; } = 1500f;
     public float FoldAirVerticalForce           { get; set; } = 300f;
+    // TEMP EXPERIMENT: free 2D force at convex-corner plant ticks (see
+    // CorrectorChannels' CornerPlant channel). 0 (default) disables the
+    // channel; opt in via movement_config.json while playtesting.
+    public float FoldCornerPlantForce           { get; set; } = 0f;
+    // Stand-fold engine: "qp" = the linearized channel solve (the default —
+    // what the test suite pins); "ref" = the reference-rollout engine
+    // (FoldReference: terrain-generated carry reference + PathDeform + servo;
+    // non-anchored regimes fall back to qp); "lm" = the nonlinear trajectory
+    // engine (TrajectoryLm — kept as the offline oracle, too heavy for the
+    // rollback loop). Hot-reloadable A/B while playtesting.
+    public string FoldEngine                    { get; set; } = "qp";
+    // TrajectoryLm tuning: fixed LM iteration budget (fixed for determinism,
+    // like FoldIterations), residual weights, and the cap on the applied
+    // tick-0 correction (px/s² — the lone actuation bound the LM path has).
+    public int   FoldLmIterations               { get; set; } = 12;
+    public float FoldLmPenWeight                { get; set; } = 10f;
+    public float FoldLmHoverWeight              { get; set; } = 0.5f;
+    public float FoldLmProgressWeight           { get; set; } = 0.2f;
+    public float FoldLmEffortWeight             { get; set; } = 0.02f;
+    public float FoldLmMaxForce                 { get; set; } = 8000f;
     // Max unresolved clearance residual (px) an ambient plan may carry and still
     // be applied. Small: ambient assists are grazes, not commitments.
     public float AmbientRefusalResidual         { get; set; } = 1f;

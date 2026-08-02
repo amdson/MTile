@@ -19,6 +19,7 @@ public enum CorrectionChannel : byte
     AirLateralBack, // maneuver-only: unrestricted damping back toward the line
     AirVertical,    // tiny two-sided vertical nudge in flight
     PathDeform,     // ReferenceCorrector: deforms an authored arc, not a body force
+    CornerPlant,    // TEMP EXPERIMENT: unrestricted 2D force at corner-plant ticks
 }
 
 // Per-step bookkeeping of what the corrector solve actually exerted — the

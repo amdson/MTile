@@ -204,7 +204,24 @@ public static class CorrectorChannels
             Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6],
             SkipSoftHorizontal = true };
-        return 7;
+        return AddCornerPlant(s, n, 7);
+    }
+
+    // TEMP EXPERIMENT: an UNRESTRICTED 2D force channel at convex-corner plant
+    // ticks (MarkCornerPlants) — no axis, no unilateral rule, no soft-row skip.
+    // Deliberately breaks the anti-autopilot structure to see what a corner
+    // plant could do with arbitrary authority. Cap 0 → channel omitted.
+    private static int AddCornerPlant(CorrectorScratch s, int n, int slot)
+    {
+        float cap = MovementConfig.Current.FoldCornerPlantForce;
+        if (cap <= 0f) return slot;
+        for (int k = 0; k < n; k++)
+            s.ChannelMask[slot][k] = s.CornerPlant[k] && !s.Samples[k].Grounded;
+        s.Problem.Channels[slot] = new ChannelDef {
+            Id = CorrectionChannel.CornerPlant,
+            Lever = LeverKind.Force, Weight = 0.05f,
+            Cap = cap, ActiveMask = s.ChannelMask[slot] };
+        return slot + 1;
     }
 
     // The maneuver channel set — the same physical semantics as the fold,
@@ -297,7 +314,7 @@ public static class CorrectorChannels
             Id = CorrectionChannel.AirVertical,
             Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6] };
-        return 7;
+        return AddCornerPlant(s, n, 7);
     }
 
     // Hand-plant reach for convex-corner redirect anchors (body center →
@@ -306,14 +323,11 @@ public static class CorrectorChannels
     public const float CornerPlantReach = 26f;
 
     // Convex-corner plant scan (cave-mouth entry, movement_todo #2): the
-    // ambient row build is verticalFacesOnly BY DESIGN (the fold must never
-    // steer around walls — bonks stay honest), so lip corners are invisible
-    // to the solver's row set. This scan marks airborne predicted ticks
+    // This scan marks airborne predicted ticks
     // within hand reach of a CONVEX tile corner — a solid tile whose
     // underside, one side, and that diagonal are all open (the lip's
     // lower-left/right corner; never a flat wall face, never a slab run) —
     // as plantable: BuildFold/BuildManeuver expose the Redirect disc there.
-    // Corners become anchors; walls stay invisible.
     public static void MarkCornerPlants(ChunkMap chunks, CoastSample[] samples, int n,
                                         bool[] outMask)
     {
