@@ -117,7 +117,8 @@ public static class CorrectorChannels
             // supported walk's speed into rise is the leg servo's job done
             // wrong — it eats vx to climb). A convex corner within hand reach
             // (MarkCornerPlants) is a plant anchor too — the cave-mouth lip.
-            s.ChannelMask[3][k] = (near[k] || s.CornerPlant[k]) && !s.Samples[k].Grounded;
+            s.ChannelMask[3][k] = cfg.FoldRedirectEnabled
+                                  && (near[k] || s.CornerPlant[k]) && !s.Samples[k].Grounded;
             s.ChannelMask[4][k] = near[k];    // Tuck: legs pulling the body down
                                               // onto the floor (ducks, drop-below-
                                               // hover) — a ground verb too
@@ -160,12 +161,13 @@ public static class CorrectorChannels
         // opening. Supported ticks stay masked off (the hover ride under a
         // slab is Grounded), and SkipSoftHorizontal still bars soft-x
         // service — this adds plant surfaces, not autopilot.
-        for (int j = 0; j < rowCount; j++)
-        {
-            if (s.Rows[j].HingeScale < 1f || s.Rows[j].Normal.Y < -0.3f) continue;
-            for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
-                if (!s.Samples[k].Grounded) s.ChannelMask[3][k] = true;
-        }
+        if (cfg.FoldRedirectEnabled)
+            for (int j = 0; j < rowCount; j++)
+            {
+                if (s.Rows[j].HingeScale < 1f || s.Rows[j].Normal.Y < -0.3f) continue;
+                for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
+                    if (!s.Samples[k].Grounded) s.ChannelMask[3][k] = true;
+            }
 
         var intent = dir == 0 ? new Vector2(1f, 0f) : new Vector2(dir, 0f);
         ch[0] = new ChannelDef {   // LegServo: strong, up-only, near ground

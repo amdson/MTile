@@ -241,6 +241,11 @@ public class MovementConfig
     // pins the enabled behavior either way. Maneuver plants are always on
     // (their face rows were never filtered).
     public bool FoldCornerPlantEnabled          { get; set; } = false;
+    // Ablation switch for the qp fold's plant-and-deflect disc (channel
+    // slot 3) — hot-reloadable A/B for measuring what the redirect actually
+    // buys on a course. Off masks the channel everywhere, including the
+    // feature-anchored (cave-mouth) plant ticks.
+    public bool FoldRedirectEnabled             { get; set; } = true;
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
     public int   AmbientHorizon                 { get; set; } = 10;
     // ── Fold tuning surface (CONSOLIDATION_PLAN §6) — hot-reloadable feel knobs.
