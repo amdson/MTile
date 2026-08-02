@@ -5,7 +5,7 @@ namespace MTile;
 
 public static class GroundChecker
 {
-    public const float ProbeSlack = 20f;
+    public const float ProbeSlack = 5f;
     // Pull the left/right faces inward so a wall tile the body's side vertex is merely flush
     // against (its column shares the strip-below's boundary) isn't reported as a floor under the
     // body. Mirror of WallChecker.VerticalInset — without it, pressing jump while wall-sliding

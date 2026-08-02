@@ -58,6 +58,7 @@ public class JumpingState : MovementState
             case LedgeGrabState:
                 corner = abilities.GrabbedCorner;
                 break;
+            //TODO remove dependency on Animation layer data
             case ClimbManeuverBase climb when climb.TryAnimationGrip(out corner):
                 break;
             default:

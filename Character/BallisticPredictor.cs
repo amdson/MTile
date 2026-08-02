@@ -32,7 +32,7 @@ public struct CoastSample
 // caller's CoastSample[] (pooled on PlayerCharacter when wired; see plan §6).
 public static class BallisticPredictor
 {
-    public const int MaxHorizon = 24;   // ≥ any CorrectorHorizon a config will ask for
+    public const int MaxHorizon = 48;   // ≥ any CorrectorHorizon a config will ask for
 
     // How far below the body a floor may be and still count as SUPPORT — the
     // gravity-hold + envelope-anchor engagement reach (hover rest sits ~20px
@@ -41,7 +41,7 @@ public static class BallisticPredictor
     // grounded classification, and the ambient envelope's anchor band — the
     // three MUST agree or the solver plans against a baseline the live tick
     // doesn't apply (the zero-g floater bug).
-    public const float SupportReach = 30f;
+    public const float SupportReach = 25f;
 
     // Inside this floor distance the gravity hold is FULL strength; it fades
     // linearly to zero at SupportReach (≈ the old spring's zero-force length
