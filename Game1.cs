@@ -35,7 +35,7 @@ public class Game1 : Game
     private MTile.Net.RollbackSession _session;
     private PlayerInput _localInput;
 
-    public Game1(NetSetup net = null) : this()
+    public Game1(NetSetup net, string configPath = null) : this(configPath)
     {
         _net = net;
     }
@@ -108,6 +108,7 @@ public class Game1 : Game
     // rebuilds the sim from _activeStage for a pristine re-entry of the scenario.
     // _activeStage starts as the config stage and switches to each new save.
     private string _activeStage;
+    private string _configPath;
     private KeyboardState _prevKeys;
     private string _toast;
     private float  _toastTtl;
@@ -121,12 +122,16 @@ public class Game1 : Game
     private bool _probeSlow, _shownSlow;
     private int _probeFrames;
 
-    public Game1()
+    public Game1(string configPath = null)
     {
         // Load game config before the GraphicsDeviceManager finalizes so window
-        // prefs take effect on the first frame. Title-relative path resolved via
+        // prefs take effect on the first frame. The path may be a CLI-selected
+        // scenario config (e.g. Testing/freeze.json) — a repo-root CWD copy is
+        // preferred so edit → F5 iterates; otherwise resolved title-relative via
         // TitleContent → TitleContainer (works on DesktopGL and the Blazor/WASM build).
-        _config = GameConfig.Load("game_config.json");
+        _configPath = configPath ?? "game_config.json";
+        _config = GameConfig.Load(File.Exists(_configPath)
+            ? Path.GetFullPath(_configPath) : _configPath);
         _camera.Zoom = _config.CameraZoom;
 
         _graphics = new GraphicsDeviceManager(this)
@@ -298,6 +303,49 @@ public class Game1 : Game
         _sim.OnPlayerRespawn += pos => Effects.Puff(_particles, pos, Color.LimeGreen);
         _sim.Chunks.OnTileBroken += (pos, type) =>
             Effects.TileBreak(_particles, pos, TilePalette.BaseColor(type));
+
+        if (_config.FreezeFrame) ApplyFreezeFrame();
+    }
+
+    // TEMP EXPERIMENT: single-frame corrector inspector (GameConfig.FreezeFrame,
+    // set by scenario configs under Testing/).
+    private readonly CoastSample[] _lmTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
+    private readonly TrajectoryLm _lmProbe = new();
+    private int _lmCount;
+
+    private void ApplyFreezeFrame()
+    {
+        var body = _sim.Player.Body;
+        body.Position = new Vector2(
+            _config.FreezeFramePosX ?? body.Position.X,
+            _config.FreezeFramePosY ?? body.Position.Y);
+        body.Velocity = new Vector2(_config.FreezeFrameVelX, _config.FreezeFrameVelY);
+
+        // TEMP EXPERIMENT: nonlinear trajectory probe from the same pre-step
+        // state the corrector captures use. Render-only; drawn lime. (With
+        // FoldEngine "lm" the sim's own solved capture is the same solve —
+        // this probe stays useful for A/B against the QP engine.)
+        var mc = MovementConfig.Current;
+        _lmCount = _lmProbe.Solve(
+            _sim.Chunks, body.Polygon, body.Position, body.Velocity,
+            _config.FreezeFrameInputX, mc.MaxWalkSpeed, trackProgress: true,
+            mc.FoldHoverOffset, mc.FoldClimbReachUp,
+            new Vector2(0f, Simulation.WorldGravityY), Simulation.FixedDt,
+            mc.AmbientHorizon, iterations: 30, _lmTrajectory, out float lmCost);
+
+        _sim.Player.CorrectorDebug.CaptureTrajectories = true;
+        _sim.Step(new PlayerInput
+        {
+            Left  = _config.FreezeFrameInputX < 0,
+            Right = _config.FreezeFrameInputX > 0,
+            Down  = _config.FreezeFrameDown,
+        });
+        _config.TimeScale = 0f;
+        var cd = _sim.Player.CorrectorDebug;
+        Toast($"frozen: pos ({body.Position.X:F1},{body.Position.Y:F1}) " +
+              $"vel ({body.Velocity.X:F1},{body.Velocity.Y:F1}) " +
+              $"ref={cd.ReferenceCount} bal={cd.BallisticCount} sol={cd.SolvedCount} " +
+              $"lmCost={lmCost:F1} - F5 reloads config");
     }
 
     protected override void LoadContent()
@@ -411,8 +459,23 @@ public class Game1 : Game
             }
             if (keyboardState.IsKeyDown(Keys.F5) && !_prevKeys.IsKeyDown(Keys.F5))
             {
+                // TEMP EXPERIMENT: re-read the active config's freeze fields
+                // (+ TimeScale, which a freeze forces to 0; + Stage while
+                // frozen) so edit → F5 iterates on a scenario.
+                var fresh = GameConfig.Load(File.Exists(_configPath)
+                    ? Path.GetFullPath(_configPath) : _configPath);
+                _config.FreezeFrame       = fresh.FreezeFrame;
+                _config.FreezeFramePosX   = fresh.FreezeFramePosX;
+                _config.FreezeFramePosY   = fresh.FreezeFramePosY;
+                _config.FreezeFrameVelX   = fresh.FreezeFrameVelX;
+                _config.FreezeFrameVelY   = fresh.FreezeFrameVelY;
+                _config.FreezeFrameInputX = fresh.FreezeFrameInputX;
+                _config.FreezeFrameDown   = fresh.FreezeFrameDown;
+                _config.TimeScale         = fresh.TimeScale;
+                if (_config.FreezeFrame) _activeStage = fresh.Stage;
+                else _lmCount = 0;
                 LoadStage(Stages.Get(_activeStage));
-                Toast($"reloaded stage '{_activeStage}'");
+                if (!_config.FreezeFrame) Toast($"reloaded stage '{_activeStage}'");
             }
         }
         _prevKeys = keyboardState;
@@ -706,6 +769,9 @@ public class Game1 : Game
                 _debugOverlay.DrawTrajectory(cd.SolvedTrajectory, cd.SolvedCount, Color.Magenta);
             if (_config.DebugDrawCorrectorContacts && cd.ContactCount > 0)
                 _debugOverlay.DrawContactForces(cd.ContactPos, cd.ContactDv, cd.ContactCount);
+            // TEMP EXPERIMENT: nonlinear trajectory probe (TrajectoryLm, freeze mode only).
+            if (_lmCount > 0)
+                _debugOverlay.DrawTrajectory(_lmTrajectory, _lmCount, Color.Lime);
         }
 
         // Enemy health bars in world space, drawn just above each wounded body.

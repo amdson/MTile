@@ -1,0 +1,24 @@
+{
+  "Stage": "corridor",
+  "CameraZoom": 4.5,
+  "WindowWidth": 1000,
+  "WindowHeight": 900,
+  "DrawPlayerSprites": false,
+  "DrawPlayerSpriteSkin": false,
+  "DebugDrawBodies":            true,
+  "DebugDrawSkeleton": false,
+  "DebugDrawHitboxes": false,
+  "DebugDrawPlayerOrientation": false,
+  "DebugDrawHealthBars": false,
+  "DebugDrawForceFields": false,
+  "DebugDrawCObstacles":         true,
+
+
+  "FreezeFrame": true,
+  "FreezeFramePosX": 344,
+  "FreezeFramePosY": 64,
+  "FreezeFrameVelX": 100,
+  "FreezeFrameVelY": 0,
+  "FreezeFrameInputX": 1,
+  "FreezeFrameDown": false
+}

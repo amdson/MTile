@@ -21,11 +21,11 @@ public sealed class GameConfig
     public bool DebugDrawHurtboxes         { get; set; } = false;
     public bool DebugDrawPlayerOrientation { get; set; } = true;
     public bool DebugDrawBodies            { get; set; } = false;
-    public bool DebugDrawConstraints       { get; set; } = true;
+    public bool DebugDrawConstraints       { get; set; } = false;
     // Corridor probe (Plans/CORRIDOR_MANEUVER_PLAN.md): per-column floor/ceiling gates ahead
     // of the primary player in their facing direction, corner markers, and a red truncation
     // post (stubs: 1 = Pinch, 2 = TallRise, 3 = NoFloor). Render-only scan.
-    public bool DebugDrawCorridor          { get; set; } = true;
+    public bool DebugDrawCorridor          { get; set; } = false;
     // BallisticPredictor coast ahead of the primary player (Plans/BALLISTIC_CORRECTOR_PLAN.md
     // step 1): predicted correction-free trajectory as a polyline, grounded samples marked.
     // Render-only rollout each frame; never feeds back into the sim.
@@ -41,7 +41,7 @@ public sealed class GameConfig
     public bool DebugDrawCorrectorSolved    { get; set; } = true;
     //   Contacts   — per-clearance-row push arrows: the δv each contact shoved
     //                into the correction applied this frame (orange-red)
-    public bool DebugDrawCorrectorContacts  { get; set; } = true;
+    public bool DebugDrawCorrectorContacts  { get; set; } = false;
     // C-space obstacle boundary near the player (exposed template facets: axis
     // faces steel blue, corner bevels orange) — what the row builder plans against.
     public bool DebugDrawCObstacles         { get; set; } = false;
@@ -145,6 +145,22 @@ public sealed class GameConfig
     // Switched at runtime via the 1/2/3/4 number keys (Game1.HandleInput). Stored
     // as a string in the config for readability; parsed once at load.
     public string StartingBlockType { get; set; } = "Dirt";
+
+    // TEMP EXPERIMENT: freeze-frame corrector inspector. When true, after the
+    // stage loads the player is teleported to FreezeFramePos (null → stage
+    // spawn) with FreezeFrameVel, the sim steps exactly ONCE with the held
+    // input below, and TimeScale is forced to 0 — the game renders that single
+    // frame's captured corrector trajectories (ballistic aqua, solved magenta,
+    // reference gold if a maneuver entered). Lives in scenario configs under
+    // Testing/ (passed as a CLI arg), not in game_config.json; F5 re-reads the
+    // active config file and re-freezes, so edit → F5 iterates.
+    public bool   FreezeFrame       { get; set; } = false;
+    public float? FreezeFramePosX   { get; set; }
+    public float? FreezeFramePosY   { get; set; }
+    public float  FreezeFrameVelX   { get; set; } = 0f;
+    public float  FreezeFrameVelY   { get; set; } = 0f;
+    public int    FreezeFrameInputX { get; set; } = 1;   // -1/0/+1 held direction
+    public bool   FreezeFrameDown   { get; set; } = false;
 
     public static GameConfig Load(string path)
     {

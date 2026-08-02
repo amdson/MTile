@@ -14,6 +14,16 @@ using MTile.Rtc;
 
 string mode = args.Length > 0 ? args[0].ToLowerInvariant() : "solo";
 
+// Any non-mode arg is an alternate game config path (scenario configs, e.g.
+// Testing/freeze.json — see GameConfig.FreezeFrame):
+//   dotnet run --project MTile.Desktop -- Testing/freeze.json
+if (mode is not ("host" or "join" or "solo") )
+{
+    using var scenario = new Game1(configPath: args[0]);
+    scenario.Run();
+    return;
+}
+
 if (mode is "host" or "join")
 {
     string[] stun = args.Length > 1 ? args[1..] : new[] { "stun:stun.l.google.com:19302" };
