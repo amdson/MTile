@@ -242,7 +242,7 @@ public class MovementConfig
     // (their face rows were never filtered).
     public bool FoldCornerPlantEnabled          { get; set; } = false;
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
-    public int   AmbientHorizon                 { get; set; } = 24;
+    public int   AmbientHorizon                 { get; set; } = 10;
     // ── Fold tuning surface (CONSOLIDATION_PLAN §6) — hot-reloadable feel knobs.
     // Structural constants (HingeWeight, hinge scales, anchor leak, SupportReach)
     // stay in code: they are stability/semantics, not feel.
