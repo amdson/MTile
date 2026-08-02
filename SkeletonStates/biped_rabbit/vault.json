@@ -14,7 +14,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.4242507
+          "Rotation": -1.4635354
         },
         {
           "Bone": "head",
@@ -32,7 +32,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -1.3335426
+          "Rotation": -1.286162
         },
         {
           "Bone": "arm_l_lower",
@@ -40,7 +40,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 0.77999985
+          "Rotation": 0.93854785
         },
         {
           "Bone": "arm_r_lower",
@@ -58,11 +58,11 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -2.0015955
+          "Rotation": -1.8146315
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 1.11
+          "Rotation": 1.1380595
         },
         {
           "Bone": "foot_l",
@@ -70,11 +70,11 @@
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 0.7532819
+          "Rotation": 0.86060256
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.98
+          "Rotation": 1.1144059
         },
         {
           "Bone": "foot_r",
@@ -100,15 +100,15 @@
         {
           "Name": "edref",
           "Kind": "Point",
-          "Px": -4.6,
-          "Py": -0.2,
+          "Px": -12.200004,
+          "Py": -0.40000015,
           "Dx": 0,
           "Dy": 0
         }
       ]
     },
     {
-      "Time": 0.14647888,
+      "Time": 0.36056337,
       "Bones": [
         {
           "Bone": "hip",
@@ -134,7 +134,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -1.7378901
+          "Rotation": -1.7538555
         },
         {
           "Bone": "arm_l_lower",
@@ -142,7 +142,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.074741
+          "Rotation": 0.24483603
         },
         {
           "Bone": "arm_r_lower",
@@ -160,11 +160,11 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -1.7000992
+          "Rotation": -1.1302809
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 1.11
+          "Rotation": 0.70023704
         },
         {
           "Bone": "foot_l",
@@ -172,15 +172,15 @@
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 0.28437415
+          "Rotation": 0.026950063
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 1.4528618
+          "Rotation": 1.7997688
         },
         {
           "Bone": "foot_r",
-          "Rotation": 0.7909323
+          "Rotation": -0.47513872
         }
       ],
       "Contacts": [
@@ -198,11 +198,19 @@
           "Py": -21.979773,
           "Dx": 0,
           "Dy": 0
+        },
+        {
+          "Name": "edref",
+          "Kind": "Point",
+          "Px": -11.4,
+          "Py": 6.5863132E-06,
+          "Dx": 0,
+          "Dy": 0
         }
       ]
     },
     {
-      "Time": 0.27323943,
+      "Time": 0.75352114,
       "Bones": [
         {
           "Bone": "hip",
@@ -292,11 +300,19 @@
           "Py": -20.979769,
           "Dx": 0,
           "Dy": 0
+        },
+        {
+          "Name": "edref",
+          "Kind": "Point",
+          "Px": -6.9999986,
+          "Py": -1.9999952,
+          "Dx": 0,
+          "Dy": 0
         }
       ]
     },
     {
-      "Time": 0.28732395,
+      "Time": 0.7661972,
       "Bones": [
         {
           "Bone": "hip",
@@ -384,7 +400,7 @@
       ]
     },
     {
-      "Time": 0.4112676,
+      "Time": 0.8915493,
       "Bones": [
         {
           "Bone": "hip",
@@ -466,6 +482,14 @@
           "Kind": "Point",
           "Px": -0.79999655,
           "Py": -21.179768,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "edref",
+          "Kind": "Point",
+          "Px": -0.19999847,
+          "Py": -14.999995,
           "Dx": 0,
           "Dy": 0
         }
