@@ -1,6 +1,12 @@
 # Rendering Upgrade Plan — primitives, density fields, and segment metaballs
 
-Status: **proposed** (June 2026). Adds a GPU primitive/mesh layer and a
+Status: **LARGELY SHIPPED** (plan written June 2026). The primitive layer, density field,
+and segment-metaball shaders all landed — see `Drawing/PrimitiveBatch.cs`,
+`Drawing/DensityField.cs`, `Drawing/SkeletonMetaballRenderer.cs`, `Drawing/GlowTrailField.cs`,
+`Content/CapsuleSplat.fx`, `Content/MetaballComposite.fx`, and the `MTile.FxLab` project.
+Kept as the design record; check the source before assuming any specific item is outstanding.
+
+Original status line: *proposed (June 2026).* Adds a GPU primitive/mesh layer and a
 RenderTarget-based density-field pipeline on top of the current SpriteBatch
 renderer, culminating in a pixel-shader **metaball field generalized to line-segment
 bones** for blobby/gooey character rendering. Everything here is **render-only and

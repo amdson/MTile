@@ -1,6 +1,10 @@
 # Enemy Capability Framework — MVP
 
-**Status:** draft / not yet implemented.
+**Status:** **BUILT.** The two-FSM MVP exists as `Entities/EnemyEntity.cs` +
+`EnemyState.cs` / `EnemyMovementStates.cs` / `EnemyActions.cs` / `EnemyController.cs`,
+with `EnemyBlueprint.cs` making new enemies data-driven (register an `EntityKind` +
+blueprint, no subclass). `BruteEnemy` is the hand-written reference; the older
+`StalkerEnemy`/`TurretEnemy` predate the framework and were not migrated.
 
 **Goal:** the smallest possible reusable enemy scaffold built the same way the player is —
 two concurrent FSMs (movement + action), flyweight states with per-activation value

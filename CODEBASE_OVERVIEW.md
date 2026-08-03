@@ -2,9 +2,9 @@
 
 A 2D platformer in C#/MonoGame about "the terrain IS the weapon" — the player slashes, stabs, pulses, fires, and erupts blocks to shape the battlefield while moving through chunked tile terrain. Project root: `c:\Users\amdic\dev\MTile`.
 
-The game logic lives at the repo root and is compiled three ways (see `CLAUDE.md` for the project layout and build commands): `MTile.Core` (the library), `MTile.Desktop` (DesktopGL host), `MTile.Web` (KNI/Blazor WASM host), and `MTile.Tests` (xUnit). Fixed timestep of 30 fps (`Simulation.FixedDt = 1/30`).
+The game logic lives at the repo root and is compiled by several hosts (see `CLAUDE.md` for the project layout and build commands): `MTile.Core` (the library), `MTile.Desktop` (DesktopGL host), `MTile.Web` (KNI/Blazor WASM host), `MTile.Tests` (xUnit), plus the tooling projects `MTile.Probe`, `MTile.Demo`, `MTile.Bench`, `MTile.FxLab` and the `MTile.Rtc` transport. Fixed timestep of 60 fps (`Simulation.FixedDt = 1/60`).
 
-> **Architecture in one sentence:** [`Simulation`](Simulation.cs) is the deterministic game world that advances on inputs alone via `Step(PlayerInput)`; [`Game1`](Game1.cs) is a thin render/input shell around it; everything is being driven toward snapshot/restore for rollback netcode (see `Plans/ROLLBACK_ROADMAP.md`).
+> **Architecture in one sentence:** [`Simulation`](Simulation.cs) is the deterministic game world that advances on inputs alone via `Step(PlayerInput)`; [`Game1`](Game1.cs) is the render/input shell around it; snapshot/restore and the rollback session on top of it are **built and running** (`Net/`), not aspirational.
 
 ## Top-level architecture
 
@@ -42,6 +42,7 @@ The data lattice tying the subsystems together:
 | `ConditionState` (offensive flags) | Action `Enter`/`Exit` set Slash2Ready/RecoveryActive/etc | Action preconditions; `Tick` expires by frame |
 | `CombatState` (defensive flags) | `PlayerCharacter.OnHit` + crush check set Hitstun/Stun/Guard | Jump/attack preconditions |
 | `HitIdAllocator` | One per `Simulation`, threaded via `EnvironmentContext.HitIds` / `IEntitySpawner.HitIds` | All hitbox-publishing code mints `HitId`s |
+| `ForceFieldWorld` (fields) | Action states publish during frame (hold/push/grab/throw) | `ForceFieldSystem.Apply`, **before** physics |
 | `OnTileBroken` / `OnPlayerRespawn` events | `ChunkMap.BreakCell` / `Simulation.Step` | `Game1` spawns cosmetic particles |
 
 **Coupling rule**: Actions may read movement state; movement code MUST NOT read action state. `MovementModifiers` and `AppliedForce` are the only channels in that direction.
@@ -50,26 +51,44 @@ The data lattice tying the subsystems together:
 
 `Simulation` owns every piece of state the world reads or writes and advances it one fixed step via `Step(PlayerInput)`. Two constructors: a headless one (terrain supplied directly + a `populate` delegate — used by tests) and the real one (`GameConfig` + `Stage`). It implements `IEntitySpawner` (AI/projectiles spawn children) and `IChunkProvider` (entities mutate terrain).
 
+There are two entry points: `Step(PlayerInput)` for solo and `Step(p0, p1)` for two players (injects `p1` into the first secondary's `Controller`, then falls through to the same body). Drag-to-build is no longer a `Step` phase — it moved per-player into `BlockReadyAction`.
+
 **`Step` phase order** (mirrored exactly by the headless `SimRunner` so tests match real play):
 1. Inject `input`; advance the absolute sim clock `_elapsed += FixedDt`.
-2. `HandleBuildInput` — RMB drag-to-build sprouts (reach-gated from the player; chains off existing sprouts).
-3. Tick dynamic surfaces (`MovingRectangle` platforms) as a **pure function of `_elapsed`** — no hidden accumulator, so they snapshot cleanly.
-4. `ChunkMap.TickSprouts(dt)` + `ChunkMap.Impact.Tick(dt)` (decay per-cell impact accumulator).
-5. Combat frame: clear hit/hurtbox registries → every `IHittable.PublishHurtboxes` → `_player.Update` (publishes hitboxes) → secondary players → entity AI `Update` → `CombatSystem.Apply`.
+2. Tick dynamic surfaces (`MovingRectangle` platforms) as a **pure function of `_elapsed`** — no hidden accumulator, so they snapshot cleanly.
+3. `ChunkMap.TickSprouts(dt)` + `ChunkMap.Impact.Tick(dt)` (decay per-cell impact accumulator).
+4. Combat frame: clear hitbox/hurtbox/**force-field** registries → every `IHittable.PublishHurtboxes` (primary, secondaries, entities in spawn order) → `_player.Update` (publishes hitboxes + fields) → secondary players → entity AI `Update` → `CombatSystem.Apply`.
+5. `ForceFieldSystem.Apply` — force fields resolve **after** every publisher has updated but **before** physics (unlike hitboxes, which resolve post-step). `onGrabHeld`/`onThrown` callbacks flag victims via `CombatState.MarkGrabbed`/`RegisterThrown`.
 6. Player respawn on death (deterministic, inside `Step`; fires `OnPlayerRespawn`).
 7. `Entity.PreStep` (gravity-scale opt-out) → `PhysicsWorld.StepSwept` → sweep up dead entities.
 
-### Snapshot / restore (rollback core — roadmap goals 4 & 6)
+`Checksum()` is a cheap order-stable FNV-1a fingerprint over both players' pose/velocity/health, the entity set in spawn order, and the id counters. It's the netcode desync guard, not a snapshot — a mismatch between peers at the same frame is a hard desync.
 
-`Snapshot()` returns a [`SimSnapshot`](SimSnapshot.cs): plain-data value structs and id-keyed maps, no live references, so it can outlive any number of `Step`s and be restored repeatedly (rollback re-restores the same frame).
+### The ECS substrate ([Sim/ECS/](Sim/ECS/))
 
-- **Players** → [`PlayerSnapshot`](Character/PlayerSnapshot.cs): FSM selection as **registry indices** (states/actions are flyweights constructed in fixed order), per-activation data as the [`MovementVars`](Character/MovementVars.cs)/[`ActionVars`](Character/ActionVars.cs) value structs, helper objects deep-cloned (`PlayerAbilityState.Clone`, parser/intents capture, eruption gesture deep-copy).
-- **Bodies** → [`BodyState`](Physics/BodyState.cs): pose + kinematics + only the **Maintained** (hard) constraints, deep-cloned. Soft state-owned contacts (`FloatingSurfaceDistance`, `SteeringRamp`, `PointForceContact`) are NOT captured — the owning state's idempotent `Ensure…`/`ResetTransient` rebuilds them next frame.
-- **Entities** → [`EntitySnapshot`](Entities/EntitySnapshot.cs): one superset struct unioned across all entity types, tagged with `EntityKind` so a despawned entity can be `Rehydrate`d (reconstructed); a still-live entity is restored in place by id.
-- **Combat dedupe** → captured by `HittableId`, resolved back to live objects on restore.
-- **Terrain** → [`TerrainSnapshot`](World/TerrainSnapshot.cs): the dense tile grid is too large to copy, so it's rolled back via an inverse-delta journal ([`TerrainJournal`](World/TerrainJournal.cs)) — a snapshot stores `Mark`, restore replays entries past it in reverse. Sparse side-structures (sprout graph, per-cell HP, foam timers, impact accumulator) tick every frame so they're value-snapshotted instead. **Caveat:** journal marks are instance-relative — terrain restore is same-instance only (the rollback case); player/entity snapshots are fully portable.
+`Simulation` no longer holds `_bodies`/`_entities`/`_hittables` lists. Bodies and entities live in a hand-rolled sparse-set `World` ([Sim/ECS/World.cs](Sim/ECS/World.cs), `ComponentStore.cs`, `Query.cs`, `WorldSnapshot.cs`, `Components/EcsComponents.cs`) keyed by generational `EntityId`s. Stores are marked at construction (`MarkWorldStores`) as either:
 
-`Restore(snap)` reverses all of the above and rebuilds the `_bodies`/`_hittables` lists in canonical order (primary, secondaries, entities in spawn order) so iteration order — and therefore stepping — is identical.
+- **live-only** — `PlayerRef`, `EntityRef`, `PhysicsBodyComponent`: skipped by capture, re-registered in canonical order on restore.
+- **snapshotted value stores** — `PlayerData`, `EntityData`, `BodyStateComp`: plain data, the latter two with deep-clone hooks.
+
+Per step the World is projected into `_bodyScratch`/`_entityScratch` for the solver. The public `Entities`/`Bodies` properties allocate fresh lists per access — render/test-only, off the hot path.
+
+### Snapshot / restore
+
+[`SimSnapshot`](SimSnapshot.cs) is small because the ECS World *is* the player+entity snapshot: `HitIdValue`, `World`, `Elapsed`, primary + secondary `ControllerState`s, `Dedupe`, `HitConfirm`, `Recoil`, `Platforms`, `Terrain`. The old `PlayerSnapshot[]`/`EntitySnapshot[]` arrays are gone.
+
+`Snapshot()` first syncs every live player and entity's serializable state into its World value components (`CaptureState(_world)`), then calls `_world.Capture()`. `Restore(snap)` restores the World's id bookkeeping, rewinds terrain, re-registers the live-only refs in canonical order (primary, secondaries, entities in spawn order) so iteration order — and therefore stepping — is identical, and rehydrates entities that no longer exist via `EntityFactory.Rehydrate`.
+
+- **Bodies** → [`BodyState`](Physics/BodyState.cs): pose + kinematics + only the **Maintained** (hard) constraints, deep-cloned. Soft state-owned contacts (`FloatingSurfaceDistance`, `PointForceContact`) are NOT captured — the owning state's idempotent `Ensure…`/`ResetTransient` rebuilds them next frame.
+- **Players** → `PlayerData`: FSM selection as **registry indices** (states/actions are flyweights constructed in fixed order), per-activation data as the [`MovementVars`](Character/MovementVars.cs)/[`ActionVars`](Character/ActionVars.cs) value structs, helper objects deep-cloned (`PlayerAbilityState.Clone`, parser/intents capture, eruption gesture deep-copy).
+- **Combat** → dedupe table by `HittableId`, plus the two 1-frame inboxes (`HitConfirm`, `Recoil`).
+- **Terrain** → [`TerrainSnapshot`](World/TerrainSnapshot.cs): the dense tile grid is too large to copy, so it's rolled back via an inverse-delta journal ([`TerrainJournal`](World/TerrainJournal.cs)) — a snapshot stores `Mark`, restore replays entries past it in reverse. Sparse side-structures (sprout graph, per-cell HP, foam timers, impact accumulator) tick every frame so they're value-snapshotted instead. **Caveat:** journal marks are instance-relative, so terrain restore is same-instance only (the rollback case). [`DenseTerrainCapture`](World/DenseTerrainCapture.cs) provides a portable full-grid alternative for tooling/tests.
+
+### Rollback netcode ([Net/](Net/))
+
+Built and running, not planned. [`RollbackSession`](Net/RollbackSession.cs) does predict → snapshot-ring → reconcile → replay with `InputFrameDelay = 3`, `StallSlack = 3`, `BufferLen = 60`, and piggybacked `Checksum()` desync detection. Around it: `InputRing`, `SnapshotRing`, `InputCodec`/`InputPacket`, `IRemoteInputSource`, `BotInputSource` (still a seeded-random stub — see `Plans/BOT_AI_PLAN.md`), `NetSetup`. Transport is `MTile.Rtc` (WebRTC, manual copy/paste SDP signaling via `MTile.Desktop -- host|join`).
+
+`Game1` takes an optional `NetSetup`; with one present it drives `_session.TryStep()` instead of stepping the sim directly, and `LocalPlayer` follows `_net.LocalPlayerIndex`. Offline-with-a-second-player uses `BotInputSource` to spoof P2. Stage save (Ctrl+M) and reload (F5) are gated off whenever a session exists.
 
 ### Determinism rules (when touching sim code)
 - **No sim-affecting mutable statics.** `HitId`s come from the per-`Simulation` [`HitIdAllocator`](World/HitIdAllocator.cs); block-type/planner-mode are per-`PlayerCharacter` (driven by that player's own input), not globals. The lone surviving static, `EruptionPlanner.DebugDrawMassBall`, is render-only.
@@ -81,7 +100,7 @@ Topology target is **same-build P2P** (desktop↔desktop or WASM↔WASM), so `fl
 
 ## Stages ([Stage.cs](Stage.cs))
 
-A `Stage` bundles "what to load at start": `TerrainConfig` (filename in `Levels/`), `PlayerSpawn`, and a `Populate(Simulation)` delegate that spawns entities + registers platform tickers. `Stages` is a code registry (stages contain behavior, not just data); `game_config.json`'s `Stage` field selects one by name. Two stages today: `start` (the original test world — moving platform, ferris-wheel cluster, balloons/balls, one stalker) and `arena` (bounded combat room — stalkers, turrets, ammo balls).
+A `Stage` bundles "what to load at start": `TerrainConfig` (filename in `Levels/`), `PlayerSpawn`, and a `Populate(Simulation)` delegate that spawns entities + registers platform tickers. `Stages` is a code registry (stages contain behavior, not just data); `game_config.json`'s `Stage` field selects one by name. Seven stages today: `start` (the original test world — moving platform, ferris-wheel cluster, balloons/balls, one stalker), `arena` (bounded combat room — stalkers, turrets, ammo balls), `plain`, `training`, `corridor` (the corrector stress harness — pairs with `PlayerCharacter.RestrictToFallAndStand()`, which strips the movement registry to Falling+Standing), `gym`, and `flat`.
 
 ## Physics ([Physics/](Physics/))
 
@@ -93,19 +112,18 @@ Two integrators:
 - **`Step`** — discrete: move by `velocity * dt`, then iterate up to 8 times pushing the body out of overlapping shapes via MTV.
 - **`StepSwept`** — used by the main loop. Sweeps the body's displacement against all shapes via swept-SAT, picks earliest `T`, advances `(1-T)` along the residual displacement, loops up to 4 bounces. Plus a discrete pre-pass for any sprout that flipped solid mid-overlap.
 
-At every impulse site it computes `vnRel = (body.V - shape.V) · normal` and applies `body.V -= vnRel · normal` to zero relative normal velocity. The swept and discrete sites also call `TryApplyImpactDamage` — probes a 1px slab along the impact face via `WorldQuery.SolidShapesInRect`, splits `(impulse − threshold) · scale` damage among the pressed tiles. Friction (`SurfaceContact.Friction`) is Coulomb-ish: caps per-step tangential velocity change at `friction · dt`, gated off when the state pushed along the same tangent.
+At every impulse site it computes `vnRel = (body.V - shape.V) · normal` and applies `body.V -= vnRel · normal` to zero relative normal velocity — **capped by how much impulse the impacted tile face can absorb** (excess carries through instead of being eaten, which is why `CrushImpulseThreshold` moved 400 → 700). The swept and discrete sites also call `TryApplyImpactDamage` — probes a 1px slab along the impact face via `WorldQuery.SolidShapesInRect`, splits `(impulse − threshold) · scale` damage among the pressed tiles. Friction (`SurfaceContact.Friction`) is Coulomb-ish: caps per-step tangential velocity change at `friction · dt`, gated off when the state pushed along the same tangent.
 
 ### `PhysicsContact` hierarchy
 - `SurfaceContact` (abstract): position, normal, minDistance, surface velocity, friction. The `Maintained` flag marks hard contacts that survive a snapshot.
 - `SurfaceDistance` — hard, stamped by collision resolution to prevent re-penetration (`Maintained == true`). Pruned next frame if the source surface is gone.
 - `FloatingSurfaceDistance` — soft, owned by movement states (Standing's `_ground`, ledge states' `_wall`/`_floor`). Spring force toward the floor; soft (not maintained), so it's rebuilt after a restore.
-- `PointForceContact`, `SteeringRamp` — soft, also rebuilt after restore.
+- `PointForceContact` — soft, also rebuilt after restore.
 
 ### `SolidShapeRef` ([World/SolidShapeProvider.cs](World/SolidShapeProvider.cs))
 Provider-agnostic shape view: AABB + position + velocity + polygon. `ChunkMap` is the first `ISolidShapeProvider`; moving platforms register additional providers. `WorldQuery.SolidShapesInRect` fans out across all of them.
 
-### `SteeringRamp`
-Rotates body velocity onto the shallowest trajectory clearing an upper/lower corner. Reads `ExposedCorner` from checkers; redirects horizontal motion into a slight vertical component when sweeping toward an unblocked corner. Now the primary mechanism behind the parkour/vault states (it replaced the old Hermite-path PD controller).
+> **`SteeringRamp` is gone.** The steering-ramp stack that once drove parkour/vault was removed wholesale by the ballistic corrector (`Plans/BALLISTIC_CORRECTOR_PLAN.md`); only stale comments still name it. Corner clearance is now solver rows against exact C-space geometry — see the corrector note under the Movement FSM.
 
 ## World / Tiles ([World/](World/))
 
@@ -135,7 +153,11 @@ Reads `Levels/*.json` (chunk-position → ASCII filename map + Perlin config). A
 ## Character ([Character/](Character/))
 
 ### `PlayerCharacter` ([Character/PlayerCharacter.cs](Character/PlayerCharacter.cs))
-Owns two parallel FSMs (movement + action), the ability state, intent buffer, and input parser. Combat stats: `Health`, `Mass` (divides incoming knockback), a post-hit invuln window, and **crush damage** (turns last step's `LastImpulseMagnitude` above `CrushImpulseThreshold` into HP loss + hitstun — a hard fall/wall-slam hurts). `OnHit` runs the Guard parry first (`CombatState.TryParry`), then applies damage/knockback/invuln/hitstun.
+Owns two parallel FSMs (movement + action), the ability state, intent buffer, and input parser. Body is a half-width hexagon: `Radius = 12f`, `BodyWidthScale = 0.5f` (both carry do-not-change notes — they are load-bearing for every tuned constant in the corrector and impact stacks).
+
+**The combat model is escalation-based (Smash-style), not HP-chipping.** A direct hit does *not* reduce HP. `OnHit` runs, in order: tech i-frames → Guard parry (`CombatState.TryParry`) → grab-struggle (`GrabStrengthDamage` erodes the grabber's hold instead of dealing anything) → otherwise `AddPercent(hit.Damage)` and knockback scaled by the resulting monotonic `DamagePercent` via `HitResolver.Resolve`. So a hit's "damage" stat is its **percent contribution**; only the tile path still reads it as damage.
+
+Real HP loss comes from **crush** — `PhysicsBody.LastImpulseMagnitude` above `CrushImpulseThreshold` (700f) converts the excess into HP loss + hitstun. Low % ⇒ shoved around harmlessly; high % ⇒ flung into terrain hard enough to take crush damage. HP fast-regens after a quiet window; `DamagePercent` is monotonic and resets only on KO. Post-hit invulnerability was **removed** (it made combos impossible) — only spawn protection and tech i-frames remain.
 
 Each `Update`:
 1. `_frame++`; tick invuln; apply crush damage.
@@ -143,14 +165,16 @@ Each `Update`:
 3. Tick `ConditionState` (combo windows) + `CombatState` (hitstun/stun) flags.
 4. `InputParser.Detect` enqueues gesture intents.
 5. Build a fresh `EnvironmentContext` (input + buffers + chunks + spawner + HitIds + condition/combat + frame + dt + `Modifiers = Identity`).
-6. Movement FSM: if current state's `CheckConditions` fails → exit + fall back to Falling. Then scan registry for higher-passive-priority candidates passing `CheckPreConditions`; transition if one beats current's `ActivePriority`.
+6. Movement FSM: if current state's `CheckConditions` fails → exit + fall back to Falling. Then scan registry for higher-passive-priority candidates passing `CheckPreConditions`; transition if one beats current's `ActivePriority`. Two further gates apply: a candidate's `RequiredCapabilities` must not intersect `CombatState.BlockedCapabilities`, and last frame's state holds a one-frame veto via `owner.Suppresses(state, ctx)`.
 7. **Action FSM selection runs *before* `MovementState.Update`** so the newly-selected action's `ApplyMovementModifiers` is in effect when movement reads physics knobs.
 8. `MovementState.Update` writes `Body.AppliedForce`; `ActionState.ApplyActionForces` augments it; gravity-scale modifier applied as counter-force.
 9. `ActionState.Update` does its FSM work (publishing hitboxes, advancing timers).
 
 **Per-activation FSM state is plain data.** The FSM state/action instances are flyweights (one per registry entry, shared across activations); all mutable per-activation fields live in the [`MovementVars`](Character/MovementVars.cs)/[`ActionVars`](Character/ActionVars.cs) value structs on the player, passed `ref` into lifecycle methods (`Enter`/`Update`/`Exit`/`CheckConditions`) and `in` into the read-only hooks. This is the snapshot unit — a struct copy. (A few genuinely reference-typed buffers, like `BlockEruptionAction`'s gesture `SmoothPen`+`List`, are deep-copied separately.) `PlayerAbilityState` holds the rest: `Facing`, `HasDoubleJumped`, ledge-grab flags, and the nested `Condition`/`Combat` states.
 
-### Movement FSM ([Character/Movement.cs](Character/Movement.cs), [MovementStates.cs](Character/MovementStates.cs))
+### Movement FSM ([Character/Movement.cs](Character/Movement.cs))
+
+`MovementStates.cs` no longer exists — the states are split by family across [LocomotionStates.cs](Character/LocomotionStates.cs), [JumpStates.cs](Character/JumpStates.cs), [WallStates.cs](Character/WallStates.cs), [LedgeStates.cs](Character/LedgeStates.cs), [ClimbStates.cs](Character/ClimbStates.cs), and [ReactionStates.cs](Character/ReactionStates.cs). **All arbitration numbers live in [MovementPriorities.cs](Character/MovementPriorities.cs), which is the single source of truth** — prefer it over the band summaries in this doc.
 
 > **The corrector era** (Plans/BALLISTIC_CORRECTOR_PLAN.md +
 > Plans/CORRECTOR_CONSOLIDATION_PLAN.md): free-state locomotion is now
@@ -178,9 +202,9 @@ Each `Update`:
 > `AmbientPolicy`.
 
 **Fold states**: `FallingState` (0/0, fallback), `StandingState` (10/10), `CrouchedState` (15/15) — support/locomotion via the ambient fold (above). **Wall**: `WallSlidingState(dir)` (owned; publishes `AmbientPolicy.Off`).
-**Stun**: `StunnedState` (25/25) — heavy-hit lockout; muted air control while `Combat.StunActive`. Preempts free/wall states but not active jumps. `TumbleState` — airborne launch variant.
-**Launch states**: `JumpingState`, `RunningJumpState`, `DoubleJumpingState`, `WallJumpingState(dir)`, `CoveredJumpState` (under low overhangs) — set vY once, hold while button held (priorities 50–60).
-**Guided traversals** (band 25–46): the corrector climb family above (trigger-by-feasibility: a maneuver fires iff its corrected arc provably delivers), `LedgeGrabState(dir)` + `LedgePullState(dir)` (wall corners via `FloatingSurfaceDistance` + ability flags), `DropdownState` (Down+platform-drop).
+**Stun**: `StunnedState` (25/25) — heavy-hit lockout; muted air control while `Combat.StunActive`. Preempts free air but not active jumps. `TumbleState` (**51 active / 26 passive**) — the airborne heavy-hit launch variant: its high Active keeps it in the launch band so nothing steals the body mid-launch, while its low Passive lets a player hit mid-jump finish the arc first.
+**Launch states**: `JumpingState`, `RunningJumpState`, `DoubleJumpingState`, `WallJumpingState(dir)`, `CoveredJumpState` (under low overhangs) — set vY once, hold while button held. Actives 50–60, but **passives are only 30–48** (they're trigger-driven, not assertive).
+**Guided traversals**: the corrector climb family above at **29/29** — trigger-by-feasibility, a maneuver fires iff its corrected arc provably delivers. 29 deliberately sits *below* every launch's passive (Jump 30 … CoveredJump 48) so a player's own jump input always wins the same-frame race at a lip, while still outbidding every free state and the stun band. (The old 46/46 was a genuine bug: preemption compares candidate Passive to current Active, so climbs were in fact unbeatable.) Holds are 42–44 (`LedgeGrabState`/`LedgePullState`, wall corners via `FloatingSurfaceDistance` + ability flags), `LedgeJumpState` is 55/44, and `DropdownState` (Down+platform-drop) sits at 20/20 in the free band.
 
 `MovementState` lifecycle methods take `ref MovementVars`; `ResetTransient()` nulls any soft-contact ref cache after a restore so the idempotent `Ensure…` rebuilds it next frame. Cross-frame corrector state (Δu anchors, elective latch) lives in `MovementVars` — snapshot-covered.
 
@@ -193,7 +217,8 @@ Same FSM shape, separate registry/history, lifecycle takes `ref ActionVars`. Eac
 - `StabAction` (30/30) — long thrust with air-stab dive boost; `AirSpinStab` (air backward-swipe variant).
 - `PulseAction` (30/30) — Circle gesture; 12-segment expanding knockback ring that carries the caster's momentum.
 - **Guard** — `GuardAction` (35/40, Shift held + no L/R) sets `GuardActive`; a weak in-cone hit parries to zero and arms `GuardCharged`, enabling `GuardRetaliateAction`.
-- **Ranged** — `EnergyBallAction` (Shift+LMB tap), `BeamAction` (Shift+LMB hold → sustained beam after charge), `GrenadeAction` (F → sticky grenade), `LobbedAreaAction` (Shift+RMB charge → ranged eruption on landing). These spawn projectile entities via `ctx.Spawner`.
+- **Grab / throw** — `GrabAction` (46/46) publishes a hold force field; `GrabbedSlash` (36/36) is the victim's exempt struggle attack, which erodes `GrabStrength` rather than dealing knockback. Throws stun the victim into Tumble.
+- **Ranged** — `EnergyBallAction` (Shift+LMB tap), `BeamAction` (Shift+LMB hold → sustained beam after charge), `GrenadeAction` (F → sticky grenade). These spawn projectile entities via `ctx.Spawner`. `LobbedAreaAction` (Shift+RMB charge → ranged eruption) still exists but is **deactivated** — its binding became Grab.
 - **Block Eruption** (two-phase) — `BlockReadyAction` (8/10, RMB held with cursor IN solid, accumulates charge) → `BlockEruptionAction` (9/10, armed when cursor exits solid, samples a `SmoothPen`-smoothed path, runs `EruptionPlanner.Plan` on release).
 
 ### Combat condition state
@@ -224,13 +249,21 @@ Hitbox-vs-hurtbox model. Per frame: both registries cleared → `IHittable.Publi
 
 `CombatSystem` is **instance-owned by `Simulation`** (the dedupe table is cross-frame sim state); `CaptureDedupe`/`RestoreDedupe` snapshot it by `HittableId`. `HitTargets.{All, TilesOnly, EntitiesOnly}` filters dispatch.
 
+It also carries two **1-frame inboxes**, both snapshotted alongside the dedupe table:
+- `_recoilByHitId` (`PeekRecoil`) — Newton's-third-law back-impulse, so a stab that pogoes off a target recoils the attacker.
+- `_entityHitsByHitId` (`PeekHits`) — hit-confirm gating (actions can branch on whether they actually connected).
+
+**Force fields** ([World/ForceField.cs](World/ForceField.cs) + `ForceFieldWorld`) are a third frame-scoped registry — hold/push/grab/throw. Cleared every `Step`, resolved by `ForceFieldSystem.Apply` before physics, and **never snapshotted** (nothing survives the frame).
+
 ## Entities ([Entities/](Entities/))
 
-[`Entity`](Entities/Entity.cs) — `IHittable` non-player wrapper around a `PhysicsBody`. Fields: `Health, MaxHealth, Mass, GravityScale, Color, Faction, Sprite, Id`. `PreStep(gravity)` cancels/amplifies gravity by `(GravityScale - 1)`. `OnHit` applies damage + knockback `impulse / Mass`. `Update(dt, player, hitboxes, spawner)` is the AI hook (no-op for passive props). Snapshot via `Capture`/`RestoreInto` + virtual `WriteState`/`ReadState`; `Kind` (`EntityKind`) tags the concrete type for `EntitySnapshot.Rehydrate`.
+[`Entity`](Entities/Entity.cs) — `IHittable` non-player wrapper around a `PhysicsBody`. Fields: `Health, MaxHealth, Mass, GravityScale, Color, Faction, Sprite, Id`. `PreStep(gravity)` cancels/amplifies gravity by `(GravityScale - 1)`. `OnHit` applies damage + knockback `impulse / Mass`. `Update(dt, player, hitboxes, spawner)` is the AI hook (no-op for passive props). Snapshot via `CaptureState`/`RestoreState` into the `EntityData` value component + virtual `WriteState`/`ReadState`; `Kind` (`EntityKind`) tags the concrete type so `EntityFactory.Rehydrate` can reconstruct a despawned entity on restore.
 
 `IEntitySpawner` (implemented by `Simulation`) lets AI spawn children mid-update and shares the `HitIdAllocator`.
 
-- [`EntityFactory`](Entities/EntityFactory.cs) — `Balloon` (floating passive target), `Ball` (gravity "crasher" that chips terrain on hard impact), `FloatingBall` (weightless crasher / combat ammo), plus `Stalker`/`Turret`.
+**The enemy layer is now data-driven.** [`EnemyEntity`](Entities/EnemyEntity.cs) runs the same two-FSM shape as the player (movement + action, priority selection) over [`EnemyMovementStates`](Entities/EnemyMovementStates.cs)/[`EnemyActions`](Entities/EnemyActions.cs), driven by a stateless swappable [`EnemyController`](Entities/EnemyController.cs) brain that emits an `EnemyInput`. A new enemy is an [`EnemyBlueprint`](Entities/EnemyBlueprint.cs) + an `EntityKind` registration — **no subclass required**. `BruteEnemy` is kept as the hand-written reference implementation; `StalkerEnemy`/`TurretEnemy` predate the framework and remain as-is.
+
+- [`EntityFactory`](Entities/EntityFactory.cs) — `Balloon` (floating passive target), `Ball` (gravity "crasher" that chips terrain on hard impact), `FloatingBall` (weightless crasher / combat ammo), `PracticeBall`, plus `Stalker`/`Turret`/blueprint enemies.
 - [`StalkerEnemy`](Entities/StalkerEnemy.cs) — ground chaser: Chase → Telegraph (visible wind-up) → Lunge (forward hitbox) → Recover, with a Stagger state on hit so knockback isn't clobbered by the AI.
 - [`TurretEnemy`](Entities/TurretEnemy.cs) — stationary: Idle → Charging (aim locks, dodgeable line of fire) → fires a `BulletProjectile` at the player's current position → Cooldown; Stagger on hit.
 - [`Projectile`](Entities/Projectile.cs) base + concrete `BulletProjectile`, `EnergyBallProjectile`, `StickyGrenadeProjectile`, `LobbedAreaProjectile` — travel + publish hitboxes; lifetime/fuse handled by the base. `LobbedAreaProjectile` captures eruption mode + block type at launch and runs a planner on detonation.
@@ -239,11 +272,33 @@ Hitbox-vs-hurtbox model. Per frame: both registries cleared → `IHittable.Publi
 
 [`DrawContext`](Drawing/DrawContext.cs) wraps `SpriteBatch` + 1×1 pixel, exposes `Line/Rect/Ring/Disc/RotatedRect`. [`Sprite`](Drawing/Sprite.cs) is a `Pose`-based vector sprite; `AnimatedSprite` adds frame timing. [`ParticleSystem`](Drawing/ParticleSystem.cs) is a fixed-capacity pool (2048 in Game1). [`Trail`](Drawing/Trail.cs) is a fading ribbon (cursor trail + slash tip trails). [`Effects`](Drawing/Effects.cs) — preset spawners (`TileBreak`, `Puff`). **All drawing is cosmetic and downstream of the sim.**
 
+The stack has grown well past that base layer:
+
+- **Character rendering** — `SkeletonMetaballRenderer` + `DensityField` + `PrimitiveBatch` drive a RenderTarget density-field pipeline with segment-metaball shaders (`Content/CapsuleSplat.fx`, `Content/MetaballComposite.fx`) for blobby bone rendering.
+- **Sprite skin** — [`SpriteSkin`](Drawing/SpriteSkin.cs) + [`SpriteBinding`](Drawing/SpriteBinding.cs) + [`MlsDeformer`](Drawing/MlsDeformer.cs): hand-drawn multi-layer PNG artwork MLS-deformed over the rig, per-player bindings (see `SpriteBindings/`, art in `SkeletonAssets/`).
+- **Glow / VFX** — `GlowRenderer`, `GlowTrailField`, `AttackGlowSystem`.
+- **World & UI** — `ChunkRenderer`, `TilePalette`/`TileTextureAtlas`, `ParallaxBackground`, `HudRenderer`, `DebugOverlayRenderer`, `DevDemoRenderer`, `ScreenshotSystem`.
+- **`CosmeticUpdateSystem`** — the extracted per-frame cosmetic update (sprite sync, secondary animators), keeping that logic out of `Game1`.
+
+## Animation ([Animation/](Animation/))
+
+Render-only, and hot-reloadable freely for that reason. The rig is a pure joint chain (`Drawing/Skeleton.cs`, rigs in `Skeletons/*.json`, clips in `SkeletonStates/<rig>/`, loaded by `SkeletonStore`).
+
+[`CharacterAnimator`](Animation/CharacterAnimator.cs) is the hub (plus `.Constraints` and `.Diagnostics` partials): it selects and blends clips (`AnimationSampler`, `AnimAdditionSampler`, `OverlayStack`, `BoneMask`, `SkeletonComposition`) and then runs a **generalized box-bounded Levenberg–Marquardt least-squares solve** ([`LeastSquaresSolver`](Animation/LeastSquaresSolver.cs)) over clip times, CoM offset, and joint corrections. Constraints are a composable `IConstraint` library — `FixedPoint`/`ExternalPin` (foot plant, vault hand grip), half-plane `NoPenetration` against `TerrainSurfaces`, and `ActionAimConstraint` (re-aims the stab overlay along the runtime input direction). `PoseIk` and `MoveDriver` sit alongside; tuning lives in `anim_solver_config.json`.
+
+[`MotionProbe`](Animation/MotionProbe.cs) converts joint angles to world positions — **use it rather than eyeballing angles** when debugging clips (this is what the `anim-probe` skill and `MTile.Probe` drive).
+
+## Recording ([Recording/](Recording/))
+
+`GameRecorder` — in-game animation take capture and scrub (Ctrl+R record, Ctrl+P playback). `AnimTake` serializes the `CharacterAnimSample` stream to `Takes/*.take.json` for replay in the standalone viewer (`MTile.Demo -- --load`). `AnimTraceLogger` (Ctrl+L) dumps CSV traces.
+
 ## Render shell ([Game1.cs](Game1.cs))
 
 `Initialize`: load `GameConfig`, resolve the `Stage`, load `MovementConfig` (+ desktop hot-reload watcher), construct `Simulation`, subscribe `OnPlayerRespawn`/`OnTileBroken` to cosmetic particle spawners.
 
-`Update`: read keyboard/mouse, compute `mouseWorldPos` from the camera, `Controller.Poll` → `_sim.Step(input)`. Then **cosmetic-only**: cursor trail, sync sprites to bodies + advance animations, air→ground landing puff, particles, camera tracking. None of this writes sim state.
+`Update`: read keyboard/mouse, compute `mouseWorldPos` from the camera, `Controller.Poll` → `_sim.Step(input)` (or `_session.TryStep()` when a `NetSetup` is present). Then **cosmetic-only**: cursor trail, sync sprites to bodies + advance animations, air→ground landing puff, particles, camera tracking. None of this writes sim state.
+
+Also in the shell: a `TimeScale` slow-mo accumulator, a freeze-frame corrector inspector driven by `Testing/freeze.json`, Ctrl+M stage save / F5 reload via `StageSaver.cs` (both disabled under a rollback session), and a worst-of-60-frames timing probe. **`Game1` is not actually thin** — ~870 lines, mostly render and HUD; `Plans/GAME1_REFACTOR_PLAN.md` tracks the remaining extraction.
 
 `Draw`: world transform from camera → chunks (damage-darkened) → platforms → growing sprouts → entities → players → particles/cursor trail → current action overlay → debug overlays (hitboxes, hurtboxes, orientation, constraints, health bars, gated by `GameConfig` toggles) → screen-space UI (state/action names, planner mode, block-picker HUD, health bars).
 
@@ -252,16 +307,19 @@ Hitbox-vs-hurtbox model. Per frame: both registries cleared → `IHittable.Publi
 xUnit. Categories:
 - `PhysicsTests`, `GroundFrictionTests`, `MovingPlatformTests`, `JumpingStateTests` — physics/movement units.
 - `Sim/` — scenario-driven simulation tests with deterministic ascii-terrain + scripted input (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport` CSV diffing). `SimRunner.Run` mirrors `Simulation.Step`'s phase order; `SimRunner.RunMulti` runs multiple players sharing terrain + combat registries for cross-player combat tests.
-- `SnapshotRoundTripTests` — the rollback gate: snapshot at frame K, run to N, restore K, re-run to N, assert identical traces (incl. terrain — a ball chipping the floor and a foam build straddling the snapshot both replay bit-for-bit).
+- `SnapshotRoundTripTests` — the rollback gate: snapshot at frame K, run to N, restore K, re-run to N, assert identical traces (incl. terrain — a ball chipping the floor and a foam build straddling the snapshot both replay bit-for-bit). Alongside it: `RollbackHarnessTests`, `InputCodecTests`, `RtcConnectionTests`, `TwoPlayerStepTests`.
+- `Animation/` — ~25 files covering the solver (`AnimSolverTests`, `FixedPointSolverTests`, `NoPenetrationSolverTests`, `VaultGripSolverTests`, `ActionAimSolverTests`), blending/overlays, rig/IK, and sprite skin. Files prefixed `Zzz` are slow soak tests, named to run last.
+
+~470–480 cases across ~100 files. **7 are `Skip`ped, all deliberately**: 4 pending an impact-break retune (the R=12 body impact spread), 1 needing the StandServo root, 1 on the crouched reflex-vault band bug, 1 an assert-free diagnostic sweep.
 
 See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 
 ## Key conventions
 
-- **Right-handed coords with Y-down** (MonoGame default). World gravity `(0, 600)` px/s² (`Simulation.Gravity`). Tile coords `gtx, gty` are integer global cell indices; cell centers are `gtx * 16 + 8`.
+- **Right-handed coords with Y-down** (MonoGame default). World gravity `(0, 600)` px/s² (`Simulation.Gravity`). Tile coords `gtx, gty` are integer global cell indices; cell centers are `gtx * Chunk.TileSize + Chunk.TileSize/2` (nominally 16px tiles — the codebase is parameterized on `Chunk.TileSize`, but px overrides in `movement_config.json` do NOT scale with it).
 - **Forces are accelerations**: `PhysicsBody` has no mass; `body.Velocity += body.AppliedForce * dt`. Mass appears only in `ImpactDamage` and `Entity`/player knockback.
 - **Modifier scalars are multiplicative on baseline config**, not absolute (`m.MaxWalkSpeed *= 0.6f`).
-- **Priorities form bands**: free states 0–20, stun 25, walls 20–40, guided 25–45, launches 50–60. `Active > Passive` for "sticky" states; `Passive > Active` for preempting states.
+- **Priorities form bands** — see [MovementPriorities.cs](Character/MovementPriorities.cs) for the authoritative numbers. Roughly: free/ground 0–20, stun 25, Tumble 51/26, climb family 29/29, jump passives 30–48, holds 42–44, launch actives 50–60. Preemption compares the **candidate's Passive** to the **current state's Active** — get that backwards and bands look right while behaving wrong.
 - **Per-activation FSM state is plain data** in `MovementVars`/`ActionVars`; the state/action objects are stateless flyweights. This is what makes snapshot a struct copy.
 - **`HitId` is monotonic per `Simulation`** via `HitIdAllocator`. CombatSystem dedupes by `(HitId, Target)` so multi-frame hitboxes land once per entity but apply cumulatively to tiles.
 - **The sim is deterministic and snapshot-restorable**; render systems are strictly downstream and must never feed back. Terrain mutations funnel through `ChunkMap.WriteTile`/`GetOrCreateChunk` so the journal stays complete.
@@ -272,8 +330,12 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 | I want to… | Look at |
 |---|---|
 | Add a new player ability | New `ActionState` subclass; add to `_actionRegistry` in [PlayerCharacter.cs](Character/PlayerCharacter.cs); put per-activation fields in `ActionVars`; pick priorities in the right band |
-| Add a new movement state | Subclass `MovementState`, add to `_stateRegistry`; put per-activation fields in `MovementVars`; null any soft-contact cache in `ResetTransient` |
-| Add a new enemy / projectile | Subclass `Entity`/`Projectile`, add an `EntityKind` + `Rehydrate` case + `WriteState`/`ReadState`; spawn via `Stage.Populate` or `ctx.Spawner` |
+| Add a new movement state | Subclass `MovementState`, add to `_stateRegistry`, put per-activation fields in `MovementVars`, null any soft-contact cache in `ResetTransient`; **add its priorities to [MovementPriorities.cs](Character/MovementPriorities.cs)** and reason about Passive-vs-current-Active, not band membership |
+| Add a new enemy | Prefer an [`EnemyBlueprint`](Entities/EnemyBlueprint.cs) + `EntityKind` — no subclass. `BruteEnemy` is the hand-written reference if you need one |
+| Add a new projectile | Subclass `Projectile`, add an `EntityKind` + `Rehydrate` case + `WriteState`/`ReadState`; spawn via `Stage.Populate` or `ctx.Spawner` |
+| Tune how a hit *feels* | Percent contribution is the hitbox's `Damage`; knockback shape is `HitResolver` + `impact_profiles.json`; HP loss is the crush path (`CrushImpulseThreshold`) |
+| Author or debug an animation clip | `MTile.Probe` CLI (`list/new/addkey/ik/contact/rot/retime/…`) against `SkeletonStates/<rig>/`; read geometry with `MotionProbe`, never by eyeballing angles |
+| Add a snapshotted per-entity field | Put it in the `EntityData`/`PlayerData` value component in `Sim/ECS/Components/`, not on the live object |
 | Make an entity crashable | Set `body.Impact = new ImpactDamage { … }` in its factory |
 | Add a new tile type | Extend `TileType`, add HP in `TileDamage.MaxHPFor`, color in `Game1.GetTileBaseColor` (+ picker key if player-selectable) |
 | Add a new dynamic surface | Implement `ISolidShapeProvider`, register via `Simulation.AddPlatform`; provide `.Velocity`; drive motion from `_elapsed` for snapshot safety |

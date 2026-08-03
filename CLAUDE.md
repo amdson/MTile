@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A 2D platformer in C#/MonoGame built around "the terrain IS the weapon": the player slashes, stabs, pulses, and erupts blocks to reshape a chunked tile world while moving through it. Fixed timestep of 60 fps (`Simulation.FixedDt`).
 
-**Read [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md) first** — it is the authoritative architecture doc (physics, character FSMs, combat, world/tiles, drawing). This file covers only build/run/test mechanics, project layout, and the in-flight refactor that the overview predates. Design notes and roadmaps live in [Plans/](Plans/).
+**Read [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md) first** — it is the authoritative architecture doc (sim/ECS/rollback, physics, character FSMs, combat, world/tiles, animation, drawing). This file covers build/run/test mechanics, project layout, and the conventions that bite hardest. Design notes and roadmaps live in [Plans/](Plans/).
 
 ## Project layout
 
@@ -16,10 +16,14 @@ Game source lives **at the repo root** (`Character/`, `Physics/`, `World/`, `Ent
 |---|---|
 | `MTile.Core.csproj` (root) | The library. Globs the root `.cs` files; excludes `MTile.Tests/`, `MTile.Desktop/`, `MTile.Web/`. Compiles against `MonoGame.Framework.DesktopGL`. |
 | `MTile.Desktop/` | `WinExe` desktop host (`AssemblyName` = `MTile`). DesktopGL. The normal way to run the game. |
-| `MTile.Web/` | Blazor WebAssembly host via the **KNI** MonoGame variant (`nkast.Xna.Framework`). Does **not** ProjectReference Core — KNI is a different assembly identity, so it re-globs the same root `.cs` and compiles them a second time. Browser-port status tracked in `Plans/BROWSER_PORT_PLAN.md`. |
+| `MTile.Web/` | Blazor WebAssembly host via the **KNI** MonoGame variant (`nkast.Xna.Framework`). Does **not** ProjectReference Core — KNI is a different assembly identity, so it re-globs the same root `.cs` and compiles them a second time. Browser-port status: `Plans/Archive/BROWSER_PORT_PLAN.md` — builds green and the dev server serves all assets, but it is **not runtime-verified**, and hosting/input/audio polish (phases 4–6) is not started. |
 | `MTile.Tests/` | xUnit. ProjectReferences `MTile.Core`. |
+| `MTile.Probe/` | Headless animation CLI — the clip-authoring workhorse (`list/digest/diff/new/addkey/ik/contact/rot/retime/stretch/…`, `--rig`). Writes clips in place. |
+| `MTile.Demo/` | Windowed tooling: animation editor, sprite-bind editor + art import (`--bind`), take viewer (`--load Takes/*.take.json`), reference-arc editor. |
+| `MTile.Rtc/` | WebRTC transport for the rollback netcode. |
+| `MTile.Bench/`, `MTile.FxLab/` | Perf harness; shader/VFX lab. |
 
-`MTile.sln` contains Core + Desktop + Tests. `MTile.Web.sln` is separate.
+`MTile.sln` contains Core + Desktop + Tests. `MTile.Web.sln` is separate **by design** — including Web would pull KNI's emcc native build into every desktop build.
 
 Because the same source compiles under both DesktopGL and KNI, **don't use APIs that exist in only one variant.** A change that builds via `MTile.Core` can still break the web build.
 
@@ -54,21 +58,31 @@ Content (`.xnb`) is built from `Content/Content.mgcb` by `MonoGame.Content.Build
 
 Each host copies these from the repo root into its own output (Desktop: alongside the binary; Web: into `wwwroot/`). Edit the **root** copies — the per-host copies under `bin/` and `MTile.Web/wwwroot/` are generated and gitignored.
 
-## In-flight refactor: deterministic sim for rollback netcode
+## Deterministic sim + rollback netcode (shipped)
 
-A large uncommitted refactor is extracting the deterministic game world out of `Game1` so it can be snapshotted and replayed for GGPO-style rollback multiplayer. **This is the most important thing the overview doesn't yet describe.**
+The sim extraction is **done and committed**, as is rollback multiplayer on top of it. Treat this as the settled architecture, not work in progress.
 
-- **`Simulation.cs`** is now the deterministic core: it owns players, entities, chunks, combat registries, and platforms, and advances them with a single `Step(PlayerInput)` on a fixed `Simulation.FixedDt` (1/60). `Game1` is becoming a thin shell (gather hardware input → `Step` → render); particles, trail, camera, and sprites are **render-only and must never feed back into the sim**.
-- `Stage`/`Stages` (`Stage.cs`) describe a match (`TerrainConfig`, `PlayerSpawn`, `Populate`). `Simulation` consumes a `Stage`.
-- `Snapshot()`/`Restore()` capture/restore players, entities, combat dedupe, platforms, and terrain. Terrain uses an inverse-delta **journal** (`World/TerrainJournal.cs`) rather than full copies; sparse per-tile structures are value-snapshotted (`*Snapshot.cs`, `*State` types, `BodyState.cs`). Verified by `MTile.Tests/Sim/SnapshotRoundTripTests.cs`.
-- **Determinism rules** when touching sim code: no sim-affecting `static` mutable state (HitIds flow through `World/HitIdAllocator.cs` and `EnvironmentContext.HitIds`); no polling hardware mid-step (all input must arrive via `PlayerInput`); same iteration order on restore. See `Plans/ROLLBACK_ROADMAP.md` (status checklist), `Plans/STATE_SNAPSHOT_PLAN.md`, and `Plans/GGPO_PLAN.md`.
+- **`Simulation.cs`** is the deterministic core: players, entities, chunks, combat registries, force fields, and platforms, advanced by `Step(PlayerInput)` (or `Step(p0, p1)`) on a fixed `Simulation.FixedDt` (1/60). Particles, trail, camera, sprites, and everything in `Animation/` are **render-only and must never feed back into the sim**.
+- Bodies and entities live in the sparse-set ECS `World` under `Sim/ECS/`. `Snapshot()` is essentially `_world.Capture()` plus terrain and a few side tables — there are no per-player/per-entity snapshot struct arrays anymore. Terrain uses an inverse-delta **journal** (`World/TerrainJournal.cs`); sparse per-tile structures are value-snapshotted. Verified by `MTile.Tests/Sim/SnapshotRoundTripTests.cs`.
+- `Net/` holds a working rollback session (predict → reconcile → replay, checksum desync detection) over the `MTile.Rtc` WebRTC transport. Run it with `dotnet run --project MTile.Desktop -- host` / `-- join`.
+- **Determinism rules** when touching sim code: no sim-affecting `static` mutable state (HitIds flow through `World/HitIdAllocator.cs` and `EnvironmentContext.HitIds`); no polling hardware mid-step (all input must arrive via `PlayerInput`); same iteration order on restore. Anything added to a live object that must survive a rollback belongs in an ECS value component.
+
+Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unchecked goals are plainly done.
+
+## Where the live work is
+
+- **The ballistic corrector** (`Character/AmbientCorrector.cs`, `CorrectionSolver.cs`, `BallisticPredictor.cs`, `FoldReference.cs`, …) — free-state locomotion is solver-driven, and this is the actively-tuned area. Hot-reload ablation knobs (`CorrectorVaultEnabled`, `FoldRedirectEnabled`, `FoldEngine`) exist for live A/B during playtests; `TrajectoryLm` is the nonlinear oracle the QP path is checked against.
+- **The animation solver** (`Animation/`) — vertical cadence/constraints shipped; horizontal `d.x`/ComOffset, joint limits, and local-SDF non-penetration are still open (`Plans/ANIMATION_SOLVER_PLAN.md` §11.6 Phase 4).
+- Known gaps worth not rediscovering: `Character/JumpStates.cs:61` has the sim reading animation-layer data (a layering violation); 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
 
 `MTile.Tests/Sim/` (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport`) is the headless analogue of the sim — scenario tests with ascii terrain + scripted input, mirroring the same phase ordering as `Simulation.Step`. Use it for deterministic gameplay tests.
 
 ## Key conventions (see CODEBASE_OVERVIEW.md for the full set)
 
-- **Y-down coords** (MonoGame default); world gravity `(0, 600)` px/s². Tile coords `gtx/gty` are integer cell indices; cell center world pos is `gtx*16 + 8`.
+- **Y-down coords** (MonoGame default); world gravity `(0, 600)` px/s². Tile coords `gtx/gty` are integer cell indices; cell center world pos is `gtx*Chunk.TileSize + Chunk.TileSize/2` (the codebase is parameterized on `Chunk.TileSize`, but px overrides in `movement_config.json` do not scale with it).
 - **Forces are accelerations** — `PhysicsBody` has no mass (`Velocity += AppliedForce * dt`); mass appears only in `ImpactDamage`/`Entity` knockback.
 - **Movement must not read action state.** Actions may read movement; the only channels the other way are `MovementModifiers` (multiplicative scalars on baseline config) and `Body.AppliedForce`.
-- **State priorities form bands** (free 0–20, walls 20–40, guided 25–45, launches 50–60); `Active`/`Passive` priority pairs control stickiness vs. preemption.
+- **State priorities**: `Character/MovementPriorities.cs` is the single source of truth — read it rather than trusting a band summary. Preemption compares the **candidate's Passive** to the **current state's Active**; getting that backwards is how the climb family sat at an unbeatable 46/46 for a while.
+- **Combat is escalation-based**: hits add to a monotonic `DamagePercent` and scale knockback; HP is lost only via crush impact into terrain. A hitbox's `Damage` is a percent contribution (except on the tile path).
 - **World reactions go through events** (`ChunkMap.OnTileBroken`), not polling.
+- **Core gameplay attributes are read-only** unless explicitly asked: `PlayerCharacter.Radius`/`BodyWidthScale`, `Simulation.Gravity`, `Chunk.TileSize`, `FixedDt`. Everything tuned in the corrector and impact stacks is calibrated against them.

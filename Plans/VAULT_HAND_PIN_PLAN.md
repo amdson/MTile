@@ -1,6 +1,11 @@
 # Vault Hand Pin — External contacts + draw-time 2-bone IK
 
-Status: **planned, not implemented.** Design for pinning the character's hand on the
+Status: **SHIPPED.** Vault grip pins landed as part of the composite-constraint refactor
+(`ANIMATION_SOLVER_PLAN.md` §11.6 Phase 3.5) — pins are `IConstraint`s solved in the LM
+pass, not draw-time 2-bone IK as sketched here. See `Animation/CharacterAnimator.Constraints.cs`
+and `MTile.Tests/Animation/VaultGripSolverTests.cs`. Kept for the design rationale.
+
+Original status line: *planned, not implemented.* Design for pinning the character's hand on the
 corner being vaulted (`ParkourState`) so the hand stays visually fixed while the
 vault clip plays, with entry possible from any walk-cycle point.
 

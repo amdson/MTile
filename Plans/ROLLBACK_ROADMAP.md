@@ -1,5 +1,13 @@
 # Rollback Netcode Roadmap
 
+> **⚠ The checklist below is stale.** Rollback is built and running: `Simulation` was
+> extracted, everything is fixed-dt and `PlayerInput`-driven, `Snapshot`/`Restore` are
+> data-oriented over the ECS `World` (`Sim/ECS/`), and `Net/RollbackSession.cs` does
+> predict → reconcile → replay with checksum desync detection over the `MTile.Rtc`
+> transport. Goals 1, 2, 4, 5 and most of 7 are done despite being unchecked. What
+> genuinely remains is soak/latency testing under real network conditions and a real
+> bot (`Plans/BOT_AI_PLAN.md`). Read the source, not the boxes.
+
 Goal: get MTile running in multiplayer with **rollback netcode** (GGPO-style).
 Topology decision: **same-build P2P only** (desktop↔desktop or WASM↔WASM). Both
 peers run the same binary, so `float`/`MathF` results and `Dictionary<Point,_>`

@@ -1,6 +1,11 @@
 # Animation ↔ Gamestate Matching: Locomotion via Constraint Optimization
 
-Status: **planned, not implemented.** Design for matching animation playback to real
+Status: **SHIPPED — superseded by `ANIMATION_SOLVER_PLAN.md`.** Cadence and IK both landed,
+but not under the names used here: the design was absorbed into the generalized LM
+solver (`Animation/LeastSquaresSolver.cs`) plus `Animation/PoseIk.cs`. There is no
+`CadenceSolver`/`TwoBoneIk` type. Kept for the design rationale.
+
+Original status line: *planned, not implemented.* Design for matching animation playback to real
 motion. The first slice we build is **cadence** (playback-rate matching for walk/run/
 climb on ground). Inverse kinematics (foot-lock, vault-hand-on-corner) is the second
 slice — but the key decision in this plan is that **both are the same optimization**
