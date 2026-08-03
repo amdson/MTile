@@ -45,6 +45,8 @@ climb family) · `ANIMATION_CLIP_GAPS.md` (mostly closed by `CLIP_BACKLOG.md`).
 in `todo.txt`) · `AIR_SLASH_PLAN.md` (A/B/C memo, no option recorded) · `HIT_MOMENTUM_PLAN.md` ·
 `PARAMETRIZED_ATTACK_ANIM_PLAN.md` (partly superseded by `STAB_AIM_PLAN.md`).
 
-## Other backlogs not covered here
+## Item-level backlog
 
-`todo.txt` (root) · `Animation/anim_todo.txt` · `Animation/TODO.md` · `Character/movement_todo.md`
+Plans are documents; **[../BACKLOG.md](../BACKLOG.md) is the item-level list** of what's actually
+outstanding, with verified status per entry. The old scattered `todo.txt` / `anim_todo.txt` /
+`Animation/TODO.md` / `movement_todo.md` files were consolidated into it and deleted.

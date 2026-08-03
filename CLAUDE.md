@@ -71,6 +71,8 @@ Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unche
 
 ## Where the live work is
 
+**[BACKLOG.md](BACKLOG.md) is the single list of outstanding work** — movement, animation, combat, engineering debt, and the deliberately-skipped tests, each with a verified status and file evidence. It replaced the old scattered `todo.txt` / `anim_todo.txt` / `movement_todo.md` files; add new items there.
+
 - **The ballistic corrector** (`Character/AmbientCorrector.cs`, `CorrectionSolver.cs`, `BallisticPredictor.cs`, `FoldReference.cs`, …) — free-state locomotion is solver-driven, and this is the actively-tuned area. Hot-reload ablation knobs (`CorrectorVaultEnabled`, `FoldRedirectEnabled`, `FoldEngine`) exist for live A/B during playtests; `TrajectoryLm` is the nonlinear oracle the QP path is checked against.
 - **The animation solver** (`Animation/`) — vertical cadence/constraints shipped; horizontal `d.x`/ComOffset, joint limits, and local-SDF non-penetration are still open (`Plans/ANIMATION_SOLVER_PLAN.md` §11.6 Phase 4).
 - Known gaps worth not rediscovering: `Character/JumpStates.cs:61` has the sim reading animation-layer data (a layering violation); 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
