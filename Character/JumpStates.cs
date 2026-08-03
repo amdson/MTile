@@ -286,6 +286,8 @@ public class DoubleJumpingState : MovementState
         vars.JumpReleased = !ctx.Input.Space;
         ctx.Intents.Consume(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
         abilities.HasDoubleJumped = true;
+        if (ctx.Intent.CurrentHorizontal != 0 && ctx.Intent.CurrentHorizontal != abilities.Facing)
+            abilities.Facing = ctx.Intent.CurrentHorizontal;
 
         // Kill existing vertical momentum entirely
         ctx.Body.Velocity.Y = MovementConfig.Current.DoubleJumpVelocity;
