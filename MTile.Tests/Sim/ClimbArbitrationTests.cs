@@ -54,14 +54,22 @@ public class ClimbArbitrationTests(ITestOutputHelper output)
         var ctrl = new Controller();
         var terrain = CorridorTerrain();
 
+        // The corridor sentinel pins the "ref" engine (the production fold for
+        // this regime); qp's corridor performance is no longer a sentinel.
+        var prevEngine = MovementConfig.Current.FoldEngine;
+        MovementConfig.Current.FoldEngine = "ref";
         var states = new List<string>();
-        for (int f = 0; f < 800; f++)
+        try
         {
-            ctrl.InjectInput(new PlayerInput { Right = true });
-            p.Update(ctrl, terrain, new HitboxWorld(), new HurtboxWorld(), Dt);
-            PhysicsWorld.StepSwept(bodies, terrain, Dt, Gravity);
-            states.Add(p.CurrentStateName);
+            for (int f = 0; f < 800; f++)
+            {
+                ctrl.InjectInput(new PlayerInput { Right = true });
+                p.Update(ctrl, terrain, new HitboxWorld(), new HurtboxWorld(), Dt);
+                PhysicsWorld.StepSwept(bodies, terrain, Dt, Gravity);
+                states.Add(p.CurrentStateName);
+            }
         }
+        finally { MovementConfig.Current.FoldEngine = prevEngine; }
 
         float avg = (p.Body.Position.X - 24f) / (800 * Dt);
         output.WriteLine($"avg {avg:F1} px/s, final x={p.Body.Position.X:F1} of 1024");

@@ -46,7 +46,7 @@ dotnet run --project MTile.Demo -- --import <dir> --out SpriteBindings --scale 0
 # Take viewer (scrub an in-game recording with solver overlays)
 dotnet run --project MTile.Demo -- --load Takes/<name>.take.json
 
-# Reference-clip editor (maneuver y(x) Hermite arcs)
+# Reference-clip editor (maneuver Hermite arcs, authored in game pixels)
 dotnet run --project MTile.Demo -- --ref vault
 ```
 
@@ -60,7 +60,7 @@ dotnet run --project MTile.Demo -- --ref vault
 | `--out <dir>` | `--import` | Output root for imported art (default `SpriteBindings`) |
 | `--scale <f>` | `--import` | Downscale factor for imported art (default `0.25`) |
 | `--load <path>` | mode flag | Take viewer for a `.take.json` recorded in-game (Ctrl+R / Ctrl+S) |
-| `--ref <clip>` | mode flag | Hermite reference-arc editor; loads/saves `ReferenceClips/<name>.json` |
+| `--ref <clip>` | mode flag | Hermite reference-arc editor; loads/saves `ReferenceClips/<name>.json`. Arcs are authored in **game pixels** against the clip's draggable **entry/gate anchors** (green rings) — the runtime rescales from that span onto the obstacle it measures, so keys are free to sit before the entry or past the gate. `U` converts a pre-anchor normalized clip to a pixel box; `[` / `]` set the arc's **Duration** (seconds end to end — what animation clips pace against) |
 
 Screenshot env vars (dev captures; the window renders a few frames, saves a PNG, and
 exits): `MTILE_SHOT=<path>` works in **every** mode. Modifiers — editor:
@@ -111,12 +111,19 @@ current **edit mode**, cycled with one key:
 | Drag joint (STRETCH) | Slide the joint along the bone's axis — writes the ratio as this **keyframe's `Stretch`** (pseudo-3D foreshortening; rotation and rig untouched). Signed: dragging past the parent joint flips the bone slightly negative, e.g. a hip strut at full leg swap |
 | Drag **com marker** | Place the player against the fixed scenery **per keyframe**: com and skeleton travel with the cursor while the floor line and vault block stay put; the drag writes the active keyframe's `edref` placement, and scrubbing interpolates it — so the body visibly arcs over the refs (e.g. a vault clearing its block). Editor-only visualization, saved with the clip (`edref` additions; the runtime ignores them). Arrow keys pan everything together |
 
-A clip can also ride the maneuver's **authored reference trajectory**: set `"ReferenceArc": "<name>"`
-in the clip json (or `MTile.Probe -- refarc <clip> <name>`) to drive the body's scene placement
-from `ReferenceClips/<name>.json` (falling back to the baked registry defaults) while scrubbing —
-the header shows `arc <name>`. The editor maps the normalized arc per clip Type (Vault: onto the
-reference block; Dropdown: down a ledge; else: up a maneuver height), and any hand-dragged `edref`
-placement adds on top as a nudge. Editor visualization only; the runtime ignores it.
+A clip can also ride the maneuver's **authored reference trajectory**: press **A** in the editor to
+cycle one on (or set `"ReferenceArc": "<name>"` in the clip json / run `MTile.Probe -- refarc <clip>
+<name>`). That drives the body's scene placement from `ReferenceClips/<name>.json` (falling back to
+the baked registry defaults) while scrubbing, and **reloads live** when that file is saved — so you
+can keep `--ref <name>` open in a second window and shape the arc while watching the body ride it —
+the header shows `arc <name> <arcDur>s x<ratio> at <progress>`. The arc is authored in game pixels
+against its own entry/gate anchors, so it maps to the scene at true scale (a Vault instead pins its
+gate to the draggable reference block). **Clip and arc have independent durations** — the body
+advances along the arc at `τ · clipDuration/arcDuration`, so a 0.4s clip on a 0.3s arc hits the gate
+at τ≈0.75 and overshoots after. The arc draws into the scene: bright where the clip's timeline
+reaches, dim past it, a green ring at the gate, a dot per keyframe, and a body-radius ring at the
+playhead — author each pose against the dot it lands on. Any hand-dragged `edref` placement adds on
+top as a nudge. Editor visualization only; the runtime ignores it.
 | Drag **root joint** | Move the body **within** the com frame — the inverse edit of the active keyframe's `com` (the game's vertical anchor): the skeleton follows the cursor while the com marker and floor line hold still, exactly as the game will place it |
 
 The active mode is shown in the top header.
@@ -149,6 +156,7 @@ default (deep-copied, so editing one keyframe's marks doesn't change the other's
 | **[** / **]** | Decrease / increase the clip's Duration (seconds) by 0.1 |
 | **L** | Toggle Loop on/off |
 | **R** | Cycle the clip's Region: **FullBody → UpperBody → LowerBody**. Region is the bone mask an *action overlay* clip owns when layered over movement at runtime — a slash is `UpperBody` (chest/head/arms) so the legs keep walking. Movement clips stay `FullBody` (the default; not written to JSON) |
+| **A** / **Shift-A** | Attach the next / previous **reference arc** to this clip, wrapping through `none`. Offers the baked arc names plus every `ReferenceClips/*.json`. Same edit as `MTile.Probe -- refarc`, saved with Ctrl-S |
 | **T** / **Shift-T** | Cycle the clip's Type forward/back through the known categories: movement clips (`Idle`, `Walk`, …) plus every action state name (`GroundSlash1`, `StabAction`, …). The runtime binds action overlay clips by exact action name |
 
 ---

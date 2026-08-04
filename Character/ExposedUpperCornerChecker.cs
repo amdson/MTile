@@ -18,7 +18,7 @@ public static class ExposedUpperCornerChecker
     //   StandingBaseY = body.Position.Y + 2 * PlayerCharacter.Radius
     //                 = body center + (halfH + floatHeight)   (apex-to-floor in standing pose)
     // A corner whose WorldTop sits inside
-    //   [StandingBaseY - MaxVaultHeightTiles*TS, StandingBaseY - MinVaultHeightTiles*TS]
+    //   [StandingBaseY - MaxClimbHeightTiles*TS, StandingBaseY - MinClimbHeightTiles*TS]
     // is "vault-able": shallow enough to crest from the current altitude, tall
     // enough to actually be a step rather than the floor or a flush wall corner.
     //
@@ -27,8 +27,8 @@ public static class ExposedUpperCornerChecker
     //   - 0-block (flush) corners — the body would just walk over.
     //   - 2-block+ corners — the wall above the step is in the way (TallWall).
     //   - corners the body has already crested (above the upper bound of the band).
-    private const float MinVaultHeightTiles = 0.5f;
-    private const float MaxVaultHeightTiles = 1.2f;
+    private const float MinClimbHeightTiles = 0.5f;
+    private const float MaxClimbHeightTiles = 1.2f;
 
     // ParkourState precondition: is there a vault-able upper corner on `wallDir`?
     // Picks the shallowest qualifying corner — largest WorldTop inside the band.
@@ -37,8 +37,8 @@ public static class ExposedUpperCornerChecker
         corner = default;
         var bounds = body.Bounds;
         float standingBaseY = body.Position.Y + 2f * PlayerCharacter.Radius;
-        float bandTop    = standingBaseY - MaxVaultHeightTiles * Chunk.TileSize;
-        float bandBottom = standingBaseY - MinVaultHeightTiles * Chunk.TileSize;
+        float bandTop    = standingBaseY - MaxClimbHeightTiles * Chunk.TileSize;
+        float bandBottom = standingBaseY - MinClimbHeightTiles * Chunk.TileSize;
 
         var probe = bounds.StripBeside(wallDir, ProbeSlack).WithVerticalRange(bandTop, bandBottom);
         float bodyFace = bounds.Side(wallDir);

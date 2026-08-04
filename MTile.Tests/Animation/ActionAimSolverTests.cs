@@ -38,7 +38,7 @@ public class ActionAimSolverTests
 
         // A standing stab: Idle base + StabAction overlay, mid-thrust, with the aim active.
         CharacterAnimSample Frame() => new(pos, Vector2.Zero, facing, true, "StandingState", "StabAction",
-            dt, actionTime: 0.25f, actionDuration: 0.6f, hasAim: true, aimDir: aimDir);
+            dt, actionTime: 0.25f, actionProgress: 0.42f, hasAim: true, aimDir: aimDir);
 
         float maxArm = 0f, maxChest = 0f, maxJacErr = 0f, lastErrDeg = 999f; int solves = 0;
         for (int i = 0; i < 40; i++)

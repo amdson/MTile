@@ -7,17 +7,17 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests;
 
-// Vault grip pins: the payoff of FixedPoint (Phase 2) + the off-locomotion solve trigger
-// (Phase 3) + Δθ-post-compose. During a parkour vault the lead hand is owned by the VaultHands
+// Parkour grip pins: the payoff of FixedPoint (Phase 2) + the off-locomotion solve trigger
+// (Phase 3) + Δθ-post-compose. During a parkour vault the lead hand is owned by the ClimbHands
 // OVERLAY (slot 1), so this is the first test that pins an overlay-owned bone — it only reaches
 // because Δθ is applied AFTER composition (pre-compose Δθ would be overwritten by the overlay).
-public class VaultGripSolverTests
+public class ParkourGripSolverTests
 {
     private readonly ITestOutputHelper _o;
-    public VaultGripSolverTests(ITestOutputHelper o) => _o = o;
+    public ParkourGripSolverTests(ITestOutputHelper o) => _o = o;
 
     [Fact]
-    public void Solver_VaultGrip_HandReachesLedgeCornerThroughOverlay()
+    public void Solver_ParkourGrip_HandReachesLedgeCornerThroughOverlay()
     {
         var clips = AnimationStore.LoadAll(StatesDir());
         var skel  = SkeletonExamples.Biped();
@@ -30,7 +30,7 @@ public class VaultGripSolverTests
         var pos = new Vector2(0f, 0f);
         const int facing = +1;
 
-        // Warm up the composed vault pose (vault legs base + VaultHands overlay) with NO grip so
+        // Warm up the composed vault pose (vault legs base + ClimbHands overlay) with NO grip so
         // the overlay eases fully in (weight→1: the hand becomes OVERLAY-OWNED) and the eased pose
         // settles. Then read where the hand naturally sits and place the corner a small offset off
         // it, so the required correction is small and steady — a clean read of whether the pin
@@ -77,7 +77,7 @@ public class VaultGripSolverTests
 
         // The off-locomotion solve ran during the vault (the trigger fires on a pin, not contacts).
         Assert.True(solves > 0, "no vault-grip solve ran");
-        // The hand reaches the ledge corner — DESPITE the VaultHands overlay fully owning the arm
+        // The hand reaches the ledge corner — DESPITE the ClimbHands overlay fully owning the arm
         // (this is the Δθ-post-compose enabling change working; pre-compose Δθ couldn't move it).
         Assert.True(maxReach < 1.5f, $"hand didn't reach the corner ({maxReach:0.00}px) — pin not driving the overlay-owned arm");
         // The RENDERED hand holds the corner too — the polish-item-1 acceptance gate. (Body is

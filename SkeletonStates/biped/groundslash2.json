@@ -1,7 +1,7 @@
 {
-  "Name": "slash1",
+  "Name": "groundslash2",
   "Type": "GroundSlash2",
-  "Skeleton": "biped_rabbit",
+  "Skeleton": "biped",
   "Duration": 0.13,
   "Loop": true,
   "Region": "UpperBody",
@@ -31,7 +31,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -0.9561386
+          "Rotation": 3.7570467
         },
         {
           "Bone": "arm_l_lower",
@@ -39,7 +39,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.3283657
+          "Rotation": 2.8983657
         },
         {
           "Bone": "arm_r_lower",
@@ -47,7 +47,7 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -1.9615955
+          "Rotation": 1.18
         },
         {
           "Bone": "leg_l_lower",
@@ -72,26 +72,6 @@
         {
           "Bone": "knife",
           "Rotation": -1.5707964
-        },
-        {
-          "Bone": "hip_l",
-          "Rotation": -3.14159,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "hip_r",
-          "Rotation": 0,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "shoulder_l",
-          "Rotation": -1.57,
-          "Stretch": 1.0021313
-        },
-        {
-          "Bone": "shoulder_r",
-          "Rotation": 1.57,
-          "Stretch": 1.0021313
         }
       ],
       "Additions": [
@@ -122,7 +102,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -0.9561386
+          "Rotation": 3.7570467
         },
         {
           "Bone": "arm_l_lower",
@@ -130,7 +110,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 2.334403
+          "Rotation": 3.904403
         },
         {
           "Bone": "arm_r_lower",
@@ -138,7 +118,7 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -1.9615955
+          "Rotation": 1.18
         },
         {
           "Bone": "leg_l_lower",
@@ -163,26 +143,6 @@
         {
           "Bone": "knife",
           "Rotation": -1.5707964
-        },
-        {
-          "Bone": "hip_l",
-          "Rotation": -3.14159,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "hip_r",
-          "Rotation": 0,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "shoulder_l",
-          "Rotation": -1.57,
-          "Stretch": 0.95971525
-        },
-        {
-          "Bone": "shoulder_r",
-          "Rotation": 1.57,
-          "Stretch": 0.95971525
         }
       ],
       "Additions": [
@@ -213,7 +173,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -0.9561386
+          "Rotation": 3.7570467
         },
         {
           "Bone": "arm_l_lower",
@@ -221,7 +181,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": -0.49505138
+          "Rotation": 1.0749487
         },
         {
           "Bone": "arm_r_lower",
@@ -229,7 +189,7 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -1.9615955
+          "Rotation": 1.18
         },
         {
           "Bone": "leg_l_lower",
@@ -254,26 +214,6 @@
         {
           "Bone": "knife",
           "Rotation": -1.5707964
-        },
-        {
-          "Bone": "hip_l",
-          "Rotation": -3.14159,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "hip_r",
-          "Rotation": 0,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "shoulder_l",
-          "Rotation": -1.57,
-          "Stretch": 0.9643816
-        },
-        {
-          "Bone": "shoulder_r",
-          "Rotation": 1.57,
-          "Stretch": 0.9643816
         }
       ],
       "Additions": [
@@ -304,7 +244,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -0.9561386
+          "Rotation": 3.7570467
         },
         {
           "Bone": "arm_l_lower",
@@ -312,7 +252,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.0593506
+          "Rotation": 2.6293507
         },
         {
           "Bone": "arm_r_lower",
@@ -320,7 +260,7 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -1.9615955
+          "Rotation": 1.18
         },
         {
           "Bone": "leg_l_lower",
@@ -345,26 +285,6 @@
         {
           "Bone": "knife",
           "Rotation": -1.5707964
-        },
-        {
-          "Bone": "hip_l",
-          "Rotation": -3.14159,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "hip_r",
-          "Rotation": 0,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "shoulder_l",
-          "Rotation": -1.57,
-          "Stretch": 0.9643816
-        },
-        {
-          "Bone": "shoulder_r",
-          "Rotation": 1.57,
-          "Stretch": 0.9643816
         }
       ],
       "Additions": [
@@ -395,7 +315,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -0.9561386
+          "Rotation": 3.7570467
         },
         {
           "Bone": "arm_l_lower",
@@ -403,7 +323,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.3283657
+          "Rotation": 2.8983657
         },
         {
           "Bone": "arm_r_lower",
@@ -411,7 +331,7 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -1.9615955
+          "Rotation": 1.18
         },
         {
           "Bone": "leg_l_lower",
@@ -436,26 +356,6 @@
         {
           "Bone": "knife",
           "Rotation": -1.5707964
-        },
-        {
-          "Bone": "hip_l",
-          "Rotation": -3.14159,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "hip_r",
-          "Rotation": 0,
-          "Stretch": 0.61051726
-        },
-        {
-          "Bone": "shoulder_l",
-          "Rotation": -1.57,
-          "Stretch": 1.0021313
-        },
-        {
-          "Bone": "shoulder_r",
-          "Rotation": 1.57,
-          "Stretch": 1.0021313
         }
       ],
       "Additions": [

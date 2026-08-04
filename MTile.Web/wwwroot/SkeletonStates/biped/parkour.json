@@ -1,9 +1,10 @@
 {
-  "Name": "vault",
-  "Type": "Vault",
+  "Name": "parkour",
+  "Type": "Parkour",
   "Skeleton": "biped",
   "Duration": 0.45,
   "Loop": false,
+  "ReferenceArc": "parkour",
   "Keyframes": [
     {
       "Time": 0,

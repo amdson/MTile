@@ -29,7 +29,7 @@ The game logic lives at the repo root and is compiled by several hosts (see `CLA
 
 **The sim/render split is the load-bearing invariant.** `Simulation.Step` is the only thing that mutates game state, runs on a fixed `dt`, and reads input solely from the `PlayerInput` it's handed. `Game1`'s cosmetic systems (particles, `_cursorTrail`, sprite animation, `Camera`) read sim state but **must never write back into it** — they're downstream of `Step`. This is what makes the sim deterministically replayable.
 
-The data lattice tying the subsystems together:
+The data lattice tying the subsystems together: 
 
 | Channel | Producer | Consumer |
 |---|---|---|
@@ -284,7 +284,11 @@ The stack has grown well past that base layer:
 
 Render-only, and hot-reloadable freely for that reason. The rig is a pure joint chain (`Drawing/Skeleton.cs`, rigs in `Skeletons/*.json`, clips in `SkeletonStates/<rig>/`, loaded by `SkeletonStore`).
 
-[`CharacterAnimator`](Animation/CharacterAnimator.cs) is the hub (plus `.Constraints` and `.Diagnostics` partials): it selects and blends clips (`AnimationSampler`, `AnimAdditionSampler`, `OverlayStack`, `BoneMask`, `SkeletonComposition`) and then runs a **generalized box-bounded Levenberg–Marquardt least-squares solve** ([`LeastSquaresSolver`](Animation/LeastSquaresSolver.cs)) over clip times, CoM offset, and joint corrections. Constraints are a composable `IConstraint` library — `FixedPoint`/`ExternalPin` (foot plant, vault hand grip), half-plane `NoPenetration` against `TerrainSurfaces`, and `ActionAimConstraint` (re-aims the stab overlay along the runtime input direction). `PoseIk` and `MoveDriver` sit alongside; tuning lives in `anim_solver_config.json`.
+[`CharacterAnimator`](Animation/CharacterAnimator.cs) is the hub (plus `.Constraints` and `.Diagnostics` partials): it selects and blends clips (`AnimationSampler`, `AnimAdditionSampler`, `OverlayStack`, `BoneMask`, `SkeletonComposition`) and then runs a **generalized box-bounded Levenberg–Marquardt least-squares solve** ([`LeastSquaresSolver`](Animation/LeastSquaresSolver.cs)) over clip times, CoM offset, and joint corrections. Constraints are a composable `IConstraint` library — `FixedPoint`/`ExternalPin` (foot plant, climb hand grip), half-plane `NoPenetration` against `TerrainSurfaces`, and `ActionAimConstraint` (re-aims the stab overlay along the runtime input direction). `PoseIk` and `MoveDriver` sit alongside; tuning lives in `anim_solver_config.json`.
+
+### Clip binding
+
+Clips are selected by the JSON **`Type`** field — never the filename or `Name` (`climbhands.json` plays as the `ClimbHands` overlay). Movement goes `MovementState.AnimationTag → AnimTag → IMoveDriver → AnimClip → clip`, where tag→clip is a hardcoded table ([MoveDriver.cs:89-106](Animation/MoveDriver.cs#L89-L106)) and *not* name matching; actions bind by exact ordinal match of the ActionState **class name** to `Type`. **[Plans/ANIMATION_BINDING_MAP.md](Plans/ANIMATION_BINDING_MAP.md) is the full state→clip→arc table** — read it before renaming anything, and note that the old `Vault` naming overload was retired 2026-08-04 (there is no `VaultState`; the clip is `parkour.json`).
 
 [`MotionProbe`](Animation/MotionProbe.cs) converts joint angles to world positions — **use it rather than eyeballing angles** when debugging clips (this is what the `anim-probe` skill and `MTile.Probe` drive).
 
@@ -308,7 +312,7 @@ xUnit. Categories:
 - `PhysicsTests`, `GroundFrictionTests`, `MovingPlatformTests`, `JumpingStateTests` — physics/movement units.
 - `Sim/` — scenario-driven simulation tests with deterministic ascii-terrain + scripted input (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport` CSV diffing). `SimRunner.Run` mirrors `Simulation.Step`'s phase order; `SimRunner.RunMulti` runs multiple players sharing terrain + combat registries for cross-player combat tests.
 - `SnapshotRoundTripTests` — the rollback gate: snapshot at frame K, run to N, restore K, re-run to N, assert identical traces (incl. terrain — a ball chipping the floor and a foam build straddling the snapshot both replay bit-for-bit). Alongside it: `RollbackHarnessTests`, `InputCodecTests`, `RtcConnectionTests`, `TwoPlayerStepTests`.
-- `Animation/` — ~25 files covering the solver (`AnimSolverTests`, `FixedPointSolverTests`, `NoPenetrationSolverTests`, `VaultGripSolverTests`, `ActionAimSolverTests`), blending/overlays, rig/IK, and sprite skin. Files prefixed `Zzz` are slow soak tests, named to run last.
+- `Animation/` — ~25 files covering the solver (`AnimSolverTests`, `FixedPointSolverTests`, `NoPenetrationSolverTests`, `ParkourGripSolverTests`, `ActionAimSolverTests`), blending/overlays, rig/IK, and sprite skin. Files prefixed `Zzz` are slow soak tests, named to run last.
 
 ~470–480 cases across ~100 files. **7 are `Skip`ped, all deliberately**: 4 pending an impact-break retune (the R=12 body impact spread), 1 needing the StandServo root, 1 on the crouched reflex-vault band bug, 1 an assert-free diagnostic sweep.
 

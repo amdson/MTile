@@ -32,22 +32,22 @@ public class CorrectorExperimentsTests(ITestOutputHelper output)
     public void FlagOff_NoCorrectorVault_BodyStallsAtStep()
     {
         var cfg = MovementConfig.Current;
-        bool saved = cfg.CorrectorVaultEnabled;
+        bool saved = cfg.CorrectorClimbEnabled;
         try
         {
-            cfg.CorrectorVaultEnabled = false;
+            cfg.CorrectorClimbEnabled = false;
             var frames = Run(StepTerrain(), new Vector2(12f, 20f), Vector2.Zero, 120, 1f / 30f);
             Assert.DoesNotContain(frames, f => f.State.Contains("Parkour") || f.State.Contains("ArcJump"));
             output.WriteLine($"flag off: final x={frames[^1].X:F1} (stalled at the step or mantled slow)");
 
-            cfg.CorrectorVaultEnabled = true;
+            cfg.CorrectorClimbEnabled = true;
             frames = Run(StepTerrain(), new Vector2(12f, 20f), Vector2.Zero, 120, 1f / 30f);
             Assert.Contains(frames, f => f.State.Contains("Parkour"));
             Assert.True(frames.Any(f => f.X > 140f && f.Y < 12f), "flag on: vault should deliver on top");
         }
         finally
         {
-            cfg.CorrectorVaultEnabled = saved;
+            cfg.CorrectorClimbEnabled = saved;
         }
     }
 

@@ -8,13 +8,22 @@ using Microsoft.Xna.Framework;
 namespace MTile;
 
 // Authored reference-arc clip for the ballistic corrector (BALLISTIC_CORRECTOR_PLAN §1):
-// a 2D cubic Hermite curve p(t), t ∈ [0,1], in the maneuver's NORMALIZED frame — entry
-// at (0,0), gate at (1,-1) by convention (y-down, so up is negative; x in units of the
-// measured horizontal gap, y in units of the measured obstacle height). Parametric, so
-// vertical phases (mantle pull-up) author fine — there is no monotone-x restriction.
-// Tangents are 2D vectors: after retargeting, the entry tangent IS the incoming velocity
-// up to the frame's time scaling. ReferencePath retargets the clip at Enter; the clip
-// carries no dynamics and does not need to be flyable.
+// a 2D cubic Hermite curve p(t), t ∈ [0,1], authored in PIXELS against a reference
+// obstacle, plus two anchor points — Entry and Gate — that say which clip-space points
+// bind to the maneuver's measured entry pose and measured gate at retarget time.
+// Parametric, so vertical phases (mantle pull-up) author fine — there is no monotone-x
+// restriction. Tangents are 2D vectors: after retargeting, the entry tangent IS the
+// incoming velocity up to the frame's time scaling. ReferencePath retargets the clip at
+// Enter; the clip carries no dynamics and does not need to be flyable.
+//
+// The anchors are what make the arc reusable: ReferenceFrame normalizes by
+// (Gate − Entry) and rescales onto (gateWorld − entryWorld), so one 26×40px pull-up
+// arc fits ledges of any height and either facing. Because the map is scale-invariant,
+// the authoring box size is a readability choice, not a behavioral one — and keys are
+// free to sit before the entry or past the gate.
+//
+// The anchor defaults, (0,0) and (1,-1), reproduce the old normalized-frame convention
+// exactly, so pre-anchor clip files keep loading and mapping identically.
 //
 // Key T values are auto-derived from chord length by the editor (≈ constant-speed
 // parametrization); tangent magnitudes modulate local speed around that.
@@ -36,7 +45,43 @@ public sealed class HermiteClipKey
 public sealed class HermiteClipDocument
 {
     public string Name { get; set; } = "";
+
+    // Seconds the arc is meant to take end to end. It is what makes arc time comparable
+    // to ANIMATION clip time: an animation riding this arc advances along it at
+    // τ · (animDuration / Duration), so a 0.4s clip on a 0.3s arc reaches the gate a
+    // third of the way before its last keyframe. Tooling reads this; the sim takes its
+    // pace from the state's own MovementConfig knob (LedgePullRefDuration /
+    // DropdownRefDuration), so keep the two in step when retuning.
+    public float Duration { get; set; } = 1f;
+
+    // Retarget anchors in clip space. Defaults are the legacy normalized convention.
+    public float EntryX { get; set; } = 0f;
+    public float EntryY { get; set; } = 0f;
+    public float GateX  { get; set; } = 1f;
+    public float GateY  { get; set; } = -1f;
+
     public List<HermiteClipKey> Keys { get; set; } = new();
+
+    [JsonIgnore] public Vector2 Entry { get => new(EntryX, EntryY); set { EntryX = value.X; EntryY = value.Y; } }
+    [JsonIgnore] public Vector2 Gate  { get => new(GateX, GateY);   set { GateX  = value.X; GateY  = value.Y; } }
+
+    // Clip-space extent between the anchors — the authoring box, and the quantity the
+    // retarget normalizes by (ReferenceFrame owns that math, including its own handling
+    // of a degenerate axis). Degenerate axes read as 1 here so callers that only want a
+    // characteristic size — the editor's tangent-magnitude limits — never see zero.
+    [JsonIgnore] public Vector2 Span
+    {
+        get
+        {
+            Vector2 s = Gate - Entry;
+            if (MathF.Abs(s.X) < 1e-4f) s.X = 1f;
+            if (MathF.Abs(s.Y) < 1e-4f) s.Y = 1f;
+            return s;
+        }
+    }
+
+    [JsonIgnore] public bool IsLegacyNormalized
+        => Entry == Vector2.Zero && Gate == new Vector2(1f, -1f);
 
     [JsonIgnore] public string FilePath;
 
@@ -136,19 +181,36 @@ public sealed class HermiteClipDocument
         FilePath = path;
     }
 
-    // Fresh clip: a plausible vault-ish arc from entry (0,0) to gate (1,-1).
+    // Fresh clip: a plausible vault-ish arc across a 26×40px reference ledge.
     public static HermiteClipDocument NewDefault(string name)
     {
         var doc = new HermiteClipDocument
         {
             Name = name,
+            Entry = Vector2.Zero,
+            Gate  = new Vector2(26f, -40f),
             Keys =
             {
-                new HermiteClipKey { X = 0f, Y = 0f, TX = 1.0f, TY = -2.0f },
-                new HermiteClipKey { X = 1f, Y = -1f, TX = 1.4f, TY = 0f },
+                new HermiteClipKey { X =  0f, Y =   0f, TX = 26f, TY = -80f },
+                new HermiteClipKey { X = 26f, Y = -40f, TX = 36f, TY =   0f },
             },
         };
         doc.RederiveT();
         return doc;
+    }
+
+    // Rescale clip space in place about the Entry anchor (positions and tangents alike,
+    // key T values untouched). The retarget map normalizes by the anchor span, so this
+    // leaves the mapped world arc bit-identical — it only changes the units the editor
+    // shows. Used to convert legacy normalized clips to a pixel authoring box.
+    public void RescaleClipSpace(Vector2 factor)
+    {
+        Vector2 e = Entry;
+        foreach (var k in Keys)
+        {
+            k.Pos = e + (k.Pos - e) * factor;
+            k.Tan = k.Tan * factor;
+        }
+        Gate = e + (Gate - e) * factor;
     }
 }

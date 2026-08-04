@@ -43,16 +43,23 @@ public abstract class ActionState
     // of, not in competition with, the movement-driven force. Default no-op.
     public virtual void ApplyActionForces(EnvironmentContext ctx, in ActionVars vars) { }
 
-    // Nominal lifetime of one activation, in seconds, for the animation layer ONLY
-    // (render-only — never read by the sim). The action overlay clip is time-remapped
-    // to span exactly [0, OverlayDuration] so it plays through once as the action runs,
-    // independent of how long the authored clip's own timeline is. 0 = no fixed length;
-    // the animator falls back to the clip's own Duration. See CharacterAnimSample.
-    public virtual float OverlayDuration => 0f;
+    // How far through this activation we are, normalized [0,1], for the animation layer ONLY
+    // (render-only — never read by the sim). The overlay clip is remapped onto it, so the
+    // authored pose sweeps once over the action regardless of how long the action actually
+    // runs or how long the clip's own timeline is. This is the action-side mirror of
+    // MovementState.AnimationProgress.
+    //
+    // **Return negative to decline.** The animator then plays the clip at its own authored
+    // seconds — which is the right answer for a HELD, open-ended action (Guard runs as long as
+    // the button is down; its clip loops). Everything with a definite lifetime should report,
+    // and a fixed-length action is simply `vars.TimeInState / Duration`. Reporting is what keeps
+    // the overlay honest when the action's real length is variable (Grab's early throw) or
+    // differs from the clip's (Beam outlives its 0.6s clip).
+    public virtual float AnimationProgress(in ActionVars vars) => -1f;
 
     // The world AIM direction of an input-parametrized action (a stab's StabDir), exposed to the
     // animation layer so it can re-aim the authored (horizontal) overlay pose along the actual
-    // input direction. Render-only, same contract as OverlayDuration — derived from ActionVars,
+    // input direction. Render-only, same contract as AnimationProgress — derived from ActionVars,
     // never read by the sim. Default none. The animator owns WHICH bones re-aim (see CharacterAnimator).
     public virtual bool TryAnimationAim(in ActionVars vars, out Vector2 dir) { dir = default; return false; }
 }
@@ -273,7 +280,7 @@ public abstract class SlashLikeAction : ActionState
 
     // The slash lives for [0, Duration]; the overlay clip is remapped onto that so it
     // sweeps once over the swing regardless of the authored clip's own timeline length.
-    public override float OverlayDuration => Duration;
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
@@ -748,7 +755,7 @@ public class StabAction : ActionState
 
     // Remap the overlay clip onto the stab's [0, Duration] so the authored thrust sweeps
     // once over the swing — windup/strike/hold/retract stay synced to the hitbox windows.
-    public override float OverlayDuration => Duration;
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
 
     // The stab's live aim (captured at commit, steered toward the cursor within MaxTotalSteer).
     // The animator rotates the authored horizontal thrust onto this so an up/diagonal stab reads.
@@ -1191,6 +1198,8 @@ public class PulseAction : ActionState
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
 
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
+
     private static Color PulseColorFor(bool grounded) => grounded ? Color.Gold : Color.Cyan;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
@@ -1364,6 +1373,10 @@ public class BlockReadyAction : ActionState
     // building (over a wall). While painting tiles the charge stays below this, so
     // ordinary drag-building leaves movement unencumbered.
     private const float StanceChargeFloor  = 0.15f;
+
+    // The charge-up pose tracks the CHARGE, not the clock: it holds at full once the charge
+    // saturates, however long the button stays down after that.
+    public override float AnimationProgress(in ActionVars vars) => vars.ChargeTime / SaturationTime;
 
     public override int ActivePriority  => 8;
     public override int PassivePriority => 10;
@@ -1579,6 +1592,8 @@ public class BlockEruptionAction : ActionState
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
         => ctx.Input.RightClick && vars.TimeInState < ArmingWindow;
 
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / ArmingWindow;
+
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         // Consume the armed flag + capture the charge/origin handoff.
@@ -1731,6 +1746,8 @@ public class EnergyBallAction : ActionState
     public override int ActivePriority  => 40;
     public override int PassivePriority => 45;
 
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         if (!ctx.Input.Shift) return false;
@@ -1858,6 +1875,16 @@ public class BeamAction : ActionState
         if (ab.Condition.RecoveryActive)    return false;
         return true;
     }
+
+    // Charge then fire, both bounded — so the overlay spans the WHOLE activation rather
+    // than running out partway through the burst (the authored clip is shorter than
+    // MinChargeTime + MaxFiringTime). The split is time-proportional; retune it here if the
+    // clip is ever authored with a deliberate wind-up/fire ratio.
+    private const float ChargeShare = MinChargeTime / (MinChargeTime + MaxFiringTime);
+    public override float AnimationProgress(in ActionVars vars)
+        => vars.Firing
+            ? ChargeShare + (1f - ChargeShare) * (vars.FiringTime / MaxFiringTime)
+            : ChargeShare * (vars.ChargeTime / MinChargeTime);
 
     // Alive while Shift + LMB both held AND we're either charging or within the
     // firing window. Releasing LMB during charge cancels the beam; releasing
@@ -2061,6 +2088,11 @@ public class LobbedAreaAction : ActionState
     // so the ball lands AT the cursor under standard MovementConfig gravity.
     // We don't actually integrate gravity ourselves — PhysicsBody handles that;
     // we just pick (vx, vy) such that the parabola hits the cursor.
+    // Charge-tracking pose, same shape as BlockReadyAction: holds at full once saturated.
+    // (Dormant — the registration is commented out in PlayerCharacter — but kept correct so
+    // re-enabling the binding doesn't reintroduce an unpaced overlay.)
+    public override float AnimationProgress(in ActionVars vars) => vars.ChargeTime / SaturationTime;
+
     private const float LaunchApexBoost = 180f;       // upward velocity at launch (px/s)
     private const float SpawnOffset     = PlayerCharacter.Radius * 1.2f;
 
@@ -2200,6 +2232,8 @@ public class GrenadeAction : ActionState
     public override int ActivePriority  => 40;
     public override int PassivePriority => 45;
 
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         if (!ctx.Input.F) return false;
@@ -2267,6 +2301,18 @@ public class GrabAction : ActionState
     private const float PullSpeed   = 320f;
     private const float PullAccel   = 9000f;          // strong — overpowers the victim walking away
     private const float ThrowSpeed  = 520f;
+
+    // Two phases with INDEPENDENT lengths, which is why the old fixed-duration remap could
+    // not express this: the hold runs until the player releases (up to GrabHoldMaxSeconds),
+    // then the throw runs its own ThrowSeconds. The authored clip devotes its tail to the
+    // throw, so map the hold onto everything before HoldShare and the throw onto the rest —
+    // a short hold jump-cuts forward to the throw, which is right: the throw pose must play
+    // WHEN the throw happens, not whenever the clip's own clock reaches it.
+    private const float HoldShare = GrabHoldMaxSeconds / (GrabHoldMaxSeconds + ThrowSeconds);
+    public override float AnimationProgress(in ActionVars vars)
+        => vars.GrabThrowing
+            ? HoldShare + (1f - HoldShare) * (vars.ChargeTime / ThrowSeconds)
+            : HoldShare * (vars.TimeInState / GrabHoldMaxSeconds);
     private const float ThrowAccel  = 12000f;
 
     public override int ActivePriority  => 46;   // above LobbedArea(45)/Guard(40), below GuardRetaliate(55)

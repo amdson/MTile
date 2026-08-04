@@ -1,7 +1,7 @@
 {
-  "Name": "vaulthands",
-  "Type": "VaultHands",
-  "Skeleton": "biped",
+  "Name": "climbhands",
+  "Type": "ClimbHands",
+  "Skeleton": "biped_rabbit",
   "Duration": 0.45,
   "Loop": false,
   "Region": "UpperBody",
@@ -19,7 +19,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": 0.74159265
+          "Rotation": 2.3115926
         },
         {
           "Bone": "arm_l_lower",
@@ -27,11 +27,21 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": -0.74159265
+          "Rotation": -2.3115926
         },
         {
           "Bone": "arm_r_lower",
           "Rotation": 0.5
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.5339331
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.5339331
         }
       ],
       "Additions": [
@@ -58,7 +68,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": -2.6415927
+          "Rotation": -1.0715927
         },
         {
           "Bone": "arm_l_lower",
@@ -66,11 +76,21 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 2.6415925
+          "Rotation": 1.0715925
         },
         {
           "Bone": "arm_r_lower",
           "Rotation": 0.20000005
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.9643816
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.9643816
         }
       ],
       "Additions": [

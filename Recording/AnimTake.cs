@@ -64,7 +64,9 @@ public sealed class AnimTake
         public string Action   { get; set; }
         public float  Dt       { get; set; }
         public float  ActionTime     { get; set; }
-        public float  ActionDuration { get; set; }
+        // Defaults to -1 ("action declined to report"), so a take recorded before this field
+        // existed replays on the clip's own seconds rather than freezing the overlay at 0.
+        public float  ActionProgress { get; set; } = -1f;
         public float  MoveProgress   { get; set; }
         public List<PinDto>     Pins     { get; set; }   // null = none
         public List<SurfaceDto> Surfaces { get; set; }   // null = none
@@ -84,7 +86,7 @@ public sealed class AnimTake
                 Px = s.Position.X, Py = s.Position.Y, Vx = s.Velocity.X, Vy = s.Velocity.Y,
                 Facing = s.Facing, Grounded = s.Grounded, State = s.MovementState,
                 Tag = (int)s.Tag, Action = s.Action, Dt = s.Dt,
-                ActionTime = s.ActionTime, ActionDuration = s.ActionDuration,
+                ActionTime = s.ActionTime, ActionProgress = s.ActionProgress,
                 MoveProgress = s.MovementProgress,
                 HasGrip = s.HasGrip, Gx = s.GripTarget.X, Gy = s.GripTarget.Y,
                 HasAim = s.HasAim, Ax = s.AimDir.X, Ay = s.AimDir.Y,
@@ -125,7 +127,7 @@ public sealed class AnimTake
             }
             return new CharacterAnimSample(
                 new Vector2(Px, Py), new Vector2(Vx, Vy), Facing, Grounded, State, Action, Dt,
-                ActionTime, ActionDuration, MoveProgress, pins, surfaces,
+                ActionTime, ActionProgress, MoveProgress, pins, surfaces,
                 HasGrip, new Vector2(Gx, Gy), HasAim, new Vector2(Ax, Ay), (AnimTag)Tag,
                 groundGap: GroundGap);
         }

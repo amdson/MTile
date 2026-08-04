@@ -391,7 +391,9 @@ public sealed class ViewerGame : Game
         var lines = new List<string>
         {
             $"state  {f.State}  [{(AnimTag)f.Tag}]{(f.Grounded ? "  grounded" : "  airborne")}",
-            $"action {(string.IsNullOrEmpty(f.Action) ? "-" : f.Action)}  t={f.ActionTime:0.00}/{f.ActionDuration:0.00}  prog={f.MoveProgress:0.00}",
+            $"action {(string.IsNullOrEmpty(f.Action) ? "-" : f.Action)}  t={f.ActionTime:0.00}"
+                + (f.ActionProgress >= 0f ? $" @{f.ActionProgress:0.00}" : " @clip")
+                + $"  prog={f.MoveProgress:0.00}",
             $"pos ({f.Px:0.0}, {f.Py:0.0})  vel ({f.Vx:0.0}, {f.Vy:0.0})  dt={f.Dt * 1000f:0.0}ms",
         };
         if (d.Solved)

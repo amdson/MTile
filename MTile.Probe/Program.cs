@@ -13,7 +13,7 @@ using MTile;
 //   dotnet run --project MTile.Probe -- digest <clip>        (no clip → write .probe/ for all)
 //   dotnet run --project MTile.Probe -- diff   <clip> <ref>
 //   dotnet run --project MTile.Probe -- report <clip>
-//   dotnet run --project MTile.Probe -- anim   <base> [Action]   base=idle|walk|run|walkback|jump|fall|crouch|vault
+//   dotnet run --project MTile.Probe -- anim   <base> [Action]   base=idle|walk|run|walkback|jump|fall|crouch|parkour
 //   dotnet run --project MTile.Probe -- addcom [clip] [--dry]    stamp grounded COM anchors (all clips, or one)
 //   dotnet run --project MTile.Probe -- new <name> <type> [--dur s] [--from clip[@t]] [--noloop]
 //   dotnet run --project MTile.Probe -- addkey <clip> <t> [--from clip[@t]]   pose = own-clip sample at t (shape-preserving) or a copy
@@ -165,7 +165,8 @@ static class Probe
             var s = new CharacterAnimSample(
                 position: pos, velocity: vel, facing: 1, grounded: grounded,
                 movementState: moveTag.ToString(), action: actType ?? "None", dt: dt,
-                actionTime: t, actionDuration: actType != null ? actDur : 0f,
+                // Sweep the overlay once over actDur, the way a reporting action would.
+                actionTime: t, actionProgress: actType != null ? MathHelper.Clamp(t / actDur, 0f, 1f) : -1f,
                 movementProgress: MathHelper.Clamp(t / 0.6f, 0f, 1f), tag: moveTag);
             anim.Update(s);
             pos += vel * dt;
@@ -761,7 +762,11 @@ static class Probe
         "fall"     => (new Vector2(0f, 120f), false, AnimTag.None),
         "crouch"   => (Vector2.Zero, true, AnimTag.Crouch),
         "crouchwalk" => (new Vector2(30f, 0f), true, AnimTag.Crouch),
-        "vault"    => (new Vector2(40f, -40f), false, AnimTag.Parkour),
+        // The four guided lip maneuvers — one clip each; the tag is what picks between them.
+        "parkour"   => (new Vector2(40f, -40f), false, AnimTag.Parkour),
+        "mantle"    => (new Vector2(10f, -40f), false, AnimTag.Mantle),
+        "arcjump"   => (new Vector2(60f, -60f), false, AnimTag.ArcJump),
+        "ledgepull" => (new Vector2(0f, -40f),  false, AnimTag.LedgePull),
         _          => (Vector2.Zero, true, AnimTag.None),            // idle
     };
 

@@ -7,11 +7,33 @@ using Xunit.Abstractions;
 namespace MTile.Tests.Sim;
 
 // movement_todo #7 + #8 (M4): LedgePull and Dropdown migrated onto the reference-
-// clip system — a baked/authored Hermite clip retargeted at Enter (clip (0,0) →
-// entry pose, clip (1,-1) → measured gate) and tracked by ReferencePath's PD
+// clip system — a baked/authored Hermite clip retargeted at Enter (the clip's Entry
+// anchor → entry pose, its Gate anchor → measured gate) and tracked by ReferencePath's PD
 // servo. Arbitration, triggers, and completion tests are unchanged; these tests
 // pin that the clip-driven moves still deliver, plus the bespoke fallback
 // behind UseReferenceClips=false.
+// The shipped pull arc as originally authored — normalized units, default anchors.
+// Used to pin that clip-space rescaling is invisible to the retarget.
+internal static class ReferenceClipRegistryTestHelper
+{
+    public static HermiteClipDocument NormalizedPull()
+    {
+        var doc = new HermiteClipDocument
+        {
+            Name = "test_pull",
+            Keys =
+            {
+                new HermiteClipKey { X = 0.00f, Y =  0.00f, TX = 0.05f, TY = -1.60f },
+                new HermiteClipKey { X = 0.06f, Y = -0.80f, TX = 0.15f, TY = -1.00f },
+                new HermiteClipKey { X = 0.22f, Y = -1.08f, TX = 1.60f, TY =  0.00f },
+                new HermiteClipKey { X = 1.00f, Y = -1.00f, TX = 1.60f, TY =  0.10f },
+            },
+        };
+        doc.RederiveT();
+        return doc;
+    }
+}
+
 public class ReferencePathTests(ITestOutputHelper output)
 {
     private const float Dt      = 1f / 30f;
@@ -35,6 +57,46 @@ public class ReferencePathTests(ITestOutputHelper output)
         Assert.Equal(new Vector2(110f, 80f), down.Map(new Vector2(1f, -1f)));
         // Mid-curve point above the entry maps below it when the gate is below.
         Assert.True(down.Map(new Vector2(0.5f, -0.5f)).Y > entry.Y);
+    }
+
+    // Clips are authored in pixels against their own Entry/Gate anchors. Rescaling
+    // clip space is therefore a no-op on the retargeted arc — that invariant is what
+    // lets the editor pick any authoring box, and what makes the anchors' defaults
+    // bit-compatible with the pre-anchor normalized files.
+    [Fact]
+    public void AnchoredFrame_RescalingClipSpace_LeavesTheWorldArcUnchanged()
+    {
+        var entry = new Vector2(132f, 44f);
+        var gate  = new Vector2(158f, 4f);
+
+        var normalized = ReferenceClipRegistryTestHelper.NormalizedPull();
+        var pixels     = ReferenceClipRegistryTestHelper.NormalizedPull();
+        pixels.RescaleClipSpace(new Vector2(26f, -40f));   // sign flip included
+
+        var fn = new ReferenceFrame(normalized, entry, gate);
+        var fp = new ReferenceFrame(pixels, entry, gate);
+
+        Assert.Equal(entry, fp.Map(pixels.Entry));
+        Assert.Equal(gate,  fp.Map(pixels.Gate));
+        for (float t = 0f; t <= 1.0001f; t += 0.1f)
+        {
+            var a = fn.Map(normalized.Eval(t));
+            var b = fp.Map(pixels.Eval(t));
+            Assert.True(Vector2.Distance(a, b) < 1e-3f, $"t={t:0.0}: {a} vs {b}");
+        }
+    }
+
+    // A clip whose anchors share an axis can't be normalized on it; the frame falls
+    // back to 1:1 there instead of dividing by zero.
+    [Fact]
+    public void AnchoredFrame_DegenerateAxis_FallsBackToPixels()
+    {
+        var clip = ReferenceClipRegistryTestHelper.NormalizedPull();
+        clip.Gate = new Vector2(0f, -40f);   // pure-vertical box
+        var frame = new ReferenceFrame(clip, new Vector2(100f, 50f), new Vector2(100f, 10f));
+
+        Assert.Equal(1f, frame.Scale.X);                                   // px passthrough
+        Assert.Equal(new Vector2(105f, 50f), frame.Map(new Vector2(5f, 0f)));
     }
 
     // ── Ledge pull: same fixture family as LedgePullExitTests ──────────────────
@@ -84,7 +146,7 @@ public class ReferencePathTests(ITestOutputHelper output)
         int pullEnd   = Array.FindLastIndex(trace, f => f.State == "LedgePullState");
         Assert.True(pullStart > 0, "pull never started");
 
-        // Completed rather than timed out: under MaxVaultTime (0.5s = 15 frames
+        // Completed rather than timed out: under MaxLipManeuverTime (0.5s = 15 frames
         // at dt=1/30). The clip pace is tuned to the bespoke pull's measured 14
         // frames, so completion rides just inside the cap — exactly as before.
         Assert.True(pullEnd - pullStart < 15,

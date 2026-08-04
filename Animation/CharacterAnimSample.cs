@@ -41,7 +41,10 @@ public readonly struct SolverSurface
 // fragile to renames and to future states whose names happen to contain a match (e.g. a
 // ParkourRoll would have read as a vault). Add a value here + an override when a new state
 // needs distinct animation policy.
-public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump, LedgeJump, Dropdown }
+// Parkour/Mantle/ArcJump are the three CLIMB states (ClimbStates.cs), split by entry speed and
+// rise band; they share the hands overlay and grip machinery but each gets its own clip so the
+// speed vault, the flush climb and the two-block arc can be authored apart.
+public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump, LedgeJump, Dropdown, Mantle, ArcJump }
 
 // A read-only snapshot of everything the animation layer is allowed to look at,
 // gathered once per render frame. This is the *one-way* boundary between the sim
@@ -64,11 +67,14 @@ public readonly struct CharacterAnimSample
     // sim time — drives the action overlay clip so the slash pose stays frame-synced
     // with the hitbox windows and survives rollback.
     public readonly float   ActionTime;
-    // Nominal total length of the current action (ActionState.OverlayDuration), seconds.
-    // The overlay clip is remapped to span exactly [0, ActionDuration] so it plays
-    // through once over the action's lifetime. 0 = no fixed length → the animator uses
-    // the clip's own Duration instead.
-    public readonly float   ActionDuration;
+    // How far through its activation the current action reports itself to be
+    // (ActionState.AnimationProgress), normalized [0,1]. The overlay clip is remapped
+    // onto it, so the authored pose sweeps once over the action no matter how long the
+    // action actually runs or how long the clip's own timeline is.
+    // **NEGATIVE = the action has no opinion** → the animator falls back to playing the
+    // clip at its own authored seconds (right for held, open-ended actions like Guard,
+    // whose clip loops).
+    public readonly float   ActionProgress;
     // Normalized progress [0,1] of a guided maneuver (CurrentState.AnimationProgress) — drives a
     // movement overlay whose clip time is SPATIAL, not a clock (a vault's hands track body-vs-
     // corner). 0 for states with no natural progress. See CharacterAnimator.ResolveMovementOverlays.
@@ -117,7 +123,7 @@ public readonly struct CharacterAnimSample
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
         string movementState, string action, float dt, float actionTime = 0f,
-        float actionDuration = 0f, float movementProgress = 0f, ExternalPin[] pins = null,
+        float actionProgress = -1f, float movementProgress = 0f, ExternalPin[] pins = null,
         SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default,
         bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None,
         int surfaceCount = -1, bool? surfacesNear = null, bool lowCeiling = false,
@@ -125,7 +131,7 @@ public readonly struct CharacterAnimSample
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
-        ActionDuration = actionDuration; MovementProgress = movementProgress; Pins = pins;
+        ActionProgress = actionProgress; MovementProgress = movementProgress; Pins = pins;
         Surfaces = surfaces; SurfaceCount = surfaceCount; HasGrip = hasGrip; GripTarget = gripTarget;
         HasAim = hasAim; AimDir = aimDir; Tag = tag; LowCeiling = lowCeiling; GroundGap = groundGap;
         // Default (hand-built samples, tests): surfaces present ⇒ near — the pre-terrain behavior.
@@ -207,7 +213,7 @@ public readonly struct CharacterAnimSample
         return new(pos, p.Body.Velocity, facing, p.IsGrounded,
                p.CurrentStateName, p.CurrentActionName, dt,
                p.CurrentActionVars.TimeInState,
-               p.CurrentAction?.OverlayDuration ?? 0f,
+               p.CurrentAction?.AnimationProgress(p.CurrentActionVars) ?? -1f,
                p.CurrentState?.AnimationProgress ?? 0f,
                surfaces: surfaces, surfaceCount: count, surfacesNear: near,
                hasGrip: hasGrip, gripTarget: gripTarget,

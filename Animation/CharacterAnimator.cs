@@ -9,8 +9,10 @@ namespace MTile;
 // Walk vs WalkBack distinguishes moving with vs against the facing direction
 // (forward stride vs backpedal). Run is forward locomotion above a speed threshold
 // (a longer-stride clip — same cadence machinery). Air is split into Jump (rising)
-// and Fall. Vault covers the guided ParkourState traversal.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Vault, Run, WallSlide, Hang, Hitstun, Tumble, WallJumpKick, DoubleJumpFlip, RunTurn, Land, LedgeJump, Dropdown }
+// and Fall. Parkour/Mantle/ArcJump/LedgePull are the four guided lip maneuvers — one clip each
+// (they were a single shared "Vault" clip until 2026-08-04; see Plans/ANIMATION_BINDING_MAP.md).
+// EVERY value here must have a clip file whose Type matches, or binding throws at construction.
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Parkour, Run, WallSlide, Hang, Hitstun, Tumble, WallJumpKick, DoubleJumpFlip, RunTurn, Land, LedgeJump, Dropdown, Mantle, ArcJump, LedgePull }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -375,7 +377,7 @@ public sealed partial class CharacterAnimator
             }
 
         // The move-driver registry — after clip binding so drivers can resolve their
-        // auxiliary clips (e.g. ParkourDriver's VaultHands) from _actionClips.
+        // auxiliary clips (e.g. ParkourDriver's ClimbHands) from _actionClips.
         _drivers = MoveDrivers.CreateDefault(rig, _actionClips);
     }
 
@@ -454,14 +456,14 @@ public sealed partial class CharacterAnimator
         //     frozen stack feeds the draw in step 3.5, so the skeleton the solver optimized is
         //     bit-identical to the one rendered.
         //     Slot 0 is the Action-FSM overlay (orthogonal to movement, resolved here); its τ
-        //     is action progress, time-remapped onto the declared ActionDuration (sweeps once
-        //     over the swing, holds past the end) or the clip's own seconds when no length is
-        //     declared. Slots 1+ serve the driver's overlay requests.
+        //     is whatever progress the action REPORTS (ActionState.AnimationProgress — sweeps
+        //     once over the activation however long it lasts), falling back to the clip's own
+        //     seconds when the action declines to say. Slots 1+ serve the driver's requests.
         string actKey = IsOverlayAction(s.Action) ? s.Action : null;
         AnimationDocument actClip =
             actKey != null && _actionClips.TryGetValue(actKey, out var ac) ? ac : null;
         float actTau = actClip == null ? 0f
-            : s.ActionDuration > 1e-4f ? MathHelper.Clamp(s.ActionTime / s.ActionDuration, 0f, 1f)
+            : s.ActionProgress >= 0f ? MathHelper.Clamp(s.ActionProgress, 0f, 1f)
             : AnimationSampler.NormalizedTime(actClip, s.ActionTime);
         _overlays.Update(actKey, actClip, actTau, _frame.Overlays, dt);
         _state.ActionWeight = _overlays.ActionWeight;   // upper-body stiffness ramp + tests
@@ -1035,7 +1037,7 @@ public sealed partial class CharacterAnimator
         _overlays.Compose(_scratch);                                              // overlay first (linear)
         int bones = _skeleton.Count;
         // Δθ is applied onto the COMPOSED pose, not the base — so the IK correction survives an
-        // overlay that fully owns a bone (a vault hand owned by the VaultHands overlay). Pre-compose
+        // overlay that fully owns a bone (a vault hand owned by the ClimbHands overlay). Pre-compose
         // Δθ would be overwritten by the overlay paint's lerp and the pin couldn't bend that limb.
         for (int i = 0; i < bones; i++) _scratch.Local[i].Rotation += x[IdxTheta0 + i];   // post-compose IK
         _scratch.ComputeWorld(_solveRoot);

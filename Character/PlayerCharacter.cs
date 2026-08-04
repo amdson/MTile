@@ -335,7 +335,7 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new CoveredJumpState());
         // Climb family (ClimbStates.cs): Parkour = at-speed 1-block vault,
         // ArcJump = 2-block band, Mantle = slow/flush 1-block. Gated per frame by
-        // MovementConfig.CorrectorVaultEnabled (hot-reloadable A/B), so
+        // MovementConfig.CorrectorClimbEnabled (hot-reloadable A/B), so
         // registration is unconditional.
         _stateRegistry.Add(new ParkourState(1));
         _stateRegistry.Add(new ParkourState(-1));

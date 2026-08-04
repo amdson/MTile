@@ -214,9 +214,17 @@ public class FoldScenarioTests(ITestOutputHelper output)
         }
         var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(24f, 74f));
 
+        // The corridor sentinel pins the "ref" engine (the production fold for
+        // this regime); qp's corridor performance is no longer a sentinel.
+        var prevEngine = MovementConfig.Current.FoldEngine;
+        MovementConfig.Current.FoldEngine = "ref";
         var trace = new List<SimFrame>();
-        for (int f = 0; f < 800; f++)
-            trace.Add(Step(p, bodies, ctrl, terrain, new PlayerInput { Right = true }, f));
+        try
+        {
+            for (int f = 0; f < 800; f++)
+                trace.Add(Step(p, bodies, ctrl, terrain, new PlayerInput { Right = true }, f));
+        }
+        finally { MovementConfig.Current.FoldEngine = prevEngine; }
 
         var last = trace[^1];
         float avg = (last.X - 24f) / (800 * Dt);

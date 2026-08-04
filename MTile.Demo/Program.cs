@@ -18,9 +18,10 @@ using MTileDemo;
 // Take viewer:           dotnet run --project MTile.Demo -- --load Takes/<name>.take.json
 //   (scrub a recorded gameplay take with solver overlays; record in-game with
 //    Ctrl+R, save with Ctrl+S. See Plans/ANIM_TAKE_VIEWER_PLAN.md.)
-// Reference-clip editor: dotnet run --project MTile.Demo -- --ref vault
-//   (authors a maneuver's y(x) Hermite reference arc in the normalized frame;
-//    loads/saves ReferenceClips/<name>.json. See Plans/BALLISTIC_CORRECTOR_PLAN.md §1.)
+// Reference-clip editor: dotnet run --project MTile.Demo -- --ref parkour
+//   (authors a maneuver's Hermite reference arc in game pixels, against the clip's
+//    own entry/gate anchors; loads/saves ReferenceClips/<name>.json.
+//    See Plans/BALLISTIC_CORRECTOR_PLAN.md §1.)
 
 string bindPng = null, useBind = null, clip = null, takePath = null, refClip = null, rig = null;
 string importDir = null, importOut = "SpriteBindings"; float importScale = 0.25f;

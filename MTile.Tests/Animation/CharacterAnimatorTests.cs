@@ -228,7 +228,7 @@ public class CharacterAnimatorTests
             BuildWalkClip(skel),
             BuildDummyClip(skel, "fall", "Fall"),
             BuildDummyClip(skel, "jump", "Jump"),
-            BuildDummyClip(skel, "vault", "Vault"),
+            BuildDummyClip(skel, "parkour", "Parkour"),
             BuildDummyClip(skel, "hang", "Hang"),
         });
 
@@ -259,16 +259,17 @@ public class CharacterAnimatorTests
     }
 
     // Same regression for the pull-up: LedgePull is the active pull-up after grab and
-    // should map to a stable guided-traversal clip (Vault), not flip on Vy sign.
+    // should map to a stable guided-traversal clip, not flip on Vy sign. (It borrowed the
+    // shared clip until the climb family was split; it owns LedgePull now.)
     [Fact]
-    public void LedgePullState_OscillatingVy_LocksToVaultClip()
+    public void LedgePullState_OscillatingVy_LocksToLedgePullClip()
     {
         var skel = SkeletonExamples.Biped();
         var anim = new CharacterAnimator(skel, 0.6f, new[] {
             BuildWalkClip(skel),
             BuildDummyClip(skel, "fall", "Fall"),
             BuildDummyClip(skel, "jump", "Jump"),
-            BuildDummyClip(skel, "vault", "Vault"),
+            BuildDummyClip(skel, "ledgepull", "LedgePull"),
         });
 
         float[] vyTrace = { -100f, 0f, -50f, 0f, -25f, 0f };
@@ -287,8 +288,8 @@ public class CharacterAnimatorTests
             clips.Add(anim.State.Clip);
         }
 
-        Assert.True(clips.TrueForAll(c => c == AnimClip.Vault),
-            $"LedgePullState should lock to Vault clip; got {string.Join(",", clips)}");
+        Assert.True(clips.TrueForAll(c => c == AnimClip.LedgePull),
+            $"LedgePullState should lock to its own LedgePull clip; got {string.Join(",", clips)}");
     }
 
     // Total (unwrapped) phase advanced after walking forward at `vx` for `frames`.

@@ -1,9 +1,10 @@
 {
-  "Name": "vault",
-  "Type": "Vault",
+  "Name": "mantle",
+  "Type": "Mantle",
   "Skeleton": "biped_rabbit",
   "Duration": 0.45,
   "Loop": false,
+  "ReferenceArc": "mantle",
   "Keyframes": [
     {
       "Time": 0,

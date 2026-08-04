@@ -119,21 +119,37 @@ dotnet $P --rig biped_rabbit refarc dropdown dropdown   # bind
 dotnet $P refarc dropdown none                          # clear
 ```
 
+- Or bind it **in the editor**: `A` / `Shift-A` cycles the clip through the baked arc
+  names plus every `ReferenceClips/*.json`, wrapping through `none`, saved on Ctrl-S.
 - Resolution: `ReferenceClips/<name>.json` (the file `--ref <name>` edits) wins, else
   the baked `ReferenceClipRegistry` default (`ledge_pull`, `dropdown`). Header shows
-  `arc <name>` (or `arc <name> (missing)`).
-- While scrubbing, the body's scene placement = the normalized Hermite arc at the
-  playhead, mapped by a per-Type editor gate (arcs are entry (0,0) → gate (1,−1); the
-  gate's *world* direction is only known at runtime from the measured maneuver):
-  **Vault** → onto the reference block's top (dragging the block rescales the ride
-  live); **Dropdown** → a ledge-height down; anything else → a maneuver-height up.
-  Constants in `DemoGame.ArcOffset`.
+  `arc <name>` (or `arc <name> (missing)`). The file is **watched and reloaded live**, so
+  `--ref <name>` in a second window shapes the arc while the animation editor rides it.
+- While scrubbing, the body's scene placement = the Hermite arc at the playhead. Arcs
+  are authored in **game pixels** against their own entry/gate anchors, so size and
+  direction come from the file; the editor only converts px → rig units by
+  `Game1.SkeletonScale`. The one exception is **Vault**, whose gate stays pinned to the
+  draggable reference block so dragging it rescales the ride live (`DemoGame.ArcOffsetAt`).
+- **Clip and arc keep independent durations.** The body advances along the arc at
+  `τ · (clip.Duration / arc.Duration)` (`DemoGame.ArcProgress`), so a 0.4s clip on a
+  0.3s arc reaches the gate at τ≈0.75 and overshoots after; the header shows
+  `arc <name> <arcDur>s x<ratio> at <progress>`. Edit the arc's duration with `[` / `]`
+  in the ref-clip editor. The **sim** still paces from `MovementConfig`
+  (`LedgePullRefDuration` 0.60 / `DropdownRefDuration` 0.30) — the arc files carry
+  matching values, and the two must be retuned together.
+- The arc is **drawn in the scene**: bright over the stretch the clip's timeline covers,
+  dim past it, a green ring at the gate, a dot per keyframe, and a body-radius ring at
+  the playhead. Author each pose against the dot it lands on. The scene auto-centers on
+  the arc (arrow-key pan composes on top).
 - Any hand-dragged `edref` placement **adds on top** as a nudge.
 - Editor visualization only. The sim follows the arc through `ReferencePath`; nothing
   runtime reads `ReferenceArc`.
 
-There is no vault arc file yet — author one with
-`dotnet run --project MTile.Demo -- --ref vault`, then `refarc vault vault`.
+All five arcs now exist and are bound: `ledge_pull`→`ledgepull`, `dropdown`→`dropdown`,
+`vault`→`vault`, `mantle`→`mantle`, `arcjump`→`arcjump`. The last three are **authoring aids
+only** — the climb family is corrector-driven, not `ReferencePath`-driven, so editing those arcs
+moves the editor preview and nothing else. See
+[ANIMATION_BINDING_MAP.md](ANIMATION_BINDING_MAP.md).
 
 ## 5. Misc editor additions (same batch)
 

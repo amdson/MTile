@@ -129,11 +129,10 @@ public class MovementConfig
     // Duck Under (stable height)
     public float DuckDamping       { get; set; } = 80f;
 
-    // Ledge Vault
-    public float VaultAutoFireSpeed { get; set; } = 90f;
-    public float VaultLiftForce  { get; set; } = 2000f;
-    public float VaultPushForce  { get; set; } = 500f;
-    public float MaxVaultTime    { get; set; } = 0.5f;
+    // Guided lip maneuvers (ledge pull, parkour, mantle, arc jump)
+    public float LipLiftForce  { get; set; } = 2000f;
+    public float LipPushForce  { get; set; } = 500f;
+    public float MaxLipManeuverTime    { get; set; } = 0.5f;
 
     // Guided States (reference-clip tracking — ReferencePath.TrackForce PD servo,
     // consumed by LedgePull/Dropdown when UseReferenceClips is on)
@@ -149,12 +148,12 @@ public class MovementConfig
     // Hermite clips (ReferenceClips/<name>.json, baked defaults in
     // ReferenceClipRegistry) instead of their legacy bespoke force logic.
     // Hot-reloadable A/B toggle; durations are the nominal clip playback times
-    // (must stay under MaxVaultTime / MaxDropdownTime respectively — the state
+    // (must stay under MaxLipManeuverTime / MaxDropdownTime respectively — the state
     // timeouts still govern).
     public bool  UseReferenceClips    { get; set; } = true;
     // 0.60 matches the bespoke pull's measured pace: the corner crossing (which
     // is both the completion trigger and the end of the mid-pull re-grab window)
-    // sits at clip progress ≈ 0.72 → ~13 of the 15 frames MaxVaultTime allows at
+    // sits at clip progress ≈ 0.72 → ~13 of the 15 frames MaxLipManeuverTime allows at
     // 1/30 — the same last-2-frames crest the legacy pull had.
     public float LedgePullRefDuration { get; set; } = 0.60f;
     public float DropdownRefDuration  { get; set; } = 0.30f;
@@ -162,10 +161,10 @@ public class MovementConfig
     public float GuidedMaxDuration    { get; set; } = 0.6f;
     public float GuidedRefSpeed       { get; set; } = 80f;    // fallback for duration estimate
 
-    // Vault kick — instantaneous velocity bump applied at ParkourState entry.
+    // Parkour kick — instantaneous velocity bump applied at ParkourState entry.
     // Forward component is scaled by wallDir; upward is negative Y.
-    public float VaultKickForward     { get; set; } = 0f;
-    public float VaultKickUp          { get; set; } = -40f;
+    public float ParkourKickForward     { get; set; } = 0f;
+    public float ParkourKickUp          { get; set; } = -40f;
 
     // Corridor probe (shared local-geometry sensing for the maneuver layer —
     // see Plans/CORRIDOR_MANEUVER_PLAN.md and Character/CorridorProbe.cs).
@@ -210,18 +209,18 @@ public class MovementConfig
     // ballistic rollout crosses the lip with a small clearance instead of grazing it.
     public float ArcJumpApexMargin { get; set; } = 4f;
 
-    // Ballistic corrector (Plans/BALLISTIC_CORRECTOR_PLAN.md). CorrectorVaultEnabled
+    // Ballistic corrector (Plans/BALLISTIC_CORRECTOR_PLAN.md). CorrectorClimbEnabled
     // gates ParkourState (the corrector-driven running vault) for A/B against
     // the ramp stack; the rest tune the predict → rows → solve loop. Iteration counts
     // and the hinge/ε weights are deliberately NOT here — fixed constants, not knobs.
-    public bool  CorrectorVaultEnabled          { get; set; } = true;
+    public bool  CorrectorClimbEnabled          { get; set; } = true;
     public int   CorrectorHorizon               { get; set; } = 18;
     public float CorrectorMargin                { get; set; } = 2f;
     public float CorrectorDeltaWeight           { get; set; } = 5f;
     // Body face within this many px of the rise lip before the vault fires — larger
     // than ArcJumpTriggerDistance because the corrector plans the whole arc (2 tiles,
     // the corridor plan's reflex-vs-autopilot boundary).
-    public float CorrectorVaultTriggerDistance  { get; set; } = 2f * Chunk.TileSize;
+    public float CorrectorClimbTriggerDistance  { get; set; } = 2f * Chunk.TileSize;
     // Ambient corrector mode (plan step 7 — replaces the ambient reflex ramps).
     // Runs during free movement under a held direction: free-coast predict over a
     // short horizon, passable-feature rows only, redirect-only solve, applied iff

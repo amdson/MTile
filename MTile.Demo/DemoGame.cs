@@ -43,8 +43,8 @@ public sealed class DemoGame : Game
     // PER-KEYFRAME reference placement: a root-space "edref" Point addition (rig units,
     // scene frame) authored by dragging the com marker — the PLAYER ensemble (com marker +
     // skeleton) offsets from the scene anchor by its interpolated value, while the ground
-    // references (floor line, vault block) stay put. Scrubbing shows the body arcing over
-    // the fixed scenery (e.g. a vault clearing its block). Editor-only visualization: it
+    // references (floor line, obstacle block) stay put. Scrubbing shows the body arcing over
+    // the fixed scenery (e.g. parkour clearing its block). Editor-only visualization: it
     // saves with the clip and rides the additions machinery (K inherits, retime follows),
     // but the runtime reads additions by name and ignores this one.
     private const string EdRefName = "edref";
@@ -52,6 +52,8 @@ public sealed class DemoGame : Game
     // authored maneuver arc (ReferenceClips/<name>.json, else the baked registry default)
     // that drives the body's scene placement while scrubbing. Null = no arc.
     private HermiteClipDocument _refArc;
+    private string   _refArcPath;    // the file _refArc came from (null = baked default), watched for saves
+    private DateTime _refArcStamp;
     private float        _floorLocalY;   // bind-pose sole height (skeleton-local), the legacy floor line
 
     // COM-ANCHORED placement (clips that author a "com" track — all of them, post addcom):
@@ -83,8 +85,8 @@ public sealed class DemoGame : Game
     private int           _dragBar  = -1;     // keyframe bar being moved
     private bool          _dragPlayhead;
     private bool          _dragRoot;          // dragging the root joint = moving the whole player (_playerOffset)
-    private Vector2       _vaultBlockOffset;  // skeleton-local offset added to the vault reference block's base placement
-    private bool          _dragVaultBlock;    // dragging the vault reference block
+    private Vector2       _obstacleBlockOffset;  // skeleton-local offset added to the obstacle reference block's base placement
+    private bool          _dragObstacleBlock;    // dragging the obstacle reference block
     private enum EditMode { Rotate, Resize, Stretch }
     private EditMode      _editMode = EditMode.Rotate;   // Tab cycles
     private float         _sidebarScroll;                // clip-list scroll offset, px (0 = top)
@@ -300,7 +302,9 @@ public sealed class DemoGame : Game
             if (Pressed(kb, Keys.L))                { Doc.Loop = !Doc.Loop; _dirty = true; }
             if (Pressed(kb, Keys.R))                { Doc.Region = (AnimRegion)(((int)Doc.Region + 1) % 3); _dirty = true; }
             if (Pressed(kb, Keys.T))                CycleType(shift ? -1 : +1);
+            if (Pressed(kb, Keys.A))                CycleReferenceArc(shift ? -1 : +1);
         }
+        RefreshRefArc();
 
         // Playback: advance the playhead per the animation's Duration/Loop.
         if (_playing && Doc != null)
@@ -361,8 +365,8 @@ public sealed class DemoGame : Game
                     int bone = _activeKey >= 0 ? PickJoint(world, mp) : -1;
                     if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
                     else if (bone >= 0) _dragBone = bone;
-                    // No joint under the cursor: grab the vault reference block if the click is on it.
-                    else if (TryGetVaultBlockRect(out var vb) && vb.Contains((int)mp.X, (int)mp.Y)) _dragVaultBlock = true;
+                    // No joint under the cursor: grab the obstacle reference block if the click is on it.
+                    else if (TryGetObstacleBlockRect(out var vb) && vb.Contains((int)mp.X, (int)mp.Y)) _dragObstacleBlock = true;
                     _selectedAdd = -1;
                 }
             }
@@ -389,10 +393,10 @@ public sealed class DemoGame : Game
                 _playerOffset += dm;
             }
         }
-        else if (leftDown && _dragVaultBlock)
+        else if (leftDown && _dragObstacleBlock)
         {
             // Block offset is skeleton-local; _root is uniform-scaled (no rotation), so undo the scale.
-            _vaultBlockOffset += (mp - new Vector2(_prevMs.X, _prevMs.Y)) / RigScale;
+            _obstacleBlockOffset += (mp - new Vector2(_prevMs.X, _prevMs.Y)) / RigScale;
         }
         else if (leftDown && _dragBar >= 0)
         {
@@ -431,7 +435,7 @@ public sealed class DemoGame : Game
             }
         }
 
-        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragVaultBlock = false; _dragSidebarThumb = false; }
+        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragObstacleBlock = false; _dragSidebarThumb = false; }
 
         _prevMs = ms;
         _prevKb = kb;
@@ -549,6 +553,11 @@ public sealed class DemoGame : Game
         float cx = SidebarW + (W - SidebarW) / 2f;
         float cy = H * 0.48f;
         _sceneAnchor = new Vector2(cx, cy) + _playerOffset;   // ground refs live here
+        // An arc is authored at true game scale, so a tall one (a 44px drop is nearly two
+        // body heights) would run off the working area from a centered anchor. Bias the
+        // scene by the arc's own midpoint so the whole path sits in view. Pure view
+        // placement — the arrow-key pan still composes on top, and nothing authored moves.
+        if (_refArc != null) _sceneAnchor -= ArcCenter() * RigScale;
         // Player ensemble rides the clip's reference arc (Doc.ReferenceArc — the maneuver's
         // authored trajectory) plus the interpolated edref track (per-keyframe hand placement
         // authored by dragging the com marker; an additive nudge when an arc is present).
@@ -565,41 +574,110 @@ public sealed class DemoGame : Game
     // covers names with no file yet. Null name / nothing found → no arc.
     private HermiteClipDocument LoadRefArc(string name)
     {
+        _refArcPath = null;
+        _refArcStamp = default;
         if (string.IsNullOrWhiteSpace(name)) return null;
-        string root = Path.GetDirectoryName(FindStatesDir());
-        var doc = root != null
-            ? HermiteClipDocument.Load(Path.Combine(root, "ReferenceClips", name + ".json"))
-            : null;
+        string path = RefArcPath(name);
+        var doc = path != null ? HermiteClipDocument.Load(path) : null;
+        if (doc != null) { _refArcPath = path; _refArcStamp = File.GetLastWriteTimeUtc(path); }
+        else if (path != null) _refArcPath = path;   // watch for it appearing later
         doc ??= ReferenceClipRegistry.Get(name);
         if (doc == null) Console.WriteLine($"ReferenceArc '{name}': no file or baked default — ignoring.");
         return doc;
     }
 
-    // The arc's editor retarget frame: normalized clip units → rig units. x: entry→gate
-    // horizontal run; y: gate height — clip y is authored with −1 = "toward the gate",
-    // and the WORLD direction of the gate comes from the measured maneuver at runtime
-    // (ReferenceFrame's signed scale), so the editor guesses it per clip Type: a Vault
-    // gate is on top of the reference block (dragging the block rescales the ride live),
-    // a Dropdown's gate is a ledge-drop below, anything else rises a generic maneuver
-    // height. Editor visualization only — tune the constants to taste.
-    private Vector2 ArcOffset(float t)
+    private string RefArcPath(string name)
     {
-        Vector2 p = _refArc.Eval(MathHelper.Clamp(t, 0f, 1f));
-        float gx, gy;
-        switch (Doc?.Type)
+        string root = Path.GetDirectoryName(FindStatesDir());
+        return root == null ? null : Path.Combine(root, "ReferenceClips", name + ".json");
+    }
+
+    // Live reload: the `--ref` editor in another window writes the same file, so pick up
+    // its saves without re-selecting the clip. A stat per frame on a file of a few keys.
+    private void RefreshRefArc()
+    {
+        if (_refArcPath == null || Doc?.ReferenceArc == null) return;
+        DateTime stamp;
+        try { if (!File.Exists(_refArcPath)) return; stamp = File.GetLastWriteTimeUtc(_refArcPath); }
+        catch (IOException) { return; }
+        if (stamp == _refArcStamp) return;
+        var doc = HermiteClipDocument.Load(_refArcPath);
+        if (doc == null) return;      // mid-write; try again next frame (stamp unchanged)
+        _refArc = doc;
+        _refArcStamp = stamp;
+        Console.WriteLine($"ReferenceArc '{Doc.ReferenceArc}': reloaded");
+    }
+
+    // Every arc name the editor can offer: the baked registry's, plus any other file
+    // sitting in ReferenceClips/. Sorted, so cycling is stable across runs.
+    private List<string> ArcNames()
+    {
+        var names = new SortedSet<string>(ReferenceClipRegistry.KnownNames, StringComparer.OrdinalIgnoreCase);
+        string root = Path.GetDirectoryName(FindStatesDir());
+        string dir = root == null ? null : Path.Combine(root, "ReferenceClips");
+        if (dir != null && Directory.Exists(dir))
+            foreach (var f in Directory.GetFiles(dir, "*.json"))
+                names.Add(Path.GetFileNameWithoutExtension(f));
+        return new List<string>(names);
+    }
+
+    // Attach the next arc to this clip (Shift = previous), wrapping through "none" — the
+    // in-editor equivalent of `MTile.Probe -- refarc <clip> <name|none>`, persisted on
+    // Ctrl-S like any other clip edit.
+    private void CycleReferenceArc(int dir)
+    {
+        if (Doc == null) return;
+        var names = ArcNames();
+        names.Insert(0, null);                       // "none" slot
+        int i = names.IndexOf(Doc.ReferenceArc);     // -1 (unknown name) → lands on none
+        i = ((i < 0 ? 0 : i) + dir + names.Count) % names.Count;
+        Doc.ReferenceArc = names[i];
+        _refArc = LoadRefArc(Doc.ReferenceArc);
+        _dirty = true;
+        Console.WriteLine($"{Doc.Name} ReferenceArc = {Doc.ReferenceArc ?? "none"}");
+    }
+
+    // Clip time → arc parameter. The two have INDEPENDENT durations, so a clip only
+    // rides its arc 1:1 when they match: a 0.4s clip on a 0.3s arc is at the gate by
+    // τ=0.75 and overshoots after. Capped at 2 so a mistuned pair can't fling the body
+    // off the far end of the linear extrapolation.
+    private float ArcProgress(float t)
+    {
+        float arcDur = _refArc.Duration <= 1e-4f ? 1f : _refArc.Duration;
+        float clipDur = Doc == null || Doc.Duration <= 1e-4f ? 1f : Doc.Duration;
+        return MathHelper.Clamp(MathHelper.Clamp(t, 0f, 1f) * (clipDur / arcDur), 0f, 2f);
+    }
+
+    private Vector2 ArcOffset(float t) => ArcOffsetAt(ArcProgress(t));
+
+    // Midpoint of the drawn arc's bounding box, in rig units — the view bias that keeps a
+    // full-scale path on screen.
+    private Vector2 ArcCenter()
+    {
+        float end = MathF.Max(ArcProgress(1f), 1f);
+        Vector2 min = new(float.MaxValue), max = new(float.MinValue);
+        for (int i = 0; i <= 16; i++)
         {
-            case "Vault":
-                gx = VaultBlockX + _vaultBlockOffset.X + VaultBlockW * 0.5f;
-                gy = VaultBlockH - _vaultBlockOffset.Y;
-                break;
-            case "Dropdown":
-                gx = 24f; gy = -30f;   // descent: clip −1 maps DOWN a ledge height
-                break;
-            default:
-                gx = 24f; gy = 30f;    // ascent (ledge pull, mantle): clip −1 maps UP
-                break;
+            Vector2 p = ArcOffsetAt(end * i / 16f);
+            min = Vector2.Min(min, p); max = Vector2.Max(max, p);
         }
-        return new Vector2(p.X * gx, p.Y * gy);
+        return (min + max) * 0.5f;
+    }
+
+    // Scene offset at a point along the ARC's own parameter (not clip time), in rig units.
+    //
+    // The arc is authored in game pixels against its own anchors, so its size and its
+    // direction both come straight from the file — the editor only has to convert px to
+    // rig units. The one exception is a Parkour clip, whose gate is pinned to the draggable
+    // reference block so dragging the block rescales the ride live.
+    private Vector2 ArcOffsetAt(float u)
+    {
+        Vector2 p = _refArc.Eval(u);
+        Vector2 gate = Doc?.Type == "Parkour"
+            ? new Vector2(ObstacleBlockX + _obstacleBlockOffset.X + ObstacleBlockW * 0.5f,
+                          -(ObstacleBlockH - _obstacleBlockOffset.Y))
+            : _refArc.Span / Game1.SkeletonScale;
+        return new ReferenceFrame(_refArc, Vector2.Zero, gate).Map(p);
     }
 
     private bool TryComAt(float t, out Vector2 com) => TryPointAt(t, "com", out com);
@@ -624,7 +702,7 @@ public sealed class DemoGame : Game
         return null;
     }
 
-    // The scene frame the GROUND-RELATIVE references (floor line, vault block) live in: fixed
+    // The scene frame the GROUND-RELATIVE references (floor line, obstacle block) live in: fixed
     // at the anchor when com-anchored (they must NOT follow the body), the rig root otherwise.
     private (Affine2 frame, float floorLocalY) SceneFrame()
         => _comAnchored ? (Affine2.FromTRS(_sceneAnchor, 0f, new Vector2(RigScale, RigScale)), GroundBelowComRig)
@@ -763,11 +841,15 @@ public sealed class DemoGame : Game
         DrawDashedH(floorY, SidebarW + 20, W - 20, new Color(90, 110, 95), 9f, 7f);
         _spriteBatch.DrawString(_font, "floor", new Vector2(SidebarW + 20, floorY + 3), new Color(90, 110, 95));
 
-        // Vault reference block: sits on the floor a hair ahead of the rig in the +X
+        // Obstacle reference block: sits on the floor a hair ahead of the rig in the +X
         // (canonical facing) direction so the foot/hip arc can be authored against a
         // concrete obstacle. Runtime mirrors clips by facing, so the block lives on the
         // forward side here regardless of the player's in-game facing.
-        DrawVaultBlock();
+        DrawObstacleBlock();
+
+        // The reference arc the body is riding, drawn as the path it sweeps through the
+        // scene, so a pose can be authored against WHERE ALONG THE ARC its keyframe lands.
+        DrawReferenceArc();
 
         // The rig overlay (bones + joint markers + additions) hides when toggled off
         // (X, skin-view only) so the sprite can be judged unobstructed. Editing still
@@ -855,36 +937,72 @@ public sealed class DemoGame : Game
         }
     }
 
-    // Reference obstacle drawn under the rig only while authoring a Vault clip. Sized
+    // Reference obstacle drawn under the rig only while authoring a Parkour clip. Sized
     // in skeleton-local units (the rig's natural frame) so it scales with RigScale.
     // ~one game-tile wide, knee-ish tall — tune to taste; nothing reads this geometry.
-    // Skeleton-local geometry of the vault reference block: ~one game-tile wide, knee-ish tall,
-    // a hair ahead of the rig in +X. _vaultBlockOffset (drag / arrows) shifts it from there.
-    private const float VaultBlockW = 18f, VaultBlockH = 14f, VaultBlockX = 8f;
+    // Skeleton-local geometry of the obstacle reference block: ~one game-tile wide, knee-ish tall,
+    // a hair ahead of the rig in +X. _obstacleBlockOffset (drag / arrows) shifts it from there.
+    private const float ObstacleBlockW = 18f, ObstacleBlockH = 14f, ObstacleBlockX = 8f;
 
-    // Screen-space rect of the vault block, false when no block is shown (non-Vault clip).
+    // Screen-space rect of the obstacle block, false when no block is shown (non-Parkour clip).
     // Shared by the renderer and the drag hit-test so they never disagree.
-    private bool TryGetVaultBlockRect(out Rectangle rect)
+    private bool TryGetObstacleBlockRect(out Rectangle rect)
     {
         rect = default;
-        if (Doc?.Type != "Vault") return false;
+        if (Doc?.Type != "Parkour") return false;
         // The block is a GROUND feature: it lives in the scene frame (fixed at the anchor when
         // com-anchored) so it doesn't ride along as the body is placed against it.
         var (scene, floorLocal) = SceneFrame();
-        Vector2 tl = scene.TransformPoint(new Vector2(VaultBlockX,               floorLocal - VaultBlockH) + _vaultBlockOffset);
-        Vector2 br = scene.TransformPoint(new Vector2(VaultBlockX + VaultBlockW, floorLocal)               + _vaultBlockOffset);
+        Vector2 tl = scene.TransformPoint(new Vector2(ObstacleBlockX,               floorLocal - ObstacleBlockH) + _obstacleBlockOffset);
+        Vector2 br = scene.TransformPoint(new Vector2(ObstacleBlockX + ObstacleBlockW, floorLocal)               + _obstacleBlockOffset);
         rect = new Rectangle((int)tl.X, (int)tl.Y, (int)(br.X - tl.X), (int)(br.Y - tl.Y));
         return true;
     }
 
-    private void DrawVaultBlock()
+    private void DrawObstacleBlock()
     {
-        if (!TryGetVaultBlockRect(out var rect)) return;
+        if (!TryGetObstacleBlockRect(out var rect)) return;
 
         Fill(rect, new Color(82, 64, 48));
         _draw.Line(new Vector2(rect.Left,  rect.Top),    new Vector2(rect.Right, rect.Top),    new Color(150, 118, 88), 2f);
         _draw.Line(new Vector2(rect.Left,  rect.Top),    new Vector2(rect.Left,  rect.Bottom), new Color(48, 36, 26), 1f);
         _draw.Line(new Vector2(rect.Right, rect.Top),    new Vector2(rect.Right, rect.Bottom), new Color(48, 36, 26), 1f);
+    }
+
+    // The clip's reference arc as a scene path, with the body's progress along it marked.
+    //
+    // The bright stretch is the part the clip's own timeline actually covers — clip and
+    // arc carry INDEPENDENT durations, so a clip shorter than its arc stops early (dim
+    // tail) and a longer one runs past the gate (the arc extrapolates). Keyframes drop a
+    // dot where they land, and the ring is the player's body circle at the playhead:
+    // author each pose against the dot it sits on.
+    private void DrawReferenceArc()
+    {
+        if (_refArc == null) return;
+        const int Samples = 96;
+        float covered = ArcProgress(1f);
+        float end = MathF.Max(covered, 1f);
+
+        Vector2 prev = _sceneAnchor + ArcOffsetAt(0f) * RigScale;
+        for (int i = 1; i <= Samples; i++)
+        {
+            float u = end * i / Samples;
+            Vector2 p = _sceneAnchor + ArcOffsetAt(u) * RigScale;
+            bool live = u <= covered;
+            _draw.Line(prev, p, live ? new Color(90, 170, 210) : new Color(55, 80, 95), live ? 2f : 1f);
+            prev = p;
+        }
+
+        // Gate marker: where the maneuver's measured target sits on this path.
+        _draw.Ring(_sceneAnchor + ArcOffsetAt(1f) * RigScale, 5f, new Color(120, 220, 160), 12, 1.5f);
+
+        if (Doc?.Keyframes != null)
+            foreach (var kf in Doc.Keyframes)
+                _draw.Disc(_sceneAnchor + ArcOffset(kf.Time) * RigScale, 3.5f, new Color(150, 200, 235));
+
+        // Body circle at the playhead — the com the rig is hung from, at the game's radius.
+        _draw.Ring(_anchor, PlayerCharacter.Radius / Game1.SkeletonScale * RigScale,
+                   new Color(230, 190, 90), 24, 1.5f);
     }
 
     private void DrawDashedH(float y, float x0, float x1, Color c, float dash, float gap)
@@ -1137,7 +1255,7 @@ public sealed class DemoGame : Game
         var a = Doc.Keyframes[_activeKey].Additions[_dragAdd];
         // The com is the player's BASE FRAME (the sim body anchor). Dragging it places the
         // PLAYER ensemble — com marker + skeleton — against the fixed scenery (floor line,
-        // vault block) PER KEYFRAME: the drag writes this keyframe's "edref" placement,
+        // obstacle block) PER KEYFRAME: the drag writes this keyframe's "edref" placement,
         // and scrubbing interpolates the track so the body visibly arcs over the refs.
         // Editor-only visualization data (saved with the clip; runtime ignores it).
         // Moving the body WITHIN the com frame (the keyframe's com channel) is the
@@ -1237,7 +1355,14 @@ public sealed class DemoGame : Game
         if (doc != null)
             _spriteBatch.DrawString(_font,
                 $"dur {doc.Duration:0.0}s  |  loop {(doc.Loop ? "on" : "off")}  |  region {doc.Region}"
-                + (doc.ReferenceArc != null ? $"  |  arc {doc.ReferenceArc}{(_refArc == null ? " (missing)" : "")}" : ""),
+                + (doc.ReferenceArc != null
+                    ? $"  |  arc {doc.ReferenceArc}"
+                      + (_refArc == null ? " (missing)"
+                         // Arc pace relative to the clip: ×1 means they share a duration,
+                         // >1 means the clip runs the arc faster than the arc's own seconds.
+                         : $" {_refArc.Duration:0.00}s  x{(_refArc.Duration > 1e-4f ? doc.Duration / _refArc.Duration : 1f):0.00}"
+                           + $"  at {ArcProgress(_scrubT):0.00}")
+                    : ""),
                 new Vector2(SidebarW + 16, 46), new Color(160, 170, 185));
 
         _spriteBatch.DrawString(_font, "H controls   |   Ctrl-S save   |   K sample keyframe",
@@ -1259,9 +1384,10 @@ public sealed class DemoGame : Game
     private static readonly (string Group, string Keys)[] HelpRows =
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
+        ("Arc",      "A attach the next reference arc (Shift back, wraps through none)    arc file saves reload live"),
         ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip"),
         ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
-        ("Vault",    "drag the brown block to reposition the obstacle (Vault clips only)"),
+        ("Parkour",  "drag the brown block to reposition the obstacle (Parkour clips only)"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
         ("Skin",     "G sprite skin on/off    W mesh wireframe    X skeleton on/off    (launch with --usebind <binding>)"),
@@ -1526,7 +1652,7 @@ public sealed class DemoGame : Game
         }
     }
 
-    // Editor view-state sidecar: the vault block's scene placement persists across sessions
+    // Editor view-state sidecar: the obstacle block's scene placement persists across sessions
     // so the obstacle reference stays where you left it. (The per-keyframe player placement
     // — the "edref" track — saves with each clip itself, not here.) Convenience view state,
     // not clip data — lives beside the rig dirs at SkeletonStates/.editor_view.json
@@ -1546,7 +1672,7 @@ public sealed class DemoGame : Game
         {
             if (!File.Exists(ViewStatePath)) return;
             var v = System.Text.Json.JsonSerializer.Deserialize<ViewState>(File.ReadAllText(ViewStatePath));
-            if (v != null) _vaultBlockOffset = new Vector2(v.BlockX, v.BlockY);
+            if (v != null) _obstacleBlockOffset = new Vector2(v.BlockX, v.BlockY);
         }
         catch { /* view state is a convenience — never block startup on it */ }
     }
@@ -1555,7 +1681,7 @@ public sealed class DemoGame : Game
     {
         try
         {
-            var v = new ViewState { BlockX = _vaultBlockOffset.X, BlockY = _vaultBlockOffset.Y };
+            var v = new ViewState { BlockX = _obstacleBlockOffset.X, BlockY = _obstacleBlockOffset.Y };
             File.WriteAllText(ViewStatePath, System.Text.Json.JsonSerializer.Serialize(v));
         }
         catch { /* best-effort */ }

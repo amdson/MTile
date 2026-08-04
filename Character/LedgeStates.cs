@@ -46,7 +46,7 @@ public class LedgeGrabState : MovementState
         if (abilities.DownJustPressed && ctx.TryGetExposedCorner(_wallDir, out _))
             return true;
         // Path C: re-grab after an abandoned pull — the pull ended (Up released, or
-        // MaxVaultTime ran out) before the body made it over the corner, so the hands
+        // MaxLipManeuverTime ran out) before the body made it over the corner, so the hands
         // are still on the lip. Re-entering the hang lets its spring/damper absorb the
         // pull's velocity through the contact, instead of the body exiting airborne
         // with a jump-sized vy (Plans/LEDGE_PULL_INPUT_MATRIX.md rows D-H, N).
@@ -271,7 +271,7 @@ public class LedgePullState : MovementState
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (!ctx.Input.Up) return false;
-        if (vars.TimeInState >= MovementConfig.Current.MaxVaultTime) return false;
+        if (vars.TimeInState >= MovementConfig.Current.MaxLipManeuverTime) return false;
 
         // Completion is judged against the grabbed corner. Reference mode has no
         // spring contact — the corner comes straight from abilities (the same
@@ -296,8 +296,8 @@ public class LedgePullState : MovementState
         vars.RefActive = clip != null;
         if (vars.RefActive)
         {
-            // Retarget at Enter (BALLISTIC_CORRECTOR_PLAN §1): clip (0,0) = the hang
-            // pose the body actually holds; clip (1,-1) = standing on top just past
+            // Retarget at Enter (BALLISTIC_CORRECTOR_PLAN §1): the clip's Entry anchor
+            // = the hang pose the body actually holds; its Gate anchor = standing on top just past
             // the corner, placed a few px beyond the completion test's thresholds so
             // the servo carries the body through them rather than stalling on them.
             var corner = abilities.GrabbedCorner;
@@ -363,7 +363,7 @@ public class LedgePullState : MovementState
                 vars.RefProgress += ctx.Dt / MathF.Max(cfg2.LedgePullRefDuration, 1e-4f);
                 // Feed the intended arc to the corrector; servo the deformed target.
                 ReferenceCorrector.DeformedTarget(ctx, clip,
-                    new ReferenceFrame(vars.RefEntry, vars.RefGate),
+                    new ReferenceFrame(clip, vars.RefEntry, vars.RefGate),
                     vars.RefProgress, cfg2.LedgePullRefDuration, ref vars.ManeuverChannelPrev,
                     out var target, out var targetVel);
                 ctx.Body.AppliedForce = ReferencePath.TrackForce(
@@ -383,14 +383,14 @@ public class LedgePullState : MovementState
 
         if (ctx.Body.Position.Y >= cornerTopY - 2f * PlayerCharacter.Radius)
         {
-            force.Y = -cfg.VaultLiftForce;
+            force.Y = -cfg.LipLiftForce;
         }
         else
         {
             if (_ramp != null) { ctx.Body.Constraints.Remove(_ramp); _ramp = null; }
             if (ctx.Body.Velocity.Y < 0f && ctx.Dt > 0f)
-                force.Y = Math.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.VaultLiftForce);
-            force.X = _wallDir * cfg.VaultPushForce;
+                force.Y = Math.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.LipLiftForce);
+            force.X = _wallDir * cfg.LipPushForce;
         }
 
         ctx.Body.AppliedForce = force;

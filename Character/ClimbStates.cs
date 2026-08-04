@@ -7,7 +7,7 @@ namespace MTile;
 // vault (ParkourState), the slow/flush 1-block climb (MantleState), and the
 // taller arc-jump band (ArcJumpState) share ClimbManeuverBase; each subclass
 // owns only its rise band and entry-speed gate. Behind
-// MovementConfig.CorrectorVaultEnabled for A/B; class names match the
+// MovementConfig.CorrectorClimbEnabled for A/B; class names match the
 // vault-family sim fixtures ("Parkour" / "Mantle" / "ArcJump").
 //
 // Shape: intent generates the reference (a one-shot entry hop sized to clear the
@@ -19,7 +19,7 @@ namespace MTile;
 // the authored feel, not solver output.
 //
 // Split between the vault and the mantle is the entry-speed gate
-// (MantleMaxEntrySpeed); cancel-on-release and MaxVaultTime liveness as
+// (MantleMaxEntrySpeed); cancel-on-release and MaxLipManeuverTime liveness as
 // everywhere in the climb family. Update passes AmbientPolicy.Off — the
 // ambient corrector must never fight an owned maneuver.
 public abstract class ClimbManeuverBase : MovementState
@@ -38,7 +38,9 @@ public abstract class ClimbManeuverBase : MovementState
     protected abstract float RiseBandMax { get; }
     protected abstract bool  RequiresRunningEntry { get; }
 
-    public override AnimTag AnimationTag => AnimTag.Parkour;   // the vault clip family
+    // Each subclass names its own clip family. They shared AnimTag.Parkour (and so one clip)
+    // until 2026-08-04 — a speed vault, a flush climb and a two-block arc all reading as the
+    // same animation. The sim split has always been real (entry speed + rise band).
 
     public override int ActivePriority  => MovementPriorities.ClimbActive;
     public override int PassivePriority => MovementPriorities.ClimbPassive;
@@ -56,7 +58,7 @@ public abstract class ClimbManeuverBase : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         var cfg = MovementConfig.Current;
-        if (!cfg.CorrectorVaultEnabled) return false;
+        if (!cfg.CorrectorClimbEnabled) return false;
         if (ctx.Intent.HeldHorizontal != _dir || !ctx.TryGetGround(out _)) return false;
         // Launch gate (StandingState's entry rule): a body rising faster than
         // support could ever push it is ballistic — the ground probe merely
@@ -91,7 +93,7 @@ public abstract class ClimbManeuverBase : MovementState
         }
 
         float dist = _dir * (rise.Pos.X - ctx.Body.Bounds.Side(_dir));
-        if (dist > cfg.CorrectorVaultTriggerDistance) return false;
+        if (dist > cfg.CorrectorClimbTriggerDistance) return false;
 
         // Trigger-by-feasibility (plan step 5): the same solve that will run every
         // Update, run at entry over the full arc — a maneuver may fire iff its
@@ -138,7 +140,7 @@ public abstract class ClimbManeuverBase : MovementState
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (ctx.Intent.CurrentHorizontal != _dir) return false;                    // release cancels
-        if (vars.TimeInState >= MovementConfig.Current.MaxVaultTime) return false; // stuck → bail
+        if (vars.TimeInState >= MovementConfig.Current.MaxLipManeuverTime) return false; // stuck → bail
         // Delivered: at gate height and past the lip — then normal arbitration
         // (Standing on the step) claims the next frame.
         bool atHeight = ctx.Body.Position.Y <= vars.MantleTargetY + 1f;
@@ -265,7 +267,7 @@ public abstract class ClimbManeuverBase : MovementState
             if (ctx.Body.Velocity.Y < -vyAllow && ctx.Dt > 0f)
                 force.Y = (-vyAllow - ctx.Body.Velocity.Y) / ctx.Dt;
             else if (ctx.Body.Velocity.Y > -0.25f * vyAllow)
-                force.Y = -cfg.VaultLiftForce;
+                force.Y = -cfg.LipLiftForce;
         }
         else
         {
@@ -276,9 +278,9 @@ public abstract class ClimbManeuverBase : MovementState
             // with, it doesn't mint more (this line was +500 unconditional
             // and pushed a 150 px/s entry to 175 over the lip).
             if (ctx.Body.Velocity.Y < 0f && ctx.Dt > 0f)
-                force.Y = MathF.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.VaultLiftForce);
+                force.Y = MathF.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.LipLiftForce);
             force.X = AirControl.SoftClampVelocity(ctx.Body.Velocity.X, _dir * vars.EntrySpeed,
-                                                   cfg.VaultPushForce, ctx.Dt);
+                                                   cfg.LipPushForce, ctx.Dt);
         }
         ctx.Body.AppliedForce = force;
 
@@ -299,6 +301,7 @@ public abstract class ClimbManeuverBase : MovementState
 public class ParkourState : ClimbManeuverBase
 {
     public ParkourState(int dir) : base(dir) { }
+    public override AnimTag AnimationTag => AnimTag.Parkour;
     protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
     protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
     protected override bool  RequiresRunningEntry => true;
@@ -311,6 +314,7 @@ public class ParkourState : ClimbManeuverBase
 public class MantleState : ClimbManeuverBase
 {
     public MantleState(int dir) : base(dir) { }
+    public override AnimTag AnimationTag => AnimTag.Mantle;
     protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
     protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
     protected override bool  RequiresRunningEntry => false;
@@ -327,6 +331,7 @@ public class MantleState : ClimbManeuverBase
 public class ArcJumpState : ClimbManeuverBase
 {
     public ArcJumpState(int dir) : base(dir) { }
+    public override AnimTag AnimationTag => AnimTag.ArcJump;
     protected override float RiseBandMin => MovementConfig.Current.MantleMaxRise;
     protected override float RiseBandMax => MovementConfig.Current.CorridorMaxRise;
     protected override bool  RequiresRunningEntry => false;

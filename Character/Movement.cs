@@ -73,17 +73,7 @@ public abstract class MovementState
     // states (Falling, Stunned, jumps without a source cache).
     public virtual void ResetTransient() { }
 
-    // The ambient corrector is a force the state APPLIES, not a shell pass over
-    // it: every concrete Update ends — on every return path — with exactly one
-    // ApplyAmbient call, choosing this frame's assist policy and fold profile
-    // explicitly. It must run even at Off/None: the early-out inside Apply
-    // clears the cross-frame ambient anchors (AmbientPrevDv/AmbientChannelPrev),
-    // and skipping it would hand a stale anchor to the next state's solve.
-    // Hitstun forces the assists off — knockback must hit corners honestly —
-    // but never the fold: dropping support would let a hit stun the body
-    // through the floor (the profile's knockback exemptions inside Apply mute
-    // the elective parts instead). startGrounded seeds the coast prediction;
-    // true only for the grounded fold states (Standing/Crouched).
+
     protected static void ApplyAmbient(EnvironmentContext ctx, PlayerAbilityState abilities,
         ref MovementVars vars, AmbientPolicy policy, in FoldProfile fold, bool startGrounded = false)
     {

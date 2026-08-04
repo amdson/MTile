@@ -145,7 +145,7 @@ public sealed class GameRecorder
         var s = CharacterAnimSample.From(sim.Player, dt, chunks: sim.Chunks);
         var sample = new CharacterAnimSample(
             s.Position, s.Velocity, s.Facing, s.Grounded, s.MovementState, s.Action, s.Dt,
-            s.ActionTime, s.ActionDuration, s.MovementProgress,
+            s.ActionTime, s.ActionProgress, s.MovementProgress,
             s.Pins is { Length: > 0 } ? (ExternalPin[])s.Pins.Clone() : null,
             s.Surfaces is { Length: > 0 } ? (SolverSurface[])s.Surfaces.Clone() : null,
             s.HasGrip, s.GripTarget, s.HasAim, s.AimDir, s.Tag,

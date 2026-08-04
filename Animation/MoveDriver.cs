@@ -7,7 +7,7 @@ namespace MTile;
 // ─── The move-driver API ────────────────────────────────────────────────────────────────
 //
 // One driver per MOVEMENT SITUATION (not per clip — the mapping is many-to-many: Parkour
-// and LedgePull both play Vault; grounded locomotion fans out over five clips). A driver
+// and LedgePull both played one shared clip; grounded locomotion fans out over five clips). A driver
 // owns all the per-move animation policy that used to be scattered across SelectClip /
 // IsPhaseDriven / ResolveMovementOverlays / ResolveMovementPins:
 //
@@ -93,7 +93,7 @@ public static class MoveDrivers
             new ParkourDriver(rig, actionClips),
             new CrouchDriver(),
             new TagClipDriver(AnimTag.WallSlide,  AnimClip.WallSlide),
-            new TagClipDriver(AnimTag.LedgePull,  AnimClip.Vault),   // same "guided pull" shape as parkour
+            new TagClipDriver(AnimTag.LedgePull,  AnimClip.LedgePull),
             new TagClipDriver(AnimTag.LedgeGrab,  AnimClip.Hang),    // stable vs. the grab spring's Vy ringing
             new TagClipDriver(AnimTag.LedgeJump,  AnimClip.LedgeJump),
             new TagClipDriver(AnimTag.Dropdown,   AnimClip.Dropdown),
@@ -192,15 +192,15 @@ public sealed class CrouchDriver : IMoveDriver
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }
 
-// The parkour vault: base clip is Vault (clock-driven), plus two contributions synchronized
+// The parkour vault: base clip is Parkour (clock-driven), plus two contributions synchronized
 // to the maneuver's SPATIAL progress (body vs. the corner, not elapsed time):
-//   · the VaultHands UpperBody overlay (reach for the ledge → push off), τ = MovementProgress;
+//   · the ClimbHands UpperBody overlay (reach for the ledge → push off), τ = MovementProgress;
 //   · a hard fixed-point pin holding the lead hand on the ledge corner over the grab window.
-// The pinned hand is owned solely by the VaultHands overlay — the plan invariant — so its
+// The pinned hand is owned solely by the ClimbHands overlay — the plan invariant — so its
 // post-compose Δθ bends it freely onto the corner.
 public sealed class ParkourDriver : IMoveDriver
 {
-    private const string HandsClipName = "VaultHands";
+    private const string HandsClipName = "ClimbHands";
     private const string GripBoneName  = "arm_l_lower";   // the lead reaching hand the clip drives
     private const float  GripStart     = 0.45f;           // engage once the clip hand is near the corner…
     private const float  GripEnd       = 0.85f;           // …release before the push-off over the top
@@ -214,9 +214,19 @@ public sealed class ParkourDriver : IMoveDriver
         _gripBone = rig.IndexOf(GripBoneName);
     }
 
-    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st) => s.Tag == AnimTag.Parkour;
+    // Serves all three climb states. They share the hands overlay and the grip pin — the
+    // reach-and-push-off is the same gesture whatever the entry speed — but each selects its
+    // own base clip so the speed vault, the flush climb and the two-block arc can diverge.
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st)
+        => s.Tag is AnimTag.Parkour or AnimTag.Mantle or AnimTag.ArcJump;
+
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st)
-        => new(AnimClip.Vault, ClipTimeMode.Clock);
+        => new(s.Tag switch
+        {
+            AnimTag.Mantle  => AnimClip.Mantle,
+            AnimTag.ArcJump => AnimClip.ArcJump,
+            _               => AnimClip.Parkour,
+        }, ClipTimeMode.Clock);
 
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst)
     {

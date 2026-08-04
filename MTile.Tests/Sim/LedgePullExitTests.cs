@@ -102,14 +102,14 @@ public class LedgePullExitTests(ITestOutputHelper output)
         Assert.True(MathF.Abs(last.Y - hangY) < 4f, $"ended at Y={last.Y}, expected hang ≈ {hangY}");
     }
 
-    // ── Row N: pull blocked past MaxVaultTime — sags back to the hang ──────────
+    // ── Row N: pull blocked past MaxLipManeuverTime — sags back to the hang ──────────
 
     [Fact]
     public void PullTimeout_RegrabsInsteadOfFallingOut()
     {
         // Floating overhang one tile above the lip (row 0, directly in the body's
         // mantle path) so the pull physically can't crest the corner — the body
-        // stalls under it until MaxVaultTime expires, then sags back to the hang.
+        // stalls under it until MaxLipManeuverTime expires, then sags back to the hang.
         // (Lip is row 2 with the 3-tall R=12 wall; same one-tile gap as before.)
         var terrain = SimTerrain.FromAscii(@"
             .........X
@@ -122,7 +122,7 @@ public class LedgePullExitTests(ITestOutputHelper output)
         {
             Terrain       = terrain,
             StartPosition = new Vector2(WallLeft - HalfW, GroundTop - 2f * PlayerCharacter.Radius),
-            Script        = GrabThenPull(60, new PlayerInput { }),   // hold Up well past MaxVaultTime
+            Script        = GrabThenPull(60, new PlayerInput { }),   // hold Up well past MaxLipManeuverTime
             Frames        = 150,
             Dt            = Dt,
             Gravity       = new Vector2(0f, Gravity),

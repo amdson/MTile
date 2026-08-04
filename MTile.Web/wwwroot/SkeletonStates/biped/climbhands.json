@@ -1,6 +1,6 @@
 {
-  "Name": "vaulthands",
-  "Type": "VaultHands",
+  "Name": "climbhands",
+  "Type": "ClimbHands",
   "Skeleton": "biped",
   "Duration": 0.45,
   "Loop": false,

@@ -61,7 +61,7 @@ public class AnimTakeTests
                 Assert.Equal(a.Action, b.Action);
                 Assert.Equal(a.Dt, b.Dt);
                 Assert.Equal(a.ActionTime, b.ActionTime);
-                Assert.Equal(a.ActionDuration, b.ActionDuration);
+                Assert.Equal(a.ActionProgress, b.ActionProgress);
                 Assert.Equal(a.MovementProgress, b.MovementProgress);
                 Assert.Equal(a.HasGrip, b.HasGrip);
                 Assert.Equal(a.GripTarget, b.GripTarget);
@@ -138,7 +138,7 @@ public class AnimTakeTests
         return new CharacterAnimSample(
             new Vector2(100 + i * 3.5f, 50 - i), new Vector2(60 + i, -5f), i % 2 == 0 ? 1 : -1,
             i % 3 != 0, "WalkState", i == 2 ? "GroundSlash1" : "", Dt,
-            actionTime: 0.1f * i, actionDuration: 0.4f, movementProgress: 0.25f * i,
+            actionTime: 0.1f * i, actionProgress: 0.4f, movementProgress: 0.25f * i,
             pins: pins, surfaces: surfaces,
             hasGrip: i == 1, gripTarget: new Vector2(7, 8),
             hasAim: i == 2, aimDir: new Vector2(0.6f, -0.8f), tag: (AnimTag)(i % 4));

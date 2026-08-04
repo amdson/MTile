@@ -250,31 +250,32 @@ public class ActionOverlayTests
             $"pose should hold the final keyframe past the clip end; got {anim.Pose.Local[armR].Rotation}");
     }
 
-    // When the action declares a duration, the clip's whole [0,1] timeline is remapped
-    // onto [0, ActionDuration] — so a 0.14s clip stretched onto a 0.5s action sits at
-    // its MIDPOINT at t=0.25s, instead of having clamped to its end (as the un-remapped
-    // path, keyed to the clip's own 0.14s, would).
+    // When the action REPORTS its progress, the clip's whole [0,1] timeline is remapped onto
+    // it — so a clip held at progress 0.5 sits at its MIDPOINT no matter how much sim time
+    // has elapsed, instead of clamping to its end (as the clip's own 0.14s clock would).
+    // This is the contract that lets a variable-length action (Grab's early throw, Beam
+    // outliving its clip) stay in sync; ActionProgress < 0 opts back out.
     [Fact]
-    public void Overlay_TimeRemapsToActionDuration()
+    public void Overlay_TimeRemapsToReportedProgress()
     {
         var skel = SkeletonExamples.Biped();
         int armR = skel.IndexOf("arm_r_upper");
         float Mid = 0.5f * (0.5f + SlashArm);   // RampSlash midpoint: lerp(0.5, 2.0, 0.5)
 
-        // Remap: 0.5s action, frozen at the halfway mark -> clip sits at its midpoint.
+        // Reported progress 0.5 with sim time far past the clip's own end -> midpoint.
         var remap = NewAnimator(skel);
-        var stR = new DriveState { ActionTime = 0.25f, FreezeActionTime = true, ActionDuration = 0.5f };
+        var stR = new DriveState { ActionTime = 0.25f, FreezeActionTime = true, ActionProgress = 0.5f };
         Drive(remap, skel, ref stR, frames: 40, action: "RampSlash");
         Assert.True(MathF.Abs(remap.Pose.Local[armR].Rotation - Mid) < 0.1f,
-            $"remapped clip should sit at its midpoint ({Mid}); got {remap.Pose.Local[armR].Rotation}");
+            $"clip should sit at its midpoint ({Mid}); got {remap.Pose.Local[armR].Rotation}");
 
-        // No declared duration: keyed to the clip's own 0.14s, so 0.25s is well past the
-        // end and the arm has clamped to the final pose.
+        // Declined (negative): keyed to the clip's own 0.14s, so 0.25s is well past the end
+        // and the arm has clamped to the final pose.
         var noRemap = NewAnimator(skel);
-        var stN = new DriveState { ActionTime = 0.25f, FreezeActionTime = true, ActionDuration = 0f };
+        var stN = new DriveState { ActionTime = 0.25f, FreezeActionTime = true, ActionProgress = null };
         Drive(noRemap, skel, ref stN, frames: 40, action: "RampSlash");
         Assert.True(MathF.Abs(noRemap.Pose.Local[armR].Rotation - SlashArm) < 0.1f,
-            $"un-remapped clip should hold its end ({SlashArm}); got {noRemap.Pose.Local[armR].Rotation}");
+            $"declined clip should hold its end ({SlashArm}); got {noRemap.Pose.Local[armR].Rotation}");
     }
 
     // --- harness ------------------------------------------------------------
@@ -284,7 +285,9 @@ public class ActionOverlayTests
         public float X;
         public float ActionTime;
         public bool  FreezeActionTime;
-        public float ActionDuration;   // 0 = use the clip's own Duration (no remap)
+        // null = the action declines to report progress (the animator uses the clip's own
+        // Duration). Nullable rather than a -1 field so `new DriveState()` means "declined".
+        public float? ActionProgress;
     }
 
     private static CharacterAnimator NewAnimator(Skeleton skel)
@@ -305,7 +308,7 @@ public class ActionOverlayTests
             st.X += WalkVx * Dt;
             anim.Update(new CharacterAnimSample(
                 new Vector2(st.X, 0f), new Vector2(WalkVx, 0f), +1, true,
-                "WalkState", action, Dt, st.ActionTime, st.ActionDuration));
+                "WalkState", action, Dt, st.ActionTime, st.ActionProgress ?? -1f));
             if (!st.FreezeActionTime) st.ActionTime += Dt;
         }
     }
