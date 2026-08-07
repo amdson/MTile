@@ -83,6 +83,8 @@ All eight were executed by `Plans/MOVEMENT_NIGHT_PLAN.md` and independently re-v
 | 3.6 | "Implement principled quality of life moves, such as ceiling sweep to avoid running into a ceiling corner when jumping up." | **OPEN** | The corrector is the natural home for this now. |
 | 3.7 | "Add a grab move (shift click)" | **DONE** | `GrabAction`, `ActionStates.cs:2256-2371`, bound Shift+RMB (which displaced `LobbedAreaAction`). |
 | 3.8 | "Test multiplayer" | **PARTIAL** | `RollbackHarnessTests`, `TwoPlayerStepTests`, `InputCodecTests`, `RtcConnectionTests` all exist. What's missing is soak/latency testing under real network conditions. |
+| 3.9 | Block-peel grab: playtest tuning pass | **OPEN** | Peel mechanics shipped 2026-08-07 (`BlockGrabAction` peel mode, `Peel*` knobs in `movement_config.json`, `BlockPeelTests`), but every number — kernel σ/rate, spring coeff/power/cap, wear rates, glue floor, material weights — is a first-guess awaiting in-game feel. Hot-reload the JSON while playing; legacy rip is the A/B baseline via `BlockPeelEnabled: false`. |
+| 3.10 | Block-peel grab: tension render polish | **OPEN** | Current feedback is the tether-darkening overlay + strain-red shift in `BlockGrabAction.Draw`. The "sticker peel" fantasy wants tethered blocks to visibly strain toward the pull (offset/jitter ∝ force share) — render-only, safe to add anytime. Decide the legacy drag-rip path's fate after the tuning pass. |
 
 ### Open design question: hitstun, combos, and disadvantage states
 

@@ -44,5 +44,23 @@
   "SpringK": 300,
   "WalkAccel": 3000,
   "MaxWalkSpeed": 100,
-  "BrakingForce": 3000
+  "BrakingForce": 3000,
+  // Block peel (Shift+LMB grab) — see MovementConfig for each knob's role. Hot-reloads.
+  // false restores the legacy one-frame drag-rip.
+  "BlockPeelEnabled": true,
+  "PeelKernelSigma": 11.2,
+  "PeelTetherRate": 3.0,
+  "PeelJoinThreshold": 0.25,
+  "PeelSpringCoeff": 4,
+  "PeelSpringPower": 1.5,
+  "PeelSpringMax": 60,
+  "PeelTetherWear": 0.05,
+  "PeelGlueWear": 0.4,
+  "PeelGlueFloor": 0.15,
+  "PeelGlueCore": 0.5,
+  "PeelCrossMaterialEdge": 0.2,
+  "PeelWeightStone": 3.0,
+  "PeelWeightDirt": 1.5,
+  "PeelWeightSand": 0.8,
+  "PeelWeightFoam": 0.4
 }

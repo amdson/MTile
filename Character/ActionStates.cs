@@ -2424,13 +2424,32 @@ public class GrenadeAction : ActionState
     }
 }
 
-// ---------- Block Grab — Shift + LMB on terrain: rip blocks out, throw them ------
+// ---------- Block Grab — Shift + LMB on terrain: peel blocks out, throw them -----
 
 // The mirror of the RMB build/eruption gesture: instead of pushing terrain out of the
 // world, this pulls it in. Shift+LMB press with the cursor on a solid cell within
-// reach, then DRAG — the drag is what rips the blocks free. Cells in a small radius
-// around the PRESS site are destroyed outright (not damaged), and their count becomes
-// an orb carried in the hand, tinted with the material it came from.
+// reach starts a grab; how blocks come free depends on MovementConfig.BlockPeelEnabled.
+//
+// PEEL MODE (BlockPeelEnabled, the live design): paint and pull are ONE phase, and the
+// gaussian paint kernel is itself the mode switch. While the held cursor sweeps over
+// terrain it deposits "tether" onto nearby solid cells (they join the grab group, cap
+// PeelMemberBuffer.Capacity); because the cursor is near the group, the player→group
+// spring — force superlinear in |mouse − group COM| — is slack. Sweep AWAY and the
+// kernel stops reaching terrain while the spring ramps: the pull. Each frame the
+// spring force is divided among members by tether share; that share erodes both the
+// group→block tether (at zero the block drops from the group, staying in the world)
+// and the block→world glue (weight(material) × (core + outward solid edges), the
+// viscoelastic attachment). When the force beats the group's aggregate remaining glue,
+// every member is broken out at once and collapses into the carried orb. Pull harder
+// than PeelSpringMax and the spring SNAPS — the whole attempt cancels, nothing
+// persists. Overpainting is therefore a hazard: every block added is more glue to
+// beat, and too many makes the group unliftable outright. A small or free-hanging
+// group (near-zero glue) pops in a single sweep-and-release.
+//
+// LEGACY MODE (flag off): press, then DRAG past a threshold — cells in a small radius
+// around the PRESS site are destroyed outright in one frame. Kept as the A/B baseline.
+// Either way the harvest becomes an orb carried in the hand, tinted with the material
+// it came from.
 //
 // Two exits from the carry phase:
 //   • Release LMB  → the orb is thrown at the cursor as a LobbedAreaProjectile whose
@@ -2498,10 +2517,18 @@ public class BlockGrabAction : ActionState
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         // Release always ends the state — Exit decides whether that release is a
-        // throw (orb in hand) or nothing (drag never happened / orb already gone).
+        // throw (orb in hand) or nothing (nothing peeled free / orb already gone).
         if (!ctx.Input.LeftClick) return false;
-        if (!vars.OrbHeld) return vars.TimeInState < GrabWindow;   // still waiting for the drag
-        return RemainingBlocks(in vars) > 0;                       // carrying until it bleeds out
+        if (vars.OrbHeld) return RemainingBlocks(in vars) > 0;     // carrying until it bleeds out
+        if (MovementConfig.Current.BlockPeelEnabled)
+        {
+            // A snapped spring kills the attempt outright; otherwise a live group
+            // keeps the state open past the press window — the pull takes as long
+            // as it takes.
+            if (vars.PeelSnapped) return false;
+            return vars.PeelCount > 0 || vars.TimeInState < GrabWindow;
+        }
+        return vars.TimeInState < GrabWindow;                      // still waiting for the drag
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -2514,6 +2541,9 @@ public class BlockGrabAction : ActionState
         vars.CursorAtPress = ctx.Input.MouseWorldPosition;
         vars.IsGrounded    = ctx.TryGetGround(out _);
         vars.GrabDir       = new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
+        vars.PeelCount     = 0;
+        vars.PeelStrain    = 0f;
+        vars.PeelSnapped   = false;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -2527,8 +2557,13 @@ public class BlockGrabAction : ActionState
 
         if (!vars.OrbHeld)
         {
-            // Waiting for the drag. Note the harvest is centered on CursorAtPress, not
-            // the current cursor — the player marks the site with the press and the
+            if (MovementConfig.Current.BlockPeelEnabled)
+            {
+                UpdatePeel(ctx, ref vars);
+                return;
+            }
+            // Legacy drag-rip. The harvest is centered on CursorAtPress, not the
+            // current cursor — the player marks the site with the press and the
             // drag is just the commit gesture, so a fast flick can't smear the dig.
             var travel = ctx.Input.MouseWorldPosition - vars.CursorAtPress;
             if (travel.LengthSquared() >= DragThreshold * DragThreshold)
@@ -2538,6 +2573,187 @@ public class BlockGrabAction : ActionState
 
         vars.ChargeTime += ctx.Dt;   // carry clock — drives the dissipation
     }
+
+    // One frame of the paint/pull phase. Order is fixed and load-bearing for
+    // determinism: prune → paint → spring → wear → compact → break-out, with every
+    // scan in ascending index / row-major cell order.
+    private static void UpdatePeel(EnvironmentContext ctx, ref ActionVars vars)
+    {
+        if (ctx.Chunks == null) return;
+        var cfg = MovementConfig.Current;
+
+        // 1. Cells broken out from under us (another player, decay) leave the group.
+        for (int i = vars.PeelCount - 1; i >= 0; i--)
+            if (ctx.Chunks.GetCellState(vars.PeelMembers[i].Gtx, vars.PeelMembers[i].Gty) != TileState.Solid)
+                RemovePeelMember(ref vars, i);
+
+        // 2. Paint: deposit tether on solid cells under the kernel.
+        PaintTether(ctx, ref vars, cfg);
+
+        if (vars.PeelCount == 0) { vars.PeelStrain = 0f; return; }
+
+        // 3. The player→group spring, superlinear in cursor distance from the COM.
+        var com = Vector2.Zero;
+        for (int i = 0; i < vars.PeelCount; i++)
+            com += CellCenter(vars.PeelMembers[i].Gtx, vars.PeelMembers[i].Gty);
+        com /= vars.PeelCount;
+
+        float dist  = (ctx.Input.MouseWorldPosition - com).Length();
+        float force = cfg.PeelSpringCoeff * MathF.Pow(dist / Chunk.TileSize, cfg.PeelSpringPower);
+        vars.PeelStrain = Math.Clamp(force / MathF.Max(1e-3f, cfg.PeelSpringMax), 0f, 1f);
+
+        if (force > cfg.PeelSpringMax)
+        {
+            // Pulled harder than the grip holds: the spring snaps and the whole
+            // attempt dies. Nothing persists — glue wear resets with the group.
+            vars.PeelSnapped = true;
+            vars.PeelCount   = 0;
+            return;
+        }
+
+        // 4. Divide the force among members by tether share; each share erodes that
+        // member's tether AND its world glue.
+        float tetherSum = 0f;
+        for (int i = 0; i < vars.PeelCount; i++) tetherSum += vars.PeelMembers[i].Tether;
+        if (tetherSum <= 1e-6f) return;
+
+        for (int i = 0; i < vars.PeelCount; i++)
+        {
+            ref var m = ref vars.PeelMembers[i];
+            float share = force * m.Tether / tetherSum;
+            m.Tether   -= cfg.PeelTetherWear * share * ctx.Dt;
+            m.GlueWear += cfg.PeelGlueWear  * share * ctx.Dt;
+        }
+
+        // 5. Members whose tether wore through drop off — the block stays in the world.
+        for (int i = vars.PeelCount - 1; i >= 0; i--)
+            if (vars.PeelMembers[i].Tether <= 0f)
+                RemovePeelMember(ref vars, i);
+        if (vars.PeelCount == 0) return;
+
+        // 6. Aggregate remaining glue of the survivors vs the pull. Glue base is
+        // recomputed live (neighbors join the group / get broken), floored so an
+        // oversized group stays unliftable no matter how long it's worked.
+        float glueTotal = 0f;
+        for (int i = 0; i < vars.PeelCount; i++)
+        {
+            ref var m = ref vars.PeelMembers[i];
+            float baseGlue = BaseGlue(ctx, in vars, m.Gtx, m.Gty, cfg);
+            glueTotal += MathF.Max(baseGlue * cfg.PeelGlueFloor, baseGlue - m.GlueWear);
+        }
+
+        if (force >= glueTotal)
+            BreakOutGroup(ctx, ref vars);
+    }
+
+    // Gaussian deposit around the cursor. Admission and accumulation share the kernel:
+    // a cell is admitted when the kernel weight over it reaches PeelJoinThreshold (a
+    // real pass, not a graze at the skirt), and every member under the kernel keeps
+    // accumulating — "time spent over the block, weighted by a fast-die-off kernel".
+    // Cells beyond GrabReach of the body never join (same arm's-reach rule as the
+    // press gate), and a full buffer admits nobody: paint deliberately.
+    private static void PaintTether(EnvironmentContext ctx, ref ActionVars vars, MovementConfig cfg)
+    {
+        var   cursor = ctx.Input.MouseWorldPosition;
+        float sigma  = MathF.Max(1f, cfg.PeelKernelSigma);
+        float extent = 2.5f * sigma;
+        float inv2s2 = 1f / (2f * sigma * sigma);
+
+        int cx   = (int)MathF.Floor(cursor.X / Chunk.TileSize);
+        int cy   = (int)MathF.Floor(cursor.Y / Chunk.TileSize);
+        int span = (int)MathF.Ceiling(extent / Chunk.TileSize);
+
+        for (int dy = -span; dy <= span; dy++)
+        for (int dx = -span; dx <= span; dx++)
+        {
+            int gtx = cx + dx, gty = cy + dy;
+            if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
+
+            var center = CellCenter(gtx, gty);
+            float r2 = (center - cursor).LengthSquared();
+            if (r2 > extent * extent) continue;
+            if ((center - ctx.Body.Position).LengthSquared() > GrabReach * GrabReach) continue;
+
+            float weight = MathF.Exp(-r2 * inv2s2);
+            int idx = FindPeelMember(in vars, gtx, gty);
+            if (idx < 0)
+            {
+                if (weight < cfg.PeelJoinThreshold) continue;        // skirt graze — no admission
+                if (vars.PeelCount >= PeelMemberBuffer.Capacity) continue;
+                idx = vars.PeelCount++;
+                vars.PeelMembers[idx] = new PeelMember { Gtx = gtx, Gty = gty };
+            }
+            vars.PeelMembers[idx].Tether += cfg.PeelTetherRate * weight * ctx.Dt;
+        }
+    }
+
+    // Block→world attachment: weight(material) × (core + Σ outward edges), where an
+    // outward edge is a solid neighbor OUTSIDE the group — 1 for same material,
+    // PeelCrossMaterialEdge for different. Edges into the group don't anchor (the
+    // group moves as one), which is what makes painting a block's neighbors loosen it.
+    private static float BaseGlue(EnvironmentContext ctx, in ActionVars vars, int gtx, int gty, MovementConfig cfg)
+    {
+        var  myType = ctx.Chunks.GetCellType(gtx, gty);
+        float edges = 0f;
+        Span<int> nx = stackalloc int[4] { gtx, gtx + 1, gtx, gtx - 1 };
+        Span<int> ny = stackalloc int[4] { gty - 1, gty, gty + 1, gty };
+        for (int k = 0; k < 4; k++)
+        {
+            if (ctx.Chunks.GetCellState(nx[k], ny[k]) != TileState.Solid) continue;
+            if (FindPeelMember(in vars, nx[k], ny[k]) >= 0) continue;
+            edges += ctx.Chunks.GetCellType(nx[k], ny[k]) == myType ? 1f : cfg.PeelCrossMaterialEdge;
+        }
+        return cfg.PeelWeight(myType) * (cfg.PeelGlueCore + edges);
+    }
+
+    // The pull beat the glue: every member breaks out at once and collapses into the
+    // carried orb — count is the throw budget, dominant material the orb's type.
+    private static void BreakOutGroup(EnvironmentContext ctx, ref ActionVars vars)
+    {
+        Span<int> counts = stackalloc int[TileTypeCount];
+        int taken = 0;
+        for (int i = 0; i < vars.PeelCount; i++)
+        {
+            ref var m = ref vars.PeelMembers[i];
+            var type = ctx.Chunks.GetCellType(m.Gtx, m.Gty);
+            if (!ctx.Chunks.BreakCell(m.Gtx, m.Gty)) continue;
+            counts[(int)type]++;
+            taken++;
+        }
+        vars.PeelCount  = 0;
+        vars.PeelStrain = 0f;
+        if (taken == 0) return;
+
+        var best = vars.OrbType;
+        int bestN = 0;
+        for (int t = 0; t < TileTypeCount; t++)
+            if (counts[t] > bestN) { bestN = counts[t]; best = (TileType)t; }
+
+        vars.OrbType    = best;
+        vars.OrbBlocks  = taken;
+        vars.ChargeTime = 0f;
+        vars.OrbHeld    = true;
+    }
+
+    private static int FindPeelMember(in ActionVars vars, int gtx, int gty)
+    {
+        for (int i = 0; i < vars.PeelCount; i++)
+            if (vars.PeelMembers[i].Gtx == gtx && vars.PeelMembers[i].Gty == gty) return i;
+        return -1;
+    }
+
+    // Order-preserving removal (shift the tail down), so member iteration order is
+    // identical before and after a rollback restore.
+    private static void RemovePeelMember(ref ActionVars vars, int index)
+    {
+        for (int i = index; i < vars.PeelCount - 1; i++)
+            vars.PeelMembers[i] = vars.PeelMembers[i + 1];
+        vars.PeelCount--;
+    }
+
+    private static Vector2 CellCenter(int gtx, int gty) => new(
+        gtx * Chunk.TileSize + Chunk.TileSize * 0.5f,
+        gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
@@ -2643,6 +2859,22 @@ public class BlockGrabAction : ActionState
 
     public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
     {
+        // Peel-phase feedback: tethered cells darken with tether strength, and the
+        // shade slides toward red as the spring nears its snap cap. Pure render —
+        // reads the sim-written member buffer and strain, feeds nothing back.
+        if (!vars.OrbHeld && vars.PeelCount > 0)
+        {
+            var tint = Color.Lerp(Color.Black, Color.DarkRed, vars.PeelStrain);
+            for (int i = 0; i < vars.PeelCount; i++)
+            {
+                var m = vars.PeelMembers[i];
+                float a = MathHelper.Clamp(0.12f + 0.35f * (m.Tether / 1.5f), 0f, 0.55f);
+                sb.Draw(pixel, new Rectangle(m.Gtx * Chunk.TileSize, m.Gty * Chunk.TileSize,
+                                             Chunk.TileSize, Chunk.TileSize), tint * a);
+            }
+            return;
+        }
+
         if (!vars.OrbHeld) return;
         int blocks = RemainingBlocks(in vars);
         if (blocks <= 0 || vars.OrbBlocks <= 0) return;

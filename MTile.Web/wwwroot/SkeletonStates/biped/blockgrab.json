@@ -1,0 +1,212 @@
+{
+  "Name": "blockgrab",
+  "Type": "BlockGrabAction",
+  "Skeleton": "biped",
+  "Duration": 0.9,
+  "Loop": true,
+  "Region": "UpperBody",
+  "OffRegionWeight": 0.2,
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.4931657
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 2.2985365
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.31901863
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 1.8077807
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.30821553
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1.18
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0.62
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.3258
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.62
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.2
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.3258
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -12.854843,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    },
+    {
+      "Time": 0.45,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.5157976
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 2.4065251
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.40674058
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 1.823185
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.38068935
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1.18
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0.62
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.3258
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.62
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.2
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.3258
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -12.854843,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    },
+    {
+      "Time": 0.9,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.4931657
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 2.2985365
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.31901863
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 1.8077807
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.30821553
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1.18
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0.62
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.3258
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.62
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.2
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.3258
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -12.854843,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    }
+  ]
+}
