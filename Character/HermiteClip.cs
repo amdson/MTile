@@ -188,11 +188,15 @@ public sealed class HermiteClipDocument
         {
             Name = name,
             Entry = Vector2.Zero,
-            Gate  = new Vector2(26f, -40f),
+            // ONE TILE up and across — a neutral, grid-legible starting box. This used to be
+            // 26×−40, which is RefLedgeW/RefLedgeH verbatim: every arc made in the editor
+            // silently started life ledge-pull-shaped (2.5 tiles of rise), and any that
+            // never had its anchors retouched still is. Author the real span deliberately.
+            Gate  = new Vector2(Chunk.TileSize, -Chunk.TileSize),
             Keys =
             {
-                new HermiteClipKey { X =  0f, Y =   0f, TX = 26f, TY = -80f },
-                new HermiteClipKey { X = 26f, Y = -40f, TX = 36f, TY =   0f },
+                new HermiteClipKey { X = 0f,             Y = 0f,              TX = Chunk.TileSize,        TY = -2f * Chunk.TileSize },
+                new HermiteClipKey { X = Chunk.TileSize, Y = -Chunk.TileSize, TX = 1.5f * Chunk.TileSize, TY = 0f },
             },
         };
         doc.RederiveT();

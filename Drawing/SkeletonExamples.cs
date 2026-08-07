@@ -9,7 +9,8 @@ namespace MTile;
 // figure or fails loudly at startup. Regenerating a lost rig = git.
 public static class SkeletonExamples
 {
-    public const string BipedName = "biped";
+    public const string BipedName  = "biped";
+    public const string RabbitName = "biped_rabbit";
 
     // Load a named rig from Skeletons/<name>.json. Throws with the expected path
     // when the directory or file is missing/unreadable — content is authored-only.

@@ -98,10 +98,7 @@ public static class AmbientCorrector
     // restricted to the anchor's own surface (roughness only). R1 applies iff
     // the TRUE corrected rollout tracks its stepped reference within tolerance
     // — otherwise the whole elective set is dropped and progress runs straight
-    // into the wall (physics delivers the stop; bimodal outcomes are what
-    // "predictable dynamics" means — the L2-graceful half-scramble is exactly
-    // ungraceful in feel). The decision LATCHES with hysteresis in both
-    // directions so it can't flicker at the margin.
+    // into the wall
     private const float ElectiveRiseDetect   = 6f;   // px above anchor ⇒ the reference is climbing
     private const float ElectiveR0Reach      = 4f;   // R0 band: surface roughness only
     private const float ElectiveTol          = 6f;   // px rollout-below-reference ⇒ undeliverable
@@ -169,8 +166,7 @@ public static class AmbientCorrector
         // optimization (TrajectoryLm); everything below (coast prediction,
         // row building, channels, elective refusal) is the QP path and is
         // bypassed. Non-fold ambient assists and the maneuver stack stay QP.
-        if (fold.Fold && cfg.FoldEngine == "lm")
-        {
+        if (fold.Fold && cfg.FoldEngine == "lm") { 
             ApplyLm(ctx, s, fold, dir, ref vars);
             return;
         }

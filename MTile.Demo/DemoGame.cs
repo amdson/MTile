@@ -48,6 +48,8 @@ public sealed class DemoGame : Game
     // saves with the clip and rides the additions machinery (K inherits, retime follows),
     // but the runtime reads additions by name and ignores this one.
     private const string EdRefName = "edref";
+    private bool _warnedArcPlacement;   // one-shot hint when a com drag is refused (arc owns placement)
+    private bool _showGrid = true;      // block-sized grid under the scene (` toggles)
     // The clip's reference trajectory (Doc.ReferenceArc), loaded on clip select: the
     // authored maneuver arc (ReferenceClips/<name>.json, else the baked registry default)
     // that drives the body's scene placement while scrubbing. Null = no arc.
@@ -137,9 +139,9 @@ public sealed class DemoGame : Game
     private SkeletonPose _skinPose;
     private bool _showSkin = true, _skinWire, _showRig = true;
 
-    // --rig <name>: edit against Skeletons/<name>.json instead of biped. Clips apply by
-    // bone name (bones a clip doesn't mention stay at rest), and Ctrl-S rig saves write
-    // back to the rig's OWN file (keyed on its Name field), never biped.json.
+    // --rig <name>: edit against Skeletons/<name>.json instead of the default
+    // biped_rabbit. Clips apply by bone name (bones a clip doesn't mention stay at rest),
+    // and Ctrl-S rig saves write back to the rig's OWN file (keyed on its Name field).
     private readonly string _rigArg;
 
     public DemoGame(string openClip = null, string binding = null, string rig = null)
@@ -182,7 +184,9 @@ public sealed class DemoGame : Game
         // if missing (no procedural fallback), and the clip list is exactly what's
         // on disk in SkeletonStates/<rigName>/ — one dir per base rig (no seed
         // autogeneration). N / C create clips there.
-        _baseSkeleton = SkeletonExamples.Load(_rigArg ?? SkeletonExamples.BipedName);
+        // Default rig is biped_rabbit — the one actually being authored. --rig biped
+        // still opens the legacy rig and its own SkeletonStates/biped/ clip dir.
+        _baseSkeleton = SkeletonExamples.Load(_rigArg ?? SkeletonExamples.RabbitName);
         _dir = Path.Combine(FindStatesDir(), _baseSkeleton.Name);
         LoadViewState();
         if (_bindingArg != null)
@@ -282,6 +286,7 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.V)) BeginAddAddition(AnimAdditionKind.Vector, mp);
         if (Pressed(kb, Keys.B)) BeginAddBone(mp, toBase: kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift));
         if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
+        if (Pressed(kb, Keys.OemTilde)) _showGrid = !_showGrid;
         if (_skin != null && Pressed(kb, Keys.G)) _showSkin = !_showSkin;
         if (_skin != null && Pressed(kb, Keys.W)) _skinWire = !_skinWire;
         if (_skin != null && Pressed(kb, Keys.X)) _showRig  = !_showRig;
@@ -558,11 +563,16 @@ public sealed class DemoGame : Game
         // scene by the arc's own midpoint so the whole path sits in view. Pure view
         // placement — the arrow-key pan still composes on top, and nothing authored moves.
         if (_refArc != null) _sceneAnchor -= ArcCenter() * RigScale;
-        // Player ensemble rides the clip's reference arc (Doc.ReferenceArc — the maneuver's
-        // authored trajectory) plus the interpolated edref track (per-keyframe hand placement
-        // authored by dragging the com marker; an additive nudge when an arc is present).
-        Vector2 refOff = TryPointAt(_scrubT, EdRefName, out var r) ? r * RigScale : Vector2.Zero;
-        if (_refArc != null) refOff += ArcOffset(_scrubT) * RigScale;
+        // Player ensemble placement, per keyframe. EXACTLY ONE source owns it:
+        //   · an attached reference arc (Doc.ReferenceArc) — the maneuver's authored
+        //     trajectory, so the com rides the drawn curve;
+        //   · otherwise the edref track (dragging the com marker).
+        // They are NOT additive. edref predates arcs and was authored as absolute
+        // placement, so summing them pushed the body off its own arc by the edref amount
+        // — the com ring and the keyframe dots (which never included edref) disagreed.
+        Vector2 refOff = _refArc != null
+            ? ArcOffset(_scrubT) * RigScale
+            : TryPointAt(_scrubT, EdRefName, out var r) ? r * RigScale : Vector2.Zero;
         _anchor = _sceneAnchor + refOff;
         _comAnchored = TryComAt(_scrubT, out var com);
         Vector2 rootT = _comAnchored ? _anchor - com * RigScale : _anchor;
@@ -652,6 +662,12 @@ public sealed class DemoGame : Game
 
     // Midpoint of the drawn arc's bounding box, in rig units — the view bias that keeps a
     // full-scale path on screen.
+    //
+    // The box covers what the RIDING BODY sweeps, not just the curve: the arc's points are
+    // com positions, and the rig hangs GroundBelowComRig (40 units = 200px at RigScale 5)
+    // below its com with the head some way above. Centering the bare curve pushed a tall
+    // arc's body off the bottom of the window — the taller the arc, the further off, which
+    // is why it only showed up once parkour started drawing at its authored 40px rise.
     private Vector2 ArcCenter()
     {
         float end = MathF.Max(ArcProgress(1f), 1f);
@@ -661,22 +677,27 @@ public sealed class DemoGame : Game
             Vector2 p = ArcOffsetAt(end * i / 16f);
             min = Vector2.Min(min, p); max = Vector2.Max(max, p);
         }
+        // Only the ASYMMETRY moves the midpoint, and the body is asymmetric about its com:
+        // soles a full GroundBelowComRig below, head roughly half that above.
+        max.Y += GroundBelowComRig;
+        min.Y -= GroundBelowComRig * 0.5f;
         return (min + max) * 0.5f;
     }
 
     // Scene offset at a point along the ARC's own parameter (not clip time), in rig units.
     //
     // The arc is authored in game pixels against its own anchors, so its size and its
-    // direction both come straight from the file — the editor only has to convert px to
-    // rig units. The one exception is a Parkour clip, whose gate is pinned to the draggable
-    // reference block so dragging the block rescales the ride live.
+    // direction both come straight from the file — the editor only converts px to rig units,
+    // for EVERY clip. Parkour used to be an exception (gate retargeted onto the reference
+    // block, so dragging the block rescaled the ride live), but that silently overrode the
+    // authored span: a 26×40px arc drew at the block's 18×14 *rig units* = 10.8×8.4px, five
+    // times shallower than authored and half the size of mantle's. The block is a piece of
+    // scenery to position the arc against, not a retarget target — the runtime does its own
+    // retargeting against the obstacle it actually measures.
     private Vector2 ArcOffsetAt(float u)
     {
         Vector2 p = _refArc.Eval(u);
-        Vector2 gate = Doc?.Type == "Parkour"
-            ? new Vector2(ObstacleBlockX + _obstacleBlockOffset.X + ObstacleBlockW * 0.5f,
-                          -(ObstacleBlockH - _obstacleBlockOffset.Y))
-            : _refArc.Span / Game1.SkeletonScale;
+        Vector2 gate = _refArc.Span / Game1.SkeletonScale;
         return new ReferenceFrame(_refArc, Vector2.Zero, gate).Map(p);
     }
 
@@ -838,6 +859,7 @@ public sealed class DemoGame : Game
         // authored moving against it; legacy clips keep the bind-pose sole height under _root.
         var (scene, floorLocal) = SceneFrame();
         float floorY = scene.TransformPoint(new Vector2(0f, floorLocal)).Y;
+        DrawTileGrid(scene, floorY);
         DrawDashedH(floorY, SidebarW + 20, W - 20, new Color(90, 110, 95), 9f, 7f);
         _spriteBatch.DrawString(_font, "floor", new Vector2(SidebarW + 20, floorY + 3), new Color(90, 110, 95));
 
@@ -937,19 +959,33 @@ public sealed class DemoGame : Game
         }
     }
 
-    // Reference obstacle drawn under the rig only while authoring a Parkour clip. Sized
-    // in skeleton-local units (the rig's natural frame) so it scales with RigScale.
-    // ~one game-tile wide, knee-ish tall — tune to taste; nothing reads this geometry.
-    // Skeleton-local geometry of the obstacle reference block: ~one game-tile wide, knee-ish tall,
-    // a hair ahead of the rig in +X. _obstacleBlockOffset (drag / arrows) shifts it from there.
-    private const float ObstacleBlockW = 18f, ObstacleBlockH = 14f, ObstacleBlockX = 8f;
+    // One game tile in SKELETON-LOCAL units — the frame the scene (floor line, block, arcs)
+    // is drawn in, where 1 unit = 1 game px / SkeletonScale. Everything sized against the
+    // world must go through this: writing raw px here silently shrinks it by 0.6.
+    private const float TileRig = Chunk.TileSize / Game1.SkeletonScale;
 
-    // Screen-space rect of the obstacle block, false when no block is shown (non-Parkour clip).
+    // Reference obstacle for the guided lip maneuvers: exactly ONE TILE, one tile ahead of
+    // the rig, so it lands on the grid and "clears the block" in the editor means what the
+    // one-block band (MantleMinRise..MantleMaxRise, 8–20px) means in game. It used to be
+    // 18×14 *rig units* = 10.8×8.4 px, 4.8px ahead — a two-thirds-size curb starting inside
+    // the body (half-width ≈ 10.4px) — which is why poses authored to clear it didn't clear
+    // a real block. _obstacleBlockOffset (drag / arrows) shifts it. Nothing reads this.
+    private const float ObstacleBlockW = TileRig, ObstacleBlockH = TileRig, ObstacleBlockX = TileRig;
+
+    // The clips the block is scenery for. Keyed on the AnimClip ENUM, not the raw Type
+    // string, so renaming a member is a compile error here instead of the block silently
+    // never appearing again (which is exactly how it stayed Parkour-only after the climb
+    // family split — mantle and arcjump author against the same obstacle).
+    private static readonly AnimClip[] BlockClips =
+        { AnimClip.Parkour, AnimClip.Mantle, AnimClip.ArcJump, AnimClip.LedgePull };
+
+    // Screen-space rect of the obstacle block, false when no block is shown.
     // Shared by the renderer and the drag hit-test so they never disagree.
     private bool TryGetObstacleBlockRect(out Rectangle rect)
     {
         rect = default;
-        if (Doc?.Type != "Parkour") return false;
+        if (!Enum.TryParse<AnimClip>(Doc?.Type, ignoreCase: true, out var c)
+            || Array.IndexOf(BlockClips, c) < 0) return false;
         // The block is a GROUND feature: it lives in the scene frame (fixed at the anchor when
         // com-anchored) so it doesn't ride along as the body is placed against it.
         var (scene, floorLocal) = SceneFrame();
@@ -957,6 +993,30 @@ public sealed class DemoGame : Game
         Vector2 br = scene.TransformPoint(new Vector2(ObstacleBlockX + ObstacleBlockW, floorLocal)               + _obstacleBlockOffset);
         rect = new Rectangle((int)tl.X, (int)tl.Y, (int)(br.X - tl.X), (int)(br.Y - tl.Y));
         return true;
+    }
+
+    // One grid cell = one game tile (Chunk.TileSize px) at the editor's zoom, so an authored
+    // rise can be read straight off in blocks: "the hip clears one cell" is exactly the
+    // one-block parkour band. Anchored to the FLOOR line and the scene X origin (the frame
+    // the obstacle block lives in), so cell edges coincide with where terrain would sit and
+    // the reference block fills exactly one cell.
+    private void DrawTileGrid(in Affine2 scene, float floorY)
+    {
+        if (!_showGrid) return;
+        float cell = TileRig * RigScale;   // one game tile in rig units → screen px
+        if (cell < 4f) return;                                          // degenerate zoom: skip
+
+        var minor = new Color(38, 42, 52);
+        var axis  = new Color(58, 64, 78);
+        float x0 = SidebarW, x1 = W, y0 = 0f, y1 = TrackY - 28f;   // stop above the timeline strip
+        float originX = scene.TransformPoint(Vector2.Zero).X;
+
+        // Verticals, walking both ways off the scene origin so the origin column is exact.
+        for (float x = originX; x <= x1; x += cell) if (x >= x0) _draw.Line(new Vector2(x, y0), new Vector2(x, y1), x == originX ? axis : minor, 1f);
+        for (float x = originX - cell; x >= x0; x -= cell)             _draw.Line(new Vector2(x, y0), new Vector2(x, y1), minor, 1f);
+        // Horizontals off the floor line (the floor itself is the axis row).
+        for (float y = floorY; y <= y1; y += cell) if (y >= y0) _draw.Line(new Vector2(x0, y), new Vector2(x1, y), y == floorY ? axis : minor, 1f);
+        for (float y = floorY - cell; y >= y0; y -= cell)              _draw.Line(new Vector2(x0, y), new Vector2(x1, y), minor, 1f);
     }
 
     private void DrawObstacleBlock()
@@ -1262,6 +1322,20 @@ public sealed class DemoGame : Game
         // root-joint drag; panning everything together is the arrow keys.
         if (_comAnchored && a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
         {
+            // With an arc attached, the ARC owns placement (UpdateRoot) — writing edref here
+            // would move the body off the curve it is supposed to be authored against. Edit
+            // the trajectory in the arc editor instead: MTile.Demo -- --ref <name>.
+            if (_refArc != null)
+            {
+                if (!_warnedArcPlacement)
+                {
+                    _warnedArcPlacement = true;
+                    Console.WriteLine($"'{Doc.ReferenceArc}' owns the body placement — drag it in "
+                                    + $"`dotnet run --project MTile.Demo -- --ref {Doc.ReferenceArc}` "
+                                    + "(or press A to detach the arc).");
+                }
+                return;
+            }
             var refAdd = ActiveKeyPoint(EdRefName);
             if (refAdd == null)
             {
@@ -1387,7 +1461,8 @@ public sealed class DemoGame : Game
         ("Arc",      "A attach the next reference arc (Shift back, wraps through none)    arc file saves reload live"),
         ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip"),
         ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
-        ("Parkour",  "drag the brown block to reposition the obstacle (Parkour clips only)"),
+        ("View",     "` block grid on/off (1 cell = 1 game tile, anchored to the floor line)"),
+        ("Obstacle", "drag the brown block to reposition it (the four lip-maneuver clips)"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
         ("Skin",     "G sprite skin on/off    W mesh wireframe    X skeleton on/off    (launch with --usebind <binding>)"),

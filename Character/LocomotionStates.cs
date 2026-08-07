@@ -82,10 +82,10 @@ public class StandingState : MovementState
     // The stand fold (see AmbientCorrector): no ground FSD, no hover spring —
     // vertical support, walk drive, braking, and the landing catch are all the
     // ambient solve's job (soft envelope rows + the channel stack). Standing
-    // keeps classification only.
+    // keeps classification only. 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        // The one baseline Standing applies is the gravity hold — sustained
+        // The one baseline Standing applies is the gravity hold — sustained 
         // support is feedforward (mirrored by the predictor's grounded branch);
         // the solver's channels act relative to it. DC demands never belong in
         // the solver's soft rows: without the hold it must win a tug-of-war
@@ -271,7 +271,7 @@ public class DropdownState : MovementState
         vars.RefActive = clip != null && vars.DropDir != 0;
         if (vars.RefActive)
         {
-            // Retarget at Enter: clip (0,0) = where the slide starts; clip (1,-1) = past
+            // Retarget at Enter: the clip's Entry anchor = where the slide starts; its Gate anchor = past
             // the drop corner and a body-height below it. Only the on-platform stretch
             // plays (going airborne exits to Falling), so the clip shapes the slide-out
             // speed profile and the velocity carried into the drop.
@@ -317,7 +317,7 @@ public class DropdownState : MovementState
                 // Guided move: feed the authored arc to the corrector and servo
                 // the deformed target (no coast — see ReferenceCorrector).
                 ReferenceCorrector.DeformedTarget(ctx, clip,
-                    new ReferenceFrame(vars.RefEntry, vars.RefGate),
+                    new ReferenceFrame(clip, vars.RefEntry, vars.RefGate),
                     vars.RefProgress, cfg.DropdownRefDuration, ref vars.ManeuverChannelPrev,
                     out var target, out var targetVel);
                 ctx.Body.AppliedForce = ReferencePath.TrackForce(

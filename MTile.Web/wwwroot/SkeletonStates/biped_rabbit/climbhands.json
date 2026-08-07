@@ -1,0 +1,108 @@
+{
+  "Name": "climbhands",
+  "Type": "ClimbHands",
+  "Skeleton": "biped_rabbit",
+  "Duration": 0.45,
+  "Loop": false,
+  "Region": "UpperBody",
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "chest",
+          "Rotation": -1.1207963
+        },
+        {
+          "Bone": "head",
+          "Rotation": -0.14999998
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 2.3115926
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.49999994
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -2.3115926
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.5
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.5339331
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.5339331
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -20.940285,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    },
+    {
+      "Time": 1,
+      "Bones": [
+        {
+          "Bone": "chest",
+          "Rotation": -1.4707963
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0.14999998
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -1.0715927
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.20000005
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 1.0715925
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.20000005
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.9643816
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.9643816
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -20.940285,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    }
+  ]
+}

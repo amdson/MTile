@@ -3,6 +3,7 @@ using MTileDemo;
 // Standalone skeleton tooling — entirely separate from the main game (Game1).
 //
 // Animation editor:      dotnet run --project MTile.Demo [-- --rig <skeleton>]
+//   (default rig: biped_rabbit; --rig biped opens the legacy one.)
 // Open a clip by name:   dotnet run --project MTile.Demo -- walk
 // ... with sprite skin:  dotnet run --project MTile.Demo -- --usebind pumpkin_man_downsampled
 //   (superimposes the binding's sprite on the rig through scrub/playback;

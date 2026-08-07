@@ -44,6 +44,11 @@ public static class FoldReference
     private const float DeformCap = Chunk.TileSize * 0.5f;
     private const float SlewCap   = 150f;
 
+    // TEMP EXPERIMENT: redirect audit counters (write-only debug stats).
+    public static int AuditSolves, AuditMaskFrames, AuditFireFrames;
+    public static float AuditMaxZr;
+    public static Vector2 AuditNetZr;
+
     // Generates the reference, deforms it around terrain, and servos the body
     // toward its tick-0 target. Returns false when the regime doesn't apply
     // (caller falls back to the ballistic-qp path).
@@ -146,6 +151,7 @@ public static class FoldReference
 
         // ── Deform (PathDeform), then servo the tick-0 target ────────────
         Vector2 z0 = Vector2.Zero;
+        Vector2 zr0 = Vector2.Zero;   // TEMP EXPERIMENT: redirect δv at tick 0
         if (rowCount > 0)
         {
             var p = s.Problem;
@@ -172,6 +178,27 @@ public static class FoldReference
             // anchor doubles as the seam term (no cross-frame leak — the
             // receding horizon re-derives the offsets each frame).
             p.PrevApplied[0] = Vector2.Zero;
+            // TEMP EXPERIMENT: qp's Redirect (Thales plant-and-deflect disc)
+            // grafted in as a second channel — same mask as BuildFold (near
+            // ground but not supported), gated on FoldRedirectEnabled for
+            // hot A/B. If the solver's clean it should be harmless; watching
+            // for the vx-eating pathology the qp audit measured.
+            if (cfg.FoldRedirectEnabled)
+            {
+                float legReach = 2f * PlayerCharacter.Radius - 2f + 20f;
+                for (int k = 0; k < n; k++)
+                    s.ChannelMask[1][k] = !s.Samples[k].Grounded
+                        && !float.IsPositiveInfinity(s.Samples[k].FloorY)
+                        && s.Samples[k].FloorY - s.Samples[k].Pos.Y <= legReach;
+                p.Channels[1] = new ChannelDef
+                {
+                    Id = CorrectionChannel.Redirect,
+                    Lever = LeverKind.VelocityUpdate, Weight = 1e-6f, Redirect = true,
+                    ActiveMask = s.ChannelMask[1], SkipSoftHorizontal = true,
+                };
+                p.PrevApplied[1] = Vector2.Zero;
+                p.ChannelCount = 2;
+            }
             p.DeltaWeight = cfg.CorrectorDeltaWeight;
             p.HingeWeight = HingeWeight;
             p.InnerIterations = cfg.FoldIterations;
@@ -179,6 +206,22 @@ public static class FoldReference
 
             CorrectionSolver.Solve(p, s.Z, s.ZScratch);
             z0 = s.Z[0];
+            // TEMP EXPERIMENT: redirect's tick-0 velocity update (z layout
+            // is [c*H + k], so channel 1 tick 0 lives at index n).
+            if (p.ChannelCount == 2) zr0 = s.Z[n];
+            AuditSolves++;
+            if (p.ChannelCount == 2)
+            {
+                bool any = false;
+                for (int k = 0; k < n; k++) if (s.ChannelMask[1][k]) { any = true; break; }
+                if (any) AuditMaskFrames++;
+                if (zr0 != Vector2.Zero)
+                {
+                    AuditFireFrames++;
+                    AuditNetZr += zr0;
+                    AuditMaxZr = MathF.Max(AuditMaxZr, zr0.Length());
+                }
+            }
 
             if (s.CaptureTrajectories)
             {
@@ -207,7 +250,7 @@ public static class FoldReference
         // z0/dt, slew-bounded. Measured against what AppliedForce already
         // holds (state baseline + action forces) so nothing double-counts;
         // capped like the guided servos.
-        Vector2 v1Des = s.Samples[0].Vel + z0 / dt;
+        Vector2 v1Des = s.Samples[0].Vel + z0 / dt + zr0;
         Vector2 v1Cur = body.Velocity + (body.AppliedForce + ctx.Gravity) * dt;
         Vector2 dF = (v1Des - v1Cur) / dt;
         float mag = dF.Length();

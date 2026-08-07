@@ -29,10 +29,10 @@ mode flag is given). Any bare argument is taken as a clip name for the editor.
 
 ```bash
 # Animation editor (default mode)
-dotnet run --project MTile.Demo                          # open on the first clip
+dotnet run --project MTile.Demo                          # open on the first clip (rig: biped_rabbit)
 dotnet run --project MTile.Demo -- walk                  # open a clip by name
-dotnet run --project MTile.Demo -- --rig biped_rabbit    # edit another rig's clip pool
-dotnet run --project MTile.Demo -- walk --rig biped_rabbit --usebind rabbit
+dotnet run --project MTile.Demo -- --rig biped           # edit the legacy rig's clip pool
+dotnet run --project MTile.Demo -- walk --usebind rabbit
 
 # Sprite bind editor
 dotnet run --project MTile.Demo -- --bind rabbit                     # SpriteBindings/rabbit.json
@@ -47,13 +47,13 @@ dotnet run --project MTile.Demo -- --import <dir> --out SpriteBindings --scale 0
 dotnet run --project MTile.Demo -- --load Takes/<name>.take.json
 
 # Reference-clip editor (maneuver Hermite arcs, authored in game pixels)
-dotnet run --project MTile.Demo -- --ref vault
+dotnet run --project MTile.Demo -- --ref parkour
 ```
 
 | Flag | Modes it applies to | Meaning |
 |---|---|---|
 | `<clip>` (bare arg) | editor | Clip name to open (sidebar jumps there). Ignored by other modes |
-| `--rig <name>` | editor, `--bind` | Rig from `Skeletons/<name>.json`. **Editor**: also selects the clip pool `SkeletonStates/<name>/`; Ctrl-S rig edits write back to that rig's own file. **Bind editor**: default is the binding's `Skeleton` field (then `biped`); passing a *different* rig re-targets the binding — bones match by name, new bones start at rest, Ctrl-S persists the new rig name. Other modes ignore it (viewer/ref are biped-tied) |
+| `--rig <name>` | editor, `--bind` | Rig from `Skeletons/<name>.json`, default `biped_rabbit`. **Editor**: also selects the clip pool `SkeletonStates/<name>/`; Ctrl-S rig edits write back to that rig's own file. **Bind editor**: default is the binding's `Skeleton` field (then `biped`); passing a *different* rig re-targets the binding — bones match by name, new bones start at rest, Ctrl-S persists the new rig name. Other modes ignore it (viewer/ref are biped-tied) |
 | `--usebind <binding>` | editor | Superimpose a sprite skin on the rig through scrub/playback. The skin bakes against the **binding's** own `Skeleton` rig; keys: `G` sprite, `W` wireframe, `X` skeleton |
 | `--bind <name\|png\|json>` | mode flag | Open the sprite bind editor. A bare name resolves `SpriteBindings/<name>.json` first (multi-image bindings have no single PNG); a `.png` argument is the legacy path and also creates brand-new bindings |
 | `--import <dir>` | mode flag | One-time intake of decomposed part art: alpha-crop + downscale each PNG, write `SpriteBindings/<char>/<part>.png` + first-pass binding jsons |
@@ -109,7 +109,7 @@ current **edit mode**, cycled with one key:
 | Drag joint (ROTATE) | Rotate the bone about its parent, preserving limb length; the subtree carries along |
 | Drag joint (RESIZE) | Move the joint to the cursor — changing the limb's rest **Length on the rig** (persists to `Skeletons/<name>.json`, affects every clip) — rolling the bone's rotation so the subtree follows |
 | Drag joint (STRETCH) | Slide the joint along the bone's axis — writes the ratio as this **keyframe's `Stretch`** (pseudo-3D foreshortening; rotation and rig untouched). Signed: dragging past the parent joint flips the bone slightly negative, e.g. a hip strut at full leg swap |
-| Drag **com marker** | Place the player against the fixed scenery **per keyframe**: com and skeleton travel with the cursor while the floor line and vault block stay put; the drag writes the active keyframe's `edref` placement, and scrubbing interpolates it — so the body visibly arcs over the refs (e.g. a vault clearing its block). Editor-only visualization, saved with the clip (`edref` additions; the runtime ignores them). Arrow keys pan everything together |
+| Drag **com marker** | Place the player against the fixed scenery **per keyframe**: com and skeleton travel with the cursor while the floor line and obstacle block stay put; the drag writes the active keyframe’s `edref` placement (refused while a reference arc is attached — the arc owns placement), and scrubbing interpolates it — so the body visibly arcs over the refs (e.g. parkour clearing its block). Editor-only visualization, saved with the clip (`edref` additions; the runtime ignores them). Arrow keys pan everything together |
 
 A clip can also ride the maneuver's **authored reference trajectory**: press **A** in the editor to
 cycle one on (or set `"ReferenceArc": "<name>"` in the clip json / run `MTile.Probe -- refarc <clip>
@@ -117,13 +117,17 @@ cycle one on (or set `"ReferenceArc": "<name>"` in the clip json / run `MTile.Pr
 the baked registry defaults) while scrubbing, and **reloads live** when that file is saved — so you
 can keep `--ref <name>` open in a second window and shape the arc while watching the body ride it —
 the header shows `arc <name> <arcDur>s x<ratio> at <progress>`. The arc is authored in game pixels
-against its own entry/gate anchors, so it maps to the scene at true scale (a Vault instead pins its
-gate to the draggable reference block). **Clip and arc have independent durations** — the body
+against its own entry/gate anchors, so it maps to the scene at true scale — for every clip, including
+Parkour. The reference block is scenery to position the arc *against*, never a retarget target; the
+runtime does its own retargeting onto the obstacle it measures. **Clip and arc have independent durations** — the body
 advances along the arc at `τ · clipDuration/arcDuration`, so a 0.4s clip on a 0.3s arc hits the gate
 at τ≈0.75 and overshoots after. The arc draws into the scene: bright where the clip's timeline
 reaches, dim past it, a green ring at the gate, a dot per keyframe, and a body-radius ring at the
-playhead — author each pose against the dot it lands on. Any hand-dragged `edref` placement adds on
-top as a nudge. Editor visualization only; the runtime ignores it.
+playhead — author each pose against the dot it lands on: the ring rides the curve exactly, because
+**the arc OWNS placement while it is attached** — `edref` is the fallback for clips with no arc, not
+an additive nudge, so a com-marker drag is refused (with a console hint) rather than pushing the body
+off its own arc. Press **A** to detach the arc if you want to hand-place again. Editor visualization
+only; the runtime ignores it.
 | Drag **root joint** | Move the body **within** the com frame — the inverse edit of the active keyframe's `com` (the game's vertical anchor): the skeleton follows the cursor while the com marker and floor line hold still, exactly as the game will place it |
 
 The active mode is shown in the top header.
@@ -165,6 +169,7 @@ default (deep-copied, so editing one keyframe's marks doesn't change the other's
 
 | Input | Action |
 |---|---|
+| **`** | Toggle the block grid — one cell = one game tile (`Chunk.TileSize`), anchored to the floor line and the scene origin so cell edges sit where terrain would. On by default |
 | **Ctrl-S** | Save **all** animations to their JSON files (`*unsaved*` clears) |
 | **N** | Create a new (empty) animation |
 | **C** | Clone the selected animation — deep-copies all keyframes/contacts into a new clip named `<name>_copy`, selected and ready to edit (saved as a separate file on Ctrl-S). Use it to fork a variant, e.g. derive a run from the walk |
