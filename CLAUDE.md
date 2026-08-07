@@ -46,6 +46,37 @@ dotnet run --project MTile.Web              # dev server
 
 Quickest correctness check while iterating on game logic: `dotnet build MTile.Core.csproj`.
 
+### Running a relevant slice of the suite
+
+The full suite is ~75 s / 489 tests, but **two scratch classes are 65% of that** — `Sim.ZzzLatticeTiming`
+(~35 s) and `Animation.ZzzRestSpasm` (~13 s). The `Zzz` prefix marks long-running harnesses, so the
+default full-coverage run should skip them (~35 s, 481 tests):
+
+```bash
+dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName!~Zzz"
+```
+
+Parallelization is disabled assembly-wide on purpose (`MTile.Tests/TestAssemblySetup.cs`) — sim tests
+mutate `MovementConfig.Current`, so classes race. 22 of 103 test files touch process-wide statics.
+Don't re-enable it without moving those into a shared `[Collection]` first.
+
+Targeted slices, by what a change touches (`--filter` alternations; namespaces are NOT a reliable
+selector — `GrabTests` is in `MTile.Tests` while `CaveMouthTests` is in `MTile.Tests.Sim`):
+
+| Area | Filter | ≈ |
+|---|---|---|
+| Combat / action FSM | `~Combat\|~Grab\|~Escalation\|~AttackRecoil\|~Commitment\|~Eruption\|~ClipBinding\|~ActionOverlay` | 4 s / 77 |
+| Snapshot / rollback | `~Snapshot\|~Rollback\|~InputCodec\|~ECS` | 2 s / 15 |
+| Corrector / fold | `~Corrector\|~Fold\|~Ballistic\|~CaveMouth\|~BumpyTunnel\|~SpeedInvariant` | ~5 s |
+| Animation solver | `~Solver\|~Anim\|~Pose\|~Skeleton\|~NoPen` | ~5 s |
+
+(Prefix each term with `FullyQualifiedName`, e.g. `--filter "FullyQualifiedName~Combat|FullyQualifiedName~Grab"`.)
+
+**Adding an `ActionState` subclass requires an authored clip** whose `Type` equals the class name, or
+`ClipBindingTests` fails — and an action that declines `AnimationProgress` needs a *looping* clip.
+Create it with `dotnet run --project MTile.Probe -- new <name> <ClassName> --from <clip>@<t>`, then set
+`Region` by hand (`probe new` defaults to `FullBody`, wrong for an overlay).
+
 **Gotcha:** while the game is running, `MTile.exe` is file-locked, so a Desktop/Tests build's final copy step fails even though the C# compile + test dll succeed. Use `dotnet test --no-build` against the already-built `MTile.Tests.dll` in that case, or close the game first.
 
 Content (`.xnb`) is built from `Content/Content.mgcb` by `MonoGame.Content.Builder.Task`; the `dotnet-mgcb` tool is pinned in `.config/dotnet-tools.json` (`dotnet tool restore`).

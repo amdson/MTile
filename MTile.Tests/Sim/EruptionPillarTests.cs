@@ -5,14 +5,14 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests.Sim;
 
-// "Dumb" verification of the block-eruption shape contract: charging on a block,
-// then sweeping straight up and releasing, should deposit a PILLAR whose thickness
-// decreases monotonically with height (wide base, narrow tip).
+// Block-eruption behaviour: charge on a block, sweep up, release.
 //
-// This drives EruptionPlanner directly (no FSM / input plumbing) so it isolates the
-// planner's shape from the gesture-capture and build-input layers. The samples list
-// is exactly what BlockEruptionAction would hand it: a zero-velocity seed at the
-// ignition cell (gives the wide base) followed by an upward sweep.
+// This used to drive EruptionPlanner directly and assert a monotonically-narrowing
+// pillar — a property of that planner's radius falloff, which no longer exists. The
+// eruption is now a MassBall entity coasting out of the release point and leaking into
+// TileMassField, so the contract that actually matters is the one the planner could only
+// fake: the deposit continues PAST where the cursor was when the button came up. That's
+// what the first test pins, driven through the real FSM rather than a planner call.
 public class EruptionPillarTests
 {
     private readonly ITestOutputHelper _out;
@@ -37,20 +37,6 @@ public class EruptionPillarTests
         return SimTerrain.FromAscii(sb.ToString(), originTileX: 0, originTileY: GroundTop);
     }
 
-    // Seed at the ignition cell (zero velocity → widest base radius), then a straight
-    // upward sweep of `steps` samples climbing `risePx` total.
-    private static List<PathSample> StraightUpSweep(Vector2 origin, int steps, float risePx)
-    {
-        var samples = new List<PathSample> { new(origin, Vector2.Zero) };
-        var up = new Vector2(0f, -180f);
-        for (int i = 1; i <= steps; i++)
-        {
-            float t = (float)i / steps;
-            samples.Add(new PathSample(origin + new Vector2(0f, -risePx * t), up));
-        }
-        return samples;
-    }
-
     // Count solid cells per row above the original ground surface, keyed by gty.
     private static Dictionary<int, int> SolidWidthsAbove(ChunkMap chunks)
     {
@@ -65,31 +51,89 @@ public class EruptionPillarTests
         return widths;
     }
 
-    [Fact]
-    public void PriorityField_SweepUp_FormsMonotonicallyNarrowingPillar()
+    // How far right of the origin column the deposit reached (0 if nothing landed).
+    private static int RightmostReach(ChunkMap chunks)
+    {
+        int reach = 0;
+        for (int gty = GroundTop - 1; gty >= GroundTop - 12; gty--)
+            for (int gtx = OriginGtx - 10; gtx <= OriginGtx + 20; gtx++)
+                if (chunks.GetCellState(gtx, gty) == TileState.Solid && gtx - OriginGtx > reach)
+                    reach = gtx - OriginGtx;
+        return reach;
+    }
+
+    // Runs the real gesture end to end: charge deep inside the ground, flick up out of it
+    // (that crossing is what arms), then drag RIGHT along just above the surface and let
+    // go. `holdFramesBeforeRelease` is the A/B knob — 0 releases mid-drag, a dozen frames
+    // parks the cursor first so the critically-damped ball catches up and stops. Both
+    // release from the SAME cursor position.
+    //
+    // The carry is measured HORIZONTALLY on purpose. A vertical flick sends the ball up
+    // past its own scaffolding — the deposit needs a few frames to solidify before it can
+    // support the next cell — so unsupported mass dies and a faster release measures as a
+    // SHORTER pillar. Dragging along the ground keeps support under the whole coast, which
+    // isolates the property being tested from the ball-outruns-its-scaffolding limitation.
+    // Returns how far right the deposit reached, and the total block count.
+    private (int reach, int blocks) RunEruption(int holdFramesBeforeRelease)
     {
         var chunks = BuildGround();
-        var origin = CellCenter(OriginGtx, GroundTop);   // ignition cell = top solid row
-        var samples = StraightUpSweep(origin, steps: 16, risePx: 80f);
+        var sim = new Simulation(chunks, CellCenter(OriginGtx, GroundTop - 1));
+        for (int f = 0; f < 10; f++) sim.Step(new PlayerInput());
 
-        // Generous budget so top-K never clips the shape — this is a pure shape test.
-        EruptionPlanner.Plan(chunks, origin, samples, budget: 200,
-            EruptionPlannerMode.PriorityField, TileType.Stone);
+        // Plain RMB, pressed with the cursor buried — the charge half of the gesture.
+        PlayerInput Rmb(Vector2 mouse) => new() { RightClick = true, MouseWorldPosition = mouse };
 
-        // Grow every sprout to completion. SproutLifetime is 0.1s; the pillar chains
-        // ~10 rows, so 300 frames (10s) is comfortably enough.
-        for (int f = 0; f < 300; f++) chunks.TickSprouts(1f / 30f);
+        // Charge from deep in the ground; the solid→air crossing of the flick below is
+        // what arms (no speed gate — the crossing itself is the signal).
+        var chargePos = CellCenter(OriginGtx, GroundTop + 4);
+        for (int f = 0; f < 70; f++) sim.Step(Rmb(chargePos));   // ~2.3s charge, well past MinChargeToArm
+
+        // Flick up out of the ground — this crossing is what arms the eruption.
+        float y = chargePos.Y;
+        float exitY = CellCenter(OriginGtx, GroundTop - 1).Y;
+        while (y > exitY) { y -= 20f; sim.Step(Rmb(new Vector2(chargePos.X, y))); }
+        // The flag is raised inside the crossing frame's Update; the FSM picks it up on
+        // the next scan, so BlockEruptionAction is only current one frame later.
+        sim.Step(Rmb(new Vector2(chargePos.X, exitY)));
+
+        Assert.True(sim.Player.CurrentAction is BlockEruptionAction,
+            "eruption never armed — adjust the gesture so the test exercises the real path");
+
+        // Drag right along the surface. Stays inside BlockEruptionAction's short arming
+        // window, so the release still counts as an eruption.
+        float x = chargePos.X;
+        for (int f = 0; f < 6; f++) { x += 20f; sim.Step(Rmb(new Vector2(x, exitY))); }
+
+        for (int f = 0; f < holdFramesBeforeRelease; f++) sim.Step(Rmb(new Vector2(x, exitY)));
+
+        sim.Step(new PlayerInput());                                 // release → spawn the ball
+        for (int f = 0; f < 180; f++) sim.Step(new PlayerInput());    // fly + grow
 
         var widths = SolidWidthsAbove(chunks);
+        int blocks = 0;
+        for (int gty = GroundTop - 1; gty >= GroundTop - 12; gty--) blocks += widths[gty];
+        return (RightmostReach(chunks), blocks);
+    }
 
-        // Dump the profile so a failure shows the actual shape.
-        for (int gty = GroundTop - 1; gty >= GroundTop - 12; gty--)
-            _out.WriteLine($"row {gty} (height {GroundTop - gty}): width {widths[gty]}");
+    // The defining property of the ball-based eruption, and the one the old planner could
+    // only fake by extrapolating its puller off the end of a recorded path: released
+    // mid-sweep, the ball keeps the velocity the sweep gave it and carries the deposit
+    // onward. Measured as an A/B against the identical gesture released from rest — same
+    // charge, same cursor position, only the motion differs — so it isolates the coast
+    // from everything else that shapes the deposit.
+    [Fact]
+    public void ReleasedInMotion_CarriesFartherThanReleasedFromRest()
+    {
+        var moving = RunEruption(holdFramesBeforeRelease: 0);
+        var parked = RunEruption(holdFramesBeforeRelease: 10);
 
-        // The pillar must exist and reach up off the ground.
-        Assert.True(widths[GroundTop - 1] > 0, "no blocks formed above the ground");
+        _out.WriteLine($"released in motion: {moving.blocks} blocks, reach +{moving.reach} cells");
+        _out.WriteLine($"released from rest: {parked.blocks} blocks, reach +{parked.reach} cells");
 
-        Assert.True(IsMonotonicNonIncreasing(widths, out string why), why);
+        Assert.True(moving.blocks > 0, "the eruption deposited nothing at all");
+        Assert.True(moving.reach > parked.reach,
+            $"a release in motion should carry farther than one from rest " +
+            $"(+{moving.reach} vs +{parked.reach} cells) — the ball isn't keeping its velocity.");
     }
 
     // Repro for the bug the user suspected: "normal right-click block placement fires
@@ -98,10 +142,10 @@ public class EruptionPillarTests
     // — with the cursor kept within build reach of the player, then asserts that NO tiles
     // are placed while the eruption is being charged.
     //
-    // Regression guard for the build-vs-eruption merge: drag-build now lives inside
-    // BlockReadyAction and is suppressed once the charge passes MinChargeToArm (the
-    // player is committed to an eruption, not painting), so the arming sweep no longer
-    // drag-places a stray tile. Before that fix this asserted-clean cell came back Solid.
+    // Regression guard, now structural: BlockReadyAction does not place tiles at all
+    // (painting moved to plain RMB / BlockPaintAction), so the arming sweep has nothing to
+    // drag-place. Kept because the guarantee still matters — a future rebind that puts
+    // placement back on Shift+RMB would break it here rather than in a playtest.
     [Fact]
     public void ChargingEruption_DoesNotAlsoDragPlaceBuildTiles()
     {
@@ -116,7 +160,8 @@ public class EruptionPillarTests
         // Cursor cells, all within BuildReach (64px) of the player:
         //   charge: a SOLID cell at/just below the surface (no placement possible there)
         //   sweep:  empty cells climbing straight up out of the ground
-        var chargeCell = CellCenter(OriginGtx, GroundTop);             // solid
+        // Charge below the surface; the swept cells above it are checked for strays.
+        var chargeCell = CellCenter(OriginGtx, GroundTop + 4);         // solid
         var sweepCells = new[]
         {
             CellCenter(OriginGtx, GroundTop - 1),
@@ -124,6 +169,8 @@ public class EruptionPillarTests
             CellCenter(OriginGtx, GroundTop - 3),
         };
 
+        // Plain RMB. Pressed with the cursor buried, the hold is the charge gesture; the
+        // flick out of solid is what arms the eruption.
         PlayerInput Rmb(Vector2 mouse) => new() { RightClick = true, MouseWorldPosition = mouse };
 
         // Charge ~2.3s on the solid cell (well past MinChargeToArm = 1.0s).
@@ -133,8 +180,10 @@ public class EruptionPillarTests
         // not fired yet). The empty cells the cursor crosses start Empty; before release,
         // ONLY HandleBuildInput's drag-place can fill them, so any that turn non-Empty are
         // stray build tiles placed concurrently with the eruption gesture.
-        foreach (var c in sweepCells)
-            for (int f = 0; f < 3; f++) sim.Step(Rmb(c));
+        float sy = chargeCell.Y;
+        float topY = sweepCells[^1].Y;
+        while (sy > topY) { sy -= 20f; sim.Step(Rmb(new Vector2(chargeCell.X, sy))); }
+        for (int f = 0; f < 3; f++) sim.Step(Rmb(new Vector2(chargeCell.X, topY)));
 
         Assert.True(sim.Player.CurrentAction is BlockEruptionAction,
             "eruption never armed — adjust the gesture so the test exercises the real path");
@@ -168,6 +217,8 @@ public class EruptionPillarTests
         var sim = new Simulation(chunks, CellCenter(OriginGtx, GroundTop - 1));
         for (int f = 0; f < 10; f++) sim.Step(new PlayerInput());
 
+        // Plain RMB. Pressed with the cursor buried, the hold is the charge gesture; the
+        // flick out of solid is what arms the eruption.
         PlayerInput Rmb(Vector2 mouse) => new() { RightClick = true, MouseWorldPosition = mouse };
 
         // Charge ~2.3s on a solid cell just below the surface (within build reach,

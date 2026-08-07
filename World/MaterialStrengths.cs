@@ -17,6 +17,13 @@ public sealed class MaterialStrength
     // 0 = dead thud (approach fully absorbed), 1 = full elastic ring. Materials a
     // json entry doesn't specify fall back to this 0.5 class default.
     public float Restitution { get; set; } = 0.5f;
+    // Meter units consumed to place one tile of this material (BuildMeters). Only
+    // ROUGHLY correlated with MaxHP, deliberately not derived from it — durability and
+    // build cost are separate design axes, and strength alone can't express the case
+    // that motivated the split: Foam and Sand have identical MaxHP, but foam decays back
+    // to Empty after a few seconds, so temporary scaffolding should be the cheapest
+    // thing in the game precisely BECAUSE it's temporary.
+    public float BuildCost { get; set; } = 1f;
 }
 
 public static class MaterialStrengths
@@ -30,14 +37,20 @@ public static class MaterialStrengths
         // Restitution gives each material a tactile identity under attack recoil:
         // stone rings, dirt thuds, sand/foam barely push back (and usually never
         // get here — the stab's hardness/break gates skip them first).
-        [TileType.Stone] = new() { MaxHP = 2.0f, Restitution = 0.70f },
-        [TileType.Dirt]  = new() { MaxHP = 1.0f, Restitution = 0.35f },
-        [TileType.Sand]  = new() { MaxHP = 0.5f, Restitution = 0.05f },
-        [TileType.Foam]  = new() { MaxHP = 0.5f, Restitution = 0.15f },
+        // BuildCost spread is 16× end to end, much wider than the 4× MaxHP spread, so
+        // material choice reads as a real speed-vs-durability decision: at BuildMeters'
+        // refill rate stone lands ~4/sec while foam sprays as fast as the painter asks.
+        [TileType.Stone] = new() { MaxHP = 2.0f, Restitution = 0.70f, BuildCost = 4.0f  },
+        [TileType.Dirt]  = new() { MaxHP = 1.0f, Restitution = 0.35f, BuildCost = 1.0f  },
+        [TileType.Sand]  = new() { MaxHP = 0.5f, Restitution = 0.05f, BuildCost = 0.5f  },
+        [TileType.Foam]  = new() { MaxHP = 0.5f, Restitution = 0.15f, BuildCost = 0.25f },
     };
 
     public static float MaxHPFor(TileType type)
         => _current.TryGetValue(type, out var m) ? m.MaxHP : TileDamage.TileMaxHP;
+
+    public static float BuildCostFor(TileType type)
+        => _current.TryGetValue(type, out var m) ? m.BuildCost : 1f;
 
     public static float RestitutionFor(TileType type)
         => _current.TryGetValue(type, out var m) ? m.Restitution : 0.5f;

@@ -91,18 +91,24 @@ public static class GroundChecker
         // through ChunkMap-as-ISolidShapeProvider.
         const float half = Chunk.TileSize * 0.5f;
         foreach (var s in chunks.Graph.Growing)
+        foreach (var face in TileSproutNode.FaceOrder)
         {
-            var c = s.Center;
+            // One volume per supporting face — a sprout with parents below and to
+            // the left offers two candidate surfaces, and only the upward-moving
+            // one should be able to carry the player.
+            if ((s.Faces & face) == 0) continue;
+            var c = s.VolumeCenter(face);
             if (c.X + half <= probe.Left || c.X - half >= probe.Right) continue;
             if (c.Y + half <= probe.Top  || c.Y - half >= probe.Bottom) continue;
             float top = c.Y - half;
             if (top < probe.Top - 1f) continue;
-            float projectedTop = top + s.Velocity.Y * dt;
+            var vel = s.VolumeVelocity(face);
+            float projectedTop = top + vel.Y * dt;
             if (projectedTop < bestProjectedTop)
             {
                 bestProjectedTop = projectedTop;
                 bestSurfaceY     = top;
-                bestSurfaceVel   = s.Velocity;
+                bestSurfaceVel   = vel;
             }
         }
 

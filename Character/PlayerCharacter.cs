@@ -180,6 +180,9 @@ public class PlayerCharacter : IHittable
     }
     
     private readonly PlayerAbilityState _abilities = new();
+    // Read-only view for the HUD (build meters, condition flags). Sim code reaches
+    // _abilities directly; this exists so rendering doesn't need a back door.
+    public PlayerAbilityState Abilities => _abilities;
     private MovementState _currentState;
     // Plain-data per-activation state for the current movement state (see MovementVars).
     // Lives here (not on the flyweight state instances) so it's a single snapshot unit.
@@ -242,17 +245,14 @@ public class PlayerCharacter : IHittable
     // guard accordingly.
     public CombatSystem CombatSystem { get; set; }
 
-    // Player-local block/eruption selection, driven by this player's own input
-    // (1-4 keys → block type; P → planner mode). Formerly global planner statics.
-    // Read by the eruption actions via EnvironmentContext, and by Simulation's
-    // drag-build + the HUD. Defaults mirror the old static defaults.
-    private TileType            _activeBlockType = TileType.Dirt;
-    private EruptionPlannerMode _eruptionMode    = EruptionPlannerMode.MassBall;
-    private bool                _wasPDown;
+    // Player-local block selection, driven by this player's own input (1-4 keys).
+    // Formerly a global static. Read by the placement actions via EnvironmentContext and
+    // by the HUD. The P planner-mode toggle that used to live alongside it is gone —
+    // placement is ball-based only now, so there is nothing to switch between.
+    private TileType _activeBlockType = TileType.Dirt;
     // Settable so Simulation can seed the initial selection from GameConfig;
     // thereafter it's driven by this player's own input each frame.
-    public TileType            ActiveBlockType { get => _activeBlockType; set => _activeBlockType = value; }
-    public EruptionPlannerMode EruptionMode    => _eruptionMode;
+    public TileType ActiveBlockType { get => _activeBlockType; set => _activeBlockType = value; }
 
     public MovementState GetPreviousState(int framesBack)
     {
@@ -302,8 +302,11 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new AirSlash1());         // 30/30
         _actionRegistry.Add(new StabAction());        // 30/30
         _actionRegistry.Add(new PulseAction());       // 30/30  — Circle gesture
-        _actionRegistry.Add(new BlockReadyAction());     // 8/10   — RMB drag-build + hold-in-solid charge
-        _actionRegistry.Add(new BlockEruptionAction());  // 9/10   — RMB hold-out-of-solid after arming, fires on release
+        _actionRegistry.Add(new BurstAction());       // 30/30  — RMB during a Ready wind-up
+        _actionRegistry.Add(new BlockPaintAction());     // 8/10   — plain RMB: paint outside solid, charge inside
+        _actionRegistry.Add(new BlockPlaceAction());     // 8/10   — Shift+RMB single-block placement
+        _actionRegistry.Add(new BlockEruptionAction());  // 10/10  — primed window after the flick, fires on release
+        _actionRegistry.Add(new BlockBurstAction());     // 30/30  — LMB while RMB paints over dead air → foam puff
         _actionRegistry.Add(new GroundSlash2());      // 30/50  — combo (Slash2Ready gated)
         _actionRegistry.Add(new GroundSlash3());      // 30/50  — combo
         _actionRegistry.Add(new AirSlash2());         // 30/50  — combo
@@ -314,9 +317,12 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new EnergyBallAction());     // 40/45 — Shift+LMB tap, preempts Guard briefly
         _actionRegistry.Add(new BeamAction());           // 40/45 — Shift+LMB hold, sustained beam after charge
         _actionRegistry.Add(new GrenadeAction());        // 40/45 — F press, throws sticky grenade
-        // LobbedAreaAction (Shift+RMB charge) deactivated — that binding is now Grab
-        // (COMBAT_FEEL_PLAN Phase 6). Re-add the line to restore the ranged eruption.
-        _actionRegistry.Add(new GrabAction());           // 46/46 — Shift+RMB hold → grab → throw
+        // LobbedAreaAction (Shift+RMB charge) deactivated in COMBAT_FEEL_PLAN Phase 6
+        // when Grab took that binding. Grab has since moved to Shift+LMB, so Shift+RMB
+        // is free again — re-add the line to restore the ranged eruption. (Its
+        // projectile is still live: BlockGrabAction throws one.)
+        _actionRegistry.Add(new BlockGrabAction());      // 46/46 — Shift+LMB on terrain → drag-rip → orb → throw
+        _actionRegistry.Add(new GrabAction());           // 48/48 — Shift+LMB hold on a victim → grab → throw
         _actionRegistry.Add(new GrabbedSlash());         // 36/36 — struggle (exempt while grabbed)
         _currentAction = _actionRegistry[0];
 
@@ -403,19 +409,14 @@ public class PlayerCharacter : IHittable
         var input = controller.Current;
         var prev  = controller.GetPrevious(1);
 
-        // Block-picker + planner-mode selection from this player's own input.
-        // Number keys are level-triggered (re-assign harmlessly); P is edge-detected
-        // so a held key toggles once. Formerly interpreted in Game1/Simulation against
-        // global planner statics — now player-local and rollback-deterministic.
+        // Block-picker selection from this player's own input. Number keys are
+        // level-triggered (re-assign harmlessly). Formerly interpreted in
+        // Game1/Simulation against a global static — now player-local and
+        // rollback-deterministic. (The P planner toggle that lived here is gone.)
         if (input.Num1) _activeBlockType = TileType.Stone;
         if (input.Num2) _activeBlockType = TileType.Dirt;
         if (input.Num3) _activeBlockType = TileType.Sand;
         if (input.Num4) _activeBlockType = TileType.Foam;
-        if (input.P && !_wasPDown)
-            _eruptionMode = _eruptionMode == EruptionPlannerMode.PriorityField
-                ? EruptionPlannerMode.MassBall
-                : EruptionPlannerMode.PriorityField;
-        _wasPDown = input.P;
 
         _abilities.JumpJustPressed  = input.Space && !prev.Space;
         _abilities.UpJustPressed    = input.Up    && !prev.Up;
@@ -449,7 +450,6 @@ public class PlayerCharacter : IHittable
             SelfId         = Id,
             HitIds         = HitIds,
             CombatSystem   = CombatSystem,
-            EruptionMode   = _eruptionMode,
             ActiveBlockType = _activeBlockType,
             Intents        = _intents,
             Condition      = _abilities.Condition,
@@ -482,6 +482,7 @@ public class PlayerCharacter : IHittable
         {
             _currentState.Exit(ctx, _abilities, ref _moveVars);
             _currentState = _stateRegistry.First(s => s is FallingState);
+            System.Console.WriteLine($"[move] -> {_currentState.GetType().Name}");
             _currentState.Enter(ctx, _abilities, ref _moveVars);
         }
 
@@ -520,6 +521,7 @@ public class PlayerCharacter : IHittable
         {
             _currentState.Exit(ctx, _abilities, ref _moveVars);
             _currentState = bestChoice;
+            System.Console.WriteLine($"[move] -> {_currentState.GetType().Name}");
             _currentState.Enter(ctx, _abilities, ref _moveVars);
         }
 
@@ -530,6 +532,7 @@ public class PlayerCharacter : IHittable
         {
             _currentAction.Exit(ctx, _abilities, ref _actionVars);
             _currentAction = _actionRegistry.First(a => a is NullAction);
+            System.Console.WriteLine($"[action] -> {_currentAction.GetType().Name}");
             _currentAction.Enter(ctx, _abilities, ref _actionVars);
         }
 
@@ -548,6 +551,7 @@ public class PlayerCharacter : IHittable
         {
             _currentAction.Exit(ctx, _abilities, ref _actionVars);
             _currentAction = bestAction;
+            System.Console.WriteLine($"[action] -> {_currentAction.GetType().Name}");
             _currentAction.Enter(ctx, _abilities, ref _actionVars);
         }
 
@@ -587,6 +591,11 @@ public class PlayerCharacter : IHittable
             Body.AppliedForce += Gravity * (ctx.Modifiers.GravityScale - 1f);
 
         _currentAction.Update(ctx, _abilities, ref _actionVars);
+
+        // Block-economy upkeep, once per frame per player and AFTER the action ran, so a
+        // placement action has had its chance to request charging. Runs unconditionally —
+        // the reservoir has to regenerate whether or not a build action is live.
+        _abilities.Meters.Step(dt);
 
         _historyHead = (_historyHead + 1) % HistorySize;
         _stateHistory[_historyHead] = _currentState;
@@ -639,10 +648,7 @@ public class PlayerCharacter : IHittable
         d.Abilities          = _abilities.Clone();
         d.Parser             = _inputParser.Capture();
         d.Intents            = _intents.Capture();
-        d.Eruption           = EruptionAction.CaptureGesture();
         d.ActiveBlockType    = _activeBlockType;
-        d.EruptionMode       = _eruptionMode;
-        d.WasPDown           = _wasPDown;
         world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
 
@@ -666,11 +672,8 @@ public class PlayerCharacter : IHittable
         _abilities.CopyFrom(s.Abilities);
         _inputParser.Restore(s.Parser);
         _intents.Restore(s.Intents);
-        EruptionAction.RestoreGesture(s.Eruption);
 
         _activeBlockType = s.ActiveBlockType;
-        _eruptionMode    = s.EruptionMode;
-        _wasPDown        = s.WasPDown;
 
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
 
@@ -680,11 +683,6 @@ public class PlayerCharacter : IHittable
         // its contact next Update from the restored pose (see ResetTransient).
         foreach (var st in _stateRegistry) st.ResetTransient();
     }
-
-    // The BlockEruptionAction flyweight in this player's registry — owner of the one
-    // reference-type per-activation buffer (_pen/_samples) that needs a deep copy.
-    private BlockEruptionAction EruptionAction
-        => _actionRegistry.OfType<BlockEruptionAction>().First();
 
     private int[] MapStateRing(MovementState[] ring)
     {

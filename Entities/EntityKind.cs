@@ -15,6 +15,7 @@ public enum EntityKind
     EnergyBall,
     StickyGrenade,
     LobbedArea,
+    MassBall,       // eruption payload — coasting ball of build mass (see MassBall.cs)
     Brute,          // MVP EnemyEntity subtype (see Plans/ENEMY_CAPABILITY_FRAMEWORK.md)
     PracticeBall,   // juggling target — breaks on tile contact, respawns at its spawn point
 

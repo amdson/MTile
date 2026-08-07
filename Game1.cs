@@ -312,6 +312,10 @@ public class Game1 : Game
     private readonly CoastSample[] _lmTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
     private readonly TrajectoryLm _lmProbe = new();
     private int _lmCount;
+    // PROTOTYPE: lattice-search oracle (LatticePlanner), drawn orange next to
+    // the LM probe's lime — freeze mode only.
+    private readonly CoastSample[] _latticeTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
+    private int _latticeCount;
 
     private void ApplyFreezeFrame()
     {
@@ -332,6 +336,15 @@ public class Game1 : Game
             mc.FoldHoverOffset, mc.FoldClimbReachUp,
             new Vector2(0f, Simulation.WorldGravityY), Simulation.FixedDt,
             mc.AmbientHorizon, iterations: 30, _lmTrajectory, out float lmCost);
+
+        // PROTOTYPE: lattice-search oracle from the same pre-step state. A
+        // longer horizon than the ambient reflex (24 ticks) so the discrete
+        // route choices are visible in the overlay.
+        _latticeCount = LatticePlanner.Solve(
+            _sim.Chunks, body.Polygon, body.Position, body.Velocity,
+            _config.FreezeFrameInputX, mc.MaxWalkSpeed, mc.FoldHoverOffset,
+            new Vector2(0f, Simulation.WorldGravityY), Simulation.FixedDt,
+            24, _latticeTrajectory, out float latticeCost);
 
         _sim.Player.CorrectorDebug.CaptureTrajectories = true;
         _sim.Step(new PlayerInput
@@ -484,10 +497,6 @@ public class Game1 : Game
         var viewport = GraphicsDevice.Viewport;
         _screenCenter = new Vector2(viewport.Width / 2f, viewport.Height / 2f);
         var mouseWorldPos = _camera.ScreenToWorld(mouseState.Position.ToVector2(), _screenCenter);
-
-        // Mirror config toggle into the action-side static so BlockEruptionAction.Draw
-        // can consult it without taking GameConfig as a dependency. Debug-draw only.
-        EruptionPlanner.DebugDrawMassBall = _config.DebugDrawMassBall;
 
         float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
 
@@ -772,6 +781,9 @@ public class Game1 : Game
             // TEMP EXPERIMENT: nonlinear trajectory probe (TrajectoryLm, freeze mode only).
             if (_lmCount > 0)
                 _debugOverlay.DrawTrajectory(_lmTrajectory, _lmCount, Color.Lime);
+            // PROTOTYPE: lattice-search oracle path (LatticePlanner).
+            if (_latticeCount > 0)
+                _debugOverlay.DrawTrajectory(_latticeTrajectory, _latticeCount, Color.Orange);
         }
 
         // Enemy health bars in world space, drawn just above each wounded body.

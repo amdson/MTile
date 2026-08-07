@@ -35,14 +35,51 @@ public sealed class HudRenderer
         _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8,  8), Color.White);
         _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, 24), Color.White);
         _spriteBatch.DrawString(_debugFont, $"Anim: {animator.State.Clip}", new Vector2(8, 40), Color.Aqua);
-        _spriteBatch.DrawString(_debugFont,
-            $"Planner: {sim.EruptionMode}  (P to toggle)",
-            new Vector2(8, 56),
-            sim.EruptionMode == EruptionPlannerMode.MassBall ? Color.LightCoral : Color.LightSkyBlue);
-
         DrawBlockPickerHud(sim);
+        DrawBuildMetersHud(sim);
 
         _spriteBatch.End();
+    }
+
+    // Build economy readout, under the block picker. Three stacked bars because the three
+    // pools live on three different time horizons and the player can't reason about any of
+    // them otherwise — a reservoir that drains while you hold a button is invisible
+    // without this. Top to bottom: reservoir, working pool, eruption charge.
+    private void DrawBuildMetersHud(Simulation sim)
+    {
+        var m = sim.Player.Abilities.Meters;
+
+        const int BarW = 126, BarH = 7, Gap = 4;
+        const int RightPadding = 12;
+        int x = _graphicsDevice.Viewport.Width - RightPadding - BarW;
+        int y = 8 + 24 + 18;   // below the picker swatches + their labels
+
+        void Bar(int yy, float frac, Color fill, string label)
+        {
+            _spriteBatch.Draw(_pixel, new Rectangle(x, yy, BarW, BarH), new Color(24, 24, 28));
+            int w = (int)(BarW * MathHelper.Clamp(frac, 0f, 1f));
+            if (w > 0) _spriteBatch.Draw(_pixel, new Rectangle(x, yy, w, BarH), fill);
+            _spriteBatch.Draw(_pixel, new Rectangle(x, yy, BarW, 1), new Color(70, 70, 78));
+            _spriteBatch.Draw(_pixel, new Rectangle(x, yy + BarH - 1, BarW, 1), new Color(70, 70, 78));
+            _spriteBatch.DrawString(_debugFont, label, new Vector2(x - 34, yy - 3), new Color(150, 150, 160));
+        }
+
+        Bar(y,                     m.Build     / BuildMeters.BuildMax, new Color(90, 130, 200),  "res");
+        Bar(y + BarH + Gap,        m.BuildMove / BuildMeters.MoveMax,  new Color(120, 200, 235), "mov");
+
+        // Charge bar is colour-coded by phase, because the timing window is the mechanic:
+        // ramping is neutral, Peak is the sweet spot to release on, Overheld is money
+        // burning. A tick marks the minimum charge a release needs to fire at all.
+        var chargeColor = m.Phase switch
+        {
+            ChargePhase.Peak     => Color.Gold,
+            ChargePhase.Overheld => new Color(215, 85, 45),
+            _                    => new Color(200, 150, 70),
+        };
+        int cy = y + 2 * (BarH + Gap);
+        Bar(cy, m.ChargeFraction, chargeColor, "chg");
+        int tick = x + (int)(BarW * (BuildMeters.EruptMinToFire / BuildMeters.EruptMax));
+        _spriteBatch.Draw(_pixel, new Rectangle(tick, cy - 2, 1, BarH + 4), new Color(230, 230, 235));
     }
 
     // Top-right block-picker indicator: four 24x24 swatches in a row, one per

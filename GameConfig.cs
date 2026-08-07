@@ -63,7 +63,6 @@ public sealed class GameConfig
     // Force fields (hold / grab / throw) — on by default so the otherwise-invisible
     // combat fields read while playtesting (COMBAT_FEEL_PLAN Phases 2/6).
     public bool DebugDrawForceFields       { get; set; } = true;
-    public bool DebugDrawMassBall          { get; set; } = false;
     // Procedural skeleton animation overlay on the primary player (render-only,
     // pull-model). On by default while the rig is being built out.
     public bool DebugDrawSkeleton          { get; set; } = true;

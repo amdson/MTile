@@ -14,9 +14,8 @@ namespace MTile;
 // per-activation state is deliberately NOT here:
 //   • Render-only caches (Trail _trail/_tipTrail, BeamAction._lastBeamDir/_lastBeamReach,
 //     BlockEruptionAction._simResult) — cosmetic, self-heal as play resumes.
-//   • BlockEruptionAction._pen (SmoothPen) + _samples (List<PathSample>) — genuine
-//     accumulating gesture buffers, neither value-copyable nor cheaply re-derivable.
-//     They stay as instance fields and get a deep-copy at snapshot time (goal 6).
+// (BlockEruptionAction used to keep a SmoothPen + List<PathSample> here for exactly this
+// reason; both are gone — its gesture is now the two Vector2s below.)
 //
 // Fields are reused across states where the meaning matches (TimeInState, HitId,
 // IsGrounded, ChargeTime), since actions are mutually exclusive in time.
@@ -31,7 +30,7 @@ public struct ActionVars
                                       // entity (read from CombatSystem.PeekHits), so combo
                                       // openers can gate their follow-up on a hit (Phase 3).
 
-    public Vector2 SlashDir;          // Slash* (incl. GuardRetaliate)
+    public Vector2 AttackDir;          // Slash* (incl. GuardRetaliate)
 
     public Vector2 StabDir;           // Stab / AirSpinStab
     public float   InitialStabAngle;  // Stab
@@ -50,19 +49,32 @@ public struct ActionVars
 
     public Vector2 CursorAtPress;     // LobbedArea
 
+    // BlockGrabAction. OrbHeld splits the two phases: false = pressed on a block and
+    // waiting for the drag that rips it out, true = carrying the orb. OrbBlocks is the
+    // block count harvested at the rip (the thrown eruption's budget before dissipation
+    // eats into it) and OrbType the material the orb is made of.
+    public bool     OrbHeld;
+    public int      OrbBlocks;
+    public TileType OrbType;
+
+    // BlockPaintAction — the mass ball. Seeded at the cursor on RMB down, then
+    // critically-damped toward it each frame, leaking mass into the cell beneath it.
+    // Two plain Vector2s, so the whole painter snapshots as part of the struct copy.
+    public Vector2 BallPos;
+    public Vector2 BallVel;
+    // BlockPaintAction — which half of the plain-RMB gesture this hold is. Latched at the
+    // PRESS (cursor in solid = charge, in open air = paint) rather than re-evaluated per
+    // frame, because the painter fills the cell under its own cursor: a per-frame
+    // "is the cursor in solid" test flips to charging the instant the first tile
+    // finalizes, so a stroke could only ever place one block. See BlockPaintAction.Update.
+    public bool    ChargeGesture;
+
     public bool    GrabThrowing;      // GrabAction — false during the hold phase, true once releasing into the throw
     public Vector2 GrabDir;           // GrabAction — hold focus / throw direction
 }
 
-// Deep-copyable snapshot of BlockEruptionAction's reference-type gesture buffer —
-// the one piece of per-activation action state that can't ride in the flat
-// ActionVars struct (a mutable SmoothPen + a growing List<PathSample>). PathSample
-// is a readonly struct, so the array is a true deep copy. Captured/restored by
-// BlockEruptionAction.CaptureGesture/RestoreGesture and carried in PlayerData.
-public struct EruptionGestureState
-{
-    public bool         HasPen;
-    public Vector2      PenPosition;
-    public Vector2      PenVelocity;
-    public PathSample[] Samples;
-}
+// (EruptionGestureState lived here — a deep-copyable capture of BlockEruptionAction's
+// SmoothPen + List<PathSample>, the last per-activation action state that couldn't ride
+// in the flat struct above. It went away with the one-shot eruption planners: the
+// gesture is now just BallPos/BallVel, and the released ball is a world entity, so
+// there is no reference-type action state left to special-case.)

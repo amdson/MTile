@@ -21,13 +21,13 @@ public sealed class TerrainSnapshot
     public Dictionary<(int gtx, int gty), float> Damage;
     public Dictionary<(int gtx, int gty), float> Foam;
     public Dictionary<(int gtx, int gty), float> Impact;
+    public Dictionary<(int gtx, int gty), float> Mass;
 }
 
-// Flat capture of the TileSproutGraph: every Pending/Growing node's data plus its
-// parent/child edges expressed as cell-coord keys (resolved back to live nodes on
-// restore). Edges are stored explicitly in both directions because a promoted child
-// clears its SproutParents while the parent keeps the forward edge — so neither
-// direction can be inferred from the other.
+// Flat capture of the TileSproutGraph: every Pending/Growing node's data. Sprouts
+// carry no edges — support is re-derived from the grid — so a node is pure value
+// data and restore needs no re-linking pass. Per-face volume geometry is derived
+// from Faces + the cell coords + Age, so none of it is stored either.
 public sealed class SproutGraphData
 {
     public SproutNodeData[] Nodes;
@@ -39,11 +39,7 @@ public struct SproutNodeData
     public int              Tx, Ty, Gtx, Gty;
     public TileType         Type;
     public TileSproutStatus Status;
-    public Vector2          StartCenter;
-    public Vector2          EndCenter;
-    public Vector2          Velocity;
+    public SproutFaces      Faces;
     public float            Lifetime;
     public float            Age;
-    public (int gtx, int gty)[] ParentKeys;   // SproutParents
-    public (int gtx, int gty)[] ChildKeys;     // Children
 }

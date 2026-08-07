@@ -157,11 +157,11 @@ public class RecoveryAction : ActionState
         // dies with its publishing state, so the gap between a hold-slash and its
         // combo follow-up would drop the victim. Recovery is the live state during
         // that gap — while a combo window from a holding slash is open, keep
-        // broadcasting a weaker pull. vars.SlashDir survives from the slash's
+        // broadcasting a weaker pull. vars.AttackDir survives from the slash's
         // activation (RecoveryAction never writes vars), so the field stays aimed.
         if ((ab.Condition.Slash2Ready || ab.Condition.Slash3Ready)
-            && vars.SlashDir != Vector2.Zero)
-            SlashLikeAction.PublishHoldField(ctx, vars.SlashDir,
+            && vars.AttackDir != Vector2.Zero)
+            SlashLikeAction.PublishHoldField(ctx, vars.AttackDir,
                 SlashLikeAction.HoldFieldBaseRadius, strengthScale: 0.6f);
     }
 }
@@ -301,7 +301,7 @@ public abstract class SlashLikeAction : ActionState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState     = 0f;
-        vars.SlashDir        = ComputeSlashDir(ctx, ab);
+        vars.AttackDir        = ComputeSlashDir(ctx, ab);
         vars.HitId           = ctx.HitIds.Next();
         vars.AttackConnected = false;
         _trail.Clear();
@@ -343,7 +343,7 @@ public abstract class SlashLikeAction : ActionState
         float windowEnd   = windowStart + Duration * HurtboxActiveFraction;
         if (vars.TimeInState >= windowStart && vars.TimeInState <= windowEnd && ctx.Hitboxes != null)
         {
-            var apex = ctx.Body.Position + vars.SlashDir * ArcRadius;
+            var apex = ctx.Body.Position + vars.AttackDir * ArcRadius;
             var region = new BoundingBox(
                 apex.X - ArcRadius * 0.5f, apex.Y - ArcRadius * 0.5f,
                 apex.X + ArcRadius * 0.5f, apex.Y + ArcRadius * 0.5f);
@@ -353,13 +353,13 @@ public abstract class SlashLikeAction : ActionState
             // deflect, and the OnHit early-outs read it as the swing direction.
             ctx.Hitboxes.Publish(new Hitbox(
                 region, vars.HitId, SlashDamagePerFrame,
-                vars.SlashDir * KnockbackMagnitude,
+                vars.AttackDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, SlashColor,
                 hitstunSecondsOverride: HitstunSecondsOverride,
                 grabStrengthDamage: GrabStrengthDamage,
                 mode: StrikeSpeed > 0f ? KnockbackMode.Collision : KnockbackMode.Impulse,
-                strikeDir: vars.SlashDir,
-                strikeVelocity: ctx.Body.Velocity + vars.SlashDir * StrikeSpeed,
+                strikeDir: vars.AttackDir,
+                strikeVelocity: ctx.Body.Velocity + vars.AttackDir * StrikeSpeed,
                 strikeMass: SlashStrikeMass,
                 restitution: SlashRestitution,
                 minLaunch: SlashMinLaunch));
@@ -369,7 +369,7 @@ public abstract class SlashLikeAction : ActionState
         // the damage window) so a victim clipped early in the arc is still held
         // through the follow-through. Re-published every frame; see ForceField.
         if (HoldVictims)
-            PublishHoldField(ctx, vars.SlashDir, ArcRadius, strengthScale: 1f);
+            PublishHoldField(ctx, vars.AttackDir, ArcRadius, strengthScale: 1f);
     }
 
     // Shared by the slash Update (full strength) and RecoveryAction's combo-gap
@@ -397,8 +397,8 @@ public abstract class SlashLikeAction : ActionState
         float angle      = halfSweep * (1f - 2f * t) * SweepDirection;
         float cos = MathF.Cos(angle), sin = MathF.Sin(angle);
         Vector2 dir = new Vector2(
-            vars.SlashDir.X * cos - vars.SlashDir.Y * sin,
-            vars.SlashDir.X * sin + vars.SlashDir.Y * cos);
+            vars.AttackDir.X * cos - vars.AttackDir.Y * sin,
+            vars.AttackDir.X * sin + vars.AttackDir.Y * cos);
         return anchor + dir * (ArcRadius * outF);
     }
 
@@ -1076,15 +1076,21 @@ public class GuardAction : ActionState
     {
         if (!ctx.Input.Shift)        return false;
         if (ctx.Input.Left || ctx.Input.Right) return false;  // no activation while pushing L/R
+        if (ctx.Input.RightClick)    return false;            // Shift+RMB is the build gesture
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (ab.Condition.RecoveryActive)       return false;
         return true;
     }
 
+    // Guard yields to Shift+RMB in both directions. Without this, Guard's Passive 40
+    // buries BlockReadyAction (Passive 10) — which is capped low on purpose so an attack
+    // can always cancel a charge — and the eruption gesture could never start. Building
+    // isn't a guard stance, so declining is the honest reading rather than a workaround.
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         if (!ctx.Input.Shift) return false;
         if (ctx.Input.Left || ctx.Input.Right) return false;
+        if (ctx.Input.RightClick) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         return true;
     }
@@ -1291,24 +1297,553 @@ public class PulseAction : ActionState
     }
 }
 
-// ---------- Block Eruption — RMB-in-solid charge + sweep ------------------------
+// ---------- Force Burst — RMB while holding a Ready wind-up ---------------------
 
-// Two-phase move:
-//   BlockReadyAction      — RMB held with cursor INSIDE a solid cell. Accumulates
-//                            charge time; arms the eruption when the cursor leaves
-//                            solid (the "ignition" event).
-//   BlockEruptionAction   — RMB held with cursor OUTSIDE solid AND BlockEruption-
-//                            Armed flag set. Samples a smoothed path of cursor
-//                            positions/velocities. On RMB release, runs the
-//                            EruptionPlanner to spawn N tile sprouts.
+// The "shove" out of a wind-up: hold LMB (→ ReadyAction) and click RMB to detonate a
+// burst in front of the body. Design intent is displacement, not damage —
+// it clears terrain and throws whatever it touches, but barely moves the percent
+// meter, so it reads as a movement/space-making tool rather than a kill move.
+//
+// Two hitboxes per segment, sharing one HitId (same trick as StabAction):
+//   • TilesOnly    — full TileMaxHP per frame, so dirt breaks on a single shell pass.
+//   • EntitiesOnly — tiny percent contribution, big Impulse knockback.
+// One box can't do both: Hitbox.Damage feeds the tile HP pool and the entity percent
+// pool alike, so "breaks blocks but tickles players" needs the split.
+//
+// Priority 30/30 matches the other attacks. Passive 30 clears ReadyAction's Active 10,
+// which is what lets it preempt the wind-up; the precondition below is what keeps it
+// from stealing RMB from the build/eruption gesture (Passive 10) outside a wind-up.
+public class BurstAction : ActionState
+{
+    private const float Duration             = 0.42f;
+    // Fast detonation: the shell sweeps out over ~0.2s, well short of Pulse's 0.4s.
+    private const float HitboxStartTime      = 0.06f;
+    private const float HitboxActiveDuration = 0.22f;
+    // 20 segments at EndRadius keeps the shell gap-free: spacing at r = 6R is
+    // 2π·6R/20 ≈ 1.9R, just under each segment's 2R width.
+    private const int   Segments             = 5;
+    private const float StartDist          = PlayerCharacter.Radius * 1.5f;
+    private const float EndDist            = PlayerCharacter.Radius * 2.5f;
+    private const float SegmentHalfSize      = PlayerCharacter.Radius * 1.0f;
+    // Hard shove — above GroundSlash3's 380 launch, since knockback is the whole point.
+    private const float KnockbackMagnitude   = 700f;
+    // Full tile HP per frame ⇒ dirt (1.0) breaks on one shell contact, stone (2.0)
+    // needs the two frames the shell dwells over a cell.
+    private const float TileDamagePerFrame   = TileDamage.TileMaxHP;
+    // ~30% of a slash's percent contribution: enough to register a hit, not enough
+    // to build a kill. Entities are HitId-deduped, so this lands exactly once.
+    private const float EntityDamage         = 0.15f;
+    // Declared rather than derived: the impulse is huge but the hit is meant to
+    // displace, not to lock the victim down for a follow-up.
+    private const float HitstunSeconds       = 0.20f;
+
+    public override int ActivePriority  => 30;
+    public override int PassivePriority => 30;
+
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
+
+    private static Color BurstColorFor(bool grounded) => grounded ? Color.Orange : Color.MediumTurquoise;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Must be mid-wind-up with LMB still down. PreviousAction(0) is last frame's
+        // settled action, so this needs one frame of Ready first — LMB-then-RMB in
+        // the same frame just fires the wind-up, and the burst lands the frame after.
+        if (ctx.PreviousAction(0) is not ReadyAction) return false;
+        if (!ctx.Input.LeftClick) return false;
+        // RMB press-edge only, so a held right button (drag-build) doesn't re-fire.
+        if (!ctx.Input.RightClick) return false;
+        if (ctx.Controller == null || ctx.Controller.GetPrevious(1).RightClick) return false;
+        if (ctx.Combat?.BlocksAttack == true) return false;
+        return true;
+    }
+
+        private Vector2 ComputeBurstDir(EnvironmentContext ctx, PlayerAbilityState ab)
+        {
+            int facing = ab.Facing == 0 ? 1 : ab.Facing;
+            Vector2 raw = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+            if (raw.X * facing < 0f) raw.X = 0f;
+            if (raw.LengthSquared() < 1e-4f) return new Vector2(facing, 0f);
+            return Vector2.Normalize(raw);
+        }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+        => vars.TimeInState < Duration;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState = 0f;
+        vars.IsGrounded  = ctx.TryGetGround(out _);
+        vars.HitId       = ctx.HitIds.Next();
+        vars.AttackDir   = ComputeBurstDir(ctx, ab); 
+        // Eat the wind-up's press so releasing LMB after the burst can't also
+        // spend the gesture on a slash.
+        ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
+                              ref ab.Condition.RecoveryExpireFrame, 0.30f, ctx.CurrentFrame, ctx.Dt);
+    }
+
+    // Planted stance while the shell goes out — the player is bracing against the
+    // shove, not steering through it.
+    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
+    {
+        m.MaxWalkSpeed   *= 0.3f;
+        m.WalkAccel      *= 0.5f;
+        m.GroundFriction *= 1.5f;
+        m.MaxAirSpeed    *= 0.3f;
+        m.AirDrag        *= 1.5f;
+        m.GravityScale   *= 0.4f;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState += ctx.Dt;
+
+        if (vars.TimeInState < HitboxStartTime ||
+            vars.TimeInState > HitboxStartTime + HitboxActiveDuration ||
+            ctx.Hitboxes == null) return;
+
+        float r = BurstDist(vars.TimeInState);
+        // Anchored to the CURRENT body position, like Pulse — the shell rides with
+        // the caster instead of hanging at the detonation point.
+        var anchor  = ctx.Body.Position + PlayerCharacter.Radius * vars.AttackDir;
+        var bodyVel = ctx.Body.Velocity;
+        var color   = BurstColorFor(vars.IsGrounded);
+        var tileColor = Color.Lerp(color, Color.Gray, 0.4f);
+        var angleSpread = (float) 0.07 * MathHelper.TwoPi; 
+        var anchorTheta = MathF.Atan2(vars.AttackDir.Y, vars.AttackDir.X);
+
+        for (int i = 0; i < Segments; i++)
+        {
+            float angle = i * 2 * angleSpread / Segments - angleSpread + anchorTheta;
+            var dir    = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+            var center = anchor + dir * r;
+            var region = new BoundingBox(
+                center.X - SegmentHalfSize, center.Y - SegmentHalfSize,
+                center.X + SegmentHalfSize, center.Y + SegmentHalfSize);
+
+            // Terrain channel — breaks blocks, imparts nothing.
+            ctx.Hitboxes.Publish(new Hitbox(
+                region, vars.HitId, TileDamagePerFrame,
+                Vector2.Zero,
+                ctx.Faction, ctx.SelfId, tileColor,
+                HitTargets.TilesOnly));
+
+            // Knockback channel — radial shove plus the caster's momentum. Impulse
+            // mode (not Collision): this is an AoE field, so every target in the
+            // shell should get the same push regardless of closing speed.
+            ctx.Hitboxes.Publish(new Hitbox(
+                region, vars.HitId, EntityDamage,
+                dir * KnockbackMagnitude + bodyVel,
+                ctx.Faction, ctx.SelfId, color,
+                HitTargets.EntitiesOnly,
+                hitstunSecondsOverride: HitstunSeconds));
+        }
+    }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    {
+        if (vars.TimeInState < HitboxStartTime ||
+            vars.TimeInState > HitboxStartTime + HitboxActiveDuration) return;
+        float r = BurstDist(vars.TimeInState);
+        var color = BurstColorFor(vars.IsGrounded);
+        for (int i = 0; i < Segments; i++)
+        {
+            float angle = i * MathHelper.TwoPi / Segments;
+            var pos = body.Position + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * r;
+            sb.Draw(pixel, new Rectangle((int)pos.X - 2, (int)pos.Y - 2, 5, 5), color);
+        }
+    }
+
+    // Shell radius at state-time `t`. Eased out (1-(1-u)²) so the burst leaves the
+    // body fast and decelerates at the rim — reads as a detonation rather than the
+    // linear ring sweep Pulse uses.
+    private static float BurstDist(float t)
+    {
+        float u = MathHelper.Clamp((t - HitboxStartTime) / HitboxActiveDuration, 0f, 1f);
+        float eased = 1f - (1f - u) * (1f - u);
+        return MathHelper.Lerp(StartDist, EndDist, eased);
+    }
+}
+
+
+// ---------- Block Paint — plain RMB: paint outside terrain, charge inside ---------
+
+// Plain RMB does two jobs, and which one depends entirely on where the cursor is:
+//   cursor OUTSIDE solid — paint. A ball trails the cursor with inertia, leaking mass
+//     into the cell underneath; TileMassField's cascade turns it into sprouts. Because
+//     the ball lags and mass spills, a stroke lays down a mound that thickens where you
+//     slow down instead of a 1-cell ribbon.
+//   cursor INSIDE solid  — charge. Nothing is placed; BuildMeters converts reservoir into
+//     eruption charge (see BuildMeters.StepCharging).
+//
+// That in-solid/out-of-solid split is doing more work than it looks. It's what keeps the
+// two gestures from colliding: painting only happens in open space, charging only inside
+// terrain, so they're mutually exclusive by construction rather than by a modifier key.
+// It is ALSO the eruption's discriminator. An eruption arms only on the conjunction of
+//   (a) real charge banked   — you spent time biting into terrain,
+//   (b) a fast solid→air exit — the flick, not a drift,
+//   (c) release soon after   — BlockEruptionAction's short window.
+// Ordinary painting satisfies none of (a): the cursor never went inside anything, so
+// there's no charge and a release is just a release. That's the answer to "don't erupt
+// every time I let go while painting."
+//
+// Critically damped, so the ball never crosses the cursor — overshoot would deposit on
+// the wrong side of the stroke, which reads as the build fighting your aim.
+public class BlockPaintAction : ActionState
+{
+    // Ball lag time constant. Long enough to see the trail bend behind a fast stroke,
+    // short enough that the deposit still lands where you're pointing.
+    private const float SmoothTime    = 0.12f;
+    // Baseline demand, in tiles/sec — what a parked cursor pours into one cell. The METER
+    // is the real limiter for expensive material (stone lands ~4/sec); this caps how fast
+    // cheap material can spray, and is what the painter's feel was tuned against before
+    // costs existed.
+    private const float TilesPerSecond = 12f;
+    // Mass laid down per cell of ball travel, in tile-equivalents. Demand scales with
+    // ball speed so a stroke's line density is speed-invariant — a fast flick spends
+    // more per second instead of smearing mass too thin for any cell to reach the
+    // sprout threshold (1.0). Above threshold so painted cells solidify with spill to
+    // spare.
+    private const float MassPerCell    = 6f;
+    // Build reach (px) from the player center; a sprout/solid neighbour on the target
+    // cell extends it so a build can chain outward. Same numbers the old drag paint
+    // used, carried over from Simulation.HandleBuildInput before it.
+    // Internal because BlockBurstAction needs the same reach to decide whether a held
+    // RMB is actually placing at the cursor — one constant so the two can't disagree.
+    internal const float BuildReach   = 64f;
+    private const float ChainReachMul = 2f;
+
+    public override int ActivePriority  => 8;
+    public override int PassivePriority => 10;
+
+    // Unbounded hold → no meaningful progress fraction, so the clip must loop.
+    public override float AnimationProgress(in ActionVars vars) => -1f;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // Plain RMB, no press-edge requirement: this is the resting state of a held right
+        // button, so it also resumes after an attack interrupted a stroke, and catches the
+        // handoff back from BlockEruptionAction when its arming window lapses unspent.
+        if (!ctx.Input.RightClick || ctx.Input.Shift) return false;
+        return ctx.Combat?.HitstunActive != true;
+    }
+
+    // Alive while RMB is held. Deliberately not gated on Shift: tapping Shift midway
+    // through a stroke shouldn't tear the ball away.
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+        => ctx.Input.RightClick;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState = 0f;
+        vars.BallPos     = ctx.Input.MouseWorldPosition;   // seeded under the cursor
+        vars.BallVel     = Vector2.Zero;
+        // The mode is decided HERE and does not get re-derived per frame: cursor buried at
+        // the press means this hold is a charge, open air means it's a paint stroke.
+        vars.ChargeGesture    = BlockEruptionHelpers.IsCursorInSolid(ctx);
+        vars.InSolidLastFrame = vars.ChargeGesture;
+        ab.Condition.BlockEruptionArmed = false;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState += ctx.Dt;
+        SmoothPen.CriticallyDampedStep(ref vars.BallPos, ref vars.BallVel,
+                                       ctx.Input.MouseWorldPosition, SmoothTime, ctx.Dt);
+
+        if (!vars.ChargeGesture) { Paint(ctx, ab, vars.BallPos, vars.BallVel.Length()); return; }
+
+        bool inSolid = BlockEruptionHelpers.IsCursorInSolid(ctx);
+        if (inSolid)
+        {
+            // Charging. Re-anchor the ignition point every frame, so after the flick it
+            // holds the last solid cell visited.
+            ab.Meters.ChargingRequested = true;
+            var (cgtx, cgty) = BlockEruptionHelpers.CursorCell(ctx);
+            vars.OriginCell = BlockEruptionHelpers.CellCenter(cgtx, cgty);
+        }
+        else if (vars.InSolidLastFrame)
+        {
+            // The cursor crossed solid→air. With enough banked charge that crossing arms
+            // the eruption — the FSM picks the flag up on the next scan and
+            // BlockEruptionAction takes over; a release inside its short arming window
+            // fires, anything later lapses back here. No speed gate: the crossing itself
+            // is the signal, the recency-of-release check lives in BlockEruptionAction.
+            // (An earlier ball-velocity gate made arming nearly impossible by hand — the
+            // damped ball is still slow on the frame a real flick exits the terrain.)
+            //
+            // An undercharged crossing is a fizzle, and rather than leave the button
+            // doing nothing for the rest of the hold, the gesture demotes to painting.
+            // The demotion is deliberately one-way. Charge→paint can't loop back, so the
+            // self-triggering that a per-frame mode test had is impossible, and a stroke
+            // that has become a paint stroke can never reach an eruption.
+            if (ab.Meters.CanFireEruption)
+            {
+                ab.Condition.BlockEruptionArmed = true;
+                ab.Condition.BlockChargeOrigin  = vars.OriginCell;
+            }
+            else vars.ChargeGesture = false;
+        }
+        vars.InSolidLastFrame = inSolid;
+    }
+
+    private static void Paint(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 ballPos, float ballSpeed)
+    {
+        int gtx = (int)MathF.Floor(ballPos.X / Chunk.TileSize);
+        int gty = (int)MathF.Floor(ballPos.Y / Chunk.TileSize);
+        var cell = BlockEruptionHelpers.CellCenter(gtx, gty);
+
+        // Reach is measured to the ball's cell, not the cursor — the ball is what's
+        // actually depositing, so a stroke flicked out of range stops where it lags to.
+        float maxReach = HasSproutNeighbour(ctx.Chunks, gtx, gty)
+            ? BuildReach * ChainReachMul : BuildReach;
+        if (Vector2.DistanceSquared(ctx.Body.Position, cell) > maxReach * maxReach) return;
+
+        // Ask for the demand rate, get back what the meters could actually fund, and emit
+        // exactly that. Paying at emission (rather than on commit) means mass that flows
+        // into unsupported air and dies is still charged for — which is visible to the
+        // player, since nothing appears.
+        float rate = MathF.Max(TilesPerSecond, MassPerCell * ballSpeed / Chunk.TileSize);
+        float want = rate * ctx.Dt;
+        float paid = ab.Meters.SpendForTiles(want, ctx.ActiveBlockType);
+        if (paid <= 0f) return;
+
+        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, paid, ctx.ActiveBlockType);
+    }
+
+    internal static bool HasSproutNeighbour(ChunkMap chunks, int gtx, int gty) =>
+        chunks.Graph.TryGet(gtx,     gty + 1, out _) ||
+        chunks.Graph.TryGet(gtx - 1, gty,     out _) ||
+        chunks.Graph.TryGet(gtx + 1, gty,     out _) ||
+        chunks.Graph.TryGet(gtx,     gty - 1, out _);
+
+    // Ordinary building stays nimble — no stance penalty. The heavy stance belongs to the
+    // charge, which is the committed half of the gesture.
+    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
+    {
+        m.MaxWalkSpeed *= 0.85f;
+        m.MaxAirSpeed  *= 0.85f;
+    }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    {
+        // The ball, plus a bright core, so the lag behind the cursor is legible.
+        sb.Draw(pixel, new Rectangle((int)vars.BallPos.X - 3, (int)vars.BallPos.Y - 3, 7, 7),
+                new Color(230, 200, 140));
+        sb.Draw(pixel, new Rectangle((int)vars.BallPos.X - 1, (int)vars.BallPos.Y - 1, 3, 3),
+                Color.White);
+    }
+}
+
+// ---------- Block Place — Shift+RMB, one deliberate block at a time --------------
+
+// The precise counterpart to the painter: no ball, no cascade, no partial mass. One tile
+// per cell, paid for in full, placed the moment the cursor enters a new cell. Use it to
+// finish an edge the mound rounded off, or to spend the reservoir carefully instead of
+// spraying it.
+//
+// Deliberately bypasses TileMassField entirely. Accumulating fractional mass is what
+// gives the painter its organic shape; for single placement that same behaviour would be
+// a bug (a tile that appears one frame after you clicked, one cell off where you aimed).
+public class BlockPlaceAction : ActionState
+{
+    private const float Reach         = BlockPaintAction.BuildReach;
+    private const float ChainReachMul = 2f;
+
+    public override int ActivePriority  => 8;
+    public override int PassivePriority => 10;
+
+    public override float AnimationProgress(in ActionVars vars) => -1f;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.RightClick || !ctx.Input.Shift) return false;
+        return ctx.Combat?.HitstunActive != true;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+        => ctx.Input.RightClick && ctx.Input.Shift;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState = 0f;
+        // Sentinel so the press frame itself places: no cell has been placed yet.
+        vars.OriginCell = new Vector2(float.NaN, float.NaN);
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState += ctx.Dt;
+
+        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+        var cell = BlockEruptionHelpers.CellCenter(gtx, gty);
+        // One placement per cell entered, so holding the button and dragging lays a
+        // single-tile line rather than re-requesting the same cell every frame.
+        if (cell == vars.OriginCell) return;
+
+        float maxReach = BlockPaintAction.HasSproutNeighbour(ctx.Chunks, gtx, gty)
+            ? Reach * ChainReachMul : Reach;
+        if (Vector2.DistanceSquared(ctx.Body.Position, cell) > maxReach * maxReach) return;
+
+        if (!ab.Meters.CanAfford(ctx.ActiveBlockType)) return;
+        if (ctx.Chunks.TryRequestTile(gtx, gty, ctx.ActiveBlockType) == null) return;
+
+        // Charge only for a placement that actually took.
+        ab.Meters.SpendForTiles(1f, ctx.ActiveBlockType);
+        vars.OriginCell = cell;
+    }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    {
+        // Nothing to draw — the placed tile is the feedback.
+    }
+}
+
+// ---------- Block Burst — LMB while holding RMB over dead air -------------------
+
+// The block-side twin of BurstAction: where that one is LMB-hold → RMB-click and shoves
+// terrain away, this is RMB-hold → LMB-click and conjures terrain out of nothing — a
+// plus-shaped puff of foam (cursor cell + its 4 neighbours) in open air. Foam is the
+// right material for it: half of dirt's HP and it decays on its own, so a free
+// mid-air platform is scaffolding rather than permanent level editing.
+//
+// Two things guard against stealing a press that RMB was already spending:
+//   • Precondition — declines whenever the cursor cell is one the drag-build could
+//     actually paint (in reach, free, touching support). That is exactly ChunkMap's
+//     placement rule, so "not placing a block" is decided by the same predicate
+//     BlockReadyAction paints with rather than by a guess.
+//   • Phase gate — the RMB gesture must currently be BlockPaintAction (plain painting).
+//     A Shift+RMB charge, an armed flag, or a running eruption all decline the click.
+//     That covers the case the predicate can't see: cursor over air, nothing placeable
+//     there, but RMB is mid-eruption.
+//
+// Priority can NOT do that job here: ReadyAction's Passive is 15, and the FSM scan takes
+// the single highest-Passive candidate, so anything below 15 loses the LMB press-edge to
+// the wind-up and never fires. Hence 30/30 (matching BurstAction and the other attacks)
+// plus the explicit gate above.
+public class BlockBurstAction : ActionState
+{
+    private const float Duration      = 0.26f;
+    // Where the foam appears. Beyond BlockReadyAction.BuildReach on purpose — this is
+    // the ranged option, so it stays useful past where drag-building gives out.
+    private const float BurstReach    = Chunk.TileSize * 8f;
+    private const float RecoverySeconds = 0.18f;
+    // Mass dropped on the (force-sprouted) center cell. Four units is exactly one per
+    // neighbour once the center forwards them, i.e. the plus. See Enter.
+    private const float MassInjection = 4f * TileMassField.Threshold;
+
+    public override int ActivePriority  => 30;
+    public override int PassivePriority => 30;
+
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        // The RMB gesture must be plain painting. Anything else — a Shift+RMB charge, an
+        // armed or running eruption — owns the button, so keep hands off.
+        if (ctx.PreviousAction(0) is not BlockPaintAction) return false;
+        if (ab.Condition.BlockEruptionArmed) return false;
+        // RMB held (not the press-edge — that frame belongs to BlockReady) + LMB press-edge.
+        if (!ctx.Input.RightClick || !ctx.Input.LeftClick) return false;
+        if (ctx.Controller == null || ctx.Controller.GetPrevious(1).LeftClick) return false;
+        if (ctx.Combat?.BlocksAttack == true) return false;
+        if (ctx.Combat?.HitstunActive == true) return false;
+        if (ab.Condition.RecoveryActive) return false;
+
+        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+        var center = BlockEruptionHelpers.CellCenter(gtx, gty);
+        float distSq = Vector2.DistanceSquared(ctx.Body.Position, center);
+        if (distSq > BurstReach * BurstReach) return false;
+        // Empty air only — a cursor in solid is the eruption gesture's territory.
+        if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Empty) return false;
+        // If the drag-build could paint here, RMB is placing: leave the press alone.
+        if (distSq <= BlockPaintAction.BuildReach * BlockPaintAction.BuildReach &&
+            ctx.Chunks.CanRequestTile(gtx, gty)) return false;
+        return true;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+        => vars.TimeInState < Duration;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState = 0f;
+        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+        vars.OriginCell = BlockEruptionHelpers.CellCenter(gtx, gty);
+
+        // The center goes in unsupported — ForceSprout is the only path that conjures
+        // matter with nothing to build from, which is the whole point of this move. The
+        // arms are then left to the mass cascade: injecting MassInjection units at the
+        // (now occupied) center makes it forward one unit at a time to each neighbour,
+        // and those commit off the center once they have a full unit. So the plus isn't
+        // hardcoded — it's the shape four units of mass takes when it flows out of a
+        // filled cell. Raise MassInjection and it grows a fatter blob for free.
+        ctx.Chunks.ForceSprout(gtx, gty, TileType.Foam);
+        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, MassInjection, TileType.Foam);
+
+        // Spend the click so releasing LMB afterwards can't also buy a slash.
+        ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
+        ctx.Intents.Consume(IntentType.Click, ctx.CurrentFrame);
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+        => vars.TimeInState += ctx.Dt;
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
+                              ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+    }
+
+    // Light planted stance — a flick of the wrist, not a commitment.
+    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
+    {
+        m.MaxWalkSpeed *= 0.6f;
+        m.WalkAccel    *= 0.7f;
+        m.MaxAirSpeed  *= 0.7f;
+    }
+
+    // A plus of expanding foam-white brackets over the target cells — the placement is
+    // already visible as sprouting tiles, so this just marks the shape that was chosen.
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    {
+        float u = MathHelper.Clamp(vars.TimeInState / Duration, 0f, 1f);
+        var color = Color.Lerp(new Color(235, 245, 255), Color.Transparent, u);
+        float half = Chunk.TileSize * 0.5f * (0.4f + 0.6f * u);
+        Span<Vector2> cells = stackalloc Vector2[5]
+        {
+            vars.OriginCell,
+            vars.OriginCell + new Vector2(0f, -Chunk.TileSize),
+            vars.OriginCell + new Vector2(Chunk.TileSize, 0f),
+            vars.OriginCell + new Vector2(0f, Chunk.TileSize),
+            vars.OriginCell + new Vector2(-Chunk.TileSize, 0f),
+        };
+        foreach (var c in cells)
+            sb.Draw(pixel, new Rectangle((int)(c.X - half), (int)(c.Y - half),
+                                         (int)(half * 2f), (int)(half * 2f)), color);
+    }
+}
+
+// ---------- Block Eruption — the primed window between flick and release ---------
+
+// The third phase of the plain-RMB gesture. BlockPaintAction does the charging (cursor in
+// solid) and the arming (fast exit from solid with charge banked); this state is the brief
+// window that follows, in which releasing the button fires the eruption. Let the window
+// lapse and it hands back to painting with the charge intact but unspent.
 //
 // Priority arrangement:
-//   BlockReady     Active 8,  Passive 10  — under ReadyAction.Active (10), so
-//                                            ReadyAction (Passive 15) can preempt
-//                                            to cancel via attack input.
-//   BlockEruption  Active 9,  Passive 10  — preempts BlockReady (8) when the
-//                                            armed flag flips; same Passive ceiling
-//                                            so ReadyAction can still cancel.
+//   BlockPaint     Active 8,  Passive 10
+//   BlockPlace     Active 8,  Passive 10
+//   BlockEruption  Active 10, Passive 10  — Passive 10 > Paint's Active 8, so it takes
+//     over when the flag flips; Active 10 is NOT less than Paint's Passive 10, so the
+//     painter can't immediately steal it back (preemption needs strictly greater). Both
+//     sit under ReadyAction.Active (10) with Passive ≤ 10 so an attack (Passive 15) can
+//     always cancel out of a build or a charge.
 
 internal static class BlockEruptionHelpers
 {
@@ -1336,255 +1871,26 @@ internal static class BlockEruptionHelpers
             gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
 }
 
-// The RMB ground-editing action. One state owns the whole right-button gesture:
-//   • Drag-to-build — every cell the cursor sweeps through (within reach) is fed to
-//     TryRequestTile, so a held RMB paints tiles. Folded in from what used to be
-//     Simulation.HandleBuildInput; living inside the FSM means building can't run
-//     concurrently with an attack or with the eruption it charges into.
-//   • Charge — accumulates while the cursor CAN'T place (over a wall); decays while it
-//     is actively placing. So painting tiles keeps the charge near zero, while holding
-//     over solid terrain builds it toward an eruption.
-//   • Arm — an in→out sweep (cursor leaving solid) past MinChargeToArm hands off to
-//     BlockEruptionAction, which fires on release.
-public class BlockReadyAction : ActionState
-{
-    // Minimum hold-in-solid time before exiting-out-of-solid arms the eruption.
-    // Below this, BlockReady just keeps painting tiles (the charge stays near zero
-    // while placing), so the player can tap RMB on a block and start building without
-    // committing to an eruption charge.
-    private const float MinChargeToArm  = 1.0f;
-    // Saturation point — best release timing for max budget.
-    private const float SaturationTime  = 2.0f;
-    // Past saturation, budget drops by 35% (the "timing penalty"). Sharp transition
-    // at the SaturationTime mark gives the player a clean target.
-    private const float DipFactor       = 0.65f;
-    // Min/Max blocks at the budget endpoints.
-    private const float BudgetMin       = 0f;
-    private const float BudgetMax       = 60f;
-    // Visual ring on the origin cell — radius grows with charge fraction.
-    private const float MaxIndicatorRadius = Chunk.TileSize * 1.8f;
-
-    // Drag-to-build reach (px) from the player center; a sprout/solid neighbour on the
-    // target cell extends it so a build can chain outward. Moved here verbatim from the
-    // old Simulation.HandleBuildInput.
-    private const float BuildReach         = 64f;
-    private const float ChainBuildReachMul = 2f;
-    // The heavy "committed" stance only kicks in once the charge has actually started
-    // building (over a wall). While painting tiles the charge stays below this, so
-    // ordinary drag-building leaves movement unencumbered.
-    private const float StanceChargeFloor  = 0.15f;
-
-    // The charge-up pose tracks the CHARGE, not the clock: it holds at full once the charge
-    // saturates, however long the button stays down after that.
-    public override float AnimationProgress(in ActionVars vars) => vars.ChargeTime / SaturationTime;
-
-    public override int ActivePriority  => 8;
-    public override int PassivePriority => 10;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-    {
-        // RMB press-edge anywhere — the charge starts wherever the press
-        // happens. Arming for BlockEruption is decided later by Update when
-        // the cursor sweeps out of a solid cell.
-        if (!ctx.Input.RightClick) return false;
-        var prev = ctx.Controller.GetPrevious(1);
-        return !prev.RightClick;
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        // Alive while RMB held. Cursor position no longer ends the state —
-        // it's checked in Update to arm BlockEruption on the in→out sweep.
-        => ctx.Input.RightClick;
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.ChargeTime = 0f;
-        // Fresh charge starts unarmed — Update sets the flag on the sweep.
-        ab.Condition.BlockEruptionArmed = false;
-        vars.InSolidLastFrame = BlockEruptionHelpers.IsCursorInSolid(ctx);
-        if (vars.InSolidLastFrame)
-        {
-            var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
-            vars.OriginCell = BlockEruptionHelpers.CellCenter(gtx, gty);
-        }
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        // Once the charge passes the arm threshold the player is committed to an
-        // eruption, not painting — so building stops. That keeps the in→out sweep that
-        // arms the eruption from also drag-placing a stray tile at the exit cell (the
-        // bug the old before-the-FSM HandleBuildInput had). Below the threshold, paint
-        // freely.
-        bool committed = vars.ChargeTime >= MinChargeToArm;
-
-        // Drag-to-build: paint tiles along the cursor sweep and learn whether we
-        // actually committed any this frame.
-        bool placedThisFrame = !committed && TryDragPlace(ctx);
-
-        // Charge grows when nothing was placed this frame; decays at the same rate when
-        // we just committed a tile. A held RMB that's actively building stays near zero,
-        // while a held RMB over a wall (no placement possible) accumulates normally.
-        if (placedThisFrame) vars.ChargeTime = MathF.Max(0f, vars.ChargeTime - ctx.Dt);
-        else                 vars.ChargeTime += ctx.Dt;
-
-        bool inSolid = BlockEruptionHelpers.IsCursorInSolid(ctx);
-        if (inSolid)
-        {
-            // Re-anchor origin to the current solid cell. After the cursor
-            // sweeps out, OriginCell retains the last solid cell visited —
-            // that's the ignition point used by BlockEruption.
-            var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
-            vars.OriginCell = BlockEruptionHelpers.CellCenter(gtx, gty);
-        }
-        vars.CursorPosition = ctx.Input.MouseWorldPosition;
-
-        // In→out sweep arms BlockEruption (set BlockEruptionArmed + handoff
-        // fields). The FSM picks up the armed flag on the following frame's
-        // scan; BlockEruption.Enter consumes it.
-        if (vars.InSolidLastFrame && !inSolid && vars.ChargeTime >= MinChargeToArm)
-        {
-            ab.Condition.BlockEruptionArmed = true;
-            ab.Condition.BlockChargeTime   = vars.ChargeTime;
-            ab.Condition.BlockChargeOrigin = vars.OriginCell;
-        }
-        vars.InSolidLastFrame = inSolid;
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        // Arming happens in Update on the in→out sweep. On a natural release
-        // (RMB up) with no pending armed handoff, clear the flag so a stale
-        // arm doesn't leak into a future press. If RMB is still held, we're
-        // being preempted by another action (likely BlockEruption itself);
-        // leave the flag intact so its Enter can consume it.
-        if (!ctx.Input.RightClick)
-            ab.Condition.BlockEruptionArmed = false;
-    }
-
-    // Drag-to-build sweep (folded in from Simulation.HandleBuildInput). While RMB is
-    // held, every cell the cursor passes through (within reach of the player center) is
-    // requested as a tile. Returns true iff at least one tile was actually committed
-    // this frame — the charge logic uses that to decide grow-vs-decay.
-    private static bool TryDragPlace(EnvironmentContext ctx)
-    {
-        var input = ctx.Input;
-        var prev  = ctx.Controller.GetPrevious(1);
-        // On the press-edge frame prev.RightClick is false, so the segment collapses to
-        // the current point (a single cell) rather than sweeping from a stale position.
-        var segStart = prev.RightClick ? prev.MouseWorldPosition : input.MouseWorldPosition;
-        var segEnd   = input.MouseWorldPosition;
-
-        bool placed = false;
-        foreach (var (gtx, gty) in MouseSweep.Cells(segStart, segEnd))
-        {
-            var cellCenter = BlockEruptionHelpers.CellCenter(gtx, gty);
-            float maxReach = HasSproutNeighbour(ctx.Chunks, gtx, gty) ? BuildReach * ChainBuildReachMul : BuildReach;
-            if (Vector2.DistanceSquared(ctx.Body.Position, cellCenter) > maxReach * maxReach)
-                continue;
-            if (ctx.Chunks.TryRequestTile(gtx, gty, ctx.ActiveBlockType) != null)
-                placed = true;
-        }
-        return placed;
-    }
-
-    private static bool HasSproutNeighbour(ChunkMap chunks, int gtx, int gty) =>
-        chunks.Graph.TryGet(gtx,     gty + 1, out _) ||
-        chunks.Graph.TryGet(gtx - 1, gty,     out _) ||
-        chunks.Graph.TryGet(gtx + 1, gty,     out _) ||
-        chunks.Graph.TryGet(gtx,     gty - 1, out _);
-
-    // Heavy stance — same shape as Stab's modifier set, on ground + air. Gated on the
-    // charge actually having started (over a wall): while merely painting tiles the
-    // charge stays below StanceChargeFloor, so ordinary drag-building stays nimble; the
-    // commitment slow only bites once the player is genuinely charging an eruption.
-    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
-    {
-        if (vars.ChargeTime < StanceChargeFloor) return;
-        m.MaxWalkSpeed   *= 0.35f;
-        m.WalkAccel      *= 0.5f;
-        m.GroundFriction *= 1.5f;
-        m.MaxAirSpeed    *= 0.5f;
-        m.AirAccel       *= 0.6f;
-        m.AirDrag        *= 1.3f;
-        m.GravityScale   *= 0.4f;
-    }
-
-    // Visual: an N-segment ring at the origin cell. Radius and color encode
-    // charge progress; at the SaturationTime mark, the ring "snaps" to its peak
-    // (bright gold). Past saturation, the ring shrinks by 35% and tints toward
-    // dim orange-red — the visible cue for "you held too long."
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
-    {
-        const int segments = 16;
-        bool saturated = vars.ChargeTime >= SaturationTime;
-
-        float chargeFrac = saturated ? 1f : (vars.ChargeTime / SaturationTime);
-        float r = MaxIndicatorRadius * chargeFrac * (saturated ? DipFactor : 1f);
-
-        Color color = saturated
-            ? new Color(220, 90, 40)                                       // dimmed orange-red after dip
-            : Color.Lerp(new Color(150, 100, 60), Color.Gold, chargeFrac); // brown → gold ramping
-
-        for (int i = 0; i < segments; i++)
-        {
-            float a = i * MathHelper.TwoPi / segments;
-            var p = vars.CursorPosition + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
-            sb.Draw(pixel, new Rectangle((int)p.X - 1, (int)p.Y - 1, 3, 3), color);
-        }
-    }
-}
 
 public class BlockEruptionAction : ActionState
 {
-    // Mirror BlockReady's budget curve.
-    private const float SaturationTime = 2.0f;
-    private const float DipFactor      = 0.65f;
-    private const float BudgetMin      = 0f;
-    private const float BudgetMax      = 240f;
-    // Trigger-arming window. Once BlockReady arms the eruption (cursor swept
-    // out of solid), the player has this long to release RMB before the
-    // arming auto-cancels. Avoids "I swept past a wall 5 seconds ago and
-    // forgot, then released somewhere weird" surprise fires.
-    private const float ArmingWindow   = 0.6f;
+    // How long after the flick a release still counts as an eruption. Short on purpose:
+    // it IS the "shortly after" half of the discriminator, and it is what sends an unspent
+    // charge back to the painter instead of letting a release five seconds later surprise
+    // the player with an eruption.
+    private const float ArmingWindow   = 0.35f;
 
-    public override int ActivePriority  => 9;
+    // Ball lag while tethered. Same filter BlockPaintAction uses, so the eruption ball
+    // and the paint ball handle identically — the only difference is what happens on
+    // release.
+    private const float SmoothTime     = 0.12f;
+
+    public override int ActivePriority  => 10;
     public override int PassivePriority => 10;
 
-    // Reference-type per-activation buffers. NOT in ActionVars (a value-type struct
-    // copy can't safely capture a growing list / mutable pen). The accumulating
-    // gesture history + smoothing pen are deep-copied at snapshot time (goal 6);
-    // _simResult is a render-only cache. See ActionVars header.
-    private SmoothPen      _pen;
-    private List<PathSample> _samples;
-    private MassBallPlanner.SimulationResult _simResult;
-
-    // ── Snapshot/restore (roadmap goal 4 §F note) ──────────────────────────────
-    // _pen + _samples are the one residual reference-type per-activation buffer that
-    // can't ride in the flat ActionVars struct: a growing gesture history + a mutable
-    // smoothing pen. They get a genuine deep copy here. _simResult is render-only —
-    // excluded (it self-heals on the next Update while the preview is on).
-    public EruptionGestureState CaptureGesture() => new()
-    {
-        HasPen      = _pen != null,
-        PenPosition = _pen?.Position ?? Vector2.Zero,
-        PenVelocity = _pen?.Velocity ?? Vector2.Zero,
-        Samples     = _samples?.ToArray(),
-    };
-
-    public void RestoreGesture(in EruptionGestureState s)
-    {
-        if (s.HasPen)
-        {
-            _pen ??= new SmoothPen(s.PenPosition);
-            _pen.Position = s.PenPosition;
-            _pen.Velocity = s.PenVelocity;
-        }
-        else _pen = null;
-
-        _samples  = s.Samples != null ? new List<PathSample>(s.Samples) : null;
-        _simResult = null;   // render-only cache; rebuilt next Update if preview is on
-    }
+    // No per-activation reference state. The whole gesture is (BallPos, BallVel) in
+    // ActionVars, which snapshots with the struct copy — the PathSample history and the
+    // EruptionGestureState deep-copy that used to live here went away with the planner.
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
         => ctx.Input.RightClick && ab.Condition.BlockEruptionArmed;
@@ -1598,36 +1904,22 @@ public class BlockEruptionAction : ActionState
     {
         // Consume the armed flag + capture the charge/origin handoff.
         ab.Condition.BlockEruptionArmed = false;
-        vars.ChargeTime  = ab.Condition.BlockChargeTime;
         vars.Origin      = ab.Condition.BlockChargeOrigin;
         vars.TimeInState = 0f;
 
-        _pen     = new SmoothPen(ctx.Input.MouseWorldPosition);
-        _samples = new List<PathSample>(64);
-        // Seed the first sample at the eruption origin with zero velocity — that
-        // gives the EruptionPlanner a wide-radius "base" deposit at the ignition
-        // cell, producing the pyramid's wide base.
-        _samples.Add(new PathSample(vars.Origin, Vector2.Zero));
+        // The ball starts at the ignition cell, not the cursor: the charge happened
+        // inside the terrain, and the sweep out of it is what accelerates the ball. So
+        // the tether immediately starts dragging it toward the cursor, and by release it
+        // is moving in the direction the player swept.
+        vars.BallPos = vars.Origin;
+        vars.BallVel = Vector2.Zero;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState += ctx.Dt;
-        _pen.Update(ctx.Input.MouseWorldPosition, ctx.Dt);
-        _samples.Add(new PathSample(_pen.Position, _pen.Velocity));
-
-        // Re-simulate when the preview is on so Draw can render an up-to-date
-        // ball trajectory + landing cells. Skipped when off so we don't burn
-        // cycles every frame on a sim no one is looking at.
-        if (EruptionPlanner.DebugDrawMassBall && ctx.EruptionMode == EruptionPlannerMode.MassBall)
-        {
-            int budget = ComputeBudget(vars.ChargeTime);
-            _simResult = MassBallPlanner.Simulate(ctx.Chunks, vars.Origin, _samples, budget);
-        }
-        else
-        {
-            _simResult = null;
-        }
+        SmoothPen.CriticallyDampedStep(ref vars.BallPos, ref vars.BallVel,
+                                       ctx.Input.MouseWorldPosition, SmoothTime, ctx.Dt);
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -1636,19 +1928,16 @@ public class BlockEruptionAction : ActionState
         // / attack leaves RMB held and silently cancels the eruption.
         if (ctx.Input.RightClick) return;
 
-        int budget = ComputeBudget(vars.ChargeTime);
-        if (budget > 0 && _samples != null && _samples.Count > 0)
-            EruptionPlanner.Plan(ctx.Chunks, vars.Origin, _samples, budget, ctx.EruptionMode, ctx.ActiveBlockType);
-    }
+        // Budget is whatever charge the meters banked, converted at the active material.s
+        // cost — so a full charge is 60 stone or a great deal more foam.
+        float mass = ab.Meters.ConsumeEruptionMass(ctx.ActiveBlockType);
+        if (mass <= 0f || ctx.Spawner == null) return;
 
-    private static int ComputeBudget(float chargeTime)
-    {
-        float raw;
-        if (chargeTime < SaturationTime)
-            raw = MathHelper.Lerp(BudgetMin, BudgetMax, chargeTime / SaturationTime);
-        else
-            raw = BudgetMax * DipFactor;
-        return (int)MathF.Round(raw);
+        // Cut the tether. The ball keeps the velocity the sweep gave it, so the eruption
+        // carries past wherever the cursor happened to be at release — the property the
+        // old planner faked by extrapolating its puller off the end of a recorded path.
+        ctx.Spawner.SpawnEntity(new MassBall(
+            vars.BallPos, vars.BallVel, mass, ctx.ActiveBlockType, ctx.Faction));
     }
 
     // Same heavy stance during sample/sweep — keeps the charge feel continuous.
@@ -1663,69 +1952,16 @@ public class BlockEruptionAction : ActionState
         m.GravityScale   *= 0.4f;
     }
 
-    // Visual: small breadcrumb dots along the sampled path. Players see the path
-    // their pen has traced; on release the eruption fires along it.
+    // Visual: the ignition cell plus the tethered ball, so the player can see the ball
+    // lagging behind the cursor and judge how much velocity the sweep has built. The old
+    // breadcrumb trail and the mass-ball footprint preview are gone with the planner —
+    // the released ball is visible in flight, so it previews itself.
     public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
     {
-        if (_samples == null) return;
-        // Origin marker — bright dot.
         sb.Draw(pixel, new Rectangle((int)vars.Origin.X - 2, (int)vars.Origin.Y - 2, 5, 5), Color.Gold);
-        // Path trail — only the tail end of the gesture is drawn so the
-        // breadcrumb doesn't run all the way back to the origin for long
-        // charges; the planner still receives the full _samples list. Dot
-        // size shrinks monotonically from head (latest) to tail (oldest)
-        // so the gesture direction reads at a glance.
-        const int VisibleTrailSamples = 12;
-        const int HeadHalf = 2;  // newest dot → 5x5
-        const int TailHalf = 0;  // oldest visible dot → 1x1
-        int n = _samples.Count;
-        int start = Math.Max(1, n - VisibleTrailSamples);
-        int span  = n - start;
-        for (int i = start; i < n; i++)
-        {
-            float t = span <= 0 ? 1f : (float)(i - start) / span;
-            var p = _samples[i].Position;
-            int half = (int)MathF.Round(MathHelper.Lerp(TailHalf, HeadHalf, t));
-            int size = half * 2 + 1;
-            sb.Draw(pixel, new Rectangle((int)p.X - half, (int)p.Y - half, size, size),
-                Color.SandyBrown * (0.35f + 0.5f * t));
-        }
-
-        // Mass-ball simulation preview. Renders the predicted ball trajectory as
-        // tiny dim dots and outlines the cells the ball is expected to sprout —
-        // so the player can see *where* their gesture is going to deposit before
-        // they release. Off by default; toggle via game_config.json.
-        if (_simResult == null) return;
-        var traj = _simResult.BallTrajectory;
-        for (int i = 0; i < traj.Count; i++)
-        {
-            var p = traj[i];
-            float t = traj.Count <= 1 ? 1f : (float)i / (traj.Count - 1);
-            sb.Draw(pixel,
-                new Rectangle((int)p.X - 1, (int)p.Y - 1, 2, 2),
-                new Color(220, 180, 80) * (0.35f + 0.4f * t));
-        }
-        // Final ball-rest position — chunky dot at the end of the trajectory.
-        if (traj.Count > 0)
-        {
-            var last = traj[traj.Count - 1];
-            sb.Draw(pixel,
-                new Rectangle((int)last.X - 3, (int)last.Y - 3, 7, 7),
-                new Color(255, 140, 40));
-        }
-        // Predicted sprout cells — translucent outline on each tile so the
-        // player sees the deposit footprint.
-        foreach (var (gtx, gty) in _simResult.SproutCells)
-        {
-            int x = gtx * Chunk.TileSize;
-            int y = gty * Chunk.TileSize;
-            int s = Chunk.TileSize;
-            var c = new Color(180, 120, 60) * 0.45f;
-            sb.Draw(pixel, new Rectangle(x,         y,         s, 1), c);
-            sb.Draw(pixel, new Rectangle(x,         y + s - 1, s, 1), c);
-            sb.Draw(pixel, new Rectangle(x,         y,         1, s), c);
-            sb.Draw(pixel, new Rectangle(x + s - 1, y,         1, s), c);
-        }
+        sb.Draw(pixel, new Rectangle((int)vars.BallPos.X - 4, (int)vars.BallPos.Y - 4, 9, 9),
+                new Color(255, 170, 60));
+        sb.Draw(pixel, new Rectangle((int)vars.BallPos.X - 1, (int)vars.BallPos.Y - 1, 3, 3), Color.White);
     }
 }
 
@@ -2145,7 +2381,7 @@ public class LobbedAreaAction : ActionState
 
         // Pick up the player's active block type for the eruption shape — same
         // material the BlockReady charge would have used.
-        ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(spawnPos, launchVel, budget, ctx.ActiveBlockType, ctx.EruptionMode, ctx.HitIds.Next(), ctx.Faction));
+        ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(spawnPos, launchVel, budget, ctx.ActiveBlockType, ctx.HitIds.Next(), ctx.Faction));
     }
 
     // Ballistic solve: given gravity g (from MovementConfig.Current.Gravity),
@@ -2270,7 +2506,241 @@ public class GrenadeAction : ActionState
     }
 }
 
-// ---------- Grab — Shift + RMB: hold an opponent, then throw ---------------------
+// ---------- Block Grab — Shift + LMB on terrain: rip blocks out, throw them ------
+
+// The mirror of the RMB build/eruption gesture: instead of pushing terrain out of the
+// world, this pulls it in. Shift+LMB press with the cursor on a solid cell within
+// reach, then DRAG — the drag is what rips the blocks free. Cells in a small radius
+// around the PRESS site are destroyed outright (not damaged), and their count becomes
+// an orb carried in the hand, tinted with the material it came from.
+//
+// Two exits from the carry phase:
+//   • Release LMB  → the orb is thrown at the cursor as a LobbedAreaProjectile whose
+//                     budget is whatever blocks are left. It lands, erupts the stolen
+//                     material back into the world, and shoves what's nearby.
+//   • Keep holding → the orb dissipates linearly over DissipateSeconds; the throw
+//                     budget bleeds with it, and at zero the action just ends. So
+//                     carrying terrain has a cost and the grab can't be banked.
+//
+// The thrown payload deliberately reuses LobbedAreaProjectile (the deactivated
+// Shift+RMB ranged eruption) rather than introducing a new projectile: it already
+// carries budget/material/mode, snapshots them for rollback, and does exactly the
+// "erupt on landing + radial shove" this wants. Its EruptionPlannerMode comes from
+// ctx.EruptionMode, so the orb builds with whatever shape the player has selected.
+//
+// Priority 46/46, above Beam/EnergyBall's 40/45 — both also live on Shift+LMB, and
+// this has to win the press frame AND still be holding the button when they'd
+// otherwise fire on release. The cursor-in-solid gate is what keeps the three from
+// fighting: on terrain you grab, off terrain you beam. Nothing preempts the carry
+// (46 Active), which is intentional — the orb is a commitment.
+public class BlockGrabAction : ActionState
+{
+    // Reach from body center, in tiles so it tracks Chunk.TileSize like the rest of
+    // the terrain verbs (BlockReadyAction's BuildReach is the px-authored analogue).
+    // Internal because GrabAction defers to this exact reach when deciding whether a
+    // Shift+LMB press is aimed at terrain — one constant, so the two can't disagree.
+    internal const float GrabReach      = Chunk.TileSize * 6f;
+    // Cursor travel from the press point that counts as "a drag". Under this it's a
+    // click, and the action lapses without taking anything.
+    private const float DragThreshold   = Chunk.TileSize * 0.75f;
+    // How long the press waits for that drag before giving up.
+    private const float GrabWindow      = 0.60f;
+    // Harvest radius around the press site. 1.6 tiles ⇒ the pressed cell plus its
+    // immediate neighbours, ~9 blocks on open ground.
+    private const float GrabRadiusTiles = 1.6f;
+    // Carry budget bleeds to nothing over this long, then the action ends empty.
+    private const float DissipateSeconds = 2.0f;
+    private const float ThrowSpeed      = 620f;
+    private const float RecoverySeconds = 0.20f;
+    // Hand offset for the carried orb, along the aim direction.
+    private const float HandDistance    = PlayerCharacter.Radius * 1.4f;
+    // Orb draw radius at full charge; scales with the blocks still held.
+    private const float OrbMaxRadius    = PlayerCharacter.Radius * 0.9f;
+    // Width of the material tally in RipBlocks. TileType is a contiguous byte enum;
+    // bump this when a value is added there.
+    private const int   TileTypeCount   = 4;
+
+    public override int ActivePriority  => 46;
+    public override int PassivePriority => 46;
+
+    // Only the carry phase has a meaningful arc, and its length is player-controlled,
+    // so decline and let the overlay clip play at its authored rate.
+    public override float AnimationProgress(in ActionVars vars) => -1f;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Input.Shift || !ctx.Input.LeftClick) return false;
+        if (ctx.Controller == null || ctx.Controller.GetPrevious(1).LeftClick) return false;  // press-edge only
+        if (ab.Condition.RecoveryActive) return false;
+        // Terrain-only gesture: the cursor must be ON a block, and within arm's reach.
+        if (!BlockEruptionHelpers.IsCursorInSolid(ctx)) return false;
+        return (ctx.Input.MouseWorldPosition - ctx.Body.Position).LengthSquared() <= GrabReach * GrabReach;
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        // Release always ends the state — Exit decides whether that release is a
+        // throw (orb in hand) or nothing (drag never happened / orb already gone).
+        if (!ctx.Input.LeftClick) return false;
+        if (!vars.OrbHeld) return vars.TimeInState < GrabWindow;   // still waiting for the drag
+        return RemainingBlocks(in vars) > 0;                       // carrying until it bleeds out
+    }
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState   = 0f;
+        vars.ChargeTime    = 0f;
+        vars.OrbHeld       = false;
+        vars.OrbBlocks     = 0;
+        vars.OrbType       = ctx.ActiveBlockType;
+        vars.CursorAtPress = ctx.Input.MouseWorldPosition;
+        vars.IsGrounded    = ctx.TryGetGround(out _);
+        vars.GrabDir       = new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState += ctx.Dt;
+
+        // Live aim, so the orb rides the hand on the cursor side and the throw
+        // direction is already known to Draw (which has no cursor of its own).
+        var aim = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+        if (aim.LengthSquared() > 1e-4f) vars.GrabDir = Vector2.Normalize(aim);
+
+        if (!vars.OrbHeld)
+        {
+            // Waiting for the drag. Note the harvest is centered on CursorAtPress, not
+            // the current cursor — the player marks the site with the press and the
+            // drag is just the commit gesture, so a fast flick can't smear the dig.
+            var travel = ctx.Input.MouseWorldPosition - vars.CursorAtPress;
+            if (travel.LengthSquared() >= DragThreshold * DragThreshold)
+                RipBlocks(ctx, ref vars);
+            return;
+        }
+
+        vars.ChargeTime += ctx.Dt;   // carry clock — drives the dissipation
+    }
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        // A live orb at exit means the player let go: throw it. Fired from Exit (not
+        // Update) for the same reason BlockEruptionAction fires there — the release
+        // that ends the state IS the trigger.
+        int blocks = RemainingBlocks(in vars);
+        if (vars.OrbHeld && blocks > 0 && ctx.Spawner != null)
+        {
+            var toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+            var dir = toCursor.LengthSquared() < 1e-4f
+                ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
+                : Vector2.Normalize(toCursor);
+            var spawnPos = ctx.Body.Position + dir * HandDistance;
+            // Inherit the thrower's velocity so a running throw carries — the orb is a
+            // physical mass leaving the hand, not a fresh muzzle.
+            ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(
+                spawnPos, ctx.Body.Velocity + dir * ThrowSpeed,
+                blocks, vars.OrbType,
+                ctx.HitIds.Next(), ctx.Faction));
+        }
+
+        // Spend the gesture either way, so the release frame can't also route a Click
+        // intent into EnergyBallAction.
+        ctx.Intents.Consume(IntentType.Click, ctx.CurrentFrame);
+        ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
+        vars.OrbHeld = false;
+
+        // Recovery only for a grab that actually took something — a lapsed press
+        // shouldn't cost the player lag.
+        if (vars.OrbBlocks > 0)
+            ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
+                                  ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+    }
+
+    // Carrying terrain is heavy: hauling an orb slows the walk and drags in air. The
+    // pre-rip wait phase leaves movement alone, since nothing's been picked up yet.
+    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
+    {
+        if (!vars.OrbHeld) return;
+        m.MaxWalkSpeed *= 0.75f;
+        m.WalkAccel    *= 0.8f;
+        m.MaxAirSpeed  *= 0.8f;
+        m.AirDrag      *= 1.2f;
+    }
+
+    // Destroy every solid cell within GrabRadiusTiles of the press site and bank the
+    // count. BreakCell (not DamageCell) because a grab takes the whole block — no
+    // partial-HP state is left behind. The dominant material becomes the orb's type,
+    // so a dig through mixed ground throws back whatever it was mostly made of.
+    private static void RipBlocks(EnvironmentContext ctx, ref ActionVars vars)
+    {
+        if (ctx.Chunks == null) return;
+
+        var  site   = vars.CursorAtPress;
+        int  cx     = (int)MathF.Floor(site.X / Chunk.TileSize);
+        int  cy     = (int)MathF.Floor(site.Y / Chunk.TileSize);
+        int  span   = (int)MathF.Ceiling(GrabRadiusTiles);
+        float r2    = GrabRadiusTiles * GrabRadiusTiles;
+
+        int taken = 0;
+        // Tally by material so the orb's color/payload reflects the bulk of the dig.
+        // A fixed array indexed by TileType (a contiguous byte enum) rather than a
+        // Dictionary: no per-frame allocation on the sim path, and the winner scan
+        // below has a fixed iteration order, which a Dictionary wouldn't guarantee.
+        Span<int> counts = stackalloc int[TileTypeCount];
+        for (int dy = -span; dy <= span; dy++)
+        for (int dx = -span; dx <= span; dx++)
+        {
+            if (dx * dx + dy * dy > r2) continue;
+            int gtx = cx + dx, gty = cy + dy;
+            if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
+            var type = ctx.Chunks.GetCellType(gtx, gty);
+            if (!ctx.Chunks.BreakCell(gtx, gty)) continue;
+            counts[(int)type]++;
+            taken++;
+        }
+
+        // Nothing solid left at the site (someone else broke it mid-press) — the grab
+        // lapses rather than handing over an empty orb.
+        if (taken == 0) return;
+
+        var best = vars.OrbType;
+        int bestN = 0;
+        for (int t = 0; t < TileTypeCount; t++)
+            if (counts[t] > bestN) { bestN = counts[t]; best = (TileType)t; }
+
+        vars.OrbType   = best;
+        vars.OrbBlocks = taken;
+        vars.ChargeTime = 0f;
+        vars.OrbHeld   = true;
+    }
+
+    // Blocks still in the orb: the harvest linearly bled down by carry time. This is
+    // both the render size and the throw budget, so what you see is what you throw.
+    private static int RemainingBlocks(in ActionVars vars)
+    {
+        if (!vars.OrbHeld) return 0;
+        float frac = 1f - vars.ChargeTime / DissipateSeconds;
+        if (frac <= 0f) return 0;
+        return (int)MathF.Floor(vars.OrbBlocks * frac);
+    }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    {
+        if (!vars.OrbHeld) return;
+        int blocks = RemainingBlocks(in vars);
+        if (blocks <= 0 || vars.OrbBlocks <= 0) return;
+
+        // GrabDir is last frame's aim (Update tracks the cursor), so the orb sits on
+        // the side the player is about to throw toward.
+        var aim  = vars.GrabDir.LengthSquared() > 1e-6f ? vars.GrabDir : Vector2.UnitX;
+        var hand = body.Position + aim * HandDistance;
+        float r  = OrbMaxRadius * MathF.Sqrt((float)blocks / vars.OrbBlocks);
+        int   d  = (int)MathF.Max(2f, r * 2f);
+        var color = TilePalette.BaseColor(vars.OrbType);
+        sb.Draw(pixel, new Rectangle((int)(hand.X - r), (int)(hand.Y - r), d, d), color);
+    }
+}
+
+// ---------- Grab — Shift + LMB: hold an opponent, then throw ---------------------
 //
 // COMBAT_FEEL_PLAN Phase 6: the grab completes the RPS triangle (grab beats guard,
 // attack beats grab, guard beats attack). It's the Phase 2 hold-field turned up — a
@@ -2315,17 +2785,53 @@ public class GrabAction : ActionState
             : HoldShare * (vars.TimeInState / GrabHoldMaxSeconds);
     private const float ThrowAccel  = 12000f;
 
-    public override int ActivePriority  => 46;   // above LobbedArea(45)/Guard(40), below GuardRetaliate(55)
-    public override int PassivePriority => 46;
+    // 48/48 — above BlockGrabAction (46/46), which shares the Shift+LMB press. The two
+    // deliberately collide: grabbing a body is the more urgent read, so it takes the
+    // press whenever a body is there to take, and falls through to the block grab when
+    // there isn't. Still below GuardRetaliate(55).
+    public override int ActivePriority  => 48;
+    public override int PassivePriority => 48;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        if (!ctx.Input.Shift || !ctx.Input.RightClick) return false;
-        if (ctx.Controller.GetPrevious(1).RightClick) return false;     // press-edge only
+        if (!ctx.Input.Shift || !ctx.Input.LeftClick) return false;
+        if (ctx.Controller.GetPrevious(1).LeftClick) return false;      // press-edge only
         if (ctx.Combat?.BlocksAttack == true) return false;             // not while stunned/grabbed
         if (ctx.Combat?.HitstunActive == true) return false;            // not while in hitstun
         if (ab.Condition.RecoveryActive) return false;
-        return true;
+        // Yield the press to BlockGrabAction ONLY when it could actually use it: the
+        // cursor is on a block inside its reach AND there's nobody to grab. Aim at a
+        // body and the grab wins on priority; aim at open air and the grab still fires
+        // and WHIFFS — which preserves the punish window (the unconditional recovery in
+        // Exit is the whole punish, see the header). Terrain aim is the only thing that
+        // hands the gesture over.
+        if (!AimedAtGrabbableTerrain(ctx)) return true;
+        return HasVictimInRange(ctx, ab);
+    }
+
+    // Cursor over a solid cell within BlockGrabAction's own reach — i.e. that action's
+    // precondition, minus the press-edge. Shares BlockGrabAction.GrabReach so "aimed at
+    // terrain" means the same thing on both sides of the handoff.
+    private static bool AimedAtGrabbableTerrain(EnvironmentContext ctx)
+    {
+        if (!BlockEruptionHelpers.IsCursorInSolid(ctx)) return false;
+        float reach = BlockGrabAction.GrabReach;
+        return (ctx.Input.MouseWorldPosition - ctx.Body.Position).LengthSquared() <= reach * reach;
+    }
+
+    // Any non-self hurtbox inside the region the hold field would cover. Same geometry
+    // as PublishHoldField below (focus in front along the aim, Range half-size), so the
+    // gate and the field can't disagree about who is grabbable. Hurtboxes for the frame
+    // are already published by the time the action FSM runs (Simulation.Step).
+    private static bool HasVictimInRange(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (ctx.Hurtboxes == null) return false;
+        var focus = ctx.Body.Position + AimDir(ctx, ab) * FocusDist;
+        var region = new BoundingBox(
+            focus.X - Range, focus.Y - Range,
+            focus.X + Range, focus.Y + Range);
+        foreach (var _ in ctx.Hurtboxes.Overlapping(region, exclude: ctx.Faction)) return true;
+        return false;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -2361,7 +2867,7 @@ public class GrabAction : ActionState
         if (!vars.GrabThrowing)
         {
             vars.TimeInState += ctx.Dt;
-            bool holding = ctx.Input.RightClick && vars.TimeInState < GrabHoldMaxSeconds;
+            bool holding = ctx.Input.LeftClick && vars.TimeInState < GrabHoldMaxSeconds;
             if (holding)
             {
                 var focus = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;

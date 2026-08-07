@@ -155,6 +155,13 @@ public static class PhysicsWorld
             // each collision's |vnRel|; the largest one is what callers (e.g.
             // PlayerCharacter.Update) read post-step for crush-damage dispatch.
             body.LastImpulseMagnitude = 0f;
+
+            // Terrain-transparent bodies just integrate (see PhysicsBody.IgnoreTiles).
+            if (body.IgnoreTiles)
+            {
+                body.Position += body.Velocity * dt;
+                continue;
+            }
             // Zero per-contact LastImpulse so accumulation below reflects only this
             // step. Both Maintained (solver-owned) and soft (state-owned) contacts
             // get reset — readers expect "impulse during the most recent StepSwept".

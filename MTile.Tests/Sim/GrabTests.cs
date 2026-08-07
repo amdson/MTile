@@ -8,11 +8,11 @@ namespace MTile.Tests;
 
 // COMBAT_FEEL_PLAN Phase 6 — grab + struggle + throw (the RPS triangle's new corner).
 //
-// Grab is Shift+RMB: a strong short-range hold field that flags the victim
+// Grab is Shift+LMB: a strong short-range hold field that flags the victim
 // GrabbedActive (gating their normal attacks/jump). It ignores guard (fields bypass
 // the parry path). A grabbed victim's one option is the exempt struggle slash, which
 // erodes the grabber's GrabStrength (without stunning them) until the grab drops
-// (grab-break). Releasing RMB flings the victim.
+// (grab-break). Releasing LMB flings the victim.
 public class GrabTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
@@ -27,11 +27,11 @@ public class GrabTests(ITestOutputHelper output)
     private static readonly Vector2 VictimStart   = new(95f, 20f);   // ~25px right, inside grab range
     private static readonly Vector2 MouseRight    = new(220f, 20f);
 
-    // Attacker settles, then holds Shift+RMB (aim right) — press-edge at frame 10 fires
-    // the grab, which then holds while RMB stays down.
+    // Attacker settles, then holds Shift+LMB (aim right) — press-edge at frame 10 fires
+    // the grab, which then holds while LMB stays down.
     private static InputScript GrabHold() => new InputScript()
         .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
-        .Forever(new PlayerInput { Shift = true, RightClick = true, MouseWorldPosition = MouseRight });
+        .Forever(new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight });
 
     private static SimConfigMulti Build(InputScript attacker, InputScript victim) => new SimConfigMulti
     {
@@ -119,10 +119,10 @@ public class GrabTests(ITestOutputHelper output)
     [Fact]
     public void Throw_FlingsVictim()
     {
-        // Hold Shift+RMB through frame 24, then release (keep aiming right) → throw.
+        // Hold Shift+LMB through frame 24, then release (keep aiming right) → throw.
         var attacker = new InputScript()
             .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
-            .For(15, new PlayerInput { Shift = true, RightClick = true, MouseWorldPosition = MouseRight })
+            .For(15, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight })
             .Forever(new PlayerInput { MouseWorldPosition = MouseRight });
 
         float maxVx = 0f;

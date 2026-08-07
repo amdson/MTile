@@ -24,11 +24,9 @@ public class EnvironmentContext
     // spawns. Set by PlayerCharacter.Update from its (sim-shared) allocator. Replaces
     // the old per-class static counters — see HitIdAllocator.
     public HitIdAllocator HitIds;
-    // Player-selected eruption planner mode + block material, driven by this player's
-    // own input (P toggle, 1-4 keys). Read by BlockEruptionAction / LobbedAreaAction
-    // when they fire. Carried here (rather than planner statics) so each player's
-    // selection is independent and rollback-deterministic.
-    public EruptionPlannerMode EruptionMode;
+    // Player-selected block material, driven by this player's own input (1-4 keys).
+    // Read by every action that deposits terrain. Carried here (rather than a static)
+    // so each player's selection is independent and rollback-deterministic.
     public TileType ActiveBlockType;
     public IntentBuffer Intents;      // gesture-parsed action intents (Click, Stab, PressEdge); action FSM reads + consumes
     public ConditionState Condition;  // combat condition flags (Slash2Ready, RecoveryActive, …) — lives on PlayerAbilityState

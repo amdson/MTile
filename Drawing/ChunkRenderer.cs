@@ -45,9 +45,14 @@ public sealed class ChunkRenderer
                 (int)(r.Right - r.Left), (int)(r.Bottom - r.Top)),
                 color);
 
+        // One quad per supporting face, matching the physics volumes exactly: a
+        // sprout with two parents visibly pushes out of both and the quads meet
+        // in the middle of the target cell.
         foreach (var s in chunks.ActiveSprouts)
+        foreach (var face in TileSproutNode.FaceOrder)
         {
-            var c = s.Center;
+            if ((s.Faces & face) == 0) continue;
+            var c = s.VolumeCenter(face);
             const float half = Chunk.TileSize * 0.5f;
             _spriteBatch.Draw(_pixel, new Rectangle(
                 (int)(c.X - half), (int)(c.Y - half),

@@ -1,9 +1,9 @@
 {
-  "Name": "blockready",
-  "Type": "BlockReadyAction",
+  "Name": "blockplace",
+  "Type": "BlockPlaceAction",
   "Skeleton": "biped",
   "Duration": 2,
-  "Loop": false,
+  "Loop": true,
   "Region": "UpperBody",
   "OffRegionWeight": 0.3,
   "Keyframes": [

@@ -34,6 +34,10 @@ public class PlayerAbilityState
     // populated by PlayerCharacter.OnHit, read by jump preconditions etc.
     public CombatState Combat = new();
 
+    // Block-placement economy (reservoir / working pool / eruption charge). Sibling of
+    // Condition; read and spent by the placement actions.
+    public BuildMeters Meters = new();
+
     // Snapshot/restore (roadmap goal 4 §E). Deep-copies the value fields plus the
     // two nested state objects, so the result is a standalone POCO with no aliasing.
     public PlayerAbilityState Clone()
@@ -41,6 +45,7 @@ public class PlayerAbilityState
         var c = (PlayerAbilityState)MemberwiseClone();   // copies value fields
         c.Condition = Condition.Clone();
         c.Combat    = Combat.Clone();
+        c.Meters    = Meters.Clone();
         return c;
     }
 
@@ -61,5 +66,6 @@ public class PlayerAbilityState
         SlashInterrupted = o.SlashInterrupted;
         Condition.CopyFrom(o.Condition);
         Combat.CopyFrom(o.Combat);
+        Meters.CopyFrom(o.Meters);
     }
 }

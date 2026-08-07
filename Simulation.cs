@@ -80,7 +80,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     //   • Snapshotted value stores (EntityData/PlayerData/BodyStateComp) hold the
     //     serializable entity + player state and ARE captured. BodyStateComp and
     //     PlayerData wrap reference state (a body's maintained-contact list; a player's
-    //     history arrays / cloned abilities / gesture samples), so they register
+    //     history arrays / cloned abilities), so they register
     //     deep-clone hooks — a shallow array copy would alias that live state into the
     //     snapshot.
     private void MarkWorldStores()
@@ -143,9 +143,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     public HurtboxWorld Hurtboxes => _hurtboxes;
     public ForceFieldWorld ForceFields => _fields;
     public PlayerInput CurrentInput => _controller.Current;
-    // Primary player's current selections — surfaced for the HUD.
-    public TileType            ActiveBlockType => _player.ActiveBlockType;
-    public EruptionPlannerMode EruptionMode    => _player.EruptionMode;
+    // Primary player's current block selection — surfaced for the HUD.
+    public TileType ActiveBlockType => _player.ActiveBlockType;
 
     // Headless/test constructor: terrain is supplied directly (no file load) and the
     // scene is populated by an optional delegate (spawn entities / platforms via the

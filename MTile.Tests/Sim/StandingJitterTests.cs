@@ -150,7 +150,7 @@ public class StandingJitterTests
                 requested = true;
                 _out.WriteLine($"[frame {f}] requested sprout at ({playerCol},{FloorRow - 1}) → {(requestedSprout != null ? "ok" : "REJECTED")}");
                 if (requestedSprout != null)
-                    _out.WriteLine($"   StartCenter={requestedSprout.StartCenter}, EndCenter={requestedSprout.EndCenter}, Lifetime={requestedSprout.Lifetime}");
+                    _out.WriteLine($"   Faces={requestedSprout.Faces}, CellCenter={requestedSprout.CellCenter}, Lifetime={requestedSprout.Lifetime}");
             }
         });
 

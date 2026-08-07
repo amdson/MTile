@@ -27,7 +27,6 @@ public class ConditionState
     // BlockEruptionAction.Enter on the same/next frame. Not time-expired — relies
     // on the action FSM to pick up the armed flag within one frame and consume it.
     public bool    BlockEruptionArmed;
-    public float   BlockChargeTime;
     public Vector2 BlockChargeOrigin;
 
     public void Tick(int currentFrame)
@@ -64,7 +63,6 @@ public class ConditionState
         RecoveryActive = o.RecoveryActive; RecoveryExpireFrame = o.RecoveryExpireFrame;
         GuardWindow = o.GuardWindow; GuardWindowExpireFrame = o.GuardWindowExpireFrame;
         BlockEruptionArmed = o.BlockEruptionArmed;
-        BlockChargeTime = o.BlockChargeTime;
         BlockChargeOrigin = o.BlockChargeOrigin;
     }
 }

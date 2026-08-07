@@ -26,7 +26,6 @@
   "DebugDrawCObstacles":         false,
   "DebugDrawHealthBars":        false,
   "DebugDrawForceFields":       false,
-  "DebugDrawMassBall":          true,
   "MouseTrail": true,
   "DebugDrawPrimitiveDemo": false,
   "DebugDrawDensityDemo": false,
@@ -35,5 +34,5 @@
   "SpawnSecondPlayer": false,
   "SecondPlayerOffsetX": 96,
   "SecondPlayerOffsetY": 0,
-  "TimeScale": 0.6
+  "TimeScale": 1.0
 }

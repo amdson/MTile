@@ -80,8 +80,8 @@ public struct EntityData
     public bool                Exploded;    // StickyGrenade
     public bool                Detonated;   // LobbedArea
     public int                 Budget;      // LobbedArea
-    public TileType            TileType;    // LobbedArea
-    public EruptionPlannerMode Mode;        // LobbedArea
+    public TileType            TileType;    // LobbedArea + MassBall
+    public float               BuildMass;   // MassBall — remaining mass to leak
 }
 
 // Everything a PlayerCharacter needs snapshotted EXCEPT its body pose (BodyStateComp)
@@ -90,7 +90,7 @@ public struct EntityData
 // a fixed order, so an index is stable across snapshot/restore); per-activation data
 // rides in the MovementVars/ActionVars value structs; the helper objects are
 // deep-copied. Because several members are reference types whose state matters
-// (history int[]s, the intent array, the cloned abilities, the gesture samples), the
+// (history int[]s, the intent array, the cloned abilities), the
 // store registers a Cloner (DeepCopy) so capture/restore never alias the live player.
 public struct PlayerData
 {
@@ -112,15 +112,12 @@ public struct PlayerData
     public ActionVars   ActionVars;
 
     // Helper objects (deep-copied — see DeepCopy).
-    public PlayerAbilityState   Abilities;
-    public InputParserState     Parser;    // pure value struct
-    public ActionIntent[]       Intents;
-    public EruptionGestureState Eruption;  // holds a PathSample[]
+    public PlayerAbilityState Abilities;
+    public InputParserState   Parser;    // pure value struct
+    public ActionIntent[]     Intents;
 
-    // Player-local selections.
-    public TileType            ActiveBlockType;
-    public EruptionPlannerMode EruptionMode;
-    public bool                WasPDown;
+    // Player-local selection.
+    public TileType ActiveBlockType;
 
     // Deep-copy the reference members so a captured/restored PlayerData never shares
     // mutable state with the live player or with another (repeated-restore) copy. Value
@@ -133,12 +130,6 @@ public struct PlayerData
         c.ActionHistory = (int[])ActionHistory?.Clone();
         c.Intents       = (ActionIntent[])Intents?.Clone();
         c.Abilities     = Abilities?.Clone();
-        if (Eruption.Samples != null)
-        {
-            var e = Eruption;
-            e.Samples = (PathSample[])Eruption.Samples.Clone();
-            c.Eruption = e;
-        }
         return c;
     }
 }

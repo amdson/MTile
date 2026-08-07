@@ -21,6 +21,11 @@ public class PhysicsBody
     // in 1-2 frames. Applied wherever PhysicsWorld assigns or computes friction.
     public float FrictionScale = 1f;
 
+    // Opt out of terrain collision entirely: StepSwept integrates position and skips
+    // constraints + chunk resolution. Set by MassBall, which deposits terrain as it
+    // flies — give it collision and it walls itself in a few frames after release.
+    public bool IgnoreTiles;
+
     // Largest |vnRel| seen during the most-recent PhysicsWorld.StepSwept — i.e.
     // the magnitude of the velocity change the body was forced to absorb at
     // collision resolution. Reset to 0 at the start of each step; max'd across

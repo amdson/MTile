@@ -23,6 +23,66 @@ public struct ActionIntent
     public bool       Consumed;      // set by Consume(); pruned next frame
 }
 
+/*
+- slightly darken blocks under effect of dragging, with darkness proportional to the strength of the tether (tethers explained later)
+- give blocks weights in descending order of toughness, roughly 
+representing the amount of energy needed to break them (e.g. stone > dirt > sand) 
+- give the joint mass of affected blocks an attachment energy based on their 
+connections to the surrounding blocks. (a simple count of adjacent edges to solid blocks)
+- Hierarchy of connections
+1. Player to GrabBlockGroup
+2. GrabBlockGroup to Blocks 
+2. GrabBlockGroup to World
+3. Blocks to world 
+connections have a break threshold based on the strength of the connection
+connection from player to GrabBlockGroup has limited strength, and pulls with force that increases 
+superlinearly with distance from block group center of mass and player mouse
+if the force exceeds strength the connection should break instantly
+
+GrabBlockGroup should have individual tethers to blocks, each with strength proportional to the time the mouse spent over the block
+while grabbing, weighted by a fast-die-off distance kernel, probably gaussian
+GrabBlockGroup should be modeled as dividing force between each of the blocks inside it and the world
+with the total force equal to that exerted by the player and the force on each block/world proportional to the strength of the tether
+(GrabBlockGroup - block) tether durability/strength should go down with time at a rate proportional to force. on tether breaking the block should be removed from
+the block group
+
+the tether between blockgroup and world should be of fixed strength, determined by the boundary between blocks in the group and the rest of the world. edges with a solid in blockgroup on one side 
+and a solid non in blockgroup on the other side should contribute to tether strength. edges between materials of different types should be maybe 0.2 as strong as same material edges. 
+
+blocks should have a baseline tether to world which should be treated as a viscoelastic glue. the strength of the tether should 
+go down with rate proportional to force exerted on the block, with a small minimum baseline. 
+
+when force exerted by the player exceeds the strength of block - world and blockgroup - world tethers, the grabbed blocks can break and the move can proceed. 
+
+
+the goal here is to allow the player to pick up larger or smaller numbers of blocks to bundle into 
+their grab throw, but at the cost of trickier physics. if the player picks up too many blocks, they should be 
+forced to pull slowly, like someone slowly peeling a sticker off paper, trying their best to avoid tearing the sticker
+if the player picks up way too many, it should be impossible to throw at all. block material, and how blocks are connected to the stage
+should influence the difficulty of picking them up. 
+
+
+
+
+blocks should have different mass costs, proportional to their strength
+- foam should be quite cheap, stone should be expensive enough that buildMoveMeter alone can only support ~4 stone per second
+buildMeter: Storage meter for how much block placement the player can execute. 
+- Regenerates slowly
+buildMoveMeter: Storage meter for block placement moves. 
+- Regenerates quickly by pulling from buildMeter
+- Placing blocks with normal right click should push mass from buildMoveMeter into world at the rate determined 
+by the current mass ball algorithm. 
+- Placing blocks with shift click should place single blocks at a time, consuming mass proportional to their cost
+eruptionMoveMeter
+- Holding right click should charge eruptionMoveMeter, which provides mass for the eruption move mass ball
+- eruptionMoveMeter should get a favorable conversion rate when pulling from buildMeter
+- currently, there's a sweet spot for eruption charging, beyond which the charge quickly resets to a much smaller value
+- this should be continued through the meter mechanism, which should charge linearly with time until reaching a peak, holding for a split second, and then 
+losing capacity. holding right click beyond this point should continue pulling from the buildMeter, but should not increase eruptionMoveMeter charge. 
+- it should be possible for normal block placement to consume from eruption move meter in addition to the normal move meter
+- eruptions should be differentiated from normal mass ball block placement by moderately fast movement from block to air followed shortly after by right click release
+*/
+
 // Frame-scoped ring of recent intents. Lifecycle:
 //   InputParser.Detect issues new intents each frame.
 //   Action preconditions Peek (non-mutating).

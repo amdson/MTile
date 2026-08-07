@@ -26,6 +26,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // TileImpactAccumulator for the design rationale.
     public readonly TileImpactAccumulator Impact = new();
 
+    // Per-cell accumulating build mass + the spill cascade that turns it into sprouts.
+    // Fed live by the RMB paint gesture; see TileMassField.
+    public readonly TileMassField Mass = new();
+
     // Per-cell decay timer for Foam tiles. Registered on Foam-sprout finalize,
     // ticked alongside sprouts, cleared on BreakCell so a foam tile broken
     // early (by damage / overwrite) doesn't fire a second BreakCell later.
@@ -64,6 +68,11 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         t.Type   = type;
         t.Sprout = sprout;
     }
+
+    // Set when a break (or a sprout cancellation) may have stranded Pending
+    // ghosts. Cleared by PruneOrphanedGhosts at the top of the next TickSprouts,
+    // which is the only thing that walks the ghost set.
+    private bool _ghostsDirty;
 
     // Fires when BreakCell actually clears a Solid tile. Arguments are the cell's
     // world-space center and its material type at break time. Subscribers (Game1's
@@ -104,15 +113,20 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 TileWorld.TileShape);
         }
 
+        // A growing sprout emits one full-size volume per supporting face, each
+        // translating out of that parent's cell. Multi-face sprouts yield several
+        // overlapping shapes; collision takes the union, so the overlap is free.
         const float half = Chunk.TileSize * 0.5f;
         foreach (var s in Graph.Growing)
+        foreach (var face in TileSproutNode.FaceOrder)
         {
-            var c = s.Center;
+            if ((s.Faces & face) == 0) continue;
+            var c = s.VolumeCenter(face);
             if (c.X + half <= region.Left || c.X - half >= region.Right) continue;
             if (c.Y + half <= region.Top  || c.Y - half >= region.Bottom) continue;
             yield return new SolidShapeRef(
                 c.X - half, c.Y - half, c.X + half, c.Y + half,
-                c, s.Velocity, s.Polygon);
+                c, s.VolumeVelocity(face), TileWorld.TileShape);
         }
     }
 
@@ -120,11 +134,13 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     {
         if (TileQuery.IsSolidAt(this, worldX, worldY)) return true;
 
-        // Growing sprouts: point-in-AABB against current (lerped) position.
+        // Growing sprouts: point-in-AABB against each face volume's current position.
         const float half = Chunk.TileSize * 0.5f;
         foreach (var s in Graph.Growing)
+        foreach (var face in TileSproutNode.FaceOrder)
         {
-            var c = s.Center;
+            if ((s.Faces & face) == 0) continue;
+            var c = s.VolumeCenter(face);
             if (worldX < c.X - half || worldX > c.X + half) continue;
             if (worldY < c.Y - half || worldY > c.Y + half) continue;
             return true;
@@ -176,62 +192,105 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         return TryRequestTile(gtx, gty) != null;
     }
 
+    // Every Solid 4-neighbour of (gtx, gty), as a face mask. This is the whole
+    // support query — a sprout has no recorded parent, it just asks the grid.
+    private SproutFaces SolidFaces(int gtx, int gty)
+    {
+        var f = SproutFaces.None;
+        if (GetCellState(gtx,     gty + 1) == TileState.Solid) f |= SproutFaces.Below;
+        if (GetCellState(gtx - 1, gty    ) == TileState.Solid) f |= SproutFaces.Left;
+        if (GetCellState(gtx + 1, gty    ) == TileState.Solid) f |= SproutFaces.Right;
+        if (GetCellState(gtx,     gty - 1) == TileState.Solid) f |= SproutFaces.Above;
+        return f;
+    }
+
+    private bool HasSproutNeighbour(int gtx, int gty)
+        => Graph.TryGet(gtx,     gty + 1, out _)
+        || Graph.TryGet(gtx - 1, gty,     out _)
+        || Graph.TryGet(gtx + 1, gty,     out _)
+        || Graph.TryGet(gtx,     gty - 1, out _);
+
     // Request a tile at (gtx, gty). Returns the created node (Pending or Growing)
-    // or null if the cell is already occupied / has no candidate parent.
+    // or null if the cell is already occupied / has nothing to grow from.
     //
-    // Parent priority for the *direction* of growth (solid neighbours only):
-    //   below (gty+1) → grows up
-    //   left  (gtx-1) → grows right
-    //   right (gtx+1) → grows left
-    //   above (gty-1) → grows down
-    //
-    // If no solid neighbour exists but at least one sprout neighbour does
-    // (Pending or Growing), the request becomes Pending and waits for the
-    // first parent to finalize — "first parent completed wins" defines the
-    // growth direction at promotion time.
+    // If any 4-neighbour is Solid the cell starts Growing immediately, on *all*
+    // of its solid faces at once — one volume pushes out of each. Otherwise, if
+    // it touches an existing sprout (Pending or Growing) it becomes a Pending
+    // ghost and waits for a neighbour to solidify. With no neighbour of either
+    // kind there's nothing to build from and the request is rejected.
     public TileSproutNode TryRequestTile(int gtx, int gty, TileType type = TileType.Stone)
     {
         if (GetCellState(gtx, gty) != TileState.Empty) return null;
-        if (Graph.TryGet(gtx, gty, out _)) return null;   // already Pending
+        if (Graph.TryGet(gtx, gty, out _)) return null;   // already requested
 
-        Vector2? solidParentCenter = null;
-        if      (GetCellState(gtx,     gty + 1) == TileState.Solid) solidParentCenter = CellCenter(gtx,     gty + 1);
-        else if (GetCellState(gtx - 1, gty    ) == TileState.Solid) solidParentCenter = CellCenter(gtx - 1, gty    );
-        else if (GetCellState(gtx + 1, gty    ) == TileState.Solid) solidParentCenter = CellCenter(gtx + 1, gty    );
-        else if (GetCellState(gtx,     gty - 1) == TileState.Solid) solidParentCenter = CellCenter(gtx,     gty - 1);
-
+        var faces = SolidFaces(gtx, gty);
         var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
 
-        if (solidParentCenter.HasValue)
+        if (faces != SproutFaces.None)
         {
             var chunk = GetOrCreateChunk(chunkPos);
             var node = Graph.AddGrowing(chunkPos, tx, ty, gtx, gty,
-                solidParentCenter.Value, CellCenter(gtx, gty),
-                MovementConfig.Current.SproutLifetime);
+                faces, MovementConfig.Current.SproutLifetime);
             node.Type = type;
             WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
             return node;
         }
 
-        // No solid parent — fall through to sprout neighbours (Pending or Growing).
-        var sproutParents = new List<TileSproutNode>(4);
-        if (Graph.TryGet(gtx,     gty + 1, out var p1)) sproutParents.Add(p1);
-        if (Graph.TryGet(gtx - 1, gty,     out var p2)) sproutParents.Add(p2);
-        if (Graph.TryGet(gtx + 1, gty,     out var p3)) sproutParents.Add(p3);
-        if (Graph.TryGet(gtx,     gty - 1, out var p4)) sproutParents.Add(p4);
-        if (sproutParents.Count == 0) return null;
+        if (!HasSproutNeighbour(gtx, gty)) return null;
 
         // Pending nodes don't touch tile state — they're invisible to the world.
         // Chunk auto-creation deferred to promotion. Type is stamped on the node
         // so it survives the Pending→Growing handoff.
-        var pending = Graph.AddPending(chunkPos, tx, ty, gtx, gty, sproutParents);
+        var pending = Graph.AddPending(chunkPos, tx, ty, gtx, gty);
         pending.Type = type;
         return pending;
     }
 
-    // Advance every Growing sprout. Finalize complete ones (cell flips to Solid,
-    // sprout dropped from the graph) and propagate completion to any Pending
-    // children (first parent to finalize wins → promote child to Growing).
+    // True iff TryRequestTile would create a node here: the cell is free AND has
+    // something (Solid face or existing sprout) to build from. Pure query — it is how
+    // BlockBurstAction tells "RMB is painting this cell" from "RMB is over dead air".
+    public bool CanRequestTile(int gtx, int gty)
+        => GetCellState(gtx, gty) == TileState.Empty
+        && !Graph.TryGet(gtx, gty, out _)
+        && (SolidFaces(gtx, gty) != SproutFaces.None || HasSproutNeighbour(gtx, gty));
+
+    // Sprout a cell with NO support — the one path that skips the "must touch solid or
+    // an existing sprout" rule. Conjuring matter out of nothing is a deliberate ability
+    // (BlockBurstAction), not something the ordinary build gesture may do, so it lives
+    // in its own method rather than as a flag on TryRequestTile.
+    //
+    // Faces: any real solid support is honoured, so a burst that clips terrain grows out
+    // of it normally; with nothing adjacent it grows on all four at once, which reads as
+    // a puff condensing in place. Once it solidifies, ordinary TryRequestTile ghosts
+    // parked on its neighbours promote off it like any other terrain.
+    public TileSproutNode ForceSprout(int gtx, int gty, TileType type)
+    {
+        if (GetCellState(gtx, gty) != TileState.Empty) return null;
+        if (Graph.TryGet(gtx, gty, out _)) return null;
+
+        var faces = SolidFaces(gtx, gty);
+        if (faces == SproutFaces.None)
+            faces = SproutFaces.Below | SproutFaces.Left | SproutFaces.Right | SproutFaces.Above;
+
+        var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
+        var chunk = GetOrCreateChunk(chunkPos);
+        var node = Graph.AddGrowing(chunkPos, tx, ty, gtx, gty,
+            faces, MovementConfig.Current.SproutLifetime);
+        node.Type = type;
+        WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
+        return node;
+    }
+
+    // Advance every Growing sprout, finalize the complete ones (cell flips to
+    // Solid, sprout dropped from the graph), then promote any Pending ghost that
+    // the newly-solid cells now support.
+    //
+    // Finalization and promotion are two separate passes on purpose. Promoting
+    // inside the finalize loop would let a ghost see only the neighbours that
+    // happened to be committed earlier in the batch, so a ghost supported from
+    // two sides would promote with one face and grow asymmetrically. Committing
+    // the whole ring first means every ghost sees the same completed ring, which
+    // is what makes the build expand as a symmetric shell.
     public void TickSprouts(float dt)
     {
         // Foam decay runs unconditionally each frame — its lifecycle is
@@ -239,6 +298,12 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // expires this frame is broken before subsequent passes (impact / damage)
         // try to read it as solid.
         Foam.Tick(dt, _breakCellAction);
+        // Bleed stale partial build mass so the table stays bounded (see TileMassField).
+        Mass.Tick(dt);
+
+        // Deferred cleanup from breaks (including Foam's, above): ghosts that are
+        // no longer connected to anything that could ever support them.
+        PruneOrphanedGhosts();
 
         List<TileSproutNode> finalize = null;
         foreach (var n in Graph.Growing)
@@ -249,6 +314,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         }
         if (finalize == null) return;
 
+        // Pass 1 — commit the completed ring.
+        float overshoot = 0f;
         foreach (var n in finalize)
         {
             if (_dict.TryGetValue(n.ChunkPos, out var chunk))
@@ -259,25 +326,108 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 Foam.Register(n.Gtx, n.Gty);
             Graph.Remove(n);
 
-            // The parent's age crossed Lifetime this tick. Carry its overshoot
-            // (Age − Lifetime ∈ [0, dt)) into the child's starting Age so growth
-            // is continuous across the handoff — the child resumes from where
-            // the parent left off, not from t=0 (which would put the child's
-            // polygon exactly atop the just-Solid parent cell for one frame).
-            float overshoot = MathF.Max(0f, n.Age - n.Lifetime);
+            // Age crossed Lifetime this tick. Carry the largest overshoot
+            // (Age − Lifetime ∈ [0, dt)) into the next ring's starting Age so
+            // growth is continuous across the handoff instead of resuming from
+            // t=0 (which would put the new volumes exactly atop the just-Solid
+            // cells for one frame). Uniform across a ring, which shares a clock.
+            overshoot = MathF.Max(overshoot, n.Age - n.Lifetime);
+        }
 
-            var parentCenter = CellCenter(n.Gtx, n.Gty);   // == n.EndCenter (now committed)
-            foreach (var child in n.Children)
+        // Pass 2 — promote every ghost adjacent to a cell that just solidified.
+        // O(4) per completed sprout, so no scan over the ghost set.
+        foreach (var n in finalize)
+        foreach (var face in TileSproutNode.FaceOrder)
+        {
+            var o = TileSproutNode.FaceOffset(face);
+            int cgtx = n.Gtx + o.X, cgty = n.Gty + o.Y;
+            if (!Graph.TryGet(cgtx, cgty, out var ghost)) continue;
+            if (ghost.Status != TileSproutStatus.Pending) continue;
+
+            if (!Graph.TryPromote(ghost, SolidFaces(cgtx, cgty),
+                                  MovementConfig.Current.SproutLifetime, overshoot))
+                continue;
+
+            // Materialize the chunk + tile state now that the ghost is physical.
+            var ghostChunk = GetOrCreateChunk(ghost.ChunkPos);
+            WriteTile(ghostChunk, ghost.Tx, ghost.Ty, TileState.Sprouting, ghost.Type, ghost);
+        }
+    }
+
+    // A cell was cleared. Any Growing sprout that was pushing out of it loses that
+    // face; a sprout that loses its last face has nothing left to grow from and is
+    // cancelled outright (its cell reverts to Empty). Called from BreakCell, so
+    // it's O(4) per break rather than a sweep — and it has to be immediate,
+    // because physics reads the face volumes every step.
+    private void DropSupportFor(int gtx, int gty)
+    {
+        _ghostsDirty = true;   // a break can orphan ghosts; swept next TickSprouts
+
+        foreach (var face in TileSproutNode.FaceOrder)
+        {
+            var o = TileSproutNode.FaceOffset(face);
+            int ngtx = gtx + o.X, ngty = gty + o.Y;
+            if (!Graph.TryGet(ngtx, ngty, out var n)) continue;
+            if (n.Status != TileSproutStatus.Growing) continue;
+
+            // The face of the neighbour that points back at the broken cell.
+            n.Faces &= ~TileSproutNode.FaceTowards(ngtx, ngty, gtx, gty);
+            if (n.Faces != SproutFaces.None) continue;
+
+            if (_dict.TryGetValue(n.ChunkPos, out var chunk))
+                WriteTile(chunk, n.Tx, n.Ty, TileState.Empty, chunk.Tiles[n.Tx, n.Ty].Type, null);
+            Graph.Remove(n);
+        }
+    }
+
+    // A ghost is only ever going to grow if it can reach something that can
+    // support it — a Solid cell or a Growing sprout — through a chain of ghosts.
+    // Anything else (a ring of ghosts left floating after the terrain under it was
+    // destroyed) can never promote, so it's deleted.
+    //
+    // This is a flood fill over the ghost set, but it only runs when a break or a
+    // sprout cancellation set the dirty flag, so steady-state cost is zero.
+    private void PruneOrphanedGhosts()
+    {
+        if (!_ghostsDirty) return;
+        _ghostsDirty = false;
+        if (Graph.Pending.Count == 0) return;
+
+        var reachable = new HashSet<(int, int)>();
+        var queue = new Queue<TileSproutNode>();
+
+        // Seeds: ghosts directly touching a Solid cell or a Growing sprout.
+        foreach (var g in Graph.Pending)
+        {
+            if (!TouchesSupport(g)) continue;
+            if (reachable.Add((g.Gtx, g.Gty))) queue.Enqueue(g);
+        }
+
+        while (queue.Count > 0)
+        {
+            var g = queue.Dequeue();
+            foreach (var face in TileSproutNode.FaceOrder)
             {
-                if (child.Status != TileSproutStatus.Pending) continue;
-                var childCenter = CellCenter(child.Gtx, child.Gty);
-                if (!Graph.TryPromote(child, parentCenter, childCenter, MovementConfig.Current.SproutLifetime, overshoot))
-                    continue;
-
-                // Materialize the chunk + tile state now that the child is physical.
-                var childChunk = GetOrCreateChunk(child.ChunkPos);
-                WriteTile(childChunk, child.Tx, child.Ty, TileState.Sprouting, child.Type, child);
+                var o = TileSproutNode.FaceOffset(face);
+                if (!Graph.TryGet(g.Gtx + o.X, g.Gty + o.Y, out var nb)) continue;
+                if (nb.Status != TileSproutStatus.Pending) continue;
+                if (reachable.Add((nb.Gtx, nb.Gty))) queue.Enqueue(nb);
             }
+        }
+
+        Graph.PrunePending(reachable);
+
+        bool TouchesSupport(TileSproutNode g)
+        {
+            foreach (var face in TileSproutNode.FaceOrder)
+            {
+                var o = TileSproutNode.FaceOffset(face);
+                int ngtx = g.Gtx + o.X, ngty = g.Gty + o.Y;
+                if (GetCellState(ngtx, ngty) == TileState.Solid) return true;
+                if (Graph.TryGet(ngtx, ngty, out var nb) && nb.Status == TileSproutStatus.Growing)
+                    return true;
+            }
+            return false;
         }
     }
 
@@ -315,6 +465,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // a foam tile broken early would still trigger another BreakCell when
         // its timer expires (no-op on an empty cell, but a needless call).
         if (brokenType == TileType.Foam) Foam.Clear(gtx, gty);
+        // Sprouts growing out of this cell just lost that face (and are cancelled
+        // if it was their last one); ghosts get swept next tick.
+        DropSupportFor(gtx, gty);
         OnTileBroken?.Invoke(CellCenter(gtx, gty), brokenType);
         return true;
     }
@@ -336,6 +489,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Damage      = Damage.Capture(),
         Foam        = Foam.Capture(),
         Impact      = Impact.Capture(),
+        Mass        = Mass.Capture(),
     };
 
     public void RestoreTerrain(TerrainSnapshot s)
@@ -349,6 +503,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Damage.Restore(s.Damage);
         Foam.Restore(s.Foam);
         Impact.Restore(s.Impact);
+        Mass.Restore(s.Mass);
 
         // 3. Re-link tile→sprout refs. Every Growing node's cell is Sprouting at the
         //    restored frame (grid and graph were captured together), so this rebuilds
@@ -356,6 +511,11 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         foreach (var n in Graph.Growing)
             if (_dict.TryGetValue(n.ChunkPos, out var chunk))
                 chunk.Tiles[n.Tx, n.Ty].Sprout = n;
+
+        // Support is derived from the grid, so a restored graph is self-consistent
+        // by construction — but re-arm the sweep rather than trusting that the
+        // captured frame's dirty flag was false.
+        _ghostsDirty = true;
     }
 
     private void RevertTile(Point chunkPos, int tx, int ty, TileState prevState, TileType prevType)
