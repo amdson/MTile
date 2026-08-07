@@ -335,6 +335,52 @@ public class MovementConfig
     public float DoubleJumpInitForce { get; set; } = 0f;
     public float DoubleJumpMaxHoldTime { get; set; } = 0.12f;
 
+    // ── Block peel (Shift+LMB terrain grab rework — see BlockGrabAction) ─────────
+    // OFF restores the legacy one-frame drag-rip. All forces here are in abstract
+    // "peel units": the spring force and the glue values live on the same scale, so
+    // break-out is a direct comparison. Hot-reloads like everything else in this file.
+    public bool  BlockPeelEnabled { get; set; } = true;
+    // Gaussian paint kernel around the cursor: tether deposited per second at the
+    // kernel center; falls off exp(-r²/2σ²). A cell is ADMITTED to the group (up to
+    // PeelMemberBuffer.Capacity) when the kernel weight over it reaches
+    // PeelJoinThreshold — i.e. the threshold sets the admission radius as a fraction
+    // of the kernel peak; skirt grazes deposit nothing on non-members.
+    public float PeelKernelSigma   { get; set; } = 0.7f * Chunk.TileSize;
+    public float PeelTetherRate    { get; set; } = 3.0f;
+    public float PeelJoinThreshold { get; set; } = 0.25f;
+    // Player→group spring: F = Coeff * (|mouse − group COM| / TileSize)^Power.
+    // Exceeding Max snaps the spring and cancels the whole attempt instantly.
+    public float PeelSpringCoeff { get; set; } = 4f;
+    public float PeelSpringPower { get; set; } = 1.5f;
+    public float PeelSpringMax   { get; set; } = 60f;
+    // Wear rates, per (force·second): group→block tethers erode with each block's
+    // share of the spring force (dropping the block from the group at zero), and
+    // the block→world glue erodes the same way — that's the "peeling" itself.
+    public float PeelTetherWear { get; set; } = 0.05f;
+    public float PeelGlueWear   { get; set; } = 0.4f;
+    // Glue never wears below this fraction of its live base value — the residual
+    // stickiness that makes oversized groups permanently unliftable.
+    public float PeelGlueFloor { get; set; } = 0.15f;
+    // Per-block base glue = weight(material) * (Core + Σ outward-edge factors),
+    // where an outward edge is a solid neighbor NOT in the group: 1.0 same
+    // material, PeelCrossMaterialEdge if different. Core is the per-block term
+    // (its own weight/inertia) that exists even for a free-hanging block.
+    public float PeelGlueCore          { get; set; } = 0.5f;
+    public float PeelCrossMaterialEdge { get; set; } = 0.2f;
+    // Material weights, descending by toughness (rough energy-to-break).
+    public float PeelWeightStone { get; set; } = 3.0f;
+    public float PeelWeightDirt  { get; set; } = 1.5f;
+    public float PeelWeightSand  { get; set; } = 0.8f;
+    public float PeelWeightFoam  { get; set; } = 0.4f;
+
+    public float PeelWeight(TileType t) => t switch
+    {
+        TileType.Stone => PeelWeightStone,
+        TileType.Dirt  => PeelWeightDirt,
+        TileType.Sand  => PeelWeightSand,
+        _              => PeelWeightFoam,
+    };
+
     private static MovementConfig _current = new MovementConfig();
     
     [JsonIgnore]
