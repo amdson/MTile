@@ -22,13 +22,6 @@ public class ConditionState
     // Set by Recovery.Enter when the move flagged its tail; unused in V1.
     public bool GuardWindow;     public int GuardWindowExpireFrame;
 
-    // Block eruption hand-off state. Set by BlockReadyAction.Exit when the player
-    // sweeps the cursor out of solid (the natural ignition). Consumed by
-    // BlockEruptionAction.Enter on the same/next frame. Not time-expired — relies
-    // on the action FSM to pick up the armed flag within one frame and consume it.
-    public bool    BlockEruptionArmed;
-    public Vector2 BlockChargeOrigin;
-
     public void Tick(int currentFrame)
     {
         if (Slash2Ready    && currentFrame >= Slash2ExpireFrame)    Slash2Ready    = false;
@@ -62,7 +55,5 @@ public class ConditionState
         AirSlash2Ready = o.AirSlash2Ready; AirSlash2ExpireFrame = o.AirSlash2ExpireFrame;
         RecoveryActive = o.RecoveryActive; RecoveryExpireFrame = o.RecoveryExpireFrame;
         GuardWindow = o.GuardWindow; GuardWindowExpireFrame = o.GuardWindowExpireFrame;
-        BlockEruptionArmed = o.BlockEruptionArmed;
-        BlockChargeOrigin = o.BlockChargeOrigin;
     }
 }

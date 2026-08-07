@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework;
 namespace MTile;
 
 // The eruption payload: a ball of build mass coasting through the world, leaking into
-// TileMassField as it goes. Spawned by BlockEruptionAction the moment RMB is released,
+// TileMassField as it goes. Spawned by BlockPaintAction's eruption upgrade on RMB release,
 // carrying the ball's velocity at that instant — which is what makes the eruption
 // continue past the cursor instead of stopping where you let go.
 //
@@ -22,7 +22,7 @@ namespace MTile;
 public class MassBall : Projectile
 {
     // Backstop only — mass depletion is the real end condition.
-    private const float LifeSeconds = 2.0f;
+    private const float LifeSeconds = 2.5f;
     // Leak per second: proportional to what's left, plus a floor so the tail doesn't
     // dribble forever. Matches the old planner's per-step curve (mass·0.1 + 1 at 60Hz),
     // so a full 240 budget still spends itself over roughly a second.
@@ -30,7 +30,7 @@ public class MassBall : Projectile
     private const float LeakFloor    = 60.0f;
     // Velocity decay per second. The ball coasts a readable distance and settles rather
     // than crossing the map.
-    private const float Drag         = 2.2f;
+    private const float Drag         = 0.3f;
     private const float DoneMass     = 0.01f;
 
     private float    _mass;

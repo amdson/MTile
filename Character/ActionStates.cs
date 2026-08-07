@@ -1484,13 +1484,19 @@ public class BurstAction : ActionState
 // That in-solid/out-of-solid split is doing more work than it looks. It's what keeps the
 // two gestures from colliding: painting only happens in open space, charging only inside
 // terrain, so they're mutually exclusive by construction rather than by a modifier key.
-// It is ALSO the eruption's discriminator. An eruption arms only on the conjunction of
-//   (a) real charge banked   — you spent time biting into terrain,
-//   (b) a fast solid→air exit — the flick, not a drift,
-//   (c) release soon after   — BlockEruptionAction's short window.
-// Ordinary painting satisfies none of (a): the cursor never went inside anything, so
-// there's no charge and a release is just a release. That's the answer to "don't erupt
-// every time I let go while painting."
+//
+// The ERUPTION is a release-time upgrade of this same stroke, not a separate state:
+// when a charged hold leaves the ground it simply starts painting (nothing is lost by
+// waiting — banked charge decays back into paintable budget), and if RMB is released
+// while the ball is moving fast enough, Exit detaches the live paint ball as a
+// free-flying MassBall carrying the banked charge. The discriminator is the conjunction
+//   (a) real charge banked      — you spent time biting into terrain (EruptMinToFire),
+//   (b) a fast release          — the ball is genuinely moving when the button comes up.
+// Ordinary painting satisfies neither by default: no time in solid means no charge, so
+// a release is just a release. That's the answer to "don't erupt every time I let go
+// while painting." (An earlier design put the eruption in its own action armed at the
+// solid→air crossing; it stole the stroke for its arming window and a lapsed window
+// forfeited the mound, which playtested as pure annoyance.)
 //
 // Critically damped, so the ball never crosses the cursor — overshoot would deposit on
 // the wrong side of the stroke, which reads as the build fighting your aim.
@@ -1503,7 +1509,7 @@ public class BlockPaintAction : ActionState
     // is the real limiter for expensive material (stone lands ~4/sec); this caps how fast
     // cheap material can spray, and is what the painter's feel was tuned against before
     // costs existed.
-    private const float TilesPerSecond = 12f;
+    private const float TilesPerSecond = 8f;
     // Mass laid down per cell of ball travel, in tile-equivalents. Demand scales with
     // ball speed so a stroke's line density is speed-invariant — a fast flick spends
     // more per second instead of smearing mass too thin for any cell to reach the
@@ -1517,6 +1523,11 @@ public class BlockPaintAction : ActionState
     // RMB is actually placing at the cursor — one constant so the two can't disagree.
     internal const float BuildReach   = 64f;
     private const float ChainReachMul = 2f;
+    // Minimum ball speed at RELEASE for the stroke to upgrade into an eruption. Measured
+    // on the ball (not the raw cursor) at the moment the button comes up — after even a
+    // short sustained sweep the damped ball genuinely carries this speed, unlike at the
+    // solid→air crossing where it always lags near zero.
+    private const float EruptReleaseSpeed = 220f;
 
     public override int ActivePriority  => 8;
     public override int PassivePriority => 10;
@@ -1527,8 +1538,7 @@ public class BlockPaintAction : ActionState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         // Plain RMB, no press-edge requirement: this is the resting state of a held right
-        // button, so it also resumes after an attack interrupted a stroke, and catches the
-        // handoff back from BlockEruptionAction when its arming window lapses unspent.
+        // button, so it also resumes after an attack interrupted a stroke.
         if (!ctx.Input.RightClick || ctx.Input.Shift) return false;
         return ctx.Combat?.HitstunActive != true;
     }
@@ -1545,9 +1555,7 @@ public class BlockPaintAction : ActionState
         vars.BallVel     = Vector2.Zero;
         // The mode is decided HERE and does not get re-derived per frame: cursor buried at
         // the press means this hold is a charge, open air means it's a paint stroke.
-        vars.ChargeGesture    = BlockEruptionHelpers.IsCursorInSolid(ctx);
-        vars.InSolidLastFrame = vars.ChargeGesture;
-        ab.Condition.BlockEruptionArmed = false;
+        vars.ChargeGesture = BlockEruptionHelpers.IsCursorInSolid(ctx);
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -1558,38 +1566,40 @@ public class BlockPaintAction : ActionState
 
         if (!vars.ChargeGesture) { Paint(ctx, ab, vars.BallPos, vars.BallVel.Length()); return; }
 
-        bool inSolid = BlockEruptionHelpers.IsCursorInSolid(ctx);
-        if (inSolid)
+        if (BlockEruptionHelpers.IsCursorInSolid(ctx))
         {
-            // Charging. Re-anchor the ignition point every frame, so after the flick it
-            // holds the last solid cell visited.
+            // Charging: BuildMeters converts reservoir into eruption charge this frame.
             ab.Meters.ChargingRequested = true;
-            var (cgtx, cgty) = BlockEruptionHelpers.CursorCell(ctx);
-            vars.OriginCell = BlockEruptionHelpers.CellCenter(cgtx, cgty);
         }
-        else if (vars.InSolidLastFrame)
+        else
         {
-            // The cursor crossed solid→air. With enough banked charge that crossing arms
-            // the eruption — the FSM picks the flag up on the next scan and
-            // BlockEruptionAction takes over; a release inside its short arming window
-            // fires, anything later lapses back here. No speed gate: the crossing itself
-            // is the signal, the recency-of-release check lives in BlockEruptionAction.
-            // (An earlier ball-velocity gate made arming nearly impossible by hand — the
-            // damped ball is still slow on the frame a real flick exits the terrain.)
-            //
-            // An undercharged crossing is a fizzle, and rather than leave the button
-            // doing nothing for the rest of the hold, the gesture demotes to painting.
-            // The demotion is deliberately one-way. Charge→paint can't loop back, so the
-            // self-triggering that a per-frame mode test had is impossible, and a stroke
-            // that has become a paint stroke can never reach an eruption.
-            if (ab.Meters.CanFireEruption)
-            {
-                ab.Condition.BlockEruptionArmed = true;
-                ab.Condition.BlockChargeOrigin  = vars.OriginCell;
-            }
-            else vars.ChargeGesture = false;
+            // The cursor left the ground: the same hold simply becomes a paint stroke,
+            // keeping the ball it already has. Whether this stroke ends as an eruption
+            // is decided at RELEASE (see Exit), not here — so nothing is forfeited by
+            // sweeping around first. The demotion is deliberately one-way; a per-frame
+            // mode test would flip back to charging the instant the first painted tile
+            // under the cursor finalizes.
+            vars.ChargeGesture = false;
         }
-        vars.InSolidLastFrame = inSolid;
+    }
+
+    // A natural release (RMB up) upgrades a charged, fast-moving stroke into the
+    // eruption: the live paint ball detaches as a free-flying MassBall carrying the
+    // banked charge. A preempt (attack stealing the slot) leaves RMB held and skips the
+    // upgrade — the stroke resumes via CheckPreConditions and the charge stays banked.
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        if (ctx.Input.RightClick) return;
+        // Released while still buried mid-charge: bank the charge for a later stroke
+        // (it decays in BuildMeters) rather than erupting from inside the ground.
+        if (vars.ChargeGesture) return;
+        if (!ab.Meters.CanFireEruption) return;
+        if (vars.BallVel.Length() < EruptReleaseSpeed) return;
+
+        float mass = ab.Meters.ConsumeEruptionMass(ctx.ActiveBlockType);
+        if (mass <= 0f || ctx.Spawner == null) return;
+        ctx.Spawner.SpawnEntity(new MassBall(
+            vars.BallPos, vars.BallVel, mass, ctx.ActiveBlockType, ctx.Faction));
     }
 
     private static void Paint(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 ballPos, float ballSpeed)
@@ -1744,10 +1754,11 @@ public class BlockBurstAction : ActionState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        // The RMB gesture must be plain painting. Anything else — a Shift+RMB charge, an
-        // armed or running eruption — owns the button, so keep hands off.
+        // The RMB gesture must be plain painting — anything else owns the button, so
+        // keep hands off. (The eruption is a release-time upgrade of the paint stroke
+        // now, so "painting" covers a charged stroke too; that's fine, the burst needs
+        // LMB while the eruption is decided by how RMB comes up.)
         if (ctx.PreviousAction(0) is not BlockPaintAction) return false;
-        if (ab.Condition.BlockEruptionArmed) return false;
         // RMB held (not the press-edge — that frame belongs to BlockReady) + LMB press-edge.
         if (!ctx.Input.RightClick || !ctx.Input.LeftClick) return false;
         if (ctx.Controller == null || ctx.Controller.GetPrevious(1).LeftClick) return false;
@@ -1831,19 +1842,13 @@ public class BlockBurstAction : ActionState
 
 // ---------- Block Eruption — the primed window between flick and release ---------
 
-// The third phase of the plain-RMB gesture. BlockPaintAction does the charging (cursor in
-// solid) and the arming (fast exit from solid with charge banked); this state is the brief
-// window that follows, in which releasing the button fires the eruption. Let the window
-// lapse and it hands back to painting with the charge intact but unspent.
-//
 // Priority arrangement:
 //   BlockPaint     Active 8,  Passive 10
 //   BlockPlace     Active 8,  Passive 10
-//   BlockEruption  Active 10, Passive 10  — Passive 10 > Paint's Active 8, so it takes
-//     over when the flag flips; Active 10 is NOT less than Paint's Passive 10, so the
-//     painter can't immediately steal it back (preemption needs strictly greater). Both
-//     sit under ReadyAction.Active (10) with Passive ≤ 10 so an attack (Passive 15) can
-//     always cancel out of a build or a charge.
+// Both sit with Passive ≤ 10 so an attack (Passive 15) can always cancel out of a build
+// or a charge. (BlockEruptionAction is gone — the eruption is BlockPaintAction's
+// release-time upgrade, see its Exit — so there is no arming window for an attack to
+// race anymore.)
 
 internal static class BlockEruptionHelpers
 {
@@ -1872,98 +1877,11 @@ internal static class BlockEruptionHelpers
 }
 
 
-public class BlockEruptionAction : ActionState
-{
-    // How long after the flick a release still counts as an eruption. Short on purpose:
-    // it IS the "shortly after" half of the discriminator, and it is what sends an unspent
-    // charge back to the painter instead of letting a release five seconds later surprise
-    // the player with an eruption.
-    private const float ArmingWindow   = 0.35f;
-
-    // Ball lag while tethered. Same filter BlockPaintAction uses, so the eruption ball
-    // and the paint ball handle identically — the only difference is what happens on
-    // release.
-    private const float SmoothTime     = 0.12f;
-
-    public override int ActivePriority  => 10;
-    public override int PassivePriority => 10;
-
-    // No per-activation reference state. The whole gesture is (BallPos, BallVel) in
-    // ActionVars, which snapshots with the struct copy — the PathSample history and the
-    // EruptionGestureState deep-copy that used to live here went away with the planner.
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-        => ctx.Input.RightClick && ab.Condition.BlockEruptionArmed;
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => ctx.Input.RightClick && vars.TimeInState < ArmingWindow;
-
-    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / ArmingWindow;
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        // Consume the armed flag + capture the charge/origin handoff.
-        ab.Condition.BlockEruptionArmed = false;
-        vars.Origin      = ab.Condition.BlockChargeOrigin;
-        vars.TimeInState = 0f;
-
-        // The ball starts at the ignition cell, not the cursor: the charge happened
-        // inside the terrain, and the sweep out of it is what accelerates the ball. So
-        // the tether immediately starts dragging it toward the cursor, and by release it
-        // is moving in the direction the player swept.
-        vars.BallPos = vars.Origin;
-        vars.BallVel = Vector2.Zero;
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.TimeInState += ctx.Dt;
-        SmoothPen.CriticallyDampedStep(ref vars.BallPos, ref vars.BallVel,
-                                       ctx.Input.MouseWorldPosition, SmoothTime, ctx.Dt);
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        // Only fire when naturally exited (RMB released). A preempt by ReadyAction
-        // / attack leaves RMB held and silently cancels the eruption.
-        if (ctx.Input.RightClick) return;
-
-        // Budget is whatever charge the meters banked, converted at the active material.s
-        // cost — so a full charge is 60 stone or a great deal more foam.
-        float mass = ab.Meters.ConsumeEruptionMass(ctx.ActiveBlockType);
-        if (mass <= 0f || ctx.Spawner == null) return;
-
-        // Cut the tether. The ball keeps the velocity the sweep gave it, so the eruption
-        // carries past wherever the cursor happened to be at release — the property the
-        // old planner faked by extrapolating its puller off the end of a recorded path.
-        ctx.Spawner.SpawnEntity(new MassBall(
-            vars.BallPos, vars.BallVel, mass, ctx.ActiveBlockType, ctx.Faction));
-    }
-
-    // Same heavy stance during sample/sweep — keeps the charge feel continuous.
-    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
-    {
-        m.MaxWalkSpeed   *= 0.35f;
-        m.WalkAccel      *= 0.5f;
-        m.GroundFriction *= 1.5f;
-        m.MaxAirSpeed    *= 0.5f;
-        m.AirAccel       *= 0.6f;
-        m.AirDrag        *= 1.3f;
-        m.GravityScale   *= 0.4f;
-    }
-
-    // Visual: the ignition cell plus the tethered ball, so the player can see the ball
-    // lagging behind the cursor and judge how much velocity the sweep has built. The old
-    // breadcrumb trail and the mass-ball footprint preview are gone with the planner —
-    // the released ball is visible in flight, so it previews itself.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
-    {
-        sb.Draw(pixel, new Rectangle((int)vars.Origin.X - 2, (int)vars.Origin.Y - 2, 5, 5), Color.Gold);
-        sb.Draw(pixel, new Rectangle((int)vars.BallPos.X - 4, (int)vars.BallPos.Y - 4, 9, 9),
-                new Color(255, 170, 60));
-        sb.Draw(pixel, new Rectangle((int)vars.BallPos.X - 1, (int)vars.BallPos.Y - 1, 3, 3), Color.White);
-    }
-}
+// (BlockEruptionAction lived here — a 0.35 s armed window entered at the solid→air
+// crossing, firing on release. Retired: it stole the stroke from the painter for its
+// window and a lapsed window forfeited the mound. The eruption is now BlockPaintAction's
+// release-time upgrade — banked charge + fast ball at RMB-up detaches the live paint
+// ball as the MassBall.)
 
 // ---------- Ranged: EnergyBall (Shift + LMB tap) --------------------------------
 
@@ -2624,8 +2542,8 @@ public class BlockGrabAction : ActionState
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         // A live orb at exit means the player let go: throw it. Fired from Exit (not
-        // Update) for the same reason BlockEruptionAction fires there — the release
-        // that ends the state IS the trigger.
+        // Update) for the same reason BlockPaintAction's eruption upgrade fires there —
+        // the release that ends the state IS the trigger.
         int blocks = RemainingBlocks(in vars);
         if (vars.OrbHeld && blocks > 0 && ctx.Spawner != null)
         {

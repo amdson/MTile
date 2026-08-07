@@ -61,9 +61,6 @@ forced to pull slowly, like someone slowly peeling a sticker off paper, trying t
 if the player picks up way too many, it should be impossible to throw at all. block material, and how blocks are connected to the stage
 should influence the difficulty of picking them up. 
 
-
-
-
 blocks should have different mass costs, proportional to their strength
 - foam should be quite cheap, stone should be expensive enough that buildMoveMeter alone can only support ~4 stone per second
 buildMeter: Storage meter for how much block placement the player can execute. 

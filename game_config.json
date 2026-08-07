@@ -16,7 +16,7 @@
   "PlayerSpriteBindings":       ["rabbit", "badger"],
   "DebugDrawSkeleton":          false,
   "RunAnimationSolver":         true,
-  "CameraZoom":                 4.0,
+  "CameraZoom":                 1.0,
   "DebugDrawConstraints":       false, 
   "DebugDrawSteeringRamps":     false,
   "DebugDrawGuidedPath":        false,

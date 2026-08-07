@@ -303,9 +303,9 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new StabAction());        // 30/30
         _actionRegistry.Add(new PulseAction());       // 30/30  — Circle gesture
         _actionRegistry.Add(new BurstAction());       // 30/30  — RMB during a Ready wind-up
-        _actionRegistry.Add(new BlockPaintAction());     // 8/10   — plain RMB: paint outside solid, charge inside
+        _actionRegistry.Add(new BlockPaintAction());     // 8/10   — plain RMB: paint outside solid, charge inside;
+                                                         //          fast release with banked charge erupts (Exit)
         _actionRegistry.Add(new BlockPlaceAction());     // 8/10   — Shift+RMB single-block placement
-        _actionRegistry.Add(new BlockEruptionAction());  // 10/10  — primed window after the flick, fires on release
         _actionRegistry.Add(new BlockBurstAction());     // 30/30  — LMB while RMB paints over dead air → foam puff
         _actionRegistry.Add(new GroundSlash2());      // 30/50  — combo (Slash2Ready gated)
         _actionRegistry.Add(new GroundSlash3());      // 30/50  — combo

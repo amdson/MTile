@@ -21,8 +21,8 @@ namespace MTile;
 // IsGrounded, ChargeTime), since actions are mutually exclusive in time.
 public struct ActionVars
 {
-    public float   TimeInState;       // Ready, Slash*, Stab, Pulse, EnergyBall, Grenade, BlockEruption
-    public float   ChargeTime;        // BlockReady, BlockEruption, Beam, LobbedArea
+    public float   TimeInState;       // Ready, Slash*, Stab, Pulse, EnergyBall, Grenade, BlockPaint
+    public float   ChargeTime;        // Beam, LobbedArea
     public bool    IsGrounded;        // Ready, Stab, Pulse
     public int     Facing;            // Ready
     public int     HitId;             // Slash*, Stab, Pulse, Beam
@@ -38,10 +38,8 @@ public struct ActionVars
     public float   TipExt;            // Stab — live tip extension; drives the per-frame
                                       // hitbox lengths (sim) AND the glow tip (render)
 
-    public Vector2 OriginCell;        // BlockReady
+    public Vector2 OriginCell;        // BlockPlace (last placed cell), BlockBurst (target cell)
     public Vector2 CursorPosition;     // BlockReady
-    public bool    InSolidLastFrame;  // BlockReady
-    public Vector2 Origin;            // BlockEruption
 
     public float   FiringTime;        // Beam
     public bool    Firing;            // Beam

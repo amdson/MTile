@@ -7,23 +7,26 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests;
 
-// Block-eruption gesture in the two-state design (BlockPaintAction →
-// BlockEruptionAction). The canonical "works" gesture:
+// The block-eruption gesture, since the release-time-upgrade redesign, is ONE action
+// end to end: BlockPaintAction. The canonical "works" gesture:
 //
-//   1. Press RMB with cursor over a solid cell (the wall the player wants
-//      to push tiles out of).
-//   2. Hold for >= MinChargeToArm seconds while the cursor stays in solid.
-//   3. Sweep cursor out of solid (the "ignition") — BlockPaintAction arms
-//      BlockEruptionArmed; BlockEruption picks up on the same frame.
-//   4. Release RMB — BlockEruption.Exit spawns the MassBall.
+//   1. Press RMB with cursor over a solid cell — the hold latches as a charge;
+//      BuildMeters banks eruption charge while the cursor stays buried.
+//   2. Sweep the cursor out of solid — the SAME stroke simply starts painting.
+//      Nothing arms, nothing is forfeited by waiting.
+//   3. Release RMB while the ball is moving fast — BlockPaintAction.Exit upgrades
+//      the stroke into an eruption and spawns the MassBall.
 //
-// This test scripts that gesture with a 3-second underground charge and a
-// fast sweep up to air, then asserts the FSM transitioned through both
-// action states and the planner actually deposited tile sprouts.
+// This harness drives player.Update directly with no spawner or entity stepping, so
+// the ball itself can't be observed here — EruptionPillarTests runs the full
+// Simulation for that. What this test pins is the FSM shape: the whole gesture stays
+// inside BlockPaintAction (the old BlockEruptionAction stole the stroke for an arming
+// window, which is exactly the bug the redesign removed), the charge banks, and the
+// release ends the action.
 public class BlockEruptionTests(ITestOutputHelper output)
 {
     [Fact]
-    public void ChargeUnderground_SweepUp_Release_DepositsSprouts()
+    public void ChargeUnderground_SweepUp_StaysOnePaintAction()
     {
         // 16-wide column, top 10 rows air, bottom 6 rows solid. Player stands
         // on top of row 10 at y=141 (same rest pose as JumpFromCompressedTests).
@@ -67,10 +70,8 @@ public class BlockEruptionTests(ITestOutputHelper output)
         }
         Assert.Contains("Standing", player.CurrentStateName);
 
-        // 2) Charge: hold RMB with cursor in solid for ~3 seconds (90 frames @
-        //    1/30). BlockReady should activate on the press-edge frame and stay
-        //    current throughout.
-        bool sawBlockReady = false;
+        // 2) Charge: hold RMB with cursor in solid for ~3 seconds. BlockPaint should
+        //    activate on the press frame, stay current, and bank eruption charge.
         for (int f = 0; f < 90; f++)
         {
             ctrl.InjectInput(new PlayerInput
@@ -80,19 +81,15 @@ public class BlockEruptionTests(ITestOutputHelper output)
             });
             player.Update(ctrl, terrain, hb, hu, dt);
             PhysicsWorld.StepSwept(bodies, terrain, dt, g);
-
-            if (player.CurrentActionName == "BlockPaintAction") sawBlockReady = true;
         }
-        output.WriteLine($"After 3s charge: action={player.CurrentActionName}");
-        Assert.True(sawBlockReady, "BlockPaintAction never became current during the underground charge.");
+        output.WriteLine($"After 3s charge: action={player.CurrentActionName}, " +
+                         $"erupt={player.Abilities.Meters.EruptMove:F1}");
         Assert.Equal("BlockPaintAction", player.CurrentActionName);
+        Assert.True(player.Abilities.Meters.CanFireEruption,
+            "an underground hold should bank enough charge to fire.");
 
-        // 3) Sweep up: snap cursor to air. On the next Update, BlockReady's
-        //    CheckConditions returns false → Exit arms BlockEruption →
-        //    BlockEruption.Enter same frame. Hold a few frames so the FSM
-        //    settles into BlockEruption and accumulates at least one path
-        //    sample beyond the seed.
-        bool sawBlockEruption = false;
+        // 3) Sweep up into air, button still held. The stroke must NOT change action —
+        //    it demotes to painting inside the same BlockPaintAction hold.
         for (int f = 0; f < 5; f++)
         {
             ctrl.InjectInput(new PlayerInput
@@ -102,27 +99,18 @@ public class BlockEruptionTests(ITestOutputHelper output)
             });
             player.Update(ctrl, terrain, hb, hu, dt);
             PhysicsWorld.StepSwept(bodies, terrain, dt, g);
-
-            if (player.CurrentActionName == "BlockEruptionAction") sawBlockEruption = true;
+            Assert.Equal("BlockPaintAction", player.CurrentActionName);
         }
-        output.WriteLine($"After sweep: action={player.CurrentActionName}");
-        Assert.True(sawBlockEruption, "BlockEruptionAction never became current after the sweep.");
 
-        // 4) Release ends the gesture. Exit now spawns a MassBall rather than depositing
-        //    sprouts inline, and this harness drives player.Update directly with no
-        //    spawner or entity stepping — so there is nothing to observe here beyond the
-        //    action letting go of the button. The deposit itself (and the coast past the
-        //    cursor that motivates the ball) is covered by
-        //    EruptionPillarTests.ReleasedMidSweep_BallCoastsPastTheCursor, which runs the
-        //    full Simulation. What this test is actually for is the FSM handoff chain
-        //    above: BlockReady charges underground, the in→out sweep arms, and
-        //    BlockEruption takes over.
+        // 4) Release ends the gesture. The eruption upgrade (charge + fast ball at
+        //    release) fires in Exit and needs a spawner to observe — covered by
+        //    EruptionPillarTests against the full Simulation.
         ctrl.InjectInput(new PlayerInput { MouseWorldPosition = cursorInAir });
         player.Update(ctrl, terrain, hb, hu, dt);
         PhysicsWorld.StepSwept(bodies, terrain, dt, g);
 
         output.WriteLine($"After release: action={player.CurrentActionName}");
-        Assert.False(player.CurrentAction is BlockEruptionAction,
-            "Releasing RMB should end the eruption gesture.");
+        Assert.False(player.CurrentAction is BlockPaintAction,
+            "Releasing RMB should end the paint/charge gesture.");
     }
 }
