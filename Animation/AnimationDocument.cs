@@ -124,21 +124,74 @@ public static class AnimationStore
         if (!Directory.Exists(dir)) return list;
         foreach (var path in Directory.GetFiles(dir, "*.json"))
         {
-            try
-            {
-                var doc = JsonSerializer.Deserialize<AnimationDocument>(File.ReadAllText(path), Opts);
-                if (doc == null) continue;
-                doc.Keyframes ??= new List<AnimationKeyframe>();
-                if (doc.Keyframes.Count == 0) continue;   // nothing usable (incl. pre-keyframe-era files)
-                doc.SortKeyframes();
-                doc.FilePath = path;
-                list.Add(doc);
-            }
-            catch { /* skip malformed files rather than crash the editor */ }
+            var doc = ParseClip(File.ReadAllText(path), path);
+            if (doc != null) list.Add(doc);
         }
-        list.Sort((a, b) => string.CompareOrdinal(a.Type + "/" + a.Name, b.Type + "/" + b.Name));
+        Sort(list);
         return list;
     }
+
+    // Directory-less form of LoadAll for hosts that can't enumerate (WASM fetches over
+    // HTTP): `dir` is a relative, forward-slashed title path whose index.json lists the
+    // clip filenames in it. The manifest is generated at build time by MTile.Web's
+    // GenerateClipManifests target. Missing/unreadable manifest → empty list; individual
+    // malformed clips are skipped, same as LoadAll.
+    public static List<AnimationDocument> LoadAllFromManifest(string dir)
+    {
+        var list = new List<AnimationDocument>();
+        dir = dir.TrimEnd('/');
+        string[] names;
+        try
+        {
+            string manifest = ReadTitleText(dir + "/index.json");
+            if (manifest == null) return list;
+            names = JsonSerializer.Deserialize<string[]>(manifest, Opts);
+        }
+        catch { return list; }
+        if (names == null) return list;
+
+        foreach (var name in names)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            string path = dir + "/" + name;
+            string text;
+            try { text = ReadTitleText(path); }
+            catch { continue; }
+            if (text == null) continue;
+            var doc = ParseClip(text, path);
+            if (doc != null) list.Add(doc);
+        }
+        Sort(list);
+        return list;
+    }
+
+    private static string ReadTitleText(string path)
+    {
+        using var stream = TitleContent.TryOpenRead(path);
+        if (stream == null) return null;
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    // Shared per-file parse. Returns null for anything unusable (malformed JSON, no
+    // keyframes) rather than throwing — a bad clip must not crash the editor or game.
+    private static AnimationDocument ParseClip(string json, string path)
+    {
+        try
+        {
+            var doc = JsonSerializer.Deserialize<AnimationDocument>(json, Opts);
+            if (doc == null) return null;
+            doc.Keyframes ??= new List<AnimationKeyframe>();
+            if (doc.Keyframes.Count == 0) return null;   // nothing usable (incl. pre-keyframe-era files)
+            doc.SortKeyframes();
+            doc.FilePath = path;
+            return doc;
+        }
+        catch { return null; }
+    }
+
+    private static void Sort(List<AnimationDocument> list) =>
+        list.Sort((a, b) => string.CompareOrdinal(a.Type + "/" + a.Name, b.Type + "/" + b.Name));
 
     public static void Save(AnimationDocument doc, string dir)
     {

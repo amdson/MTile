@@ -60,6 +60,11 @@
        was tried first but only populated bin/wwwroot, which the dev server doesn't
        serve. The copied files are gitignored. -->
   <Target Name="StageGameAssetsToWwwroot" BeforeTargets="BeforeBuild">
+    <!-- The rig trees are SYNCED, not accreted: WASM loads clips from a generated
+         index.json manifest, and a stale clip left behind from a pre-reorg layout is
+         dead weight the manifest would never reference. Wipe first, then recopy.
+         Levels/ and ReferenceClips/ stay accretive (nothing enumerates them). -->
+    <RemoveDir Directories="$(MSBuildThisFileDirectory)wwwroot\SkeletonStates;$(MSBuildThisFileDirectory)wwwroot\Skeletons" />
     <Copy SourceFiles="..\game_config.json"       DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
     <Copy SourceFiles="..\movement_config.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
     <Copy SourceFiles="..\anim_solver_config.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
@@ -85,6 +90,25 @@
     <Copy SourceFiles="@(_SkeletonAsset)"
           DestinationFiles="@(_SkeletonAsset->'$(MSBuildThisFileDirectory)wwwroot\Skeletons\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
+  </Target>
+
+  <!-- WASM can't enumerate a directory over HTTP, so AnimationStore.LoadAll's
+       Directory.GetFiles has no browser equivalent. Emit a per-rig index.json listing
+       the clip files staged above; AnimationStore.LoadAllFromManifest reads it and
+       fetches each clip by name. Task-batched on %(RecursiveDir) → one manifest per
+       rig subdir, e.g. wwwroot/SkeletonStates/biped/index.json = ["fall.json",...]. -->
+  <Target Name="GenerateClipManifests" AfterTargets="StageGameAssetsToWwwroot">
+    <ItemGroup>
+      <_ClipJson Include="..\SkeletonStates\**\*.json" Exclude="..\SkeletonStates\**\index.json" />
+      <!-- One item per rig subdir (batched on %(RecursiveDir)); the JSON array is built
+           as metadata because WriteLinesToFile's Lines is an item parameter and can't
+           take a literal-concatenated transform directly (MSB4012). -->
+      <_ClipManifest Include="$(MSBuildThisFileDirectory)wwwroot\SkeletonStates\%(_ClipJson.RecursiveDir)index.json">
+        <Json>[@(_ClipJson->'&quot;%(Filename)%(Extension)&quot;', ',')]</Json>
+      </_ClipManifest>
+    </ItemGroup>
+    <WriteLinesToFile File="%(_ClipManifest.Identity)" Lines="%(_ClipManifest.Json)"
+                      Overwrite="true" WriteOnlyWhenDifferent="true" />
   </Target>
 
   <ItemGroup>

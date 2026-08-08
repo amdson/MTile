@@ -408,12 +408,27 @@ public class Game1 : Game
         };
         // Load authored skeleton animations (copied next to the binary). Clips live in
         // one dir per base rig — SkeletonStates/<rigName>/ — so the pool matches the
-        // animator's skeleton (GameConfig.AnimationRig). Empty on platforms without a
-        // readable filesystem (e.g. WASM) → procedural fallback.
+        // animator's skeleton (GameConfig.AnimationRig). There is no procedural
+        // fallback: content is authored-only, so an empty pool is fatal. On WASM the
+        // directory can't be enumerated, so the clip list comes from a build-generated
+        // index.json manifest fetched over HTTP instead.
         var animRig = SkeletonExamples.Load(
             string.IsNullOrEmpty(_config.AnimationRig) ? SkeletonExamples.BipedName : _config.AnimationRig);
-        _skeletonAnims = AnimationStore.LoadAll(
-            Path.Combine(AppContext.BaseDirectory, "SkeletonStates", animRig.Name));
+        if (OperatingSystem.IsBrowser())
+        {
+            string manifestDir = "SkeletonStates/" + animRig.Name;
+            _skeletonAnims = AnimationStore.LoadAllFromManifest(manifestDir);
+            if (_skeletonAnims.Count == 0)
+                throw new InvalidOperationException(
+                    $"No animation clips loaded for rig '{animRig.Name}' from wwwroot/{manifestDir}/index.json. " +
+                    "That manifest is written by MTile.Web's GenerateClipManifests target from the repo-root " +
+                    "SkeletonStates/ tree — rebuild MTile.Web to regenerate it.");
+        }
+        else
+        {
+            _skeletonAnims = AnimationStore.LoadAll(
+                Path.Combine(AppContext.BaseDirectory, "SkeletonStates", animRig.Name));
+        }
         _animator = new CharacterAnimator(animRig, SkeletonScale, _skeletonAnims);
         // Sprite skins load lazily per player in SkinForPlayer (secondary players may
         // not exist yet here).
