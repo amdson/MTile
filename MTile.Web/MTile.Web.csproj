@@ -13,6 +13,11 @@
     <!-- AOT massively speeds up the physics loop in-browser but ~2-3x's the binary.
          Defer until Phase 4 perf tuning. -->
     <RunAOTCompilation>false</RunAOTCompilation>
+    <!-- KNI's builder targets default to Tools\MGCB.exe, which is Windows-only
+         (and the wrong case for Linux). Route through the launcher script, which
+         runs the managed MGCB.dll under dotnet; see kni-mgcb.sh for the native
+         libs the .fx compile needs on a fresh Linux box. -->
+    <KniContentBuilderExe Condition="!$([MSBuild]::IsOSPlatform('Windows'))">$(MSBuildThisFileDirectory)kni-mgcb.sh</KniContentBuilderExe>
   </PropertyGroup>
 
   <ItemGroup>
