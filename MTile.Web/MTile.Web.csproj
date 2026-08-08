@@ -86,6 +86,19 @@
           DestinationFiles="@(_LevelAsset->'$(MSBuildThisFileDirectory)wwwroot\Levels\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
     <ItemGroup>
+      <!-- Raw PNGs the renderer loads outside the content pipeline (rock atlas,
+           backdrop) and the sprite skins + their art. .png only — Assets/ also holds
+           reference material (paper.pdf) that has no business in a web payload. -->
+      <_ImageAsset         Include="..\Assets\*.png" />
+      <_SpriteBindingAsset Include="..\SpriteBindings\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ImageAsset)"
+          DestinationFiles="@(_ImageAsset->'$(MSBuildThisFileDirectory)wwwroot\Assets\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_SpriteBindingAsset)"
+          DestinationFiles="@(_SpriteBindingAsset->'$(MSBuildThisFileDirectory)wwwroot\SpriteBindings\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <ItemGroup>
       <_SkeletonStateAsset Include="..\SkeletonStates\**\*" />
       <_SkeletonAsset      Include="..\Skeletons\**\*" />
     </ItemGroup>

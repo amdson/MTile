@@ -386,12 +386,10 @@ public class Game1 : Game
         // Rock grain for tile fills — same raw-PNG loading rules as the backdrop below.
         try
         {
-            string r1 = Path.Combine(AppContext.BaseDirectory, "Assets", "rock1.png");
-            string r2 = Path.Combine(AppContext.BaseDirectory, "Assets", "rock2.png");
-            if (File.Exists(r1) && File.Exists(r2))
+            using var fs1 = OpenAsset("rock1.png");
+            using var fs2 = OpenAsset("rock2.png");
+            if (fs1 != null && fs2 != null)
             {
-                using var fs1 = File.OpenRead(r1);
-                using var fs2 = File.OpenRead(r2);
                 _chunkRenderer.Atlas = TileTextureAtlas.Build(GraphicsDevice,
                     Texture2D.FromStream(GraphicsDevice, fs1),
                     Texture2D.FromStream(GraphicsDevice, fs2));
@@ -437,11 +435,10 @@ public class Game1 : Game
         // works without an .mgcb rebuild; silently absent on hosts without the file.
         if (_config.DrawBackground)
         {
-            var bgPath = Path.Combine(AppContext.BaseDirectory, "Assets", "mountain_background.png");
             try
             {
-                if (File.Exists(bgPath))
-                    using (var fs = File.OpenRead(bgPath))
+                using (var fs = OpenAsset("mountain_background.png"))
+                    if (fs != null)
                         _background = new ParallaxBackground(Texture2D.FromStream(GraphicsDevice, fs), _pixel);
             }
             catch (Exception) { _background = null; }
@@ -450,6 +447,14 @@ public class Game1 : Game
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
                                               _camera, _particles, _cursorTrail, _attackGlow);
     }
+
+    // A raw PNG under Assets/ — beside the binary on desktop, fetched from wwwroot over
+    // HTTP in the browser (relative + forward-slashed for TitleContainer). Null when the
+    // file is absent; every caller treats missing art as cosmetic.
+    private static Stream OpenAsset(string file)
+        => TitleContent.TryOpenRead(OperatingSystem.IsBrowser()
+            ? "Assets/" + file
+            : Path.Combine(AppContext.BaseDirectory, "Assets", file));
 
     // The player this client controls + the camera follows. Host (index 0) = primary;
     // joiner (index 1) = the secondary player. Offline = primary.
@@ -594,13 +599,18 @@ public class Game1 : Game
     }
 
     // Cached by name; a failed load caches null (TryLoad logs once) → stick figure.
+    // On WASM the binding (and the PNGs it names, resolved relative to it) is fetched from
+    // wwwroot over HTTP, so the path has to stay relative and forward-slashed.
     private SpriteSkin SkinByName(string name)
     {
         if (string.IsNullOrEmpty(name)) return null;
         if (!_spriteSkins.TryGetValue(name, out var skin))
-            _spriteSkins[name] = skin = SpriteSkin.TryLoad(GraphicsDevice,
-                Path.Combine(AppContext.BaseDirectory, "SpriteBindings", name + ".json"),
-                _animator.Skeleton);
+        {
+            string path = OperatingSystem.IsBrowser()
+                ? "SpriteBindings/" + name + ".json"
+                : Path.Combine(AppContext.BaseDirectory, "SpriteBindings", name + ".json");
+            _spriteSkins[name] = skin = SpriteSkin.TryLoad(GraphicsDevice, path, _animator.Skeleton);
+        }
         return skin;
     }
 
