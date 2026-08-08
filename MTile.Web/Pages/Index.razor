@@ -18,3 +18,115 @@
 ">
     <canvas id="theCanvas" style="touch-action:none;"></canvas>
 </div>
+
+@if (_phase != Phase.Playing)
+{
+    <div class="mtile-lobby">
+        <div class="mtile-panel">
+            <h1>MTile</h1>
+
+            @switch (_phase)
+            {
+                case Phase.Menu:
+                    <p class="mtile-hint">Play solo against a bot, or host / join a two-player match.
+                       Matches connect peer-to-peer — copy one blob each way, no server.</p>
+                    <div class="mtile-row">
+                        <button class="mtile-btn" @onclick="StartSolo">Solo</button>
+                        <button class="mtile-btn" @onclick="StartHost">Host</button>
+                        <button class="mtile-btn" @onclick="ChooseJoin">Join</button>
+                    </div>
+                    break;
+
+                case Phase.HostGathering:
+                    <p class="mtile-hint">Gathering network candidates&hellip;</p>
+                    break;
+
+                case Phase.HostShowOffer:
+                    <h2>1. Send this offer to your opponent</h2>
+                    <textarea class="mtile-blob" readonly>@_offerBlob</textarea>
+                    <div class="mtile-row">
+                        <button class="mtile-btn" @onclick="() => Copy(_offerBlob)">Copy offer</button>
+                    </div>
+
+                    <h2>2. Paste their answer here</h2>
+                    <textarea class="mtile-blob" @bind="_pastedAnswer" @bind:event="oninput"
+                              placeholder="paste the answer blob"></textarea>
+                    <div class="mtile-row">
+                        <button class="mtile-btn" @onclick="HostConnect">Connect</button>
+                        <button class="mtile-btn mtile-btn-quiet" @onclick="BackToMenu">Cancel</button>
+                    </div>
+                    break;
+
+                case Phase.JoinPasteOffer:
+                    <h2>1. Paste the host's offer</h2>
+                    <textarea class="mtile-blob" @bind="_pastedOffer" @bind:event="oninput"
+                              placeholder="paste the offer blob"></textarea>
+                    <div class="mtile-row">
+                        <button class="mtile-btn" @onclick="JoinCreateAnswer">Create answer</button>
+                        <button class="mtile-btn mtile-btn-quiet" @onclick="BackToMenu">Cancel</button>
+                    </div>
+                    break;
+
+                case Phase.JoinShowAnswer:
+                    <h2>2. Send this answer back to the host</h2>
+                    <textarea class="mtile-blob" readonly>@_answerBlob</textarea>
+                    <div class="mtile-row">
+                        <button class="mtile-btn" @onclick="() => Copy(_answerBlob)">Copy answer</button>
+                    </div>
+                    <p class="mtile-hint">Waiting for the host&hellip;</p>
+                    break;
+
+                case Phase.Connecting:
+                    <p class="mtile-hint">Connecting&hellip;</p>
+                    break;
+
+                case Phase.Failed:
+                    <h2 class="mtile-bad">Connection failed</h2>
+                    <pre class="mtile-error">@_error</pre>
+                    <div class="mtile-row">
+                        <a class="mtile-btn" href="">Reload</a>
+                    </div>
+                    break;
+            }
+
+            @if (_phase != Phase.Failed && !string.IsNullOrEmpty(_error))
+            {
+                <p class="mtile-bad">@_error</p>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .mtile-lobby {
+        position: fixed; inset: 0; z-index: 10;
+        background: #111; color: #eee;
+        font-family: system-ui, sans-serif;
+        display: flex; align-items: center; justify-content: center;
+        overflow: auto;
+    }
+    .mtile-panel { width: min(46rem, 92vw); padding: 1.5rem 0; }
+    .mtile-panel h1 { margin: 0 0 0.75rem 0; font-size: 2rem; letter-spacing: 0.06em; }
+    .mtile-panel h2 { margin: 1.1rem 0 0.4rem 0; font-size: 0.95rem; font-weight: 600; color: #9cf; }
+    .mtile-hint { color: #999; font-size: 0.9rem; line-height: 1.4; margin: 0.5rem 0; }
+    .mtile-row { display: flex; gap: 0.6rem; margin: 0.6rem 0; flex-wrap: wrap; }
+    .mtile-btn {
+        background: #222; color: #eee; border: 1px solid #444; border-radius: 4px;
+        padding: 0.5rem 1.1rem; font: inherit; font-size: 0.95rem; cursor: pointer;
+        text-decoration: none; display: inline-block;
+    }
+    .mtile-btn:hover { background: #2c2c2c; border-color: #666; }
+    .mtile-btn-quiet { color: #999; }
+    .mtile-blob {
+        width: 100%; height: 7rem; box-sizing: border-box; resize: vertical;
+        background: #1b1b1b; color: #ddd; border: 1px solid #333; border-radius: 4px;
+        padding: 0.5rem; font-family: ui-monospace, monospace; font-size: 0.75rem;
+        word-break: break-all;
+    }
+    .mtile-bad { color: #f77; }
+    .mtile-error {
+        white-space: pre-wrap; word-break: break-word; color: #f99;
+        background: #1b1b1b; border: 1px solid #333; border-radius: 4px;
+        padding: 0.6rem; max-height: 40vh; overflow: auto; font-size: 0.75rem;
+    }
+</style>
