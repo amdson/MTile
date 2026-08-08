@@ -48,11 +48,40 @@
     <script src="_content/nkast.Wasm.Audio/js/Audio.8.0.5.js"></script>
     <script src="_content/nkast.Wasm.XR/js/XR.8.0.5.js"></script>
 
+    <!-- WebRTC transport for browser-vs-browser PvP (window.mtileRtc). -->
+    <script src="mtileRtc.js"></script>
+
     <script>
+        // TickDotNet returns false (or throws) when the game loop has stopped — either an
+        // unhandled exception surfaced into the lobby's Failed screen, or the page is done.
+        // Either way, stop re-queueing so we don't spin an rAF loop against a dead game.
         function tickJS() {
-            window.theInstance.invokeMethod('TickDotNet');
-            window.requestAnimationFrame(tickJS);
+            var alive = false;
+            try {
+                alive = window.theInstance.invokeMethod('TickDotNet');
+            } catch (e) {
+                console.error('MTile: game loop stopped', e);
+                alive = false;
+            }
+            if (alive) window.requestAnimationFrame(tickJS);
         }
+
+        // Clipboard helper for the lobby's "copy" buttons. Kept out of mtileRtc.js so that
+        // module stays DOM-free and reusable by a signaling server.
+        window.mtileCopy = (text) => {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).catch(e => console.warn('copy failed', e));
+                return;
+            }
+            var ta = document.createElement('textarea');
+            ta.value = text;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch (e) { console.warn('copy failed', e); }
+            document.body.removeChild(ta);
+        };
 
         window.initRenderJS = (instance) => {
             window.theInstance = instance;

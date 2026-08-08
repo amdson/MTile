@@ -41,18 +41,37 @@ public static class SkeletonStore
     };
 
     // Load Skeletons/<name>.json from `dir`. Returns null if missing or malformed
-    // (caller falls back to a procedural builder).
+    // (callers decide whether that's fatal — SkeletonExamples.Load throws).
     public static Skeleton Load(string dir, string name)
     {
         try
         {
             string path = Path.Combine(dir, name + ".json");
             if (!File.Exists(path)) return null;
-            var doc = JsonSerializer.Deserialize<SkeletonDocument>(File.ReadAllText(path), Opts);
-            if (doc?.Bones == null || doc.Bones.Count == 0) return null;
-            return Build(doc);
+            return LoadFromJson(File.ReadAllText(path));
         }
         catch { return null; }
+    }
+
+    // Stream form of Load, for hosts that can't enumerate a directory (WASM reads the
+    // rig over HTTP via TitleContent). Same soft-null contract: null/malformed → null.
+    public static Skeleton LoadFromStream(Stream stream)
+    {
+        try
+        {
+            if (stream == null) return null;
+            using var reader = new StreamReader(stream);
+            return LoadFromJson(reader.ReadToEnd());
+        }
+        catch { return null; }
+    }
+
+    // Shared deserialize + Build. Returns null on empty/bone-less documents.
+    private static Skeleton LoadFromJson(string json)
+    {
+        var doc = JsonSerializer.Deserialize<SkeletonDocument>(json, Opts);
+        if (doc?.Bones == null || doc.Bones.Count == 0) return null;
+        return Build(doc);
     }
 
     public static void Save(SkeletonDocument doc, string dir)

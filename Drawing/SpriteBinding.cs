@@ -126,12 +126,16 @@ public sealed class SpriteBindingDocument
     };
 
     // Null if missing or malformed (callers treat "no binding" as "draw the stick figure").
+    // Opened through TitleContent so a relative path resolves over HTTP from wwwroot on
+    // WASM; a rooted path is still plain file I/O (desktop/editor/tests are unchanged).
     public static SpriteBindingDocument Load(string path)
     {
         try
         {
-            if (!File.Exists(path)) return null;
-            var doc = JsonSerializer.Deserialize<SpriteBindingDocument>(File.ReadAllText(path), Opts);
+            using var stream = TitleContent.TryOpenRead(path);
+            if (stream == null) return null;
+            using var reader = new StreamReader(stream);
+            var doc = JsonSerializer.Deserialize<SpriteBindingDocument>(reader.ReadToEnd(), Opts);
             if (doc == null || !doc.HasValidImages) return null;
             doc.FilePath = path;
             return doc;

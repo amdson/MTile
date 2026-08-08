@@ -68,7 +68,7 @@ public sealed class SpriteSkin : IDisposable
             Texture2D tex = null;
             if (doc.ImagePath != null)   // absent for all-own-image bindings
             {
-                using var fs = File.OpenRead(doc.ImagePath);
+                using var fs = OpenRequired(doc.ImagePath);
                 tex = Texture2D.FromStream(gd, fs);
             }
             return new SpriteSkin(gd, doc, skel, tex, ownsTexture: true);
@@ -79,6 +79,15 @@ public sealed class SpriteSkin : IDisposable
             return null;
         }
     }
+
+    // Open a PNG the binding names. Goes through TitleContent so a relative path (the
+    // browser host's "SpriteBindings/<name>.json" and its siblings) resolves over HTTP
+    // from wwwroot, while a rooted path is plain file I/O exactly as before. A named-but-
+    // missing file throws rather than returning null: a present-but-broken binding must
+    // stay loud (TryLoad logs it; the ctor's callers already handle exceptions).
+    private static Stream OpenRequired(string path)
+        => TitleContent.TryOpenRead(path)
+           ?? throw new FileNotFoundException($"SpriteSkin: image '{path}' not found.", path);
 
     // Bakes everything up front: layer assignment from the mask, per-layer meshes from
     // each layer's image alpha, MLS weights from the bind pose. `texture` is the doc's
@@ -136,7 +145,7 @@ public sealed class SpriteSkin : IDisposable
                 {
                     // The layer's own PNG, placed on the shared canvas at its offset.
                     Texture2D layerTex;
-                    using (var fs = File.OpenRead(doc.LayerImagePath(spec)))
+                    using (var fs = OpenRequired(doc.LayerImagePath(spec)))
                         layerTex = Texture2D.FromStream(gd, fs);
                     int lw = layerTex.Width, lh = layerTex.Height;
                     var lpx = new Color[lw * lh];
@@ -191,7 +200,7 @@ public sealed class SpriteSkin : IDisposable
                                       Color[] sprite, int w, int h)
     {
         Color[] mask;
-        using (var fs = File.OpenRead(doc.MaskPath))
+        using (var fs = OpenRequired(doc.MaskPath))
         using (var mtex = Texture2D.FromStream(gd, fs))
         {
             if (mtex.Width != w || mtex.Height != h)

@@ -48,7 +48,11 @@ float4 MainPS(VSOutput input) : COLOR0
         return float4(field.rgb, saturate(v));
 
     float  a     = smoothstep(Iso - Edge, Iso + Edge, v);     // antialiased silhouette
-    if (a <= 0.0) discard;
+    // `if (a <= 0) discard` compiles to a partial-mask TEXKILL under vkd3d's
+    // HLSL compiler, which mojoshader (the KNI/WebGL translator) rejects —
+    // it requires the full .xyzw mask. clip() on a replicated vec4 keeps the
+    // exact same kill condition and satisfies both fxc and vkd3d+mojoshader.
+    clip(a <= 0.0 ? float4(-1, -1, -1, -1) : float4(1, 1, 1, 1));
 
     float  t      = saturate((v - Iso) / max(1.0 - Iso, 1e-3));
     float3 ramp   = lerp(RimColor, InnerColor, t);

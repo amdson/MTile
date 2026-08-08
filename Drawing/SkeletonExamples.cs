@@ -16,6 +16,20 @@ public static class SkeletonExamples
     // when the directory or file is missing/unreadable — content is authored-only.
     public static Skeleton Load(string name)
     {
+        // WASM has no enumerable filesystem: fetch the rig over HTTP from wwwroot
+        // instead of walking AppContext.BaseDirectory. Still authored-only — a
+        // missing/unparseable rig is fatal here exactly as it is on desktop.
+        if (OperatingSystem.IsBrowser())
+        {
+            using var stream = TitleContent.TryOpenRead("Skeletons/" + name + ".json");
+            return SkeletonStore.LoadFromStream(stream)
+                ?? throw new FileNotFoundException(
+                    $"Rig '{name}' not found or unreadable at wwwroot/Skeletons/{name}.json. " +
+                    "Content is authored-only (no procedural fallback) — the MTile.Web build's " +
+                    "StageGameAssetsToWwwroot target copies Skeletons/ from the repo root; rebuild " +
+                    "MTile.Web to restage it.");
+        }
+
         string dir = FindSkeletonsDir()
             ?? throw new FileNotFoundException(
                 "No Skeletons/ directory found (searched up from " +
