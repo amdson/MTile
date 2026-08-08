@@ -9,7 +9,7 @@ namespace MTile;
 // transparent, so the screen is flood-filled with sky blue first, and everything
 // below the strip's bottom edge is extended with the image's own bottom-row color
 // so the seam is invisible.
-public sealed class ParallaxBackground
+public sealed class ParallaxBackground : IBackdrop
 {
     private readonly Texture2D _tex;
     private readonly Texture2D _pixel;

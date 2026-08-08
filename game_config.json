@@ -9,6 +9,7 @@
   "DebugDrawPlayerOrientation": false,
   "DebugDrawBodies":            false,
   "DrawBackground":             true,
+  "BackgroundStyle":            "trees",
   "DrawPlayerSprites":          false, 
   "DrawPlayerSpriteSkin":       true, 
   "AnimationRig":               "biped_rabbit", 

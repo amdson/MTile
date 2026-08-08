@@ -41,7 +41,7 @@ public class Game1 : Game
     }
 
     private readonly Camera _camera = new();
-    private ParallaxBackground _background;
+    private IBackdrop _background;
 
     private DrawContext _draw;
     private DebugOverlayRenderer _debugOverlay;
@@ -422,12 +422,22 @@ public class Game1 : Game
         // works without an .mgcb rebuild; silently absent on hosts without the file.
         if (_config.DrawBackground)
         {
-            var bgPath = Path.Combine(AppContext.BaseDirectory, "Assets", "mountain_background.png");
             try
             {
-                if (File.Exists(bgPath))
-                    using (var fs = File.OpenRead(bgPath))
-                        _background = new ParallaxBackground(Texture2D.FromStream(GraphicsDevice, fs), _pixel);
+                if (_config.BackgroundStyle == "trees")
+                {
+                    var treePath = Path.Combine(AppContext.BaseDirectory, "Assets", "tree.png");
+                    if (File.Exists(treePath))
+                        using (var fs = File.OpenRead(treePath))
+                            _background = new TreeParallaxBackground(GraphicsDevice, Texture2D.FromStream(GraphicsDevice, fs), _pixel);
+                }
+                if (_background == null)
+                {
+                    var bgPath = Path.Combine(AppContext.BaseDirectory, "Assets", "mountain_background.png");
+                    if (File.Exists(bgPath))
+                        using (var fs = File.OpenRead(bgPath))
+                            _background = new ParallaxBackground(Texture2D.FromStream(GraphicsDevice, fs), _pixel);
+                }
             }
             catch (Exception) { _background = null; }
         }
