@@ -302,8 +302,15 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
             float s = Proj(layer.Z);
             float baseH = layer.TreeHeight * s;
             float spacing = layer.Spacing * s;
-            int stripW = (int)(spacing * layer.SlotCount);
-            int stripH = (int)MathF.Ceiling(baseH * MaxScale(layer));
+            // Clamp the strip to the device's texture cap (Reach — the KNI/WebGL
+            // profile — allows only 2048). The lattice is periodic, so dropping
+            // slots just makes the strip repeat sooner instead of overflowing.
+            int maxTex = _device.GraphicsProfile == GraphicsProfile.Reach ? 2048 : 4096;
+            int slots  = layer.SlotCount;
+            if ((int)(spacing * slots) > maxTex)
+                slots = Math.Max(1, (int)(maxTex / spacing));
+            int stripW = Math.Min(maxTex, (int)(spacing * slots));
+            int stripH = Math.Min(maxTex, (int)MathF.Ceiling(baseH * MaxScale(layer)));
 
             var rt = new RenderTarget2D(_device, stripW, stripH);
             _strips[li] = rt;
@@ -312,7 +319,7 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
             sb.Begin(samplerState: SamplerState.LinearClamp);
 
             var tint = Shade(Color.Lerp(Color.White, Fog, layer.FogAmount), layer.Z);
-            for (int i = 0; i < layer.SlotCount; i++)
+            for (int i = 0; i < slots; i++)
             {
                 uint h = Hash(layer.Seed, i);
                 if ((int)(h % 100) < layer.SkipPct) continue;
@@ -369,9 +376,10 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
             minGroundY = MathF.Min(minGroundY, groundYs[li]);
         }
 
-        // Wrap sampling: the layer strips tile horizontally via source rects that
-        // run past the texture edge (same trick as the mountain backdrop).
-        sb.Begin(samplerState: SamplerState.LinearWrap);
+        // Clamp sampling + manual tiling: Reach (the KNI/WebGL profile) forbids Wrap
+        // on non-power-of-two textures, so the strips are drawn in segments instead
+        // of via a source rect that runs past the texture edge.
+        sb.Begin(samplerState: SamplerState.LinearClamp);
 
         // Sky gradient, top of screen down to the topmost ground line (banded
         // strips — cheap and invisible at this contrast). Every layer's band fills
@@ -395,7 +403,7 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
         {
             sb.End();
             DrawRays(sb, -1, camera.Position.X, screenW, screenH);
-            sb.Begin(samplerState: SamplerState.LinearWrap);
+            sb.Begin(samplerState: SamplerState.LinearClamp);
         }
 
         for (int li = 0; li < _layers.Length; li++)
@@ -418,15 +426,26 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
             if (srcX < 0) srcX += rt.Width;
             int destTop = (int)(groundY + SinkPx) - rt.Height;
             if (destTop < screenH && destTop + rt.Height > 0)
-                sb.Draw(rt, new Rectangle(0, destTop, screenW, rt.Height),
-                        new Rectangle(srcX, 0, screenW, rt.Height), Color.White);
+            {
+                // Tile manually: segments of the strip laid end to end across the
+                // screen (Wrap sampling is unavailable on NPOT textures in Reach).
+                int destX = 0, sx = srcX;
+                while (destX < screenW)
+                {
+                    int take = Math.Min(screenW - destX, rt.Width - sx);
+                    sb.Draw(rt, new Rectangle(destX, destTop, take, rt.Height),
+                            new Rectangle(sx, 0, take, rt.Height), Color.White);
+                    destX += take;
+                    sx = 0;
+                }
+            }
 
             // Rays slotted in front of this plane (additive pass needs its own batch).
             if (HasRays(li))
             {
                 sb.End();
                 DrawRays(sb, li, camera.Position.X, screenW, screenH);
-                sb.Begin(samplerState: SamplerState.LinearWrap);
+                sb.Begin(samplerState: SamplerState.LinearClamp);
             }
         }
 

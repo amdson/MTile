@@ -453,30 +453,29 @@ public class Game1 : Game
         // Parallax backdrop — loaded straight from PNG (not the content pipeline) so it
         // works without an .mgcb rebuild; silently absent on hosts without the file.
         //
-        // Browser: skipped. Texture2D.FromStream decodes the PNG in managed code on the
-        // interpreted WASM runtime, and the ~9-Mpx backdrops take ~50 s of frozen main
-        // thread before failing — measured at the whole difference between a 10 s and a
-        // 60 s boot. Re-enable once the backdrop ships as pipeline content or the
-        // publish is AOT-compiled.
-        if (_config.DrawBackground && OperatingSystem.IsBrowser())
+        // Browser gets the quarter-scale *_web variants: Texture2D.FromStream decodes
+        // PNGs in managed code, ~5.6 s per megapixel on the interpreted WASM runtime —
+        // the full 9-Mpx art was 51 s of frozen main thread (and then failed). The tree
+        // layers are baked once into strips and drawn minified 10-40x, so the smaller
+        // source doesn't read any different on screen.
+        if (_config.DrawBackground)
         {
-            Console.WriteLine("[boot] backdrop skipped on browser (managed PNG decode is ~50s interpreted)");
-        }
-        else if (_config.DrawBackground)
-        {
+            bool web = OperatingSystem.IsBrowser();
             try
             {
                 if (_config.BackgroundStyle == "trees")
                 {
-                    using var tfs = OpenAsset("tree.png");
+                    using var tfs = OpenAsset(web ? "tree_web.png" : "tree.png");
                     if (tfs != null)
                         _background = new TreeParallaxBackground(GraphicsDevice, Texture2D.FromStream(GraphicsDevice, tfs), _pixel);
+                    BootMark("tree backdrop built");
                 }
                 if (_background == null)
                 {
-                    using var fs = OpenAsset("mountain_background.png");
+                    using var fs = OpenAsset(web ? "mountain_background_web.png" : "mountain_background.png");
                     if (fs != null)
                         _background = new ParallaxBackground(Texture2D.FromStream(GraphicsDevice, fs), _pixel);
+                    BootMark("mountain backdrop built");
                 }
             }
             catch (Exception) { _background = null; }
