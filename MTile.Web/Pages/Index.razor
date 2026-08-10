@@ -19,6 +19,17 @@
     <canvas id="theCanvas" style="touch-action:none;"></canvas>
 </div>
 
+@if (_phase == Phase.Playing && !_bootDone)
+{
+    <div class="mtile-lobby">
+        <div class="mtile-panel">
+            <h1>MTile</h1>
+            <p class="mtile-hint">Loading&hellip; first boot takes a few seconds
+               (the tab may briefly freeze — that's normal).</p>
+        </div>
+    </div>
+}
+
 @if (_phase != Phase.Playing)
 {
     <div class="mtile-lobby">

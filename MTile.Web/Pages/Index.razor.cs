@@ -51,6 +51,14 @@ public partial class Index : IDisposable
     private bool _sendBase64;   // latched if byte[] -> JS marshaling ever fails
     private int _connectEpoch;  // bumped to cancel an armed connect timeout
 
+    // Boot-freeze UX. Game construction runs synchronously inside one render tick and
+    // blocks the main thread for ~10 s on the interpreted WASM runtime, so the page
+    // must paint the "Loading…" overlay BEFORE that tick — _paintedOnce skips the very
+    // first rAF callback (rAF fires before the frame paints; constructing there would
+    // freeze the tab with the lobby still on screen). _bootDone flips the overlay off.
+    private bool _paintedOnce;
+    private bool _bootDone;
+
     // ── lobby actions ───────────────────────────────────────────────────────────
 
     private void StartSolo()
@@ -192,10 +200,15 @@ public partial class Index : IDisposable
     {
         try
         {
+            // Let the loading overlay reach the screen before the boot freeze.
+            if (!_paintedOnce) { _paintedOnce = true; return true; }
+
             if (_game == null)
             {
                 _game = _net != null ? new MTile.Game1(_net) : new MTile.Game1();
                 _game.Run();
+                _bootDone = true;
+                StateHasChanged();
             }
 
             _game.Tick();

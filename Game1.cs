@@ -13,6 +13,14 @@ namespace MTile;
 // animation) that must never feed back into the sim.
 public class Game1 : Game
 {
+    // Boot timing — one console line per startup stage. On the interpreted WASM
+    // runtime the whole boot runs synchronously inside the first render tick and
+    // the tab freezes until it finishes, so this breakdown is the only visibility
+    // into where that time goes.
+    private static readonly System.Diagnostics.Stopwatch _bootSw = System.Diagnostics.Stopwatch.StartNew();
+    private static void BootMark(string label)
+        => Console.WriteLine($"[boot] {label} @ {_bootSw.ElapsedMilliseconds} ms");
+
     private GraphicsDeviceManager _graphics;
     private SpriteBatch _spriteBatch;
     private Texture2D _pixel;
@@ -166,6 +174,7 @@ public class Game1 : Game
 
     protected override void Initialize()
     {
+        BootMark("Initialize start");
         _screenshots.Initialize();
 
         // Stages captured in-game (Ctrl+M → Levels/saved/) register before the config
@@ -254,14 +263,17 @@ public class Game1 : Game
         // and the rollback peers would desync if one side picked up an edit
         // mid-match. Title-relative paths work on both DesktopGL (resolved
         // via TitleContainer) and Blazor WASM (HTTP fetch from wwwroot).
+        BootMark("configs loaded");
         ImpactProfiles.Load("impact_profiles.json");
         MaterialStrengths.Load("material_strengths.json");
+        BootMark("impact/material configs loaded");
 
         // A networked match always has two real players (local + remote), so force the
         // second player on regardless of config.
         if (_net != null) _config.SpawnSecondPlayer = true;
 
         LoadStage(stage);
+        BootMark("stage/sim built");
 
         if (_net != null)
         {
@@ -363,10 +375,12 @@ public class Game1 : Game
 
     protected override void LoadContent()
     {
+        BootMark("LoadContent start");
         _spriteBatch = new SpriteBatch(GraphicsDevice);
         _pixel = new Texture2D(GraphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
         _debugFont = Content.Load<SpriteFont>("DebugFont");
+        BootMark("DebugFont loaded");
         // Never let a HUD string crash the game: glyphs missing from the font atlas
         // render as '?' instead of throwing from DrawString mid-Draw.
         _debugFont.DefaultCharacter ??= '?';
@@ -379,6 +393,7 @@ public class Game1 : Game
         _density = new DensityField(GraphicsDevice, kernelSize: 128, downscale: 2);
         var splatFx     = Content.Load<Effect>("CapsuleSplat");
         var compositeFx = Content.Load<Effect>("MetaballComposite");
+        BootMark("effects loaded");
         _metaballs = new SkeletonMetaballRenderer(GraphicsDevice, splatFx, compositeFx, downscale: 2);
         _glow = new GlowRenderer(GraphicsDevice);
         _devDemos = new DevDemoRenderer(_prims, _density, _metaballs, _glow);
@@ -396,6 +411,7 @@ public class Game1 : Game
             }
         }
         catch (Exception) { /* cosmetic only — flat fills without it */ }
+        BootMark("rock atlas built");
         _glowField = new GlowTrailField(GraphicsDevice, downscale: 2)
         {
             Lambda           = 6f,    // ~0.8s visible streak
@@ -410,6 +426,7 @@ public class Game1 : Game
         // fallback: content is authored-only, so an empty pool is fatal. On WASM the
         // directory can't be enumerated, so the clip list comes from a build-generated
         // index.json manifest fetched over HTTP instead.
+        BootMark("glow field ready");
         var animRig = SkeletonExamples.Load(
             string.IsNullOrEmpty(_config.AnimationRig) ? SkeletonExamples.BipedName : _config.AnimationRig);
         if (OperatingSystem.IsBrowser())
@@ -427,13 +444,25 @@ public class Game1 : Game
             _skeletonAnims = AnimationStore.LoadAll(
                 Path.Combine(AppContext.BaseDirectory, "SkeletonStates", animRig.Name));
         }
+        BootMark($"clips loaded ({_skeletonAnims.Count})");
         _animator = new CharacterAnimator(animRig, SkeletonScale, _skeletonAnims);
+        BootMark("animator built");
         // Sprite skins load lazily per player in SkinForPlayer (secondary players may
         // not exist yet here).
         _spriteSkins.Clear();
         // Parallax backdrop — loaded straight from PNG (not the content pipeline) so it
         // works without an .mgcb rebuild; silently absent on hosts without the file.
-        if (_config.DrawBackground)
+        //
+        // Browser: skipped. Texture2D.FromStream decodes the PNG in managed code on the
+        // interpreted WASM runtime, and the ~9-Mpx backdrops take ~50 s of frozen main
+        // thread before failing — measured at the whole difference between a 10 s and a
+        // 60 s boot. Re-enable once the backdrop ships as pipeline content or the
+        // publish is AOT-compiled.
+        if (_config.DrawBackground && OperatingSystem.IsBrowser())
+        {
+            Console.WriteLine("[boot] backdrop skipped on browser (managed PNG decode is ~50s interpreted)");
+        }
+        else if (_config.DrawBackground)
         {
             try
             {
@@ -455,6 +484,7 @@ public class Game1 : Game
         _attackGlow = new AttackGlowSystem(_animator, _glow, _glowField, SkeletonScale);
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
                                               _camera, _particles, _cursorTrail, _attackGlow);
+        BootMark("LoadContent done");
     }
 
     // A raw PNG under Assets/ — beside the binary on desktop, fetched from wwwroot over
