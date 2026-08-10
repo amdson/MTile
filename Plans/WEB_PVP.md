@@ -1,4 +1,4 @@
-# Browser PvP — operator guide (web-pvp branch, 2026-08-08)
+ddddddddddd # Browser PvP — operator guide (web-pvp branch, 2026-08-08)
 
 Two-player rollback PvP between two **browser** instances of the KNI/Blazor
 WASM build, with manual copy-paste signaling (a small signaling server can
@@ -8,8 +8,9 @@ design). Supersedes the runtime-bring-up unknowns in
 
 ## Play a match
 
-Dev server: `dotnet run --project MTile.Web` → http://localhost:5000.
-Published build: any static file host (see below).
+Dev server: `dotnet run --project MTile.Web` → http://localhost:5000 —
+interpreter-only, fine for lobby/UI work but unplayably slow in-game (~3 fps).
+For an actual match use the AOT publish: any static file host (see below).
 
 1. Player 1 clicks **Host**, copies the offer blob, sends it to player 2
    (chat, email, anything).
@@ -40,16 +41,23 @@ Wire format and channel config are byte-identical to the desktop
 
 ## Hosting the published build
 
+**AOT is mandatory for playability.** The dev server and a non-AOT publish run
+the game on Mono's WASM interpreter: measured 2.7 fps average under gameplay
+load. The AOT publish measured ~40 fps average / 60 fps median in the same
+probe — and that was headless software rendering, so a real GPU does better.
+Requires the `wasm-tools` workload (`dotnet workload install wasm-tools`); the
+first AOT compile takes ~15 min, later ones are incremental.
+
 ```bash
-dotnet publish MTile.Web/MTile.Web.csproj -c Release -o out/
+dotnet publish MTile.Web/MTile.Web.csproj -c Release -p:RunAOTCompilation=true -o out/
 # serve out/wwwroot from any static host — verified working via plain `python3 -m http.server`
 ```
 
 Any static host works (Cloudflare Pages, Netlify, GitHub Pages, a VPS with
 nginx). No server code, no special headers required in the current setup.
-Brotli/AOT/trimming size work is still open (BROWSER_PORT_PLAN phase 4 — the
-default publish is ~19 MB before compression, and the dev-server warning about
-`wasm-tools` applies to publish size too).
+The AOT publish wwwroot is ~49 MB on disk, but Blazor ships precompressed
+`.br` files alongside — a host that serves those (or compresses itself)
+delivers far less over the wire.
 
 ## Building web content on Linux
 
@@ -70,3 +78,4 @@ Headless smoke tests (boot + full two-browser PvP with pixel-diff assert):
 and input mirroring all PASS against both the dev server and a static-served
 publish; rendering was verified in SwiftShader (software WebGL) — worth one
 eyeball pass on a real GPU for the metaball/glow effects.
+
