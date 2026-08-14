@@ -5,14 +5,20 @@ using Microsoft.Xna.Framework;
 
 namespace MTile.Web.Pages;
 
-// Host page + copy/paste lobby for browser-vs-browser PvP.
+// Host page + lobby for browser-vs-browser PvP.
 //
 // The lobby is a small state machine over wwwroot/mtileRtc.js (the browser twin of
 // MTile.Rtc/RtcConnection.cs). It hands Game1 a NetSetup — the transport-agnostic seam the
-// rollback session already speaks — so nothing in the sim knows a browser is involved:
+// rollback session already speaks — so nothing in the sim knows a browser is involved.
 //
-//   Host : createOffer -> show blob -> paste peer's answer -> acceptAnswer -> channel open
-//   Join : paste offer -> acceptOfferCreateAnswer -> show blob -> wait -> channel open
+// Two signaling paths move the same non-trickle SDP blobs:
+//   Room code (wwwroot/signaling.js, Firestore; only offered when firebase-config.js is
+//   filled in):
+//     Host : createOffer -> createRoom -> show code -> waitForAnswer -> acceptAnswer -> open
+//     Join : enter code  -> fetchOffer -> acceptOfferCreateAnswer -> postAnswer -> open
+//   Manual copy/paste fallback (no server; also what the smoke harness drives):
+//     Host : createOffer -> show blob -> paste peer's answer -> acceptAnswer -> channel open
+//     Join : paste offer -> acceptOfferCreateAnswer -> show blob -> wait -> channel open
 //   Solo : no NetSetup, Game1's parameterless ctor (bot opponent)
 //
 // The render loop (initRenderJS -> rAF -> TickDotNet) only starts once we reach Playing, so
@@ -23,7 +29,9 @@ public partial class Index : IDisposable
     {
         Menu,
         HostGathering,
+        HostShowCode,
         HostShowOffer,
+        JoinEnterCode,
         JoinPasteOffer,
         JoinShowAnswer,
         Connecting,
@@ -36,6 +44,10 @@ public partial class Index : IDisposable
 
     private const int ConnectTimeoutMs = 30_000;
 
+    // How long a host sits on "waiting for opponent" before giving up. Generous — the
+    // opponent is a human finding the code in chat, not a machine.
+    private const int AnswerWaitTimeoutMs = 300_000;
+
     private Game _game;
     private MTile.NetSetup _net;
     private DotNetObjectReference<Index> _selfRef;
@@ -45,7 +57,12 @@ public partial class Index : IDisposable
     private string _answerBlob = "";
     private string _pastedOffer = "";
     private string _pastedAnswer = "";
+    private string _roomCode = "";
+    private string _enteredCode = "";
+    private bool _signalReady;   // firebase-config.js filled in -> room-code UI offered
     private string _error = "";
+
+    private string JoinUrl => Nav.BaseUri + "?room=" + _roomCode;
 
     private bool _ticking;
     private bool _sendBase64;   // latched if byte[] -> JS marshaling ever fails
@@ -59,6 +76,31 @@ public partial class Index : IDisposable
     private bool _paintedOnce;
     private bool _bootDone;
 
+    // ── lifecycle ───────────────────────────────────────────────────────────────
+
+    // ?room=CODE deep link (the host's "Copy invite link") pre-fills the join screen.
+    protected override void OnInitialized()
+    {
+        var query = new Uri(Nav.Uri).Query;
+        foreach (var part in query.TrimStart('?').Split('&'))
+        {
+            var kv = part.Split('=', 2);
+            if (kv.Length == 2 && kv[0] == "room" && kv[1].Length > 0)
+            {
+                _enteredCode = Uri.UnescapeDataString(kv[1]).Trim().ToUpperInvariant();
+                _phase = Phase.JoinEnterCode;
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { _signalReady = await JsRuntime.InvokeAsync<bool>("mtileSignal.isConfigured"); }
+        catch { _signalReady = false; }
+        StateHasChanged();
+    }
+
     // ── lobby actions ───────────────────────────────────────────────────────────
 
     private void StartSolo()
@@ -67,7 +109,87 @@ public partial class Index : IDisposable
         StartTicking();
     }
 
+    // Room-code host: publish the offer to Firestore, then sit on the code until the
+    // joiner posts an answer (or the wait times out / the user cancels).
     private async Task StartHost()
+    {
+        try
+        {
+            await EnsureRtcAsync();
+            _net = new MTile.NetSetup { LocalPlayerIndex = 0, Send = SendBytes };
+
+            _error = "";
+            _phase = Phase.HostGathering;
+            StateHasChanged();
+
+            _offerBlob = await JsRuntime.InvokeAsync<string>("mtileRtc.createOffer", (object)StunUrls);
+            _roomCode = await JsRuntime.InvokeAsync<string>("mtileSignal.createRoom", _offerBlob);
+            _phase = Phase.HostShowCode;
+            StateHasChanged();
+
+            int epoch = _connectEpoch;
+            var answer = await JsRuntime.InvokeAsync<string>(
+                "mtileSignal.waitForAnswer", _roomCode, AnswerWaitTimeoutMs);
+            if (epoch != _connectEpoch || _phase != Phase.HostShowCode) return;   // cancelled
+
+            _phase = Phase.Connecting;
+            StateHasChanged();
+            await JsRuntime.InvokeVoidAsync("mtileRtc.acceptAnswer", answer);
+            ArmConnectTimeout();
+        }
+        catch (Exception ex)
+        {
+            if (_phase == Phase.Menu) return;   // BackToMenu rejected the wait — expected
+            Fail("Hosting failed.\n" + ex);
+        }
+        StateHasChanged();
+    }
+
+    private void ChooseJoinCode()
+    {
+        _error = "";
+        _phase = Phase.JoinEnterCode;
+    }
+
+    // Room-code join: code -> offer from Firestore -> answer back to Firestore, then
+    // both sides race to open the data channel. Lookup errors (bad code, full room)
+    // return to the code prompt instead of the terminal Failed screen.
+    private async Task JoinWithCode()
+    {
+        var code = (_enteredCode ?? "").Trim().ToUpperInvariant();
+        if (code.Length == 0)
+        {
+            _error = "Enter the room code from the host.";
+            return;
+        }
+
+        try
+        {
+            _error = "";
+            _phase = Phase.Connecting;
+            StateHasChanged();
+
+            await EnsureRtcAsync();
+            _net = new MTile.NetSetup { LocalPlayerIndex = 1, Send = SendBytes };
+
+            var offer = await JsRuntime.InvokeAsync<string>("mtileSignal.fetchOffer", code);
+            _answerBlob = await JsRuntime.InvokeAsync<string>(
+                "mtileRtc.acceptOfferCreateAnswer", offer, (object)StunUrls);
+            await JsRuntime.InvokeVoidAsync("mtileSignal.postAnswer", code, _answerBlob);
+            ArmConnectTimeout();
+        }
+        catch (Exception ex)
+        {
+            _net = null;
+            _ = JsRuntime.InvokeVoidAsync("mtileRtc.close");
+            _error = "Could not join: " + ex.Message;
+            _phase = Phase.JoinEnterCode;
+        }
+        StateHasChanged();
+    }
+
+    // Manual copy/paste fallback (no server) — also what the smoke harness drives.
+    private async Task StartHostManual()
     {
         try
         {
@@ -114,7 +236,7 @@ public partial class Index : IDisposable
         }
     }
 
-    private void ChooseJoin()
+    private void ChooseJoinManual()
     {
         _error = "";
         _phase = Phase.JoinPasteOffer;
@@ -153,8 +275,10 @@ public partial class Index : IDisposable
         _net = null;
         _error = "";
         _offerBlob = _answerBlob = _pastedOffer = _pastedAnswer = "";
+        _roomCode = _enteredCode = "";
         _connectEpoch++;
         _phase = Phase.Menu;
+        _ = JsRuntime.InvokeVoidAsync("mtileSignal.cancel");   // rejects a pending waitForAnswer
         _ = JsRuntime.InvokeVoidAsync("mtileRtc.close");
     }
 

@@ -19,13 +19,15 @@ async def main():
         a.on("pageerror", lambda e: errors.append(f"A: {e}"))
         b.on("pageerror", lambda e: errors.append(f"B: {e}"))
         await a.goto(URL, wait_until="load"); await b.goto(URL, wait_until="load")
-        await a.get_by_role("button", name="Host").wait_for(timeout=90000)
-        await b.get_by_role("button", name="Join").wait_for(timeout=90000)
+        # Drive the serverless manual blob exchange — "Host"/"Join" without the "(manual)"
+        # suffix are the Firestore room-code path, which needs network + config.
+        await a.get_by_role("button", name="Host (manual)").wait_for(timeout=90000)
+        await b.get_by_role("button", name="Join (manual)").wait_for(timeout=90000)
 
-        await a.get_by_role("button", name="Host").click()
+        await a.get_by_role("button", name="Host (manual)").click()
         offer_el = a.locator("textarea[readonly]"); await offer_el.wait_for(timeout=20000)
         offer = (await offer_el.input_value()).strip()
-        await b.get_by_role("button", name="Join").click()
+        await b.get_by_role("button", name="Join (manual)").click()
         await b.locator("textarea:not([readonly])").fill(offer)
         await b.get_by_role("button", name="Create answer").click()
         ans_el = b.locator("textarea[readonly]"); await ans_el.wait_for(timeout=20000)

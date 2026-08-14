@@ -1,6 +1,8 @@
 @page "/"
 @page "/index.html"
 @inject IJSRuntime JsRuntime
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.Components
 @using nkast.Wasm.Canvas
 
 <PageTitle>MTile</PageTitle>
@@ -40,16 +42,51 @@
             {
                 case Phase.Menu:
                     <p class="mtile-hint">Play solo against a bot, or host / join a two-player match.
-                       Matches connect peer-to-peer — copy one blob each way, no server.</p>
+                       Matches connect peer-to-peer.</p>
                     <div class="mtile-row">
                         <button class="mtile-btn" @onclick="StartSolo">Solo</button>
-                        <button class="mtile-btn" @onclick="StartHost">Host</button>
-                        <button class="mtile-btn" @onclick="ChooseJoin">Join</button>
+                        @if (_signalReady)
+                        {
+                            <button class="mtile-btn" @onclick="StartHost">Host</button>
+                            <button class="mtile-btn" @onclick="ChooseJoinCode">Join</button>
+                        }
+                    </div>
+                    @if (!_signalReady)
+                    {
+                        <p class="mtile-hint">Room codes are unavailable (no Firebase config) —
+                           use the manual blob exchange: copy one blob each way, no server.</p>
+                    }
+                    <div class="mtile-row">
+                        <button class="mtile-btn mtile-btn-quiet" @onclick="StartHostManual">Host (manual)</button>
+                        <button class="mtile-btn mtile-btn-quiet" @onclick="ChooseJoinManual">Join (manual)</button>
                     </div>
                     break;
 
                 case Phase.HostGathering:
                     <p class="mtile-hint">Gathering network candidates&hellip;</p>
+                    break;
+
+                case Phase.HostShowCode:
+                    <h2>Room code</h2>
+                    <div class="mtile-code">@_roomCode</div>
+                    <p class="mtile-hint">Send the code (or the invite link) to your opponent.
+                       Waiting for them to join&hellip;</p>
+                    <div class="mtile-row">
+                        <button class="mtile-btn" @onclick="() => Copy(JoinUrl)">Copy invite link</button>
+                        <button class="mtile-btn" @onclick="() => Copy(_roomCode)">Copy code</button>
+                        <button class="mtile-btn mtile-btn-quiet" @onclick="BackToMenu">Cancel</button>
+                    </div>
+                    break;
+
+                case Phase.JoinEnterCode:
+                    <h2>Enter the host's room code</h2>
+                    <input class="mtile-codein" @bind="_enteredCode" @bind:event="oninput"
+                           maxlength="8" spellcheck="false" autocapitalize="characters"
+                           placeholder="e.g. K7Q2M" />
+                    <div class="mtile-row">
+                        <button class="mtile-btn" @onclick="JoinWithCode">Join</button>
+                        <button class="mtile-btn mtile-btn-quiet" @onclick="BackToMenu">Cancel</button>
+                    </div>
                     break;
 
                 case Phase.HostShowOffer:
@@ -133,6 +170,16 @@
         background: #1b1b1b; color: #ddd; border: 1px solid #333; border-radius: 4px;
         padding: 0.5rem; font-family: ui-monospace, monospace; font-size: 0.75rem;
         word-break: break-all;
+    }
+    .mtile-code {
+        font: 700 2.4rem ui-monospace, monospace; letter-spacing: 0.35em;
+        color: #9cf; margin: 0.4rem 0; user-select: all;
+    }
+    .mtile-codein {
+        width: 12rem; box-sizing: border-box; text-transform: uppercase;
+        background: #1b1b1b; color: #ddd; border: 1px solid #333; border-radius: 4px;
+        padding: 0.5rem; font-family: ui-monospace, monospace; font-size: 1.2rem;
+        letter-spacing: 0.2em;
     }
     .mtile-bad { color: #f77; }
     .mtile-error {

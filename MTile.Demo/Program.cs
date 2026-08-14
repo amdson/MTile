@@ -23,12 +23,18 @@ using MTileDemo;
 //   (authors a maneuver's Hermite reference arc in game pixels, against the clip's
 //    own entry/gate anchors; loads/saves ReferenceClips/<name>.json.
 //    See Plans/BALLISTIC_CORRECTOR_PLAN.md §1.)
+// Tree backdrop viewer:  dotnet run --project MTile.Demo -- --trees
+//   (just the TreeParallaxBackground, no sim/stage — WASD pan, R rebuild. Best
+//    with hot reload:  dotnet watch run --project MTile.Demo --non-interactive -- --trees
+//    then edit TreeParallaxBackground.cs, save, press R to re-bake.)
 
 string bindPng = null, useBind = null, clip = null, takePath = null, refClip = null, rig = null;
 string importDir = null, importOut = "SpriteBindings"; float importScale = 0.25f;
+bool trees = false;
 for (int i = 0; i < args.Length; i++)
 {
-    if (args[i] == "--bind" && i + 1 < args.Length)         bindPng = args[++i];
+    if (args[i] == "--trees")                               trees = true;
+    else if (args[i] == "--bind" && i + 1 < args.Length)    bindPng = args[++i];
     else if (args[i] == "--rig" && i + 1 < args.Length)     rig = args[++i];
     else if (args[i] == "--usebind" && i + 1 < args.Length) useBind = args[++i];
     else if (args[i] == "--load" && i + 1 < args.Length)    takePath = args[++i];
@@ -39,7 +45,12 @@ for (int i = 0; i < args.Length; i++)
     else clip ??= args[i];
 }
 
-if (importDir != null)
+if (trees)
+{
+    using var viewer = new TreeViewerGame();
+    viewer.Run();
+}
+else if (importDir != null)
 {
     using var import = new ImportGame(importDir, importOut, importScale);
     import.Run();

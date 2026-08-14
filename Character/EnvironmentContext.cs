@@ -114,12 +114,16 @@ public class EnvironmentContext
     public Vector2 Gravity;
 
     public bool TryGetGround(out FloatingSurfaceDistance ground) =>
-        TryGetGroundAt(PlayerCharacter.Radius, ref _groundSearched, ref _hasGround, ref _groundContact, out ground);
+        TryGetGroundAt(PlayerCharacter.Radius, GroundChecker.ProbeSlack, ref _groundSearched, ref _hasGround, ref _groundContact, out ground);
 
+    // Crouch probe keeps floatHeight 0 (the contact's hover distance — CoveredJump
+    // servos against it), but must still SEE ground from the fold-standing hover
+    // (FoldHoverOffset above the surface), so the hover is added to the probe reach.
     public bool TryGetCrouchGround(out FloatingSurfaceDistance ground) =>
-        TryGetGroundAt(0f, ref _crouchGroundSearched, ref _hasCrouchGround, ref _crouchGroundContact, out ground);
+        TryGetGroundAt(0f, GroundChecker.ProbeSlack + MovementConfig.Current.FoldHoverOffset,
+            ref _crouchGroundSearched, ref _hasCrouchGround, ref _crouchGroundContact, out ground);
 
-    private bool TryGetGroundAt(float floatHeight, ref bool searched, ref bool has, ref FloatingSurfaceDistance contact, out FloatingSurfaceDistance ground)
+    private bool TryGetGroundAt(float floatHeight, float probeSlack, ref bool searched, ref bool has, ref FloatingSurfaceDistance contact, out FloatingSurfaceDistance ground)
     {
         if (!searched)
         {
@@ -131,7 +135,7 @@ public class EnvironmentContext
             has = GroundChecker.TryFind(
                 Body, Chunks,
                 PlayerCharacter.Radius, floatHeight,
-                GroundChecker.ProbeSlack, Dt,
+                probeSlack, Dt,
                 MovementConfig.Current.MaxGroundEngageVnRel,
                 out contact);
             searched = true;

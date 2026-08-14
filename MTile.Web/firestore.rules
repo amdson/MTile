@@ -1,0 +1,35 @@
+// Firestore security rules for the room-code signaling (wwwroot/signaling.js).
+// Deploy: paste into Firebase console → Firestore → Rules (or `firebase deploy --only firestore:rules`).
+//
+// Also enable a TTL policy on the "expireAt" field of collection "rooms"
+// (console → Firestore → TTL) so stale rooms self-delete after ~1 h.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /rooms/{code} {
+      // Direct get by code only — no enumeration of open rooms.
+      allow get: if true;
+      allow list: if false;
+
+      // Host creates the room: offer blob + timestamps, nothing else.
+      allow create: if code.size() >= 4 && code.size() <= 8
+        && request.resource.data.keys().hasOnly(['offer', 'createdAt', 'expireAt'])
+        && request.resource.data.offer is string
+        && request.resource.data.offer.size() > 0
+        && request.resource.data.offer.size() < 8192;
+
+      // Joiner adds the answer, exactly once, changing nothing else.
+      allow update: if !('answer' in resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer'])
+        && request.resource.data.answer is string
+        && request.resource.data.answer.size() > 0
+        && request.resource.data.answer.size() < 8192;
+
+      allow delete: if false;   // cleanup is the TTL policy's job
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

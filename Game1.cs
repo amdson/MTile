@@ -465,9 +465,22 @@ public class Game1 : Game
             {
                 if (_config.BackgroundStyle == "trees")
                 {
-                    using var tfs = OpenAsset(web ? "tree_web.png" : "tree.png");
-                    if (tfs != null)
-                        _background = new TreeParallaxBackground(GraphicsDevice, Texture2D.FromStream(GraphicsDevice, tfs), _pixel);
+                    // Tree art variants, order matching Layer.Tree indices in
+                    // TreeParallaxBackground (0 pine, 1 broadleaf, 2 snag, 3 conifer).
+                    // The downsampled set (1024px tall) is preferred on every host;
+                    // the pine falls back to the legacy full-res/web copies.
+                    var treeNames = new[] { "tree.png", "redwood_tree.png", "deadwood_tree.png", "trees_all_layers.png" };
+                    var treeTexs = new List<Texture2D>();
+                    foreach (var name in treeNames)
+                    {
+                        var stream = OpenAsset("trees_small/" + name);
+                        if (stream == null && name == "tree.png")
+                            stream = OpenAsset(web ? "tree_web.png" : "tree.png");
+                        if (stream == null) continue;
+                        using (stream) treeTexs.Add(Texture2D.FromStream(GraphicsDevice, stream));
+                    }
+                    if (treeTexs.Count > 0)
+                        _background = new TreeParallaxBackground(GraphicsDevice, treeTexs.ToArray(), _pixel);
                     BootMark("tree backdrop built");
                 }
                 if (_background == null)
