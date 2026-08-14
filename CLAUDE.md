@@ -16,7 +16,7 @@ Game source lives **at the repo root** (`Character/`, `Physics/`, `World/`, `Ent
 |---|---|
 | `MTile.Core.csproj` (root) | The library. Globs the root `.cs` files; excludes `MTile.Tests/`, `MTile.Desktop/`, `MTile.Web/`. Compiles against `MonoGame.Framework.DesktopGL`. |
 | `MTile.Desktop/` | `WinExe` desktop host (`AssemblyName` = `MTile`). DesktopGL. The normal way to run the game. |
-| `MTile.Web/` | Blazor WebAssembly host via the **KNI** MonoGame variant (`nkast.Xna.Framework`). Does **not** ProjectReference Core — KNI is a different assembly identity, so it re-globs the same root `.cs` and compiles them a second time. Browser-port status: `Plans/Archive/BROWSER_PORT_PLAN.md` — builds green and the dev server serves all assets, but it is **not runtime-verified**, and hosting/input/audio polish (phases 4–6) is not started. |
+| `MTile.Web/` | Blazor WebAssembly host via the **KNI** MonoGame variant (`nkast.Xna.Framework`). Does **not** ProjectReference Core — KNI is a different assembly identity, so it re-globs the same root `.cs` and compiles them a second time. Also excludes `MTile.Rtc/`; the browser transport is `wwwroot/mtileRtc.js`. **Now runtime-verified and deployed** — browser PvP works over WebRTC with Firestore room codes. See `Plans/WEB_PVP.md` (operator guide) and `Plans/INTERNET_READY_PLAN.md` (what's left). |
 | `MTile.Tests/` | xUnit. ProjectReferences `MTile.Core`. |
 | `MTile.Probe/` | Headless animation CLI — the clip-authoring workhorse (`list/digest/diff/new/addkey/ik/contact/rot/retime/stretch/…`, `--rig`). Writes clips in place. |
 | `MTile.Demo/` | Windowed tooling: animation editor, sprite-bind editor + art import (`--bind`), take viewer (`--load Takes/*.take.json`), reference-arc editor. |
@@ -41,8 +41,22 @@ dotnet watch test --project MTile.Tests/MTile.Tests.csproj   # re-run on change
 
 # Web build (KNI/Blazor WASM)
 dotnet build MTile.Web/MTile.Web.csproj
-dotnet run --project MTile.Web              # dev server
+dotnet run --project MTile.Web              # dev server (interpreted — slow, fine for logic)
+
+# Web publish → GitHub Pages (https://amdson.github.io/mtile/)
+pwsh scripts/publish-web.ps1                # -NoPush / -SkipBuild / -SiteRepo
 ```
+
+**AOT is mandatory for a playable web build: 2.7 fps interpreted vs ~40 fps AOT.** The csproj still
+has `<RunAOTCompilation>false</RunAOTCompilation>`; `scripts/publish-web.ps1` overrides it with
+`-p:RunAOTCompilation=true`. **A plain `dotnet publish -c Release` therefore ships the 2.7 fps
+build** — always publish via the script. AOT needs `dotnet workload install wasm-tools`; the first
+compile takes ~15 min and the output wwwroot is ~49 MB.
+
+Browser smoke tests (Playwright, headless Chromium + SwiftShader) live in `MTile.Web/smoke/`:
+`web_smoke.py` (boot + console errors), `pvp_move.py` (two *separate* browser processes — not two
+tabs, since a backgrounded tab's rAF throttles and the peer stall-caps — driving the manual
+copy/paste lobby and pixel-diffing that input mirrored). Setup in `MTile.Web/smoke/README.md`.
 
 Quickest correctness check while iterating on game logic: `dotnet build MTile.Core.csproj`.
 
@@ -95,7 +109,7 @@ The sim extraction is **done and committed**, as is rollback multiplayer on top 
 
 - **`Simulation.cs`** is the deterministic core: players, entities, chunks, combat registries, force fields, and platforms, advanced by `Step(PlayerInput)` (or `Step(p0, p1)`) on a fixed `Simulation.FixedDt` (1/60). Particles, trail, camera, sprites, and everything in `Animation/` are **render-only and must never feed back into the sim**.
 - Bodies and entities live in the sparse-set ECS `World` under `Sim/ECS/`. `Snapshot()` is essentially `_world.Capture()` plus terrain and a few side tables — there are no per-player/per-entity snapshot struct arrays anymore. Terrain uses an inverse-delta **journal** (`World/TerrainJournal.cs`); sparse per-tile structures are value-snapshotted. Verified by `MTile.Tests/Sim/SnapshotRoundTripTests.cs`.
-- `Net/` holds a working rollback session (predict → reconcile → replay, checksum desync detection) over the `MTile.Rtc` WebRTC transport. Run it with `dotnet run --project MTile.Desktop -- host` / `-- join`.
+- `Net/` holds a working rollback session (predict → reconcile → replay, checksum desync detection). `NetSetup` (`LocalPlayerIndex` + `Send` + a delivery queue) is the transport-agnostic seam, and it held up: **adding browser multiplayer required zero changes under `Net/`.** Two parallel transports — desktop `MTile.Rtc` (`MTile.Desktop -- host` / `-- join`) and browser `MTile.Web/wwwroot/mtileRtc.js`. Wire-compatible but **never cross-play**: float determinism doesn't hold across runtimes, so both peers must run the same build.
 - **Determinism rules** when touching sim code: no sim-affecting `static` mutable state (HitIds flow through `World/HitIdAllocator.cs` and `EnvironmentContext.HitIds`); no polling hardware mid-step (all input must arrive via `PlayerInput`); same iteration order on restore. Anything added to a live object that must survive a rollback belongs in an ECS value component.
 
 Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unchecked goals are plainly done.
@@ -106,7 +120,9 @@ Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unche
 
 - **The ballistic corrector** (`Character/AmbientCorrector.cs`, `CorrectionSolver.cs`, `BallisticPredictor.cs`, `FoldReference.cs`, …) — free-state locomotion is solver-driven, and this is the actively-tuned area. Hot-reload ablation knobs (`CorrectorVaultEnabled`, `FoldRedirectEnabled`, `FoldEngine`) exist for live A/B during playtests; `TrajectoryLm` is the nonlinear oracle the QP path is checked against.
 - **The animation solver** (`Animation/`) — vertical cadence/constraints shipped; horizontal `d.x`/ComOffset, joint limits, and local-SDF non-penetration are still open (`Plans/ANIMATION_SOLVER_PLAN.md` §11.6 Phase 4).
-- Known gaps worth not rediscovering: `Character/JumpStates.cs:61` has the sim reading animation-layer data (a layering violation); 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
+- **Browser PvP** — works end to end (WebRTC + Firestore room codes, deployed to GitHub Pages). What's left before strangers can play: TURN (STUN-only today, so symmetric NAT/CGNAT fails), desync/disconnect handling, and a Firestore-path smoke test. `Plans/INTERNET_READY_PLAN.md`.
+- **Terrain building** — the paint/place/burst/peel + mass-economy rework replaced the old eruption planners. Actively evolving.
+- Known gaps worth not rediscovering: `Character/JumpStates.cs:61` has the sim reading animation-layer data (a layering violation); `PlayerCharacter.cs:485-554` prints `[move]`/`[action]` transitions to the console on the sim hot path (fires during rollback re-sim too — almost certainly leftover tracing); 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
 
 `MTile.Tests/Sim/` (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport`) is the headless analogue of the sim — scenario tests with ascii terrain + scripted input, mirroring the same phase ordering as `Simulation.Step`. Use it for deterministic gameplay tests.
 

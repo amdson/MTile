@@ -5,9 +5,9 @@ Single consolidated list of outstanding and projected work. Consolidated 2026-08
 (all four now deleted — this file replaces them), plus open items from `Plans/` and the
 deliberately-skipped tests.
 
-Original item text is preserved verbatim in quotes. **Status was verified against the source
-on 2026-08-03** — several items had quietly been implemented and were still sitting in the
-todo files. Status will drift; re-verify before acting on an old row.
+Original item text is preserved verbatim in quotes. **Statuses last re-verified against source
+2026-08-14** (first consolidated 2026-08-03) — several items had quietly been implemented and
+were still sitting in the todo files. Status will drift; re-verify before acting on an old row.
 
 Status key: **OPEN** · **PARTIAL** · **DONE** (kept for the record, delete freely) ·
 **UNCLEAR** (couldn't determine from source).
@@ -19,7 +19,7 @@ Status key: **OPEN** · **PARTIAL** · **DONE** (kept for the record, delete fre
 | # | Item | Status | Evidence / notes |
 |---|---|---|---|
 | 1.1 | "Pressing right while in ledge grab should pull player over and onto the ledge." | **OPEN** | `Character/LedgeStates.cs` only reads horizontal input to *exit* the grab (`pressingAway`, line 83). The pull is Up-triggered only. |
-| 1.2 | "Add a cooldown to block charge starting up again after placing a block, so that if the player is actively building the block charge state is never visually active." | **OPEN** | `BlockReadyAction` (`Character/ActionStates.cs:1340-1523`) zeroes `ChargeTime` on Enter but has no post-placement suppression window. |
+| 1.2 | "Add a cooldown to block charge starting up again after placing a block, so that if the player is actively building the block charge state is never visually active." | **SUPERSEDED** | `BlockReadyAction` no longer exists. The paint/place/burst rework replaced charge-on-hold with the `BuildMeters` economy (`ChargePhase Ramping/Peak/Overheld`), so re-state the intent against the new model if it still bothers you in play. |
 | 1.3 | "Pressing up while next to a two high ledge should trigger a mini jump into parkour state so that the player smoothly arcs over the corner. The jump should be scaled up a bit if the player is moving into the ledge quickly and is far enough away that the jump won't carry them into a wall" | **PARTIAL** | `ArcJumpState` (`Character/ClimbStates.cs:327-342`) covers the 2-block band with Up held at speed, but it's a full ballistic arc, not a speed-scaled mini-hop at corner detection. |
 | 1.4 | "Make duck under put player at stable height under ledge, so there isn't bobbing up and down." | **PARTIAL** | `FoldDuckReach` (`Character/MovementConfig.cs:268`) feeds `wallEscapeDown` in `FoldReference.cs:135` and the reference shapes the duck, but no formal stable-height contract is pinned. |
 | 1.5 | "Track forces applied by physics contacts at all times, so that by the end of an update physics contacts always know the total force that's been exerted through them." | **DONE** | `Character/CorrectorLedger.cs:43-110` — per-channel and per-contact force recording. |
@@ -61,11 +61,11 @@ All eight were executed by `Plans/MOVEMENT_NIGHT_PLAN.md` and independently re-v
 
 | # | Item | Status | Evidence / notes |
 |---|---|---|---|
-| 2.1 | "Build an additional animation clip for run for the case where they're technically not in contact with the ground. One foot forward, prepared to run on contact. Add machinery for transitioning from this state to a specific phase in the current run clip when the run clip is activated." | **OPEN** | No run-air clip in `SkeletonStates/`. Infrastructure partly exists: `ClipTimeMode.Hold` + `MatchPose` (`MoveDriver.cs:34,161`). |
-| 2.2 | "Work on transitions from running into vaulting / mantling. we should be solving for the initial phase which best matches the pose output in the previous step." | **PARTIAL** | `ClipChoice.MatchPose` + `BestMatchingPhase` exist (`CharacterAnimator.cs:419-426,754`) but `ParkourDriver` plays Vault at Clock mode (`MoveDriver.cs:219`) without using them. |
+| 2.1 | "Build an additional animation clip for run for the case where they're technically not in contact with the ground. One foot forward, prepared to run on contact. Add machinery for transitioning from this state to a specific phase in the current run clip when the run clip is activated." | **PARTIAL** | *The machinery half is now done and live*: `ClipTimeMode.Hold` + `MatchPose` freeze the run/walk cycle at a pose-matched phase while `GroundGap > PreContactGap` (`MoveDriver.cs:155-161`), pinned by `PreRunAirborneTests.cs`. Still open: the dedicated airborne run clip — none of the 47 biped clips is a run variant. |
+| 2.2 | "Work on transitions from running into vaulting / mantling. we should be solving for the initial phase which best matches the pose output in the previous step." | **PARTIAL** | `MatchPose`/`BestMatchingPhase` exist (`CharacterAnimator.cs:421-428,756`) but `ParkourDriver.Select` still returns Clock mode with no `matchPose` for all three climb tags (`MoveDriver.cs:224-230`). **Note the blocker**: `BestMatchingPhase` is only honored in phase modes (`CadencePhase`/`IdleBob`/`Hold`), so Clock-mode Parkour can't use it as written — this needs a mode change, not just a flag. |
 | 2.3 | "Visibly show knees going from bent to straight in jump. To a reasonable extent, parametrize jump to keep feet in contact with ground while jump servo active (e.g. add a soft ground-contact constraint)" | **OPEN** | No jump knee parametrization or soft ground-contact constraint found. |
-| 2.4 | "Add machinery for tracking clip progression for moves parametrized by position, such as dropdown." | **OPEN** | `ClipTimeMode.Progress` exists but only `ParkourDriver`'s VaultHands overlay consumes `MovementProgress`; dropdown is Clock-driven (`MoveDriver.cs:99`). |
-| 2.5 | "Remove the lean stuff. (or I already did remove it, but make sure i didn't fuck anything up by block commenting it out)" | **PARTIAL** | Verified harmless — all lean code is cleanly commented with no live side effects (`CharacterAnimator.cs:58-59,155,641-647`). Still *commented*, not deleted; delete when convenient. |
+| 2.4 | "Add machinery for tracking clip progression for moves parametrized by position, such as dropdown." | **OPEN** | `ClipTimeMode.Progress` is declared (`MoveDriver.cs:33`) and handled (`CharacterAnimator.cs:745`), but **no driver ever emits it** — the switch arm is the only reference outside the enum. Dropdown is still Clock-driven (`MoveDriver.cs:99`). The one live `MovementProgress` consumer is the ClimbHands overlay/grip pin. |
+| 2.5 | "Remove the lean stuff. (or I already did remove it, but make sure i didn't fuck anything up by block commenting it out)" | **PARTIAL** | Verified harmless — all lean code is cleanly commented with no live side effects (`CharacterAnimator.cs:60-61,157,643-649`). Still *commented*, not deleted. Note deleting also means touching the live comments at `:144` and `:609-610,634-635` that explain lean as a post-solve additive layer. |
 | 2.6 | "Editor WYSIWYG: editor still samples linearly." Runtime uses C1 Catmull-Rom (`SampleSmooth`); editor scrubbed via the linear path, so in-between poses differed from the game. | **PARTIAL** | The animation editor was fixed — `MTile.Demo/DemoGame.cs:1393` now calls `SampleSmooth`. **The bind editor was not**: `MTile.Demo/BindGame.cs:218,455` still call `SampleAtTime`. |
 | 2.7 | Animation solver §11.6 **Phase 4** — horizontal `d.x`/ComOffset (vertical only today), `JointLimits` as a real constraint class (currently just a config knob in `AnimSolverConfig`), local-SDF `NoPenetration` (v1 half-planes only). | **OPEN** | `Plans/ANIMATION_SOLVER_PLAN.md`. |
 
@@ -102,20 +102,45 @@ capability gates are tuned right in practice.
 
 ---
 
-## 4. Engineering debt
+## 4. Web / multiplayer
+
+Browser PvP works end to end and is deployed to https://amdson.github.io/mtile/. These are the
+items between "works for us" and "send a stranger a link" — see `Plans/INTERNET_READY_PLAN.md`.
 
 | # | Item | Status | Evidence / notes |
 |---|---|---|---|
-| 4.1 | Sim reads animation-layer data — a layering violation against the render-only invariant. | **OPEN** | `Character/JumpStates.cs:61` (`// TODO remove dependency on Animation layer data`). |
-| 4.2 | Distance heuristic in collision resolution should be a line-segment/plane intersection test. | **OPEN** | `Physics/PhysicsWorld.cs:30`. |
-| 4.3 | `Game1` render/HUD extraction half-done — ~870 lines still inline (was 1029). | **OPEN** | `Plans/GAME1_REFACTOR_PLAN.md`. |
-| 4.4 | Corrector: lever-normalized hinge weighting. | **OPEN** | `Plans/CORRECTOR_CONSOLIDATION_PLAN.md` §6, the one deferred item. |
-| 4.5 | Web port never runtime-tested; hosting/input/audio/fullscreen polish not started. | **OPEN** | `Plans/Archive/BROWSER_PORT_PLAN.md` phases 4–6. Builds green, dev server serves assets. |
-| 4.6 | `BotInputSource` is still a seeded-random stub. | **OPEN** | `Net/BotInputSource.cs` (81 lines), `Plans/BOT_AI_PLAN.md` not started. |
-| 4.7 | Tangential carry on moving platforms not implemented. | **OPEN** | `MTile.Tests/MovingPlatformTests.cs:13`; `Plans/DYNAMIC_PHYSICS_ROADMAP.md`. |
-| 4.8 | Surface-relative descent limiting (sprout-style moving floors) wants surface velocity in the solve. | **OPEN** | Deferred from the corrector work — the "more general solver" pass. |
-| 4.9 | `CorrectorCost_VaultHeavyCourse` budget test is marginal in Debug (~0.8–1.2ms vs a 0.5ms ceiling) regardless of changes. | **OPEN** | Needs relaxing or making Release-only. |
-| 4.10 | `MaxEvents` is pinned at 32 — raising to 64 broke qp's GroundFriction post-release braking. QP row-budget crowding is load-bearing. | **OPEN** | Latent fragility, noted not fixed. |
+| 4.1 | **TURN relay.** STUN-only today, so symmetric-NAT and CGNAT pairs simply can't connect. | **OPEN** | `mtileRtc.js:117` builds `iceServers: [{urls}]` with no username/credential. `INTERNET_READY_PLAN.md` Phase 2, not started. The single biggest blocker for strangers. |
+| 4.2 | **Desync is detected but not surfaced.** | **OPEN** | `RollbackSession.OnDesync` has zero production subscribers — only the declaration (`:65`) and the invoke (`:223`). A desync currently just diverges silently. |
+| 4.3 | **Mid-game disconnect freezes instead of reporting.** | **OPEN** | `Index.razor.cs:311` early-returns while `Phase.Playing`, so a peer dropping mid-match leaves the game stuck at the stall cap with no message. |
+| 4.4 | **`RunAOTCompilation` is `false` in the csproj.** A plain `dotnet publish -c Release` silently ships the 2.7 fps interpreted build; only `scripts/publish-web.ps1` overrides it. | **OPEN** | `MTile.Web.csproj:15`, with a stale comment ("Defer until Phase 4 perf tuning"). Real footgun — flip it, or make the plain publish fail loudly. |
+| 4.5 | **No Firestore-path smoke test.** `pvp_move.py` deliberately drives only the manual copy/paste lobby, so the room-code path has no automated coverage. | **OPEN** | `pvp_move.py:22-25`; `INTERNET_READY_PLAN.md:112` lists it as pending. |
+| 4.6 | **STUN/ICE config is hardcoded in three places.** | **OPEN** | `Program.cs`, `Index.razor.cs:43`, `mtileRtc.js:20`. Plan item 6 (centralize into one file) not done. |
+| 4.7 | Firestore TTL policy — documented as 1h `expireAt`, but whether the console-side TTL policy was actually created is unverified. | **UNCLEAR** | Worth confirming, else rooms accumulate. |
+| 4.8 | No AOT **boot** measurement exists — all boot figures (~11.9 s) are interpreted-build numbers. | **OPEN** | Worth one measurement so the real first-load experience is known. |
+
+Stale docs to fix while you're in there: `INTERNET_READY_PLAN.md` still claims `firebase-config.js`
+is a placeholder (it holds live config for project `mtile-937a0` as of `506a3f8`), and `WEB_PVP.md`
+describes only the copy/paste lobby — it predates room codes and wasn't updated.
+
+---
+
+## 5. Engineering debt
+
+| # | Item | Status | Evidence / notes |
+|---|---|---|---|
+| 5.1 | Sim reads animation-layer data — a layering violation against the render-only invariant. | **OPEN** | `Character/JumpStates.cs:61` (`// TODO remove dependency on Animation layer data`). |
+| 5.2 | Distance heuristic in collision resolution should be a line-segment/plane intersection test. | **OPEN** | `Physics/PhysicsWorld.cs:30`. |
+| 5.3 | `Game1` render/HUD extraction half-done — ~870 lines still inline (was 1029). | **OPEN** | `Plans/GAME1_REFACTOR_PLAN.md`. |
+| 5.4 | Corrector: lever-normalized hinge weighting. | **OPEN** | `Plans/CORRECTOR_CONSOLIDATION_PLAN.md` §6, the one deferred item. |
+| 5.5 | Web port never runtime-tested. | **DONE** | Superseded — the browser now runs verified PvP and is deployed. Remaining web work moved to §4. |
+| 5.11 | `PlayerCharacter.cs:485,524,535,554` print `[move]`/`[action]` transitions via `System.Console.WriteLine` on the sim hot path — including during rollback re-simulation. | **OPEN** | Almost certainly leftover debug tracing. Delete or gate behind a debug flag. |
+| 5.12 | `Character/LatticePlanner.cs` (beam-search movement planner) is marked PROTOTYPE / "freeze-frame oracle only — not wired into the live sim"; its only caller is `ZzzLatticeTiming`, an assert-free benchmark self-labelled "TEMP EXPERIMENT: … Delete me". | **OPEN** | Decide: wire it up or delete both. `ZzzLatticeTiming` is also ~35 s of the test suite's ~75 s runtime. |
+| 5.13 | Stale comments referencing retired classes in the new build code — `BlockBurstAction`'s header and `BurstReach` cite `BlockReadyAction`/`BlockReadyAction.BuildReach` (`ActionStates.cs:1729,1742`); `BlockGrabAction:2465,2476` likewise, including a mention of `ctx.EruptionMode`, which no longer exists. | **OPEN** | Cheap cleanup. |
+| 5.6 | `BotInputSource` is still a seeded-random stub. | **OPEN** | `Net/BotInputSource.cs` (81 lines), `Plans/BOT_AI_PLAN.md` not started. |
+| 5.7 | Tangential carry on moving platforms not implemented. | **OPEN** | `MTile.Tests/MovingPlatformTests.cs:13`; `Plans/DYNAMIC_PHYSICS_ROADMAP.md`. |
+| 5.8 | Surface-relative descent limiting (sprout-style moving floors) wants surface velocity in the solve. | **OPEN** | Deferred from the corrector work — the "more general solver" pass. |
+| 5.9 | `CorrectorCost_VaultHeavyCourse` budget test is marginal in Debug (~0.8–1.2ms vs a 0.5ms ceiling) regardless of changes. | **OPEN** | Needs relaxing or making Release-only. |
+| 5.10 | `MaxEvents` is pinned at 32 — raising to 64 broke qp's GroundFriction post-release braking. QP row-budget crowding is load-bearing. | **OPEN** | Latent fragility, noted not fixed. |
 
 ### Deliberately skipped tests
 
@@ -131,13 +156,15 @@ Each encodes a specific missing capability. Un-skip as the capability lands.
 
 ---
 
-## 5. Uncommitted experiment (working tree)
+## 6. In-flight experiments
 
-`Character/FoldReference.cs` and `Character/AmbientCorrector.cs` carry a `TEMP EXPERIMENT`:
+**Redirect audit** — `Character/FoldReference.cs` and `AmbientCorrector.cs` carry a `TEMP EXPERIMENT`:
 redirect audit counters (`AuditSolves`/`AuditMaskFrames`/`AuditFireFrames`/`AuditMaxZr`/`AuditNetZr`)
 plus a second Redirect channel grafted into the ref fold path, gated on `FoldRedirectEnabled`
-for hot A/B. Deliberately uncommitted. Resolve to either "the redirect is clean, land it" or
-"it eats vx as the qp audit measured, drop it", then strip the counters.
+for hot A/B. **No longer uncommitted** — it landed in the `0eeab5b` "WIP working state" bundle
+(2026-08-06), which also carries ~7 corrector test failures. Still unresolved: decide "the redirect
+is clean, land it" vs "it eats vx as the qp audit measured, drop it", then strip the counters and
+fix those tests.
 
 Related ablation knobs, all hot-reloadable from `movement_config.json`:
 `FoldEngine` ("qp" | "ref" | "lm"), `CorrectorVaultEnabled`, `FoldRedirectEnabled`.

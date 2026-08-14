@@ -14,6 +14,9 @@ actually does today.
 | `CORRECTOR_CONSOLIDATION_PLAN.md` | Phases 1–6 shipped. Open: lever-normalized hinge weighting (§6). The corrector is the actively-tuned area of the codebase. |
 | `ANIMATION_SOLVER_PLAN.md` | Through §11.6 Phase 3.5. Open: horizontal `d.x`/ComOffset (vertical only today), JointLimits as a real constraint class, local-SDF non-penetration. |
 | `GAME1_REFACTOR_PLAN.md` | Item 1 done (debug overlay, HUD, chunk renderer, cosmetics extracted). ~870 lines of render/HUD still inline. |
+| `INTERNET_READY_PLAN.md` | Phase 1 (Firestore signaling + room codes) **implemented**. Phase 2 (TURN) not started — the blocker for strangers on symmetric NAT. Phase 3 (ship a URL) partial: deployed to GitHub Pages via `scripts/publish-web.ps1`, but the csproj AOT flag is still unflipped. Phase 4 (desync/disconnect handling) not started. |
+| `WEB_PVP.md` | Operator guide for running a browser match. **Stale**: written before room codes, so it documents only the copy/paste lobby. |
+| `ANIMATION_BINDING_MAP.md` | Reference, verified 2026-08-04. The authoritative map of movement-state → AnimTag → AnimClip → clip file, action class → clip, and reference arcs. Read before renaming anything animation-side. |
 | `BOT_AI_PLAN.md` | Not started. `Net/BotInputSource.cs` is still the seeded-random stub. |
 | `ANIMATION_POLISH_PLAN.md`, `ANIMATION_DIRECTIONS.md` | Polish items 1–3 done; directions doc is uncommitted thinking. |
 

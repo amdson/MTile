@@ -51,7 +51,7 @@ The data lattice tying the subsystems together:
 
 `Simulation` owns every piece of state the world reads or writes and advances it one fixed step via `Step(PlayerInput)`. Two constructors: a headless one (terrain supplied directly + a `populate` delegate — used by tests) and the real one (`GameConfig` + `Stage`). It implements `IEntitySpawner` (AI/projectiles spawn children) and `IChunkProvider` (entities mutate terrain).
 
-There are two entry points: `Step(PlayerInput)` for solo and `Step(p0, p1)` for two players (injects `p1` into the first secondary's `Controller`, then falls through to the same body). Drag-to-build is no longer a `Step` phase — it moved per-player into `BlockReadyAction`.
+There are two entry points: `Step(PlayerInput)` for solo and `Step(p0, p1)` for two players (injects `p1` into the first secondary's `Controller`, then falls through to the same body). Drag-to-build is no longer a `Step` phase — it moved per-player into the terrain-building actions.
 
 **`Step` phase order** (mirrored exactly by the headless `SimRunner` so tests match real play):
 1. Inject `input`; advance the absolute sim clock `_elapsed += FixedDt`.
@@ -90,8 +90,20 @@ Built and running, not planned. [`RollbackSession`](Net/RollbackSession.cs) does
 
 `Game1` takes an optional `NetSetup`; with one present it drives `_session.TryStep()` instead of stepping the sim directly, and `LocalPlayer` follows `_net.LocalPlayerIndex`. Offline-with-a-second-player uses `BotInputSource` to spoof P2. Stage save (Ctrl+M) and reload (F5) are gated off whenever a session exists.
 
+**`NetSetup` is the transport-agnostic seam** — just `LocalPlayerIndex`, an `Action<byte[]> Send`, and a `ConcurrentQueue` for delivery. This paid off: adding browser multiplayer required **zero changes under `Net/`** (verified — `git diff` over `Net/` across the entire browser-PvP effort is empty). Two transports now meet the sim at that seam:
+
+- **Desktop** — `MTile.Rtc/RtcConnection.cs`, driven by `MTile.Desktop -- host` / `-- join`.
+- **Browser** — `MTile.Web/wwwroot/mtileRtc.js`, a hand-written twin. `MTile.Web.csproj` explicitly *excludes* `MTile.Rtc/` from compilation, so these are parallel implementations, not shared code. They are wire-compatible (same blob format, same `"mtile"` channel, `{ordered:false, maxRetransmits:0}`, non-trickle ICE) — but **cross-play is forbidden anyway**, because float determinism doesn't hold across runtimes. Same build on both ends, always.
+
+### Browser PvP ([MTile.Web/](MTile.Web/))
+
+- **Lobby/signaling** — two paths. *Room code*: `wwwroot/signaling.js` writes to Firestore, where the room doc id **is** the code (5 chars from an unambiguous alphabet, no `0/O/1/I/L`), schema `rooms/{CODE} = { offer, createdAt, expireAt }` with the joiner adding `answer`; 1h TTL; `?room=CODE` deep-links into join. *Manual*: the original copy/paste blob exchange, kept as a fallback and as the path the smoke test drives. The Firebase SDK is lazily dynamic-imported, so the page still works offline in solo/manual mode.
+- **Security** — `MTile.Web/firestore.rules` allows `get` but not `list` (no room enumeration), restricts `create` to exactly the three expected fields with an 8KB offer cap, and permits exactly one `update` that may only add `answer`. No deletes. Setup steps in `MTile.Web/FIREBASE_SETUP.md`.
+- **Interop** — `MTile.Web/Pages/Index.razor.cs` runs a lobby FSM (`Menu → HostGathering/JoinEnterCode → … → Playing/Failed`). JS→C# via `[JSInvokable]` (`OnRtcOpen`, `OnRtcMessage(byte[])`, `OnRtcState`, `TickDotNet`); the send hot path prefers synchronous `IJSInProcessRuntime.InvokeVoid` and latches to base64 if `byte[]` marshaling throws.
+- **STUN only, no TURN** — `iceServers` is built with `{urls}` and no credentials, so symmetric-NAT/CGNAT pairs still fail to connect. This is the main thing standing between the current state and "send a stranger a link" (`Plans/INTERNET_READY_PLAN.md` Phase 2).
+
 ### Determinism rules (when touching sim code)
-- **No sim-affecting mutable statics.** `HitId`s come from the per-`Simulation` [`HitIdAllocator`](World/HitIdAllocator.cs); block-type/planner-mode are per-`PlayerCharacter` (driven by that player's own input), not globals. The lone surviving static, `EruptionPlanner.DebugDrawMassBall`, is render-only.
+- **No sim-affecting mutable statics.** `HitId`s come from the per-`Simulation` [`HitIdAllocator`](World/HitIdAllocator.cs); block type is per-`PlayerCharacter` (driven by that player's own input), not global.
 - **All input arrives via `PlayerInput`** — no polling hardware mid-step. Block-picker (1-4) and planner toggle (P) are interpreted inside `PlayerCharacter.Update`.
 - **Same iteration order on restore.** Lists are rebuilt deterministically.
 - `MovementConfig` hot-reload is gated behind `GameConfig.HotReloadMovementConfig` (off for MP).
@@ -170,7 +182,7 @@ Each `Update`:
 8. `MovementState.Update` writes `Body.AppliedForce`; `ActionState.ApplyActionForces` augments it; gravity-scale modifier applied as counter-force.
 9. `ActionState.Update` does its FSM work (publishing hitboxes, advancing timers).
 
-**Per-activation FSM state is plain data.** The FSM state/action instances are flyweights (one per registry entry, shared across activations); all mutable per-activation fields live in the [`MovementVars`](Character/MovementVars.cs)/[`ActionVars`](Character/ActionVars.cs) value structs on the player, passed `ref` into lifecycle methods (`Enter`/`Update`/`Exit`/`CheckConditions`) and `in` into the read-only hooks. This is the snapshot unit — a struct copy. (A few genuinely reference-typed buffers, like `BlockEruptionAction`'s gesture `SmoothPen`+`List`, are deep-copied separately.) `PlayerAbilityState` holds the rest: `Facing`, `HasDoubleJumped`, ledge-grab flags, and the nested `Condition`/`Combat` states.
+**Per-activation FSM state is plain data.** The FSM state/action instances are flyweights (one per registry entry, shared across activations); all mutable per-activation fields live in the [`MovementVars`](Character/MovementVars.cs)/[`ActionVars`](Character/ActionVars.cs) value structs on the player, passed `ref` into lifecycle methods (`Enter`/`Update`/`Exit`/`CheckConditions`) and `in` into the read-only hooks. This is the snapshot unit — a struct copy. The eruption rework removed the last reference-typed action buffer, so there is no longer any per-action deep-copy special case; `BlockGrabAction`'s peel group rides in an `[InlineArray(25)] PeelMemberBuffer` inside `ActionVars` precisely to keep value semantics. `PlayerAbilityState` holds the rest: `Facing`, `HasDoubleJumped`, ledge-grab flags, the [`BuildMeters`](Character/BuildMeters.cs), and the nested `Condition`/`Combat` states.
 
 ### Movement FSM ([Character/Movement.cs](Character/Movement.cs))
 
@@ -219,23 +231,31 @@ Same FSM shape, separate registry/history, lifecycle takes `ref ActionVars`. Eac
 - **Guard** — `GuardAction` (35/40, Shift held + no L/R) sets `GuardActive`; a weak in-cone hit parries to zero and arms `GuardCharged`, enabling `GuardRetaliateAction`.
 - **Grab / throw** — `GrabAction` (46/46) publishes a hold force field; `GrabbedSlash` (36/36) is the victim's exempt struggle attack, which erodes `GrabStrength` rather than dealing knockback. Throws stun the victim into Tumble.
 - **Ranged** — `EnergyBallAction` (Shift+LMB tap), `BeamAction` (Shift+LMB hold → sustained beam after charge), `GrenadeAction` (F → sticky grenade). These spawn projectile entities via `ctx.Spawner`. `LobbedAreaAction` (Shift+RMB charge → ranged eruption) still exists but is **deactivated** — its binding became Grab.
-- **Block Eruption** (two-phase) — `BlockReadyAction` (8/10, RMB held with cursor IN solid, accumulates charge) → `BlockEruptionAction` (9/10, armed when cursor exits solid, samples a `SmoothPen`-smoothed path, runs `EruptionPlanner.Plan` on release).
+- **Terrain building** — see the section below. `BlockPaintAction` (8/10, plain RMB), `BlockPlaceAction` (8/10, Shift+RMB), `BlockBurstAction` (30/30), `BlockGrabAction` (46/46, Shift+LMB into solid). `GrabAction` moved to 48/48 so grabbing a *player* outranks grabbing *terrain*.
 
 ### Combat condition state
-[`ConditionState`](Character/ConditionState.cs) — *offensive* combo/recovery/guard-window flags, each with an expire frame; `Tick` closes windows. Also carries the block-eruption hand-off (`BlockEruptionArmed`/`BlockChargeTime`/`BlockChargeOrigin`).
+[`ConditionState`](Character/ConditionState.cs) — *offensive* combo/recovery/guard-window flags, each with an expire frame; `Tick` closes windows.
 [`CombatState`](Character/CombatState.cs) — *defensive*: `Hitstun` (every hit briefly locks Jump, with diminishing extensions so stun-locks can't grow unbounded), `Stun` (heavy hits, gates attacks too), and Guard (`GuardActive`/`GuardCharged` + `TryParry`). Exposes `BlocksJump`/`BlocksAttack` gates.
 
-### Block Eruption planners
-[`EruptionPlanner`](Character/EruptionPlanner.cs) dispatches between two implementations (per-player `EruptionMode`, toggled by P; default MassBall):
-- **PriorityField** — scores empty cells by front-loaded weight × radial falloff with area-conserving radius; picks top-K.
-- **MassBall** ([Character/MassBallPlanner.cs](Character/MassBallPlanner.cs)) — simulates a spring-pulled ball tracing the recorded path; mass leaks into field cells, threshold-crossing sprouts, excess spills to neighbors recursively.
+### Terrain building — paint, place, burst, peel
+
+**This replaced the old two-phase Block Eruption model.** `EruptionPlanner.cs` and `MassBallPlanner.cs` are **deleted**, along with `BlockReadyAction`/`BlockEruptionAction`, the per-player `EruptionMode`, and the `P` planner toggle. Building is now a continuous *mass economy* rather than a one-shot plan.
+
+- **The mass field** ([World/TileMassField.cs](World/TileMassField.cs), reachable as `ChunkMap.Mass`) — a sparse per-cell "build mass" table with an N/E/S/W spill cascade (threshold 1, spill share 0.25, max depth 8, exponential decay with prune). A cell that is empty *and* supported commits a sprout via `TryRequestTile`; a cell that is occupied or unsupported **forwards** its unit to neighbours instead. That forwarding is the deliberate change from the old planner: mass flows until it finds somewhere legal to land. It **is** snapshotted (`ChunkMap.CaptureTerrain`/`RestoreTerrain`).
+- **The economy** ([Character/BuildMeters.cs](Character/BuildMeters.cs), on `PlayerAbilityState.Meters`, stepped once per frame after the action runs) — three pools: `Build` (reservoir 200, regen 24/s), `BuildMove` (working pool 48, refills from Build at 12/s), and `EruptMove` (charge, max 240, bought from Build at 2:1). Charging ramps to max over 2s, plateaus 0.25s, then overheld charge decays at 60/s while Build bleeds. Per-tile cost comes from `MaterialStrengths.BuildCostFor` — Stone 4.0, Dirt 1.0, Sand 0.5, Foam 0.25 (a 16× spread, vs only 4× on MaxHP). Snapshot-safe via `Clone`/`CopyFrom`.
+- **Paint** (`BlockPaintAction`, plain RMB) — spends proportionally and deposits into the mass field. **Eruption is now a release-time upgrade of the paint stroke**, not a separate action: holding charges `EruptMove`, and release spawns a [`MassBall`](Entities/MassBall.cs) — a gravity-free, tile-ignoring projectile that leaks mass into the field as it flies.
+- **Place** (`BlockPlaceAction`, Shift+RMB) — all-or-nothing single block.
+- **Burst** (`BlockBurstAction`) — LMB press-edge while painting over dead air; uses `ChunkMap.ForceSprout` to place unsupported.
+- **Peel** (`BlockGrabAction`, Shift+LMB with the cursor in solid, 6-tile reach) — the block-peel tether. A Gaussian kernel around the cursor admits cells into a group; a spring from cursor to group centre-of-mass pulls with `force = coeff · (dist/TileSize)^power`; force is divided among tether shares, wearing down per-member glue derived from material weight × outward solid edges. Overpull snaps (attempt dies); enough force breaks the group out and it becomes carried blocks, thrown on release as a `LobbedAreaProjectile`. Gated by `MovementConfig.BlockPeelEnabled` (default true; off = legacy drag-rip).
+
+Sprout topology changed to match: parent/child edges are **gone** from [`TileSproutGraph`](World/TileSproutGraph.cs)/`TileSproutNode`, replaced by a `SproutFaces` bitflag — a growing sprout emits one volume per supporting face, with geometry derived rather than stored. `TickSprouts` now runs two passes (commit the whole ring, then promote ghosts) so builds expand as a symmetric shell.
 
 ### Input parsing
 - [`Controller`](Character/Controller.cs) — 32-frame ring buffer of `PlayerInput` (Left/Right/Up/Down/Space/Shift/F/Num1-4/P/LeftClick/RightClick/MousePosition/MouseWorldPosition). `Poll(mouseWorldPos)` builds one from hardware; `InjectInput` feeds a supplied one (sim/tests). `Capture`/`Restore` for snapshots.
 - [`InputParser`](Character/InputParser.cs) — edge-triggered gesture detection: `Click`, `Stab`, `Circle`, `PressEdge`. Snapshot-able (`InputParserState`).
 - [`IntentBuffer`](Character/IntentBuffer.cs) — short queue of `ActionIntent`; Peek + explicit Consume, pruned by age.
 - [`InputIntent`](Character/InputIntent.cs) — lightweight per-frame intent struct (HeldHorizontal, JumpJustPressed, …) for movement-side use.
-- [`SmoothPen`](Character/SmoothPen.cs) — spring-pulled cursor smoother for block-eruption path sampling.
+- [`SmoothPen`](Character/SmoothPen.cs) — spring-pulled cursor smoother for build-stroke path sampling.
 
 ### Surface checkers
 [`GroundChecker`](Character/GroundChecker.cs), `CeilingChecker`, `WallChecker`, `ExposedUpperCornerChecker`, `ExposedLowerCornerChecker` — build strip regions via `body.Bounds.StripXxx(thickness)`, call `WorldQuery.SolidShapesInRect`. `EnvironmentContext` caches results within a frame.
@@ -266,6 +286,7 @@ It also carries two **1-frame inboxes**, both snapshotted alongside the dedupe t
 - [`EntityFactory`](Entities/EntityFactory.cs) — `Balloon` (floating passive target), `Ball` (gravity "crasher" that chips terrain on hard impact), `FloatingBall` (weightless crasher / combat ammo), `PracticeBall`, plus `Stalker`/`Turret`/blueprint enemies.
 - [`StalkerEnemy`](Entities/StalkerEnemy.cs) — ground chaser: Chase → Telegraph (visible wind-up) → Lunge (forward hitbox) → Recover, with a Stagger state on hit so knockback isn't clobbered by the AI.
 - [`TurretEnemy`](Entities/TurretEnemy.cs) — stationary: Idle → Charging (aim locks, dodgeable line of fire) → fires a `BulletProjectile` at the player's current position → Cooldown; Stagger on hit.
+- [`MassBall`](Entities/MassBall.cs) — the eruption payload. A `Projectile` with `IgnoreTiles`, zero gravity and light drag, leaking build mass into `ChunkMap.Mass` every frame. Spawned only from `BlockPaintAction.Exit`.
 - [`Projectile`](Entities/Projectile.cs) base + concrete `BulletProjectile`, `EnergyBallProjectile`, `StickyGrenadeProjectile`, `LobbedAreaProjectile` — travel + publish hitboxes; lifetime/fuse handled by the base. `LobbedAreaProjectile` captures eruption mode + block type at launch and runs a planner on detonation.
 
 ## Drawing ([Drawing/](Drawing/))
@@ -291,6 +312,12 @@ Render-only, and hot-reloadable freely for that reason. The rig is a pure joint 
 Clips are selected by the JSON **`Type`** field — never the filename or `Name` (`climbhands.json` plays as the `ClimbHands` overlay). Movement goes `MovementState.AnimationTag → AnimTag → IMoveDriver → AnimClip → clip`, where tag→clip is a hardcoded table ([MoveDriver.cs:89-106](Animation/MoveDriver.cs#L89-L106)) and *not* name matching; actions bind by exact ordinal match of the ActionState **class name** to `Type`. **[Plans/ANIMATION_BINDING_MAP.md](Plans/ANIMATION_BINDING_MAP.md) is the full state→clip→arc table** — read it before renaming anything, and note that the old `Vault` naming overload was retired 2026-08-04 (there is no `VaultState`; the clip is `parkour.json`).
 
 [`MotionProbe`](Animation/MotionProbe.cs) converts joint angles to world positions — **use it rather than eyeballing angles** when debugging clips (this is what the `anim-probe` skill and `MTile.Probe` drive).
+
+**Clip binding is by the JSON `Type` field, not the filename** — `Type` either parses as an `AnimClip` enum member (movement clip) or matches an `ActionState` class name exactly (upper-body overlay). There is no compile-time link, so [ClipBindingTests.cs](MTile.Tests/Animation/ClipBindingTests.cs) enforces it in both directions: every `AnimClip` member needs a file **in every rig** (a missing one throws the first frame a driver selects it), every concrete `ActionState` needs a matching clip (a missing one *silently* drops the overlay), and every action-typed clip needs a class. It also enforces the pacing contract: an action must either override `AnimationProgress` or bind a looping clip. [Plans/ANIMATION_BINDING_MAP.md](Plans/ANIMATION_BINDING_MAP.md) is the authoritative map of all three namespaces.
+
+**Action/movement progress** are two mirrored render-only channels: `ActionState.AnimationProgress` (default `-1f` = decline, requires a looping clip) and `MovementState.AnimationProgress`. Both land in `CharacterAnimSample`; the animator remaps the overlay clip onto `ActionProgress`, and `ClipTimeMode.Progress` maps onto `MovementProgress`.
+
+> **"Vault" is retired as a name.** `VaultState` never existed — the at-speed one-block climb is `ParkourState`, and `MantleState` is its at-rest complement. Clips renamed accordingly (`vault.json` → `mantle.json`, `vaulthands.json` → `climbhands.json`), along with config keys (`VaultLiftForce` → `LipLiftForce`, `CorrectorVault*` → `CorrectorClimb*`). Sim test fixture names deliberately kept "vault".
 
 ## Recording ([Recording/](Recording/))
 
@@ -347,5 +374,7 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 | Make a change snapshot-safe | Put mutable state in a value struct or a `Capture`/`Restore` pair; route terrain writes through `ChunkMap`; verify with a `SnapshotRoundTripTests` case |
 | Add a feedback effect on a game event | Fire an event from the sim, subscribe in `Game1`, spawn via `Effects` (never mutate sim from the handler) |
 | Tune movement | Edit `movement_config.json` — hot-reload picks it up (desktop) |
-| Tune block eruption | Constants in [MassBallPlanner.cs](Character/MassBallPlanner.cs) |
+| Tune building / eruption | [BuildMeters.cs](Character/BuildMeters.cs) for the economy, [TileMassField.cs](World/TileMassField.cs) for spill/decay, `BuildCost` in `material_strengths.json` for per-material cost |
+| Tune the block peel | `Peel*` constants in `BlockGrabAction` ([ActionStates.cs](Character/ActionStates.cs)); `MovementConfig.BlockPeelEnabled` toggles legacy drag-rip |
+| Add an `ActionState` | You **must** author a clip whose `Type` equals the class name, or `ClipBindingTests` fails; an action that declines `AnimationProgress` needs a *looping* clip |
 | Tune impact / crush damage | `ImpactDamage` in [EntityFactory.cs](Entities/EntityFactory.cs) / [PlayerCharacter.cs](Character/PlayerCharacter.cs) |
