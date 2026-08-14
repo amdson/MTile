@@ -34,10 +34,12 @@ if (-not (Test-Path (Join-Path $wwwroot "_framework"))) {
     throw "No publish output at $wwwroot - run without -SkipBuild"
 }
 
-# Mirror into the site repo. GitHub Pages never serves the precompressed
-# variants (it gzips on the fly), so skip .br/.gz to keep the site repo lean.
+# Mirror into the site repo. Skip .br/.gz (GitHub Pages never serves the
+# precompressed variants; it gzips on the fly) and .md (the Pages build's
+# jekyll-optional-front-matter plugin turns any markdown into a site page,
+# polluting the site nav; the game never fetches markdown at runtime).
 Write-Host "== copying to $target ==" -ForegroundColor Cyan
-robocopy $wwwroot $target /MIR /XF *.br *.gz | Out-Null
+robocopy $wwwroot $target /MIR /XF *.br *.gz *.md | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "robocopy failed with exit code $LASTEXITCODE" }
 
 $hash = (git -C $gameRepo rev-parse --short HEAD).Trim()

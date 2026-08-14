@@ -140,6 +140,7 @@ describes only the copy/paste lobby — it predates room codes and wasn't update
 | 5.7 | Tangential carry on moving platforms not implemented. | **OPEN** | `MTile.Tests/MovingPlatformTests.cs:13`; `Plans/DYNAMIC_PHYSICS_ROADMAP.md`. |
 | 5.8 | Surface-relative descent limiting (sprout-style moving floors) wants surface velocity in the solve. | **OPEN** | Deferred from the corrector work — the "more general solver" pass. |
 | 5.9 | `CorrectorCost_VaultHeavyCourse` budget test is marginal in Debug (~0.8–1.2ms vs a 0.5ms ceiling) regardless of changes. | **OPEN** | Needs relaxing or making Release-only. |
+| 5.14 | Cosmetic sim-event hooks fired during rollback re-simulation, spraying duplicate particles — `Game1.cs` subscribed to `OnPlayerRespawn`/`OnTileBroken` unguarded while `RollbackSession.cs:108-112` re-runs `Step` over every rolled-back frame. | **FIXED** | Both hooks now emit into `Presentation/PresentationEvents.cs` keyed `(Simulation.Frame, PresentationId)`; `Game1.PresentThisFrame()` drains once per rendered frame. Replay re-emits the same key and is dropped. Tests: `MTile.Tests/Sim/PresentationEventLogTests.cs`. |
 | 5.10 | `MaxEvents` is pinned at 32 — raising to 64 broke qp's GroundFriction post-release braking. QP row-budget crowding is load-bearing. | **OPEN** | Latent fragility, noted not fixed. |
 
 ### Deliberately skipped tests
@@ -168,3 +169,20 @@ fix those tests.
 
 Related ablation knobs, all hot-reloadable from `movement_config.json`:
 `FoldEngine` ("qp" | "ref" | "lm"), `CorrectorVaultEnabled`, `FoldRedirectEnabled`.
+
+---
+
+## 7. Audio
+
+**Nothing implemented** — there is no audio anywhere in the codebase (no `SoundEffect`/`AudioEngine`
+reference). Design is in [Plans/AUDIO_PLAN.md](Plans/AUDIO_PLAN.md): rollback-safe by construction
+via level-triggered (predicate-driven) vs edge-triggered (event + `(simFrame, SoundId)` dedup)
+sounds, over an `ISoundSource` registry modelled on the animation move-driver registry.
+
+| # | Item | Status | Evidence / notes |
+|---|---|---|---|
+| 7.1 | Sim frame counter for the single-player path. | **DONE** | `Simulation.Frame` — incremented in `Step` beside `_elapsed`, carried in `SimSnapshot.Frame`, so it rewinds on `Restore`. `PlayerCharacter.Frame` would also have worked but is per-player; a global presentation key shouldn't depend on which player exists. |
+| 7.2 | `SimAudioView` read-only façade + `AudioFrame`/`ISoundSource` registry + mixer diff. | **OPEN** | Plan §4. Validate with a debug overlay of live voices before any real sound. |
+| 7.3 | Shared presentation-events seam; move particles onto it. | **DONE** | `Presentation/PresentationEvents.cs` + `Game1.PresentThisFrame()`. Edge-triggered half only — level-triggered (predicate) sounds are re-derived per frame and don't use the log. Audio plugs in as a second consumer. |
+| 7.4 | Per-key voice caps + per-frame coalescing. | **OPEN** | Plan §5. Burst/peel can break many tiles in one frame; likely the first practical problem, ahead of anything rollback-related. |
+| 7.5 | Web/KNI audio API parity + `Content.mgcb` assets. | **OPEN** | Audio is a place DesktopGL and KNI can diverge — verify anything used builds under `MTile.Web`. |

@@ -66,6 +66,10 @@ public class Game1 : Game
     private GlowTrailField _glowField;
     private AttackGlowSystem _attackGlow;
     private readonly ParticleSystem _particles = new(capacity: 2048);
+    // Edge-triggered sim events on their way to the render shell, deduped by
+    // (sim frame, id) so a rollback replay doesn't re-present them. Audio will hang off
+    // the same log — see Plans/AUDIO_PLAN.md.
+    private readonly PresentationEventLog _events = new();
     // Cursor trail — a fading ribbon trailing the world-space mouse position.
     private readonly Trail _cursorTrail = new(capacity: 24, lifetime: 0.22f);
     private CosmeticUpdateSystem _cosmetics;
@@ -310,13 +314,40 @@ public class Game1 : Game
             ? new MTile.Net.BotInputSource(seed: 1234)
             : null;
 
-        // Cosmetic feedback hooks. The sim raises these during Step; Game1 turns
-        // them into particles. ChunkMap tints the tile-break burst by material.
-        _sim.OnPlayerRespawn += pos => Effects.Puff(_particles, pos, Color.LimeGreen);
+        // Cosmetic feedback hooks. The sim raises these during Step; they land in the
+        // presentation log rather than spawning particles on the spot, because Step runs
+        // again for every rolled-back frame and used to spray a duplicate burst each
+        // time. The log drains once per rendered frame, below.
+        _events.Reset();   // fresh sim ⇒ frame counter restarts ⇒ old keys are stale
+        _sim.OnPlayerRespawn += pos =>
+            _events.Emit(_sim.Frame, new PresentationId(PresentationKind.PlayerRespawn), pos);
         _sim.Chunks.OnTileBroken += (pos, type) =>
-            Effects.TileBreak(_particles, pos, TilePalette.BaseColor(type));
+            _events.Emit(_sim.Frame,
+                         new PresentationId(PresentationKind.TileBreak,
+                                            (int)MathF.Floor(pos.X / Chunk.TileSize),
+                                            (int)MathF.Floor(pos.Y / Chunk.TileSize)),
+                         pos, (int)type);
 
         if (_config.FreezeFrame) ApplyFreezeFrame();
+    }
+
+    // Turn this frame's fresh presentation events into cosmetics. The only consumer today
+    // is the particle system; audio joins here (Plans/AUDIO_PLAN.md §8).
+    private void PresentThisFrame()
+    {
+        foreach (var e in _events.Pending)
+        {
+            switch (e.Id.Kind)
+            {
+                case PresentationKind.TileBreak:
+                    Effects.TileBreak(_particles, e.Position, TilePalette.BaseColor((TileType)e.Payload));
+                    break;
+                case PresentationKind.PlayerRespawn:
+                    Effects.Puff(_particles, e.Position, Color.LimeGreen);
+                    break;
+            }
+        }
+        _events.Clear();
     }
 
     // TEMP EXPERIMENT: single-frame corrector inspector (GameConfig.FreezeFrame,
@@ -635,6 +666,11 @@ public class Game1 : Game
             }
             _animTrace.HandleInput(keyboardState);
         }
+
+        // Drain the presentation log once per RENDERED frame — not once per Step, since a
+        // rollback runs many Steps inside one frame. Everything here is already deduped.
+        PresentThisFrame();
+
         _probeSlow |= gameTime.IsRunningSlowly;
         _toastTtl -= dt;
 

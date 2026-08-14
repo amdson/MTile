@@ -71,6 +71,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // moving-platform tickers as a pure function of time so platforms snapshot/restore
     // with no hidden accumulator state.
     private float _elapsed;
+    // Step counter. Snapshotted, so it rewinds with a rollback and a replayed frame
+    // carries the same number it did the first time — which is what makes
+    // (Frame, id) usable as a presentation-event dedup key. See Plans/AUDIO_PLAN.md §4.
+    private int _frame;
 
     // Configure the World's component stores once per construction, before any entity
     // is registered. Two flavors:
@@ -126,6 +130,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     public event Action<Vector2> OnPlayerRespawn;
 
     // ── Read-only views for the render shell ────────────────────────────────────
+    // Steps taken. Rewinds on Restore, so it names a frame of the *timeline*, not of
+    // wall-clock execution — a rolled-back frame is re-stepped under its old number.
+    public int Frame => _frame;
     public PlayerCharacter Player => _player;
     public IReadOnlyList<(PlayerCharacter Player, Controller Ctrl)> SecondaryPlayers => _secondaryPlayers;
     // Render/test views, projected from the World on access (spawn order). Not on the
@@ -253,6 +260,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         _controller.InjectInput(input);
         const float dt = FixedDt;
         _elapsed += dt;
+        _frame++;
 
         // Block-picker (1-4) and planner-mode toggle (P) are now interpreted per-player
         // inside PlayerCharacter.Update from its own input — no global planner statics.
@@ -397,6 +405,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             HitIdValue           = _hitIds.Value,
             World                = _world.Capture(),
             Elapsed              = _elapsed,
+            Frame                = _frame,
             PrimaryController    = _controller.Capture(),
             SecondaryControllers = secCtrls,
             Dedupe               = _combat.CaptureDedupe(),
@@ -411,6 +420,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     {
         _hitIds.Value = snap.HitIdValue;
         _elapsed      = snap.Elapsed;
+        _frame        = snap.Frame;
 
         // Snapshot the live entity set (by id) BEFORE the World restore clears the
         // registry stores — used to restore-in-place where an id still matches.
