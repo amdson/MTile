@@ -16,6 +16,10 @@ public abstract class Projectile : Entity
     // Counts seconds since spawn. Override Update can use this to gate behavior
     // (arming delay, fuse, lifetime).
     protected float Age;
+    // Read-only view for the render shell: the audio layer turns it into a spawn frame
+    // (see Audio/GameAudio.cs), which is what makes a spawn sound idempotent under
+    // rollback. Snapshotted with the rest of the projectile, so it rewinds correctly.
+    public float AgeSeconds => Age;
     // After this many seconds, the projectile dies on its own. Subclasses set
     // in constructor. 0 = no lifetime cap (caller manages death).
     protected float Lifetime;

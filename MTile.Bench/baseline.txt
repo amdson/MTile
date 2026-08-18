@@ -1,0 +1,15 @@
+# MTile.Bench baseline — regenerate with: dotnet run -c Release --project MTile.Bench -- --save <path>
+# name	mean_us	worst_us
+flat rest (no input)	31.4	66.8
+flat run	25.1	103.5
+bumpy corridor	184.2	651.4
+vault-heavy course	32.8	237.3
+snapshot+step (pair)	71.8	0.0
+restore	10.5	0.0
+rollback frame (win=8)	250.2	0.0
+anim biped/run (+sim)	125.5	543.9
+anim biped/idle (+sim)	174.8	350.7
+anim biped/idle (no terrain) (+sim)	27.0	47.1
+anim biped_rabbit/run (+sim)	162.2	592.3
+anim biped_rabbit/idle (+sim)	206.0	341.6
+anim biped_rabbit/idle (no terrain) (+sim)	30.4	59.4

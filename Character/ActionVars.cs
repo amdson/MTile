@@ -21,7 +21,8 @@ namespace MTile;
 // IsGrounded, ChargeTime), since actions are mutually exclusive in time.
 public struct ActionVars
 {
-    public float   TimeInState;       // Ready, Slash*, Stab, Pulse, EnergyBall, Grenade, BlockPaint
+    public float   TimeInState;       // Recovery, Slash*, Stab, Pulse, EnergyBall, Grenade, BlockPaint
+    public bool    Charging;          // Recovery — LMB wind-up hold live (the merged ReadyAction role)
     public float   ChargeTime;        // Beam, LobbedArea
     public bool    IsGrounded;        // Ready, Stab, Pulse
     public int     Facing;            // Ready

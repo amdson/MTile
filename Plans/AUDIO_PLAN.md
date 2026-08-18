@@ -485,8 +485,14 @@ Marked honestly; these are not settled.
   browser test, not a code read.
 - **Browser audio unlock** (§7 risk 2) — no click-to-start screen exists. Prerequisite for
   any web audio at all.
-- **Pipeline vs raw assets** (§8) — undecided. Affected by `/compress:False` and the WASM
-  directory-enumeration constraint.
+- ~~**Pipeline vs raw assets**~~ **RESOLVED — content pipeline, and the `.ogg` stays where
+  `build-sfx.ps1` puts it.** `SoundEffect.FromStream` is RIFF-WAV-only on both backends
+  (MonoGame's own XML doc lists the accepted formats), so raw loading would have meant
+  shipping WAV or taking an NVorbis dependency the web build cannot see. Verified instead
+  that `OggImporter` + `SoundEffectProcessor` exist in *both* toolchains, and that mgcb
+  accepts an out-of-tree source with a remapped asset name:
+  `/build:../Assets/Sounds/x.ogg;Sounds/x.xnb` — probed against a real file, xnb produced.
+  So no clip ever moves or is duplicated; `scripts/sync-sounds.ps1` writes the entries.
 - ~~**Presentation-events seam scope**~~ **RESOLVED — shared, and built first.**
   `Presentation/PresentationEvents.cs` (`PresentationId` / `PresentationEvent` /
   `PresentationEventLog`), with the particle hooks moved onto it and drained by
@@ -502,12 +508,27 @@ The bias throughout: **a thin vertical slice beats a complete registry with noth
 into it.** One predicate sound and one event sound end to end will surface the real problems
 (coalescing, unlock, KNI behaviour) faster than any amount of infrastructure.
 
-**Phase 0 — the slice.** One `SoundEffect` loaded, one hardcoded predicate sound (wall
-scrape: `AnimTag.WallSlide`, gain from `Body.Velocity.Y`) and one hardcoded event sound (tile
-break, keyed `(gtx,gty)`), reconciled from `CosmeticUpdateSystem.Update` at `:124`. No
-registry, no façade, no `ISoundSource` — a single class with a dictionary of live voices, a
-dedup ring, and retarget-don't-restart. Ship it on desktop first. This is the whole design
-proven in ~200 lines, and it is where the retarget/fade semantics get tuned by ear.
+**Phase 0 — the slice. Infrastructure DONE; waiting on clips.** Built and verified end to
+end with a committed 440 Hz `dev_tone.ogg`: pipeline entry → `SoundBank` → `AudioMixer` →
+audible on desktop. What exists now, all under `Audio/`:
+
+| File | Role |
+|---|---|
+| `SoundKind.cs` | the logical sound vocabulary + file stems + which kinds are loops |
+| `SoundId.cs` | voice identity, pure function of sim state, with a deterministic variant seed |
+| `SoundBank.cs` | loads clips; a kind with no clips is silent, never an error |
+| `AudioMixer.cs` | voice pool: retarget-don't-restart, fade on departure, camera-relative pan/falloff, per-kind cap + per-frame fold, `(frame, id)` dedup |
+| `GameAudio.cs` | **the policy file** — the only place that maps sim facts to sounds |
+| `SoundManifest.g.cs` | generated; do not hand-edit |
+
+Wired in `Game1.PresentThisFrame(dt)`: `BeginFrame` → events through `GameAudio.Present` →
+`CollectLevel(sim)` → `EndFrame(camera, dt)`. Wall scrape (level-triggered, gain/pitch
+riding slide speed) and tile break + respawn (edge-triggered) are already mapped and will
+sound the moment clips with those stems exist. Dev hotkeys: **F9** fires the dev tone,
+**F10** mutes.
+
+Remaining for Phase 0: real clips, then tuning the retarget/fade constants by ear —
+`FadeSeconds`, `FalloffStart/End`, `PanWidth` in `AudioMixer.cs`.
 
 **Phase 1 — web parity.** Build `MTile.Web`, add the click-to-start unlock, and verify in a
 real browser that `Volume`/`Pitch`/`Pan` do something. Resolve §7 risk 1 and §8's format

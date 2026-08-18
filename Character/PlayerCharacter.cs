@@ -92,6 +92,11 @@ public class PlayerCharacter : IHittable
     // at vnAbs ≈ 849 from terminal velocity) still trigger crush; 2-cell-dirt
     // plunges likewise. Was 400 — pre-absorption-cap that was sized for self-
     // jumps only, before sand impacts could legally exceed it.
+    // Armored hits are damped, not no-sold: the body still visibly reacts so a
+    // tanked hit reads as armor, not a whiff (HIT_AIRLOCK_PLAN open q. 3 —
+    // knockback scaling chosen over the binary no-sell).
+    private const float ArmorKnockbackScale = 0.3f;
+
     private const float CrushImpulseThreshold = 700f;
     private const float CrushDamagePerImpulse = 0.003f;
     private const float CrushCooldownSeconds  = 0.2f;   // ≈ the original 6 frames at 30 fps
@@ -153,6 +158,19 @@ public class PlayerCharacter : IHittable
         _abilities.Combat.AddPercent(hit.Damage);
         float kbScale = _abilities.Combat.KnockbackScale;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity, kbScale);
+
+        // Superarmor (Plans/HIT_AIRLOCK_PLAN.md §4): the live action may tank
+        // hits below its armor threshold. Percent still accrued above (armor
+        // takes the damage), attacker recoil unchanged, but knockback is scaled
+        // way down and the hit never REGISTERS — no hitstun, no stun, and
+        // therefore no flinch eviction (RecoveryAction keys off LastHitFrame).
+        float armor = _currentAction?.ArmorProfile(in _actionVars) ?? 0f;
+        if (armor > 0f && res.Strength < armor)
+        {
+            Body.Velocity += res.TargetDeltaV * ArmorKnockbackScale;
+            return res.Impulse;
+        }
+
         Body.Velocity += res.TargetDeltaV;
 
         // Register the hit for hitstun (every hit) + the stun-threshold check.
@@ -295,8 +313,7 @@ public class PlayerCharacter : IHittable
         // candidates; preconditions + ConditionState gates do the real selection work.
         // Listed roughly low-to-high priority for readability.
         _actionRegistry.Add(new NullAction());        // 0/0
-        _actionRegistry.Add(new ReadyAction());       // 10/15  — wind-up on LMB press
-        _actionRegistry.Add(new RecoveryAction());    // 40/45  — post-attack lockout
+        _actionRegistry.Add(new RecoveryAction());    // 10/45  — countdown + wind-up airlock (absorbed ReadyAction)
         _actionRegistry.Add(new GroundSlash1());      // 30/30
         _actionRegistry.Add(new CrouchSlash());       // 30/32  — crouch-only, no combo
         _actionRegistry.Add(new AirSlash1());         // 30/30
@@ -452,6 +469,8 @@ public class PlayerCharacter : IHittable
             CombatSystem   = CombatSystem,
             ActiveBlockType = _activeBlockType,
             Intents        = _intents,
+            ActionRegistry = _actionRegistry,
+            CurrentActionVars = _actionVars,
             Condition      = _abilities.Condition,
             Combat         = _abilities.Combat,
             CurrentFrame   = _frame,
@@ -482,7 +501,7 @@ public class PlayerCharacter : IHittable
         {
             _currentState.Exit(ctx, _abilities, ref _moveVars);
             _currentState = _stateRegistry.First(s => s is FallingState);
-            System.Console.WriteLine($"[move] -> {_currentState.GetType().Name}");
+            if (SimTrace.Enabled) SimTrace.Write($"[move] -> {_currentState.GetType().Name}");
             _currentState.Enter(ctx, _abilities, ref _moveVars);
         }
 
@@ -521,7 +540,7 @@ public class PlayerCharacter : IHittable
         {
             _currentState.Exit(ctx, _abilities, ref _moveVars);
             _currentState = bestChoice;
-            System.Console.WriteLine($"[move] -> {_currentState.GetType().Name}");
+            if (SimTrace.Enabled) SimTrace.Write($"[move] -> {_currentState.GetType().Name}");
             _currentState.Enter(ctx, _abilities, ref _moveVars);
         }
 
@@ -532,9 +551,15 @@ public class PlayerCharacter : IHittable
         {
             _currentAction.Exit(ctx, _abilities, ref _actionVars);
             _currentAction = _actionRegistry.First(a => a is NullAction);
-            System.Console.WriteLine($"[action] -> {_currentAction.GetType().Name}");
+            if (SimTrace.Enabled) SimTrace.Write($"[action] -> {_currentAction.GetType().Name}");
             _currentAction.Enter(ctx, _abilities, ref _actionVars);
         }
+
+        // Refresh AFTER the natural-exit handling so RecoveryAction's entry cases
+        // see the true live incumbent (Null on an exit frame, not the ghost that
+        // PreviousAction(0) still reports) and its current-phase vars.
+        ctx.CurrentAction     = _currentAction;
+        ctx.CurrentActionVars = _actionVars;
 
         ActionState bestAction = null;
         int bestActionPriority = int.MinValue;
@@ -551,7 +576,7 @@ public class PlayerCharacter : IHittable
         {
             _currentAction.Exit(ctx, _abilities, ref _actionVars);
             _currentAction = bestAction;
-            System.Console.WriteLine($"[action] -> {_currentAction.GetType().Name}");
+            if (SimTrace.Enabled) SimTrace.Write($"[action] -> {_currentAction.GetType().Name}");
             _currentAction.Enter(ctx, _abilities, ref _actionVars);
         }
 

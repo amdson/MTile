@@ -208,7 +208,7 @@ public sealed partial class CharacterAnimator
                 foreach (var c in _a._contacts)
                     if (c.Bone == b &&
                         MathF.Abs(s.Normal.X * (c.Target.X - s.Point.X)
-                                + s.Normal.Y * (c.Target.Y - s.Point.Y)) < 8f)
+                                + s.Normal.Y * (c.Target.Y - s.Point.Y)) < ContactSupportBand)
                         return true;                       // this plane supports the plant
             return false;
         }
@@ -335,16 +335,21 @@ public sealed partial class CharacterAnimator
         public PhaseRateFloorConstraint(CharacterAnimator a) => _a = a;
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
+            var cfg = AnimSolverConfig.Current;
             float fl = _a._phaseFloor;
-            float def = fl > 1e-5f ? 1f - x[IdxPhi] / fl : 0f;
-            r[0] = def > 0f ? MathF.Sqrt(AnimSolverConfig.Current.PhaseFloorPrior) * def : 0f;
+            if (cfg.PhaseFloorMode == 2 || fl <= 1e-5f) { r[0] = 0f; return 1; }  // box mode: the bound does it
+            float def = cfg.PhaseFloorMode == 1 ? fl - x[IdxPhi] : 1f - x[IdxPhi] / fl;
+            r[0] = def > 0f ? MathF.Sqrt(cfg.PhaseFloorPrior) * def : 0f;
             return 1;
         }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
         {
+            var cfg = AnimSolverConfig.Current;
             float fl = _a._phaseFloor;
-            if (fl > 1e-5f && x[IdxPhi] < fl)
-                jac[row0 * stride + IdxPhi] = -MathF.Sqrt(AnimSolverConfig.Current.PhaseFloorPrior) / fl;
+            if (cfg.PhaseFloorMode == 2 || fl <= 1e-5f) return 1;
+            if (x[IdxPhi] < fl)
+                jac[row0 * stride + IdxPhi] = -MathF.Sqrt(cfg.PhaseFloorPrior)
+                                            * (cfg.PhaseFloorMode == 1 ? 1f : 1f / fl);
             return 1;
         }
     }

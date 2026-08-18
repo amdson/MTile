@@ -236,6 +236,118 @@ public sealed partial class CharacterAnimator
         public float        AimErrDeg;       // solved aim error, degrees (0 when inactive)
     }
 
+    // Work done by the LAST LM solve this animator ran (0/0/0 if it took a fast path).
+    // Exposed for the perf harness: solve cost is driven by how many times the residual
+    // function had to rebuild the pose, which is iterations plus trust-region retries —
+    // a number nothing else surfaces. See LeastSquaresSolver's counter block.
+    public (int Iterations, int ResidualEvals, int JacobianEvals) LastSolveWork
+        => (_ls.LastIterations, _ls.LastResidualEvals, _ls.LastJacobianEvals);
+
+    // Where the last solve's time went, in Stopwatch ticks. Requires
+    // LeastSquaresSolver.ProfileCallbacks — zero otherwise.
+    public (long Residual, long Jacobian, long Algebra) LastSolveTicks
+        => (_ls.LastResidualTicks, _ls.LastJacobianTicks, _ls.LastAlgebraTicks);
+
+    // Split the final cost by which constraint block produced it.
+    //
+    // LastSolveCost is a single number over rows carrying very different weights, so it says
+    // "the solve got better" without saying WHAT got better — a numerical change that buys a
+    // large cost reduction by satisfying a 4700-weight hard row is a different event from one
+    // that buys the same reduction by relaxing a weight-4 pose prior. This re-evaluates the
+    // residuals at the solved x and sums the squares per block, which is the only way to tell
+    // those apart.
+    //
+    // Off by default: it costs one extra pose rebuild per frame, and it re-runs BuildSolvePose,
+    // so it must be called while the solver's final x is still the live pose state (i.e. from
+    // inside the solve, not after Update has moved on). Diagnostics only.
+    public static bool CaptureResidualBreakdown;
+    public readonly System.Collections.Generic.List<(string Block, int Rows, float SumSq)>
+        LastResidualBreakdown = new();
+
+    // The raw solved offsets (world px) at capture time. Read here rather than through
+    // VerticalOffset/HorizontalOffset, which gate on _haveCorr and so report zero once the
+    // frame's correction has been consumed — that gate made the run scenarios read 0.000px
+    // against a plainly nonzero ComOffset residual.
+    public float LastSolveDy, LastSolveDx, LastSolveDphi;
+
+    // Per-column diagonal of JᵀJ, decomposed by which constraint block contributed it.
+    //
+    // The question this exists to settle: is the ill-conditioning DIAGONAL (some columns
+    // barely touched by anything, so their diagonal is tiny) or OFF-diagonal (columns
+    // genuinely correlated)? Only the first is fixable by weights or by dropping variables.
+    // The decomposition matters as much as the totals: a Δθ column whose diagonal comes
+    // ENTIRELY from PosePrior + ThetaSmoothness is a bone no geometric constraint reached
+    // this frame — a free variable held up by a weight-4 spring, which is exactly the shape
+    // that produces a huge diagonal ratio.
+    //
+    // Filled alongside LastResidualBreakdown, same gate, same cost class (one Jacobian eval).
+    public readonly System.Collections.Generic.List<(string Block, float[] ColSq)>
+        LastColumnBreakdown = new();
+    private float[] _bdJac;
+
+    private void CaptureColumns(int n)
+    {
+        int nv = _solveVars.Length;
+        _bdJac ??= new float[_maxResiduals * nv];
+        LastColumnBreakdown.Clear();
+
+        // Same preconditions CadenceJacobian establishes: composed pose at φ+Δφ, and ω_j for
+        // the Δφ channel. Without these the blocks read stale FK state.
+        var x = _solveVars.AsSpan(0, n);
+        BuildSolvePose(x);
+        AnimationSampler.SampleAngularVelocity(_solveClip, Wrap01(_solvePhi + x[IdxPhi]),
+                                               _kfA, _kfB, _kfC, _kfD,
+                                               _angVel.AsSpan(0, _skeleton.Count));
+
+        Array.Clear(_bdJac, 0, _maxResiduals * nv);
+        int row = 0;
+        foreach (var c in _frameComposite)
+        {
+            int k = c.Jacobian(x, _bdJac, nv, row);
+            var colSq = new float[n];
+            for (int i = row; i < row + k; i++)
+                for (int a = 0; a < n; a++)
+                {
+                    float v = _bdJac[i * nv + a];
+                    colSq[a] += v * v;
+                }
+            LastColumnBreakdown.Add((c.GetType().Name, colSq));
+            row += k;
+        }
+    }
+
+    private void CaptureBreakdown(int n)
+    {
+        if (!CaptureResidualBreakdown) return;
+        CaptureColumns(n);
+        LastResidualBreakdown.Clear();
+        LastSolveDy = _solveVars[IdxDy];
+        LastSolveDx = _solveVars[IdxDx];
+        LastSolveDphi = _solveVars[IdxPhi];
+        var x = _solveVars.AsSpan(0, n);
+        BuildSolvePose(x);
+        var r = new float[_maxResiduals];
+        int row = 0;
+        foreach (var c in _frameComposite)
+        {
+            int k = c.Residuals(x, r.AsSpan(row));
+            float s = 0f;
+            for (int i = 0; i < k; i++) s += r[row + i] * r[row + i];
+            LastResidualBreakdown.Add((c.GetType().Name, k, s));
+            row += k;
+        }
+    }
+
+    // Residual row count m of the last solve.
+    public int LastSolveRows => _ls.LastRows;
+    public float LastSolveCost => _ls.LastCost;
+    public static float LastPivotRatio => LeastSquaresSolver.LastPivotRatio;
+    public static float LastDiagRatio  => LeastSquaresSolver.LastDiagRatio;
+
+    // Per-iteration cost of the last solve (index 0 = starting cost). Requires
+    // LeastSquaresSolver.ProfileCallbacks.
+    public ReadOnlySpan<float> LastSolveCostTrace => _ls.CostTrace.AsSpan(0, _ls.CostTraceCount);
+
     public AnimFrameDebug CaptureDebug()
     {
         var d = new AnimFrameDebug

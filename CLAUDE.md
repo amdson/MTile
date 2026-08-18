@@ -45,6 +45,19 @@ dotnet run --project MTile.Web              # dev server (interpreted — slow, 
 
 # Web publish → GitHub Pages (https://amdson.github.io/mtile/)
 pwsh scripts/publish-web.ps1                # -NoPush / -SkipBuild / -SiteRepo
+
+# Performance (see Plans/PERF_AUDIT.md)
+dotnet run -c Release --project MTile.Bench              # sim + animation-solver µs/frame
+dotnet run -c Release --project MTile.Bench -- --check   # diff vs baseline.txt; exit 1 on a ~1.5x regression
+dotnet run -c Release --project MTile.Bench -- --save MTile.Bench/baseline.txt   # re-baseline
+dotnet run -c Release --project MTile.Bench -- --corrector             # corrector QP share of a sim tick
+node MTile.Web/smoke/qp_bench.js http://127.0.0.1:8080/                # ...the same solve in the browser (AOT publish required)
+
+# Audio assets: hand-cut slices in Audio/raw → game-ready Ogg in Assets/Sounds
+pwsh scripts/build-sfx.ps1 -Name tile_break -DryRun   # print the plan + filter chain
+pwsh scripts/build-sfx.ps1 -Name tile_break           # → tile_break_01.ogg, _02, …
+pwsh scripts/build-sfx.ps1 -Loop -Name wall_scrape    # loops: no silence trim, no end fade
+pwsh scripts/sync-sounds.ps1                          # wire clips into the pipeline + manifest
 ```
 
 **AOT is mandatory for a playable web build: 2.7 fps interpreted vs ~40 fps AOT.** The csproj still
@@ -58,7 +71,38 @@ Browser smoke tests (Playwright, headless Chromium + SwiftShader) live in `MTile
 tabs, since a backgrounded tab's rAF throttles and the peer stall-caps — driving the manual
 copy/paste lobby and pixel-diffing that input mirrored). Setup in `MTile.Web/smoke/README.md`.
 
+`build-sfx.ps1` needs ffmpeg (`winget install Gyan.FFmpeg`, then restart the shell). It outputs the
+format `Plans/AUDIO_ASSET_LIST.md` specifies — mono, 22.05 kHz, Ogg Vorbis, **loudness-matched by
+LUFS** (peak normalization does not match perceived loudness, and round-robin variants that differ
+in loudness read as a bug rather than as variety). It deliberately does *not* bake in pitch, gain,
+pan, or variant selection: those are runtime concerns (`Plans/AUDIO_PLAN.md` §5), and doing both is
+the classic mistake.
+
+**Slotting a clip in: `build-sfx.ps1` → `sync-sounds.ps1` → build.** `sync-sounds.ps1` scans
+`Assets/Sounds/*.ogg` and regenerates the `GENERATED SOUNDS` region of `Content/Content.mgcb`
+plus `Audio/SoundManifest.g.cs`; both are generated, don't hand-edit them. The clips stay in
+`Assets/Sounds` and are built out-of-tree (`/build:../Assets/Sounds/x.ogg;Sounds/x.xnb`), so
+nothing is moved or duplicated, and the same entries serve both content toolchains — no
+wwwroot copy rule needed. `SoundEffect.FromStream` is WAV-only on both backends, which is why
+audio goes through the pipeline while the PNGs under `Assets/` do not.
+
+A clip is only *audible* once a `SoundKind` maps to its stem (`Audio/SoundKind.cs`) and
+`Audio/GameAudio.cs` says what triggers it — that policy file is the only hand-written step.
+Unmapped stems build fine and are reported by `sync-sounds.ps1` with a `?`. A kind with no
+clips on disk is silent, never an error, so the game runs identically with an empty bank.
+Dev hotkeys: **F9** fires the committed `dev_tone.ogg`, **F10** mutes. Design:
+`Plans/AUDIO_PLAN.md`; web audio still needs a click-to-start unlock before it will sound.
+
+All operational tooling is indexed in [scripts/README.md](scripts/README.md) (publish, SFX
+conversion, headless build VM).
+
 Quickest correctness check while iterating on game logic: `dotnet build MTile.Core.csproj`.
+
+**Frame profiling in-game**: `GameConfig.DebugFrameTimings` (on by default) draws a per-pass
+breakdown — `sim / anim / cosmetic / chunks / skins / fx / glow / present / …`, mean+worst over
+60 frames. **F11 dumps the last window to the console**, which is how the *web* build is
+profiled (the dump lands in devtools). Draw-side scopes measure batch *building*; the GPU
+submit lands in `present`. `Diagnostics/FrameProfiler.cs`.
 
 ### Running a relevant slice of the suite
 

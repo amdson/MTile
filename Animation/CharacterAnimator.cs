@@ -116,6 +116,12 @@ public sealed partial class CharacterAnimator
     private readonly List<SolverSurface> _surfaces = new();
     private const int MaxSurfaces = 8;   // sizes the residual scratch; excess surfaces are dropped
                                          // (terrain extraction emits a handful + the wall plane)
+    // How near an upward-facing face must be to a toe to count as SUPPORTING its plant. One
+    // meaning, two users that must agree: SnapToSupport captures the target onto such a face,
+    // and NoPenetrationConstraint.SkipPair mutes its own row against the same face because the
+    // contact now owns it. If they disagreed, a plant could be snapped to a face that still
+    // fires a no-pen row against it, or held off a face that stays muted.
+    private const float ContactSupportBand = 8f;
     // Whether any surface can plausibly engage this frame (sample.SurfacesNear) — gates the
     // off-locomotion static solve so dormant terrain planes don't defeat the fast path.
     private bool _surfacesNear;
@@ -881,8 +887,40 @@ public sealed partial class CharacterAnimator
         {
             if (w <= 1e-3f || ActiveIndex(bone) >= 0) continue;   // held ones updated above
             Vector2 tip = _scratch.WorldOf(bone).Translation;     // bone's far end = contact tip
-            _contacts.Add(new ActiveContact { Bone = bone, Target = tip, Weight = w, Source = ContactSource.SelfPlant });
+            _contacts.Add(new ActiveContact { Bone = bone, Target = SnapToSupport(bone, tip),
+                                              Weight = w, Source = ContactSource.SelfPlant });
         }
+    }
+
+    // Snap a freshly captured plant onto the terrain face that supports it.
+    //
+    // Without this a SelfPlant target is purely SELF-referential: it holds the foot at
+    // whatever height the com anchor happened to place the rig, and NOTHING else can pull it
+    // down. NoPenetration is one-sided at margin 0 (a foot at gap 0 is exactly inactive), and
+    // SkipPair additionally mutes it under a plant on the premise that this contact's V-row
+    // owns "foot sits on ground" — which it could not, having no ground in it. So a clip whose
+    // com.Y missed the addcom identity (com.Y = soleLocal − 2·Radius/scale) hovered permanently,
+    // invisible to the objective because the target moved with the rig. Snapping makes the
+    // V-row genuinely own ground contact, which in turn makes SkipPair's premise true.
+    //
+    // The move is VERTICAL, not along the normal, so the horizontal no-slip anchor stays
+    // exactly where the rig put it — that row drives the cadence and must not be perturbed by
+    // the ground. Falls through unchanged when no face supports the toe (no terrain extracted,
+    // or the plant is genuinely mid-air), so the com anchor remains the fallback.
+    private Vector2 SnapToSupport(int bone, Vector2 tip)
+    {
+        float best = ContactSupportBand, drop = 0f;
+        foreach (var s in _surfaces)
+        {
+            if (((s.BoneMask >> bone) & 1) == 0) continue;
+            if (s.Normal.Y > -0.7f) continue;                     // upward-facing only (y-down)
+            float gap = s.Normal.X * (tip.X - s.Point.X) + s.Normal.Y * (tip.Y - s.Point.Y);
+            float d = MathF.Abs(gap);
+            if (d >= best) continue;                              // outside the band, or a nearer face won
+            best = d;
+            drop = -gap / s.Normal.Y;                             // vertical move onto the plane
+        }
+        return best < ContactSupportBand ? new Vector2(tip.X, tip.Y + drop) : tip;
     }
 
     // The cadence solve: horizontal foot no-slip + a playback-continuity prior (plus the
@@ -899,6 +937,11 @@ public sealed partial class CharacterAnimator
         int n = IdxTheta0 + _skeleton.Count;  // x = [Δφ, δ, d.x, Δθ_0…]
 
         _solveLo[IdxPhi] = 0f;                    _solveHi[IdxPhi] = cfg.MaxPhaseStep;
+        // Rate floor as a BOX rather than a penalty row (PhaseFloorMode 2): same anti-collapse
+        // guarantee, enforced exactly, and it removes the row whose √λ/floor Jacobian is the
+        // whole 1e6 diagonal ratio. Clamped below MaxPhaseStep so the box can never invert.
+        if (cfg.PhaseFloorMode == 2 && _phaseFloor > 1e-5f)
+            _solveLo[IdxPhi] = MathF.Min(_phaseFloor, cfg.MaxPhaseStep);
         _solveLo[IdxDy]  = -cfg.VertOffsetLimit;  _solveHi[IdxDy]  = cfg.VertOffsetLimit;
         _solveLo[IdxDx]  = -cfg.HorizOffsetLimit; _solveHi[IdxDx]  = cfg.HorizOffsetLimit;
         for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
@@ -925,12 +968,14 @@ public sealed partial class CharacterAnimator
             if (c < bestCost) { bestCost = c; best = s; }
         }
 
-        _solveVars[0] = best;
+        _solveVars[0] = MathF.Max(best, _solveLo[IdxPhi]);   // respect the box (mode 2 raises it)
         // Δθ starts at 0 (not warm-started): the θ-smoothness prior supplies the temporal
         // continuity from the COST side (its target is last frame's EMITTED pose), and a
         // box-clamped warm seed would stick the solution at the wall.
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
-                     _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n));
+                     _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n),
+                     vectorize: AnimSolverConfig.Current.CadenceVectorize);
+        CaptureBreakdown(n);
         _haveCorr = true;
         return _solveVars[0];
     }
@@ -1005,7 +1050,9 @@ public sealed partial class CharacterAnimator
         CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
 
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
-                     _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n));
+                     _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n),
+                     ftol: cfg.StaticFtol, vectorize: cfg.StaticVectorize);
+        CaptureBreakdown(n);
         _haveCorr = true;
     }
 

@@ -57,6 +57,23 @@ public sealed class RollbackSession
     public int        RollbackCount { get; private set; }
     public int        DesyncCount   { get; private set; }
     public Simulation Sim           => _sim;
+
+    // ── Cost + health counters (diagnostics only; nothing here feeds the sim) ──────
+    // RollbackCount alone says nothing about cost: one rollback of depth 20 replays 20
+    // Simulation.Steps inside a single frame, and that burst — not the event count — is
+    // what blows the frame budget. ResimSteps is the honest total.
+    public long ResimSteps         { get; private set; }
+    public int  WorstRollbackDepth { get; private set; }
+    // A misprediction we could NOT correct: the frame to roll back to had already fallen
+    // out of the snapshot ring (BufferLen frames). The peers are silently wrong from here
+    // and only the checksum guard will notice. Under independent loss this should stay 0
+    // — RedundancyWindow makes losing all copies of an input vanishingly unlikely — so a
+    // nonzero count means loss is CORRELATED (a burst) or latency exceeded the ring.
+    public int  MissedRollbacks    { get; private set; }
+    // TryStep returned false: the stall cap held us behind the peer, so no frame ran.
+    // This is the metric that maps to felt lag — a stalled frame is a frame where the
+    // local player's world does not advance.
+    public int  StallCount         { get; private set; }
     // Highest frame whose state is final on our side: remote inputs confirmed AND the
     // frame has been stepped. Checksum comparisons only happen at/below this.
     private int ConfirmedFrame => Math.Min(_confirmedThrough, _frame - 1);
@@ -100,9 +117,14 @@ public sealed class RollbackSession
     {
         int rollbackTo = ReconcileRemote();
         bool rolledBack = false;
+        if (rollbackTo < _frame && !_snaps.TryGet(rollbackTo, out _))
+            MissedRollbacks++;    // needed to roll back, but the snapshot had aged out
         if (rollbackTo < _frame && _snaps.TryGet(rollbackTo, out var snap))
         {
             RollbackCount++;
+            int depth = _frame - rollbackTo;
+            ResimSteps += depth;
+            if (depth > WorstRollbackDepth) WorstRollbackDepth = depth;
             rolledBack = true;
             _sim.Restore(snap);
             for (int f = rollbackTo; f < _frame; f++)
@@ -137,7 +159,10 @@ public sealed class RollbackSession
         // 3. Stall cap: never simulate more than InputFrameDelay + StallSlack frames
         //    ahead of the newest input we've heard from the peer.
         if (_frame >= _highestRemote + InputFrameDelay + StallSlack)
+        {
+            StallCount++;
             return false;
+        }
 
         // 4. Predict the remote input for the frame about to run (repeat-last).
         EnsurePredicted(_remote, _frame);

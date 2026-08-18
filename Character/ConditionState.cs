@@ -17,10 +17,11 @@ public class ConditionState
     public bool Slash2Ready;     public int Slash2ExpireFrame;
     public bool Slash3Ready;     public int Slash3ExpireFrame;
     public bool AirSlash2Ready;  public int AirSlash2ExpireFrame;
+    // RecoveryActive + its expire frame double as the recovery COUNTDOWN: the
+    // frames remaining (expire − now) are the "recovery index" entrants gate on
+    // via EnvironmentContext.RecoveryIndex(). (The old GuardWindow flag is gone —
+    // guard's late-recovery entry is its MaxEntrySeconds index gate now.)
     public bool RecoveryActive;  public int RecoveryExpireFrame;
-    // Late-recovery window for moves that *can* preempt Recovery (Guard etc).
-    // Set by Recovery.Enter when the move flagged its tail; unused in V1.
-    public bool GuardWindow;     public int GuardWindowExpireFrame;
 
     public void Tick(int currentFrame)
     {
@@ -28,7 +29,6 @@ public class ConditionState
         if (Slash3Ready    && currentFrame >= Slash3ExpireFrame)    Slash3Ready    = false;
         if (AirSlash2Ready && currentFrame >= AirSlash2ExpireFrame) AirSlash2Ready = false;
         if (RecoveryActive && currentFrame >= RecoveryExpireFrame)  RecoveryActive = false;
-        if (GuardWindow    && currentFrame >= GuardWindowExpireFrame) GuardWindow  = false;
     }
 
     // Helper for the common "set flag, schedule expiry" pattern used by every attack's Exit.
@@ -54,6 +54,5 @@ public class ConditionState
         Slash3Ready = o.Slash3Ready; Slash3ExpireFrame = o.Slash3ExpireFrame;
         AirSlash2Ready = o.AirSlash2Ready; AirSlash2ExpireFrame = o.AirSlash2ExpireFrame;
         RecoveryActive = o.RecoveryActive; RecoveryExpireFrame = o.RecoveryExpireFrame;
-        GuardWindow = o.GuardWindow; GuardWindowExpireFrame = o.GuardWindowExpireFrame;
     }
 }

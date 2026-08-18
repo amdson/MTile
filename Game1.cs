@@ -67,9 +67,14 @@ public class Game1 : Game
     private AttackGlowSystem _attackGlow;
     private readonly ParticleSystem _particles = new(capacity: 2048);
     // Edge-triggered sim events on their way to the render shell, deduped by
-    // (sim frame, id) so a rollback replay doesn't re-present them. Audio will hang off
-    // the same log — see Plans/AUDIO_PLAN.md.
+    // (sim frame, id) so a rollback replay doesn't re-present them. Particles and audio
+    // are both consumers — see Plans/AUDIO_PLAN.md.
     private readonly PresentationEventLog _events = new();
+    // Audio. Render-only, like the particle system beside it — see Plans/AUDIO_PLAN.md.
+    // Level-triggered sounds are re-derived each frame from sim state; edge-triggered
+    // ones arrive through _events, already deduped against rollback replay.
+    private readonly GameAudio _audio = new();
+    private int _devToneSeq;
     // Cursor trail — a fading ribbon trailing the world-space mouse position.
     private readonly Trail _cursorTrail = new(capacity: 24, lifetime: 0.22f);
     private CosmeticUpdateSystem _cosmetics;
@@ -97,7 +102,12 @@ public class Game1 : Game
     // Rig→world scale. Public so offline tooling (MTile.Probe `addcom`) bakes COM
     // anchors against the same value the renderer places the rig with.
     public const float SkeletonScale = 0.6f;
-    private float _simAccum;   // fixed-step accumulator for GameConfig.TimeScale (slow-mo)
+    private float _simAccum;   // real time -> whole Simulation.Step calls (and TimeScale slow-mo)
+    // Longest wall interval one frame may hand the sim, in fixed steps. Past this, time is
+    // DROPPED rather than banked: a hitch (stage load, alt-tab, breakpoint) would otherwise
+    // queue a backlog whose catch-up costs more than the hitch did. Dropping shows up as the
+    // world skipping slightly; banking shows up as a freeze followed by a fast-forward.
+    private const float MaxCatchUpSteps = 4f;
     // Viewport center, recomputed once at the top of Update and reused in Draw — the
     // camera transform's pivot. Consistent within a frame.
     private Vector2 _screenCenter;
@@ -125,14 +135,15 @@ public class Game1 : Game
     private string _toast;
     private float  _toastTtl;
 
-    // Frame-time probe (GameConfig.DebugFrameTimings). Tracks the WORST cost of each
-    // frame section over a 60-frame window (hitches hide in averages), shown for the
-    // last completed window. Single stopwatch reused: Update and Draw run sequentially.
-    private readonly System.Diagnostics.Stopwatch _probeSw = new();
-    private double _probeSimMs, _probeCosMs, _probeDrawMs;
-    private double _shownSimMs, _shownCosMs, _shownDrawMs;
+    // Frame-time probe (GameConfig.DebugFrameTimings): per-pass mean+worst over a
+    // 60-frame window. This is the primary perf instrument for the WEB build, where no
+    // external profiler exists — F11 dumps the last window to the console (devtools on
+    // WASM). Slots are resolved once in Initialize; the per-frame path indexes ints.
+    private readonly FrameProfiler _prof = new();
+    private int _sSim, _sAnim, _sCosmetic, _sBackdrop, _sChunks, _sEntities, _sSkins,
+                _sSkeleton, _sParticles, _sOverlays, _sGlow, _sHud, _sPresent;
     private bool _probeSlow, _shownSlow;
-    private int _probeFrames;
+    private int  _probeFrames;
 
     public Game1(string configPath = null)
     {
@@ -172,14 +183,41 @@ public class Game1 : Game
                 RenderTargetUsage.PreserveContents;
         Content.RootDirectory = "Content";
         IsMouseVisible = true;
-        IsFixedTimeStep = true;
-        TargetElapsedTime = TimeSpan.FromSeconds(Simulation.FixedDt);
+        // Render frames and sim steps are DECOUPLED: vsync paces presentation, and the sim
+        // advances in whole Simulation.FixedDt steps off a wall-clock accumulator (see
+        // Update). Sim rate is a property of the game, not of the monitor — under
+        // IsFixedTimeStep the two were the same knob, so display refresh and frame overruns
+        // both leaked into how fast the world actually ran.
+        //
+        // This matters most for netplay: peers must agree on sim rate, and with the
+        // accumulator they run 60 steps per wall second whatever their refresh rates are,
+        // rather than agreeing only because both happened to be pinned to MonoGame's clock.
+        // Rollback itself is untouched — RollbackSession is already sim-frame-native
+        // (snapshot ring, input rings and checksums are all keyed by sim frame, and TryStep
+        // advances exactly one). The only frame-coupled thing was calling it once per
+        // Update, which is what the accumulator replaces.
+        IsFixedTimeStep = false;
     }
 
     protected override void Initialize()
     {
         BootMark("Initialize start");
         _screenshots.Initialize();
+
+        // Profiler slots, resolved once. Order here is the order they print in.
+        _sSim       = _prof.Slot("sim");        // Simulation.Step (all fixed steps this frame)
+        _sAnim      = _prof.Slot("anim");       // animation solver (inside cosmetics)
+        _sCosmetic  = _prof.Slot("cosmetic");   // rest of the cosmetic pass
+        _sBackdrop  = _prof.Slot("backdrop");
+        _sChunks    = _prof.Slot("chunks");     // terrain + platforms + sprouts
+        _sEntities  = _prof.Slot("entities");
+        _sSkins     = _prof.Slot("skins");      // MLS sprite-skin deform + upload
+        _sSkeleton  = _prof.Slot("skeleton");   // debug stick figure
+        _sParticles = _prof.Slot("fx");         // particles + trails + action overlays
+        _sOverlays  = _prof.Slot("debugdraw");  // the DebugDraw* world overlays
+        _sGlow      = _prof.Slot("glow");       // GlowTrailField / GlowRenderer passes
+        _sHud       = _prof.Slot("hud");
+        _sPresent   = _prof.Slot("present");    // SpriteBatch.End flush of the world pass
 
         // Stages captured in-game (Ctrl+M → Levels/saved/) register before the config
         // lookup so "Stage": "saved_NNN" works across restarts. Desktop only: the
@@ -319,11 +357,18 @@ public class Game1 : Game
         // again for every rolled-back frame and used to spray a duplicate burst each
         // time. The log drains once per rendered frame, below.
         _events.Reset();   // fresh sim ⇒ frame counter restarts ⇒ old keys are stale
+        _audio.StopAll();  // and no voice should survive into a different world
         _sim.OnPlayerRespawn += pos =>
             _events.Emit(_sim.Frame, new PresentationId(PresentationKind.PlayerRespawn), pos);
         _sim.Chunks.OnTileBroken += (pos, type) =>
             _events.Emit(_sim.Frame,
                          new PresentationId(PresentationKind.TileBreak,
+                                            (int)MathF.Floor(pos.X / Chunk.TileSize),
+                                            (int)MathF.Floor(pos.Y / Chunk.TileSize)),
+                         pos, (int)type);
+        _sim.Chunks.OnTilePlaced += (pos, type) =>
+            _events.Emit(_sim.Frame,
+                         new PresentationId(PresentationKind.TilePlace,
                                             (int)MathF.Floor(pos.X / Chunk.TileSize),
                                             (int)MathF.Floor(pos.Y / Chunk.TileSize)),
                          pos, (int)type);
@@ -333,8 +378,11 @@ public class Game1 : Game
 
     // Turn this frame's fresh presentation events into cosmetics. The only consumer today
     // is the particle system; audio joins here (Plans/AUDIO_PLAN.md §8).
-    private void PresentThisFrame()
+    private void PresentThisFrame(float dt)
     {
+        _audio.BeginFrame();
+
+        // Edge-triggered: each event is already unique per (sim frame, id).
         foreach (var e in _events.Pending)
         {
             switch (e.Id.Kind)
@@ -346,8 +394,13 @@ public class Game1 : Game
                     Effects.Puff(_particles, e.Position, Color.LimeGreen);
                     break;
             }
+            _audio.Present(in e);
         }
         _events.Clear();
+
+        // Level-triggered: re-derived from final sim state, so a rollback needs nothing.
+        _audio.CollectLevel(_sim);
+        _audio.EndFrame(_camera.Position, dt);
     }
 
     // TEMP EXPERIMENT: single-frame corrector inspector (GameConfig.FreezeFrame,
@@ -526,7 +579,15 @@ public class Game1 : Game
         }
         _attackGlow = new AttackGlowSystem(_animator, _glow, _glowField, SkeletonScale);
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
-                                              _camera, _particles, _cursorTrail, _attackGlow);
+                                              _camera, _particles, _cursorTrail, _attackGlow)
+        {
+            Profiler = _prof, AnimSlot = _sAnim,
+        };
+
+        // Audio. The bank is optional: with no clips built every kind resolves to null
+        // and the mixer no-ops, so the game runs exactly as it does today.
+        _audio.Load(Content);
+        Console.WriteLine("[boot] " + _audio.Summary);
         BootMark("LoadContent done");
     }
 
@@ -547,6 +608,7 @@ public class Game1 : Game
 
     protected override void Update(GameTime gameTime)
     {
+        _prof.BeginFrame();
         var keyboardState = Keyboard.GetState();
 
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed ||
@@ -593,6 +655,68 @@ public class Game1 : Game
                 if (!_config.FreezeFrame) Toast($"reloaded stage '{_activeStage}'");
             }
         }
+
+        // Audio dev hotkeys: F9 plays the committed dev tone at the player (proves the
+        // whole chain — pipeline, bank, mixer, backend — without needing real clips),
+        // F10 mutes. Both offline-only, like the stage hotkeys above.
+        if (keyboardState.IsKeyDown(Keys.F9) && !_prevKeys.IsKeyDown(Keys.F9))
+        {
+            // Unique id per press so the dedup table cannot swallow a repeat while paused.
+            _audio.Mixer.Fire(new SoundId(SoundKind.DevTone, ++_devToneSeq), _sim.Frame,
+                              gain: 1f, pitch: 0f, pos: _sim.Player.Body.Position);
+            Toast(_audio.Summary);
+        }
+        // F11: dump the last complete profiler window, to BOTH the console and a file —
+        // neither one alone is readable everywhere:
+        //   web     — there is no filesystem, and Console.WriteLine lands in devtools.
+        //   desktop — the console is swamped by PlayerCharacter's [move]/[action] tracing,
+        //             which scrolls a dump away in well under a second, and the on-screen
+        //             line runs off the edge of a small window.
+        // APPENDS rather than overwrites: the workflow this exists for is an A/B (toggle a
+        // setting, press F11 on each side, compare), which needs both blocks to survive.
+        if (keyboardState.IsKeyDown(Keys.F11) && !_prevKeys.IsKeyDown(Keys.F11))
+        {
+            string dump = _prof.Dump();
+            Console.WriteLine("[perf]\n" + dump);
+            if (!OperatingSystem.IsBrowser())
+            {
+                try
+                {
+                    string path = Path.Combine(AppContext.BaseDirectory, "perf_log.txt");
+                    // Stamp each block with what produced it. A dump with no record of the
+                    // settings behind it can't be compared against anything measured later,
+                    // which defeats the point of appending.
+                    File.AppendAllText(path,
+                        $"--- {DateTime.Now:HH:mm:ss}"
+                        + $"  bg={(_config.DrawBackground ? _config.BackgroundStyle : "off")}"
+                        + $"  {GraphicsDevice.Viewport.Width}x{GraphicsDevice.Viewport.Height}"
+                        + $"  zoom={_config.CameraZoom}"
+                        + $"  stage={_activeStage} ---\n{dump}\n");
+                    Toast($"perf -> {path}");
+                }
+                catch (Exception ex) { Toast($"perf log FAILED: {ex.Message}"); }
+            }
+        }
+
+        // F8: run the corrector-QP microbenchmark and print to the console. Same code, same
+        // captured subproblem, on desktop and in the browser — so the wasm penalty on the
+        // sim's hot solver is measured rather than extrapolated. It blocks for ~1.5 s by
+        // design (batched under one clock pair; wasm clock resolution is too coarse to time
+        // a single ~100 µs solve).
+        if (keyboardState.IsKeyDown(Keys.F8) && !_prevKeys.IsKeyDown(Keys.F8))
+        {
+            Toast("running qp bench...");
+            Console.WriteLine("[perf] " + QpBench.Run());
+        }
+        // ...and the same bench armed by ?qpbench=1 on the web host, which is how the
+        // headless driver triggers it (Chrome keeps the function keys for itself).
+        if (QpBench.PollStartup(out string qpReport)) Console.WriteLine("[perf] " + qpReport);
+        if (keyboardState.IsKeyDown(Keys.F10) && !_prevKeys.IsKeyDown(Keys.F10))
+        {
+            _audio.Mixer.Muted = !_audio.Mixer.Muted;
+            if (_audio.Mixer.Muted) _audio.StopAll();
+            Toast(_audio.Mixer.Muted ? "audio muted" : "audio on");
+        }
         _prevKeys = keyboardState;
 
         var mouseState = Mouse.GetState();
@@ -612,9 +736,30 @@ public class Game1 : Game
             while (_net.TryReceive(out var bytes))
                 if (MTile.Net.InputCodec.TryDecode(bytes, out var pkt))
                     _session.Receive(in pkt);
-            bool stepped = _session.TryStep();
-            _cosmetics.Update(_sim, _config, dt, stepped ? Simulation.FixedDt : 0f,
+            // Advance by real time rather than one step per rendered frame, so both peers
+            // run 60 sim steps per wall second whatever their refresh rates are. TimeScale
+            // is deliberately NOT applied here: slow-mo is an offline dev knob, and scaling
+            // it on one side would desync the pair outright.
+            _simAccum += MathF.Min(dt / Simulation.FixedDt, MaxCatchUpSteps);
+            int netSteps = 0;
+            long tNetSim = _prof.Begin();
+            while (_simAccum >= 1f)
+            {
+                // A false return is the stall cap: we are further ahead of the peer than
+                // InputFrameDelay + StallSlack, so no frame ran. Running slower than real
+                // time is the CORRECT response there — it is how the peers resynchronise —
+                // so drop the banked time instead of queueing it. Queued, the stall would
+                // end in a burst of catch-up steps: a visible speed spike, and a way to
+                // make the next rollback deeper than it needed to be.
+                if (!_session.TryStep()) { _simAccum = 0f; break; }
+                _simAccum -= 1f;
+                netSteps++;
+            }
+            _prof.End(_sSim, tNetSim);   // includes any rollback resim this frame
+            long tNetCos = _prof.Begin();
+            _cosmetics.Update(_sim, _config, dt, netSteps * Simulation.FixedDt,
                               mouseWorldPos, _screenCenter, LocalPlayer);
+            _prof.End(_sCosmetic, tNetCos);
         }
         else
         {
@@ -636,9 +781,13 @@ public class Game1 : Game
                 var input = Controller.Poll(mouseWorldPos);
                 // Slow-/fast-motion: accumulate TimeScale and run that many fixed steps
                 // this frame — <1 skips frames (slow-mo), >1 runs extra, 0 pauses.
-                _simAccum += MathF.Max(0f, _config.TimeScale);
+                // Accumulate REAL TIME (in units of fixed steps) rather than one step per
+                // frame, so the sim advances at 60 Hz whatever the display refresh is.
+                // TimeScale still multiplies it, so slow-/fast-motion is unchanged.
+                _simAccum += MathF.Min(dt / Simulation.FixedDt, MaxCatchUpSteps)
+                             * MathF.Max(0f, _config.TimeScale);
                 int stepsRun = 0;
-                _probeSw.Restart();
+                long tSim = _prof.Begin();
                 while (_simAccum >= 1f)
                 {
                     _simAccum -= 1f;
@@ -647,15 +796,15 @@ public class Game1 : Game
                     else                   _sim.Step(input);
                     stepsRun++;
                 }
-                _probeSimMs = Math.Max(_probeSimMs, _probeSw.Elapsed.TotalMilliseconds);
+                _prof.End(_sSim, tSim);
                 float simDt = stepsRun * Simulation.FixedDt;
 
                 // Cosmetic-only pass: sprite sync, skeleton animators, knife trail,
                 // particles, landing puff, camera tracking — reads sim state, never writes.
                 // Animators tick on simDt (lockstep with physics, incl. slow-mo).
-                _probeSw.Restart();
+                long tCos = _prof.Begin();
                 _cosmetics.Update(_sim, _config, dt, simDt, mouseWorldPos, _screenCenter, LocalPlayer);
-                _probeCosMs = Math.Max(_probeCosMs, _probeSw.Elapsed.TotalMilliseconds);
+                _prof.End(_sCosmetic, tCos);
 
                 // Record AFTER cosmetics so the captured pose + RigRoot reflect this frame.
                 _recorder.CaptureFrame(_sim, _camera, _animator, _secondaryAnimators, SkeletonScale, dt);
@@ -669,7 +818,7 @@ public class Game1 : Game
 
         // Drain the presentation log once per RENDERED frame — not once per Step, since a
         // rollback runs many Steps inside one frame. Everything here is already deduped.
-        PresentThisFrame();
+        PresentThisFrame(dt);
 
         _probeSlow |= gameTime.IsRunningSlowly;
         _toastTtl -= dt;
@@ -703,27 +852,33 @@ public class Game1 : Game
 
     protected override void Draw(GameTime gameTime)
     {
-        _probeSw.Restart();
         // Capture this frame to an offscreen target (if a screenshot is pending), so the
         // save is immune to window focus/occlusion. Null when nothing is being captured.
         RenderTarget2D shotTarget = _screenshots.BeginCapture(GraphicsDevice);
 
         GraphicsDevice.Clear(Color.Black);
 
-        _background?.Draw(_spriteBatch, _camera, _screenCenter);
+        using (_prof.Measure(_sBackdrop))
+            _background?.Draw(_spriteBatch, _camera, _screenCenter);
 
         _spriteBatch.Begin(transformMatrix: _camera.GetTransform(_screenCenter));
 
         var player = _sim.Player;
 
-        _chunkRenderer.Draw(_sim);
+        // NOTE: these Draw-side scopes measure the CPU cost of BUILDING the batch, not the
+        // GPU work — SpriteBatch is deferred, so the actual submission lands in the
+        // `present` scope at the closing End(). Read them as "managed cost per pass".
+        using (_prof.Measure(_sChunks))
+            _chunkRenderer.Draw(_sim);
 
+        long tEnt = _prof.Begin();
         // Entities before the player so the player overlays them when they overlap.
         foreach (var e in _sim.Entities)
         {
             if (e.Sprite != null) e.Sprite.Draw(_draw);
             else _debugOverlay.DrawPolygon(e.Body.Polygon, e.Body.Position, e.Color);
         }
+        _prof.End(_sEntities, tEnt);
 
         if (_config.DrawPlayerSprites)
         {
@@ -735,6 +890,7 @@ public class Game1 : Game
         // resolved per player (P1/P2 can wear different bindings). Drawn between the
         // placeholder sprites and the debug skeleton, outside the SpriteBatch pass
         // (each skin issues its own device draw) — split the batch around them.
+        long tSkins = _prof.Begin();
         if (_config.DrawPlayerSpriteSkin)
         {
             var cam = _camera.GetTransform(_screenCenter);
@@ -766,6 +922,9 @@ public class Game1 : Game
             }
             if (split) _spriteBatch.Begin(transformMatrix: cam);
         }
+        _prof.End(_sSkins, tSkins);
+
+        long tSkel = _prof.Begin();
         if (_config.DebugDrawSkeleton)
         {
             // In playback the rig is drawn from the recorder's captured pose (already
@@ -799,7 +958,9 @@ public class Game1 : Game
             foreach (var e in _sim.Entities)
                 _debugOverlay.DrawPolygon(e.Body.Polygon, e.Body.Position, Color.White * 0.3f);
         }
+        _prof.End(_sSkeleton, tSkel);
 
+        long tFx = _prof.Begin();
         // Particles over gameplay but under debug overlays.
         _particles.Draw(_draw);
         _cursorTrail.Draw(_spriteBatch, _pixel,
@@ -819,7 +980,9 @@ public class Game1 : Game
         // slash arcs.
         foreach (var e in _sim.Entities)
             if (e is EnemyEntity en) en.DrawOverlay(_spriteBatch, _pixel);
+        _prof.End(_sParticles, tFx);
 
+        long tDbg = _prof.Begin();
         if (_config.DebugDrawHitboxes)
             foreach (var hb in _sim.Hitboxes.All)
                 _debugOverlay.DrawHitbox(hb);
@@ -901,8 +1064,12 @@ public class Game1 : Game
         // Enemy health bars in world space, drawn just above each wounded body.
         foreach (var e in _sim.Entities)
             if (_config.DebugDrawHealthBars && e.Health < e.MaxHealth) _debugOverlay.DrawEntityHealthBar(e);
+        _prof.End(_sOverlays, tDbg);
 
-        _spriteBatch.End();
+        // The deferred world pass actually submits here — everything batched above pays
+        // its GPU-upload/draw-call cost inside this End(), not at the Draw call sites.
+        using (_prof.Measure(_sPresent))
+            _spriteBatch.End();
 
         // PrimitiveBatch layer (gradients / curves / surfaces) draws in world space on
         // top of the SpriteBatch pass. Demo card for now; real users (metaballs) land later.
@@ -921,6 +1088,7 @@ public class Game1 : Game
         // Glowing-shape pass (world space): the slash apex renders as a glowing triangle +
         // trail here, since the glow renderers need their own pass outside the SpriteBatch.
         var camTransform = _camera.GetTransform(_screenCenter);
+        long tGlow = _prof.Begin();
         // Frozen during playback: the glow advances its own trail state from dt and reads
         // a live RigRoot, neither of which is valid while scrubbing a recorded take.
         if (!_recorder.IsPlayback)
@@ -930,6 +1098,9 @@ public class Game1 : Game
             _devDemos.DrawGlowDemo(camTransform,
                          new Vector2(player.Body.Position.X, player.Body.Position.Y - 70f));
 
+        _prof.End(_sGlow, tGlow);
+
+        long tHud = _prof.Begin();
         _hud.Draw(_sim, _animator, _config);
         _recorder.DrawHud(_spriteBatch, _debugFont);
         if (_animTrace.Active)
@@ -942,30 +1113,27 @@ public class Game1 : Game
                                     tracePos, new Color(255, 90, 70));
             _spriteBatch.End();
         }
+        _prof.End(_sHud, tHud);
 
         if (_config.DebugFrameTimings)
         {
-            _probeDrawMs = Math.Max(_probeDrawMs, _probeSw.Elapsed.TotalMilliseconds);
-            if (++_probeFrames >= 60)
-            {
-                _shownSimMs = _probeSimMs; _shownCosMs = _probeCosMs; _shownDrawMs = _probeDrawMs;
-                _shownSlow  = _probeSlow;
-                _probeSimMs = _probeCosMs = _probeDrawMs = 0; _probeSlow = false; _probeFrames = 0;
-            }
-            string probe = $"worst/60f  sim {_shownSimMs:F2}ms  cosmetics {_shownCosMs:F2}ms  draw {_shownDrawMs:F2}ms" +
-                           $"  particles {_particles.Count}  entities {_sim.Entities.Count}" +
-                           (_shownSlow ? "  CATCH-UP" : "");
+            // Two lines: the per-pass breakdown (mean ms over the window, worst appended
+            // only for passes that spike), then the scene counters that explain it.
+            string probe = _prof.Report + (_shownSlow ? "  CATCH-UP" : "");
+            string counts = $"particles {_particles.Count}  entities {_sim.Entities.Count}  F11 dumps to console";
             var probePos = new Vector2(8, 96);
             _spriteBatch.Begin();
             _spriteBatch.DrawString(_debugFont, probe, probePos + new Vector2(1, 1), Color.Black);
             _spriteBatch.DrawString(_debugFont, probe, probePos, _shownSlow ? new Color(255, 90, 70) : Color.LimeGreen);
+            _spriteBatch.DrawString(_debugFont, counts, probePos + new Vector2(1, 17), Color.Black);
+            _spriteBatch.DrawString(_debugFont, counts, probePos + new Vector2(0, 16), Color.Gray);
             _spriteBatch.End();
         }
 
         // Stage save/reload feedback line (Ctrl+M / F5), below the frame-time probe.
         if (_toastTtl > 0f && _toast != null)
         {
-            var toastPos = new Vector2(8, 116);
+            var toastPos = new Vector2(8, 136);
             _spriteBatch.Begin();
             _spriteBatch.DrawString(_debugFont, _toast, toastPos + new Vector2(1, 1), Color.Black);
             _spriteBatch.DrawString(_debugFont, _toast, toastPos, Color.Gold);
@@ -974,6 +1142,17 @@ public class Game1 : Game
 
         if (shotTarget != null && _screenshots.EndCapture(shotTarget, _spriteBatch, GraphicsDevice))
             Exit();
+
+        // Close the profiling frame. IsRunningSlowly is latched across the window on the
+        // same schedule as the profiler's, so the CATCH-UP flag and the numbers beside it
+        // describe the same span.
+        _prof.EndFrame();
+        if (++_probeFrames >= _prof.WindowFrames)
+        {
+            _shownSlow = _probeSlow;
+            _probeSlow = false;
+            _probeFrames = 0;
+        }
 
         base.Draw(gameTime);
     }

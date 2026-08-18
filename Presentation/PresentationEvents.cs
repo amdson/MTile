@@ -24,6 +24,7 @@ namespace MTile;
 public enum PresentationKind : byte
 {
     TileBreak,
+    TilePlace,
     PlayerRespawn,
 }
 

@@ -36,4 +36,12 @@ _shot_*.png
 
 # Recorded gameplay takes (Ctrl+S in the recorder; opened via MTile.Demo -- --load)
 Takes/
+
+# Audio *sources* — licensed third-party bundles and raw/unsliced working material.
+# The Sonniss GDC bundles are royalty-free to USE in a shipped game but NOT to
+# REDISTRIBUTE, and this repo is public and deployed. Multi-GB besides.
+# Only the built, game-ready Assets/Sounds/*.ogg belongs in git.
+Assets/Sounds/*.zip
+Audio/candidates/
+Audio/raw/
 SkeletonStates/.editor_view.json

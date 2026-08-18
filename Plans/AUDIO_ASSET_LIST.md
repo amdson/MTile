@@ -109,6 +109,49 @@ plausibly outperforms the library.
 > Licensing terms and download availability change. Confirm current Sonniss terms and which
 > years are still hosted before building a pipeline on them.
 
+## Workflow
+
+**Cut by hand, convert by script.** Slicing is a judgement call per file; everything after it
+is mechanical and should never be done by hand across 150 files.
+
+1. **Slice** in [Audacity](https://www.audacityteam.org/) (free — fine for trim/fade/export,
+   which is the whole job) or [Reaper](https://www.reaper.fm/) ($60, 60-day full eval — worth
+   it at this file count for its batch converter and render matrix). Cut tight to the
+   transient: for a one-shot the first sample should be nearly the loudest, or every trigger
+   feels late. Leave the tail — that is where the character is.
+2. **Drop the slices in `Audio/raw/`.**
+3. **Convert** with [`scripts/build-sfx.ps1`](../scripts/build-sfx.ps1) (needs ffmpeg —
+   `winget install Gyan.FFmpeg`):
+
+   ```powershell
+   pwsh scripts/build-sfx.ps1 -Name tile_break -DryRun   # print the plan + filter chain
+   pwsh scripts/build-sfx.ps1 -Name tile_break           # -> tile_break_01.ogg, _02, ...
+   pwsh scripts/build-sfx.ps1 -Loop -Name wall_scrape    # loops: no trim, no end fade
+   ```
+
+   Per file it strips leading silence, loudness-matches to −16 LUFS, applies a 5 ms tail fade,
+   and writes mono 22.05 kHz Ogg to `Assets/Sounds/`. `-Loop` disables the trim and the fade,
+   both of which would move or break the loop point.
+
+**Loop points are the one fiddly part.** `IsLooped` just wraps to the start, so any
+discontinuity clicks once per cycle and no amount of ffmpeg fixes it. Crossfade the file onto
+itself in the editor: take the last ~200 ms, overlap onto the head, crossfade, trim. Audition
+looped for ~30 s — a click you cannot hear once is obvious after ten repeats. Sourcing tip
+that sidesteps this: take a *steady* section from the middle of a long recording rather than
+one with an obvious contour; steady material crossfades invisibly.
+
+**Layer offline only when the mix is fixed.** A tile break is always crack + debris tail —
+bake it into one file. A landing wants its thud and impact-crunch balanced differently by
+impact hardness — keep those separate and let the mixer blend. Baking a mix you later need to
+vary is the expensive mistake.
+
+**Pitch is a runtime concern**, via `SoundEffectInstance.Pitch`. Two caveats: the range is
+−1..1 (one octave down/up), and it is implemented as resampling, so it changes *duration*
+too. Fine for the ±5% jitter that defeats repetition; wrong if you need a pitched sound to
+keep its length — for that, shift offline with SoX (`sox in.wav out.wav pitch 200`, cents,
+duration-preserving). Pitch is also on the KNI-unverified list (`AUDIO_PLAN.md` §7 risk 1),
+so keep it behind the narrow mixer interface.
+
 ## Format
 
 Decided by `AUDIO_PLAN.md` §8's open pipeline-vs-raw question, but independent of it:

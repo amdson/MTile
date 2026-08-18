@@ -72,7 +72,8 @@ public class BlockBurstTests(ITestOutputHelper output)
             onFrame: (f, ps) =>
             {
                 if (ps[0].CurrentActionName == "BlockBurstAction") burst = true;
-                if (ps[0].CurrentActionName == "ReadyAction")      ready = true;
+                // The wind-up is RecoveryAction now (Ready merged in as index 0).
+                if (ps[0].CurrentActionName == "RecoveryAction")   ready = true;
             });
         output.WriteLine($"cursor {cursor}: burst={burst}, ready={ready}");
         sawReady = ready;

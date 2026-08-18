@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.Xna.Framework;
 using MTile;
 using MTile.Tests.Sim;
+using MTile.Bench;
 
 // Release-mode profiling harness for the corrector-era sim
 // (Plans/CORRECTOR_CONSOLIDATION_PLAN.md §6):
@@ -23,14 +24,44 @@ using MTile.Tests.Sim;
 internal static class Program
 {
     private static readonly PlayerInput HoldRight = new() { Right = true };
+    private static readonly BenchReport Report = new();
 
-    private static void Main()
+    // Default baseline location. Committed, so a regression shows up in review as a diff
+    // on this file rather than as a number nobody re-measured.
+    private const string DefaultBaseline = "MTile.Bench/baseline.txt";
+
+    private static int Main(string[] args)
     {
         Console.WriteLine($"MTile.Bench — {(Debugger.IsAttached ? "DEBUGGER ATTACHED — numbers invalid" : "release profiling")}");
 #if DEBUG
         Console.WriteLine("WARNING: Debug build — run with -c Release for real numbers.");
 #endif
-        Console.WriteLine($"{"scenario",-26} {"µs/tick",10} {"worst 60-tick bucket",22}");
+        // The FSM transition trace prints from inside the timed loop; leaving it on both
+        // inflates the numbers and buries the table in scrollback.
+        SimTrace.Enabled = false;
+
+        if (Array.IndexOf(args, "--corrector") >= 0) { CorrectorDiag.Run(); return 0; }
+        if (Array.IndexOf(args, "--ftol") >= 0) { JtJDiff.Run(); AnimDiag.Run(); return 0; }
+        if (Array.IndexOf(args, "--simd") >= 0) { FtolStudy.SimdCheck(); return 0; }
+        if (Array.IndexOf(args, "--hover") >= 0) { HoverDiag.Run(); return 0; }
+        if (Array.IndexOf(args, "--columns") >= 0) { ColumnDiag.Run(); return 0; }
+        if (Array.IndexOf(args, "--breakdown") >= 0) { FtolStudy.BreakdownCsv(System.IO.Path.Combine(RepoRoot(), "solver_breakdown.csv")); return 0; }
+        if (Array.IndexOf(args, "--double") >= 0) { FtolStudy.DoubleCheck(); return 0; }
+        if (Array.IndexOf(args, "--qr") >= 0) { FtolStudy.QrCheck(); FtolStudy.QrStabilityCheck(); return 0; }
+        // Regenerate the frozen problem QpBench replays on both runtimes.
+        if (Array.IndexOf(args, "--dump-problem") >= 0)
+        {
+            string src = QpBench.DumpProblemLiteral();
+            if (src == null) { Console.WriteLine("dump-problem: no fold solve captured."); return 1; }
+            string path = System.IO.Path.Combine(RepoRoot(), "Diagnostics", "QpProblem.g.cs");
+            System.IO.File.WriteAllText(path, src);
+            Console.WriteLine($"wrote {path} ({src.Length} chars)");
+            return 0;
+        }
+        string save = ArgValue(args, "--save");
+        string compare = ArgValue(args, "--compare") ?? (Array.IndexOf(args, "--check") >= 0 ? DefaultBaseline : null);
+
+        BenchReport.Header();
 
         Measure("flat rest (no input)",   FlatFloor(),   new Vector2(100f, 72f), default,   1800);
         Measure("flat run",               FlatFloor(),   new Vector2(24f, 72f),  HoldRight, 1800);
@@ -41,51 +72,91 @@ internal static class Program
         MeasureSnapshot();
         MeasureRollback();
 
+        // Render-side CPU: the animation solver, which has no fixed-timestep budget
+        // protecting it and which nothing else here measures.
+        AnimationBench.Run(Report);
+
+        if (Array.IndexOf(args, "--diag") >= 0) { AnimDiag.Run(); AnimDiag.PoseSplit(); SolverCore.Run(); JtJLayout.Run(); AnimDiag.Convergence(); FtolStudy.Run(); CorrectorDiag.Run(); }
+
         Budget();
+
+        if (save != null) Report.Save(save);
+        // Non-zero exit on regression so this can gate a build; --compare alone is
+        // advisory-only until someone wires it into CI.
+        return compare != null && !Report.CompareTo(compare) ? 1 : 0;
+    }
+
+    // Walks up from the bin directory to the repo root (the folder holding MTile.sln).
+    private static string RepoRoot()
+    {
+        var d = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
+        while (d != null && !System.IO.File.Exists(System.IO.Path.Combine(d.FullName, "MTile.sln"))) d = d.Parent;
+        return d?.FullName ?? ".";
+    }
+
+    private static string ArgValue(string[] args, string flag)
+    {
+        int i = Array.IndexOf(args, flag);
+        if (i < 0) return null;
+        return i + 1 < args.Length && !args[i + 1].StartsWith("--") ? args[i + 1] : DefaultBaseline;
     }
 
     private static void Measure(string name, ChunkMap terrain, Vector2 spawn, PlayerInput input,
                                 int frames, Action<Simulation> populate = null)
     {
-        var sim = new Simulation(terrain, spawn, populate);
-        for (int f = 0; f < 120; f++) sim.Step(input);   // warmup: JIT + first-touch
-
-        const int Bucket = 60;
-        double worstBucketUs = 0;
-        var sw = new Stopwatch();
-        var total = Stopwatch.StartNew();
-        for (int b = 0; b < frames / Bucket; b++)
+        // Report the MINIMUM over Bench.Reps repetitions, not the mean of one. A single
+        // timed pass here swung 2× between back-to-back runs on an idle desktop, which is
+        // enough noise to make any regression gate useless. Everything that perturbs a
+        // benchmark — scheduler preemption, a background build, thermal throttle — only
+        // ever ADDS time, so the minimum is the closest estimate of the true cost and it
+        // converges fast. The worst-bucket column stays a max across all reps: that one is
+        // deliberately measuring the hitches.
+        double bestUs = double.MaxValue, worstBucketUs = 0;
+        for (int rep = 0; rep < Bench.Reps; rep++)
         {
-            sw.Restart();
-            for (int f = 0; f < Bucket; f++) sim.Step(input);
-            sw.Stop();
-            worstBucketUs = Math.Max(worstBucketUs, sw.Elapsed.TotalMilliseconds * 1000.0 / Bucket);
+            var sim = new Simulation(terrain, spawn, populate);
+            for (int f = 0; f < 120; f++) sim.Step(input);   // warmup: JIT + first-touch
+
+            const int Bucket = 60;
+            var sw = new Stopwatch();
+            var total = Stopwatch.StartNew();
+            for (int b = 0; b < frames / Bucket; b++)
+            {
+                sw.Restart();
+                for (int f = 0; f < Bucket; f++) sim.Step(input);
+                sw.Stop();
+                worstBucketUs = Math.Max(worstBucketUs, sw.Elapsed.TotalMilliseconds * 1000.0 / Bucket);
+            }
+            total.Stop();
+            bestUs = Math.Min(bestUs, total.Elapsed.TotalMilliseconds * 1000.0 / frames);
         }
-        total.Stop();
-        double avgUs = total.Elapsed.TotalMilliseconds * 1000.0 / frames;
-        Console.WriteLine($"{name,-26} {avgUs,10:F1} {worstBucketUs,22:F1}");
+        Report.Add(name, bestUs, worstBucketUs);
     }
 
     private static void MeasureSnapshot()
     {
-        var sim = new Simulation(VaultCourse(), new Vector2(12f, 72f));
-        for (int f = 0; f < 120; f++) sim.Step(HoldRight);
-
         const int N = 600;
-        var snap = sim.Snapshot();
-        var sw = Stopwatch.StartNew();
-        for (int i = 0; i < N; i++) { snap = sim.Snapshot(); sim.Step(HoldRight); }
-        sw.Stop();
-        // Subtract the known step cost? No — report the pair as measured, and
-        // restore separately below; the composite is what rollback pays.
-        double pairUs = sw.Elapsed.TotalMilliseconds * 1000.0 / N;
+        double bestPair = double.MaxValue, bestRestore = double.MaxValue;
+        for (int rep = 0; rep < Bench.Reps; rep++)
+        {
+            var sim = new Simulation(VaultCourse(), new Vector2(12f, 72f));
+            for (int f = 0; f < 120; f++) sim.Step(HoldRight);
 
-        var sw2 = Stopwatch.StartNew();
-        for (int i = 0; i < N; i++) sim.Restore(snap);
-        sw2.Stop();
-        double restoreUs = sw2.Elapsed.TotalMilliseconds * 1000.0 / N;
-        Console.WriteLine($"{"snapshot+step (pair)",-26} {pairUs,10:F1}");
-        Console.WriteLine($"{"restore",-26} {restoreUs,10:F1}");
+            var snap = sim.Snapshot();
+            var sw = Stopwatch.StartNew();
+            for (int i = 0; i < N; i++) { snap = sim.Snapshot(); sim.Step(HoldRight); }
+            sw.Stop();
+            // Subtract the known step cost? No — report the pair as measured, and
+            // restore separately below; the composite is what rollback pays.
+            bestPair = Math.Min(bestPair, sw.Elapsed.TotalMilliseconds * 1000.0 / N);
+
+            var sw2 = Stopwatch.StartNew();
+            for (int i = 0; i < N; i++) sim.Restore(snap);
+            sw2.Stop();
+            bestRestore = Math.Min(bestRestore, sw2.Elapsed.TotalMilliseconds * 1000.0 / N);
+        }
+        Report.Add("snapshot+step (pair)", bestPair);
+        Report.Add("restore", bestRestore);
     }
 
     private static void MeasureRollback()
@@ -93,21 +164,25 @@ internal static class Program
         // GGPO worst case, amortized: every visual frame = restore an 8-frame-old
         // snapshot, resimulate 7 confirmed frames, step the new one, snapshot.
         const int Window = 8;
-        var sim = new Simulation(VaultCourse(), new Vector2(12f, 72f));
-        for (int f = 0; f < 120; f++) sim.Step(HoldRight);
-
         const int Frames = 600;
-        var snap = sim.Snapshot();
-        var sw = Stopwatch.StartNew();
-        for (int f = 0; f < Frames; f++)
+        double best = double.MaxValue;
+        for (int rep = 0; rep < Bench.Reps; rep++)
         {
-            sim.Restore(snap);
-            for (int r = 0; r < Window; r++) sim.Step(HoldRight);
-            snap = sim.Snapshot();
+            var sim = new Simulation(VaultCourse(), new Vector2(12f, 72f));
+            for (int f = 0; f < 120; f++) sim.Step(HoldRight);
+
+            var snap = sim.Snapshot();
+            var sw = Stopwatch.StartNew();
+            for (int f = 0; f < Frames; f++)
+            {
+                sim.Restore(snap);
+                for (int r = 0; r < Window; r++) sim.Step(HoldRight);
+                snap = sim.Snapshot();
+            }
+            sw.Stop();
+            best = Math.Min(best, sw.Elapsed.TotalMilliseconds * 1000.0 / Frames);
         }
-        sw.Stop();
-        double perVisualFrameUs = sw.Elapsed.TotalMilliseconds * 1000.0 / Frames;
-        Console.WriteLine($"{"rollback frame (win=8)",-26} {perVisualFrameUs,10:F1}");
+        Report.Add("rollback frame (win=8)", best);
     }
 
     private static void Budget()

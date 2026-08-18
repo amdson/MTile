@@ -91,7 +91,15 @@ public class CombatState
 
     // Hoisted gates so callers can write `ctx.Combat?.BlocksAttack == true` instead
     // of repeating raw flag checks at every action/movement precondition site.
-    public bool BlocksAttack => StunActive || GrabbedActive;
+    //
+    // BlocksAttack is GRABBED-ONLY since the hit-airlock unification
+    // (Plans/HIT_AIRLOCK_PLAN.md): hitstun/stun now gate actions through the
+    // recovery index (EnvironmentContext.HitDisadvantageFrames folds into
+    // RecoveryIndex, consumed by each entrant's EntryOk window), so a stun is a
+    // countdown every action prices with its own entry window rather than a
+    // blanket refusal. Grabbed stays a flag — it's a live external hold
+    // re-marked every frame, not a timed window.
+    public bool BlocksAttack => GrabbedActive;
     public bool BlocksJump   => HitstunActive || StunActive || GrabbedActive;
 
     // Cross-cutting movement-capability lock-out (COMBAT_FEEL_PLAN Phase 4). The

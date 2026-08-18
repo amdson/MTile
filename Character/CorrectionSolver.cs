@@ -111,12 +111,55 @@ public sealed class CorrectionProblem
     // Feeds the debug overlay's contact arrows and CorrectorLedger's per-contact
     // reaction bookkeeping.
     public Vector2[] RowPush;
+
+    // Deep copy for Diagnostics/QpBench: the live problem is pooled scratch that the next
+    // tick overwrites, so a benchmark that wants to replay one frozen subproblem has to own
+    // its arrays. Bench-only — the sim never calls this.
+    public CorrectionProblem Clone()
+    {
+        var q = new CorrectionProblem
+        {
+            H = H, Dt = Dt, RowCount = RowCount, ChannelCount = ChannelCount,
+            DeltaWeight = DeltaWeight, HingeWeight = HingeWeight, InnerIterations = InnerIterations,
+            CoastVel = (Vector2[])CoastVel.Clone(),
+            Rows = (ClearanceRow[])Rows.Clone(),
+            PrevApplied = (Vector2[])PrevApplied.Clone(),
+            Channels = (ChannelDef[])Channels.Clone(),
+            RowPush = RowPush != null ? new Vector2[RowPush.Length] : null,
+        };
+        for (int c = 0; c < q.ChannelCount; c++)
+        {
+            if (q.Channels[c].CapPerTick != null) q.Channels[c].CapPerTick = (float[])q.Channels[c].CapPerTick.Clone();
+            if (q.Channels[c].ActiveMask != null) q.Channels[c].ActiveMask = (bool[])q.Channels[c].ActiveMask.Clone();
+        }
+        return q;
+    }
 }
 
 public static class CorrectionSolver
 {
     public const int DefaultInnerIterations = 4;
     public const int MaxChannels = 8;
+
+    // Write-only profiling counters, off by default. Same contract as
+    // PlayerCharacter.CorrectorDebug's trajectory capture: nothing in the sim ever READS
+    // these, so they cannot influence a step, a replay, or a rollback checksum — the
+    // no-sim-affecting-statics rule is about state that feeds back, and this never does.
+    // Enabled by MTile.Bench to attribute the corrector's share of a sim tick.
+    public static bool Profile;
+    public static long Ticks;   // Stopwatch ticks accumulated inside Solve
+    public static int  Calls;   // Solve invocations
+    public static void ResetProfile() { Ticks = 0; Calls = 0; SumH = SumC = SumR = SumIters = 0; }
+
+    // Per-sweep step magnitude was measured here once (see Plans/PERF_AUDIT.md): the fold
+    // path's 16 sweeps decay only ~5x end to end, so there is no converged tail to skip.
+    public static long SumH, SumC, SumR, SumIters;   // dimension totals over profiled calls
+
+    // Capture hook for Diagnostics/QpBench (bench-only, never armed by the sim): while
+    // armed, each FOLD subproblem is deep-copied out so it can be replayed under one clock
+    // pair. Write-only from the sim's point of view — nothing in a step reads it back.
+    public static bool ArmCapture;
+    public static CorrectionProblem Captured;
 
     private static bool Active(in ChannelDef ch, int k)
         => ch.ActiveMask != null ? ch.ActiveMask[k] : k >= ch.ActiveFrom && k < ch.ActiveTo;
@@ -133,62 +176,169 @@ public static class CorrectionSolver
     // residual: max over rows of the remaining violation (0 = all rows cleared).
     public static float Solve(CorrectionProblem p, Vector2[] z, Vector2[] zScratch)
     {
-        int H = p.H, C = p.ChannelCount;
+        if (ArmCapture && p.InnerIterations > DefaultInnerIterations) Captured = p.Clone();
+        if (Profile) { Calls++; long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+                       float r = SolveCore(p, z, zScratch);
+                       Ticks += System.Diagnostics.Stopwatch.GetTimestamp() - t0; return r; }
+        return SolveCore(p, z, zScratch);
+    }
+
+    private static float SolveCore(CorrectionProblem p, Vector2[] z, Vector2[] zScratch)
+    {
+        int H = p.H, C = p.ChannelCount, R = p.RowCount;
+        if (Profile) { SumH += H; SumC += C; SumR += R; SumIters += p.InnerIterations; }
 
         // Cold start at z = 0 every tick — the coast is the origin.
         for (int i = 0; i < C * H; i++) z[i] = Vector2.Zero;
 
         if (p.RowPush != null)
-            for (int j = 0; j < p.RowCount; j++) p.RowPush[j] = Vector2.Zero;
+            for (int j = 0; j < R; j++) p.RowPush[j] = Vector2.Zero;
 
-        // PER-VARIABLE step sizes η_ck = 1/L_ck (diagonal preconditioning with a
-        // Gershgorin row-sum bound). A single global η is set by the stiffest
-        // variable — and the fold mixes VelocityUpdate levers (∝ dt) with Force
-        // levers (∝ dt²) and hard rows (HingeScale 1) with soft references
-        // (0.02): the curvature disparity is ~10³–10⁴, so a shared step starves
-        // the force channels and soft demands to numerical silence under the
-        // fixed iteration budget. Per-variable: L_ck = 2w_c + 8wΔ (Δ-chain row
-        // sum) + Σ_j 2·wH·hs_j·lever_ckj·S_j, where S_j is row j's TOTAL
-        // compatible lever mass — the hinge Hessian's (c,k) row sum, so the
-        // preconditioned gradient step is a descent step on the quadratic
-        // surrogate. Compatibility (HardRowsOnly) shapes both gradient and
-        // bound identically.
+        // ---- Iteration-invariant precompute -------------------------------
+        // Everything in this block depends only on the FROZEN subproblem
+        // (channels, rows, dt, H) and not on the iterate z, but it used to be
+        // rebuilt inside every one of the InnerIterations sweeps — 16 of them on
+        // the fold path (MovementConfig.FoldIterations), which is the path that
+        // fires on nearly every tick in tight terrain. Hoisting is
+        // arithmetically identical: same expressions, same accumulation order,
+        // so the solve is bit-for-bit what it was.
+
+        // Lever table. Lever(kind, T, k, dt) depends on the kind and the TICK
+        // GAP T − k alone, so 2·H entries cover every (row, tick) pair and
+        // replace an O(C·H·R) recompute per sweep. PositionOffset is the gap-0
+        // indicator and needs no table.
+        Span<float> levV = stackalloc float[BallisticPredictor.MaxHorizon];
+        Span<float> levF = stackalloc float[BallisticPredictor.MaxHorizon];
+        for (int d = 0; d < BallisticPredictor.MaxHorizon; d++) { levV[d] = (d + 1) * p.Dt; levF[d] = levV[d] * p.Dt; }
+
+        // Row-class compatibility per (channel, row) as a bitmask — R is capped
+        // at ClearanceConstraintBuilder.MaxEvents = 32, so one uint per channel.
+        // Bit set = this channel takes no hinge gradient from that row.
+        Span<uint> skip = stackalloc uint[MaxChannels];
+        for (int c = 0; c < C; c++)
+        {
+            uint m = 0;
+            for (int j = 0; j < R; j++) if (Skips(p.Channels[c], p.Rows[j])) m |= 1u << j;
+            skip[c] = m;
+        }
+
+        // Activation and lever kind flattened out of ChannelDef. The sweeps used to
+        // re-read the (large, array-carrying) struct and dereference ActiveMask on every
+        // (row, channel, tick) triple; H is capped at BallisticPredictor.MaxHorizon = 48,
+        // so one ulong per channel holds the whole activation predicate as a bit test.
+        Span<ulong> act  = stackalloc ulong[MaxChannels];
+        Span<int>   kind = stackalloc int[MaxChannels];
+        for (int c = 0; c < C; c++)
+        {
+            ulong m = 0;
+            for (int k = 0; k < H; k++) if (Active(p.Channels[c], k)) m |= 1ul << k;
+            act[c] = m;
+            kind[c] = (int)p.Channels[c].Lever;
+        }
+
+        // Row constants folded to the same grouping the gradient uses:
+        // ((2*wH*hs) * slack) * lever * n̂ is left-associative exactly as before.
+        Span<float> hs2 = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
+        for (int j = 0; j < R; j++) hs2[j] = 2f * p.HingeWeight * p.Rows[j].HingeScale;
+
+        // PER-VARIABLE step sizes eta_ck = 1/L_ck (diagonal preconditioning with
+        // a Gershgorin row-sum bound). A single global step is set by the
+        // stiffest variable — and the fold mixes VelocityUpdate levers (~dt)
+        // with Force levers (~dt^2) and hard rows (HingeScale 1) with soft
+        // references (0.02): the curvature disparity is ~10^3–10^4, so a shared
+        // step starves the force channels and soft demands to numerical silence
+        // under the fixed iteration budget. Per-variable: L_ck = 2w_c + 8wD
+        // (delta-chain row sum) + sum_j 2*wH*hs_j*lever_ckj*S_j, where S_j is
+        // row j's TOTAL compatible lever mass — the hinge Hessian's (c,k) row
+        // sum, so the preconditioned gradient step is a descent step on the
+        // quadratic surrogate. Compatibility (HardRowsOnly) shapes both gradient
+        // and bound identically.
         Span<float> rowS = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
-        for (int j = 0; j < p.RowCount; j++)
+        for (int j = 0; j < R; j++)
         {
             float sum = 0f;
+            int kMax = Math.Min(p.Rows[j].Tick, H - 1);
             for (int c = 0; c < C; c++)
             {
+                if ((skip[c] & (1u << j)) != 0) continue;
                 var ch = p.Channels[c];
-                if (Skips(ch, p.Rows[j])) continue;
-                int kMax = Math.Min(p.Rows[j].Tick, H - 1);
+                int kd = kind[c];
                 for (int k = 0; k <= kMax; k++)
                 {
                     if (!Active(ch, k)) continue;
-                    sum += Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
+                    sum += Lev(kd, p.Rows[j].Tick, k, levV, levF);
                 }
             }
             rowS[j] = sum;
         }
 
+        // Curvature bound over the SAME (row, k) pairs the gradient uses — the
+        // Hessian row sum of the terms this variable actually feels. The bound
+        // uses the full hinge set (not just currently-violated rows):
+        // conservative when a hinge is inactive, never optimistic. Fixed for the
+        // whole solve, so it is built once here rather than per sweep.
+        Span<float> Lt = stackalloc float[MaxChannels * BallisticPredictor.MaxHorizon];
+        for (int c = 0; c < C; c++)
+        {
+            var ch = p.Channels[c];
+            uint sk = skip[c];
+            int kd = kind[c];
+            for (int k = 0; k < H; k++)
+            {
+                if (!Active(ch, k)) continue;
+                float L = 2f * ch.Weight + 8f * p.DeltaWeight;
+                for (int j = 0; j < R; j++)
+                {
+                    if (k > p.Rows[j].Tick) continue;
+                    if ((sk & (1u << j)) != 0) continue;
+                    float lever = Lev(kd, p.Rows[j].Tick, k, levV, levF);
+                    L += 2f * p.HingeWeight * p.Rows[j].HingeScale * lever * rowS[j];
+                }
+                Lt[c * H + k] = L;
+            }
+        }
+        // -------------------------------------------------------------------
+
         Span<float> slack = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
         for (int it = 0; it < p.InnerIterations; it++)
         {
             // Row slacks s_j = m_j − Σ lever·(z·n̂) from the CURRENT iterate.
-            for (int j = 0; j < p.RowCount; j++)
-                slack[j] = RowSlack(p, z, j);
+            // Inlined RowSlack so it can use the lever table; same order of
+            // accumulation as the shared helper, which stays the API for
+            // callers outside the solve.
+            for (int j = 0; j < R; j++)
+            {
+                var row = p.Rows[j];
+                int kMax = Math.Min(row.Tick, H - 1);
+                float achieved = 0f;
+                for (int c = 0; c < C; c++)
+                {
+                    ulong a = act[c];
+                    int kd = kind[c];
+                    for (int k = 0; k <= kMax; k++)
+                    {
+                        if ((a >> k & 1) == 0) continue;
+                        achieved += Lev(kd, row.Tick, k, levV, levF)
+                                  * Vector2.Dot(z[c * H + k], row.Normal);
+                    }
+                }
+                slack[j] = row.Depth - achieved;
+            }
 
             // Synchronous gradient step into zScratch, then project per channel.
             for (int c = 0; c < C; c++)
             {
                 var ch = p.Channels[c];
+                uint sk = skip[c];
+                int kd = kind[c];
+                ulong a = act[c];
                 for (int k = 0; k < H; k++)
                 {
                     int i = c * H + k;
-                    if (!Active(ch, k)) { zScratch[i] = Vector2.Zero; continue; }
+                    if ((a >> k & 1) == 0) { zScratch[i] = Vector2.Zero; continue; }
 
                     var g = 2f * ch.Weight * z[i];
-                    float L = 2f * ch.Weight + 8f * p.DeltaWeight;
+                    float L = Lt[i];
 
                     if (p.DeltaWeight > 0f)
                     {
@@ -198,26 +348,16 @@ public static class CorrectionSolver
                             g -= 2f * p.DeltaWeight * (z[i + 1] - z[i]);
                     }
 
-                    // Curvature bound over the SAME (row, k) pairs the gradient
-                    // uses — the Hessian row sum of the terms this variable
-                    // actually feels. The bound uses the full hinge set (not
-                    // just currently-violated rows): conservative when a hinge
-                    // is inactive, never optimistic.
-                    for (int j = 0; j < p.RowCount; j++)
-                    {
-                        if (k > p.Rows[j].Tick) continue;
-                        if (Skips(ch, p.Rows[j])) continue;
-                        float lever = Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
-                        L += 2f * p.HingeWeight * p.Rows[j].HingeScale * lever * rowS[j];
-                    }
                     if (L <= 0f) { zScratch[i] = z[i]; continue; }
 
-                    for (int j = 0; j < p.RowCount; j++)
+                    for (int j = 0; j < R; j++)
                     {
-                        if (slack[j] <= 0f || k > p.Rows[j].Tick) continue;
-                        if (Skips(ch, p.Rows[j])) continue;
-                        float lever = Lever(ch.Lever, p.Rows[j].Tick, k, p.Dt);
-                        var push = 2f * p.HingeWeight * p.Rows[j].HingeScale * slack[j] * lever * p.Rows[j].Normal;
+                        if (slack[j] <= 0f) continue;
+                        var row = p.Rows[j];
+                        if (k > row.Tick) continue;
+                        if ((sk & (1u << j)) != 0) continue;
+                        float lever = Lev(kd, row.Tick, k, levV, levF);
+                        var push = hs2[j] * slack[j] * lever * row.Normal;
                         g -= push;
                         if (p.RowPush != null && k == 0)
                             p.RowPush[j] += (ch.Lever switch
@@ -252,6 +392,18 @@ public static class CorrectionSolver
 
         return ComputeResidual(p, z);
     }
+
+    // Table-backed Lever for the solve's hot loops. Identical arithmetic to
+    // Lever(): (T − k + 1)·dt is precomputed per tick gap instead of per
+    // (channel, tick, row) per sweep.
+    private static float Lev(int kind, int rowTick, int k,
+                             ReadOnlySpan<float> levV, ReadOnlySpan<float> levF)
+        => kind switch
+        {
+            (int)LeverKind.PositionOffset => k == rowTick ? 1f : 0f,
+            (int)LeverKind.VelocityUpdate => levV[rowTick - k],
+            _                        => levF[rowTick - k],
+        };
 
     // Remaining violation of row j under the linear dynamics map.
     public static float RowSlack(CorrectionProblem p, Vector2[] z, int j)

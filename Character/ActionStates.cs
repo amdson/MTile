@@ -16,6 +16,59 @@ public abstract class ActionState
     public abstract int ActivePriority  { get; }
     public abstract int PassivePriority { get; }
 
+    // Sentinel for CommitProfile: the action refuses voluntary eviction outright.
+    // Escape hatch only — nothing returns it today; commitment is normally
+    // expressed as a PRICE (a long quote), not a refusal, so user intent stays
+    // expressible at any time. Priorities are the guard rail instead: eviction
+    // bids with the future candidate's PassivePriority (see RecoveryAction), so
+    // a request that couldn't preempt this action directly can't evict it either.
+    public const int Blocked = -1;
+
+    // Commitment envelope: the frames of mandatory recovery this action would hand
+    // RecoveryAction if evicted at this instant. RecoveryAction's lookahead calls
+    // this on the LIVE action to decide whether an early exit pays; an action whose
+    // Exit stamps its own recovery should stamp from the same number so eviction
+    // pays exactly what was quoted. Default 0: freely evictable (the Exit stamp,
+    // if any, is still the actual price).
+    public virtual int CommitProfile(EnvironmentContext ctx, in ActionVars vars) => 0;
+
+    // Involuntary-eviction price knob — CommitProfile's twin (HIT_AIRLOCK_PLAN §4).
+    // Strength threshold below which an incoming hit does NOT interrupt this
+    // action: armored hits still add their full escalation percent and recoil the
+    // attacker, but arrive at heavily scaled knockback and never register
+    // hitstun/stun — so no flinch eviction and no disadvantage window. Compared
+    // against HitResult.Strength (pre-mass, the same units as CombatState's stun
+    // threshold; reference points: Slash1 ~200, Slash3 ~500, Stab ~950).
+    // Default 0 = no armor: any hit flinches.
+    public virtual float ArmorProfile(in ActionVars vars) => 0f;
+
+    // Hub states (Null, the build holds) that entrants may fire out of directly,
+    // as if from neutral: ctx.RecoveryIndex() reads through them to the recovery
+    // countdown. Every other action is opaque — entering over a live action needs
+    // an explicit chord in the entrant's precondition (GuardRetaliate←GuardCharged,
+    // Burst←Recovery-charge, GrabbedSlash←grabbed) or the eviction lookahead.
+    public virtual bool NeutralForEntry => false;
+
+    // Standard entry gate for the strict transition graph: fire only from neutral
+    // or recovery, and only once the countdown has reached maxEntryIndex frames.
+    // 0 (the default) = fully recovered. The countdown includes hit-imposed
+    // disadvantage (hitstun/stun — see EnvironmentContext.RecoveryIndex), so a
+    // finite window like guard's 0.2s doubles as its stun-escape window.
+    //
+    // The UNBOUNDED window (int.MaxValue) is the combo-chaining privilege: it
+    // spans only the player's own recovery stamp, never hit disadvantage —
+    // being interrupted drops your combo. `ignoreHitDisadvantage` is the
+    // struggle channel's exemption (GrabbedSlash).
+    protected static bool EntryOk(EnvironmentContext ctx, int maxEntryIndex = 0,
+                                  bool ignoreHitDisadvantage = false)
+    {
+        if (ctx.RecoveryIndex(includeHitDisadvantage: !ignoreHitDisadvantage) is not int i)
+            return false;
+        if (maxEntryIndex == int.MaxValue && !ignoreHitDisadvantage
+            && ctx.HitDisadvantageFrames() > 0) return false;
+        return i <= maxEntryIndex;
+    }
+
     // CheckPreConditions (candidate selection) reads only ctx + abilities, never the
     // current activation's vars — so it keeps the lean signature. The lifecycle methods
     // below run on the active/transitioning action and carry ActionVars, the plain-data
@@ -69,90 +122,210 @@ public class NullAction : ActionState
 {
     public override int ActivePriority  => 0;
     public override int PassivePriority => 0;
+    public override bool NeutralForEntry => true;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab) => true;
     public override bool CheckConditions  (EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars) => true;
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars) {}
 }
 
-// Wind-up state. Entered on LMB-press edge; held while LMB is down. Doesn't commit
-// to any specific move — Slash/Stab/etc. preempt it on their own preconditions.
-// Visual is a small pulsing indicator at the body, colored by posture.
-public class ReadyAction : ActionState
+// Post-attack countdown AND pre-attack wind-up — the single airlock state between
+// actions. The countdown ("recovery index", ctx.RecoveryIndex()) is the frames
+// remaining on Condition.RecoveryActive; index 0 is the READY posture (the old
+// ReadyAction, now merged): at zero the state persists only while a pressed-and-
+// held LMB is charging, so buffered gestures resolve out of one place.
+//
+// Three ways in (CheckPreConditions):
+//   1. An attack's Exit stamped recovery frames — the normal handoff.
+//   2. LMB press-hold from a neutral state — the wind-up role, at index 0. The
+//      press FRAME itself is left to press-edge chords (BlockBurst, Beam, Grab,
+//      all of which outrank or consume the press); the wind-up picks up what
+//      they declined one frame later.
+//   3. Eviction lookahead: re-running the candidate preconditions under the
+//      hypothetical future ("recovery entered now at the live action's
+//      CommitProfile index, intents aged accordingly") finds some request that
+//      will still be alive when the countdown reaches an index it can fire from.
+//      Recovery then bids with THAT CANDIDATE'S PassivePriority — it inherits the
+//      priority of the move it is chaining into, so eviction wins exactly when
+//      the request could have preempted the live action directly. Guard (P40)
+//      evicts a stab (A30); a mashed slash (P30) does not.
+//   4. FLINCH — involuntary eviction (HIT_AIRLOCK_PLAN): a hit that registered
+//      hitstun on the previous frame evicts any live action at InterruptBid,
+//      above every Active. Flinch is universal; exceptions are ArmorProfile's
+//      job (armored hits never register, so they never trip this). While
+//      hitstun/stun frames remain, Recovery also holds the slot from neutral
+//      (case 1) — the victim visibly sits in the airlock through disadvantage.
+//
+// Active is LOW (10): recovery is a waiting room, and the index gates in each
+// entrant's precondition — not this state's priority — decide who may leave it
+// and when.
+public class RecoveryAction : ActionState
 {
-    private const float MaxHold = 1.0f;   // hard cap so a stuck button doesn't lock us forever
+    private const float MaxChargeHold = 1.0f;   // stuck-button cap on the wind-up hold
+    private const int   PassiveBase   = 45;     // countdown handoff / wind-up entry bid
+    // Flinch bid — above every action's Active (Grab is 48), so a registered hit
+    // always interrupts. Universality is deliberate: "this move can't be
+    // interrupted by light hits" is expressed with ArmorProfile, not priority.
+    private const int   InterruptBid  = 60;
+
+    // Set by CheckPreConditions each time it passes, read by the selection loop
+    // immediately after. Transient within a Step (recomputed before every read),
+    // so it needs no snapshot for rollback.
+    private int _bid = PassiveBase;
+
     public override int ActivePriority  => 10;
-    public override int PassivePriority => 15;
+    public override int PassivePriority => _bid;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        if (ab.Condition.RecoveryActive) return false;
-        return ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out _);
+        _bid = PassiveBase;
+
+        // The LIVE incumbent (falls back to PreviousAction for hand-built test
+        // contexts that don't wire ctx.CurrentAction).
+        var cur = ctx.CurrentAction ?? ctx.PreviousAction(0);
+        bool neutral = cur == null || cur is RecoveryAction || cur.NeutralForEntry;
+        if (neutral)
+        {
+            // (1) Post-attack handoff: an Exit stamped recovery frames. Gated on
+            // a NEUTRAL incumbent: a state that legitimately fired mid-countdown
+            // (guard's MaxEntry window) owns its activation — the still-ticking
+            // stamp must not drag it back into the airlock (that was a 1-frame
+            // guard↔recovery oscillation). Reaching over a live action is
+            // exclusively the eviction lookahead's business, below. Hit
+            // disadvantage (hitstun/stun) holds the slot the same way — a hit
+            // taken while neutral parks the victim here for its window.
+            if (ab.Condition.RecoveryActive || ctx.HitDisadvantageFrames() > 0) return true;
+
+            // (2) Wind-up role. PressEdge age ≥ 1: the press frame belongs to the
+            // press-edge chords; Shift+LMB belongs to Beam/EnergyBall/Grab.
+            return !ctx.Input.Shift && ctx.Input.LeftClick
+                && ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out var pe)
+                && ctx.CurrentFrame - pe.IssuedFrame >= 1;
+        }
+
+        // (4) FLINCH — involuntary eviction. CombatSystem applies hits after all
+        // updates, so a connect on frame N registers with LastHitFrame == N and
+        // is seen here on N+1 (crush self-registration happens earlier in the
+        // same Update, hence <= 1). Armored, parried, invulnerable, and
+        // struggle hits never reach OnHitRegistered, so they never trip this.
+        // The evicted action's Exit still stamps its CommitProfile; the recovery
+        // index max-merges it with the hitstun window, so a jab can't be used
+        // as a cheap self-cancel of a long tail.
+        if (ctx.Combat != null && ctx.Combat.HitstunActive
+            && ctx.CurrentFrame - ctx.Combat.LastHitFrame <= 1)
+        {
+            _bid = InterruptBid;
+            return true;
+        }
+
+        // (3) Eviction lookahead against the live action, bidding with the found
+        // candidate's own PassivePriority.
+        if (ctx.ActionRegistry == null) return false;
+        int commit = cur.CommitProfile(ctx, in ctx.CurrentActionVars);
+        if (commit == Blocked) return false;
+        int bid = LookaheadBestBid(ctx, ab, cur, commit);
+        if (bid <= cur.ActivePriority) return false;
+        _bid = bid;
+        return true;
+    }
+
+    // Hypothetical re-run of the candidate scan: enter recovery now at index
+    // `commitFrames`, tick it down, and at each future frame ask every candidate's
+    // REAL precondition whether it would fire — with ctx.CurrentFrame shifted (so
+    // intent ages grow and expire honestly) and RecoveryIndex() overlaid. The
+    // world is frozen (ctx's geometry caches, input levels, combat flags stay at
+    // this frame's values); environment-sensitive preconditions are re-checked
+    // for real at fire time, and a lookahead that guessed wrong just leaves the
+    // player resting in recovery → Null. Peek-only: nothing is consumed here.
+    //
+    // Returns the highest PassivePriority among candidates that (a) could NOT
+    // fire directly this frame — a chord that already passes (EnergyBall over
+    // guard, GuardRetaliate) preempts on its own; routing it through recovery
+    // would only add a frame — but (b) would fire at some point of the
+    // hypothetical countdown, and (c) outrank the incumbent's Active, so the
+    // inherited bid can actually win the selection loop. int.MinValue if none.
+    private int LookaheadBestBid(EnvironmentContext ctx, PlayerAbilityState ab,
+                                 ActionState cur, int commitFrames)
+    {
+        var registry = ctx.ActionRegistry;
+        int frame0 = ctx.CurrentFrame;
+        int best = int.MinValue;
+        try
+        {
+            for (int i = 0; i < registry.Count; i++)
+            {
+                var a = registry[i];
+                if (a is RecoveryAction or NullAction) continue;
+                if (a == cur) continue;   // evicting an action to re-enter itself is a no-op
+                if (a.PassivePriority <= cur.ActivePriority) continue;   // bid couldn't win
+                if (a.PassivePriority <= best) continue;                 // can't improve
+
+                // (a) Direct-fire pre-check at the real present, no overlay.
+                ctx.CurrentFrame = frame0;
+                ctx.LookaheadRecoveryIndex = null;
+                if (a.CheckPreConditions(ctx, ab)) continue;
+
+                // (b) The countdown walk.
+                for (int k = 0; k <= commitFrames; k++)
+                {
+                    ctx.CurrentFrame = frame0 + k;
+                    ctx.LookaheadRecoveryIndex = commitFrames - k;
+                    if (a.CheckPreConditions(ctx, ab)) { best = a.PassivePriority; break; }
+                }
+            }
+            return best;
+        }
+        finally
+        {
+            ctx.CurrentFrame = frame0;
+            ctx.LookaheadRecoveryIndex = null;
+        }
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        // Stay alive while LMB held, up to MaxHold. Release exits via Click/Stab preempt
-        // (their preconditions fire as the release-edge intent appears) OR via Null fallback.
-        if (!ctx.Input.LeftClick) return false;
-        return vars.TimeInState < MaxHold;
+        if (ab.Condition.RecoveryActive || ctx.HitDisadvantageFrames() > 0) return true;
+        // Index 0 — the READY posture: persist only while a held LMB charge lives.
+        return vars.Charging && ctx.Input.LeftClick && vars.TimeInState < MaxChargeHold;
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
+        // AttackDir is deliberately NOT touched — the combo hold-field
+        // continuation in Update re-broadcasts the exiting slash's aim.
         vars.TimeInState = 0f;
-        vars.IsGrounded  = ctx.TryGetGround(out _);
         vars.Facing      = ab.Facing == 0 ? 1 : ab.Facing;
-        ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
+        vars.IsGrounded  = ctx.TryGetGround(out _);
+        vars.Charging    = ChargeInputLive(ctx);
     }
+
+    // A live (unconsumed) press with the button still down and no Shift — the
+    // wind-up. Latched per frame rather than at Enter so a press issued DURING
+    // the countdown still charges once the countdown runs out.
+    private static bool ChargeInputLive(EnvironmentContext ctx)
+        => !ctx.Input.Shift && ctx.Input.LeftClick
+        && ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out _);
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState += ctx.Dt;
-    }
 
-    // Light slowdown while charging — telegraphs commitment. Slashes flick through
-    // Ready in 1–2 frames so the dip is imperceptible; a long-held stab charge
-    // lingers and feels heavy. The GravityScale dip pairs with the horizontal
-    // clamp to give a "floaty hover while you wind up" feel in the air; on the
-    // ground the standing spring overrides gravity, so the scale is a no-op.
-    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
-    {
-        m.MaxWalkSpeed   *= 0.6f;
-        m.WalkAccel      *= 0.7f;
-        m.GroundFriction *= 1.3f;
-        m.MaxAirSpeed    *= 0.7f;
-        m.GravityScale   *= 0.3f;
-    }
+        bool charge = ChargeInputLive(ctx);
+        if (charge && !vars.Charging)
+        {
+            vars.Charging    = true;
+            vars.TimeInState = 0f;   // charge clock — drives the cap + pulse indicator
+            vars.IsGrounded  = ctx.TryGetGround(out _);
+            vars.Facing      = ab.Facing == 0 ? 1 : ab.Facing;
+        }
+        else if (!charge) vars.Charging = false;
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
-    {
-        // Pulsing dot offset slightly toward facing, color matches posture
-        const float ArcR = PlayerCharacter.Radius * 1.5f;
-        float pulse  = MathF.Sin(vars.TimeInState * MathF.PI * 4f) * 0.5f + 0.5f;
-        float offset = ArcR * 0.5f * pulse;
-        var pos = body.Position + new Vector2(vars.Facing * offset, 0f);
-        var color = (vars.IsGrounded ? Color.Red : Color.DeepSkyBlue) * 0.7f;
-        sb.Draw(pixel, new Rectangle((int)pos.X - 2, (int)pos.Y - 2, 3, 3), color);
-    }
-}
-
-// Post-attack lockout. Owns the RecoveryActive flag; high active priority so most
-// moves can't interrupt it. Combo moves (Slash2/3, AirSlash2) preempt via higher
-// passive priority + their combo-flag gates.
-public class RecoveryAction : ActionState
-{
-    public override int ActivePriority  => 40;
-    public override int PassivePriority => 45;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-        => ab.Condition.RecoveryActive;
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => ab.Condition.RecoveryActive;
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
+        // Stuck-button cap: spend the press so the wind-up can't re-arm forever.
+        if (vars.Charging && vars.TimeInState >= MaxChargeHold)
+        {
+            ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
+            vars.Charging = false;
+        }
         // Hold-field continuation (COMBAT_FEEL_PLAN Phase 2): the stateless field
         // dies with its publishing state, so the gap between a hold-slash and its
         // combo follow-up would drop the victim. Recovery is the live state during
@@ -163,6 +336,34 @@ public class RecoveryAction : ActionState
             && vars.AttackDir != Vector2.Zero)
             SlashLikeAction.PublishHoldField(ctx, vars.AttackDir,
                 SlashLikeAction.HoldFieldBaseRadius, strengthScale: 0.6f);
+    }
+
+    // The old ReadyAction's charge slowdown — applied only while the wind-up hold
+    // is live, never during a bare countdown. Slashes flick through the wind-up in
+    // 1–2 frames so the dip is imperceptible; a long-held stab charge lingers and
+    // feels heavy. The GravityScale dip gives a floaty hover while winding up in
+    // the air; grounded, the standing spring overrides gravity so it's a no-op.
+    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
+    {
+        if (!vars.Charging) return;
+        m.MaxWalkSpeed   *= 0.6f;
+        m.WalkAccel      *= 0.7f;
+        m.GroundFriction *= 1.3f;
+        m.MaxAirSpeed    *= 0.7f;
+        m.GravityScale   *= 0.3f;
+    }
+
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    {
+        // Wind-up indicator (the old ReadyAction visual): pulsing dot offset
+        // toward facing, colored by posture. Nothing drawn for a bare countdown.
+        if (!vars.Charging) return;
+        const float ArcR = PlayerCharacter.Radius * 1.5f;
+        float pulse  = MathF.Sin(vars.TimeInState * MathF.PI * 4f) * 0.5f + 0.5f;
+        float offset = ArcR * 0.5f * pulse;
+        var pos = body.Position + new Vector2(vars.Facing * offset, 0f);
+        var color = (vars.IsGrounded ? Color.Red : Color.DeepSkyBlue) * 0.7f;
+        sb.Draw(pixel, new Rectangle((int)pos.X - 2, (int)pos.Y - 2, 3, 3), color);
     }
 }
 
@@ -242,6 +443,9 @@ public abstract class SlashLikeAction : ActionState
     protected abstract bool    RequireAir          { get; }
     // Override to gate on combo flags (Slash2 → cond.Slash2Ready).
     protected virtual  bool    CombosOk(ConditionState cond) => true;
+    // Combo steps may fire from ANY point of the recovery countdown (their combo
+    // flag is the real gate); openers must wait for index 0.
+    protected virtual  bool    EntryFromAnyRecoveryIndex => false;
     // Override to clear the flag we just used + the recovery flag.
     protected virtual  void    OnEnterClearFlags(ConditionState cond) { }
     // Override to set the next-stage flag + recovery duration. Durations are
@@ -285,8 +489,12 @@ public abstract class SlashLikeAction : ActionState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
-        // Stun gate: a stunned player can't initiate slashes. Guard is the
-        // intended escape (it can fire during stun); see roadmap §1.5.
+        // Strict from-set: fire only out of neutral/recovery (never over a live
+        // action), and openers wait out the full countdown.
+        if (!EntryOk(ctx, EntryFromAnyRecoveryIndex ? int.MaxValue : 0)) return false;
+        // Grab gate (BlocksAttack is grabbed-only now): hitstun/stun gate through
+        // the recovery index inside EntryOk above. Guard's escape from stun is
+        // its own 0.2s entry window — see GuardAction.
         if (ctx.Combat?.BlocksAttack == true) return false;
         bool grounded = ctx.TryGetGround(out _);
         if (RequireGround && !grounded) return false;
@@ -457,6 +665,7 @@ public class GroundSlash2 : SlashLikeAction
     // Combo moves preempt Recovery via higher passive priority.
     public override int PassivePriority => 50;
 
+    protected override bool EntryFromAnyRecoveryIndex => true;
     protected override bool CombosOk(ConditionState c) => c.Slash2Ready;
     protected override void OnEnterClearFlags(ConditionState c)
     {
@@ -486,6 +695,7 @@ public class GroundSlash3 : SlashLikeAction
 
     public override int PassivePriority => 50;
 
+    protected override bool EntryFromAnyRecoveryIndex => true;
     protected override bool CombosOk(ConditionState c) => c.Slash3Ready;
     protected override void OnEnterClearFlags(ConditionState c)
     {
@@ -526,6 +736,7 @@ public class CrouchSlash : SlashLikeAction
         // base class doesn't expose CheckPreConditions in a way we can extend
         // cleanly, so we duplicate its check and add the crouch requirement.
         if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (!EntryOk(ctx)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (!ctx.TryGetGround(out _)) return false;
         if (ctx.PreviousState(0) is not CrouchedState) return false;
@@ -576,6 +787,7 @@ public class AirSlash2 : SlashLikeAction
 
     public override int PassivePriority => 50;
 
+    protected override bool EntryFromAnyRecoveryIndex => true;
     protected override bool CombosOk(ConditionState c) => c.AirSlash2Ready;
     protected override void OnEnterClearFlags(ConditionState c)
     {
@@ -771,6 +983,8 @@ public class StabAction : ActionState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out _)) return false;
+        // Strict from-set: only out of neutral/recovery, at a finished countdown.
+        if (!EntryOk(ctx)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         // Shift+LMB-hold-swipe is reserved for BeamAction. A Stab intent
         // emitted from a Shift-held press would otherwise route to a normal
@@ -825,11 +1039,39 @@ public class StabAction : ActionState
         }
     }
 
+    // Superarmor through the wind-up + strike (HIT_AIRLOCK_PLAN §4): light pokes
+    // (Slash1 strength ~200) can't stuff a committed stab; Slash3 (~500), another
+    // stab (~950), or anything stun-tier still breaks it. Armored hits land at
+    // scaled-down knockback and full percent (see PlayerCharacter.OnHit) — no
+    // flinch, no hitstun. The tail (retract/settle) is unarmored: a whiffed stab
+    // is punishable as before.
+    private const float ArmorStrength = 300f;
+    public override float ArmorProfile(in ActionVars vars)
+        => vars.TimeInState < HurtboxStartTime + HurtboxActiveDuration ? ArmorStrength : 0f;
+
+    // Larger recovery than slashes — stab can't roll directly into anything.
+    private const float RecoverySeconds     = 0.3f;
+    // Recovery price of bailing during the wind-up: nothing was swung, so the
+    // cancel is nearly free — just enough that guard-flicker can't zero it out.
+    private const float WindupEvictSeconds  = 0.10f;
+
+    // Commitment envelope: cheap cancel out of the wind-up, the FULL tail price
+    // anywhere from the strike on. User intent is always expressible — a guard
+    // request mid-strike evicts the stab (guard P40 > stab A30) — but bailing
+    // during the swing forfeits the strike AND pays the whole whiff tail, so it
+    // is a real trade, not a free cancel. A mashed slash (P30) can't evict at
+    // all: recovery's inherited bid loses to the stab's Active 30. Exit stamps
+    // recovery from the same number so an eviction pays exactly what was quoted.
+    public override int CommitProfile(EnvironmentContext ctx, in ActionVars vars)
+        => vars.TimeInState < HurtboxStartTime
+            ? SimFrames.FromSeconds(WindupEvictSeconds, ctx.Dt)
+            : SimFrames.FromSeconds(RecoverySeconds,    ctx.Dt);
+
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        // Larger recovery than slashes — stab can't roll directly into anything.
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
-                              ref ab.Condition.RecoveryExpireFrame, 0.3f, ctx.CurrentFrame, ctx.Dt);
+        ConditionState.SetFor(ref ab.Condition.RecoveryActive,
+                              ref ab.Condition.RecoveryExpireFrame,
+                              CommitProfile(ctx, in vars), ctx.CurrentFrame);
     }
 
     // Heavy-stance modifiers throughout the stab; friction dips during the lunge
@@ -1069,7 +1311,13 @@ public class AirSpinStab : StabAction
 // slowdown via modifiers is identical air-vs-ground; no separate movement state.
 public class GuardAction : ActionState
 {
-    public override int ActivePriority  => 35;   // beats slash candidates (30) but loses to Recovery (40)
+    // How deep into a recovery countdown guard may fire: the defensive move gets
+    // the TAIL of any recovery (attack re-arm stays the full countdown). This is
+    // also what the eviction lookahead keys off — a stab wind-up's short evict
+    // stamp lands inside this window, so guard comes out almost immediately.
+    private const float MaxEntrySeconds = 0.2f;
+
+    public override int ActivePriority  => 35;   // beats slash candidates (30)
     public override int PassivePriority => 40;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
@@ -1078,7 +1326,9 @@ public class GuardAction : ActionState
         if (ctx.Input.Left || ctx.Input.Right) return false;  // no activation while pushing L/R
         if (ctx.Input.RightClick)    return false;            // Shift+RMB is the build gesture
         if (ctx.Combat?.BlocksAttack == true) return false;
-        if (ab.Condition.RecoveryActive)       return false;
+        // Strict from-set: neutral or the tail of recovery — never over a live
+        // action (reaching one is the eviction lookahead's call, not a priority race).
+        if (!EntryOk(ctx, SimFrames.FromSeconds(MaxEntrySeconds, ctx.Dt))) return false;
         return true;
     }
 
@@ -1209,7 +1459,8 @@ public class PulseAction : ActionState
     private static Color PulseColorFor(bool grounded) => grounded ? Color.Gold : Color.Cyan;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-        => ctx.Intents.Peek(IntentType.Circle, ctx.CurrentFrame, out _);
+        => ctx.Intents.Peek(IntentType.Circle, ctx.CurrentFrame, out _)
+        && EntryOk(ctx);
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
         => vars.TimeInState < Duration;
@@ -1222,12 +1473,23 @@ public class PulseAction : ActionState
         ctx.Intents.Consume(IntentType.Circle, ctx.CurrentFrame);
     }
 
+    // Long recovery — pulse is the biggest single attack, can't roll directly
+    // into anything else.
+    private const float RecoverySeconds    = 0.4f;
+    private const float WindupEvictSeconds = 0.10f;
+
+    // Same envelope shape as StabAction: near-free cancel before the ring starts,
+    // the full recovery price from the expansion on.
+    public override int CommitProfile(EnvironmentContext ctx, in ActionVars vars)
+        => vars.TimeInState < HitboxStartTime
+            ? SimFrames.FromSeconds(WindupEvictSeconds, ctx.Dt)
+            : SimFrames.FromSeconds(RecoverySeconds,    ctx.Dt);
+
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        // Long recovery — pulse is the biggest single attack, can't roll directly
-        // into anything else.
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
-                              ref ab.Condition.RecoveryExpireFrame, 0.4f, ctx.CurrentFrame, ctx.Dt);
+        ConditionState.SetFor(ref ab.Condition.RecoveryActive,
+                              ref ab.Condition.RecoveryExpireFrame,
+                              CommitProfile(ctx, in vars), ctx.CurrentFrame);
     }
 
     // Heavy stance throughout the pulse — applies on ground AND in air, unlike
@@ -1310,9 +1572,10 @@ public class PulseAction : ActionState
 // One box can't do both: Hitbox.Damage feeds the tile HP pool and the entity percent
 // pool alike, so "breaks blocks but tickles players" needs the split.
 //
-// Priority 30/30 matches the other attacks. Passive 30 clears ReadyAction's Active 10,
-// which is what lets it preempt the wind-up; the precondition below is what keeps it
-// from stealing RMB from the build/eruption gesture (Passive 10) outside a wind-up.
+// Priority 30/30 matches the other attacks. Passive 30 clears the wind-up's Active 10
+// (RecoveryAction's charge role), which is what lets it preempt the wind-up; the
+// precondition below is what keeps it from stealing RMB from the build/eruption
+// gesture (Passive 10) outside a wind-up.
 public class BurstAction : ActionState
 {
     private const float Duration             = 0.42f;
@@ -1346,11 +1609,14 @@ public class BurstAction : ActionState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        // Must be mid-wind-up with LMB still down. PreviousAction(0) is last frame's
-        // settled action, so this needs one frame of Ready first — LMB-then-RMB in
-        // the same frame just fires the wind-up, and the burst lands the frame after.
-        if (ctx.PreviousAction(0) is not ReadyAction) return false;
+        // Must be mid-wind-up with LMB still down: the merged Recovery at index 0,
+        // charging a live press. PreviousAction(0) is last frame's settled action,
+        // so this needs the wind-up to have picked up the press first — LMB-then-RMB
+        // in the same frame charges first and the burst lands a couple frames later.
+        if (ctx.PreviousAction(0) is not RecoveryAction) return false;
+        if (ctx.RecoveryIndex() != 0) return false;
         if (!ctx.Input.LeftClick) return false;
+        if (!ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out _)) return false;
         // RMB press-edge only, so a held right button (drag-build) doesn't re-fire.
         if (!ctx.Input.RightClick) return false;
         if (ctx.Controller == null || ctx.Controller.GetPrevious(1).RightClick) return false;
@@ -1531,6 +1797,9 @@ public class BlockPaintAction : ActionState
 
     public override int ActivePriority  => 8;
     public override int PassivePriority => 10;
+    // Freely interruptible hold — entrants fire over it as if from neutral (an
+    // attack can always cancel a build), reading the countdown straight through.
+    public override bool NeutralForEntry => true;
 
     // Unbounded hold → no meaningful progress fraction, so the clip must loop.
     public override float AnimationProgress(in ActionVars vars) => -1f;
@@ -1667,6 +1936,8 @@ public class BlockPlaceAction : ActionState
 
     public override int ActivePriority  => 8;
     public override int PassivePriority => 10;
+    // Same as BlockPaintAction: an interruptible hold, transparent to entrants.
+    public override bool NeutralForEntry => true;
 
     public override float AnimationProgress(in ActionVars vars) => -1f;
 
@@ -1732,10 +2003,11 @@ public class BlockPlaceAction : ActionState
 //     That covers the case the predicate can't see: cursor over air, nothing placeable
 //     there, but RMB is mid-eruption.
 //
-// Priority can NOT do that job here: ReadyAction's Passive is 15, and the FSM scan takes
-// the single highest-Passive candidate, so anything below 15 loses the LMB press-edge to
-// the wind-up and never fires. Hence 30/30 (matching BurstAction and the other attacks)
-// plus the explicit gate above.
+// Priority can NOT do that job here: the wind-up (RecoveryAction's charge role, Passive
+// 45) contests the press one frame later, and the FSM scan takes the single highest-
+// Passive candidate — the press FRAME itself is what this action must win, which its
+// 30/30 does only because the wind-up deliberately sits the press frame out. Hence the
+// explicit gates above rather than a priority arms race.
 public class BlockBurstAction : ActionState
 {
     private const float Duration      = 0.26f;
@@ -1908,6 +2180,9 @@ public class EnergyBallAction : ActionState
         if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (ab.Condition.RecoveryActive)    return false;
+        // From-set: neutral/recovery, or straight out of a live Guard (the Shift+
+        // click during a guard stance — this action's documented role).
+        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
         return true;
     }
 
@@ -2027,6 +2302,9 @@ public class BeamAction : ActionState
         if (prev.LeftClick) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (ab.Condition.RecoveryActive)    return false;
+        // From-set: neutral/recovery, or straight out of a live Guard (Shift is
+        // already down in a guard stance, so the press-edge lands over Guard).
+        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
         return true;
     }
 
@@ -2395,6 +2673,9 @@ public class GrenadeAction : ActionState
         if (prev.F) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (ab.Condition.RecoveryActive)    return false;
+        // From-set: neutral/recovery, or over a live Guard (F throw keeps its
+        // old ability to preempt the stance).
+        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
         return true;
     }
 
@@ -2509,6 +2790,8 @@ public class BlockGrabAction : ActionState
         if (!ctx.Input.Shift || !ctx.Input.LeftClick) return false;
         if (ctx.Controller == null || ctx.Controller.GetPrevious(1).LeftClick) return false;  // press-edge only
         if (ab.Condition.RecoveryActive) return false;
+        // From-set: neutral/recovery, or over a live Guard (Shift is already down).
+        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
         // Terrain-only gesture: the cursor must be ON a block, and within arm's reach.
         if (!BlockEruptionHelpers.IsCursorInSolid(ctx)) return false;
         return (ctx.Input.MouseWorldPosition - ctx.Body.Position).LengthSquared() <= GrabReach * GrabReach;
@@ -2949,6 +3232,8 @@ public class GrabAction : ActionState
         if (ctx.Combat?.BlocksAttack == true) return false;             // not while stunned/grabbed
         if (ctx.Combat?.HitstunActive == true) return false;            // not while in hitstun
         if (ab.Condition.RecoveryActive) return false;
+        // From-set: neutral/recovery, or over a live Guard (Shift is already down).
+        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
         // Yield the press to BlockGrabAction ONLY when it could actually use it: the
         // cursor is on a block inside its reach AND there's nobody to grab. Aim at a
         // body and the grab wins on priority; aim at open air and the grab still fires
@@ -3103,9 +3388,15 @@ public class GrabbedSlash : SlashLikeAction
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         // EXEMPT from the BlocksAttack gate (which a grab raises) — that's the whole
-        // point. Requires being grabbed + a click intent.
+        // point. Requires being grabbed + a click intent. Still pays its own
+        // recovery between struggles (EntryOk) — mash cadence is throttled by the
+        // 0.15s stamp, same rhythm the old recovery priority enforced. The
+        // exemption extends to hit disadvantage: a pummeling grabber's hitstun
+        // must not lock the victim out of struggling, so only the SELF stamp
+        // gates re-entry (flinch still interrupts a struggle swing mid-arc).
         if (ctx.Combat?.GrabbedActive != true) return false;
         if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (!EntryOk(ctx, 0, ignoreHitDisadvantage: true)) return false;
         return true;
     }
 

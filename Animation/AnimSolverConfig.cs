@@ -47,6 +47,20 @@ public class AnimSolverConfig
     // (CharacterAnimator, 0.5 × speed·dt·PhasePerPixel — well below any legitimate cadence),
     // so the row is inert in steady locomotion and at a stop. 0 disables.
     public float PhaseFloorPrior { get; set; } = 60f;
+
+    // How the Δφ rate floor is enforced. This row is the single largest source of
+    // ill-conditioning in the cadence solve: in RELATIVE mode its Jacobian is √λ/floor, and
+    // with floor ≈ one frame's phase step (~0.008) that is ~930, giving a JᵀJ diagonal of
+    // ~8.6e5 against delta_y's 0.83 — the whole 1e6 diagonal ratio, from one row.
+    //   0 = relative: √λ·(1 − Δφ/floor).   The historical behaviour.
+    //   1 = absolute: √λ·(floor − Δφ).     Jacobian √λ. Reparametrization only — see below.
+    //   2 = box:      row inert; Δφ's lower bound is raised to the floor instead.
+    //
+    // NOTE on mode 1: it is NOT a free win. Matching mode 0's push requires λ_abs = λ_rel/floor²,
+    // which puts the Jacobian back at √λ_rel/floor exactly. Mode 1 at a moderate λ is a
+    // genuinely WEAKER constraint, not the same one better conditioned. Mode 2 is the only
+    // option that keeps the constraint strict while removing the column entirely.
+    public int PhaseFloorMode { get; set; }
     public float ComWeightY    { get; set; } = 23f;   // soft λ pulling δ → com baseline (so flight frames release)
     // λ pulling the horizontal body sway d.x → 0. Deliberately STIFFER than ComWeightY: d.x
     // exists to soak the no-slip residual at a planted foot's horizontal turning point
@@ -60,6 +74,25 @@ public class AnimSolverConfig
     // exceed 1 rad — a tight box would clamp the bridge and pop. Sanity backstop only; the
     // priors do the real bounding. Proper per-joint bounds = JointLimits (future phase).
     public float AngleCorrLimit  { get; set; } = 3.2f;
+    // Relative-cost-reduction stopping test for the STATIC solve (MINPACK ftol, Ceres
+    // function_tolerance). The static path had none, so it spent its whole 12-iteration
+    // budget regardless: the cost trace shows idle reaching 0.001 of its starting cost
+    // after ONE iteration and then flatlining for nine more (Plans/PERF_AUDIT.md 1c).
+    // Not applied to the CADENCE solve — Δφ persists frame to frame, so a solve that stops
+    // earlier shifts the phase rather than just the pose, and that needs eyes on it.
+    // 0 disables (historical behaviour, bit-for-bit).
+    public float StaticFtol { get; set; } = 1e-3f;
+    // Vectorize the normal equations on each solve path. Measured (MTile.Bench --ftol):
+    // on the STATIC path the vectorized reduction reaches an identical final cost while
+    // running 1.3–1.6× faster, so it is free. On the CADENCE path it is not — and the reason
+    // is conditioning, not delicate arithmetic. Forming the normal equations SQUARES cond(J):
+    // biped/run reaches cond(JᵀJ) ~ 1e6 on its worst frames, so the ~5e-7 relative difference
+    // between the two summation orders becomes an O(1) change in the computed STEP, and the
+    // solve walks off to a ~25% worse cost. Idle sits at ~1e3 and is unaffected. The fix is
+    // QR of J instead of normal equations (Plans/PERF_AUDIT.md Finding 1b), which works with
+    // cond(J) rather than its square; until then the cadence path stays scalar.
+    public bool StaticVectorize  { get; set; } = true;
+    public bool CadenceVectorize { get; set; } = false;
     public float VertOffsetLimit { get; set; } = 24f;   // |δ| cap (world px)
     public float HorizOffsetLimit { get; set; } = 4f;   // |d.x| cap (world px) — small sway, and the hard backstop on travel absorption
     public float MaxPhaseStep    { get; set; } = 0.25f; // max Δφ advanced per frame (< one stance window)

@@ -1811,8 +1811,7 @@ public sealed class DemoGame : Game
         var actions = new List<string>();
         foreach (var t in typeof(ActionState).Assembly.GetTypes())
             if (t.IsSubclassOf(typeof(ActionState)) && !t.IsAbstract
-                && t.Name != nameof(NullAction) && t.Name != nameof(ReadyAction)
-                && t.Name != nameof(RecoveryAction))
+                && t.Name != nameof(NullAction) && t.Name != nameof(RecoveryAction))
                 actions.Add(t.Name);
         actions.Sort(StringComparer.Ordinal);
         list.AddRange(actions);

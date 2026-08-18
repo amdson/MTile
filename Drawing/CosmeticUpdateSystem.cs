@@ -19,6 +19,12 @@ public sealed class CosmeticUpdateSystem
     private readonly Trail                     _cursorTrail;
     private readonly AttackGlowSystem         _attackGlow;
 
+    // Optional per-pass timing (Game1.DebugFrameTimings). The animation solver is the
+    // single most expensive cosmetic sub-pass and the one most likely to dominate a WASM
+    // frame, so it gets its own slot rather than hiding inside the cosmetic lump.
+    public FrameProfiler Profiler;
+    public int AnimSlot = -1;
+
     // Tracked frame-to-frame so the landing puff fires exactly once on the
     // air→ground transition.
     private bool _wasGroundedLastFrame;
@@ -81,6 +87,7 @@ public sealed class CosmeticUpdateSystem
                 SkeletonExamples.Load(_animator.Skeleton.Name), _skeletonScale, _skeletonAnims));
         if (config.RunAnimationSolver && simDt > 0f)
         {
+            long tAnim = Profiler != null && AnimSlot >= 0 ? Profiler.Begin() : 0;
             // Terrain no-penetration: extract nearby exposed tile faces around LAST frame's
             // pose (must run before this animator's Update) and ride them into the sample.
             int tc = TerrainSurfaces.Extract(sim.Chunks, _animator, player.Body.Position,
@@ -97,6 +104,7 @@ public sealed class CosmeticUpdateSystem
                 _secondaryAnimators[i].Update(
                     CharacterAnimSample.From(sp, simDt, _terrainScratch, tc, near, sim.Chunks));
             }
+            if (Profiler != null && AnimSlot >= 0) Profiler.End(AnimSlot, tAnim);
         }
         _attackGlow.Update(player, dt);
         foreach (var (p, _) in sim.SecondaryPlayers)

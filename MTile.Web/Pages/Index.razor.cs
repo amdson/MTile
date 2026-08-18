@@ -106,6 +106,12 @@ public partial class Index : IDisposable
     private void StartSolo()
     {
         _net = null;
+        // ?qpbench=1 runs the corrector-QP microbenchmark once the game loop is up and
+        // prints to the console. A URL flag rather than the in-game F8 hotkey because
+        // Chrome owns the function keys as browser shortcuts, so a headless driver cannot
+        // deliver them to the canvas — see MTile.Web/smoke/qp_bench.js.
+        if (Nav.Uri.Contains("qpbench", StringComparison.OrdinalIgnoreCase))
+            QpBench.RunOnStartup = true;
         StartTicking();
     }
 

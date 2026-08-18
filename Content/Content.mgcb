@@ -1,4 +1,4 @@
-
+﻿
 #----------------------------- Global Properties ----------------------------#
 
 /outputDir:bin/$(Platform)
@@ -32,3 +32,91 @@
 /processorParam:DebugMode=Auto
 /build:MetaballComposite.fx
 
+#--------------------------- GENERATED SOUNDS -------------------------------#
+# Written by scripts/sync-sounds.ps1 — do not hand-edit; your changes will be lost.
+
+#begin ../Assets/Sounds/dev_tone.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/dev_tone.ogg;Sounds/dev_tone.xnb
+
+#begin ../Assets/Sounds/double_jump_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/double_jump_01.ogg;Sounds/double_jump_01.xnb
+
+#begin ../Assets/Sounds/eruption_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/eruption_01.ogg;Sounds/eruption_01.xnb
+
+#begin ../Assets/Sounds/footstep_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/footstep_01.ogg;Sounds/footstep_01.xnb
+
+#begin ../Assets/Sounds/footstep_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/footstep_02.ogg;Sounds/footstep_02.xnb
+
+#begin ../Assets/Sounds/grunt_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/grunt_01.ogg;Sounds/grunt_01.xnb
+
+#begin ../Assets/Sounds/hit_connect_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/hit_connect_01.ogg;Sounds/hit_connect_01.xnb
+
+#begin ../Assets/Sounds/hit_connect_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/hit_connect_02.ogg;Sounds/hit_connect_02.xnb
+
+#begin ../Assets/Sounds/hit_connect_03.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/hit_connect_03.ogg;Sounds/hit_connect_03.xnb
+
+#begin ../Assets/Sounds/hit_connect_04.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/hit_connect_04.ogg;Sounds/hit_connect_04.xnb
+
+#begin ../Assets/Sounds/jump_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/jump_01.ogg;Sounds/jump_01.xnb
+
+#begin ../Assets/Sounds/throw_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/throw_01.ogg;Sounds/throw_01.xnb
+
+#begin ../Assets/Sounds/tile_break_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/tile_break_01.ogg;Sounds/tile_break_01.xnb
+
+#begin ../Assets/Sounds/tile_place_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/tile_place_01.ogg;Sounds/tile_place_01.xnb
+
+#------------------------- END GENERATED SOUNDS -----------------------------#

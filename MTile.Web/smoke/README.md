@@ -39,3 +39,25 @@ dotnet publish MTile.Web/MTile.Web.csproj -c Release -o /tmp/mtile-publish
 (cd /tmp/mtile-publish/wwwroot && python3 -m http.server 8080)
 ~/.mtile-smoke-venv/bin/python MTile.Web/smoke/pvp_move.py http://127.0.0.1:8080/ /tmp/pub
 ```
+
+## Benchmarking the sim in the browser
+
+`Diagnostics/QpBench.cs` compiles into both hosts, so the corrector QP — the sim's only hot
+solver — can be timed on the same captured subproblem natively and in wasm. **F8** runs it
+in-game and prints to the console (devtools on web) — but Chrome reserves the function keys,
+so a headless driver cannot press F8 and `?qpbench=1` in the URL arms the same run instead.
+Native reference comes from
+`dotnet run -c Release --project MTile.Bench -- --corrector`.
+
+Driving that headlessly on Windows uses node + Chrome rather than the Playwright/Python
+scripts above (this box has no usable python):
+
+```bash
+npm i puppeteer-core                       # once, anywhere on PATH for node
+pwsh scripts/publish-web.ps1 -NoPush       # or: dotnet publish MTile.Web -c Release -p:RunAOTCompilation=true -o <dir>
+node MTile.Web/smoke/serve.js <publish-dir>/wwwroot 8080
+node MTile.Web/smoke/qp_bench.js http://127.0.0.1:8080/
+```
+
+**It must be an AOT publish.** `dotnet run --project MTile.Web` is interpreted and roughly
+15× slower, so benchmarking against the dev server measures the interpreter, not the browser.

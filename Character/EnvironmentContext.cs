@@ -47,6 +47,65 @@ public class EnvironmentContext
     // (PhysicsBody itself is massless). Set by PlayerCharacter.Update.
     public float Mass;
     public InputIntent Intent;
+    // Full action registry, for RecoveryAction's eviction lookahead (it re-runs
+    // candidate preconditions under a hypothetical future). Null in hand-built
+    // test contexts — lookahead eviction simply disables there.
+    public System.Collections.Generic.IReadOnlyList<ActionState> ActionRegistry;
+    // Struct copy of the live activation's ActionVars, refreshed each frame by
+    // PlayerCharacter.Update before action selection — lets precondition-side
+    // logic (the lookahead → CommitProfile) read the incumbent's phase without
+    // widening the CheckPreConditions signature.
+    public ActionVars CurrentActionVars;
+    // The LIVE incumbent action at scan time — unlike PreviousAction(0), which on
+    // an exit frame still points at the action that just ended. RecoveryAction
+    // keys its entry cases off this: a countdown handoff only happens from a
+    // neutral incumbent, so a state that legitimately entered mid-countdown
+    // (guard's MaxEntry window) isn't dragged back into the airlock while the
+    // stamp is still ticking. Refreshed by PlayerCharacter.Update right before
+    // the action scan; null in hand-built test contexts (treated as neutral).
+    public ActionState CurrentAction;
+    // Lookahead overlay: while RecoveryAction probes a hypothetical future frame,
+    // this carries the hypothetical countdown index and RecoveryIndex() returns
+    // it verbatim (CurrentFrame is shifted by the same probe). Null outside it.
+    public int? LookaheadRecoveryIndex;
+
+    // Frames of hit-imposed disadvantage remaining (hitstun or stun, whichever is
+    // longer) — the INVOLUNTARY twin of the Condition recovery stamp
+    // (Plans/HIT_AIRLOCK_PLAN.md). Folded into RecoveryIndex below so per-action
+    // entry windows gate disadvantage with the same law as self-recovery. Reads
+    // CurrentFrame, so it shrinks honestly under the lookahead's frame shift.
+    public int HitDisadvantageFrames()
+    {
+        if (Combat == null) return 0;
+        int h = Combat.HitstunActive ? Math.Max(0, Combat.HitstunExpireFrame - CurrentFrame) : 0;
+        int s = Combat.StunActive    ? Math.Max(0, Combat.StunExpireFrame    - CurrentFrame) : 0;
+        return Math.Max(h, s);
+    }
+
+    // The recovery countdown as entrants see it: 0 = fully ready (neutral, or the
+    // stamped recovery has expired), >0 = frames remaining on the countdown,
+    // null = a live action holds the slot — no direct entry; reaching this state
+    // routes through RecoveryAction's eviction lookahead. Neutral hub states
+    // (Null, the build holds — ActionState.NeutralForEntry) read through to the
+    // countdown; every other action is opaque.
+    //
+    // The countdown is the MAX of the self stamp (an attack's Exit) and the
+    // hit-imposed disadvantage window — max-merge, so getting jabbed mid-move
+    // can never shorten the move's own tail (a hit is not a cheap self-cancel).
+    // `includeHitDisadvantage: false` is the struggle channel's exemption
+    // (GrabbedSlash): it reads the self stamp alone, since pummel hitstun must
+    // not lock a grabbed victim out of struggling.
+    public int? RecoveryIndex(bool includeHitDisadvantage = true)
+    {
+        int hit = includeHitDisadvantage ? HitDisadvantageFrames() : 0;
+        if (LookaheadRecoveryIndex is int overlay) return Math.Max(overlay, hit);
+        var cur = PreviousAction?.Invoke(0);
+        if (cur != null && cur is not RecoveryAction && !cur.NeutralForEntry) return null;
+        int stamp = Condition != null && Condition.RecoveryActive
+            ? Math.Max(0, Condition.RecoveryExpireFrame - CurrentFrame)
+            : 0;
+        return Math.Max(stamp, hit);
+    }
     // Multiplicative scalars on movement knobs (WalkAccel, MaxAirSpeed, GroundFriction, …).
     // Reset to Identity each frame in PlayerCharacter.Update, populated by the current
     // action's ApplyMovementModifiers, then read by movement states at their config sites.

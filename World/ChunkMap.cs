@@ -79,6 +79,12 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // particle system) react to feedback events without ChunkMap knowing about them.
     public System.Action<Microsoft.Xna.Framework.Vector2, TileType> OnTileBroken;
 
+    // Fires when a cell first becomes visible terrain — a Growing sprout appearing,
+    // whether from an ordinary build or a forced burst. The mirror of OnTileBroken, and
+    // like it, purely a feedback channel: ChunkMap knows nothing about its subscribers.
+    // Not fired for Pending nodes, which are invisible to the world.
+    public System.Action<Microsoft.Xna.Framework.Vector2, TileType> OnTilePlaced;
+
     // Iteration view used by physics + drawing — only Growing nodes are physically
     // present in the world. Pending nodes live solely in the graph.
     public IReadOnlyList<TileSproutNode> ActiveSprouts => Graph.Growing;
@@ -233,6 +239,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 faces, MovementConfig.Current.SproutLifetime);
             node.Type = type;
             WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
+            OnTilePlaced?.Invoke(CellCenter(gtx, gty), type);
             return node;
         }
 
@@ -278,6 +285,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             faces, MovementConfig.Current.SproutLifetime);
         node.Type = type;
         WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
+        OnTilePlaced?.Invoke(CellCenter(gtx, gty), type);
         return node;
     }
 
