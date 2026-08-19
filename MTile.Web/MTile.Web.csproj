@@ -88,8 +88,11 @@
     <ItemGroup>
       <!-- Raw PNGs the renderer loads outside the content pipeline (rock atlas,
            backdrop) and the sprite skins + their art. .png only — Assets/ also holds
-           reference material (paper.pdf) that has no business in a web payload. -->
-      <_ImageAsset         Include="..\Assets\*.png" />
+           reference material (paper.pdf) that has no business in a web payload.
+           Recursive so Assets/trees_small/ comes along: Game1 asks for the downsampled
+           trees by "trees_small/<name>" on every host, and a flat *.png glob left the
+           web build 404ing all four and falling back to the single legacy pine. -->
+      <_ImageAsset         Include="..\Assets\**\*.png" />
       <_SpriteBindingAsset Include="..\SpriteBindings\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(_ImageAsset)"

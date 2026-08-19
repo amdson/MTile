@@ -1,6 +1,15 @@
 import asyncio, sys
 from playwright.async_api import async_playwright
+
 from PIL import Image, ImageChops
+
+def _browser_path():
+    """The system browser to drive. Defaults to the dev box's chromium; macOS has
+    no /usr/bin/chromium, so MTILE_SMOKE_BROWSER overrides — e.g.
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"."""
+    import os
+    return os.environ.get("MTILE_SMOKE_BROWSER", "/usr/bin/chromium")
+
 
 URL = sys.argv[1]; PRE = sys.argv[2]
 ARGS = ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--disable-dev-shm-usage",
@@ -10,8 +19,8 @@ ARGS = ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--disable-dev
 async def main():
     logs, errors = [], []
     async with async_playwright() as p:
-        ba = await p.chromium.launch(executable_path="/usr/bin/chromium", args=ARGS)
-        bb = await p.chromium.launch(executable_path="/usr/bin/chromium", args=ARGS)
+        ba = await p.chromium.launch(executable_path=_browser_path(), args=ARGS)
+        bb = await p.chromium.launch(executable_path=_browser_path(), args=ARGS)
         a = await ba.new_page(viewport={"width": 1100, "height": 800})
         b = await bb.new_page(viewport={"width": 1100, "height": 800})
         a.on("console", lambda m: logs.append("[A]" + m.text[:200]))

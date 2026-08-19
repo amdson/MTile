@@ -22,7 +22,15 @@ python3 -m venv ~/.mtile-smoke-venv
 ~/.mtile-smoke-venv/bin/pip install playwright pillow
 ```
 
-The scripts use the system `/usr/bin/chromium` (no `playwright install` download).
+The scripts drive a browser already on the machine rather than downloading one
+(`playwright install` is never needed). They default to `/usr/bin/chromium`; set
+`MTILE_SMOKE_BROWSER` to point elsewhere — required on macOS, which has no such path:
+
+```bash
+export MTILE_SMOKE_BROWSER="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+```
+
+On macOS the venv setup is just the last two lines above (Chrome stands in for chromium).
 
 ## Run
 

@@ -10,6 +10,14 @@ Exit 0 = no page errors and app rendered; 1 otherwise.
 import asyncio, sys, json
 from playwright.async_api import async_playwright
 
+def _browser_path():
+    """The system browser to drive. Defaults to the dev box's chromium; macOS has
+    no /usr/bin/chromium, so MTILE_SMOKE_BROWSER overrides — e.g.
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"."""
+    import os
+    return os.environ.get("MTILE_SMOKE_BROWSER", "/usr/bin/chromium")
+
+
 async def main():
     url = sys.argv[1]
     seconds = 20
@@ -23,7 +31,7 @@ async def main():
     console, errors = [], []
     async with async_playwright() as p:
         browser = await p.chromium.launch(
-            executable_path="/usr/bin/chromium",
+            executable_path=_browser_path(),
             args=["--enable-unsafe-swiftshader", "--use-angle=swiftshader",
                   "--disable-dev-shm-usage"])
         page = await browser.new_page(viewport={"width": 1280, "height": 900})
