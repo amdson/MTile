@@ -25,4 +25,16 @@ public enum EntityKind
     // single source of truth for snapshot identity across hosts and replays.
     Skirmisher,
     Bombardier,
+
+    // Gauntlet trio (Levels/gauntlet.json, Stages "gauntlet"). Each is a
+    // registered EnemyBlueprint — see EnemyFactory.RegisterBuiltIns.
+    Bastion,        // rooted emplacement; charges a terrain-shredding rail shot
+    Pouncer,        // hops surface to surface; damage scales with its fall speed
+    Latcher,        // crawls walls/ceilings; telegraphed medium-range lash
+
+    RailBolt,       // Bastion ordnance — fast, tile-breaking (see RailBoltProjectile)
+
+    // Copy-and-edit starting point for a new enemy — Entities/Enemies/Types/TemplateEnemy.cs.
+    // Spawn it on the "sandbox" stage.
+    Template,
 }

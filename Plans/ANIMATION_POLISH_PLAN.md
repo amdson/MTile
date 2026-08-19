@@ -243,7 +243,7 @@ CONTACT ≫ priors`) — the tuned weights had implemented that spread all along
 config numerals only looked inverted (TierHard 10 < CorePosePrior 60) because px and
 radian rows were in different units. The "similar OOM" appearance was a units illusion,
 so that preference is moot: the honest numbers show the true ~1000× spread. §11.4 now
-carries the live tier table; root `anim_solver_config.json` regenerated.
+carries the live tier table; root `configs/anim_solver_config.json` regenerated.
 
 ---
 

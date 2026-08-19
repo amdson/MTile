@@ -67,7 +67,7 @@ Replace the copy/paste textareas with the rtcpvp flow, minimally adapted:
    same way it drives `mtileRtc.js` today (byte[]↔base64 fallback pattern
    already exists at `Index.razor.cs:174-182`).
 6. **Config**: signaling endpoint + ICE servers move into one place
-   (`wwwroot/netconfig.json` or `game_config.json`) instead of the three
+   (`wwwroot/netconfig.json` or `configs/game_config.json`) instead of the three
    hardcoded STUN literals (`Program.cs:29`, `Index.razor.cs:35`,
    `mtileRtc.js:20`).
 

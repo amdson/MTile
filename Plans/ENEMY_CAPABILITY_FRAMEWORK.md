@@ -1,6 +1,6 @@
 # Enemy Capability Framework — MVP
 
-**Status:** **BUILT.** The two-FSM MVP exists as `Entities/EnemyEntity.cs` +
+**Status:** **BUILT.** The two-FSM MVP exists as `Entities/Enemies/EnemyEntity.cs` +
 `EnemyState.cs` / `EnemyMovementStates.cs` / `EnemyActions.cs` / `EnemyController.cs`,
 with `EnemyBlueprint.cs` making new enemies data-driven (register an `EntityKind` +
 blueprint, no subclass). `BruteEnemy` is the hand-written reference; the older
@@ -59,7 +59,7 @@ Mapping to the player so it's familiar:
 
 The host. An `Entity` subtype (`EntityKind.Enemy`) so it rides every existing system
 (`PhysicsBody`, `IHittable`/`Hurtbox`, `CombatSystem`, knockback, snapshot) for free.
-Same shape as [Entities/StalkerEnemy.cs](../Entities/StalkerEnemy.cs), generalized so concrete enemies
+Same shape as [Entities/Enemies/Types/StalkerEnemy.cs](../Entities/Enemies/Types/StalkerEnemy.cs), generalized so concrete enemies
 just hand it a movement-state list and an action-state list.
 
 ```csharp
@@ -475,9 +475,9 @@ public sealed class BruteEnemy : EnemyEntity
 ## 7. Integration checklist (what touches the live tree)
 
 Additive new files (no conflicts):
-- `Entities/EnemyEntity.cs`, `Entities/EnemyContext.cs`, `Entities/EnemyState.cs`,
-  `Entities/EnemyMovementStates.cs` (Idle/Chase/AttackHold), `Entities/EnemyActions.cs`
-  (`EnemyMeleeAction`), `Entities/BruteEnemy.cs`.
+- `Entities/Enemies/EnemyEntity.cs`, `Entities/EnemyContext.cs`, `Entities/Enemies/EnemyState.cs`,
+  `Entities/Enemies/EnemyMovementStates.cs` (Idle/Chase/AttackHold), `Entities/Enemies/EnemyActions.cs`
+  (`EnemyMeleeAction`), `Entities/Enemies/Types/BruteEnemy.cs`.
 
 Shared touchpoints (small, coordinated):
 - `EntitySnapshot`: add `int ActionIdx; float ActionTime; int LockedFacing;` + an
@@ -486,6 +486,62 @@ Shared touchpoints (small, coordinated):
 
 Do **not** touch: `PhysicsWorld`, `CombatSystem`, `PlayerCharacter`, `Simulation.Step`
 ordering. The enemy is just another `Entity` to all of them.
+
+---
+
+## 7b. The gauntlet trio (built)
+
+Three enemies added on top of the MVP for the `gauntlet` stage
+([Levels/gauntlet.json](../Levels/gauntlet.json), `Stages.Get("gauntlet")`). All three are
+plain `EnemyBlueprint` registrations — no subclasses — which is the outcome §7 was aiming at.
+
+| Enemy | Movement | Action | The one idea |
+|---|---|---|---|
+| **Bastion** | `EnemyIdleState` only | `EnemyRailShotAction` → `RailBoltProjectile` | Rooted emplacement. 1.35s windup draws the exact firing line; the bolt then crosses it in ~4 frames and **eats terrain** (`HitTargets.All`), so cover is a timer, not a solution. Mass 40 + no stagger ⇒ the charge cannot be interrupted; the counterplay is to leave the line or close inside `MinRange`. |
+| **Pouncer** | `EnemyHopState` | `EnemyPounceSlamAction` | Solves its own ballistic arc toward the brain's aim point (`v = Δ/T − ½gT`) and hops surface to surface. The slam's damage and knockback scale with live fall speed, so height *is* the damage stat. |
+| **Latcher** | `EnemyClingMoveState` | `EnemyLashAction` | Crawls floors, walls and ceilings via the anchor probe, and strikes along a frozen 2D axis so an inverted attack lands where the telegraph pointed. |
+
+### Framework changes these required
+
+1. **`EnemyActionVars.LockedAim`** (`Vector2`). `LockedFacing` (±1) is enough only for an
+   enemy that swings horizontally. Frozen at `Enter` so the telegraph and the hitbox can
+   never disagree. Snapshotted through the previously-unused `EntityData.Aim` slot, so it
+   costs the snapshot nothing.
+2. **`EnemyInput.WantAttack` is now actually read.** It was declared and documented but
+   never consulted by `EnemyEntity.SelectAction`. It now vetoes *new* selections only — an
+   in-flight action still plays out its recovery. Note the doc comment's old claim that it
+   "defaults to true" was wrong: it is a bool on a struct, so every brain must set it.
+3. **`EnemyClingMoveState` no longer consults `IsActionCommitted`** in either gate. `Exit`
+   restores `GravityScale`, so the old "drop the cling while attacking" behaviour peeled a
+   crawler off the ceiling on the first frame of every swing; and the old entry gate meant a
+   crawler that first saw the player from inside its own attack range never latched at all —
+   it fell, attacking, all the way to the floor. Clinging is a relationship with a surface,
+   not a locomotion choice, so it is not the action FSM's business. `Update` freezes the
+   body while committed, which is what `EnemyAttackHoldState` would have done.
+4. **New states/brains:** `EnemyHopState` (crouch → ballistic launch → land, whole cycle in
+   one state because `TimeInState` is the only movement field that snapshots) and
+   `StationaryAimController`.
+
+**Corollary worth remembering:** an enemy whose attack depends on its own momentum, or whose
+locomotion state owns gravity, must **not** register `EnemyAttackHoldState`. At priority 40 it
+preempts both and brakes the body.
+
+Tests: `MTile.Tests/Sim/GauntletEnemyTests.cs` (behaviour + snapshot round-trip) and
+`GauntletStageTests.cs` (level integrity + a real player walking the run end to end).
+
+### Starting point for a new enemy
+
+[Entities/Enemies/Types/TemplateEnemy.cs](../Entities/Enemies/Types/TemplateEnemy.cs) is a complete
+minimal bot written to be copied and edited — brain, one movement state, one telegraphed attack, and
+the blueprint — with the framework's rules and traps documented inline. Run it with
+`"Stage": "sandbox"` in `configs/game_config.json`. `MTile.Tests/Sim/TemplateEnemyTests.cs` is the matching
+pair of tests (one behaviour gate, one determinism gate) worth copying alongside it.
+
+One trap it documents that cost real debugging time: **an action's trigger `Range` must be strictly
+inside its hitbox's effective reach.** `EnemyEntity` runs `SelectAction` before `SelectMovement`, so
+an action that can trigger from outside its own reach re-commits the frame its recovery ends — before
+the movement FSM gets a turn — and the enemy pins at the trigger boundary swinging at thin air
+forever. The safe ordering is `effective reach > trigger Range > the controller's hold band`.
 
 ---
 

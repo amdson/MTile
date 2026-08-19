@@ -145,8 +145,124 @@ public static class EnemyFactory
             },
         });
 
-        // Template — uncomment and adapt for your own types. Each new blueprint
-        // wants its own EntityKind in EntityKind.cs.
+        // ── Gauntlet trio ───────────────────────────────────────────────────
+        // Three enemies that between them cover the three axes a traversal
+        // encounter has: hold a line (Bastion), close from above (Pouncer), and
+        // deny the walls and ceiling (Latcher). Each is expressed purely as a
+        // blueprint — body knobs, a brain, and a pick from the movement/action
+        // pools — with no subclass. See Levels/gauntlet.json for the stage they
+        // were tuned against.
+
+        // Bastion — rooted emplacement. Never moves; charges a 1.35s rail shot
+        // that fires a bolt fast enough to be effectively undodgeable once
+        // released, and which eats the cover the player is hiding behind.
+        //
+        // Mass 40 is the "rooted" mechanism: Entity.OnHit divides the knockback
+        // impulse by mass, so at 40 even a heavy slash barely nudges it. No
+        // stagger state is registered either, so hitting a Bastion never
+        // interrupts a charge — the counterplay is to leave the line or to
+        // close inside MinRange, not to trade hits at distance.
+        Register(new EnemyBlueprint
+        {
+            Kind          = EntityKind.Bastion,
+            Radius        = 14f,
+            Sides         = 8,
+            Health        = 7f,
+            Mass          = 40f,
+            FrictionScale = 0.9f,
+            Color         = new Color(90, 95, 115),
+            Sprite        = Sprites.Bastion,
+            Controller    = new StationaryAimController { AlertRange = 540f },
+            Movement = () => new()
+            {
+                // Idle only. A brain that never emits MoveDir makes every
+                // locomotion state dead weight; leaving them out documents the
+                // intent better than registering states that can't fire.
+                new EnemyIdleState(),          // 0 — fallback (and the whole kit)
+            },
+            Actions = () => new()
+            {
+                new EnemyRailShotAction(),
+            },
+        });
+
+        // Pouncer — surface-to-surface hopper. EnemyHopState solves its own
+        // ballistic arc toward the brain's aim point, so it climbs terrain in
+        // discrete bounds; EnemyPounceSlamAction turns the descent into a
+        // hitbox whose damage and knockback scale with fall speed.
+        //
+        // Deliberately NO EnemyAttackHoldState: at priority 40 it would preempt
+        // the hop and brake the body, destroying the very momentum the slam
+        // measures. GravityScale 1.25 sharpens the arcs so the drop reads as a
+        // commitment rather than a float.
+        Register(new EnemyBlueprint
+        {
+            Kind          = EntityKind.Pouncer,
+            Radius        = 11f,
+            Sides         = 3,
+            Health        = 4f,
+            Mass          = 1.1f,
+            GravityScale  = 1.25f,
+            FrictionScale = 0.14f,
+            Color         = new Color(200, 130, 40),
+            Sprite        = Sprites.Pouncer,
+            // EngageRange 0 ⇒ always emit an aim vector, which EnemyHopState
+            // consumes as its landing target. A chase brain would be wrong here:
+            // the hop state wants a point in 2D, not a left/right sign.
+            Controller    = new MoveTowardPlayerController { EngageRange = 0f },
+            Movement = () => new()
+            {
+                new EnemyIdleState(),          // 0 — fallback (recovery between bounds)
+                new EnemyHopState(),
+                new EnemyStaggerState(),
+            },
+            Actions = () => new()
+            {
+                new EnemyPounceSlamAction(),
+            },
+        });
+
+        // Latcher — wall/ceiling crawler. EnemyClingMoveState zeroes gravity and
+        // walks the body along whichever direction keeps it anchored to solid
+        // tiles, so it tracks the player around overhangs and up shafts;
+        // EnemyLashAction strikes along a frozen 2D axis, which is what makes an
+        // attack from an inverted position land where the telegraph pointed.
+        //
+        // Also no EnemyAttackHoldState — same reason as the Pouncer but a
+        // different failure: AttackHold would preempt the cling, and cling's
+        // Exit restores gravity, so the Latcher would drop off the ceiling the
+        // instant it started a swing. Cling handles the planting itself.
+        // EnemyStaggerState IS registered, and does peel it off the wall on a
+        // hit — that's the intended reward for connecting.
+        Register(new EnemyBlueprint
+        {
+            Kind          = EntityKind.Latcher,
+            Radius        = 10f,
+            Health        = 5f,
+            Mass          = 1.6f,
+            FrictionScale = 0.10f,
+            Color         = new Color(60, 150, 130),
+            Sprite        = Sprites.Latcher,
+            Controller    = new MoveTowardPlayerController { EngageRange = 40f },
+            Movement = () => new()
+            {
+                new EnemyIdleState(),          // 0 — fallback (falls if it loses the surface)
+                new EnemyClingMoveState(),
+                new EnemyStaggerState(),
+            },
+            Actions = () => new()
+            {
+                new EnemyLashAction(),
+            },
+        });
+
+        // Template — the documented copy-and-edit starting point. Body, brain,
+        // and both state lists live in Entities/Enemies/Types/TemplateEnemy.cs; this is the
+        // one line that makes it spawnable and snapshot-restorable.
+        Register(TemplateEnemy.Blueprint);
+
+        // Older inline template — each new blueprint wants its own EntityKind
+        // in EntityKind.cs.
         //
         // Register(new EnemyBlueprint
         // {

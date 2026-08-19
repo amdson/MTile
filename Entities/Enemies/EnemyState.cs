@@ -72,6 +72,14 @@ public struct EnemyActionVars
     public int   LockedFacing;
     public int   HitId;
     public bool  Committed;             // movement FSM reads this — the only cross-FSM channel
+    // Aim direction captured at Enter, as a unit vector. LockedFacing (±1) is
+    // enough for an enemy that only ever strikes horizontally; anything that
+    // fires or swings along an arbitrary 2D axis — a sentry sniping diagonally,
+    // a ceiling-crawler lashing downward — needs the full vector, and needs it
+    // FROZEN at windup start so the telegraph the player reads is the same line
+    // the hitbox will occupy. Snapshotted through the previously-unused
+    // EntityData.Aim slot (see EnemyEntity.WriteState).
+    public Vector2 LockedAim;
     public float WindupDuration;
     public float ActiveDuration;
     public float RecoveryDuration;

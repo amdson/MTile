@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Content;
 using Microsoft.Xna.Framework.Graphics;
 using Microsoft.Xna.Framework.Input;
 
@@ -149,10 +150,11 @@ public class Game1 : Game
     {
         // Load game config before the GraphicsDeviceManager finalizes so window
         // prefs take effect on the first frame. The path may be a CLI-selected
-        // scenario config (e.g. Testing/freeze.json) — a repo-root CWD copy is
+        // scenario config (e.g. Testing/freeze.json) — a repo-root CWD copy under
+        // configs/ is
         // preferred so edit → F5 iterates; otherwise resolved title-relative via
         // TitleContent → TitleContainer (works on DesktopGL and the Blazor/WASM build).
-        _configPath = configPath ?? "game_config.json";
+        _configPath = configPath ?? "configs/game_config.json";
         _config = GameConfig.Load(File.Exists(_configPath)
             ? Path.GetFullPath(_configPath) : _configPath);
         _camera.Zoom = _config.CameraZoom;
@@ -236,13 +238,13 @@ public class Game1 : Game
         // disabled for multiplayer (roadmap §3) so both peers share fixed config.
         if (OperatingSystem.IsBrowser())
         {
-            MovementConfig.Load("movement_config.json");
-            AnimSolverConfig.Load("anim_solver_config.json");
+            MovementConfig.Load("configs/movement_config.json");
+            AnimSolverConfig.Load("configs/anim_solver_config.json");
             ReferenceClipRegistry.LoadOverrides();
         }
         else
         {
-            string movementCfgPath = Path.GetFullPath("movement_config.json");
+            string movementCfgPath = Path.GetFullPath("configs/movement_config.json");
             MovementConfig.Load(movementCfgPath);
 
             // Hot-reload is a desktop dev convenience only. It mutates a sim-affecting
@@ -264,7 +266,7 @@ public class Game1 : Game
 
             // Reference clips (LedgePull/Dropdown): baked defaults overridden by
             // ReferenceClips/*.json. Prefer the repo-source copies (same CWD
-            // convention as movement_config.json above) so editor saves are what
+            // convention as configs/movement_config.json above) so editor saves are what
             // the game loads; fall back to the title-relative bin copies.
             string refClipDir = Path.GetFullPath("ReferenceClips");
             ReferenceClipRegistry.LoadOverrides(Directory.Exists(refClipDir) ? refClipDir : "ReferenceClips");
@@ -283,9 +285,9 @@ public class Game1 : Game
                 };
             }
 
-            // The animation solver weights (anim_solver_config.json). The solver is RENDER-ONLY
+            // The animation solver weights (configs/anim_solver_config.json). The solver is RENDER-ONLY
             // (never feeds the sim), so hot-reloading it is always safe — no multiplayer gate.
-            string animCfgPath = Path.GetFullPath("anim_solver_config.json");
+            string animCfgPath = Path.GetFullPath("configs/anim_solver_config.json");
             AnimSolverConfig.Load(animCfgPath);
             _animConfigWatcher = new FileSystemWatcher(Path.GetDirectoryName(animCfgPath))
             {
@@ -301,13 +303,13 @@ public class Game1 : Game
         }
 
         // One-shot config loads for impact tuning. No hot-reload (unlike
-        // movement_config.json) — these are sim-affecting per-body parameters
+        // configs/movement_config.json) — these are sim-affecting per-body parameters
         // and the rollback peers would desync if one side picked up an edit
         // mid-match. Title-relative paths work on both DesktopGL (resolved
         // via TitleContainer) and Blazor WASM (HTTP fetch from wwwroot).
         BootMark("configs loaded");
-        ImpactProfiles.Load("impact_profiles.json");
-        MaterialStrengths.Load("material_strengths.json");
+        ImpactProfiles.Load("configs/impact_profiles.json");
+        MaterialStrengths.Load("configs/material_strengths.json");
         BootMark("impact/material configs loaded");
 
         // A networked match always has two real players (local + remote), so force the
@@ -475,10 +477,17 @@ public class Game1 : Game
         // Half-res field (downscale 2) — cheaper and softer; 8-bit Color until banding
         // proves we need HalfVector4 (RENDERING_UPGRADE_PLAN spike #0).
         _density = new DensityField(GraphicsDevice, kernelSize: 128, downscale: 2);
-        var splatFx     = Content.Load<Effect>("CapsuleSplat");
-        var compositeFx = Content.Load<Effect>("MetaballComposite");
+        // Optional, like the rock atlas below: the macOS content build ships without the
+        // .fx shaders (mgfxc needs Wine — see Content.Mac.mgcb), and their only consumer
+        // is the DebugDrawMetaballDemo preview. Missing .xnb → no metaball renderer.
+        try
+        {
+            var splatFx     = Content.Load<Effect>("CapsuleSplat");
+            var compositeFx = Content.Load<Effect>("MetaballComposite");
+            _metaballs = new SkeletonMetaballRenderer(GraphicsDevice, splatFx, compositeFx, downscale: 2);
+        }
+        catch (ContentLoadException) { _metaballs = null; }
         BootMark("effects loaded");
-        _metaballs = new SkeletonMetaballRenderer(GraphicsDevice, splatFx, compositeFx, downscale: 2);
         _glow = new GlowRenderer(GraphicsDevice);
         _devDemos = new DevDemoRenderer(_prims, _density, _metaballs, _glow);
         _chunkRenderer = new ChunkRenderer(_spriteBatch, _pixel, _camera, GraphicsDevice);
@@ -1081,7 +1090,7 @@ public class Game1 : Game
             _devDemos.DrawDensityDemo(_camera.GetTransform(_screenCenter),
                             new Vector2(player.Body.Position.X, player.Body.Position.Y - 80f));
 
-        if (_config.DebugDrawMetaballDemo)
+        if (_config.DebugDrawMetaballDemo && _metaballs != null)
             _devDemos.DrawMetaballDemo(_camera.GetTransform(_screenCenter),
                              new Vector2(player.Body.Position.X, player.Body.Position.Y - 70f));
 

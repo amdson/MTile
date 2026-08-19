@@ -321,7 +321,7 @@ on the object (called from systems) or move into per-subtype systems.
 - Per subtype (StalkerEnemy, TurretEnemy, BruteEnemy, EnergyBallProjectile,
   BulletProjectile, …): subclass-specific data → dedicated components
   (e.g. `ProjectileHoming { EntityId Target }`)
-- [Entities/EnemyEntity.cs:20-32](../Entities/EnemyEntity.cs#L20-L32) — FSM
+- [Entities/Enemies/EnemyEntity.cs:20-32](../Entities/Enemies/EnemyEntity.cs#L20-L32) — FSM
   registries → `EnemyFSM` component
 
 **Done when:**

@@ -83,7 +83,7 @@ All eight were executed by `Plans/MOVEMENT_NIGHT_PLAN.md` and independently re-v
 | 3.6 | "Implement principled quality of life moves, such as ceiling sweep to avoid running into a ceiling corner when jumping up." | **OPEN** | The corrector is the natural home for this now. |
 | 3.7 | "Add a grab move (shift click)" | **DONE** | `GrabAction`, `ActionStates.cs:2256-2371`, bound Shift+RMB (which displaced `LobbedAreaAction`). |
 | 3.8 | "Test multiplayer" | **PARTIAL** | `RollbackHarnessTests`, `TwoPlayerStepTests`, `InputCodecTests`, `RtcConnectionTests` all exist. What's missing is soak/latency testing under real network conditions. |
-| 3.9 | Block-peel grab: playtest tuning pass | **OPEN** | Peel mechanics shipped 2026-08-07 (`BlockGrabAction` peel mode, `Peel*` knobs in `movement_config.json`, `BlockPeelTests`), but every number — kernel σ/rate, spring coeff/power/cap, wear rates, glue floor, material weights — is a first-guess awaiting in-game feel. Hot-reload the JSON while playing; legacy rip is the A/B baseline via `BlockPeelEnabled: false`. |
+| 3.9 | Block-peel grab: playtest tuning pass | **OPEN** | Peel mechanics shipped 2026-08-07 (`BlockGrabAction` peel mode, `Peel*` knobs in `configs/movement_config.json`, `BlockPeelTests`), but every number — kernel σ/rate, spring coeff/power/cap, wear rates, glue floor, material weights — is a first-guess awaiting in-game feel. Hot-reload the JSON while playing; legacy rip is the A/B baseline via `BlockPeelEnabled: false`. |
 | 3.10 | Block-peel grab: tension render polish | **OPEN** | Current feedback is the tether-darkening overlay + strain-red shift in `BlockGrabAction.Draw`. The "sticker peel" fantasy wants tethered blocks to visibly strain toward the pull (offset/jitter ∝ force share) — render-only, safe to add anytime. Decide the legacy drag-rip path's fate after the tuning pass. |
 
 ### Open design question: hitstun, combos, and disadvantage states
@@ -141,6 +141,7 @@ describes only the copy/paste lobby — it predates room codes and wasn't update
 | 5.8 | Surface-relative descent limiting (sprout-style moving floors) wants surface velocity in the solve. | **OPEN** | Deferred from the corrector work — the "more general solver" pass. |
 | 5.9 | `CorrectorCost_VaultHeavyCourse` budget test is marginal in Debug (~0.8–1.2ms vs a 0.5ms ceiling) regardless of changes. | **OPEN** | Needs relaxing or making Release-only. |
 | 5.14 | Cosmetic sim-event hooks fired during rollback re-simulation, spraying duplicate particles — `Game1.cs` subscribed to `OnPlayerRespawn`/`OnTileBroken` unguarded while `RollbackSession.cs:108-112` re-runs `Step` over every rolled-back frame. | **FIXED** | Both hooks now emit into `Presentation/PresentationEvents.cs` keyed `(Simulation.Frame, PresentationId)`; `Game1.PresentThisFrame()` drains once per rendered frame. Replay re-emits the same key and is dropped. Tests: `MTile.Tests/Sim/PresentationEventLogTests.cs`. |
+| 5.15 | `EnemyEntity` snapshots only `EnemyMovementVars.TimeInState` (`Entities/Enemies/EnemyEntity.cs` `WriteState`/`ReadState`), so any movement state that wants per-activation data beyond a clock silently loses it across a rollback. `SavedGravityScale` survives only because `Exit` is the sole reader and a restore never lands mid-`Exit`. `EnemyEntity._frame` (surfaced as `EnemyContext.Frame`) isn't snapshotted at all. | **OPEN** | Not currently biting — no shipped movement state stores anything else, and nothing reads `ctx.Frame`. It IS a trap: `EnemyHopState` had to keep its whole crouch→launch→land cycle inside one state, and stash its aim nowhere, purely to stay inside the one field that round-trips. Either snapshot the full vars struct (as the action side already does for `LockedFacing`/`LockedAim`) or delete `EnemyContext.Frame`. |
 | 5.10 | `MaxEvents` is pinned at 32 — raising to 64 broke qp's GroundFriction post-release braking. QP row-budget crowding is load-bearing. | **OPEN** | Latent fragility, noted not fixed. |
 
 ### Deliberately skipped tests
@@ -167,7 +168,7 @@ for hot A/B. **No longer uncommitted** — it landed in the `0eeab5b` "WIP worki
 is clean, land it" vs "it eats vx as the qp audit measured, drop it", then strip the counters and
 fix those tests.
 
-Related ablation knobs, all hot-reloadable from `movement_config.json`:
+Related ablation knobs, all hot-reloadable from `configs/movement_config.json`:
 `FoldEngine` ("qp" | "ref" | "lm"), `CorrectorVaultEnabled`, `FoldRedirectEnabled`.
 
 ---

@@ -57,7 +57,7 @@ special-case code paths.
 | ThetaSmoothness | N | Δθ | **The ease, in-solve**: final angle pulled toward last frame's *emitted* angle, λ derived per frame from Stiffness(20)/UpperBodyStiffness(90) + dt. Deviation-space, so clip playback itself is never charged. |
 
 **Weights** are dimensionless (px rows ÷ rig reach ≈ 21.6px, so radian and px rows
-compare directly — 1 rad of joint ≈ 1 reach of tip). Tiers in `anim_solver_config.json`
+compare directly — 1 rad of joint ≈ 1 reach of tip). Tiers in `configs/anim_solver_config.json`
 (hot-reloaded): HARD ≈ 4700 (pins/no-pen) ≫ CONTACT ≈ 470 ≫ SOFT (com ties) ≫ priors.
 Tune from `SolveScaleReport()` numbers, not first principles.
 
@@ -135,7 +135,7 @@ Tune from `SolveScaleReport()` numbers, not first principles.
 | `Animation/CharacterAnimator.Diagnostics.cs` | FD oracle, SolveScaleReport, debug hooks |
 | `Animation/LeastSquaresSolver.cs` | Allocation-free box-bounded LM (portable MathF) |
 | `Animation/AnimationSampler.cs` | C1 sampling + angular velocity + IsCyclic + SeamMismatch guard |
-| `Animation/AnimSolverConfig.cs` + `anim_solver_config.json` | All weights/limits, hot-reloaded |
+| `Animation/AnimSolverConfig.cs` + `configs/anim_solver_config.json` | All weights/limits, hot-reloaded |
 | `Animation/MotionProbe.cs` / `MTile.Probe/` | Digest/report/diff tooling + FLAGS |
 | `Animation/CharacterAnimSample.cs` | The sim→animation boundary (sample, pins, surfaces, AnimTag) |
 | `Animation/TerrainSurfaces.cs` | Terrain no-pen sourcing: exposed tile faces → bone-masked half-planes |

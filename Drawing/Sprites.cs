@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -116,6 +117,113 @@ public static class Sprites
         var sprite = new AnimatedSprite();
         sprite.Play(anim);
         return sprite;
+    }
+
+    // Bastion: the gauntlet's emplacement. Heavy octagonal shell with an armoured
+    // outer ring, a recessed aperture, and four bracing struts that read as
+    // "bolted to the floor" — the silhouette has to say *immobile*, because the
+    // player's correct response to it is positional rather than evasive. The
+    // idle pulse is on the aperture core only; the shell never moves.
+    public static AnimatedSprite Bastion(float radius)
+    {
+        var shell    = new Color(90, 95, 115);
+        var plate    = new Color(55, 60, 78);
+        var aperture = new Color(255, 90, 40);
+
+        Pose Frame(float glow) => new Pose()
+            .Ring(Vector2.Zero, radius,         shell, 8, 2.5f)
+            .Ring(Vector2.Zero, radius * 0.72f, plate, 8, 1.5f)
+            // Bracing struts — four short outward stubs at the diagonals.
+            .Line(new Vector2(-radius * 0.7f,  radius * 0.7f), new Vector2(-radius * 1.05f, radius * 1.0f), shell, 1.5f)
+            .Line(new Vector2( radius * 0.7f,  radius * 0.7f), new Vector2( radius * 1.05f, radius * 1.0f), shell, 1.5f)
+            .Line(new Vector2(-radius * 0.85f, 0f),            new Vector2(-radius * 1.15f, 0f),            shell, 1.5f)
+            .Line(new Vector2( radius * 0.85f, 0f),            new Vector2( radius * 1.15f, 0f),            shell, 1.5f)
+            // Aperture — the muzzle the rail shot charges in.
+            .Disc(Vector2.Zero, 3f + glow, aperture);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(0f), Frame(0.8f), Frame(1.4f), Frame(0.8f) },
+            frameDuration: 0.22f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
+    // Pouncer: compact triangular body (apex down — it lands point-first) with
+    // coiled hind legs and a pair of forward eyes. Read at a glance it should
+    // look sprung, so the two idle frames swap between a loaded and a released
+    // leg angle rather than pulsing a colour.
+    public static AnimatedSprite Pouncer(float radius)
+    {
+        var body = new Color(200, 130, 40);
+        var limb = new Color(120, 70, 20);
+        var eye  = Color.White;
+
+        Pose Frame(float coil) => new Pose()
+            // Downward-pointing triangle: two upper corners and a bottom apex.
+            .Line(new Vector2(-radius,        -radius * 0.6f), new Vector2( radius,        -radius * 0.6f), body, 2f)
+            .Line(new Vector2( radius,        -radius * 0.6f), new Vector2( 0f,             radius),        body, 2f)
+            .Line(new Vector2( 0f,             radius),        new Vector2(-radius,        -radius * 0.6f), body, 2f)
+            // Hind legs — the coil parameter folds them up toward the body.
+            .Line(new Vector2(-radius * 0.75f, -radius * 0.5f),
+                  new Vector2(-radius * 1.0f,   radius * (0.55f - coil * 0.5f)), limb, 1.5f)
+            .Line(new Vector2( radius * 0.75f, -radius * 0.5f),
+                  new Vector2( radius * 1.0f,   radius * (0.55f - coil * 0.5f)), limb, 1.5f)
+            .Disc(new Vector2(-radius * 0.32f, -radius * 0.15f), 1.5f, eye)
+            .Disc(new Vector2( radius * 0.32f, -radius * 0.15f), 1.5f, eye);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(0f), Frame(0.6f) },
+            frameDuration: 0.28f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
+    // Latcher: low, wide, many-legged. The silhouette deliberately has no clear
+    // "up" — it spends as much time inverted on a ceiling as it does on a floor,
+    // and a sprite with an obvious top would read as broken the moment it
+    // crawls over an overhang. Six radial legs + a central eye ring do that.
+    public static AnimatedSprite Latcher(float radius)
+    {
+        var carapace = new Color(60, 150, 130);
+        var limb     = new Color(35, 95, 85);
+        var eye      = new Color(180, 255, 230);
+
+        Pose Frame(float step) => new Pose()
+            .Ring(Vector2.Zero, radius * 0.72f, carapace, 8, 2f)
+            .Ring(Vector2.Zero, radius * 0.34f, limb,     6, 1f)
+            .Disc(Vector2.Zero, 1.8f, eye)
+            // Six legs at 60° spacing; alternating legs extend on each frame so
+            // the crawl reads as a gait regardless of which way is down.
+            .Line(LegInner(radius, 0, 0f),   LegOuter(radius, 0, 0f,   step), limb, 1.5f)
+            .Line(LegInner(radius, 1, 0f),   LegOuter(radius, 1, 0f,   1f - step), limb, 1.5f)
+            .Line(LegInner(radius, 2, 0f),   LegOuter(radius, 2, 0f,   step), limb, 1.5f)
+            .Line(LegInner(radius, 3, 0f),   LegOuter(radius, 3, 0f,   1f - step), limb, 1.5f)
+            .Line(LegInner(radius, 4, 0f),   LegOuter(radius, 4, 0f,   step), limb, 1.5f)
+            .Line(LegInner(radius, 5, 0f),   LegOuter(radius, 5, 0f,   1f - step), limb, 1.5f);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(0f), Frame(1f) },
+            frameDuration: 0.20f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
+    private static Vector2 LegInner(float radius, int i, float phase)
+    {
+        float a = i * MathHelper.TwoPi / 6f + phase;
+        return new Vector2(MathF.Cos(a), MathF.Sin(a)) * (radius * 0.6f);
+    }
+
+    private static Vector2 LegOuter(float radius, int i, float phase, float extend)
+    {
+        float a = i * MathHelper.TwoPi / 6f + phase;
+        return new Vector2(MathF.Cos(a), MathF.Sin(a)) * (radius * (1.0f + 0.35f * extend));
     }
 
     // Brute: thicker hex body in dark red with a single big central eye and

@@ -184,6 +184,10 @@ public abstract class EnemyEntity : Entity
             _actionVars    = default;
         }
 
+        // Brain veto. Only blocks *new* selections — the drop check above still
+        // runs, so an in-flight action finishes its recovery and exits cleanly.
+        if (!ctx.Input.WantAttack) return;
+
         int bestIdx = -1;
         int bestPri = int.MinValue;
         for (int i = 0; i < _actions.Count; i++)
@@ -269,6 +273,10 @@ public abstract class EnemyEntity : Entity
         s.ActionIdx    = _currentAction;
         s.ActionTime   = _actionVars.TimeInState;
         s.LockedFacing = _actionVars.LockedFacing;
+        // EntityData.Aim is a Vector2 slot the Stalker/Turret subtypes use for
+        // their own aim; no EnemyEntity path wrote it before, so it's free real
+        // estate for the action FSM's locked 2D aim. Keeps the snapshot flat.
+        s.Aim          = _actionVars.LockedAim;
     }
 
     protected override void ReadState(in EntityData s)
@@ -283,6 +291,7 @@ public abstract class EnemyEntity : Entity
         _actionVars.HitId        = s.HitId;
         _actionVars.TimeInState  = s.ActionTime;
         _actionVars.LockedFacing = s.LockedFacing;
+        _actionVars.LockedAim    = s.Aim;
         _actionVars.Committed    = _currentAction >= 0;
 
         // Re-derive durations from the flyweight so Draw / phase math reads the

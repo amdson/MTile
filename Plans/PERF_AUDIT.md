@@ -34,7 +34,7 @@ anim biped_rabbit/idle  (+sim)             2209.8                    4403.7
 anim biped_rabbit/idle (no terrain)          89.5                     254.1
 ```
 
-`biped_rabbit` is the rig `game_config.json` actually ships (`"AnimationRig"`).
+`biped_rabbit` is the rig `configs/game_config.json` actually ships (`"AnimationRig"`).
 
 ### Finding 1 — the LM solve costs ~1.3–2.2 ms per character per frame
 
@@ -378,7 +378,7 @@ scenario is a large enough behavioural change that it wants eyes, not just a num
 The sim has a **second, unrelated solver**: `CorrectionSolver`, a projected-descent QP over
 (channels × horizon) with a fixed 4 inner iterations. It shares nothing with the animation
 solver — different algorithm, different file — so none of Finding 1 transfers to it. (The
-LM-based `TrajectoryLm` is *not* in this path: `movement_config.json` ships
+LM-based `TrajectoryLm` is *not* in this path: `configs/movement_config.json` ships
 `FoldEngine: "ref"`, and `"lm"` is a freeze-frame diagnostic.)
 
 `-- --diag` attributes it (`CorrectionSolver.Profile`, write-only counters that nothing in
@@ -405,7 +405,7 @@ So the corrector is **not** the priority — but one asymmetry keeps it from bei
   but it is per character: ~2.2 ms × 2 players ≈ **4.4 ms per visual frame** in PvP.
 
 Animation still dominates roughly 6:1 in the worst realistic case. Note also that
-`game_config.json` ships `"Stage": "corridor"` — the corrector's worst case is the default
+`configs/game_config.json` ships `"Stage": "corridor"` — the corrector's worst case is the default
 stage, so any in-game reading starts from there.
 
 (The committed baseline's 305 µs for `bumpy corridor` was captured while the machine was

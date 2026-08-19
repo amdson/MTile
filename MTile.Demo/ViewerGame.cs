@@ -94,7 +94,7 @@ public sealed class ViewerGame : Game
         string repo = RepoRoot();
         _skel  = SkeletonExamples.Biped();
         _clips = AnimationStore.LoadAll(Path.Combine(repo, "SkeletonStates", _skel.Name));
-        _solverCfg = Path.Combine(repo, "anim_solver_config.json");
+        _solverCfg = Path.Combine(repo, "configs", "anim_solver_config.json");
         AnimSolverConfig.Load(_solverCfg);
 
         Presolve();

@@ -70,11 +70,11 @@
          dead weight the manifest would never reference. Wipe first, then recopy.
          Levels/ and ReferenceClips/ stay accretive (nothing enumerates them). -->
     <RemoveDir Directories="$(MSBuildThisFileDirectory)wwwroot\SkeletonStates;$(MSBuildThisFileDirectory)wwwroot\Skeletons" />
-    <Copy SourceFiles="..\game_config.json"       DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="..\movement_config.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="..\anim_solver_config.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="..\impact_profiles.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="..\material_strengths.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\configs\game_config.json"       DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\configs\movement_config.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\configs\anim_solver_config.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\configs\impact_profiles.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\configs\material_strengths.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
     <ItemGroup>
       <_LevelAsset Include="..\Levels\**\*" />
       <_RefClipAsset Include="..\ReferenceClips\**\*" />

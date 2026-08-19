@@ -56,7 +56,7 @@ public sealed class TreeViewerGame : Game
         _shotPath = Environment.GetEnvironmentVariable("MTILE_SHOT");
         // Vertical parallax tracks camY * Zoom (see TreeParallaxBackground.ParallaxY),
         // so previewing with the game's configured zoom keeps the motion honest.
-        _camera.Zoom = GameConfig.Load(Path.Combine(RepoRoot(), "game_config.json")).CameraZoom;
+        _camera.Zoom = GameConfig.Load(Path.Combine(RepoRoot(), "configs", "game_config.json")).CameraZoom;
         BuildBackground();
     }
 

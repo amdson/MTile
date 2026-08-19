@@ -1,0 +1,19 @@
+{
+  "//": "Gauntlet run — eight hand-authored chunks laid left to right at chunk row 0, world x 0..2048. Every chunk shares the same floor line (tile y 12-13 dirt over 14-15 stone), so the run is traversable end to end regardless of what is built above it. The single rule below fills everything else: chunk rows >= 1 are solid bedrock (a floor under the floor, so a bolt that punches through the slab makes a pit rather than a void), chunk rows <= -1 are open sky. Enemy placement lives in Stage.cs (Stages 'gauntlet') because it is behaviour, not terrain. The rules seal the run in solid rock rather than in walls: every wall here is destructible (that is the whole game), so a player who spends long enough slamming into the end wall WILL dig through it — measured. Beyond the authored columns they hit bedrock instead of falling into a void with no floor and no respawn.",
+  "Extents": 8,
+  "ChunkFiles": {
+    "0,0": "gauntlet_00_entry.txt",
+    "1,0": "gauntlet_01_gallery.txt",
+    "2,0": "gauntlet_02_perch.txt",
+    "3,0": "gauntlet_03_terrace.txt",
+    "4,0": "gauntlet_04_terrace2.txt",
+    "5,0": "gauntlet_05_tunnel.txt",
+    "6,0": "gauntlet_06_pinch.txt",
+    "7,0": "gauntlet_07_final.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 16",  "IsSolid": true },
+    { "Condition": "x > 127",  "IsSolid": true },
+    { "Condition": "x < 0",    "IsSolid": true }
+  ]
+}

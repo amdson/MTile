@@ -46,9 +46,14 @@ public struct EnemyInput
     // the player.
     public Vector2 AimWorld;
 
-    // Global attack permission. When false, action selection is suppressed —
-    // useful for "panic flee" or scripted timeouts. Defaults to true so
-    // controllers that don't care don't have to set it.
+    // Global attack permission. When false, EnemyEntity skips the action-FSM
+    // candidate scan — useful for "panic flee", out-of-alert-range emplacements,
+    // or scripted timeouts. An action already in flight is NOT cancelled; it
+    // plays out its windup/active/recovery, because yanking a committed swing
+    // mid-active-window reads as a bug rather than as a decision.
+    //
+    // NOTE: this is a plain bool on a struct, so it defaults to FALSE, not true.
+    // Every brain must set it explicitly or its enemy will never attack.
     public bool WantAttack;
 }
 
@@ -146,4 +151,29 @@ public sealed class MoveTowardPlayerController : EnemyController
             WantAttack = true,
         };
     }
+}
+
+// Emplacement brain — never moves, always points at the player. MoveDir stays
+// zero so any locomotion state in the movement list simply never fires, which
+// is how a turret-shaped enemy is expressed in this framework: not a special
+// "static" flag, just a brain with nothing to say about movement.
+//
+// AimWorld still tracks the player every frame, so facing stays live between
+// attacks (EnemyEntity only derives facing while no action is committed) and
+// ranged actions that lock their aim at Enter get an up-to-date target.
+public sealed class StationaryAimController : EnemyController
+{
+    // Suppress attacks entirely beyond this distance. Ranged actions gate on
+    // their own MaxRange too; this is the coarser "don't wind up at a player
+    // who is a screen away and hasn't seen me yet" knob, which is what keeps a
+    // gauntlet's later emplacements quiet until the player arrives.
+    public float AlertRange { get; init; } = 420f;
+
+    public override EnemyInput Decide(in EnemyContext ctx) => new()
+    {
+        MoveDir    = Vector2.Zero,
+        Jump       = false,
+        AimWorld   = ctx.Player.Body.Position,
+        WantAttack = ctx.Dist <= AlertRange,
+    };
 }

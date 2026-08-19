@@ -72,6 +72,9 @@ public static class EntityFactory
             EntityKind.StickyGrenade => new StickyGrenadeProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.LobbedArea    => new LobbedAreaProjectile(body.Position, body.Velocity, d.Budget, d.TileType, d.HitId, d.Faction),
             EntityKind.MassBall      => new MassBall(body.Position, body.Velocity, d.BuildMass, d.TileType, d.Faction),
+            // Budget is the penetration counter, restored through the same
+            // EntityData slot LobbedArea uses (disjoint kinds, one slot).
+            EntityKind.RailBolt      => new RailBoltProjectile(body.Position, body.Velocity, d.HitId, d.Faction, d.Budget),
             EntityKind.Brute         => new BruteEnemy(body.Position),
             // Spawn-point placeholder — RestoreState's ReadState overwrites it from
             // the snapshotted Aim slot right after construction.

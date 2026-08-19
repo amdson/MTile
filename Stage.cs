@@ -100,6 +100,33 @@ public static class Stages
             Populate      = _ => { },
         });
 
+        // ─── gauntlet ─────────────────────────────────────────────────────────
+        // Left-to-right combat run: eight authored chunks (world x 0..2048)
+        // strung as gallery → terraces → tunnel → chamber, each section built
+        // around one of the three gauntlet enemies and the last mixing all
+        // three. See Levels/gauntlet.json for the terrain and PopulateGauntlet
+        // below for who stands where and why.
+        Register(new Stage {
+            Name          = "gauntlet",
+            TerrainConfig = "gauntlet.json",
+            PlayerSpawn   = new Vector2(40f, 150f),
+            Populate      = PopulateGauntlet,
+        });
+
+        // ─── sandbox ──────────────────────────────────────────────────────────
+        // One Template enemy on empty flat ground, and nothing else. The edit
+        // loop for Entities/Enemies/Types/TemplateEnemy.cs: change a number, `dotnet run
+        // --project MTile.Desktop`, watch what it does. Reuses flat.json (floor
+        // at world tile y = 6), so there's no terrain to read around the
+        // behaviour. Turn on "DebugDrawHitboxes" in game_config.json to see the
+        // damage volume the attack publishes.
+        Register(new Stage {
+            Name          = "sandbox",
+            TerrainConfig = "flat.json",
+            PlayerSpawn   = new Vector2(-80f, 40f),
+            Populate      = PopulateSandbox,
+        });
+
         // ─── flat ─────────────────────────────────────────────────────────────
         // Empty, perfectly flat plain (floor at world tile y = 6, open sky, no
         // hills/chunk art, no entities or platforms). A clean testbed for the
@@ -306,6 +333,72 @@ public static class Stages
 
             ctrl.InjectInput(input);
         });
+    }
+
+    private static void PopulateSandbox(Simulation g)
+    {
+        // flat.json's floor surface is world tile y = 6; a body rests one radius
+        // above it. Spawned to the player's right, far enough out that you can
+        // watch it close the distance before it starts swinging.
+        const float floorTopY = 6 * Chunk.TileSize;
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Template,
+                                          new Vector2(120f, floorTopY - 11f)));
+    }
+
+    // Gauntlet encounter layout. Positions are given in world pixels and derived
+    // from the chunk grid: chunk cx spans world x [256·cx, 256·cx+255], and every
+    // gauntlet chunk shares a floor whose top surface is tile y 12 → world y 192.
+    // A body resting on a surface sits one radius above it, which is where the
+    // "surface − radius" figures below come from.
+    //
+    // The run is paced as three teaching sections plus a test:
+    //   x    0.. 512  gallery   — one Bastion, two consumable pillars
+    //   x  768..1279  terraces  — three Pouncers on stacked platforms
+    //   x 1280..1791  tunnel    — Latchers on a ceiling, then a pinch point
+    //   x 1792..2047  chamber   — one of each, in a walled room
+    private static void PopulateGauntlet(Simulation g)
+    {
+        const float FloorTop   = 12 * Chunk.TileSize;   // 192 — shared across all eight chunks
+        const float FloorStand = FloorTop - 11f;        // body centre for a radius-11 enemy
+
+        // ── Gallery (cx 1-2) ────────────────────────────────────────────────
+        // The Bastion perches on the cx=2 platform (top surface tile y 8 → 128)
+        // and fires back down the open lane. Its own MinRange (70px) is the
+        // player's escape hatch: get under the perch and it cannot charge.
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Bastion, new Vector2(700f, 128f - 14f)));
+
+        // ── Terraces (cx 3-4) ───────────────────────────────────────────────
+        // Three Pouncers seeded at three heights. The top one has the longest
+        // fall, so it hits hardest — the slam scales on impact speed — which
+        // makes "which one is above me" the question the section asks.
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Pouncer, new Vector2( 820f,  80f - 11f)));  // cx3 upper terrace
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Pouncer, new Vector2( 990f, 128f - 11f)));  // cx3 lower terrace
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Pouncer, new Vector2(1090f,  96f - 11f)));  // cx4 terrace
+
+        // ── Tunnel (cx 5-6) ─────────────────────────────────────────────────
+        // Spawned just under the corridor ceiling (underside at tile y 7 → 112)
+        // so they latch on frame one rather than falling to the floor first and
+        // having to climb back up — the section only reads correctly if the
+        // player meets them overhead.
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Latcher, new Vector2(1400f, 112f + 11f)));
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Latcher, new Vector2(1560f, 112f + 11f)));
+        // Floor-level crawler by the pinch point, so the player is pincered
+        // between an overhead lash and a ground-level one at the tightest spot.
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Latcher, new Vector2(1700f, FloorTop - 10f)));
+
+        // ── Final chamber (cx 7) ────────────────────────────────────────────
+        // One of each, with the Bastion on the elevated platform (tile y 7 →
+        // 112) covering the room. The cover stub at world x ≈ 1880 is the only
+        // thing between the tunnel mouth and its firing line.
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Bastion, new Vector2(1990f, 112f - 14f)));
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Pouncer, new Vector2(1860f, FloorStand)));
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Latcher, new Vector2(1930f, FloorTop - 10f)));
+
+        // Ammo. Same idea as the arena/plain stages — weightless balls the
+        // player can slash into an emplacement that otherwise ignores knockback.
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(300f, 150f)));
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(1150f, 150f)));
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(1850f, 150f)));
     }
 
     private static void PopulatePlain(Simulation g)

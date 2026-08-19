@@ -92,7 +92,7 @@ instead of never reaching it) and `BeamAction` (charge → fire, which together 
 clip). `BlockReadyAction` and `LobbedAreaAction` track their *charge* rather than the clock, so
 the pose holds at full once saturated.
 
-Enemies have a **separate** action FSM (`Entities/EnemyActions.cs`) that never reaches
+Enemies have a **separate** action FSM (`Entities/Enemies/EnemyActions.cs`) that never reaches
 `CharacterAnimator` and has no clips at all.
 
 ## Reference arcs
@@ -146,7 +146,7 @@ the tuning vocabulary. The rename map:
 | `MinVaultHeightTiles` / `MaxVaultHeightTiles` | `MinClimbHeightTiles` / `MaxClimbHeightTiles` | private to `ExposedUpperCornerChecker` |
 | `VaultGripSolverTests` | `ParkourGripSolverTests` | |
 
-No `movement_config.json` key had to change — none of the renamed properties were overridden
+No `configs/movement_config.json` key had to change — none of the renamed properties were overridden
 there. **There is no `VaultState` class and never was**: the at-speed one-block climb is
 `ParkourState` ([ClimbStates.cs:299](../Character/ClimbStates.cs#L299)) — rise band
 `MantleMinRise`..`MantleMaxRise` (8–20px), entry speed **above** `MantleMaxEntrySpeed`

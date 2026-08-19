@@ -186,7 +186,7 @@ Four ranged options on `todo.txt`. They have enough mechanism in common (publish
 
 ### Shared infrastructure
 
-A new `Entities/Projectile.cs` base — abstract over `BulletProjectile` ([Entities/BulletProjectile.cs](Entities/BulletProjectile.cs)) which is *already* exactly the shape we want for player-spawned projectiles:
+A new `Entities/Projectiles/Projectile.cs` base — abstract over `BulletProjectile` ([Entities/Projectiles/BulletProjectile.cs](Entities/Projectiles/BulletProjectile.cs)) which is *already* exactly the shape we want for player-spawned projectiles:
 
 ```csharp
 public abstract class Projectile : Entity {

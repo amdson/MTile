@@ -141,11 +141,17 @@ Content (`.xnb`) is built from `Content/Content.mgcb` by `MonoGame.Content.Build
 
 ## Config & assets at runtime
 
-- `movement_config.json` — movement tuning, **hot-reloaded** via `FileSystemWatcher` (gated by `GameConfig.HotReloadMovementConfig`; off in multiplayer). Edit while the game runs to retune.
-- `game_config.json` — match/stage config (`GameConfig`).
+All five runtime configs live in **`configs/`**:
+
+- `configs/movement_config.json` — movement tuning, **hot-reloaded** via `FileSystemWatcher` (gated by `GameConfig.HotReloadMovementConfig`; off in multiplayer). Edit while the game runs to retune.
+- `configs/game_config.json` — match/stage config (`GameConfig`).
+- `configs/anim_solver_config.json` — animation-solver weights/limits. Render-only, so hot-reload is always safe (no multiplayer gate).
+- `configs/impact_profiles.json`, `configs/material_strengths.json` — per-body impact tuning and per-tile-type strength/build cost. Loaded once at boot: both are sim-affecting, so a mid-match reload would desync rollback peers.
 - `Levels/*.json` — terrain: chunk-position → ASCII-file map + Perlin params, loaded by `TerrainLoader`.
 
-Each host copies these from the repo root into its own output (Desktop: alongside the binary; Web: into `wwwroot/`). Edit the **root** copies — the per-host copies under `bin/` and `MTile.Web/wwwroot/` are generated and gitignored.
+Each host copies `configs/` into its own output, **at the same sub-path** (Desktop: `configs/` beside the binary; Web: `wwwroot/configs/`). That match is load-bearing rather than cosmetic: every config is loaded by one string that resolves CWD-relative first — so launching from the repo root reads the file you actually edit, which is what makes hot-reload work — and falls back to title-relative, which reads the host copy. Move the source without updating a host's copy rule and it still compiles; the game just boots with silently-defaulted tuning, because every loader no-ops on a missing file. `MTile.Tests/ConfigLayoutTests.cs` guards the pairing.
+
+Edit the **`configs/` originals** — the per-host copies under `bin/` and `MTile.Web/wwwroot/` are generated and gitignored.
 
 ## Deterministic sim + rollback netcode (shipped)
 
@@ -172,7 +178,7 @@ Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unche
 
 ## Key conventions (see CODEBASE_OVERVIEW.md for the full set)
 
-- **Y-down coords** (MonoGame default); world gravity `(0, 600)` px/s². Tile coords `gtx/gty` are integer cell indices; cell center world pos is `gtx*Chunk.TileSize + Chunk.TileSize/2` (the codebase is parameterized on `Chunk.TileSize`, but px overrides in `movement_config.json` do not scale with it).
+- **Y-down coords** (MonoGame default); world gravity `(0, 600)` px/s². Tile coords `gtx/gty` are integer cell indices; cell center world pos is `gtx*Chunk.TileSize + Chunk.TileSize/2` (the codebase is parameterized on `Chunk.TileSize`, but px overrides in `configs/movement_config.json` do not scale with it).
 - **Forces are accelerations** — `PhysicsBody` has no mass (`Velocity += AppliedForce * dt`); mass appears only in `ImpactDamage`/`Entity` knockback.
 - **Movement must not read action state.** Actions may read movement; the only channels the other way are `MovementModifiers` (multiplicative scalars on baseline config) and `Body.AppliedForce`.
 - **State priorities**: `Character/MovementPriorities.cs` is the single source of truth — read it rather than trusting a band summary. Preemption compares the **candidate's Passive** to the **current state's Active**; getting that backwards is how the climb family sat at an unbeatable 46/46 for a while.

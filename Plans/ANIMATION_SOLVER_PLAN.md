@@ -284,7 +284,7 @@ implementations, `AnimEnv`, `PoseSolver` (variable layout, residual+Jacobian ass
    `ComWeightY = 0.05` (≪ contact weight 1), `VertOffsetLimit = 24px`. Test
    `Solver_VerticalOffset_EngagesInStance_ReleasesInFlight`: over a run, δ both engages in
    stance and releases to exactly 0 in flight, bounded well inside the box. To see it live:
-   `"AnimSolver": true` in `game_config.json` (the MTile.Demo editor plays raw clips, no δ).
+   `"AnimSolver": true` in `configs/game_config.json` (the MTile.Demo editor plays raw clips, no δ).
    **Deferred:** (a) the horizontal `d.x` — left out to avoid a Δφ/d.x cadence redundancy
    (a free d.x could absorb horizontal no-slip and stall the leg cycle); add it with a
    strong horizontal ComOffset when there's a reason (lean, non-locomotion). (b) Removing
@@ -526,7 +526,7 @@ pre-normalization tuning — px tiers carry the ×reach² rescale):
 So the original tier intent (`HARD ~1e3 ≫ CONTACT ≫ priors`) was in fact what the tuned
 weights implemented all along — the old config numerals (TierHard 10 vs CorePosePrior 60)
 only LOOKED inverted because px and radian rows were in different units. Weights remain
-empirical: read `SolveScaleReport`, tune by feel, hot-reload `anim_solver_config.json`.
+empirical: read `SolveScaleReport`, tune by feel, hot-reload `configs/anim_solver_config.json`.
 
 ### 11.5 NoPenetration v1 (decision: half-planes from known contacts)
 v1 emits one-sided HALF-PLANE residuals from surfaces the movement layer ALREADY resolved
@@ -549,7 +549,7 @@ PointJacobian(b, q)`. The full local-SDF version (§4.5, arbitrary terrain) is a
    (`_isCore`: stiff torso λ≈60, loose limbs λ≈4) so the arm does the IK and the torso stays put;
    (b) the 2-link arm still has a near-singular **flat DOF** that re-solves to a new spot each frame
    → fix = a **temporal Δθ-smoothness prior** `√λ·(Δθ−Δθ_prev)` (`ThetaSmoothnessConstraint`). All
-   solver weights/limits moved to **`AnimSolverConfig`** ← `anim_solver_config.json` (hot-reloaded;
+   solver weights/limits moved to **`AnimSolverConfig`** ← `configs/anim_solver_config.json` (hot-reloaded;
    render-only so no determinism gate). Test `FixedPointSolverTests`: reach, **torso-stable**, arm
    engaged + bounded. NOTE the solve still only runs on the locomotion+contact path — Phase 3 must
    broaden the trigger so pins engage off-locomotion (wall slide).
@@ -571,7 +571,7 @@ PointJacobian(b, q)`. The full local-SDF version (§4.5, arbitrary terrain) is a
    analytic Jacobian `−√w·n·PointJacobian(b,q)` matches FD to the float floor (`jacErr ≈ 0`).
    Test `NoPenetrationSolverTests`: off-locomotion solve runs, the wall pushes the hand ~2px out
    of the solid via a bounded arm Δθ, and the new block's Jacobian is exact. `TierNoPen` is in
-   `anim_solver_config.json` (defaults to the hard tier, 10).
+   `configs/anim_solver_config.json` (defaults to the hard tier, 10).
 3.5. **Δθ-post-compose + vault GRIP PINS — DONE.** The payoff of Phase 2 (FixedPoint) + Phase 3
    (off-locomotion trigger): a parkour vault's lead hand pins to the ledge corner so it lands on
    the real edge, not an approximate canned reach. ENABLING CHANGE: Δθ is now applied to the

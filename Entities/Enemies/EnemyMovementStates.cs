@@ -223,11 +223,28 @@ public class EnemyClingMoveState : EnemyMovementState
     public override int ActivePriority  => 32;
     public override int PassivePriority => 26;
 
+    // Anchored-ness is the ONLY gate, on entry and on exit alike. Neither check
+    // consults IsActionCommitted, and that is load-bearing in both directions:
+    //
+    //   * On exit — Exit restores GravityScale, so a clinger that bailed to Idle
+    //     for the duration of its own attack would peel off the ceiling the
+    //     moment it started swinging. Instead it holds the latch and Update
+    //     freezes the body for the swing (below), which is what
+    //     EnemyAttackHoldState would have done anyway.
+    //   * On entry — a crawler that first sees the player from inside its own
+    //     attack range commits the action on the same frame it would otherwise
+    //     have latched. Gating entry on "no attack in flight" meant it never
+    //     latched at all: it fell, attacking, all the way to the floor.
+    //
+    // Clinging is a relationship with a surface, not a locomotion choice, so it
+    // simply is not the action FSM's business. Corollary: don't put
+    // EnemyAttackHoldState in a clinger's movement list — at priority 40 it
+    // would preempt this state and un-latch it through Exit.
     public override bool CheckPreConditions(in EnemyContext ctx)
-        => !ctx.Self.IsActionCommitted && IsAnchored(ctx.Self.Body.Position, ctx);
+        => IsAnchored(ctx.Self.Body.Position, ctx);
 
     public override bool CheckConditions(in EnemyContext ctx, ref EnemyMovementVars v)
-        => !ctx.Self.IsActionCommitted && IsAnchored(ctx.Self.Body.Position, ctx);
+        => IsAnchored(ctx.Self.Body.Position, ctx);
 
     public override void Enter(in EnemyContext ctx, ref EnemyMovementVars v)
     {
@@ -249,6 +266,13 @@ public class EnemyClingMoveState : EnemyMovementState
     public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
     {
         v.TimeInState += ctx.Dt;
+
+        // Planted swing: an attack roots the body without giving up the latch.
+        if (ctx.Self.IsActionCommitted)
+        {
+            ctx.Self.Body.Velocity = Vector2.Zero;
+            return;
+        }
 
         var request = ctx.Input.MoveDir;
         if (request.LengthSquared() < 1e-4f)
@@ -451,26 +475,172 @@ public class EnemyFlyState : EnemyMovementState
     }
 }
 
-// Static helper so EnemyClingMoveState and EnemyLeapState use the same
-// anchor-probe semantics. Both states key off "is a solid tile within
-// AnchorDist of `pos`?" — if those answers ever diverge, leap and cling
-// hand off at the wrong moment and the body either falls through or sticks
-// to mid-air. Sharing the probe makes the invariant a single line of code.
-internal static class SurfaceProbe
+// Ballistic hop cycle — crouch, launch, ride the arc, land, repeat. One state
+// covers the whole loop (rather than a crouch state + a leap state) because the
+// cycle's phase is exactly "how long have I been in this state", and
+// EnemyMovementVars.TimeInState is the only movement field EnemyEntity
+// snapshots. Splitting the phases across states would have been equivalent;
+// keeping them together means the launch impulse and the tell that precedes it
+// can never desynchronise.
+//
+// Distinct from EnemyLeapState, which executes a trajectory the *brain* chose
+// (Input.JumpVelocity) and therefore needs a brain that can do ballistics. Hop
+// solves its own arc from Input.AimWorld, so it pairs with any aim-at-the-player
+// controller — including the stock ones.
+//
+// Phase timeline (t = TimeInState):
+//   [0, CrouchTime)                  compress + telegraph, horizontal brake
+//   the frame t crosses CrouchTime   one-shot launch velocity, then hands off
+//   (CrouchTime, +MinAirTime)        grace window; anchor probe ignored
+//   … until the anchor probe fires   ballistic, zero control (that's the point)
+//
+// The landing (anchor probe true) drops the state; EnemyEntity falls back to
+// index 0, whose CheckPreConditions re-selects Hop on the very next frame. That
+// one-frame bounce through Idle is deliberate and deterministic — it's what
+// resets TimeInState so the next crouch telegraph starts from zero.
+public class EnemyHopState : EnemyMovementState
 {
-    // 16-sample ring at AnchorDist. Arc gap at radius 14 is ~5.5 px, well
-    // below the 16-px tile size, so a tile within AnchorDist of `pos` is
-    // always hit by at least one probe.
-    public static bool IsAnchored(Vector2 pos, ChunkMap chunks, float anchorDist, int numSamples)
+    // Wind-up before takeoff. This is the whole tell for the pounce that
+    // follows, so it wants to be long enough to read and short enough that a
+    // cornered player still feels pressured.
+    protected virtual float CrouchTime      => 0.40f;
+    // Target time-of-flight for the ballistic solve. Longer = floatier, higher
+    // arcs and more time to dodge; shorter = flatter, faster, meaner.
+    protected virtual float FlightTime      => 0.62f;
+    // Horizontal reach cap. Keeps "hop toward the player" reading as a series
+    // of discrete tile-to-tile bounds instead of one map-crossing pounce, and
+    // stops the solve from demanding absurd launch speeds at long range.
+    protected virtual float MaxHopRun       => 110f;
+    protected virtual float MaxHopRise      => 90f;    // Y-up ⇒ how far ABOVE us we'll aim
+    protected virtual float MaxHopDrop      => 160f;   // …and how far below
+    // Floor on the upward component so a hop at a target that's level-or-below
+    // still visibly leaves the ground rather than sliding along it.
+    protected virtual float MinRise         => 200f;
+    protected virtual float MaxLaunchSpeed  => 520f;
+    // Grace window after takeoff during which the anchor probe is ignored —
+    // same rationale as EnemyLeapState.MinAirTime: the body is still within
+    // AnchorDist of the surface it just pushed off.
+    protected virtual float MinAirTime      => 0.14f;
+    // Hard cutoff for a hop that never lands (flung off the map, launched into
+    // open sky). Idle takes over and the body just falls.
+    protected virtual float MaxAirTime      => 2.0f;
+    protected virtual float AnchorDist      => 14f;
+    protected virtual int   NumSamples      => 16;
+    protected virtual Color TelegraphColor  => new(255, 170, 60);
+
+    // Above Chase (20) and Jump (28) — an enemy given this state hops instead of
+    // walking. Below Stagger (50) so a hit still interrupts mid-crouch. NOT
+    // below AttackHold (40) on purpose: see the class list note in
+    // EnemyFactory — a hopper must not register AttackHold, or the braking
+    // would kill the very momentum its attack is built on.
+    public override int ActivePriority  => 34;
+    public override int PassivePriority => 30;
+
+    // Grounded (on any surface, including a wall or ceiling) and not still
+    // recovering from an attack. The action-commit gate is what paces the
+    // cycle: it inserts the slam's recovery between successive hops instead of
+    // letting the pouncer chain bounds with no breathing room.
+    public override bool CheckPreConditions(in EnemyContext ctx)
+        => !ctx.Self.IsActionCommitted
+           && SurfaceProbe.IsAnchored(ctx.Self.Body.Position, ctx.Spawner?.Chunks, AnchorDist, NumSamples);
+
+    public override bool CheckConditions(in EnemyContext ctx, ref EnemyMovementVars v)
     {
-        if (chunks == null) return false;
-        for (int i = 0; i < numSamples; i++)
+        float t = v.TimeInState;
+        if (t < CrouchTime)              return true;   // winding up
+        if (t < CrouchTime + MinAirTime) return true;   // just launched
+        if (t >= CrouchTime + MaxAirTime) return false; // never landed — bail out
+        return !SurfaceProbe.IsAnchored(ctx.Self.Body.Position, ctx.Spawner?.Chunks, AnchorDist, NumSamples);
+    }
+
+    public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
+    {
+        float prev = v.TimeInState;
+        v.TimeInState += ctx.Dt;
+
+        if (v.TimeInState < CrouchTime)
         {
-            float a = i * MathHelper.TwoPi / numSamples;
-            float px = pos.X + MathF.Cos(a) * anchorDist;
-            float py = pos.Y + MathF.Sin(a) * anchorDist;
-            if (TileQuery.IsSolidAt(chunks, px, py)) return true;
+            // Plant the feet. Braking rather than zeroing so a hop that landed
+            // with residual slide settles over a few frames instead of snapping.
+            ctx.Self.Body.Velocity.X *= 0.72f;
+            return;
         }
-        return false;
+
+        // Exactly one frame per cycle satisfies this at a fixed timestep, which
+        // is what lets the launch be a pure function of TimeInState — no "have I
+        // fired yet" flag to snapshot (same trick EnemyRangedAction uses).
+        if (prev < CrouchTime) Launch(in ctx);
+
+        // Airborne: deliberately no velocity writes. Gravity and the collision
+        // solver own the arc from here.
+    }
+
+    // Solve for the launch velocity that lands the body at the brain's aim point
+    // in FlightTime seconds, under this entity's own gravity:
+    //
+    //     p(T) = p0 + v·T + ½·g·T²   ⇒   v = Δ/T − ½·g·T
+    //
+    // The −½gT term is what supplies the upward pop; with Y-down gravity it is
+    // automatically negative (upward), so even a perfectly level target
+    // produces a real arc rather than a horizontal skid.
+    private void Launch(in EnemyContext ctx)
+    {
+        var body = ctx.Self.Body;
+        var delta = ctx.Input.AimWorld - body.Position;
+
+        // Clamp the target BEFORE solving. Clamping the resulting velocity
+        // instead would keep the arc's shape but wreck its landing point; this
+        // way an out-of-reach player simply gets approached one bound at a time.
+        if (MathF.Abs(delta.X) > MaxHopRun) delta.X = MathF.Sign(delta.X) * MaxHopRun;
+        delta.Y = MathHelper.Clamp(delta.Y, -MaxHopRise, MaxHopDrop);
+
+        float g = Simulation.WorldGravityY * ctx.Self.GravityScale;
+        float T = MathF.Max(FlightTime, 1e-3f);
+
+        var launch = new Vector2(delta.X / T, delta.Y / T - 0.5f * g * T);
+        if (launch.Y > -MinRise) launch.Y = -MinRise;
+
+        float speed = launch.Length();
+        if (speed > MaxLaunchSpeed) launch *= MaxLaunchSpeed / speed;
+
+        // Replace rather than add: the crouch already killed the inherited
+        // velocity, and the solve assumes it starts from this exact vector.
+        body.Velocity = launch;
+    }
+
+    // Crouch tell only — nothing is drawn once the body is committed to the arc,
+    // because at that point the arc IS the telegraph. A compression bar squashes
+    // under the body while a ring tightens around it; both peak right as the
+    // launch fires, so the player's cue to move is unambiguous.
+    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyMovementVars v)
+    {
+        float t = v.TimeInState;
+        if (t >= CrouchTime || CrouchTime <= 0f) return;
+
+        float p = t / CrouchTime;                  // 0 → 1 across the crouch
+        var   c = body.Position;
+
+        // Compression bar: widens and brightens as the legs load up.
+        int w = 8 + (int)(p * 16f);
+        sb.Draw(pixel, new Rectangle((int)c.X - w / 2, (int)c.Y + 8, w, 2),
+                Color.Lerp(new Color(TelegraphColor, 90), TelegraphColor, p));
+
+        // Tightening ring — radius collapses 16 → 5 px, the visual inverse of
+        // the launch that follows.
+        float r = 16f - p * 11f;
+        for (int i = 0; i < 10; i++)
+        {
+            float a  = i * MathHelper.TwoPi / 10f;
+            var  pos = c + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
+            sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2), TelegraphColor * (0.35f + 0.65f * p));
+        }
+
+        // Final quarter: a white flash-up so the exact takeoff frame is readable.
+        if (p > 0.75f)
+        {
+            float fp = (p - 0.75f) / 0.25f;
+            int   sz = 3 + (int)(fp * 4f);
+            sb.Draw(pixel, new Rectangle((int)c.X - sz / 2, (int)c.Y - sz / 2, sz, sz), Color.White * fp);
+        }
     }
 }

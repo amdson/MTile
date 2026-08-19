@@ -6,10 +6,15 @@
   Scans Assets/Sounds/*.ogg, then regenerates two things so a new clip needs no
   hand-editing anywhere:
 
-    1. The GENERATED SOUNDS region of Content/Content.mgcb — one pipeline entry per
+    1. The GENERATED SOUNDS region of every .mgcb in -Mgcb — one pipeline entry per
        clip, built out-of-tree from ../Assets/Sounds and mapped to the asset name
        "Sounds/<stem>". Both toolchains (MonoGame 3.8.4.1 desktop, KNI 4.1.9001 web)
        have OggImporter + SoundEffectProcessor, so the same entries serve both.
+
+       Content.Mac.mgcb is in that list because macOS builds a shader-free content set
+       (mgfxc is a Windows binary needing Wine). It is a local, untracked file on most
+       machines, so a target that does not exist is skipped rather than created — the
+       sound entries are identical across variants, only the .fx entries differ.
     2. Audio/SoundManifest.g.cs — the compile-time (stem, variant count) table
        SoundBank loads from. Generated rather than read at runtime because the WASM
        host cannot enumerate a content directory.
@@ -28,7 +33,7 @@
 [CmdletBinding()]
 param(
     [string]$SoundDir = "Assets/Sounds",
-    [string]$Mgcb     = "Content/Content.mgcb",
+    [string[]]$Mgcb   = @("Content/Content.mgcb", "Content/Content.Mac.mgcb"),
     [string]$Manifest = "Audio/SoundManifest.g.cs",
     [switch]$DryRun
 )
@@ -90,10 +95,17 @@ foreach ($c in $clips) {
 $lines.Add($EndMark)
 $generated = ($lines -join "`n")
 
-$mgcbText = Get-Content $Mgcb -Raw
-$pattern  = "(?s)" + [regex]::Escape($BeginMark) + ".*?" + [regex]::Escape($EndMark)
-if ($mgcbText -match $pattern) { $newMgcb = [regex]::Replace($mgcbText, $pattern, { $generated }) }
-else                           { $newMgcb = $mgcbText.TrimEnd() + "`n`n" + $generated + "`n" }
+$pattern = "(?s)" + [regex]::Escape($BeginMark) + ".*?" + [regex]::Escape($EndMark)
+$targets = @()
+$skipped = @()
+foreach ($path in $Mgcb) {
+    if (-not (Test-Path $path)) { $skipped += $path; continue }
+    $text = Get-Content $path -Raw
+    if ($text -match $pattern) { $newText = [regex]::Replace($text, $pattern, { $generated }) }
+    else                       { $newText = $text.TrimEnd() + "`n`n" + $generated + "`n" }
+    $targets += [pscustomobject]@{ Path = $path; Text = $newText }
+}
+if ($targets.Count -eq 0) { throw "none of the -Mgcb targets exist: $($Mgcb -join ', ')" }
 
 # ── manifest ────────────────────────────────────────────────────────────────────
 $entries = foreach ($stem in ($groups.Keys | Sort-Object)) {
@@ -136,8 +148,16 @@ if ($unknown) {
     Write-Host "      Add an enum entry + stem in Audio/SoundKind.cs." -ForegroundColor Yellow
 }
 
-if ($DryRun) { Write-Host "-DryRun: nothing written" -ForegroundColor DarkGray; return }
+foreach ($p in $skipped) { Write-Host "  - $p not present, skipped" -ForegroundColor DarkGray }
 
-$newMgcb      | Set-Content $Mgcb      -Encoding utf8 -NoNewline
-$manifestText | Set-Content $Manifest  -Encoding utf8
-Write-Host "wrote $Mgcb and $Manifest" -ForegroundColor Green
+# @(...) matters: with a single target $targets.Path is a scalar string, and
+# "str" + $Manifest concatenates instead of building a two-element list.
+$written = (@($targets.Path) + $Manifest) -join ', '
+if ($DryRun) { Write-Host "-DryRun: would write $written" -ForegroundColor DarkGray; return }
+
+# utf8BOM, not utf8: pwsh 7's "utf8" is BOM-less, but these files were first generated
+# by Windows PowerShell 5.1 (where "utf8" means with-BOM) and are committed that way.
+# Writing them BOM-less makes every regeneration a spurious one-byte diff.
+foreach ($t in $targets) { $t.Text | Set-Content $t.Path -Encoding utf8BOM -NoNewline }
+$manifestText | Set-Content $Manifest -Encoding utf8BOM
+Write-Host "wrote $written" -ForegroundColor Green

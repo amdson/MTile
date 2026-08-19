@@ -23,7 +23,7 @@ over it. That gives us, for free:
 2. **Full introspection.** The viewer owns a live animator, so every internal (frozen
    contact weights, pin targets, residuals) is inspectable — not just whatever we thought
    to record.
-3. **Offline solver tuning.** Edit `anim_solver_config.json`, press R in the viewer, and
+3. **Offline solver tuning.** Edit `configs/anim_solver_config.json`, press R in the viewer, and
    the same take re-solves under the new weights in ~a second. Deterministic A/B on real
    gameplay.
 
@@ -79,7 +79,7 @@ clip editor). On load:
   (Shift ×10), Home/End, timeline bar with click-to-seek, +/- zoom, camera follows the body.
 - Overlay toggles: C contacts (marker size/alpha by weight + weight text), P pins/surfaces,
   D per-frame solver readout (clip, φ, Δφ, δ, d.x, |Δθ|max, state/tag/action).
-- **R**: reload `anim_solver_config.json` + rerun the pre-solve pass (offline tuning loop).
+- **R**: reload `configs/anim_solver_config.json` + rerun the pre-solve pass (offline tuning loop).
 
 ## Tests
 

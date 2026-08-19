@@ -7,7 +7,7 @@ without re-spelunking the codebase.
 
 ## Phase A — Quick win / config plumbing
 
-### Step 1 — Bullet 8: `SproutLifetime` from `game_config.json`
+### Step 1 — Bullet 8: `SproutLifetime` from `configs/game_config.json`
 - Add `public float SproutLifetime { get; set; } = 0.1f;` to [GameConfig.cs](../GameConfig.cs).
 - In [Simulation.cs](../Simulation.cs) ctor where `MovementConfig` is loaded, write the
   override (`MovementConfig.Current.SproutLifetime = gameConfig.SproutLifetime` — or,

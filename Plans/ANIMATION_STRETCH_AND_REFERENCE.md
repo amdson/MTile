@@ -159,6 +159,6 @@ moves the editor preview and nothing else. See
 - **CONTROLS.md** carries the user-facing versions of all of the above (CLI flags,
   edit-mode table, com/root/arrow frame table).
 - **`GameConfig.AnimationRig`** selects the in-game rig + clip pool + skin bake target
-  (render-only). `game_config.json` currently runs `biped_rabbit` with the rabbit/badger
+  (render-only). `configs/game_config.json` currently runs `biped_rabbit` with the rabbit/badger
   bindings; the badger binding is still authored on biped and needs a
   `--bind badger --rig biped_rabbit` re-drag before enabling the second player.

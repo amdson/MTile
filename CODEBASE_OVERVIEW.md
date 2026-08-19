@@ -112,7 +112,7 @@ Topology target is **same-build P2P** (desktop↔desktop or WASM↔WASM), so `fl
 
 ## Stages ([Stage.cs](Stage.cs))
 
-A `Stage` bundles "what to load at start": `TerrainConfig` (filename in `Levels/`), `PlayerSpawn`, and a `Populate(Simulation)` delegate that spawns entities + registers platform tickers. `Stages` is a code registry (stages contain behavior, not just data); `game_config.json`'s `Stage` field selects one by name. Seven stages today: `start` (the original test world — moving platform, ferris-wheel cluster, balloons/balls, one stalker), `arena` (bounded combat room — stalkers, turrets, ammo balls), `plain`, `training`, `corridor` (the corrector stress harness — pairs with `PlayerCharacter.RestrictToFallAndStand()`, which strips the movement registry to Falling+Standing), `gym`, and `flat`.
+A `Stage` bundles "what to load at start": `TerrainConfig` (filename in `Levels/`), `PlayerSpawn`, and a `Populate(Simulation)` delegate that spawns entities + registers platform tickers. `Stages` is a code registry (stages contain behavior, not just data); `configs/game_config.json`'s `Stage` field selects one by name. Seven stages today: `start` (the original test world — moving platform, ferris-wheel cluster, balloons/balls, one stalker), `arena` (bounded combat room — stalkers, turrets, ammo balls), `plain`, `training`, `corridor` (the corrector stress harness — pairs with `PlayerCharacter.RestrictToFallAndStand()`, which strips the movement registry to Falling+Standing), `gym`, and `flat`.
 
 ## Physics ([Physics/](Physics/))
 
@@ -261,7 +261,7 @@ Sprout topology changed to match: parent/child edges are **gone** from [`TileSpr
 [`GroundChecker`](Character/GroundChecker.cs), `CeilingChecker`, `WallChecker`, `ExposedUpperCornerChecker`, `ExposedLowerCornerChecker` — build strip regions via `body.Bounds.StripXxx(thickness)`, call `WorldQuery.SolidShapesInRect`. `EnvironmentContext` caches results within a frame.
 
 ### Config
-[`MovementConfig`](Character/MovementConfig.cs) hot-reloaded from `movement_config.json` (desktop only, gated by `GameConfig.HotReloadMovementConfig`). Walk/jump speeds, accelerations, frictions, spring constants, sprout lifetime.
+[`MovementConfig`](Character/MovementConfig.cs) hot-reloaded from `configs/movement_config.json` (desktop only, gated by `GameConfig.HotReloadMovementConfig`). Walk/jump speeds, accelerations, frictions, spring constants, sprout lifetime.
 
 ## Combat ([World/HitboxWorld.cs](World/HitboxWorld.cs), [HurtboxWorld.cs](World/HurtboxWorld.cs), [CombatSystem.cs](World/CombatSystem.cs), [Hitbox.cs](World/Hitbox.cs), [Hurtbox.cs](World/Hurtbox.cs))
 
@@ -281,13 +281,20 @@ It also carries two **1-frame inboxes**, both snapshotted alongside the dedupe t
 
 `IEntitySpawner` (implemented by `Simulation`) lets AI spawn children mid-update and shares the `HitIdAllocator`.
 
-**The enemy layer is now data-driven.** [`EnemyEntity`](Entities/EnemyEntity.cs) runs the same two-FSM shape as the player (movement + action, priority selection) over [`EnemyMovementStates`](Entities/EnemyMovementStates.cs)/[`EnemyActions`](Entities/EnemyActions.cs), driven by a stateless swappable [`EnemyController`](Entities/EnemyController.cs) brain that emits an `EnemyInput`. A new enemy is an [`EnemyBlueprint`](Entities/EnemyBlueprint.cs) + an `EntityKind` registration — **no subclass required**. `BruteEnemy` is kept as the hand-written reference implementation; `StalkerEnemy`/`TurretEnemy` predate the framework and remain as-is.
+`Entities/` is laid out by role: the base `Entity`/`EntityKind`/`EntityFactory` sit at its root,
+`Entities/Enemies/` holds the reusable enemy machinery (host, states, brains, blueprints) plus the
+stateless helpers `SurfaceProbe` (terrain anchoring), `EnemyAim` (aiming + line of sight) and
+`EnemyTelegraph` (telegraph drawing), `Entities/Enemies/Types/` holds the concrete enemies, and
+`Entities/Projectiles/` holds the projectile family. Namespaces are flat (`MTile`), so the folders
+are organisational only — moving a file between them needs no other change.
+
+**The enemy layer is now data-driven.** [`EnemyEntity`](Entities/Enemies/EnemyEntity.cs) runs the same two-FSM shape as the player (movement + action, priority selection) over [`EnemyMovementStates`](Entities/Enemies/EnemyMovementStates.cs)/[`EnemyActions`](Entities/Enemies/EnemyActions.cs), driven by a stateless swappable [`EnemyController`](Entities/Enemies/EnemyController.cs) brain that emits an `EnemyInput`. A new enemy is an [`EnemyBlueprint`](Entities/Enemies/EnemyBlueprint.cs) + an `EntityKind` registration — **no subclass required**. `BruteEnemy` is kept as the hand-written reference implementation; `StalkerEnemy`/`TurretEnemy` predate the framework and remain as-is.
 
 - [`EntityFactory`](Entities/EntityFactory.cs) — `Balloon` (floating passive target), `Ball` (gravity "crasher" that chips terrain on hard impact), `FloatingBall` (weightless crasher / combat ammo), `PracticeBall`, plus `Stalker`/`Turret`/blueprint enemies.
-- [`StalkerEnemy`](Entities/StalkerEnemy.cs) — ground chaser: Chase → Telegraph (visible wind-up) → Lunge (forward hitbox) → Recover, with a Stagger state on hit so knockback isn't clobbered by the AI.
-- [`TurretEnemy`](Entities/TurretEnemy.cs) — stationary: Idle → Charging (aim locks, dodgeable line of fire) → fires a `BulletProjectile` at the player's current position → Cooldown; Stagger on hit.
+- [`StalkerEnemy`](Entities/Enemies/Types/StalkerEnemy.cs) — ground chaser: Chase → Telegraph (visible wind-up) → Lunge (forward hitbox) → Recover, with a Stagger state on hit so knockback isn't clobbered by the AI.
+- [`TurretEnemy`](Entities/Enemies/Types/TurretEnemy.cs) — stationary: Idle → Charging (aim locks, dodgeable line of fire) → fires a `BulletProjectile` at the player's current position → Cooldown; Stagger on hit.
 - [`MassBall`](Entities/MassBall.cs) — the eruption payload. A `Projectile` with `IgnoreTiles`, zero gravity and light drag, leaking build mass into `ChunkMap.Mass` every frame. Spawned only from `BlockPaintAction.Exit`.
-- [`Projectile`](Entities/Projectile.cs) base + concrete `BulletProjectile`, `EnergyBallProjectile`, `StickyGrenadeProjectile`, `LobbedAreaProjectile` — travel + publish hitboxes; lifetime/fuse handled by the base. `LobbedAreaProjectile` captures eruption mode + block type at launch and runs a planner on detonation.
+- [`Projectile`](Entities/Projectiles/Projectile.cs) base + concrete `BulletProjectile`, `EnergyBallProjectile`, `StickyGrenadeProjectile`, `LobbedAreaProjectile` — travel + publish hitboxes; lifetime/fuse handled by the base. `LobbedAreaProjectile` captures eruption mode + block type at launch and runs a planner on detonation.
 
 ## Drawing ([Drawing/](Drawing/))
 
@@ -305,7 +312,7 @@ The stack has grown well past that base layer:
 
 Render-only, and hot-reloadable freely for that reason. The rig is a pure joint chain (`Drawing/Skeleton.cs`, rigs in `Skeletons/*.json`, clips in `SkeletonStates/<rig>/`, loaded by `SkeletonStore`).
 
-[`CharacterAnimator`](Animation/CharacterAnimator.cs) is the hub (plus `.Constraints` and `.Diagnostics` partials): it selects and blends clips (`AnimationSampler`, `AnimAdditionSampler`, `OverlayStack`, `BoneMask`, `SkeletonComposition`) and then runs a **generalized box-bounded Levenberg–Marquardt least-squares solve** ([`LeastSquaresSolver`](Animation/LeastSquaresSolver.cs)) over clip times, CoM offset, and joint corrections. Constraints are a composable `IConstraint` library — `FixedPoint`/`ExternalPin` (foot plant, climb hand grip), half-plane `NoPenetration` against `TerrainSurfaces`, and `ActionAimConstraint` (re-aims the stab overlay along the runtime input direction). `PoseIk` and `MoveDriver` sit alongside; tuning lives in `anim_solver_config.json`.
+[`CharacterAnimator`](Animation/CharacterAnimator.cs) is the hub (plus `.Constraints` and `.Diagnostics` partials): it selects and blends clips (`AnimationSampler`, `AnimAdditionSampler`, `OverlayStack`, `BoneMask`, `SkeletonComposition`) and then runs a **generalized box-bounded Levenberg–Marquardt least-squares solve** ([`LeastSquaresSolver`](Animation/LeastSquaresSolver.cs)) over clip times, CoM offset, and joint corrections. Constraints are a composable `IConstraint` library — `FixedPoint`/`ExternalPin` (foot plant, climb hand grip), half-plane `NoPenetration` against `TerrainSurfaces`, and `ActionAimConstraint` (re-aims the stab overlay along the runtime input direction). `PoseIk` and `MoveDriver` sit alongside; tuning lives in `configs/anim_solver_config.json`.
 
 ### Clip binding
 
@@ -347,7 +354,7 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 
 ## Key conventions
 
-- **Right-handed coords with Y-down** (MonoGame default). World gravity `(0, 600)` px/s² (`Simulation.Gravity`). Tile coords `gtx, gty` are integer global cell indices; cell centers are `gtx * Chunk.TileSize + Chunk.TileSize/2` (nominally 16px tiles — the codebase is parameterized on `Chunk.TileSize`, but px overrides in `movement_config.json` do NOT scale with it).
+- **Right-handed coords with Y-down** (MonoGame default). World gravity `(0, 600)` px/s² (`Simulation.Gravity`). Tile coords `gtx, gty` are integer global cell indices; cell centers are `gtx * Chunk.TileSize + Chunk.TileSize/2` (nominally 16px tiles — the codebase is parameterized on `Chunk.TileSize`, but px overrides in `configs/movement_config.json` do NOT scale with it).
 - **Forces are accelerations**: `PhysicsBody` has no mass; `body.Velocity += body.AppliedForce * dt`. Mass appears only in `ImpactDamage` and `Entity`/player knockback.
 - **Modifier scalars are multiplicative on baseline config**, not absolute (`m.MaxWalkSpeed *= 0.6f`).
 - **Priorities form bands** — see [MovementPriorities.cs](Character/MovementPriorities.cs) for the authoritative numbers. Roughly: free/ground 0–20, stun 25, Tumble 51/26, climb family 29/29, jump passives 30–48, holds 42–44, launch actives 50–60. Preemption compares the **candidate's Passive** to the **current state's Active** — get that backwards and bands look right while behaving wrong.
@@ -362,9 +369,9 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 |---|---|
 | Add a new player ability | New `ActionState` subclass; add to `_actionRegistry` in [PlayerCharacter.cs](Character/PlayerCharacter.cs); put per-activation fields in `ActionVars`; pick priorities in the right band |
 | Add a new movement state | Subclass `MovementState`, add to `_stateRegistry`, put per-activation fields in `MovementVars`, null any soft-contact cache in `ResetTransient`; **add its priorities to [MovementPriorities.cs](Character/MovementPriorities.cs)** and reason about Passive-vs-current-Active, not band membership |
-| Add a new enemy | Prefer an [`EnemyBlueprint`](Entities/EnemyBlueprint.cs) + `EntityKind` — no subclass. `BruteEnemy` is the hand-written reference if you need one |
+| Add a new enemy | Prefer an [`EnemyBlueprint`](Entities/Enemies/EnemyBlueprint.cs) + `EntityKind` — no subclass. `BruteEnemy` is the hand-written reference if you need one |
 | Add a new projectile | Subclass `Projectile`, add an `EntityKind` + `Rehydrate` case + `WriteState`/`ReadState`; spawn via `Stage.Populate` or `ctx.Spawner` |
-| Tune how a hit *feels* | Percent contribution is the hitbox's `Damage`; knockback shape is `HitResolver` + `impact_profiles.json`; HP loss is the crush path (`CrushImpulseThreshold`) |
+| Tune how a hit *feels* | Percent contribution is the hitbox's `Damage`; knockback shape is `HitResolver` + `configs/impact_profiles.json`; HP loss is the crush path (`CrushImpulseThreshold`) |
 | Author or debug an animation clip | `MTile.Probe` CLI (`list/new/addkey/ik/contact/rot/retime/…`) against `SkeletonStates/<rig>/`; read geometry with `MotionProbe`, never by eyeballing angles |
 | Add a snapshotted per-entity field | Put it in the `EntityData`/`PlayerData` value component in `Sim/ECS/Components/`, not on the live object |
 | Make an entity crashable | Set `body.Impact = new ImpactDamage { … }` in its factory |
@@ -373,8 +380,8 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 | Add a new stage | Register a `Stage` in `Stages` with a `Populate` delegate; add its `Levels/*.json` |
 | Make a change snapshot-safe | Put mutable state in a value struct or a `Capture`/`Restore` pair; route terrain writes through `ChunkMap`; verify with a `SnapshotRoundTripTests` case |
 | Add a feedback effect on a game event | Fire an event from the sim, subscribe in `Game1`, spawn via `Effects` (never mutate sim from the handler) |
-| Tune movement | Edit `movement_config.json` — hot-reload picks it up (desktop) |
-| Tune building / eruption | [BuildMeters.cs](Character/BuildMeters.cs) for the economy, [TileMassField.cs](World/TileMassField.cs) for spill/decay, `BuildCost` in `material_strengths.json` for per-material cost |
+| Tune movement | Edit `configs/movement_config.json` — hot-reload picks it up (desktop) |
+| Tune building / eruption | [BuildMeters.cs](Character/BuildMeters.cs) for the economy, [TileMassField.cs](World/TileMassField.cs) for spill/decay, `BuildCost` in `configs/material_strengths.json` for per-material cost |
 | Tune the block peel | `Peel*` constants in `BlockGrabAction` ([ActionStates.cs](Character/ActionStates.cs)); `MovementConfig.BlockPeelEnabled` toggles legacy drag-rip |
 | Add an `ActionState` | You **must** author a clip whose `Type` equals the class name, or `ClipBindingTests` fails; an action that declines `AnimationProgress` needs a *looping* clip |
 | Tune impact / crush damage | `ImpactDamage` in [EntityFactory.cs](Entities/EntityFactory.cs) / [PlayerCharacter.cs](Character/PlayerCharacter.cs) |

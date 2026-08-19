@@ -24,20 +24,24 @@
   <ItemGroup>
     <!-- Asset bundling for the desktop build. Each platform host (Desktop, Web)
          declares its own copy rules so source files at the repo root can land
-         in the right place — alongside the binary on desktop, under wwwroot on web. -->
-    <None Include="..\game_config.json" Link="game_config.json">
+         in the right place — alongside the binary on desktop, under wwwroot on web.
+         The runtime sub-path must MATCH the source sub-path: config loads resolve
+         CWD-relative first (repo root, so edit → hot-reload works on the file you
+         actually edit) and fall back to title-relative (this output copy). Both
+         arms use the same string, so configs/ has to be configs/ in both places. -->
+    <None Include="..\configs\game_config.json" Link="configs\game_config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\movement_config.json" Link="movement_config.json">
+    <None Include="..\configs\movement_config.json" Link="configs\movement_config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\anim_solver_config.json" Link="anim_solver_config.json">
+    <None Include="..\configs\anim_solver_config.json" Link="configs\anim_solver_config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\impact_profiles.json" Link="impact_profiles.json">
+    <None Include="..\configs\impact_profiles.json" Link="configs\impact_profiles.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Include="..\material_strengths.json" Link="material_strengths.json">
+    <None Include="..\configs\material_strengths.json" Link="configs\material_strengths.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="..\ReferenceClips\**\*" Link="ReferenceClips\%(RecursiveDir)%(Filename)%(Extension)">
@@ -68,7 +72,12 @@
   <ItemGroup>
     <!-- Content pipeline lives with the executable so .xnb output lands next to
          the binary. The shared .mgcb at the repo root is referenced via a link. -->
-    <MonoGameContentReference Include="..\Content\Content.mgcb" Link="Content\Content.mgcb" />
+    <MonoGameContentReference Include="..\Content\Content.mgcb" Link="Content\Content.mgcb"
+                              Condition="!$([MSBuild]::IsOSPlatform('OSX'))" />
+    <!-- macOS can't run mgfxc (Windows-only; needs a Wine prefix), so the Mac build
+         uses a shader-free content set. See the header of Content.Mac.mgcb. -->
+    <MonoGameContentReference Include="..\Content\Content.Mac.mgcb" Link="Content\Content.mgcb"
+                              Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
     <!-- Pinned to match the mgcb tool in .config/dotnet-tools.json — see MTile.Core.csproj. -->
     <PackageReference Include="MonoGame.Content.Builder.Task" Version="3.8.4.1" />
   </ItemGroup>
