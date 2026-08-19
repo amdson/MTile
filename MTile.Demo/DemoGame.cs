@@ -279,7 +279,7 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 3);
         if (Pressed(kb, Keys.F)) FlipAnimation();
         if (Pressed(kb, Keys.Space)) TogglePlay();
-        if (Pressed(kb, Keys.Delete)) { if (_selectedAdd >= 0) RemoveSelectedAddition(); else DeleteActiveKeyframe(); }
+        if (Pressed(kb, Keys.Delete) || Pressed(kb, Keys.Back)) { if (_selectedAdd >= 0) RemoveSelectedAddition(); else DeleteActiveKeyframe(); }
         // Add labeled constructs: P point, V vector (to the active keyframe), B child bone.
         // B adds the bone to the active clip (clip-local); Shift+B adds it to the base rig.
         if (Pressed(kb, Keys.P)) BeginAddAddition(AnimAdditionKind.Point, mp);
