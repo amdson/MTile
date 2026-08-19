@@ -355,12 +355,12 @@ Steps 1–3 are scaffolding (no visible behavior change). Steps 4–9 each intro
 
 | File | Role |
 |---|---|
-| `Character/InputParser.cs` | NEW. Owns ClickDetector + StabDetector instances. Called once per frame from `PlayerCharacter.Update`. |
-| `Character/IntentBuffer.cs` | NEW. ActionIntent struct + buffer with Peek/Consume/Prune. |
-| `Character/ConditionState.cs` | NEW. Combo flag bundle with auto-expiry. |
-| `Character/EnvironmentContext.cs` | EDIT. Add `IntentBuffer Intents` and `ConditionState Condition`. |
-| `Character/PlayerAbilityState.cs` | EDIT. Own a `ConditionState` field. |
-| `Character/ActionStates.cs` | REWRITE. Split SlashAction into Slash1/Slash2/Slash3, add AirSlash1/AirSlash2, Stab, Ready, Recovery. |
+| `Character/Input/InputParser.cs` | NEW. Owns ClickDetector + StabDetector instances. Called once per frame from `PlayerCharacter.Update`. |
+| `Character/Input/IntentBuffer.cs` | NEW. ActionIntent struct + buffer with Peek/Consume/Prune. |
+| `Character/Action/ConditionState.cs` | NEW. Combo flag bundle with auto-expiry. |
+| `Character/Sensing/EnvironmentContext.cs` | EDIT. Add `IntentBuffer Intents` and `ConditionState Condition`. |
+| `Character/Action/PlayerAbilityState.cs` | EDIT. Own a `ConditionState` field. |
+| `Character/Action/ActionStates.cs` | REWRITE. Split SlashAction into Slash1/Slash2/Slash3, add AirSlash1/AirSlash2, Stab, Ready, Recovery. |
 | `Character/PlayerCharacter.cs` | EDIT. Construct InputParser; run it pre-action-FSM each frame. |
 
 The `Facing` and slash arc math stay. The geometry layer is unchanged.

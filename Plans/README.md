@@ -26,7 +26,7 @@ actually does today.
 ## Shipped (kept for rationale)
 
 `BALLISTIC_CORRECTOR_PLAN.md` · `ELECTIVE_REFUSAL_NOTE.md` · `MOVEMENT_NIGHT_PLAN.md`
-(items 7+8 landed as prototype — see `Character/ReferencePath.cs`) · `SPRITE_SKIN_PLAN.md` ·
+(items 7+8 landed as prototype — see `Character/Corrector/ReferencePath.cs`) · `SPRITE_SKIN_PLAN.md` ·
 `STAB_AIM_PLAN.md` · `VAULT_HAND_PIN_PLAN.md` · `ANIMATION_LOCOMOTION_PLAN.md` ·
 `RENDERING_UPGRADE_PLAN.md` · `ENEMY_CAPABILITY_FRAMEWORK.md` · `TILE_SPROUT_GRAPH_PLAN.md` ·
 `ANIM_TAKE_VIEWER_PLAN.md` · `ANIMATION_STRETCH_AND_REFERENCE.md` · `CLIP_BACKLOG.md` (17/17) ·

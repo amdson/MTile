@@ -12,6 +12,13 @@ A 2D platformer in C#/MonoGame built around "the terrain IS the weapon": the pla
 
 Game source lives **at the repo root** (`Character/`, `Physics/`, `World/`, `Entities/`, `Drawing/`, `Game1.cs`, etc.). It is compiled into the `MTile.Core` library and reused by three hosts:
 
+`Character/` is split into `Input/`, `Movement/`, `Action/`, `Corrector/`, and `Sensing/` (with
+`PlayerCharacter.cs` + `SimFrames.cs` at its root) — see the table in
+[CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md#character-character). **Every file there is still
+`namespace MTile;`**: the subdirs are for navigation only, so a file can move between them without
+touching a single `using`. Keep it that way — folder-scoped namespaces would turn a rename into a
+codebase-wide edit.
+
 | Project | Role |
 |---|---|
 | `MTile.Core.csproj` (root) | The library. Globs the root `.cs` files; excludes `MTile.Tests/`, `MTile.Desktop/`, `MTile.Web/`. Compiles against `MonoGame.Framework.DesktopGL`. |
@@ -168,11 +175,11 @@ Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unche
 
 **[BACKLOG.md](BACKLOG.md) is the single list of outstanding work** — movement, animation, combat, engineering debt, and the deliberately-skipped tests, each with a verified status and file evidence. It replaced the old scattered `todo.txt` / `anim_todo.txt` / `movement_todo.md` files; add new items there.
 
-- **The ballistic corrector** (`Character/AmbientCorrector.cs`, `CorrectionSolver.cs`, `BallisticPredictor.cs`, `FoldReference.cs`, …) — free-state locomotion is solver-driven, and this is the actively-tuned area. Hot-reload ablation knobs (`CorrectorVaultEnabled`, `FoldRedirectEnabled`, `FoldEngine`) exist for live A/B during playtests; `TrajectoryLm` is the nonlinear oracle the QP path is checked against.
+- **The ballistic corrector** (`Character/Corrector/AmbientCorrector.cs`, `CorrectionSolver.cs`, `BallisticPredictor.cs`, `FoldReference.cs`, …) — free-state locomotion is solver-driven, and this is the actively-tuned area. Hot-reload ablation knobs (`CorrectorVaultEnabled`, `FoldRedirectEnabled`, `FoldEngine`) exist for live A/B during playtests; `TrajectoryLm` is the nonlinear oracle the QP path is checked against.
 - **The animation solver** (`Animation/`) — vertical cadence/constraints shipped; horizontal `d.x`/ComOffset, joint limits, and local-SDF non-penetration are still open (`Plans/ANIMATION_SOLVER_PLAN.md` §11.6 Phase 4).
 - **Browser PvP** — works end to end (WebRTC + Firestore room codes, deployed to GitHub Pages). What's left before strangers can play: TURN (STUN-only today, so symmetric NAT/CGNAT fails), desync/disconnect handling, and a Firestore-path smoke test. `Plans/INTERNET_READY_PLAN.md`.
 - **Terrain building** — the paint/place/burst/peel + mass-economy rework replaced the old eruption planners. Actively evolving.
-- Known gaps worth not rediscovering: `Character/JumpStates.cs:61` has the sim reading animation-layer data (a layering violation); `PlayerCharacter.cs:485-554` prints `[move]`/`[action]` transitions to the console on the sim hot path (fires during rollback re-sim too — almost certainly leftover tracing); 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
+- Known gaps worth not rediscovering: `Character/Movement/JumpStates.cs:61` has the sim reading animation-layer data (a layering violation); `PlayerCharacter.cs:485-554` prints `[move]`/`[action]` transitions to the console on the sim hot path (fires during rollback re-sim too — almost certainly leftover tracing); 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
 
 `MTile.Tests/Sim/` (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport`) is the headless analogue of the sim — scenario tests with ascii terrain + scripted input, mirroring the same phase ordering as `Simulation.Step`. Use it for deterministic gameplay tests.
 
@@ -181,7 +188,7 @@ Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unche
 - **Y-down coords** (MonoGame default); world gravity `(0, 600)` px/s². Tile coords `gtx/gty` are integer cell indices; cell center world pos is `gtx*Chunk.TileSize + Chunk.TileSize/2` (the codebase is parameterized on `Chunk.TileSize`, but px overrides in `configs/movement_config.json` do not scale with it).
 - **Forces are accelerations** — `PhysicsBody` has no mass (`Velocity += AppliedForce * dt`); mass appears only in `ImpactDamage`/`Entity` knockback.
 - **Movement must not read action state.** Actions may read movement; the only channels the other way are `MovementModifiers` (multiplicative scalars on baseline config) and `Body.AppliedForce`.
-- **State priorities**: `Character/MovementPriorities.cs` is the single source of truth — read it rather than trusting a band summary. Preemption compares the **candidate's Passive** to the **current state's Active**; getting that backwards is how the climb family sat at an unbeatable 46/46 for a while.
+- **State priorities**: `Character/Movement/MovementPriorities.cs` is the single source of truth — read it rather than trusting a band summary. Preemption compares the **candidate's Passive** to the **current state's Active**; getting that backwards is how the climb family sat at an unbeatable 46/46 for a while.
 - **Combat is escalation-based**: hits add to a monotonic `DamagePercent` and scale knockback; HP is lost only via crush impact into terrain. A hitbox's `Damage` is a percent contribution (except on the tile path).
 - **World reactions go through events** (`ChunkMap.OnTileBroken`), not polling.
 - **Core gameplay attributes are read-only** unless explicitly asked: `PlayerCharacter.Radius`/`BodyWidthScale`, `Simulation.Gravity`, `Chunk.TileSize`, `FixedDt`. Everything tuned in the corrector and impact stacks is calibrated against them.

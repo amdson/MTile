@@ -60,7 +60,7 @@ already computes (see §3); all capture/ease/IK state stays animator-side.
 
 ## 3. Anchor exposure (sim → sample)
 
-- **`PlayerAbilityState`** (`Character/PlayerAbilityState.cs`) gains
+- **`PlayerAbilityState`** (`Character/Action/PlayerAbilityState.cs`) gains
   `public bool HasVaultAnchor; public Vector2 VaultAnchor;`. `ParkourState` writes the
   **over-ramp** corner each frame in `Reconcile` and clears on `Exit` — the same
   pattern `LedgeGrabState` uses for `GrabbedCorner`.

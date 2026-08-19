@@ -80,7 +80,7 @@ Per step the World is projected into `_bodyScratch`/`_entityScratch` for the sol
 `Snapshot()` first syncs every live player and entity's serializable state into its World value components (`CaptureState(_world)`), then calls `_world.Capture()`. `Restore(snap)` restores the World's id bookkeeping, rewinds terrain, re-registers the live-only refs in canonical order (primary, secondaries, entities in spawn order) so iteration order — and therefore stepping — is identical, and rehydrates entities that no longer exist via `EntityFactory.Rehydrate`.
 
 - **Bodies** → [`BodyState`](Physics/BodyState.cs): pose + kinematics + only the **Maintained** (hard) constraints, deep-cloned. Soft state-owned contacts (`FloatingSurfaceDistance`, `PointForceContact`) are NOT captured — the owning state's idempotent `Ensure…`/`ResetTransient` rebuilds them next frame.
-- **Players** → `PlayerData`: FSM selection as **registry indices** (states/actions are flyweights constructed in fixed order), per-activation data as the [`MovementVars`](Character/MovementVars.cs)/[`ActionVars`](Character/ActionVars.cs) value structs, helper objects deep-cloned (`PlayerAbilityState.Clone`, parser/intents capture, eruption gesture deep-copy).
+- **Players** → `PlayerData`: FSM selection as **registry indices** (states/actions are flyweights constructed in fixed order), per-activation data as the [`MovementVars`](Character/Movement/MovementVars.cs)/[`ActionVars`](Character/Action/ActionVars.cs) value structs, helper objects deep-cloned (`PlayerAbilityState.Clone`, parser/intents capture, eruption gesture deep-copy).
 - **Combat** → dedupe table by `HittableId`, plus the two 1-frame inboxes (`HitConfirm`, `Recoil`).
 - **Terrain** → [`TerrainSnapshot`](World/TerrainSnapshot.cs): the dense tile grid is too large to copy, so it's rolled back via an inverse-delta journal ([`TerrainJournal`](World/TerrainJournal.cs)) — a snapshot stores `Mark`, restore replays entries past it in reverse. Sparse side-structures (sprout graph, per-cell HP, foam timers, impact accumulator) tick every frame so they're value-snapshotted instead. **Caveat:** journal marks are instance-relative, so terrain restore is same-instance only (the rollback case). [`DenseTerrainCapture`](World/DenseTerrainCapture.cs) provides a portable full-grid alternative for tooling/tests.
 
@@ -164,6 +164,19 @@ Reads `Levels/*.json` (chunk-position → ASCII filename map + Perlin config). A
 
 ## Character ([Character/](Character/))
 
+Grouped into five subdirectories. **The namespace is still flat `MTile`** for every file — the
+directories are organizational only, so moving a file between them needs no `using` and no
+namespace edit, and both compile globs (`MTile.Core`, and `MTile.Web`'s `..\**\*.cs`) are recursive.
+
+| Dir | What lives there |
+|---|---|
+| `Character/` (root) | [`PlayerCharacter`](Character/PlayerCharacter.cs) — the hub owning both FSMs — and `SimFrames` (seconds→frames, used by both). |
+| [`Input/`](Character/Input/) | Raw hardware → intent: `Controller` (+`PlayerInput`), `InputParser`, `IntentBuffer`, `InputIntent`, `SmoothPen`. |
+| [`Movement/`](Character/Movement/) | The movement FSM (`Movement`, the six `*States.cs` families, `MovementPriorities`) plus its plumbing (`MovementConfig`, `MovementVars`, `MovementModifiers`, `MovementCapability`, `AirControl`, `JumpServo`). |
+| [`Action/`](Character/Action/) | The action/combat FSM: `ActionStates` (+`ActionVars`), `CombatState`, `ConditionState`, `PlayerAbilityState`, `BuildMeters`, `IHittable`. |
+| [`Corrector/`](Character/Corrector/) | The ballistic corrector stack — `AmbientCorrector`, `CorrectionSolver`, `BallisticPredictor`, `FoldReference`, `TrajectoryLm`, the `Corrector*` support types, and the geometry/path helpers (`CObstacle`, `CorridorProbe`, `ClearanceConstraints`, `ReferencePath`, `GuidedPath`, `HermiteClip`, `LatticePlanner`). |
+| [`Sensing/`](Character/Sensing/) | `EnvironmentContext` and the five terrain checkers it caches (`Ground`/`Ceiling`/`Wall`/`ExposedUpperCorner`/`ExposedLowerCorner`). |
+
 ### `PlayerCharacter` ([Character/PlayerCharacter.cs](Character/PlayerCharacter.cs))
 Owns two parallel FSMs (movement + action), the ability state, intent buffer, and input parser. Body is a half-width hexagon: `Radius = 12f`, `BodyWidthScale = 0.5f` (both carry do-not-change notes — they are load-bearing for every tuned constant in the corrector and impact stacks).
 
@@ -182,11 +195,11 @@ Each `Update`:
 8. `MovementState.Update` writes `Body.AppliedForce`; `ActionState.ApplyActionForces` augments it; gravity-scale modifier applied as counter-force.
 9. `ActionState.Update` does its FSM work (publishing hitboxes, advancing timers).
 
-**Per-activation FSM state is plain data.** The FSM state/action instances are flyweights (one per registry entry, shared across activations); all mutable per-activation fields live in the [`MovementVars`](Character/MovementVars.cs)/[`ActionVars`](Character/ActionVars.cs) value structs on the player, passed `ref` into lifecycle methods (`Enter`/`Update`/`Exit`/`CheckConditions`) and `in` into the read-only hooks. This is the snapshot unit — a struct copy. The eruption rework removed the last reference-typed action buffer, so there is no longer any per-action deep-copy special case; `BlockGrabAction`'s peel group rides in an `[InlineArray(25)] PeelMemberBuffer` inside `ActionVars` precisely to keep value semantics. `PlayerAbilityState` holds the rest: `Facing`, `HasDoubleJumped`, ledge-grab flags, the [`BuildMeters`](Character/BuildMeters.cs), and the nested `Condition`/`Combat` states.
+**Per-activation FSM state is plain data.** The FSM state/action instances are flyweights (one per registry entry, shared across activations); all mutable per-activation fields live in the [`MovementVars`](Character/Movement/MovementVars.cs)/[`ActionVars`](Character/Action/ActionVars.cs) value structs on the player, passed `ref` into lifecycle methods (`Enter`/`Update`/`Exit`/`CheckConditions`) and `in` into the read-only hooks. This is the snapshot unit — a struct copy. The eruption rework removed the last reference-typed action buffer, so there is no longer any per-action deep-copy special case; `BlockGrabAction`'s peel group rides in an `[InlineArray(25)] PeelMemberBuffer` inside `ActionVars` precisely to keep value semantics. `PlayerAbilityState` holds the rest: `Facing`, `HasDoubleJumped`, ledge-grab flags, the [`BuildMeters`](Character/Action/BuildMeters.cs), and the nested `Condition`/`Combat` states.
 
-### Movement FSM ([Character/Movement.cs](Character/Movement.cs))
+### Movement FSM ([Character/Movement/Movement.cs](Character/Movement/Movement.cs))
 
-`MovementStates.cs` no longer exists — the states are split by family across [LocomotionStates.cs](Character/LocomotionStates.cs), [JumpStates.cs](Character/JumpStates.cs), [WallStates.cs](Character/WallStates.cs), [LedgeStates.cs](Character/LedgeStates.cs), [ClimbStates.cs](Character/ClimbStates.cs), and [ReactionStates.cs](Character/ReactionStates.cs). **All arbitration numbers live in [MovementPriorities.cs](Character/MovementPriorities.cs), which is the single source of truth** — prefer it over the band summaries in this doc.
+`MovementStates.cs` no longer exists — the states are split by family across [LocomotionStates.cs](Character/Movement/LocomotionStates.cs), [JumpStates.cs](Character/Movement/JumpStates.cs), [WallStates.cs](Character/Movement/WallStates.cs), [LedgeStates.cs](Character/Movement/LedgeStates.cs), [ClimbStates.cs](Character/Movement/ClimbStates.cs), and [ReactionStates.cs](Character/Movement/ReactionStates.cs). **All arbitration numbers live in [MovementPriorities.cs](Character/Movement/MovementPriorities.cs), which is the single source of truth** — prefer it over the band summaries in this doc.
 
 > **The corrector era** (Plans/BALLISTIC_CORRECTOR_PLAN.md +
 > Plans/CORRECTOR_CONSOLIDATION_PLAN.md): free-state locomotion is now
@@ -220,7 +233,7 @@ Each `Update`:
 
 `MovementState` lifecycle methods take `ref MovementVars`; `ResetTransient()` nulls any soft-contact ref cache after a restore so the idempotent `Ensure…` rebuilds it next frame. Cross-frame corrector state (Δu anchors, elective latch) lives in `MovementVars` — snapshot-covered.
 
-### Action FSM ([Character/ActionStates.cs](Character/ActionStates.cs))
+### Action FSM ([Character/Action/ActionStates.cs](Character/Action/ActionStates.cs))
 
 Same FSM shape, separate registry/history, lifecycle takes `ref ActionVars`. Each action overrides `ApplyMovementModifiers(ref MovementModifiers, in ActionVars)` (declarative multiplicative scalars) and `ApplyActionForces(ctx, in ActionVars)` (direct `AppliedForce` writes). Registered actions (Active/Passive priority):
 
@@ -234,15 +247,15 @@ Same FSM shape, separate registry/history, lifecycle takes `ref ActionVars`. Eac
 - **Terrain building** — see the section below. `BlockPaintAction` (8/10, plain RMB), `BlockPlaceAction` (8/10, Shift+RMB), `BlockBurstAction` (30/30), `BlockGrabAction` (46/46, Shift+LMB into solid). `GrabAction` moved to 48/48 so grabbing a *player* outranks grabbing *terrain*.
 
 ### Combat condition state
-[`ConditionState`](Character/ConditionState.cs) — *offensive* combo/recovery/guard-window flags, each with an expire frame; `Tick` closes windows.
-[`CombatState`](Character/CombatState.cs) — *defensive*: `Hitstun` (every hit briefly locks Jump, with diminishing extensions so stun-locks can't grow unbounded), `Stun` (heavy hits, gates attacks too), and Guard (`GuardActive`/`GuardCharged` + `TryParry`). Exposes `BlocksJump`/`BlocksAttack` gates.
+[`ConditionState`](Character/Action/ConditionState.cs) — *offensive* combo/recovery/guard-window flags, each with an expire frame; `Tick` closes windows.
+[`CombatState`](Character/Action/CombatState.cs) — *defensive*: `Hitstun` (every hit briefly locks Jump, with diminishing extensions so stun-locks can't grow unbounded), `Stun` (heavy hits, gates attacks too), and Guard (`GuardActive`/`GuardCharged` + `TryParry`). Exposes `BlocksJump`/`BlocksAttack` gates.
 
 ### Terrain building — paint, place, burst, peel
 
 **This replaced the old two-phase Block Eruption model.** `EruptionPlanner.cs` and `MassBallPlanner.cs` are **deleted**, along with `BlockReadyAction`/`BlockEruptionAction`, the per-player `EruptionMode`, and the `P` planner toggle. Building is now a continuous *mass economy* rather than a one-shot plan.
 
 - **The mass field** ([World/TileMassField.cs](World/TileMassField.cs), reachable as `ChunkMap.Mass`) — a sparse per-cell "build mass" table with an N/E/S/W spill cascade (threshold 1, spill share 0.25, max depth 8, exponential decay with prune). A cell that is empty *and* supported commits a sprout via `TryRequestTile`; a cell that is occupied or unsupported **forwards** its unit to neighbours instead. That forwarding is the deliberate change from the old planner: mass flows until it finds somewhere legal to land. It **is** snapshotted (`ChunkMap.CaptureTerrain`/`RestoreTerrain`).
-- **The economy** ([Character/BuildMeters.cs](Character/BuildMeters.cs), on `PlayerAbilityState.Meters`, stepped once per frame after the action runs) — three pools: `Build` (reservoir 200, regen 24/s), `BuildMove` (working pool 48, refills from Build at 12/s), and `EruptMove` (charge, max 240, bought from Build at 2:1). Charging ramps to max over 2s, plateaus 0.25s, then overheld charge decays at 60/s while Build bleeds. Per-tile cost comes from `MaterialStrengths.BuildCostFor` — Stone 4.0, Dirt 1.0, Sand 0.5, Foam 0.25 (a 16× spread, vs only 4× on MaxHP). Snapshot-safe via `Clone`/`CopyFrom`.
+- **The economy** ([Character/Action/BuildMeters.cs](Character/Action/BuildMeters.cs), on `PlayerAbilityState.Meters`, stepped once per frame after the action runs) — three pools: `Build` (reservoir 200, regen 24/s), `BuildMove` (working pool 48, refills from Build at 12/s), and `EruptMove` (charge, max 240, bought from Build at 2:1). Charging ramps to max over 2s, plateaus 0.25s, then overheld charge decays at 60/s while Build bleeds. Per-tile cost comes from `MaterialStrengths.BuildCostFor` — Stone 4.0, Dirt 1.0, Sand 0.5, Foam 0.25 (a 16× spread, vs only 4× on MaxHP). Snapshot-safe via `Clone`/`CopyFrom`.
 - **Paint** (`BlockPaintAction`, plain RMB) — spends proportionally and deposits into the mass field. **Eruption is now a release-time upgrade of the paint stroke**, not a separate action: holding charges `EruptMove`, and release spawns a [`MassBall`](Entities/MassBall.cs) — a gravity-free, tile-ignoring projectile that leaks mass into the field as it flies.
 - **Place** (`BlockPlaceAction`, Shift+RMB) — all-or-nothing single block.
 - **Burst** (`BlockBurstAction`) — LMB press-edge while painting over dead air; uses `ChunkMap.ForceSprout` to place unsupported.
@@ -251,17 +264,17 @@ Same FSM shape, separate registry/history, lifecycle takes `ref ActionVars`. Eac
 Sprout topology changed to match: parent/child edges are **gone** from [`TileSproutGraph`](World/TileSproutGraph.cs)/`TileSproutNode`, replaced by a `SproutFaces` bitflag — a growing sprout emits one volume per supporting face, with geometry derived rather than stored. `TickSprouts` now runs two passes (commit the whole ring, then promote ghosts) so builds expand as a symmetric shell.
 
 ### Input parsing
-- [`Controller`](Character/Controller.cs) — 32-frame ring buffer of `PlayerInput` (Left/Right/Up/Down/Space/Shift/F/Num1-4/P/LeftClick/RightClick/MousePosition/MouseWorldPosition). `Poll(mouseWorldPos)` builds one from hardware; `InjectInput` feeds a supplied one (sim/tests). `Capture`/`Restore` for snapshots.
-- [`InputParser`](Character/InputParser.cs) — edge-triggered gesture detection: `Click`, `Stab`, `Circle`, `PressEdge`. Snapshot-able (`InputParserState`).
-- [`IntentBuffer`](Character/IntentBuffer.cs) — short queue of `ActionIntent`; Peek + explicit Consume, pruned by age.
-- [`InputIntent`](Character/InputIntent.cs) — lightweight per-frame intent struct (HeldHorizontal, JumpJustPressed, …) for movement-side use.
-- [`SmoothPen`](Character/SmoothPen.cs) — spring-pulled cursor smoother for build-stroke path sampling.
+- [`Controller`](Character/Input/Controller.cs) — 32-frame ring buffer of `PlayerInput` (Left/Right/Up/Down/Space/Shift/F/Num1-4/P/LeftClick/RightClick/MousePosition/MouseWorldPosition). `Poll(mouseWorldPos)` builds one from hardware; `InjectInput` feeds a supplied one (sim/tests). `Capture`/`Restore` for snapshots.
+- [`InputParser`](Character/Input/InputParser.cs) — edge-triggered gesture detection: `Click`, `Stab`, `Circle`, `PressEdge`. Snapshot-able (`InputParserState`).
+- [`IntentBuffer`](Character/Input/IntentBuffer.cs) — short queue of `ActionIntent`; Peek + explicit Consume, pruned by age.
+- [`InputIntent`](Character/Input/InputIntent.cs) — lightweight per-frame intent struct (HeldHorizontal, JumpJustPressed, …) for movement-side use.
+- [`SmoothPen`](Character/Input/SmoothPen.cs) — spring-pulled cursor smoother for build-stroke path sampling.
 
 ### Surface checkers
-[`GroundChecker`](Character/GroundChecker.cs), `CeilingChecker`, `WallChecker`, `ExposedUpperCornerChecker`, `ExposedLowerCornerChecker` — build strip regions via `body.Bounds.StripXxx(thickness)`, call `WorldQuery.SolidShapesInRect`. `EnvironmentContext` caches results within a frame.
+[`GroundChecker`](Character/Sensing/GroundChecker.cs), `CeilingChecker`, `WallChecker`, `ExposedUpperCornerChecker`, `ExposedLowerCornerChecker` — build strip regions via `body.Bounds.StripXxx(thickness)`, call `WorldQuery.SolidShapesInRect`. `EnvironmentContext` caches results within a frame.
 
 ### Config
-[`MovementConfig`](Character/MovementConfig.cs) hot-reloaded from `configs/movement_config.json` (desktop only, gated by `GameConfig.HotReloadMovementConfig`). Walk/jump speeds, accelerations, frictions, spring constants, sprout lifetime.
+[`MovementConfig`](Character/Movement/MovementConfig.cs) hot-reloaded from `configs/movement_config.json` (desktop only, gated by `GameConfig.HotReloadMovementConfig`). Walk/jump speeds, accelerations, frictions, spring constants, sprout lifetime.
 
 ## Combat ([World/HitboxWorld.cs](World/HitboxWorld.cs), [HurtboxWorld.cs](World/HurtboxWorld.cs), [CombatSystem.cs](World/CombatSystem.cs), [Hitbox.cs](World/Hitbox.cs), [Hurtbox.cs](World/Hurtbox.cs))
 
@@ -357,7 +370,7 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 - **Right-handed coords with Y-down** (MonoGame default). World gravity `(0, 600)` px/s² (`Simulation.Gravity`). Tile coords `gtx, gty` are integer global cell indices; cell centers are `gtx * Chunk.TileSize + Chunk.TileSize/2` (nominally 16px tiles — the codebase is parameterized on `Chunk.TileSize`, but px overrides in `configs/movement_config.json` do NOT scale with it).
 - **Forces are accelerations**: `PhysicsBody` has no mass; `body.Velocity += body.AppliedForce * dt`. Mass appears only in `ImpactDamage` and `Entity`/player knockback.
 - **Modifier scalars are multiplicative on baseline config**, not absolute (`m.MaxWalkSpeed *= 0.6f`).
-- **Priorities form bands** — see [MovementPriorities.cs](Character/MovementPriorities.cs) for the authoritative numbers. Roughly: free/ground 0–20, stun 25, Tumble 51/26, climb family 29/29, jump passives 30–48, holds 42–44, launch actives 50–60. Preemption compares the **candidate's Passive** to the **current state's Active** — get that backwards and bands look right while behaving wrong.
+- **Priorities form bands** — see [MovementPriorities.cs](Character/Movement/MovementPriorities.cs) for the authoritative numbers. Roughly: free/ground 0–20, stun 25, Tumble 51/26, climb family 29/29, jump passives 30–48, holds 42–44, launch actives 50–60. Preemption compares the **candidate's Passive** to the **current state's Active** — get that backwards and bands look right while behaving wrong.
 - **Per-activation FSM state is plain data** in `MovementVars`/`ActionVars`; the state/action objects are stateless flyweights. This is what makes snapshot a struct copy.
 - **`HitId` is monotonic per `Simulation`** via `HitIdAllocator`. CombatSystem dedupes by `(HitId, Target)` so multi-frame hitboxes land once per entity but apply cumulatively to tiles.
 - **The sim is deterministic and snapshot-restorable**; render systems are strictly downstream and must never feed back. Terrain mutations funnel through `ChunkMap.WriteTile`/`GetOrCreateChunk` so the journal stays complete.
@@ -368,7 +381,7 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 | I want to… | Look at |
 |---|---|
 | Add a new player ability | New `ActionState` subclass; add to `_actionRegistry` in [PlayerCharacter.cs](Character/PlayerCharacter.cs); put per-activation fields in `ActionVars`; pick priorities in the right band |
-| Add a new movement state | Subclass `MovementState`, add to `_stateRegistry`, put per-activation fields in `MovementVars`, null any soft-contact cache in `ResetTransient`; **add its priorities to [MovementPriorities.cs](Character/MovementPriorities.cs)** and reason about Passive-vs-current-Active, not band membership |
+| Add a new movement state | Subclass `MovementState`, add to `_stateRegistry`, put per-activation fields in `MovementVars`, null any soft-contact cache in `ResetTransient`; **add its priorities to [MovementPriorities.cs](Character/Movement/MovementPriorities.cs)** and reason about Passive-vs-current-Active, not band membership |
 | Add a new enemy | Prefer an [`EnemyBlueprint`](Entities/Enemies/EnemyBlueprint.cs) + `EntityKind` — no subclass. `BruteEnemy` is the hand-written reference if you need one |
 | Add a new projectile | Subclass `Projectile`, add an `EntityKind` + `Rehydrate` case + `WriteState`/`ReadState`; spawn via `Stage.Populate` or `ctx.Spawner` |
 | Tune how a hit *feels* | Percent contribution is the hitbox's `Damage`; knockback shape is `HitResolver` + `configs/impact_profiles.json`; HP loss is the crush path (`CrushImpulseThreshold`) |
@@ -381,7 +394,7 @@ See `CLAUDE.md` for build/run/test commands and the file-lock gotcha.
 | Make a change snapshot-safe | Put mutable state in a value struct or a `Capture`/`Restore` pair; route terrain writes through `ChunkMap`; verify with a `SnapshotRoundTripTests` case |
 | Add a feedback effect on a game event | Fire an event from the sim, subscribe in `Game1`, spawn via `Effects` (never mutate sim from the handler) |
 | Tune movement | Edit `configs/movement_config.json` — hot-reload picks it up (desktop) |
-| Tune building / eruption | [BuildMeters.cs](Character/BuildMeters.cs) for the economy, [TileMassField.cs](World/TileMassField.cs) for spill/decay, `BuildCost` in `configs/material_strengths.json` for per-material cost |
-| Tune the block peel | `Peel*` constants in `BlockGrabAction` ([ActionStates.cs](Character/ActionStates.cs)); `MovementConfig.BlockPeelEnabled` toggles legacy drag-rip |
+| Tune building / eruption | [BuildMeters.cs](Character/Action/BuildMeters.cs) for the economy, [TileMassField.cs](World/TileMassField.cs) for spill/decay, `BuildCost` in `configs/material_strengths.json` for per-material cost |
+| Tune the block peel | `Peel*` constants in `BlockGrabAction` ([ActionStates.cs](Character/Action/ActionStates.cs)); `MovementConfig.BlockPeelEnabled` toggles legacy drag-rip |
 | Add an `ActionState` | You **must** author a clip whose `Type` equals the class name, or `ClipBindingTests` fails; an action that declines `AnimationProgress` needs a *looping* clip |
 | Tune impact / crush damage | `ImpactDamage` in [EntityFactory.cs](Entities/EntityFactory.cs) / [PlayerCharacter.cs](Character/PlayerCharacter.cs) |

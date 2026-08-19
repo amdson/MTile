@@ -101,8 +101,8 @@ An arc serves two unrelated purposes, and **only two arcs serve both**:
 
 | Arc | Sim flies the body along it | Bound to a clip (authoring) |
 |---|---|---|
-| `ledge_pull` | ✅ `LedgePullState` ([LedgeStates.cs:363](../Character/LedgeStates.cs#L363)) | `ledgepull.json` |
-| `dropdown` | ✅ `DropdownState` ([LocomotionStates.cs:316](../Character/LocomotionStates.cs#L316)) | `dropdown.json` |
+| `ledge_pull` | ✅ `LedgePullState` ([LedgeStates.cs:363](../Character/Movement/LedgeStates.cs#L363)) | `ledgepull.json` |
+| `dropdown` | ✅ `DropdownState` ([LocomotionStates.cs:316](../Character/Movement/LocomotionStates.cs#L316)) | `dropdown.json` |
 | `parkour` | ❌ | `parkour.json` |
 | `mantle` | ❌ | `mantle.json` |
 | `arcjump` | ❌ | `arcjump.json` |
@@ -140,7 +140,7 @@ the tuning vocabulary. The rename map:
 | `ReferenceClips/vault.json` | `ReferenceClips/parkour.json` | arc name `parkour` |
 | `VaultLiftForce` / `VaultPushForce` | `LipLiftForce` / `LipPushForce` | climb family **and** `LedgePullState` |
 | `MaxVaultTime` | `MaxLipManeuverTime` | bail timeout for both |
-| `CorrectorVaultEnabled` / `CorrectorVaultTriggerDistance` | `CorrectorClimbEnabled` / `CorrectorClimbTriggerDistance` | gates only the three climb states ([ClimbStates.cs:59](../Character/ClimbStates.cs#L59)) |
+| `CorrectorVaultEnabled` / `CorrectorVaultTriggerDistance` | `CorrectorClimbEnabled` / `CorrectorClimbTriggerDistance` | gates only the three climb states ([ClimbStates.cs:59](../Character/Movement/ClimbStates.cs#L59)) |
 | `VaultKickForward` / `VaultKickUp` | `ParkourKickForward` / `ParkourKickUp` | `ParkourState` entry impulse |
 | `VaultAutoFireSpeed` | *(deleted)* | declared, never read |
 | `MinVaultHeightTiles` / `MaxVaultHeightTiles` | `MinClimbHeightTiles` / `MaxClimbHeightTiles` | private to `ExposedUpperCornerChecker` |
@@ -148,7 +148,7 @@ the tuning vocabulary. The rename map:
 
 No `configs/movement_config.json` key had to change — none of the renamed properties were overridden
 there. **There is no `VaultState` class and never was**: the at-speed one-block climb is
-`ParkourState` ([ClimbStates.cs:299](../Character/ClimbStates.cs#L299)) — rise band
+`ParkourState` ([ClimbStates.cs:299](../Character/Movement/ClimbStates.cs#L299)) — rise band
 `MantleMinRise`..`MantleMaxRise` (8–20px), entry speed **above** `MantleMaxEntrySpeed`
 (60 px/s). `MantleState` is its exact complement at or below that speed, so precisely one of
 the pair bids per frame; `ArcJumpState` takes the taller band and additionally wants Up held

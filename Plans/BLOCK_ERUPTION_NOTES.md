@@ -137,9 +137,9 @@ You probably want to spawn from the **closest-to-origin** outward in time so the
 |---|---|---|
 | `IntentType.BlockEruption` | new enum value | emitted when LMB-in-solid releases after drag |
 | `InputParser` | modified | detect: LMB-down inside solid → tracked charge; mouse-exit-solid → ignition; LMB-release → emit intent with `(originCell, smoothedPath[])` |
-| `Character/SmoothPen.cs` | new, ~30 lines | spring-pulled smoothing of cursor input |
+| `Character/Input/SmoothPen.cs` | new, ~30 lines | spring-pulled smoothing of cursor input |
 | `Character/EruptionPlanner.cs` | new, ~80 lines | priority-field accumulator + top-K spawn |
-| `Character/ActionStates.cs` | additions | `BlockReadyAction`, `BlockEruptionAction` (both with movement modifier slowdown) |
+| `Character/Action/ActionStates.cs` | additions | `BlockReadyAction`, `BlockEruptionAction` (both with movement modifier slowdown) |
 | `Character/PlayerCharacter.cs` | additions | register new actions |
 
 No physics simulation, no convergence loop, no neighbor spillover. The mass-ball machinery stays in the design folder as v2.

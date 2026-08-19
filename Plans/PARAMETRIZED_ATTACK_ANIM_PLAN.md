@@ -12,7 +12,7 @@ params and produces a *visual* pose; it never writes back, so no rollback/determ
 A normal attack animation can just be played and the hitbox matched to it. The **stab** is
 different: its tip position is a function of `body.Position + StabDir · TipExtension(t)`,
 where `StabDir` points at the mouse (an arbitrary angle θ) and `TipExtension` is a Bézier
-reach curve ([StabAction](../Character/ActionStates.cs)). The glowing dot rides that tip. So
+reach curve ([StabAction](../Character/Action/ActionStates.cs)). The glowing dot rides that tip. So
 the *target geometry is parametrized* (angle θ, phase t, dive boost, grounded/air) and the
 arm/body pose must follow it — you can't pre-bake one clip.
 

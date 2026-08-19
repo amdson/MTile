@@ -118,7 +118,7 @@ trades ever feel wrong.
 
 ## Components (all root-compiled into MTile.Core; pure math — KNI-safe)
 
-### 1. ReferencePath (`Character/ReferencePath.cs`)
+### 1. ReferencePath (`Character/Corrector/ReferencePath.cs`)
 An **authored cubic Hermite clip, retargeted at Enter** — not a computed ballistic arc.
 Division of labor: the reference owns *feel*; physics honesty is enforced entirely by the
 roots' admissible sets and force caps. The curve therefore does not need to be flyable —
@@ -131,7 +131,7 @@ is involved in building it.
   pull-up) author fine. Key t values are auto-derived from chord length; tangent
   magnitudes modulate local speed around that. Authored in the dedicated editor
   (`dotnet run --project MTile.Demo -- --ref <name>` → `ReferenceClips/<name>.json`;
-  format + eval in `Character/HermiteClip.cs`, KNI-safe).
+  format + eval in `Character/Corrector/HermiteClip.cs`, KNI-safe).
   `ReferenceClips/` is empty as of 2026-07-26 — expect to author new clips in the editor
   as each maneuver is wired (build steps 4 and 6, and any later maneuver). Clip authoring
   is recurring per-maneuver work, not one-time setup.
@@ -154,7 +154,7 @@ is involved in building it.
   granting only passive roots will **sag** below energy-adding curve segments — the fix is
   authoring (shape the curve while the servo is still granted), never new machinery.
 
-### 2. BallisticPredictor (`Character/BallisticPredictor.cs`)
+### 2. BallisticPredictor (`Character/Corrector/BallisticPredictor.cs`)
 Forward-simulate the **coast** (no corrections) H steps from the current state, mirroring
 PhysicsWorld.Step's exact order (AppliedForce → gravity → position) including movement
 modifiers. Output p̂ₖ, v̂ₖ into pooled scratch arrays on PlayerCharacter (Corridor-scratch
@@ -186,7 +186,7 @@ references (feasibility-as-trigger then tests them); its truncation/pinch feasib
 taxonomy dies — impossibly thin gaps are allowed to bonk honestly (user decision:
 least-violation best-effort + real collision, no geometry rejection in ambient mode).
 
-### 4. CorrectionSolver (`Character/CorrectionSolver.cs`)
+### 4. CorrectionSolver (`Character/Corrector/CorrectionSolver.cs`)
 
 **Channel interface (the extension point for all future work).** A channel is exactly the
 triple: (1) a per-tick convex admissible set with a CLOSED-FORM projection, (2) a lever

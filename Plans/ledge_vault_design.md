@@ -23,7 +23,7 @@ When the vault activates:
 
 ---
 
-## New file: `Character/ExposedUpperCornerChecker.cs`
+## New file: `Character/Sensing/ExposedUpperCornerChecker.cs`
 
 Parallel to `GroundChecker` and `WallChecker`. Scans tiles on the indicated side for a vaultable
 corner and returns its world-space coordinates.
@@ -267,11 +267,11 @@ _stateRegistry.Add(new LedgeVaultState(-1));
 |---|---|
 | `Physics/PhysicsContact.cs` | No change |
 | `Physics/PhysicsWorld.cs` | No change |
-| `Character/ExposedUpperCornerChecker.cs` | **New file** |
-| `Character/EnvironmentContext.cs` | Add `TryGetExposedCorner` cache (~15 lines) |
+| `Character/Sensing/ExposedUpperCornerChecker.cs` | **New file** |
+| `Character/Sensing/EnvironmentContext.cs` | Add `TryGetExposedCorner` cache (~15 lines) |
 | `Character/MovementStates.cs` | Add `LedgeVaultState` class |
 | `Character/PlayerCharacter.cs` | Register `LedgeVaultState(1)` and `LedgeVaultState(-1)` |
-| `Character/MovementConfig.cs` | Add `VaultLiftForce`, `VaultPushForce`, `MaxVaultTime`, `MaxVaultHeight` |
+| `Character/Movement/MovementConfig.cs` | Add `VaultLiftForce`, `VaultPushForce`, `MaxVaultTime`, `MaxVaultHeight` |
 
 ---
 

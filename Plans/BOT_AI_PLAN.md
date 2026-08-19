@@ -133,7 +133,7 @@ Tier 2 (later, no new machinery): `F` edge → `GrenadeAction` at long range;
 
 ## Files
 
-- `Character/Controller.cs` — add `AttackSlash/AttackStab/AttackPulse` to
+- `Character/Input/Controller.cs` — add `AttackSlash/AttackStab/AttackPulse` to
   `PlayerInput` (humans never set them).
 - `Character/DirectIntentParser.cs` — new; the trivial in-sim button→intent
   frontend. `IIntentParser` interface extracted over it + `InputParser`;

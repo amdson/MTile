@@ -56,10 +56,10 @@ envelope and needs no dedup at all:
 
 | Stamp | Where | Gives you |
 |---|---|---|
-| `CombatState.LastHitFrame` + `LastHitImpulse` | `Character/CombatState.cs:24` | "was hit within N frames", with magnitude |
-| `CombatState.HitstunExpireFrame` / `StunExpireFrame` | `Character/CombatState.cs:17-18` | hitstun/stun as a live window |
+| `CombatState.LastHitFrame` + `LastHitImpulse` | `Character/Action/CombatState.cs:24` | "was hit within N frames", with magnitude |
+| `CombatState.HitstunExpireFrame` / `StunExpireFrame` | `Character/Action/CombatState.cs:17-18` | hitstun/stun as a live window |
 | `PlayerCharacter._lastCrushFrame` | `Character/PlayerCharacter.cs:98` (stamped `:398`) | crush impact as a window (private today — would need an accessor) |
-| `ActionVars.PeelSnapped` | `Character/ActionVars.cs:67` | tether snap, sim-written and snapshotted |
+| `ActionVars.PeelSnapped` | `Character/Action/ActionVars.cs:67` | tether snap, sim-written and snapshotted |
 | `PhysicsBody.LastImpulseMagnitude` | `Physics/PhysicsBody.cs:34`, snapshotted in `Physics/BodyState.cs:30` | landing/impact hardness, zeroed per step at `Physics/PhysicsWorld.cs:157` |
 
 Current frame: prefer `Simulation.Frame` (added — snapshotted, rewinds on `Restore`).
@@ -349,35 +349,35 @@ Predicate = pure read of snapshotted sim state, reconciled per rendered frame. E
 inside `Step` (therefore refires on every resim at `Net/RollbackSession.cs:111`) and must be
 ledgered or deduped, never played at the callsite.
 
-Movement states are best keyed on `MovementState.AnimationTag` (`Character/Movement.cs:88`)
+Movement states are best keyed on `MovementState.AnimationTag` (`Character/Movement/Movement.cs:88`)
 rather than the concrete type — the tag is the existing stable discriminator, and it is what
 `TagClipDriver.Matches` already uses.
 
 | Sound | Kind | Sim state / event | file:line |
 |---|---|---|---|
-| Wall-slide scrape (loop, gain·pitch from slide speed) | predicate | `CurrentState.AnimationTag == AnimTag.WallSlide`; speed `Body.Velocity.Y`; fast-slide branch on `Input.Down` | `Character/WallStates.cs:10,12,112-116`; `PlayerCharacter.cs:614` |
-| Wall jump | predicate (tag window) | `AnimTag.WallJump` | `Character/WallStates.cs:130,142` |
-| Ledge grab / pull / jump | predicate | `AnimTag.LedgeGrab` / `LedgePull` (+ `AnimationProgress`) / `LedgeJump` | `Character/LedgeStates.cs:13,15,223,225,409,418`; progress `Character/Movement.cs:95` |
-| Climb effort (parkour / mantle / arc-jump) | predicate | `ClimbManeuverBase.AnimationProgress` drives a scrape/grunt envelope | `Character/ClimbStates.cs:54,301-334` |
-| Crouch / dropdown / double jump / stun / tumble | predicate | corresponding `AnimTag` | `Character/LocomotionStates.cs:149,151,199,205`; `JumpStates.cs:262,267`; `ReactionStates.cs:26,33,79,95` |
+| Wall-slide scrape (loop, gain·pitch from slide speed) | predicate | `CurrentState.AnimationTag == AnimTag.WallSlide`; speed `Body.Velocity.Y`; fast-slide branch on `Input.Down` | `Character/Movement/WallStates.cs:10,12,112-116`; `PlayerCharacter.cs:614` |
+| Wall jump | predicate (tag window) | `AnimTag.WallJump` | `Character/Movement/WallStates.cs:130,142` |
+| Ledge grab / pull / jump | predicate | `AnimTag.LedgeGrab` / `LedgePull` (+ `AnimationProgress`) / `LedgeJump` | `Character/Movement/LedgeStates.cs:13,15,223,225,409,418`; progress `Character/Movement/Movement.cs:95` |
+| Climb effort (parkour / mantle / arc-jump) | predicate | `ClimbManeuverBase.AnimationProgress` drives a scrape/grunt envelope | `Character/Movement/ClimbStates.cs:54,301-334` |
+| Crouch / dropdown / double jump / stun / tumble | predicate | corresponding `AnimTag` | `Character/Movement/LocomotionStates.cs:149,151,199,205`; `JumpStates.cs:262,267`; `ReactionStates.cs:26,33,79,95` |
 | Landing thud (gain from impact) | predicate (edge already exists, render-side) | `IsGrounded` compared to last **rendered** frame; hardness `Body.LastImpulseMagnitude` | `Drawing/CosmeticUpdateSystem.cs:115-120`; `PlayerCharacter.cs:612`; `Physics/PhysicsBody.cs:34` |
 | Footsteps | **render-derived, see caveat** | `PoseState.Phase` + authored contact labels | `Animation/PoseState.cs:24`; `CharacterAnimator.cs:551,554-556`; `Animation/ContactLabel.cs` |
-| Mass-ball paint hiss (loop) | predicate | `paid` — the *funded* deposition rate from `Meters.SpendForTiles`; demand rate at `:1621` | `Character/ActionStates.cs:1621-1623`; `Character/BuildMeters.cs:141` |
-| Charge whine (rising, phase-coloured) | predicate | `Meters.ChargeFraction`, `Meters.Phase` (`Ramping/Peak/Overheld`), `ChargingRequested` | `Character/BuildMeters.cs:72,73,75,187` |
-| Build reservoir empty / starved | predicate | `Meters.Build`, `CanAfford` | `Character/BuildMeters.cs:62,157` |
-| Peel tether tension (loop) | predicate | `ActionVars.PeelStrain` — a 0..1 spring load, explicitly "sim-written, read by Draw" | `Character/ActionVars.cs:66`; written `Character/ActionStates.cs:2580-2602` |
-| Peel snap | predicate (snapshotted flag) | `ActionVars.PeelSnapped` | `Character/ActionVars.cs:67` |
+| Mass-ball paint hiss (loop) | predicate | `paid` — the *funded* deposition rate from `Meters.SpendForTiles`; demand rate at `:1621` | `Character/Action/ActionStates.cs:1621-1623`; `Character/Action/BuildMeters.cs:141` |
+| Charge whine (rising, phase-coloured) | predicate | `Meters.ChargeFraction`, `Meters.Phase` (`Ramping/Peak/Overheld`), `ChargingRequested` | `Character/Action/BuildMeters.cs:72,73,75,187` |
+| Build reservoir empty / starved | predicate | `Meters.Build`, `CanAfford` | `Character/Action/BuildMeters.cs:62,157` |
+| Peel tether tension (loop) | predicate | `ActionVars.PeelStrain` — a 0..1 spring load, explicitly "sim-written, read by Draw" | `Character/Action/ActionVars.cs:66`; written `Character/Action/ActionStates.cs:2580-2602` |
+| Peel snap | predicate (snapshotted flag) | `ActionVars.PeelSnapped` | `Character/Action/ActionVars.cs:67` |
 | Sprout growth hum | predicate | count of `Chunks.Graph.Growing` / `Pending` | `World/TileSproutGraph.cs:27-28` |
 | Mass-ball whoosh (loop, per ball) | predicate | entity of `EntityKind.MassBall` in `sim.Entities`; `Body.Velocity`. Single-state — always "flying and leaking" | `Entities/MassBall.cs:22,39,67-83` |
 | Mass-ball extinguish | event | `_mass <= DoneMass` → `Health = 0` | `Entities/MassBall.cs:69` |
-| Escalation tension layer | predicate | `CombatState.DamagePercent` (monotonic) | `Character/CombatState.cs:32` |
-| Hitstun / stun / guard / grabbed | predicate | `HitstunActive`, `StunActive`, `GuardActive`/`GuardCharged`, `GrabbedActive`, `GrabStrength` | `Character/CombatState.cs:17,18,58,78,113-114` |
+| Escalation tension layer | predicate | `CombatState.DamagePercent` (monotonic) | `Character/Action/CombatState.cs:32` |
+| Hitstun / stun / guard / grabbed | predicate | `HitstunActive`, `StunActive`, `GuardActive`/`GuardCharged`, `GrabbedActive`, `GrabStrength` | `Character/Action/CombatState.cs:17,18,58,78,113-114` |
 | Hit connect (impact) | event, id = `HitId` | `CombatSystem.Apply`, entity path; `PeekHits(hitId) > 0` is the per-frame confirm | `World/CombatSystem.cs:57,50,151-172`; `Simulation.cs:291` |
-| Attack whiff / swing start | predicate | `ActionState.AnimationProgress(in ActionVars)` = `TimeInState / Duration` | `Character/ActionStates.cs:58,283,758,…` |
+| Attack whiff / swing start | predicate | `ActionState.AnimationProgress(in ActionVars)` = `TimeInState / Duration` | `Character/Action/ActionStates.cs:58,283,758,…` |
 | Crush damage | predicate (frame stamp) | `_lastCrushFrame` changing; gate `LastImpulseMagnitude > CrushImpulseThreshold` | `Character/PlayerCharacter.cs:388-398,98` |
 | Tile break | **event**, id = `(gtx,gty)` | `ChunkMap.OnTileBroken(Vector2 pos, TileType)` — the only delegate on `ChunkMap` | decl `World/ChunkMap.cs:80`, fire `:471` in `BreakCell` `:454` |
 | Tile place / commit | event, count-valued | `TileMassField.Deposit` **returns committed-tile count**; promotion to Solid has no event | `World/TileMassField.cs:65`; `World/ChunkMap.cs:322` |
-| Eruption fire | event | `BlockPaintAction` eruption branch | `Character/ActionStates.cs:1596-1599` |
+| Eruption fire | event | `BlockPaintAction` eruption branch | `Character/Action/ActionStates.cs:1596-1599` |
 | Respawn | event | `Simulation.OnPlayerRespawn` | decl `Simulation.cs:126`, fire `:310` |
 
 **Footstep caveat, worth stating explicitly.** The only normalized stride phase in the
@@ -422,7 +422,7 @@ ran. That is the property the whole design rests on, and it is free.
 ### If a per-step event list is needed
 
 For the genuinely event-driven set (§9), the precedent to copy is **`CorrectorLedger`**
-(`Character/CorrectorLedger.cs`) — per-step derived data that is deliberately never
+(`Character/Corrector/CorrectorLedger.cs`) — per-step derived data that is deliberately never
 snapshotted. Its contract comment (`:39-42`) is the exact contract an `AudioLedger` wants:
 
 > *"Lifecycle: cleared in `CorrectorScratch.BeginFrame`, written by the apply site right
@@ -435,7 +435,7 @@ Its shape, all worth mirroring:
   `Contacts`/`ContactCount` `:63-64`. Zero allocation on the sim hot path.
 - **`Clear()` (`:70-75`) resets counts only**, not contents; entries past the count are
   simply unreadable.
-- Owned by a per-player scratch: `CorrectorScratch.Ledger` (`Character/CorrectorScratch.cs:88`),
+- Owned by a per-player scratch: `CorrectorScratch.Ledger` (`Character/Corrector/CorrectorScratch.cs:88`),
   cleared in `BeginFrame()` (`:95`), which is called once at the top of each player's step
   from `Character/PlayerCharacter.cs:436`.
 - Exposed to render through a read-only property: `PlayerCharacter.ForceLedger`

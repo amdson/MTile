@@ -21,7 +21,7 @@ Six items rely on a shared piece of plumbing that doesn't exist yet: **"how hard
 
 ### 1.1 `CombatState` — a sibling of `ConditionState`
 
-`PlayerAbilityState.Condition` ([Character/ConditionState.cs](Character/ConditionState.cs)) already holds combo-readiness flags (`Slash2Ready`, `RecoveryActive`, …) keyed by expire-frame. Combat *defensive* condition wants the same shape but distinct data, so it's worth a separate struct rather than ballooning `ConditionState`:
+`PlayerAbilityState.Condition` ([Character/Action/ConditionState.cs](Character/Action/ConditionState.cs)) already holds combo-readiness flags (`Slash2Ready`, `RecoveryActive`, …) keyed by expire-frame. Combat *defensive* condition wants the same shape but distinct data, so it's worth a separate struct rather than ballooning `ConditionState`:
 
 ```csharp
 public class CombatState {

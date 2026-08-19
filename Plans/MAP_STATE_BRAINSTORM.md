@@ -151,7 +151,7 @@ dynamics:
 2. Material reaction table — Stone (detonate), Sand (melt → flow →
    glass), Empty (gas → ignite). Skip Dirt/Foam/Glass-as-source for v1.
 3. One input — the existing charge action writes to the energy field.
-4. One output — Stone detonation reuses [`BlockEruptionAction`](../Character/ActionStates.cs)'s
+4. One output — Stone detonation reuses [`BlockEruptionAction`](../Character/Action/ActionStates.cs)'s
    planners with mass = f(energy).
 5. Rendering — per-material energy-level shader/sprite override; ship
    with a debug overlay that draws the raw energy field.
@@ -198,7 +198,7 @@ Options (not exclusive — could combine):
 ### What charged blocks can DO
 
 - **Instant eruption**: holding RMB over a charged block skips the wind-up
-  phase of [`BlockEruptionAction`](../Character/ActionStates.cs) AND scales
+  phase of [`BlockEruptionAction`](../Character/Action/ActionStates.cs) AND scales
   the planner's mass by charge level. Existing planners (MassBall,
   PriorityField) already do the structural work — charge is just fuel input.
 - **Beam amplifier**: a beam fired *through* a charged block has its energy
@@ -1095,7 +1095,7 @@ energy field** above (Threads A + B + J collapsed into one mechanic).
 3. **Prototype `EnergyAccumulator`** — copy [`TileImpactAccumulator`](../World/TileImpactAccumulator.cs),
    add neighbor diffusion to `Tick`. Snapshot follows existing pattern.
 4. **Wire one input + one output**: charge action writes to the field;
-   Stone detonate reuses [`BlockEruptionAction`](../Character/ActionStates.cs)
+   Stone detonate reuses [`BlockEruptionAction`](../Character/Action/ActionStates.cs)
    with mass = f(energy). Validate the stored-state-releases loop.
 5. **Add Sand reactions** (melt → fluidize, cool → Glass) and **Empty
    reactions** (gas, ignite). Now lava + gas + glass all exist.

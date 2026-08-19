@@ -20,7 +20,7 @@ added later without re-shaping the foundation.
    objects are stateless. No `System.Random`, no wall-clock reads, no sim-affecting
    mutable statics.
 2. **Mirror the player.** `EnemyMovementState`/`EnemyActionState` are the enemy analogues
-   of [Character/MovementStates.cs](../Character/MovementStates.cs) and [Character/ActionStates.cs](../Character/ActionStates.cs).
+   of [Character/MovementStates.cs](../Character/MovementStates.cs) and [Character/Action/ActionStates.cs](../Character/Action/ActionStates.cs).
    Same precondition + priority + Enter/Update/Exit shape. Two registries, one current
    index each, the same selection loop.
 3. **Telegraphs are animation, not sim.** Just like the player's slash dot, the stab tip

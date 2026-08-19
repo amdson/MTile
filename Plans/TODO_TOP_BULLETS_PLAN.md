@@ -12,7 +12,7 @@ without re-spelunking the codebase.
 - In [Simulation.cs](../Simulation.cs) ctor where `MovementConfig` is loaded, write the
   override (`MovementConfig.Current.SproutLifetime = gameConfig.SproutLifetime` — or,
   cleaner, add a constructor param on `Simulation` and remove the
-  [MovementConfig.cs:136](../Character/MovementConfig.cs#L136) hardcoded default's
+  [MovementConfig.cs:136](../Character/Movement/MovementConfig.cs#L136) hardcoded default's
   role as the source-of-truth).
 - Mention in [CLAUDE.md](../CLAUDE.md) "Config & assets" section.
 - Snapshot impact: zero — it's a static tuning constant.
@@ -102,7 +102,7 @@ without re-spelunking the codebase.
 - Add `_lastPlacementFrame` (sim frame index, `int`) to `PlayerAbilityState` (or
   directly on `ActionVars` for `BlockReadyAction`) so it round-trips through
   snapshot.
-- In [`BlockReadyAction.TryDragPlace`](../Character/ActionStates.cs), stamp
+- In [`BlockReadyAction.TryDragPlace`](../Character/Action/ActionStates.cs), stamp
   `_lastPlacementFrame = ctx.Frame` on a successful placement.
 - In `BlockReadyAction.Update`, gate the charge accumulator on
   `(ctx.Frame - _lastPlacementFrame) >= PlacementCooldownFrames` (suggest 6 frames

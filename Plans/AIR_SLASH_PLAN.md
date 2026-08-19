@@ -115,9 +115,9 @@ What was previously "ground-loss interrupt" goes away too — air slash is fine 
 
 | File | Change |
 |---|---|
-| `Character/ActionStates.cs` | Replace `_facing` with `_slashDir`; rewrite `ComputeDotPosition` for arbitrary direction; rewrite hurtbox apex formula; drop ground check; drop ground-loss interrupt; drop `Exit`'s `SlashInterrupted` write (interrupt path is gone). |
+| `Character/Action/ActionStates.cs` | Replace `_facing` with `_slashDir`; rewrite `ComputeDotPosition` for arbitrary direction; rewrite hurtbox apex formula; drop ground check; drop ground-loss interrupt; drop `Exit`'s `SlashInterrupted` write (interrupt path is gone). |
 | `Game1.cs` / `PlayerCharacter.cs` | No change. |
-| `Character/PlayerAbilityState.cs` | `SlashInterrupted` becomes unused — can remove now, or leave for symmetry with future interruptible actions. Recommend: leave, mark as TODO. |
+| `Character/Action/PlayerAbilityState.cs` | `SlashInterrupted` becomes unused — can remove now, or leave for symmetry with future interruptible actions. Recommend: leave, mark as TODO. |
 
 This is **less code than today**, not more — the variant-explosion is avoided, and the parametrization is just one Vector2 instead of an int.
 

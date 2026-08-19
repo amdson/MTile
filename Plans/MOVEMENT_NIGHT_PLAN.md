@@ -167,7 +167,7 @@ reference-clip system (`b1d4486`, editor via `--ref`).
 ## Campaign log
 
 - M4 — reference trajectories (prototype): DONE. Runtime half built:
-  `Character/ReferencePath.cs` — ReferenceFrame (affine endpoint retarget at
+  `Character/Corrector/ReferencePath.cs` — ReferenceFrame (affine endpoint retarget at
   Enter: clip (0,0) → entry pose, (1,-1) → measured gate; mirror/descent fall
   out of the scale signs), ReferencePath.TrackForce (critically-damped PD
   servo + tangent velocity feedforward + gravity cancel, magnitude-capped),

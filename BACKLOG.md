@@ -18,11 +18,11 @@ Status key: **OPEN** · **PARTIAL** · **DONE** (kept for the record, delete fre
 
 | # | Item | Status | Evidence / notes |
 |---|---|---|---|
-| 1.1 | "Pressing right while in ledge grab should pull player over and onto the ledge." | **OPEN** | `Character/LedgeStates.cs` only reads horizontal input to *exit* the grab (`pressingAway`, line 83). The pull is Up-triggered only. |
+| 1.1 | "Pressing right while in ledge grab should pull player over and onto the ledge." | **OPEN** | `Character/Movement/LedgeStates.cs` only reads horizontal input to *exit* the grab (`pressingAway`, line 83). The pull is Up-triggered only. |
 | 1.2 | "Add a cooldown to block charge starting up again after placing a block, so that if the player is actively building the block charge state is never visually active." | **SUPERSEDED** | `BlockReadyAction` no longer exists. The paint/place/burst rework replaced charge-on-hold with the `BuildMeters` economy (`ChargePhase Ramping/Peak/Overheld`), so re-state the intent against the new model if it still bothers you in play. |
-| 1.3 | "Pressing up while next to a two high ledge should trigger a mini jump into parkour state so that the player smoothly arcs over the corner. The jump should be scaled up a bit if the player is moving into the ledge quickly and is far enough away that the jump won't carry them into a wall" | **PARTIAL** | `ArcJumpState` (`Character/ClimbStates.cs:327-342`) covers the 2-block band with Up held at speed, but it's a full ballistic arc, not a speed-scaled mini-hop at corner detection. |
-| 1.4 | "Make duck under put player at stable height under ledge, so there isn't bobbing up and down." | **PARTIAL** | `FoldDuckReach` (`Character/MovementConfig.cs:268`) feeds `wallEscapeDown` in `FoldReference.cs:135` and the reference shapes the duck, but no formal stable-height contract is pinned. |
-| 1.5 | "Track forces applied by physics contacts at all times, so that by the end of an update physics contacts always know the total force that's been exerted through them." | **DONE** | `Character/CorrectorLedger.cs:43-110` — per-channel and per-contact force recording. |
+| 1.3 | "Pressing up while next to a two high ledge should trigger a mini jump into parkour state so that the player smoothly arcs over the corner. The jump should be scaled up a bit if the player is moving into the ledge quickly and is far enough away that the jump won't carry them into a wall" | **PARTIAL** | `ArcJumpState` (`Character/Movement/ClimbStates.cs:327-342`) covers the 2-block band with Up held at speed, but it's a full ballistic arc, not a speed-scaled mini-hop at corner detection. |
+| 1.4 | "Make duck under put player at stable height under ledge, so there isn't bobbing up and down." | **PARTIAL** | `FoldDuckReach` (`Character/Movement/MovementConfig.cs:268`) feeds `wallEscapeDown` in `FoldReference.cs:135` and the reference shapes the duck, but no formal stable-height contract is pinned. |
+| 1.5 | "Track forces applied by physics contacts at all times, so that by the end of an update physics contacts always know the total force that's been exerted through them." | **DONE** | `Character/Corrector/CorrectorLedger.cs:43-110` — per-channel and per-contact force recording. |
 | 1.6 | "Cap forces added by ramps to velocity so that players never accelerate at unrealistic speeds (this is an issue when parkor state moves players upwards on high ledges)." | **DONE** | `ClimbStates.cs:222` caps hop vy at `MaxAssistRiseSpeed`. (The ramp system itself was deleted with the corrector.) |
 | 1.7 | "Holding up should trigger player to enter ledge grab and then trigger them to move up out of ledge grab (player shouldn't have to tap up twice). However, it should be easy to tap jump and not move up out of ledge grab." | **DONE** | `LedgeStates.cs:41-42`. |
 | 1.8 | "Dropdown from ledge should push the player into ledge grab state unless they're holding down when drop down ends." | **DONE** | `LocomotionStates.cs:294-297` (`DropChainDir` handoff) → `LedgeStates.cs:60` path D. Test: `DropdownTests.cs:170-211`. |
@@ -52,7 +52,7 @@ All eight were executed by `Plans/MOVEMENT_NIGHT_PLAN.md` and independently re-v
 | 1.20 | "edit jump so that it can use ledge corners as a pushing off point, for the case of jumping out of a ledge grab or vault" | **DONE** | `JumpStates.cs:29-69` (`TryCornerLaunch`, 24px window). |
 | 1.21 | "add tests confirming that moves like vault never significantly push the player's horizontal movement speed past normal running speed" | **DONE** | `SpeedInvariantTests.cs`; soft-clamp at `ClimbStates.cs:256-282`. |
 | 1.22 | "edit the 2 block arc to only activate when the player is running in with up arrow held down. when the player is still, and within range of a two block ledge, holding up arrow should trigger ledge grab" | **DONE** | `ClimbStates.cs:338-342` (`ArcJumpRunSpeed` 50 px/s); standing case falls to LedgeGrab on priority. |
-| 1.23 | "use the reference trajectory system for ledge pull" | **DONE (prototype)** | `LedgeStates.cs:290-308,353-374` + `ReferenceClips/ledge_pull.json`. `Character/ReferencePath.cs` header still says **PROTOTYPE SCOPE** — productionizing is open work. |
+| 1.23 | "use the reference trajectory system for ledge pull" | **DONE (prototype)** | `LedgeStates.cs:290-308,353-374` + `ReferenceClips/ledge_pull.json`. `Character/Corrector/ReferencePath.cs` header still says **PROTOTYPE SCOPE** — productionizing is open work. |
 | 1.24 | "use reference trajectories for the drop down move" | **DONE (prototype)** | `LocomotionStates.cs:269-282,311-332` + `ReferenceClips/dropdown.json`. Same prototype caveat. |
 
 ---
@@ -128,13 +128,13 @@ describes only the copy/paste lobby — it predates room codes and wasn't update
 
 | # | Item | Status | Evidence / notes |
 |---|---|---|---|
-| 5.1 | Sim reads animation-layer data — a layering violation against the render-only invariant. | **OPEN** | `Character/JumpStates.cs:61` (`// TODO remove dependency on Animation layer data`). |
+| 5.1 | Sim reads animation-layer data — a layering violation against the render-only invariant. | **OPEN** | `Character/Movement/JumpStates.cs:61` (`// TODO remove dependency on Animation layer data`). |
 | 5.2 | Distance heuristic in collision resolution should be a line-segment/plane intersection test. | **OPEN** | `Physics/PhysicsWorld.cs:30`. |
 | 5.3 | `Game1` render/HUD extraction half-done — ~870 lines still inline (was 1029). | **OPEN** | `Plans/GAME1_REFACTOR_PLAN.md`. |
 | 5.4 | Corrector: lever-normalized hinge weighting. | **OPEN** | `Plans/CORRECTOR_CONSOLIDATION_PLAN.md` §6, the one deferred item. |
 | 5.5 | Web port never runtime-tested. | **DONE** | Superseded — the browser now runs verified PvP and is deployed. Remaining web work moved to §4. |
 | 5.11 | `PlayerCharacter.cs:485,524,535,554` print `[move]`/`[action]` transitions via `System.Console.WriteLine` on the sim hot path — including during rollback re-simulation. | **OPEN** | Almost certainly leftover debug tracing. Delete or gate behind a debug flag. |
-| 5.12 | `Character/LatticePlanner.cs` (beam-search movement planner) is marked PROTOTYPE / "freeze-frame oracle only — not wired into the live sim"; its only caller is `ZzzLatticeTiming`, an assert-free benchmark self-labelled "TEMP EXPERIMENT: … Delete me". | **OPEN** | Decide: wire it up or delete both. `ZzzLatticeTiming` is also ~35 s of the test suite's ~75 s runtime. |
+| 5.12 | `Character/Corrector/LatticePlanner.cs` (beam-search movement planner) is marked PROTOTYPE / "freeze-frame oracle only — not wired into the live sim"; its only caller is `ZzzLatticeTiming`, an assert-free benchmark self-labelled "TEMP EXPERIMENT: … Delete me". | **OPEN** | Decide: wire it up or delete both. `ZzzLatticeTiming` is also ~35 s of the test suite's ~75 s runtime. |
 | 5.13 | Stale comments referencing retired classes in the new build code — `BlockBurstAction`'s header and `BurstReach` cite `BlockReadyAction`/`BlockReadyAction.BuildReach` (`ActionStates.cs:1729,1742`); `BlockGrabAction:2465,2476` likewise, including a mention of `ctx.EruptionMode`, which no longer exists. | **OPEN** | Cheap cleanup. |
 | 5.6 | `BotInputSource` is still a seeded-random stub. | **OPEN** | `Net/BotInputSource.cs` (81 lines), `Plans/BOT_AI_PLAN.md` not started. |
 | 5.7 | Tangential carry on moving platforms not implemented. | **OPEN** | `MTile.Tests/MovingPlatformTests.cs:13`; `Plans/DYNAMIC_PHYSICS_ROADMAP.md`. |
@@ -160,7 +160,7 @@ Each encodes a specific missing capability. Un-skip as the capability lands.
 
 ## 6. In-flight experiments
 
-**Redirect audit** — `Character/FoldReference.cs` and `AmbientCorrector.cs` carry a `TEMP EXPERIMENT`:
+**Redirect audit** — `Character/Corrector/FoldReference.cs` and `AmbientCorrector.cs` carry a `TEMP EXPERIMENT`:
 redirect audit counters (`AuditSolves`/`AuditMaskFrames`/`AuditFireFrames`/`AuditMaxZr`/`AuditNetZr`)
 plus a second Redirect channel grafted into the ref fold path, gated on `FoldRedirectEnabled`
 for hot A/B. **No longer uncommitted** — it landed in the `0eeab5b` "WIP working state" bundle

@@ -11,7 +11,7 @@ Movement-specific clips (hang / wall-slide / tumble) are **Tier 3, deferred**.
 > ⚠️ **The specific combat numbers in Groups B/C (sweep angles, "active windows",
 > knockback, reach scales) are NOT all in the code yet — treat them as placeholder feel
 > hints, not facts.** For the real timing/handedness/geometry, the worker (and you, when
-> refining) should read each action's state class in `Character/ActionStates.cs`
+> refining) should read each action's state class in `Character/Action/ActionStates.cs`
 > (`CombatState.cs` / `ActionVars.cs`) directly. Where the code is silent, it's a design
 > choice to make here, not a value to look up.
 

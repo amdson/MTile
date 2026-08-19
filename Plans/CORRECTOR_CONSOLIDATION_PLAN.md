@@ -134,7 +134,7 @@ Promote, revert, or redo each experiment deliberately:
 | Fall+stand-only player, gym/corridor stages | **Keep** as test stages; restore the full FSM (Phase 3). |
 | `ChannelPrev` not snapshotted | **Fix** in Phase 2 — non-negotiable for rollback. |
 | Diagnostic tests (bumpy tunnel, hard landing, rest equilibrium) | Convert to asserting scenario tests (Phase 5) or delete. |
-| `Character/corrector_pseudocode_reference.txt` | Fold into this plan / BALLISTIC_CORRECTOR_PLAN and delete from `Character/`. |
+| `Character/Corrector/corrector_pseudocode_reference.txt` | Fold into this plan / BALLISTIC_CORRECTOR_PLAN and delete from `Character/`. |
 
 ## Phase 2 — Restore invariants
 
