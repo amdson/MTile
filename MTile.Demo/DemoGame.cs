@@ -50,6 +50,7 @@ public sealed class DemoGame : Game
     private const string EdRefName = "edref";
     private bool _warnedArcPlacement;   // one-shot hint when a com drag is refused (arc owns placement)
     private bool _showGrid = true;      // block-sized grid under the scene (` toggles)
+    private bool _showBodyPoly;         // the game's physics hexagon at the com anchor (O toggles)
     // The clip's reference trajectory (Doc.ReferenceArc), loaded on clip select: the
     // authored maneuver arc (ReferenceClips/<name>.json, else the baked registry default)
     // that drives the body's scene placement while scrubbing. Null = no arc.
@@ -179,6 +180,7 @@ public sealed class DemoGame : Game
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_HELP") != null) _showHelp = true;
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_WIRE") != null) _skinWire = true;
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_NOSKEL") != null) _showRig = false;
+        if (Environment.GetEnvironmentVariable("MTILE_SHOT_BODY") != null) _showBodyPoly = true;
 
         // Authored-only content: the rig comes from Skeletons/<name>.json and throws
         // if missing (no procedural fallback), and the clip list is exactly what's
@@ -287,6 +289,7 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.B)) BeginAddBone(mp, toBase: kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift));
         if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
         if (Pressed(kb, Keys.OemTilde)) _showGrid = !_showGrid;
+        if (Pressed(kb, Keys.O)) _showBodyPoly = !_showBodyPoly;
         if (_skin != null && Pressed(kb, Keys.G)) _showSkin = !_showSkin;
         if (_skin != null && Pressed(kb, Keys.W)) _skinWire = !_skinWire;
         if (_skin != null && Pressed(kb, Keys.X)) _showRig  = !_showRig;
@@ -873,6 +876,9 @@ public sealed class DemoGame : Game
         // scene, so a pose can be authored against WHERE ALONG THE ARC its keyframe lands.
         DrawReferenceArc();
 
+        // The game's collision silhouette, under the rig so bones stay readable on top.
+        DrawBodyPolygon();
+
         // The rig overlay (bones + joint markers + additions) hides when toggled off
         // (X, skin-view only) so the sprite can be judged unobstructed. Editing still
         // works while hidden — picking is position-based, not marker-based.
@@ -1063,6 +1069,26 @@ public sealed class DemoGame : Game
         // Body circle at the playhead — the com the rig is hung from, at the game's radius.
         _draw.Ring(_anchor, PlayerCharacter.Radius / Game1.SkeletonScale * RigScale,
                    new Color(230, 190, 90), 24, 1.5f);
+    }
+
+    // The player's PHYSICS polygon (PlayerCharacter.CreateBodyPolygon — the width-squeezed
+    // hexagon), drawn at true game scale around the com anchor. The com convention puts the
+    // ground 2·Radius below the anchor — float height (R) plus the hexagon's half-height (R)
+    // — so this is exactly where the collision body sits relative to the authored ground
+    // line: the bottom vertex hovers one Radius above the floor, like in game. Use it to
+    // judge a pose against the real collision bounds (what clears a block is the hexagon,
+    // not the limbs). O toggles.
+    private void DrawBodyPolygon()
+    {
+        if (!_showBodyPoly) return;
+        float s = RigScale / Game1.SkeletonScale;   // game px → editor screen px
+        var verts = PlayerCharacter.CreateBodyPolygon().GetVertices(Vector2.Zero);
+        var col = new Color(230, 190, 90);
+        for (int i = 0; i < verts.Length; i++)
+            _draw.Line(_anchor + verts[i] * s,
+                       _anchor + verts[(i + 1) % verts.Length] * s, col, 1.5f);
+        // Tick the anchor itself so the polygon's center reads even with no com marker drawn.
+        _draw.Ring(_anchor, 2.5f, col, 8, 1f);
     }
 
     private void DrawDashedH(float y, float x0, float x1, Color c, float dash, float gap)
@@ -1461,7 +1487,7 @@ public sealed class DemoGame : Game
         ("Arc",      "A attach the next reference arc (Shift back, wraps through none)    arc file saves reload live"),
         ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip"),
         ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
-        ("View",     "` block grid on/off (1 cell = 1 game tile, anchored to the floor line)"),
+        ("View",     "` block grid on/off (1 cell = 1 game tile, anchored to the floor line)    O physics hexagon at the com"),
         ("Obstacle", "drag the brown block to reposition it (the four lip-maneuver clips)"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),

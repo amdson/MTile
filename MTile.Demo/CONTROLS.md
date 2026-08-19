@@ -64,7 +64,7 @@ dotnet run --project MTile.Demo -- --ref parkour
 
 Screenshot env vars (dev captures; the window renders a few frames, saves a PNG, and
 exits): `MTILE_SHOT=<path>` works in **every** mode. Modifiers — editor:
-`MTILE_SHOT_HELP`, `MTILE_SHOT_WIRE`, `MTILE_SHOT_NOSKEL`; bind editor:
+`MTILE_SHOT_HELP`, `MTILE_SHOT_WIRE`, `MTILE_SHOT_NOSKEL`, `MTILE_SHOT_BODY`; bind editor:
 `MTILE_SHOT_PREVIEW`, `MTILE_SHOT_CLIP=<clip>`, `MTILE_SHOT_LAYER=<layer>`;
 take viewer: `MTILE_SHOT_HELP`, `MTILE_SHOT_FRAME=<n>`.
 
@@ -170,6 +170,7 @@ default (deep-copied, so editing one keyframe's marks doesn't change the other's
 | Input | Action |
 |---|---|
 | **`** | Toggle the block grid — one cell = one game tile (`Chunk.TileSize`), anchored to the floor line and the scene origin so cell edges sit where terrain would. On by default |
+| **O** | Toggle the player's **physics polygon** — the game's collision hexagon (`PlayerCharacter.CreateBodyPolygon`), drawn at true game scale around the com anchor. Its bottom vertex hovers one `Radius` above the floor line, exactly the in-game float height. Off by default |
 | **Ctrl-S** | Save **all** animations to their JSON files (`*unsaved*` clears) |
 | **N** | Create a new (empty) animation |
 | **C** | Clone the selected animation — deep-copies all keyframes/contacts into a new clip named `<name>_copy`, selected and ready to edit (saved as a separate file on Ctrl-S). Use it to fork a variant, e.g. derive a run from the walk |
