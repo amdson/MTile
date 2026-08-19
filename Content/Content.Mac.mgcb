@@ -29,12 +29,14 @@
 # The GENERATED SOUNDS region below is maintained by scripts/sync-sounds.ps1, which
 # writes this file and Content.mgcb from the same clip scan — don't hand-edit it.
 
-#begin DebugFont.spritefont
+#begin DebugFont.Mac.spritefont
 /importer:FontDescriptionImporter
 /processor:FontDescriptionProcessor
 /processorParam:PremultiplyAlpha=True
 /processorParam:TextureFormat=Compressed
-/build:DebugFont.spritefont
+# Built under the name "DebugFont" so Content.Load<SpriteFont>("DebugFont") is
+# unchanged; see the header of DebugFont.Mac.spritefont for why macOS needs its own.
+/build:DebugFont.Mac.spritefont;DebugFont
 
 #--------------------------- GENERATED SOUNDS -------------------------------#
 # Written by scripts/sync-sounds.ps1 — do not hand-edit; your changes will be lost.

@@ -5,7 +5,8 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 
 | Script | Purpose |
 |---|---|
-| [`publish-web.ps1`](publish-web.ps1) | AOT-publish the Blazor/KNI web build and push it to GitHub Pages. |
+| [`publish-web.sh`](publish-web.sh) | AOT-publish the Blazor/KNI web build and push it to GitHub Pages (macOS/Linux). |
+| [`publish-web.ps1`](publish-web.ps1) | The same, on Windows. |
 | [`extract-sfx-candidates.ps1`](extract-sfx-candidates.ps1) | Pull the hand-picked SFX candidates out of the Sonniss zips into `Audio/candidates/`. |
 | [`build-sfx.ps1`](build-sfx.ps1) | Batch-convert hand-cut sound slices into game-ready Ogg. |
 | [`sync-sounds.ps1`](sync-sounds.ps1) | Wire the built Ogg clips into the content pipeline + sound manifest. |
@@ -14,14 +15,28 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 
 ---
 
-## `publish-web.ps1` — web publish → GitHub Pages
+## `publish-web.sh` / `publish-web.ps1` — web publish → GitHub Pages
+
+Two ports of one script — use the one for your platform, and **change both together**.
+
+```bash
+./scripts/publish-web.sh                  # macOS/Linux: AOT publish -> copy -> commit -> push
+./scripts/publish-web.sh --no-push        # stop after the commit (inspect first)
+./scripts/publish-web.sh --skip-build     # reuse the last publish output (copy/push only)
+./scripts/publish-web.sh --site-repo <path>
+```
 
 ```powershell
-pwsh scripts/publish-web.ps1              # AOT publish -> copy -> commit -> push
+pwsh scripts/publish-web.ps1              # Windows: same steps
 pwsh scripts/publish-web.ps1 -NoPush      # stop after the commit (inspect first)
 pwsh scripts/publish-web.ps1 -SkipBuild   # reuse the last publish output (copy/push only)
 pwsh scripts/publish-web.ps1 -SiteRepo <path>
 ```
+
+The site checkout lives outside this repo, so its path is per-machine. The `.sh` port finds it
+by looking for a directory holding `_config.yml` — first a sibling of the game repo, then
+`~/dev/amdson.github.io` — and `MTILE_SITE_REPO` or `--site-repo` overrides that. The `.ps1`
+defaults to the Windows box's `C:\Users\amdic\amdson.github.io`.
 
 Publishes to <https://amdson.github.io/mtile/>.
 
@@ -31,8 +46,9 @@ Publishes to <https://amdson.github.io/mtile/>.
 `-p:RunAOTCompilation=true`, so a plain `dotnet publish -c Release` ships the 2.7 fps build.
 
 Needs `dotnet workload install wasm-tools`. First compile takes ~15 min; output wwwroot is
-~49 MB. The mirror step skips `.br`/`.gz` (Pages gzips on the fly) and `.md` (the Pages
-Jekyll build would turn stray markdown into site pages).
+~49 MB. The mirror step (`rsync -a --delete`, or `robocopy /MIR` on Windows) skips `.br`/`.gz`
+(Pages gzips on the fly) and `.md` (the Pages Jekyll build would turn stray markdown into site
+pages). It mirrors rather than copies, so a file dropped from the build is dropped from the site.
 
 See `Plans/WEB_PVP.md` and `Plans/INTERNET_READY_PLAN.md`.
 

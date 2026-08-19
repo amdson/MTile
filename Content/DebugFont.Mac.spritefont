@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- macOS-only twin of DebugFont.spritefont, built as "DebugFont" by Content.Mac.mgcb.
+
+     Identical apart from FontName. A bare family name ("Arial") makes the processor
+     enumerate and parse every installed system font to resolve it, and KNI 4.1.9001's
+     bundled Typography.OpenFont throws a NullReferenceException on one of the fonts
+     macOS ships — so the family-name path can't work here at all. Naming the file
+     directly skips that scan.
+
+     This reads the OS's own Arial rather than a copy in the repo on purpose: Arial is
+     Monotype-licensed and this repo is public, so the font itself must not be committed.
+     Standard macOS installs have it at this path.
+
+     Keep the Size/Spacing/Style/CharacterRegions below in step with
+     DebugFont.spritefont, or the HUD renders differently depending on which OS
+     published the build. -->
+<XnaContent xmlns:Graphics="Microsoft.Xna.Framework.Content.Pipeline.Graphics">
+  <Asset Type="Graphics:FontDescription">
+    <FontName>/System/Library/Fonts/Supplemental/Arial.ttf</FontName>
+    <Size>14</Size>
+    <Spacing>0</Spacing>
+    <UseKerning>true</UseKerning>
+    <Style>Regular</Style>
+    <CharacterRegions>
+      <CharacterRegion>
+        <Start>&#32;</Start>
+        <End>&#126;</End>
+      </CharacterRegion>
+    </CharacterRegions>
+  </Asset>
+</XnaContent>
