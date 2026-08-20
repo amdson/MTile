@@ -636,7 +636,7 @@ public class GroundSlash1 : SlashLikeAction
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
     protected override float HitstunSecondsOverride => 0.30f;
-    protected override bool  HoldVictims         => true;
+    protected override bool  HoldVictims         => false;
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
         // Hit-confirm (`connected`) is tracked but intentionally does NOT gate the
@@ -660,7 +660,7 @@ public class GroundSlash2 : SlashLikeAction
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
     protected override float HitstunSecondsOverride => 0.30f;
-    protected override bool  HoldVictims         => true;
+    protected override bool  HoldVictims         => false;
 
     // Combo moves preempt Recovery via higher passive priority.
     public override int PassivePriority => 50;
