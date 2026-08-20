@@ -126,6 +126,13 @@ public class Game1 : Game
     // anim_traces notebook plots it directly).
     private readonly AnimTraceLogger _animTrace = new();
 
+    // Live pause + frame-step (offline dev tool). F6/Pause freezes the sim; F7/'.' advances
+    // exactly one Simulation.Step (Shift for a 10-frame burst, hold to repeat). Unlike the
+    // recorder's Ctrl+P scrubbing this keeps the sim LIVE, so input is polled on each
+    // stepped frame and you can walk a movement/animation transition forward one frame at
+    // a time. Skipped in netplay — see FrameStepper.
+    private readonly FrameStepper _stepper = new();
+
     // Stage save/reload dev tool (desktop, offline only). Ctrl+M captures the player
     // position + nearby chunks into Levels/saved/ as a new stage (StageSaver); F5
     // rebuilds the sim from _activeStage for a pristine re-entry of the scenario.
@@ -776,8 +783,13 @@ public class Game1 : Game
             // false while in playback (sim frozen) — we skip the normal step + cosmetics.
             bool live = _recorder.HandleInput(keyboardState, _sim, _camera, _animator,
                                               _secondaryAnimators, SkeletonScale);
+            // Pause/step keys. Fed the REAL delta so hold-to-repeat keeps ticking while the
+            // sim is frozen, and only while `live` — during playback the sim is already
+            // frozen and the recorder owns the same arrow/space scrubbing keys.
             if (live)
             {
+                _stepper.HandleInput(keyboardState, dt);
+
                 // Corrector trajectory capture follows the draw flags (write-only
                 // diagnostics inside the sim; the buffers are read in Draw below).
                 _sim.Player.CorrectorDebug.CaptureTrajectories =
@@ -788,22 +800,40 @@ public class Game1 : Game
 
                 // Gather this frame's input and advance the simulation by fixed steps.
                 var input = Controller.Poll(mouseWorldPos);
-                // Slow-/fast-motion: accumulate TimeScale and run that many fixed steps
-                // this frame — <1 skips frames (slow-mo), >1 runs extra, 0 pauses.
-                // Accumulate REAL TIME (in units of fixed steps) rather than one step per
-                // frame, so the sim advances at 60 Hz whatever the display refresh is.
-                // TimeScale still multiplies it, so slow-/fast-motion is unchanged.
-                _simAccum += MathF.Min(dt / Simulation.FixedDt, MaxCatchUpSteps)
-                             * MathF.Max(0f, _config.TimeScale);
                 int stepsRun = 0;
                 long tSim = _prof.Begin();
-                while (_simAccum >= 1f)
+                if (_stepper.Paused)
                 {
-                    _simAccum -= 1f;
-                    // With a second player present offline, the bot spoofs its input (P2).
-                    if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
-                    else                   _sim.Step(input);
-                    stepsRun++;
+                    // Paused: the wall clock no longer drives the sim, only the step key
+                    // does. Zero the accumulator rather than letting it bank — banked time
+                    // would fast-forward the moment you resume, which is exactly the frame
+                    // you stopped to look at. Input is still polled above, so holding a
+                    // direction and tapping step advances one frame of that input.
+                    _simAccum = 0f;
+                    while (_stepper.TryConsumeStep())
+                    {
+                        if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
+                        else                   _sim.Step(input);
+                        stepsRun++;
+                    }
+                }
+                else
+                {
+                    // Slow-/fast-motion: accumulate TimeScale and run that many fixed steps
+                    // this frame — <1 skips frames (slow-mo), >1 runs extra, 0 pauses.
+                    // Accumulate REAL TIME (in units of fixed steps) rather than one step per
+                    // frame, so the sim advances at 60 Hz whatever the display refresh is.
+                    // TimeScale still multiplies it, so slow-/fast-motion is unchanged.
+                    _simAccum += MathF.Min(dt / Simulation.FixedDt, MaxCatchUpSteps)
+                                 * MathF.Max(0f, _config.TimeScale);
+                    while (_simAccum >= 1f)
+                    {
+                        _simAccum -= 1f;
+                        // With a second player present offline, the bot spoofs its input (P2).
+                        if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
+                        else                   _sim.Step(input);
+                        stepsRun++;
+                    }
                 }
                 _prof.End(_sSim, tSim);
                 float simDt = stepsRun * Simulation.FixedDt;
@@ -1112,6 +1142,15 @@ public class Game1 : Game
         long tHud = _prof.Begin();
         _hud.Draw(_sim, _animator, _config);
         _recorder.DrawHud(_spriteBatch, _debugFont);
+        string stepLine = _stepper.HudLine(_sim.Frame);
+        if (stepLine != null)
+        {
+            var stepPos = new Vector2(8, 56);   // above the anim-trace indicator
+            _spriteBatch.Begin();
+            _spriteBatch.DrawString(_debugFont, stepLine, stepPos + new Vector2(1, 1), Color.Black);
+            _spriteBatch.DrawString(_debugFont, stepLine, stepPos, Color.Cyan);
+            _spriteBatch.End();
+        }
         if (_animTrace.Active)
         {
             var tracePos = new Vector2(8, 76);   // below the recorder's HUD line
