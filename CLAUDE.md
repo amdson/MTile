@@ -45,97 +45,28 @@ dotnet run --project MTile.Desktop          # launches the game window
 dotnet test MTile.Tests/MTile.Tests.csproj
 dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName~SnapshotRoundTrip"   # single class/test
 dotnet watch test --project MTile.Tests/MTile.Tests.csproj   # re-run on change
-
-# Web build (KNI/Blazor WASM)
-dotnet build MTile.Web/MTile.Web.csproj
-dotnet run --project MTile.Web              # dev server (interpreted — slow, fine for logic)
-
-# Web publish → GitHub Pages (https://amdson.github.io/mtile/)
-pwsh scripts/publish-web.ps1                # -NoPush / -SkipBuild / -SiteRepo
-
-# Performance (see Plans/PERF_AUDIT.md)
-dotnet run -c Release --project MTile.Bench              # sim + animation-solver µs/frame
-dotnet run -c Release --project MTile.Bench -- --check   # diff vs baseline.txt; exit 1 on a ~1.5x regression
-dotnet run -c Release --project MTile.Bench -- --save MTile.Bench/baseline.txt   # re-baseline
-dotnet run -c Release --project MTile.Bench -- --corrector             # corrector QP share of a sim tick
-node MTile.Web/smoke/qp_bench.js http://127.0.0.1:8080/                # ...the same solve in the browser (AOT publish required)
-
-# Audio assets: hand-cut slices in Audio/raw → game-ready Ogg in Assets/Sounds
-pwsh scripts/build-sfx.ps1 -Name tile_break -DryRun   # print the plan + filter chain
-pwsh scripts/build-sfx.ps1 -Name tile_break           # → tile_break_01.ogg, _02, …
-pwsh scripts/build-sfx.ps1 -Loop -Name wall_scrape    # loops: no silence trim, no end fade
-pwsh scripts/sync-sounds.ps1                          # wire clips into the pipeline + manifest
 ```
 
-**AOT is mandatory for a playable web build: 2.7 fps interpreted vs ~40 fps AOT.** The csproj still
-has `<RunAOTCompilation>false</RunAOTCompilation>`; `scripts/publish-web.ps1` overrides it with
-`-p:RunAOTCompilation=true`. **A plain `dotnet publish -c Release` therefore ships the 2.7 fps
-build** — always publish via the script. AOT needs `dotnet workload install wasm-tools`; the first
-compile takes ~15 min and the output wwwroot is ~49 MB.
+Task-specific workflows live in skills under `.claude/skills/`, loaded on demand — invoke by name:
+`/web-publish` (KNI/Blazor build, publish to GitHub Pages, browser smoke tests), `/audio-pipeline`
+(SFX conversion and wiring a clip in), `/perf-profiling` (`MTile.Bench`, in-game frame profiler),
+`/test-slices` (targeted `--filter` sets instead of the full 489-test suite).
 
-Browser smoke tests (Playwright, headless Chromium + SwiftShader) live in `MTile.Web/smoke/`:
-`web_smoke.py` (boot + console errors), `pvp_move.py` (two *separate* browser processes — not two
-tabs, since a backgrounded tab's rAF throttles and the peer stall-caps — driving the manual
-copy/paste lobby and pixel-diffing that input mirrored). Setup in `MTile.Web/smoke/README.md`.
+**Never plain-`dotnet publish` the web build** — it ships the 2.7 fps interpreted build instead of
+the ~40 fps AOT one. Always `pwsh scripts/publish-web.ps1`. Details: `/web-publish`.
 
-`build-sfx.ps1` needs ffmpeg (`winget install Gyan.FFmpeg`, then restart the shell). It outputs the
-format `Plans/AUDIO_ASSET_LIST.md` specifies — mono, 22.05 kHz, Ogg Vorbis, **loudness-matched by
-LUFS** (peak normalization does not match perceived loudness, and round-robin variants that differ
-in loudness read as a bug rather than as variety). It deliberately does *not* bake in pitch, gain,
-pan, or variant selection: those are runtime concerns (`Plans/AUDIO_PLAN.md` §5), and doing both is
-the classic mistake.
-
-**Slotting a clip in: `build-sfx.ps1` → `sync-sounds.ps1` → build.** `sync-sounds.ps1` scans
-`Assets/Sounds/*.ogg` and regenerates the `GENERATED SOUNDS` region of `Content/Content.mgcb`
-plus `Audio/SoundManifest.g.cs`; both are generated, don't hand-edit them. The clips stay in
-`Assets/Sounds` and are built out-of-tree (`/build:../Assets/Sounds/x.ogg;Sounds/x.xnb`), so
-nothing is moved or duplicated, and the same entries serve both content toolchains — no
-wwwroot copy rule needed. `SoundEffect.FromStream` is WAV-only on both backends, which is why
-audio goes through the pipeline while the PNGs under `Assets/` do not.
-
-A clip is only *audible* once a `SoundKind` maps to its stem (`Audio/SoundKind.cs`) and
-`Audio/GameAudio.cs` says what triggers it — that policy file is the only hand-written step.
-Unmapped stems build fine and are reported by `sync-sounds.ps1` with a `?`. A kind with no
-clips on disk is silent, never an error, so the game runs identically with an empty bank.
-Dev hotkeys: **F9** fires the committed `dev_tone.ogg`, **F10** mutes. Design:
-`Plans/AUDIO_PLAN.md`; web audio still needs a click-to-start unlock before it will sound.
+**Don't hand-edit** the `GENERATED SOUNDS` region of `Content/Content.mgcb` or
+`Audio/SoundManifest.g.cs` — `scripts/sync-sounds.ps1` regenerates both. Adding a clip:
+`/audio-pipeline`.
 
 All operational tooling is indexed in [scripts/README.md](scripts/README.md) (publish, SFX
 conversion, headless build VM).
 
 Quickest correctness check while iterating on game logic: `dotnet build MTile.Core.csproj`.
 
-**Frame profiling in-game**: `GameConfig.DebugFrameTimings` (on by default) draws a per-pass
-breakdown — `sim / anim / cosmetic / chunks / skins / fx / glow / present / …`, mean+worst over
-60 frames. **F11 dumps the last window to the console**, which is how the *web* build is
-profiled (the dump lands in devtools). Draw-side scopes measure batch *building*; the GPU
-submit lands in `present`. `Diagnostics/FrameProfiler.cs`.
-
-### Running a relevant slice of the suite
-
-The full suite is ~75 s / 489 tests, but **two scratch classes are 65% of that** — `Sim.ZzzLatticeTiming`
-(~35 s) and `Animation.ZzzRestSpasm` (~13 s). The `Zzz` prefix marks long-running harnesses, so the
-default full-coverage run should skip them (~35 s, 481 tests):
-
-```bash
-dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName!~Zzz"
-```
-
 Parallelization is disabled assembly-wide on purpose (`MTile.Tests/TestAssemblySetup.cs`) — sim tests
 mutate `MovementConfig.Current`, so classes race. 22 of 103 test files touch process-wide statics.
 Don't re-enable it without moving those into a shared `[Collection]` first.
-
-Targeted slices, by what a change touches (`--filter` alternations; namespaces are NOT a reliable
-selector — `GrabTests` is in `MTile.Tests` while `CaveMouthTests` is in `MTile.Tests.Sim`):
-
-| Area | Filter | ≈ |
-|---|---|---|
-| Combat / action FSM | `~Combat\|~Grab\|~Escalation\|~AttackRecoil\|~Commitment\|~Eruption\|~ClipBinding\|~ActionOverlay` | 4 s / 77 |
-| Snapshot / rollback | `~Snapshot\|~Rollback\|~InputCodec\|~ECS` | 2 s / 15 |
-| Corrector / fold | `~Corrector\|~Fold\|~Ballistic\|~CaveMouth\|~BumpyTunnel\|~SpeedInvariant` | ~5 s |
-| Animation solver | `~Solver\|~Anim\|~Pose\|~Skeleton\|~NoPen` | ~5 s |
-
-(Prefix each term with `FullyQualifiedName`, e.g. `--filter "FullyQualifiedName~Combat|FullyQualifiedName~Grab"`.)
 
 **Adding an `ActionState` subclass requires an authored clip** whose `Type` equals the class name, or
 `ClipBindingTests` fails — and an action that declines `AnimationProgress` needs a *looping* clip.
