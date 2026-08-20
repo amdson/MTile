@@ -99,7 +99,13 @@ public static class ImpactProfiles
         try
         {
             using var stream = TitleContent.TryOpenRead(path);
-            if (stream == null) return;
+            if (stream == null)
+            {
+                // Sim-affecting: a peer on defaults diverges from one on the file.
+                Console.WriteLine($"[ImpactProfiles] {path} not found — running on DEFAULT " +
+                                  "impact tuning. Desyncs against any peer that loaded it.");
+                return;
+            }
             var opts = new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true,

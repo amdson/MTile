@@ -247,6 +247,122 @@ public class RollbackHarnessTests(ITestOutputHelper output)
                          $"desyncs=0; link sent={lossyLink.Sent} dropped={lossyLink.Dropped}.");
     }
 
+    // ── Terrain-aware repro ────────────────────────────────────────────────────────
+    // Probe() above fingerprints players + entities only, and Simulation.Checksum() —
+    // what the wire-level desync guard compares — covers bodies/health/entities and
+    // likewise stops short of terrain. So a terrain-only divergence is invisible to
+    // BOTH the existing tests and the runtime guard, while being the most visible
+    // thing on screen. This pair adds the terrain signature to the comparison.
+
+    // Same shape as SnapshotRoundTripTests.AppendTerrain: dense cell states over a
+    // window, live sprout nodes with exact age, and per-cell damage HP.
+    private static void AppendTerrain(ChunkMap chunks, StringBuilder sb)
+    {
+        for (int gty = -2; gty <= 8; gty++)
+        {
+            sb.Append("T");
+            for (int gtx = -6; gtx <= 22; gtx++)
+                sb.Append((int)chunks.GetCellState(gtx, gty));
+            sb.Append('\n');
+        }
+        foreach (var sp in chunks.ActiveSprouts)
+            sb.Append($"S{sp.Gtx},{sp.Gty}:{sp.Type}|age{Bits(sp.Age)}\n");
+        var dmg = new List<string>();
+        foreach (var d in chunks.Damage.Damaged) dmg.Add($"{d.Key.gtx},{d.Key.gty}={Bits(d.Value)}");
+        dmg.Sort();
+        foreach (var d in dmg) sb.Append("D").Append(d).Append('\n');
+    }
+
+    private static string ProbeFull(Simulation sim)
+    {
+        var sb = new StringBuilder(Probe(sim));
+        AppendTerrain(sim.Chunks, sb);
+        return sb.ToString();
+    }
+
+    // Like Script(), but deliberately hammers the terrain-editing verbs (place / break,
+    // with block-type switches) at a spot that tracks the player. Still a pure function
+    // of frame, so the clean and lossy runs see identical input streams.
+    private static Func<int, PlayerInput> TerrainScript(int seed, float baseX)
+    {
+        var rng = new Random(seed);
+        var cache = new Dictionary<int, PlayerInput>();
+        bool left = false, right = false, space = false; int hold = 0;
+        int built = -1;
+        PlayerInput Build(int f)
+        {
+            if (hold <= 0)
+            {
+                hold = rng.Next(6, 16);
+                int dir = rng.Next(3);
+                left = dir == 1; right = dir == 2;
+                space = rng.Next(4) == 0;
+            }
+            hold--;
+            int pick = rng.Next(4);
+            return new PlayerInput
+            {
+                Left = left, Right = right, Space = space,
+                LeftClick  = rng.Next(3) == 0,     // break
+                RightClick = rng.Next(3) == 0,     // place
+                Num1 = pick == 0, Num2 = pick == 1, Num3 = pick == 2, Num4 = pick == 3,
+                MouseWorldPosition = new Vector2(baseX + (f % 33), 24f + (f % 17)),
+            };
+        }
+        return f =>
+        {
+            if (cache.TryGetValue(f, out var pi)) return pi;
+            for (int g = built + 1; g <= f; g++) cache[g] = Build(g);
+            built = Math.Max(built, f);
+            return cache[f];
+        };
+    }
+
+    [Fact]
+    public void LatencyAndLoss_TerrainAlsoReconstructsTheReference()
+    {
+        const int N = 240;
+
+        var refLink = new LossyLink(seed: 1, minLat: 1, maxLat: 1, drop: 0.0);
+        var reference = new Harness(refLink, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        reference.RunTo(N);
+        string truth = ProbeFull(reference.A.Sim);
+
+        var lossyLink = new LossyLink(seed: 99, minLat: 3, maxLat: 9, drop: 0.25);
+        var lossy = new Harness(lossyLink, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        lossy.RunTo(N);
+
+        Assert.True(lossy.A.RollbackCount > 0 || lossy.B.RollbackCount > 0,
+            "Expected rollbacks under latency+loss");
+
+        string lossyA = ProbeFull(lossy.A.Sim);
+        string lossyB = ProbeFull(lossy.B.Sim);
+
+        output.WriteLine($"Rollbacks A={lossy.A.RollbackCount} B={lossy.B.RollbackCount}; " +
+                         $"desyncs A={lossy.A.DesyncCount} B={lossy.B.DesyncCount}.");
+        output.WriteLine(FirstDiff("A-vs-B", lossyA, lossyB));
+        output.WriteLine(FirstDiff("truth-vs-A", truth, lossyA));
+
+        Assert.Equal(lossyA, lossyB);
+        Assert.Equal(truth, lossyA);
+    }
+
+    // Report the first differing line so a failure names the divergence instead of
+    // dumping two multi-KB blobs.
+    private static string FirstDiff(string label, string x, string y)
+    {
+        if (x == y) return $"{label}: identical";
+        var a = x.Split('\n');
+        var b = y.Split('\n');
+        for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+        {
+            string la = i < a.Length ? a[i] : "<missing>";
+            string lb = i < b.Length ? b[i] : "<missing>";
+            if (la != lb) return $"{label}: first diff at line {i}:\n  {la}\n  {lb}";
+        }
+        return $"{label}: differ in length only";
+    }
+
     [Fact]
     public void DesyncGuard_FiresWhenSimsDiverge()
     {

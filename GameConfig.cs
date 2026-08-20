@@ -52,6 +52,12 @@ public sealed class GameConfig
     // CATCH-UP marker whenever MonoGame reports IsRunningSlowly (fixed-timestep
     // debt — the classic cause of visible lag spirals).
     public bool DebugFrameTimings          { get; set; } = true;
+    // Netcode trace: every 30th sim frame, both peers print frame + sim checksum +
+    // both player positions. Diffing the two peers' logs by frame number locates the
+    // exact frame a desync began — the built-in guard can miss one entirely, since it
+    // only compares checksums for frames confirmed on both ends while still inside the
+    // snapshot ring. Diagnostic only; off by default (it is per-frame console spam).
+    public bool NetTrace                   { get; set; } = false;
     // Master switch for the skeletal animation solver (LM cadence solve + terrain
     // surface extraction, CosmeticUpdateSystem). Off = animators never tick: the
     // rig/sprite-skin/attack-glow read a frozen pose. Perf escape hatch — cosmetic

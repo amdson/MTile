@@ -327,6 +327,14 @@ public class Game1 : Game
                 _sim, _net.LocalPlayerIndex,
                 _ => _localInput,
                 pkt => _net.Send(MTile.Net.InputCodec.Encode(in pkt)));
+            // The desync guard had no subscriber anywhere in the codebase, so a
+            // divergence incremented a counter nobody read: the peers drifted apart on
+            // screen with nothing said in the log. Reporting it is the minimum; recovery
+            // is still open (Plans/INTERNET_READY_PLAN.md).
+            _session.OnDesync = (frame, ours, theirs) =>
+                Console.WriteLine($"[net] DESYNC frame={frame} ours={ours:x16} " +
+                                  $"theirs={theirs:x16} count={_session.DesyncCount} " +
+                                  $"rollbacks={_session.RollbackCount}");
         }
 
         base.Initialize();
@@ -763,6 +771,20 @@ public class Game1 : Game
                 if (!_session.TryStep()) { _simAccum = 0f; break; }
                 _simAccum -= 1f;
                 netSteps++;
+                // Net trace: a periodic per-frame fingerprint both peers emit. The
+                // desync guard only compares checksums for frames that confirm on BOTH
+                // ends while still inside the snapshot ring, so a divergence can slip
+                // past it; lining these up by frame number across two logs shows the
+                // exact frame the sims parted. Off unless explicitly enabled.
+                if (_config.NetTrace && _sim.Frame % 30 == 0)
+                {
+                    var p0 = _sim.Player.Body.Position;
+                    var p1 = _sim.SecondaryPlayers.Count > 0
+                           ? _sim.SecondaryPlayers[0].Player.Body.Position : Vector2.Zero;
+                    Console.WriteLine($"[nettrace] f={_sim.Frame} sum={_sim.Checksum():x16} " +
+                                      $"p0={p0.X:F4},{p0.Y:F4} p1={p1.X:F4},{p1.Y:F4} " +
+                                      $"rb={_session.RollbackCount} ds={_session.DesyncCount}");
+                }
             }
             _prof.End(_sSim, tNetSim);   // includes any rollback resim this frame
             long tNetCos = _prof.Begin();
