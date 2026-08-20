@@ -10,7 +10,7 @@
   // BuildCost is meter units per placed tile (see Character/BuildMeters.cs). Only
   // roughly correlated with MaxHP — foam is dirt-cheap because it evaporates, stone is
   // dear because it lasts. At the move meter's refill rate stone lands ~4/sec.
-  "Stone": { "MaxHP": 2.0, "BuildCost": 4.0  },
+  "Stone": { "MaxHP": 12.0, "BuildCost": 4.0  },
   "Dirt":  { "MaxHP": 1.0, "BuildCost": 1.0  },
   "Sand":  { "MaxHP": 0.5, "BuildCost": 0.5  },
   "Foam":  { "MaxHP": 0.5, "BuildCost": 0.25 }

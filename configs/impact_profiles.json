@@ -15,13 +15,8 @@
   // BounceImpulseThreshold:  below this |vnRel|, no bounce — body sticks
   //                          (prevents quiver near rest).
 
-  // Tuned to the PlayerImpactByVelocityTests spec:
-  //   single jump (impact ≈ 256 px/s, impulse ≈ 640): FSD catches — no break/bounce
-  //   double jump (impact ≈ 363 px/s, impulse ≈ 908): bounce off Stone+Dirt, break Sand
-  //   terminal    (impact ≈ 850 px/s, impulse ≈ 2125): bounce off Stone, break Dirt+Sand
-  // The "FSD catches single jump" half is gated by MovementConfig.MaxGroundEngageVnRel.
   "player": {
-    "Mass": 2.5,
+    "Mass": 5.5,
     "ImpulseThreshold": 100,
     "DamagePerUnitImpulse": 0.0008,
     "BreakThreshold": 800,
