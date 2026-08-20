@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 
@@ -25,6 +25,18 @@ public sealed class GameAudio
     // Landing borrows the footstep clips (SoundKinds.Fallback), so it needs to sit
     // clearly above a step. Drop this toward 1.0 once a dedicated land clip exists.
     private const float LandGain = 1.35f;
+
+    // Footstep placeholder (see Footsteps). Cadence is speed/stride, so the strides are
+    // set against *measured* top ground speed, not against config: an upright walk
+    // settles at 150 px/s — the MaxAirSpeed cap governs it, NOT MaxWalkSpeed's 100 —
+    // and a crouch-walk at 50, which does match CrouchMaxWalkSpeed. 50px and 25px give
+    // ~3.0 and ~2.0 steps/s there. The same two speeds normalize the gain ramp, so
+    // re-measure both if ground locomotion is retuned.
+    private const float StridePx        = 50f;
+    private const float CrouchStridePx  = 25f;
+    private const float TopSpeed        = 150f;
+    private const float CrouchTopSpeed  = 50f;
+    private const float MinStepSpeed    = 25f;  // below this, shuffling in place is silent
 
     private readonly SoundBank  _bank  = new();
     private readonly AudioMixer _mixer;
@@ -90,6 +102,7 @@ public sealed class GameAudio
         DoubleJump(p, index);
         ClimbEffort(p, index);
         Land(p, index);
+        Footsteps(p, index);
     }
 
     // Continuous prerequisite: the movement state is a wall slide. Gain and pitch ride
@@ -180,6 +193,49 @@ public sealed class GameAudio
 
     private static bool IsEffortClimb(MovementState s) => s is LedgePullState || s is MantleState;
 
+    // Footsteps — PLACEHOLDER, sim-only. The honest cadence is the animator's stride
+    // phase (PoseState.Phase, AUDIO_PLAN.md §9); this bucket-counts ground travel
+    // instead, which keeps audio a pure function of snapshotted sim state at the cost
+    // of not lining up with the visible feet. Swap it for the render-derived version
+    // when the real 6-8 clip set lands.
+    private void Footsteps(PlayerCharacter p, int index)
+    {
+        if (!p.IsGrounded) return;
+
+        // Ground locomotion only. StandingState is the walk/run state — there is no
+        // separate RunningState — and CrouchedState is the crouch-walk.
+        bool crouched = p.CurrentState is CrouchedState;
+        if (!crouched && p.CurrentState is not StandingState) return;
+
+        float vx    = p.Body.Velocity.X;
+        float speed = MathF.Abs(vx);
+        if (speed < MinStepSpeed) return;
+
+        // The step edge: the stride bucket the body is in now versus the one it was in
+        // a sim step ago. Reconstructing the previous position from velocity rather
+        // than remembering it is what keeps this derivable — no audio-side state to
+        // roll back. A sim that steps twice inside one rendered frame can miss a
+        // crossing; for a placeholder that is a dropped step, not a desync.
+        float stride     = crouched ? CrouchStridePx : StridePx;
+        float x          = p.Body.Position.X;
+        int   bucket     = (int)MathF.Floor(x / stride);
+        int   prevBucket = (int)MathF.Floor((x - vx * Simulation.FixedDt) / stride);
+        if (bucket == prevBucket) return;
+
+        // Variety on a two-clip set. VariantSeed flips its low bit on consecutive
+        // buckets, so the clips alternate and read as left/right; pitch and gain then
+        // wobble per step so the repeat is never identical. Everything is keyed on the
+        // bucket, so a replayed step picks the same clip and the same wobble.
+        float t    = MathF.Min(speed / (crouched ? CrouchTopSpeed : TopSpeed), 1f);
+        float gain = (crouched ? 0.28f : 0.5f) * (0.75f + 0.35f * t);
+
+        _mixer.Fire(new SoundId(SoundKind.Footstep, index, bucket),
+                    simFrame: p.Frame,
+                    gain:     gain * (1f + 1.6f * Jitter(bucket * 3 + index * 101)),
+                    pitch:    -0.05f * t + 1.8f * Jitter(bucket * 13 + 7),
+                    pos:      p.Body.Position);
+    }
+
     // DoubleJumpingState is excluded on purpose — it has its own clip (see DoubleJump).
     private static bool IsJump(MovementState s)
         => s is JumpingState || s is RunningJumpState || s is CoveredJumpState;
@@ -205,16 +261,18 @@ public sealed class GameAudio
 
     // NOT WIRED, deliberately, though the clips are built and in the bank:
     //
-    //   Footstep — the cadence lives in the animation, not the sim. Deriving it from sim
-    //     state alone would mean re-inventing stride phase; reading the animator would
-    //     make audio depend on a render system rather than on the sim, and would not
-    //     survive a rollback the way everything else here does. Left silent by choice.
     //   Throw — CombatState.RegisterThrown funnels into the same LastHitFrame stamp a
     //     normal hit uses (CombatState.cs:90), so there is nothing render-side that
     //     distinguishes a throw from a hit. Needs its own stamp to sound distinctly.
 
     // ±5% pitch variety on repeated one-shots. Render-side only — the sim never sees it,
     // but it is derived from the event key so a replay picks the same jitter.
+    //
+    // Note it is *linear* in the seed: a caller stepping the seed by a small constant
+    // (bucket * 5, say) walks the hash in small steps and gets a slow drift rather than
+    // per-event scatter. Odd multipliers whose low three digits land mid-range — 3 and
+    // 13 are the ones used here — scatter properly. Worth checking when wiring a sound
+    // that fires in a long repeated run, which is why the footsteps use those two.
     private static float Jitter(int seed)
     {
         int h = (seed * 83492791) & 0x7fffffff;
