@@ -363,6 +363,171 @@ public class RollbackHarnessTests(ITestOutputHelper output)
         return $"{label}: differ in length only";
     }
 
+    // ── Burst loss: what actually threatens the protocol ───────────────────────────
+    // Independent per-packet loss (LossyLink) is the wrong model for a real link, where
+    // loss is correlated — a Wi-Fi hiccup or a hand-off drops a run of packets, not a
+    // scattering. That matters because the two constants defending against loss are very
+    // differently sized: BufferLen=60 frames (1s) of snapshot ring, but RedundancyWindow=8
+    // means frame f only rides in packets f..f+7. Lose all EIGHT and f is gone for good —
+    // no later packet carries it — so the tighter bound is 8 frames (~133ms), not 60.
+    //
+    // The stall cap makes a total blackout harmless: _highestRemote stops advancing, both
+    // peers stall, and they resume together. The dangerous shape is a burst that ends —
+    // frames f..f+7 lost, f+8 delivered — because _highestRemote jumps the hole and the
+    // sim walks on with an imputed input that can never be corrected.
+    private sealed class BurstLink
+    {
+        private struct Pending { public long DeliverTick; public InputPacket Packet; }
+        private readonly List<Pending> _toA = new(), _toB = new();
+        private readonly Random _rng;
+        private readonly int _lat, _burst, _gap;
+        private int _sinceBurst;
+        private int _burstLeft;
+        public int Sent, Dropped, Bursts;
+
+        // Every `gap` packets, drop `burst` consecutive ones.
+        private readonly bool _oneWay;
+
+        // oneWay: drop only on the B→A path. A symmetric blackout is the SAFE shape —
+        // both peers' _highestRemote freeze, both stall, and they resume in step. One
+        // direction failing is what lets A keep hearing... nothing, and walk past a hole.
+        public BurstLink(int seed, int lat, int burst, int gap, bool oneWay = false)
+        { _rng = new Random(seed); _lat = lat; _burst = burst; _gap = gap; _oneWay = oneWay; }
+
+        public void SendToA(long now, in InputPacket p) => Enqueue(_toA, now, p, lossy: true);
+        public void SendToB(long now, in InputPacket p) => Enqueue(_toB, now, p, lossy: !_oneWay);
+
+        private void Enqueue(List<Pending> q, long now, in InputPacket p, bool lossy)
+        {
+            Sent++;
+            if (!lossy) { q.Add(new Pending { DeliverTick = now + _lat, Packet = p }); return; }
+            if (_burstLeft > 0) { _burstLeft--; Dropped++; return; }
+            if (++_sinceBurst >= _gap) { _sinceBurst = 0; _burstLeft = _burst - 1; Bursts++; Dropped++; return; }
+            q.Add(new Pending { DeliverTick = now + _lat, Packet = p });
+        }
+
+        public void DeliverDue(long now, List<InputPacket> toA, List<InputPacket> toB)
+        { Drain(_toA, now, toA); Drain(_toB, now, toB); }
+        public void DeliverAll(List<InputPacket> toA, List<InputPacket> toB)
+        { Drain(_toA, long.MaxValue, toA); Drain(_toB, long.MaxValue, toB); }
+        private static void Drain(List<Pending> q, long now, List<InputPacket> outList)
+        {
+            for (int i = q.Count - 1; i >= 0; i--)
+                if (q[i].DeliverTick <= now) { outList.Add(q[i].Packet); q.RemoveAt(i); }
+        }
+        public bool Idle => _toA.Count == 0 && _toB.Count == 0;
+    }
+
+    // Harness above is hardwired to LossyLink; this mirrors it over BurstLink.
+    private sealed class BurstHarness
+    {
+        public readonly RollbackSession A, B;
+        private readonly BurstLink _link;
+        private long _tick;
+        private readonly List<InputPacket> _toA = new(), _toB = new();
+
+        public BurstHarness(BurstLink link, Func<int, PlayerInput> sa, Func<int, PlayerInput> sb)
+        {
+            _link = link;
+            A = new RollbackSession(BuildSim(), 0, sa, p => _link.SendToB(_tick, p));
+            B = new RollbackSession(BuildSim(), 1, sb, p => _link.SendToA(_tick, p));
+        }
+
+        public void RunTo(int n)
+        {
+            int guard = 0, guardMax = Math.Max(4000, n * 80);
+            while ((A.Frame < n || B.Frame < n) && guard++ < guardMax)
+            {
+                _toA.Clear(); _toB.Clear();
+                _link.DeliverDue(_tick, _toA, _toB);
+                foreach (var p in _toA) A.Receive(p);
+                foreach (var p in _toB) B.Receive(p);
+                if (A.Frame < n) A.TryStep(); else A.ProcessInbox();
+                if (B.Frame < n) B.TryStep(); else B.ProcessInbox();
+                _tick++;
+            }
+            guard = 0;
+            do
+            {
+                _toA.Clear(); _toB.Clear();
+                _link.DeliverAll(_toA, _toB);
+                foreach (var p in _toA) A.Receive(p);
+                foreach (var p in _toB) B.Receive(p);
+                A.ProcessInbox(); B.ProcessInbox();
+            }
+            while ((!_link.Idle || !A.InboxEmpty || !B.InboxEmpty) && guard++ < 10000);
+        }
+        public bool Reached(int n) => A.Frame >= n && B.Frame >= n;
+    }
+
+    [Theory]
+    // burst length in packets ≈ ms of outage at 60/s. 7 is inside RedundancyWindow=8;
+    // 8 and 12 are past it.
+    [InlineData(4,  120, false)]
+    [InlineData(7,  120, false)]
+    [InlineData(8,  120, false)]
+    [InlineData(12, 120, false)]
+    [InlineData(4,  120, true)]
+    [InlineData(8,  120, true)]
+    [InlineData(12, 120, true)]
+    [InlineData(20, 120, true)]
+    public void BurstLoss_ShowsWhereTheProtocolBreaks(int burst, int gap, bool oneWay)
+    {
+        const int N = 400;
+        var link = new BurstLink(seed: 7, lat: 2, burst: burst, gap: gap, oneWay: oneWay);
+        var h = new BurstHarness(link, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        h.RunTo(N);
+
+        string pa = h.Reached(N) ? ProbeFull(h.A.Sim) : "<did not reach N>";
+        string pb = h.Reached(N) ? ProbeFull(h.B.Sim) : "<did not reach N>";
+        bool agree = pa == pb;
+
+        output.WriteLine(
+            $"burst={burst} (~{burst * 1000 / 60}ms) gap={gap} oneWay={oneWay} bursts={link.Bursts} " +
+            $"dropped={link.Dropped}/{link.Sent} | reachedN={h.Reached(N)} " +
+            $"rollbacks A={h.A.RollbackCount} B={h.B.RollbackCount} " +
+            $"worstDepth A={h.A.WorstRollbackDepth} B={h.B.WorstRollbackDepth} " +
+            $"missed A={h.A.MissedRollbacks} B={h.B.MissedRollbacks} " +
+            $"desync A={h.A.DesyncCount} B={h.B.DesyncCount} | peersAgree={agree}");
+        if (!agree) output.WriteLine(FirstDiff("A-vs-B", pa, pb));
+
+        // Measurement, not a gate: the point is the printed table. The one hard
+        // invariant is that a rollback never needed a snapshot older than the ring —
+        // if that trips, BufferLen (not RedundancyWindow) is the binding constraint.
+        Assert.True(h.A.WorstRollbackDepth < RollbackSession.BufferLen
+                 && h.B.WorstRollbackDepth < RollbackSession.BufferLen,
+            $"rollback depth reached the {RollbackSession.BufferLen}-frame ring");
+    }
+
+    [Fact(Skip = "Known gap: one-directional loss of >= RedundancyWindow (8) consecutive " +
+                 "packets diverges the peers permanently, and the desync guard reports " +
+                 "nothing. Un-skip when input recovery (retransmit/NAK) or a state resync " +
+                 "lands. Measured by BurstLoss_ShowsWhereTheProtocolBreaks.")]
+    public void OneDirectionalBurst_PastRedundancyWindow_ShouldStillConverge()
+    {
+        // Frame f rides only in packets f..f+7 (RedundancyWindow = 8). Lose all eight in
+        // ONE direction — the other direction stays clean, so the far peer keeps producing
+        // frames, _highestRemote steps over the hole, and the stall cap never engages —
+        // and f is unrecoverable: no later packet carries it. The imputed repeat-last
+        // input stands forever and the sims part.
+        //
+        // Two things make this worse than "rare packet loss":
+        //   • Nothing detects it. _confirmedThrough is the highest CONTIGUOUSLY confirmed
+        //     frame, so a permanent hole pins it, ConfirmedFrame stops advancing, and
+        //     CheckPendingChecksums' `frame > ConfirmedFrame` guard skips every claim
+        //     from then on. The guard goes blind exactly when it is needed — measured:
+        //     DesyncCount stays 0 while the peers visibly disagree.
+        //   • Nothing recovers it. Rollback only replays from a snapshot in the ring;
+        //     there is no state transfer, so terrain in particular never re-converges.
+        //
+        // Note BufferLen (60) is NOT the constraint here — measured worst depth is ~5.
+        const int N = 400;
+        var link = new BurstLink(seed: 7, lat: 2, burst: 12, gap: 120, oneWay: true);
+        var h = new BurstHarness(link, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        h.RunTo(N);
+        Assert.Equal(ProbeFull(h.A.Sim), ProbeFull(h.B.Sim));
+    }
+
     [Fact]
     public void DesyncGuard_FiresWhenSimsDiverge()
     {
