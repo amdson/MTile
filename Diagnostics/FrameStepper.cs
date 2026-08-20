@@ -64,9 +64,19 @@ public sealed class FrameStepper
         }
         else if (stepDown && Paused)
         {
-            // TODO(human): hold-to-repeat. _heldFor is seconds the key has been down and
+            // hold-to-repeat. _heldFor is seconds the key has been down and
             // _repeatAccum is seconds banked since the last repeat fired; advance both by
             // realDt and add to _pending when a repeat is due.
+            _heldFor += realDt;
+            if (_heldFor >= RepeatDelay)
+            {
+                _repeatAccum += realDt;
+                if (_repeatAccum >= RepeatInterval)
+                {
+                    _pending++;
+                    _repeatAccum = 0f;
+                }
+            }
         }
         else
         {
