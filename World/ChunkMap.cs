@@ -64,9 +64,55 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     {
         ref var t = ref chunk.Tiles[tx, ty];
         _journal.RecordTileWrite(chunk.ChunkPos, tx, ty, t.State, t.Type);
+        TerrainHash ^= CellHash(chunk.ChunkPos, tx, ty, t.State, t.Type);   // out with the old
         t.State  = state;
         t.Type   = type;
         t.Sprout = sprout;
+        TerrainHash ^= CellHash(chunk.ChunkPos, tx, ty, state, type);       // in with the new
+    }
+
+    // ── Dense-grid fingerprint (desync guard) ───────────────────────────────────
+    // Simulation.Checksum() ran on bodies and entities only, so a terrain-only
+    // divergence was invisible on the wire — the worst kind to miss, since terrain is
+    // cumulative and rollback is the only thing that ever corrects it.
+    //
+    // Maintained incrementally, because Checksum() runs every frame (and again per
+    // replayed frame inside a rollback): re-hashing 256 cells × every loaded chunk there
+    // would land squarely on the sim hot path. XOR is what makes that work — it is
+    // commutative, so chunk iteration order can't affect the result, and self-inverse,
+    // so the journal's RewindTo undoes hash contributions for free through RevertTile.
+    // A default cell hashes to 0, so lazily-created empty chunks contribute nothing and
+    // dropping one on rewind needs no special handling.
+    public ulong TerrainHash { get; private set; }
+
+    private static ulong CellHash(Point cp, int tx, int ty, TileState state, TileType type)
+    {
+        if (state == TileState.Empty && type == default) return 0UL;
+        ulong k = (ulong)(uint)cp.X * 0x9E3779B97F4A7C15UL
+                ^ (ulong)(uint)cp.Y * 0xC2B2AE3D27D4EB4FUL
+                ^ (ulong)(uint)(tx * 31 + ty) * 0x165667B19E3779F9UL
+                ^ ((ulong)(byte)state << 56)
+                ^ ((ulong)(byte)type  << 48);
+        k ^= k >> 33; k *= 0xFF51AFD7ED558CCDUL;
+        k ^= k >> 33; k *= 0xC4CEB9FE1A85EC53UL;
+        return k ^ (k >> 33);
+    }
+
+    // Seed the fingerprint from the current grid. Terrain arrives via TerrainLoader
+    // writing cells directly (not through WriteTile), so without this the hash would
+    // only cover EDITS — and two peers that started from different levels would agree
+    // until someone dug. Called once after load; O(cells), never on the hot path.
+    public void RecomputeTerrainHash()
+    {
+        ulong h = 0;
+        foreach (var (pos, chunk) in _dict)
+            for (int tx = 0; tx < Chunk.Size; tx++)
+                for (int ty = 0; ty < Chunk.Size; ty++)
+                {
+                    ref var t = ref chunk.Tiles[tx, ty];
+                    h ^= CellHash(pos, tx, ty, t.State, t.Type);
+                }
+        TerrainHash = h;
     }
 
     // Set when a break (or a sprout cancellation) may have stranded Pending
@@ -530,9 +576,11 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     {
         if (!_dict.TryGetValue(chunkPos, out var chunk)) return;
         ref var t = ref chunk.Tiles[tx, ty];
+        TerrainHash ^= CellHash(chunkPos, tx, ty, t.State, t.Type);
         t.State  = prevState;
         t.Type   = prevType;
         t.Sprout = null;   // re-linked in RestoreTerrain step 3 if this cell is Sprouting
+        TerrainHash ^= CellHash(chunkPos, tx, ty, prevState, prevType);
     }
 
     // ── Full dense capture (in-game recorder) ───────────────────────────────────

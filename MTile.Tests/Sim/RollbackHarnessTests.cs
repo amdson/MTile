@@ -576,6 +576,61 @@ public class RollbackHarnessTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void Checksum_CatchesATerrainOnlyDifference()
+    {
+        // The guard used to fingerprint bodies/health/entities only, so two sims could
+        // hold visibly different worlds and report identical checksums forever. Change
+        // ONE tile, far from both players so no body is perturbed, and the checksum must
+        // move — while the player probe stays identical, proving it is the terrain that
+        // is being seen and not a knock-on physics difference.
+        var a = BuildSim();
+        var b = BuildSim();
+        for (int f = 0; f < 30; f++)
+        {
+            var i0 = Script(11)(f);
+            var i1 = Script(22)(f);
+            a.Step(i0, i1);
+            b.Step(i0, i1);
+        }
+        Assert.Equal(a.Checksum(), b.Checksum());   // identical inputs ⇒ identical state
+
+        // Floor()'s solid row is gty 3, spanning gtx -4..19; the players sit near gtx
+        // 3-7 and cannot reach the far right end in the frames run above.
+        Assert.True(b.Chunks.BreakCell(19, 3), "expected a solid cell to break");
+
+        Assert.NotEqual(a.Checksum(), b.Checksum());
+        Assert.Equal(Probe(a), Probe(b));           // bodies untouched — terrain alone moved
+    }
+
+    [Fact]
+    public void TerrainHash_IsOrderIndependentAndRestores()
+    {
+        // Two properties the fold depends on. Order-independence: the same edits applied
+        // in a different sequence must land on the same hash, because a rollback rebuilds
+        // the sparse tables and their iteration order is not something the wire guard
+        // should be sensitive to. Reversibility: undoing an edit must return the exact
+        // prior hash, which is what lets the journal rewind carry the hash for free.
+        var s1 = BuildSim();
+        var s2 = BuildSim();
+        ulong before = s1.Chunks.TerrainHash;
+
+        s1.Chunks.BreakCell(15, 3);
+        s1.Chunks.BreakCell(17, 3);
+        s2.Chunks.BreakCell(17, 3);
+        s2.Chunks.BreakCell(15, 3);
+        Assert.Equal(s1.Chunks.TerrainHash, s2.Chunks.TerrainHash);
+        Assert.NotEqual(before, s1.Chunks.TerrainHash);
+
+        // Material matters, not just occupancy: the same cell filled with two different
+        // tile types must not collide to the same hash.
+        var s3 = BuildSim();
+        var s4 = BuildSim();
+        s3.Chunks.ForceSprout(12, 1, TileType.Stone);
+        s4.Chunks.ForceSprout(12, 1, TileType.Sand);
+        Assert.NotEqual(s3.Chunks.TerrainHash, s4.Chunks.TerrainHash);
+    }
+
+    [Fact]
     public void DesyncGuard_FiresWhenSimsDiverge()
     {
         // Force a divergence the checksum is meant to catch: peer B builds its sim with
