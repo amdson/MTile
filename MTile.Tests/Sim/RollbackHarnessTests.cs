@@ -384,6 +384,7 @@ public class RollbackHarnessTests(ITestOutputHelper output)
         private int _sinceBurst;
         private int _burstLeft;
         public int Sent, Dropped, Bursts;
+        public bool Blackout;   // hard-cut the B->A path (dead peer)
 
         // Every `gap` packets, drop `burst` consecutive ones.
         private readonly bool _oneWay;
@@ -400,6 +401,7 @@ public class RollbackHarnessTests(ITestOutputHelper output)
         private void Enqueue(List<Pending> q, long now, in InputPacket p, bool lossy)
         {
             Sent++;
+            if (Blackout && lossy) { Dropped++; return; }
             if (!lossy) { q.Add(new Pending { DeliverTick = now + _lat, Packet = p }); return; }
             if (_burstLeft > 0) { _burstLeft--; Dropped++; return; }
             if (++_sinceBurst >= _gap) { _sinceBurst = 0; _burstLeft = _burst - 1; Bursts++; Dropped++; return; }
@@ -458,6 +460,21 @@ public class RollbackHarnessTests(ITestOutputHelper output)
             while ((!_link.Idle || !A.InboxEmpty || !B.InboxEmpty) && guard++ < 10000);
         }
         public bool Reached(int n) => A.Frame >= n && B.Frame >= n;
+
+        // Step both peers a fixed number of times with no target frame — for watching
+        // what a peer does when the other is simply gone.
+        public void RunFor(int steps)
+        {
+            for (int i = 0; i < steps; i++)
+            {
+                _toA.Clear(); _toB.Clear();
+                _link.DeliverDue(_tick, _toA, _toB);
+                foreach (var p in _toA) A.Receive(p);
+                foreach (var p in _toB) B.Receive(p);
+                A.TryStep(); B.TryStep();
+                _tick++;
+            }
+        }
     }
 
     [Theory]
@@ -471,6 +488,9 @@ public class RollbackHarnessTests(ITestOutputHelper output)
     [InlineData(8,  120, true)]
     [InlineData(12, 120, true)]
     [InlineData(20, 120, true)]
+    // Past MaxSendWindow (60): the re-send can no longer reach back far enough.
+    [InlineData(45,  150, true)]
+    [InlineData(90,  200, true)]
     public void BurstLoss_ShowsWhereTheProtocolBreaks(int burst, int gap, bool oneWay)
     {
         const int N = 400;
@@ -499,33 +519,60 @@ public class RollbackHarnessTests(ITestOutputHelper output)
             $"rollback depth reached the {RollbackSession.BufferLen}-frame ring");
     }
 
-    [Fact(Skip = "Known gap: one-directional loss of >= RedundancyWindow (8) consecutive " +
-                 "packets diverges the peers permanently, and the desync guard reports " +
-                 "nothing. Un-skip when input recovery (retransmit/NAK) or a state resync " +
-                 "lands. Measured by BurstLoss_ShowsWhereTheProtocolBreaks.")]
-    public void OneDirectionalBurst_PastRedundancyWindow_ShouldStillConverge()
+    [Fact]
+    public void OneDirectionalBurst_PastRedundancyWindow_StillConverges()
     {
-        // Frame f rides only in packets f..f+7 (RedundancyWindow = 8). Lose all eight in
-        // ONE direction — the other direction stays clean, so the far peer keeps producing
-        // frames, _highestRemote steps over the hole, and the stall cap never engages —
-        // and f is unrecoverable: no later packet carries it. The imputed repeat-last
-        // input stands forever and the sims part.
+        // This diverged permanently before the stall gate moved onto _confirmedThrough
+        // and SendWindow became ack-driven. With a fixed redundancy window, frame f rode
+        // only in packets f..f+7; losing all eight in ONE direction (the other stays
+        // clean, so the far peer keeps producing frames and the old _highestRemote gate
+        // never engaged) made f unrecoverable, the imputed input stood forever, and the
+        // sims parted — with DesyncCount stuck at 0, because a permanent hole pins
+        // _confirmedThrough and CheckPendingChecksums skips every later claim.
         //
-        // Two things make this worse than "rare packet loss":
-        //   • Nothing detects it. _confirmedThrough is the highest CONTIGUOUSLY confirmed
-        //     frame, so a permanent hole pins it, ConfirmedFrame stops advancing, and
-        //     CheckPendingChecksums' `frame > ConfirmedFrame` guard skips every claim
-        //     from then on. The guard goes blind exactly when it is needed — measured:
-        //     DesyncCount stays 0 while the peers visibly disagree.
-        //   • Nothing recovers it. Rollback only replays from a snapshot in the ring;
-        //     there is no state transfer, so terrain in particular never re-converges.
-        //
-        // Note BufferLen (60) is NOT the constraint here — measured worst depth is ~5.
+        // Now the sender re-sends from the peer's ack until it lands, and the receiver
+        // will not step past a frame it could no longer correct, so neither half of that
+        // can happen. Guarding both halves at once: peers must AGREE (no fork) and must
+        // REACH N (no deadlock — a stalled peer keeps transmitting so acks still flow).
         const int N = 400;
         var link = new BurstLink(seed: 7, lat: 2, burst: 12, gap: 120, oneWay: true);
         var h = new BurstHarness(link, TerrainScript(11, 70f), TerrainScript(22, 95f));
         h.RunTo(N);
+        Assert.True(h.Reached(N), "peers deadlocked instead of healing the hole");
         Assert.Equal(ProbeFull(h.A.Sim), ProbeFull(h.B.Sim));
+    }
+
+    [Fact]
+    public void DeadPeer_StallsRatherThanForking_AndReportsIt()
+    {
+        // A peer that goes away for good. The gate holds the survivor at
+        // _confirmedThrough + slack forever, which is correct — it must not invent a
+        // timeline it can never reconcile — but silence would read as a hang, so
+        // OnStallTimeout names the frame we are stuck behind.
+        const int Cut = 40;
+        var link = new BurstLink(seed: 3, lat: 1, burst: 1, gap: int.MaxValue);
+        var h = new BurstHarness(link, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        h.RunTo(Cut);
+
+        int stalledAt = -1;
+        h.A.OnStallTimeout = f => stalledAt = f;
+
+        // Cut the B→A path entirely and let A spin well past the timeout.
+        link.Blackout = true;
+        int before = h.A.Frame;
+        h.RunFor(RollbackSession.StallTimeoutSteps + 60);
+
+        // The invariant is about distance from CONFIRMED input, not from the cut: packets
+        // already in flight keep confirming for a tick or two after the link dies, so the
+        // frame count advances slightly more than the slack.
+        int ahead = h.A.Frame - h.A.ConfirmedThrough;
+        output.WriteLine($"A advanced {h.A.Frame - before} frames after the cut, now {ahead} " +
+                         $"ahead of confirmed (gate allows {RollbackSession.InputFrameDelay + RollbackSession.StallSlack}); " +
+                         $"stalls={h.A.StallCount} timeoutAtFrame={stalledAt}");
+
+        Assert.True(ahead <= RollbackSession.InputFrameDelay + RollbackSession.StallSlack,
+            $"survivor ran {ahead} frames past the last confirmed input — further than it could correct");
+        Assert.True(stalledAt >= 0, "OnStallTimeout never fired for a dead peer");
     }
 
     [Fact]

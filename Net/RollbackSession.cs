@@ -30,6 +30,13 @@ public sealed class RollbackSession
     public const int InputFrameDelay  = 3;
     public const int StallSlack       = 3;
     public const int RedundancyWindow = 8;
+    // Ceiling on the ack-driven re-send (Count is a byte on the wire, and a packet this
+    // size is already ~620 bytes). Reaching it means the peer has not acked for a second;
+    // the stall gate is holding us, so nothing is lost by not going further back.
+    public const int MaxSendWindow    = BufferLen;
+    // Consecutive stalled steps before OnStallTimeout fires (~10s at 60fps). Long enough
+    // that ordinary loss never trips it, short enough to not read as a hang.
+    public const int StallTimeoutSteps = 600;
 
     private readonly Simulation _sim;
     private readonly int        _localPlayer;          // 0 or 1
@@ -50,8 +57,14 @@ public sealed class RollbackSession
     private readonly List<(int Frame, ulong Checksum)> _pendingClaims = new();
 
     private int _frame;             // next frame to simulate (and the sim's current frame)
-    private int _highestRemote;     // highest remote frame ever received
+    private int _highestRemote;     // highest remote frame ever received (diagnostics only)
     private int _confirmedThrough;  // highest frame F with remote[0..F] all confirmed
+    // Peer's cumulative ack of OUR inputs — the highest frame it has confirmed from us.
+    // -1 until it tells us, so the first packet still starts at frame 0.
+    private int _remoteAckedThrough = -1;
+    private int _consecutiveStalls;
+    // Newest frame we have scheduled a local input for; the window a stalled peer re-sends.
+    private int _newestScheduled = -1;
 
     public int        Frame         => _frame;
     public int        RollbackCount { get; private set; }
@@ -74,12 +87,22 @@ public sealed class RollbackSession
     // This is the metric that maps to felt lag — a stalled frame is a frame where the
     // local player's world does not advance.
     public int  StallCount         { get; private set; }
+    // Highest frame with every remote input real (no prediction) — the frame the stall
+    // gate measures from. Exposed for diagnostics/tests: Frame - ConfirmedThrough is how
+    // far the sim has run on predicted input, and the gate bounds it by
+    // InputFrameDelay + StallSlack.
+    public int  ConfirmedThrough   => _confirmedThrough;
     // Highest frame whose state is final on our side: remote inputs confirmed AND the
     // frame has been stepped. Checksum comparisons only happen at/below this.
     private int ConfirmedFrame => Math.Min(_confirmedThrough, _frame - 1);
     // Fired when a peer's checksum claim disagrees with ours for a frame both have
     // confirmed: (frame, ourChecksum, theirChecksum). Hard desync — see §F.
     public Action<int, ulong, ulong> OnDesync;
+    // Fired once when the stall gate has held for StallTimeoutSteps consecutive steps:
+    // the peer has gone quiet, or a hole is not healing. Argument is _confirmedThrough —
+    // the frame we are stuck behind. The session keeps stalling; recovery is the host's
+    // call (reconnect / abandon). Re-armed as soon as a frame runs.
+    public Action<int> OnStallTimeout;
 
     public RollbackSession(Simulation sim, int localPlayer,
                            Func<int, PlayerInput> pollLocal, Action<InputPacket> send)
@@ -156,13 +179,38 @@ public sealed class RollbackSession
         // 1–2. Reconcile arrivals and roll back if a prediction was wrong.
         ProcessInbox();
 
-        // 3. Stall cap: never simulate more than InputFrameDelay + StallSlack frames
-        //    ahead of the newest input we've heard from the peer.
-        if (_frame >= _highestRemote + InputFrameDelay + StallSlack)
+        // 3. Stall cap: never advance past a frame we could no longer correct.
+        //
+        //    This keys off _confirmedThrough (highest frame with remote[0..F] all real),
+        //    NOT _highestRemote (highest frame ever seen). The difference only shows up
+        //    when there is a HOLE — an unreceived frame with received frames after it.
+        //    Gating on _highestRemote let the sim step straight over such a hole; the
+        //    missing input could then fall out of the ring, at which point ReconcileRemote
+        //    drops it ("older than the buffer window") and the peers are forked for good,
+        //    silently, because _confirmedThrough also pins there and blinds the checksum
+        //    guard. Gating on _confirmedThrough makes that unreachable: an input can never
+        //    arrive too late to apply, because we never went anywhere without it.
+        //
+        //    In normal play this is a no-op. Every packet carries a run of consecutive
+        //    inputs (SendWindow), so any arrival confirms a contiguous stretch and
+        //    _confirmedThrough tracks _highestRemote exactly — jitter and reorder included.
+        //    It only engages when a gap outlives what the sender is still re-sending.
+        if (_frame >= _confirmedThrough + InputFrameDelay + StallSlack)
         {
             StallCount++;
+            // Keep sending while stalled. Sending used to happen only after a successful
+            // step, which deadlocks under this gate: a stalled peer goes silent, its
+            // silence stalls the other, and with neither transmitting no ack ever moves
+            // and the hole can never heal. Re-sending the same window costs one packet per
+            // rendered frame and is what actually breaks a mutual stall.
+            if (_newestScheduled >= 0) SendWindow(_newestScheduled);
+            // Backstop: stalling forever is the honest response to an unrecoverable hole,
+            // but it must not look like a hang. Report it once so the host can decide.
+            if (++_consecutiveStalls == StallTimeoutSteps)
+                OnStallTimeout?.Invoke(_confirmedThrough);
             return false;
         }
+        _consecutiveStalls = 0;
 
         // 4. Predict the remote input for the frame about to run (repeat-last).
         EnsurePredicted(_remote, _frame);
@@ -179,6 +227,7 @@ public sealed class RollbackSession
         int scheduleFrame = sampleFrame + InputFrameDelay;
         var localInput    = _pollLocal(sampleFrame);
         _local.Set(scheduleFrame, localInput, imputed: false);
+        _newestScheduled = scheduleFrame;
         SendWindow(scheduleFrame);
         return true;
     }
@@ -191,10 +240,13 @@ public sealed class RollbackSession
         int rollbackTo = int.MaxValue;
         foreach (var pkt in _inbox)
         {
+            // Cumulative + monotonic: a reordered older packet must not walk the ack back.
+            if (pkt.AckThrough > _remoteAckedThrough) _remoteAckedThrough = pkt.AckThrough;
             for (int i = 0; i < pkt.Inputs.Length; i++)
             {
                 int frame = pkt.FirstFrame + i;
                 if (frame > _highestRemote) _highestRemote = frame;
+
 
                 if (frame >= _frame)
                 {
@@ -263,8 +315,19 @@ public sealed class RollbackSession
 
     private void SendWindow(int newestFrame)
     {
-        int count = Math.Min(RedundancyWindow, newestFrame + 1);
-        int first = newestFrame - count + 1;
+        // Cover everything the peer has not yet acked, with a floor of RedundancyWindow
+        // (so a current ack still carries spare copies and a single drop costs no round
+        // trip) and a ceiling of MaxSendWindow (so a long outage can't grow the packet
+        // without bound — Count is one byte on the wire).
+        //
+        // The fixed window alone was the deeper problem: frame f rode only in packets
+        // f..f+RedundancyWindow-1, so losing that run made f unrecoverable at any ring
+        // size. Re-sending from the ack means f keeps going out until the peer confirms
+        // it, which — paired with the stall gate above — removes "too late to apply".
+        int first = Math.Min(_remoteAckedThrough + 1, newestFrame - RedundancyWindow + 1);
+        first = Math.Max(first, newestFrame - MaxSendWindow + 1);
+        first = Math.Max(first, 0);
+        int count = newestFrame - first + 1;
         var window = new PlayerInput[count];
         for (int i = 0; i < count; i++) window[i] = _local.InputAt(first + i);
 
@@ -281,6 +344,7 @@ public sealed class RollbackSession
             Inputs        = window,
             ChecksumFrame = haveCs ? csFrame : -1,
             Checksum      = haveCs ? _checksums[csIdx] : 0UL,
+            AckThrough    = _confirmedThrough,
         });
     }
 }

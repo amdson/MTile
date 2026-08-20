@@ -331,6 +331,12 @@ public class Game1 : Game
             // divergence incremented a counter nobody read: the peers drifted apart on
             // screen with nothing said in the log. Reporting it is the minimum; recovery
             // is still open (Plans/INTERNET_READY_PLAN.md).
+            // The stall gate refuses to advance past a frame it could no longer correct,
+            // which is right, but an unreachable peer then looks like a freeze. Say which.
+            _session.OnStallTimeout = confirmed =>
+                Console.WriteLine($"[net] STALLED {MTile.Net.RollbackSession.StallTimeoutSteps} " +
+                                  $"steps waiting on the peer past frame {confirmed} — " +
+                                  "connection is likely gone.");
             _session.OnDesync = (frame, ours, theirs) =>
                 Console.WriteLine($"[net] DESYNC frame={frame} ours={ours:x16} " +
                                   $"theirs={theirs:x16} count={_session.DesyncCount} " +
