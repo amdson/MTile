@@ -116,7 +116,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 left, top, left + Chunk.TileSize, top + Chunk.TileSize,
                 new Vector2(t.WorldCenterX, t.WorldCenterY),
                 Vector2.Zero,
-                TileWorld.TileShape);
+                TileWorld.TileShape,
+                SolidShapeSource.Tile, t.Gtx, t.Gty);
         }
 
         // A growing sprout emits one full-size volume per supporting face, each
@@ -132,7 +133,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             if (c.Y + half <= region.Top  || c.Y - half >= region.Bottom) continue;
             yield return new SolidShapeRef(
                 c.X - half, c.Y - half, c.X + half, c.Y + half,
-                c, s.VolumeVelocity(face), TileWorld.TileShape);
+                c, s.VolumeVelocity(face), TileWorld.TileShape,
+                SolidShapeSource.Sprout, s.Gtx, s.Gty);
         }
     }
 
@@ -463,6 +465,22 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     {
         var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
         if (!_dict.TryGetValue(chunkPos, out var chunk)) return false;
+        // A Sprouting cell is destructible too. It used to be exempt purely because the
+        // guard tested IsSolid (== State.Solid), so the one tile a body can be actively
+        // crushed by was the one tile nothing could break. Cancel the node first: its
+        // face volumes are live physics shapes read every step, so leaving it in
+        // Graph.Growing would keep the shape colliding after the cell went Empty.
+        if (chunk.Tiles[tx, ty].State == TileState.Sprouting)
+        {
+            var node = chunk.Tiles[tx, ty].Sprout;
+            var sproutType = chunk.Tiles[tx, ty].Type;
+            if (node != null) Graph.Remove(node);
+            WriteTile(chunk, tx, ty, TileState.Empty, sproutType, null);
+            Damage.Clear(gtx, gty);
+            DropSupportFor(gtx, gty);
+            OnTileBroken?.Invoke(CellCenter(gtx, gty), sproutType);
+            return true;
+        }
         if (!chunk.Tiles[tx, ty].IsSolid) return false;
         var brokenType = chunk.Tiles[tx, ty].Type;
         // Empty the cell (journaled). Type is preserved in the prior-state record so a

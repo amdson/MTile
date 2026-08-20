@@ -100,6 +100,15 @@ public class PlayerCharacter : IHittable
     private const float CrushImpulseThreshold = 700f;
     private const float CrushDamagePerImpulse = 0.003f;
     private const float CrushCooldownSeconds  = 0.2f;   // ≈ the original 6 frames at 30 fps
+    // Sprout crush (a growing block wedged us against terrain, so physics destroyed it).
+    // Flat HP per destroyed cell against MaxHealth = 3, so ~6 crush events down you at
+    // one cell each — punishing enough that being walled in is a real threat, survivable
+    // enough that a single bad sprout is not a death sentence.
+    private const float SproutCrushDamage = 0.5f;
+    // Impulse magnitude reported to OnHitRegistered for hitstun/stun scaling. A squeeze
+    // has no real |vnRel| to report, so this stands in for "how hard that felt" — just
+    // over CrushImpulseThreshold, so it reads as a solid hit and nothing more.
+    private const float SproutCrushImpulseFeel = 750f;
     private int _lastCrushFrame = int.MinValue / 2;
 
     // Fast HP regen (COMBAT_FEEL_PLAN Phase 5). HP is a quick-recovering pool now that
@@ -411,6 +420,21 @@ public class PlayerCharacter : IHittable
             // mute: a hard landing briefly gates jump ("give me a sec") but doesn't
             // turn walking to mush — that treatment is for combat hits.
             _abilities.Combat.OnHitRegistered(_frame, Body.LastImpulseMagnitude, dt,
+                hitstunSecondsOverride: 0.27f, muteControl: false);
+            _lastCrushFrame = _frame;
+        }
+
+        // Sprout crush: a block grew into us and the depenetration solver could not push
+        // us clear, so PhysicsWorld destroyed it (see CrushOverlappingSprouts). Flat cost
+        // per event rather than impulse-scaled — the trigger is binary ("physics gave
+        // up"), and a slow squeeze carries almost no |vnRel|, which is exactly why the
+        // impulse gate above never fires for it. Shares _lastCrushFrame, so a squeeze and
+        // a slam can't both bill you inside the cooldown, and regen stays paused after.
+        else if (Body.SproutCrushCount > 0
+            && _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt))
+        {
+            Health -= SproutCrushDamage * Body.SproutCrushCount;
+            _abilities.Combat.OnHitRegistered(_frame, SproutCrushImpulseFeel, dt,
                 hitstunSecondsOverride: 0.27f, muteControl: false);
             _lastCrushFrame = _frame;
         }

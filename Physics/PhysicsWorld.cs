@@ -99,7 +99,7 @@ public static class PhysicsWorld
                 }
             }
 
-            if (!found) break;
+            if (!found) return nextPos;   // fully resolved — no residual overlap to crush out of
 
             var normal = Vector2.Normalize(bestMtv);
             nextPos += bestMtv + normal * Epsilon;
@@ -136,7 +136,51 @@ public static class PhysicsWorld
             if (vnRel < 0f) sd.LastImpulse += -vnRel * normal;
             sd.LastImpulse += frictionDv;
         }
+
+        // Budget exhausted and the body is STILL overlapping — the loop only falls
+        // through here, the resolved path returns above. This is the wedge case: two or
+        // more surfaces whose push-out directions disagree, so every iteration ejects
+        // from the deepest one straight into another. Left alone the body settles into a
+        // stable embedded rest state (measurably deeper than it started) with no damage
+        // and no signal that anything went wrong.
+        //
+        // Sprouts are the escape hatch: a block that grew into the body is the thing
+        // that has no right to be there, so it loses. Destroying it re-opens the pocket
+        // in the SAME step, before the sweep runs. Committed tiles are deliberately left
+        // alone — letting a wedge chew through permanent terrain would turn "get crushed"
+        // into "dig anywhere by standing in the right corner".
+        CrushOverlappingSprouts(body, chunks, nextPos);
         return nextPos;
+    }
+
+    // Destroy every growing sprout whose face volume overlaps the body at `pos`, and
+    // count them on the body so PlayerCharacter can turn it into HP loss. Called only
+    // from the give-up path above, so the common case pays nothing.
+    private static void CrushOverlappingSprouts(PhysicsBody body, ChunkMap chunks, Vector2 pos)
+    {
+        var bounds = body.Polygon.GetBoundingBox(pos);
+        List<(int gtx, int gty)> doomed = null;
+        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, bounds))
+        {
+            if (shape.Source != SolidShapeSource.Sprout) continue;
+            var hit = Collision.Check(body.Polygon, pos, 0f, shape.Polygon, shape.Position, 0f);
+            if (!hit.Intersects) continue;
+            // A multi-face sprout emits one volume per face, so the same cell can show up
+            // several times; break it once.
+            (doomed ??= new List<(int, int)>()).Add((shape.Gtx, shape.Gty));
+        }
+        if (doomed == null) return;
+
+        // Materialize the list before breaking: BreakCell mutates the graph the query
+        // above iterates, and it cancels neighbouring sprouts via DropSupportFor.
+        for (int i = 0; i < doomed.Count; i++)
+        {
+            bool dup = false;
+            for (int j = 0; j < i; j++)
+                if (doomed[j] == doomed[i]) { dup = true; break; }
+            if (dup) continue;
+            if (chunks.BreakCell(doomed[i].gtx, doomed[i].gty)) body.SproutCrushCount++;
+        }
     }
 
     public static void StepSwept(
@@ -155,6 +199,7 @@ public static class PhysicsWorld
             // each collision's |vnRel|; the largest one is what callers (e.g.
             // PlayerCharacter.Update) read post-step for crush-damage dispatch.
             body.LastImpulseMagnitude = 0f;
+            body.SproutCrushCount = 0;
 
             // Terrain-transparent bodies just integrate (see PhysicsBody.IgnoreTiles).
             if (body.IgnoreTiles)

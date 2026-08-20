@@ -33,6 +33,14 @@ public class PhysicsBody
     // dispatch crush damage when the body's "ouch" exceeds CrushThreshold.
     public float LastImpulseMagnitude;
 
+    // Number of sprout cells destroyed out from under this body during the most-recent
+    // StepSwept because the depenetration solver could not resolve the overlap within
+    // its iteration budget. Reset to 0 at the start of each step, same as
+    // LastImpulseMagnitude; read post-step by PlayerCharacter.Update to dispatch crush
+    // damage. A per-step transient, so it needs no snapshot — it is recomputed from
+    // scratch on every replayed frame during a rollback.
+    public int SproutCrushCount;
+
     // Float-precision AABB of the polygon at the body's current position. Recomputes on access (cheap
     // for a 6-vertex hex). Doubles as a probe-region builder — `body.Bounds.StripAbove(20)` gives the
     // 20px slab right above the body for ceiling-probing, etc. See BoundingBox.
