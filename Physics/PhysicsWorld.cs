@@ -266,7 +266,8 @@ public static class PhysicsWorld
 
         var displacement = targetPos - pos;
 
-        for (int bounce = 0; bounce < maxBounces; bounce++)
+        int bounce = 0;
+        for (; bounce < maxBounces; bounce++)
         {
             if (displacement.LengthSquared() < 0.001f) break;
 
@@ -437,7 +438,51 @@ public static class PhysicsWorld
             }
         }
 
+        // Every other way out of the loop leaves `displacement` safe to apply as-is: the
+        // `!anyHit` break has just proven the path is clear, and the remaining breaks
+        // zero it. Falling out the bottom is the one exit that does not — a fast body
+        // plowing through terrain spends one bounce per broken layer, so four layers in
+        // it runs out of budget mid-swing with travel still owed. `pos` is collision-
+        // valid (every iteration leaves it at a contact point pushed out along its
+        // normal), but `pos + displacement` has never been tested against anything.
+        // Applying it unchecked deposits the body wherever the remainder ends up — at
+        // dive speed, tens of pixels past the face it should have stopped at, and
+        // routinely inside tiles it never broke. Nothing recovers it from there: the
+        // discrete push-out cannot escape a body enclosed on several sides, and the
+        // give-up path only crushes sprouts, deliberately sparing committed tiles.
+        // Advance as far as the next surface allows and stop there instead. Gated on
+        // exhaustion so the common path pays nothing.
+        if (bounce >= maxBounces)
+            displacement = ClipToFirstContact(body, chunks, pos, displacement);
+
         return pos + displacement;
+    }
+
+    // How far the body can travel along `displacement` from `pos` before it touches
+    // something: the whole vector when the path is clear, a shortened one when a surface
+    // blocks it, zero when the body already overlaps. Pure query — no impulses, no tile
+    // damage, no constraints. This is the safety net on the sweep's exit path, not a
+    // collision response; the response already ran inside the loop.
+    private static Vector2 ClipToFirstContact(PhysicsBody body, ChunkMap chunks, Vector2 pos, Vector2 displacement)
+    {
+        float lenSq = displacement.LengthSquared();
+        if (lenSq < 0.001f) return Vector2.Zero;
+
+        float minT = 1f;
+        bool anyHit = false;
+        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, GetSweptBounds(body.Polygon, pos, displacement)))
+        {
+            var swept = Collision.Swept(body.Polygon, pos, 0f, displacement, shape.Polygon, shape.Position, 0f);
+            if (!swept.Hit || swept.T > minT) continue;
+            minT = swept.T;
+            anyHit = true;
+        }
+        if (!anyHit) return displacement;
+
+        // Stop just short of the surface rather than exactly on it, matching the Epsilon
+        // back-off every in-loop contact applies.
+        float backOff = Epsilon / MathF.Sqrt(lenSq);
+        return displacement * MathF.Max(0f, minT - backOff);
     }
 
     // Scratch list reused across ResolveChunkCollisionsSwept iterations; the
