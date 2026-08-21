@@ -14,7 +14,7 @@
   "DrawPlayerSpriteSkin":       true, 
   "AnimationRig":               "biped_rabbit", 
   // "PlayerSpriteBinding":        "pumpkin_man_downsampled", 
-  "PlayerSpriteBindings":       ["rabbit", "badger"],
+  "PlayerSpriteBindings":       ["rabbit", "rabbit"],
   "DebugDrawSkeleton":          false,
   "RunAnimationSolver":         true,
   "CameraZoom":                 5.0,

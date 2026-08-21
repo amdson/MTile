@@ -22,6 +22,14 @@ namespace MTile;
 // convex corner the tip is over BOTH adjacent exposed faces (CornerSlop), and two
 // half-planes are the correct outer approximation.
 //
+// GROWING SPROUTS are policed too. A sprout is collision-solid while it grows (ChunkMap
+// emits one full-tile volume per supporting face, translating out of that parent) but its
+// cell is TileState.Sprouting, never Solid — so the cell scan below is blind to it and a
+// limb clips straight through a block that is visibly growing into it. The volumes are
+// axis-aligned but NOT grid-aligned, so their faces are emitted from the volume geometry
+// itself (the same geometry physics collides with and ChunkRenderer draws), with faces
+// backed by rock skipped exactly like a tile's interior faces.
+//
 // BURIED tips (the tip's own cell is solid) are special-cased: only the shallowest
 // exposed face of THAT cell constrains them (nearest exit; near-tied non-opposing faces
 // join for corners). Interior faces (solid neighbor) never emit, and other cells' faces
@@ -35,6 +43,8 @@ public static class TerrainSurfaces
     private const float CornerSlop  = 2f;   // lateral overhang that still counts as "over" a face
     private const float ExitTie     = 2f;   // buried tip: emit near-tied exit faces too (corners)
     private const float CoplanarEps = 0.75f;
+    private const float FaceProbe   = 4f;   // px past a sprout face when testing "is there rock behind it"
+
 
     // The rig tips the terrain polices: toes, ankles, hands, head (world[i].Translation is
     // the bone's FAR tip under the joint chain). Torso bones are deliberately absent — the
@@ -98,6 +108,17 @@ public static class TerrainSurfaces
                 continue;
             }
 
+            // BURIED IN A GROWING SPROUT: the cell is Sprouting, not Solid, so the branch
+            // above can't see it and TryEmit rejects behind-the-plane tips — a limb inside
+            // a growing block would otherwise be left completely un-policed.
+            int ns = SproutExits(chunks, q, facesP, facesN);
+            if (ns > 0)
+            {
+                near = true;
+                for (int i = 0; i < ns; i++) Emit(dest, ref count, facesP[i], facesN[i], b);
+                continue;
+            }
+
             int gx0 = (int)MathF.Floor((q.X - QueryRadius) / TileSize);
             int gx1 = (int)MathF.Floor((q.X + QueryRadius) / TileSize);
             int gy0 = (int)MathF.Floor((q.Y - QueryRadius) / TileSize);
@@ -117,6 +138,26 @@ public static class TerrainSurfaces
                     if (chunks.GetCellState(gx + 1, gy) != TileState.Solid)   // right face
                         TryEmit(dest, ref count, ref near, q, new Vector2(x0 + TileSize, y0 + HalfTile), new Vector2(1f, 0f), b);
                 }
+
+            // Same pass over the growing sprout volumes near this tip. Cheap: Growing is
+            // empty on most frames and holds a handful of nodes on a build frame.
+            var growing = chunks.ActiveSprouts;
+            for (int i = 0; i < growing.Count; i++)
+            {
+                var s = growing[i];
+                for (int k = 0; k < TileSproutNode.FaceOrder.Length; k++)
+                {
+                    var face = TileSproutNode.FaceOrder[k];
+                    if ((s.Faces & face) == 0) continue;
+                    var c = s.VolumeCenter(face);
+                    if (MathF.Abs(q.X - c.X) > HalfTile + QueryRadius) continue;
+                    if (MathF.Abs(q.Y - c.Y) > HalfTile + QueryRadius) continue;
+                    TryEmitVolume(chunks, dest, ref count, ref near, q, new Vector2(c.X, c.Y - HalfTile), new Vector2(0f, -1f), b);
+                    TryEmitVolume(chunks, dest, ref count, ref near, q, new Vector2(c.X, c.Y + HalfTile), new Vector2(0f,  1f), b);
+                    TryEmitVolume(chunks, dest, ref count, ref near, q, new Vector2(c.X - HalfTile, c.Y), new Vector2(-1f, 0f), b);
+                    TryEmitVolume(chunks, dest, ref count, ref near, q, new Vector2(c.X + HalfTile, c.Y), new Vector2( 1f, 0f), b);
+                }
+            }
         }
         return count;
     }
@@ -137,6 +178,88 @@ public static class TerrainSurfaces
         if (chunks.GetCellState(gx + 1, gy) != TileState.Solid)
         { p[c] = new Vector2(x0 + TileSize, y0 + HalfTile); n[c] = new Vector2(1f, 0f);  d[c] = Dot(n[c], q, p[c]); c++; }
         return c;
+    }
+
+    // Exits from the UNION of growing-sprout volumes containing q, shallowest first, then
+    // any near-tied non-opposing exit (corners) — the moving-volume analogue of the
+    // buried-in-tile branch. Returns 0 when q is inside no volume (the common case).
+    private static int SproutExits(ChunkMap chunks, Vector2 q, Span<Vector2> p, Span<Vector2> n)
+    {
+        float dUp = 0f, dDn = 0f, dLf = 0f, dRt = 0f;   // depth to clear, per exit direction
+        float fUp = 0f, fDn = 0f, fLf = 0f, fRt = 0f;   // the face line that exit clears
+        bool inside = false;
+        var growing = chunks.ActiveSprouts;
+        for (int i = 0; i < growing.Count; i++)
+        {
+            var s = growing[i];
+            for (int k = 0; k < TileSproutNode.FaceOrder.Length; k++)
+            {
+                var face = TileSproutNode.FaceOrder[k];
+                if ((s.Faces & face) == 0) continue;
+                var c = s.VolumeCenter(face);
+                float l = c.X - HalfTile, r = c.X + HalfTile, t = c.Y - HalfTile, bo = c.Y + HalfTile;
+                if (q.X <= l || q.X >= r || q.Y <= t || q.Y >= bo) continue;
+                inside = true;
+                // A multi-face sprout emits overlapping volumes on purpose, so an exit has
+                // to clear ALL of the ones q is in: each direction takes the deepest.
+                if (q.Y - t  > dUp) { dUp = q.Y - t;  fUp = t;  }
+                if (bo - q.Y > dDn) { dDn = bo - q.Y; fDn = bo; }
+                if (q.X - l  > dLf) { dLf = q.X - l;  fLf = l;  }
+                if (r - q.X  > dRt) { dRt = r - q.X;  fRt = r;  }
+            }
+        }
+        if (!inside) return 0;
+
+        Span<float>   d  = stackalloc float[4]   { dUp, dDn, dLf, dRt };
+        Span<Vector2> pp = stackalloc Vector2[4] { new(q.X, fUp), new(q.X, fDn), new(fLf, q.Y), new(fRt, q.Y) };
+        Span<Vector2> nn = stackalloc Vector2[4] { new(0f, -1f), new(0f, 1f), new(-1f, 0f), new(1f, 0f) };
+
+        // An exit into rock is no exit — and the trailing face of a growing volume sits in
+        // the Solid parent it is pushing out of, which is usually the shallowest one.
+        int best = -1;
+        for (int i = 0; i < 4; i++)
+        {
+            if (BlockedDeep(chunks, pp[i], nn[i])) continue;
+            if (best < 0 || d[i] < d[best]) best = i;
+        }
+        if (best < 0) return 0;   // boxed in on every side: leave it to the physics
+
+        int c2 = 0;
+        p[c2] = pp[best]; n[c2] = nn[best]; c2++;
+        for (int i = 0; i < 4; i++)
+            if (i != best && d[i] <= d[best] + ExitTie && Vector2.Dot(nn[i], nn[best]) > -0.5f
+                && !BlockedDeep(chunks, pp[i], nn[i]))
+            { p[c2] = pp[i]; n[c2] = nn[i]; c2++; }
+        return c2;
+    }
+
+    private static void TryEmitVolume(ChunkMap chunks, SolverSurface[] dest, ref int count,
+                                      ref bool near, Vector2 q, Vector2 p, Vector2 n, int bone)
+    {
+        if (Blocked(chunks, p, n)) return;
+        TryEmit(dest, ref count, ref near, q, p, n, bone);
+    }
+
+    // Is the space just past this face solid rock? Probed a few px along the outward normal
+    // because sprout volumes are not grid-aligned — a cell test on the face line itself is
+    // ambiguous whenever the face happens to land on a cell boundary.
+    private static bool Blocked(ChunkMap chunks, Vector2 p, Vector2 n)
+    {
+        Vector2 o = p + n * FaceProbe;
+        return chunks.GetCellState((int)MathF.Floor(o.X / TileSize),
+                                   (int)MathF.Floor(o.Y / TileSize)) == TileState.Solid;
+    }
+
+    // As Blocked, but a NEIGHBOURING SPROUT VOLUME counts as blocking too — the physics
+    // point-solidity predicate verbatim. Only the buried branch pays for it (it is O(growing
+    // volumes) per probe): picking an exit that merely lands in the next volume of a growing
+    // wall would shove the limb sideways through the wall instead of out of it. The free-tip
+    // face scan stays on the cheap tile-only test — a tip on the free side of a
+    // sprout-backed face is, by construction, one the buried branch already declined.
+    private static bool BlockedDeep(ChunkMap chunks, Vector2 p, Vector2 n)
+    {
+        Vector2 o = p + n * FaceProbe;
+        return ((ISolidShapeProvider)chunks).IsSolidAt(o.X, o.Y);
     }
 
     private static float Dot(Vector2 n, Vector2 q, Vector2 p) => n.X * (q.X - p.X) + n.Y * (q.Y - p.Y);

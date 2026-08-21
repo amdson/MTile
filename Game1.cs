@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using Microsoft.Xna.Framework;
@@ -866,11 +866,16 @@ public class Game1 : Game
     }
 
     // Player index → binding name (PlayerSpriteBindings[i], else the fallback) → skin.
+    // Secondary players fall back to P1's binding last: a binding authored on another rig
+    // than AnimationRig fails to load (SpriteSkin rejects the mismatch), and an unskinned
+    // P2 reads as a bug rather than as a missing cosmetic.
     private SpriteSkin SkinForPlayer(int index)
     {
         string name = _config.PlayerSpriteBindings != null && index < _config.PlayerSpriteBindings.Count
             ? _config.PlayerSpriteBindings[index] : null;
-        return SkinByName(name) ?? SkinByName(_config.PlayerSpriteBinding);
+        return SkinByName(name)
+            ?? SkinByName(_config.PlayerSpriteBinding)
+            ?? (index > 0 ? SkinForPlayer(0) : null);
     }
 
     // Cached by name; a failed load caches null (TryLoad logs once) → stick figure.
