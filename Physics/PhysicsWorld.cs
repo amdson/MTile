@@ -352,38 +352,48 @@ public static class PhysicsWorld
 
                 if (!hitFromFloating && body.Impact != null)
                 {
-                    var impactCells = _impactCellsScratch ??= new(4);
-                    ComputeImpactCells(body, pos, hitNormal, chunks, impactCells);
-                    int n = impactCells.Count;
-                    if (n > 0)
+                    // Two questions that used to share one answer, now asked separately.
+                    //
+                    // WHAT BREAKS is a field problem: the impact's kinetic energy spreads
+                    // through the surrounding rock and takes out everything it can afford,
+                    // which is what opens a crater instead of a body-width hole. See
+                    // ImpactSpringField.
+                    //
+                    // WHETHER THE BODY CARRIES ON is a much narrower question about the
+                    // cells directly in its way. Conflating the two is why widening the
+                    // damaged region used to be dangerous: the old absorption cap summed
+                    // over every damaged cell, so a wider region made break-through
+                    // proportionally harder and the body simply bounced off everything.
+                    var pathCells = _impactCellsScratch ??= new(4);
+                    ComputeImpactCells(body, pos, hitNormal, chunks, pathCells);
+                    if (pathCells.Count > 0)
                     {
-                        float totalCapImpulse = 0f;
-                        float dmgRate = MathF.Max(body.Impact.DamagePerUnitImpulse, 1e-6f);
-                        foreach (var (gtx, gty) in impactCells)
-                        {
-                            var type = chunks.GetCellType(gtx, gty);
-                            float hpRemaining = MathF.Max(0f, TileDamage.MaxHPFor(type) - chunks.Damage.Get(gtx, gty));
-                            totalCapImpulse += body.Impact.ImpulseThreshold + hpRemaining / dmgRate;
-                        }
-                        float capDvMag = totalCapImpulse / MathF.Max(body.Impact.Mass, 1e-6f);
-                        if (vnAbs > capDvMag)
-                        {
-                            dvCapMag = capDvMag;
-                            brokeThrough = true;
-                        }
+                        float mass = MathF.Max(body.Impact.Mass, 1e-6f);
+                        float ke = 0.5f * mass * vnAbs * vnAbs;
+                        var seed = pathCells[0];
 
-                        // Distribute the actually-delivered impulse across the
-                        // cells and chip/break them. On a break-through pass
-                        // each cell receives exactly its cap, so the accumulator's
-                        // over-portion equals hpRemaining/dmgRate and the cell
-                        // breaks. Below-cap passes chip per the old formula.
-                        float deliveredImpulse = dvCapMag * body.Impact.Mass;
-                        float perCell = deliveredImpulse / n;
-                        foreach (var (gtx, gty) in impactCells)
+                        var impact = ImpactSpringField.Apply(
+                            chunks, seed.gtx, seed.gty, -hitNormal,
+                            ImpactSpringField.HpForEnergy(ke), pathCells);
+
+                        if (impact.PathCleared)
                         {
-                            float over = chunks.Impact.AccrueAndConsume(gtx, gty, perCell, body.Impact.ImpulseThreshold);
-                            if (over > 0f) chunks.DamageCell(gtx, gty, over * body.Impact.DamagePerUnitImpulse);
+                            // Kinetic energy is spent on the HP it destroyed; whatever is
+                            // left keeps the body moving into the gap. Energy rather than
+                            // impulse is the right currency for breaking material, and it
+                            // makes the deceleration fall out of the same accounting that
+                            // decided what broke.
+                            float spent = ImpactSpringField.EnergyForHp(impact.HpConsumed);
+                            float remainingKe = MathF.Max(0f, ke - spent);
+                            float vnAfter = MathF.Sqrt(2f * remainingKe / mass);
+                            if (vnAfter < vnAbs)
+                            {
+                                dvCapMag = vnAbs - vnAfter;
+                                brokeThrough = true;
+                            }
                         }
+                        // Path still blocked ⇒ dvCapMag stays at vnAbs: the body stops dead
+                        // even though it may have cratered the rock to either side.
                     }
                 }
 

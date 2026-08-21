@@ -9,43 +9,31 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests.Sim;
 
-// Repro for "hold Down, fall fast, end up trapped inside the terrain".
+// Repro for "hold Down, fall fast, end up buried deep in the terrain".
 //
-// CAUSE — the break-through path in PhysicsWorld.ResolveChunkCollisionsSwept.
-// On each swept contact the solver works out how much impulse the impacted cells can
-// absorb before they break:
+// STATUS. The one-tile chimney this originally pinned is gone: impacts now spread their
+// energy through a spring network (Physics/ImpactSpringField.cs), so a dive opens a
+// crater several tiles across and the shaft it bores is correspondingly wider. Depth is
+// much reduced too — a 5000px drop into Dirt used to bury the player ~45 tiles and now
+// buries ~15.
 //
-//     totalCapImpulse = sum over impact cells of (ImpulseThreshold + hpRemaining / DamagePerUnitImpulse)
-//     capDvMag        = totalCapImpulse / body.Impact.Mass
+// WHAT IS STILL WRONG. Deep enough dives still sink further than they should, and the
+// remaining cause is not the impact model at all: holding Down adds FastFallForce (1000)
+// on top of gravity (600) in LocomotionStates.cs:30, and AirDrag is applied only
+// horizontally (AirControl.Apply), so downward speed has NO terminal clamp. A 5000px drop
+// arrives at ~3600px/s, and kinetic energy goes as v², so the dive carries far more than
+// the crater around it can absorb — the neighbourhood saturates and the surplus can only
+// become forward motion. Capping fast-fall speed is a movement-tuning change rather than
+// a physics one, so it is deliberately left alone here.
 //
-// If inbound normal speed exceeds capDvMag the cells break and the body KEEPS the
-// surplus ("brokeThrough"), carrying it into the space behind them. Two things turn
-// that into a ratchet rather than a one-off for a downward dive:
-//
-//   1. ComputeImpactCells insets the body's AABB by 2px along the contact face. The
-//      player is only 10.39px wide, so a downward impact insets to ~6.4px and selects
-//      exactly ONE cell. The absorption budget is one cell's worth, divided by the
-//      player's Mass.
-//   2. Holding Down adds FastFallForce (1000) on top of gravity (600) in
-//      LocomotionStates.cs:30, and AirDrag is applied only horizontally
-//      (AirControl.Apply), so downward speed has NO terminal clamp. Gravity re-loads
-//      the impact every frame.
-//
-// So each frame the single cell under the player breaks, the player keeps its surplus
-// velocity, and gravity adds more. The player drills a ONE-TILE-WIDE vertical shaft
-// dozens of tiles deep — which reads in game as phasing through the surface and being
-// stuck inside the ground.
-//
-// TUNING NOTE: the rest of the suite runs on hardcoded defaults, because
-// ConfigLayoutTests deliberately never calls the real loaders (they swap process-wide
-// statics, and this assembly runs un-parallelised for exactly that reason). For this
-// bug the gap matters: the default player Mass is 2.5 but configs/impact_profiles.json
-// ships 5.5, and capDvMag scales as 1/Mass, so the real player breaks through tiles at
-// roughly half the speed the defaults imply. Every other input is identical — Dirt and
-// Sand MaxHP match the defaults, and FastFallForce is absent from movement_config.json
-// so its 1000 default applies. These tests therefore read only the player's Mass out of
-// the shipped config and apply it to the body directly, rather than calling Load and
-// leaking the change into every class that runs afterwards.
+// TUNING NOTE: the rest of the suite runs on hardcoded defaults, because ConfigLayoutTests
+// deliberately never calls the real loaders (they swap process-wide statics, and this
+// assembly runs un-parallelised for exactly that reason). For this bug the gap matters:
+// the default player Mass is 2.5 but configs/impact_profiles.json ships 5.5, and impact
+// energy is ½·Mass·v², so the real player hits over twice as hard as the defaults imply.
+// These tests therefore read only the player's Mass out of the shipped config and apply it
+// to the body directly, rather than calling Load and leaking the change into every class
+// that runs afterwards.
 public class DiveDrillTests
 {
     private readonly ITestOutputHelper _out;
@@ -127,16 +115,26 @@ public class DiveDrillTests
             PhysicsWorld.StepSwept(bodies, chunks, Simulation.FixedDt, Simulation.Gravity);
         }
 
-        int by = (int)MathF.Floor(player.Body.Position.Y / Chunk.TileSize);
+        // Widest point of the shaft, not the width at the body's final row. The last row
+        // is the freshly-punched tip, which is always about one body wide whatever the
+        // rest of the tunnel looks like — measuring there reports "1 tile" even for a
+        // shaft that is plainly a crater further up.
+        int bottom = (int)MathF.Floor(player.Body.Position.Y / Chunk.TileSize);
         int shaft = 0;
-        for (int tx = 0; tx < W; tx++)
-            if (!WorldQuery.IsSolidAt(chunks, tx * Chunk.TileSize + 8, by * Chunk.TileSize + 8)) shaft++;
+        for (int ty = GroundRow; ty <= bottom; ty++)
+        {
+            int run = 0;
+            for (int tx = 0; tx < W; tx++)
+                if (!WorldQuery.IsSolidAt(chunks, tx * Chunk.TileSize + 8, ty * Chunk.TileSize + 8)) run++;
+            if (run > shaft) shaft = run;
+        }
 
         return (player.Body.Position.Y - RestY, impactVy, shaft);
     }
 
     // Holding Down through a fall must not bury the player many tiles under the surface.
-    // Fails today: Dirt buries ~17 tiles and Sand ~33 from a tall drop.
+    // Still fails on the tallest drops — see the note on fast-fall's missing terminal
+    // velocity at the top of this file.
     [Theory]
     [InlineData(TileType.Dirt)]
     [InlineData(TileType.Sand)]
@@ -165,9 +163,9 @@ public class DiveDrillTests
             $"({worst / Chunk.TileSize:F1} tiles) below the surface\n{log}");
     }
 
-    // The shaft the dive carves is exactly one tile wide, because ComputeImpactCells
-    // insets the 10.39px-wide body by 2px per side and lands on a single column. That is
-    // what makes the result a chimney rather than an open crater.
+    // The shaft a dive carves must be wider than the body that made it. It used to be
+    // exactly one tile: the damaged set came from the contact silhouette, and a 10.39px
+    // body inset by 2px a side lands on a single 16px column however hard it hits.
     [Fact]
     public void DiveCarvesAOneTileWideChimney()
     {
