@@ -121,9 +121,9 @@ public class ImpactCraterTests
         var hole = Slam(TileType.Dirt, 2400f, impact, 1);
         _out.WriteLine($"broken={hole.Broken} width={hole.Width} depth={hole.Depth}\n{hole.Art}");
 
-        Assert.True(hole.Width >= 3,
+        Assert.True(hole.Width >= 7,
             $"a 2400px/s impact opened a hole only {hole.Width} tile(s) wide\n{hole.Art}");
-        Assert.True(hole.Broken >= 6,
+        Assert.True(hole.Broken >= 24,
             $"a 2400px/s impact broke only {hole.Broken} cells\n{hole.Art}");
     }
 
@@ -158,6 +158,20 @@ public class ImpactCraterTests
 
         Assert.True(hole.Width >= 3,
             $"eight frames at 2400px/s bored a shaft only {hole.Width} tile(s) wide\n{hole.Art}");
+    }
+
+    // Coupling across the impact is stiffer than coupling along it (LateralBias), so a
+    // hard hit should open out rather than burrow. Without that the same energy makes a
+    // narrow pit, which reads as a puncture rather than a crater.
+    [Fact]
+    public void AHardImpactOpensOutRatherThanBurrowing()
+    {
+        var impact = ShippedPlayerImpact();
+        var hole = Slam(TileType.Dirt, 2400f, impact, 1);
+        _out.WriteLine($"{hole.Width} wide x {hole.Depth} deep\n{hole.Art}");
+
+        Assert.True(hole.Width > hole.Depth,
+            $"a 2400px/s impact bored {hole.Depth} deep but only {hole.Width} wide\n{hole.Art}");
     }
 
     // Softer rock must give way more readily than hard rock for the same impact — the

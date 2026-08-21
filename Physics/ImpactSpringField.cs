@@ -63,12 +63,15 @@ namespace MTile;
 public static class ImpactSpringField
 {
     // How far energy can propagate, in cells, and how many relaxation sweeps to run.
+    // Radius has to leave room for the biggest crater the model wants to make, or the
+    // window edge starts deciding the shape instead of the physics — at 5 a hard hit came
+    // out as a flat-sided rectangle, clipped rather than tapered.
     // Rounds must be at least Radius — a Jacobi sweep advances influence exactly one hop,
     // so fewer would leave the outer ring permanently zero — but it also has to be enough
     // for the field to converge, and convergence gets slower as Beta rises. At Beta = 9,
     // five rounds is nowhere near settled and the crater comes out narrower than a much
     // softer material would give, which is the opposite of what the parameter means.
-    public const int Radius = 5;
+    public const int Radius = 7;
     public const int Rounds = 20;
 
     private const int Span = 2 * Radius + 1;
@@ -93,6 +96,19 @@ public static class ImpactSpringField
     // job ImpulseThreshold used to do in the old per-cell impulse model.
     private const float YieldFraction = 0.25f;
 
+    // How many times surplus energy is re-offered to the neighbourhood. Each pass is
+    // capped by what the cells can take, so one pass can leave energy unplaced; a handful
+    // converges without ever being able to cascade.
+    private const int SpillPasses = 4;
+
+    // How much better coupling ACROSS the impact conducts than coupling ALONG it. At 1
+    // the material is isotropic and a hit spreads as readily downward as sideways, so the
+    // crater burrows as much as it widens. Above 1 the energy prefers to run sideways and
+    // the crater opens out. Measured perpendicular to the impact direction rather than to
+    // the world axes, so a hit into a wall widens along the wall the same way a hit into
+    // the floor widens along the floor.
+    private const float LateralBias = 2.6f;
+
     // Ring of 8 neighbours. Diagonals are √2 further apart, so their springs are weaker
     // by the same factor.
     private static readonly int[] NeighbourDx = { -1, 0, 1, -1, 1, -1, 0, 1 };
@@ -110,6 +126,7 @@ public static class ImpactSpringField
     [ThreadStatic] private static Vector2[] _next;
     [ThreadStatic] private static float[] _hp;
     [ThreadStatic] private static float[] _yield;
+    [ThreadStatic] private static float[] _weight;
     [ThreadStatic] private static bool[] _solid;
     [ThreadStatic] private static float[] _energy;
 
@@ -149,8 +166,21 @@ public static class ImpactSpringField
         var next = _next ??= new Vector2[Cells];
         var hp = _hp ??= new float[Cells];
         var yield = _yield ??= new float[Cells];
+        var weight = _weight ??= new float[8];
         var solid = _solid ??= new bool[Cells];
         var energy = _energy ??= new float[Cells];
+
+        // ---- effective spring weights for this impact direction ------------------------
+        // Depends only on `direction`, so it is worked out once here rather than per cell
+        // per round. align = 1 for a neighbour straight along the impact, 0 for one square
+        // across it.
+        for (int k = 0; k < 8; k++)
+        {
+            float ox = NeighbourDx[k], oy = NeighbourDy[k];
+            float inv = 1f / MathF.Sqrt(ox * ox + oy * oy);
+            float align = MathF.Abs(direction.X * ox * inv + direction.Y * oy * inv);
+            weight[k] = NeighbourW[k] * (1f + (LateralBias - 1f) * (1f - align));
+        }
 
         // ---- sample the neighbourhood -------------------------------------------------
         bool anySolid = false;
@@ -200,7 +230,7 @@ public static class ImpactSpringField
                     {
                         int nx = lx + NeighbourDx[k];
                         int ny = ly + NeighbourDy[k];
-                        float w = NeighbourW[k];
+                        float w = weight[k];
                         if (nx < 0 || nx >= Span || ny < 0 || ny >= Span)
                         {
                             // Outside the window: assume solid, displacement zero.
@@ -253,24 +283,42 @@ public static class ImpactSpringField
         // go into the material around it, so spill it once, proportionally, into whatever
         // capacity the neighbourhood has left. One pass: bounded, order-independent, and
         // it cannot cascade.
-        float surplus = 0f, capacity = 0f;
+        float surplus = 0f;
         for (int i = 0; i < Cells; i++)
         {
             if (!solid[i]) { energy[i] = 0f; continue; }
             energy[i] = 0.5f * s2 * phi[i].LengthSquared();
-            float over = energy[i] - hp[i];
-            if (over > 0f) surplus += over;
-            else capacity += -over;
+            if (energy[i] > hp[i]) { surplus += energy[i] - hp[i]; energy[i] = hp[i]; }
         }
-        if (surplus > 0f && capacity > 0f)
+
+        // Spill follows the same shape as the original impact — share ∝ |phi_i|² — rather
+        // than each cell's leftover room. Weighting by room spreads the surplus as an even
+        // film over the whole window, which lands most cells just under their breaking
+        // point: a wide smear of damage and almost nothing actually destroyed. Following
+        // the field instead fills the cells nearest the strike to failure first, so extra
+        // energy widens the crater rather than lightly bruising the neighbourhood.
+        // Capping at each cell's room means a pass can leave surplus unplaced, so run a
+        // few; whatever is still unplaced at the end is energy the neighbourhood could not
+        // take, and the body keeps it.
+        for (int pass = 0; pass < SpillPasses && surplus > 1e-6f; pass++)
         {
-            float share = MathF.Min(1f, surplus / capacity);
+            float wsum = 0f;
+            for (int i = 0; i < Cells; i++)
+                if (solid[i] && energy[i] < hp[i]) wsum += phi[i].LengthSquared();
+            if (wsum <= 1e-9f) break;
+
+            float placed = 0f;
             for (int i = 0; i < Cells; i++)
             {
                 if (!solid[i]) continue;
                 float room = hp[i] - energy[i];
-                if (room > 0f) energy[i] += room * share;
+                if (room <= 0f) continue;
+                float give = MathF.Min(room, surplus * phi[i].LengthSquared() / wsum);
+                energy[i] += give;
+                placed += give;
             }
+            if (placed <= 1e-9f) break;
+            surplus -= placed;
         }
 
         // ---- chip and break -----------------------------------------------------------
