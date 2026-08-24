@@ -631,8 +631,11 @@ tracker / give-up split (§4.3) is the one place deliverability is judged.
 > block climb, ceiling duck, full-height bonk, free-standing-wall over-route
 > pinned as accepted §3.3 behavior, determinism, timing).
 >
-> **Phase 2 is BUILT (same day)** — `FoldEngine = "lattice"` →
-> `Character/Corrector/FoldLattice.cs`. `FoldReference` was split into
+> **Phase 2 is BUILT (same day)** — `FoldEngine = "lattice"`. *Second pass,
+> later that day: re-wired onto the `qp` channel stack per the §1 revised
+> note (`AmbientCorrector.EmitLatticeReference`; `FoldLattice.cs` deleted;
+> results in `LATTICE_SCENARIOS.md` "channel stack results"). The paragraph
+> below describes the first pass.* First pass: `Character/Corrector/FoldLattice.cs`. `FoldReference` was split into
 > `Admit` (the §4.7 guards) / `Rollout` (the hand-written carry) / `Track`
 > (rows → deform → servo); the lattice engine is `Admit` + a rollout that
 > time-parameterizes the DP's polyline + the same `Track`. Rules kept from
