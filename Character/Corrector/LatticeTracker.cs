@@ -10,10 +10,11 @@ namespace MTile;
 //   nominal    the exact free rollout — v += (F_baseline + g)·dt, p += v·dt —
 //              the dynamics with zero correction; channel forces enter
 //              linearly, so nothing is linearized or predicted;
-//   reference  the planned polyline sampled at the body's CURRENT speed:
-//              p̂_T at arc length |v|·(T+1)·dt from the body, with the path's
-//              local direction t̂_T there (the shape at the body's pace —
-//              the reference never asks for acceleration);
+//   reference  a sliding BEAD per tick: the nearest point on the planned
+//              polyline to the iterate's tick-T position, monotone along the
+//              path — where along the path the body is at tick T is the
+//              solve's own output (path following, not trajectory tracking);
+//              alternated with the solve for BeadPasses outer passes;
 //   channels   BuildFold's stack (legs / drive / tuck / redirect / air-lateral
 //              / air-vertical) with caps and masks evaluated at the body's
 //              current state and held for the horizon;
@@ -38,6 +39,7 @@ namespace MTile;
 public static class LatticeTracker
 {
     private const int   Horizon = 5;
+    private const int   BeadPasses = 3;   // project → rows → solve, alternated
     private const float HingeWeight = 1e6f;      // the solver's stiffness constant (AmbientCorrector's)
     private const float ProgressHingeScale = 0.02f;
 
@@ -93,88 +95,111 @@ public static class LatticeTracker
             s.CornerPlant[k] = false;
         }
 
-        // ── Reference: the polyline sampled at the current speed ─────────
-        // Polyline = body → first node ≥ one cell away → following nodes.
-        // Walked once, in order (arc targets increase with T).
-        int rowCount = 0;
-        Vector2 tLast = new Vector2(dir, 0f);
+        // ── Reference polyline: body → first node ≥ one cell away → nodes ──
+        int nv = 0;
         if (havePath)
         {
             int j = 0;
             while (j < count - 1 && (s.LatticePath[j].Pos - body.Position).Length() < 0.9f * cell) j++;
-            float vmag = body.Velocity.Length();
-            Vector2 a = body.Position, b = s.LatticePath[j].Pos;
-            Vector2 segDir = b - a; float segLen = segDir.Length();
-            segDir = segLen > 1e-6f ? segDir / segLen : new Vector2(dir, 0f);
-            float segStart = 0f;
-            for (int T = 0; T < H; T++)
+            s.BeadVerts[nv] = body.Position; s.BeadArc[nv] = 0f; nv++;
+            for (; j < count; j++)
             {
-                float arc = vmag * (T + 1) * dt;
-                while (arc > segStart + segLen && j + 1 < count)
-                {
-                    segStart += segLen; a = b; b = s.LatticePath[++j].Pos;
-                    segDir = b - a; segLen = segDir.Length();
-                    segDir = segLen > 1e-6f ? segDir / segLen : segDir;
-                }
-                Vector2 pRef = a + segDir * MathF.Min(arc - segStart, segLen);
-                if (arc > segStart + segLen) pRef = b + segDir * (arc - segStart - segLen);   // past the end: carry on
-                var t = segDir; var n = new Vector2(-t.Y, t.X);
-                tLast = t;
-                float e = Vector2.Dot(s.DeliverySamples[T].Pos - pRef, n);
-                s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f };
-                s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f };
+                var q = s.LatticePath[j].Pos;
+                if ((q - s.BeadVerts[nv - 1]).LengthSquared() < 1e-6f) continue;
+                s.BeadArc[nv] = s.BeadArc[nv - 1] + (q - s.BeadVerts[nv - 1]).Length();
+                s.BeadVerts[nv] = q; nv++;
             }
+            if (nv < 2) havePath = false;
         }
-        else if (anchored)
-        {
-            // Hover column: the reference is the hover point under the body.
-            float yHover = floorY - fold.HoverOffset;
-            for (int T = 0; T < H; T++)
-            {
-                float e = s.DeliverySamples[T].Pos.Y - yHover;
-                s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, 1f),  Depth = -band - e, HingeScale = 1f };
-                s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, -1f), Depth = e - band,  HingeScale = 1f };
-            }
-        }
-        if (dir != 0)
-        {
-            for (int T = 0; T < H; T++)
-            {
-                float along = (s.DeliverySamples[T].Pos.X - p0.X) * dir;
-                s.Rows[rowCount++] = new ClearanceRow
-                    { Tick = T, Normal = new Vector2(-dir, 0f), Depth = along - speed * (T + 1) * dt, HingeScale = 1f };
-            }
-            // Progress: what the channels could add along t̂ by the last tick
-            // at their caps — Σ_k (T−k+1)·dt² = dt²·(T+1)(T+2)/2.
-            float capX = near ? cfg.FoldDriveForce : cfg.FoldAirLateralForce;
-            float capY = tLast.Y < 0f
-                ? (near ? cfg.FoldLegForce : cfg.FoldAirVerticalForce)
-                : (near ? cfg.FoldTuckForce : cfg.FoldAirVerticalForce);
-            float capAlong = MathF.Abs(tLast.X) * capX + MathF.Abs(tLast.Y) * capY;
-            int T9 = H - 1;
-            s.Rows[rowCount++] = new ClearanceRow
-            {
-                Tick = T9, Normal = tLast, HingeScale = ProgressHingeScale,
-                Depth = capAlong * dt * dt * (T9 + 1) * (T9 + 2) * 0.5f,
-            };
-        }
+        float yHover = floorY - fold.HoverOffset;
 
-        // ── Channels (BuildFold, frozen masks), solve, apply tick 0 ──────
+        // ── Sliding beads: outer passes of project → rows → solve ────────
+        // Bead T = the nearest point on the polyline to the iterate's tick-T
+        // position (pass 0: the free rollout; later: free + last solve's Δp),
+        // made monotone along the path. In the bead's local frame the
+        // along-path residual is zero by construction, so the rows are the
+        // perpendicular band and the progress row along the last bead's
+        // tangent — timing along the path is the solve's own output.
         var pr = s.Problem;
-        pr.H = H; pr.Dt = dt;
-        pr.CoastVel = s.CoastVel;
-        pr.Rows = s.Rows; pr.RowCount = rowCount;
-        pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed);
-        for (int k = 0; k < H; k++) s.ChannelMask[2][k] = false;   // CornerAssist: not carried over
-        for (int c = 0; c < pr.ChannelCount; c++)
-            pr.PrevApplied[c] = vars.AmbientChannelPrev[c] * CorrectorChannels.AnchorLeak;
-        pr.DeltaWeight = cfg.CorrectorDeltaWeight;
-        pr.HingeWeight = HingeWeight;
-        pr.InnerIterations = cfg.FoldIterations;
-        pr.RowPush = s.RowPush;
+        int rowCount = 0;
+        for (int pass = 0; pass < BeadPasses; pass++)
+        {
+            rowCount = 0;
+            Vector2 tLast = new Vector2(dir, 0f);
+            float sPrev = 0f;
+            for (int T = 0; T < H; T++)
+            {
+                Vector2 pT = s.DeliverySamples[T].Pos + (pass == 0 ? Vector2.Zero : s.TrackDelta[T]);
+                if (havePath)
+                {
+                    float sT = MathF.Max(sPrev, ProjectArc(s, nv, pT));
+                    sPrev = sT;
+                    PointAt(s, nv, sT, out var q, out var t);
+                    tLast = t;
+                    var n = new Vector2(-t.Y, t.X);
+                    float e = Vector2.Dot(pT - q, n) - Vector2.Dot(pass == 0 ? Vector2.Zero : s.TrackDelta[T], n);
+                    // e is the FREE rollout's offset from the bead along n
+                    // (rows measure Δp from the free rollout).
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f };
+                }
+                else if (anchored)
+                {
+                    float e = s.DeliverySamples[T].Pos.Y - yHover;
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, 1f),  Depth = -band - e, HingeScale = 1f };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, -1f), Depth = e - band,  HingeScale = 1f };
+                }
+            }
+            if (dir != 0)
+            {
+                for (int T = 0; T < H; T++)
+                {
+                    float along = (s.DeliverySamples[T].Pos.X - p0.X) * dir;
+                    s.Rows[rowCount++] = new ClearanceRow
+                        { Tick = T, Normal = new Vector2(-dir, 0f), Depth = along - speed * (T + 1) * dt, HingeScale = 1f };
+                }
+                // Progress: what the channels could add along t̂ by the last
+                // tick at their caps — Σ_k (T−k+1)·dt² = dt²·(T+1)(T+2)/2.
+                float capX = near ? cfg.FoldDriveForce : cfg.FoldAirLateralForce;
+                float capY = tLast.Y < 0f
+                    ? (near ? cfg.FoldLegForce : cfg.FoldAirVerticalForce)
+                    : (near ? cfg.FoldTuckForce : cfg.FoldAirVerticalForce);
+                float capAlong = MathF.Abs(tLast.X) * capX + MathF.Abs(tLast.Y) * capY;
+                int T9 = H - 1;
+                s.Rows[rowCount++] = new ClearanceRow
+                {
+                    Tick = T9, Normal = tLast, HingeScale = ProgressHingeScale,
+                    Depth = capAlong * dt * dt * (T9 + 1) * (T9 + 2) * 0.5f,
+                };
+            }
 
-        CorrectionSolver.Solve(pr, s.Z, s.ZScratch);
-        CorrectorChannels.ComputeTickDv(s, pr, H, dt);
+            // ── Channels (BuildFold, frozen masks), solve ────────────────
+            pr.H = H; pr.Dt = dt;
+            pr.CoastVel = s.CoastVel;
+            pr.Rows = s.Rows; pr.RowCount = rowCount;
+            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed);
+            for (int k = 0; k < H; k++) s.ChannelMask[2][k] = false;   // CornerAssist: not carried over
+            for (int c = 0; c < pr.ChannelCount; c++)
+                pr.PrevApplied[c] = vars.AmbientChannelPrev[c] * CorrectorChannels.AnchorLeak;
+            pr.DeltaWeight = cfg.CorrectorDeltaWeight;
+            pr.HingeWeight = HingeWeight;
+            pr.InnerIterations = cfg.FoldIterations;
+            pr.RowPush = s.RowPush;
+
+            CorrectionSolver.Solve(pr, s.Z, s.ZScratch);
+            CorrectorChannels.ComputeTickDv(s, pr, H, dt);
+            if (!havePath) break;                                // the hover column has no beads to slide
+            // Corrected displacement per tick for the next pass's projection:
+            // δv at tick k moves tick T by (T − k + 1)·dt.
+            for (int T = 0; T < H; T++)
+            {
+                var d = Vector2.Zero;
+                for (int k = 0; k <= T; k++) d += s.TickDv[k] * ((T - k + 1) * dt);
+                s.TrackDelta[T] = d;
+            }
+        }
+
+        // ── Apply tick 0 of the last solve ────────────────────────────────
         for (int c = 0; c < pr.ChannelCount; c++) vars.AmbientChannelPrev[c] = s.Z[c * H];
         body.AppliedForce += s.TickDv[0] / dt;
         vars.AmbientPrevDv = s.TickDv[0];
@@ -188,5 +213,37 @@ public static class LatticeTracker
             for (int k = 0; k < H; k++) s.BallisticTrajectory[k] = s.DeliverySamples[k];
             s.BallisticCount = H;
         }
+    }
+
+    // Arc length of the nearest point on the polyline (vertices 0..nv−1,
+    // last segment extended as a ray — the honest carry past the end).
+    private static float ProjectArc(CorrectorScratch s, int nv, Vector2 p)
+    {
+        float best = float.PositiveInfinity, bestArc = 0f;
+        for (int i = 0; i + 1 < nv; i++)
+        {
+            var a = s.BeadVerts[i]; var d = s.BeadVerts[i + 1] - a;
+            float len2 = d.LengthSquared();
+            if (len2 < 1e-9f) continue;
+            float t = Vector2.Dot(p - a, d) / len2;
+            bool last = i + 2 == nv;
+            t = last ? MathF.Max(0f, t) : Math.Clamp(t, 0f, 1f);
+            var q = a + d * t;
+            float dist2 = (p - q).LengthSquared();
+            if (dist2 < best) { best = dist2; bestArc = s.BeadArc[i] + t * MathF.Sqrt(len2); }
+        }
+        return bestArc;
+    }
+
+    // Point and unit tangent at arc length `arc` (past the end: along the
+    // last segment's ray).
+    private static void PointAt(CorrectorScratch s, int nv, float arc, out Vector2 q, out Vector2 t)
+    {
+        int i = 0;
+        while (i + 2 < nv && arc > s.BeadArc[i + 1]) i++;
+        var a = s.BeadVerts[i]; var d = s.BeadVerts[i + 1] - a;
+        float len = d.Length();
+        t = len > 1e-6f ? d / len : new Vector2(1f, 0f);
+        q = a + t * (arc - s.BeadArc[i]);
     }
 }

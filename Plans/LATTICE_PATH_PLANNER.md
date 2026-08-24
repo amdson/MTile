@@ -67,6 +67,12 @@ orders of magnitude cheaper than the state-space search prototype.
 > vertical rows it cannot move). Corridor 66 px/s, rows 2/7/8 pass, 47 µs a
 > step. The engine-test tunnel exposes a one-cell seam in C-space at margin
 > 2 (a terrain/margin question, recorded there).
+>
+> **Sixth pass, same day — current:** sliding beads — the reference point
+> per tick is the nearest point on the polyline to the iterate (path
+> following, not trajectory tracking), three outer project → solve passes.
+> Corridor 79 px/s, the seam spawn threads too, 104 µs a step; row 7 slips
+> to 9.3 px of strain (the give-up question).
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
