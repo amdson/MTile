@@ -327,12 +327,25 @@ The todo notes this is necessary, and it is the one place a pure spatial DP has
 no natural answer. The workable version:
 
 - Seed at the body's actual cell with cost 0.
-- **Bias, do not hard-restrict,** the first edge toward the current velocity:
-  `+ w_seed · (1 − dot(ô, v̂))` on edges out of the seed only.
+- **Fix the initial direction to the body's actual direction of travel**
+  (decided 2026-08-24, superseding the bias-only rule below): quantize `v̂` to
+  the nearest admitted offset `o*` and force the path's first
+  `LatticeSeedRunPx` (8 px ≈ 2–3 cells) along it — the nodes `seed + j·o*`
+  may leave only along `o*`. No node state is added; it is a per-node
+  arithmetic check on the DP's existing loop. Guard rails, so the seed is
+  never stranded: the run applies only when the body is moving
+  (`LatticeSeedRunMinSpeed`, 20 px/s) *and* `v̂` is representable in the cone
+  (`dot(o*, v̂) ≥ 0.85` — a vertical fall under a horizontal `u` is not forced
+  into a 45° diagonal); a run that hits an obstacle is forced only as far as it
+  fits.
+- Below those thresholds, the soft form: `+ w_seed · (1 − dot(ô, v̂))` on
+  edges out of the seed only.
 
-Hard-restricting the first edge is tempting and wrong: a body descending fast
-has `v̂` outside the cone, and the restriction would strand the seed and fail the
-whole solve. A cost bias degrades gracefully.
+The first draft of this section argued against any hard restriction because a
+fast-descending body has `v̂` outside the cone and would strand the seed. That
+is exactly what the representability test and the fit-as-far-as-possible rule
+cover; with them in place, fixing the initial direction is the more honest
+model — the path starts where the body is *going*.
 
 ### 3.6 Progress along the path is the tracker's output, not an input
 

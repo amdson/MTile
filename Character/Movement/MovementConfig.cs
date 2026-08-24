@@ -315,6 +315,13 @@ public class MovementConfig
     public float LatticeLenWeight               { get; set; } = 1f;     // per px
     public float LatticeHoverWeight             { get; set; } = 0.05f;  // per px²
     public float LatticeSeedWeight              { get; set; } = 20f;
+    // Seed run (§3.5): the path's first SeedRunPx are FORCED along the body's
+    // current velocity direction (quantized to the nearest admitted offset)
+    // when it moves at ≥ SeedRunMinSpeed and that direction lies inside the
+    // cone; a blocked run is forced as far as it fits. Otherwise only the
+    // soft SeedWeight bias applies. 0 disables the run.
+    public float LatticeSeedRunPx               { get; set; } = 8f;
+    public float LatticeSeedRunMinSpeed         { get; set; } = 20f;
     // Max unresolved clearance residual (px) an ambient plan may carry and still
     // be applied. Small: ambient assists are grazes, not commitments.
     public float AmbientRefusalResidual         { get; set; } = 1f;

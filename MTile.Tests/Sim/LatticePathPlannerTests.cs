@@ -28,7 +28,12 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
 
     private static int Solve(LatticePathPlanner planner, ChunkMap chunks, PhysicsBody body,
                              Vector2 seed, CoastSample[] path, out float cost, out bool bonk)
-        => planner.Solve(chunks, body.Polygon, seed, new Vector2(100f, 0f),
+        => Solve(planner, chunks, body, seed, new Vector2(100f, 0f), path, out cost, out bonk);
+
+    private static int Solve(LatticePathPlanner planner, ChunkMap chunks, PhysicsBody body,
+                             Vector2 seed, Vector2 vel, CoastSample[] path,
+                             out float cost, out bool bonk)
+        => planner.Solve(chunks, body.Polygon, seed, vel,
             new Vector2(1f, 0f), hover: true, MovementConfig.Current.FoldHoverOffset,
             path, out cost, out bonk);
 
@@ -144,6 +149,65 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         float minY = float.MaxValue;
         for (int i = 0; i < n; i++) minY = MathF.Min(minY, path[i].Pos.Y);
         Assert.True(minY < 55f, $"did not route over the wall: minY {minY:F1}");
+    }
+
+    // Seed run (§3.5): a body moving up-right at hover has its first 8 px of
+    // path FORCED up-right — the path starts where the body is going — and
+    // the hover cost then brings it back down within the window.
+    [Fact]
+    public void SeedVelocity_FixesInitialDirection()
+    {
+        var seed = new Vector2(100f, 75f);
+        var (planner, body, path) = Setup(seed);
+        int n = Solve(planner, FlatFloor(), body, seed, new Vector2(100f, -100f), path,
+                      out _, out bool bonk);
+
+        Assert.True(n > 2, "no path");
+        Assert.False(bonk, planner.LastDebug);
+        var d0 = path[1].Pos - path[0].Pos;
+        Assert.True(d0.X > 0f && d0.Y < 0f && MathF.Abs(d0.X + d0.Y) < 1e-3f,
+            $"first edge is not the 45° run: {d0}");
+        float minY = float.MaxValue;
+        for (int i = 0; i < n; i++) minY = MathF.Min(minY, path[i].Pos.Y);
+        float runPx = MovementConfig.Current.LatticeSeedRunPx;
+        Assert.True(seed.Y - minY >= runPx * 0.7f - 2f,
+            $"run too short: rose only {seed.Y - minY:F1} px for an {runPx} px run");
+        Assert.True(MathF.Abs(path[n - 1].Pos.Y - seed.Y) <= 5f,
+            $"never came back to hover: end y {path[n - 1].Pos.Y:F1}");
+    }
+
+    // Below SeedRunMinSpeed nothing is forced: hover jitter must not bend the
+    // path.
+    [Fact]
+    public void SeedVelocity_SlowIsNotForced()
+    {
+        var seed = new Vector2(100f, 75f);
+        var (planner, body, path) = Setup(seed);
+        int n = Solve(planner, FlatFloor(), body, seed, new Vector2(10f, -10f), path,
+                      out _, out _);
+        Assert.True(n > 0, "no path");
+        for (int i = 0; i < n; i++)
+            Assert.True(MathF.Abs(path[i].Pos.Y - seed.Y) <= 5f,
+                $"slow seed velocity bent the path: {path[i].Pos.Y - seed.Y:F1} at {i}");
+    }
+
+    // A run into an obstacle is forced only as far as it fits. Seeded one
+    // cell above the floor's inflated C-obstacle (boundary ≈ 83.6) and moving
+    // down-right, the first run edge is blocked, nothing is forced, and the
+    // solve degrades to the plain seeded path — which rises back to hover.
+    [Fact]
+    public void SeedVelocity_BlockedRunFallsBack()
+    {
+        var seed = new Vector2(100f, 81f);
+        var (planner, body, path) = Setup(seed);
+        int n = Solve(planner, FlatFloor(), body, seed, new Vector2(100f, 100f), path,
+                      out _, out bool bonk);
+        Assert.True(n > 1, "no path");
+        Assert.False(bonk, planner.LastDebug);
+        Assert.True(path[1].Pos.Y <= path[0].Pos.Y + 0.01f,
+            $"forced a dive into the floor: {path[0].Pos.Y:F1} → {path[1].Pos.Y:F1}");
+        Assert.True(path[n - 1].Pos.Y < seed.Y - 3f,
+            $"never rose back toward hover: end y {path[n - 1].Pos.Y:F1}");
     }
 
     [Fact]

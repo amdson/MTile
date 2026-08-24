@@ -102,6 +102,10 @@ public sealed class LatticePathPlanner
     private float _cell;
     private int _x0, _y0, _w, _h;
 
+    // Seed run (§3.5): nodes seed + j·o for j < _runLen may leave only along
+    // admitted offset _runOffset (−1 = no run). Seed in window-cell coords.
+    private int _runOffset = -1, _runLen, _seedCx, _seedCy;
+
     // ── Stamp mask cache ─────────────────────────────────────────────────────
     // The grid is world-aligned and the cell divides the tile exactly, so a
     // cell center's offset from a tile center depends only on
@@ -179,6 +183,37 @@ public sealed class LatticePathPlanner
             seedX = _x0 + seedIdx % _w; seedY = _y0 + seedIdx / _w;
         }
 
+        // Seed run (§3.5): the body's actual direction of travel is fixed for
+        // the first SeedRunPx — the current velocity quantized to the nearest
+        // admitted offset — so the path starts where the body is GOING, not
+        // where the cost surface would like it to be. Only when the body is
+        // moving (≥ SeedRunMinSpeed) and that direction is representable in
+        // the cone (dot ≥ 0.85 with the best offset — a vertical fall under a
+        // horizontal u is not forced into a 45° diagonal); a blocked run is
+        // forced as far as it fits. Everything else falls back to the soft
+        // seed bias below, so the seed is never stranded.
+        _runOffset = -1; _runLen = 0;
+        _seedCx = seedX - _x0; _seedCy = seedY - _y0;
+        float runPx = cfg.LatticeSeedRunPx, runMin = cfg.LatticeSeedRunMinSpeed;
+        if (runPx > 0f && vel.LengthSquared() >= runMin * runMin)
+        {
+            var vh = Vector2.Normalize(vel);
+            int bestA = -1; float bestDot = 0.85f;
+            for (int a = 0; a < _admittedCount; a++)
+            {
+                float d = Vector2.Dot(_admitted[a].Unit, vh);
+                if (d > bestDot) { bestDot = d; bestA = a; }
+            }
+            if (bestA >= 0)
+            {
+                ref var o = ref _admitted[bestA];
+                int want = Math.Max(1, (int)MathF.Ceiling(runPx / (o.Len * _cell)));
+                int cx = _seedCx, cy = _seedCy, k = 0;
+                while (k < want && EdgeFree(cx, cy, ref o)) { cx += o.Dx; cy += o.Dy; k++; }
+                if (k > 0) { _runOffset = bestA; _runLen = k; }
+            }
+        }
+
         int reachCount = Flood(seedIdx);
         // Sort reachable nodes by p = dot(center, u). Equal-p nodes never share
         // an edge (every edge strictly increases p), so sort instability among
@@ -204,19 +239,13 @@ public sealed class LatticePathPlanner
             if (float.IsPositiveInfinity(dn)) continue;
             int nx = n % _w, ny = n / _w;
             bool atSeed = n == seedIdx;
+            int forced = ForcedOffset(nx, ny);
             for (int a = 0; a < _admittedCount; a++)
             {
+                if (forced >= 0 && a != forced) continue;        // seed run
                 ref var o = ref _admitted[a];
-                int mx = nx + o.Dx, my = ny + o.Dy;
-                if ((uint)mx >= (uint)_w || (uint)my >= (uint)_h) continue;
-                int m = my * _w + mx;
-                if (_blocked[m]) continue;
-                if (o.CrossCount > 0)
-                {
-                    int c1 = (ny + o.C1y) * _w + (nx + o.C1x);
-                    int c2 = (ny + o.C2y) * _w + (nx + o.C2x);
-                    if (_blocked[c1] || _blocked[c2]) continue;   // tunneling (§3.3)
-                }
+                if (!EdgeFree(nx, ny, ref o)) continue;          // blocked / tunneling (§3.3)
+                int m = (ny + o.Dy) * _w + (nx + o.Dx);
                 float c = dn
                     + wSteep * (1f - Vector2.Dot(o.Unit, u))
                     + wLen * o.Len * _cell;
@@ -442,23 +471,55 @@ public sealed class LatticePathPlanner
             int n = _queue[head++];
             _order[count++] = n;
             int nx = n % _w, ny = n / _w;
+            int forced = ForcedOffset(nx, ny);
             for (int a = 0; a < _admittedCount; a++)
             {
+                if (forced >= 0 && a != forced) continue;        // seed run
                 ref var o = ref _admitted[a];
-                int mx = nx + o.Dx, my = ny + o.Dy;
-                if ((uint)mx >= (uint)_w || (uint)my >= (uint)_h) continue;
-                int m = my * _w + mx;
-                if (_reachable[m] || _blocked[m]) continue;
-                if (o.CrossCount > 0)
-                {
-                    int c1 = (ny + o.C1y) * _w + (nx + o.C1x);
-                    int c2 = (ny + o.C2y) * _w + (nx + o.C2x);
-                    if (_blocked[c1] || _blocked[c2]) continue;
-                }
+                if (!EdgeFree(nx, ny, ref o)) continue;
+                int m = (ny + o.Dy) * _w + (nx + o.Dx);
+                if (_reachable[m]) continue;
                 _reachable[m] = true;
                 _queue[tail++] = m;
             }
         }
         return count;
+    }
+
+    // Edge (nx,ny) → (nx,ny)+o is in the window, lands on a free cell and
+    // crosses only free cells (the supercover tunneling check, §3.3).
+    private bool EdgeFree(int nx, int ny, ref Offset o)
+    {
+        int mx = nx + o.Dx, my = ny + o.Dy;
+        if ((uint)mx >= (uint)_w || (uint)my >= (uint)_h) return false;
+        if (_blocked[my * _w + mx]) return false;
+        if (o.CrossCount > 0)
+        {
+            int c1 = (ny + o.C1y) * _w + (nx + o.C1x);
+            int c2 = (ny + o.C2y) * _w + (nx + o.C2x);
+            if (_blocked[c1] || _blocked[c2]) return false;
+        }
+        return true;
+    }
+
+    // The seed run's constraint at a node: the run offset if (nx,ny) is the
+    // j-th node of the run (seed + j·o, j < _runLen), else −1 (free choice).
+    private int ForcedOffset(int nx, int ny)
+    {
+        if (_runOffset < 0) return -1;
+        ref var o = ref _admitted[_runOffset];
+        int dx = nx - _seedCx, dy = ny - _seedCy, j;
+        if (o.Dx != 0)
+        {
+            if (dx % o.Dx != 0) return -1;
+            j = dx / o.Dx;
+            if (dy != j * o.Dy) return -1;
+        }
+        else
+        {
+            if (dx != 0 || dy % o.Dy != 0) return -1;
+            j = dy / o.Dy;
+        }
+        return j >= 0 && j < _runLen ? _runOffset : -1;
     }
 }
