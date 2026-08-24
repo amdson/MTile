@@ -262,11 +262,13 @@ public class MovementConfig
     public float CrouchClimbReachUp             { get; set; } = 4f;
     // Lattice engine (FoldProfile.RiseCost): the state's price per px CLIMBED
     // on the planned path, traded against LatticeProgressWeight at the goal;
-    // drops are free (gravity delivers them). Standing 6: a 16 px block is
-    // worth its ~96 whenever ≥ 14 px of window lie beyond it, a 32 px wall
-    // (192) never is at ProgressWeight 7. Crouch 30: a 16 px rise (480) can
-    // never be worth a 56 px window — a crouch does not mount ledges.
-    public float FoldRiseCost                   { get; set; } = 6f;
+    // drops are free (gravity delivers them). The binding case is the body
+    // PRESSED AGAINST the obstacle, where standing still earns nothing and
+    // the window's whole progress (7 × 56 = 392) is the climb's reward:
+    // Standing 16 mounts a 16 px block (256 < 392) and refuses a 32 px wall
+    // (512 > 392); Crouch 30 refuses the block too (480 > 392) — a crouch
+    // does not mount ledges.
+    public float FoldRiseCost                   { get; set; } = 16f;
     public float CrouchRiseCost                 { get; set; } = 30f;
     // Duck budget — FoldClimbReachUp's downward mirror for the ref engine's
     // wall classification: a frontal obstacle whose duck-under needs at most
@@ -326,8 +328,8 @@ public class MovementConfig
     // "mount a 1-high block, refuse a 2-high wall" at SteepWeight 30:
     // roughly (5, 9). The §4.1 taste number.
     public float LatticeProgressWeight          { get; set; } = 7f;
-    public float LatticeHoverWeight             { get; set; } = 2f;     // per px (linear, like RiseCost)
-    public float LatticeSeedWeight              { get; set; } = 20f;
+    public float LatticeHoverWeight             { get; set; } = 3f;     // per px (linear, like RiseCost)
+    public float LatticeSeedWeight              { get; set; } = 0f;
     // Seed run (§3.5): the path's first SeedRunPx are FORCED along the body's
     // current velocity direction (quantized to the nearest admitted offset)
     // when it moves at ≥ SeedRunMinSpeed and that direction lies inside the

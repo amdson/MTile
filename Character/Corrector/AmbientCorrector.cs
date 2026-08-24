@@ -35,8 +35,40 @@ public struct FoldProfile
     // this is what decides what a state will and won't climb — a crouch's
     // is high enough that no ledge is ever worth it (LATTICE_SCENARIOS.md).
     public float RiseCost;
+    // Lattice engine: hover cost on (the fold states ride a surface) or off
+    // (jump states: an airborne seed must not be dragged to the floor).
+    public bool  Hover;
+    // Lattice engine: the intent points UP as well as along dir — u becomes
+    // (dir, −1)^ — while a jump is held. The launch is then the tracker
+    // spending the legs along a rising path; nothing fires an impulse.
+    public bool  Rising;
 
     public static FoldProfile None => default;
+
+    // Falling on the lattice engine: no hover — the plan is a level line at
+    // the body's height (obstacle avoidance only) and nothing in free air
+    // may push up (AirVertical down-only, legs out of reach: LegReach is the
+    // standing probe, so wherever the legs could act StandingState owns the
+    // body instead). Air control stays the state's baseline.
+    public static FoldProfile Fall => new()
+    {
+        Fold = true, Hover = false, Rising = false,
+        HoverOffset  = MovementConfig.Current.FoldHoverOffset,
+        ClimbReachUp = 0f,
+        MaxSpeed     = float.PositiveInfinity,
+        RiseCost     = MovementConfig.Current.FoldRiseCost,
+    };
+
+    // Jump states on the lattice engine (plan §7.3): hover off, rise free,
+    // no speed limit ("as fast as possible"), u up-and-along-intent while
+    // the button is held. Jump height is what the legs deliver along a
+    // rising path before leg reach runs out — a retune, not a mechanism.
+    public static FoldProfile Jump => new()
+    {
+        Fold = true, Hover = false, Rising = true,
+        HoverOffset = 0f, ClimbReachUp = 0f,
+        MaxSpeed = float.PositiveInfinity, RiseCost = 0f,
+    };
 
     // Standing/Falling: hover ≈ the old spring equilibrium; 1-high ledges ramp
     // the reference (16 ≤ 20), 2-high walls never do (32 > 20).
@@ -47,6 +79,7 @@ public struct FoldProfile
         ClimbReachUp = MovementConfig.Current.FoldClimbReachUp,
         MaxSpeed     = MovementConfig.Current.MaxWalkSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
+        Hover        = true,
     };
 
     // Crouched: same fold, lower reference — the crouch IS reference shaping,
@@ -60,6 +93,7 @@ public struct FoldProfile
         ClimbReachUp = MovementConfig.Current.CrouchClimbReachUp,
         MaxSpeed     = MovementConfig.Current.CrouchMaxWalkSpeed,
         RiseCost     = MovementConfig.Current.CrouchRiseCost,
+        Hover        = true,
     };
 }
 

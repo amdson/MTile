@@ -89,6 +89,30 @@ orders of magnitude cheaper than the state-space search prototype.
 > trade is scale-free; `IntentTilt` removed. The 2-high wall is refused by
 > the costs; the crouch's block-mounting turned out to be `MantleState`
 > firing from a crouch, not the planner. `LATTICE_SCENARIOS.md`.
+>
+> **Ninth pass, same day — current:** §7.3 begun. `JumpingState` on the
+> lattice engine fires no impulse: it hands the tracker `FoldProfile.Jump`
+> (hover off, `u` up-and-along-intent, rise free, no speed limit) and the
+> legs launch the body along a rising path — 61.5 px, zero drift, matching
+> the bespoke jump. Needed: no Δ-smoothing in the tracker (a `qp`
+> regularizer, not in §3.7 — and it had been throttling the walk: corridor
+> 77 → 89 px/s) and a lateral tie-break in the DP.
+>
+> **Tenth pass, same day — current:** running and covered jumps fold into
+> `JumpingState` (the other two states yield on the engine); the seed
+> velocity bias is off (the soft seed run — same loop). Row 10's hop clears
+> its block on the engine; row 3's planner half works and its actuator half
+> is the open decision (a neutral press has no x channel to start along
+> the bevel escape — redirect while grounded, or drive along the plan's
+> tangent). `LATTICE_SCENARIOS.md`.
+>
+> **Eleventh pass, same day — current:** `LegReach` = the standing probe
+> (17 px), so legs available ⇔ Standing; `FoldProfile.Fall` has no hover
+> and the lattice engine allows no upward air force; band/speed rows are
+> `Reference` rows the channel builder's feature heuristics ignore (the
+> redirect had been planting against the band in free air); `FoldRiseCost`
+> 16 / `LatticeHoverWeight` 3. Rows 7, 8, 13 pass; jump height halved by
+> the shorter leg reach — the retune decision. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

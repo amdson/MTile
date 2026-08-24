@@ -107,7 +107,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // slab's end, under the last tile's corner bevel — the (1,−1) climb is
     // admissible and the body rises out to the right. FAR: body deep under
     // the slab — no rising edge, honest bonk, no shuffle toward the exit.
-    [Fact(Skip = "LATTICE_SCENARIOS row 3 — jump states not on the engine; CoveredJumpState owns the launch (plan §7.3). No rise today (apex 76.5)")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 3 — the DP finds the bevel escape but a neutral press has no x channel to start along its sideways first segment (actuator-list decision, tenth pass)")]
     public void Row03_CoveredJump_NearEdge_RisesOutDiagonally()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (r == 3 && c < 8));
@@ -175,7 +175,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // The path routes over (accepted); the legs cannot deliver a 32 px rise
     // from a walk, so the give-up must turn it into row 6's honest stop —
     // the body ends AT the wall at hover, not floating up its face.
-    [Fact(Skip = "LATTICE_SCENARIOS row 7 — the planner now refuses the wall (RiseCost, argmax), but the approach creeps up the bevel where each step is worth it: 8.1 px of lift against the 8 px gate (eighth pass)")]
+    [Fact]
     public void Row07_FreeStandingTwoHighWall_GiveUpIsHonestStop()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (c == 12 && r >= 4));
@@ -231,10 +231,37 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
         Assert.True(maxDx < 2f, $"drifted {maxDx:F1} px on a neutral jump");
     }
 
+    // ── Row 10: diagonal hop over a block ────────────────────────────────
+    // Hold Right, and jump ~40 px before a 1-high block: u = (1,−1)^, the
+    // path rises over the block's C-obstacle, the legs launch along it, the
+    // body lands beyond and keeps running. On the engine this is
+    // JumpingState with dir held (RunningJumpState yields).
+    [Fact(Skip = "LATTICE_SCENARIOS row 10 — clears the block and lands at hover, but the apex is 19 px against the test's 20: with LegReach = the standing probe (17 px) a launch's powered rise is 7 px, not 22 — the jump-height retune (eleventh pass)")]
+    public void Row10_DiagonalHop_ClearsBlock_AndContinues()
+    {
+        var chunks = Terrain(7, 40, (r, c) => r == 6 || (r == 5 && c == 12));
+        var sim = new Simulation(chunks, OnFloor(40f, 6));
+        const float blockX = 12 * Ts, jumpX = blockX - 14f - 40f;
+        int pressed = -1; float minY = float.MaxValue; bool wasJumping = false;
+        for (int f = 0; f < 180; f++)
+        {
+            if (pressed < 0 && sim.Player.Body.Position.X >= jumpX) pressed = f;
+            sim.Step(pressed < 0 ? Right : JumpInput(f - pressed, right: true));
+            minY = MathF.Min(minY, sim.Player.Body.Position.Y);
+            wasJumping |= sim.Player.CurrentStateName.Contains("Jump");
+        }
+        var end = sim.Player.Body.Position;
+        output.WriteLine($"row10: apex y={minY:F1} end=({end.X:F1},{end.Y:F1}) jumped={wasJumping}");
+        Assert.True(wasJumping, "never entered a jump state");
+        Assert.True(minY < 6 * Ts - Rest - 20f, $"did not rise: apex {minY:F1}");
+        Assert.True(end.X > blockX + 2 * Ts, $"did not clear the block: x={end.X:F1} (block at {blockX})");
+        Assert.True(MathF.Abs(end.Y - (6 * Ts - Rest)) < 8f, $"not back at hover past the block: y={end.Y:F1}");
+    }
+
     // ── Row 11: crouch at a 1-high block ─────────────────────────────────
     // Crawling right (Down held) into a 1-high block: stays low and stops at
     // it — a crouch never mounts ledges.
-    [Fact(Skip = "LATTICE_SCENARIOS row 11 — NOT the planner: with CrouchRiseCost 30 the path refuses the block (bonk, flat), then MantleState fires from the crouch and vaults it (trace, eighth pass). State arbitration — its own thing")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 11 — NOT the planner: the path refuses the block (CrouchRiseCost 30), then MantleState fires from the crouch and vaults it. State arbitration — its own thing")]
     public void Row11_CrouchAtBlock_StaysLow_HonestStop()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (r == 5 && c >= 12));
@@ -260,7 +287,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // uncorrected body reaches (a control run with the corrector off — air
     // drag means that is below free fall); then hover re-binds and the carry
     // resumes.
-    [Fact(Skip = "LATTICE_SCENARIOS row 13 — descent 203 of the uncorrected 270 px/s (75%); the band holds the falling body to the path's descent slope (Falling passes hover on)")]
+    [Fact]
     public void Row13_Landing_ImpactHonest_ThenRebinds()
     {
         var chunks = Terrain(10, 40, (r, c) => r == 9);

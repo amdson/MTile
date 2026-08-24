@@ -34,14 +34,17 @@ public class JumpingState : MovementState
             // Enter's sourceVy is 0 and the hold window rides
             // vars.JumpFromCorner instead of a source FSD.
             if (!TryCornerLaunch(ctx, abilities, out _)) return false;
-            return !(ctx.TryGetCeiling(out var c)
+            return OnLattice || !(ctx.TryGetCeiling(out var c)
                      && ctx.Body.Position.Y - c.Position.Y <= 2 * Chunk.TileSize);
         }
         // Hitstun/stun lock-out is enforced centrally via RequiredCapabilities.Jump
         // (the selection loop drops jump candidates while BlocksJump). Movement
         // otherwise stays free — it only blocks the cheap vertical-reset option.
         // Low ceiling (≤ 2 tiles) overhead: head would smack — defer to CoveredJumpState.
-        if (ctx.TryGetCeiling(out var ceiling)
+        // On the lattice engine there is no deferral: the DP plans the rise
+        // from under the slab — the bevel escape near an edge, an honest
+        // bonk deeper in — and CoveredJumpState yields (§7.3, row 3).
+        if (!OnLattice && ctx.TryGetCeiling(out var ceiling)
             && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
         return true;
     }
@@ -68,8 +71,24 @@ public class JumpingState : MovementState
                <= CornerLaunchReach * CornerLaunchReach;
     }
 
+    // Lattice engine (Plans/LATTICE_PATH_PLANNER.md §7.3): the jump is a
+    // planned rise, not a fired impulse. Enter sets no velocity, Update
+    // applies no hold force and adds no source constraint; the state hands
+    // the tracker FoldProfile.Jump (hover off, u up-and-along-intent) and the
+    // legs spend themselves along the rising path. The state lasts while the
+    // button is held and the body rises; Falling owns the descent as before.
+    private static bool OnLattice => MovementConfig.Current.FoldEngine == "lattice";
+
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        if (OnLattice)
+        {
+            if (vars.JumpReleased) return false;
+            // The apex ends the jump — after the first ticks, so the legs
+            // have had a chance to act on the plan.
+            if (vars.TimeInState >= 2f * ctx.Dt && ctx.Body.Velocity.Y >= 0f) return false;
+            return vars.JumpFromCorner || TryFindSource(ctx, out _);
+        }
         if (vars.JumpReleased || vars.TimeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
         // The jump is anchored to its source surface. Once the body has risen out
         // of the (wider-than-Standing) probe window, the "relative-to-source" frame
@@ -88,6 +107,13 @@ public class JumpingState : MovementState
         // Replace any pre-existing FSD (e.g. StandingState's _ground) with our own
         // source FSD: same kind of contact, just tuned for an airborne body.
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
+        if (OnLattice)
+        {
+            // No source constraint, no impulse: the tracker's legs are the
+            // support and the launch (see OnLattice).
+            vars.JumpFromCorner = !TryFindSource(ctx, out _);
+            return;
+        }
         EnsureSource(ctx);
 
         // Vertical velocity is set *relative* to the source surface, not added to
@@ -122,6 +148,16 @@ public class JumpingState : MovementState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        if (OnLattice)
+        {
+            vars.TimeInState += ctx.Dt;
+            if (!ctx.Input.Space) vars.JumpReleased = true;
+            var mo = ctx.Modifiers; var cf = MovementConfig.Current;
+            ctx.Body.AppliedForce = new Vector2(AirControl.Apply(ctx,
+                cf.AirAccel * mo.AirAccel, cf.MaxAirSpeed * mo.MaxAirSpeed, cf.AirDrag * mo.AirDrag), 0f);
+            ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Jump);
+            return;
+        }
         EnsureSource(ctx);
         vars.TimeInState += ctx.Dt;
         if (!ctx.Input.Space) vars.JumpReleased = true;
@@ -174,6 +210,10 @@ public class RunningJumpState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
+        // Lattice engine: the running jump IS JumpingState with dir held —
+        // u tilts to (dir, −1)^ and the legs launch along it. No separate
+        // impulse family (Plans/LATTICE_PATH_PLANNER.md §7.3).
+        if (MovementConfig.Current.FoldEngine == "lattice") return false;
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
         if (!ctx.TryGetGround(out var ground)) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
@@ -386,6 +426,9 @@ public class CoveredJumpState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
+        // Lattice engine: JumpingState plans from under the slab; the slide-
+        // then-launch and TryPickOpenDir dissolve into path + tracker (§7.3).
+        if (MovementConfig.Current.FoldEngine == "lattice") return false;
         if (!ctx.Input.Space) return false;            // held-jump (tapped-jump variant TBD)
         if (!ctx.TryGetGround(out var ground)) return false;
         if (!ctx.TryGetCeiling(out var ceiling)) return false;   // must actually be under something

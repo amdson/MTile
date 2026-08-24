@@ -39,6 +39,7 @@ public sealed class LatticePathPlanner
 {
     public const int MaxCells = 4096;   // pooled scratch bound; window clamps to fit
     public const int MaxPath  = 256;    // ≥ any monotone path across a MaxCells window
+    private const float LateralTieBreak = 0.05f;   // per px perpendicular to u — an ε, not a knob
 
     // ── Primitive offset table (§3.3): |dx|,|dy| ≤ Radius, gcd = 1 ───────────
     // Each offset carries the cells its segment crosses (conservative
@@ -261,6 +262,7 @@ public sealed class LatticePathPlanner
 
         // ── The DP sweep (§3.4) ──────────────────────────────────────────────
         float wRise = riseCost;                                 // the state's price per px climbed
+        var uPerp = new Vector2(-u.Y, u.X);
         // Exact prune from the argmax goal: a node's value is
         // w_prog·(p − p_seed) − dp ≤ w_prog·L − dp, so once dp exceeds
         // w_prog·L the node can never beat the seed (value 0) and nothing
@@ -293,7 +295,12 @@ public sealed class LatticePathPlanner
                 // gravity delivers them, and charging them would let the
                 // argmax goal refuse to walk off a ledge.
                 float c = dn
-                    + wRise * MathF.Max(0f, -o.Dy) * _cell;
+                    + wRise * MathF.Max(0f, -o.Dy) * _cell
+                    // Tie-break on excursion perpendicular to u: with hover off
+                    // and rise free every route up costs the same, and the DP
+                    // would zigzag a straight-up jump sideways. Negligible
+                    // against every priced term (a 48 px drop costs 2.4).
+                    + LateralTieBreak * MathF.Abs(o.Dx * uPerp.X + o.Dy * uPerp.Y) * _cell;
                 if (hover && !float.IsPositiveInfinity(_floorBelow[m]))
                 {
                     float dev = _floorBelow[m] - hoverOffset;

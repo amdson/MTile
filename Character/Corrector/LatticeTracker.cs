@@ -33,8 +33,9 @@ namespace MTile;
 // Feedback is re-planning: the DP's seed is the body every tick.
 //
 // dir == 0 (plan §4.6) / no path: the hover column — band rows on y around
-// the hover point under the body if anchored; unanchored and pathless:
-// nothing to track. CornerAssist is masked off (its meaning was the coast's
+// the hover point under the body if the state hovers and is anchored; no
+// path and nothing to hover on: nothing to track. Jump states plan with
+// hover off and u tilted up (FoldProfile.Jump). CornerAssist is masked off (its meaning was the coast's
 // hard rows).
 public static class LatticeTracker
 {
@@ -67,15 +68,19 @@ public static class LatticeTracker
 
         // ── The plan ─────────────────────────────────────────────────────
         float speed = fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
-        int count = dir != 0
+        // u is intent: along dir, and up as well while a jump is held.
+        bool planning = dir != 0 || fold.Rising;
+        Vector2 u = fold.Rising ? Vector2.Normalize(new Vector2(dir, -1f)) : new Vector2(dir, 0f);
+        int count = planning
             ? s.Lattice.Solve(ctx.Chunks, body.Polygon, body.Position, body.Velocity,
-                new Vector2(dir, 0f), hover: true, fold.HoverOffset, fold.RiseCost,
+                u, fold.Hover, fold.HoverOffset, fold.RiseCost,
                 s.LatticePath, out _, out _)
             : 0;
         float cell = (float)Chunk.TileSize / Math.Clamp(cfg.LatticeCellsPerTile, 2, 8);
         float band = 0.5f * cell;
         bool havePath = count >= 2;
-        if (!havePath && !anchored && dir == 0)
+        bool hoverColumn = !havePath && fold.Hover && anchored;
+        if (!havePath && !hoverColumn && !planning)
         {
             vars.AmbientPrevDv = Vector2.Zero; vars.AmbientChannelPrev = default;
             return;                                              // free air, no plan: nothing to track
@@ -126,7 +131,7 @@ public static class LatticeTracker
         for (int pass = 0; pass < BeadPasses; pass++)
         {
             rowCount = 0;
-            Vector2 tLast = new Vector2(dir, 0f);
+            Vector2 tLast = u;
             float sPrev = 0f;
             for (int T = 0; T < H; T++)
             {
@@ -141,24 +146,27 @@ public static class LatticeTracker
                     float e = Vector2.Dot(pT - q, n) - Vector2.Dot(pass == 0 ? Vector2.Zero : s.TrackDelta[T], n);
                     // e is the FREE rollout's offset from the bead along n
                     // (rows measure Δp from the free rollout).
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f };
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f, Reference = true };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f, Reference = true };
                 }
-                else if (anchored)
+                else if (hoverColumn)
                 {
                     float e = s.DeliverySamples[T].Pos.Y - yHover;
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, 1f),  Depth = -band - e, HingeScale = 1f };
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, -1f), Depth = e - band,  HingeScale = 1f };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, 1f),  Depth = -band - e, HingeScale = 1f, Reference = true };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, -1f), Depth = e - band,  HingeScale = 1f, Reference = true };
                 }
             }
-            if (dir != 0)
+            if (dir != 0 && float.IsFinite(speed))              // no limit = "as fast as possible"
             {
                 for (int T = 0; T < H; T++)
                 {
                     float along = (s.DeliverySamples[T].Pos.X - p0.X) * dir;
                     s.Rows[rowCount++] = new ClearanceRow
-                        { Tick = T, Normal = new Vector2(-dir, 0f), Depth = along - speed * (T + 1) * dt, HingeScale = 1f };
+                        { Tick = T, Normal = new Vector2(-dir, 0f), Depth = along - speed * (T + 1) * dt, HingeScale = 1f, Reference = true };
                 }
+            }
+            if (planning)
+            {
                 // Progress: what the channels could add along t̂ by the last
                 // tick at their caps — Σ_k (T−k+1)·dt² = dt²·(T+1)(T+2)/2.
                 float capX = near ? cfg.FoldDriveForce : cfg.FoldAirLateralForce;
@@ -178,11 +186,20 @@ public static class LatticeTracker
             pr.H = H; pr.Dt = dt;
             pr.CoastVel = s.CoastVel;
             pr.Rows = s.Rows; pr.RowCount = rowCount;
-            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed);
+            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed, airUp: false);
             for (int k = 0; k < H; k++) s.ChannelMask[2][k] = false;   // CornerAssist: not carried over
-            for (int c = 0; c < pr.ChannelCount; c++)
-                pr.PrevApplied[c] = vars.AmbientChannelPrev[c] * CorrectorChannels.AnchorLeak;
-            pr.DeltaWeight = cfg.CorrectorDeltaWeight;
+            // (Band and speed rows are Reference rows, so BuildFold's corner /
+            // redirect feature activation does not see them — the disc had
+            // been "planting" against the band in free air, holding a 4-tile
+            // fall to 27 px/s.)
+            // No Δ-smoothing (the qp engine's anti-bang-bang regularizer, not
+            // part of the §3.7 objective): caps and the band bound the plan,
+            // and "as fast as possible" IS bang-bang — a launch is the legs
+            // at their cap on tick 0. Measured with it on: a jump's tick-0
+            // push was −2 px/s against gravity (the smoothing anchored the
+            // launch to Standing's near-zero output) and the body fell.
+            for (int c = 0; c < pr.ChannelCount; c++) pr.PrevApplied[c] = Vector2.Zero;
+            pr.DeltaWeight = 0f;
             pr.HingeWeight = HingeWeight;
             pr.InnerIterations = cfg.FoldIterations;
             pr.RowPush = s.RowPush;
