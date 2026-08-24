@@ -307,8 +307,8 @@ public class MovementConfig
     // the cone's footprint from the seed: LookaheadTiles along u, ±L·tanθ
     // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3) and
     // is set to "90° − ε" so every forward offset is an edge — steepness is
-    // priced by SteepWeight, never filtered (with the ±2 offset table any
-    // value ≤ 0.447 admits the same edges). Sim-affecting under "lattice" —
+    // priced by SteepWeight, never filtered (with the ±3 offset table any
+    // value ≤ 0.316 admits the same edges). Sim-affecting under "lattice" —
     // hot-reload is gated like every movement knob.
     public float LatticeLookaheadTiles          { get; set; } = 3.5f;
     public int   LatticeCellsPerTile            { get; set; } = 5;

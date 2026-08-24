@@ -40,15 +40,18 @@ public sealed class LatticePathPlanner
     public const int MaxCells = 4096;   // pooled scratch bound; window clamps to fit
     public const int MaxPath  = 256;    // ≥ any monotone path across a MaxCells window
 
-    // ── Primitive offset table (§3.3): |dx|,|dy| ≤ 2, gcd = 1 ────────────────
+    // ── Primitive offset table (§3.3): |dx|,|dy| ≤ Radius, gcd = 1 ───────────
     // Each offset carries the cells its segment crosses (conservative
-    // supercover — diagonals require both side cells free, so a body never
-    // slips through a checkerboard pinch).
+    // supercover — a segment through a cell corner requires both side cells
+    // free, so a body never slips through a checkerboard pinch). Radius 3
+    // (decided 2026-08-24): 32 offsets, steepest slope 3 (≈ 72°), 15 forward
+    // edges per node under a near-90° cone.
+    private const int Radius = 3;
     private struct Offset
     {
         public sbyte Dx, Dy;
-        public sbyte C1x, C1y, C2x, C2y;   // crossed cells; 0,0 = none
-        public byte  CrossCount;
+        public sbyte[] Cross;              // crossed cells as (x,y) pairs, excluding the ends
+        public int    CrossCount;          // number of pairs
         public Vector2 Unit;
         public float  Len;                 // in cells
     }
@@ -56,34 +59,55 @@ public sealed class LatticePathPlanner
 
     private static Offset[] BuildOffsets()
     {
-        (int dx, int dy, (int, int)[] cross)[] baseSet =
+        var list = new System.Collections.Generic.List<Offset>();
+        for (int dx = 0; dx <= Radius; dx++)
+        for (int dy = 0; dy <= Radius; dy++)
         {
-            (1, 0, Array.Empty<(int, int)>()),
-            (0, 1, Array.Empty<(int, int)>()),
-            (1, 1, new[] { (1, 0), (0, 1) }),
-            (1, 2, new[] { (0, 1), (1, 1) }),
-            (2, 1, new[] { (1, 0), (1, 1) }),
-        };
-        int[] positive = { 1 }, both = { 1, -1 };
-        var list = new Offset[16];
-        int n = 0;
-        foreach (var (dx, dy, cross) in baseSet)
-        foreach (int sx in dx == 0 ? positive : both)
-        foreach (int sy in dy == 0 ? positive : both)
-        {
-            var o = new Offset { Dx = (sbyte)(dx * sx), Dy = (sbyte)(dy * sy) };
-            if (cross.Length > 0)
+            if (dx == 0 && dy == 0) continue;
+            if (Gcd(dx, dy) != 1) continue;            // primitive only
+            var cross = Supercover(dx, dy);
+            foreach (int sx in dx == 0 ? new[] { 1 } : new[] { 1, -1 })
+            foreach (int sy in dy == 0 ? new[] { 1 } : new[] { 1, -1 })
             {
-                o.C1x = (sbyte)(cross[0].Item1 * sx); o.C1y = (sbyte)(cross[0].Item2 * sy);
-                o.C2x = (sbyte)(cross[1].Item1 * sx); o.C2y = (sbyte)(cross[1].Item2 * sy);
-                o.CrossCount = 2;
+                var o = new Offset { Dx = (sbyte)(dx * sx), Dy = (sbyte)(dy * sy) };
+                o.CrossCount = cross.Count;
+                o.Cross = new sbyte[2 * cross.Count];
+                for (int i = 0; i < cross.Count; i++)
+                {
+                    o.Cross[2 * i]     = (sbyte)(cross[i].x * sx);
+                    o.Cross[2 * i + 1] = (sbyte)(cross[i].y * sy);
+                }
+                o.Len  = MathF.Sqrt(o.Dx * o.Dx + o.Dy * o.Dy);
+                o.Unit = new Vector2(o.Dx / o.Len, o.Dy / o.Len);
+                list.Add(o);
             }
-            o.Len  = MathF.Sqrt(o.Dx * o.Dx + o.Dy * o.Dy);
-            o.Unit = new Vector2(o.Dx / o.Len, o.Dy / o.Len);
-            list[n++] = o;
         }
-        Array.Resize(ref list, n);
-        return list;
+        return list.ToArray();
+    }
+
+    private static int Gcd(int a, int b) { while (b != 0) (a, b) = (b, a % b); return a; }
+
+    // Cells the center-to-center segment (0,0) → (dx,dy) passes through,
+    // excluding both ends, for dx,dy ≥ 0 with gcd 1. Exact: the segment
+    // crosses the x boundary before cell i at t = (2i−1)/(2dx) and the y
+    // boundary before cell j at t = (2j−1)/(2dy); compare as integers. A
+    // simultaneous crossing is a corner — both side cells are added
+    // (conservative), then the diagonal cell.
+    private static System.Collections.Generic.List<(int x, int y)> Supercover(int dx, int dy)
+    {
+        var cells = new System.Collections.Generic.List<(int x, int y)>();
+        int cx = 0, cy = 0, i = 1, j = 1;
+        while (i <= dx || j <= dy)
+        {
+            long a = i <= dx ? (long)(2 * i - 1) * dy : long.MaxValue;
+            long b = j <= dy ? (long)(2 * j - 1) * dx : long.MaxValue;
+            if (a < b)      { cx++; i++; }
+            else if (b < a) { cy++; j++; }
+            else            { cells.Add((cx + 1, cy)); cells.Add((cx, cy + 1)); cx++; cy++; i++; j++; }
+            cells.Add((cx, cy));
+        }
+        cells.RemoveAt(cells.Count - 1);               // the end cell itself
+        return cells;
     }
 
     // ── Pooled per-solve scratch ─────────────────────────────────────────────
@@ -489,12 +513,9 @@ public sealed class LatticePathPlanner
         int mx = nx + o.Dx, my = ny + o.Dy;
         if ((uint)mx >= (uint)_w || (uint)my >= (uint)_h) return false;
         if (_blocked[my * _w + mx]) return false;
-        if (o.CrossCount > 0)
-        {
-            int c1 = (ny + o.C1y) * _w + (nx + o.C1x);
-            int c2 = (ny + o.C2y) * _w + (nx + o.C2x);
-            if (_blocked[c1] || _blocked[c2]) return false;
-        }
+        var cross = o.Cross;
+        for (int c = 0; c < o.CrossCount; c++)
+            if (_blocked[(ny + cross[2 * c + 1]) * _w + (nx + cross[2 * c])]) return false;
         return true;
     }
 

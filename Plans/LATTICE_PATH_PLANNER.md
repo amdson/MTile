@@ -128,7 +128,7 @@ ahead than the servo will ever track. So:
   set separately. (Revised 2026-08-24: the first draft sized the box from the
   cone's edge rays, `±L·tan θ`; with the cone at 90° − ε that is unbounded,
   while the reachable region is bounded by the offset table's steepest edge.)
-  At `L = 3.5` tiles and the `±2` table (slope 2) that is **3.5 × 14 tiles**.
+  At `L = 3.5` tiles and the `±3` table (slope 3) that is **3.5 × 21 tiles**.
 - **Tracking horizon** stays `AmbientHorizon` = 10 ticks; §3.6 consumes only the
   first ~17 px of the plan.
 
@@ -153,8 +153,8 @@ angles — with the cone at 90° − ε the whole table is admitted):
 | steepest offset | slope | box (tiles) | box cells | fan cells (≈ ½ box) |
 |---|---|---|---|---|
 | `(1,1)` | 1 (45°) | 3.5 × 7 | ~600 | ~300 |
-| `(1,2)` (the `±2` table, **current**) | 2 (63°) | 3.5 × 14 | ~1,650 | ~800 |
-| `(1,3)` (a `±3` table) | 3 (72°) | 3.5 × 21 | ~2,400 | ~1,200 |
+| `(1,2)` (the `±2` table, first build) | 2 (63°) | 3.5 × 14 | ~1,650 | ~800 |
+| `(1,3)` (the `±3` table, **current**) | 3 (72°) | 3.5 × 21 | ~2,400 | ~1,200 |
 
 The box is what gets allocated (pooled, fixed-size — pick a `LatticeMaxCells`
 the scratch arrays are sized to, ~4k, and clamp the box to it); the **fan is
@@ -283,22 +283,24 @@ and a vertical up/down pair forms a cycle; the fix would be a step-indexed DP
 (`(node, depth)` states, ~20× the work) and it is not worth it — see the wall
 argument below.
 
-- **Neighborhood:** the primitive offsets with `|dx|, |dy| ≤ 2` (gcd = 1, so no
-  offset is a multiple of a shorter one): `(±1,0) (0,±1) (±1,±1) (±1,±2)
-  (±2,±1)` — 16 offsets. With `u = +x` and `cos θ = 0.3` the cone admits
-  `(1,0) (1,±1) (1,±2) (2,±1)` = **7 edges per node**, steepest slope 2
-  (≈ 63°). Filtering is done once per solve into a small admitted-offset list;
-  the DP loop indexes that list.
-  **The neighborhood is the lever on steepness** (noted 2026-08-24): a
-  `(1,k)` offset admits slope `k` — `atan(k)` — so the steepest admissible
-  edge can be made arbitrarily steep (short of the DAG's 90°) by widening the
-  table, e.g. adding `(±1,±3) (±3,±1) (±2,±3) (±3,±2)` gives 24 directions at
-  ≤ 18° spacing with the same code, masks and supercover check. Neither the
-  cone (a filter on this table) nor a different lattice changes that bound.
+- **Neighborhood:** the primitive offsets with `|dx|, |dy| ≤ 3` (gcd = 1, so
+  no offset is a multiple of a shorter one): `(±1,0) (0,±1) (±1,±1) (±1,±2)
+  (±2,±1) (±1,±3) (±3,±1) (±2,±3) (±3,±2)` — 32 offsets, directions ≤ 18.4°
+  apart. With `u = +x` and the 90° − ε cone (§4.5) every forward offset is an
+  edge: **15 edges per node**, steepest slope 3 (≈ 72°). Filtering is done
+  once per solve into a small admitted-offset list; the DP loop indexes that
+  list. (Radius 2 — 16 offsets, 7 forward edges, slope 2 — was the first
+  build; widened 2026-08-24.)
+  **The neighborhood is the lever on steepness:** a `(1,k)` offset admits
+  slope `k` — `atan(k)` — so the steepest admissible edge can be made
+  arbitrarily steep (short of the DAG's 90°) by raising the radius; the table
+  and its supercover lists are generated from the radius at static init.
+  Neither the cone (a filter on this table) nor a different lattice changes
+  that bound.
 - **Tunneling:** an offset longer than one cell can jump a blocked cell. Every
   admitted offset carries a precomputed list of the cells its segment crosses
-  (supercover; ≤ 3 cells at radius 2), and an edge is dropped if any is
-  blocked. Cheap and exact at this radius.
+  (exact supercover, corners conservative — both side cells; ≤ 4 cells at
+  radius 3), and an edge is dropped if any is blocked. Cheap and exact.
 - **Hex later:** only the offset table and the cell→center map change. Nothing
   else in the planner knows the lattice is square.
 
@@ -647,7 +649,11 @@ tracker / give-up split (§4.3) is the one place deliverability is judged.
 > engagement (path on 240/240 frames) and a rollback round trip across the
 > solve. Measured, Release, JIT warmed: **12.7 µs / 0 B per solve** at the
 > original 60° cone (22×35 cells); **39 µs at the 90° − ε cone** decided later
-> the same day (22×75 cells, §4.5 — accepted for the simplicity); a whole
+> the same day (22×75 cells, §4.5 — accepted for the simplicity); **108 µs at
+> the ±3 offset table** (22×110 cells, 15 edges/node, 460 reachable — also
+> accepted; if it ever matters, most of that window is empty sky above a
+> hover path, and the reachability flood is where a cheaper bound would go);
+> a whole
 > sim step in the bumpy tunnel is **48 µs under lattice vs 25 µs under ref**
 > (the stamp is a cached per-tile mask now; buried tiles are skipped). The
 > earlier "~90 µs" figure was tier-0 JIT code — the timing tests now warm
