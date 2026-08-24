@@ -113,6 +113,13 @@ orders of magnitude cheaper than the state-space search prototype.
 > redirect had been planting against the band in free air); `FoldRiseCost`
 > 16 / `LatticeHoverWeight` 3. Rows 7, 8, 13 pass; jump height halved by
 > the shorter leg reach — the retune decision. `LATTICE_SCENARIOS.md`.
+>
+> **Twelfth pass, same day — current:** WallSliding (`Fall`), DoubleJumping
+> and WallJumping (`Jump`, impulse kept as the state's own) join the engine;
+> no state runs the qp coast path on it any more. **No actuators in free
+> air**: the tracker masks AirLateral/AirVertical — the double jump's trace
+> showed them bending a launch toward a momentum-blind plan (58.9 → 39.4 px)
+> and overdriving the state's air cap. Rows 15–17. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

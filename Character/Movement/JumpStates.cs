@@ -351,7 +351,13 @@ public class DoubleJumpingState : MovementState
 
         ctx.Body.AppliedForce = force;
 
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
+        // Lattice engine: the launch stays the state's own — an impulse and a
+        // hold force, since in free air there is nothing to push against and
+        // the engine allows no upward air force — and the tracker shapes the
+        // arc around terrain under the Jump profile (hover off, rising along
+        // intent). Unlike the ground jump, the legs play no part.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
+            OnLattice ? FoldProfile.Jump : FoldProfile.None);
     }
 }
 

@@ -14,7 +14,7 @@ scenario needs something not on it, that is a design gap, not a parameter.
 | parameter | who sets it | values |
 |---|---|---|
 | `u` | the state, from **intent** (never from the jump direction) | unit vector; `(±1,0)` walking, `(±1,−1)/√2` diagonal hops, `(0,−1)` pure vertical (see row 9 for the tie rule); `dir == 0` → no solve, hover column |
-| `hover` / `hoverOffset` | the state (`FoldProfile.Hover`) | Standing `on / 10`; Crouched `on / 0`; Falling `off` (level line, no upward air force); Jump `off` |
+| `hover` / `hoverOffset` | the state (`FoldProfile.Hover`) | Standing `on / 10`; Crouched `on / 0`; Falling / WallSliding `off` (level line); Jump (ground, double, wall) `off` |
 | `Rising` | the state (`FoldProfile.Rising`) | `u = (dir, −1)^` while a jump is held — the launch is the legs along a rising path |
 | `RiseCost` | the state (`FoldProfile.RiseCost`) | price per px climbed on the path, traded against `ProgressWeight` at the goal — Standing/Falling 16 (mounts 16 px, refuses 32, even pressed against it), Crouch 30 (never mounts), Jump 0; drops are free |
 | progress target | the state | `MaxWalkSpeed`×mods (Standing), `CrouchMaxWalkSpeed` (Crouched), **unbounded** (jumps) |
@@ -52,12 +52,15 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
 | 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ✅ `Row13` (eleventh pass): 260 of 270 — Falling has no hover and no upward air force; the legs catch only where Standing owns the body |
 | 14 | **Knockback** | body hit, `PreserveExternalVelocity` set | any | engine **excluded** | No correction at all — the fold does not fight combat momentum | ✅ `Admit` guard |
+| 15 | **Wall slide** | airborne beside a tall wall, pressing into it | WallSliding | `Fall` profile: `u=(dir,0)` into the face (the DP finds nothing), hover **off**; the state's drag and FSDs are the baseline | The descent is the state's own (equilibrium 80 px/s from `SlideDrag`), no lift, no push-off; the held direction leans into the wall; lands at hover and stands | ✅ `Row15` (twelfth pass): slide max vy 80.0 = corrector-off control; never left the wall |
+| 16 | **Double jump in open air** | falling, press jump with or without a direction | DoubleJumping | `Jump` profile; the impulse + hold force are the state's (nothing to push against in free air); **no engine actuators in the air** | The rise is the state's (58.9 px from the press), no drift when neutral; the engine adds nothing off the ground | ✅ `Row16` both cases (twelfth pass): 58.9 = control. Before the air channels were masked: 39.4 held-right — `AirVertical` bent the arc toward the plan |
+| 17 | **Wall jump** | sliding down a tall wall, press jump holding into the wall (kick off, arc back, re-slide) or away | WallJumping | `Jump` profile; kick-off, hold force and the state's air steering are the baseline; no air actuators | The arc is the state's (54.2 px), the into case arcs back and re-enters the slide; the DP planning up the face changes nothing because there is nothing to push with | ✅ `Row17` both cases (twelfth pass): rise and kick-off reach = control, re-slide ✓ |
 
 ## Tests
 
 `MTile.Tests/Sim/LatticeScenarioTests.cs` — one test per encoded row (1, 2, 3
-near + far, 4, 6, 7, 8, 9, 11, 13), all under `FoldEngine = "lattice"`,
-asserting the table's *correct* behavior. Rows 5, 10, 12, 14 are deliberately
+near + far, 4, 6, 7, 8, 9, 10, 11, 13, 15, 16, 17), all under `FoldEngine = "lattice"`,
+asserting the table's *correct* behavior. Rows 5, 12, 14 are deliberately
 not encoded yet. Tests the engine cannot pass today are `Skip`ped with the
 row's blocker in the reason — that list is the next cycle's checklist.
 
@@ -106,7 +109,57 @@ is a phase accident (row 1's does, the engine test's doesn't). The design
 question it raises is what the margin means to the bitmap versus to the
 tracker's band; not decided here.
 
-### Eleventh pass (2026-08-24) — Falling without hover; legs reach = standing reach — current
+### Twelfth pass (2026-08-24) — the remaining unguided states; no actuators in free air — current
+
+WallSliding, DoubleJumping and WallJumping join the engine (Dropdown stays as
+it is). Each is one line: the profile the state hands `ApplyAmbient` —
+`Fall` for the slide (Falling against a wall), `Jump` for the two launches
+— with everything the state did before kept as its baseline: the slide's
+drag and FSDs, the launches' impulse, hold force and air steering. Unlike
+the ground jump, these launches are not the legs': in free air there is
+nothing to push against, so the impulse stays the state's own. `OnLattice`
+is now one gate on `MovementState`.
+
+With this, no state runs the qp coast/row path on the lattice engine any
+more — `AmbientCorrector.Apply` past the dispatch is `qp`/`ref` only.
+
+One principle fell out of the double jump's trace. Held-right, the engine
+cut the rise from 58.9 to **39.4 px**: `AirVertical` (300 px/s², now
+down-only) pushed down 5 px/s per tick for 16 ticks to bend the arc toward
+the plan — the 45° line while DoubleJumping, then Falling's *level* line
+while the body was still rising at −180 — and `AirLateral` drove vx to 171
+past the state's 150 air cap, after which the state's own air control
+dragged it back (two authorities). Neither channel is the engine's to have:
+they are the qp fold's flight steering, duplicating the state's air control
+minus its speed cap, and a plan that knows nothing of the body's momentum
+must not be enforced where the body cannot follow it. **The lattice engine
+has no actuators in free air** — `LatticeTracker` masks AirLateral and
+AirVertical (the eleventh pass's `airUp` flag is gone); the engine acts
+where it can push: near the floor (legs, drive, tuck, redirect) and at a
+plantable corner. Off the ground the body follows physics and the state's
+air control.
+
+| | eleventh pass | **twelfth pass** |
+|---|---|---|
+| row 16 double jump held-right / neutral | — (qp coast path) | **58.9 / 58.9 = control** (39.4 held-right before the air masks) |
+| row 17 wall jump into / away | — (qp coast path) | **54.2 / 54.2 = control**, re-slide ✓ |
+| row 15 wall slide | — (`Off`) | **80.0 = control**, never leaves the wall |
+| row 13 landing (max vy / 270) | 260 | **260** |
+| row 8 ledge drop | ✓ 73.6 | **✓ 73.1** |
+| row 1 corridor | 79.2 | **77.3** |
+| row 2 tunnel entry (lip 75.5) | ✓ | **✓ (75.6)** |
+| rows 4, 6, 7, 9, 3-far; engine and planner gates | ✓ | **✓** (29 passed / 4 skipped) |
+| `qp` / `ref` scenario slices | — | **unchanged** (21 passed; `BuildFold` is back to its pre-eleventh signature) |
+
+Seen in the slide's trace, not acted on: with the DP blocked at the face
+the tracker still emits the progress row along `u` (no path → `tLast = u`),
+so AirLateral pressed into the wall at its cap before the masks — the same
+lean Standing has at a wall (row 6). Standing pressed against the wall
+after the landing creeps up at −1.2 px/s (the RiseCost strain at the
+face); the `qp` landing beside it dives 8 px below hover and bounces for a
+second, the lattice one settles in 15 frames.
+
+### Eleventh pass (2026-08-24) — Falling without hover; legs reach = standing reach — superseded
 
 Decided: whenever the stand channel (legs) is available, Falling is
 inactive; then Falling drops hover. Changes, in order:

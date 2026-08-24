@@ -210,6 +210,11 @@ public class WallJumpingState : MovementState
 
         ctx.Body.AppliedForce = force;
 
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
+        // Lattice engine: as DoubleJumpingState — the kick-off impulse, hold
+        // force and air steering above stay the state's own; the tracker
+        // plans under the Jump profile (rising along the held direction —
+        // into the wall, the DP climbs its face; away, it rises clear).
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
+            OnLattice ? FoldProfile.Jump : FoldProfile.None);
     }
 }

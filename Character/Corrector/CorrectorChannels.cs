@@ -53,11 +53,7 @@ public static class CorrectorChannels
     // CornerAssist is lift-only for the same reason. The redirect disc may
     // still shed speed — passivity is its physical semantics (a deflection off
     // planted feet) — and exists only near the ground.
-    // airUp: whether AirVertical may push UP. The lattice engine passes false —
-    // in free air nothing may add lift (the plan only ever removes freedom);
-    // qp keeps its two-sided nudge.
-    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed,
-                                bool airUp = true)
+    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed)
     {
         var cfg = MovementConfig.Current;
         float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
@@ -208,9 +204,9 @@ public static class CorrectorChannels
             Id = CorrectionChannel.AirLateral,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
             Axis = intent, Cap = cfg.FoldAirLateralForce, ActiveMask = s.ChannelMask[5] };
-        ch[6] = new ChannelDef {   // AirVertical: tiny nudge in flight (down-only when !airUp)
+        ch[6] = new ChannelDef {   // AirVertical: tiny two-sided nudge in flight
             Id = CorrectionChannel.AirVertical,
-            Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true, Unilateral = !airUp,
+            Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6],
             SkipSoftHorizontal = true };
         return AddCornerPlant(s, n, 7);

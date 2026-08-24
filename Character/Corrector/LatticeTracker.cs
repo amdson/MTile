@@ -169,10 +169,9 @@ public static class LatticeTracker
             {
                 // Progress: what the channels could add along t̂ by the last
                 // tick at their caps — Σ_k (T−k+1)·dt² = dt²·(T+1)(T+2)/2.
-                float capX = near ? cfg.FoldDriveForce : cfg.FoldAirLateralForce;
-                float capY = tLast.Y < 0f
-                    ? (near ? cfg.FoldLegForce : cfg.FoldAirVerticalForce)
-                    : (near ? cfg.FoldTuckForce : cfg.FoldAirVerticalForce);
+                // (zero in free air: no actuators there — see the masks below)
+                float capX = near ? cfg.FoldDriveForce : 0f;
+                float capY = !near ? 0f : tLast.Y < 0f ? cfg.FoldLegForce : cfg.FoldTuckForce;
                 float capAlong = MathF.Abs(tLast.X) * capX + MathF.Abs(tLast.Y) * capY;
                 int T9 = H - 1;
                 s.Rows[rowCount++] = new ClearanceRow
@@ -186,8 +185,21 @@ public static class LatticeTracker
             pr.H = H; pr.Dt = dt;
             pr.CoastVel = s.CoastVel;
             pr.Rows = s.Rows; pr.RowCount = rowCount;
-            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed, airUp: false);
-            for (int k = 0; k < H; k++) s.ChannelMask[2][k] = false;   // CornerAssist: not carried over
+            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed);
+            for (int k = 0; k < H; k++)
+            {
+                s.ChannelMask[2][k] = false;   // CornerAssist: not carried over
+                // No actuators in free air. AirLateral/AirVertical are the qp
+                // fold's flight steering — a second air control without the
+                // state's speed cap, and a vertical nudge that bent a launch
+                // toward a plan that knows nothing of the body's momentum (a
+                // held-right double jump lost a third of its rise). Off the
+                // ground the body follows physics and the state's own air
+                // control; the engine acts where it can push: near the floor
+                // (legs, drive, tuck, redirect) and at a plantable corner.
+                s.ChannelMask[5][k] = false;
+                s.ChannelMask[6][k] = false;
+            }
             // (Band and speed rows are Reference rows, so BuildFold's corner /
             // redirect feature activation does not see them — the disc had
             // been "planting" against the band in free air, holding a 4-tile
