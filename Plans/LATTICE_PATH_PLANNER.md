@@ -98,9 +98,13 @@ could not see a two-tile block coming.
 That is not a problem, because the path is spatial: it can be planned further
 ahead than the servo will ever track. So:
 
-- **Plan window** (spatial, a config knob): `LatticeLookaheadTiles` ahead of the
-  body along `dir`, ± `LatticeBandTiles` vertically around the current support
-  anchor. Start at **3 tiles ahead, ±2.5 tiles**.
+- **Plan window** = the **cone's footprint from the seed**: the bounding box of
+  `{ seed + t · R(±φ) u : t ∈ [0, L], |φ| ≤ θ }`, i.e. `L` along `u` and
+  `±L · tan θ` across it. `L` (`LatticeLookaheadTiles`) is the one knob; the
+  cross extent is *derived* from `L` and `cos θ` (§3.3), never set separately —
+  a band narrower than the fan would clip the cone and silently forbid the
+  steep routes the cone was opened to admit. At `L ≈ 3.5` tiles and a 45° cone
+  that is a **7 × 7 tile** box, which is the right mental size for this.
 - **Tracking horizon** stays `AmbientHorizon` = 10 ticks; §3.6 consumes only the
   first ~17 px of the plan.
 
@@ -118,13 +122,23 @@ this plan argued for was built on a bad derivation and is withdrawn (see §3.3).
 `CObstacleTemplate.TopSurfaceRy`), so the bitmap resolves every feature the
 hover reference can see.
 
-At 3 tiles × ±2.5 tiles × 5×: **15 × 50 = 750 nodes**, ~7 edges each (§3.3)
-≈ **5,000 transitions**. Four tiles ahead is 1,000 nodes. Both well
-inside the todo's 5,000-point budget, and a dense-array sweep at that size
-should land in the **single-digit µs** — a small fraction of the current 25–184
-µs sim step rather than a multiple of it.
+Box and fan sizes at `L = 3.5` tiles, 5× cells, `u = +x`:
 
-Cell size and both window extents should be config knobs from the first commit;
+| `cos θ` | half-angle | box (tiles) | box cells | fan cells (≈ ½ box) |
+|---|---|---|---|---|
+| 0.7 | 45° | 3.5 × 7 | ~600 | ~300 |
+| 0.5 | 60° | 3.5 × 12 | ~1,050 | ~530 |
+| 0.3 | 72° | 3.5 × 22 | ~1,900 | ~970 |
+
+The box is what gets allocated (pooled, fixed-size — pick a `LatticeMaxCells`
+the scratch arrays are sized to, ~4k, and clamp the box to it); the **fan is
+what the DP actually visits**, after the reachability pass of §3.2 discards
+everything outside the cone from the seed and everything behind an obstacle.
+Every row is inside the todo's 5,000-point budget, and a dense-array sweep over
+a few hundred to a thousand nodes should land in the **single-digit µs** — a
+small fraction of the current 25–184 µs sim step rather than a multiple of it.
+
+Cell size and `L` should be config knobs from the first commit;
 phase 0 (§5) exists largely to look at the bitmap at a few settings before
 committing to any of them.
 
@@ -172,12 +186,12 @@ Two arrays, both dense and pooled in `CorrectorScratch`:
    overlapping the window, marking lattice cells inside the C-obstacle as
    blocked. Cost ≈ (solid tiles in window) × (cells per C-obstacle footprint).
    The template's `Reach` is ~20 px, so the footprint is ~40 px across: at 3.2 px
-   cells that is ~13 × 13 ≈ 170 marks per tile, ~40 tiles in the window → ~7k
-   marks. Cheap, and it is the *correct* use of the template.
+   cells that is ~13 × 13 ≈ 170 marks per tile, ~50 tiles in a 7 × 7 box →
+   ~8k marks. Cheap, and it is the *correct* use of the template.
 2. **Distance to the surface below, per node.** One bottom-up sweep per
    x-column of the bitmap: `floorBelow[n]` = distance from `center(n)` down to
-   the first blocked cell in its column (∞ if none in the window). ~750 ops
-   total. Because the bitmap *is* the C-obstacle — facets, bevels and all —
+   the first blocked cell in its column (∞ if none in the window). One op per
+   cell of the box. Because the bitmap *is* the C-obstacle — facets, bevels and all —
    this is the floor envelope, evaluated at every node instead of once per
    column, and it is **multi-floor aware**: a ledge top and the ground beneath
    it are both found, which a single-band `FloorEnvelope` query is not.
@@ -186,6 +200,23 @@ Two arrays, both dense and pooled in `CorrectorScratch`:
    downstream `Grounded` / `FloorY` fields (§3.6) are filled from it. No
    `FloorEnvelope` calls at all. The x-column sweep stays x-indexed whatever
    `u` is — floors are floors.
+3. **Reachability prune.** A forward flood from the seed over admissible edges
+   (§3.3 conditions, bit ops only — no costs), producing a `reachable` bitmap
+   and a compact node list. This discards, before the DP runs, everything
+   outside the cone-fan from the seed (roughly half the box — the fan is a
+   triangle in a rectangle) and everything behind an obstacle. Three things it
+   buys:
+   - the sort in §3.4 runs over the compact list, not the box;
+   - an **early-out**: if no far-band node is reachable, the answer is the
+     bonk (§3.4) and the DP is skipped entirely;
+   - the overlay (§3.8) can show "reachable" as its own layer, which is the
+     first thing to look at when the path does something odd.
+
+   Honest note: the DP's own `dp[n] = ∞` skip already prunes implicitly, so the
+   pass is an optimization and a diagnostic, not a correctness step. A
+   *backward* prune (nodes that cannot reach the far band) is possible too and
+   would shrink the DP further; it never changes the answer, so leave it for
+   the profiler to ask for.
 
 Getting this wrong is the difference between "fast" and "unusable": the
 state-space prototype's per-node `FloorEnvelope` calls (facet walks over
@@ -269,10 +300,11 @@ answered after the fact by the tracking-residual give-up of §4.3.
 Note what is *not* here: a curvature term (§4.4).
 
 ```
-sort nodes by p = dot(center, u)          // once per solve; deterministic tie-break
+nodes = reachable list (§3.2), sorted by p = dot(center, u)   // deterministic tie-break
+if no far-band node in nodes: return bonk
 dp[*] = ∞;  dp[seed] = 0
-for n in sorted order:
-  if dp[n] == ∞ or blocked[n]: continue
+for n in nodes:
+  if dp[n] == ∞: continue
   for o in admittedOffsets:               // §3.3, ~7
     m = n + o
     if outOfWindow(m) or blocked[m] or crossesBlocked(n, o): continue
@@ -285,8 +317,9 @@ Goal: the minimum-cost node among those in the **far band** of the window
 progress term. If the far band is unreachable, take the reachable node of
 greatest `p` — that is the honest bonk (§4.3).
 
-~750 nodes × 7 edges ≈ **5,000 transitions**. Dense arrays, almost no
-branching — single-digit µs, a small fraction of the current 25–184 µs sim step.
+A few hundred to ~1,000 reachable nodes × 7 edges ≈ **2,000–7,000
+transitions** depending on the cone (§2.2). Dense arrays, almost no branching —
+single-digit µs, a small fraction of the current 25–184 µs sim step.
 
 ### 3.5 Seeding with the current velocity
 
@@ -412,8 +445,9 @@ polish, it is what keeps walls feeling solid.
 ### 4.4 Skip direction state in v1
 
 Adding "incoming edge offset" to the node state to penalize curvature is a
-**~7× state blowup** (one state per admitted offset): ~750 nodes → ~5,000
-states, ~5,000 transitions → ~37,000. That likely lands at 50–100 µs/solve, and
+**~7× state blowup** (one state per admitted offset): ~500–1,000 reachable
+nodes → ~3,500–7,000 states, and transitions ×7 with them. That likely lands at
+50–100 µs/solve, and
 with two players × a rollback window of 8 that is on the order of 1.5 ms/frame
 on top of the current 250 µs rollback frame. Real, not fatal, but not free.
 
