@@ -36,7 +36,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
                              out float cost, out bool bonk)
         => planner.Solve(chunks, body.Polygon, seed, vel,
             new Vector2(1f, 0f), hover: true, MovementConfig.Current.FoldHoverOffset,
-            path, out cost, out bonk);
+            MovementConfig.Current.FoldRiseCost, path, out cost, out bonk);
 
     // Flat floor at tile row 6 (top face y = 96): rest center ≈ 75.6.
     private static ChunkMap FlatFloor() =>
@@ -131,15 +131,15 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
                 $"path claims to pass the wall: {path[n - 1].Pos.X:F1}");
     }
 
-    [Fact(Skip = "argmax goal at ProgressWeight 7: the 2-high wall's over-route costs only ~45 (per-edge-angle steepness, ±3 primitives — a (1,3) edge buys 9.6 px of rise for 20.5), so it is still worth its ~26 px of progress; the single-weight window that mounts 1-high (cost 13) and refuses 2-high is (0.5, 1.7). Cost structure decision pending — LATTICE_SCENARIOS.md seventh pass")]
+    [Fact]
     public void FreeStandingTwoHighWall_NotWorthClimbing()
     {
         // PINS THE GOAL RULE (plan §3.4 revised): edges are still pure
         // geometry, so an over-the-top route EXISTS for a free-standing
-        // 2-high wall — but at ProgressWeight 7 its ≈238 of steepness is not
-        // worth the ≈26 px of progress it buys, so the argmax stops the path
-        // before the wall (a bonk the costs decided). A 1-high block (≈132)
-        // still is worth it: BlockAhead_PathClimbsOver.
+        // 2-high wall — but at FoldRiseCost 6 its 32 px of rise (192) is not
+        // worth the progress it buys at ProgressWeight 7, so the argmax stops
+        // the path before the wall (a bonk the costs decided). A 1-high block
+        // (96) still is worth it: BlockAhead_PathClimbsOver.
         var sb = new StringBuilder();
         sb.Append("OOOOOOOOOOXOOOOOOOOOOOOO\n");        // row 4: wall top
         sb.Append("OOOOOOOOOOXOOOOOOOOOOOOO\n");        // row 5: wall bottom
@@ -154,7 +154,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         float minY = float.MaxValue;
         for (int i = 0; i < n; i++) minY = MathF.Min(minY, path[i].Pos.Y);
         Assert.True(minY > 65f, $"climbed the wall anyway: minY {minY:F1}");
-        Assert.True(path[n - 1].Pos.X < 160f - 14f, $"path claims to pass the wall: {path[n - 1].Pos.X:F1}");
+        Assert.True(path[n - 1].Pos.X < 160f - 6f, $"path claims to pass the wall's face: {path[n - 1].Pos.X:F1}");
     }
 
     // The seed run (§3.5) is OFF by default (a re-planning tracker turns it

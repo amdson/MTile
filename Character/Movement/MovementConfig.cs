@@ -260,6 +260,14 @@ public class MovementConfig
     // it in sync (or delete the JSON key) when tweaking Chunk.TileSize.
     public float FoldClimbReachUp               { get; set; } = 1.25f * Chunk.TileSize;
     public float CrouchClimbReachUp             { get; set; } = 4f;
+    // Lattice engine (FoldProfile.RiseCost): the state's price per px CLIMBED
+    // on the planned path, traded against LatticeProgressWeight at the goal;
+    // drops are free (gravity delivers them). Standing 6: a 16 px block is
+    // worth its ~96 whenever ≥ 14 px of window lie beyond it, a 32 px wall
+    // (192) never is at ProgressWeight 7. Crouch 30: a 16 px rise (480) can
+    // never be worth a 56 px window — a crouch does not mount ledges.
+    public float FoldRiseCost                   { get; set; } = 6f;
+    public float CrouchRiseCost                 { get; set; } = 30f;
     // Duck budget — FoldClimbReachUp's downward mirror for the ref engine's
     // wall classification: a frontal obstacle whose duck-under needs at most
     // this much descent is entered by ducking; anything deeper is a give-up
@@ -306,20 +314,19 @@ public class MovementConfig
     // "lattice" reference generator, also the freeze-frame oracle. Window =
     // the cone's footprint from the seed: LookaheadTiles along u, ±L·tanθ
     // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3) and
-    // is set to "90° − ε" so every forward offset is an edge — steepness is
-    // priced by SteepWeight, never filtered (with the ±3 offset table any
+    // is set to "90° − ε" so every forward offset is an edge — climbing is
+    // priced by RiseWeight, never filtered (with the ±3 offset table any
     // value ≤ 0.316 admits the same edges). Sim-affecting under "lattice" —
     // hot-reload is gated like every movement knob.
     public float LatticeLookaheadTiles          { get; set; } = 3.5f;
     public int   LatticeCellsPerTile            { get; set; } = 5;
     public float LatticeConeCos                 { get; set; } = 0.05f;
-    public float LatticeSteepWeight             { get; set; } = 30f;
     // Progress worth per px along u, traded against the edge costs at the
     // goal (argmax of w·progress − cost over every reachable node). Bounded by
     // "mount a 1-high block, refuse a 2-high wall" at SteepWeight 30:
     // roughly (5, 9). The §4.1 taste number.
     public float LatticeProgressWeight          { get; set; } = 7f;
-    public float LatticeHoverWeight             { get; set; } = 0.05f;  // per px²
+    public float LatticeHoverWeight             { get; set; } = 2f;     // per px (linear, like RiseCost)
     public float LatticeSeedWeight              { get; set; } = 20f;
     // Seed run (§3.5): the path's first SeedRunPx are FORCED along the body's
     // current velocity direction (quantized to the nearest admitted offset)

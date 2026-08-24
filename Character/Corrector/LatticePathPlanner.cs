@@ -19,9 +19,9 @@ namespace MTile;
 //     cosθ > 0 is what makes the graph a DAG (projection onto u strictly
 //     increases along every edge), so one pass over nodes sorted by p is a
 //     valid DP order;
-//   - cost: per-edge steepness (angle off u), per-node hover toward the
-//     surface below (state-supplied on/off flag), seed-edge velocity bias
-//     (§3.4–3.5);
+//   - cost: per-edge RISE (px climbed — table-invariant; drops are free),
+//     per-node hover toward the surface below (state-supplied on/off flag),
+//     seed-edge velocity bias (§3.4–3.5);
 //   - goal: the reachable node maximizing progress·w_prog − cost; a bonk is
 //     a route that is not worth its cost (§3.4, revised).
 //
@@ -160,12 +160,13 @@ public sealed class LatticePathPlanner
     private Vector2 CellCenter(int gx, int gy) => new((gx + 0.5f) * _cell, (gy + 0.5f) * _cell);
 
     // Solve. u = requested direction (unit not required; zero → no solve).
-    // hover on/off is the state-supplied flag (§3.4). Returns the number of
+    // hover on/off and riseCost (price per px climbed; drops are free) are
+    // the state-supplied parameters (§3.4). Returns the number of
     // path samples written to outPath (body-center positions, seed → goal,
     // FloorY/Grounded filled per §3.6, Vel zero); 0 = no solve (zero u, seed
     // inside an obstacle with no not-behind free neighbour, degenerate window).
     public int Solve(ChunkMap chunks, Polygon body, Vector2 seed, Vector2 vel,
-                     Vector2 u, bool hover, float hoverOffset,
+                     Vector2 u, bool hover, float hoverOffset, float riseCost,
                      CoastSample[] outPath, out float cost, out bool bonk)
     {
         cost = 0f; bonk = false;
@@ -259,7 +260,7 @@ public sealed class LatticePathPlanner
         Array.Sort(_orderKey, _order, 0, reachCount);
 
         // ── The DP sweep (§3.4) ──────────────────────────────────────────────
-        float wSteep = cfg.LatticeSteepWeight;
+        float wRise = riseCost;                                 // the state's price per px climbed
         float wHover = cfg.LatticeHoverWeight, wSeed = cfg.LatticeSeedWeight;
         Vector2 vHat = vel.LengthSquared() > 1f ? Vector2.Normalize(vel) : Vector2.Zero;
         for (int i = 0; i < reachCount; i++) _dp[_order[i]] = float.PositiveInfinity;
@@ -279,12 +280,22 @@ public sealed class LatticePathPlanner
                 ref var o = ref _admitted[a];
                 if (!EdgeFree(nx, ny, ref o)) continue;          // blocked / tunneling (§3.3)
                 int m = (ny + o.Dy) * _w + (nx + o.Dx);
+                // Climb cost = height climbed (px of rise), so a route's price
+                // is the geometry's, not the offset table's — a (1,3) edge
+                // and three (1,1) edges cost the same 9.6 px. Drops are free:
+                // gravity delivers them, and charging them would let the
+                // argmax goal refuse to walk off a ledge.
                 float c = dn
-                    + wSteep * (1f - Vector2.Dot(o.Unit, u));
+                    + wRise * MathF.Max(0f, -o.Dy) * _cell;
                 if (hover && !float.IsPositiveInfinity(_floorBelow[m]))
                 {
                     float dev = _floorBelow[m] - hoverOffset;
-                    c += wHover * dev * dev;
+                    // Linear, like the rise cost: the "rise back to hover" vs
+                    // "stay sagged" trade then compares w_rise against
+                    // w_hover × nodes, independent of how large the sag is (a
+                    // quadratic hover against a linear rise crossed at ~7 px —
+                    // inside the hover band, measured 2026-08-24).
+                    c += wHover * MathF.Abs(dev);
                 }
                 if (atSeed && vHat != Vector2.Zero)
                     c += wSeed * (1f - Vector2.Dot(o.Unit, vHat));

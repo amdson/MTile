@@ -67,10 +67,10 @@ public static class LatticeTracker
 
         // ── The plan ─────────────────────────────────────────────────────
         float speed = fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
-        var u = new Vector2(dir * MathF.Cos(fold.IntentTilt), MathF.Sin(fold.IntentTilt));
         int count = dir != 0
             ? s.Lattice.Solve(ctx.Chunks, body.Polygon, body.Position, body.Velocity,
-                u, hover: true, fold.HoverOffset, s.LatticePath, out _, out _)
+                new Vector2(dir, 0f), hover: true, fold.HoverOffset, fold.RiseCost,
+                s.LatticePath, out _, out _)
             : 0;
         float cell = (float)Chunk.TileSize / Math.Clamp(cfg.LatticeCellsPerTile, 2, 8);
         float band = 0.5f * cell;

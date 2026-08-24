@@ -241,7 +241,10 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
         }
         output.WriteLine($"engaged {engaged}/{N} frames, bonk on {bonked}");
         Assert.True(engaged >= (int)(0.9f * N), $"lattice engaged on only {engaged}/{N} frames");
-        Assert.True(bonked == 0, $"open course reported bonk on {bonked} frames");
+        // Under the argmax goal a "bonk" also means "chose to stop short of
+        // the far band" — legitimate in front of a step while the climb is
+        // not yet worth it — so it is no longer an error on an open course.
+        Assert.True(bonked <= N / 10, $"bonked on {bonked} frames of an open course");
     }
 
     // Informational: whole-step cost under "lattice" vs "ref" on the tunnel

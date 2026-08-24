@@ -82,6 +82,13 @@ orders of magnitude cheaper than the state-space search prototype.
 > therefore depends on the offset table (a `(1,3)` edge buys 9.6 px of rise
 > for 20.5) — the cost-structure decision that pass leaves open; see
 > `LATTICE_SCENARIOS.md`.
+>
+> **Eighth pass, same day — current:** climb cost = pixels climbed, priced
+> by the state (`FoldProfile.RiseCost`: Standing 6, Crouch 30 — the accepted
+> new parameter; drops free), hover cost linear (2/px) so the rise/hover
+> trade is scale-free; `IntentTilt` removed. The 2-high wall is refused by
+> the costs; the crouch's block-mounting turned out to be `MantleState`
+> firing from a crouch, not the planner. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
