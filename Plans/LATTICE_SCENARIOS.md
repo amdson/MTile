@@ -104,6 +104,45 @@ is a phase accident (row 1's does, the engine test's doesn't). The design
 question it raises is what the margin means to the bitmap versus to the
 tracker's band; not decided here.
 
+### Idea on the table (2026-08-24, not built): sliding-bead path loss
+
+The fifth pass's reference is the polyline sampled at the body's *current
+speed* — a stand-in for where along the path the body will be at tick k.
+The path-following formulation makes that a solved quantity instead: a
+**bead** `s_k` (arc length along the lattice path) per QP tick, free to
+slide, monotone:
+
+```
+min over z, s:   Σ_k w_c ‖z_{c,k}‖²  +  w_H Σ_k ‖p_k(z) − P(s_k)‖²  −  w_prog · s_{H−1}
+                 s_0 ≤ s_1 ≤ … ≤ s_{H−1},   s_k − s_{k−1} ≤ v_max · dt
+```
+
+with `P(s)` the polyline at arc length `s` and `p_k(z) = p̄_k + Δp_k(z)`.
+The band becomes exact (distance to the path, not to a line or a pre-timed
+sample), progress is the last bead's arc length, and the speed limit is a
+bound on bead spacing — one object for all three.
+
+It is biconvex: for fixed `z`, the optimal `s_k` is the nearest-point
+projection of `p_k` onto the polyline (closed form) followed by a running
+max for monotonicity — that *is* the sliding; for fixed `s`, `P(s_k)` is a
+constant point and the loss is quadratic in `z`. In the bead's local frame
+the along-path residual is zero after projection, so only the perpendicular
+term survives: two rows with normal `n̂_k` at the bead plus the progress row
+along `t̂_k` — exactly today's row structure. So the whole change is *where
+the reference point comes from*: nearest point on the path to the current
+iterate instead of the point at `|v|·(k+1)·dt`. Alternate 2–3 outer passes
+(project → rebuild rows → solve, cold-started each pass to keep the solver's
+determinism contract) and it converges on the exact constraint.
+
+Notes for when it is weighed: (a) even one pass improves on the current
+scheme — projecting the *free rollout* onto the path puts a falling body's
+bead below it rather than where the path's timing would; (b) cost is
+~×(outer passes) on the 47 µs step; (c) the corridor seam is unchanged by
+it — the perpendicular distance to a 63° two-step is the same geometry;
+(d) the progress term is still a hinge with an achievable-at-cap depth on
+the current solver, not a true linear objective — the same approximation as
+now.
+
 ### Horizon-QP results (2026-08-24, fourth pass — superseded)
 
 The one-tick tracker's overshoot is H = 1 myopia, so `LatticeTracker` became
