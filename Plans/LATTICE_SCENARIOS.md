@@ -196,7 +196,11 @@ inactive; then Falling drops hover. Changes, in order:
    hard rows with non-floor normals, which that heuristic reads as lip
    undersides — the Redirect disc had been "planting" against the band in
    free air and converting horizontal speed into lift (a 4-tile fall held to
-   27 px/s). The disc still fires at real corners (the corridor's).
+   27 px/s). *(Correction, twelfth pass: with the band rows ignored the disc
+   never fires on the engine at all — its only other activations are
+   `near && !Grounded`, impossible since `SupportReach` 25 > `LegReach` 17,
+   and corner plants, which the tracker never marks. Ledger over the whole
+   corridor: LegServo, Drive, Tuck only.)*
 4. **`FoldRiseCost` 6 → 16, `LatticeHoverWeight` 2 → 3.** The binding case
    for the rise price is the body *pressed against* the obstacle, where
    standing still earns nothing and the window's whole worth (392) is the
