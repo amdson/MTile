@@ -263,6 +263,12 @@ argument below.
   `(1,0) (1,±1) (1,±2) (2,±1)` = **7 edges per node**, steepest slope 2
   (≈ 63°). Filtering is done once per solve into a small admitted-offset list;
   the DP loop indexes that list.
+  **The neighborhood is the lever on steepness** (noted 2026-08-24): a
+  `(1,k)` offset admits slope `k` — `atan(k)` — so the steepest admissible
+  edge can be made arbitrarily steep (short of the DAG's 90°) by widening the
+  table, e.g. adding `(±1,±3) (±3,±1) (±2,±3) (±3,±2)` gives 24 directions at
+  ≤ 18° spacing with the same code, masks and supercover check. Neither the
+  cone (a filter on this table) nor a different lattice changes that bound.
 - **Tunneling:** an offset longer than one cell can jump a blocked cell. Every
   admitted offset carries a precomputed list of the cells its segment crosses
   (supercover; ≤ 3 cells at radius 2), and an edge is dropped if any is

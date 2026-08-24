@@ -78,7 +78,11 @@ Both surfaced by rows 8 and 13 and confirmed with a per-frame probe against
    rollouts are independent (y falls at gravity regardless of x). Candidate
    rule: a path *below* the reference is not a support until it is at hover
    height — the reference falls at gravity (no faster, no slower) and rides
-   the path only where the path's node sits on its floor at hover.
+   the path only where the path's node sits on its floor at hover. The
+   general answer is the §3.7 tracker with gravity in its dynamics (no rule
+   at all). Note also that the *path's* steepness is set by the offset
+   neighborhood — a `(1,k)` edge admits `atan(k)` — so the 45°/63° figures
+   above are a table choice, not a lattice limit (plan §3.3).
 2. **The seed run can lock the tick-0 servo.** With the run on, a landing
    settles at 81.6 (6 px low) and never rises: velocity is `(100, 0)`, the run
    forces a flat 8 px, the servo tracks only tick 0's reference velocity (inside
