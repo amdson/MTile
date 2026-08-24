@@ -300,6 +300,18 @@ public class MovementConfig
     public float FoldLmProgressWeight           { get; set; } = 0.2f;
     public float FoldLmEffortWeight             { get; set; } = 0.02f;
     public float FoldLmMaxForce                 { get; set; } = 8000f;
+    // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — oracle-only for
+    // now (freeze-frame inspector + tests; not wired into the sim). Window =
+    // the cone's footprint from the seed: LookaheadTiles along u, ±L·tanθ
+    // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3);
+    // steepness feel is tuned with SteepWeight, not the cone.
+    public float LatticeLookaheadTiles          { get; set; } = 3.5f;
+    public int   LatticeCellsPerTile            { get; set; } = 5;
+    public float LatticeConeCos                 { get; set; } = 0.5f;
+    public float LatticeSteepWeight             { get; set; } = 30f;
+    public float LatticeLenWeight               { get; set; } = 1f;     // per px
+    public float LatticeHoverWeight             { get; set; } = 0.05f;  // per px²
+    public float LatticeSeedWeight              { get; set; } = 20f;
     // Max unresolved clearance residual (px) an ambient plan may carry and still
     // be applied. Small: ambient assists are grazes, not commitments.
     public float AmbientRefusalResidual         { get; set; } = 1f;
