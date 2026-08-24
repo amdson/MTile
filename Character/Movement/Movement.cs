@@ -74,6 +74,11 @@ public abstract class MovementState
     public virtual void ResetTransient() { }
 
 
+    // The lattice engine (Plans/LATTICE_PATH_PLANNER.md) changes what several
+    // states hand the ambient layer — which FoldProfile, whether a launch is
+    // an impulse or a planned rise, which launch states yield. One gate.
+    protected static bool OnLattice => MovementConfig.Current.FoldEngine == "lattice";
+
     protected static void ApplyAmbient(EnvironmentContext ctx, PlayerAbilityState abilities,
         ref MovementVars vars, AmbientPolicy policy, in FoldProfile fold, bool startGrounded = false)
     {
