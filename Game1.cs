@@ -421,6 +421,11 @@ public class Game1 : Game
     // the LM probe's lime — freeze mode only.
     private readonly CoastSample[] _latticeTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
     private int _latticeCount;
+    // PHASE 0/1 (Plans/LATTICE_PATH_PLANNER.md): the lattice PATH planner
+    // oracle — drawn yellow (path) with red blocked-cell ticks, freeze only.
+    private readonly LatticePathPlanner _latticePath = new();
+    private readonly CoastSample[] _latticePathBuf = new CoastSample[256];
+    private int _latticePathCount;
 
     private void ApplyFreezeFrame()
     {
@@ -450,6 +455,15 @@ public class Game1 : Game
             _config.FreezeFrameInputX, mc.MaxWalkSpeed, mc.FoldHoverOffset,
             new Vector2(0f, Simulation.WorldGravityY), Simulation.FixedDt,
             24, _latticeTrajectory, out float latticeCost);
+
+        // PHASE 0/1 lattice path planner oracle (Plans/LATTICE_PATH_PLANNER.md):
+        // spatial DP from the same pre-step state. u = held direction; hover on
+        // at the standing offset (the fold-state configuration).
+        _latticePathCount = _config.FreezeFrameInputX == 0 ? 0 : _latticePath.Solve(
+            _sim.Chunks, body.Polygon, body.Position, body.Velocity,
+            new Vector2(Math.Sign(_config.FreezeFrameInputX), 0f),
+            hover: true, mc.FoldHoverOffset,
+            _latticePathBuf, out _, out _);
 
         _sim.Player.CorrectorDebug.CaptureTrajectories = true;
         _sim.Step(new PlayerInput
@@ -1098,6 +1112,22 @@ public class Game1 : Game
             // PROTOTYPE: lattice-search oracle path (LatticePlanner).
             if (_latticeCount > 0)
                 _debugOverlay.DrawTrajectory(_latticeTrajectory, _latticeCount, Color.Orange);
+            // PHASE 0/1: lattice PATH planner (Plans/LATTICE_PATH_PLANNER.md) —
+            // yellow path, red ticks on blocked lattice cells (the C-obstacle
+            // bitmap: the phase-0 visual gate).
+            if (_latticePathCount > 0)
+            {
+                _debugOverlay.DrawTrajectory(_latticePathBuf, _latticePathCount, Color.Yellow);
+                float half = _latticePath.DebugCell * 0.5f;
+                for (int cy = 0; cy < _latticePath.DebugHeight; cy++)
+                for (int cx = 0; cx < _latticePath.DebugWidth; cx++)
+                {
+                    if (!_latticePath.DebugBlocked(cx, cy)) continue;
+                    var c = _latticePath.DebugCellCenter(cx, cy);
+                    _debugOverlay.DrawLine(c - new Vector2(half, half),
+                                           c + new Vector2(half, half), Color.Red, 1);
+                }
+            }
         }
 
         // Enemy health bars in world space, drawn just above each wounded body.

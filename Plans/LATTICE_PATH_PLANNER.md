@@ -575,6 +575,15 @@ tracker / give-up split (§4.3) is the one place deliverability is judged.
 
 ## 5. Phasing
 
+> **Status 2026-08-24: phases 0–1 are BUILT** — `Character/Corrector/LatticePathPlanner.cs`
+> (window, bitmap, `floorBelow` sweep, flood, DP, path recovery), wired as a
+> freeze-frame oracle in `Game1` (yellow path + red blocked-cell ticks) with
+> gates in `MTile.Tests/Sim/LatticePathPlannerTests.cs` (flat hover carry,
+> block climb, ceiling duck, full-height bonk, free-standing-wall over-route
+> pinned as accepted §3.3 behavior, determinism, timing). Measured: **~90 µs
+> and 160 B (the debug string) per solve** at a 20×33-cell window — stamping
+> dominates; fine for an oracle, revisit before phase 2's rollback loop.
+
 | phase | deliverable | gate |
 |---|---|---|
 | **0** | Lattice geometry: window, admissibility bitmap, `floorBelow` column sweep, admitted-offset cone. Drawn in the freeze-frame inspector. No DP, no sim wiring. | bitmap visually matches terrain at a few cell sizes; `floorBelow` shading matches the visible floor under a ledge and in a pit; cone overlay matches `u` |
