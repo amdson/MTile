@@ -636,6 +636,9 @@ to find with a picture and no sim wiring.
 
 ## 7. Scenario audit (2026-08-23) — can the design as written do these?
 
+> The per-scenario table — parameters the owning state passes, correct path
+> and motion, status — lives in [LATTICE_SCENARIOS.md](LATTICE_SCENARIOS.md).
+
 Three scenarios the engine is expected to handle with **one uniform solve**:
 (1) a bumpy corridor, alternating over 1-high blocks and under 1-low lips;
 (2) a jump into a 2-high tunnel, pushing slightly under the upper lip and
