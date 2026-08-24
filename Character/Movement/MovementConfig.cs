@@ -245,6 +245,12 @@ public class MovementConfig
     // buys on a course. Off masks the channel everywhere, including the
     // feature-anchored (cave-mouth) plant ticks.
     public bool FoldRedirectEnabled             { get; set; } = true;
+    // Bound on the redirect's per-tick deflection, as an acceleration
+    // (‖Δv‖ ≤ FoldRedirectForce·dt). The bare Thales disc lets one tick take
+    // the body to rest — a plant against the ground is a push of bounded
+    // strength, so a walk into a face slows over several ticks instead of
+    // halting. 0 = unbounded (the bare disc).
+    public float FoldRedirectForce              { get; set; } = 1500f;
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
     public int   AmbientHorizon                 { get; set; } = 10;
     // ── Fold tuning surface (CONSOLIDATION_PLAN §6) — hot-reloadable feel knobs.

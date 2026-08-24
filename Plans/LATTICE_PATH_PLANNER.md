@@ -121,7 +121,12 @@ orders of magnitude cheaper than the state-space search prototype.
 > showed them bending a launch toward a momentum-blind plan (58.9 → 39.4 px)
 > and overdriving the state's air cap. Rows 15–17. Tuning from live play:
 > `FoldLegPushFadeSpeed` 400 (the launch ceiling — neutral jump back to 60
-> px) and `FoldTuckForce` 3600 (corridor 92.6 px/s). `LATTICE_SCENARIOS.md`.
+> px) and `FoldTuckForce` 3600 (corridor 92.6 px/s). The redirect's
+> `!Grounded` gate is gone on the engine (active wherever the legs are): the
+> disc is parametrized as a force (its Δv lever starved every other channel)
+> and priced like the legs (free, it served every band violation by shedding
+> the walk); `FoldRedirectForce` 1500 bounds it. Costs ~10 px/s in the
+> corridor and ~9 px of jump. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

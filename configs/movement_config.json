@@ -23,6 +23,7 @@
   "FoldDriveForce": 3000,
   "FoldCornerForce": 1500,
   "FoldTuckForce": 3600,
+  "FoldRedirectForce": 1500,
   "FoldLegPushFadeSpeed": 400,
   "FoldAirLateralForce": 1500,
   "FoldAirVerticalForce": 300,
