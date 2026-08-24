@@ -73,6 +73,15 @@ orders of magnitude cheaper than the state-space search prototype.
 > following, not trajectory tracking), three outer project → solve passes.
 > Corridor 79 px/s, the seam spawn threads too, 104 µs a step; row 7 slips
 > to 9.3 px of strain (the give-up question).
+>
+> **Seventh pass, same day — current:** the goal is `argmax w_prog·(p −
+> p_seed) − dp` over every reachable node (the far band is its w → ∞
+> limit; length cost removed; `LatticeProgressWeight` 7), and the state's
+> `u` may tilt into the floor (`FoldProfile.IntentTilt`, Crouch 30°). The
+> planner-level sweep found the steepness cost is priced per edge angle and
+> therefore depends on the offset table (a `(1,3)` edge buys 9.6 px of rise
+> for 20.5) — the cost-structure decision that pass leaves open; see
+> `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

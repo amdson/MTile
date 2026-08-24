@@ -19,11 +19,11 @@ namespace MTile;
 //     cosθ > 0 is what makes the graph a DAG (projection onto u strictly
 //     increases along every edge), so one pass over nodes sorted by p is a
 //     valid DP order;
-//   - cost: per-edge steepness (angle off u) + length, per-node hover toward
-//     the surface below (state-supplied on/off flag), seed-edge velocity bias
+//   - cost: per-edge steepness (angle off u), per-node hover toward the
+//     surface below (state-supplied on/off flag), seed-edge velocity bias
 //     (§3.4–3.5);
-//   - goal: cheapest reachable node in the far band, else the furthest
-//     reachable node — the honest bonk (§3.4).
+//   - goal: the reachable node maximizing progress·w_prog − cost; a bonk is
+//     a route that is not worth its cost (§3.4, revised).
 //
 // Output samples carry the plan's §3.6 support fields: FloorY = the C-space
 // surface below the node (Pos.Y + floorBelow), Grounded = floorBelow within
@@ -259,7 +259,7 @@ public sealed class LatticePathPlanner
         Array.Sort(_orderKey, _order, 0, reachCount);
 
         // ── The DP sweep (§3.4) ──────────────────────────────────────────────
-        float wSteep = cfg.LatticeSteepWeight, wLen = cfg.LatticeLenWeight;
+        float wSteep = cfg.LatticeSteepWeight;
         float wHover = cfg.LatticeHoverWeight, wSeed = cfg.LatticeSeedWeight;
         Vector2 vHat = vel.LengthSquared() > 1f ? Vector2.Normalize(vel) : Vector2.Zero;
         for (int i = 0; i < reachCount; i++) _dp[_order[i]] = float.PositiveInfinity;
@@ -280,8 +280,7 @@ public sealed class LatticePathPlanner
                 if (!EdgeFree(nx, ny, ref o)) continue;          // blocked / tunneling (§3.3)
                 int m = (ny + o.Dy) * _w + (nx + o.Dx);
                 float c = dn
-                    + wSteep * (1f - Vector2.Dot(o.Unit, u))
-                    + wLen * o.Len * _cell;
+                    + wSteep * (1f - Vector2.Dot(o.Unit, u));
                 if (hover && !float.IsPositiveInfinity(_floorBelow[m]))
                 {
                     float dev = _floorBelow[m] - hoverOffset;
@@ -293,26 +292,29 @@ public sealed class LatticePathPlanner
             }
         }
 
-        // ── Goal: far band, else furthest reachable (§3.4) ──────────────────
+        // ── Goal: progress worth its cost (§3.4, revised 2026-08-24) ────────
+        // argmax over every reachable node of  w_prog·(p − p_seed) − dp.  The
+        // far-band rule ("cheapest node at p ≥ p_seed + L, else the furthest")
+        // is this rule's w_prog → ∞ limit. A bonk is now a decision the costs
+        // make — "the rest of the window is not worth its climb" — so the
+        // state's intent direction decides what it will and won't climb (a
+        // crouch's u tilts down, and a 1-high block stops being worth it),
+        // and nothing needs a give-up. Length cost is gone: every edge
+        // advances p, so progress reward and length cost were one term.
         float pSeed = Vector2.Dot(CellCenter(seedX, seedY), u);
         float pFar  = pSeed + L - _cell;
-        int best = -1; float bestP = float.NegativeInfinity, bestCost = float.PositiveInfinity;
+        float wProg = cfg.LatticeProgressWeight;
+        int best = -1; float bestVal = float.NegativeInfinity, bestP = float.NegativeInfinity;
         for (int i = 0; i < reachCount; i++)
         {
             int idx = _order[i];
             if (float.IsPositiveInfinity(_dp[idx])) continue;
             float pI = _orderKey[i];
-            if (pI >= pFar)
-            {
-                if (bestP < pFar || _dp[idx] < bestCost) { best = idx; bestCost = _dp[idx]; bestP = pFar; }
-            }
-            else if (bestP < pFar && (pI > bestP || (pI == bestP && _dp[idx] < bestCost)))
-            {
-                best = idx; bestP = pI; bestCost = _dp[idx];
-            }
+            float val = wProg * (pI - pSeed) - _dp[idx];
+            if (val > bestVal || (val == bestVal && pI > bestP)) { best = idx; bestVal = val; bestP = pI; }
         }
         if (best < 0) { bonk = true; LastBonk = true; return 0; }
-        bonk = bestP < pFar;
+        bonk = bestP < pFar;                                     // did not find the far band worth reaching
         cost = _dp[best];
         LastReach = reachCount; LastBonk = bonk; LastCost = cost;
 

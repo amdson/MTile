@@ -314,7 +314,11 @@ public class MovementConfig
     public int   LatticeCellsPerTile            { get; set; } = 5;
     public float LatticeConeCos                 { get; set; } = 0.05f;
     public float LatticeSteepWeight             { get; set; } = 30f;
-    public float LatticeLenWeight               { get; set; } = 1f;     // per px
+    // Progress worth per px along u, traded against the edge costs at the
+    // goal (argmax of w·progress − cost over every reachable node). Bounded by
+    // "mount a 1-high block, refuse a 2-high wall" at SteepWeight 30:
+    // roughly (5, 9). The §4.1 taste number.
+    public float LatticeProgressWeight          { get; set; } = 7f;
     public float LatticeHoverWeight             { get; set; } = 0.05f;  // per px²
     public float LatticeSeedWeight              { get; set; } = 20f;
     // Seed run (§3.5): the path's first SeedRunPx are FORCED along the body's

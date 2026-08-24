@@ -30,6 +30,12 @@ public struct FoldProfile
     public float HoverOffset;   // hover clearance above the C-obstacle top surface (px)
     public float ClimbReachUp;  // envelope may bind floors this far above the anchor (px)
     public float MaxSpeed;      // progress-target speed (px/s, pre-modifier)
+    // Lattice engine: the intent direction u the state hands the planner is
+    // (dir, 0) rotated DOWN by this angle (radians). A crouch crawls: its
+    // intent leans into the floor, which is what makes a 1-high block "not
+    // worth" climbing under the progress-vs-cost goal — no rise limit, no
+    // per-state weight (Plans/LATTICE_SCENARIOS.md, argmax goal).
+    public float IntentTilt;
 
     public static FoldProfile None => default;
 
@@ -53,6 +59,7 @@ public struct FoldProfile
         HoverOffset  = MovementConfig.Current.CrouchHoverOffset,
         ClimbReachUp = MovementConfig.Current.CrouchClimbReachUp,
         MaxSpeed     = MovementConfig.Current.CrouchMaxWalkSpeed,
+        IntentTilt   = MathF.PI / 6f,   // 30° into the floor
     };
 }
 

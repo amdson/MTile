@@ -175,7 +175,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // The path routes over (accepted); the legs cannot deliver a 32 px rise
     // from a walk, so the give-up must turn it into row 6's honest stop —
     // the body ends AT the wall at hover, not floating up its face.
-    [Fact(Skip = "LATTICE_SCENARIOS row 7 — sliding beads follow the over-the-top route more faithfully: strain 9.3 px against the 8 px gate (6.6 before beads); the §4.3 give-up question")]
+    [Fact]
     public void Row07_FreeStandingTwoHighWall_GiveUpIsHonestStop()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (c == 12 && r >= 4));
@@ -234,7 +234,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // ── Row 11: crouch at a 1-high block ─────────────────────────────────
     // Crawling right (Down held) into a 1-high block: stays low and stops at
     // it — a crouch never mounts ledges.
-    [Fact(Skip = "LATTICE_SCENARIOS row 11 — known gap: edges carry no climb band, the crouch mounts the block (plan §3.3 note)")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 11 — argmax goal + 30° intent tilt does not refuse the block: a tilted u taxes level edges as much as it taxes the climb, and per-edge-angle steepness makes a 16 px rise cost only ~13 (seventh pass)")]
     public void Row11_CrouchAtBlock_StaysLow_HonestStop()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (r == 5 && c >= 12));
