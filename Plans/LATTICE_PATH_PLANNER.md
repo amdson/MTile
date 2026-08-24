@@ -49,6 +49,16 @@ orders of magnitude cheaper than the state-space search prototype.
 > exposes (the target speed along a descending tangent; the seed run feeding
 > the current velocity back into the target; the give-up) are in
 > `LATTICE_SCENARIOS.md` "one-tick tracker results".
+>
+> **Fourth pass, same day — current:** the one-tick overshoot is H = 1
+> myopia, so the tracker is now the §3.7 QP at `AmbientHorizon` on
+> `CorrectionSolver`: exact free-rollout nominal, BuildFold channels with
+> masks frozen at the body, a ½-cell band around the reference line (hard),
+> a speed-limit row (hard), one progress row at the last tick (soft, depth =
+> the channels' reach at cap — no target speed). Seed run off by default
+> (§3.5 finding 2 confirmed three ways). Rows 7 and 8 pass for the first
+> time; corridor speed is the open cost (46 vs 88 px/s), plus ~140 µs a
+> step. `LATTICE_SCENARIOS.md` "horizon-QP results".
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

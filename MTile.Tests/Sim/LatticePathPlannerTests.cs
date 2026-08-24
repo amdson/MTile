@@ -153,11 +153,28 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         Assert.True(minY < 55f, $"did not route over the wall: minY {minY:F1}");
     }
 
+    // The seed run (§3.5) is OFF by default (a re-planning tracker turns it
+    // into a feedback loop — LATTICE_SCENARIOS.md fourth pass); these three
+    // tests pin the feature itself, so they switch it on for their scope.
+    private static float WithRun(float px)
+    {
+        float prev = MovementConfig.Current.LatticeSeedRunPx;
+        MovementConfig.Current.LatticeSeedRunPx = px;
+        return prev;
+    }
+
     // Seed run (§3.5): a body moving up-right at hover has its first 8 px of
     // path FORCED up-right — the path starts where the body is going — and
     // the hover cost then brings it back down within the window.
     [Fact]
     public void SeedVelocity_FixesInitialDirection()
+    {
+        float prevRun = WithRun(8f);
+        try { SeedVelocity_FixesInitialDirection_Body(); }
+        finally { MovementConfig.Current.LatticeSeedRunPx = prevRun; }
+    }
+
+    private static void SeedVelocity_FixesInitialDirection_Body()
     {
         var seed = new Vector2(100f, 75f);
         var (planner, body, path) = Setup(seed);
@@ -183,6 +200,13 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
     [Fact]
     public void SeedVelocity_SlowIsNotForced()
     {
+        float prevRun = WithRun(8f);
+        try { SeedVelocity_SlowIsNotForced_Body(); }
+        finally { MovementConfig.Current.LatticeSeedRunPx = prevRun; }
+    }
+
+    private static void SeedVelocity_SlowIsNotForced_Body()
+    {
         var seed = new Vector2(100f, 75f);
         var (planner, body, path) = Setup(seed);
         int n = Solve(planner, FlatFloor(), body, seed, new Vector2(10f, -10f), path,
@@ -199,6 +223,13 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
     // solve degrades to the plain seeded path — which rises back to hover.
     [Fact]
     public void SeedVelocity_BlockedRunFallsBack()
+    {
+        float prevRun = WithRun(8f);
+        try { SeedVelocity_BlockedRunFallsBack_Body(); }
+        finally { MovementConfig.Current.LatticeSeedRunPx = prevRun; }
+    }
+
+    private static void SeedVelocity_BlockedRunFallsBack_Body()
     {
         var seed = new Vector2(100f, 81f);
         var (planner, body, path) = Setup(seed);

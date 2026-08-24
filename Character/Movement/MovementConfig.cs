@@ -321,8 +321,13 @@ public class MovementConfig
     // current velocity direction (quantized to the nearest admitted offset)
     // when it moves at ≥ SeedRunMinSpeed and that direction lies inside the
     // cone; a blocked run is forced as far as it fits. Otherwise only the
-    // soft SeedWeight bias applies. 0 disables the run.
-    public float LatticeSeedRunPx               { get; set; } = 8f;
+    // soft SeedWeight bias applies. 0 disables the run — the default since
+    // 2026-08-24: with a tracker that re-plans from the body every tick, the
+    // run feeds the current velocity back into the target (measured three
+    // times: a landing that never rose, a drop caught at leg reach, a jump
+    // arc straightened into a line off a tunnel roof). Kept as a knob for
+    // the freeze-frame oracle only.
+    public float LatticeSeedRunPx               { get; set; } = 0f;
     public float LatticeSeedRunMinSpeed         { get; set; } = 20f;
     // Max unresolved clearance residual (px) an ambient plan may carry and still
     // be applied. Small: ambient assists are grazes, not commitments.
