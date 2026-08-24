@@ -169,7 +169,10 @@ is clean, land it" vs "it eats vx as the qp audit measured, drop it", then strip
 fix those tests.
 
 Related ablation knobs, all hot-reloadable from `configs/movement_config.json`:
-`FoldEngine` ("qp" | "ref" | "lm"), `CorrectorVaultEnabled`, `FoldRedirectEnabled`.
+`FoldEngine` ("qp" | "ref" | "lattice" | "lm"), `CorrectorVaultEnabled`, `FoldRedirectEnabled`.
+The "lattice" engine (`FoldLattice` + `LatticePathPlanner`, `Plans/LATTICE_PATH_PLANNER.md`) is
+phase 2 of that plan: weights untuned by playtest, no tracking-residual give-up yet (§4.3), crouch
+mounts 1-high blocks under it (edges carry no climb band — §3.3), jump states not yet on it (§7).
 
 ---
 

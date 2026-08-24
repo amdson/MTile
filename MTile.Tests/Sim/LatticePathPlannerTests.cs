@@ -169,7 +169,14 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         var seed = new Vector2(100f, 75f);
         var (planner, body, path) = Setup(seed);
         var chunks = FlatFloor();
-        for (int i = 0; i < 20; i++)
+        // Warm past the JIT's tier-up threshold (30 calls + a ~100 ms
+        // background compile), else this times tier-0 code — measured 6×
+        // slower than the optimized solve. DOTNET_TieredCompilation=0 is the
+        // no-doubt way to run it.
+        for (int i = 0; i < 300; i++)
+            Solve(planner, chunks, body, seed, path, out _, out _);
+        System.Threading.Thread.Sleep(300);
+        for (int i = 0; i < 100; i++)
             Solve(planner, chunks, body, seed, path, out _, out _);
         long a0 = GC.GetAllocatedBytesForCurrentThread();
         var sw = Stopwatch.StartNew();
