@@ -580,9 +580,32 @@ tracker / give-up split (§4.3) is the one place deliverability is judged.
 > freeze-frame oracle in `Game1` (yellow path + red blocked-cell ticks) with
 > gates in `MTile.Tests/Sim/LatticePathPlannerTests.cs` (flat hover carry,
 > block climb, ceiling duck, full-height bonk, free-standing-wall over-route
-> pinned as accepted §3.3 behavior, determinism, timing). Measured: **~90 µs
-> and 160 B (the debug string) per solve** at a 20×33-cell window — stamping
-> dominates; fine for an oracle, revisit before phase 2's rollback loop.
+> pinned as accepted §3.3 behavior, determinism, timing).
+>
+> **Phase 2 is BUILT (same day)** — `FoldEngine = "lattice"` →
+> `Character/Corrector/FoldLattice.cs`. `FoldReference` was split into
+> `Admit` (the §4.7 guards) / `Rollout` (the hand-written carry) / `Track`
+> (rows → deform → servo); the lattice engine is `Admit` + a rollout that
+> time-parameterizes the DP's polyline + the same `Track`. Rules kept from
+> ref: `dir == 0` → the ref hover column (§4.6); progress along `u` at the
+> fold target ramped by `WalkAccel`; descent no faster than gravity. Rules
+> dropped on purpose: the rise cap and climb band (the path's climb is the
+> climb — §3.3). Progress is the projection onto `u`, not arc length (arc
+> pacing halves the carry on a 60° drop). Seeds inside the margin snap to the
+> nearest not-behind free cell; no such cell (flush at a wall) → the ref
+> carry, so the bonk stays honest. Gates in
+> `MTile.Tests/Sim/FoldLatticeEngineTests.cs`: the `FoldRefEngineTests`
+> contracts verbatim (hover + progress, rest, bumpy tunnel at 97 px/s, 1-high
+> step, tall-wall honest stop, corridor duck-in, bit-determinism) plus
+> engagement (path on 240/240 frames) and a rollback round trip across the
+> solve. Measured, Release, JIT warmed: **12.7 µs / 0 B per solve**; a whole
+> sim step in the bumpy tunnel is **48 µs under lattice vs 25 µs under ref**
+> (the stamp is a cached per-tile mask now; buried tiles are skipped). The
+> earlier "~90 µs" figure was tier-0 JIT code — the timing tests now warm
+> past tier-up. Default stays `qp`; `configs/movement_config.json` ships
+> `ref`; flip to `lattice` to A/B. Open: phase 3 (weights by playtest, the
+> §4.3 tracking-residual give-up), crouch mounting 1-high blocks (no climb
+> band on edges), and §7 (jump states own a solve).
 
 | phase | deliverable | gate |
 |---|---|---|
@@ -612,6 +635,9 @@ to find with a picture and no sim wiring.
   lattice solve.
 
 ## 7. Scenario audit (2026-08-23) — can the design as written do these?
+
+> The per-scenario table — parameters the owning state passes, correct path
+> and motion, status — lives in [LATTICE_SCENARIOS.md](LATTICE_SCENARIOS.md).
 
 Three scenarios the engine is expected to handle with **one uniform solve**:
 (1) a bumpy corridor, alternating over 1-high blocks and under 1-low lips;

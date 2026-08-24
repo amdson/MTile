@@ -3,9 +3,11 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-// Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — PHASE 0/1: the
-// oracle. Not wired into the live sim; runs in the freeze-frame inspector
-// beside the LM probe and the old state-space LatticePlanner, and in tests.
+// Lattice path planner (Plans/LATTICE_PATH_PLANNER.md): the spatial DP that
+// generates the fold's reference path. Phase 0/1 built it as a freeze-frame
+// oracle (Game1, beside the LM probe and the old state-space LatticePlanner);
+// phase 2 wires it as the FoldEngine "lattice" reference generator
+// (FoldLattice) in front of FoldReference's rows → deform → servo tail.
 //
 // The solve, per the plan:
 //   - a world-aligned cell grid (TileSize / LatticeCellsPerTile) over the
@@ -23,14 +25,20 @@ namespace MTile;
 //   - goal: cheapest reachable node in the far band, else the furthest
 //     reachable node — the honest bonk (§3.4).
 //
+// Output samples carry the plan's §3.6 support fields: FloorY = the C-space
+// surface below the node (Pos.Y + floorBelow), Grounded = floorBelow within
+// BallisticPredictor.SupportReach — the same test the coast predictor uses.
+// No timing: Vel is left zero; the caller time-parameterizes the polyline.
+//
 // Determinism: pooled fixed-size arrays, no allocation per solve (after the
 // instance is built), deterministic orders (float-key sort; equal keys can
 // permute but equal-p nodes never share an edge, so any tie order yields the
-// same DP result). No statics beyond immutable tables. Render/oracle-only
-// today — nothing here is snapshot state.
+// same DP result). No statics beyond immutable tables. Scratch only, fully
+// rewritten every solve — never snapshot state.
 public sealed class LatticePathPlanner
 {
     public const int MaxCells = 4096;   // pooled scratch bound; window clamps to fit
+    public const int MaxPath  = 256;    // ≥ any monotone path across a MaxCells window
 
     // ── Primitive offset table (§3.3): |dx|,|dy| ≤ 2, gcd = 1 ────────────────
     // Each offset carries the cells its segment crosses (conservative
@@ -94,6 +102,19 @@ public sealed class LatticePathPlanner
     private float _cell;
     private int _x0, _y0, _w, _h;
 
+    // ── Stamp mask cache ─────────────────────────────────────────────────────
+    // The grid is world-aligned and the cell divides the tile exactly, so a
+    // cell center's offset from a tile center depends only on
+    // (cellIndex − tileIndex·perTile): one (2R+1)² boolean mask per
+    // (template, perTile, margin) covers every solid tile. Rebuilt only when
+    // the key changes (a hot-reload of the cell count / margin).
+    private CObstacleTemplate _maskTemplate;
+    private int _maskPerTile = -1;
+    private float _maskMargin = float.NaN;
+    private bool[] _mask = Array.Empty<bool>();
+    private int _maskR;          // mask covers k ∈ [−R, R] on each axis
+    private int _maskW;          // 2R + 1
+
     // ── Debug accessors (freeze-frame overlay; §3.8) ─────────────────────────
     public float DebugCell   => _cell;
     public int   DebugWidth  => _w;
@@ -101,19 +122,26 @@ public sealed class LatticePathPlanner
     public Vector2 DebugCellCenter(int cx, int cy) => CellCenter(_x0 + cx, _y0 + cy);
     public bool  DebugBlocked(int cx, int cy)   => _blocked[cy * _w + cx];
     public bool  DebugReachable(int cx, int cy) => _reachable[cy * _w + cx];
-    public string LastDebug { get; private set; } = "";
+    // Last solve's stats; the string is built on demand (nothing allocates
+    // per solve on the sim path).
+    public int   LastReach { get; private set; }
+    public bool  LastBonk  { get; private set; }
+    public float LastCost  { get; private set; }
+    public string LastDebug => $"cells={_w}x{_h} reach={LastReach} bonk={LastBonk} cost={LastCost:F1}";
 
     private Vector2 CellCenter(int gx, int gy) => new((gx + 0.5f) * _cell, (gy + 0.5f) * _cell);
 
     // Solve. u = requested direction (unit not required; zero → no solve).
     // hover on/off is the state-supplied flag (§3.4). Returns the number of
-    // path samples written to outPath (body-center positions, seed → goal);
-    // 0 = no solve (zero u, blocked seed, or degenerate window).
+    // path samples written to outPath (body-center positions, seed → goal,
+    // FloorY/Grounded filled per §3.6, Vel zero); 0 = no solve (zero u, seed
+    // inside an obstacle with no not-behind free neighbour, degenerate window).
     public int Solve(ChunkMap chunks, Polygon body, Vector2 seed, Vector2 vel,
                      Vector2 u, bool hover, float hoverOffset,
                      CoastSample[] outPath, out float cost, out bool bonk)
     {
         cost = 0f; bonk = false;
+        LastReach = 0; LastBonk = false; LastCost = 0f;
         var cfg = MovementConfig.Current;
         if (u.LengthSquared() < 1e-8f) return 0;
         u.Normalize();
@@ -133,13 +161,23 @@ public sealed class LatticePathPlanner
                 _admitted[_admittedCount++] = o;
         if (_admittedCount == 0) return 0;
 
-        StampObstacles(chunks, body, cfg.CorrectorMargin);
+        StampObstacles(chunks, body, perTile, cfg.CorrectorMargin);
         SweepFloorBelow();
 
         int seedX = (int)MathF.Floor(seed.X / _cell), seedY = (int)MathF.Floor(seed.Y / _cell);
         if (seedX < _x0 || seedX >= _x0 + _w || seedY < _y0 || seedY >= _y0 + _h) return 0;
         int seedIdx = (seedY - _y0) * _w + (seedX - _x0);
-        if (_blocked[seedIdx]) { bonk = true; return 0; }
+        if (_blocked[seedIdx])
+        {
+            // The body sits inside the margin (flush with a floor in a squeeze,
+            // pressed to a lip). Snap to the nearest free cell that is NOT
+            // behind the body along u — a path may start beside the body but
+            // never by pulling it back off an obstacle (that would be a planned
+            // brake; the wall bonk stays honest via the caller's fallback).
+            seedIdx = SnapSeed(seed, u, seedX, seedY);
+            if (seedIdx < 0) { bonk = true; LastBonk = true; return 0; }
+            seedX = _x0 + seedIdx % _w; seedY = _y0 + seedIdx / _w;
+        }
 
         int reachCount = Flood(seedIdx);
         // Sort reachable nodes by p = dot(center, u). Equal-p nodes never share
@@ -211,22 +249,50 @@ public sealed class LatticePathPlanner
                 best = idx; bestP = pI; bestCost = _dp[idx];
             }
         }
-        if (best < 0) { bonk = true; return 0; }
+        if (best < 0) { bonk = true; LastBonk = true; return 0; }
         bonk = bestP < pFar;
         cost = _dp[best];
-        LastDebug = $"cells={_w}x{_h} reach={reachCount} bonk={bonk} cost={cost:F1}";
+        LastReach = reachCount; LastBonk = bonk; LastCost = cost;
 
         // Recover seed → goal (parents run goal → seed; reverse in place).
         int count = 0, cur = best;
         while (cur >= 0 && count < outPath.Length)
         {
+            float below = _floorBelow[cur];
+            var pos = CellCenter(_x0 + cur % _w, _y0 + cur / _w);
             outPath[count++] = new CoastSample
-                { Pos = CellCenter(_x0 + cur % _w, _y0 + cur / _w) };
+            {
+                Pos      = pos,
+                Grounded = below <= BallisticPredictor.SupportReach,
+                FloorY   = float.IsPositiveInfinity(below) ? float.PositiveInfinity : pos.Y + below,
+            };
             cur = _parent[cur];
         }
         for (int i = 0, j = count - 1; i < j; i++, j--)
             (outPath[i], outPath[j]) = (outPath[j], outPath[i]);
         return count;
+    }
+
+    // Nearest free cell within a 2-cell Chebyshev radius of the blocked seed
+    // cell whose center is not behind the seed along u. Ties break on scan
+    // order (deterministic). −1 = none.
+    private int SnapSeed(Vector2 seed, Vector2 u, int seedX, int seedY)
+    {
+        int best = -1; float bestD = float.PositiveInfinity;
+        float behind = -0.25f * _cell;
+        for (int dy = -2; dy <= 2; dy++)
+        for (int dx = -2; dx <= 2; dx++)
+        {
+            int gx = seedX + dx, gy = seedY + dy;
+            if (gx < _x0 || gx >= _x0 + _w || gy < _y0 || gy >= _y0 + _h) continue;
+            int idx = (gy - _y0) * _w + (gx - _x0);
+            if (_blocked[idx]) continue;
+            var rel = CellCenter(gx, gy) - seed;
+            if (Vector2.Dot(rel, u) < behind) continue;
+            float d = rel.LengthSquared();
+            if (d < bestD) { bestD = d; best = idx; }
+        }
+        return best;
     }
 
     // Window = bbox of the cone fan {seed + t·R(±φ)u : t ∈ [0,L], |φ| ≤ θ}
@@ -251,10 +317,12 @@ public sealed class LatticePathPlanner
             var p = seed + dirs[i] * L;
             min = Vector2.Min(min, p); max = Vector2.Max(max, p);
         }
-        _x0 = (int)MathF.Floor(min.X / _cell) - 1;
-        _y0 = (int)MathF.Floor(min.Y / _cell) - 1;
-        _w  = (int)MathF.Floor(max.X / _cell) + 2 - _x0;
-        _h  = (int)MathF.Floor(max.Y / _cell) + 2 - _y0;
+        // Two cells of slack on every side: one for the bbox floor, one so the
+        // seed snap has room when the body sits at the window's edge.
+        _x0 = (int)MathF.Floor(min.X / _cell) - 2;
+        _y0 = (int)MathF.Floor(min.Y / _cell) - 2;
+        _w  = (int)MathF.Floor(max.X / _cell) + 3 - _x0;
+        _h  = (int)MathF.Floor(max.Y / _cell) + 3 - _y0;
 
         int seedX = (int)MathF.Floor(seed.X / _cell), seedY = (int)MathF.Floor(seed.Y / _cell);
         while (_w * _h > MaxCells)
@@ -273,11 +341,15 @@ public sealed class LatticePathPlanner
     }
 
     // §3.2 item 1: stamp the C-obstacle template at every solid tile whose
-    // footprint overlaps the window, inflated by the corrector margin.
-    private void StampObstacles(ChunkMap chunks, Polygon body, float margin)
+    // footprint overlaps the window, inflated by the corrector margin. Tiles
+    // buried on all four sides are skipped: their C-obstacle is covered by the
+    // neighbours' (the nearest point of a buried tile to any body center lies
+    // on a face it shares with a solid neighbour).
+    private void StampObstacles(ChunkMap chunks, Polygon body, int perTile, float margin)
     {
         Array.Clear(_blocked, 0, _w * _h);
         var t = CObstacleTemplate.For(body);
+        EnsureMask(t, perTile, margin);
         int ts = Chunk.TileSize;
         float half = ts * 0.5f, reach = t.Reach + margin;
 
@@ -286,27 +358,56 @@ public sealed class LatticePathPlanner
         int tMinX = (int)MathF.Floor((wx0 - reach) / ts), tMaxX = (int)MathF.Floor((wx1 + reach) / ts);
         int tMinY = (int)MathF.Floor((wy0 - reach) / ts), tMaxY = (int)MathF.Floor((wy1 + reach) / ts);
 
+        // Mask cell (mx, my) ↔ grid cell gx = gtx·perTile + kBase + mx (see
+        // EnsureMask for the offset algebra).
+        int kBase = (perTile - 1) / 2 - _maskR;
         for (int gtx = tMinX; gtx <= tMaxX; gtx++)
         for (int gty = tMinY; gty <= tMaxY; gty++)
         {
             float cx = gtx * ts + half, cy = gty * ts + half;
             if (!TileQuery.IsSolidAt(chunks, cx, cy)) continue;
+            if (TileQuery.IsSolidAt(chunks, cx - ts, cy) && TileQuery.IsSolidAt(chunks, cx + ts, cy)
+                && TileQuery.IsSolidAt(chunks, cx, cy - ts) && TileQuery.IsSolidAt(chunks, cx, cy + ts))
+                continue;                                                   // buried
 
-            int sx0 = Math.Max(_x0, (int)MathF.Floor((cx - reach) / _cell));
-            int sy0 = Math.Max(_y0, (int)MathF.Floor((cy - reach) / _cell));
-            int sx1 = Math.Min(_x0 + _w - 1, (int)MathF.Floor((cx + reach) / _cell));
-            int sy1 = Math.Min(_y0 + _h - 1, (int)MathF.Floor((cy + reach) / _cell));
-            for (int gy = sy0; gy <= sy1; gy++)
-            for (int gx = sx0; gx <= sx1; gx++)
+            int gx0 = gtx * perTile + kBase, gy0 = gty * perTile + kBase;
+            int mx0 = Math.Max(0, _x0 - gx0), mx1 = Math.Min(_maskW - 1, _x0 + _w - 1 - gx0);
+            int my0 = Math.Max(0, _y0 - gy0), my1 = Math.Min(_maskW - 1, _y0 + _h - 1 - gy0);
+            for (int my = my0; my <= my1; my++)
             {
-                int idx = (gy - _y0) * _w + (gx - _x0);
-                if (_blocked[idx]) continue;
-                var rel = CellCenter(gx, gy) - new Vector2(cx, cy);
-                bool inside = true;
-                foreach (var f in t.Facets)
-                    if (Vector2.Dot(rel, f.Normal) >= f.Offset + margin) { inside = false; break; }
-                if (inside) _blocked[idx] = true;
+                int row = (gy0 + my - _y0) * _w + (gx0 - _x0);
+                int mrow = my * _maskW;
+                for (int mx = mx0; mx <= mx1; mx++)
+                    if (_mask[mrow + mx]) _blocked[row + mx] = true;
             }
+        }
+    }
+
+    // Build the per-tile stamp mask for (template, perTile, margin). Mask cell
+    // (mx, my) is the grid cell gx = gtx·perTile + kBase + mx; its center's
+    // offset from the tile center is (gx + 0.5)·cell − (gtx + 0.5)·ts
+    // = (kBase + mx + 0.5 − perTile/2)·cell, independent of gtx. kBase puts
+    // mask index R on the tile's central cell (odd perTile) or the cell just
+    // left/above center (even), so the mask spans ≥ reach both ways.
+    private void EnsureMask(CObstacleTemplate t, int perTile, float margin)
+    {
+        if (ReferenceEquals(t, _maskTemplate) && perTile == _maskPerTile && margin == _maskMargin)
+            return;
+        _maskTemplate = t; _maskPerTile = perTile; _maskMargin = margin;
+        float reach = t.Reach + margin;
+        _maskR = (int)MathF.Ceiling(reach / _cell) + 1;
+        _maskW = 2 * _maskR + 1;
+        if (_mask.Length < _maskW * _maskW) _mask = new bool[_maskW * _maskW];
+        int kBase = (perTile - 1) / 2 - _maskR;
+        for (int my = 0; my < _maskW; my++)
+        for (int mx = 0; mx < _maskW; mx++)
+        {
+            var rel = new Vector2((kBase + mx + 0.5f - perTile * 0.5f) * _cell,
+                                  (kBase + my + 0.5f - perTile * 0.5f) * _cell);
+            bool inside = true;
+            foreach (var f in t.Facets)
+                if (Vector2.Dot(rel, f.Normal) >= f.Offset + margin) { inside = false; break; }
+            _mask[my * _maskW + mx] = inside;
         }
     }
 

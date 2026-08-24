@@ -289,7 +289,9 @@ public class MovementConfig
     // (FoldReference: terrain-generated carry reference + PathDeform + servo;
     // non-anchored regimes fall back to qp); "lm" = the nonlinear trajectory
     // engine (TrajectoryLm — kept as the offline oracle, too heavy for the
-    // rollback loop). Hot-reloadable A/B while playtesting.
+    // rollback loop); "lattice" = the ref engine's tail riding the lattice
+    // path DP's reference (FoldLattice / LatticePathPlanner; the Lattice*
+    // knobs above tune it). Hot-reloadable A/B while playtesting.
     public string FoldEngine                    { get; set; } = "qp";
     // TrajectoryLm tuning: fixed LM iteration budget (fixed for determinism,
     // like FoldIterations), residual weights, and the cap on the applied
@@ -300,11 +302,12 @@ public class MovementConfig
     public float FoldLmProgressWeight           { get; set; } = 0.2f;
     public float FoldLmEffortWeight             { get; set; } = 0.02f;
     public float FoldLmMaxForce                 { get; set; } = 8000f;
-    // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — oracle-only for
-    // now (freeze-frame inspector + tests; not wired into the sim). Window =
+    // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — the FoldEngine
+    // "lattice" reference generator, also the freeze-frame oracle. Window =
     // the cone's footprint from the seed: LookaheadTiles along u, ±L·tanθ
     // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3);
-    // steepness feel is tuned with SteepWeight, not the cone.
+    // steepness feel is tuned with SteepWeight, not the cone. Sim-affecting
+    // under "lattice" — hot-reload is gated like every movement knob.
     public float LatticeLookaheadTiles          { get; set; } = 3.5f;
     public int   LatticeCellsPerTile            { get; set; } = 5;
     public float LatticeConeCos                 { get; set; } = 0.5f;

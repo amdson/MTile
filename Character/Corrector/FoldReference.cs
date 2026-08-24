@@ -32,6 +32,10 @@ namespace MTile;
 // (AmbientCorrector.Apply's normal flow) — TryApply returns false.
 // Deliberately not carried over yet: elective climb refusal, corner plants,
 // per-tile ledger attribution.
+//
+// Structure: Admit (regime guards) → Rollout (the reference) → Track (rows →
+// deform → servo). The lattice engine (FoldLattice, FoldEngine "lattice")
+// reuses Admit and Track with its own rollout — the tail is engine-agnostic.
 public static class FoldReference
 {
     private const float HingeWeight  = 1e6f;    // stiffness constant, not a knob
@@ -56,7 +60,20 @@ public static class FoldReference
                                 in FoldProfile fold, AmbientPolicy policy, int dir,
                                 ref MovementVars vars)
     {
+        if (!Admit(ctx, s, out var template, out float anchorY)) return false;
+        int n = Rollout(ctx, s, fold, dir, template, anchorY);
+        Track(ctx, s, fold, policy, n, ref vars);
+        return true;
+    }
+
+    // The regime gates (shared with the lattice engine — LATTICE_PATH_PLANNER
+    // §4.7 inherits them verbatim). anchorY = the support surface under the
+    // body's x; false = not this engine's regime.
+    internal static bool Admit(EnvironmentContext ctx, CorrectorScratch s,
+                               out CObstacleTemplate template, out float anchorY)
+    {
         var cfg = MovementConfig.Current;
+        template = null; anchorY = 0f;
         if (s == null || ctx.Dt <= 0f) return false;
         var body = ctx.Body;
 
@@ -64,13 +81,23 @@ public static class FoldReference
         if (-body.Velocity.Y > cfg.SpringMaxRiseSpeed) return false;       // launched
         if (body.Velocity.Y > cfg.MaxGroundEngageVnRel) return false;      // plunging
 
-        var template = CObstacleTemplate.For(body.Polygon);
-        float anchorY = AmbientCorrector.FloorEnvelope(ctx.Chunks, template, body.Position.X,
+        template = CObstacleTemplate.For(body.Polygon);
+        anchorY = AmbientCorrector.FloorEnvelope(ctx.Chunks, template, body.Position.X,
             body.Position.Y - 2f, body.Position.Y + BallisticPredictor.SupportReach,
             out bool anchored);
-        if (!anchored) return false;                                       // free flight
+        return anchored;                                                   // else free flight
+    }
 
-        // ── The reference rollout ────────────────────────────────────────
+    // ── The reference rollout ────────────────────────────────────────────
+    // Fills s.Samples / s.CoastVel for the horizon; returns the tick count.
+    // With dir == 0 this is the pure hover column the lattice engine also
+    // uses (a direction-ordered lattice has no order without a direction).
+    internal static int Rollout(EnvironmentContext ctx, CorrectorScratch s,
+                                in FoldProfile fold, int dir,
+                                CObstacleTemplate template, float anchorY)
+    {
+        var cfg = MovementConfig.Current;
+        var body = ctx.Body;
         float dt = ctx.Dt;
         int n = Math.Min(cfg.AmbientHorizon, BallisticPredictor.MaxHorizon);
         float target = dir * fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
@@ -121,6 +148,18 @@ public static class FoldReference
             s.CoastVel[k] = s.Samples[k].Vel;
             prev = pos;
         }
+        return n;
+    }
+
+    // ── Rows → deform → servo over whatever reference s.Samples[0..n) holds ──
+    // The tail every reference-generating engine shares (ref, lattice).
+    internal static void Track(EnvironmentContext ctx, CorrectorScratch s,
+                               in FoldProfile fold, AmbientPolicy policy, int n,
+                               ref MovementVars vars)
+    {
+        var cfg = MovementConfig.Current;
+        var body = ctx.Body;
+        float dt = ctx.Dt;
 
         // ── Rows along the reference, walls CLASSIFIED (not filtered): a
         // frontal obstacle becomes a duck/step row when its vertical escape
@@ -256,6 +295,5 @@ public static class FoldReference
         float mag = dF.Length();
         if (mag > cfg.GuidedMaxForce) dF *= cfg.GuidedMaxForce / mag;
         body.AppliedForce += dF;
-        return true;
     }
 }

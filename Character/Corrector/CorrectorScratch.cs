@@ -91,6 +91,11 @@ public sealed class CorrectorScratch
     // player like everything here; stateless between solves (seed is always
     // the straight line at current velocity), so never snapshot state.
     public readonly TrajectoryLm Lm = new();
+    // Lattice fold engine (MovementConfig.FoldEngine "lattice") — the DP's
+    // pooled scratch plus its output polyline; fully rewritten every solve,
+    // never snapshot state.
+    public readonly LatticePathPlanner Lattice = new();
+    public readonly CoastSample[] LatticePath = new CoastSample[LatticePathPlanner.MaxPath];
 
     public void BeginFrame() { BallisticCount = 0; SolvedCount = 0; ContactCount = 0; Ledger.Clear(); }
 }
