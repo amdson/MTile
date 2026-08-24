@@ -19,6 +19,27 @@ orders of magnitude cheaper than the state-space search prototype.
 
 ## 1. The good news: this replaces one function, not the corrector
 
+> **Revised 2026-08-24 — the tail is provisional, the channel stack is the
+> plan of record.** Phase 2 reused `FoldReference`'s rows → deform → servo so
+> the DP could drive a body quickly. The servo at the end of that tail is a
+> single free 2D force capped by `GuidedMaxForce` (10 000 px/s², direction-
+> free — originally a debug force from the guided-maneuver work, carried into
+> the ref engine on 2026-08-01). It is what braked the ledge-drop fall in
+> `LATTICE_SCENARIOS.md` finding 1, and it is the reason the lattice rollout
+> kept re-importing ref's hand-written rules (walk ramp, descent cap, …) one
+> at a time. Decision: **the lattice planner drives the `qp` channel stack**
+> (legs / drive / tuck / air-lateral / air-vertical / corner, each capped and
+> masked — `CorrectorChannels.BuildFold`, `CorrectionProblem`), with progress
+> rows along the path tangent instead of x, and with the legs mask meaning
+> *at support* (body at or below the hover line), not merely "a floor within
+> `SupportReach`". Behaviour is then controlled from the physics side: the path
+> is followed exactly as far as bounded actuators allow and no further; a fall
+> follows gravity because no channel can beat it in open air. The ref engine's
+> rollout rules and its free servo are to be treated as hacks, not as a design
+> to preserve — do not port more of them into `FoldLattice`; no reference-side
+> descent/rise/lookahead rules, no new config knobs. This supersedes the
+> "keep rows + deform + servo" framing below for everything after phase 2.
+
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
 

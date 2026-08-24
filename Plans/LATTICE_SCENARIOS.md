@@ -65,6 +65,12 @@ path, not the lattice engine), 3-far, 4, 6, 7, 9. **Skipped** — 3-near, 8, 11,
 
 ### Findings from wiring the tests (engine, not fixed — next cycle)
 
+> Decision after these findings (2026-08-24): the fix for both is **not** a
+> reference-side rule. The free servo in `FoldReference.Track` was a debug
+> force; the lattice engine is to drive the `qp` channel stack with legs
+> meaning *at support* (plan §1, revised note). The "candidate rules" below
+> are kept only as a record of what was tried and withdrawn.
+
 Both surfaced by rows 8 and 13 and confirmed with a per-frame probe against
 `ref` on the same ledge drop. They are in `FoldLattice`'s rollout, not the DP.
 
