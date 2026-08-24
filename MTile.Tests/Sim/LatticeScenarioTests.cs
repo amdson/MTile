@@ -236,7 +236,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // path rises over the block's C-obstacle, the legs launch along it, the
     // body lands beyond and keeps running. On the engine this is
     // JumpingState with dir held (RunningJumpState yields).
-    [Fact(Skip = "LATTICE_SCENARIOS row 10 — clears the block and lands at hover, but the apex is 19 px against the test's 20: with LegReach = the standing probe (17 px) a launch's powered rise is 7 px, not 22 — the jump-height retune (eleventh pass)")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 10 — clears the block and lands at hover, apex 18.8 px against the test's 20, and the leg fade speed does not move it (neutral jump 60 px at the same settings): the 45° Jump plan's band couples the rise to the x speed, so the legs launch at the drive's pace, not at their cap — a plan-shape decision (steeper u for launches, or a soft band for Rising profiles)")]
     public void Row10_DiagonalHop_ClearsBlock_AndContinues()
     {
         var chunks = Terrain(7, 40, (r, c) => r == 6 || (r == 5 && c == 12));

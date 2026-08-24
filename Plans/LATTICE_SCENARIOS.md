@@ -47,7 +47,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 7 | **Free-standing 2-high wall** | 2-high column with open air above | Standing | `u=(dir,0)`, hover on 10, walk | *Path*: routes over (edges are geometry, §3.3 — accepted). *Motion*: the legs cannot deliver a 32 px rise from a walk, so tracking residual grows → **give-up** (§4.3) → honest bonk as in row 6. The path being over the wall must not make the body float up it | ✅ `Row07` (eleventh pass): the argmax refuses the wall at the face (RiseCost 16); 4 px of strain |
 | 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | ✅ `Row08` (eleventh pass): a real fall (max vy 213), caught by Standing, lands at hover |
 | 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` — on the engine: 31.5 px, 0 drift (61.5 before `LegReach` became the standing probe — the jump-height retune, eleventh pass) |
-| 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | 🟡 `Row10` skipped by 1 px — clears the block and lands at hover, apex 19 px against a 20 px bar (the jump-height retune) |
+| 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | 🟡 `Row10` skipped by 1 px — clears the block and lands at hover, apex 18.8 px against a 20 px bar. Not the leg fade (the neutral jump is 60 px at the same settings): the 45° plan's band couples the rise to the x speed — a plan-shape decision (twelfth pass) |
 | 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — the planner refuses the block (`CrouchRiseCost` 30, bonk); **`MantleState` fires from the crouch and vaults it** — state arbitration, its own thing (eighth pass trace) |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
 | 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ✅ `Row13` (eleventh pass): 260 of 270 — Falling has no hover and no upward air force; the legs catch only where Standing owns the body |
@@ -151,6 +151,22 @@ air control.
 | rows 4, 6, 7, 9, 3-far; engine and planner gates | ✓ | **✓** (29 passed / 4 skipped) |
 | `qp` / `ref` scenario slices | — | **unchanged** (21 passed; `BuildFold` is back to its pre-eleventh signature) |
 
+**Tuning, from live play (same day).** Two config values, both hot-reloaded,
+both shared with `qp` (its slices unchanged, 45 passed):
+`FoldLegPushFadeSpeed` 200 → **400** and `FoldTuckForce` 1200 → **3600**.
+The leg cap fades to zero at the fade speed (`ChannelCap[0] = LegForce ·
+(1 − riseSpeed/fade)`), so on the engine it is the launch's ceiling — the
+jump-height retune the eleventh pass left open is this one number, not
+`LegReach`: neutral jump 31.5 → **60.1 px** (the old 61.5) with the standing
+rest untouched (0.00 deviation at every setting; leg force 9000 would give
+75). The corridor's corners on the engine are the legs (bumps) and the tuck
+(lips) — `CornerAssist` is masked off and the redirect never fires there
+(`SupportReach` 25 > `LegReach` 17, so near ⇒ Grounded); `FoldCornerForce`
+1500 → 4000 measured no change at all. Tuck 3600: corridor **77.3 → 92.6
+px/s** with no hard vertical events (2400 gave 92.4 with ten frames of
+|vy| > 150; drive 4500 on top gives 96.8, not taken). Row 10's hop stays at
+18.8 px through all of this — see its row.
+
 Seen in the slide's trace, not acted on: with the DP blocked at the face
 the tracker still emits the progress row along `u` (no path → `tLast = u`),
 so AirLateral pressed into the wall at its cap before the masks — the same
@@ -196,7 +212,7 @@ inactive; then Falling drops hover. Changes, in order:
 | row 7 free-standing 2-high wall | strain 8 ✗ | **4 px ✓ — the argmax refuses at the face** |
 | row 2 tunnel entry | ✓ | **✓** |
 | row 1 corridor / engine tunnel | 84.4 / 85.9 | **79.2 / 78.2** (bumps cost more at 16) |
-| row 9 neutral jump | 61.5 px | **31.5 px** — see below |
+| row 9 neutral jump | 61.5 px | **31.5 px** — see below (60.1 again after the twelfth pass's leg-fade retune) |
 | row 10 diagonal hop | apex 28 px ✓ | **apex 19 px ✗ (bar 20); still clears the block, lands at hover** |
 | rest / tall wall / step / duck-in / rollback / rows 3-far, 4, 6 | ✓ | **✓** |
 | rows 3-near, 11 | ✗ | **✗** (unchanged: actuator decision; Mantle) |

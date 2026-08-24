@@ -283,8 +283,8 @@ public class MovementConfig
     public float FoldLegForce                   { get; set; } = 6000f;
     public float FoldDriveForce                 { get; set; } = 3000f;
     public float FoldCornerForce                { get; set; } = 1500f;
-    public float FoldTuckForce                  { get; set; } = 1200f;
-    public float FoldLegPushFadeSpeed           { get; set; } = 200f;
+    public float FoldTuckForce                  { get; set; } = 3600f;
+    public float FoldLegPushFadeSpeed           { get; set; } = 400f;
     // Flight authority (px/s²): lateral air steering along intent, and the
     // deliberately TINY two-sided vertical nudge — in flight there is nothing
     // to push against (no redirect, no legs), only air control.
