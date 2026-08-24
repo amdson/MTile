@@ -261,6 +261,13 @@ public sealed class LatticePathPlanner
 
         // ── The DP sweep (§3.4) ──────────────────────────────────────────────
         float wRise = riseCost;                                 // the state's price per px climbed
+        // Exact prune from the argmax goal: a node's value is
+        // w_prog·(p − p_seed) − dp ≤ w_prog·L − dp, so once dp exceeds
+        // w_prog·L the node can never beat the seed (value 0) and nothing
+        // reached through it can either — stop relaxing from it. Same
+        // result on every solve; the sky above a hover path dies within a
+        // few nodes of rise/hover cost instead of being swept to the box.
+        float bound = cfg.LatticeProgressWeight * L;
         float wHover = cfg.LatticeHoverWeight, wSeed = cfg.LatticeSeedWeight;
         Vector2 vHat = vel.LengthSquared() > 1f ? Vector2.Normalize(vel) : Vector2.Zero;
         for (int i = 0; i < reachCount; i++) _dp[_order[i]] = float.PositiveInfinity;
@@ -270,7 +277,7 @@ public sealed class LatticePathPlanner
         {
             int n = _order[i];
             float dn = _dp[n];
-            if (float.IsPositiveInfinity(dn)) continue;
+            if (float.IsPositiveInfinity(dn) || dn > bound) continue;
             int nx = n % _w, ny = n / _w;
             bool atSeed = n == seedIdx;
             int forced = ForcedOffset(nx, ny);
@@ -299,6 +306,7 @@ public sealed class LatticePathPlanner
                 }
                 if (atSeed && vHat != Vector2.Zero)
                     c += wSeed * (1f - Vector2.Dot(o.Unit, vHat));
+                if (c > bound) continue;                          // never worth it: prune
                 if (c < _dp[m]) { _dp[m] = c; _parent[m] = n; }
             }
         }
