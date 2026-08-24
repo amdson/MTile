@@ -291,7 +291,7 @@ answered after the fact by the tracking-residual give-up of §4.3.
 
 | term | form | notes |
 |---|---|---|
-| **(C) hover** | `w_hover · (floorBelow[n] − hoverOffset)²` | per node, from the column sweep (§3.2); 0 when no floor is in the window; `w_hover` should fade with `|u_y|` — a jump's `u` has no business being pulled to the floor |
+| **(C) hover** | `w_hover · (floorBelow[n] − hoverOffset)²` | per node, from the column sweep (§3.2); 0 when no floor is in the window. **Hover is a per-solve on/off flag the state passes in** (on for Standing / Crouched, off for jump states) — a jump's `u` has no business being pulled to the floor, and a flag is simpler and more legible than a fade |
 | **(D) admissible** | hard prune | blocked cell, or a crossed cell blocked ⇒ no edge |
 | **(B) steepness** | `w_steep · (1 − dot(ô, u))` | per edge: cost rises with angle off `u`; may be asymmetric (cheaper below `u` than above — descending is free, climbing is legs) |
 | **(A) direction** | implicit | the cone + DAG ordering already forbid backward motion |
@@ -576,3 +576,51 @@ to find with a picture and no sim wiring.
   regression-checked against `baseline.txt` from phase 1 onward.
 - Determinism: extend `CorrectorSnapshotTests` to cover a rollback across a
   lattice solve.
+
+## 7. Scenario audit (2026-08-23) — can the design as written do these?
+
+Three scenarios the engine is expected to handle with **one uniform solve**:
+(1) a bumpy corridor, alternating over 1-high blocks and under 1-low lips;
+(2) a jump into a 2-high tunnel, pushing slightly under the upper lip and
+dipping slightly below hover to get in; (3) a jump from under an overhang,
+requiring a sideways shuffle before the body can rise. Body facts that drive
+the geometry: hexagon half-width 6, half-height 10.4, standing hover 10 → head
+at ~31 px, so a 2-high (32 px) tunnel fits standing by ~1 px.
+
+| | verdict | why |
+|---|---|---|
+| **1** corridor | **yes** | Admissibility forces the path under lips and over blocks; hover cost pays for the deviation; the far-band goal makes "stop" not an option. No state change to duck — crouch is reference shaping over the same polygon. Needs the cone to admit slope ≈ 1 (the C-obstacle bevels make block corners 45° ramps). Tracker is the ref engine's, which already does this. |
+| **2** tunnel entry | **no** | (a) §4.7 keeps the launched guard, so the engine does not run mid-jump. (b) With the guard lifted the *plan* is right — `u = +x`, hover off, admissibility keeps the path under the lip and the far band inside the tunnel pulls it in low — but the body arrives with jump momentum the velocity-free path cannot see, and the v1 tracker has no mid-air authority to cancel it (air-vertical 300 px/s²; tuck and redirect are near-ground only). |
+| **3** covered jump | **no** | With `u = up`, `cos θ > 0` admits only rising edges; a sideways shuffle is perpendicular to `u` and a shuffle-while-settling is *backward*. Under a 2-high slab there is ~1 px of headroom, so no diagonal fits either. **The DAG cannot express the motion** unless `u` is tilted to the exit side (`u` = up-right makes `(1,0)` then `(0,−1)` legal) — and picking that side is exactly what `CoveredJumpState.TryPickOpenDir` decides today. The launch is also a jump impulse, which the fold tracker cannot emit. |
+
+The finding is that **the solve is uniform; the surrounding contract is not.**
+What differs per scenario is (i) how `u` is chosen, (ii) whether hover is on,
+and (iii) who consumes the path. Three changes make all three cases run
+through the same solve:
+
+1. **Run the engine airborne, with hover as a state-supplied flag.** Drop the
+   launched / plunging guards *for this engine*; §4.7 becomes "the engine runs
+   in every fold and jump regime; only knockback stays excluded." Standing /
+   Crouched pass hover on; jump states pass it off, so an airborne seed is not
+   dragged toward the lower floor. This is the todo's "abstract boundaries
+   based on hover constraints, passed in" — nothing cleverer.
+2. **`u` is intent, and a pure-vertical intent solves twice.** `u` is the
+   direction the player wants to *go*, never the jump direction (in scenario 2,
+   `u` = up-right would put the lip tuck against `u` and the `u⊥` lock of §3.7
+   would forbid it). When intent has no horizontal component, solve for
+   `u` = up-left and up-right and take the cheaper far-band cost — ~5 µs each,
+   and it replaces `TryPickOpenDir` with the same machinery every other case
+   uses.
+3. **Jump states consume the path.** Two discrete decisions a path informs but
+   a continuous tracker cannot make: *when* to launch (scenario 3: drive along
+   the path while its first segment is ground-level, fire when it turns up —
+   `CoveredJumpState` with the path replacing its bespoke slide) and *how hard*
+   (scenario 2: size the impulse to the path's apex so the body never has the
+   momentum the lip would have to cancel). The fold servo stays the tracker
+   for supported motion; jumps are impulse decisions, and the path's job is to
+   inform them.
+
+These are not in the v1 scope of §5 as written. If the three scenarios are the
+acceptance bar — and they are a good one — then §4.7's scope and §5's phasing
+need to be revised to include them, and (3) is the part that touches the
+movement state machine rather than the corrector.
