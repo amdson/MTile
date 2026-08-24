@@ -5,7 +5,7 @@
   // generated carry reference + PathDeform + servo) | "lattice" (the ref
   // tail riding the lattice path DP's reference; Lattice* knobs below) |
   // "lm" (nonlinear oracle, heavy). Hot-reloads — flip mid-game to A/B.
-  "FoldEngine": "ref",
+  "FoldEngine": "lattice",
   "FoldLmIterations": 12,
   "FoldLmPenWeight": 10,
   "FoldLmHoverWeight": 0.5,
