@@ -677,13 +677,19 @@ through the same solve:
    Crouched pass hover on; jump states pass it off, so an airborne seed is not
    dragged toward the lower floor. This is the todo's "abstract boundaries
    based on hover constraints, passed in" — nothing cleverer.
-2. **`u` is intent, and a pure-vertical intent solves twice.** `u` is the
-   direction the player wants to *go*, never the jump direction (in scenario 2,
-   `u` = up-right would put the lip tuck against `u` and the `u⊥` lock of §3.7
-   would forbid it). When intent has no horizontal component, solve for
-   `u` = up-left and up-right and take the cheaper far-band cost — ~5 µs each,
-   and it replaces `TryPickOpenDir` with the same machinery every other case
-   uses.
+2. **`u` is intent, and a pure-vertical intent solves straight up.** `u` is
+   the direction the player wants to *go*, never the jump direction (in
+   scenario 2, `u` = up-right would put the lip tuck against `u` and the `u⊥`
+   lock of §3.7 would forbid it). When intent has no horizontal component,
+   `u = (0,−1)` — one solve. The covered-jump shuffle is not a search for an
+   exit: the tile C-obstacle's corner bevel is a ≈45° ramp, so a body within a
+   few px of the slab's edge has an admissible `(±1,−1)` climb out, and a body
+   deeper under the slab has no rising edge and bonks honestly (the cutoff).
+   That replaces `TryPickOpenDir` with plain admissibility, and it means a
+   neutral jump in open air never drifts. (An earlier draft solved twice with
+   tilted `u`; in open air both tilted solves prefer a diagonal — withdrawn.)
+   With left or right held, `u` tilts to that side and the same bonk cutoff
+   applies. Per-row detail: [LATTICE_SCENARIOS.md](LATTICE_SCENARIOS.md).
 3. **Jump states own a solve, same as fold states.** A jump state generates
    the path with its own parameters (`u` from intent, hover off, its window)
    and runs the same tracker with its own channel list and an unbounded
