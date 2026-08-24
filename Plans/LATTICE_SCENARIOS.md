@@ -36,7 +36,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 
 | # | scenario | terrain & seed | owner / regime | solver parameters | correct behavior | status |
 |---|---|---|---|---|---|---|
-| 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ❌ `Row01` / `BumpyTunnel` skipped — horizon QP: 46 px/s (gate 55; one-tick gave 82–88) — open |
+| 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 65.8 px/s (fifth pass); `BumpyTunnel` skipped — its spawn hits the one-cell lip→bump seam (terrain/margin finding, fifth pass) |
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state | `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance (the seed run fixes the first stretch to the arc); body enters low and clean, no bonk on the lip | ✅ `Row02` — horizon QP: arrives 4 px above the band and enters (the engine now runs in Falling; §7.1's launched guard is gone with the ref tail) |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ❌ `Row03_NearEdge` skipped (no rise today); far ✅ `Row03_FarFromEdge` (bonks, no shuffle) — `CoveredJumpState` still owns the launch (§7.3) |
 | 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut`, `Row04` |
@@ -48,7 +48,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | ❌ jump states not on the engine |
 | 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — crouch mounts the block; design gap, logged in BACKLOG |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
-| 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ❌ `Row13` skipped — horizon QP: descent 187 of 270 (the band holds the fall to the path's slope) |
+| 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ❌ `Row13` skipped — fifth pass: descent 201 of 270 (the band holds the fall to the path's slope) |
 | 14 | **Knockback** | body hit, `PreserveExternalVelocity` set | any | engine **excluded** | No correction at all — the fold does not fight combat momentum | ✅ `Admit` guard |
 
 ## Tests
@@ -63,7 +63,48 @@ Status on 2026-08-24 (at commit): **pass** — 1, 2 (today via the qp airborne
 path, not the lattice engine), 3-far, 4, 6, 7, 9. **Skipped** — 3-near, 8, 11,
 13.
 
-### Horizon-QP results (2026-08-24, fourth pass — current)
+### Fifth pass (2026-08-24) — path-sampled reference, H = 5, exact step bound — current
+
+Three changes on the fourth pass, all from the design discussion: (1) the
+**reference is the polyline sampled at the body's current speed** — `p̂_T`
+at arc length `|v|·(T+1)·dt` from the body, band ±½ cell *perpendicular* to
+the path's local direction there, progress free along it (the fourth pass
+banded a straight line through the first node, which diverged from the
+polyline within the horizon); (2) **horizon 5** (stopping times are 1–4
+ticks); (3) **the solver's step bound now carries `|n̂_j · axis_c|`** for
+axis-only channels — the exact Hessian row-sum entry; without it the 20
+vertical band rows shrank the horizontal Drive's step until it output 34 of
+a 3000 cap. Masks were already constant. Seed run off. The bound change
+touches the `qp` engine's numerics too: its gates were re-run and the
+failure set is unchanged (the pre-existing six in that slice).
+
+| | fourth pass (H=10, line band) | (1)+(2) only | **(1)+(2)+(3) — committed** |
+|---|---|---|---|
+| row 1 corridor | 46.7 ✗ | 30.6 ✗ | **65.8 ✓** |
+| engine tunnel (spawn 3.6 px higher) | 45.9 ✗ | 30.6 ✗ | **30.6 ✗ — stuck at x=330, see below** |
+| row 2 tunnel entry | ✓ (lip 74) | ✓ (lip 73) | **✓ (lip 73)** |
+| row 7 free-standing 2-high wall | strain 7.7 ✓ | 5.1 ✓ | **6.6 ✓** |
+| row 8 ledge drop | ✓ (72.0) | ✓ (72.5) | **✓ (73.2, max vy 178, full carry)** |
+| row 13 landing (max vy / 270) | 187 ✗ | 202 ✗ | **201 ✗** |
+| rest / tall wall / step / duck-in / rollback / rows 3-far, 4, 6, 9 | ✓ | ✓ | **✓** |
+| rows 3-near, 11 | ✗ | ✗ | **✗** |
+| tunnel sim step (Release, warmed) | 159 µs | — | **47 µs** |
+
+**The engine-test tunnel is a terrain finding, not a tracker one.** Its
+`x = 330.3` was bit-identical across the solver change — the body is stuck,
+not slow. The corridor's lip at tile 19 (row 3) and bump at tile 21 (row 5)
+leave, in C-space with the 2 px margin, a seam exactly one lattice cell
+wide: at x = 328 the free column is y ∈ [62, 82]; at x = 324 only y ≥ 75; at
+x = 331 only y ≤ 69 — a 12 px rise in 6 px of run that the DP threads only by
+two exact `(1,−2)` steps, and a seed one cell off (326, 76) bonks with 4
+reachable cells. The old servos shoved the real body (2 px smaller than the
+inflated obstacle) through the margin; the horizon tracker honours the path
+and, on a bonk, carries straight into the bump. Which spawn threads the seam
+is a phase accident (row 1's does, the engine test's doesn't). The design
+question it raises is what the margin means to the bitmap versus to the
+tracker's band; not decided here.
+
+### Horizon-QP results (2026-08-24, fourth pass — superseded)
 
 The one-tick tracker's overshoot is H = 1 myopia, so `LatticeTracker` became
 the §3.7 solve at a short horizon (`AmbientHorizon`, 10 ticks) on the

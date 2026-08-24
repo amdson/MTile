@@ -59,6 +59,14 @@ orders of magnitude cheaper than the state-space search prototype.
 > (§3.5 finding 2 confirmed three ways). Rows 7 and 8 pass for the first
 > time; corridor speed is the open cost (46 vs 88 px/s), plus ~140 µs a
 > step. `LATTICE_SCENARIOS.md` "horizon-QP results".
+>
+> **Fifth pass, same day — current:** reference = the polyline sampled at
+> the body's current speed (band perpendicular to the local path direction,
+> progress free along it), H = 5, and `CorrectionSolver`'s step bound made
+> exact for axis-only channels (`|n̂·axis|` — the drive had been starved by
+> vertical rows it cannot move). Corridor 66 px/s, rows 2/7/8 pass, 47 µs a
+> step. The engine-test tunnel exposes a one-cell seam in C-space at margin
+> 2 (a terrain/margin question, recorded there).
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

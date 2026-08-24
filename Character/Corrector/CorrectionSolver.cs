@@ -253,6 +253,11 @@ public static class CorrectionSolver
         // sum, so the preconditioned gradient step is a descent step on the
         // quadratic surrogate. Compatibility (HardRowsOnly) shapes both gradient
         // and bound identically.
+        // Axis-only channels enter row j's Hessian through |n̂_j · axis| — a
+        // vertical row cannot move a horizontal channel — so the bound carries
+        // that factor (exact row-sum entries; free 2D channels keep 1). Without
+        // it, hard rows a channel cannot serve still shrank its step: measured
+        // as the lattice tracker's Drive at 34 of a 3000 cap (2026-08-24).
         Span<float> rowS = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
         for (int j = 0; j < R; j++)
         {
@@ -263,10 +268,11 @@ public static class CorrectionSolver
                 if ((skip[c] & (1u << j)) != 0) continue;
                 var ch = p.Channels[c];
                 int kd = kind[c];
+                float ax = AxisFactor(ch, p.Rows[j].Normal);
                 for (int k = 0; k <= kMax; k++)
                 {
                     if (!Active(ch, k)) continue;
-                    sum += Lev(kd, p.Rows[j].Tick, k, levV, levF);
+                    sum += Lev(kd, p.Rows[j].Tick, k, levV, levF) * ax;
                 }
             }
             rowS[j] = sum;
@@ -291,7 +297,7 @@ public static class CorrectionSolver
                 {
                     if (k > p.Rows[j].Tick) continue;
                     if ((sk & (1u << j)) != 0) continue;
-                    float lever = Lev(kd, p.Rows[j].Tick, k, levV, levF);
+                    float lever = Lev(kd, p.Rows[j].Tick, k, levV, levF) * AxisFactor(ch, p.Rows[j].Normal);
                     L += 2f * p.HingeWeight * p.Rows[j].HingeScale * lever * rowS[j];
                 }
                 Lt[c * H + k] = L;
@@ -392,6 +398,11 @@ public static class CorrectionSolver
 
         return ComputeResidual(p, z);
     }
+
+    // |n̂ · axis| for axis-only channels (the row's true coupling to the
+    // variable); 1 for free 2D channels (Redirect).
+    private static float AxisFactor(in ChannelDef ch, Vector2 normal)
+        => ch.AxisOnly ? MathF.Abs(Vector2.Dot(ch.Axis, normal)) : 1f;
 
     // Table-backed Lever for the solve's hot loops. Identical arithmetic to
     // Lever(): (T − k + 1)·dt is precomputed per tick gap instead of per

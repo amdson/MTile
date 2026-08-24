@@ -54,7 +54,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // ── Row 1: bumpy corridor ────────────────────────────────────────────
     // Alternating 1-high bumps and 1-low lips in a 3-tile corridor; hold
     // right. Traverses at speed, never leaves the standing fold to crouch.
-    [Fact(Skip = "LATTICE_SCENARIOS row 1 — horizon QP: corridor at 46.7 px/s (gate 55; one-tick tracker gave 88) — open, see the doc's horizon-QP results")]
+    [Fact]
     public void Row01_BumpyCorridor_TraversesAtSpeed_WithoutCrouching()
     {
         var chunks = Terrain(7, 64, (r, c) =>
@@ -260,7 +260,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // uncorrected body reaches (a control run with the corrector off — air
     // drag means that is below free fall); then hover re-binds and the carry
     // resumes.
-    [Fact(Skip = "LATTICE_SCENARIOS row 13 — horizon QP: descent 187 of the uncorrected 270 px/s (69%); the band holds the falling body to the path's descent slope with legs/air-vertical")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 13 — horizon QP: descent 201 of the uncorrected 270 px/s (75%); the band holds the falling body to the path's descent slope")]
     public void Row13_Landing_ImpactHonest_ThenRebinds()
     {
         var chunks = Terrain(10, 40, (r, c) => r == 9);

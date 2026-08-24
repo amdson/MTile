@@ -98,7 +98,7 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
     // alternating floor/ceiling bumps — every crossing is a duck or step-up.
     // Under the lattice engine the path itself threads them (plan §7
     // scenario 1); the deform only mops up quantization.
-    [Fact(Skip = "horizon QP (LatticeTracker): 45.9 px/s vs the 55 gate (one-tick tracker: 81.7; ref: 97) — open, see LATTICE_SCENARIOS.md horizon-QP results")]
+    [Fact(Skip = "the lip(19)→bump(21) seam is one lattice cell wide in C-space with margin 2 (free x=328 only; 12 px rise in 6 px of run) — the tracker honours the path and sticks at x=330 where older engines shoved the body through the margin; LATTICE_SCENARIOS.md fifth pass. Row01 (same terrain, spawn 3.6 px lower) threads it at 65.8 px/s")]
     public void BumpyTunnel_HoldRight_TraversesAtSpeed()
     {
         const int W = 64;
