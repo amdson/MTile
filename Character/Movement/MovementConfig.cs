@@ -305,12 +305,14 @@ public class MovementConfig
     // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — the FoldEngine
     // "lattice" reference generator, also the freeze-frame oracle. Window =
     // the cone's footprint from the seed: LookaheadTiles along u, ±L·tanθ
-    // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3);
-    // steepness feel is tuned with SteepWeight, not the cone. Sim-affecting
-    // under "lattice" — hot-reload is gated like every movement knob.
+    // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3) and
+    // is set to "90° − ε" so every forward offset is an edge — steepness is
+    // priced by SteepWeight, never filtered (with the ±2 offset table any
+    // value ≤ 0.447 admits the same edges). Sim-affecting under "lattice" —
+    // hot-reload is gated like every movement knob.
     public float LatticeLookaheadTiles          { get; set; } = 3.5f;
     public int   LatticeCellsPerTile            { get; set; } = 5;
-    public float LatticeConeCos                 { get; set; } = 0.5f;
+    public float LatticeConeCos                 { get; set; } = 0.05f;
     public float LatticeSteepWeight             { get; set; } = 30f;
     public float LatticeLenWeight               { get; set; } = 1f;     // per px
     public float LatticeHoverWeight             { get; set; } = 0.05f;  // per px²

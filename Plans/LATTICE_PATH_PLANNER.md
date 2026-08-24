@@ -119,13 +119,16 @@ could not see a two-tile block coming.
 That is not a problem, because the path is spatial: it can be planned further
 ahead than the servo will ever track. So:
 
-- **Plan window** = the **cone's footprint from the seed**: the bounding box of
-  `{ seed + t · R(±φ) u : t ∈ [0, L], |φ| ≤ θ }`, i.e. `L` along `u` and
-  `±L · tan θ` across it. `L` (`LatticeLookaheadTiles`) is the one knob; the
-  cross extent is *derived* from `L` and `cos θ` (§3.3), never set separately —
-  a band narrower than the fan would clip the cone and silently forbid the
-  steep routes the cone was opened to admit. At `L ≈ 3.5` tiles and a 45° cone
-  that is a **7 × 7 tile** box, which is the right mental size for this.
+- **Plan window** = everything a monotone path can reach before the far
+  band: for each admitted offset `ô`, the point where a straight run along it
+  crosses `p = pSeed + L` (`seed + ô · L / dot(ô, u)`); the box is the bbox of
+  those points and the seed. A path mixing offsets never leaves that hull, so
+  this is exact for the offset table. `L` (`LatticeLookaheadTiles`) is the one
+  knob; the cross extent is *derived* — `L × (steepest admitted slope)`, never
+  set separately. (Revised 2026-08-24: the first draft sized the box from the
+  cone's edge rays, `±L·tan θ`; with the cone at 90° − ε that is unbounded,
+  while the reachable region is bounded by the offset table's steepest edge.)
+  At `L = 3.5` tiles and the `±2` table (slope 2) that is **3.5 × 14 tiles**.
 - **Tracking horizon** stays `AmbientHorizon` = 10 ticks; §3.6 consumes only the
   first ~17 px of the plan.
 
@@ -143,13 +146,15 @@ this plan argued for was built on a bad derivation and is withdrawn (see §3.3).
 `CObstacleTemplate.TopSurfaceRy`), so the bitmap resolves every feature the
 hover reference can see.
 
-Box and fan sizes at `L = 3.5` tiles, 5× cells, `u = +x`:
+Box and fan sizes at `L = 3.5` tiles, 5× cells, `u = +x` (the box is set by
+the steepest admitted offset, so the rows are offset-table choices, not cone
+angles — with the cone at 90° − ε the whole table is admitted):
 
-| `cos θ` | half-angle | box (tiles) | box cells | fan cells (≈ ½ box) |
+| steepest offset | slope | box (tiles) | box cells | fan cells (≈ ½ box) |
 |---|---|---|---|---|
-| 0.7 | 45° | 3.5 × 7 | ~600 | ~300 |
-| 0.5 | 60° | 3.5 × 12 | ~1,050 | ~530 |
-| 0.3 | 72° | 3.5 × 22 | ~1,900 | ~970 |
+| `(1,1)` | 1 (45°) | 3.5 × 7 | ~600 | ~300 |
+| `(1,2)` (the `±2` table, **current**) | 2 (63°) | 3.5 × 14 | ~1,650 | ~800 |
+| `(1,3)` (a `±3` table) | 3 (72°) | 3.5 × 21 | ~2,400 | ~1,200 |
 
 The box is what gets allocated (pooled, fixed-size — pick a `LatticeMaxCells`
 the scratch arrays are sized to, ~4k, and clamp the box to it); the **fan is
@@ -527,14 +532,16 @@ You probably do not need it. Two things already produce smooth paths:
 only if visible zigzag survives.** If it does, note that the cheaper fix is
 usually a post-hoc smoothing pass over the recovered path, not a bigger DP.
 
-### 4.5 The cone is doing two jobs; keep them apart in your head
+### 4.5 The cone does one job: it is the DAG condition
 
-`cos θ` (§3.3) is simultaneously (a) the thing that makes the graph a DAG
-(`cos θ > 0`, structural) and (b) the maximum steepness the path may take
-(tuning). Because (a) is a hard floor, the tuning range for (b) is narrow —
-roughly `0.3 … 0.7` at radius 2 — and most of the "how steep" question is really
-answered by the neighborhood radius and by `w_steep`, not by the cone. Do not
-expect to tune feel with `cos θ`; expect to tune it with `w_steep`.
+`cos θ` (§3.3) is the thing that makes the graph a DAG (`cos θ > 0`,
+structural). **Decided 2026-08-24: it is set to 90° − ε (`LatticeConeCos`
+0.05) and is not a tuning knob.** Every forward offset in the table is an
+edge; "how steep" is answered by the neighborhood (a `(1,k)` offset admits
+`atan(k)`) and priced by `w_steep`, never filtered. This costs a wider window
+(§2) but removes a knob and a class of "the cone forbade the route" surprises,
+which makes everything downstream simpler. An earlier draft treated the cone
+as a steepness tuner with a `0.3 … 0.7` range — withdrawn.
 
 The cone must also be looser than the todo's phrasing suggests: hopping a
 one-tile block at walk speed is 45–60° off horizontal, so a "tight" cone would
@@ -638,7 +645,9 @@ tracker / give-up split (§4.3) is the one place deliverability is judged.
 > contracts verbatim (hover + progress, rest, bumpy tunnel at 97 px/s, 1-high
 > step, tall-wall honest stop, corridor duck-in, bit-determinism) plus
 > engagement (path on 240/240 frames) and a rollback round trip across the
-> solve. Measured, Release, JIT warmed: **12.7 µs / 0 B per solve**; a whole
+> solve. Measured, Release, JIT warmed: **12.7 µs / 0 B per solve** at the
+> original 60° cone (22×35 cells); **39 µs at the 90° − ε cone** decided later
+> the same day (22×75 cells, §4.5 — accepted for the simplicity); a whole
 > sim step in the bumpy tunnel is **48 µs under lattice vs 25 µs under ref**
 > (the stamp is a cached per-tile mask now; buried tiles are skipped). The
 > earlier "~90 µs" figure was tier-0 JIT code — the timing tests now warm

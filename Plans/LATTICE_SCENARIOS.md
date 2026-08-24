@@ -17,7 +17,7 @@ scenario needs something not on it, that is a design gap, not a parameter.
 | `hover` / `hoverOffset` | the state | Standing `on / 10`; Crouched `on / 0`; jump states `off` |
 | progress target | the state | `MaxWalkSpeed`×mods (Standing), `CrouchMaxWalkSpeed` (Crouched), **unbounded** (jumps) |
 | window `L` | config `LatticeLookaheadTiles` (3.5) | a state may shorten it; nothing lengthens it (§4.2 — the autopilot dial) |
-| cone `cosθ` | config `LatticeConeCos` (0.5) | structural; not a per-state knob |
+| cone `cosθ` | config `LatticeConeCos` (0.05 — "90° − ε") | structural (the DAG condition); every forward offset is an edge, steepness is priced not filtered; not a per-state knob |
 | weights | config `LatticeSteepWeight` 30, `LenWeight` 1/px, `HoverWeight` 0.05/px², `SeedWeight` 20 | phase-3 tuning surface; per-state overrides only if a row below forces one |
 | seed run | the body's current velocity (not a state choice) | first `LatticeSeedRunPx` (8) forced along the velocity's nearest admitted offset when moving ≥ `SeedRunMinSpeed` (20 px/s) and inside the cone; else the soft `SeedWeight` bias (§3.5) |
 | channel list + caps | the state (§3.7) | legs / drive / tuck (fold); air lateral / air vertical / leg-impulse (jumps) |

@@ -111,11 +111,13 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         // A barrier spanning the whole window at tile x=10 (world 160..176):
         // no admissible route at any height — the far band is unreachable and
         // the DP gives up at the furthest reachable node (the honest bonk).
+        // The window reaches ±L·(steepest slope) = ±112 px from the seed
+        // (near-90° cone, ±2 offsets), so the wall starts at row −4.
         var sb = new StringBuilder();
-        for (int r = 0; r < 6; r++)
-            sb.Append("OOOOOOOOOOXOOOOOOOOOOOOO\n");   // rows 0..5: the wall
+        for (int r = -4; r < 6; r++)
+            sb.Append("OOOOOOOOOOXOOOOOOOOOOOOO\n");   // rows −4..5: the wall
         sb.Append(new string('X', 24));                 // row 6: floor
-        var chunks = SimTerrain.FromAscii(sb.ToString(), originTileX: 0, originTileY: 0);
+        var chunks = SimTerrain.FromAscii(sb.ToString(), originTileX: 0, originTileY: -4);
         var seed = new Vector2(100f, 75f);
         var (planner, body, path) = Setup(seed);
         int n = Solve(planner, chunks, body, seed, path, out _, out bool bonk);

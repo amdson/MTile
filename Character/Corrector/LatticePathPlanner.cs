@@ -155,15 +155,18 @@ public sealed class LatticePathPlanner
         _cell = (float)Chunk.TileSize / perTile;
         float L = cfg.LatticeLookaheadTiles * Chunk.TileSize;
 
-        BuildWindow(seed, u, cosTheta, L);
-        if (_w <= 0 || _h <= 0) return 0;
-
-        // Admitted offsets under the cone (§3.3).
+        // Admitted offsets under the cone (§3.3). The cone is nearly 90° by
+        // default (cosθ 0.05): every forward offset in the table is an edge and
+        // steepness is priced by SteepWeight, not filtered. cosθ > 0 stays
+        // structural — it is the DAG condition.
         _admittedCount = 0;
         foreach (var o in AllOffsets)
             if (Vector2.Dot(o.Unit, u) >= cosTheta)
                 _admitted[_admittedCount++] = o;
         if (_admittedCount == 0) return 0;
+
+        BuildWindow(seed, u, L);
+        if (_w <= 0 || _h <= 0) return 0;
 
         StampObstacles(chunks, body, perTile, cfg.CorrectorMargin);
         SweepFloorBelow();
@@ -324,26 +327,19 @@ public sealed class LatticePathPlanner
         return best;
     }
 
-    // Window = bbox of the cone fan {seed + t·R(±φ)u : t ∈ [0,L], |φ| ≤ θ}
-    // (§2.1): the two edge rays, the axis directions inside the cone (the arc's
-    // axis-aligned extremes), and the seed itself. Clamped to MaxCells by
-    // trimming the side of the longer axis farther from the seed.
-    private void BuildWindow(Vector2 seed, Vector2 u, float cosTheta, float L)
+    // Window = bbox of everything a monotone path can reach before the far
+    // band: for each admitted offset ô, the point where a straight run along
+    // it crosses p = pSeed + L (seed + ô·L/dot(ô,u)). A path mixing offsets
+    // never leaves the hull of those extremes, so this is exact for the
+    // offset table — and it is what keeps a near-90° cone affordable: the
+    // lateral extent is L·(steepest admitted slope), not L·tanθ.
+    private void BuildWindow(Vector2 seed, Vector2 u, float L)
     {
-        float sinTheta = MathF.Sqrt(MathF.Max(0f, 1f - cosTheta * cosTheta));
-        Span<Vector2> dirs = stackalloc Vector2[6];
-        int nd = 0;
-        dirs[nd++] = new Vector2(u.X * cosTheta - u.Y * sinTheta, u.X * sinTheta + u.Y * cosTheta);
-        dirs[nd++] = new Vector2(u.X * cosTheta + u.Y * sinTheta, -u.X * sinTheta + u.Y * cosTheta);
-        Span<Vector2> axes = stackalloc Vector2[]
-            { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
-        foreach (var a in axes)
-            if (Vector2.Dot(a, u) >= cosTheta) dirs[nd++] = a;
-
         Vector2 min = seed, max = seed;
-        for (int i = 0; i < nd; i++)
+        for (int a = 0; a < _admittedCount; a++)
         {
-            var p = seed + dirs[i] * L;
+            var o = _admitted[a];
+            var p = seed + o.Unit * (L / Vector2.Dot(o.Unit, u));
             min = Vector2.Min(min, p); max = Vector2.Max(max, p);
         }
         // Two cells of slack on every side: one for the bbox floor, one so the
