@@ -182,10 +182,10 @@ Two arrays, both dense and pooled in `CorrectorScratch`:
    column, and it is **multi-floor aware**: a ledge top and the ground beneath
    it are both found, which a single-band `FloorEnvelope` query is not.
 
-   Two things read it: the hover term (§3.4), as `floorBelow[n] − hoverOffset`,
-   and the support predicate of the edge condition (§3.3),
-   `supported[n] = floorBelow[n] ≤ riseReach`. No `FloorEnvelope` calls at all.
-   The x-column sweep stays x-indexed whatever `u` is — floors are floors.
+   The hover term (§3.4) reads it as `floorBelow[n] − hoverOffset`, and the
+   downstream `Grounded` / `FloorY` fields (§3.6) are filled from it. No
+   `FloorEnvelope` calls at all. The x-column sweep stays x-indexed whatever
+   `u` is — floors are floors.
 
 Getting this wrong is the difference between "fast" and "unusable": the
 state-space prototype's per-node `FloorEnvelope` calls (facet walks over
@@ -207,27 +207,17 @@ That is the *cone* condition; the full edge condition `n → m`, `o = m − n`, 
 2. **Cone** — `dot(ô, u) ≥ cos θ`, `cos θ > 0`.
 3. **Geometry** — `m` in the window, `m` admissible, and every cell the segment
    `center(n) → center(m)` crosses admissible (tunneling, below).
-4. **Actuation** — if `o` rises (`dy < 0`, y-down), `n` must be **supported**:
-   `floorBelow[n] ≤ riseReach` (§3.2). Descending and horizontal edges are
-   always available — gravity is free, and air control / drive exist in every
-   fold regime.
 
-Condition 4 is the todo's "operations available based on the player movement
-state and environment," in the only form a velocity-free path can hold it. The
-*environment* half is the per-node support predicate. The *state* half is what
-the state hands in: `riseReach` (`FoldClimbReachUp` for Stand,
-`CrouchClimbReachUp` for Crouch — the existing profile numbers, reused) and,
-later, a corner-plant flag that would admit rising edges from nodes with a
-convex corner within hand reach (`MarkCornerPlants`' predicate, not built in
-v1). No per-node force, no velocity.
-
-Its effect is that a chain of rising edges must stay within `riseReach` of a
-surface the whole way. That climbs a 1-tile ledge (the C-obstacle bevel keeps
-the body supported up the corner) and **stalls at a 2-tile wall by
-construction** — the wall face has no surface within reach — which is today's
-elective refusal, produced from geometry rather than from a rollout check.
-Without it the DP would draw a path rising through open air over a gap and
-lean entirely on the §4.3 give-up to catch it.
+That is the whole condition: **edges are pure geometry.** Nothing about the
+edge asks whether the body could actuate it — no support check, no force
+availability, no velocity. A draft of this plan added a fourth condition
+(rising edges only from nodes within reach of a floor) and it was deliberately
+taken out: the path's job is to say where the body would *like* to go, and
+whether the legs can deliver it is the tracker's question (§3.7) and, failing
+that, the give-up's (§4.3). Keeping actuation out of the graph keeps the graph
+one thing, and keeps every "why won't it climb this" answerable from the
+bitmap and the cone alone. Revisit only with a specific failing scenario in
+hand.
 
 `cos θ` is the todo's cosine threshold and is a config knob. **`cos θ > 0` is
 structural, not tuning:** it is what makes every edge strictly increase `p` and
@@ -286,7 +276,6 @@ for n in sorted order:
   for o in admittedOffsets:               // §3.3, ~7
     m = n + o
     if outOfWindow(m) or blocked[m] or crossesBlocked(n, o): continue
-    if o.dy < 0 and floorBelow[n] > riseReach: continue      // §3.3 condition 4
     c = dp[n] + w_steep·(1 − dot(ô, u)) + w_len·|o| + w_hover·(floorBelow[m] − hoverOffset)²
     if c < dp[m]: dp[m] = c; parent[m] = n
 ```
@@ -332,7 +321,9 @@ covers ≤ 17 px, so the tracker consumes only the first tile of a three-tile
 plan; the rest exists so the first tile is chosen with foresight (§2.1).
 
 The `Grounded` / `FloorY` fields the downstream rows and channels read are
-filled from `floorBelow` at the nearest node (`Grounded` = supported). This is why the integration point in §1 matters:
+filled from `floorBelow` at the nearest node (`Grounded` =
+`floorBelow ≤ SupportReach`, the same test `BallisticPredictor` uses). This is
+why the integration point in §1 matters:
 the piece the todo's algorithm does not produce is the piece the existing code
 already computes.
 
@@ -510,18 +501,16 @@ Stated intent, written down now rather than discovered later:
 
 ### 4.10 Where this plan deviates from the todo
 
-Less than the first two drafts claimed. The todo passes "a list of operations
-available based on player movement state and environment" into the path solve;
-this plan does too, but reduced to what a velocity-free path can use: a
-per-node support predicate (environment) and the state's `riseReach` plus a
-corner-plant flag (state) — §3.3 condition 4. What it does *not* do is model
-per-node force magnitudes or which channel would deliver an edge; that stays
-with the tracker (§3.7) and the give-up (§4.3).
+One deliberate deviation. The todo passes "a list of operations available based
+on player movement state and environment" **into the path solve**. This plan
+keeps that list out of the path entirely: edges are pure geometry (§3.3), and
+the ops list configures only the tracker (§3.7).
 
-An earlier draft kept the ops list out of the path entirely on the grounds
-that per-node support needs a per-node `FloorEnvelope` call. That was wrong:
-once the bitmap exists, support is a column sweep (§3.2), and the objection
-evaporates. Recorded so it is not re-argued.
+This is a choice, not a limitation of the DP. Per-node support is cheap once
+the bitmap exists (`floorBelow`, §3.2 — a column sweep, not a `FloorEnvelope`
+call), so an actuation gate on rising edges *could* be added in a line. It is
+left out so the graph stays a single-purpose geometric object and so the
+tracker / give-up split (§4.3) is the one place deliverability is judged.
 
 ---
 
@@ -529,7 +518,7 @@ evaporates. Recorded so it is not re-argued.
 
 | phase | deliverable | gate |
 |---|---|---|
-| **0** | Lattice geometry: window, admissibility bitmap, `floorBelow` column sweep, admitted-offset cone. Drawn in the freeze-frame inspector. No DP, no sim wiring. | bitmap visually matches terrain at a few cell sizes; supported nodes highlighted correctly on a ledge and beside a 2-tile wall; cone overlay matches `u` |
+| **0** | Lattice geometry: window, admissibility bitmap, `floorBelow` column sweep, admitted-offset cone. Drawn in the freeze-frame inspector. No DP, no sim wiring. | bitmap visually matches terrain at a few cell sizes; `floorBelow` shading matches the visible floor under a ledge and in a pit; cone overlay matches `u` |
 | **1** | The DP (no direction state) + path export. Oracle-only, run beside the LM/lattice oracles in `Game1`. | µs/solve measured in `MTile.Bench`; path looks sane over lips, corridors, 1- and 2-tile blocks at radius 2 and 3 |
 | **2** | Wire as `FoldEngine = "lattice"`: replace `FoldReference`'s rollout block, keep rows + deform + servo. Default stays `qp`. | `FoldRefEngineTests`-style scenario tests pass for the new engine |
 | **3** | Weight tuning by playtest; the tracking-residual give-up of §4.3. | walls feel solid; no bobbing at rest; no visible autopilot |
