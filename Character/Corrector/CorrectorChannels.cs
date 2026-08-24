@@ -30,11 +30,11 @@ public static class CorrectorChannels
     // (float height + half height − sag) so "floor within leg range" matches
     // the old spring's engagement envelope.
     private const float HoverDist    = 2f * PlayerCharacter.Radius - 2f;
-    private const float LegReach     = HoverDist + 20f;  // px — floor within leg range
+    internal const float LegReach    = HoverDist + 20f;  // px — floor within leg range
     private const float WeakTraction = 800f;             // scenario: deliberately underpowered legs-forward
     // Channel authority caps live in MovementConfig (Fold*Force — the hot-
     // reloadable tuning surface); the constants left here are structural.
-    private const float CatchFadeBand = 60f;   // px/s — catch authority ramps out across
+    internal const float CatchFadeBand = 60f;   // px/s — catch authority ramps out across
                                                // MaxGroundEngageVnRel ± this window
     private const float RedirectEpsilon = 1e-6f;         // uniqueness regularizer, not a knob
 
@@ -50,11 +50,7 @@ public static class CorrectorChannels
     // CornerAssist is lift-only for the same reason. The redirect disc may
     // still shed speed — passivity is its physical semantics (a deflection off
     // planted feet) — and exists only near the ground.
-    // supportHover (px): when finite, the LegServo mask means AT SUPPORT —
-    // floor within this distance below the body — instead of "floor within
-    // LegReach" (the lattice engine; qp passes NaN and is unchanged).
-    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed,
-                                float supportHover = float.NaN)
+    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed)
     {
         var cfg = MovementConfig.Current;
         float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
@@ -110,8 +106,7 @@ public static class CorrectorChannels
         // "full": the whole stack.
         for (int k = 0; k < n; k++)
         {
-            s.ChannelMask[0][k] = float.IsNaN(supportHover) ? near[k]    // LegServo
-                : near[k] && s.Samples[k].FloorY - s.Samples[k].Pos.Y <= supportHover;
+            s.ChannelMask[0][k] = near[k];    // LegServo
             s.ChannelMask[1][k] = dir != 0 && near[k];   // Drive — no x channel at
                                               // station (friction is baseline; a
                                               // two-sided x channel would let hard

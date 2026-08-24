@@ -7,7 +7,7 @@ using Xunit.Abstractions;
 namespace MTile.Tests.Sim;
 
 // Plans/LATTICE_SCENARIOS.md, one test per encoded row, under FoldEngine
-// "lattice" (the qp channel stack riding the lattice path's reference).
+// "lattice" (LatticeTracker: the path's first step → one-tick channel solve).
 // These pin the CORRECT behavior from the table, not today's —
 // rows the engine cannot do yet are Skip'ped with the row's blocker so they
 // read as the checklist for the next cycle (un-skip, make it pass). Rows 5,
@@ -174,7 +174,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // The path routes over (accepted); the legs cannot deliver a 32 px rise
     // from a walk, so the give-up must turn it into row 6's honest stop —
     // the body ends AT the wall at hover, not floating up its face.
-    [Fact(Skip = "LATTICE_SCENARIOS row 7 — with the qp legs mask the legs strain the body 12 px up the face toward the over-the-top path (minY 63.3); the legs-at-support mask (AmbientCorrector, LegsAtSupport) holds it honest at the cost of corridor speed")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 7 — the legs push toward the over-the-top path and strain 11 px up the face (minY 64.2); the give-up question (§4.3)")]
     public void Row07_FreeStandingTwoHighWall_GiveUpIsHonestStop()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (c == 12 && r >= 4));
@@ -194,7 +194,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // Upper floor (row 3) for x < 160, lower floor (row 6) beyond: a 48 px
     // drop. Full carry through the drop (no grab), descent no faster than
     // free fall (no dive), re-bound at hover on the lower floor.
-    [Fact(Skip = "LATTICE_SCENARIOS row 8 — full carry and no dive pass; the landing settles 5 px below hover (80.7 vs 75.6) under the channel stack")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 8 — one-tick tracker: the descent target is walk speed along the tangent, so the legs catch the fall at the leg-reach boundary and the body hovers 32 px above the lower floor (see the doc's one-tick results)")]
     public void Row08_LedgeDrop_FullCarry_NoDive_Rebinds()
     {
         var chunks = Terrain(7, 40, (r, c) => r == 6 || (r == 3 && c < 10));
@@ -259,7 +259,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // uncorrected body reaches (a control run with the corrector off — air
     // drag means that is below free fall); then hover re-binds and the carry
     // resumes.
-    [Fact(Skip = "LATTICE_SCENARIOS row 13 — descent reaches 250 of the uncorrected 270 px/s (92.6%) under the channel stack; the remaining brake is not the legs (identical with the at-support mask)")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 13 — one-tick tracker: descent held to 138 of the uncorrected 270 px/s by air-vertical then legs (the walk-speed target along a descending tangent)")]
     public void Row13_Landing_ImpactHonest_ThenRebinds()
     {
         var chunks = Terrain(10, 40, (r, c) => r == 9);

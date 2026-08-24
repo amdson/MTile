@@ -6,9 +6,9 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests.Sim;
 
-// The lattice stand-fold engine (MovementConfig.FoldEngine "lattice" → the
-// qp channel stack with its hover reference taken from LatticePathPlanner's
-// path; Plans/LATTICE_PATH_PLANNER.md §1 revised note).
+// The lattice stand-fold engine (MovementConfig.FoldEngine "lattice" →
+// LatticePathPlanner for the shape, LatticeTracker for this tick's channel
+// forces; Plans/LATTICE_PATH_PLANNER.md §1 revised note).
 // The FoldRefEngineTests contracts, verbatim, for the new engine — plus a
 // rollback round trip across the lattice solve. The qp engine stays the
 // config default, so the rest of the sim suite is unaffected.

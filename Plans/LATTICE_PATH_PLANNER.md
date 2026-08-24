@@ -39,6 +39,16 @@ orders of magnitude cheaper than the state-space search prototype.
 > to preserve — do not port more of them into `FoldLattice`; no reference-side
 > descent/rise/lookahead rules, no new config knobs. This supersedes the
 > "keep rows + deform + servo" framing below for everything after phase 2.
+>
+> **Third pass, same day:** the horizon went too. `LatticeTracker` solves
+> channel usage for the *first step* of the planned trajectory only —
+> §3.7 at H = 1: `v_des` = first-step tangent × progress speed, projected
+> onto the channels available at the body's current state (BuildFold's caps
+> and masks). No coast, rows, linearization, deform or servo; feedback is
+> re-planning from the body every tick. Results and the open questions it
+> exposes (the target speed along a descending tangent; the seed run feeding
+> the current velocity back into the target; the give-up) are in
+> `LATTICE_SCENARIOS.md` "one-tick tracker results".
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
