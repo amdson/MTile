@@ -28,7 +28,12 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
 
     private static int Solve(LatticePathPlanner planner, ChunkMap chunks, PhysicsBody body,
                              Vector2 seed, CoastSample[] path, out float cost, out bool bonk)
-        => planner.Solve(chunks, body.Polygon, seed, new Vector2(100f, 0f),
+        => Solve(planner, chunks, body, seed, new Vector2(100f, 0f), path, out cost, out bonk);
+
+    private static int Solve(LatticePathPlanner planner, ChunkMap chunks, PhysicsBody body,
+                             Vector2 seed, Vector2 vel, CoastSample[] path,
+                             out float cost, out bool bonk)
+        => planner.Solve(chunks, body.Polygon, seed, vel,
             new Vector2(1f, 0f), hover: true, MovementConfig.Current.FoldHoverOffset,
             path, out cost, out bonk);
 
@@ -106,11 +111,13 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         // A barrier spanning the whole window at tile x=10 (world 160..176):
         // no admissible route at any height — the far band is unreachable and
         // the DP gives up at the furthest reachable node (the honest bonk).
+        // The window reaches ±L·(steepest slope) = ±168 px from the seed
+        // (near-90° cone, ±3 offsets), so the wall starts at row −8.
         var sb = new StringBuilder();
-        for (int r = 0; r < 6; r++)
-            sb.Append("OOOOOOOOOOXOOOOOOOOOOOOO\n");   // rows 0..5: the wall
+        for (int r = -8; r < 6; r++)
+            sb.Append("OOOOOOOOOOXOOOOOOOOOOOOO\n");   // rows −8..5: the wall
         sb.Append(new string('X', 24));                 // row 6: floor
-        var chunks = SimTerrain.FromAscii(sb.ToString(), originTileX: 0, originTileY: 0);
+        var chunks = SimTerrain.FromAscii(sb.ToString(), originTileX: 0, originTileY: -8);
         var seed = new Vector2(100f, 75f);
         var (planner, body, path) = Setup(seed);
         int n = Solve(planner, chunks, body, seed, path, out _, out bool bonk);
@@ -144,6 +151,96 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         float minY = float.MaxValue;
         for (int i = 0; i < n; i++) minY = MathF.Min(minY, path[i].Pos.Y);
         Assert.True(minY < 55f, $"did not route over the wall: minY {minY:F1}");
+    }
+
+    // The seed run (§3.5) is OFF by default (a re-planning tracker turns it
+    // into a feedback loop — LATTICE_SCENARIOS.md fourth pass); these three
+    // tests pin the feature itself, so they switch it on for their scope.
+    private static float WithRun(float px)
+    {
+        float prev = MovementConfig.Current.LatticeSeedRunPx;
+        MovementConfig.Current.LatticeSeedRunPx = px;
+        return prev;
+    }
+
+    // Seed run (§3.5): a body moving up-right at hover has its first 8 px of
+    // path FORCED up-right — the path starts where the body is going — and
+    // the hover cost then brings it back down within the window.
+    [Fact]
+    public void SeedVelocity_FixesInitialDirection()
+    {
+        float prevRun = WithRun(8f);
+        try { SeedVelocity_FixesInitialDirection_Body(); }
+        finally { MovementConfig.Current.LatticeSeedRunPx = prevRun; }
+    }
+
+    private static void SeedVelocity_FixesInitialDirection_Body()
+    {
+        var seed = new Vector2(100f, 75f);
+        var (planner, body, path) = Setup(seed);
+        int n = Solve(planner, FlatFloor(), body, seed, new Vector2(100f, -100f), path,
+                      out _, out bool bonk);
+
+        Assert.True(n > 2, "no path");
+        Assert.False(bonk, planner.LastDebug);
+        var d0 = path[1].Pos - path[0].Pos;
+        Assert.True(d0.X > 0f && d0.Y < 0f && MathF.Abs(d0.X + d0.Y) < 1e-3f,
+            $"first edge is not the 45° run: {d0}");
+        float minY = float.MaxValue;
+        for (int i = 0; i < n; i++) minY = MathF.Min(minY, path[i].Pos.Y);
+        float runPx = MovementConfig.Current.LatticeSeedRunPx;
+        Assert.True(seed.Y - minY >= runPx * 0.7f - 2f,
+            $"run too short: rose only {seed.Y - minY:F1} px for an {runPx} px run");
+        Assert.True(MathF.Abs(path[n - 1].Pos.Y - seed.Y) <= 5f,
+            $"never came back to hover: end y {path[n - 1].Pos.Y:F1}");
+    }
+
+    // Below SeedRunMinSpeed nothing is forced: hover jitter must not bend the
+    // path.
+    [Fact]
+    public void SeedVelocity_SlowIsNotForced()
+    {
+        float prevRun = WithRun(8f);
+        try { SeedVelocity_SlowIsNotForced_Body(); }
+        finally { MovementConfig.Current.LatticeSeedRunPx = prevRun; }
+    }
+
+    private static void SeedVelocity_SlowIsNotForced_Body()
+    {
+        var seed = new Vector2(100f, 75f);
+        var (planner, body, path) = Setup(seed);
+        int n = Solve(planner, FlatFloor(), body, seed, new Vector2(10f, -10f), path,
+                      out _, out _);
+        Assert.True(n > 0, "no path");
+        for (int i = 0; i < n; i++)
+            Assert.True(MathF.Abs(path[i].Pos.Y - seed.Y) <= 5f,
+                $"slow seed velocity bent the path: {path[i].Pos.Y - seed.Y:F1} at {i}");
+    }
+
+    // A run into an obstacle is forced only as far as it fits. Seeded one
+    // cell above the floor's inflated C-obstacle (boundary ≈ 83.6) and moving
+    // down-right, the first run edge is blocked, nothing is forced, and the
+    // solve degrades to the plain seeded path — which rises back to hover.
+    [Fact]
+    public void SeedVelocity_BlockedRunFallsBack()
+    {
+        float prevRun = WithRun(8f);
+        try { SeedVelocity_BlockedRunFallsBack_Body(); }
+        finally { MovementConfig.Current.LatticeSeedRunPx = prevRun; }
+    }
+
+    private static void SeedVelocity_BlockedRunFallsBack_Body()
+    {
+        var seed = new Vector2(100f, 81f);
+        var (planner, body, path) = Setup(seed);
+        int n = Solve(planner, FlatFloor(), body, seed, new Vector2(100f, 100f), path,
+                      out _, out bool bonk);
+        Assert.True(n > 1, "no path");
+        Assert.False(bonk, planner.LastDebug);
+        Assert.True(path[1].Pos.Y <= path[0].Pos.Y + 0.01f,
+            $"forced a dive into the floor: {path[0].Pos.Y:F1} → {path[1].Pos.Y:F1}");
+        Assert.True(path[n - 1].Pos.Y < seed.Y - 3f,
+            $"never rose back toward hover: end y {path[n - 1].Pos.Y:F1}");
     }
 
     [Fact]

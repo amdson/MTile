@@ -305,16 +305,30 @@ public class MovementConfig
     // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — the FoldEngine
     // "lattice" reference generator, also the freeze-frame oracle. Window =
     // the cone's footprint from the seed: LookaheadTiles along u, ±L·tanθ
-    // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3);
-    // steepness feel is tuned with SteepWeight, not the cone. Sim-affecting
-    // under "lattice" — hot-reload is gated like every movement knob.
+    // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3) and
+    // is set to "90° − ε" so every forward offset is an edge — steepness is
+    // priced by SteepWeight, never filtered (with the ±3 offset table any
+    // value ≤ 0.316 admits the same edges). Sim-affecting under "lattice" —
+    // hot-reload is gated like every movement knob.
     public float LatticeLookaheadTiles          { get; set; } = 3.5f;
     public int   LatticeCellsPerTile            { get; set; } = 5;
-    public float LatticeConeCos                 { get; set; } = 0.5f;
+    public float LatticeConeCos                 { get; set; } = 0.05f;
     public float LatticeSteepWeight             { get; set; } = 30f;
     public float LatticeLenWeight               { get; set; } = 1f;     // per px
     public float LatticeHoverWeight             { get; set; } = 0.05f;  // per px²
     public float LatticeSeedWeight              { get; set; } = 20f;
+    // Seed run (§3.5): the path's first SeedRunPx are FORCED along the body's
+    // current velocity direction (quantized to the nearest admitted offset)
+    // when it moves at ≥ SeedRunMinSpeed and that direction lies inside the
+    // cone; a blocked run is forced as far as it fits. Otherwise only the
+    // soft SeedWeight bias applies. 0 disables the run — the default since
+    // 2026-08-24: with a tracker that re-plans from the body every tick, the
+    // run feeds the current velocity back into the target (measured three
+    // times: a landing that never rose, a drop caught at leg reach, a jump
+    // arc straightened into a line off a tunnel roof). Kept as a knob for
+    // the freeze-frame oracle only.
+    public float LatticeSeedRunPx               { get; set; } = 0f;
+    public float LatticeSeedRunMinSpeed         { get; set; } = 20f;
     // Max unresolved clearance residual (px) an ambient plan may carry and still
     // be applied. Small: ambient assists are grazes, not commitments.
     public float AmbientRefusalResidual         { get; set; } = 1f;

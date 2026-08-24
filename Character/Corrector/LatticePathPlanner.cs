@@ -40,15 +40,18 @@ public sealed class LatticePathPlanner
     public const int MaxCells = 4096;   // pooled scratch bound; window clamps to fit
     public const int MaxPath  = 256;    // ≥ any monotone path across a MaxCells window
 
-    // ── Primitive offset table (§3.3): |dx|,|dy| ≤ 2, gcd = 1 ────────────────
+    // ── Primitive offset table (§3.3): |dx|,|dy| ≤ Radius, gcd = 1 ───────────
     // Each offset carries the cells its segment crosses (conservative
-    // supercover — diagonals require both side cells free, so a body never
-    // slips through a checkerboard pinch).
+    // supercover — a segment through a cell corner requires both side cells
+    // free, so a body never slips through a checkerboard pinch). Radius 3
+    // (decided 2026-08-24): 32 offsets, steepest slope 3 (≈ 72°), 15 forward
+    // edges per node under a near-90° cone.
+    private const int Radius = 3;
     private struct Offset
     {
         public sbyte Dx, Dy;
-        public sbyte C1x, C1y, C2x, C2y;   // crossed cells; 0,0 = none
-        public byte  CrossCount;
+        public sbyte[] Cross;              // crossed cells as (x,y) pairs, excluding the ends
+        public int    CrossCount;          // number of pairs
         public Vector2 Unit;
         public float  Len;                 // in cells
     }
@@ -56,34 +59,55 @@ public sealed class LatticePathPlanner
 
     private static Offset[] BuildOffsets()
     {
-        (int dx, int dy, (int, int)[] cross)[] baseSet =
+        var list = new System.Collections.Generic.List<Offset>();
+        for (int dx = 0; dx <= Radius; dx++)
+        for (int dy = 0; dy <= Radius; dy++)
         {
-            (1, 0, Array.Empty<(int, int)>()),
-            (0, 1, Array.Empty<(int, int)>()),
-            (1, 1, new[] { (1, 0), (0, 1) }),
-            (1, 2, new[] { (0, 1), (1, 1) }),
-            (2, 1, new[] { (1, 0), (1, 1) }),
-        };
-        int[] positive = { 1 }, both = { 1, -1 };
-        var list = new Offset[16];
-        int n = 0;
-        foreach (var (dx, dy, cross) in baseSet)
-        foreach (int sx in dx == 0 ? positive : both)
-        foreach (int sy in dy == 0 ? positive : both)
-        {
-            var o = new Offset { Dx = (sbyte)(dx * sx), Dy = (sbyte)(dy * sy) };
-            if (cross.Length > 0)
+            if (dx == 0 && dy == 0) continue;
+            if (Gcd(dx, dy) != 1) continue;            // primitive only
+            var cross = Supercover(dx, dy);
+            foreach (int sx in dx == 0 ? new[] { 1 } : new[] { 1, -1 })
+            foreach (int sy in dy == 0 ? new[] { 1 } : new[] { 1, -1 })
             {
-                o.C1x = (sbyte)(cross[0].Item1 * sx); o.C1y = (sbyte)(cross[0].Item2 * sy);
-                o.C2x = (sbyte)(cross[1].Item1 * sx); o.C2y = (sbyte)(cross[1].Item2 * sy);
-                o.CrossCount = 2;
+                var o = new Offset { Dx = (sbyte)(dx * sx), Dy = (sbyte)(dy * sy) };
+                o.CrossCount = cross.Count;
+                o.Cross = new sbyte[2 * cross.Count];
+                for (int i = 0; i < cross.Count; i++)
+                {
+                    o.Cross[2 * i]     = (sbyte)(cross[i].x * sx);
+                    o.Cross[2 * i + 1] = (sbyte)(cross[i].y * sy);
+                }
+                o.Len  = MathF.Sqrt(o.Dx * o.Dx + o.Dy * o.Dy);
+                o.Unit = new Vector2(o.Dx / o.Len, o.Dy / o.Len);
+                list.Add(o);
             }
-            o.Len  = MathF.Sqrt(o.Dx * o.Dx + o.Dy * o.Dy);
-            o.Unit = new Vector2(o.Dx / o.Len, o.Dy / o.Len);
-            list[n++] = o;
         }
-        Array.Resize(ref list, n);
-        return list;
+        return list.ToArray();
+    }
+
+    private static int Gcd(int a, int b) { while (b != 0) (a, b) = (b, a % b); return a; }
+
+    // Cells the center-to-center segment (0,0) → (dx,dy) passes through,
+    // excluding both ends, for dx,dy ≥ 0 with gcd 1. Exact: the segment
+    // crosses the x boundary before cell i at t = (2i−1)/(2dx) and the y
+    // boundary before cell j at t = (2j−1)/(2dy); compare as integers. A
+    // simultaneous crossing is a corner — both side cells are added
+    // (conservative), then the diagonal cell.
+    private static System.Collections.Generic.List<(int x, int y)> Supercover(int dx, int dy)
+    {
+        var cells = new System.Collections.Generic.List<(int x, int y)>();
+        int cx = 0, cy = 0, i = 1, j = 1;
+        while (i <= dx || j <= dy)
+        {
+            long a = i <= dx ? (long)(2 * i - 1) * dy : long.MaxValue;
+            long b = j <= dy ? (long)(2 * j - 1) * dx : long.MaxValue;
+            if (a < b)      { cx++; i++; }
+            else if (b < a) { cy++; j++; }
+            else            { cells.Add((cx + 1, cy)); cells.Add((cx, cy + 1)); cx++; cy++; i++; j++; }
+            cells.Add((cx, cy));
+        }
+        cells.RemoveAt(cells.Count - 1);               // the end cell itself
+        return cells;
     }
 
     // ── Pooled per-solve scratch ─────────────────────────────────────────────
@@ -101,6 +125,10 @@ public sealed class LatticePathPlanner
     // Window in cell coords (world-anchored: cell i covers [i·cell, (i+1)·cell)).
     private float _cell;
     private int _x0, _y0, _w, _h;
+
+    // Seed run (§3.5): nodes seed + j·o for j < _runLen may leave only along
+    // admitted offset _runOffset (−1 = no run). Seed in window-cell coords.
+    private int _runOffset = -1, _runLen, _seedCx, _seedCy;
 
     // ── Stamp mask cache ─────────────────────────────────────────────────────
     // The grid is world-aligned and the cell divides the tile exactly, so a
@@ -151,15 +179,18 @@ public sealed class LatticePathPlanner
         _cell = (float)Chunk.TileSize / perTile;
         float L = cfg.LatticeLookaheadTiles * Chunk.TileSize;
 
-        BuildWindow(seed, u, cosTheta, L);
-        if (_w <= 0 || _h <= 0) return 0;
-
-        // Admitted offsets under the cone (§3.3).
+        // Admitted offsets under the cone (§3.3). The cone is nearly 90° by
+        // default (cosθ 0.05): every forward offset in the table is an edge and
+        // steepness is priced by SteepWeight, not filtered. cosθ > 0 stays
+        // structural — it is the DAG condition.
         _admittedCount = 0;
         foreach (var o in AllOffsets)
             if (Vector2.Dot(o.Unit, u) >= cosTheta)
                 _admitted[_admittedCount++] = o;
         if (_admittedCount == 0) return 0;
+
+        BuildWindow(seed, u, L);
+        if (_w <= 0 || _h <= 0) return 0;
 
         StampObstacles(chunks, body, perTile, cfg.CorrectorMargin);
         SweepFloorBelow();
@@ -177,6 +208,37 @@ public sealed class LatticePathPlanner
             seedIdx = SnapSeed(seed, u, seedX, seedY);
             if (seedIdx < 0) { bonk = true; LastBonk = true; return 0; }
             seedX = _x0 + seedIdx % _w; seedY = _y0 + seedIdx / _w;
+        }
+
+        // Seed run (§3.5): the body's actual direction of travel is fixed for
+        // the first SeedRunPx — the current velocity quantized to the nearest
+        // admitted offset — so the path starts where the body is GOING, not
+        // where the cost surface would like it to be. Only when the body is
+        // moving (≥ SeedRunMinSpeed) and that direction is representable in
+        // the cone (dot ≥ 0.85 with the best offset — a vertical fall under a
+        // horizontal u is not forced into a 45° diagonal); a blocked run is
+        // forced as far as it fits. Everything else falls back to the soft
+        // seed bias below, so the seed is never stranded.
+        _runOffset = -1; _runLen = 0;
+        _seedCx = seedX - _x0; _seedCy = seedY - _y0;
+        float runPx = cfg.LatticeSeedRunPx, runMin = cfg.LatticeSeedRunMinSpeed;
+        if (runPx > 0f && vel.LengthSquared() >= runMin * runMin)
+        {
+            var vh = Vector2.Normalize(vel);
+            int bestA = -1; float bestDot = 0.85f;
+            for (int a = 0; a < _admittedCount; a++)
+            {
+                float d = Vector2.Dot(_admitted[a].Unit, vh);
+                if (d > bestDot) { bestDot = d; bestA = a; }
+            }
+            if (bestA >= 0)
+            {
+                ref var o = ref _admitted[bestA];
+                int want = Math.Max(1, (int)MathF.Ceiling(runPx / (o.Len * _cell)));
+                int cx = _seedCx, cy = _seedCy, k = 0;
+                while (k < want && EdgeFree(cx, cy, ref o)) { cx += o.Dx; cy += o.Dy; k++; }
+                if (k > 0) { _runOffset = bestA; _runLen = k; }
+            }
         }
 
         int reachCount = Flood(seedIdx);
@@ -204,19 +266,13 @@ public sealed class LatticePathPlanner
             if (float.IsPositiveInfinity(dn)) continue;
             int nx = n % _w, ny = n / _w;
             bool atSeed = n == seedIdx;
+            int forced = ForcedOffset(nx, ny);
             for (int a = 0; a < _admittedCount; a++)
             {
+                if (forced >= 0 && a != forced) continue;        // seed run
                 ref var o = ref _admitted[a];
-                int mx = nx + o.Dx, my = ny + o.Dy;
-                if ((uint)mx >= (uint)_w || (uint)my >= (uint)_h) continue;
-                int m = my * _w + mx;
-                if (_blocked[m]) continue;
-                if (o.CrossCount > 0)
-                {
-                    int c1 = (ny + o.C1y) * _w + (nx + o.C1x);
-                    int c2 = (ny + o.C2y) * _w + (nx + o.C2x);
-                    if (_blocked[c1] || _blocked[c2]) continue;   // tunneling (§3.3)
-                }
+                if (!EdgeFree(nx, ny, ref o)) continue;          // blocked / tunneling (§3.3)
+                int m = (ny + o.Dy) * _w + (nx + o.Dx);
                 float c = dn
                     + wSteep * (1f - Vector2.Dot(o.Unit, u))
                     + wLen * o.Len * _cell;
@@ -295,26 +351,19 @@ public sealed class LatticePathPlanner
         return best;
     }
 
-    // Window = bbox of the cone fan {seed + t·R(±φ)u : t ∈ [0,L], |φ| ≤ θ}
-    // (§2.1): the two edge rays, the axis directions inside the cone (the arc's
-    // axis-aligned extremes), and the seed itself. Clamped to MaxCells by
-    // trimming the side of the longer axis farther from the seed.
-    private void BuildWindow(Vector2 seed, Vector2 u, float cosTheta, float L)
+    // Window = bbox of everything a monotone path can reach before the far
+    // band: for each admitted offset ô, the point where a straight run along
+    // it crosses p = pSeed + L (seed + ô·L/dot(ô,u)). A path mixing offsets
+    // never leaves the hull of those extremes, so this is exact for the
+    // offset table — and it is what keeps a near-90° cone affordable: the
+    // lateral extent is L·(steepest admitted slope), not L·tanθ.
+    private void BuildWindow(Vector2 seed, Vector2 u, float L)
     {
-        float sinTheta = MathF.Sqrt(MathF.Max(0f, 1f - cosTheta * cosTheta));
-        Span<Vector2> dirs = stackalloc Vector2[6];
-        int nd = 0;
-        dirs[nd++] = new Vector2(u.X * cosTheta - u.Y * sinTheta, u.X * sinTheta + u.Y * cosTheta);
-        dirs[nd++] = new Vector2(u.X * cosTheta + u.Y * sinTheta, -u.X * sinTheta + u.Y * cosTheta);
-        Span<Vector2> axes = stackalloc Vector2[]
-            { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
-        foreach (var a in axes)
-            if (Vector2.Dot(a, u) >= cosTheta) dirs[nd++] = a;
-
         Vector2 min = seed, max = seed;
-        for (int i = 0; i < nd; i++)
+        for (int a = 0; a < _admittedCount; a++)
         {
-            var p = seed + dirs[i] * L;
+            var o = _admitted[a];
+            var p = seed + o.Unit * (L / Vector2.Dot(o.Unit, u));
             min = Vector2.Min(min, p); max = Vector2.Max(max, p);
         }
         // Two cells of slack on every side: one for the bbox floor, one so the
@@ -442,23 +491,52 @@ public sealed class LatticePathPlanner
             int n = _queue[head++];
             _order[count++] = n;
             int nx = n % _w, ny = n / _w;
+            int forced = ForcedOffset(nx, ny);
             for (int a = 0; a < _admittedCount; a++)
             {
+                if (forced >= 0 && a != forced) continue;        // seed run
                 ref var o = ref _admitted[a];
-                int mx = nx + o.Dx, my = ny + o.Dy;
-                if ((uint)mx >= (uint)_w || (uint)my >= (uint)_h) continue;
-                int m = my * _w + mx;
-                if (_reachable[m] || _blocked[m]) continue;
-                if (o.CrossCount > 0)
-                {
-                    int c1 = (ny + o.C1y) * _w + (nx + o.C1x);
-                    int c2 = (ny + o.C2y) * _w + (nx + o.C2x);
-                    if (_blocked[c1] || _blocked[c2]) continue;
-                }
+                if (!EdgeFree(nx, ny, ref o)) continue;
+                int m = (ny + o.Dy) * _w + (nx + o.Dx);
+                if (_reachable[m]) continue;
                 _reachable[m] = true;
                 _queue[tail++] = m;
             }
         }
         return count;
+    }
+
+    // Edge (nx,ny) → (nx,ny)+o is in the window, lands on a free cell and
+    // crosses only free cells (the supercover tunneling check, §3.3).
+    private bool EdgeFree(int nx, int ny, ref Offset o)
+    {
+        int mx = nx + o.Dx, my = ny + o.Dy;
+        if ((uint)mx >= (uint)_w || (uint)my >= (uint)_h) return false;
+        if (_blocked[my * _w + mx]) return false;
+        var cross = o.Cross;
+        for (int c = 0; c < o.CrossCount; c++)
+            if (_blocked[(ny + cross[2 * c + 1]) * _w + (nx + cross[2 * c])]) return false;
+        return true;
+    }
+
+    // The seed run's constraint at a node: the run offset if (nx,ny) is the
+    // j-th node of the run (seed + j·o, j < _runLen), else −1 (free choice).
+    private int ForcedOffset(int nx, int ny)
+    {
+        if (_runOffset < 0) return -1;
+        ref var o = ref _admitted[_runOffset];
+        int dx = nx - _seedCx, dy = ny - _seedCy, j;
+        if (o.Dx != 0)
+        {
+            if (dx % o.Dx != 0) return -1;
+            j = dx / o.Dx;
+            if (dy != j * o.Dy) return -1;
+        }
+        else
+        {
+            if (dx != 0 || dy % o.Dy != 0) return -1;
+            j = dy / o.Dy;
+        }
+        return j >= 0 && j < _runLen ? _runOffset : -1;
     }
 }

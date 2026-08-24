@@ -17,8 +17,9 @@ scenario needs something not on it, that is a design gap, not a parameter.
 | `hover` / `hoverOffset` | the state | Standing `on / 10`; Crouched `on / 0`; jump states `off` |
 | progress target | the state | `MaxWalkSpeed`×mods (Standing), `CrouchMaxWalkSpeed` (Crouched), **unbounded** (jumps) |
 | window `L` | config `LatticeLookaheadTiles` (3.5) | a state may shorten it; nothing lengthens it (§4.2 — the autopilot dial) |
-| cone `cosθ` | config `LatticeConeCos` (0.5) | structural; not a per-state knob |
+| cone `cosθ` | config `LatticeConeCos` (0.05 — "90° − ε") | structural (the DAG condition); every forward offset is an edge, steepness is priced not filtered; not a per-state knob |
 | weights | config `LatticeSteepWeight` 30, `LenWeight` 1/px, `HoverWeight` 0.05/px², `SeedWeight` 20 | phase-3 tuning surface; per-state overrides only if a row below forces one |
+| seed run | — | **off** (`LatticeSeedRunPx` 0): with a re-planning tracker it feeds the current velocity back into the target (fourth pass); the soft `SeedWeight` bias remains (§3.5) |
 | channel list + caps | the state (§3.7) | legs / drive / tuck (fold); air lateral / air vertical / leg-impulse (jumps) |
 | deviation band | `FoldReference` deform cap 8 px, slew 150 px/s | shared |
 
@@ -30,25 +31,256 @@ opening fits nothing.
 ## The table
 
 Status is as of 2026-08-24 (phase 2 built). ✅ = passes a gate in
-`FoldLatticeEngineTests` / `LatticePathPlannerTests`; 🟡 = the rule exists
+`FoldLatticeEngineTests` / `LatticePathPlannerTests` / `LatticeScenarioTests`; 🟡 = the rule exists
 but no gate pins it; ❌ = not built or a known gap (says which).
 
 | # | scenario | terrain & seed | owner / regime | solver parameters | correct behavior | status |
 |---|---|---|---|---|---|---|
+<<<<<<< HEAD
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `BumpyTunnel` 97 px/s |
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state| `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance; body enters low and clean, no bonk on the lip | ❌ launched guard excludes the engine (§7.1); |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0, -1)` (use different u, bonk cutoff, if left or right is pressed), hover **off**, unbounded; take the cheaper far-band cost, bonk if too far from an open ceiling | The open side wins if close, (the covered side bonks at the slab); path = sideways shuffle along the floor then a rise once clear of the slab edge; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | ❌ `CoveredJumpState.TryPickOpenDir` + bespoke launch still own this (§7.3) |
 | 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut` |
+=======
+| 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 65.8 px/s (fifth pass); `BumpyTunnel` skipped — its spawn hits the one-cell lip→bump seam (terrain/margin finding, fifth pass) |
+| 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state | `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance (the seed run fixes the first stretch to the arc); body enters low and clean, no bonk on the lip | ✅ `Row02` — horizon QP: arrives 4 px above the band and enters (the engine now runs in Falling; §7.1's launched guard is gone with the ref tail) |
+| 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ❌ `Row03_NearEdge` skipped (no rise today); far ✅ `Row03_FarFromEdge` (bonks, no shuffle) — `CoveredJumpState` still owns the launch (§7.3) |
+| 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut`, `Row04` |
+>>>>>>> worktree-lattice-path-planner-plan
 | 5 | **1-high step while walking** | flat floor, 1-high ledge ahead | Standing | `u=(dir,0)`, hover on 10, walk | Path ramps up the block's C-obstacle bevel (≈45°) and re-hugs hover on top; x carry continues through the climb; on the ledge the body rides one tile higher | ✅ `OneHighStep` |
-| 6 | **Tall wall** | wall spanning the whole window ahead | Standing | `u=(dir,0)`, hover on 10, walk | DP bonks (far band unreachable) at the wall; reference carries straight into it; rows truncate; body stops ≈6 px from the face at hover height — **no climb, no planned brake, no push-back** | ✅ `TallWall_HonestStop`, `FullHeightWall_Bonks` |
-| 7 | **Free-standing 2-high wall** | 2-high column with open air above | Standing | `u=(dir,0)`, hover on 10, walk | *Path*: routes over (edges are geometry, §3.3 — accepted). *Motion*: the legs cannot deliver a 32 px rise from a walk, so tracking residual grows → **give-up** (§4.3) → honest bonk as in row 6. The path being over the wall must not make the body float up it | 🟡 path pinned (`FreeStandingTwoHighWall_RoutesOver`); give-up ❌ not built — today the servo strains toward the crest |
-| 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | 🟡 gravity rule implemented in `FoldLattice`; no gate |
-| 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: solve `u=(0,−1)` **first**; only if it bonks at the seed (row 3's slab) fall back to the two tilted solves | A vertical path — the body must **not drift sideways** on a neutral jump. (With `cosθ` 0.5 the tilted `u` admits `(0,−1)` but charges it steepness, so the two-solve rule alone would pick a diagonal in open air — this row is the refinement §7.2 needs) | ❌ jump states not on the engine; rule not yet in the plan text |
+| 6 | **Tall wall** | wall spanning the whole window ahead | Standing | `u=(dir,0)`, hover on 10, walk | DP bonks (far band unreachable) at the wall; reference carries straight into it; rows truncate; body stops ≈6 px from the face at hover height — **no climb, no planned brake, no push-back** | ✅ `TallWall_HonestStop`, `FullHeightWall_Bonks`, `Row06` |
+| 7 | **Free-standing 2-high wall** | 2-high column with open air above | Standing | `u=(dir,0)`, hover on 10, walk | *Path*: routes over (edges are geometry, §3.3 — accepted). *Motion*: the legs cannot deliver a 32 px rise from a walk, so tracking residual grows → **give-up** (§4.3) → honest bonk as in row 6. The path being over the wall must not make the body float up it | ✅ `Row07` — horizon QP holds at the wall (strain 7.7 px); path pinned by `FreeStandingTwoHighWall_RoutesOver` |
+| 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | ✅ `Row08` — horizon QP, seed run off: lands at hover, no dive, full carry |
+| 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` (rises 61 px, 0 px drift; lands cleaner than qp) — the jump state still owns the arc |
 | 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | ❌ jump states not on the engine |
-| 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ design gap, logged in BACKLOG |
+| 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — crouch mounts the block; design gap, logged in BACKLOG |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
-| 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ✅ regime guard inherited (`Admit`); no lattice-specific gate |
+| 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ❌ `Row13` skipped — fifth pass: descent 201 of 270 (the band holds the fall to the path's slope) |
 | 14 | **Knockback** | body hit, `PreserveExternalVelocity` set | any | engine **excluded** | No correction at all — the fold does not fight combat momentum | ✅ `Admit` guard |
+
+## Tests
+
+`MTile.Tests/Sim/LatticeScenarioTests.cs` — one test per encoded row (1, 2, 3
+near + far, 4, 6, 7, 8, 9, 11, 13), all under `FoldEngine = "lattice"`,
+asserting the table's *correct* behavior. Rows 5, 10, 12, 14 are deliberately
+not encoded yet. Tests the engine cannot pass today are `Skip`ped with the
+row's blocker in the reason — that list is the next cycle's checklist.
+
+Status on 2026-08-24 (at commit): **pass** — 1, 2 (today via the qp airborne
+path, not the lattice engine), 3-far, 4, 6, 7, 9. **Skipped** — 3-near, 8, 11,
+13.
+
+### Fifth pass (2026-08-24) — path-sampled reference, H = 5, exact step bound — current
+
+Three changes on the fourth pass, all from the design discussion: (1) the
+**reference is the polyline sampled at the body's current speed** — `p̂_T`
+at arc length `|v|·(T+1)·dt` from the body, band ±½ cell *perpendicular* to
+the path's local direction there, progress free along it (the fourth pass
+banded a straight line through the first node, which diverged from the
+polyline within the horizon); (2) **horizon 5** (stopping times are 1–4
+ticks); (3) **the solver's step bound now carries `|n̂_j · axis_c|`** for
+axis-only channels — the exact Hessian row-sum entry; without it the 20
+vertical band rows shrank the horizontal Drive's step until it output 34 of
+a 3000 cap. Masks were already constant. Seed run off. The bound change
+touches the `qp` engine's numerics too: its gates were re-run and the
+failure set is unchanged (the pre-existing six in that slice).
+
+| | fourth pass (H=10, line band) | (1)+(2) only | **(1)+(2)+(3) — committed** |
+|---|---|---|---|
+| row 1 corridor | 46.7 ✗ | 30.6 ✗ | **65.8 ✓** |
+| engine tunnel (spawn 3.6 px higher) | 45.9 ✗ | 30.6 ✗ | **30.6 ✗ — stuck at x=330, see below** |
+| row 2 tunnel entry | ✓ (lip 74) | ✓ (lip 73) | **✓ (lip 73)** |
+| row 7 free-standing 2-high wall | strain 7.7 ✓ | 5.1 ✓ | **6.6 ✓** |
+| row 8 ledge drop | ✓ (72.0) | ✓ (72.5) | **✓ (73.2, max vy 178, full carry)** |
+| row 13 landing (max vy / 270) | 187 ✗ | 202 ✗ | **201 ✗** |
+| rest / tall wall / step / duck-in / rollback / rows 3-far, 4, 6, 9 | ✓ | ✓ | **✓** |
+| rows 3-near, 11 | ✗ | ✗ | **✗** |
+| tunnel sim step (Release, warmed) | 159 µs | — | **47 µs** |
+
+**The engine-test tunnel is a terrain finding, not a tracker one.** Its
+`x = 330.3` was bit-identical across the solver change — the body is stuck,
+not slow. The corridor's lip at tile 19 (row 3) and bump at tile 21 (row 5)
+leave, in C-space with the 2 px margin, a seam exactly one lattice cell
+wide: at x = 328 the free column is y ∈ [62, 82]; at x = 324 only y ≥ 75; at
+x = 331 only y ≤ 69 — a 12 px rise in 6 px of run that the DP threads only by
+two exact `(1,−2)` steps, and a seed one cell off (326, 76) bonks with 4
+reachable cells. The old servos shoved the real body (2 px smaller than the
+inflated obstacle) through the margin; the horizon tracker honours the path
+and, on a bonk, carries straight into the bump. Which spawn threads the seam
+is a phase accident (row 1's does, the engine test's doesn't). The design
+question it raises is what the margin means to the bitmap versus to the
+tracker's band; not decided here.
+
+### Horizon-QP results (2026-08-24, fourth pass — superseded)
+
+The one-tick tracker's overshoot is H = 1 myopia, so `LatticeTracker` became
+the §3.7 solve at a short horizon (`AmbientHorizon`, 10 ticks) on the
+existing `CorrectionSolver`: the nominal is the **exact free rollout**
+(`v += (F_baseline + g)·dt`, `p += v·dt` — forces enter linearly, nothing is
+linearized), the channels are `BuildFold`'s with masks and caps **frozen at
+the body's current state**, and the rows are: a **band** (hard, ±½ cell
+around the reference line — the path's resolution), a **speed limit** (hard,
+displacement along intent ≤ state limit × t), and one **progress** row at the
+last tick (soft, along the path direction, depth = what the channels could
+add at their caps — it saturates the actuators and rests; no target speed).
+The reference line is the path's direction at the first node ≥ one cell from
+the body, through that node; `dir == 0` uses the hover column. CornerAssist
+is masked off (its meaning was the coast's hard rows). Two runs, differing
+only in the seed run:
+
+| | one-tick tracker (3rd pass) | **horizon QP, seed run OFF** (committed) | horizon QP, seed run on |
+|---|---|---|---|
+| bumpy tunnel | 81.7 px/s | **45.9 ✗** (gate 55) | 41.0 ✗ |
+| row 1 corridor | 88.2 | **46.7 ✗** | 45.9 ✗ |
+| rest / tall wall / step / duck-in / rollback / row 4, 6, 9 | ✓ | **✓** | ✓ |
+| row 2 tunnel entry | ✓ (lip 45) | **✓ (lip 74.0 — arrives 4 px above the band)** | ✗ flies straight off the roof (y −21) |
+| row 7 free-standing 2-high wall | strains 11 px ✗ | **strains 7.7 px ✓** | 10 px ✗ |
+| row 8 ledge drop | hovers 32 px up ✗ | **✓ — lands at hover (72.0), max vy 151, full carry** | hovers 18 px up, max vy 22 ✗ |
+| row 13 landing (max vy / 270) | 138 ✗ | **187 (69%) ✗** | 176 ✗ |
+| rows 3-near, 11 | ✗ | **✗** | ✗ |
+| tunnel sim step (Release, warmed) | 22 µs | **159 µs** (16 solver sweeps × 31 rows × 7 channels × 10 ticks) | — |
+
+Reading it: the horizon does what it was for — rows 7 and 8 pass for the
+first time, the landing and the tunnel entry are the cleanest of any pass,
+with no reference-side rules — and it costs corridor speed (46 vs 88) and
+~140 µs a step. The two open results are the corridor speed (not yet
+diagnosed; candidates are the progress row's soft scale against the band,
+the Δ-anchor smoothing, and the band's tightness through a zigzag — all
+inspectable, none measured) and row 13, where the band legitimately holds a
+falling body to the path's descent slope. The seed-run column settles §3.5
+finding 2: with a tracker that re-plans from the body every tick, the run is
+a feedback loop — the reference direction is read on the run, so the current
+velocity becomes the target (row 2 turned a jump arc into a straight line).
+`LatticeSeedRunPx` now defaults to 0.
+
+### One-tick tracker results (2026-08-24, third pass — superseded)
+
+Decided after the second pass: drop the horizon entirely. `LatticeTracker`
+takes the path's first step (the first node ≥ one cell from the body),
+`v_des = t̂ · progressSpeed`, and projects `(v_des − v_free)/dt` onto the
+channels available at the body's current state (BuildFold's caps and masks
+evaluated at the body: legs / drive / tuck within LegReach, air-lateral /
+air-vertical beyond; drive and air-lateral push only along intent). No
+coast, rows, linearization, deform or servo; `dir == 0` and no-path solves
+use the hover column (vertical dead-beat toward the hover line if anchored,
+no vertical force otherwise). Not carried over: Redirect, CornerAssist, the
+ledger.
+
+| | old (ref tail + free servo) | second pass A (qp stack) | **third pass: one-tick tracker** |
+|---|---|---|---|
+| bumpy tunnel | 97 px/s | 65.8 | **81.7** ✓ |
+| row 1 corridor | 94 | 62.3 | **88.2** ✓ |
+| rest | ✓ | ✓ | **✓** (settles at y 74.0, vy 0) |
+| tall wall | ✓ | ✓ | **✓** |
+| row 9 neutral jump | 61 px, 0 drift | 61 | **61, 0 drift** ✓ (lands cleaner than qp: 74.0 steady vs 78→73 wobble) |
+| row 7 free-standing 2-high wall | holds | strains 12 px | **strains 11 px ✗** |
+| row 8 ledge drop | lands 6 px low | lands 5 px low | **hovers 32 px above the lower floor ✗** |
+| row 13 landing (max vy / 270) | 234 (87%) | 250 (92.6%) | **138 (51%) ✗** |
+| rows 2, 3-far, 4, 6 | ✓ | ✓ | **✓** |
+| rows 3-near, 11 | ✗ | ✗ | **✗** |
+| tunnel sim step (Release, warmed) | 48 µs | 123 µs | **22 µs** (the tunnel window is mostly blocked; a flat-ground solve alone is ~108 µs) |
+
+**What the three failures are** (per-frame probe on the drop):
+
+- Rows 8 and 13 are one mechanism, and it is the *target*, not a channel:
+  `v_des = t̂ · walkSpeed` caps the desired descent at `walkSpeed · sin φ`
+  (≈ 64–95 px/s on the path's 40–72° descents), so a body falling faster
+  than that gets "need up" — served by air-vertical (300) beyond leg reach
+  and by the **legs (6000)** within it. On the drop the body is caught at
+  exactly the LegReach boundary (43.4 px above the floor: legs off above it,
+  a 6000 px/s² kick below it) and hovers there. The seed run (§3.5) then
+  turns the kicked-up velocity into the next tick's forced first step, so
+  the target alternates up/down around that boundary. Both ingredients are
+  design choices of the target, not of the actuators: (a) the speed along a
+  *descending* tangent, (b) the current-velocity run feeding the target.
+- Row 7 is the give-up question (§4.3): the path goes over the wall, the
+  legs push toward it up to their cap, the body rises 11 px and stalls.
+
+One wiring bug found and fixed during the pass, recorded so its symptoms are
+not mistaken for design results: "no vertical demand" was first coded as
+`v_des.y = v.y`, which the projection reads as "hold my vertical velocity" —
+i.e. cancel gravity — and made the neutral jump rise 91 px instead of 61.
+
+### Channel stack results (2026-08-24, second pass — superseded)
+
+The engine was re-wired as decided: the `qp` flow unchanged (coast → obstacle
+rows → progress rows → `BuildFold` channel stack → solve → tick-0 force) with
+one substitution — the hover reference row's target is the lattice path's y
+at `xRef` (`AmbientCorrector.EmitLatticeReference`) instead of the floor
+envelope's climb-band / down-anchor rules. The free servo is gone
+(`FoldLattice.cs` deleted). Two runs, differing only in the LegServo mask:
+
+| | previous (ref tail + free servo) | **A: qp legs mask** (committed) | B: legs at support |
+|---|---|---|---|
+| bumpy tunnel (`FoldLatticeEngineTests`) | 97 px/s | **65.8** | 36.6 ✗ (gate 55) |
+| row 1 corridor | 94 | **62.3** | 24.2 ✗ |
+| rest (`AtRest_StaysPut`) | ✓ | **✓** | vy 6.1 ✗ |
+| tall wall (engine test) | ✓ | **✓** | 4.6 px low ✗ |
+| row 7 free-standing 2-high wall | holds at 74.0 | **strains to 63.3 ✗** | holds at 73.9 ✓ |
+| row 8 ledge drop | lands 6 px low | **5 px low** (carry ✓, no dive ✓) | 7 px low |
+| row 13 landing brake (max vy / uncorrected 270) | 234 (87%) | **250 (92.6%)** | 250 (92.6%) |
+| row 13 rebind | 6 px low | **2 px low** | 7 px high |
+| row 2 tunnel entry | ✓ (lip 57) | **✓ (lip 76.9)** | ✓ (lip 74.9) |
+| rows 3-far, 4, 6, 9 | ✓ | **✓** | ✓ |
+| rows 3-near, 11 | ✗ | **✗** | ✗ |
+
+What the A/B isolates: the legs mask is exactly the row-7-vs-corridor trade
+(at support: the legs cannot serve a path above the hover line, so they
+neither strain up the wall nor push the body over a bump until it is on it);
+the row-13 brake is **not** the legs (identical in A and B) — with the legs
+off in the air the remaining actuators are air-vertical (300 px/s²) and
+tuck; and the post-landing 5–7 px sag survives the servo's removal, so it
+is in the reference/rows, not the actuator. `LegsAtSupport` is a code
+constant in `AmbientCorrector`, off; A is committed because B fails three
+engine gates.
+
+Cost (Release, JIT warmed): a bumpy-tunnel sim step is **123 µs under lattice
+vs 36 µs under ref** (the 119 µs solve is nearly all of it; the qp stack adds
+little over ref's tail).
+
+Forced choices in the wiring, none of them rules: `dir == 0` and a solve
+with no path (seed pinned in an obstacle's margin) keep the `qp` envelope
+reference; past the path's end the last node's y is held (the honest carry);
+the at-support tolerance is one lattice cell.
+
+### Findings from wiring the tests (engine, not fixed — first pass)
+
+> Decision after these findings (2026-08-24): the fix for both is **not** a
+> reference-side rule. The free servo in `FoldReference.Track` was a debug
+> force; the lattice engine is to drive the `qp` channel stack with legs
+> meaning *at support* (plan §1, revised note). The "candidate rules" below
+> are kept only as a record of what was tried and withdrawn.
+
+Both surfaced by rows 8 and 13 and confirmed with a per-frame probe against
+`ref` on the same ledge drop. They are in `FoldLattice`'s rollout, not the DP.
+
+1. **Descents are air-braked.** The reference's y is tied to progress along
+   `u` through the path, and the cone limits the path to 45°, so at walk speed
+   the reference cannot descend faster than ~100 px/s. A body dropping off a
+   ledge at 170 px/s within `SupportReach` of the lower floor is *anchored*
+   (the fold runs) and gets braked to the path's slope — the probe showed vy
+   170 → 53 in four frames, then hanging in `FallingState` 22 px above the
+   floor with the seed run off. `ref` never does this because its x and y
+   rollouts are independent (y falls at gravity regardless of x). Candidate
+   rule: a path *below* the reference is not a support until it is at hover
+   height — the reference falls at gravity (no faster, no slower) and rides
+   the path only where the path's node sits on its floor at hover. The
+   general answer is the §3.7 tracker with gravity in its dynamics (no rule
+   at all). Note also that the *path's* steepness is set by the offset
+   neighborhood — a `(1,k)` edge admits `atan(k)` — so the 45°/63° figures
+   above are a table choice, not a lattice limit (plan §3.3).
+2. **The seed run can lock the tick-0 servo.** With the run on, a landing
+   settles at 81.6 (6 px low) and never rises: velocity is `(100, 0)`, the run
+   forces a flat 8 px, the servo tracks only tick 0's reference velocity (inside
+   the run → vertical 0), the body stays flat, next frame the velocity is still
+   flat. The run re-derives itself. Any forced run ≥ one tick of progress hides
+   the turn behind it from a tick-0 servo. Candidate fix: servo toward the
+   first sample *past* the run (pursuit), or make the run a plan-side bias the
+   §3.7 tracker looks through.
+
+Also observed, not a defect: row 7 already holds at the 2-high wall (the servo
+cannot deliver the 32 px rise and the rows/deform pin the body at y = 74) — the
+§4.3 give-up is not needed for that case as things stand.
 
 ## Notes the table can't hold
 

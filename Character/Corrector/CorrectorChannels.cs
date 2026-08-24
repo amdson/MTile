@@ -30,11 +30,11 @@ public static class CorrectorChannels
     // (float height + half height − sag) so "floor within leg range" matches
     // the old spring's engagement envelope.
     private const float HoverDist    = 2f * PlayerCharacter.Radius - 2f;
-    private const float LegReach     = HoverDist + 20f;  // px — floor within leg range
+    internal const float LegReach    = HoverDist + 20f;  // px — floor within leg range
     private const float WeakTraction = 800f;             // scenario: deliberately underpowered legs-forward
     // Channel authority caps live in MovementConfig (Fold*Force — the hot-
     // reloadable tuning surface); the constants left here are structural.
-    private const float CatchFadeBand = 60f;   // px/s — catch authority ramps out across
+    internal const float CatchFadeBand = 60f;   // px/s — catch authority ramps out across
                                                // MaxGroundEngageVnRel ± this window
     private const float RedirectEpsilon = 1e-6f;         // uniqueness regularizer, not a knob
 

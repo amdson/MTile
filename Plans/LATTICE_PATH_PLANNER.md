@@ -19,6 +19,55 @@ orders of magnitude cheaper than the state-space search prototype.
 
 ## 1. The good news: this replaces one function, not the corrector
 
+> **Revised 2026-08-24 — the tail is provisional, the channel stack is the
+> plan of record.** Phase 2 reused `FoldReference`'s rows → deform → servo so
+> the DP could drive a body quickly. The servo at the end of that tail is a
+> single free 2D force capped by `GuidedMaxForce` (10 000 px/s², direction-
+> free — originally a debug force from the guided-maneuver work, carried into
+> the ref engine on 2026-08-01). It is what braked the ledge-drop fall in
+> `LATTICE_SCENARIOS.md` finding 1, and it is the reason the lattice rollout
+> kept re-importing ref's hand-written rules (walk ramp, descent cap, …) one
+> at a time. Decision: **the lattice planner drives the `qp` channel stack**
+> (legs / drive / tuck / air-lateral / air-vertical / corner, each capped and
+> masked — `CorrectorChannels.BuildFold`, `CorrectionProblem`), with progress
+> rows along the path tangent instead of x, and with the legs mask meaning
+> *at support* (body at or below the hover line), not merely "a floor within
+> `SupportReach`". Behaviour is then controlled from the physics side: the path
+> is followed exactly as far as bounded actuators allow and no further; a fall
+> follows gravity because no channel can beat it in open air. The ref engine's
+> rollout rules and its free servo are to be treated as hacks, not as a design
+> to preserve — do not port more of them into `FoldLattice`; no reference-side
+> descent/rise/lookahead rules, no new config knobs. This supersedes the
+> "keep rows + deform + servo" framing below for everything after phase 2.
+>
+> **Third pass, same day:** the horizon went too. `LatticeTracker` solves
+> channel usage for the *first step* of the planned trajectory only —
+> §3.7 at H = 1: `v_des` = first-step tangent × progress speed, projected
+> onto the channels available at the body's current state (BuildFold's caps
+> and masks). No coast, rows, linearization, deform or servo; feedback is
+> re-planning from the body every tick. Results and the open questions it
+> exposes (the target speed along a descending tangent; the seed run feeding
+> the current velocity back into the target; the give-up) are in
+> `LATTICE_SCENARIOS.md` "one-tick tracker results".
+>
+> **Fourth pass, same day — current:** the one-tick overshoot is H = 1
+> myopia, so the tracker is now the §3.7 QP at `AmbientHorizon` on
+> `CorrectionSolver`: exact free-rollout nominal, BuildFold channels with
+> masks frozen at the body, a ½-cell band around the reference line (hard),
+> a speed-limit row (hard), one progress row at the last tick (soft, depth =
+> the channels' reach at cap — no target speed). Seed run off by default
+> (§3.5 finding 2 confirmed three ways). Rows 7 and 8 pass for the first
+> time; corridor speed is the open cost (46 vs 88 px/s), plus ~140 µs a
+> step. `LATTICE_SCENARIOS.md` "horizon-QP results".
+>
+> **Fifth pass, same day — current:** reference = the polyline sampled at
+> the body's current speed (band perpendicular to the local path direction,
+> progress free along it), H = 5, and `CorrectionSolver`'s step bound made
+> exact for axis-only channels (`|n̂·axis|` — the drive had been starved by
+> vertical rows it cannot move). Corridor 66 px/s, rows 2/7/8 pass, 47 µs a
+> step. The engine-test tunnel exposes a one-cell seam in C-space at margin
+> 2 (a terrain/margin question, recorded there).
+
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
 
@@ -98,13 +147,16 @@ could not see a two-tile block coming.
 That is not a problem, because the path is spatial: it can be planned further
 ahead than the servo will ever track. So:
 
-- **Plan window** = the **cone's footprint from the seed**: the bounding box of
-  `{ seed + t · R(±φ) u : t ∈ [0, L], |φ| ≤ θ }`, i.e. `L` along `u` and
-  `±L · tan θ` across it. `L` (`LatticeLookaheadTiles`) is the one knob; the
-  cross extent is *derived* from `L` and `cos θ` (§3.3), never set separately —
-  a band narrower than the fan would clip the cone and silently forbid the
-  steep routes the cone was opened to admit. At `L ≈ 3.5` tiles and a 45° cone
-  that is a **7 × 7 tile** box, which is the right mental size for this.
+- **Plan window** = everything a monotone path can reach before the far
+  band: for each admitted offset `ô`, the point where a straight run along it
+  crosses `p = pSeed + L` (`seed + ô · L / dot(ô, u)`); the box is the bbox of
+  those points and the seed. A path mixing offsets never leaves that hull, so
+  this is exact for the offset table. `L` (`LatticeLookaheadTiles`) is the one
+  knob; the cross extent is *derived* — `L × (steepest admitted slope)`, never
+  set separately. (Revised 2026-08-24: the first draft sized the box from the
+  cone's edge rays, `±L·tan θ`; with the cone at 90° − ε that is unbounded,
+  while the reachable region is bounded by the offset table's steepest edge.)
+  At `L = 3.5` tiles and the `±3` table (slope 3) that is **3.5 × 21 tiles**.
 - **Tracking horizon** stays `AmbientHorizon` = 10 ticks; §3.6 consumes only the
   first ~17 px of the plan.
 
@@ -122,13 +174,15 @@ this plan argued for was built on a bad derivation and is withdrawn (see §3.3).
 `CObstacleTemplate.TopSurfaceRy`), so the bitmap resolves every feature the
 hover reference can see.
 
-Box and fan sizes at `L = 3.5` tiles, 5× cells, `u = +x`:
+Box and fan sizes at `L = 3.5` tiles, 5× cells, `u = +x` (the box is set by
+the steepest admitted offset, so the rows are offset-table choices, not cone
+angles — with the cone at 90° − ε the whole table is admitted):
 
-| `cos θ` | half-angle | box (tiles) | box cells | fan cells (≈ ½ box) |
+| steepest offset | slope | box (tiles) | box cells | fan cells (≈ ½ box) |
 |---|---|---|---|---|
-| 0.7 | 45° | 3.5 × 7 | ~600 | ~300 |
-| 0.5 | 60° | 3.5 × 12 | ~1,050 | ~530 |
-| 0.3 | 72° | 3.5 × 22 | ~1,900 | ~970 |
+| `(1,1)` | 1 (45°) | 3.5 × 7 | ~600 | ~300 |
+| `(1,2)` (the `±2` table, first build) | 2 (63°) | 3.5 × 14 | ~1,650 | ~800 |
+| `(1,3)` (the `±3` table, **current**) | 3 (72°) | 3.5 × 21 | ~2,400 | ~1,200 |
 
 The box is what gets allocated (pooled, fixed-size — pick a `LatticeMaxCells`
 the scratch arrays are sized to, ~4k, and clamp the box to it); the **fan is
@@ -257,16 +311,24 @@ and a vertical up/down pair forms a cycle; the fix would be a step-indexed DP
 (`(node, depth)` states, ~20× the work) and it is not worth it — see the wall
 argument below.
 
-- **Neighborhood:** the primitive offsets with `|dx|, |dy| ≤ 2` (gcd = 1, so no
-  offset is a multiple of a shorter one): `(±1,0) (0,±1) (±1,±1) (±1,±2)
-  (±2,±1)` — 16 offsets. With `u = +x` and `cos θ = 0.3` the cone admits
-  `(1,0) (1,±1) (1,±2) (2,±1)` = **7 edges per node**, steepest slope 2
-  (≈ 63°). Filtering is done once per solve into a small admitted-offset list;
-  the DP loop indexes that list.
+- **Neighborhood:** the primitive offsets with `|dx|, |dy| ≤ 3` (gcd = 1, so
+  no offset is a multiple of a shorter one): `(±1,0) (0,±1) (±1,±1) (±1,±2)
+  (±2,±1) (±1,±3) (±3,±1) (±2,±3) (±3,±2)` — 32 offsets, directions ≤ 18.4°
+  apart. With `u = +x` and the 90° − ε cone (§4.5) every forward offset is an
+  edge: **15 edges per node**, steepest slope 3 (≈ 72°). Filtering is done
+  once per solve into a small admitted-offset list; the DP loop indexes that
+  list. (Radius 2 — 16 offsets, 7 forward edges, slope 2 — was the first
+  build; widened 2026-08-24.)
+  **The neighborhood is the lever on steepness:** a `(1,k)` offset admits
+  slope `k` — `atan(k)` — so the steepest admissible edge can be made
+  arbitrarily steep (short of the DAG's 90°) by raising the radius; the table
+  and its supercover lists are generated from the radius at static init.
+  Neither the cone (a filter on this table) nor a different lattice changes
+  that bound.
 - **Tunneling:** an offset longer than one cell can jump a blocked cell. Every
   admitted offset carries a precomputed list of the cells its segment crosses
-  (supercover; ≤ 3 cells at radius 2), and an edge is dropped if any is
-  blocked. Cheap and exact at this radius.
+  (exact supercover, corners conservative — both side cells; ≤ 4 cells at
+  radius 3), and an edge is dropped if any is blocked. Cheap and exact.
 - **Hex later:** only the offset table and the cell→center map change. Nothing
   else in the planner knows the lattice is square.
 
@@ -327,12 +389,25 @@ The todo notes this is necessary, and it is the one place a pure spatial DP has
 no natural answer. The workable version:
 
 - Seed at the body's actual cell with cost 0.
-- **Bias, do not hard-restrict,** the first edge toward the current velocity:
-  `+ w_seed · (1 − dot(ô, v̂))` on edges out of the seed only.
+- **Fix the initial direction to the body's actual direction of travel**
+  (decided 2026-08-24, superseding the bias-only rule below): quantize `v̂` to
+  the nearest admitted offset `o*` and force the path's first
+  `LatticeSeedRunPx` (8 px ≈ 2–3 cells) along it — the nodes `seed + j·o*`
+  may leave only along `o*`. No node state is added; it is a per-node
+  arithmetic check on the DP's existing loop. Guard rails, so the seed is
+  never stranded: the run applies only when the body is moving
+  (`LatticeSeedRunMinSpeed`, 20 px/s) *and* `v̂` is representable in the cone
+  (`dot(o*, v̂) ≥ 0.85` — a vertical fall under a horizontal `u` is not forced
+  into a 45° diagonal); a run that hits an obstacle is forced only as far as it
+  fits.
+- Below those thresholds, the soft form: `+ w_seed · (1 − dot(ô, v̂))` on
+  edges out of the seed only.
 
-Hard-restricting the first edge is tempting and wrong: a body descending fast
-has `v̂` outside the cone, and the restriction would strand the seed and fail the
-whole solve. A cost bias degrades gracefully.
+The first draft of this section argued against any hard restriction because a
+fast-descending body has `v̂` outside the cone and would strand the seed. That
+is exactly what the representability test and the fit-as-far-as-possible rule
+cover; with them in place, fixing the initial direction is the more honest
+model — the path starts where the body is *going*.
 
 ### 3.6 Progress along the path is the tracker's output, not an input
 
@@ -487,14 +562,16 @@ You probably do not need it. Two things already produce smooth paths:
 only if visible zigzag survives.** If it does, note that the cheaper fix is
 usually a post-hoc smoothing pass over the recovered path, not a bigger DP.
 
-### 4.5 The cone is doing two jobs; keep them apart in your head
+### 4.5 The cone does one job: it is the DAG condition
 
-`cos θ` (§3.3) is simultaneously (a) the thing that makes the graph a DAG
-(`cos θ > 0`, structural) and (b) the maximum steepness the path may take
-(tuning). Because (a) is a hard floor, the tuning range for (b) is narrow —
-roughly `0.3 … 0.7` at radius 2 — and most of the "how steep" question is really
-answered by the neighborhood radius and by `w_steep`, not by the cone. Do not
-expect to tune feel with `cos θ`; expect to tune it with `w_steep`.
+`cos θ` (§3.3) is the thing that makes the graph a DAG (`cos θ > 0`,
+structural). **Decided 2026-08-24: it is set to 90° − ε (`LatticeConeCos`
+0.05) and is not a tuning knob.** Every forward offset in the table is an
+edge; "how steep" is answered by the neighborhood (a `(1,k)` offset admits
+`atan(k)`) and priced by `w_steep`, never filtered. This costs a wider window
+(§2) but removes a knob and a class of "the cone forbade the route" surprises,
+which makes everything downstream simpler. An earlier draft treated the cone
+as a steepness tuner with a `0.3 … 0.7` range — withdrawn.
 
 The cone must also be looser than the todo's phrasing suggests: hopping a
 one-tile block at walk speed is 45–60° off horizontal, so a "tight" cone would
@@ -582,8 +659,11 @@ tracker / give-up split (§4.3) is the one place deliverability is judged.
 > block climb, ceiling duck, full-height bonk, free-standing-wall over-route
 > pinned as accepted §3.3 behavior, determinism, timing).
 >
-> **Phase 2 is BUILT (same day)** — `FoldEngine = "lattice"` →
-> `Character/Corrector/FoldLattice.cs`. `FoldReference` was split into
+> **Phase 2 is BUILT (same day)** — `FoldEngine = "lattice"`. *Second pass,
+> later that day: re-wired onto the `qp` channel stack per the §1 revised
+> note (`AmbientCorrector.EmitLatticeReference`; `FoldLattice.cs` deleted;
+> results in `LATTICE_SCENARIOS.md` "channel stack results"). The paragraph
+> below describes the first pass.* First pass: `Character/Corrector/FoldLattice.cs`. `FoldReference` was split into
 > `Admit` (the §4.7 guards) / `Rollout` (the hand-written carry) / `Track`
 > (rows → deform → servo); the lattice engine is `Admit` + a rollout that
 > time-parameterizes the DP's polyline + the same `Track`. Rules kept from
@@ -598,7 +678,13 @@ tracker / give-up split (§4.3) is the one place deliverability is judged.
 > contracts verbatim (hover + progress, rest, bumpy tunnel at 97 px/s, 1-high
 > step, tall-wall honest stop, corridor duck-in, bit-determinism) plus
 > engagement (path on 240/240 frames) and a rollback round trip across the
-> solve. Measured, Release, JIT warmed: **12.7 µs / 0 B per solve**; a whole
+> solve. Measured, Release, JIT warmed: **12.7 µs / 0 B per solve** at the
+> original 60° cone (22×35 cells); **39 µs at the 90° − ε cone** decided later
+> the same day (22×75 cells, §4.5 — accepted for the simplicity); **108 µs at
+> the ±3 offset table** (22×110 cells, 15 edges/node, 460 reachable — also
+> accepted; if it ever matters, most of that window is empty sky above a
+> hover path, and the reachability flood is where a cheaper bound would go);
+> a whole
 > sim step in the bumpy tunnel is **48 µs under lattice vs 25 µs under ref**
 > (the stamp is a cached per-tile mask now; buried tiles are skipped). The
 > earlier "~90 µs" figure was tier-0 JIT code — the timing tests now warm
@@ -664,13 +750,19 @@ through the same solve:
    Crouched pass hover on; jump states pass it off, so an airborne seed is not
    dragged toward the lower floor. This is the todo's "abstract boundaries
    based on hover constraints, passed in" — nothing cleverer.
-2. **`u` is intent, and a pure-vertical intent solves twice.** `u` is the
-   direction the player wants to *go*, never the jump direction (in scenario 2,
-   `u` = up-right would put the lip tuck against `u` and the `u⊥` lock of §3.7
-   would forbid it). When intent has no horizontal component, solve for
-   `u` = up-left and up-right and take the cheaper far-band cost — ~5 µs each,
-   and it replaces `TryPickOpenDir` with the same machinery every other case
-   uses.
+2. **`u` is intent, and a pure-vertical intent solves straight up.** `u` is
+   the direction the player wants to *go*, never the jump direction (in
+   scenario 2, `u` = up-right would put the lip tuck against `u` and the `u⊥`
+   lock of §3.7 would forbid it). When intent has no horizontal component,
+   `u = (0,−1)` — one solve. The covered-jump shuffle is not a search for an
+   exit: the tile C-obstacle's corner bevel is a ≈45° ramp, so a body within a
+   few px of the slab's edge has an admissible `(±1,−1)` climb out, and a body
+   deeper under the slab has no rising edge and bonks honestly (the cutoff).
+   That replaces `TryPickOpenDir` with plain admissibility, and it means a
+   neutral jump in open air never drifts. (An earlier draft solved twice with
+   tilted `u`; in open air both tilted solves prefer a diagonal — withdrawn.)
+   With left or right held, `u` tilts to that side and the same bonk cutoff
+   applies. Per-row detail: [LATTICE_SCENARIOS.md](LATTICE_SCENARIOS.md).
 3. **Jump states own a solve, same as fold states.** A jump state generates
    the path with its own parameters (`u` from intent, hover off, its window)
    and runs the same tracker with its own channel list and an unbounded
