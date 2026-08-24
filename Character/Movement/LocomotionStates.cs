@@ -36,7 +36,8 @@ public class FallingState : MovementState
         // descent) and the graze/duck assists all run through the fold solve.
         // High free fall is naturally unbound (anchor beyond leg reach ⇒ no
         // envelope rows).
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Stand);
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
+            MovementConfig.Current.FoldEngine == "lattice" ? FoldProfile.Fall : FoldProfile.Stand);
     }
 }
 

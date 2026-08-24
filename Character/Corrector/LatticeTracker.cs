@@ -146,14 +146,14 @@ public static class LatticeTracker
                     float e = Vector2.Dot(pT - q, n) - Vector2.Dot(pass == 0 ? Vector2.Zero : s.TrackDelta[T], n);
                     // e is the FREE rollout's offset from the bead along n
                     // (rows measure Δp from the free rollout).
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f };
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f, Reference = true };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f, Reference = true };
                 }
                 else if (hoverColumn)
                 {
                     float e = s.DeliverySamples[T].Pos.Y - yHover;
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, 1f),  Depth = -band - e, HingeScale = 1f };
-                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, -1f), Depth = e - band,  HingeScale = 1f };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, 1f),  Depth = -band - e, HingeScale = 1f, Reference = true };
+                    s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, -1f), Depth = e - band,  HingeScale = 1f, Reference = true };
                 }
             }
             if (dir != 0 && float.IsFinite(speed))              // no limit = "as fast as possible"
@@ -162,7 +162,7 @@ public static class LatticeTracker
                 {
                     float along = (s.DeliverySamples[T].Pos.X - p0.X) * dir;
                     s.Rows[rowCount++] = new ClearanceRow
-                        { Tick = T, Normal = new Vector2(-dir, 0f), Depth = along - speed * (T + 1) * dt, HingeScale = 1f };
+                        { Tick = T, Normal = new Vector2(-dir, 0f), Depth = along - speed * (T + 1) * dt, HingeScale = 1f, Reference = true };
                 }
             }
             if (planning)
@@ -186,8 +186,12 @@ public static class LatticeTracker
             pr.H = H; pr.Dt = dt;
             pr.CoastVel = s.CoastVel;
             pr.Rows = s.Rows; pr.RowCount = rowCount;
-            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed);
+            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed, airUp: false);
             for (int k = 0; k < H; k++) s.ChannelMask[2][k] = false;   // CornerAssist: not carried over
+            // (Band and speed rows are Reference rows, so BuildFold's corner /
+            // redirect feature activation does not see them — the disc had
+            // been "planting" against the band in free air, holding a 4-tile
+            // fall to 27 px/s.)
             // No Δ-smoothing (the qp engine's anti-bang-bang regularizer, not
             // part of the §3.7 objective): caps and the band bound the plan,
             // and "as fast as possible" IS bang-bang — a launch is the legs

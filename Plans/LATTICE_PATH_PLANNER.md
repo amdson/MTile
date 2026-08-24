@@ -105,6 +105,14 @@ orders of magnitude cheaper than the state-space search prototype.
 > is the open decision (a neutral press has no x channel to start along
 > the bevel escape — redirect while grounded, or drive along the plan's
 > tangent). `LATTICE_SCENARIOS.md`.
+>
+> **Eleventh pass, same day — current:** `LegReach` = the standing probe
+> (17 px), so legs available ⇔ Standing; `FoldProfile.Fall` has no hover
+> and the lattice engine allows no upward air force; band/speed rows are
+> `Reference` rows the channel builder's feature heuristics ignore (the
+> redirect had been planting against the band in free air); `FoldRiseCost`
+> 16 / `LatticeHoverWeight` 3. Rows 7, 8, 13 pass; jump height halved by
+> the shorter leg reach — the retune decision. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

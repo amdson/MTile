@@ -23,6 +23,11 @@ public struct ClearanceRow
     // duck-in). With no plant tick in reach the row sits unserved in the
     // residual — the bonk stays honest.
     public bool    PlantOnly;
+    // A REFERENCE row (the lattice tracker's band around its path) rather
+    // than a contact with terrain: channel builders must not read it as a
+    // plantable feature (BuildFold's corner/redirect activation keys on hard
+    // rows with non-floor normals — a band row looks exactly like a lip).
+    public bool    Reference;
     // Source tile (gtx/gty) whose facet emitted this row — the cell at the
     // run's max-depth tick when consecutive ticks merged. Valid iff HasCell;
     // soft reference rows (hover/progress envelopes) have none. Bookkeeping

@@ -26,11 +26,14 @@ namespace MTile;
 //     nothing.
 public static class CorrectorChannels
 {
-    // Fold-stack tuning. LegReach is measured from the pre-fold hover distance
-    // (float height + half height − sag) so "floor within leg range" matches
-    // the old spring's engagement envelope.
-    private const float HoverDist    = 2f * PlayerCharacter.Radius - 2f;
-    internal const float LegReach    = HoverDist + 20f;  // px — floor within leg range
+    // Fold-stack tuning. LegReach = the standing ground probe's reach
+    // (floatHeight + ProbeSlack below the feet = the same distance above the
+    // C-space envelope), so "the legs can act" and "StandingState claims the
+    // body" are the same condition — Falling never has live legs (decided
+    // 2026-08-24; it was HoverDist + 20 = 42 px, and a falling body could
+    // hang at leg reach for 25 px of height where Standing was not yet
+    // active).
+    internal const float LegReach    = PlayerCharacter.Radius + GroundChecker.ProbeSlack;   // 17 px
     private const float WeakTraction = 800f;             // scenario: deliberately underpowered legs-forward
     // Channel authority caps live in MovementConfig (Fold*Force — the hot-
     // reloadable tuning surface); the constants left here are structural.
@@ -50,7 +53,11 @@ public static class CorrectorChannels
     // CornerAssist is lift-only for the same reason. The redirect disc may
     // still shed speed — passivity is its physical semantics (a deflection off
     // planted feet) — and exists only near the ground.
-    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed)
+    // airUp: whether AirVertical may push UP. The lattice engine passes false —
+    // in free air nothing may add lift (the plan only ever removes freedom);
+    // qp keeps its two-sided nudge.
+    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed,
+                                bool airUp = true)
     {
         var cfg = MovementConfig.Current;
         float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
@@ -146,7 +153,7 @@ public static class CorrectorChannels
         for (int k = 0; k < n; k++) s.ChannelMask[2][k] = false;
         for (int j = 0; j < rowCount; j++)
         {
-            if (s.Rows[j].HingeScale < 1f) continue;
+            if (s.Rows[j].HingeScale < 1f || s.Rows[j].Reference) continue;
             for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
                 s.ChannelMask[2][k] = true;
         }
@@ -164,7 +171,7 @@ public static class CorrectorChannels
         if (cfg.FoldRedirectEnabled)
             for (int j = 0; j < rowCount; j++)
             {
-                if (s.Rows[j].HingeScale < 1f || s.Rows[j].Normal.Y < -0.3f) continue;
+                if (s.Rows[j].HingeScale < 1f || s.Rows[j].Reference || s.Rows[j].Normal.Y < -0.3f) continue;
                 for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
                     if (!s.Samples[k].Grounded) s.ChannelMask[3][k] = true;
             }
@@ -201,9 +208,9 @@ public static class CorrectorChannels
             Id = CorrectionChannel.AirLateral,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = true,
             Axis = intent, Cap = cfg.FoldAirLateralForce, ActiveMask = s.ChannelMask[5] };
-        ch[6] = new ChannelDef {   // AirVertical: tiny two-sided nudge in flight
+        ch[6] = new ChannelDef {   // AirVertical: tiny nudge in flight (down-only when !airUp)
             Id = CorrectionChannel.AirVertical,
-            Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
+            Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true, Unilateral = !airUp,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6],
             SkipSoftHorizontal = true };
         return AddCornerPlant(s, n, 7);
@@ -268,7 +275,7 @@ public static class CorrectorChannels
         for (int k = 0; k < n; k++) s.ChannelMask[1][k] = false;
         for (int j = 0; j < rowCount; j++)
         {
-            if (s.Rows[j].HingeScale < 1f) continue;
+            if (s.Rows[j].HingeScale < 1f || s.Rows[j].Reference) continue;
             for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
                 s.ChannelMask[1][k] = true;
         }
@@ -277,7 +284,7 @@ public static class CorrectorChannels
         // airborne ticks.
         for (int j = 0; j < rowCount; j++)
         {
-            if (s.Rows[j].HingeScale < 1f || s.Rows[j].Normal.Y < -0.3f) continue;
+            if (s.Rows[j].HingeScale < 1f || s.Rows[j].Reference || s.Rows[j].Normal.Y < -0.3f) continue;
             for (int k = Math.Max(0, s.Rows[j].Tick - 2); k <= Math.Min(n - 1, s.Rows[j].Tick + 2); k++)
                 if (!s.Samples[k].Grounded) s.ChannelMask[2][k] = true;
         }
