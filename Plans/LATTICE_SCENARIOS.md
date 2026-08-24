@@ -136,6 +136,25 @@ freed; reachable cells 460 → 626 on flat ground). The corridor seam was
 threaded by the beads, not by this. Kept for the principle and the removed
 knob; `CorrectorMargin` still serves the qp/ref row builders.
 
+**Linear progress objective (same day) — tried, reverted.** A true linear
+term `−w·(t̂ · Δp_{H−1})` was added to `CorrectionSolver` (off unless set)
+and used in place of the achievable-at-cap progress hinge:
+
+| `w` | corridor / tunnel | row 7 strain | tall wall |
+|---|---|---|---|
+| hinge (committed) | 78.6 / 78.7 | 9.3 | ✓ |
+| 2·10⁵ | 37.0 / 43.4 | — | ✓ |
+| 10⁶ | 82.3 / 83.0 | 8.2 | ✓ |
+| 4·10⁶ | 96.9 / 96.8 | **13.8** | **✗ both** (driven up/into the face) |
+
+Why it was reverted despite 10⁶ being 5% faster: the linear pull never
+vanishes, so `w / w_H` is a genuine trade between "as fast as possible" and
+"stay on the path", with a cliff ~3× above the working value — a weight to
+tune, which is what this design avoids. The hinge's depth is the channels'
+reach at cap, so its pull dies exactly at saturation and the trade-off is
+fixed by physics, not by a number. If the 5% ever matters, `w = w_H` is
+the principled pairing (one constant, not two) — but it is still a pairing.
+
 ### Idea (2026-08-24) — sliding-bead path loss — BUILT as the sixth pass; kept for the derivation
 
 The fifth pass's reference is the polyline sampled at the body's *current
