@@ -134,6 +134,17 @@ committing to any of them.
 
 ### 3.1 Lattice, direction, and ordering
 
+**A node is a candidate position of the body center** — one cell of the
+world-aligned grid, nothing more. It carries no velocity, no time, and no
+incoming direction. `center(n)` is the world point the body center would
+occupy; a node is admissible iff that center lies outside every stamped
+C-obstacle (the hexagon overlaps no solid tile there); `dp[n]` is the cheapest
+cone-admissible polyline from the seed (the cell the body center is in now) to
+`center(n)`; `parent[n]` is the previous body-center position on it. The
+recovered path is therefore a chain of body-center positions, and time is
+stamped onto it afterwards (§3.6). This is the whole difference from the
+state-space prototype, whose nodes are `(pos, vel)`.
+
 - **The lattice is world-aligned** (tile-aligned, cell = `TileSize / 5`), not
   aligned to the requested direction. This is what makes the todo's "hexgrid
   later" a one-table change (§3.3) and what lets `u` be any direction.
