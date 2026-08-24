@@ -12,7 +12,8 @@ namespace MTile.Tests.Sim;
 // block, a duck-under ceiling, wall behavior, determinism, timing. Terrain via
 // SimTerrain ascii (X solid, O open), origin in TILE coords (tile = 16 px).
 //
-// Geometry cheat sheet (hexagon half-width 6, half-height 10.4, margin 2,
+// Geometry cheat sheet (hexagon half-width 6, half-height 10.4, margin =
+// half a cell = 1.6 px at 5 cells/tile — the tracker's band,
 // hover 10): a floor whose top face is at world y F rests the body center at
 // ≈ F − 20.4 (envelope ≈ F − 10.4, minus hover); a ceiling whose bottom face
 // is at world y C blocks centers above ≈ C + 12.4 (+ margin). The default
@@ -35,7 +36,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
                              out float cost, out bool bonk)
         => planner.Solve(chunks, body.Polygon, seed, vel,
             new Vector2(1f, 0f), hover: true, MovementConfig.Current.FoldHoverOffset,
-            path, out cost, out bonk);
+            MovementConfig.Current.FoldRiseCost, path, out cost, out bonk);
 
     // Flat floor at tile row 6 (top face y = 96): rest center ≈ 75.6.
     private static ChunkMap FlatFloor() =>
@@ -124,19 +125,21 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
 
         Assert.True(bonk, planner.LastDebug);
         // The wall's C-obstacle boundary is at 160 − (half-tile 8 + half-width
-        // 6 + margin 2) = 152: the honest bonk walks up to exactly there.
+        // 6 + margin 1.6) = 144.4: the honest bonk walks up to exactly there.
         if (n > 0)
             Assert.True(path[n - 1].Pos.X <= 152.5f,
                 $"path claims to pass the wall: {path[n - 1].Pos.X:F1}");
     }
 
     [Fact]
-    public void FreeStandingTwoHighWall_RoutesOver()
+    public void FreeStandingTwoHighWall_NotWorthClimbing()
     {
-        // PINS AN ACCEPTED DESIGN DECISION (plan §3.3/§4.3): edges are pure
-        // geometry — no support gate — so a free-standing 2-high wall with open
-        // air above it gets an over-the-top route. Whether the legs can deliver
-        // it is the tracker's and the give-up's question, not the path's.
+        // PINS THE GOAL RULE (plan §3.4 revised): edges are still pure
+        // geometry, so an over-the-top route EXISTS for a free-standing
+        // 2-high wall — but at FoldRiseCost 6 its 32 px of rise (192) is not
+        // worth the progress it buys at ProgressWeight 7, so the argmax stops
+        // the path before the wall (a bonk the costs decided). A 1-high block
+        // (96) still is worth it: BlockAhead_PathClimbsOver.
         var sb = new StringBuilder();
         sb.Append("OOOOOOOOOOXOOOOOOOOOOOOO\n");        // row 4: wall top
         sb.Append("OOOOOOOOOOXOOOOOOOOOOOOO\n");        // row 5: wall bottom
@@ -147,10 +150,11 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         int n = Solve(planner, chunks, body, seed, path, out _, out bool bonk);
 
         Assert.True(n > 0, "no path");
-        Assert.False(bonk, planner.LastDebug);
+        Assert.True(bonk, planner.LastDebug);
         float minY = float.MaxValue;
         for (int i = 0; i < n; i++) minY = MathF.Min(minY, path[i].Pos.Y);
-        Assert.True(minY < 55f, $"did not route over the wall: minY {minY:F1}");
+        Assert.True(minY > 65f, $"climbed the wall anyway: minY {minY:F1}");
+        Assert.True(path[n - 1].Pos.X < 160f - 6f, $"path claims to pass the wall's face: {path[n - 1].Pos.X:F1}");
     }
 
     // The seed run (§3.5) is OFF by default (a re-planning tracker turns it

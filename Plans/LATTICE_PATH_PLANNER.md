@@ -67,6 +67,28 @@ orders of magnitude cheaper than the state-space search prototype.
 > vertical rows it cannot move). Corridor 66 px/s, rows 2/7/8 pass, 47 µs a
 > step. The engine-test tunnel exposes a one-cell seam in C-space at margin
 > 2 (a terrain/margin question, recorded there).
+>
+> **Sixth pass, same day — current:** sliding beads — the reference point
+> per tick is the nearest point on the polyline to the iterate (path
+> following, not trajectory tracking), three outer project → solve passes.
+> Corridor 79 px/s, the seam spawn threads too, 104 µs a step; row 7 slips
+> to 9.3 px of strain (the give-up question).
+>
+> **Seventh pass, same day — current:** the goal is `argmax w_prog·(p −
+> p_seed) − dp` over every reachable node (the far band is its w → ∞
+> limit; length cost removed; `LatticeProgressWeight` 7), and the state's
+> `u` may tilt into the floor (`FoldProfile.IntentTilt`, Crouch 30°). The
+> planner-level sweep found the steepness cost is priced per edge angle and
+> therefore depends on the offset table (a `(1,3)` edge buys 9.6 px of rise
+> for 20.5) — the cost-structure decision that pass leaves open; see
+> `LATTICE_SCENARIOS.md`.
+>
+> **Eighth pass, same day — current:** climb cost = pixels climbed, priced
+> by the state (`FoldProfile.RiseCost`: Standing 6, Crouch 30 — the accepted
+> new parameter; drops free), hover cost linear (2/px) so the rise/hover
+> trade is scale-free; `IntentTilt` removed. The 2-high wall is refused by
+> the costs; the crouch's block-mounting turned out to be `MantleState`
+> firing from a crouch, not the planner. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

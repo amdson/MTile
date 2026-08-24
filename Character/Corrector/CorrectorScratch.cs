@@ -96,6 +96,12 @@ public sealed class CorrectorScratch
     // never snapshot state.
     public readonly LatticePathPlanner Lattice = new();
     public readonly CoastSample[] LatticePath = new CoastSample[LatticePathPlanner.MaxPath];
+    // LatticeTracker's bead scratch: the reference polyline (body + path
+    // nodes) with cumulative arc length, and the corrected displacement per
+    // tick between outer passes. Pure per-solve derived data.
+    public readonly Vector2[] BeadVerts = new Vector2[LatticePathPlanner.MaxPath + 1];
+    public readonly float[]   BeadArc   = new float[LatticePathPlanner.MaxPath + 1];
+    public readonly Vector2[] TrackDelta = new Vector2[BallisticPredictor.MaxHorizon];
 
     public void BeginFrame() { BallisticCount = 0; SolvedCount = 0; ContactCount = 0; Ledger.Clear(); }
 }

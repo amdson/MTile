@@ -98,7 +98,7 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
     // alternating floor/ceiling bumps — every crossing is a duck or step-up.
     // Under the lattice engine the path itself threads them (plan §7
     // scenario 1); the deform only mops up quantization.
-    [Fact(Skip = "the lip(19)→bump(21) seam is one lattice cell wide in C-space with margin 2 (free x=328 only; 12 px rise in 6 px of run) — the tracker honours the path and sticks at x=330 where older engines shoved the body through the margin; LATTICE_SCENARIOS.md fifth pass. Row01 (same terrain, spawn 3.6 px lower) threads it at 65.8 px/s")]
+    [Fact]
     public void BumpyTunnel_HoldRight_TraversesAtSpeed()
     {
         const int W = 64;
@@ -241,7 +241,10 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
         }
         output.WriteLine($"engaged {engaged}/{N} frames, bonk on {bonked}");
         Assert.True(engaged >= (int)(0.9f * N), $"lattice engaged on only {engaged}/{N} frames");
-        Assert.True(bonked == 0, $"open course reported bonk on {bonked} frames");
+        // Under the argmax goal a "bonk" also means "chose to stop short of
+        // the far band" — legitimate in front of a step while the climb is
+        // not yet worth it — so it is no longer an error on an open course.
+        Assert.True(bonked <= N / 10, $"bonked on {bonked} frames of an open course");
     }
 
     // Informational: whole-step cost under "lattice" vs "ref" on the tunnel

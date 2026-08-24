@@ -462,7 +462,7 @@ public class Game1 : Game
         _latticePathCount = _config.FreezeFrameInputX == 0 ? 0 : _latticePath.Solve(
             _sim.Chunks, body.Polygon, body.Position, body.Velocity,
             new Vector2(Math.Sign(_config.FreezeFrameInputX), 0f),
-            hover: true, mc.FoldHoverOffset,
+            hover: true, mc.FoldHoverOffset, mc.FoldRiseCost,
             _latticePathBuf, out _, out _);
 
         _sim.Player.CorrectorDebug.CaptureTrajectories = true;

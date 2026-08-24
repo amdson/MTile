@@ -15,10 +15,11 @@ scenario needs something not on it, that is a design gap, not a parameter.
 |---|---|---|
 | `u` | the state, from **intent** (never from the jump direction) | unit vector; `(±1,0)` walking, `(±1,−1)/√2` diagonal hops, `(0,−1)` pure vertical (see row 9 for the tie rule); `dir == 0` → no solve, hover column |
 | `hover` / `hoverOffset` | the state | Standing `on / 10`; Crouched `on / 0`; jump states `off` |
+| `RiseCost` | the state (`FoldProfile.RiseCost`) | price per px climbed on the path, traded against `ProgressWeight` at the goal — Standing 6 (mounts 16 px, refuses 32), Crouch 30 (never mounts), jump states 0; drops are free |
 | progress target | the state | `MaxWalkSpeed`×mods (Standing), `CrouchMaxWalkSpeed` (Crouched), **unbounded** (jumps) |
 | window `L` | config `LatticeLookaheadTiles` (3.5) | a state may shorten it; nothing lengthens it (§4.2 — the autopilot dial) |
 | cone `cosθ` | config `LatticeConeCos` (0.05 — "90° − ε") | structural (the DAG condition); every forward offset is an edge, steepness is priced not filtered; not a per-state knob |
-| weights | config `LatticeSteepWeight` 30, `LenWeight` 1/px, `HoverWeight` 0.05/px², `SeedWeight` 20 | phase-3 tuning surface; per-state overrides only if a row below forces one |
+| weights | config `HoverWeight` 2/px (linear), `SeedWeight` 20, `ProgressWeight` 7 (the argmax goal's progress worth); the climb price is the state's `RiseCost` (below); steepness and length costs removed | the §4.1 taste surface |
 | seed run | — | **off** (`LatticeSeedRunPx` 0): with a re-planning tracker it feeds the current velocity back into the target (fourth pass); the soft `SeedWeight` bias remains (§3.5) |
 | channel list + caps | the state (§3.7) | legs / drive / tuck (fold); air lateral / air vertical / leg-impulse (jumps) |
 | deviation band | `FoldReference` deform cap 8 px, slew 150 px/s | shared |
@@ -37,23 +38,27 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | # | scenario | terrain & seed | owner / regime | solver parameters | correct behavior | status |
 |---|---|---|---|---|---|---|
 <<<<<<< HEAD
+<<<<<<< HEAD
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `BumpyTunnel` 97 px/s |
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state| `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance; body enters low and clean, no bonk on the lip | ❌ launched guard excludes the engine (§7.1); |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0, -1)` (use different u, bonk cutoff, if left or right is pressed), hover **off**, unbounded; take the cheaper far-band cost, bonk if too far from an open ceiling | The open side wins if close, (the covered side bonks at the slab); path = sideways shuffle along the floor then a rise once clear of the slab edge; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | ❌ `CoveredJumpState.TryPickOpenDir` + bespoke launch still own this (§7.3) |
 | 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut` |
 =======
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 65.8 px/s (fifth pass); `BumpyTunnel` skipped — its spawn hits the one-cell lip→bump seam (terrain/margin finding, fifth pass) |
+=======
+| 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 78.6 px/s, `BumpyTunnel` 78.7 (sixth pass, beads) |
+>>>>>>> worktree-lattice-path-planner-plan
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state | `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance (the seed run fixes the first stretch to the arc); body enters low and clean, no bonk on the lip | ✅ `Row02` — horizon QP: arrives 4 px above the band and enters (the engine now runs in Falling; §7.1's launched guard is gone with the ref tail) |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ❌ `Row03_NearEdge` skipped (no rise today); far ✅ `Row03_FarFromEdge` (bonks, no shuffle) — `CoveredJumpState` still owns the launch (§7.3) |
 | 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut`, `Row04` |
 >>>>>>> worktree-lattice-path-planner-plan
 | 5 | **1-high step while walking** | flat floor, 1-high ledge ahead | Standing | `u=(dir,0)`, hover on 10, walk | Path ramps up the block's C-obstacle bevel (≈45°) and re-hugs hover on top; x carry continues through the climb; on the ledge the body rides one tile higher | ✅ `OneHighStep` |
 | 6 | **Tall wall** | wall spanning the whole window ahead | Standing | `u=(dir,0)`, hover on 10, walk | DP bonks (far band unreachable) at the wall; reference carries straight into it; rows truncate; body stops ≈6 px from the face at hover height — **no climb, no planned brake, no push-back** | ✅ `TallWall_HonestStop`, `FullHeightWall_Bonks`, `Row06` |
-| 7 | **Free-standing 2-high wall** | 2-high column with open air above | Standing | `u=(dir,0)`, hover on 10, walk | *Path*: routes over (edges are geometry, §3.3 — accepted). *Motion*: the legs cannot deliver a 32 px rise from a walk, so tracking residual grows → **give-up** (§4.3) → honest bonk as in row 6. The path being over the wall must not make the body float up it | ✅ `Row07` — horizon QP holds at the wall (strain 7.7 px); path pinned by `FreeStandingTwoHighWall_RoutesOver` |
+| 7 | **Free-standing 2-high wall** | 2-high column with open air above | Standing | `u=(dir,0)`, hover on 10, walk | *Path*: routes over (edges are geometry, §3.3 — accepted). *Motion*: the legs cannot deliver a 32 px rise from a walk, so tracking residual grows → **give-up** (§4.3) → honest bonk as in row 6. The path being over the wall must not make the body float up it | ❌ `Row07` skipped by 0.1 px — the planner now refuses the wall (RiseCost); the approach creeps 8.1 px up the bevel against an 8 px gate (eighth pass) |
 | 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | ✅ `Row08` — horizon QP, seed run off: lands at hover, no dive, full carry |
 | 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` (rises 61 px, 0 px drift; lands cleaner than qp) — the jump state still owns the arc |
 | 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | ❌ jump states not on the engine |
-| 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — crouch mounts the block; design gap, logged in BACKLOG |
+| 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — the planner refuses the block (`CrouchRiseCost` 30, bonk); **`MantleState` fires from the crouch and vaults it** — state arbitration, its own thing (eighth pass trace) |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
 | 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ❌ `Row13` skipped — fifth pass: descent 201 of 270 (the band holds the fall to the path's slope) |
 | 14 | **Knockback** | body hit, `PreserveExternalVelocity` set | any | engine **excluded** | No correction at all — the fold does not fight combat momentum | ✅ `Admit` guard |
@@ -110,6 +115,189 @@ and, on a bonk, carries straight into the bump. Which spawn threads the seam
 is a phase accident (row 1's does, the engine test's doesn't). The design
 question it raises is what the margin means to the bitmap versus to the
 tracker's band; not decided here.
+
+### Eighth pass (2026-08-24) — rise priced per pixel, per profile — current
+
+Three changes on the seventh pass:
+
+1. **Climb cost = pixels climbed** (`w · max(0, −Δy)` per edge), replacing
+   the per-edge-angle steepness. Table-invariant: a `(1,3)` edge and three
+   `(1,1)` edges cost the same 9.6 px. Drops are free — gravity delivers
+   them, and charging them would let the argmax refuse to walk off a ledge.
+2. **The price is the state's**: `FoldProfile.RiseCost` (`FoldRiseCost` 6,
+   `CrouchRiseCost` 30), passed to `Solve` beside `hover`. The accepted new
+   parameter: what a state will and won't climb. Standing's 6 mounts 16 px
+   (96) whenever ≥ 14 px of window lie beyond and never mounts 32 px (192)
+   at `ProgressWeight` 7; Crouch's 30 makes 16 px (480) never worth a 56 px
+   window. `IntentTilt` removed — it could not do this job (it taxed level
+   edges as much as climbs) and has no other.
+3. **Hover cost made linear** (`w · |dev|`, `LatticeHoverWeight` 0.05/px² →
+   2/px). A quadratic hover against a linear rise crossed at ~7 px — inside
+   the hover band — so the path tolerated sags up to 7 px and skimmed block
+   tops low (measured: the block test rose 9.4 px of 15). With both linear,
+   "rise back to hover" vs "stay sagged" compares `w_rise` against
+   `w_hover × nodes remaining`, independent of the sag's size; 2 makes
+   recovery worth it with > 3 nodes left, while a full-depth duck for the
+   whole window (272) is still cheaper than the progress it buys (392).
+
+| | seventh pass | **eighth pass** |
+|---|---|---|
+| row 1 corridor / engine tunnel | 78.8 / 79.1 | **76.7 / 75.7** ✓ (the approach to each bump creeps: a climb is worth it only once enough window lies beyond it) |
+| 2-high wall, planner | routed over (cost 45) | **refused — path stops at the face** ✓ |
+| row 7 (sim) | strain 6.9 ✓ | **8.1 ✗** (gate 8; the bevel creep) |
+| row 8 ledge drop | ✓ | **✓ (73.1, max vy 201)** |
+| row 2 tunnel entry | ✓ | **✓ (lip 74.9)** |
+| rest / tall wall / step / duck-in / rollback / rows 3-far, 4, 6, 9 | ✓ | **✓** |
+| row 13 | 201 ✗ | **203 ✗** (unchanged) |
+| tunnel sim step / flat-ground solve (Release, warmed) | 104 µs / 108 µs | **110 µs / 224 µs** (the smaller margin doubled the reachable cells, 460 → 626) |
+| row 11 crouch at a block | mounts ✗ | **mounts ✗ — but not the planner's doing, see below** |
+
+**Row 11 was never a planner question.** The per-frame trace under
+`CrouchRiseCost` 30: the crouched body approaches at 52 px/s with the
+planner reporting `bonk`, path flat at y 81.6 ending before the face — and
+at frame 159 **`MantleState` fires from the crouch** (vx → 100, vy → −156)
+and vaults the block. The lattice engine refused; the climb-maneuver family
+did the mounting, in every pass. That is state arbitration (Mantle's
+preconditions under Crouched), outside this engine — its own thing.
+
+One consequence of the argmax worth naming: a "bonk" now also means "chose
+to stop short of the far band", which is a normal outcome in front of a
+step while the climb is not yet worth it — the engine test that asserted
+"no bonks on an open course" encoded the far-band goal and was relaxed.
+
+### Seventh pass (2026-08-24) — the argmax goal — superseded
+
+**Goal rule changed** (`LatticePathPlanner`): the path ends at the reachable
+node maximizing `w_prog · (p − p_seed) − dp[n]` over *every* reachable node.
+The far-band rule ("cheapest node at p ≥ p_seed + L, else the furthest") is
+its `w_prog → ∞` limit. A bonk is now a decision the costs make. Length
+cost removed (`LatticeLenWeight`): every edge advances `p`, so progress
+reward and length cost were one term. `LatticeProgressWeight = 7`.
+**Intent tilt**: `FoldProfile.IntentTilt` rotates the state's `u` into the
+floor — Standing 0, Crouch 30° — the hypothesis being that a crawling
+intent makes a 1-high block "not worth it" with no per-state weight.
+
+| | sixth pass | **seventh pass (argmax, tilt)** |
+|---|---|---|
+| row 1 corridor / engine tunnel | 78.6 / 78.7 | **78.8 / 79.1** ✓ |
+| row 7 free-standing 2-high wall (sim) | strain 9.3 ✗ | **strain 6.9 ✓, ends at hover** — but see below |
+| row 11 crouch at a block | mounts ✗ | **mounts ✗** (minY 56.5, unchanged) |
+| rows 2, 8, 4, 6, 9, 3-far; rest/wall/step/duck/rollback | ✓ | **✓** |
+| rows 3-near, 13 | ✗ | **✗** (unchanged) |
+
+**What the planner-level sweep found** (progress weight 3–12, tilt 0/30/45°):
+
+| route | cost (per-edge-angle steepness, ±3 table) | worth it at `w_prog = 7`? |
+|---|---|---|
+| 2-high wall, standing | **45** | yes — routed over at every `w ≥ 3` |
+| 1-high block, standing | **13** | yes |
+| 1-high block, crouch, tilt 30° | 102 | yes (the tilt taxes the *level* run too, ≈4/edge, so stopping short saves nothing) |
+| 1-high block, crouch, tilt 45° | 159 / bonk | refused only at `w ≤ 3` |
+
+So (a) the sim's row 7 passes for the old reason — the tracker doesn't
+deliver the climb — not because the path stopped; (b) the single-weight
+window for "mount 1-high, refuse 2-high" is **(0.5, 1.7)**, not the (5, 9)
+estimated from 45° edges of one cell, and at that scale the hover term
+(≈1.25/node at 5 px) is the same size — fragile; (c) the estimate was off
+because **steepness is priced per edge angle, so the cost of a climb depends
+on the offset table**: widening to `±3` made a `(1,3)` edge buy 9.6 px of
+rise for 20.5, and a 32 px wall became ~3 edges. That table-dependence is
+the actual defect this pass exposed, and it predates the argmax.
+
+The argmax goal and the tilt are kept (the goal is the general rule; at
+`w_prog = 7` it reproduces the far-band behaviour on every test); the wall
+test that pins "not worth climbing" is skipped on this finding until the
+cost structure is decided.
+
+### Sixth pass (2026-08-24) — sliding beads — superseded
+
+The idea below is built: `LatticeTracker` runs three outer passes of
+*project → rows → solve*. Bead T is the nearest point on the reference
+polyline (body → first node ≥ one cell away → nodes, last segment extended
+as a ray) to the iterate's tick-T position — the free rollout on pass 0,
+free + the previous solve's Δp after — made monotone along the path. Rows
+are the perpendicular band at the bead, the speed rows, and the progress
+row along the last bead's tangent; each pass cold-starts the solver
+(determinism contract). Nothing else changed from the fifth pass.
+
+| | fifth pass (current-speed sample) | **sixth pass (beads)** |
+|---|---|---|
+| row 1 corridor | 65.8 | **78.6 ✓** |
+| engine tunnel (the seam spawn) | stuck at 330 ✗ | **78.7 ✓** — the bead is wherever the body is, so the seam's phase no longer matters |
+| row 2 tunnel entry | ✓ (lip 73) | **✓ (lip 73, ends 77.8)** |
+| row 7 free-standing 2-high wall | strain 6.6 ✓ | **strain 9.3 ✗** (gate 8) — the beads follow the over route more faithfully; the give-up question |
+| row 8 ledge drop | ✓ (73.2) | **✓ (73.5, max vy 179, full carry)** |
+| row 13 landing (max vy / 270) | 201 ✗ | **201 ✗** (unchanged: the path's slope) |
+| rest / tall wall / step / duck-in / rollback / rows 3-far, 4, 6, 9 | ✓ | **✓** |
+| rows 3-near, 11 | ✗ | **✗** |
+| tunnel sim step (Release, warmed) | 47 µs | **104 µs** (three passes) |
+
+**Margin = band (same day, after the beads).** The DP now inflates obstacles
+by half a cell — the tracker's band — instead of `CorrectorMargin` (2 px, the
+qp/ref engines'): one allowance, counted once, no separate number. Measured
+effect on every scenario and engine test: **none** — every printed value is
+bit-identical (the DP's chosen cells were never the ones the extra 0.4 px
+freed; reachable cells 460 → 626 on flat ground). The corridor seam was
+threaded by the beads, not by this. Kept for the principle and the removed
+knob; `CorrectorMargin` still serves the qp/ref row builders.
+
+**Linear progress objective (same day) — tried, reverted.** A true linear
+term `−w·(t̂ · Δp_{H−1})` was added to `CorrectionSolver` (off unless set)
+and used in place of the achievable-at-cap progress hinge:
+
+| `w` | corridor / tunnel | row 7 strain | tall wall |
+|---|---|---|---|
+| hinge (committed) | 78.6 / 78.7 | 9.3 | ✓ |
+| 2·10⁵ | 37.0 / 43.4 | — | ✓ |
+| 10⁶ | 82.3 / 83.0 | 8.2 | ✓ |
+| 4·10⁶ | 96.9 / 96.8 | **13.8** | **✗ both** (driven up/into the face) |
+
+Why it was reverted despite 10⁶ being 5% faster: the linear pull never
+vanishes, so `w / w_H` is a genuine trade between "as fast as possible" and
+"stay on the path", with a cliff ~3× above the working value — a weight to
+tune, which is what this design avoids. The hinge's depth is the channels'
+reach at cap, so its pull dies exactly at saturation and the trade-off is
+fixed by physics, not by a number. If the 5% ever matters, `w = w_H` is
+the principled pairing (one constant, not two) — but it is still a pairing.
+
+### Idea (2026-08-24) — sliding-bead path loss — BUILT as the sixth pass; kept for the derivation
+
+The fifth pass's reference is the polyline sampled at the body's *current
+speed* — a stand-in for where along the path the body will be at tick k.
+The path-following formulation makes that a solved quantity instead: a
+**bead** `s_k` (arc length along the lattice path) per QP tick, free to
+slide, monotone:
+
+```
+min over z, s:   Σ_k w_c ‖z_{c,k}‖²  +  w_H Σ_k ‖p_k(z) − P(s_k)‖²  −  w_prog · s_{H−1}
+                 s_0 ≤ s_1 ≤ … ≤ s_{H−1},   s_k − s_{k−1} ≤ v_max · dt
+```
+
+with `P(s)` the polyline at arc length `s` and `p_k(z) = p̄_k + Δp_k(z)`.
+The band becomes exact (distance to the path, not to a line or a pre-timed
+sample), progress is the last bead's arc length, and the speed limit is a
+bound on bead spacing — one object for all three.
+
+It is biconvex: for fixed `z`, the optimal `s_k` is the nearest-point
+projection of `p_k` onto the polyline (closed form) followed by a running
+max for monotonicity — that *is* the sliding; for fixed `s`, `P(s_k)` is a
+constant point and the loss is quadratic in `z`. In the bead's local frame
+the along-path residual is zero after projection, so only the perpendicular
+term survives: two rows with normal `n̂_k` at the bead plus the progress row
+along `t̂_k` — exactly today's row structure. So the whole change is *where
+the reference point comes from*: nearest point on the path to the current
+iterate instead of the point at `|v|·(k+1)·dt`. Alternate 2–3 outer passes
+(project → rebuild rows → solve, cold-started each pass to keep the solver's
+determinism contract) and it converges on the exact constraint.
+
+Notes for when it is weighed: (a) even one pass improves on the current
+scheme — projecting the *free rollout* onto the path puts a falling body's
+bead below it rather than where the path's timing would; (b) cost is
+~×(outer passes) on the 47 µs step; (c) the corridor seam is unchanged by
+it — the perpendicular distance to a 63° two-step is the same geometry;
+(d) the progress term is still a hinge with an achievable-at-cap depth on
+the current solver, not a true linear objective — the same approximation as
+now.
 
 ### Horizon-QP results (2026-08-24, fourth pass — superseded)
 

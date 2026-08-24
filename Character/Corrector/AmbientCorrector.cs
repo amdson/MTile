@@ -30,6 +30,11 @@ public struct FoldProfile
     public float HoverOffset;   // hover clearance above the C-obstacle top surface (px)
     public float ClimbReachUp;  // envelope may bind floors this far above the anchor (px)
     public float MaxSpeed;      // progress-target speed (px/s, pre-modifier)
+    // Lattice engine: the state's price per px CLIMBED on the planned path
+    // (drops are free). The planner's goal trades it against progress, so
+    // this is what decides what a state will and won't climb — a crouch's
+    // is high enough that no ledge is ever worth it (LATTICE_SCENARIOS.md).
+    public float RiseCost;
 
     public static FoldProfile None => default;
 
@@ -41,6 +46,7 @@ public struct FoldProfile
         HoverOffset  = MovementConfig.Current.FoldHoverOffset,
         ClimbReachUp = MovementConfig.Current.FoldClimbReachUp,
         MaxSpeed     = MovementConfig.Current.MaxWalkSpeed,
+        RiseCost     = MovementConfig.Current.FoldRiseCost,
     };
 
     // Crouched: same fold, lower reference — the crouch IS reference shaping,
@@ -53,6 +59,7 @@ public struct FoldProfile
         HoverOffset  = MovementConfig.Current.CrouchHoverOffset,
         ClimbReachUp = MovementConfig.Current.CrouchClimbReachUp,
         MaxSpeed     = MovementConfig.Current.CrouchMaxWalkSpeed,
+        RiseCost     = MovementConfig.Current.CrouchRiseCost,
     };
 }
 

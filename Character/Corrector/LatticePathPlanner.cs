@@ -19,11 +19,11 @@ namespace MTile;
 //     cosθ > 0 is what makes the graph a DAG (projection onto u strictly
 //     increases along every edge), so one pass over nodes sorted by p is a
 //     valid DP order;
-//   - cost: per-edge steepness (angle off u) + length, per-node hover toward
-//     the surface below (state-supplied on/off flag), seed-edge velocity bias
-//     (§3.4–3.5);
-//   - goal: cheapest reachable node in the far band, else the furthest
-//     reachable node — the honest bonk (§3.4).
+//   - cost: per-edge RISE (px climbed — table-invariant; drops are free),
+//     per-node hover toward the surface below (state-supplied on/off flag),
+//     seed-edge velocity bias (§3.4–3.5);
+//   - goal: the reachable node maximizing progress·w_prog − cost; a bonk is
+//     a route that is not worth its cost (§3.4, revised).
 //
 // Output samples carry the plan's §3.6 support fields: FloorY = the C-space
 // surface below the node (Pos.Y + floorBelow), Grounded = floorBelow within
@@ -160,12 +160,13 @@ public sealed class LatticePathPlanner
     private Vector2 CellCenter(int gx, int gy) => new((gx + 0.5f) * _cell, (gy + 0.5f) * _cell);
 
     // Solve. u = requested direction (unit not required; zero → no solve).
-    // hover on/off is the state-supplied flag (§3.4). Returns the number of
+    // hover on/off and riseCost (price per px climbed; drops are free) are
+    // the state-supplied parameters (§3.4). Returns the number of
     // path samples written to outPath (body-center positions, seed → goal,
     // FloorY/Grounded filled per §3.6, Vel zero); 0 = no solve (zero u, seed
     // inside an obstacle with no not-behind free neighbour, degenerate window).
     public int Solve(ChunkMap chunks, Polygon body, Vector2 seed, Vector2 vel,
-                     Vector2 u, bool hover, float hoverOffset,
+                     Vector2 u, bool hover, float hoverOffset, float riseCost,
                      CoastSample[] outPath, out float cost, out bool bonk)
     {
         cost = 0f; bonk = false;
@@ -192,7 +193,13 @@ public sealed class LatticePathPlanner
         BuildWindow(seed, u, L);
         if (_w <= 0 || _h <= 0) return 0;
 
-        StampObstacles(chunks, body, perTile, cfg.CorrectorMargin);
+        // The obstacle margin IS the tracker's band (half a cell): the DP keeps
+        // path nodes this far outside the true C-obstacle, and the tracker
+        // lets the body stray this far from the path — one allowance, counted
+        // once. (CorrectorMargin, the qp/ref engines' 2 px, had been added on
+        // top of the band: two allowances, and a corridor seam narrowed to a
+        // single cell — LATTICE_SCENARIOS.md fifth pass.)
+        StampObstacles(chunks, body, perTile, 0.5f * _cell);
         SweepFloorBelow();
 
         int seedX = (int)MathF.Floor(seed.X / _cell), seedY = (int)MathF.Floor(seed.Y / _cell);
@@ -253,7 +260,7 @@ public sealed class LatticePathPlanner
         Array.Sort(_orderKey, _order, 0, reachCount);
 
         // ── The DP sweep (§3.4) ──────────────────────────────────────────────
-        float wSteep = cfg.LatticeSteepWeight, wLen = cfg.LatticeLenWeight;
+        float wRise = riseCost;                                 // the state's price per px climbed
         float wHover = cfg.LatticeHoverWeight, wSeed = cfg.LatticeSeedWeight;
         Vector2 vHat = vel.LengthSquared() > 1f ? Vector2.Normalize(vel) : Vector2.Zero;
         for (int i = 0; i < reachCount; i++) _dp[_order[i]] = float.PositiveInfinity;
@@ -273,13 +280,22 @@ public sealed class LatticePathPlanner
                 ref var o = ref _admitted[a];
                 if (!EdgeFree(nx, ny, ref o)) continue;          // blocked / tunneling (§3.3)
                 int m = (ny + o.Dy) * _w + (nx + o.Dx);
+                // Climb cost = height climbed (px of rise), so a route's price
+                // is the geometry's, not the offset table's — a (1,3) edge
+                // and three (1,1) edges cost the same 9.6 px. Drops are free:
+                // gravity delivers them, and charging them would let the
+                // argmax goal refuse to walk off a ledge.
                 float c = dn
-                    + wSteep * (1f - Vector2.Dot(o.Unit, u))
-                    + wLen * o.Len * _cell;
+                    + wRise * MathF.Max(0f, -o.Dy) * _cell;
                 if (hover && !float.IsPositiveInfinity(_floorBelow[m]))
                 {
                     float dev = _floorBelow[m] - hoverOffset;
-                    c += wHover * dev * dev;
+                    // Linear, like the rise cost: the "rise back to hover" vs
+                    // "stay sagged" trade then compares w_rise against
+                    // w_hover × nodes, independent of how large the sag is (a
+                    // quadratic hover against a linear rise crossed at ~7 px —
+                    // inside the hover band, measured 2026-08-24).
+                    c += wHover * MathF.Abs(dev);
                 }
                 if (atSeed && vHat != Vector2.Zero)
                     c += wSeed * (1f - Vector2.Dot(o.Unit, vHat));
@@ -287,26 +303,29 @@ public sealed class LatticePathPlanner
             }
         }
 
-        // ── Goal: far band, else furthest reachable (§3.4) ──────────────────
+        // ── Goal: progress worth its cost (§3.4, revised 2026-08-24) ────────
+        // argmax over every reachable node of  w_prog·(p − p_seed) − dp.  The
+        // far-band rule ("cheapest node at p ≥ p_seed + L, else the furthest")
+        // is this rule's w_prog → ∞ limit. A bonk is now a decision the costs
+        // make — "the rest of the window is not worth its climb" — so the
+        // state's intent direction decides what it will and won't climb (a
+        // crouch's u tilts down, and a 1-high block stops being worth it),
+        // and nothing needs a give-up. Length cost is gone: every edge
+        // advances p, so progress reward and length cost were one term.
         float pSeed = Vector2.Dot(CellCenter(seedX, seedY), u);
         float pFar  = pSeed + L - _cell;
-        int best = -1; float bestP = float.NegativeInfinity, bestCost = float.PositiveInfinity;
+        float wProg = cfg.LatticeProgressWeight;
+        int best = -1; float bestVal = float.NegativeInfinity, bestP = float.NegativeInfinity;
         for (int i = 0; i < reachCount; i++)
         {
             int idx = _order[i];
             if (float.IsPositiveInfinity(_dp[idx])) continue;
             float pI = _orderKey[i];
-            if (pI >= pFar)
-            {
-                if (bestP < pFar || _dp[idx] < bestCost) { best = idx; bestCost = _dp[idx]; bestP = pFar; }
-            }
-            else if (bestP < pFar && (pI > bestP || (pI == bestP && _dp[idx] < bestCost)))
-            {
-                best = idx; bestP = pI; bestCost = _dp[idx];
-            }
+            float val = wProg * (pI - pSeed) - _dp[idx];
+            if (val > bestVal || (val == bestVal && pI > bestP)) { best = idx; bestVal = val; bestP = pI; }
         }
         if (best < 0) { bonk = true; LastBonk = true; return 0; }
-        bonk = bestP < pFar;
+        bonk = bestP < pFar;                                     // did not find the far band worth reaching
         cost = _dp[best];
         LastReach = reachCount; LastBonk = bonk; LastCost = cost;
 
