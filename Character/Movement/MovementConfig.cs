@@ -327,7 +327,7 @@ public class MovementConfig
     // roughly (5, 9). The §4.1 taste number.
     public float LatticeProgressWeight          { get; set; } = 7f;
     public float LatticeHoverWeight             { get; set; } = 2f;     // per px (linear, like RiseCost)
-    public float LatticeSeedWeight              { get; set; } = 20f;
+    public float LatticeSeedWeight              { get; set; } = 0f;
     // Seed run (§3.5): the path's first SeedRunPx are FORCED along the body's
     // current velocity direction (quantized to the nearest admitted offset)
     // when it moves at ≥ SeedRunMinSpeed and that direction lies inside the

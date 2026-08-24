@@ -107,7 +107,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // slab's end, under the last tile's corner bevel — the (1,−1) climb is
     // admissible and the body rises out to the right. FAR: body deep under
     // the slab — no rising edge, honest bonk, no shuffle toward the exit.
-    [Fact(Skip = "LATTICE_SCENARIOS row 3 — jump states not on the engine; CoveredJumpState owns the launch (plan §7.3). No rise today (apex 76.5)")]
+    [Fact(Skip = "LATTICE_SCENARIOS row 3 — the DP finds the bevel escape ((133,75)→(139,72)→up from the seed 3 px inside the edge) but the path's first segment is 8 px sideways and a neutral press has no x channel (drive/air-lateral need dir, redirect needs !Grounded): an actuator-list decision for the jump profile, tenth pass")]
     public void Row03_CoveredJump_NearEdge_RisesOutDiagonally()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (r == 3 && c < 8));
@@ -229,6 +229,33 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
         output.WriteLine($"row9: rise={start.Y - minY:F1} max |dx|={maxDx:F1}");
         Assert.True(start.Y - minY > 30f, $"did not jump: rose {start.Y - minY:F1} px");
         Assert.True(maxDx < 2f, $"drifted {maxDx:F1} px on a neutral jump");
+    }
+
+    // ── Row 10: diagonal hop over a block ────────────────────────────────
+    // Hold Right, and jump ~40 px before a 1-high block: u = (1,−1)^, the
+    // path rises over the block's C-obstacle, the legs launch along it, the
+    // body lands beyond and keeps running. On the engine this is
+    // JumpingState with dir held (RunningJumpState yields).
+    [Fact]
+    public void Row10_DiagonalHop_ClearsBlock_AndContinues()
+    {
+        var chunks = Terrain(7, 40, (r, c) => r == 6 || (r == 5 && c == 12));
+        var sim = new Simulation(chunks, OnFloor(40f, 6));
+        const float blockX = 12 * Ts, jumpX = blockX - 14f - 40f;
+        int pressed = -1; float minY = float.MaxValue; bool wasJumping = false;
+        for (int f = 0; f < 180; f++)
+        {
+            if (pressed < 0 && sim.Player.Body.Position.X >= jumpX) pressed = f;
+            sim.Step(pressed < 0 ? Right : JumpInput(f - pressed, right: true));
+            minY = MathF.Min(minY, sim.Player.Body.Position.Y);
+            wasJumping |= sim.Player.CurrentStateName.Contains("Jump");
+        }
+        var end = sim.Player.Body.Position;
+        output.WriteLine($"row10: apex y={minY:F1} end=({end.X:F1},{end.Y:F1}) jumped={wasJumping}");
+        Assert.True(wasJumping, "never entered a jump state");
+        Assert.True(minY < 6 * Ts - Rest - 20f, $"did not rise: apex {minY:F1}");
+        Assert.True(end.X > blockX + 2 * Ts, $"did not clear the block: x={end.X:F1} (block at {blockX})");
+        Assert.True(MathF.Abs(end.Y - (6 * Ts - Rest)) < 8f, $"not back at hover past the block: y={end.Y:F1}");
     }
 
     // ── Row 11: crouch at a 1-high block ─────────────────────────────────

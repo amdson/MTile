@@ -96,8 +96,15 @@ orders of magnitude cheaper than the state-space search prototype.
 > legs launch the body along a rising path — 61.5 px, zero drift, matching
 > the bespoke jump. Needed: no Δ-smoothing in the tracker (a `qp`
 > regularizer, not in §3.7 — and it had been throttling the walk: corridor
-> 77 → 89 px/s) and a lateral tie-break in the DP. Next: running jump,
-> covered jump.
+> 77 → 89 px/s) and a lateral tie-break in the DP.
+>
+> **Tenth pass, same day — current:** running and covered jumps fold into
+> `JumpingState` (the other two states yield on the engine); the seed
+> velocity bias is off (the soft seed run — same loop). Row 10's hop clears
+> its block on the engine; row 3's planner half works and its actuator half
+> is the open decision (a neutral press has no x channel to start along
+> the bevel escape — redirect while grounded, or drive along the plan's
+> tangent). `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
