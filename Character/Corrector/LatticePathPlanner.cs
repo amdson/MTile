@@ -192,7 +192,13 @@ public sealed class LatticePathPlanner
         BuildWindow(seed, u, L);
         if (_w <= 0 || _h <= 0) return 0;
 
-        StampObstacles(chunks, body, perTile, cfg.CorrectorMargin);
+        // The obstacle margin IS the tracker's band (half a cell): the DP keeps
+        // path nodes this far outside the true C-obstacle, and the tracker
+        // lets the body stray this far from the path — one allowance, counted
+        // once. (CorrectorMargin, the qp/ref engines' 2 px, had been added on
+        // top of the band: two allowances, and a corridor seam narrowed to a
+        // single cell — LATTICE_SCENARIOS.md fifth pass.)
+        StampObstacles(chunks, body, perTile, 0.5f * _cell);
         SweepFloorBelow();
 
         int seedX = (int)MathF.Floor(seed.X / _cell), seedY = (int)MathF.Floor(seed.Y / _cell);

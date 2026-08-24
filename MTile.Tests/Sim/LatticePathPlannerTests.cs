@@ -12,7 +12,8 @@ namespace MTile.Tests.Sim;
 // block, a duck-under ceiling, wall behavior, determinism, timing. Terrain via
 // SimTerrain ascii (X solid, O open), origin in TILE coords (tile = 16 px).
 //
-// Geometry cheat sheet (hexagon half-width 6, half-height 10.4, margin 2,
+// Geometry cheat sheet (hexagon half-width 6, half-height 10.4, margin =
+// half a cell = 1.6 px at 5 cells/tile — the tracker's band,
 // hover 10): a floor whose top face is at world y F rests the body center at
 // ≈ F − 20.4 (envelope ≈ F − 10.4, minus hover); a ceiling whose bottom face
 // is at world y C blocks centers above ≈ C + 12.4 (+ margin). The default
@@ -124,7 +125,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
 
         Assert.True(bonk, planner.LastDebug);
         // The wall's C-obstacle boundary is at 160 − (half-tile 8 + half-width
-        // 6 + margin 2) = 152: the honest bonk walks up to exactly there.
+        // 6 + margin 1.6) = 144.4: the honest bonk walks up to exactly there.
         if (n > 0)
             Assert.True(path[n - 1].Pos.X <= 152.5f,
                 $"path claims to pass the wall: {path[n - 1].Pos.X:F1}");

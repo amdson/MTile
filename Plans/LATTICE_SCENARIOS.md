@@ -127,6 +127,15 @@ row along the last bead's tangent; each pass cold-starts the solver
 | rows 3-near, 11 | ✗ | **✗** |
 | tunnel sim step (Release, warmed) | 47 µs | **104 µs** (three passes) |
 
+**Margin = band (same day, after the beads).** The DP now inflates obstacles
+by half a cell — the tracker's band — instead of `CorrectorMargin` (2 px, the
+qp/ref engines'): one allowance, counted once, no separate number. Measured
+effect on every scenario and engine test: **none** — every printed value is
+bit-identical (the DP's chosen cells were never the ones the extra 0.4 px
+freed; reachable cells 460 → 626 on flat ground). The corridor seam was
+threaded by the beads, not by this. Kept for the principle and the removed
+knob; `CorrectorMargin` still serves the qp/ref row builders.
+
 ### Idea (2026-08-24) — sliding-bead path loss — BUILT as the sixth pass; kept for the derivation
 
 The fifth pass's reference is the polyline sampled at the body's *current
