@@ -89,6 +89,15 @@ orders of magnitude cheaper than the state-space search prototype.
 > trade is scale-free; `IntentTilt` removed. The 2-high wall is refused by
 > the costs; the crouch's block-mounting turned out to be `MantleState`
 > firing from a crouch, not the planner. `LATTICE_SCENARIOS.md`.
+>
+> **Ninth pass, same day — current:** §7.3 begun. `JumpingState` on the
+> lattice engine fires no impulse: it hands the tracker `FoldProfile.Jump`
+> (hover off, `u` up-and-along-intent, rise free, no speed limit) and the
+> legs launch the body along a rising path — 61.5 px, zero drift, matching
+> the bespoke jump. Needed: no Δ-smoothing in the tracker (a `qp`
+> regularizer, not in §3.7 — and it had been throttling the walk: corridor
+> 77 → 89 px/s) and a lateral tie-break in the DP. Next: running jump,
+> covered jump.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

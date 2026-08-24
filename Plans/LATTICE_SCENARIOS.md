@@ -14,7 +14,8 @@ scenario needs something not on it, that is a design gap, not a parameter.
 | parameter | who sets it | values |
 |---|---|---|
 | `u` | the state, from **intent** (never from the jump direction) | unit vector; `(±1,0)` walking, `(±1,−1)/√2` diagonal hops, `(0,−1)` pure vertical (see row 9 for the tie rule); `dir == 0` → no solve, hover column |
-| `hover` / `hoverOffset` | the state | Standing `on / 10`; Crouched `on / 0`; jump states `off` |
+| `hover` / `hoverOffset` | the state (`FoldProfile.Hover`) | Standing `on / 10`; Crouched `on / 0`; Jump `off` |
+| `Rising` | the state (`FoldProfile.Rising`) | `u = (dir, −1)^` while a jump is held — the launch is the legs along a rising path |
 | `RiseCost` | the state (`FoldProfile.RiseCost`) | price per px climbed on the path, traded against `ProgressWeight` at the goal — Standing 6 (mounts 16 px, refuses 32), Crouch 30 (never mounts), jump states 0; drops are free |
 | progress target | the state | `MaxWalkSpeed`×mods (Standing), `CrouchMaxWalkSpeed` (Crouched), **unbounded** (jumps) |
 | window `L` | config `LatticeLookaheadTiles` (3.5) | a state may shorten it; nothing lengthens it (§4.2 — the autopilot dial) |
@@ -37,7 +38,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 
 | # | scenario | terrain & seed | owner / regime | solver parameters | correct behavior | status |
 |---|---|---|---|---|---|---|
-| 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 78.6 px/s, `BumpyTunnel` 78.7 (sixth pass, beads) |
+| 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 89.4 px/s, `BumpyTunnel` 87.1 (ninth pass, no Δ-smoothing) |
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state | `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance (the seed run fixes the first stretch to the arc); body enters low and clean, no bonk on the lip | ✅ `Row02` — horizon QP: arrives 4 px above the band and enters (the engine now runs in Falling; §7.1's launched guard is gone with the ref tail) |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ❌ `Row03_NearEdge` skipped (no rise today); far ✅ `Row03_FarFromEdge` (bonks, no shuffle) — `CoveredJumpState` still owns the launch (§7.3) |
 | 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut`, `Row04` |
@@ -45,7 +46,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 6 | **Tall wall** | wall spanning the whole window ahead | Standing | `u=(dir,0)`, hover on 10, walk | DP bonks (far band unreachable) at the wall; reference carries straight into it; rows truncate; body stops ≈6 px from the face at hover height — **no climb, no planned brake, no push-back** | ✅ `TallWall_HonestStop`, `FullHeightWall_Bonks`, `Row06` |
 | 7 | **Free-standing 2-high wall** | 2-high column with open air above | Standing | `u=(dir,0)`, hover on 10, walk | *Path*: routes over (edges are geometry, §3.3 — accepted). *Motion*: the legs cannot deliver a 32 px rise from a walk, so tracking residual grows → **give-up** (§4.3) → honest bonk as in row 6. The path being over the wall must not make the body float up it | ❌ `Row07` skipped by 0.1 px — the planner now refuses the wall (RiseCost); the approach creeps 8.1 px up the bevel against an 8 px gate (eighth pass) |
 | 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | ✅ `Row08` — horizon QP, seed run off: lands at hover, no dive, full carry |
-| 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` (rises 61 px, 0 px drift; lands cleaner than qp) — the jump state still owns the arc |
+| 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` — **on the engine** (ninth pass): 61.5 px, 0 drift, the legs at cap on tick 0 along a straight-up path; no impulse fired |
 | 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | ❌ jump states not on the engine |
 | 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — the planner refuses the block (`CrouchRiseCost` 30, bonk); **`MantleState` fires from the crouch and vaults it** — state arbitration, its own thing (eighth pass trace) |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
@@ -105,7 +106,44 @@ is a phase accident (row 1's does, the engine test's doesn't). The design
 question it raises is what the margin means to the bitmap versus to the
 tracker's band; not decided here.
 
-### Eighth pass (2026-08-24) — rise priced per pixel, per profile — current
+### Ninth pass (2026-08-24) — jump states on the engine, step 1: the neutral jump — current
+
+`JumpingState` on the lattice engine fires nothing: `Enter` sets no
+velocity and adds no source constraint, `Update` applies no hold force.
+It hands the tracker `FoldProfile.Jump` — hover **off**, `Rising` (u =
+`(dir, −1)^` while the button is held), `RiseCost` 0, no speed limit — and
+the legs spend themselves along a rising path. The state ends at the apex
+or on release; `Falling` owns the descent as before. `qp`/`ref` paths are
+untouched (the engine check gates every change). Two engine changes were
+needed, both subtractions:
+
+- **No Δ-smoothing in the lattice tracker.** `CorrectorDeltaWeight` and the
+  leaky `PrevApplied` anchors are the `qp` engine's anti-bang-bang
+  regularizer; they came along with reusing its `Problem` and are not in
+  §3.7's objective. Measured with them on: the launch's tick-0 push was
+  −2 px/s against gravity (anchored to `Standing`'s near-zero output) and
+  the body fell; the apex rule then ended the jump at 3 px. With them off
+  the legs are at their cap on tick 0. Side effect: the **corridor rose
+  76.7 → 89.4 px/s** — the smoothing had been throttling the walk too.
+- **A lateral tie-break in the DP** (0.05/px perpendicular to `u`, an ε):
+  with hover off and rise free every route up costs the same, and the DP
+  would have zigzagged a straight-up jump.
+
+| | before (bespoke `JumpingState`) | **engine jump** |
+|---|---|---|
+| row 9 neutral jump | 60.8 px, 0 drift | **61.5 px, 0 drift** — tick-0 push −100 px/s (legs at cap), asymptote −180 at the fade |
+| row 1 corridor / engine tunnel | 76.7 / 75.7 | **89.4 / 87.1** |
+| rows 2, 8; rest, wall, step, duck-in, rollback, 3-far, 4, 6 | ✓ | **✓** |
+| rows 3-near, 7, 11, 13 | skipped | skipped (unchanged) |
+
+Jump height came out equal by the constants' coincidence: the legs push
+until leg reach (42 px) runs out, fading to zero at `FoldLegPushFadeSpeed`
+200, so the body leaves at ~180–200 px/s and coasts ~30 px. Next: the
+diagonal hop (row 10 — `RunningJumpState` folds into this with `dir` held)
+and the covered jump (row 3 — `JumpingState` allowed under a low ceiling,
+the bevel escape falling out of the DP).
+
+### Eighth pass (2026-08-24) — rise priced per pixel, per profile — superseded
 
 Three changes on the seventh pass:
 
