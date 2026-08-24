@@ -174,14 +174,23 @@ Two arrays, both dense and pooled in `CorrectorScratch`:
    The template's `Reach` is ~20 px, so the footprint is ~40 px across: at 3.2 px
    cells that is ~13 × 13 ≈ 170 marks per tile, ~40 tiles in the window → ~7k
    marks. Cheap, and it is the *correct* use of the template.
-2. **Hover reference per lattice column.** One `AmbientCorrector.FloorEnvelope`
-   call per x-column of the window (~15 calls), not per node. The hover term
-   (§3.4) reads `env[column(node)]`. This stays x-indexed whatever `u` is —
-   floors are floors.
+2. **Distance to the surface below, per node.** One bottom-up sweep per
+   x-column of the bitmap: `floorBelow[n]` = distance from `center(n)` down to
+   the first blocked cell in its column (∞ if none in the window). ~750 ops
+   total. Because the bitmap *is* the C-obstacle — facets, bevels and all —
+   this is the floor envelope, evaluated at every node instead of once per
+   column, and it is **multi-floor aware**: a ledge top and the ground beneath
+   it are both found, which a single-band `FloorEnvelope` query is not.
 
-Getting this wrong is the difference between "fast" and "unusable":
-`FloorEnvelope` walks facets over gathered tiles, and calling it per node — which
-is what the state-space prototype does — is a large part of why it costs 38 ms.
+   Two things read it: the hover term (§3.4), as `floorBelow[n] − hoverOffset`,
+   and the support predicate of the edge condition (§3.3),
+   `supported[n] = floorBelow[n] ≤ riseReach`. No `FloorEnvelope` calls at all.
+   The x-column sweep stays x-indexed whatever `u` is — floors are floors.
+
+Getting this wrong is the difference between "fast" and "unusable": the
+state-space prototype's per-node `FloorEnvelope` calls (facet walks over
+gathered tiles) are a large part of why it costs 38 ms. Here the equivalent
+information is a subtraction per node off a precomputed column sweep.
 
 ### 3.3 Edges: a neighborhood table filtered by a cone
 
@@ -191,6 +200,34 @@ admitted iff
 ```
 dot( normalize(dx, dy), u )  ≥  cos θ,     with  cos θ > 0
 ```
+
+That is the *cone* condition; the full edge condition `n → m`, `o = m − n`, is:
+
+1. **Neighborhood** — `o` is in the primitive-offset table below.
+2. **Cone** — `dot(ô, u) ≥ cos θ`, `cos θ > 0`.
+3. **Geometry** — `m` in the window, `m` admissible, and every cell the segment
+   `center(n) → center(m)` crosses admissible (tunneling, below).
+4. **Actuation** — if `o` rises (`dy < 0`, y-down), `n` must be **supported**:
+   `floorBelow[n] ≤ riseReach` (§3.2). Descending and horizontal edges are
+   always available — gravity is free, and air control / drive exist in every
+   fold regime.
+
+Condition 4 is the todo's "operations available based on the player movement
+state and environment," in the only form a velocity-free path can hold it. The
+*environment* half is the per-node support predicate. The *state* half is what
+the state hands in: `riseReach` (`FoldClimbReachUp` for Stand,
+`CrouchClimbReachUp` for Crouch — the existing profile numbers, reused) and,
+later, a corner-plant flag that would admit rising edges from nodes with a
+convex corner within hand reach (`MarkCornerPlants`' predicate, not built in
+v1). No per-node force, no velocity.
+
+Its effect is that a chain of rising edges must stay within `riseReach` of a
+surface the whole way. That climbs a 1-tile ledge (the C-obstacle bevel keeps
+the body supported up the corner) and **stalls at a 2-tile wall by
+construction** — the wall face has no surface within reach — which is today's
+elective refusal, produced from geometry rather than from a rollout check.
+Without it the DP would draw a path rising through open air over a gap and
+lean entirely on the §4.3 give-up to catch it.
 
 `cos θ` is the todo's cosine threshold and is a config knob. **`cos θ > 0` is
 structural, not tuning:** it is what makes every edge strictly increase `p` and
@@ -233,7 +270,7 @@ answered after the fact by the tracking-residual give-up of §4.3.
 
 | term | form | notes |
 |---|---|---|
-| **(C) hover** | `w_hover · (y_node − (env[col] − hoverOffset))²` | per node, from the column cache; `w_hover` should fade with `|u_y|` — a jump's `u` has no business being pulled to the floor |
+| **(C) hover** | `w_hover · (floorBelow[n] − hoverOffset)²` | per node, from the column sweep (§3.2); 0 when no floor is in the window; `w_hover` should fade with `|u_y|` — a jump's `u` has no business being pulled to the floor |
 | **(D) admissible** | hard prune | blocked cell, or a crossed cell blocked ⇒ no edge |
 | **(B) steepness** | `w_steep · (1 − dot(ô, u))` | per edge: cost rises with angle off `u`; may be asymmetric (cheaper below `u` than above — descending is free, climbing is legs) |
 | **(A) direction** | implicit | the cone + DAG ordering already forbid backward motion |
@@ -249,7 +286,8 @@ for n in sorted order:
   for o in admittedOffsets:               // §3.3, ~7
     m = n + o
     if outOfWindow(m) or blocked[m] or crossesBlocked(n, o): continue
-    c = dp[n] + w_steep·(1 − dot(ô, u)) + w_len·|o| + w_hover·(y_m − ref[col(m)])²
+    if o.dy < 0 and floorBelow[n] > riseReach: continue      // §3.3 condition 4
+    c = dp[n] + w_steep·(1 − dot(ô, u)) + w_len·|o| + w_hover·(floorBelow[m] − hoverOffset)²
     if c < dp[m]: dp[m] = c; parent[m] = n
 ```
 
@@ -294,7 +332,7 @@ covers ≤ 17 px, so the tracker consumes only the first tile of a three-tile
 plan; the rest exists so the first tile is chosen with foresight (§2.1).
 
 The `Grounded` / `FloorY` fields the downstream rows and channels read are
-filled from the column caches. This is why the integration point in §1 matters:
+filled from `floorBelow` at the nearest node (`Grounded` = supported). This is why the integration point in §1 matters:
 the piece the todo's algorithm does not produce is the piece the existing code
 already computes.
 
@@ -472,16 +510,18 @@ Stated intent, written down now rather than discovered later:
 
 ### 4.10 Where this plan deviates from the todo
 
-One deliberate deviation. The todo passes "a list of operations available based
-on player movement state and environment" **into the path solve**. This plan
-keeps that list out of the path entirely and uses it only to configure the
-tracker (§3.7).
+Less than the first two drafts claimed. The todo passes "a list of operations
+available based on player movement state and environment" into the path solve;
+this plan does too, but reduced to what a velocity-free path can use: a
+per-node support predicate (environment) and the state's `riseReach` plus a
+corner-plant flag (state) — §3.3 condition 4. What it does *not* do is model
+per-node force magnitudes or which channel would deliver an edge; that stays
+with the tracker (§3.7) and the give-up (§4.3).
 
-Reason: knowing which ops are available *at a node* requires knowing whether that
-node is near ground, which is a per-node `FloorEnvelope` query. That is exactly
-the per-node dynamics lookup that makes the state-space prototype cost 38 ms.
-The path is geometry; whether it is deliverable is the tracker's and the
-give-up's problem (§4.3).
+An earlier draft kept the ops list out of the path entirely on the grounds
+that per-node support needs a per-node `FloorEnvelope` call. That was wrong:
+once the bitmap exists, support is a column sweep (§3.2), and the objection
+evaporates. Recorded so it is not re-argued.
 
 ---
 
@@ -489,7 +529,7 @@ give-up's problem (§4.3).
 
 | phase | deliverable | gate |
 |---|---|---|
-| **0** | Lattice geometry: window, admissibility bitmap, per-column envelope cache, admitted-offset cone. Drawn in the freeze-frame inspector. No DP, no sim wiring. | bitmap visually matches terrain at a few cell sizes; cone overlay matches `u` |
+| **0** | Lattice geometry: window, admissibility bitmap, `floorBelow` column sweep, admitted-offset cone. Drawn in the freeze-frame inspector. No DP, no sim wiring. | bitmap visually matches terrain at a few cell sizes; supported nodes highlighted correctly on a ledge and beside a 2-tile wall; cone overlay matches `u` |
 | **1** | The DP (no direction state) + path export. Oracle-only, run beside the LM/lattice oracles in `Game1`. | µs/solve measured in `MTile.Bench`; path looks sane over lips, corridors, 1- and 2-tile blocks at radius 2 and 3 |
 | **2** | Wire as `FoldEngine = "lattice"`: replace `FoldReference`'s rollout block, keep rows + deform + servo. Default stays `qp`. | `FoldRefEngineTests`-style scenario tests pass for the new engine |
 | **3** | Weight tuning by playtest; the tracking-residual give-up of §4.3. | walls feel solid; no bobbing at rest; no visible autopilot |
