@@ -315,4 +315,151 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
         Assert.True(MathF.Abs(p.Y - (floorTop - Rest)) < 5f, $"not re-bound at hover: y={p.Y:F1}");
         Assert.True(v.X > 70f, $"carry did not resume: vx={v.X:F1}");
     }
+
+    // ── Row 15: wall slide, undisturbed ──────────────────────────────────
+    // Airborne beside a tall wall, pressing into it. On the engine the slide
+    // hands the Fall profile: the plan is blocked at the face, so the engine
+    // adds nothing to the descent — no lift, no brake beyond the state's own
+    // drag (equilibrium 80 px/s: SlideDrag·vy/SlideTerminalSpeed = g), which
+    // a corrector-off control run measures. The held direction presses the
+    // body into the wall (the FSD holds it); it never moves away. Lands at
+    // hover beside the wall and stands.
+    [Fact]
+    public void Row15_WallSlide_UndisturbedDescent()
+    {
+        var chunks = Terrain(10, 24, (r, c) => r == 9 || c == 12);
+        float faceX = 12 * Ts, floorTop = 9 * Ts;
+        var start = new Vector2(faceX - 14f - 1f, 2 * Ts);
+        (float maxVy, float minVyHigh, float minX, bool slid) Run(bool corrector)
+        {
+            bool prev = MovementConfig.Current.AmbientCorrectorEnabled;
+            MovementConfig.Current.AmbientCorrectorEnabled = corrector;
+            try
+            {
+                var sim = new Simulation(chunks, start);
+                float maxVy = 0f, minVyHigh = float.MaxValue, minX = float.MaxValue; bool slid = false;
+                for (int f = 0; f < 240; f++)
+                {
+                    sim.Step(Right);
+                    var b = sim.Player.Body;
+                    if (!sim.Player.CurrentStateName.Contains("WallSlid")) continue;
+                    slid = true;
+                    maxVy = MathF.Max(maxVy, b.Velocity.Y);
+                    minX = MathF.Min(minX, b.Position.X);
+                    if (f > 30 && floorTop - b.Position.Y > Rest + 30f) minVyHigh = MathF.Min(minVyHigh, b.Velocity.Y);
+                }
+                return (maxVy, minVyHigh, minX, slid);
+            }
+            finally { MovementConfig.Current.AmbientCorrectorEnabled = prev; }
+        }
+        var control = Run(corrector: false);
+        var r = Run(corrector: true);
+        var simEnd = new Simulation(chunks, start);
+        for (int f = 0; f < 240; f++) simEnd.Step(Right);
+        var p = simEnd.Player.Body.Position;
+        output.WriteLine($"row15: slid={r.slid} slide maxVy={r.maxVy:F1} (control {control.maxVy:F1}) min vy high on the wall={r.minVyHigh:F1} minX={r.minX:F1} (start {start.X}) end=({p.X:F1},{p.Y:F1}) {simEnd.Player.CurrentStateName}");
+        Assert.True(r.slid && control.slid, "never entered the wall slide");
+        Assert.True(MathF.Abs(r.maxVy - control.maxVy) < 3f, $"the slide's own drag was overridden: max vy {r.maxVy:F1} vs control {control.maxVy:F1}");
+        Assert.True(r.minVyHigh > 40f, $"held up on the wall: vy fell to {r.minVyHigh:F1} while sliding");
+        Assert.True(r.minX > start.X - 1f, $"pushed off the wall: x {r.minX:F1} < start {start.X}");
+        Assert.True(MathF.Abs(p.Y - (floorTop - Rest)) < 5f, $"not at hover on the floor: y={p.Y:F1}");
+    }
+
+    // ── Row 16: double jump in open air ──────────────────────────────────
+    // Falling in open air, press jump (held 12 frames) with or without a
+    // direction. The launch is the state's own impulse + hold force (nothing
+    // to push against in free air) and the engine has no actuators there, so
+    // the rise equals a corrector-off control run's; neutral has no drift.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Row16_DoubleJump_RiseIsTheStates_NoDriftNeutral(bool right)
+    {
+        var chunks = Terrain(10, 40, (r, c) => r == 9);
+        var start = new Vector2(100f, 2 * Ts);
+        var input = right ? Right : default;
+        var inputJump = right ? RightJump : Jump;
+        (float rise, float maxDx, bool jumped) Run(bool corrector)
+        {
+            bool prev = MovementConfig.Current.AmbientCorrectorEnabled;
+            MovementConfig.Current.AmbientCorrectorEnabled = corrector;
+            try
+            {
+                var sim = new Simulation(chunks, start);
+                float minY = float.MaxValue, pressY = 0f, pressX = 0f, maxDx = 0f; bool jumped = false;
+                for (int f = 0; f < 120; f++)
+                {
+                    sim.Step(f >= 10 && f < 10 + JumpHoldFrames ? inputJump : input);
+                    var b = sim.Player.Body;
+                    if (f == 10) { pressY = b.Position.Y; pressX = b.Position.X; }
+                    if (f < 10) continue;
+                    minY = MathF.Min(minY, b.Position.Y);
+                    maxDx = MathF.Max(maxDx, MathF.Abs(b.Position.X - pressX));
+                    jumped |= sim.Player.CurrentStateName.Contains("DoubleJump");
+                }
+                return (pressY - minY, maxDx, jumped);
+            }
+            finally { MovementConfig.Current.AmbientCorrectorEnabled = prev; }
+        }
+        var control = Run(corrector: false);
+        var r = Run(corrector: true);
+        output.WriteLine($"row16 right={right}: rise={r.rise:F1} (control {control.rise:F1}) max|dx|={r.maxDx:F1} jumped={r.jumped}");
+        Assert.True(r.jumped, "never entered the double jump");
+        Assert.True(MathF.Abs(r.rise - control.rise) < 2f, $"the engine changed the double jump's rise: {r.rise:F1} vs control {control.rise:F1}");
+        if (!right) Assert.True(r.maxDx < 1f, $"drifted {r.maxDx:F1} px on a neutral double jump");
+    }
+
+    // ── Row 17: wall jump ────────────────────────────────────────────────
+    // Sliding down a tall wall (pressing into it), press jump holding INTO
+    // the wall (the classic: kick off, arc back, re-slide) or AWAY (kick off
+    // and fly clear). The kick-off, hold force and air steering are the
+    // state's; the engine has no actuators in free air, so the arc equals a
+    // corrector-off control run's; the into case re-enters the slide.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Row17_WallJump_ArcIsTheStates(bool into)
+    {
+        var chunks = Terrain(10, 40, (r, c) => r == 9 || c == 24);
+        float faceX = 24 * Ts;
+        var start = new Vector2(faceX - 14f - 1f, 2 * Ts);
+        var slide = Right;
+        var hold = into ? RightJump : new PlayerInput { Left = true, Space = true };
+        var after = into ? Right : new PlayerInput { Left = true };
+        (float rise, float minX, bool jumped, bool reslid) Run(bool corrector)
+        {
+            bool prev = MovementConfig.Current.AmbientCorrectorEnabled;
+            MovementConfig.Current.AmbientCorrectorEnabled = corrector;
+            try
+            {
+                var sim = new Simulation(chunks, start);
+                float minY = float.MaxValue, pressY = 0f, minX = float.MaxValue; bool jumped = false, reslid = false;
+                for (int f = 0; f < 150; f++)
+                {
+                    sim.Step(f < 20 ? slide : f < 20 + JumpHoldFrames ? hold : after);
+                    var b = sim.Player.Body; string st = sim.Player.CurrentStateName;
+                    if (f == 20) pressY = b.Position.Y;
+                    if (f < 20) continue;
+                    // The arc is measured until the body re-crosses its launch
+                    // height: below that the runs differ by the landing itself
+                    // (the legs catch at hover; a corrector-off body falls to
+                    // the collision floor) and a corrector-off Standing has no walk.
+                    if (jumped && minY < pressY - 5f && b.Position.Y >= pressY) break;
+                    minY = MathF.Min(minY, b.Position.Y);
+                    minX = MathF.Min(minX, b.Position.X);
+                    jumped |= st.Contains("WallJump");
+                    reslid |= jumped && f > 30 && st.Contains("WallSlid");
+                }
+                return (pressY - minY, minX, jumped, reslid);
+            }
+            finally { MovementConfig.Current.AmbientCorrectorEnabled = prev; }
+        }
+        var control = Run(corrector: false);
+        var r = Run(corrector: true);
+        output.WriteLine($"row17 into={into}: rise={r.rise:F1} (control {control.rise:F1}) minX={r.minX:F1} (control {control.minX:F1}) jumped={r.jumped} reslid={r.reslid}");
+        Assert.True(r.jumped, "never entered the wall jump");
+        Assert.True(MathF.Abs(r.rise - control.rise) < 2f, $"the engine changed the wall jump's rise: {r.rise:F1} vs control {control.rise:F1}");
+        Assert.True(MathF.Abs(r.minX - control.minX) < 3f, $"the engine changed the kick-off's reach: {r.minX:F1} vs control {control.minX:F1}");
+        if (into) Assert.True(r.reslid, "did not arc back onto the wall");
+    }
 }

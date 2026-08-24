@@ -37,7 +37,7 @@ public class FallingState : MovementState
         // High free fall is naturally unbound (anchor beyond leg reach ⇒ no
         // envelope rows).
         ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
-            MovementConfig.Current.FoldEngine == "lattice" ? FoldProfile.Fall : FoldProfile.Stand);
+            OnLattice ? FoldProfile.Fall : FoldProfile.Stand);
     }
 }
 

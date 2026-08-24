@@ -123,7 +123,11 @@ public class WallSlidingState : MovementState
         // Off: owned state servoing against fixed contacts (wall FSD + optional ground
         // FSD) — the ambient layer must never fight it (CONSOLIDATION_PLAN §3.4).
         // Still called so Apply's early-out clears cross-frame anchor state.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        // Lattice engine: the slide is Falling against a wall — the same Fall
+        // profile (no hover, no upward air force, obstacle avoidance on the
+        // descent); the drag above stays the state's baseline, the FSDs stay.
+        if (OnLattice) ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Fall);
+        else           ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 }
 
@@ -206,6 +210,11 @@ public class WallJumpingState : MovementState
 
         ctx.Body.AppliedForce = force;
 
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
+        // Lattice engine: as DoubleJumpingState — the kick-off impulse, hold
+        // force and air steering above stay the state's own; the tracker
+        // plans under the Jump profile (rising along the held direction —
+        // into the wall, the DP climbs its face; away, it rises clear).
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
+            OnLattice ? FoldProfile.Jump : FoldProfile.None);
     }
 }

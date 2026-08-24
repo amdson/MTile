@@ -46,10 +46,11 @@ public struct FoldProfile
     public static FoldProfile None => default;
 
     // Falling on the lattice engine: no hover — the plan is a level line at
-    // the body's height (obstacle avoidance only) and nothing in free air
-    // may push up (AirVertical down-only, legs out of reach: LegReach is the
-    // standing probe, so wherever the legs could act StandingState owns the
-    // body instead). Air control stays the state's baseline.
+    // the body's height (obstacle avoidance only) and the engine has no
+    // actuators in free air (LatticeTracker masks the air channels; the legs
+    // are out of reach: LegReach is the standing probe, so wherever they
+    // could act StandingState owns the body instead). Air control stays the
+    // state's baseline.
     public static FoldProfile Fall => new()
     {
         Fold = true, Hover = false, Rising = false,

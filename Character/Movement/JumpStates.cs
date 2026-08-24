@@ -77,7 +77,6 @@ public class JumpingState : MovementState
     // the tracker FoldProfile.Jump (hover off, u up-and-along-intent) and the
     // legs spend themselves along the rising path. The state lasts while the
     // button is held and the body rises; Falling owns the descent as before.
-    private static bool OnLattice => MovementConfig.Current.FoldEngine == "lattice";
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
@@ -213,7 +212,7 @@ public class RunningJumpState : MovementState
         // Lattice engine: the running jump IS JumpingState with dir held —
         // u tilts to (dir, −1)^ and the legs launch along it. No separate
         // impulse family (Plans/LATTICE_PATH_PLANNER.md §7.3).
-        if (MovementConfig.Current.FoldEngine == "lattice") return false;
+        if (OnLattice) return false;
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
         if (!ctx.TryGetGround(out var ground)) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
@@ -352,7 +351,13 @@ public class DoubleJumpingState : MovementState
 
         ctx.Body.AppliedForce = force;
 
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
+        // Lattice engine: the launch stays the state's own — an impulse and a
+        // hold force, since in free air there is nothing to push against and
+        // the engine allows no upward air force — and the tracker shapes the
+        // arc around terrain under the Jump profile (hover off, rising along
+        // intent). Unlike the ground jump, the legs play no part.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
+            OnLattice ? FoldProfile.Jump : FoldProfile.None);
     }
 }
 
@@ -428,7 +433,7 @@ public class CoveredJumpState : MovementState
     {
         // Lattice engine: JumpingState plans from under the slab; the slide-
         // then-launch and TryPickOpenDir dissolve into path + tracker (§7.3).
-        if (MovementConfig.Current.FoldEngine == "lattice") return false;
+        if (OnLattice) return false;
         if (!ctx.Input.Space) return false;            // held-jump (tapped-jump variant TBD)
         if (!ctx.TryGetGround(out var ground)) return false;
         if (!ctx.TryGetCeiling(out var ceiling)) return false;   // must actually be under something
