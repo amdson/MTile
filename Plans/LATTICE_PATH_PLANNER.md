@@ -334,49 +334,74 @@ Hard-restricting the first edge is tempting and wrong: a body descending fast
 has `v̂` outside the cone, and the restriction would strand the seed and fail the
 whole solve. A cost bias degrades gracefully.
 
-### 3.6 Time parameterization
+### 3.6 Progress along the path is the tracker's output, not an input
 
-The DP gives a polyline. The tracker needs `p_k` per tick. Parameterize by
-**arc length along the polyline** at the ramped target speed — reuse
-`FoldReference`'s walk-accel ramp (`FoldReference.cs:82-85`) verbatim, but let
-its output be distance-along-path rather than `x`:
+The DP gives a spatial polyline with no timing. **Timing is not precomputed** —
+it is what the tracker solves for. The state hands the tracker three things
+alongside the path:
 
-```
-s_k = <existing walk-accel ramp, as arc length>
-p_k = polyline.At(s_k)
-```
+- a **progress-speed target** along the path: `MaxWalkSpeed` (× modifiers) for
+  Standing, `CrouchMaxWalkSpeed` for Crouched, **unbounded — "as fast as
+  possible" — for jump states**;
+- its **channel list** — the ops the state may use (the todo's "list of
+  operations available based on the player movement state"): legs / drive /
+  tuck near the ground, air lateral / air vertical in flight, corner plant
+  where a convex corner is in reach — with caps. This is the *only* place the
+  ops list enters the engine;
+- a **deviation band** around the path (the `PathDeform` cap + slew of the
+  existing channel).
 
-Arc length, not `u`-projection, on purpose: on a steep segment the body's
-progress along `u` slows while its speed along the path holds — the honest
-"you slow down when you climb" — whereas projecting at full speed would demand
-2× walk speed up a slope-2 edge. Over 10 ticks at ≤ `MaxWalkSpeed` the ramp
-covers ≤ 17 px, so the tracker consumes only the first tile of a three-tile
-plan; the rest exists so the first tile is chosen with foresight (§2.1).
+The ref engine's walk-accel ramp (`FoldReference.cs:82-85`) is then just the
+fold's progress target, not a separate mechanism. A first draft of this plan
+precomputed `p_k` by walking arc length at the ramped walk speed; that would
+have made "as fast as possible" inexpressible and pinned jump timing to a
+schedule the path has no business setting.
 
 The `Grounded` / `FloorY` fields the downstream rows and channels read are
 filled from `floorBelow` at the nearest node (`Grounded` =
-`floorBelow ≤ SupportReach`, the same test `BallisticPredictor` uses). This is
-why the integration point in §1 matters:
-the piece the todo's algorithm does not produce is the piece the existing code
-already computes.
+`floorBelow ≤ SupportReach`, the same test `BallisticPredictor` uses).
 
-### 3.7 Tracking
+### 3.7 Tracking: one QP, parameterized by the state
 
-The todo asks for "a simplified version of the current QP." The honest
-simplification is that **the tracker gets dumber as the path gets smarter** —
-that is the whole point of moving intelligence into the path.
+The todo asks for "a simplified version of the current QP." The shape:
 
-- **v1: reuse `CorrectionProblem` exactly as `FoldReference` already does** —
-  one `PathDeform` position-offset channel with `SlewCap`, then servo tick-0.
-  Zero new solver code. One generalization: `FoldReference` locks the deform
-  axis to vertical (`FoldReference.cs:162`) so a deform can never cancel the
-  carry; with a general `u`, lock it to **`u⊥`** instead — the same doctrine
-  ("deform never brakes progress"), stated in the planner's frame.
-- Only if that proves insufficient, expand to a small per-tick least-squares
-  over the available force ops (`BuildFold`'s stack minus the redirect disc).
+```
+variables:   per-tick channel forces z_{c,k}, c ∈ state's channel list, k < H
+dynamics:    the existing lever model (CorrectionProblem — velocity-update /
+             force / position-offset levers, linearized about a rollout)
+objective:   − w_prog · progress(H)                 // arc length reached along the path
+             + w_dev  · Σ_k dist(p_k, path)²        // stay in the band
+             + Σ_c w_c Σ_k ‖z_{c,k}‖²               // effort
+constraints: channel caps and masks; progress rate ≤ progress-speed target
+```
 
-Do not write a new QP for v1. `CorrectionSolver` already does this, and the
-deform channel is already the right shape.
+That is the current `CorrectionProblem` with the soft progress rows pointed
+along the path tangent instead of along `x`, and a speed cap that is finite for
+fold states and absent for jumps. Nothing else is new: rows, hinge weights,
+fixed iteration counts, the `u⊥` deform lock (generalizing `FoldReference`'s
+vertical lock at `FoldReference.cs:162` — a deform never brakes progress)
+all carry over.
+
+**What falls out of this, and why it matters for §7:** a jump is not a special
+event the tracker has to be told about. A jump state's channel list includes a
+strong upward leg channel usable while `Grounded`; "as fast as possible" along
+a path that turns upward makes the QP spend that channel exactly when the path
+rises (scenario 3: after the sideways segment, not before), and along a path
+that stays low it makes the QP *not* spend it (scenario 2: the body never gets
+the momentum the lip would have to cancel). Launch timing and launch height
+emerge from the solve. The state fires nothing bespoke and reads nothing back.
+
+The consequence for `JumpStates.cs` is real and should be said plainly: the
+jump's impulse + hold-time physics becomes a channel with a cap, and jump
+height in open air is then `cap × grounded ticks` along a straight-up path —
+i.e. the same jump, produced by the tracker. That is a retune, not a
+behaviour loss, and it is the price of one engine.
+
+- **v1 for the fold states** is still `FoldReference`'s `PathDeform` + servo
+  instance of this QP, unchanged.
+- **v1 for jump states** needs the progress-along-tangent objective and the
+  unbounded speed target — the one genuinely new piece of solver code in the
+  plan.
 
 ### 3.8 Debug export
 
@@ -590,8 +615,8 @@ at ~31 px, so a 2-high (32 px) tunnel fits standing by ~1 px.
 | | verdict | why |
 |---|---|---|
 | **1** corridor | **yes** | Admissibility forces the path under lips and over blocks; hover cost pays for the deviation; the far-band goal makes "stop" not an option. No state change to duck — crouch is reference shaping over the same polygon. Needs the cone to admit slope ≈ 1 (the C-obstacle bevels make block corners 45° ramps). Tracker is the ref engine's, which already does this. |
-| **2** tunnel entry | **no** | (a) §4.7 keeps the launched guard, so the engine does not run mid-jump. (b) With the guard lifted the *plan* is right — `u = +x`, hover off, admissibility keeps the path under the lip and the far band inside the tunnel pulls it in low — but the body arrives with jump momentum the velocity-free path cannot see, and the v1 tracker has no mid-air authority to cancel it (air-vertical 300 px/s²; tuck and redirect are near-ground only). |
-| **3** covered jump | **no** | With `u = up`, `cos θ > 0` admits only rising edges; a sideways shuffle is perpendicular to `u` and a shuffle-while-settling is *backward*. Under a 2-high slab there is ~1 px of headroom, so no diagonal fits either. **The DAG cannot express the motion** unless `u` is tilted to the exit side (`u` = up-right makes `(1,0)` then `(0,−1)` legal) — and picking that side is exactly what `CoveredJumpState.TryPickOpenDir` decides today. The launch is also a jump impulse, which the fold tracker cannot emit. |
+| **2** tunnel entry | **no** | (a) §4.7 keeps the launched guard, so the engine does not run mid-jump. (b) With the guard lifted the *plan* is right — `u = +x`, hover off, admissibility keeps the path under the lip and the far band inside the tunnel pulls it in low — but the jump impulse is fired by the state today, not chosen by a tracker, so the body arrives with momentum nothing planned for and no mid-air channel can cancel (air-vertical 300 px/s²; tuck and redirect are near-ground only). |
+| **3** covered jump | **no** | With `u = up`, `cos θ > 0` admits only rising edges; a sideways shuffle is perpendicular to `u` and a shuffle-while-settling is *backward*. Under a 2-high slab there is ~1 px of headroom, so no diagonal fits either. **The DAG cannot express the motion** unless `u` is tilted to the exit side (`u` = up-right makes `(1,0)` then `(0,−1)` legal) — and picking that side is exactly what `CoveredJumpState.TryPickOpenDir` decides today. The launch is also a bespoke impulse today, so even with the right path nothing would time it to the path's turn. |
 
 The finding is that **the solve is uniform; the surrounding contract is not.**
 What differs per scenario is (i) how `u` is chosen, (ii) whether hover is on,
@@ -611,16 +636,21 @@ through the same solve:
    `u` = up-left and up-right and take the cheaper far-band cost — ~5 µs each,
    and it replaces `TryPickOpenDir` with the same machinery every other case
    uses.
-3. **Jump states consume the path.** Two discrete decisions a path informs but
-   a continuous tracker cannot make: *when* to launch (scenario 3: drive along
-   the path while its first segment is ground-level, fire when it turns up —
-   `CoveredJumpState` with the path replacing its bespoke slide) and *how hard*
-   (scenario 2: size the impulse to the path's apex so the body never has the
-   momentum the lip would have to cancel). The fold servo stays the tracker
-   for supported motion; jumps are impulse decisions, and the path's job is to
-   inform them.
+3. **Jump states own a solve, same as fold states.** A jump state generates
+   the path with its own parameters (`u` from intent, hover off, its window)
+   and runs the same tracker with its own channel list and an unbounded
+   progress target (§3.6–3.7). Launch timing and height are not decisions the
+   state makes or reads back — they emerge from "as fast as possible" along a
+   path that turns up (scenario 3) or stays low (scenario 2). The jump impulse
+   becomes a leg channel with a cap. `CoveredJumpState`'s slide-then-launch
+   and `TryPickOpenDir` both dissolve into path + tracker.
+
+   An earlier draft of this section had jump states *reading* the path to time
+   and size a bespoke impulse. That was the wrong split: it kept two
+   mechanisms where one suffices, and it made the state responsible for a
+   dynamics judgment the QP already makes. Withdrawn.
 
 These are not in the v1 scope of §5 as written. If the three scenarios are the
 acceptance bar — and they are a good one — then §4.7's scope and §5's phasing
-need to be revised to include them, and (3) is the part that touches the
-movement state machine rather than the corrector.
+need to be revised to include them. (1) and (2) are corrector-side; (3) is the
+`JumpStates.cs` retune of §3.7.
