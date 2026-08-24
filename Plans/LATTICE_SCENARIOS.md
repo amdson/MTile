@@ -165,6 +165,18 @@ to stop short of the far band", which is a normal outcome in front of a
 step while the climb is not yet worth it — the engine test that asserted
 "no bonks on an open course" encoded the far-band goal and was relaxed.
 
+**Runtime, first cut (same day): the argmax's exact prune.** A node's value
+is `w_prog·(p − p_seed) − dp ≤ w_prog·L − dp`, so once `dp > w_prog·L` (392)
+it can never beat the seed and the DP stops relaxing from it. Same result
+on every scenario (all printed numbers bit-identical); flat-ground solve
+**224 → 109 µs** (Release, warmed). The tunnel step stays ~109 µs because
+that window is mostly blocked and the tracker's three passes dominate. Next
+on this axis: derive the window's height above the seed from
+`w_prog·L / RiseCost` (65 px standing, 13 crouched) so the dense stamp /
+sweep / flood stop covering sky no path can afford — and only then is a
+steeper lattice (triangular r=2: 12 edges for the ±3 table's 16 at ≈ the
+same angular resolution, but a 79° max edge) affordable.
+
 ### Seventh pass (2026-08-24) — the argmax goal — superseded
 
 **Goal rule changed** (`LatticePathPlanner`): the path ends at the reachable
