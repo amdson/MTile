@@ -4,12 +4,14 @@ Status: **plan only — nothing built.** Written 2026-08-23 against `main` @ cc6
 
 A short-horizon, configuration-space path planner to replace the hand-written
 reference-generation rules in the stand fold. The path is found by dynamic
-programming over a spatial lattice ordered into shells by progress along the
-requested direction; a small QP then picks forces to track it.
+programming over a world-aligned spatial lattice whose edges are filtered by a
+cone around the requested direction — which makes the graph a DAG, ordered by
+progress along that direction; a small QP then picks forces to track it.
 
 The trade the design accepts: **the path search knows geometry, not dynamics.**
 It does not carry velocity, does not model per-point force availability, and
-cannot represent a trajectory that doubles back or goes vertical. In exchange it
+cannot represent a trajectory that doubles back against the requested direction.
+In exchange it
 is a dense fixed-size DP — deterministic, allocation-free, and roughly three
 orders of magnitude cheaper than the state-space search prototype.
 
@@ -36,7 +38,8 @@ The **rollout** block — 40 lines — is the hand-written reference generator:
 
 Every one of those bullets is a rule the lattice DP subsumes: the climb band and
 descent-rate limit become a steepness bound on edges, wall classification becomes
-plain admissibility, and the give-up becomes "no path exists through this shell."
+plain admissibility, and the give-up becomes "no admissible path reaches the
+far side of the window."
 
 **So the change is: swap the rollout for the DP, keep rows + deform + servo
 unchanged.** Rows, the `PathDeform` position-offset channel, the vertical axis
@@ -89,11 +92,11 @@ Real numbers from the codebase:
 
 The ref rollout's x-ramp is clamped at `MaxWalkSpeed` (`FoldReference.cs:84`),
 so over the 10-tick tracking horizon the body advances at most **16.7 px — one
-tile.** A lattice sized to the tracking horizon would be five shells wide and
+tile.** A lattice sized to the tracking horizon would be five cells wide and
 could not see a two-tile block coming.
 
-That is not a problem, because the path is a *height field over x*: it can be
-planned further ahead than the servo will ever track. So:
+That is not a problem, because the path is spatial: it can be planned further
+ahead than the servo will ever track. So:
 
 - **Plan window** (spatial, a config knob): `LatticeLookaheadTiles` ahead of the
   body along `dir`, ± `LatticeBandTiles` vertically around the current support
@@ -115,8 +118,8 @@ this plan argued for was built on a bad derivation and is withdrawn (see §3.3).
 `CObstacleTemplate.TopSurfaceRy`), so the bitmap resolves every feature the
 hover reference can see.
 
-At 3 tiles × ±2.5 tiles × 5×: **15 shells × 50 rows = 750 nodes**, ~5 edges
-each (§3.3) ≈ **3,750 transitions**. Four tiles ahead is 1,000 nodes. Both well
+At 3 tiles × ±2.5 tiles × 5×: **15 × 50 = 750 nodes**, ~7 edges each (§3.3)
+≈ **5,000 transitions**. Four tiles ahead is 1,000 nodes. Both well
 inside the todo's 5,000-point budget, and a dense-array sweep at that size
 should land in the **single-digit µs** — a small fraction of the current 25–184
 µs sim step rather than a multiple of it.
@@ -129,19 +132,26 @@ committing to any of them.
 
 ## 3. Concrete design
 
-### 3.1 Frame and shells
+### 3.1 Lattice, direction, and ordering
 
-- **Progress axis** `u` = the requested direction, in practice `±x` from
-  `ctx.Intent.CurrentHorizontal`. Shells are columns perpendicular to `u`.
-- Shell `s ∈ [0, S]`, `S = LatticeLookaheadTiles · TileSize / cell` ≈ 15 at
-  the §2.2 settings.
-- Within a shell, rows index `j` over the vertical band (~50 of them).
-- The graph is a DAG by construction: **every edge advances exactly one shell.**
-  Acyclicity is free; no topological sort needed, and the DP is a single sweep
-  `s = 0 … S`.
+- **The lattice is world-aligned** (tile-aligned, cell = `TileSize / 5`), not
+  aligned to the requested direction. This is what makes the todo's "hexgrid
+  later" a one-table change (§3.3) and what lets `u` be any direction.
+- **`u` is a unit 2D direction supplied by the state**, not `±x`. Standing /
+  crouched pass `(±1, 0)`; a jump state would pass up or up-diagonal; a drop
+  passes down. The planner does not know what a state is, only its `u`.
+- **Ordering is by projection onto `u`**: `p(node) = dot(cellCenter, u)`. Every
+  admitted edge strictly increases `p` (§3.3), so the graph is a DAG and a
+  single pass over nodes sorted by `p` (index tie-break, for determinism) is a
+  valid DP order. This is the todo's "shells by depth in the DAG" — projection
+  bands are the shells, and no explicit topological sort is needed.
 
-Because every edge advances `u`, the result is a **height field `y(x)`, not a
-general curve.** See §4.7 — this is the load-bearing limitation.
+The path is **monotone along `u` and otherwise free**: with `u = +x` it can
+rise steeply at a wall face and then run along the top; with `u` diagonal it
+can alternate up and across. It is *not* a height field `y(x)` — the first
+draft of this plan had that constraint by carrying the ref engine's `y = f(x)`
+rollout shape into the lattice, and it was wrong: it forced a wall climb to
+start a tile early at a fixed slope, and it could not express a jump at all.
 
 ### 3.2 Precomputation (once per solve, not per node)
 
@@ -153,106 +163,129 @@ Two arrays, both dense and pooled in `CorrectorScratch`:
    The template's `Reach` is ~20 px, so the footprint is ~40 px across: at 3.2 px
    cells that is ~13 × 13 ≈ 170 marks per tile, ~40 tiles in the window → ~7k
    marks. Cheap, and it is the *correct* use of the template.
-2. **Floor envelope per shell.** One `AmbientCorrector.FloorEnvelope` call per
-   *column* (~15 calls), not per node.
+2. **Hover reference per lattice column.** One `AmbientCorrector.FloorEnvelope`
+   call per x-column of the window (~15 calls), not per node. The hover term
+   (§3.4) reads `env[column(node)]`. This stays x-indexed whatever `u` is —
+   floors are floors.
 
 Getting this wrong is the difference between "fast" and "unusable":
 `FloorEnvelope` walks facets over gathered tiles, and calling it per node — which
 is what the state-space prototype does — is a large part of why it costs 38 ms.
 
-### 3.3 Edges
+### 3.3 Edges: a neighborhood table filtered by a cone
 
-From `(s, j)` to `(s+1, j')`, with `|j' − j| ≤ K`. `K` is a **geometric** slope
-bound — a config knob, not a derived quantity — and it is the same constraint the
-todo phrases as a cosine threshold on the requested direction (§4.5). `K = 2`
-admits slopes up to 2 (≈ 63° off horizontal) per edge, which is enough to hop a
-one-tile block within a tile of travel; `K = 1` would cap the path at 45°.
+An edge is a lattice offset `(dx, dy)` from a fixed **neighborhood table**,
+admitted iff
 
-**The first draft of this plan derived `K` from `SpringMaxRiseSpeed` and the
-current `vx`, and that was wrong on three counts**, recorded here so it is not
-re-derived:
+```
+dot( normalize(dx, dy), u )  ≥  cos θ,     with  cos θ > 0
+```
 
-1. It floored `rise-per-shell / cellH` to an integer per edge, which reads
-   "less than one cell of rise per shell" as "cannot climb." Slope is a property
-   of the *path*, not of one edge — 0.8 cells per shell is simply Δj = +1 on
-   four shells out of five.
-2. `SpringMaxRiseSpeed` (80 px/s) is the launched-vs-supported *classification
-   gate* — Standing's entry test, `BallisticPredictor`'s grounded test — which
-   the ref engine also adopted as a self-imposed cap on its reference. It is not
-   the legs' capacity (`FoldLegForce` is 6000 px/s²), and reusing the ref
-   engine's honesty rules is exactly what the DP is meant to stop doing.
-3. It depended on the current `vx`, which drops during a step-up (unilateral
-   drive, wall contact) — so the bound would have been wrong precisely at the
-   moment it mattered.
+`cos θ` is the todo's cosine threshold and is a config knob. **`cos θ > 0` is
+structural, not tuning:** it is what makes every edge strictly increase `p` and
+therefore what makes the graph a DAG. Admit a perpendicular edge (`cos θ ≤ 0`)
+and a vertical up/down pair forms a cycle; the fix would be a step-indexed DP
+(`(node, depth)` states, ~20× the work) and it is not worth it — see the wall
+argument below.
 
-The todo's contract is that the path carries no velocity, and this plan now
-honours it: the only velocity term anywhere is the seed bias of §3.5. Whether
-the legs can actually deliver a given slope is not the planner's question — it
-is answered after the fact by the tracking-residual give-up of §4.3, which is
-the mechanism that already exists for it.
+- **Neighborhood:** the primitive offsets with `|dx|, |dy| ≤ 2` (gcd = 1, so no
+  offset is a multiple of a shorter one): `(±1,0) (0,±1) (±1,±1) (±1,±2)
+  (±2,±1)` — 16 offsets. With `u = +x` and `cos θ = 0.3` the cone admits
+  `(1,0) (1,±1) (1,±2) (2,±1)` = **7 edges per node**, steepest slope 2
+  (≈ 63°). Filtering is done once per solve into a small admitted-offset list;
+  the DP loop indexes that list.
+- **Tunneling:** an offset longer than one cell can jump a blocked cell. Every
+  admitted offset carries a precomputed list of the cells its segment crosses
+  (supercover; ≤ 3 cells at radius 2), and an edge is dropped if any is
+  blocked. Cheap and exact at this radius.
+- **Hex later:** only the offset table and the cell→center map change. Nothing
+  else in the planner knows the lattice is square.
 
-Edges per node = `2K + 1` ≈ 5. Asymmetry (steeper descents than climbs) is a
-cost-weight matter (§3.4), not an admissibility one.
+**Why slope 2 is enough for the fold's regime.** A pure-vertical segment at a
+wall face is the one thing `cos θ > 0` cannot express. It is not needed: a
+1-tile ledge's C-obstacle corner is already a bevel ramp (`CObstacleTemplate`),
+so the true boundary near a lip is ≈ 45°, not vertical; and a 2-tile wall is
+beyond `FoldClimbReachUp` (20 px < 32) — the fold gives up on it *today* and
+hands it to the maneuver family (vault / mantle), which this planner does not
+replace (§4.7). If playtests want steeper, widen the table to radius 3
+(`(1,±3)`, slope 3 ≈ 72°) before touching `cos θ`.
+
+**What is deliberately absent:** any velocity-derived slope bound. The first
+draft derived one from `SpringMaxRiseSpeed` and the current `vx`; that was wrong
+— `SpringMaxRiseSpeed` is the launched/supported classification gate, not leg
+capacity, and `vx` collapses during the very step-up the bound would govern.
+The todo's contract is that the path carries no velocity, and the only velocity
+term anywhere is the seed bias of §3.5. Whether the legs can deliver a slope is
+answered after the fact by the tracking-residual give-up of §4.3.
 
 ### 3.4 Cost
 
 | term | form | notes |
 |---|---|---|
-| **(C) hover** | `w_hover · (y_j − (env_s − hoverOffset))²` | per node; `env_s` from the column cache |
-| **(D) admissible** | hard prune | blocked cell ⇒ no node |
-| **(B) steepness** | `w_steep · Δj²` | per edge, **needs no state** |
-| **(A) direction** | implicit | shell monotonicity already forbids backward motion |
+| **(C) hover** | `w_hover · (y_node − (env[col] − hoverOffset))²` | per node, from the column cache; `w_hover` should fade with `|u_y|` — a jump's `u` has no business being pulled to the floor |
+| **(D) admissible** | hard prune | blocked cell, or a crossed cell blocked ⇒ no edge |
+| **(B) steepness** | `w_steep · (1 − dot(ô, u))` | per edge: cost rises with angle off `u`; may be asymmetric (cheaper below `u` than above — descending is free, climbing is legs) |
+| **(A) direction** | implicit | the cone + DAG ordering already forbid backward motion |
+| **length** | `w_len · ‖(dx, dy)‖` | per edge; keeps the DP from preferring long diagonals for free |
 
-Note what is *not* here: a curvature term. See §4.4.
-
-The DP is the textbook sweep:
+Note what is *not* here: a curvature term (§4.4).
 
 ```
-dp[0][j] = seed cost                        // §3.5
-for s in 0..S-1:
-  for j in shell s:
-    for j' in [j-K, j+K]:
-      if blocked[s+1][j']: continue
-      c = dp[s][j] + w_steep(Δj)·Δj² + w_hover·(y_j' - ref_{s+1})²   // w_steep may differ for Δj > 0 vs < 0
-      if c < dp[s+1][j']: dp[s+1][j'] = c; parent[s+1][j'] = j
+sort nodes by p = dot(center, u)          // once per solve; deterministic tie-break
+dp[*] = ∞;  dp[seed] = 0
+for n in sorted order:
+  if dp[n] == ∞ or blocked[n]: continue
+  for o in admittedOffsets:               // §3.3, ~7
+    m = n + o
+    if outOfWindow(m) or blocked[m] or crossesBlocked(n, o): continue
+    c = dp[n] + w_steep·(1 − dot(ô, u)) + w_len·|o| + w_hover·(y_m − ref[col(m)])²
+    if c < dp[m]: dp[m] = c; parent[m] = n
 ```
 
-~750 nodes × 5 edges ≈ **3,750 transitions** at the §2.2 settings. Dense float
-arrays, almost no branching — this should land in the **single-digit µs**, i.e. a
-small fraction of the current 25–184 µs sim step rather than a multiple of it.
+Goal: the minimum-cost node among those in the **far band** of the window
+(`p ≥ p_max − cell`), so the path is rewarded for progress without a per-node
+progress term. If the far band is unreachable, take the reachable node of
+greatest `p` — that is the honest bonk (§4.3).
+
+~750 nodes × 7 edges ≈ **5,000 transitions**. Dense arrays, almost no
+branching — single-digit µs, a small fraction of the current 25–184 µs sim step.
 
 ### 3.5 Seeding with the current velocity
 
 The todo notes this is necessary, and it is the one place a pure spatial DP has
 no natural answer. The workable version:
 
-- Seed shell 0 at the body's actual cell with cost 0.
+- Seed at the body's actual cell with cost 0.
 - **Bias, do not hard-restrict,** the first edge toward the current velocity:
-  `dp[1][j'] += w_seed · (Δj − Δj_vel)²`, where `Δj_vel` is the slope the body's
-  present velocity implies over one shell.
+  `+ w_seed · (1 − dot(ô, v̂))` on edges out of the seed only.
 
-Hard-restricting the first edge is tempting and wrong: a body descending fast has
-`Δj_vel` outside `K`, and the restriction would empty shell 1 and fail the whole
-solve. A quadratic bias degrades gracefully.
+Hard-restricting the first edge is tempting and wrong: a body descending fast
+has `v̂` outside the cone, and the restriction would strand the seed and fail the
+whole solve. A cost bias degrades gracefully.
 
-### 3.6 Time parameterization — already written
+### 3.6 Time parameterization
 
-The DP gives `y(x)`. The tracker needs `p_k` per tick. `FoldReference`'s rollout
-already computes `x_k` per tick from the walk-accel ramp
-(`FoldReference.cs:82-85`), and that block stays. So:
+The DP gives a polyline. The tracker needs `p_k` per tick. Parameterize by
+**arc length along the polyline** at the ramped target speed — reuse
+`FoldReference`'s walk-accel ramp (`FoldReference.cs:82-85`) verbatim, but let
+its output be distance-along-path rather than `x`:
 
 ```
-x_k = <existing walk-accel ramp>
-y_k = latticePath(x_k)          // linear interp between shells
+s_k = <existing walk-accel ramp, as arc length>
+p_k = polyline.At(s_k)
 ```
 
-That is the whole time parameterization. Over 10 ticks at ≤ `MaxWalkSpeed` the
-ramp covers ≤ 17 px, so the tracker only ever consumes the first tile of a
-three-tile plan; the rest exists so the first tile is chosen with foresight
-(§2.1). The `Grounded` / `FloorY` fields the
-downstream rows and channels read are filled from the column caches. **This is
-why the integration point in §1 matters so much: the piece the todo's algorithm
-does not produce is the piece the existing code already computes.**
+Arc length, not `u`-projection, on purpose: on a steep segment the body's
+progress along `u` slows while its speed along the path holds — the honest
+"you slow down when you climb" — whereas projecting at full speed would demand
+2× walk speed up a slope-2 edge. Over 10 ticks at ≤ `MaxWalkSpeed` the ramp
+covers ≤ 17 px, so the tracker consumes only the first tile of a three-tile
+plan; the rest exists so the first tile is chosen with foresight (§2.1).
+
+The `Grounded` / `FloorY` fields the downstream rows and channels read are
+filled from the column caches. This is why the integration point in §1 matters:
+the piece the todo's algorithm does not produce is the piece the existing code
+already computes.
 
 ### 3.7 Tracking
 
@@ -261,10 +294,13 @@ simplification is that **the tracker gets dumber as the path gets smarter** —
 that is the whole point of moving intelligence into the path.
 
 - **v1: reuse `CorrectionProblem` exactly as `FoldReference` already does** —
-  one `PathDeform` position-offset channel, vertical axis lock, `SlewCap`, then
-  servo tick-0. Zero new solver code.
-- Only if that proves insufficient, expand to a small per-tick least-squares over
-  the available force ops (`BuildFold`'s stack minus the redirect disc).
+  one `PathDeform` position-offset channel with `SlewCap`, then servo tick-0.
+  Zero new solver code. One generalization: `FoldReference` locks the deform
+  axis to vertical (`FoldReference.cs:162`) so a deform can never cancel the
+  carry; with a general `u`, lock it to **`u⊥`** instead — the same doctrine
+  ("deform never brakes progress"), stated in the planner's frame.
+- Only if that proves insufficient, expand to a small per-tick least-squares
+  over the available force ops (`BuildFold`'s stack minus the redirect disc).
 
 Do not write a new QP for v1. `CorrectionSolver` already does this, and the
 deform channel is already the right shape.
@@ -275,8 +311,9 @@ deform channel is already the right shape.
 / `SolvedTrajectory` behind a `CaptureTrajectories` gate, and `Game1` already
 draws oracle paths in the freeze-frame inspector. Publish the lattice path into
 the reference buffer and it is drawn for free. Worth adding beyond that: the
-per-shell chosen `j` and the blocked bitmap as an overlay — the bitmap is where
-the resolution bugs will show up.
+blocked bitmap and the admitted-offset cone as an overlay — the bitmap is where
+the resolution bugs will show up, and the cone is where the "why won't it climb
+this" questions get answered.
 
 ---
 
@@ -304,9 +341,10 @@ behind that comment), elective climbs refuse wholesale when undeliverable
 
 A planner that routes around obstacles violates the spirit of all of it.
 
-- The **x half is safe for free**: shell monotonicity means the path can never
-  brake or reverse. That is a stronger guarantee than the unilateral channels
-  give today, and it is a genuine argument *for* this design.
+- The **along-`u` half is safe for free**: DAG ordering means the path can
+  never brake or reverse against intent. That is a stronger guarantee than the
+  unilateral channels give today, and it is a genuine argument *for* this
+  design.
 - The **y half is bought with lookahead.** The dial is `LatticeLookaheadTiles`
   (§2.1), not the tick count: the servo only ever tracks the first tile, but the
   path chooses that tile knowing what is three tiles out. At three tiles a routed
@@ -333,16 +371,16 @@ polish, it is what keeps walls feeling solid.
 
 ### 4.4 Skip direction state in v1
 
-Adding "incoming edge direction" to the node state to penalize curvature is a
-**5× state blowup** (one state per `Δj` value at `K = 2`): ~750 nodes → ~3,750
-states, ~3,750 transitions → ~19,000. That likely lands at 30–80 µs/solve, and
-with two players × a rollback window of 8 that is on the order of 1 ms/frame on
-top of the current 250 µs rollback frame. Real, not fatal, but not free either.
+Adding "incoming edge offset" to the node state to penalize curvature is a
+**~7× state blowup** (one state per admitted offset): ~750 nodes → ~5,000
+states, ~5,000 transitions → ~37,000. That likely lands at 50–100 µs/solve, and
+with two players × a rollback window of 8 that is on the order of 1.5 ms/frame
+on top of the current 250 µs rollback frame. Real, not fatal, but not free.
 
 You probably do not need it. Two things already produce smooth paths:
 
-1. the `Δj²` steepness penalty, which needs no state and punishes exactly the
-   large-amplitude zigzags that look bad;
+1. the per-edge steepness penalty `w_steep · (1 − dot(ô, u))`, which needs no
+   state and punishes exactly the large-amplitude zigzags that look bad;
 2. the reference being tracked is the **bevel-smoothed** floor envelope, so the
    attractor is already smooth.
 
@@ -350,25 +388,25 @@ You probably do not need it. Two things already produce smooth paths:
 only if visible zigzag survives.** If it does, note that the cheaper fix is
 usually a post-hoc smoothing pass over the recovered path, not a bigger DP.
 
-### 4.5 The cosine threshold and the slope bound are the same knob — keep one
+### 4.5 The cone is doing two jobs; keep them apart in your head
 
-The todo proposes filtering edges by cosine distance from the requested
-direction. On a shell-ordered lattice that is exactly the per-edge `|Δj| ≤ K`
-bound of §3.3: a cone of half-angle θ about horizontal is `K = tan θ` in cells.
-Backward motion is already excluded by shell monotonicity, so the cone's only
-remaining job is the slope cap.
+`cos θ` (§3.3) is simultaneously (a) the thing that makes the graph a DAG
+(`cos θ > 0`, structural) and (b) the maximum steepness the path may take
+(tuning). Because (a) is a hard floor, the tuning range for (b) is narrow —
+roughly `0.3 … 0.7` at radius 2 — and most of the "how steep" question is really
+answered by the neighborhood radius and by `w_steep`, not by the cone. Do not
+expect to tune feel with `cos θ`; expect to tune it with `w_steep`.
 
-Keep the integer `K`; it is cheaper and it is what the DP loop actually indexes
-by. Note the cone must be loose — hopping a one-tile block at walk speed is
-45–60° off horizontal — so a "tight" cosine threshold in the todo's sense would
+The cone must also be looser than the todo's phrasing suggests: hopping a
+one-tile block at walk speed is 45–60° off horizontal, so a "tight" cone would
 forbid the hops the planner exists to find.
 
 ### 4.6 `dir == 0` has no progress axis
 
 The fold deliberately runs *unconditionally*, with no input gate, because hover
 must hold at rest — `AmbientCorrector`'s header calls out the `vx = 0` liveness
-deadlock this fixed. A direction-ordered lattice has no shells when there is no
-direction.
+deadlock this fixed. A direction-ordered lattice has no ordering when there is
+no direction.
 
 **Rule:** below a small target-speed threshold, skip the DP entirely and use a
 pure hover column (`y = env − hoverOffset` at the current x), tracked by the same
@@ -382,11 +420,13 @@ launched (`-vy > SpringMaxRiseSpeed`), plunging (`vy > MaxGroundEngageVnRel`),
 and unanchored (no floor within `SupportReach`) — falling back to the ballistic
 QP path. Keep every one of those.
 
-They are exactly the regimes where a velocity-blind height field is wrong: a fall
-is near-vertical (unrepresentable as `y(x)`), and a launch has momentum the path
-cannot see. **The planner owns the supported / near-support regime and nothing
-else.** That is not a temporary limitation to remove later; it is the scope that
-makes the algorithm sound.
+Not because the path cannot represent those motions — with a general `u` it
+can — but because in those regimes there is nothing for the hover term to track
+against and the body's momentum, which the path cannot see, dominates where it
+goes. **In v1 the planner owns the supported / near-support regime and nothing
+else.** Extending it to jump states (a `u` of up or up-diagonal, no hover term)
+is a plausible v2, and the direction-general design in §3 is what keeps that
+door open; it is not v1 scope.
 
 ### 4.8 Determinism — an improvement, but be deliberate
 
@@ -394,8 +434,8 @@ Requirements (`CLAUDE.md`'s sim rules): no sim-affecting mutable statics, no
 hardware polling, identical iteration order on restore, and — because the solve
 runs inside `Simulation.Step` — it is replayed on every rollback frame.
 
-A dense-array DP over fixed-size shells satisfies all of this naturally, with no
-allocation. Note that the existing `LatticePlanner` does **not**: it iterates
+A dense-array DP over a fixed-size window, with a deterministic node order,
+satisfies all of this naturally, with no allocation. Note that the existing `LatticePlanner` does **not**: it iterates
 `Dictionary.Values` (`frontier.AddRange(next.Values)`) and allocates 622 KB per
 solve. Same-build peers make that survivable today, but it is a genuine hazard
 and another reason not to evolve that file.
@@ -438,8 +478,8 @@ give-up's problem (§4.3).
 
 | phase | deliverable | gate |
 |---|---|---|
-| **0** | Lattice geometry: window, admissibility bitmap, per-shell envelope cache. Drawn in the freeze-frame inspector. No DP, no sim wiring. | bitmap visually matches terrain across a few shell/row resolutions |
-| **1** | The DP (no direction state) + path export. Oracle-only, run beside the LM/lattice oracles in `Game1`. | µs/solve measured in `MTile.Bench`; path looks sane over lips, corridors, 1- and 2-tile blocks at `K = 1` and `K = 2` |
+| **0** | Lattice geometry: window, admissibility bitmap, per-column envelope cache, admitted-offset cone. Drawn in the freeze-frame inspector. No DP, no sim wiring. | bitmap visually matches terrain at a few cell sizes; cone overlay matches `u` |
+| **1** | The DP (no direction state) + path export. Oracle-only, run beside the LM/lattice oracles in `Game1`. | µs/solve measured in `MTile.Bench`; path looks sane over lips, corridors, 1- and 2-tile blocks at radius 2 and 3 |
 | **2** | Wire as `FoldEngine = "lattice"`: replace `FoldReference`'s rollout block, keep rows + deform + servo. Default stays `qp`. | `FoldRefEngineTests`-style scenario tests pass for the new engine |
 | **3** | Weight tuning by playtest; the tracking-residual give-up of §4.3. | walls feel solid; no bobbing at rest; no visible autopilot |
 | **4** | *Only if needed:* direction state for curvature. Re-measure. | zigzag actually visible in the export first |
