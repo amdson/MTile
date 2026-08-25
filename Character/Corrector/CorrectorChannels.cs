@@ -59,6 +59,12 @@ public static class CorrectorChannels
         float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
         float CornerForce = cfg.FoldCornerForce, TuckForce = cfg.FoldTuckForce;
         float VPushMax = cfg.FoldLegPushFadeSpeed;
+        // The rise ceiling every lifting channel obeys: the fastest rise a
+        // DELIBERATE jump can author (ground, running or double — derived from
+        // the jump tuning, not a knob). FoldLegPushFadeSpeed is an authority
+        // fade, not a speed limit; at 400 it never binds, so a corner-served
+        // channel could hand a jump rise no jump could produce.
+        float RiseMax = cfg.MaxAssistRiseSpeed;
         Span<bool> near = stackalloc bool[BallisticPredictor.MaxHorizon];
         for (int k = 0; k < n; k++)
         {
@@ -176,7 +182,8 @@ public static class CorrectorChannels
         ch[0] = new ChannelDef {   // LegServo: strong, up-only, near ground
             Id = CorrectionChannel.LegServo,
             Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
-            Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], ActiveMask = s.ChannelMask[0] };
+            Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], RiseCap = RiseMax,
+            ActiveMask = s.ChannelMask[0] };
         ch[1] = new ChannelDef {   // Drive: along intent only, capped, near ground
             Id = CorrectionChannel.Drive,
             Lever = LeverKind.Force, Weight = 0.05f, AxisOnly = true, Unilateral = dir != 0,
@@ -185,7 +192,7 @@ public static class CorrectorChannels
             Id = CorrectionChannel.CornerAssist,
             Lever = LeverKind.Force, Weight = 0.5f, AxisOnly = true, Unilateral = true,
             Axis = new Vector2(0f, -1f), Cap = CornerForce, ActiveMask = s.ChannelMask[2],
-            SkipSoftHorizontal = true };
+            RiseCap = RiseMax, SkipSoftHorizontal = true };
         ch[3] = new ChannelDef {   // Redirect: Thales disc, NEAR-GROUND, free.
                                    // Serves hard rows and soft VERTICAL references
                                    // (ducks, catches); never the soft x-progress
@@ -196,6 +203,11 @@ public static class CorrectorChannels
             Id = CorrectionChannel.Redirect,
             Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon, Redirect = true,
             Cap = cfg.FoldRedirectForce,   // a bounded push, not an instant halt
+            // The corner force obeys the launch's ceiling. The disc adds no
+            // energy, but at a corner it converts forward speed into rise —
+            // and unbounded that outran the legs' own ceiling, so a jump near
+            // a corner picked up rise no jump can author.
+            RiseCap = RiseMax,
             ActiveMask = s.ChannelMask[3], SkipSoftHorizontal = true, PlantServes = true };
         ch[4] = new ChannelDef {   // Tuck: down-only, near ground (legs pull down)
             Id = CorrectionChannel.Tuck,
@@ -226,7 +238,8 @@ public static class CorrectorChannels
         s.Problem.Channels[slot] = new ChannelDef {
             Id = CorrectionChannel.CornerPlant,
             Lever = LeverKind.Force, Weight = 0.05f,
-            Cap = cap, ActiveMask = s.ChannelMask[slot] };
+            Cap = cap, RiseCap = MovementConfig.Current.MaxAssistRiseSpeed,
+            ActiveMask = s.ChannelMask[slot] };
         return slot + 1;
     }
 

@@ -320,6 +320,59 @@ that a plan hugging terrain is a walk however brief the air is — the
 planner knows it (each path node carries `Grounded`) — but it would also
 brake a real jump's carry on landing, so it is a feel decision.
 
+**The rise ceiling (fourteenth pass).** Reported from play: rapid extra
+movement during a jump taken near a corner — "the jump gets access to a
+corner force, which is fine, but allows it to go faster than the maximum
+jump speed I'd like to enforce."
+
+Measured on a pillar course, per channel, against `MaxAssistRiseSpeed`
+(208 — a *derived* value: the fastest rise a deliberate ground, running
+or double jump can author, so not a new knob):
+
+```
+[  2] JumpingState     rise=256.6  LegServo=(0,-2669)  Redirect=(-780,0)
+[243] WallJumpingState rise=308.4  LegServo=(0,-1958)  Redirect=(506,21)
+[247] WallJumpingState rise=335.1
+--- ref ---   peaks at 220
+```
+
+The named `CornerAssist` channel is inert (0 everywhere) and
+`CornerPlant` is off (`FoldCornerPlantForce` 0); the corner force that
+actually fires is the **redirect disc**, and beside it the leg servo. The
+disc adds no energy — but at a corner it CONVERTS forward speed into
+rise, and nothing bounded that conversion. The legs are bounded, but by
+`FoldLegPushFadeSpeed` (400), an authority fade that sits so far above
+the jump ceiling it never binds.
+
+`ChannelDef.RiseCap` is the fix — the vertical twin of the `ForwardCap`
+the disc already had: a channel may not leave the body rising faster than
+`max(coast rise, cap)`, so it can keep a rise the body brought but never
+grow one. Set from `MaxAssistRiseSpeed` on the disc, `CornerAssist`,
+`CornerPlant` and the leg servo.
+
+One subtlety cost most of the pass: enforcing it in `Project` alone did
+nothing. `ExactSweeps` — the exact coordinate solve — REPLACES the
+projection's answer for every axis channel, so the ceiling has to be part
+of that sweep's box (`RiseHeadroom`), not a projection touch-up. That is
+the general lesson: a bound that lives only in `Project` is invisible to
+the exact sweep.
+
+| jump near a corner | before | **now** | `ref` |
+|---|---|---|---|
+| ground jump peak rise | 256.6 | **215.4** | 220 |
+| wall jump peak rise | 335.1 | **gone** (never selected) | 220 |
+| flat jump (control) | 200 | 200 | 220 |
+
+Row 18 encodes the law against the ledger — no corrector channel may lift
+a body already above the ceiling — and is `Skip`ped on the one case still
+open: a **double jump** over a pillar still draws ~4300 px/s² of leg lift
+while rising at 210. The legs re-arm because the pillar top is within
+`LegReach` of a body that is leaving it, and the double jump's own
+authored hold force (which `MaxAssistRiseSpeed` does not count — its
+formula takes `-DoubleJumpVelocity` alone) carries the peak to 300.
+Whether that is a leg-mask question (support you are leaving is not
+support) or a `MaxAssistRiseSpeed` definition question is undecided.
+
 **The maneuver states come back (thirteenth pass).** Reported from
 play: "a lot of the movement states are just never activating, like the
 two block arc." True, and measured — a ledge sweep at 1/2/3 tiles, per

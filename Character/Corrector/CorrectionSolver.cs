@@ -46,6 +46,15 @@ public struct ChannelDef
     // it arrived with but the deflector won't grow it past the cap. 0 = off.
     public Vector2   ForwardAxis;
     public float     ForwardCap;
+    // Rise bound — ForwardCap's vertical twin, and the SAME ceiling the leg
+    // servo's own cap fades out at (FoldLegPushFadeSpeed). A channel may not
+    // leave the body rising faster than max(coast rise, RiseCap). The legs
+    // obey this by construction (their cap tapers to zero at the ceiling), so
+    // without it a corner-served channel outranks the launch it rides on: the
+    // disc adds no energy, but it CONVERTS forward speed into rise, and an
+    // unbounded conversion at a corner sent a jump up faster than any jump
+    // should go. 0 = off.
+    public float     RiseCap;
     // May serve PlantOnly rows (ambient wall faces near a convex corner) —
     // true only on the corner-plant redirect; every other channel takes no
     // hinge gradient from them (walls recruit nothing but a hand-plant).
@@ -438,6 +447,12 @@ public static class CorrectionSolver
             if (!ch.AxisOnly || ch.Lever == LeverKind.PositionOffset || !Active(ch, k)) continue;
             int i = c * H + k;
             float cap = CapAt(ch, k);
+            // The rise ceiling is part of the admissible set, not a
+            // post-projection touch-up: this sweep REPLACES whatever Project
+            // produced for an axis channel, so a bound only enforced there
+            // would be silently undone (the leg servo kept pushing a jump past
+            // MaxAssistRiseSpeed exactly this way).
+            cap = MathF.Min(cap, RiseHeadroom(ch, p.CoastVel[k], p.Dt));
             if (cap <= 0f) { z[i] = Vector2.Zero; continue; }
             float lo = ch.Unilateral ? 0f : -cap, hi = cap;
             float lamOld = Vector2.Dot(z[i], ch.Axis);
@@ -571,6 +586,7 @@ public static class CorrectionSolver
                 float bound = MathF.Max(Vector2.Dot(coastVel, ch.ForwardAxis), ch.ForwardCap);
                 if (fwd > bound) z -= (fwd - bound) * ch.ForwardAxis;
             }
+            z = ClampRise(ch, z, coastVel, dt: 1f);   // already in Δv space here
             // Bounded plant: ‖z‖ ≤ Cap·dt. The disc is convex and contains 0,
             // so shrinking z toward 0 keeps it admissible — the clipped point
             // is in both sets (not the nearest point of the intersection,
@@ -588,11 +604,44 @@ public static class CorrectionSolver
         {
             float lam = Vector2.Dot(v, ch.Axis);
             lam = ch.Unilateral ? Math.Clamp(lam, 0f, cap) : Math.Clamp(lam, -cap, cap);
-            return lam * ch.Axis;
+            return ClampRise(ch, lam * ch.Axis, coastVel, dt);
         }
 
         float vlen = v.Length();
-        if (vlen <= cap) return v;
-        return vlen > 0f ? v * (cap / vlen) : v;
+        if (vlen > cap) v = vlen > 0f ? v * (cap / vlen) : v;
+        return ClampRise(ch, v, coastVel, dt);
+    }
+
+    // ChannelDef.RiseCap: trim whatever part of z would leave the body rising
+    // past max(coast rise, cap). Applied in Δv space so a force lever and a
+    // velocity lever obey one rule — a lift that would push past the ceiling
+    // is shortened, a deflection that would rotate speed up past it is rotated
+    // back down. Like the forward bound it is an approximate projection (it
+    // can leave the disc's boundary); the projected iteration tolerates that.
+    // The largest λ an UPWARD-pointing axis channel may spend at this tick
+    // before the body would rise past max(coast rise, RiseCap) — the cap form
+    // of ClampRise, for the exact coordinate sweep (which sets λ directly and
+    // so must see the ceiling as part of its box, not as a later projection).
+    // A channel with no upward component is unbounded by it.
+    private static float RiseHeadroom(in ChannelDef ch, Vector2 coastVel, float dt)
+    {
+        if (ch.RiseCap <= 0f) return float.MaxValue;
+        float up = -ch.Axis.Y;                      // y-down: up is −y
+        if (up <= 0f) return float.MaxValue;
+        float scale = ch.Lever == LeverKind.Force ? dt : 1f;
+        if (scale <= 0f) return float.MaxValue;
+        float coastRise = -coastVel.Y;
+        float bound = MathF.Max(coastRise, ch.RiseCap);
+        return MathF.Max(0f, (bound - coastRise) / (scale * up));
+    }
+
+    private static Vector2 ClampRise(in ChannelDef ch, Vector2 z, Vector2 coastVel, float dt)
+    {
+        if (ch.RiseCap <= 0f) return z;
+        float scale = ch.Lever == LeverKind.Force ? dt : 1f;   // z → Δv
+        float rise  = -(coastVel.Y + z.Y * scale);             // y-down: up is −y
+        float bound = MathF.Max(-coastVel.Y, ch.RiseCap);
+        if (rise > bound && scale > 0f) z.Y += (rise - bound) / scale;
+        return z;
     }
 }

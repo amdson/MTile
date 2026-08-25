@@ -462,4 +462,40 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
         Assert.True(MathF.Abs(r.minX - control.minX) < 3f, $"the engine changed the kick-off's reach: {r.minX:F1} vs control {control.minX:F1}");
         if (into) Assert.True(r.reslid, "did not arc back onto the wall");
     }
+
+    // ── Row 18: the rise ceiling ─────────────────────────────────────────
+    // No CORRECTOR channel may push a body upward once it is already rising
+    // faster than a deliberate jump can author (MovementConfig
+    // .MaxAssistRiseSpeed — derived from the jump tuning, not a knob). The
+    // states' own authored forces are theirs (a double jump's hold force
+    // legitimately outruns the ceiling, and its carry into Falling with it);
+    // what the engine adds on top is not. Jumping through a field of pillars,
+    // the legs and the corner disc used to keep lifting a body already rising:
+    // JumpingState peaked at 256.6 px/s and a wall jump at 335.1, against the
+    // reference engine's 220.
+    [Fact(Skip = "LATTICE_SCENARIOS row 18 — the ground jump and the wall jump are fixed (256.6 -> 215.4, 335.1 gone); a DOUBLE jump over a pillar still draws ~4300 px/s^2 of leg lift while rising at 210, because the legs re-arm on the pillar top the body is already leaving")]
+    public void Row18_RiseCeiling_CorrectorNeverLiftsPastAJump()
+    {
+        const int floorRow = 11;
+        float ceiling = MovementConfig.Current.MaxAssistRiseSpeed;
+        var chunks = Terrain(14, 64, (r, c) =>
+            r == floorRow || (c >= 16 && (c / 3) % 4 == 0 && r >= floorRow - 3 && r < floorRow));
+        var sim = new Simulation(chunks, OnFloor(40f, floorRow));
+        float worstLift = 0f, riseAtWorst = 0f, peakRise = 0f; int frame = -1;
+        for (int f = 0; f < 300; f++)
+        {
+            sim.Step(new PlayerInput { Right = true, Space = f % 24 < 12 });
+            float rise = -sim.Player.Body.Velocity.Y;
+            peakRise = MathF.Max(peakRise, rise);
+            if (rise <= ceiling) continue;
+            var led = sim.Player.ForceLedger;
+            float lift = 0f;
+            for (int i = 0; i < led.ChannelCount; i++) lift += MathF.Max(0f, -led.Channels[i].Force.Y);
+            if (lift > worstLift) { worstLift = lift; riseAtWorst = rise; frame = f; }
+        }
+        output.WriteLine($"row18: worst corrector lift above the ceiling = {worstLift:F0} px/s^2 "
+            + $"at [{frame}] (rise {riseAtWorst:F1}, ceiling {ceiling:F1}); peak rise {peakRise:F1}");
+        Assert.True(worstLift < 1f,
+            $"corrector lifted a body already rising at {riseAtWorst:F1} (ceiling {ceiling:F1}): {worstLift:F0} px/s^2");
+    }
 }
