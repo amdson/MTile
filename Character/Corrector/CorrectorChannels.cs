@@ -195,6 +195,7 @@ public static class CorrectorChannels
                                    // corner-plant/near ticks per its mask.
             Id = CorrectionChannel.Redirect,
             Lever = LeverKind.VelocityUpdate, Weight = RedirectEpsilon, Redirect = true,
+            Cap = cfg.FoldRedirectForce,   // a bounded push, not an instant halt
             ActiveMask = s.ChannelMask[3], SkipSoftHorizontal = true, PlantServes = true };
         ch[4] = new ChannelDef {   // Tuck: down-only, near ground (legs pull down)
             Id = CorrectionChannel.Tuck,

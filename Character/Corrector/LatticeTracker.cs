@@ -199,7 +199,24 @@ public static class LatticeTracker
                 // (legs, drive, tuck, redirect) and at a plantable corner.
                 s.ChannelMask[5][k] = false;
                 s.ChannelMask[6][k] = false;
+                // Redirect: wherever the legs are — a plant needs ground to
+                // push against, nothing else. BuildFold's !Grounded gate
+                // (no deflection on supported ticks, so a coast-tracking
+                // solve could not trade a walk's vx for rise) is the qp
+                // objective's worry: this solve maximizes progress along the
+                // path and has no reason to. The push is bounded
+                // (FoldRedirectForce), so a face slows the body, not halts it.
+                s.ChannelMask[3][k] = cfg.FoldRedirectEnabled && near;
             }
+            // ...parametrized as a force (see CorrectionSolver.Project: the
+            // same disc, in Δv/dt) so its lever is commensurate with the other
+            // channels' — as a Δv lever, active on every near tick, it
+            // inflated every variable's step bound and starved the legs and
+            // drive — and priced like the legs (BuildFold's ε weight makes a
+            // deflection free, which makes it the solver's first choice for
+            // every band violation: rotating the walk's velocity, shedding it).
+            pr.Channels[3].Lever  = LeverKind.Force;
+            pr.Channels[3].Weight = pr.Channels[0].Weight;
             // (Band and speed rows are Reference rows, so BuildFold's corner /
             // redirect feature activation does not see them — the disc had
             // been "planting" against the band in free air, holding a 4-tile

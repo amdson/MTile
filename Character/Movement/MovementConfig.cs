@@ -245,6 +245,12 @@ public class MovementConfig
     // buys on a course. Off masks the channel everywhere, including the
     // feature-anchored (cave-mouth) plant ticks.
     public bool FoldRedirectEnabled             { get; set; } = true;
+    // Bound on the redirect's per-tick deflection, as an acceleration
+    // (‖Δv‖ ≤ FoldRedirectForce·dt). The bare Thales disc lets one tick take
+    // the body to rest — a plant against the ground is a push of bounded
+    // strength, so a walk into a face slows over several ticks instead of
+    // halting. 0 = unbounded (the bare disc).
+    public float FoldRedirectForce              { get; set; } = 1500f;
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
     public int   AmbientHorizon                 { get; set; } = 10;
     // ── Fold tuning surface (CONSOLIDATION_PLAN §6) — hot-reloadable feel knobs.
@@ -283,8 +289,8 @@ public class MovementConfig
     public float FoldLegForce                   { get; set; } = 6000f;
     public float FoldDriveForce                 { get; set; } = 3000f;
     public float FoldCornerForce                { get; set; } = 1500f;
-    public float FoldTuckForce                  { get; set; } = 1200f;
-    public float FoldLegPushFadeSpeed           { get; set; } = 200f;
+    public float FoldTuckForce                  { get; set; } = 3600f;
+    public float FoldLegPushFadeSpeed           { get; set; } = 400f;
     // Flight authority (px/s²): lateral air steering along intent, and the
     // deliberately TINY two-sided vertical nudge — in flight there is nothing
     // to push against (no redirect, no legs), only air control.

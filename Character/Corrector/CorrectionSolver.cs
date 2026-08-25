@@ -25,7 +25,8 @@ public struct ChannelDef
     public CorrectionChannel Id;
     public LeverKind Lever;
     public float     Weight;       // quadratic cost on ‖z_k‖² (Redirect: the ε regularizer)
-    public float     Cap;          // Force: ‖z_k‖ ≤ Cap. Ignored for Redirect.
+    public float     Cap;          // Force: ‖z_k‖ ≤ Cap. Redirect: ‖z_k‖ ≤ Cap·dt (a
+                                   // plant is a bounded push — 0 = the bare disc)
     public bool      Redirect;     // admissible set = Thales disc of the coast velocity v̂ₖ
                                    // (v′·(v̂ₖ−v′) ≥ 0 ⇔ ‖z + v̂ₖ/2‖ ≤ ‖v̂ₖ‖/2): the exact
                                    // reachable set of composed frictionless projections.
@@ -374,7 +375,7 @@ public static class CorrectionSolver
                             }) * push / L;
                     }
 
-                    zScratch[i] = Project(ch, k, p.CoastVel[k], z[i] - g / L);
+                    zScratch[i] = Project(ch, k, p.CoastVel[k], z[i] - g / L, p.Dt);
 
                     // Slew clamp (PositionOffset dynamics honesty): pull the
                     // offset into reach of its predecessor. Mid-chain uses the
@@ -456,10 +457,19 @@ public static class CorrectionSolver
     }
 
     // Closed-form projection onto the channel's admissible set.
-    private static Vector2 Project(in ChannelDef ch, int k, Vector2 coastVel, Vector2 v)
+    private static Vector2 Project(in ChannelDef ch, int k, Vector2 coastVel, Vector2 v, float dt)
     {
         if (ch.Redirect)
         {
+            // The disc may be parametrized as a VelocityUpdate (z = Δv) or as
+            // a Force (z = Δv/dt): the same admissible set, projected in Δv
+            // space. The force form keeps the channel's lever commensurate
+            // with the force channels' — a Δv lever is 1/dt (60×) larger and
+            // inflates every variable's Gershgorin step bound wherever the
+            // disc is active (the lattice tracker, where it is active on all
+            // near ticks, saw the legs and drive starve to ~1% of their caps).
+            bool asForce = ch.Lever == LeverKind.Force;
+            if (asForce) v *= dt;
             // Thales disc: ‖z + v̂/2‖ ≤ ‖v̂‖/2 — encodes speed-never-added,
             // positive-dot-product, ≤90°/tick, all for free.
             var center = -coastVel * 0.5f;
@@ -477,7 +487,16 @@ public static class CorrectionSolver
                 float bound = MathF.Max(Vector2.Dot(coastVel, ch.ForwardAxis), ch.ForwardCap);
                 if (fwd > bound) z -= (fwd - bound) * ch.ForwardAxis;
             }
-            return z;
+            // Bounded plant: ‖z‖ ≤ Cap·dt. The disc is convex and contains 0,
+            // so shrinking z toward 0 keeps it admissible — the clipped point
+            // is in both sets (not the nearest point of the intersection,
+            // which is fine for the projected iteration).
+            if (ch.Cap > 0f)
+            {
+                float zc = ch.Cap * dt, zl = z.Length();
+                if (zl > zc) z *= zc / zl;
+            }
+            return asForce ? z / dt : z;
         }
 
         float cap = CapAt(ch, k);

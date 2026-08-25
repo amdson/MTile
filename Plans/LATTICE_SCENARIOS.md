@@ -41,6 +41,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `BumpyTunnel` 97 px/s |
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state| `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance; body enters low and clean, no bonk on the lip | ❌ launched guard excludes the engine (§7.1); |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0, -1)` (use different u, bonk cutoff, if left or right is pressed), hover **off**, unbounded; take the cheaper far-band cost, bonk if too far from an open ceiling | The open side wins if close, (the covered side bonks at the slab); path = sideways shuffle along the floor then a rise once clear of the slab edge; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | ❌ `CoveredJumpState.TryPickOpenDir` + bespoke launch still own this (§7.3) |
@@ -53,6 +54,9 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 =======
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 79.2 px/s, `BumpyTunnel` 78.2 (eleventh pass; 89 at RiseCost 6) |
 >>>>>>> worktree-lattice-path-planner-plan
+=======
+| 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 82.9 px/s (twelfth pass: 92.6 with tuck 3600, then −10 with the redirect on the ground), `BumpyTunnel` similar |
+>>>>>>> worktree-lattice-path-planner-plan
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state | `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance (the seed run fixes the first stretch to the arc); body enters low and clean, no bonk on the lip | ✅ `Row02` — horizon QP: arrives 4 px above the band and enters (the engine now runs in Falling; §7.1's launched guard is gone with the ref tail) |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ❌ `Row03_NearEdge` skipped — the DP finds the bevel escape; a neutral press has no x channel to start along it (actuator-list decision, tenth pass); far ✅ `Row03_FarFromEdge` (bonks, no shuffle); `CoveredJumpState` yields on the engine |
 | 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut`, `Row04` |
@@ -61,8 +65,8 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 6 | **Tall wall** | wall spanning the whole window ahead | Standing | `u=(dir,0)`, hover on 10, walk | DP bonks (far band unreachable) at the wall; reference carries straight into it; rows truncate; body stops ≈6 px from the face at hover height — **no climb, no planned brake, no push-back** | ✅ `TallWall_HonestStop`, `FullHeightWall_Bonks`, `Row06` |
 | 7 | **Free-standing 2-high wall** | 2-high column with open air above | Standing | `u=(dir,0)`, hover on 10, walk | *Path*: routes over (edges are geometry, §3.3 — accepted). *Motion*: the legs cannot deliver a 32 px rise from a walk, so tracking residual grows → **give-up** (§4.3) → honest bonk as in row 6. The path being over the wall must not make the body float up it | ✅ `Row07` (eleventh pass): the argmax refuses the wall at the face (RiseCost 16); 4 px of strain |
 | 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | ✅ `Row08` (eleventh pass): a real fall (max vy 213), caught by Standing, lands at hover |
-| 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` — on the engine: 31.5 px, 0 drift (61.5 before `LegReach` became the standing probe — the jump-height retune, eleventh pass) |
-| 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | 🟡 `Row10` skipped by 1 px — clears the block and lands at hover, apex 19 px against a 20 px bar (the jump-height retune) |
+| 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` — on the engine: 51.3 px, 0 drift (60.1 with the leg fade at 400; the redirect on the ground trims ~9 px; 31.5 at fade 200) |
+| 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | 🟡 `Row10` skipped by 1 px — clears the block and lands at hover, apex 18.8 px against a 20 px bar. Not the leg fade (the neutral jump is 60 px at the same settings): the 45° plan's band couples the rise to the x speed — a plan-shape decision (twelfth pass) |
 | 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — the planner refuses the block (`CrouchRiseCost` 30, bonk); **`MantleState` fires from the crouch and vaults it** — state arbitration, its own thing (eighth pass trace) |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
 | 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ✅ `Row13` (eleventh pass): 260 of 270 — Falling has no hover and no upward air force; the legs catch only where Standing owns the body |
@@ -166,6 +170,58 @@ air control.
 | rows 4, 6, 7, 9, 3-far; engine and planner gates | ✓ | **✓** (29 passed / 4 skipped) |
 | `qp` / `ref` scenario slices | — | **unchanged** (21 passed; `BuildFold` is back to its pre-eleventh signature) |
 
+**Tuning, from live play (same day).** Two config values, both hot-reloaded,
+both shared with `qp` (its slices unchanged, 45 passed):
+`FoldLegPushFadeSpeed` 200 → **400** and `FoldTuckForce` 1200 → **3600**.
+The leg cap fades to zero at the fade speed (`ChannelCap[0] = LegForce ·
+(1 − riseSpeed/fade)`), so on the engine it is the launch's ceiling — the
+jump-height retune the eleventh pass left open is this one number, not
+`LegReach`: neutral jump 31.5 → **60.1 px** (the old 61.5) with the standing
+rest untouched (0.00 deviation at every setting; leg force 9000 would give
+75). The corridor's corners on the engine are the legs (bumps) and the tuck
+(lips) — `CornerAssist` is masked off and the redirect never fires there
+(`SupportReach` 25 > `LegReach` 17, so near ⇒ Grounded); `FoldCornerForce`
+1500 → 4000 measured no change at all. Tuck 3600: corridor **77.3 → 92.6
+px/s** with no hard vertical events (2400 gave 92.4 with ten frames of
+|vy| > 150; drive 4500 on top gives 96.8, not taken). Row 10's hop stays at
+18.8 px through all of this — see its row.
+
+**The redirect on the ground (same day).** The `!Grounded` gate on the
+disc was BuildFold's rule, not the planner's — a coast-tracking solve had to
+be kept from trading a walk's vx for rise. Under the progress objective it
+is a hack; removed on the engine: the disc is active wherever the legs are
+(`near`), a plant needing only ground to push against. Two things had to
+change for that to work at all, both found by measurement:
+
+1. *Conditioning.* The disc's lever is a Δv — 1/dt = 60× a force channel's.
+   Active on every near tick, its column inflated every variable's
+   Gershgorin step bound (`rowS` sums all channels' levers) and the legs and
+   drive starved to ~1% of their caps: flat walk 30 px/s, corridor 24, the
+   neutral jump 0.4 px, the ledge drop never leaving the ledge — identical
+   at any cap or weight, the tell that the solve itself was dead. On the
+   engine the disc is parametrized as a *force* (`CorrectionSolver.Project`
+   projects `a·dt` onto the same disc): same admissible set, commensurate
+   column. `qp` keeps the Δv form.
+2. *Price.* BuildFold's ε weight makes a deflection free (physically true),
+   which makes it the solver's first choice for every band violation —
+   gravity drops the free rollout 2 px in 5 ticks, past the ±1.6 band, and
+   rotating the walk's velocity is a million times cheaper than the legs'
+   force. The gate had been standing in for a price. On the engine the disc
+   is weighted like the legs (same units now).
+
+And the bound asked for: `FoldRedirectForce` 1500 (‖Δv‖ ≤ 25 px/s per
+tick; 0 = the bare disc), applied in BuildFold for every engine — `qp`'s
+gates hold (47 passed). Measured, it never binds: 0 / 1500 / 3000 give
+identical numbers everywhere, the disc's deflections stay ~5 px/s per tick,
+and the one instant stop in the probes is the tile collision at a wall face.
+
+What the disc costs under the band, with everything else equal: corridor
+92.6 → **82.9 px/s**, neutral jump 60.1 → **51.3 px**, and after a landing it
+trims a 150 px/s air carry to the walk cap (rows 8/13 end ~150 px shorter;
+before, the excess speed simply rode on). Rows 6/7 stop 3 px above rest at
+the face (the strain). All 33 lattice gates pass. Whether the disc earns
+its keep on the engine is now a measured question rather than a gated one.
+
 Seen in the slide's trace, not acted on: with the DP blocked at the face
 the tracker still emits the progress row along `u` (no path → `tLast = u`),
 so AirLateral pressed into the wall at its cap before the masks — the same
@@ -195,7 +251,11 @@ inactive; then Falling drops hover. Changes, in order:
    hard rows with non-floor normals, which that heuristic reads as lip
    undersides — the Redirect disc had been "planting" against the band in
    free air and converting horizontal speed into lift (a 4-tile fall held to
-   27 px/s). The disc still fires at real corners (the corridor's).
+   27 px/s). *(Correction, twelfth pass: with the band rows ignored the disc
+   never fires on the engine at all — its only other activations are
+   `near && !Grounded`, impossible since `SupportReach` 25 > `LegReach` 17,
+   and corner plants, which the tracker never marks. Ledger over the whole
+   corridor: LegServo, Drive, Tuck only.)*
 4. **`FoldRiseCost` 6 → 16, `LatticeHoverWeight` 2 → 3.** The binding case
    for the rise price is the body *pressed against* the obstacle, where
    standing still earns nothing and the window's whole worth (392) is the
@@ -211,7 +271,7 @@ inactive; then Falling drops hover. Changes, in order:
 | row 7 free-standing 2-high wall | strain 8 ✗ | **4 px ✓ — the argmax refuses at the face** |
 | row 2 tunnel entry | ✓ | **✓** |
 | row 1 corridor / engine tunnel | 84.4 / 85.9 | **79.2 / 78.2** (bumps cost more at 16) |
-| row 9 neutral jump | 61.5 px | **31.5 px** — see below |
+| row 9 neutral jump | 61.5 px | **31.5 px** — see below (60.1 again after the twelfth pass's leg-fade retune) |
 | row 10 diagonal hop | apex 28 px ✓ | **apex 19 px ✗ (bar 20); still clears the block, lands at hover** |
 | rest / tall wall / step / duck-in / rollback / rows 3-far, 4, 6 | ✓ | **✓** |
 | rows 3-near, 11 | ✗ | **✗** (unchanged: actuator decision; Mantle) |
