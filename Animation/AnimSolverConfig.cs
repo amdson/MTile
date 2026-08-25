@@ -61,6 +61,28 @@ public class AnimSolverConfig
     // genuinely WEAKER constraint, not the same one better conditioned. Mode 2 is the only
     // option that keeps the constraint strict while removing the column entirely.
     public int PhaseFloorMode { get; set; }
+    // HARD bound on the cadence's ACCELERATION, in cycles/s²: the per-frame phase step may
+    // change by at most MaxPhaseAccel·dt² from one frame to the next (Δφ = rate·dt, so a
+    // rate change per frame scales with dt² — this stays the SAME ramp at 30 or 60 fps).
+    // The phase rate must RAMP — it can't jump. Enforced as a box on Δφ around Δφ_prev in
+    // the cadence solve, the same cap on the flight coast, and the coarse seed search is
+    // clamped into it. The soft twin is PhaseStepPrior (a quadratic pull toward Δφ_prev) —
+    // at its default 8 it barely resists the re-contact hop, which is why this exists.
+    // 0 disables (historical behaviour, bit-for-bit).
+    //
+    // Sizing (measured, biped 0.6 scale, 60 fps ⇒ box = MaxPhaseAccel/3600 per frame): a run
+    // at 90 px/s changes Δφ by ~0.002–0.005 per frame WITHIN a stride, coasts flight at a
+    // constant, and HOPS ~0.025–0.03 on re-contact (0.021 → 0.051). The WALK is the
+    // constraint on how tight this can go: its authored phase rate is far from uniform
+    // (Δφ sweeps 0.005 ↔ 0.09 per frame at 30 fps, ~0.007/frame changes at 60 fps), and the
+    // box can't tell that authored swing from a hop — at 22 it fought the walk every stride
+    // (mean |Δθ| 0.024 → 0.039 rad, corrections erratic instead of decaying). 40 (= 0.011/
+    // frame at 60 fps) lets the walk's swings through and still turns the run's re-contact
+    // hop into a ~3-frame ramp. The price of going tighter: the planted foot slips over the
+    // ramp (the no-slip row can't be met at a rate the box forbids) — tune by eye.
+    // A clip change seeds Δφ_prev with the velocity-derived legacy rate (|vx|·dt·PhasePerPixel)
+    // rather than 0, so Walk↔Run / Fall→Run don't restart the cadence from a standstill.
+    public float MaxPhaseAccel { get; set; } = 40f;
     public float ComWeightY    { get; set; } = 23f;   // soft λ pulling δ → com baseline (so flight frames release)
     // λ pulling the horizontal body sway d.x → 0. Deliberately STIFFER than ComWeightY: d.x
     // exists to soak the no-slip residual at a planted foot's horizontal turning point
@@ -141,6 +163,7 @@ public class AnimSolverConfig
         PhaseStepPrior          = src.PhaseStepPrior;
         PhaseFloorPrior         = src.PhaseFloorPrior;
         PhaseFloorMode          = src.PhaseFloorMode;
+        MaxPhaseAccel           = src.MaxPhaseAccel;
         ComWeightY              = src.ComWeightY;
         ComWeightX              = src.ComWeightX;
         LowCeilingRunComWeightY = src.LowCeilingRunComWeightY;

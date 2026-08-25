@@ -48,6 +48,8 @@ public sealed partial class CharacterAnimator
 
         var rp = new float[m];
         var rm = new float[m];
+        var rp2 = new float[m];   // ±h/2 evaluations for the Δφ column's Richardson step
+        var rm2 = new float[m];
 
         // The no-penetration rows carry a one-sided max(0, margin − gap): smooth where active,
         // but with a KNEE at gap == margin. A central difference that straddles that knee (the
@@ -98,12 +100,25 @@ public sealed partial class CharacterAnimator
             float save = x[j];
             x[j] = save + h; CadenceResiduals(x, rp);
             x[j] = save - h; CadenceResiduals(x, rm);
+            // Δφ column: Richardson-extrapolate the central difference with a second, half-
+            // size step. Within one keyframe interval the C1 spline is a CUBIC, and a central
+            // difference of a cubic carries EXACTLY h²·f‴/6 of error — (4·D(h/2) − D(h))/3
+            // cancels that term identically, so the oracle is exact on the segment instead of
+            // depending on where the solved Δφ happens to land (the acceleration box parks it
+            // at phases the free solve never visited, where the plain difference reached 0.8%
+            // in a ~0.01-wide interval). The ±h/2 points lie inside the same interval as ±h.
+            if (j == 0)
+            {
+                x[j] = save + 0.5f * h; CadenceResiduals(x, rp2);
+                x[j] = save - 0.5f * h; CadenceResiduals(x, rm2);
+            }
             x[j] = save;
             for (int i = 0; i < m; i++)
             {
                 if (skipRow[i]) continue;   // no-pen row at its activation knee — FD oracle is mute here
                 float a  = anal[i * n + j];
                 float fd = (rp[i] - rm[i]) / (2f * h);
+                if (j == 0) fd = (4f * (rp2[i] - rm2[i]) / h - fd) / 3f;
                 // Relative metric: the float32 oracle carries ~0.1% truncation/cancellation
                 // noise on large entries, while any STRUCTURAL Jacobian error (sign, wrong
                 // lever, missing term) is O(10–100%). Normalizing by the magnitude separates

@@ -49,6 +49,7 @@ public sealed class LeastSquaresSolver
     // the column norms that form the damping metric.
     private readonly float[] _qrA, _qrB, _qrS, _qrSb, _qrColSq;
     private readonly float[] _dInv, _gScaled;  // [maxVars] Jacobi column scaling
+    private readonly bool[]  _fixed;           // [maxVars] active-set mask: variable held this iteration
 
     // Work counters for the last Minimize call. The wall-clock cost of a solve is almost
     // entirely (residual evals + Jacobian evals) × the cost of one pose rebuild, because
@@ -101,6 +102,7 @@ public sealed class LeastSquaresSolver
         _qrSb = new float[2 * maxVars];
         _qrColSq = new float[maxVars];
         _dInv    = new float[maxVars];
+        _fixed   = new bool[maxVars];
         _gScaled = new float[maxVars];
         _g = new float[maxVars];
         _jtj = new float[maxVars * maxVars];
@@ -163,6 +165,49 @@ public sealed class LeastSquaresSolver
     // formation is ever done in higher precision; not enabled, because it changed biped/run's
     // result with no benefit to show for it. See Plans/PERF_AUDIT.md Finding 1b.
     public static bool JacobiScale;
+    // Active-set treatment of the box bounds. Historically the box was enforced by PROJECTION
+    // only: solve the free Gauss–Newton step, then clamp the trial point. That is fine while
+    // the bounds are slack, but a variable pressed against a wall poisons every other
+    // variable's step — the clamped component was computed jointly with theirs, so once it
+    // is cut off the rest of the step no longer fits, the trial cost rises, and the trust
+    // loop answers by inflating µ for ALL variables. With Δφ boxed to a ramp (MaxPhaseAccel)
+    // this showed up as a hard-tier hand pin missed by 2px and the terrain no-pen by 1.4px:
+    // the cadence wall was starving the IK. The rule here (projected Newton, Bertsekas):
+    // a variable AT a bound whose gradient points OUT of the box — or whose box is a point,
+    // like the static solve's locked Δφ — is held for this iteration: its Jacobian column
+    // is zeroed and it gets a unit diagonal, so its step is exactly 0 and the others solve
+    // as if it were a constant. Off = projection only (historical behaviour, bit-for-bit).
+    public static bool ActiveSetBounds = true;
+
+    // The active-set pass (see ActiveSetBounds). Runs on the freshly built Jacobian, before
+    // either factorization consumes it. g = Jᵀr is the gradient of ½‖r‖²; the descent
+    // direction is −g, so a variable at its LOWER bound wants to leave the box when g > 0,
+    // at its UPPER bound when g < 0. The mask is consumed by the normal-equation
+    // accumulation (unit diagonal) and QrFactor (unit column scale).
+    private void ApplyActiveSet(ReadOnlySpan<float> x, ReadOnlySpan<float> lo, ReadOnlySpan<float> hi, int m, int n)
+    {
+        for (int j = 0; j < n; j++)
+        {
+            float span = hi[j] - lo[j];
+            bool hold;
+            if (span <= 1e-9f) hold = true;                    // point box: the variable is locked
+            else
+            {
+                float tol = 1e-6f * span;
+                bool atLo = x[j] - lo[j] <= tol, atHi = hi[j] - x[j] <= tol;
+                if (!atLo && !atHi) hold = false;
+                else
+                {
+                    float g = 0f;
+                    for (int i = 0; i < m; i++) g += _jac[i * _maxVars + j] * _r[i];
+                    hold = (atLo && g > 0f) || (atHi && g < 0f);
+                }
+            }
+            _fixed[j] = hold;
+            if (hold)
+                for (int i = 0; i < m; i++) _jac[i * _maxVars + j] = 0f;
+        }
+    }
 
     // Minimize in place using an ANALYTIC Jacobian `jac` (null → finite differences).
     // Returns the final sum-of-squares cost.
@@ -214,6 +259,9 @@ public sealed class LeastSquaresSolver
                 for (int i = 0; i < m; i++) _jac[i * _maxVars + j] = (_rTrial[i] - _r[i]) * inv;
                 x[j] = xj;
             }
+
+            if (ActiveSetBounds) ApplyActiveSet(x, lo, hi, m, n);
+            else Array.Clear(_fixed, 0, n);
 
             bool useQr = qr ?? UseQr;
 
@@ -295,6 +343,11 @@ public sealed class LeastSquaresSolver
                 }
             }
             accumulated: ;
+            // Held variables (ActiveSetBounds): their column is zero, so their JᵀJ row/col and
+            // gradient are 0 — give them a unit diagonal so every damped system stays PD and
+            // solves their step as exactly 0 (g_j = 0 ⇒ step_j = 0/(1+µ)).
+            for (int a = 0; a < n; a++)
+                if (_fixed[a]) { _jtj[a * n + a] = 1f; if (DoubleAccum) _jtjD[a * n + a] = 1.0; }
             }
 
             if (!useQr)   // JᵀJ only exists on the normal-equations path
@@ -475,7 +528,10 @@ public sealed class LeastSquaresSolver
         {
             float s = 0f;
             for (int i = 0; i < m; i++) { float v = _qrA[a * _maxRes + i]; s += v * v; }
-            _qrColSq[a] = s;
+            // A held variable's column is zero; a unit scale keeps its damping row healthy
+            // (its LS solution is 0 either way — the column is decoupled — this just avoids
+            // the √(µ·1e-6) floor doing the job).
+            _qrColSq[a] = _fixed[a] ? 1f : s;
         }
         for (int i = 0; i < m; i++) _qrB[i] = -_r[i];
         HouseholderQr(_qrA, _maxRes, _qrB, m, n);
