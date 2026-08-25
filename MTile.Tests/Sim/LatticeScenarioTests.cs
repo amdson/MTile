@@ -261,7 +261,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // ── Row 11: crouch at a 1-high block ─────────────────────────────────
     // Crawling right (Down held) into a 1-high block: stays low and stops at
     // it — a crouch never mounts ledges.
-    [Fact(Skip = "LATTICE_SCENARIOS row 11 — NOT the planner: the path refuses the block (CrouchRiseCost 30), then MantleState fires from the crouch and vaults it. State arbitration — its own thing")]
+    [Fact]
     public void Row11_CrouchAtBlock_StaysLow_HonestStop()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (r == 5 && c >= 12));

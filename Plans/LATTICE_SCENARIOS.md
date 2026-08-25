@@ -71,7 +71,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | ✅ `Row08` (eleventh pass): a real fall (max vy 213), caught by Standing, lands at hover |
 | 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` — on the engine: 51.3 px, 0 drift (60.1 with the leg fade at 400; the redirect on the ground trims ~9 px; 31.5 at fade 200) |
 | 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | ✅ `Row10` (twelfth pass): apex 41.3 px, clears the block, lands at hover — the launch plan's tilt is now the actuators' direction (legs' ceiling up, walk speed along ≈ 76°), not a fixed 45°, which had capped the rise at the x speed (18.8 px) |
-| 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — the planner refuses the block (`CrouchRiseCost` 30, bonk); **`MantleState` fires from the crouch and vaults it** — state arbitration, its own thing (eighth pass trace) |
+| 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ✅ `Row11` (twelfth pass): the planner refuses the block (`CrouchRiseCost` 30) and the body stays crouched at it (x = 185.6) — the climb family yields on the engine |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
 | 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ✅ `Row13` (eleventh pass): 260 of 270 — Falling has no hover and no upward air force; the legs catch only where Standing owns the body |
 | 14 | **Knockback** | body hit, `PreserveExternalVelocity` set | any | engine **excluded** | No correction at all — the fold does not fight combat momentum | ✅ `Admit` guard |
@@ -83,7 +83,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 
 `MTile.Tests/Sim/LatticeScenarioTests.cs` — one test per encoded row (1, 2, 3
 near + far, 4, 6, 7, 8, 9, 10, 11, 13, 15, 16, 17), all under `FoldEngine = "lattice"`
-(only row 11 — Mantle — still skipped),
+(every row passes),
 asserting the table's *correct* behavior. Rows 5, 12, 14 are deliberately
 not encoded yet. Tests the engine cannot pass today are `Skip`ped with the
 row's blocker in the reason — that list is the next cycle's checklist.
@@ -288,6 +288,30 @@ corridor's max fall 145). A per-profile push fade (Stand 200 / Jump 400)
 would separate them — one more profile parameter, the decision from the
 eleventh pass in another form. Neutral jump launch 247 px/s, running hop
 270 (`qp`/`ref` 220 / 200).
+
+**The climb family yields (same day).** Reported from play: a big
+upward spike jumping into an upper corner. Reproduced with a block whose
+top is at the jump's apex: at the corner the disc plants and deflects the
+body upward (−20 px/s per tick, bounded), and then **Mantle / Parkour
+steal the body from Falling** (climb passive 29 > Falling's 0) and fire
+their own vault at −112 px/s — a maneuver's solve stacked on the engine's.
+The climb family now yields on the lattice engine, as RunningJump and
+CoveredJump do: corners are the engine's (the DP routes over a lip it
+rates worth it, the disc plants against the face, Standing's legs lift
+where the ground probe claims the body), and what the engine refuses
+stays refused. Without the vault the same corner reads:
+
+```
+[62] Falling  v=(47,−54)  dvy=−86  disc=(−889,−1208)  ← collision response + the plant (−20 of it)
+[64] Standing v=(52,−103) legs=2350                    ← the probe finds the top; Standing lifts
+[72] Standing y=41.9, at hover on the block
+```
+
+— the body mounts the lip through the engine's channels; the one-tick
+swing at the corner is −86 px/s, two thirds of it the tile collision
+resolving the corner. Row 11 passes (the crouch stays at the block); the
+step course's bonk count is unchanged (18). `qp` untouched (42 passed):
+the gate is `OnLattice`.
 
 **The running jump (same day).** `u` for a `Rising` profile was `(dir, −1)`
 normalized — a fixed 45° tilt, an arbitrary constant. The band then holds

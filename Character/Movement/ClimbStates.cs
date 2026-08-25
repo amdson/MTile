@@ -59,6 +59,16 @@ public abstract class ClimbManeuverBase : MovementState
     {
         var cfg = MovementConfig.Current;
         if (!cfg.CorrectorClimbEnabled) return false;
+        // Lattice engine: the climb family yields, as RunningJump and
+        // CoveredJump do. Corners are the engine's — the DP routes over a
+        // lip it deems worth it, the disc plants against the face, the legs
+        // lift where Standing claims the body — and a maneuver with its own
+        // solve stacked on top of that: at a block's top corner near a jump's
+        // apex the disc deflected the body upward and Mantle/Parkour then
+        // stole it from Falling (passive 29 > 0) and fired a vault at −112
+        // px/s — the "spike" at an upper corner. What the engine refuses
+        // (a crouch at a block, a wall it does not rate) stays refused.
+        if (OnLattice) return false;
         if (ctx.Intent.HeldHorizontal != _dir || !ctx.TryGetGround(out _)) return false;
         // Launch gate (StandingState's entry rule): a body rising faster than
         // support could ever push it is ballistic — the ground probe merely
