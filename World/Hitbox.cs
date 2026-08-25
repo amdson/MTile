@@ -101,6 +101,16 @@ public readonly struct Hitbox
     // a retreating swing); CombatSystem additionally latches the bounce to fire
     // once per attack, so a multi-frame overlap can't machine-gun the floor.
     public readonly float       MinRecoilSpeed;
+    // Terrain occlusion (TileReach). When Occluded, the hit only lands on cells and
+    // hurtboxes with a clear line from Origin — the attacker's body, a blast
+    // center, a projectile — so a swing can't reach through a wall, and tile
+    // damage propagates front-to-back from the origin (a cell hidden behind
+    // another takes damage only once the one in front has broken). Publishers
+    // opt in by passing `origin`; a hitbox without one behaves as before and
+    // damages everything it overlaps (BeamAction, whose march is its own
+    // occlusion model).
+    public readonly bool        Occluded;
+    public readonly Vector2     Origin;
 
     // Input cheat-sheet (details on the fields above):
     //   Identity   region (broad AABB) · hitId (dedupe key) · owner/source · targets
@@ -113,6 +123,7 @@ public readonly struct Hitbox
     //              + n·strikeSpeed) · strikeMass · restitution (vs entities;
     //              tiles use their material's) · minLaunch (target Δv floor)
     //              · minRecoilSpeed (tile-pogo floor)
+    //   Occlusion  origin (null = no terrain occlusion)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
                   Color? debugColor = null, HitTargets targets = HitTargets.All,
@@ -123,8 +134,11 @@ public readonly struct Hitbox
                   KnockbackMode mode = KnockbackMode.Impulse,
                   Vector2 strikeDir = default, Vector2 strikeVelocity = default,
                   float strikeMass = 0f, float restitution = 0.5f, float minLaunch = 0f,
-                  float minRecoilSpeed = 0f)
+                  float minRecoilSpeed = 0f,
+                  Vector2? origin = null)
     {
+        Occluded             = origin.HasValue;
+        Origin               = origin ?? default;
         Region               = region;
         HitId                = hitId;
         Damage               = damage;

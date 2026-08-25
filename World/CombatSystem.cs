@@ -16,6 +16,9 @@ namespace MTile;
 //             prunes when the HitId disappears (attack ended).
 //   Tiles:   No dedupe — multi-frame hitboxes accumulate damage on a tile every
 //            frame they overlap. Preserves the progressive darkening visual.
+// Occlusion: a hitbox published with an Origin only lands on cells / hurtboxes
+//            it has line of sight to through the terrain (TileReach), and its
+//            tile damage propagates nearest-first from that origin.
 // Instance-owned (not static): the (HitId → already-hit targets) dedupe table
 // persists across frames, so it's simulation state that must be snapshot/restored
 // for rollback. One CombatSystem per Simulation. The geometry helper below stays
@@ -40,6 +43,9 @@ public sealed class CombatSystem
     // polls PeekHits each of its active/recovery frames sees the connection exactly
     // once and can latch a "did I hit?" flag (COMBAT_FEEL_PLAN Phase 3 hit-confirm).
     private readonly Dictionary<int, int> _entityHitsByHitId = new();
+    // Per-hitbox scratch: the Solid cells it overlaps, keyed for nearest-first
+    // ordering when the hitbox is occluded (see TileReach).
+    private readonly List<(float key, int gtx, int gty)> _scratchCells = new();
 
     public Vector2 PeekRecoil(int hitId)
         => _recoilByHitId.TryGetValue(hitId, out var v) ? v : Vector2.Zero;
@@ -94,6 +100,12 @@ public sealed class CombatSystem
                 // (< 0 ⇒ no eligible surface contacted this frame.)
                 float surfaceRestitution = -1f;
 
+                // Gather the Solid cells the hitbox overlaps (DamageCell is a no-op
+                // on anything else). An occluded hitbox then visits them nearest
+                // the origin first, so a cell that breaks frees the sightline to
+                // the one behind it within this same pass — a hit strong enough
+                // to break the front layer punches on through.
+                _scratchCells.Clear();
                 int gtx0 = (int)MathF.Floor(hit.Region.Left   / Chunk.TileSize);
                 int gtx1 = (int)MathF.Floor(hit.Region.Right  / Chunk.TileSize);
                 int gty0 = (int)MathF.Floor(hit.Region.Top    / Chunk.TileSize);
@@ -101,6 +113,7 @@ public sealed class CombatSystem
                 for (int gtx = gtx0; gtx <= gtx1; gtx++)
                 for (int gty = gty0; gty <= gty1; gty++)
                 {
+                    if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
                     if (hit.Shape != null)
                     {
                         var tileAABB = new BoundingBox(
@@ -108,13 +121,21 @@ public sealed class CombatSystem
                             (gtx + 1) * Chunk.TileSize, (gty + 1) * Chunk.TileSize);
                         if (!OverlapsPolyAABB(hitVerts, hitAxes, tileAABB)) continue;
                     }
+                    float key = hit.Occluded ? TileReach.DistanceKey(hit.Origin, gtx, gty) : 0f;
+                    _scratchCells.Add((key, gtx, gty));
+                }
+                if (hit.Occluded) _scratchCells.Sort();
+
+                foreach (var (_, gtx, gty) in _scratchCells)
+                {
+                    if (hit.Occluded && !TileReach.IsCellReachable(chunks, hit.Origin, gtx, gty))
+                        continue;
                     // Snapshot the material BEFORE DamageCell, since a break clears
                     // the cell and we'd lose the type info for the hardness gate.
-                    var typeBefore  = chunks.GetCellType(gtx, gty);
-                    var stateBefore = chunks.GetCellState(gtx, gty);
+                    var typeBefore = chunks.GetCellType(gtx, gty);
                     // DamageCell returns true iff the tile broke this call.
                     bool broke = chunks.DamageCell(gtx, gty, hit.Damage);
-                    if (hit.RecoilScale > 0f && stateBefore == TileState.Solid)
+                    if (hit.RecoilScale > 0f)
                     {
                         // Two gates, both must allow before crediting recoil:
                         //   BreakProtected ⇒ skip cells that this hit destroyed.
@@ -157,6 +178,10 @@ public sealed class CombatSystem
                     if (alreadyHit.Contains(hb.Target)) continue;
                     if (!HitboxWorld.Overlaps(hit.Region, hb.Region)) continue;
                     if (hit.Shape != null && !OverlapsPolyAABB(hitVerts, hitAxes, hb.Region)) continue;
+                    // Terrain between the origin and the target blocks the hit. Runs
+                    // after the tile pass above, so a swing that just broke through a
+                    // wall reaches whoever was behind it this same frame.
+                    if (hit.Occluded && !TileReach.IsRegionReachable(chunks, hit.Origin, hb.Region)) continue;
                     var target = resolve(hb.Target);
                     if (target == null) continue;   // owner despawned this frame — skip
                     // OnHit returns the impulse actually delivered (HitResolver) —

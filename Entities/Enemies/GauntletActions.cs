@@ -258,7 +258,8 @@ public class EnemyPounceSlamAction : EnemyActionState
         ctx.Hitboxes?.Publish(new Hitbox(
             region, v.HitId, damage, impulse,
             Faction.Enemy, ctx.Self.Id, SlamColor,
-            targets: HitTargets.EntitiesOnly));
+            targets: HitTargets.EntitiesOnly,
+            origin: ctx.Self.Body.Position));
     }
 
     // Speed-proportional tell, read straight off the live body velocity — the
@@ -366,7 +367,8 @@ public class EnemyLashAction : EnemyActionState
             dir * Knockback + new Vector2(0f, -UpBias),
             Faction.Enemy, ctx.Self.Id, LashColor,
             targets: HitTargets.EntitiesOnly,
-            shape: poly, shapePos: center, shapeRotation: rotation));
+            shape: poly, shapePos: center, shapeRotation: rotation,
+            origin: ctx.Self.Body.Position));
     }
 
     // Windup extends a thin probe along the frozen axis, growing to full reach

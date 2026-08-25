@@ -122,6 +122,7 @@ public class RailBoltProjectile : Projectile
             dir * KnockbackImpulse,
             Faction, Id, Color,
             // All, not EntitiesOnly — this is the whole point of the bolt.
-            targets: HitTargets.All));
+            targets: HitTargets.All,
+            origin: p));
     }
 }

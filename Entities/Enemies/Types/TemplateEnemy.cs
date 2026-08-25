@@ -333,7 +333,9 @@ public class TemplateAction : EnemyActionState
             // EntitiesOnly = doesn't chew terrain. Use HitTargets.All to make an
             // attack destructive; then Damage is also tile HP, and anything ≥ 2.0
             // one-shots Stone. RailBoltProjectile is the worked example.
-            targets: HitTargets.EntitiesOnly));
+            targets: HitTargets.EntitiesOnly,
+            // Origin = terrain occlusion: this swing can't reach through a wall.
+            origin: ctx.Self.Body.Position));
     }
 
     // The telegraph. This is pure rendering — deleting it changes nothing about

@@ -72,7 +72,8 @@ public class EnemyMeleeAction : EnemyActionState
             region, v.HitId, Damage,
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, StrikeColor,
-            targets: HitTargets.EntitiesOnly));
+            targets: HitTargets.EntitiesOnly,
+            origin: ctx.Self.Body.Position));
     }
 
     // Telegraph IS the Draw — read everything off vars, just like the player's
@@ -171,7 +172,8 @@ public class EnemyLungeAction : EnemyActionState
             region, v.HitId, Damage,
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, Color.MediumPurple,
-            targets: HitTargets.EntitiesOnly));
+            targets: HitTargets.EntitiesOnly,
+            origin: ctx.Self.Body.Position));
     }
 
     // Layered telegraph — readable across the 0.35s windup. Phases:
@@ -326,7 +328,8 @@ public class EnemyShockwaveAction : EnemyActionState
             region, v.HitId, Damage,
             new Vector2(outSign * KnockOutward, KnockUp),
             Faction.Enemy, ctx.Self.Id, Color.Gold,
-            targets: HitTargets.EntitiesOnly));
+            targets: HitTargets.EntitiesOnly,
+            origin: c));
     }
 
     // Telegraph: expanding ring on the ground throughout windup (0→full radius),
@@ -711,7 +714,8 @@ public class EnemySlamAction : EnemyActionState
             region, v.HitId, Damage,
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, Color.Crimson,
-            targets: HitTargets.EntitiesOnly));
+            targets: HitTargets.EntitiesOnly,
+            origin: ctx.Self.Body.Position));
     }
 
     // Telegraph: short windup, so the visual is dense — overhead chevron forming
@@ -826,7 +830,8 @@ public class EnemySpinAction : EnemyActionState
             region, v.HitId, Damage,
             new Vector2(outSign * KnockOutward, KnockUp),
             Faction.Enemy, ctx.Self.Id, Color.Aquamarine,
-            targets: HitTargets.EntitiesOnly));
+            targets: HitTargets.EntitiesOnly,
+            origin: c));
     }
 
     // Telegraph: 3 orbiting dots spinning around the brute. Spin rate ramps up

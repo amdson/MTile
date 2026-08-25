@@ -570,7 +570,8 @@ public abstract class SlashLikeAction : ActionState
                 strikeVelocity: ctx.Body.Velocity + vars.AttackDir * StrikeSpeed,
                 strikeMass: SlashStrikeMass,
                 restitution: SlashRestitution,
-                minLaunch: SlashMinLaunch));
+                minLaunch: SlashMinLaunch,
+                origin: ctx.Body.Position));
         }
 
         // Holding slashes broadcast their pull field for the WHOLE slash (not just
@@ -1192,7 +1193,8 @@ public class StabAction : ActionState
                 strikeMass: ctx.Mass,
                 restitution: Restitution,
                 minLaunch: MinLaunch,
-                minRecoilSpeed: MinRecoilSpeed));
+                minRecoilSpeed: MinRecoilSpeed,
+                origin: ctx.Body.Position));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No
             // knockback (knockback comes from the primary box). Tiles only — passes
@@ -1212,7 +1214,8 @@ public class StabAction : ActionState
                 ctx.Faction, ctx.SelfId,
                 blockColor,
                 HitTargets.TilesOnly,
-                shape: blockPoly, shapePos: blockCenter, shapeRotation: rotation));
+                shape: blockPoly, shapePos: blockCenter, shapeRotation: rotation,
+                origin: ctx.Body.Position));
         }
     }
 
@@ -1538,7 +1541,8 @@ public class PulseAction : ActionState
             ctx.Hitboxes.Publish(new Hitbox(
                 region, vars.HitId, DamagePerFrame,
                 dir * KnockbackMagnitude + bodyVel,
-                ctx.Faction, ctx.SelfId, color));
+                ctx.Faction, ctx.SelfId, color,
+                origin: anchor));
         }
     }
 
@@ -1697,7 +1701,8 @@ public class BurstAction : ActionState
                 region, vars.HitId, TileDamagePerFrame,
                 Vector2.Zero,
                 ctx.Faction, ctx.SelfId, tileColor,
-                HitTargets.TilesOnly));
+                HitTargets.TilesOnly,
+                origin: ctx.Body.Position));
 
             // Knockback channel — radial shove plus the caster's momentum. Impulse
             // mode (not Collision): this is an AoE field, so every target in the
@@ -1707,7 +1712,8 @@ public class BurstAction : ActionState
                 dir * KnockbackMagnitude + bodyVel,
                 ctx.Faction, ctx.SelfId, color,
                 HitTargets.EntitiesOnly,
-                hitstunSecondsOverride: HitstunSeconds));
+                hitstunSecondsOverride: HitstunSeconds,
+                origin: ctx.Body.Position));
         }
     }
 

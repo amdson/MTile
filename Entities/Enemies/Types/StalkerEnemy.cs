@@ -144,7 +144,8 @@ public class StalkerEnemy : Entity
                         region, _hitId, LungeDamage,
                         new Vector2(_facing * LungeKnockback.X, LungeKnockback.Y),
                         Faction.Enemy, Id, Color.OrangeRed,
-                        targets: HitTargets.EntitiesOnly));
+                        targets: HitTargets.EntitiesOnly,
+                        origin: Body.Position));
                 }
                 if (_stateTime >= LungeDuration) Transition(AIState.Recover);
                 break;

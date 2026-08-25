@@ -118,6 +118,7 @@ public class BulletProjectile : Projectile
             region, _hitId, DamagePerFrame,
             dir * KnockbackImpulse,
             Faction, Id, Color,
-            targets: HitTargets.EntitiesOnly));
+            targets: HitTargets.EntitiesOnly,
+            origin: p));
     }
 }
