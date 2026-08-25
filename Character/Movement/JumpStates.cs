@@ -213,10 +213,6 @@ public class RunningJumpState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        // Lattice engine: the running jump IS JumpingState with dir held —
-        // u tilts to (dir, −1)^ and the legs launch along it. No separate
-        // impulse family (Plans/LATTICE_PATH_PLANNER.md §7.3).
-        if (OnLattice) return false;
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
         if (!ctx.TryGetGround(out var ground)) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
@@ -435,9 +431,6 @@ public class CoveredJumpState : MovementState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        // Lattice engine: JumpingState plans from under the slab; the slide-
-        // then-launch and TryPickOpenDir dissolve into path + tracker (§7.3).
-        if (OnLattice) return false;
         if (!ctx.Input.Space) return false;            // held-jump (tapped-jump variant TBD)
         if (!ctx.TryGetGround(out var ground)) return false;
         if (!ctx.TryGetCeiling(out var ceiling)) return false;   // must actually be under something

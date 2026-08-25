@@ -140,9 +140,9 @@ orders of magnitude cheaper than the state-space search prototype.
 > only after rising — row 3-near passes. The air profiles' x cap is the
 > air cap (the speed rows bound the drive, and `∞` let it fire at 3000 on
 > the last Falling tick: 200 px/s at a lip); the disc has a `ForwardCap`.
-> The climb family (Parkour/Mantle/ArcJump) yields on the engine — it had
-> been vaulting from corners on top of the disc's plant (the "spike" at an
-> upper corner); row 11 passes. Grounded profiles cap progress ALONG the
+> The climb family (Parkour/Mantle/ArcJump), RunningJump and CoveredJump
+> all run on the engine as they do on `ref` — reference-trajectory moves,
+> their own solve, `AmbientPolicy.Off`. Grounded profiles cap progress ALONG the
 > path (the bead's arc), not along x — capping x let a 45° bevel run at
 > |v| = 141 and a staircase became a chain of hops (rise 167 → 99).
 > `LATTICE_SCENARIOS.md`.

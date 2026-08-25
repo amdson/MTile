@@ -62,7 +62,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 85.8 px/s, **no corner hit** (twelfth pass: wall rows in the tracker + the redirect on the ground; before, the body stalled at every one of the corridor's ten faces) |
 >>>>>>> worktree-lattice-path-planner-plan
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state | `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance (the seed run fixes the first stretch to the arc); body enters low and clean, no bonk on the lip | ✅ `Row02` — horizon QP: arrives 4 px above the band and enters (the engine now runs in Falling; §7.1's launched guard is gone with the ref tail) |
-| 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ✅ `Row03_NearEdge` (twelfth pass): slides the 8 px out along the escape's first segment — the drive pushes along the plan's first direction — the path turns up the bevel, apex 60 px clear at x = 138; far ✅ `Row03_FarFromEdge` (bonks, no shuffle); `CoveredJumpState` yields on the engine |
+| 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ✅ `Row03_NearEdge` (twelfth pass): slides the 8 px out along the escape's first segment — the drive pushes along the plan's first direction — the path turns up the bevel, apex 60 px clear at x = 138; far ✅ `Row03_FarFromEdge` (bonks, no shuffle); `CoveredJumpState` runs on the engine again (thirteenth pass) — the row passed with it yielding, and passes with it back |
 | 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut`, `Row04` |
 >>>>>>> worktree-lattice-path-planner-plan
 | 5 | **1-high step while walking** | flat floor, 1-high ledge ahead | Standing | `u=(dir,0)`, hover on 10, walk | Path ramps up the block's C-obstacle bevel (≈45°) and re-hugs hover on top; x carry continues through the climb; on the ledge the body rides one tile higher | ✅ `OneHighStep` |
@@ -71,7 +71,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | ✅ `Row08` (eleventh pass): a real fall (max vy 213), caught by Standing, lands at hover |
 | 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` — on the engine: 51.3 px, 0 drift (60.1 with the leg fade at 400; the redirect on the ground trims ~9 px; 31.5 at fade 200) |
 | 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | ✅ `Row10` (twelfth pass): apex 41.3 px, clears the block, lands at hover — the launch plan's tilt is now the actuators' direction (legs' ceiling up, walk speed along ≈ 76°), not a fixed 45°, which had capped the rise at the x speed (18.8 px) |
-| 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ✅ `Row11` (twelfth pass): the planner refuses the block (`CrouchRiseCost` 30) and the body stays crouched at it (x = 185.6) — the climb family yields on the engine |
+| 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — the planner refuses the block (`CrouchRiseCost` 30, bonk); **`MantleState` fires from the crouch and vaults it** — state arbitration, its own thing (eighth pass trace) |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
 | 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ✅ `Row13` (eleventh pass): 260 of 270 — Falling has no hover and no upward air force; the legs catch only where Standing owns the body |
 | 14 | **Knockback** | body hit, `PreserveExternalVelocity` set | any | engine **excluded** | No correction at all — the fold does not fight combat momentum | ✅ `Admit` guard |
@@ -83,7 +83,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 
 `MTile.Tests/Sim/LatticeScenarioTests.cs` — one test per encoded row (1, 2, 3
 near + far, 4, 6, 7, 8, 9, 10, 11, 13, 15, 16, 17), all under `FoldEngine = "lattice"`
-(every row passes),
+(only row 11 — Mantle from a crouch — still skipped),
 asserting the table's *correct* behavior. Rows 5, 12, 14 are deliberately
 not encoded yet. Tests the engine cannot pass today are `Skip`ped with the
 row's blocker in the reason — that list is the next cycle's checklist.
@@ -320,29 +320,44 @@ that a plan hugging terrain is a walk however brief the air is — the
 planner knows it (each path node carries `Grounded`) — but it would also
 brake a real jump's carry on landing, so it is a feel decision.
 
-**The climb family yields (same day).** Reported from play: a big
-upward spike jumping into an upper corner. Reproduced with a block whose
-top is at the jump's apex: at the corner the disc plants and deflects the
-body upward (−20 px/s per tick, bounded), and then **Mantle / Parkour
-steal the body from Falling** (climb passive 29 > Falling's 0) and fire
-their own vault at −112 px/s — a maneuver's solve stacked on the engine's.
-The climb family now yields on the lattice engine, as RunningJump and
-CoveredJump do: corners are the engine's (the DP routes over a lip it
-rates worth it, the disc plants against the face, Standing's legs lift
-where the ground probe claims the body), and what the engine refuses
-stays refused. Without the vault the same corner reads:
+**The maneuver states come back (thirteenth pass).** Reported from
+play: "a lot of the movement states are just never activating, like the
+two block arc." True, and measured — a ledge sweep at 1/2/3 tiles, per
+engine:
 
-```
-[62] Falling  v=(47,−54)  dvy=−86  disc=(−889,−1208)  ← collision response + the plant (−20 of it)
-[64] Standing v=(52,−103) legs=2350                    ← the probe finds the top; Standing lifts
-[72] Standing y=41.9, at hover on the block
-```
+| ledge | lattice (before) | `qp` / `ref` |
+|---|---|---|
+| 1-high, walk in | mounts as `Standing > Falling > Standing` | `ParkourState` |
+| 2-high, Up held | **stops dead** | `ArcJumpState` — mounts |
+| 3-high | nobody climbs (correct) | — |
 
-— the body mounts the lip through the engine's channels; the one-tick
-swing at the corner is −86 px/s, two thirds of it the tile collision
-resolving the corner. Row 11 passes (the crouch stays at the block); the
-step course's bonk count is unchanged (18). `qp` untouched (42 passed):
-the gate is `OnLattice`.
+Five states were gated off on the engine — Parkour, Mantle, ArcJump,
+RunningJump, CoveredJump. Two of those gates were mine from earlier
+passes on the theory that each maneuver dissolves into path + tracker;
+the third (the climb family) was this cycle's fix for a corner spike.
+The cost was not what those notes assumed: ArcJump is a **traversal
+ability**, not a solver detail — Up + running at a 2-block lip — and with
+it gated the engine simply had no way up, while the 1-block vault still
+happened but read as a stumble instead of a vault clip.
+
+The gates are removed: all five run on the lattice engine exactly as they
+do on `ref`, keeping their reference trajectories, their entry hop, their
+own solve and `AmbientPolicy.Off`. The maneuver stack was working well
+and the engine has no claim on it — what the engine owns is the *ambient*
+free-state locomotion the maneuvers hand back to. Measured after, the
+three engines agree on every cell of the sweep (lattice mounts the 2-high
+lip via ArcJump at minY 89 vs `qp` 88 / `ref` 89; RunningJump fires on all
+three when jump is pressed at the lip). 17 lines deleted, nothing added.
+
+Costs, both known and pre-existing: row 11 goes back to `Skip` — crawling
+into a 1-high block, `MantleState` fires from the crouch and vaults it,
+the arbitration gap the row was always skipped for. And the corner spike
+that motivated the climb gate is back on the table as its own problem: at
+a block top near a jump's apex the disc plants (−20 px/s, bounded) and
+then Mantle/Parkour steal the body from Falling (climb passive 29 >
+Falling's 0) and add their vault at −112 px/s. That is a **priority**
+question — should a climb outrank a live descent? — not a reason to
+delete the move.
 
 **The running jump (same day).** `u` for a `Rising` profile was `(dir, −1)`
 normalized — a fixed 45° tilt, an arbitrary constant. The band then holds
@@ -478,7 +493,7 @@ different quantity — legs extending from crouch to full — and if the old
 height is wanted it is the jump profile's own reach (a profile parameter,
 like its hover flag), not a longer `LegReach`. Left for the decision.
 
-### Tenth pass (2026-08-24) — jump states on the engine, steps 2–3: running and covered jumps — superseded
+### Tenth pass (2026-08-24) — jump states on the engine, steps 2–3: running and covered jumps — SUPERSEDED by the thirteenth pass (both states run on the engine again)
 
 On the lattice engine `RunningJumpState` and `CoveredJumpState` yield; both
 are `JumpingState` with the same profile — the running jump is `u` tilted
