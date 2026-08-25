@@ -311,15 +311,22 @@ public sealed partial class CharacterAnimator
         }
     }
 
-    // One row: √PhaseStepPrior · (Δφ − Δφ_prev) — the playback-continuity / momentum prior.
+    // One row: √PhaseAccelPrior · (Δφ − Δφ_prev) / (dt² · PhaseAccelRef) — the cadence
+    // ACCELERATION penalty (playback continuity / momentum). Δφ − Δφ_prev is the phase
+    // acceleration in cycles/frame²; dividing by dt² makes it cycles/s² (so the row means the
+    // same thing at 30 and 60 fps) and by PhaseAccelRef (100 cycles/s² ≈ the run's re-contact
+    // hop at 60 fps) makes it O(1) like every other dimensionless row — λ = 1 charges one full
+    // hop about what one pixel of planted-foot slip costs (√TierContact/reach ≈ 1). The old
+    // PhaseStepPrior was this row without the normalization: in raw phase/frame units a 0.03
+    // hop cost 8·0.03² ≈ 0.007 against 1.0 for 1px of slip, so at 8 it never did anything.
     private sealed class PlaybackContinuityConstraint : ISolveConstraint
     {
         private readonly CharacterAnimator _a;
         public PlaybackContinuityConstraint(CharacterAnimator a) => _a = a;
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
-        { r[0] = MathF.Sqrt(_a._frame.Solver.PhaseStepPrior) * (x[IdxPhi] - _a._prevPhaseStep); return 1; }
+        { r[0] = MathF.Sqrt(_a._frame.Solver.PhaseAccelPrior) * _a._phaseAccelNorm * (x[IdxPhi] - _a._prevPhaseStep); return 1; }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
-        { jac[row0 * stride + IdxPhi] = MathF.Sqrt(_a._frame.Solver.PhaseStepPrior); return 1; }
+        { jac[row0 * stride + IdxPhi] = MathF.Sqrt(_a._frame.Solver.PhaseAccelPrior) * _a._phaseAccelNorm; return 1; }
     }
 
     // One row: √PhaseFloorPrior · max(0, 1 − Δφ/floor) — the one-sided phase-rate floor.

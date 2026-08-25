@@ -520,7 +520,7 @@ pre-normalization tuning — px tiers carry the ×reach² rescale):
 | AIM / CORE | TierAim, CorePosePrior | 60 |
 | SMOOTH | ThetaSmooth (Δθ toward prev) | 40 |
 | COM-Y | ComWeightY (δ → baseline) | 23 |
-| CADENCE | PhaseStepPrior (Δφ momentum; phase units) | 8 |
+| CADENCE | PhaseAccelPrior (Δφ acceleration, normalized to 100 cycles/s²; was PhaseStepPrior in raw phase units) | 0.05 |
 | LIMB | LimbPosePrior (loose limbs do the IK) | 4 |
 
 So the original tier intent (`HARD ~1e3 ≫ CONTACT ≫ priors`) was in fact what the tuned

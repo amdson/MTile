@@ -39,7 +39,25 @@ public class AnimSolverConfig
     // per frame from the pose-follow stiffness + dt (CharacterAnimator._lambdaSmooth), so the
     // in-solve smoothing reproduces the retired BlendToward ease exactly on unconstrained
     // bones. Tune the FEEL via CharacterAnimator.Stiffness / UpperBodyStiffness.
-    public float PhaseStepPrior { get; set; } = 8f;   // λ on (Δφ − Δφ_prev) — cadence momentum / playback continuity
+    // λ on the cadence's ACCELERATION (Δφ − Δφ_prev)/dt², normalized by 100 cycles/s² — the
+    // soft "the phase rate should change smoothly" cost (PlaybackContinuityConstraint). It
+    // replaces PhaseStepPrior, the same row in raw phase/frame units, which at 8 was ~140×
+    // too weak to ever matter. Calibration: λ = 1 charges one re-contact hop (~0.03/frame at
+    // 60 fps ≈ 100 cycles/s²) about what 1px of planted-foot slip costs. dt-invariant.
+    // 0 disables. Contrast MaxPhaseAccel, the HARD box.
+    //
+    // Sizing (measured 2026-08-25, walk 25 / run 90 px/s, 30 and 60 fps). The row is
+    // QUADRATIC, which is what makes a small λ useful: the free solve occasionally SKIPS a
+    // quarter cycle in one frame (Δφ → MaxPhaseStep: the coarse seed search picking the next
+    // basin — ~850 cycles/s²), while the walk clip's AUTHORED phase-rate swing is ~70 cycles/s²
+    // and the run's re-contact hop ~50–140. At 0.05 a skip costs ~3–4px of slip-equivalent
+    // and is gone (max accel 850 → ~60), the authored swing costs ~0.03 and is untouched (walk
+    // mean |Δθ| within ~15% of free, cadence unchanged). Regimes: 0.2–1 starts smoothing the
+    // re-contact hop but taxes the walk (mean |Δθ| ×2–4, cadence −5–15%); ≥ 2 fights the
+    // authored swing outright (walk |Δθ| ×10). To make a LARGE λ appropriate, retime the
+    // clips to a uniform phase rate (MTile.Probe retime) so "zero acceleration" is actually
+    // the authored intent — a penalty toward zero is only principled against uniform clips.
+    public float PhaseAccelPrior { get; set; } = 0.05f;
     // λ on the one-sided phase-rate floor max(0, 1 − Δφ/floor): a hinge that keeps a solved
     // step from collapsing toward 0 when a weak-weight contact (feather fade, fresh capture)
     // stops driving Δφ — the collapsed value would then be replayed by the flight coast for a
@@ -61,14 +79,15 @@ public class AnimSolverConfig
     // genuinely WEAKER constraint, not the same one better conditioned. Mode 2 is the only
     // option that keeps the constraint strict while removing the column entirely.
     public int PhaseFloorMode { get; set; }
-    // HARD bound on the cadence's ACCELERATION, in cycles/s²: the per-frame phase step may
-    // change by at most MaxPhaseAccel·dt² from one frame to the next (Δφ = rate·dt, so a
-    // rate change per frame scales with dt² — this stays the SAME ramp at 30 or 60 fps).
-    // The phase rate must RAMP — it can't jump. Enforced as a box on Δφ around Δφ_prev in
-    // the cadence solve, the same cap on the flight coast, and the coarse seed search is
-    // clamped into it. The soft twin is PhaseStepPrior (a quadratic pull toward Δφ_prev) —
-    // at its default 8 it barely resists the re-contact hop, which is why this exists.
-    // 0 disables (historical behaviour, bit-for-bit).
+    // OPTIONAL HARD bound on the cadence's ACCELERATION, in cycles/s²: the per-frame phase
+    // step may change by at most MaxPhaseAccel·dt² from one frame to the next (Δφ = rate·dt,
+    // so a rate change per frame scales with dt² — the SAME ramp at 30 or 60 fps). Enforced
+    // as a box on Δφ around Δφ_prev in the cadence solve, the same cap on the flight coast,
+    // and the coarse seed search is clamped into it. OFF by default (0): a hard cap turns the
+    // run's one-frame re-contact hop into several frames of planted-foot SLIP — the foot
+    // slides while the phase catches up at the capped rate — which read worse than the hop.
+    // The shipped mechanism is the soft PhaseAccelPrior above, which trades hop against slip
+    // continuously; this box is kept as an opt-in experiment. 0 = off (bit-for-bit).
     //
     // Sizing (measured, biped 0.6 scale, 60 fps ⇒ box = MaxPhaseAccel/3600 per frame): a run
     // at 90 px/s changes Δφ by ~0.002–0.005 per frame WITHIN a stride, coasts flight at a
@@ -78,11 +97,12 @@ public class AnimSolverConfig
     // box can't tell that authored swing from a hop — at 22 it fought the walk every stride
     // (mean |Δθ| 0.024 → 0.039 rad, corrections erratic instead of decaying). 40 (= 0.011/
     // frame at 60 fps) lets the walk's swings through and still turns the run's re-contact
-    // hop into a ~3-frame ramp. The price of going tighter: the planted foot slips over the
-    // ramp (the no-slip row can't be met at a rate the box forbids) — tune by eye.
+    // hop into a ~3-frame ramp — if you switch it on, start there. The price of going
+    // tighter: the planted foot slips over the ramp (the no-slip row can't be met at a rate
+    // the box forbids).
     // A clip change seeds Δφ_prev with the velocity-derived legacy rate (|vx|·dt·PhasePerPixel)
     // rather than 0, so Walk↔Run / Fall→Run don't restart the cadence from a standstill.
-    public float MaxPhaseAccel { get; set; } = 40f;
+    public float MaxPhaseAccel { get; set; } = 0f;
     public float ComWeightY    { get; set; } = 23f;   // soft λ pulling δ → com baseline (so flight frames release)
     // λ pulling the horizontal body sway d.x → 0. Deliberately STIFFER than ComWeightY: d.x
     // exists to soak the no-slip residual at a planted foot's horizontal turning point
@@ -160,7 +180,7 @@ public class AnimSolverConfig
         TierContact             = src.TierContact;
         CorePosePrior           = src.CorePosePrior;
         LimbPosePrior           = src.LimbPosePrior;
-        PhaseStepPrior          = src.PhaseStepPrior;
+        PhaseAccelPrior         = src.PhaseAccelPrior;
         PhaseFloorPrior         = src.PhaseFloorPrior;
         PhaseFloorMode          = src.PhaseFloorMode;
         MaxPhaseAccel           = src.MaxPhaseAccel;

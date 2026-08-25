@@ -220,6 +220,11 @@ public sealed partial class CharacterAnimator
     private Affine2           _solveRoot;
     private float             _phaseFloor;        // speed-derived Δφ floor for PhaseRateFloorConstraint (0 = inert)
     private float             _phaseAccelBox;     // this frame's |Δφ − Δφ_prev| bound = MaxPhaseAccel·dt² (0 = no box)
+    private float             _phaseAccelNorm;    // 1/(dt²·PhaseAccelRef): (Δφ − Δφ_prev)·norm = acceleration in PhaseAccelRef units
+    // Reference phase acceleration (cycles/s²) the soft acceleration row is normalized by —
+    // about one re-contact hop of the run at 60 fps (0.03/frame · 3600). Makes PhaseAccelPrior
+    // O(1): λ = 1 ⇒ one such hop costs ≈ 1px of planted-foot slip.
+    private const float       PhaseAccelRef = 100f;
     private bool              _haveCorr;          // a Δθ-correction solve ran this frame
 
     // Action-aim state (the stab re-aim, §STAB_AIM_PLAN), resolved each frame in step 1.7 and
@@ -562,6 +567,10 @@ public sealed partial class CharacterAnimator
         // the per-frame step may move by at most a·dt²). Read AFTER the driver's Contribute
         // so a per-frame override reaches it; shared by the solve box and the flight coast.
         _phaseAccelBox = _frame.Solver.MaxPhaseAccel > 0f ? _frame.Solver.MaxPhaseAccel * dt * dt : 0f;
+        // Normalization for the soft acceleration row (PlaybackContinuityConstraint):
+        // (Δφ − Δφ_prev) · _phaseAccelNorm is the phase acceleration in units of PhaseAccelRef
+        // cycles/s² — dimensionless and dt-invariant, like every other row.
+        _phaseAccelNorm = 1f / (MathF.Max(dt, 1e-4f) * MathF.Max(dt, 1e-4f) * PhaseAccelRef);
 
         if (locomotion && hasClip && HasContacts(anim))
         {
