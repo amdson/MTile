@@ -233,6 +233,39 @@ Row 3-near: apex y = 15 at x = 138 (60 px clear of the slab). Row 3-far
 unchanged (bonk, no shuffle), rows 9, 10, 16, 17 and the corridor
 unchanged. All 35 lattice gates pass; `qp` 47.
 
+**The velocity caps (same day).** Peak speeds per state across the
+scenario set, against the caps the earlier solvers kept (walk 100, crouch
+50, air 150): `qp` and `ref` never exceed 150 anywhere; the lattice engine
+did — corridor **168 grounded / 193 airborne**, ledge drop **178 / 200**.
+Not the disc (a `ForwardCap` on it, the maneuver stack's speed-cap
+principle, changed nothing): the ledger showed the **drive at 3000 px/s²
+on the last Falling tick before a catch** (150 → 200 in one tick). The
+`Fall` and `Jump` profiles had `MaxSpeed = ∞`, meant as "the plan does not
+pace the descent" — but the tracker's speed rows are also the only bound
+on the drive's x push, and with the floor in leg reach the drive is live.
+The air profiles' x cap is now the state's air cap (`MaxAirSpeed`, under
+the air modifier); the speed rows bound x only, so the legs' launch is
+untouched. The disc keeps its `ForwardCap` (the profile's speed, else the
+air cap) as the guard it was built to be.
+
+| peak, lattice | before | **now** | `qp` / `ref` |
+|---|---|---|---|
+| ledge drop: Falling \|vx\| / first Standing ticks | 200 / 178 | **152 / 138** | 150 / 150 · 150 / 100 |
+| corridor: Falling / Standing | 193 / 168 | **136 / 124** | 150 / 103 · 100 / 100 |
+| landing 4 tiles: first Standing ticks | 137 | 137 | 150 · 100 |
+| flat walk / step / crouch | 99.6 / 99.7 / 49.7 | same | ✓ |
+
+What remains above the walk cap is the *carry*: a body that lands at the
+air cap keeps it for a few Standing ticks while the speed rows trim it —
+`qp` carries the full 150 the same way; `ref`'s servo trims at once.
+Flagged, not changed: the legs' rise while Standing peaks at **150 px/s**
+at the corridor's bumps (`qp` 79, `ref` 115) — the leg fade at 400 is the
+jump's ceiling and the bump climb's alike, so bumps are now small hops (the
+corridor's max fall 145). A per-profile push fade (Stand 200 / Jump 400)
+would separate them — one more profile parameter, the decision from the
+eleventh pass in another form. Neutral jump launch 247 px/s, running hop
+270 (`qp`/`ref` 220 / 200).
+
 **The running jump (same day).** `u` for a `Rising` profile was `(dir, −1)`
 normalized — a fixed 45° tilt, an arbitrary constant. The band then holds
 the launch to vy = vx and the legs fire at the drive's pace instead of

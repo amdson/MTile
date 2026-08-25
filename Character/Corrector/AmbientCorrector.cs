@@ -50,25 +50,28 @@ public struct FoldProfile
     // actuators in free air (LatticeTracker masks the air channels; the legs
     // are out of reach: LegReach is the standing probe, so wherever they
     // could act StandingState owns the body instead). Air control stays the
-    // state's baseline.
+    // state's baseline. MaxSpeed is the AIR cap: the tracker's speed rows
+    // are what bound the drive's x push, and with no limit the drive fired
+    // at its cap on the last tick before a catch (150 → 200 px/s).
     public static FoldProfile Fall => new()
     {
         Fold = true, Hover = false, Rising = false,
         HoverOffset  = MovementConfig.Current.FoldHoverOffset,
         ClimbReachUp = 0f,
-        MaxSpeed     = float.PositiveInfinity,
+        MaxSpeed     = MovementConfig.Current.MaxAirSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
     };
 
     // Jump states on the lattice engine (plan §7.3): hover off, rise free,
-    // no speed limit ("as fast as possible"), u up-and-along-intent while
-    // the button is held. Jump height is what the legs deliver along a
-    // rising path before leg reach runs out — a retune, not a mechanism.
+    // x at the air cap (the speed rows bound x only; the launch is the
+    // legs', "as fast as possible" along the rising path), u up-and-along-
+    // intent while the button is held. Jump height is what the legs deliver
+    // along a rising path before leg reach runs out.
     public static FoldProfile Jump => new()
     {
         Fold = true, Hover = false, Rising = true,
         HoverOffset = 0f, ClimbReachUp = 0f,
-        MaxSpeed = float.PositiveInfinity, RiseCost = 0f,
+        MaxSpeed = MovementConfig.Current.MaxAirSpeed, RiseCost = 0f,
     };
 
     // Standing/Falling: hover ≈ the old spring equilibrium; 1-high ledges ramp

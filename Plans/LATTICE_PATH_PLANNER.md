@@ -137,7 +137,10 @@ orders of magnitude cheaper than the state-space search prototype.
 > floor is the tracker's (the stamp margin added back — no walk-start hop).
 > Then the covered jump: the drive pushes along the plan's first segment
 > (a neutral escape begins sideways), and a lattice jump ends at an apex
-> only after rising — row 3-near passes. `LATTICE_SCENARIOS.md`.
+> only after rising — row 3-near passes. The air profiles' x cap is the
+> air cap (the speed rows bound the drive, and `∞` let it fire at 3000 on
+> the last Falling tick: 200 px/s at a lip); the disc has a `ForwardCap`.
+> `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

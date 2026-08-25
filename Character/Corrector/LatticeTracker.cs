@@ -68,7 +68,8 @@ public static class LatticeTracker
         bool anchored = dist <= BallisticPredictor.SupportReach;
 
         // ── The plan ─────────────────────────────────────────────────────
-        float speed = fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
+        // The x speed cap: the profile's, under the walk or air modifier.
+        float speed = fold.MaxSpeed * (fold.Hover ? ctx.Modifiers.MaxWalkSpeed : ctx.Modifiers.MaxAirSpeed);
         // u is intent: along dir, and up as well while a jump is held. A
         // launch's tilt is the direction the actuators produce — the legs'
         // ceiling (the push fade speed) up, the walk speed along — so the
@@ -254,6 +255,16 @@ public static class LatticeTracker
             }
             pr.Channels[1].Axis = new Vector2(MathF.Sign(t0.X), 0f);
             pr.Channels[1].Unilateral = true;
+            // The disc never grows forward speed past the state's cap (the
+            // maneuver stack's speed-cap principle, movement_todo #5): a
+            // deflection keeps |v|, so a 200 px/s drop rotated at a lip came
+            // out as 200 px/s of walk (the corridor peaked at 168 grounded,
+            // 193 airborne; qp/ref never exceed the 150 air cap). The cap is
+            // the profile's speed where it has one (walk, crouch), else the
+            // air cap; forward is the plan's first direction.
+            pr.Channels[3].ForwardAxis = new Vector2(MathF.Sign(t0.X), 0f);
+            pr.Channels[3].ForwardCap  = t0.X == 0f ? 0f
+                : float.IsFinite(speed) ? speed : cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed;
             // ...parametrized as a force (see CorrectionSolver.Project: the
             // same disc, in Δv/dt) so its lever is commensurate with the other
             // channels' — as a Δv lever, active on every near tick, it
