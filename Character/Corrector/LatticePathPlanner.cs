@@ -200,7 +200,8 @@ public sealed class LatticePathPlanner
         // once. (CorrectorMargin, the qp/ref engines' 2 px, had been added on
         // top of the band: two allowances, and a corridor seam narrowed to a
         // single cell — LATTICE_SCENARIOS.md fifth pass.)
-        StampObstacles(chunks, body, perTile, 0.5f * _cell);
+        _margin = 0.5f * _cell;
+        StampObstacles(chunks, body, perTile, _margin);
         SweepFloorBelow();
 
         int seedX = (int)MathF.Floor(seed.X / _cell), seedY = (int)MathF.Floor(seed.Y / _cell);
@@ -495,7 +496,14 @@ public sealed class LatticePathPlanner
     }
 
     // §3.2 item 2: per x-column bottom-up sweep — distance from each free
-    // cell's center down to the top edge of the first blocked cell below.
+    // cell's center down to the C-space floor below it. The bitmap is stamped
+    // with a margin, so the first blocked cell's top edge sits one margin
+    // above the true C-envelope; the margin is added back so the DP's hover
+    // point is the tracker's (measured against the exact envelope). Without
+    // it the two floors differed by 1.6 px and every walk from rest began
+    // with a one-cell hop: the body rests at the tracker's band bottom and
+    // the DP's path stepped up to its own, higher, hover cell.
+    private float _margin;
     private void SweepFloorBelow()
     {
         for (int gx = 0; gx < _w; gx++)
@@ -505,7 +513,7 @@ public sealed class LatticePathPlanner
             {
                 int idx = gy * _w + gx;
                 float cyC = (_y0 + gy + 0.5f) * _cell;
-                if (_blocked[idx]) { blockTop = cyC - 0.5f * _cell; _floorBelow[idx] = 0f; }
+                if (_blocked[idx]) { blockTop = cyC - 0.5f * _cell + _margin; _floorBelow[idx] = 0f; }
                 else _floorBelow[idx] = blockTop - cyC;
             }
         }
