@@ -149,7 +149,7 @@ public sealed class GameRecorder
             s.Pins is { Length: > 0 } ? (ExternalPin[])s.Pins.Clone() : null,
             s.Surfaces is { Length: > 0 } ? (SolverSurface[])s.Surfaces.Clone() : null,
             s.HasGrip, s.GripTarget, s.HasAim, s.AimDir, s.Tag,
-            groundGap: s.GroundGap);
+            lowCeiling: s.LowCeiling, groundGap: s.GroundGap);
 
         return new Frame
         {

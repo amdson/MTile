@@ -5,12 +5,16 @@ namespace MTile;
 
 public static class CeilingChecker
 {
-    private const float ProbeSlack = 20f;
+    public const float ProbeSlack = 20f;
 
-    public static bool TryFind(PhysicsBody body, ChunkMap chunks, out FloatingSurfaceDistance contact)
+    // `probeSlack`: how far above the body's top the strip reaches (px). The default is the
+    // FSM's crouch/ceiling query; the animation sample passes a tighter one to ask "is a tile
+    // right over the head" (CharacterAnimSample.RunHeadroomSlack). Sim callers never pass it.
+    public static bool TryFind(PhysicsBody body, ChunkMap chunks, out FloatingSurfaceDistance contact,
+                               float probeSlack = ProbeSlack)
     {
         contact = null;
-        var probe = body.Bounds.StripAbove(ProbeSlack);
+        var probe = body.Bounds.StripAbove(probeSlack);
 
         // Pick the lowest tile-bottom (= largest Y under MonoGame y-down) in the probe.
         // That's the closest ceiling face.

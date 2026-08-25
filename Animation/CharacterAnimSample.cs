@@ -106,10 +106,14 @@ public readonly struct CharacterAnimSample
     // HasAim false ⇒ AimDir unused. Render-only.
     public readonly bool    HasAim;
     public readonly Vector2 AimDir;
-    // A solid ceiling sits right above the (crouched) body this frame — the SAME signal
-    // CrouchedState uses to stay crouched with Down released (CeilingChecker.TryFind). When
-    // set on a still crouch it selects the DuckUnder clip (head tucked, torso flat, free hand
-    // braced) so squeezing through a low gap reads as "under something". Render-only.
+    // A solid ceiling sits right above the body this frame — the SAME signal CrouchedState
+    // uses to stay crouched with Down released (CeilingChecker.TryFind: a solid tile within
+    // 20px of the body's top for a crouch, within RunHeadroomSlack for any other grounded
+    // state — so a 2-high corridor fires it and a 3-high one doesn't). On a still
+    // crouch it selects the DuckUnder clip (head tucked, torso flat, free hand braced) so
+    // squeezing through a low gap reads as "under something"; on a grounded run it softens
+    // the solver's vertical com tie (GroundLocomotionDriver.Contribute → FrameInputs.Solver).
+    // Render-only.
     public readonly bool    LowCeiling;
     // PHYSICAL ground gap (world px): how far the body floats ABOVE its supported rest height,
     // from the same GroundChecker probe the movement FSM uses. 0 = at/below rest (physically
@@ -138,6 +142,14 @@ public readonly struct CharacterAnimSample
         SurfacesNear = surfacesNear ?? (surfaces != null && (surfaceCount < 0 ? surfaces.Length : surfaceCount) > 0);
     }
 
+    // How far above the body's top (px) a solid tile counts as "right over the head" for a
+    // grounded, non-crouched sample's LowCeiling. Deliberately TIGHTER than the FSM's
+    // CeilingChecker.ProbeSlack (20px): Standing at fold hover clears a 2-high/32px corridor
+    // by ~1px (fires) but sits ~17px under a 3-high roof (must NOT fire — that's the bumpy
+    // corridor's ordinary interior, where the run is fine). Half a tile of slack so the
+    // lattice's under-lip dips still register without reaching the next tile row up.
+    public const float RunHeadroomSlack = 8f;
+
     // Scratch for the wall-slide half-plane, reused every frame instead of allocating a
     // fresh array (render-only + single-threaded: samples are built and consumed one
     // character at a time within the same Update, so reuse is safe).
@@ -159,12 +171,18 @@ public readonly struct CharacterAnimSample
         int facing = p.Facing;
         AnimTag tag = p.CurrentState?.AnimationTag ?? AnimTag.None;
 
-        // Is there a solid ceiling right overhead while crouched? Reuse CeilingChecker.TryFind —
-        // the exact query CrouchedState.CheckConditions uses to stay crouched with Down released.
-        // Only meaningful for a crouch, so skip the tile query otherwise. Render-only read of the
-        // public body + chunks; nothing flows back into the sim.
-        bool lowCeiling = tag == AnimTag.Crouch && chunks != null
-                          && CeilingChecker.TryFind(p.Body, chunks, out _);
+        // Is there a solid ceiling right overhead? Reuse CeilingChecker.TryFind — the exact
+        // query CrouchedState.CheckConditions uses to stay crouched with Down released (a 20px
+        // strip above the body: a 2-high/32px corridor fires it, a 3-high one doesn't).
+        // Evaluated for a crouch (→ the DuckUnder clip) AND for any grounded state — Standing
+        // threads a 2-high corridor upright at fold hover, and the ground locomotion driver
+        // softens the run's com tie under a roof (GroundLocomotionDriver.Contribute). Skipped
+        // while airborne, where nothing reads it. Render-only read of the public body + chunks;
+        // nothing flows back into the sim.
+        bool lowCeiling = chunks != null
+                          && (tag == AnimTag.Crouch
+                                ? CeilingChecker.TryFind(p.Body, chunks, out _)
+                                : p.IsGrounded && CeilingChecker.TryFind(p.Body, chunks, out _, RunHeadroomSlack));
 
         SolverSurface[] surfaces = null;
         int count = 0;

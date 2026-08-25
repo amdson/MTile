@@ -67,6 +67,15 @@ public class AnimSolverConfig
     // (∂slipX/∂Δφ = 0 there — cadence alone can't track the body), and the absolute pull-to-0
     // is what stops it absorbing sustained travel and stalling the leg cycle (§11.1's trap).
     public float ComWeightX    { get; set; } = 230f;
+    // EXPERIMENT (2026-08-25): the ComWeightY a RUN uses while a solid ceiling sits right
+    // over the body (CharacterAnimSample.LowCeiling — a 2-high/32px corridor, which Standing
+    // threads upright at fold hover with ~1px of head-room). The run cycle is authored for
+    // a full-height stance; pressed under a roof the body's com rides low and the legs get
+    // mashed into the floor. A looser com tie lets the ground-hold rows lift the rig root
+    // off the com baseline instead of fighting it. Applied per frame by
+    // GroundLocomotionDriver.Contribute through FrameInputs.Solver (the per-frame effective
+    // config) — nothing else reads it. Set equal to ComWeightY to disable the experiment.
+    public float LowCeilingRunComWeightY { get; set; } = 4f;
 
     // --- box limits (clamps, not weights) ---
     // |Δθ| cap per bone (rad). Widened from 0.6 when smoothing moved in-solve: Δθ now also
@@ -108,6 +117,43 @@ public class AnimSolverConfig
 
     [JsonIgnore]
     public static AnimSolverConfig Current => _current;
+
+    // Overwrite every knob on this instance from `src`. This is how the animator builds its
+    // PER-FRAME EFFECTIVE config (FrameInputs.Solver): a copy of Current taken at the top of
+    // each Update, which a move driver may then override programmatically for that frame
+    // (IMoveDriver.Contribute) — e.g. a softer ComWeightY for a run under a low ceiling.
+    // Every solve-side reader goes through the effective copy, never Current directly, so
+    // any knob in this class is overridable the same way. Allocation-free by design (one
+    // long-lived instance per animator, refreshed in place, ~30 field copies a frame).
+    //
+    // KEEP IN SYNC with the property list: a knob added above but not copied here would be
+    // silently read at its DEFAULT on the effective config — the hot-reloaded json value
+    // would never reach the solver. AnimSolverOverrideTests.CopyFrom_CoversEveryKnob walks
+    // the public properties by reflection and fails the build's test run if one is missed.
+    public void CopyFrom(AnimSolverConfig src)
+    {
+        TierHard                = src.TierHard;
+        TierNoPen               = src.TierNoPen;
+        TierAim                 = src.TierAim;
+        TierContact             = src.TierContact;
+        CorePosePrior           = src.CorePosePrior;
+        LimbPosePrior           = src.LimbPosePrior;
+        PhaseStepPrior          = src.PhaseStepPrior;
+        PhaseFloorPrior         = src.PhaseFloorPrior;
+        PhaseFloorMode          = src.PhaseFloorMode;
+        ComWeightY              = src.ComWeightY;
+        ComWeightX              = src.ComWeightX;
+        LowCeilingRunComWeightY = src.LowCeilingRunComWeightY;
+        AngleCorrLimit          = src.AngleCorrLimit;
+        StaticFtol              = src.StaticFtol;
+        StaticVectorize         = src.StaticVectorize;
+        CadenceVectorize        = src.CadenceVectorize;
+        VertOffsetLimit         = src.VertOffsetLimit;
+        HorizOffsetLimit        = src.HorizOffsetLimit;
+        MaxPhaseStep            = src.MaxPhaseStep;
+        FeatherWidth            = src.FeatherWidth;
+        ContactReleaseTime      = src.ContactReleaseTime;
+    }
 
     public static void Load(string path)
     {

@@ -62,8 +62,10 @@ public sealed partial class CharacterAnimator
 
     // --- cadence / IK solver ---
     // All solver weights + box limits live in AnimSolverConfig (hot-reloadable; the solve is
-    // render-only so there's no determinism risk). Read as AnimSolverConfig.Current.X. See the
-    // weight TIERS / per-region pose-prior rationale documented there and in §11.4.
+    // render-only so there's no determinism risk). Read as _frame.Solver.X — the PER-FRAME
+    // effective copy of AnimSolverConfig.Current (refreshed at the top of Update, overridable
+    // by the move driver in Contribute) — never as Current directly. See the weight TIERS /
+    // per-region pose-prior rationale documented there and in §11.4.
 
     // --- action overlay ---
     // (The overlay slot machinery — binding, easing, request→slot matching, compositing —
@@ -233,6 +235,9 @@ public sealed partial class CharacterAnimator
     public Skeleton           Skeleton => _skeleton;
     public SkeletonPose       Pose     => _pose;
     public CharacterAnimState State    => _state;
+    // The solver config the LAST Update actually solved with — Current plus whatever the
+    // move driver overrode that frame (FrameInputs.Solver). Diagnostics / tests.
+    public AnimSolverConfig   SolverConfig => _frame.Solver;
 
     // Per-bone angle correction Δθ (radians) the solver applied this frame, by bone
     // index — the IK channel on top of the authored blend. Zero on frames with no
@@ -391,6 +396,10 @@ public sealed partial class CharacterAnimator
     {
         float dt = s.Dt;
         _haveCorr = false;   // cleared until a cadence solve produces Δθ this frame
+        // This frame's EFFECTIVE solver config: a fresh copy of the (hot-reloaded) global,
+        // which the move driver may override in step 1.4 before any solve reads it. Every
+        // config read below and in the constraint rows goes through _frame.Solver.
+        _frame.Solver.CopyFrom(AnimSolverConfig.Current);
 
         // 0. Use the previous frame's state: detect a touchdown (was airborne, now
         //    grounded) and arm the authored Land one-shot window.
@@ -482,7 +491,7 @@ public sealed partial class CharacterAnimator
         //     limbs follow at the same rate unless constrained. Computed before the solves so
         //     the LM path and the fast path share identical smoothing this frame.
         {
-            var cfg0 = AnimSolverConfig.Current;
+            var cfg0 = _frame.Solver;
             float bBase  = 1f - MathF.Exp(-Stiffness * dt);
             float upperK = Stiffness + (UpperBodyStiffness - Stiffness) * _state.ActionWeight;
             float bUpper = 1f - MathF.Exp(-upperK * dt);
@@ -816,7 +825,7 @@ public sealed partial class CharacterAnimator
             if (phase < ks[0].Time) phase += 1f;
         }
 
-        float feather = AnimSolverConfig.Current.FeatherWidth;
+        float feather = _frame.Solver.FeatherWidth;
         float featherStart = jTime - feather;
         bool inWindow = j != i && phase > featherStart;
         float u  = inWindow ? MathHelper.Clamp((phase - featherStart) / feather, 0f, 1f) : 0f;
@@ -862,7 +871,7 @@ public sealed partial class CharacterAnimator
         // go within ContactReleaseTime, and the new foot's no-slip pulls the cycle forward
         // again. At healthy cadence the phase fade is faster and the time floor never bites.
         // (The weight must stay FROZEN inside the solve itself — see PlantedContactsConstraint.)
-        float timeFade = dt / MathF.Max(1e-3f, AnimSolverConfig.Current.ContactReleaseTime);
+        float timeFade = dt / MathF.Max(1e-3f, _frame.Solver.ContactReleaseTime);
         for (int i = _contacts.Count - 1; i >= 0; i--)
         {
             var c = _contacts[i];
@@ -933,7 +942,7 @@ public sealed partial class CharacterAnimator
     private float SolvePhaseStepLm(AnimationDocument clip, float phi, in Affine2 root)
     {
         _solveClip = clip; _solvePhi = phi; _solveRoot = root;
-        var cfg = AnimSolverConfig.Current;
+        var cfg = _frame.Solver;
         int n = IdxTheta0 + _skeleton.Count;  // x = [Δφ, δ, d.x, Δθ_0…]
 
         _solveLo[IdxPhi] = 0f;                    _solveHi[IdxPhi] = cfg.MaxPhaseStep;
@@ -974,7 +983,7 @@ public sealed partial class CharacterAnimator
         // box-clamped warm seed would stick the solution at the wall.
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n),
-                     vectorize: AnimSolverConfig.Current.CadenceVectorize);
+                     vectorize: _frame.Solver.CadenceVectorize);
         CaptureBreakdown(n);
         _haveCorr = true;
         return _solveVars[0];
@@ -993,7 +1002,7 @@ public sealed partial class CharacterAnimator
 
     private void SolveStaticPose(AnimationDocument anim, in CharacterAnimSample s)
     {
-        var cfg = AnimSolverConfig.Current;
+        var cfg = _frame.Solver;
         int dir = s.Facing == 0 ? 1 : s.Facing;
         float phi = SampleT(anim, in s);
         float comBaseY = 0f;

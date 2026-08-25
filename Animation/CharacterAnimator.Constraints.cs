@@ -96,7 +96,7 @@ public sealed partial class CharacterAnimator
             foreach (var c in _a._contacts)
             {
                 Vector2 tip = _a._scratch.WorldOf(c.Bone).Translation;   // bone's far end = contact tip
-                float sw = MathF.Sqrt(AnimSolverConfig.Current.TierContact * c.Weight) * _a._invCharLen;
+                float sw = MathF.Sqrt(_a._frame.Solver.TierContact * c.Weight) * _a._invCharLen;
                 r[n++] = sw * (tip.X + dx - c.Target.X);     // horizontal no-slip (drives Δφ + d.x sway)
                 r[n++] = sw * (tip.Y + dy - c.Target.Y);     // vertical ground hold (drives δ)
             }
@@ -112,7 +112,7 @@ public sealed partial class CharacterAnimator
             foreach (var c in _a._contacts)
             {
                 Vector2 tip = _a._scratch.WorldOf(c.Bone).Translation;
-                float sw = MathF.Sqrt(AnimSolverConfig.Current.TierContact * c.Weight) * _a._invCharLen;
+                float sw = MathF.Sqrt(_a._frame.Solver.TierContact * c.Weight) * _a._invCharLen;
                 _a.PointJacobianColumns(c.Bone, tip, colX, colY);
                 int hRow = row, vRow = row + 1;
                 for (int v = 0; v < nv; v++)
@@ -141,7 +141,7 @@ public sealed partial class CharacterAnimator
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
             float dy = x[IdxDy], dx = x[IdxDx];
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierHard) * _a._invCharLen;
+            float sw = MathF.Sqrt(_a._frame.Solver.TierHard) * _a._invCharLen;
             int n = 0;
             foreach (var (bone, target) in _a._pins)
             {
@@ -157,7 +157,7 @@ public sealed partial class CharacterAnimator
             int nv = IdxTheta0 + _a._skeleton.Count;
             var colX = _a._colX.AsSpan(0, nv);
             var colY = _a._colY.AsSpan(0, nv);
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierHard) * _a._invCharLen;
+            float sw = MathF.Sqrt(_a._frame.Solver.TierHard) * _a._invCharLen;
             int row = row0;
             foreach (var (bone, _) in _a._pins)
             {
@@ -216,7 +216,7 @@ public sealed partial class CharacterAnimator
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
             float dy = x[IdxDy], dx = x[IdxDx];
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierNoPen) * _a._invCharLen;
+            float sw = MathF.Sqrt(_a._frame.Solver.TierNoPen) * _a._invCharLen;
             int bones = _a._skeleton.Count, n = 0;
             foreach (var s in _a._surfaces)
                 for (int b = 0; b < bones; b++)
@@ -233,7 +233,7 @@ public sealed partial class CharacterAnimator
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
         {
             float dy = x[IdxDy], dx = x[IdxDx];
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierNoPen) * _a._invCharLen;
+            float sw = MathF.Sqrt(_a._frame.Solver.TierNoPen) * _a._invCharLen;
             int nv = IdxTheta0 + _a._skeleton.Count, bones = _a._skeleton.Count;
             var colX = _a._colX.AsSpan(0, nv);
             var colY = _a._colY.AsSpan(0, nv);
@@ -279,7 +279,7 @@ public sealed partial class CharacterAnimator
             Vector2 v = pR - pL, u = _a._aimTarget;
             float c = v.X * u.Y - v.Y * u.X;   // cross
             float d = v.X * u.X + v.Y * u.Y;   // dot
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierAim);
+            float sw = MathF.Sqrt(_a._frame.Solver.TierAim);
             r[0] = sw * MathF.Atan2(c, d);     // signed angle(v, û*); 0 ⇔ parallel, ±π ⇔ antiparallel (a max)
             return 1;
         }
@@ -298,7 +298,7 @@ public sealed partial class CharacterAnimator
             float c = v.X * u.Y - v.Y * u.X, d = v.X * u.X + v.Y * u.Y;
             float denom = c * c + d * d;       // = |v|² (û* unit); the d(atan2) normalizer
             if (denom < 1e-9f) return 1;        // hands coincident — leave the row at 0
-            float sw = MathF.Sqrt(AnimSolverConfig.Current.TierAim) / denom;
+            float sw = MathF.Sqrt(_a._frame.Solver.TierAim) / denom;
             // θ = atan2(c, d) ⇒ ∂θ/∂x_k = (d·∂c − c·∂d)/(c²+d²), with ∂v = ∂pR − ∂pL.
             for (int k = 0; k < nv; k++)
             {
@@ -317,9 +317,9 @@ public sealed partial class CharacterAnimator
         private readonly CharacterAnimator _a;
         public PlaybackContinuityConstraint(CharacterAnimator a) => _a = a;
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
-        { r[0] = MathF.Sqrt(AnimSolverConfig.Current.PhaseStepPrior) * (x[IdxPhi] - _a._prevPhaseStep); return 1; }
+        { r[0] = MathF.Sqrt(_a._frame.Solver.PhaseStepPrior) * (x[IdxPhi] - _a._prevPhaseStep); return 1; }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
-        { jac[row0 * stride + IdxPhi] = MathF.Sqrt(AnimSolverConfig.Current.PhaseStepPrior); return 1; }
+        { jac[row0 * stride + IdxPhi] = MathF.Sqrt(_a._frame.Solver.PhaseStepPrior); return 1; }
     }
 
     // One row: √PhaseFloorPrior · max(0, 1 − Δφ/floor) — the one-sided phase-rate floor.
@@ -335,7 +335,7 @@ public sealed partial class CharacterAnimator
         public PhaseRateFloorConstraint(CharacterAnimator a) => _a = a;
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
-            var cfg = AnimSolverConfig.Current;
+            var cfg = _a._frame.Solver;
             float fl = _a._phaseFloor;
             if (cfg.PhaseFloorMode == 2 || fl <= 1e-5f) { r[0] = 0f; return 1; }  // box mode: the bound does it
             float def = cfg.PhaseFloorMode == 1 ? fl - x[IdxPhi] : 1f - x[IdxPhi] / fl;
@@ -344,7 +344,7 @@ public sealed partial class CharacterAnimator
         }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
         {
-            var cfg = AnimSolverConfig.Current;
+            var cfg = _a._frame.Solver;
             float fl = _a._phaseFloor;
             if (cfg.PhaseFloorMode == 2 || fl <= 1e-5f) return 1;
             if (x[IdxPhi] < fl)
@@ -366,14 +366,14 @@ public sealed partial class CharacterAnimator
         public ComOffsetConstraint(CharacterAnimator a) => _a = a;
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
-            r[0] = MathF.Sqrt(AnimSolverConfig.Current.ComWeightY) * _a._invCharLen * x[IdxDy];
-            r[1] = MathF.Sqrt(AnimSolverConfig.Current.ComWeightX) * _a._invCharLen * x[IdxDx];
+            r[0] = MathF.Sqrt(_a._frame.Solver.ComWeightY) * _a._invCharLen * x[IdxDy];
+            r[1] = MathF.Sqrt(_a._frame.Solver.ComWeightX) * _a._invCharLen * x[IdxDx];
             return 2;
         }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
         {
-            jac[row0 * stride + IdxDy]       = MathF.Sqrt(AnimSolverConfig.Current.ComWeightY) * _a._invCharLen;
-            jac[(row0 + 1) * stride + IdxDx] = MathF.Sqrt(AnimSolverConfig.Current.ComWeightX) * _a._invCharLen;
+            jac[row0 * stride + IdxDy]       = MathF.Sqrt(_a._frame.Solver.ComWeightY) * _a._invCharLen;
+            jac[(row0 + 1) * stride + IdxDx] = MathF.Sqrt(_a._frame.Solver.ComWeightX) * _a._invCharLen;
             return 2;
         }
     }
@@ -387,7 +387,7 @@ public sealed partial class CharacterAnimator
         public PosePriorConstraint(CharacterAnimator a) => _a = a;
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
-            var cfg = AnimSolverConfig.Current;
+            var cfg = _a._frame.Solver;
             int bones = _a._skeleton.Count;
             for (int i = 0; i < bones; i++)
                 r[i] = MathF.Sqrt(_a._isCore[i] ? cfg.CorePosePrior : cfg.LimbPosePrior) * x[IdxTheta0 + i];
@@ -395,7 +395,7 @@ public sealed partial class CharacterAnimator
         }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
         {
-            var cfg = AnimSolverConfig.Current;
+            var cfg = _a._frame.Solver;
             int bones = _a._skeleton.Count;
             for (int i = 0; i < bones; i++)
                 jac[(row0 + i) * stride + (IdxTheta0 + i)] = MathF.Sqrt(_a._isCore[i] ? cfg.CorePosePrior : cfg.LimbPosePrior);

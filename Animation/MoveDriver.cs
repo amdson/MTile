@@ -65,6 +65,15 @@ public sealed class FrameInputs
     public readonly List<OverlayRequest>            Overlays    = new();
     public readonly List<(int Bone, Vector2 Target)> Pins       = new();
     public readonly List<ISolveConstraint>          Constraints = new();
+    // This frame's EFFECTIVE solver config. The animator refreshes it from
+    // AnimSolverConfig.Current (CopyFrom) at the top of every Update, BEFORE the driver's
+    // Contribute runs, so a driver can override any knob programmatically for this frame
+    // only — `dst.Solver.ComWeightY = …` — and the override evaporates next frame. Every
+    // solve-side read (constraint rows, box limits, contact feathering) goes through this
+    // copy, never through Current, which is what makes the override actually reach the
+    // solve. Not cleared by Clear(): the refresh is the animator's job, so a driver that
+    // touches nothing sees exactly the hot-reloaded json values.
+    public readonly AnimSolverConfig                Solver      = new();
     public void Clear() { Overlays.Clear(); Pins.Clear(); Constraints.Clear(); }
 }
 
@@ -164,7 +173,24 @@ public sealed class GroundLocomotionDriver : IMoveDriver
         return new ClipChoice(AnimClip.Idle, ClipTimeMode.IdleBob);
     }
 
-    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+    // Is this sample in the RUN band Select picks the Run clip for — run speed, travelling
+    // with facing (a reversal skid is RunTurn, a backpedal is WalkBack)? Same test as Select
+    // so Contribute's per-clip overrides can't drift from the clip choice.
+    public static bool IsRunning(in CharacterAnimSample s)
+        => MathF.Abs(s.Velocity.X) > RunSpeedThreshold && Math.Sign(s.Velocity.X) == s.Facing;
+
+    // EXPERIMENT: a run squeezed under a low ceiling (LowCeiling — a solid tile right over
+    // the head, the 2-high corridor case) runs with a softer vertical com tie, so the
+    // ground-hold rows can lift the rig root off the low-riding com baseline instead of
+    // mashing the authored full-height cycle into the floor. Per-frame override of the
+    // effective config (FrameInputs.Solver) — gone the frame the roof clears. Only the Run
+    // clip (not Walk/Idle) and only while physically supported (a pre-contact Hold frame has
+    // no cadence to fix). See AnimSolverConfig.LowCeilingRunComWeightY.
+    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst)
+    {
+        if (s.LowCeiling && s.GroundGap <= PreContactGap && IsRunning(in s))
+            dst.Solver.ComWeightY = dst.Solver.LowCeilingRunComWeightY;
+    }
 }
 
 // Generic airborne (no tag): rising plays Jump, falling plays Fall.

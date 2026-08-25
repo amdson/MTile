@@ -11,6 +11,7 @@
   "PhaseFloorPrior": 140,
   "ComWeightY": 23,
   "ComWeightX": 80,
+  "LowCeilingRunComWeightY": 4,
 
   "AngleCorrLimit": 3.2,
   "VertOffsetLimit": 24,
