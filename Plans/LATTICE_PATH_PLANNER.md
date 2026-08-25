@@ -142,7 +142,10 @@ orders of magnitude cheaper than the state-space search prototype.
 > the last Falling tick: 200 px/s at a lip); the disc has a `ForwardCap`.
 > The climb family (Parkour/Mantle/ArcJump) yields on the engine — it had
 > been vaulting from corners on top of the disc's plant (the "spike" at an
-> upper corner); row 11 passes. `LATTICE_SCENARIOS.md`.
+> upper corner); row 11 passes. Grounded profiles cap progress ALONG the
+> path (the bead's arc), not along x — capping x let a 45° bevel run at
+> |v| = 141 and a staircase became a chain of hops (rise 167 → 99).
+> `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

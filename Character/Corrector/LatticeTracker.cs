@@ -140,6 +140,9 @@ public static class LatticeTracker
         // perpendicular band and the progress row along the last bead's
         // tangent — timing along the path is the solve's own output.
         var pr = s.Problem;
+        // Grounded profiles (those that hover) cap the SPEED along the path;
+        // air profiles cap x only — see the rows below.
+        bool arcSpeed = fold.Hover && havePath && float.IsFinite(speed);
 
         // ── The walls: clearance rows from the free rollout ──────────────
         // The path is guidance; the tiles are the constraint. Without these
@@ -178,6 +181,19 @@ public static class LatticeTracker
                     // (rows measure Δp from the free rollout).
                     s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = n,  Depth = -band - e, HingeScale = 1f, Reference = true };
                     s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = -n, Depth = e - band,  HingeScale = 1f, Reference = true };
+                    if (arcSpeed)
+                    {
+                        // A walk speed is a SPEED: cap progress along the
+                        // path, not along x. Capping x let a body on a 45°
+                        // bevel run at |v| = 141 (a staircase came out at
+                        // 150 px/s of x and 160 of rise — a chain of hops,
+                        // where qp/ref walk at 100). The body's arc position
+                        // is the bead's, so the cap is the bead's own
+                        // coordinate: s_T ≤ speed·(T+1)·dt.
+                        float sFree = sT - Vector2.Dot(pass == 0 ? Vector2.Zero : s.TrackDelta[T], t);
+                        s.Rows[rowCount++] = new ClearanceRow
+                            { Tick = T, Normal = -t, Depth = sFree - speed * (T + 1) * dt, HingeScale = 1f, Reference = true };
+                    }
                 }
                 else if (hoverColumn)
                 {
@@ -186,7 +202,10 @@ public static class LatticeTracker
                     s.Rows[rowCount++] = new ClearanceRow { Tick = T, Normal = new Vector2(0f, -1f), Depth = e - band,  HingeScale = 1f, Reference = true };
                 }
             }
-            if (dir != 0 && float.IsFinite(speed))              // no limit = "as fast as possible"
+            // Air profiles keep the x-only cap: an air speed bounds lateral
+            // steering, while the vertical is gravity and the legs' launch
+            // ("as fast as possible" along a rising path).
+            if (!arcSpeed && dir != 0 && float.IsFinite(speed))
             {
                 for (int T = 0; T < H; T++)
                 {

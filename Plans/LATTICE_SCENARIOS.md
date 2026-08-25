@@ -266,6 +266,37 @@ would separate them — one more profile parameter, the decision from the
 eleventh pass in another form. Neutral jump launch 247 px/s, running hop
 270 (`qp`/`ref` 220 / 200).
 
+**A walk speed is a speed (same day).** Reported from play: excessive
+velocity on stair-like structures. Measured on an 8-step staircase, going
+up: lattice **150 px/s of x and 167 of rise, hopping** (10 airborne
+frames); `qp`/`ref` walk it at 100 (they vault it with Parkour, which the
+engine no longer uses). The speed rows capped **x**, not speed — on a 45°
+bevel x = 100 permits |v| = 141, and the legs supply the rest, so each
+step became a small launch. Grounded profiles (those that hover) now cap
+progress **along the path**: the bead's own arc coordinate, s_T ≤
+speed·(T+1)·dt, one row per tick in place of the x row. Air profiles keep
+the x cap — an air speed bounds lateral steering, while the vertical is
+gravity and the legs' launch.
+
+| stairs, 8 × 1-high | before | **now** | `qp` / `ref` |
+|---|---|---|---|
+| up: max rise | 167 | **99** | 137 / 137 (Parkour) |
+| up: max \|vx\| | 150 | **119** | 100 / 100 |
+| up: airborne frames | 10 | **2** | 156 / 156 (in the vault) |
+| down: max \|vx\| | 150 | 150 | 150 / 100 |
+| row 1 corridor | 97.1 | 87.1 px/s | — |
+
+The corridor pays 10 px/s for it, which is the same statement seen from
+the other side: over a bumpy path the arc is longer than the x span, so a
+speed cap along it *is* a smaller x speed. Left as measured, not decided:
+descending, the body leaves each step for a few frames, and in free air
+the state's own air control (`MaxAirSpeed` 150) accelerates it — `qp`
+does the same, only `ref` holds 100 (its reference servos to the walk
+target even airborne). Making a descent hold the walk speed means saying
+that a plan hugging terrain is a walk however brief the air is — the
+planner knows it (each path node carries `Grounded`) — but it would also
+brake a real jump's carry on landing, so it is a feel decision.
+
 **The climb family yields (same day).** Reported from play: a big
 upward spike jumping into an upper corner. Reproduced with a block whose
 top is at the jump's apex: at the corner the disc plants and deflects the
