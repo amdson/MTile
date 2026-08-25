@@ -124,6 +124,11 @@ public static class LatticeTracker
             }
             if (nv < 2) havePath = false;
         }
+        // The plan's first direction: where the drive pushes (below). A path
+        // that follows intent starts along dir; a neutral launch's escape
+        // from under a slab starts sideways toward the open side; a plain
+        // neutral jump starts straight up (no x at all).
+        Vector2 t0 = havePath ? Vector2.Normalize(s.BeadVerts[1] - s.BeadVerts[0]) : u;
         float yHover = floorY - fold.HoverOffset;
 
         // ── Sliding beads: outer passes of project → rows → solve ────────
@@ -238,7 +243,17 @@ public static class LatticeTracker
                 // px above the floor once the solve converged). Falling has no
                 // upward force; the catch is Standing's, where the legs are.
                 if (!fold.Hover && !fold.Rising) s.ChannelMask[0][k] = false;
+                // Drive: along the plan's first segment, wherever the legs
+                // are. BuildFold masks it off at dir == 0 (qp's "no x channel
+                // at station"); on the engine the plan is the authority — a
+                // neutral covered jump's escape begins sideways and needs an
+                // x push (from rest the disc has no radius). Where the plan
+                // follows intent this is the same drive as before; a vertical
+                // first segment turns it off (a neutral jump does not drift).
+                s.ChannelMask[1][k] = near && planning && t0.X != 0f;
             }
+            pr.Channels[1].Axis = new Vector2(MathF.Sign(t0.X), 0f);
+            pr.Channels[1].Unilateral = true;
             // ...parametrized as a force (see CorrectionSolver.Project: the
             // same disc, in Δv/dt) so its lever is commensurate with the other
             // channels' — as a Δv lever, active on every near tick, it

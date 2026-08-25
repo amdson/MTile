@@ -80,6 +80,9 @@ public struct MovementVars
     public ChannelAnchors AmbientChannelPrev; // AmbientCorrector fold: per-channel Δu anchors
                                     // (rollback-critical: an unsnapshotted anchor desyncs the
                                     // Δ-smoothness chain on restore)
+    public float JumpEntryY;        // JumpingState on the lattice engine: the launch height —
+                                    // the jump ends at an apex only once the body has risen
+                                    // above it (a covered jump's escape begins sideways)
     public bool JumpFromCorner;     // JumpingState launched off a gripped corner (no
                                     // source FSD exists) — keeps the hold window alive
                                     // where TryFindSource would end the jump.

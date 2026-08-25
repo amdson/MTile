@@ -40,7 +40,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 |---|---|---|---|---|---|---|
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 85.8 px/s, **no corner hit** (twelfth pass: wall rows in the tracker + the redirect on the ground; before, the body stalled at every one of the corridor's ten faces) |
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state | `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance (the seed run fixes the first stretch to the arc); body enters low and clean, no bonk on the lip | ✅ `Row02` — horizon QP: arrives 4 px above the band and enters (the engine now runs in Falling; §7.1's launched guard is gone with the ref tail) |
-| 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ❌ `Row03_NearEdge` skipped — the DP finds the bevel escape; a neutral press has no x channel to start along it (actuator-list decision, tenth pass); far ✅ `Row03_FarFromEdge` (bonks, no shuffle); `CoveredJumpState` yields on the engine |
+| 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ✅ `Row03_NearEdge` (twelfth pass): slides the 8 px out along the escape's first segment — the drive pushes along the plan's first direction — the path turns up the bevel, apex 60 px clear at x = 138; far ✅ `Row03_FarFromEdge` (bonks, no shuffle); `CoveredJumpState` yields on the engine |
 | 4 | **Rest** | flat floor, no input, body at hover | Standing, anchored | `dir == 0` → **no DP**; ref hover column, hover on 10 | No bobbing (\|vy\| < 5), no drift (\|vx\| < 5); the engine never fabricates a direction | ✅ `AtRest_StaysPut`, `Row04` |
 | 5 | **1-high step while walking** | flat floor, 1-high ledge ahead | Standing | `u=(dir,0)`, hover on 10, walk | Path ramps up the block's C-obstacle bevel (≈45°) and re-hugs hover on top; x carry continues through the climb; on the ledge the body rides one tile higher | ✅ `OneHighStep` |
 | 6 | **Tall wall** | wall spanning the whole window ahead | Standing | `u=(dir,0)`, hover on 10, walk | DP bonks (far band unreachable) at the wall; reference carries straight into it; rows truncate; body stops ≈6 px from the face at hover height — **no climb, no planned brake, no push-back** | ✅ `TallWall_HonestStop`, `FullHeightWall_Bonks`, `Row06` |
@@ -59,7 +59,8 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 ## Tests
 
 `MTile.Tests/Sim/LatticeScenarioTests.cs` — one test per encoded row (1, 2, 3
-near + far, 4, 6, 7, 8, 9, 10, 11, 13, 15, 16, 17), all under `FoldEngine = "lattice"`,
+near + far, 4, 6, 7, 8, 9, 10, 11, 13, 15, 16, 17), all under `FoldEngine = "lattice"`
+(only row 11 — Mantle — still skipped),
 asserting the table's *correct* behavior. Rows 5, 12, 14 are deliberately
 not encoded yet. Tests the engine cannot pass today are `Skip`ped with the
 row's blocker in the reason — that list is the next cycle's checklist.
@@ -210,6 +211,27 @@ Two things the converged solve exposed:
 | rows 2, 3-far, 7, 8, 13, 16, 17; planner gates | ✓ | **✓** |
 | `Engages_OnNearlyEveryFrame` | ✓ | bonks now counted only on fold-owned frames — Parkour vaults its step and the approach's legitimate stop-short frames are all that remain (18 ≤ 24) |
 | Release tunnel step | 147 µs | **187 µs** |
+
+**The covered jump (same day).** Row 3-near had been an actuator question
+since the tenth pass: the DP finds the bevel escape from under the slab,
+but its first segment is 8 px *sideways* and a neutral press had no x
+channel — the drive is masked at `dir == 0` (qp's "no x channel at
+station"), and from rest the disc has no radius. Two general rules, no
+covered-jump case:
+
+1. **The drive pushes along the plan's first segment**, unilateral,
+   wherever the legs are: `Axis = (sign(t₀.x), 0)` with `t₀` the polyline's
+   first direction. Where the plan follows intent it is the drive as
+   before; a neutral escape that begins sideways gets its push; a vertical
+   first segment (the open-air neutral jump) turns it off, so row 9's
+   no-drift holds by construction.
+2. **`JumpingState` on the engine ends at an apex only once the body has
+   risen** (`JumpEntryY`, new in `MovementVars`): the sideways slide has
+   vy = 0 and was ending the jump two ticks in.
+
+Row 3-near: apex y = 15 at x = 138 (60 px clear of the slab). Row 3-far
+unchanged (bonk, no shuffle), rows 9, 10, 16, 17 and the corridor
+unchanged. All 35 lattice gates pass; `qp` 47.
 
 **The running jump (same day).** `u` for a `Rising` profile was `(dir, −1)`
 normalized — a fixed 45° tilt, an arbitrary constant. The band then holds
