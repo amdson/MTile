@@ -107,7 +107,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     // slab's end, under the last tile's corner bevel — the (1,−1) climb is
     // admissible and the body rises out to the right. FAR: body deep under
     // the slab — no rising edge, honest bonk, no shuffle toward the exit.
-    [Fact(Skip = "LATTICE_SCENARIOS row 3 — the DP finds the bevel escape but a neutral press has no x channel to start along its sideways first segment (actuator-list decision, tenth pass)")]
+    [Fact]
     public void Row03_CoveredJump_NearEdge_RisesOutDiagonally()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (r == 3 && c < 8));

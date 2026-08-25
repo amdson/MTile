@@ -83,9 +83,12 @@ public class JumpingState : MovementState
         if (OnLattice)
         {
             if (vars.JumpReleased) return false;
-            // The apex ends the jump — after the first ticks, so the legs
-            // have had a chance to act on the plan.
-            if (vars.TimeInState >= 2f * ctx.Dt && ctx.Body.Velocity.Y >= 0f) return false;
+            // The apex ends the jump — once the body has risen (a covered
+            // jump's escape from under a slab begins sideways at vy = 0, and
+            // the rise comes when the path turns up the bevel), after the
+            // first ticks so the legs have had a chance to act on the plan.
+            if (vars.TimeInState >= 2f * ctx.Dt && ctx.Body.Velocity.Y >= 0f
+                && ctx.Body.Position.Y < vars.JumpEntryY - 1f) return false;
             return vars.JumpFromCorner || TryFindSource(ctx, out _);
         }
         if (vars.JumpReleased || vars.TimeInState >= MovementConfig.Current.MaxJumpHoldTime) return false;
@@ -111,6 +114,7 @@ public class JumpingState : MovementState
             // No source constraint, no impulse: the tracker's legs are the
             // support and the launch (see OnLattice).
             vars.JumpFromCorner = !TryFindSource(ctx, out _);
+            vars.JumpEntryY = ctx.Body.Position.Y;
             return;
         }
         EnsureSource(ctx);

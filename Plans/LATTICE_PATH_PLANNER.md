@@ -135,7 +135,9 @@ orders of magnitude cheaper than the state-space search prototype.
 > of a cap a row asked for — start from rest 27 → 2 ticks, corridor 97 px/s;
 > `Fall` loses its legs (a level line + legs was a fixed point) and the DP's
 > floor is the tracker's (the stamp margin added back — no walk-start hop).
-> `LATTICE_SCENARIOS.md`.
+> Then the covered jump: the drive pushes along the plan's first segment
+> (a neutral escape begins sideways), and a lattice jump ends at an apex
+> only after rising — row 3-near passes. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
