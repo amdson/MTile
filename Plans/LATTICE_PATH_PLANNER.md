@@ -140,7 +140,9 @@ orders of magnitude cheaper than the state-space search prototype.
 > only after rising — row 3-near passes. The air profiles' x cap is the
 > air cap (the speed rows bound the drive, and `∞` let it fire at 3000 on
 > the last Falling tick: 200 px/s at a lip); the disc has a `ForwardCap`.
-> `LATTICE_SCENARIOS.md`.
+> The climb family (Parkour/Mantle/ArcJump) yields on the engine — it had
+> been vaulting from corners on top of the disc's plant (the "spike" at an
+> upper corner); row 11 passes. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
