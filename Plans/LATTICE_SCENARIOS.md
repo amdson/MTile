@@ -13,7 +13,7 @@ scenario needs something not on it, that is a design gap, not a parameter.
 
 | parameter | who sets it | values |
 |---|---|---|
-| `u` | the state, from **intent** (never from the jump direction) | unit vector; `(±1,0)` walking, `(±1,−1)/√2` diagonal hops, `(0,−1)` pure vertical (see row 9 for the tie rule); `dir == 0` → no solve, hover column |
+| `u` | the state, from **intent** (never from the jump direction) | unit vector; `(±1,0)` walking; a held launch `normalize(±walk, −FoldLegPushFadeSpeed)` ≈ 76° (the direction the legs and drive can produce — a fixed 45° capped the rise at the x speed, twelfth pass), `(0,−1)` pure vertical (see row 9 for the tie rule); `dir == 0` → no solve, hover column |
 | `hover` / `hoverOffset` | the state (`FoldProfile.Hover`) | Standing `on / 10`; Crouched `on / 0`; Falling / WallSliding `off` (level line); Jump (ground, double, wall) `off` |
 | `Rising` | the state (`FoldProfile.Rising`) | `u = (dir, −1)^` while a jump is held — the launch is the legs along a rising path |
 | `RiseCost` | the state (`FoldProfile.RiseCost`) | price per px climbed on the path, traded against `ProgressWeight` at the goal — Standing/Falling 16 (mounts 16 px, refuses 32, even pressed against it), Crouch 30 (never mounts), Jump 0; drops are free |
@@ -47,7 +47,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 | 7 | **Free-standing 2-high wall** | 2-high column with open air above | Standing | `u=(dir,0)`, hover on 10, walk | *Path*: routes over (edges are geometry, §3.3 — accepted). *Motion*: the legs cannot deliver a 32 px rise from a walk, so tracking residual grows → **give-up** (§4.3) → honest bonk as in row 6. The path being over the wall must not make the body float up it | ✅ `Row07` (eleventh pass): the argmax refuses the wall at the face (RiseCost 16); 4 px of strain |
 | 8 | **Ledge drop while walking** | flat floor ending in a drop of ≥2 tiles | Standing → Falling | `u=(dir,0)`, hover on 10, walk | Reference descends **no faster than gravity** while x carries at full walk speed — no "grab" at the lip (arc-length pacing would halve speed), no dive; once the lower floor enters the window the hover term re-binds and the path hugs it | ✅ `Row08` (eleventh pass): a real fall (max vy 213), caught by Standing, lands at hover |
 | 9 | **Neutral jump in open air** | flat floor, jump with no horizontal input, nothing overhead | Jump state | intent pure-vertical: **one solve** `u=(0,−1)` (row 3's rule — there is no tilted fallback) | A vertical path — the body must **not drift sideways** on a neutral jump; row 3's diagonal escape only ever fires against a bevel, never in open air | ✅ `Row09` — on the engine: 51.3 px, 0 drift (60.1 with the leg fade at 400; the redirect on the ground trims ~9 px; 31.5 at fade 200) |
-| 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | 🟡 `Row10` skipped by 1 px — clears the block and lands at hover, apex 18.8 px against a 20 px bar. Not the leg fade (the neutral jump is 60 px at the same settings): the 45° plan's band couples the rise to the x speed — a plan-shape decision (twelfth pass) |
+| 10 | **Diagonal hop over a block** | 1-high block ahead, player holds right + jump | Jump state | `u=(+1,−1)/√2`, hover **off**, unbounded, leg-impulse + air channels | Path rises over the block's C-obstacle and continues; "as fast as possible" spends the leg channel at launch while grounded; lands beyond the block; the same block *walked* into (row 5) is a climb, not a jump — the difference is only `u` and hover | ✅ `Row10` (twelfth pass): apex 41.3 px, clears the block, lands at hover — the launch plan's tilt is now the actuators' direction (legs' ceiling up, walk speed along ≈ 76°), not a fixed 45°, which had capped the rise at the x speed (18.8 px) |
 | 11 | **Crouch at a 1-high block** | crouching under a 2-high ceiling, 1-high block ahead | Crouched | `u=(dir,0)`, hover on **0**, crouch speed | Body stays low and stops at the block (honest bonk) — a crouch never mounts ledges (`CrouchClimbReachUp` 4). **Known gap:** edges carry no climb band, so today's path routes over the block exactly as row 5; needs a per-state rise cap or steepness weight on the solve, not on the edges | ❌ `Row11` skipped — the planner refuses the block (`CrouchRiseCost` 30, bonk); **`MantleState` fires from the crouch and vaults it** — state arbitration, its own thing (eighth pass trace) |
 | 12 | **2-wide pit while walking** | flat floor with a 2-tile gap; player holds right | Standing → Falling | `u=(dir,0)`, hover on 10, walk | No auto-jump, no auto-brake: the path continues at hover into the gap (no floor below → no hover cost), x carries at full speed, the body falls at gravity (row 8's rule) and re-binds on the pit floor if it is in the window. A 1-wide gap is not a gap (C-obstacles of the two edge tiles overlap): the path carries straight across | 🟡 follows from rows 6/8; no gate |
 | 13 | **Landing on flat, holding right** | body descending onto a floor | Falling → Standing | engine **excluded** while `vy > MaxGroundEngageVnRel` (plunging); re-admits on the anchored frame | Impact honesty: no air-brake softening of a slam; the first admitted frame's path is row-1 shaped (hover re-bind) and the carry resumes at the ramp | ✅ `Row13` (eleventh pass): 260 of 270 — Falling has no hover and no upward air force; the legs catch only where Standing owns the body |
@@ -164,8 +164,16 @@ rest untouched (0.00 deviation at every setting; leg force 9000 would give
 (`SupportReach` 25 > `LegReach` 17, so near ⇒ Grounded); `FoldCornerForce`
 1500 → 4000 measured no change at all. Tuck 3600: corridor **77.3 → 92.6
 px/s** with no hard vertical events (2400 gave 92.4 with ten frames of
-|vy| > 150; drive 4500 on top gives 96.8, not taken). Row 10's hop stays at
-18.8 px through all of this — see its row.
+|vy| > 150; drive 4500 on top gives 96.8, not taken). Row 10's hop stayed at
+18.8 px through all of this — its limiter was the plan's angle, below.
+
+**The running jump (same day).** `u` for a `Rising` profile was `(dir, −1)`
+normalized — a fixed 45° tilt, an arbitrary constant. The band then holds
+the launch to vy = vx and the legs fire at the drive's pace instead of
+their cap. Now the tilt is the direction the actuators produce: the legs'
+ceiling (`FoldLegPushFadeSpeed`) up, the walk speed along — ≈ 76°. Row 10:
+apex 18.8 → **41.3 px**, clears the block, lands at hover; the neutral jump
+(`dir = 0` → vertical) is untouched; rows 3-far, 16, 17 unchanged.
 
 **The redirect on the ground (same day).** The `!Grounded` gate on the
 disc was BuildFold's rule, not the planner's — a coast-tracking solve had to

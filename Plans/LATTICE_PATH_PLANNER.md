@@ -128,7 +128,9 @@ orders of magnitude cheaper than the state-space search prototype.
 > the walk); `FoldRedirectForce` 1500 bounds it. And the tracker now builds
 > **clearance rows from the free rollout** — the QP had known only the band
 > and the body hit every corridor face (`ref`: none); with walls to plant
-> against the disc does its job: 0 stalls. `LATTICE_SCENARIOS.md`.
+> against the disc does its job: 0 stalls. A launch's `u` is the actuators'
+> direction (legs' ceiling up, walk speed along ≈ 76°), not a fixed 45°:
+> the running hop 19 → 41 px. `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

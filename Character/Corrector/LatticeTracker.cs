@@ -68,9 +68,15 @@ public static class LatticeTracker
 
         // ── The plan ─────────────────────────────────────────────────────
         float speed = fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed;
-        // u is intent: along dir, and up as well while a jump is held.
+        // u is intent: along dir, and up as well while a jump is held. A
+        // launch's tilt is the direction the actuators produce — the legs'
+        // ceiling (the push fade speed) up, the walk speed along — so the
+        // band does not cap the rise at the x speed: with a fixed 1:1 tilt
+        // a running hop reached 19 px against the neutral jump's 60.
         bool planning = dir != 0 || fold.Rising;
-        Vector2 u = fold.Rising ? Vector2.Normalize(new Vector2(dir, -1f)) : new Vector2(dir, 0f);
+        Vector2 u = fold.Rising
+            ? Vector2.Normalize(new Vector2(dir * cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, -cfg.FoldLegPushFadeSpeed))
+            : new Vector2(dir, 0f);
         int count = planning
             ? s.Lattice.Solve(ctx.Chunks, body.Polygon, body.Position, body.Velocity,
                 u, fold.Hover, fold.HoverOffset, fold.RiseCost,
