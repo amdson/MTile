@@ -219,6 +219,7 @@ public sealed partial class CharacterAnimator
     private float             _solvePhi;
     private Affine2           _solveRoot;
     private float             _phaseFloor;        // speed-derived Δφ floor for PhaseRateFloorConstraint (0 = inert)
+    private float             _phaseAccelBox;     // this frame's |Δφ − Δφ_prev| bound = MaxPhaseAccel·dt² (0 = no box)
     private bool              _haveCorr;          // a Δθ-correction solve ran this frame
 
     // Action-aim state (the stab re-aim, §STAB_AIM_PLAN), resolved each frame in step 1.7 and
@@ -238,6 +239,9 @@ public sealed partial class CharacterAnimator
     // The solver config the LAST Update actually solved with — Current plus whatever the
     // move driver overrode that frame (FrameInputs.Solver). Diagnostics / tests.
     public AnimSolverConfig   SolverConfig => _frame.Solver;
+    // The cadence's current per-frame phase rate Δφ (last solved / coasted step; the
+    // legacy velocity-derived rate right after a clip change). Diagnostics / tests.
+    public float              PhaseStep    => _prevPhaseStep;
 
     // Per-bone angle correction Δθ (radians) the solver applied this frame, by bone
     // index — the IK channel on top of the authored blend. Zero on frames with no
@@ -432,7 +436,12 @@ public sealed partial class CharacterAnimator
             _state.Clip = clip;
             _state.ClipTime = 0f;
             _contacts.Clear();        // contacts belong to the clip that just ended
-            _prevPhaseStep = 0f;
+            // Δφ momentum across the switch: the velocity-derived legacy rate (the same
+            // estimate the rate floor / fallback advance use — at or below any authored
+            // cadence), NOT 0. With the acceleration box (MaxPhaseAccel) a zero seed would
+            // freeze the legs for a ramp at every Walk↔Run / Fall→Run switch even though the
+            // body never stopped; without the box it's just a better momentum-prior target.
+            _prevPhaseStep = speed * dt * PhasePerPixel;
             // Entry override: a driver may place the new clip's start — MatchPose scans the
             // cycle for the phase closest to the pose already on screen (fall → run's flight
             // arc), StartT places it explicitly (future run→vault footing). StartT < 0 keeps
@@ -549,6 +558,10 @@ public sealed partial class CharacterAnimator
         // coast would then replay for a whole no-contact window (the mid-flight phase lock).
         // Scales with |vx|, so stopping/decelerating legitimately drops the floor to 0.
         _phaseFloor = 0.5f * speed * dt * PhasePerPixel;
+        // This frame's cadence acceleration box (AnimSolverConfig.MaxPhaseAccel, cycles/s² —
+        // the per-frame step may move by at most a·dt²). Read AFTER the driver's Contribute
+        // so a per-frame override reaches it; shared by the solve box and the flight coast.
+        _phaseAccelBox = _frame.Solver.MaxPhaseAccel > 0f ? _frame.Solver.MaxPhaseAccel * dt * dt : 0f;
 
         if (locomotion && hasClip && HasContacts(anim))
         {
@@ -581,6 +594,9 @@ public sealed partial class CharacterAnimator
                 // was solved; no solve runs in flight to notice). The floor tracks current
                 // |vx| each frame and is stored back so the momentum survives the window.
                 float coast = MathF.Max(_prevPhaseStep, _phaseFloor);
+                // The floor may lift a collapsed rate only as fast as the acceleration box
+                // allows — same ramp rule as the solve (0 = no box).
+                if (_phaseAccelBox > 0f) coast = MathF.Min(coast, _prevPhaseStep + _phaseAccelBox);
                 _state.Phase   = Wrap01(_state.Phase + coast);
                 _prevPhaseStep = coast;
             }
@@ -945,12 +961,24 @@ public sealed partial class CharacterAnimator
         var cfg = _frame.Solver;
         int n = IdxTheta0 + _skeleton.Count;  // x = [Δφ, δ, d.x, Δθ_0…]
 
-        _solveLo[IdxPhi] = 0f;                    _solveHi[IdxPhi] = cfg.MaxPhaseStep;
+        float phiLo = 0f, phiHi = cfg.MaxPhaseStep;
         // Rate floor as a BOX rather than a penalty row (PhaseFloorMode 2): same anti-collapse
         // guarantee, enforced exactly, and it removes the row whose √λ/floor Jacobian is the
         // whole 1e6 diagonal ratio. Clamped below MaxPhaseStep so the box can never invert.
         if (cfg.PhaseFloorMode == 2 && _phaseFloor > 1e-5f)
-            _solveLo[IdxPhi] = MathF.Min(_phaseFloor, cfg.MaxPhaseStep);
+            phiLo = MathF.Min(_phaseFloor, cfg.MaxPhaseStep);
+        // Acceleration box: |Δφ − Δφ_prev| ≤ MaxPhaseAccel — the cadence RAMPS, it doesn't
+        // hop (AnimSolverConfig.MaxPhaseAccel). This is the OUTERMOST bound: the rate floor
+        // may raise the lower edge inside it, but never past its ceiling, so a collapsed
+        // rate climbs back to the floor at the capped acceleration instead of snapping.
+        if (_phaseAccelBox > 0f)
+        {
+            float aHi = MathF.Min(cfg.MaxPhaseStep, _prevPhaseStep + _phaseAccelBox);
+            float aLo = MathF.Max(0f,               _prevPhaseStep - _phaseAccelBox);
+            phiHi = aHi;
+            phiLo = MathF.Min(MathF.Max(phiLo, aLo), aHi);
+        }
+        _solveLo[IdxPhi] = phiLo;                 _solveHi[IdxPhi] = phiHi;
         _solveLo[IdxDy]  = -cfg.VertOffsetLimit;  _solveHi[IdxDy]  = cfg.VertOffsetLimit;
         _solveLo[IdxDx]  = -cfg.HorizOffsetLimit; _solveHi[IdxDx]  = cfg.HorizOffsetLimit;
         for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
@@ -967,17 +995,19 @@ public sealed partial class CharacterAnimator
         // refine. δ and the Δθ corrections need no seeding — under their (com / Tikhonov)
         // priors they are convex about 0 — so they ride along at 0 while we pick the Δφ
         // basin, then LM refines the whole vector jointly (ANIMATION_SOLVER_PLAN §3.5).
-        float best     = MathHelper.Clamp(_prevPhaseStep, 0f, cfg.MaxPhaseStep);
+        // Seeds are clamped into the Δφ box (the floor raises its bottom, the acceleration
+        // box narrows both edges) so the basin pick can't land where the solve can't go.
+        float best     = MathHelper.Clamp(_prevPhaseStep, phiLo, phiHi);
         float bestCost = CadenceCostAt(best, n);
         const int seeds = 9;
         for (int k = 0; k <= seeds; k++)
         {
-            float s = cfg.MaxPhaseStep * k / seeds;
+            float s = MathHelper.Clamp(cfg.MaxPhaseStep * k / seeds, phiLo, phiHi);
             float c = CadenceCostAt(s, n);
             if (c < bestCost) { bestCost = c; best = s; }
         }
 
-        _solveVars[0] = MathF.Max(best, _solveLo[IdxPhi]);   // respect the box (mode 2 raises it)
+        _solveVars[0] = best;   // already inside the box
         // Δθ starts at 0 (not warm-started): the θ-smoothness prior supplies the temporal
         // continuity from the COST side (its target is last frame's EMITTED pose), and a
         // box-clamped warm seed would stick the solution at the wall.

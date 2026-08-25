@@ -9,7 +9,8 @@
   "LimbPosePrior": 4,
   "PhaseStepPrior": 8,
   "PhaseFloorPrior": 140,
-  "ComWeightY": 7,
+  "MaxPhaseAccel": 40,
+  "ComWeightY": 8,
   "ComWeightX": 80,
   "LowCeilingRunComWeightY": 2,
 
