@@ -127,10 +127,27 @@ public static class LatticeTracker
         // perpendicular band and the progress row along the last bead's
         // tangent — timing along the path is the solve's own output.
         var pr = s.Problem;
+
+        // ── The walls: clearance rows from the free rollout ──────────────
+        // The path is guidance; the tiles are the constraint. Without these
+        // the QP knew only the band — symmetric, so lagging a bend toward
+        // the wall cost no more than lagging it toward free space — and the
+        // body hit every corner of the bumpy corridor (10 stalls; the ref
+        // engine, whose QP has clearance rows, hits none). The rows are the
+        // swept body's penetrations along the free rollout, hard, with tile
+        // normals: the tuck/legs take their gradient from the actual face,
+        // and the redirect can plant against it. All faces (the DP already
+        // decided bonk-vs-route, so no anti-autopilot filter). Built once;
+        // every bead pass starts from them.
+        int wallRows = ClearanceConstraintBuilder.Build(ctx.Chunks, body.Polygon, s.DeliverySamples, H,
+            cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation, s.Rows, out _,
+            verticalFacesOnly: false);
+        wallRows = Math.Min(wallRows, ClearanceConstraintBuilder.MaxEvents - (3 * H + 1));
+
         int rowCount = 0;
         for (int pass = 0; pass < BeadPasses; pass++)
         {
-            rowCount = 0;
+            rowCount = wallRows;
             Vector2 tLast = u;
             float sPrev = 0f;
             for (int T = 0; T < H; T++)

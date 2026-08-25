@@ -42,6 +42,7 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `BumpyTunnel` 97 px/s |
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state| `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance; body enters low and clean, no bonk on the lip | ❌ launched guard excludes the engine (§7.1); |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0, -1)` (use different u, bonk cutoff, if left or right is pressed), hover **off**, unbounded; take the cheaper far-band cost, bonk if too far from an open ceiling | The open side wins if close, (the covered side bonks at the slab); path = sideways shuffle along the floor then a rise once clear of the slab edge; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | ❌ `CoveredJumpState.TryPickOpenDir` + bespoke launch still own this (§7.3) |
@@ -56,6 +57,9 @@ but no gate pins it; ❌ = not built or a known gap (says which).
 >>>>>>> worktree-lattice-path-planner-plan
 =======
 | 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 82.9 px/s (twelfth pass: 92.6 with tuck 3600, then −10 with the redirect on the ground), `BumpyTunnel` similar |
+>>>>>>> worktree-lattice-path-planner-plan
+=======
+| 1 | **Bumpy corridor** | 3-tile interior, alternating 1-high floor bumps and 1-low ceiling lips; body walking at hover | Standing, anchored | `u=(dir,0)`, hover **on** 10, walk speed, `L` 3.5 | Path alternates over each bump and under each lip in one polyline; no stall at any crossing; no state change (crouch is not needed — the path *is* the duck); average speed near walk speed; body never contacts | ✅ `Row01` 85.8 px/s, **no corner hit** (twelfth pass: wall rows in the tracker + the redirect on the ground; before, the body stalled at every one of the corridor's ten faces) |
 >>>>>>> worktree-lattice-path-planner-plan
 | 2 | **Jump into a 2-high tunnel** | tunnel mouth ahead, body airborne on a jump arc arriving slightly above the mouth's free band | Fall state | `u=(+1,0)` (intent = right, not the arc), hover **off**, progress unbounded, corner channels | Path begins with the player already having jumped, moving right and upwards/downwards in an arc towards the tunnel entrance (the seed run fixes the first stretch to the arc); body enters low and clean, no bonk on the lip | ✅ `Row02` — horizon QP: arrives 4 px above the band and enters (the engine now runs in Falling; §7.1's launched guard is gone with the ref tail) |
 | 3 | **Covered jump** | body standing under a 2-high slab with open air very close to one side; player presses jump with no horizontal input | Jump state, grounded under cover | intent pure-vertical → **one solve** `u=(0,−1)` (a different `u`, with the bonk cutoff, if left or right is pressed), hover **off**, unbounded; bonk if too far from an open ceiling | The open side wins **if close** — the tile C-obstacle's corner bevel is a ≈45° ramp the `(±1,−1)` offsets can ride, so a body within a few px of the slab's edge rises out diagonally; deeper under the slab no rising edge exists and it bonks honestly; the leg-impulse channel fires **when the path turns up**, not at the button press; no slide-then-launch logic in the state | near ❌ `Row03_NearEdge` skipped — the DP finds the bevel escape; a neutral press has no x channel to start along it (actuator-list decision, tenth pass); far ✅ `Row03_FarFromEdge` (bonks, no shuffle); `CoveredJumpState` yields on the engine |
@@ -219,8 +223,36 @@ What the disc costs under the band, with everything else equal: corridor
 92.6 → **82.9 px/s**, neutral jump 60.1 → **51.3 px**, and after a landing it
 trims a 150 px/s air carry to the walk cap (rows 8/13 end ~150 px shorter;
 before, the excess speed simply rode on). Rows 6/7 stop 3 px above rest at
-the face (the strain). All 33 lattice gates pass. Whether the disc earns
-its keep on the engine is now a measured question rather than a gated one.
+the face (the strain). All 33 lattice gates pass.
+
+Where the cost comes from (the disc is opt-in and the problem near-convex,
+so a slower corridor means the *objective* asks for the shed): the hard
+speed rows brake a body above walk speed after each descent (~18 px/s per
+bump exit — only the disc can brake, so a row that had been moot became a
+brake); the tuck's weight (0.5) is 50× the disc's, so descents route
+through the disc; and the H = 5 progress row prices a permanent speed loss
+as a few px. Objective fixes, not channel ones — open.
+
+**The walls, at last (same day).** Measured against the other engines the
+lattice corridor was hitting *every* face: `ref` 0 stalls (min vx 93),
+`qp` 10, lattice 10–11 with or without the disc — 6 px before each lip
+face and each bump face. The tracker had given the QP no wall rows at all:
+only the band, which is symmetric, so lagging a bend toward the wall cost
+exactly what lagging it toward free space cost; and the band is
+dynamically infeasible at a 45° corner at walk speed (a 100 px/s
+direction change inside ±1.6 px is 6000 px/s²), so the body lagged, and
+the lag landed on the wall side. The redirect could not help because it
+had nothing about walls to serve.
+
+Now the tracker builds **clearance rows from the free rollout**
+(`ClearanceConstraintBuilder.Build` on the nominal, all faces, hard, tile
+normals) once per tick, and every bead pass starts from them. The path is
+guidance; the tiles are the constraint. Result: with the disc, **0 stalls,
+min vx 34, 85.8 px/s**; without the disc, the lip stalls vanish (the tuck
+takes the face's gradient) but the bump faces still stall (11) — the disc
+is what turns a run into a rise at a face, exactly the plant-and-deflect it
+was built for. All 33 lattice gates pass; `qp` untouched (tracker-only).
+Cost: Release tunnel step 98 → 147 µs.
 
 Seen in the slide's trace, not acted on: with the DP blocked at the face
 the tracker still emits the progress row along `u` (no path → `tLast = u`),
