@@ -40,7 +40,8 @@ namespace MTile;
 public static class LatticeTracker
 {
     private const int   Horizon = 5;
-    private const int   BeadPasses = 3;   // project → rows → solve, alternated
+    private const int   BeadPasses = 3;
+    private const int   ExactSweepCount = 3;   // exact coordinate sweeps after the gradient solve   // project → rows → solve, alternated
     private const float HingeWeight = 1e6f;      // the solver's stiffness constant (AmbientCorrector's)
     private const float ProgressHingeScale = 0.02f;
 
@@ -230,6 +231,13 @@ public static class LatticeTracker
                 // path and has no reason to. The push is bounded
                 // (FoldRedirectForce), so a face slows the body, not halts it.
                 s.ChannelMask[3][k] = cfg.FoldRedirectEnabled && near;
+                // No legs for a profile that neither hovers nor rises (Fall):
+                // its plan is a level line at the body's height, and legs in
+                // reach would hold it there — a re-planned level line, a hard
+                // band and the legs make a fixed point (a wall slide hung 27
+                // px above the floor once the solve converged). Falling has no
+                // upward force; the catch is Standing's, where the legs are.
+                if (!fold.Hover && !fold.Rising) s.ChannelMask[0][k] = false;
             }
             // ...parametrized as a force (see CorrectionSolver.Project: the
             // same disc, in Δv/dt) so its lever is commensurate with the other
@@ -257,6 +265,10 @@ public static class LatticeTracker
             pr.RowPush = s.RowPush;
 
             CorrectionSolver.Solve(pr, s.Z, s.ZScratch);
+            // The applied tick, exactly (the sweeps under-deliver: a channel a
+            // row asks for at its cap reaches a few percent of it — from rest
+            // the walk took 27 ticks to 90 px/s; converged, 3).
+            CorrectionSolver.ExactSweeps(pr, s.Z, ExactSweepCount, H);
             CorrectorChannels.ComputeTickDv(s, pr, H, dt);
             if (!havePath) break;                                // the hover column has no beads to slide
             // Corrected displacement per tick for the next pass's projection:

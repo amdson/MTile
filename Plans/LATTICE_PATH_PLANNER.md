@@ -130,7 +130,12 @@ orders of magnitude cheaper than the state-space search prototype.
 > and the body hit every corridor face (`ref`: none); with walls to plant
 > against the disc does its job: 0 stalls. A launch's `u` is the actuators'
 > direction (legs' ceiling up, walk speed along ≈ 76°), not a fixed 45°:
-> the running hop 19 → 41 px. `LATTICE_SCENARIOS.md`.
+> the running hop 19 → 41 px. Then an exact coordinate solve after the
+> gradient sweeps (`CorrectionSolver.ExactSweeps`): the sweeps delivered 6%
+> of a cap a row asked for — start from rest 27 → 2 ticks, corridor 97 px/s;
+> `Fall` loses its legs (a level line + legs was a fixed point) and the DP's
+> floor is the tracker's (the stamp margin added back — no walk-start hop).
+> `LATTICE_SCENARIOS.md`.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:

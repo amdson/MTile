@@ -400,6 +400,90 @@ public static class CorrectionSolver
         return ComputeResidual(p, z);
     }
 
+    // Exact coordinate sweeps over ticks [0, ticks) — at least the tick the
+    // caller applies — after the gradient sweeps. The projected-gradient step bound is a Gershgorin row
+    // sum over every hard row a variable touches, inactive ones included, so
+    // in a handful of sweeps a channel that a row simply asks for at its cap
+    // delivers a few percent of it (from rest, the drive gave 179 of 3000
+    // px/s² in 16 sweeps; the converged optimum is the cap, 1024 sweeps).
+    // With the other ticks held, each axis channel's objective in its one
+    // scalar λ is a convex piecewise quadratic — Σ w_j·max(0, b_j − a_j λ)²
+    // over the rows it serves, plus Weight·λ² — whose derivative is monotone,
+    // so its minimizer on [lo, cap] is found exactly by bracketing. Sweeping
+    // the whole horizon (ticks = H) converges to the optimum's tick 0; tick 0
+    // alone makes it do the later ticks' work (from rest the legs fired at
+    // 2471 px/s² against the optimum's 1165 — a visible hop on every walk
+    // start). Free 2D channels keep the gradient sweeps' value. No
+    // Δ-smoothing term: callers with DeltaWeight > 0 are not served (the
+    // lattice tracker runs with 0).
+    public static void ExactSweeps(CorrectionProblem p, Vector2[] z, int sweeps, int ticks)
+    {
+        if (p.DeltaWeight > 0f || p.H <= 0) return;
+        int H = p.H, C = p.ChannelCount, R = p.RowCount;
+        ticks = Math.Min(ticks, H);
+        Span<float> a = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
+        Span<float> b = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
+        Span<float> w = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
+        Span<int>   rj = stackalloc int[ClearanceConstraintBuilder.MaxEvents];
+        // Row slacks, maintained incrementally: a coordinate's move Δλ shifts
+        // every row it physically touches by −coef·Δλ (skipped rows too —
+        // Skips only withholds a row's gradient, not the channel's effect).
+        Span<float> slack = stackalloc float[ClearanceConstraintBuilder.MaxEvents];
+        for (int j = 0; j < R; j++) slack[j] = RowSlack(p, z, j);
+        for (int sw = 0; sw < sweeps; sw++)
+        for (int k = 0; k < ticks; k++)
+        for (int c = 0; c < C; c++)
+        {
+            var ch = p.Channels[c];
+            if (!ch.AxisOnly || ch.Lever == LeverKind.PositionOffset || !Active(ch, k)) continue;
+            int i = c * H + k;
+            float cap = CapAt(ch, k);
+            if (cap <= 0f) { z[i] = Vector2.Zero; continue; }
+            float lo = ch.Unilateral ? 0f : -cap, hi = cap;
+            float lamOld = Vector2.Dot(z[i], ch.Axis);
+            // slack_j(λ) = b_j − a_j·λ for the rows this channel serves at tick k
+            int n = 0;
+            for (int j = 0; j < R; j++)
+            {
+                var row = p.Rows[j];
+                if (row.Tick < k) continue;
+                float coef = Lever(ch.Lever, row.Tick, k, p.Dt) * Vector2.Dot(ch.Axis, row.Normal);
+                if (coef == 0f) continue;
+                a[n] = coef; b[n] = slack[j] + coef * lamOld; rj[n] = j;
+                w[n] = Skips(ch, row) ? 0f : p.HingeWeight * row.HingeScale;   // touched, but no gradient
+                n++;
+            }
+            float lam;
+            if (Deriv(lo, ch.Weight, a, b, w, n) >= 0f) lam = lo;
+            else if (Deriv(hi, ch.Weight, a, b, w, n) <= 0f) lam = hi;
+            else
+            {
+                float l = lo, h = hi;
+                for (int it = 0; it < 40; it++)
+                {
+                    float m = 0.5f * (l + h);
+                    if (Deriv(m, ch.Weight, a, b, w, n) > 0f) h = m; else l = m;
+                }
+                lam = 0.5f * (l + h);
+            }
+            z[i] = lam * ch.Axis;
+            for (int q = 0; q < n; q++) slack[rj[q]] = b[q] - a[q] * lam;
+        }
+    }
+
+    // d/dλ of Σ w_j·max(0, b_j − a_j λ)² + weight·λ² — monotone increasing.
+    private static float Deriv(float lam, float weight, ReadOnlySpan<float> a, ReadOnlySpan<float> b,
+                               ReadOnlySpan<float> w, int n)
+    {
+        float d = 2f * weight * lam;
+        for (int q = 0; q < n; q++)
+        {
+            float s = b[q] - a[q] * lam;
+            if (s > 0f) d -= 2f * w[q] * a[q] * s;
+        }
+        return d;
+    }
+
     // |n̂ · axis| for axis-only channels (the row's true coupling to the
     // variable); 1 for free 2D channels (Redirect).
     private static float AxisFactor(in ChannelDef ch, Vector2 normal)

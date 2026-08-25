@@ -237,9 +237,14 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
         {
             sim.Step(HoldRight);
             if (planner.LastReach > 0) engaged++;
-            if (planner.LastBonk) bonked++;
+            // Bonks count only while a fold state owns the body: the climb
+            // family (Parkour vaults this step — the arbitration item) runs
+            // its own solve, and the planner's verdict under it is moot.
+            string st = sim.Player.CurrentStateName;
+            bool fold = st.Contains("Standing") || st.Contains("Crouched") || st.Contains("Falling");
+            if (planner.LastBonk && fold) bonked++;
         }
-        output.WriteLine($"engaged {engaged}/{N} frames, bonk on {bonked}");
+        output.WriteLine($"engaged {engaged}/{N} frames, bonk on {bonked} (fold-owned frames)");
         Assert.True(engaged >= (int)(0.9f * N), $"lattice engaged on only {engaged}/{N} frames");
         // Under the argmax goal a "bonk" also means "chose to stop short of
         // the far band" — legitimate in front of a step while the climb is

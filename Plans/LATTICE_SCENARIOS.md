@@ -167,6 +167,50 @@ px/s** with no hard vertical events (2400 gave 92.4 with ten frames of
 |vy| > 150; drive 4500 on top gives 96.8, not taken). Row 10's hop stayed at
 18.8 px through all of this — its limiter was the plan's angle, below.
 
+**The start from rest — an exact solve (same day).** From rest, holding
+right on flat, the drive delivered **179 of its 3000 px/s²** for eight
+ticks: 27 ticks to 90 px/s (`ref`: 1, `qp`: 13). Not the optimum's
+choice — the projected-gradient step bound is a Gershgorin row sum over
+every hard row a variable touches, inactive ones included (the five hard
+speed rows at 10⁶), so in 16 sweeps a channel a row simply asks for at its
+cap reaches a few percent of it. Sweeping longer proved it: 64 → 8 ticks,
+256 → 4, 1024 → 3 with the drive at its cap on tick 1. So
+`CorrectionSolver.ExactSweeps`: after the gradient sweeps, exact coordinate
+minimization over the horizon's axis channels — each coordinate's objective
+in its scalar is a convex piecewise quadratic (hinges + weight) with a
+monotone derivative, bracketed on [lo, cap]; slacks maintained
+incrementally; free 2D channels keep the sweeps' value; lattice-only call.
+Tick 0 alone was tried first and made tick 0 do the later ticks' work (legs
+2471 vs the optimum's 1165 — a visible hop on every walk start); the
+whole horizon gives the optimum's tick 0.
+
+Two things the converged solve exposed:
+
+1. *`Fall` had legs.* Its plan is a level line at the body's height, and
+   with the legs in reach (the last 17 px) the exact solve enforced it
+   perfectly — a re-planned level line, a hard band and the legs are a
+   fixed point: the wall slide (row 15) hung 27 px above the floor forever.
+   It had worked only because the sweeps under-delivered and gravity won.
+   A profile that neither hovers nor rises now has no legs — the upward
+   force Falling was never meant to have; the catch is Standing's.
+2. *Two floors.* The DP's `floorBelow` was measured to the first blocked
+   cell of the margin-stamped bitmap — one margin (1.6 px) above the true
+   C-envelope the tracker's hover column uses — so the DP's hover point sat
+   a cell above the body's rest height and every walk from rest began with
+   a one-cell hop (`path y: 75.2 → 72.0`). The margin is added back; the
+   path from rest is level at the body's cell and the start has no vertical
+   motion at all.
+
+| | before | **exact solve** |
+|---|---|---|
+| start from rest, ticks to 90 px/s | 27 | **2** (48 → 90 → 94), no hop |
+| row 1 corridor | 85.8 | **97.4 px/s** |
+| row 9 neutral jump / row 10 hop | 51.3 / 41.3 | **60.6 / 72.5** (the hop now launches from rest height with the legs' full reach; a running launch above the neutral one is worth an eye) |
+| row 15 wall slide | ✓ (by under-convergence) | **✓** (legs off in `Fall`) |
+| rows 2, 3-far, 7, 8, 13, 16, 17; planner gates | ✓ | **✓** |
+| `Engages_OnNearlyEveryFrame` | ✓ | bonks now counted only on fold-owned frames — Parkour vaults its step and the approach's legitimate stop-short frames are all that remain (18 ≤ 24) |
+| Release tunnel step | 147 µs | **187 µs** |
+
 **The running jump (same day).** `u` for a `Rising` profile was `(dir, −1)`
 normalized — a fixed 45° tilt, an arbitrary constant. The band then holds
 the launch to vy = vx and the legs fire at the drive's pace instead of
