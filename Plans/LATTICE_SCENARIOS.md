@@ -320,6 +320,44 @@ that a plan hugging terrain is a walk however brief the air is — the
 planner knows it (each path node carries `Grounded`) — but it would also
 brake a real jump's carry on landing, so it is a feel decision.
 
+**A plant is a contact (fifteenth pass).** From play, on the rise
+ceiling: happy with the corner force as a correction, but it makes a
+nasty floating effect if it is active too far from corners while a jump
+is active.
+
+Measured — every frame in a jump state where the redirect disc produced
+LIFT, against the distance to the nearest convex tile corner:
+
+| course | disc lifts | beyond plant reach (26 px) | max lift @ corner dist |
+|---|---|---|---|
+| flat | 4 → **1** | 2 → **0** | 446 → 338 @ 23.3 |
+| pillars | 4 → **3** | 2 → **0** | 446 → 338 @ 23.3 |
+| stairs | 4 → **2** | 2 → **0** | 446 → 544 @ 14.3 |
+| lips | 4 → **1** | 2 → **0** | 446 → 338 @ 23.3 |
+
+The before-numbers were **identical on flat ground and on pillars**,
+which is the whole diagnosis: the lift had nothing to do with corners. On
+the engine the disc is not corner-gated at all — the tracker overrides
+`BuildFold`'s feature activation with a single `near` bool (floor within
+`LegReach`, 17 px, for the whole horizon), so for the first frames of
+*every* jump, anywhere, the disc could convert forward speed into rise.
+A corner force firing where there is no corner.
+
+The gate restored is one the codebase already states, in
+`MarkCornerPlants`: *a hand-plant is a DESCENDING maneuver; rising ticks
+are climb work, the leg servo's domain.* The tracker had dropped it along
+with `!Grounded` (which stays dropped — the disc on the ground was
+deliberate). The threshold is `SpringMaxRiseSpeed`, the same one
+`StandingState` and the climb family already use to call a body
+ballistic rather than supported: a rise no support could author means
+there is nothing left to push against.
+
+No new knob, and the spatial boundary needed no separate treatment — it
+falls out, because the only frames that were beyond plant reach were
+launch frames. The corridor is unchanged (87.8 px/s, was 87.1); rows 6–8
+unchanged. Row 19 pins it: over flat / pillars / stairs, the disc never
+lifts with no convex corner within `CornerPlantReach`.
+
 **The rise ceiling (fourteenth pass).** Reported from play: rapid extra
 movement during a jump taken near a corner — "the jump gets access to a
 corner force, which is fine, but allows it to go faster than the maximum

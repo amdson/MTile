@@ -65,6 +65,10 @@ public static class LatticeTracker
             body.Position.Y - 2f, body.Position.Y + CorrectorChannels.LegReach, out bool floorFound);
         float dist = floorFound ? floorY - body.Position.Y : float.PositiveInfinity;
         bool near     = dist <= CorrectorChannels.LegReach;
+        // Rising faster than support could ever push: the body is leaving the
+        // floor, so there is nothing to plant against (StandingState's entry
+        // rule, and the climb family's launch gate).
+        bool ballistic = -body.Velocity.Y > cfg.SpringMaxRiseSpeed;
         bool anchored = dist <= BallisticPredictor.SupportReach;
 
         // ── The plan ─────────────────────────────────────────────────────
@@ -255,7 +259,18 @@ public static class LatticeTracker
                 // objective's worry: this solve maximizes progress along the
                 // path and has no reason to. The push is bounded
                 // (FoldRedirectForce), so a face slows the body, not halts it.
-                s.ChannelMask[3][k] = cfg.FoldRedirectEnabled && near;
+                // ...but NOT off a surface the body is already leaving. A
+                // plant is a contact: MarkCornerPlants has always said a
+                // hand-plant is a DESCENDING maneuver and that rising ticks
+                // are climb work, the leg servo's domain — the tracker had
+                // dropped that gate along with !Grounded. Without it the disc
+                // spent up to 446 px/s^2 of LIFT on the first frames of every
+                // jump, on flat ground, with no corner within plant reach: a
+                // corner force firing where there is no corner, which reads as
+                // the body floating off the launch. The threshold is the one
+                // StandingState already uses to decide a body is ballistic
+                // rather than supported (a rise no support could author).
+                s.ChannelMask[3][k] = cfg.FoldRedirectEnabled && near && !ballistic;
                 // No legs for a profile that neither hovers nor rises (Fall):
                 // its plan is a level line at the body's height, and legs in
                 // reach would hold it there — a re-planned level line, a hard

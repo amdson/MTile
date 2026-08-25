@@ -498,4 +498,76 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
         Assert.True(worstLift < 1f,
             $"corrector lifted a body already rising at {riseAtWorst:F1} (ceiling {ceiling:F1}): {worstLift:F0} px/s^2");
     }
+
+    // -- Row 19: the disc plants at corners, not in mid-air ---------------
+    // A plant is a CONTACT. The redirect disc may lift the body only where
+    // something plantable is actually in reach -- MarkCornerPlants' own law
+    // ("a hand-plant is a DESCENDING maneuver; rising ticks are climb work").
+    // The tracker had dropped that gate along with !Grounded, so the disc
+    // spent up to 446 px/s^2 of LIFT on the first frames of EVERY jump, on
+    // flat ground, with no convex corner within hand reach -- a corner force
+    // firing where there is no corner, which reads as the body floating off
+    // the launch. Measured over four courses: 2 such frames per run before,
+    // 0 after.
+    [Theory]
+    [InlineData("flat")]
+    [InlineData("pillars")]
+    [InlineData("stairs")]
+    public void Row19_DiscLiftsOnlyWithinPlantReachOfACorner(string course)
+    {
+        const int floorRow = 11;
+        var chunks = course switch
+        {
+            "pillars" => Terrain(14, 64, (r, c) =>
+                r == floorRow || (c >= 16 && (c / 3) % 4 == 0 && r >= floorRow - 3 && r < floorRow)),
+            "stairs"  => Terrain(14, 64, (r, c) =>
+                r == floorRow || (c >= 16 && r > floorRow - 1 - (c - 16) / 6 && r < floorRow)),
+            _         => Terrain(14, 64, (r, c) => r == floorRow),
+        };
+        var sim = new Simulation(chunks, OnFloor(40f, floorRow));
+        int far = 0; float worstLift = 0f, worstDist = 0f;
+        for (int f = 0; f < 400; f++)
+        {
+            sim.Step(new PlayerInput { Right = true, Space = f % 30 < 12 });
+            if (!sim.Player.CurrentStateName.Contains("Jump")) continue;
+            var led = sim.Player.ForceLedger;
+            float lift = 0f;
+            for (int i = 0; i < led.ChannelCount; i++)
+                if (led.Channels[i].Channel == CorrectionChannel.Redirect)
+                    lift = MathF.Max(0f, -led.Channels[i].Force.Y);
+            if (lift <= 1f) continue;
+            float d = NearestConvexCorner(chunks, sim.Player.Body.Position);
+            if (d > CorrectorChannels.CornerPlantReach)
+            {
+                far++;
+                if (lift > worstLift) { worstLift = lift; worstDist = d; }
+            }
+        }
+        output.WriteLine($"row19 {course}: disc lifts beyond plant reach = {far}"
+            + (far > 0 ? $" (worst {worstLift:F0} px/s^2 at {worstDist:F1} px)" : ""));
+        Assert.True(far == 0,
+            $"the disc lifted {far}x with no corner in reach (worst {worstLift:F0} px/s^2 at {worstDist:F1} px)");
+    }
+
+    // Body centre -> nearest convex tile corner (a solid tile with an open
+    // side or open top) -- what a hand-plant could actually grab.
+    private static float NearestConvexCorner(ChunkMap chunks, Vector2 p)
+    {
+        float best = float.PositiveInfinity;
+        const float half = Ts * 0.5f;
+        int g0x = (int)MathF.Floor((p.X - 96f) / Ts), g1x = (int)MathF.Floor((p.X + 96f) / Ts);
+        int g0y = (int)MathF.Floor((p.Y - 96f) / Ts), g1y = (int)MathF.Floor((p.Y + 96f) / Ts);
+        for (int gy = g0y; gy <= g1y; gy++)
+        for (int gx = g0x; gx <= g1x; gx++)
+        {
+            float cx = gx * Ts + half, cy = gy * Ts + half;
+            if (!TileQuery.IsSolidAt(chunks, cx, cy)) continue;
+            bool up = !TileQuery.IsSolidAt(chunks, cx, cy - Ts);
+            if (up || !TileQuery.IsSolidAt(chunks, cx - Ts, cy))
+                best = MathF.Min(best, Vector2.Distance(p, new Vector2(cx - half, cy - half)));
+            if (up || !TileQuery.IsSolidAt(chunks, cx + Ts, cy))
+                best = MathF.Min(best, Vector2.Distance(p, new Vector2(cx + half, cy - half)));
+        }
+        return best;
+    }
 }
