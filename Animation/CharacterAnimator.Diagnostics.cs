@@ -354,6 +354,12 @@ public sealed partial class CharacterAnimator
     }
 
     // Residual row count m of the last solve.
+    // The active planted contacts after this frame's RefreshContacts (bone index, frozen
+    // feathered weight, world target). Diagnostics / tests only.
+    internal int ContactCount => _contacts.Count;
+    internal (int Bone, float Weight, Vector2 Target) ContactAt(int i)
+        => (_contacts[i].Bone, _contacts[i].Weight, _contacts[i].Target);
+
     public int LastSolveRows => _ls.LastRows;
     public float LastSolveCost => _ls.LastCost;
     public static float LastPivotRatio => LeastSquaresSolver.LastPivotRatio;
