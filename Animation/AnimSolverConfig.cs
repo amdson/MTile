@@ -154,6 +154,12 @@ public class AnimSolverConfig
     // Also bounds the visible cadence pause at a slow-walk foot swap (~3 frames at 0.1s —
     // reads as a weight shift). At healthy cadence the phase feather completes faster anyway.
     public float ContactReleaseTime { get; set; } = 0.1f;
+    // ENGAGE mirror of ContactReleaseTime: a planted contact's weight rises over at least this
+    // many seconds (captured at ≤ one frame's worth, then +dt/ContactEngageTime per frame,
+    // min of that and the phase feather). The phase feather alone is under two frames at run
+    // cadence, so a re-contact engaged at ~full weight in one frame and the ground-hold row
+    // yanked the root down to the new foot (the landing jerk). ~5 frames at 60 fps.
+    public float ContactEngageTime { get; set; } = 0.08f;
 
     private static AnimSolverConfig _current = new AnimSolverConfig();
 
@@ -196,6 +202,7 @@ public class AnimSolverConfig
         MaxPhaseStep            = src.MaxPhaseStep;
         FeatherWidth            = src.FeatherWidth;
         ContactReleaseTime      = src.ContactReleaseTime;
+        ContactEngageTime       = src.ContactEngageTime;
     }
 
     public static void Load(string path)

@@ -367,21 +367,44 @@ public sealed partial class CharacterAnimator
     // the body sway: pulling toward 0 (not toward last frame) charges sustained travel
     // absorption quadratically, so d.x can soak the turning-point singularity's residual but
     // can never carry the cadence. ComWeightX ≫ ComWeightY on purpose.
+    //
+    // Rows 2–3 are the TEMPORAL smoothness twins: √λs·(δ − δ_prev) and √λs·(d.x − d.x_prev),
+    // anchored on last frame's EMITTED offsets (_dyEmitted / _dxEmitted). λs = λ·(1−b)/b with
+    // b the base ease factor — the same derivation as the per-bone Δθ smoothness (step 1.6),
+    // so with nothing else in the objective δ eases toward 0 by exactly the factor the
+    // no-solve frames apply. Without these rows δ was memoryless: it jumped to whatever the
+    // new contact's ground-hold asked on the capture frame and snapped to 0 on release — the
+    // 4px one-frame root drop/pop at every run stride's flight ↔ stance edge.
     private sealed class ComOffsetConstraint : ISolveConstraint
     {
         private readonly CharacterAnimator _a;
         public ComOffsetConstraint(CharacterAnimator a) => _a = a;
+        private void Weights(out float wy, out float wx, out float sy, out float sx)
+        {
+            var cfg = _a._frame.Solver;
+            float b = _a._easeBase, k = (1f - b) / b;
+            wy = MathF.Sqrt(cfg.ComWeightY) * _a._invCharLen;
+            wx = MathF.Sqrt(cfg.ComWeightX) * _a._invCharLen;
+            sy = MathF.Sqrt(cfg.ComWeightY * k) * _a._invCharLen;
+            sx = MathF.Sqrt(cfg.ComWeightX * k) * _a._invCharLen;
+        }
         public int Residuals(ReadOnlySpan<float> x, Span<float> r)
         {
-            r[0] = MathF.Sqrt(_a._frame.Solver.ComWeightY) * _a._invCharLen * x[IdxDy];
-            r[1] = MathF.Sqrt(_a._frame.Solver.ComWeightX) * _a._invCharLen * x[IdxDx];
-            return 2;
+            Weights(out float wy, out float wx, out float sy, out float sx);
+            r[0] = wy * x[IdxDy];
+            r[1] = wx * x[IdxDx];
+            r[2] = sy * (x[IdxDy] - _a._dyEmitted);
+            r[3] = sx * (x[IdxDx] - _a._dxEmitted);
+            return 4;
         }
         public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
         {
-            jac[row0 * stride + IdxDy]       = MathF.Sqrt(_a._frame.Solver.ComWeightY) * _a._invCharLen;
-            jac[(row0 + 1) * stride + IdxDx] = MathF.Sqrt(_a._frame.Solver.ComWeightX) * _a._invCharLen;
-            return 2;
+            Weights(out float wy, out float wx, out float sy, out float sx);
+            jac[row0 * stride + IdxDy]       = wy;
+            jac[(row0 + 1) * stride + IdxDx] = wx;
+            jac[(row0 + 2) * stride + IdxDy] = sy;
+            jac[(row0 + 3) * stride + IdxDx] = sx;
+            return 4;
         }
     }
 

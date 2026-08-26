@@ -221,6 +221,13 @@ public sealed partial class CharacterAnimator
     private float             _phaseFloor;        // speed-derived Δφ floor for PhaseRateFloorConstraint (0 = inert)
     private float             _phaseAccelBox;     // this frame's |Δφ − Δφ_prev| bound = MaxPhaseAccel·dt² (0 = no box)
     private float             _phaseAccelNorm;    // 1/(dt²·PhaseAccelRef): (Δφ − Δφ_prev)·norm = acceleration in PhaseAccelRef units
+    // The root offset d = (δ, d.x) as EMITTED (drawn) last frame — the temporal anchor for the
+    // com block's smoothness rows and the value the host reads (VerticalOffset /
+    // HorizontalOffset). On a solve frame it is the solved d; on a no-solve frame (flight,
+    // non-locomotion) it EASES toward 0 by the same base ease factor the bones use, instead
+    // of snapping to the baseline — the one-frame root pop at contact release/capture.
+    private float             _dyEmitted, _dxEmitted;
+    private float             _easeBase;          // this frame's base ease factor b = 1 − exp(−Stiffness·dt)
     // Reference phase acceleration (cycles/s²) the soft acceleration row is normalized by —
     // about one re-contact hop of the run at 60 fps (0.03/frame · 3600). Makes PhaseAccelPrior
     // O(1): λ = 1 ⇒ one such hop costs ≈ 1px of planted-foot slip.
@@ -254,15 +261,20 @@ public sealed partial class CharacterAnimator
     public float AngleCorrection(int bone)
         => _haveCorr && bone >= 0 && bone < _skeleton.Count ? _solveVars[IdxTheta0 + bone] : 0f;
 
-    // Solved vertical root offset δ (world px) to add on top of the host's baseline
-    // placement (RigRoot) — the body's bob that keeps the planted foot grounded. Zero on
-    // flight / non-locomotion frames with no solve (→ host baseline = com anchor).
-    public float VerticalOffset => _haveCorr ? _solveVars[IdxDy] : 0f;
+    // Emitted vertical root offset δ (world px) to add on top of the host's baseline
+    // placement (RigRoot) — the body's bob that keeps the planted foot grounded. The solved
+    // value on a solve frame; on flight / non-locomotion frames with no solve it EASES toward
+    // 0 (the com anchor) at the base ease rate rather than snapping there — see _dyEmitted.
+    public float VerticalOffset => _dyEmitted;
 
-    // Solved horizontal root offset d.x (world px) — the body's slight fore-aft sway that
+    // Emitted horizontal root offset d.x (world px) — the body's slight fore-aft sway that
     // soaks the no-slip residual at a planted foot's horizontal turning point (where cadence
-    // alone can't track the body). Added by the host beside VerticalOffset. Zero with no solve.
-    public float HorizontalOffset => _haveCorr ? _solveVars[IdxDx] : 0f;
+    // alone can't track the body). Added by the host beside VerticalOffset; eases like δ.
+    public float HorizontalOffset => _dxEmitted;
+
+    // Did a solve (cadence or static) run this frame? False on flight / plain non-locomotion
+    // frames, where the offsets above are easing and AngleCorrection reads 0. Tests.
+    public bool SolvedThisFrame => _haveCorr;
 
     // Lowest point (max local Y; Y is down) of the *current* eased pose, in skeleton-
     // local units — the live "sole" line. A host places the rig so this rests on the
@@ -319,10 +331,11 @@ public sealed partial class CharacterAnimator
         // external pin + continuity + com + one prior per bone. Sized to the rig once.
         int nv = IdxTheta0 + rig.Count + 2;
         // 2/contact + 2/pin + (MaxSurfaces × bones) no-penetration + 1 aim + continuity
-        // + phase-rate floor + com(δ, d.x) + bones Tikhonov + bones Δθ-smoothness
+        // + phase-rate floor + com(δ, d.x: absolute tie + temporal smoothness = 4)
+        // + bones Tikhonov + bones Δθ-smoothness
         // + headroom for driver-contributed constraint blocks (FrameInputs.Constraints).
         const int MaxContributedRows = 16;
-        int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 1 + 4 + 2 * rig.Count + 2
+        int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 1 + 4 + 2 * rig.Count + 4
                + MaxContributedRows;
         _maxResiduals = nr;
         _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
@@ -507,6 +520,7 @@ public sealed partial class CharacterAnimator
         {
             var cfg0 = _frame.Solver;
             float bBase  = 1f - MathF.Exp(-Stiffness * dt);
+            _easeBase = MathF.Max(bBase, 1e-4f);   // the root offset d eases at the base rate (see _dyEmitted)
             float upperK = Stiffness + (UpperBodyStiffness - Stiffness) * _state.ActionWeight;
             float bUpper = 1f - MathF.Exp(-upperK * dt);
             for (int i = 0; i < _skeleton.Count; i++)
@@ -676,6 +690,12 @@ public sealed partial class CharacterAnimator
         // would then be applied twice). Persists across clip switches (that's the crossfade).
         for (int i = 0; i < _skeleton.Count; i++) _thetaEmitted[i] = _target.Local[i].Rotation;
         _haveEmitted = true;
+        // The root offset d follows the same rule: a solve frame emits the solved d (which the
+        // com block's smoothness rows already pulled toward last frame's); a no-solve frame
+        // eases it toward the baseline at the base rate — the closed-form of the same prior
+        // with nothing else in the objective — so flight ↔ stance edges are continuous.
+        if (_haveCorr) { _dyEmitted = _solveVars[IdxDy]; _dxEmitted = _solveVars[IdxDx]; }
+        else           { _dyEmitted *= 1f - _easeBase;   _dxEmitted *= 1f - _easeBase; }
 
         // 3b. Directional lean for locomotion — an eased scalar layered OUTSIDE the smoothing
         //     loop (see the capture note above). The ease covers both the speed ramp and the
@@ -897,11 +917,27 @@ public sealed partial class CharacterAnimator
         // again. At healthy cadence the phase fade is faster and the time floor never bites.
         // (The weight must stay FROZEN inside the solve itself — see PlantedContactsConstraint.)
         float timeFade = dt / MathF.Max(1e-3f, _frame.Solver.ContactReleaseTime);
+        // ENGAGE mirror of the release floor: a contact's weight may RISE by at most this much
+        // per frame, from a capture at (at most) this much. The phase feather alone is too
+        // short in TIME at run cadence — FeatherWidth 0.12 phase at Δφ ≈ 0.07/frame is under
+        // two frames, so a re-contact went 0 → 0.76 → 1.0 and the ground-hold row yanked the
+        // root to the new foot in one frame (the landing jerk). Ramping over ContactEngageTime
+        // lets δ and the leg share the landing across several frames at any cadence; at a slow
+        // walk the phase feather is the slower of the two and this floor never bites.
+        float timeRamp = dt / MathF.Max(1e-3f, _frame.Solver.ContactEngageTime);
         for (int i = _contacts.Count - 1; i >= 0; i--)
         {
             var c = _contacts[i];
             float w = WeightOf(c.Bone);
+            w = MathF.Min(w, c.Weight + timeRamp);
             if (DWeightOf(c.Bone) < 0f) w = MathF.Min(w, c.Weight - timeFade);
+            // Deliberately NO slew floor on release (tried 2026-08-26): a fast cadence steps
+            // clean over the release feather (Δφ 0.078 vs FeatherWidth 0.12) and a full-weight
+            // contact drops in one frame — but holding it for a time ramp instead dragged the
+            // old foot's ground-hold through toe-off (δ → +6px) and stalled the cadence on
+            // its no-slip row (Δφ → 0.01), the foot-swap deadlock all over again. Toe-off
+            // must let go promptly; the root's continuity across it is the emitted offsets'
+            // ease (_dyEmitted), not a lingering contact.
             if (w <= 1e-3f) { _contacts.RemoveAt(i); continue; }
             c.Weight = w;
             _contacts[i] = c;
@@ -922,7 +958,8 @@ public sealed partial class CharacterAnimator
             if (w <= 1e-3f || ActiveIndex(bone) >= 0) continue;   // held ones updated above
             Vector2 tip = _scratch.WorldOf(bone).Translation;     // bone's far end = contact tip
             _contacts.Add(new ActiveContact { Bone = bone, Target = SnapToSupport(bone, tip),
-                                              Weight = w, Source = ContactSource.SelfPlant });
+                                              Weight = MathF.Min(w, timeRamp),   // capture SMALL, ramp in
+                                              Source = ContactSource.SelfPlant });
         }
     }
 

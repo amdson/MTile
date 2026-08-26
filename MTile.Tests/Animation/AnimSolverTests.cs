@@ -105,8 +105,11 @@ public class AnimSolverTests
     // δ is the body's vertical bob: a hard per-contact ground row holds the planted foot
     // at its plant height (δ ≠ 0), and a soft com row pulls δ → 0 when no foot pins it.
     // Run has both stance and no-contact (flight) windows, so over a cycle δ must BOTH
-    // engage (stance) and release to exactly 0 (flight → body at the com baseline, both
-    // feet free to leave the ground), and never pin to the box.
+    // engage (stance) and release (flight → body eases back to the com baseline, both feet
+    // free to leave the ground), and never pin to the box. Release is an EASE, not a snap
+    // (2026-08-26): on a no-solve frame δ decays toward 0 by the base ease factor — |δ| is
+    // non-increasing across every flight frame — instead of reading 0 the instant the
+    // contact drops (the one-frame root pop at each stride's stance → flight edge).
     [Theory]
     [InlineData("run", 90f, +1)]
     [InlineData("run", 90f, -1)]
@@ -117,20 +120,27 @@ public class AnimSolverTests
         var skel = SkeletonExamples.Biped();
         var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
 
-        float dt = 1f / 30f, vx = speed * facing, x = 0f, maxAbs = 0f;
-        int flightFrames = 0, stanceBobFrames = 0;
+        float dt = 1f / 30f, vx = speed * facing, x = 0f, maxAbs = 0f, prevAbs = 0f;
+        int flightFrames = 0, stanceBobFrames = 0, flightGrew = 0;
         for (int i = 0; i < 60; i++)
         {
             x += vx * dt;
             anim.Update(new CharacterAnimSample(
                 new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState", "", dt));
-            float d = anim.VerticalOffset;
-            maxAbs = MathF.Max(maxAbs, MathF.Abs(d));
-            if (d == 0f) flightFrames++;                       // no solve this frame → flight, baseline
-            else if (MathF.Abs(d) > 0.05f) stanceBobFrames++;  // foot pinned → body bobbed off baseline
+            float d = anim.VerticalOffset, a = MathF.Abs(d);
+            maxAbs = MathF.Max(maxAbs, a);
+            bool flight = !anim.SolvedThisFrame;               // no solve this frame → flight, easing to baseline
+            if (flight)
+            {
+                flightFrames++;
+                if (a > prevAbs + 1e-4f) flightGrew++;         // must decay, never grow, while easing
+            }
+            else if (a > 0.05f) stanceBobFrames++;             // foot pinned → body bobbed off baseline
+            prevAbs = a;
         }
 
-        Assert.True(flightFrames > 0, "δ never released to 0 — no flight frame (body always pinned)");
+        Assert.True(flightFrames > 0, "δ never released — no flight frame (body always pinned)");
+        Assert.Equal(0, flightGrew);
         Assert.True(stanceBobFrames > 0, "δ never engaged — the vertical ground hold did nothing");
         Assert.True(maxAbs < 23f, $"δ pinned near the box wall ({maxAbs:0.0} px) — over-correcting");
     }
