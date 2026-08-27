@@ -470,7 +470,9 @@ public class PlayerCharacter : IHittable
 
         // Edge-detect input gestures and enqueue intents. Done BEFORE the FSMs so
         // freshly-released clicks are visible to action preconditions this frame.
-        _inputParser.Detect(controller, _intents, _frame, dt);
+        // Gestures are measured relative to the body so camera follow (player motion)
+        // doesn't read as cursor motion.
+        _inputParser.Detect(controller, _intents, _frame, dt, Body.Position);
 
         // Per-tick corrector trajectory captures expire every frame — the overlay
         // only ever shows what THIS timestep computed (see CorrectorScratch).

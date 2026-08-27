@@ -13,6 +13,14 @@ namespace MTile;
 //   short hold (≤ ClickMaxHoldFrames) → Click
 //   long hold + swipe (≥ StabSwipeThreshold) → Stab
 //   neither → dropped (no intent)
+//
+// All cursor geometry is measured in PLAYER-RELATIVE space (mouse world position
+// minus the player's body position). The camera follows the player, so a cursor
+// that sits still on screen drifts through world space whenever the player moves —
+// measuring swipes in world space made a plain run-and-hold register as a stab in
+// the direction of travel, and made the circle accumulator spin without the cursor
+// moving. Subtracting the body position each frame keeps the gesture about what the
+// hand actually did.
 public class InputParser
 {
     // Authored in seconds (0.2 s ≈ the original 6 frames at 30 fps); converted to
@@ -29,6 +37,7 @@ public class InputParser
     public const float CircleAngleThreshold   = MathF.PI * 1.5f;
 
     // Track the active press so we can measure hold-duration and swipe-distance on release.
+    // _activePressMouse is player-relative (mouse world pos − body pos at the press).
     private int     _activePressFrame   = -1;
     private Vector2 _activePressMouse;
 
@@ -46,11 +55,15 @@ public class InputParser
     private int _lastCircleEmitted    = int.MinValue;
     private int _lastJumpEmitted      = int.MinValue;
 
-    public void Detect(Controller controller, IntentBuffer buffer, int currentFrame, float dt)
+    // playerPosition: the player's body position this frame; all cursor geometry is
+    // taken relative to it (see class comment).
+    public void Detect(Controller controller, IntentBuffer buffer, int currentFrame, float dt,
+                       Vector2 playerPosition)
     {
         int clickMaxHoldFrames = SimFrames.FromSeconds(ClickMaxHoldSeconds, dt);
         var cur  = controller.Current;
         var prev = controller.GetPrevious(1);
+        Vector2 mouseRel = cur.MouseWorldPosition - playerPosition;
 
         // Jump edge — Space just went down. Movement-side intent: jump states Peek
         // this within IntentBuffer.JumpBufferFrames (so a slightly-early press still
@@ -68,7 +81,7 @@ public class InputParser
             buffer.Issue(new ActionIntent { Type = IntentType.PressEdge, IssuedFrame = currentFrame });
             _lastPressEdgeEmitted = currentFrame;
             _activePressFrame     = currentFrame;
-            _activePressMouse     = cur.MouseWorldPosition;
+            _activePressMouse     = mouseRel;
             _cumAngle             = 0f;
             _hasLastDir           = false;
         }
@@ -79,7 +92,7 @@ public class InputParser
         // near the center produces large angular jumps from tiny movements.
         if (_activePressFrame >= 0)
         {
-            var fromCenter = cur.MouseWorldPosition - _activePressMouse;
+            var fromCenter = mouseRel - _activePressMouse;
             float dist = fromCenter.Length();
             if (dist >= MinCircleRadius)
             {
@@ -100,7 +113,7 @@ public class InputParser
         if (!cur.LeftClick && prev.LeftClick && _activePressFrame >= 0)
         {
             int     holdFrames    = currentFrame - _activePressFrame;
-            Vector2 swipe         = cur.MouseWorldPosition - _activePressMouse;
+            Vector2 swipe         = mouseRel - _activePressMouse;
             bool    holdIsClick   = holdFrames <= clickMaxHoldFrames;
             bool    holdIsCircle  = holdFrames >  clickMaxHoldFrames
                                   && MathF.Abs(_cumAngle) >= CircleAngleThreshold;
