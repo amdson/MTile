@@ -161,6 +161,191 @@ public class BlockThrowTests(ITestOutputHelper output)
         });
     }
 
+    // ── T5: release before the blocks have come loose ─────────────────────────────
+
+    // Deep flat ground: surface row gty=3, two solid rows beneath.
+    private static ChunkMap DeepGround() => SimTerrain.FromAscii(@"
+        OOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOO
+        XXXXXXXXXXXXXXXXXXXXXXXX
+        XXXXXXXXXXXXXXXXXXXXXXXX
+        XXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+
+    // The one-motion gesture: paint the block for 15 frames, then the same 8-frame
+    // 300 px/s leftward swipe the held-throw test uses, then let go — with the spring
+    // weakened so the block is still in the ground when the button comes up.
+    private static InputScript PaintThenSwipeAndRelease(out Vector2 restAt)
+    {
+        var script = new InputScript()
+            .For(10, new PlayerInput { MouseWorldPosition = OnBlock })
+            .For(15, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = OnBlock });
+        var p = OnBlock;
+        for (int i = 0; i < 8; i++)
+        {
+            p += new Vector2(-300f * Dt, 0f);
+            script.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = p });
+        }
+        restAt = p;
+        return script;
+    }
+
+    private sealed class ContestTrace
+    {
+        public int     BallSpawnFrame = -1;
+        public int     DetachFrame    = -1;
+        public Vector2 DetachVel;
+        public int     PointGoneFrame = -1;
+        public List<string> Actions = new();
+    }
+
+    private static ContestTrace RunContest(InputScript script, ChunkMap terrain, int frames, ITestOutputHelper output)
+    {
+        var t = new ContestTrace();
+        SimRunner.RunMulti(Build(script, terrain, frames),
+            onFrameEntities: (f, ps, es) =>
+            {
+                t.Actions.Add(ps[0].CurrentActionName);
+                bool point = false;
+                foreach (var e in es)
+                {
+                    if (e is PullPointEntity) point = true;
+                    if (e is not LobbedAreaProjectile ball) continue;
+                    if (t.BallSpawnFrame < 0) t.BallSpawnFrame = f;
+                    if (!ball.Tracking && t.DetachFrame < 0) { t.DetachFrame = f; t.DetachVel = ball.Body.Velocity; }
+                }
+                if (!point && t.BallSpawnFrame >= 0 && t.PointGoneFrame < 0) t.PointGoneFrame = f;
+                if (!point && f > 30 && t.PointGoneFrame < 0 && t.BallSpawnFrame < 0) t.PointGoneFrame = f;
+            });
+        output.WriteLine($"ball@f{t.BallSpawnFrame} detach@f{t.DetachFrame} v=({t.DetachVel.X:F0},{t.DetachVel.Y:F0}) pointGone@f{t.PointGoneFrame}");
+        return t;
+    }
+
+    private static void WithWeakSpring(float coeff, Action run)
+    {
+        var cfg  = MovementConfig.Current;
+        float prev = cfg.PeelSpringCoeff;
+        cfg.PeelSpringCoeff = coeff;
+        try { run(); } finally { cfg.PeelSpringCoeff = prev; }
+    }
+
+    // Let go while the block is still in the ground: the point flies on, the contest
+    // finishes against it, the block comes free into a ball that chases the point —
+    // and detaches at the SAME speed as a clod that was already in hand for the same
+    // swipe. That equality is the whole point of routing both through the point.
+    [Fact]
+    public void ReleaseBeforeBreakout_StillThrows_AtTheHeldThrowsSpeed()
+    {
+        WithPeel(() =>
+        {
+            // Reference: clod in hand, same 8-frame swipe, release.
+            var held = GrabThenHold(new Vector2(100f, 30f), 20);
+            var hp = new Vector2(100f, 30f);
+            for (int i = 0; i < 8; i++)
+            {
+                hp += new Vector2(-300f * Dt, 0f);
+                held.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = hp });
+            }
+            held.Forever(new PlayerInput { MouseWorldPosition = hp });
+            var a = RunContest(held, FloatingBlock(), 100, output);
+
+            // One motion: the block is still attached at release (weak spring), and
+            // comes free only once the flying point has pulled far enough.
+            ContestTrace b = null;
+            WithWeakSpring(0.15f, () =>
+            {
+                var script = PaintThenSwipeAndRelease(out var restAt)
+                    .Forever(new PlayerInput { MouseWorldPosition = restAt });
+                b = RunContest(script, FloatingBlock(), 100, output);
+            });
+
+            const int releaseB = 33;   // 10 + 15 + 8
+            Assert.True(b.BallSpawnFrame > releaseB, $"the block should come free AFTER the release (ball at f{b.BallSpawnFrame}, release f{releaseB})");
+            Assert.True(b.DetachFrame > 0, "the freed ball should chase the point and detach");
+            Assert.True(a.DetachFrame > 0);
+            Assert.True(MathF.Abs(b.DetachVel.X - a.DetachVel.X) < 60f,
+                        $"one-motion throw ({b.DetachVel.X:F0}) should match the held throw ({a.DetachVel.X:F0}) for the same swipe");
+            Assert.True(b.DetachVel.X < -220f, $"and it should carry the swipe, got {b.DetachVel.X:F0}");
+        });
+    }
+
+    // Anchored stone, released mid-pull: the flying point can't beat the glue; the
+    // point dies empty within its cap, terrain intact, no ball.
+    [Fact]
+    public void ReleaseBeforeBreakout_AnchoredStone_DiesEmpty()
+    {
+        WithPeel(() =>
+        {
+            var terrain = DeepGround();
+            int before  = 0;
+            for (int gtx = 0; gtx <= 23; gtx++) for (int gty = 3; gty <= 5; gty++)
+                if (terrain.GetCellState(gtx, gty) == TileState.Solid) before++;
+            var onSurf = new Vector2(120f, 52f);
+            var pullTo = new Vector2(120f, 20f);
+            var script = new InputScript()
+                .For(10, new PlayerInput { MouseWorldPosition = onSurf })
+                .For(20, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = onSurf })
+                .For(30, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = pullTo })
+                .Forever(new PlayerInput { MouseWorldPosition = pullTo });
+
+            var cfgMulti = new SimConfigMulti
+            {
+                Terrain = terrain, Frames = 100, Dt = Dt, Gravity = new Vector2(0f, 600f),
+                Players = new[] { new SimPlayer { StartPosition = new Vector2(120f, 40f), Script = script } },
+            };
+            int pointGone = -1; bool sawBall = false;
+            SimRunner.RunMulti(cfgMulti, onFrameEntities: (f, ps, es) =>
+            {
+                bool point = false;
+                foreach (var e in es)
+                {
+                    if (e is PullPointEntity) point = true;
+                    if (e is LobbedAreaProjectile) sawBall = true;
+                }
+                if (f >= 60 && !point && pointGone < 0) pointGone = f;
+            });
+
+            int after = 0;
+            for (int gtx = 0; gtx <= 23; gtx++) for (int gty = 3; gty <= 5; gty++)
+                if (terrain.GetCellState(gtx, gty) == TileState.Solid) after++;
+            int cap = (int)MathF.Ceiling(MovementConfig.Current.GrabPointMaxSeconds / Dt) + 2;
+            output.WriteLine($"point gone at f{pointGone} (release f60, cap +{cap})");
+            Assert.False(sawBall, "stone's glue should hold against the flying point");
+            Assert.Equal(before, after);
+            Assert.True(pointGone >= 60 && pointGone <= 60 + cap, $"point should die within its cap, gone at f{pointGone}");
+        });
+    }
+
+    // The reason the contest lives on the entity: a slash pressed the frame after the
+    // release enters immediately AND the throw still lands.
+    [Fact]
+    public void SlashRightAfterRelease_EntersAndTheThrowStillLands()
+    {
+        WithPeel(() =>
+        {
+            WithWeakSpring(0.15f, () =>
+            {
+                var script = PaintThenSwipeAndRelease(out var restAt)
+                    .For(1, new PlayerInput { MouseWorldPosition = restAt })
+                    .For(6, new PlayerInput { LeftClick = true, MouseWorldPosition = restAt + new Vector2(20f, 0f) })
+                    .Forever(new PlayerInput { MouseWorldPosition = restAt });
+                var t = RunContest(script, FloatingBlock(), 100, output);
+
+                // A click while the cursor is still moving parses as the stab gesture
+                // (motion + click), so the follow-up lands as Stab rather than Slash —
+                // either is "an attack entered immediately", which is what matters.
+                const int release = 33;
+                bool attacked = false;
+                for (int f = release; f <= release + 2 && f < t.Actions.Count; f++)
+                    if (t.Actions[f].Contains("Slash") || t.Actions[f].Contains("Stab")) attacked = true;
+                output.WriteLine(string.Join(",", t.Actions.GetRange(release - 1, 10)));
+                Assert.True(attacked, "the follow-up attack should enter within two frames of the release");
+                Assert.True(t.BallSpawnFrame > release, "the block should still come free after the release");
+                Assert.True(t.DetachFrame > 0 && t.DetachVel.X < -220f, $"and the throw should still fly, got vx={t.DetachVel.X:F0}");
+            });
+        });
+    }
+
     // Bookkeeping: a released grab leaves exactly one ball and no point behind, the
     // action exits on the release frame, and nothing routes the release into another
     // Shift+LMB action.

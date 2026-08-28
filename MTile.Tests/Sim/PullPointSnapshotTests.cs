@@ -199,8 +199,9 @@ public class PullPointSnapshotTests(ITestOutputHelper output)
             var snap   = sim.Snapshot();
             string atK = Probe(sim);
 
-            // Release: the action exits, kills the point, it's swept.
-            for (int f = 0; f < 5; f++) sim.Step(new PlayerInput { MouseWorldPosition = new Vector2(120f, 20f) });
+            // Release: the action exits and hands the point off; it contests the stone
+            // for up to GrabPointMaxSeconds, loses, and is swept.
+            for (int f = 0; f < 25; f++) sim.Step(new PlayerInput { MouseWorldPosition = new Vector2(120f, 20f) });
             bool anyPoint = false;
             foreach (var e in sim.Entities) if (e is PullPointEntity) anyPoint = true;
             Assert.False(anyPoint, "the point should be gone after release");

@@ -172,26 +172,37 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
             return;
         }
 
+        var chunks = (spawner as IChunkProvider)?.Chunks;
+
         if (!Driven)
         {
+            // Released with the blocks still in the ground: the contest finishes
+            // against the flying point (T5 — "drag and release in one motion"). No
+            // painting; the spring endpoint is wherever the point has flown to, so the
+            // force ramps as it recedes and the group either comes free — spawning the
+            // same tracking ball — or the spring snaps. A hard cap bounds the wait.
             HandoffTime += dt;
-            if (HandoffTime >= cfg.GrabPointMaxSeconds) { Health = 0f; return; }
-            // Phase 2: a released point with no ball has nothing to finish yet — the
-            // post-hand-off contest lands in Phase 3.
-            Health = 0f;
+            if (HandoffTime >= cfg.GrabPointMaxSeconds || _group.Count == 0
+                || !cfg.BlockPeelEnabled || chunks == null)
+            {
+                Health = 0f;
+                return;
+            }
+            TargetPos = Body.Position;
+            UpdatePeel(chunks, spawner, dt, paint: false);
             return;
         }
 
         if (!cfg.BlockPeelEnabled) return;   // legacy: the action rips
-        var chunks = (spawner as IChunkProvider)?.Chunks;
         if (chunks == null) return;
-        UpdatePeel(chunks, spawner, dt);
+        UpdatePeel(chunks, spawner, dt, paint: true);
     }
 
     // One frame of the paint/pull phase. Order is fixed and load-bearing for
     // determinism: prune → paint → spring → wear → compact → break-out, with every scan
-    // in ascending index / row-major cell order.
-    private void UpdatePeel(ChunkMap chunks, IEntitySpawner spawner, float dt)
+    // in ascending index / row-major cell order. `paint` is off after hand-off: the
+    // flying point pulls but admits nothing.
+    private void UpdatePeel(ChunkMap chunks, IEntitySpawner spawner, float dt, bool paint)
     {
         var cfg = MovementConfig.Current;
 
@@ -201,7 +212,7 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
                 RemoveMember(i);
 
         // 2. Paint: deposit tether on solid cells under the kernel.
-        PaintTether(chunks, cfg, dt);
+        if (paint) PaintTether(chunks, cfg, dt);
 
         if (_group.Count == 0) { _group.Strain = 0f; return; }
 
