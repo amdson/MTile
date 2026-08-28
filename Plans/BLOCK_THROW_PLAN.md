@@ -146,57 +146,88 @@ ring, `Controller.cs:36-52`) is an equivalent zero-state alternative; either is
 deterministic. ~4 frames / 67 ms of smoothing is the right order — enough to kill jitter,
 short enough that the flick just before release is what's measured.
 
-### 4.3 Two things outlive the release — decide where each lives
+### 4.3 Nothing may outlive the release inside the action — the point is an entity the action drives, then hands off
 
 Today LMB-up *is* the exit (:2810), and `Exit` both throws and consumes the click intents
 (:3070). After release two things keep running with no button held: the **peel contest**
-(if the group hadn't broken out) and the **chase** (once a ball exists). They have
-different natural homes.
+(if the group hadn't broken out) and the **chase** (once a ball exists). The tempting
+answer — a `Releasing` phase inside `BlockGrabAction`, like `GrabAction.GrabThrowing`
+(:3308) — is wrong for a feel reason: the natural follow-up to a throw is another action,
+a slash say, pressed within a few frames. Either the grab's 46 Active lock eats that press
+for up to 0.25 s, or (if the lock is dropped for the release phase) the follow-up preempts
+the grab and kills a contest the player already perceives as a thrown throw. Both are
+wrong, so the contest cannot live in the action, and the same argument already put the
+chase in the projectile.
 
-- **The contest stays in the action** — a `Releasing` phase inside `BlockGrabAction`, the
-  same shape as `GrabAction.GrabThrowing` (:3308). `CheckConditions` stays true until the
-  group breaks out, snaps, or a hard cap (`GrabReleaseMaxSeconds ≈ 0.25`) elapses. The
-  25-member `PeelMemberBuffer` already lives in `ActionVars`; moving it into `EntityData`
-  would bloat every entity snapshot for one rare case.
-- **The chase goes in the projectile.** The moment a ball exists with LMB up — at release
-  in the carry case, at break-out in the `Releasing` case — spawn the `LobbedAreaProjectile`
-  carrying the point (`PointPos`, `PointVel`, `Chasing` in `EntityData`: two `Vector2` and a
-  bool, cheap) and let the entity run the follower itself: gravity 0 and `IgnoreTiles`
-  while chasing (`MassBall` already uses both), then flip to the normal ballistic lob when
-  it detaches. One chase implementation, entered from two places with the same arguments —
-  that's the uniformity, in code. It also frees the action the instant a carried ball is
-  released (no priority lock through the chase), and the only reason the action lingers is
-  a contest that's still live.
+**Route the pull through a `PullPoint` entity from the press onward, and transfer ownership
+on release.** The action becomes thin — input in, summary out:
 
-  The alternative — running the chase in the action's `Releasing` phase for both cases and
-  spawning the projectile at detach — works too, and keeps `EntityData` untouched, at the
-  cost of the 46/46 lock lasting through every throw's chase. Pick the entity.
+- **Spawn on press.** `BlockGrabAction.Enter` spawns a `PullPointEntity` (new
+  `EntityKind.PullPoint`) and keeps its `EntityId` in `vars.PullPointId` (a value struct,
+  so it snapshots with `ActionVars`). Object references must not be held: a rollback
+  restore rehydrates fresh entity objects (`Simulation.cs:455-478`), ids survive. Resolve
+  it each frame through a new `IEntitySpawner.Resolve(EntityId)` (`World.IsAlive` +
+  `EntityRef.Obj`, `Simulation.cs:203-214` shows the registration it inverts).
+- **Drive while held** (`Driven = true`). Each frame the action writes `TargetPos` (raw
+  cursor in the peel, soft-clamped in the carry), `OwnerPos`, and `SwipeVel` into the
+  entity, and mirrors `PeelCount / PeelStrain / OrbHeld` back into `ActionVars` as
+  read-only copies — `CheckConditions`, `Draw`'s tether tint, and the existing tests keep
+  their shape. Players update before entities within a step (`Simulation.cs:289-297`), so
+  a write on frame N is consumed on N and read back on N+1: one frame of latency on
+  `PeelSnapped`/`OrbHeld`, harmless.
+- **The entity owns the mechanics.** Paint → spring → wear → glue → break-out
+  (`UpdatePeel`/`PaintTether`/`BaseGlue`/`BreakOutGroup`, :2869-3025) move onto the entity,
+  re-parameterized on `(ref PeelGroupComp, target, ownerPos)` — a mechanical re-homing with
+  no behaviour change while driven. The held ball, its tracker and its dissipation live
+  there too: while held, the point entity *is* the orb.
+- **Hand off on release** (`Release(swipeVel)`: `Driven = false`, `PointVel = swipeVel`).
+  The action consumes intents, stamps recovery (only if something was harvested, as
+  today), and exits **immediately**. The point flies straight, finishes any live contest,
+  spawns the projectile, dies. No lingering lock; the slash goes through.
+- **Where the group lives:** a sparse ECS value component `PeelGroupComp` (the 25-member
+  buffer + count + strain + snapped) added only to point entities. `World.Capture`
+  snapshots every value store generically (`Sim/ECS/World.cs:134-150`), so other entities
+  pay nothing; the entity marshals it in `CaptureState/RestoreState` alongside
+  `EntityData`, and `EntityFactory.Rehydrate` gets a `PullPoint` case.
+- **Lifecycle:** the point dies on snap, when a held ball dissipates to zero, when it spawns
+  the projectile, or `GrabPointMaxSeconds` after hand-off. The action ends when `Resolve`
+  returns null — that *is* the snap path from the action's side.
 
-Consequences to plan for, not discover:
-- Intent consumption (`Click`/`PressEdge`, :3070) and the recovery stamp must fire on the
-  **release frame**, not at eventual exit — otherwise the Shift+LMB release routes into
-  `EnergyBall/Beam` 0.25 s late.
-- Movement modifiers should drop on release (the orb isn't in hand any more).
-- 46/46 priority holds through the window: the player can't start another action for
-  ≤0.25 s after a release that's still contesting. Acceptable — say so in the header.
-- `PaintTether` must **not** run in the phase (nothing is painting), only prune → spring →
-  wear → glue → break-out, with the spring endpoint = `P`.
-- The point's flight has to be reproduced identically in the action (contest) and in the
-  entity (chase): a straight line, `PointPos += PointVel·dt`, no drag (§4.4). Keep it that
-  trivial so there's nothing to disagree about.
+Costs to budget for, not discover:
+- Plumbing: `IEntitySpawner.Resolve`, `EntityKind.PullPoint`, `EntityFactory` case,
+  `PeelGroupComp`, and a generic overlay-draw hook — today `Game1.cs:1039-1040` type-checks
+  `EnemyEntity` for `DrawOverlay`; the point needs the same for tether tint + orb, so
+  generalize to an interface.
+- **The test harness.** `SimRunner` (`MTile.Tests/Sim/SimRunner.cs:76,172`) calls
+  `PlayerCharacter.Update` with no spawner and never updates entities — `BlockPeelTests`
+  runs entirely inside the action today. An entity-resident peel needs either (a)
+  `SimRunner` to grow a spawner and an entity-update pass mirroring `Simulation.Step`
+  :293-297 (it already mirrors that phase order, so this is in character), or (b) the peel
+  tests to move onto a real `Simulation.Step` with scripted `PlayerInput`. **(a).** Note
+  `FreeHangingBlock_OneSweep_GrabsAndThrows` never actually checked the throw — with no
+  spawner, `Exit` skips the spawn — so (a) also makes its name true.
+- `Entity.Update` receives only the primary player (`Simulation.cs:297`); the point must
+  not read it. Everything it needs — owner position, faction, block type — is written in
+  by the action each frame or captured at spawn.
+- One live point per player: `CheckPreConditions` refuses while `vars.PullPointId` still
+  resolves (a re-press during a live contest). Default: ignore the press; see §7.5.
+- Intent consumption and recovery happen on the release frame by construction now (the
+  action exits there), so the "0.25 s late `EnergyBall`" hazard is gone with the phase.
 
 ### 4.4 No drag on the point — and the contest has a short fuse
 
 Drag on the point would break the uniformity: the peel-case ball starts in the crater and
 chases longer than the carry-case ball at the hand, so with a decaying point it detaches
 slower. A throw shouldn't be weaker because the blocks took a few frames to come loose. So
-the point coasts at constant velocity, in both the action and the entity.
+the point coasts at constant velocity — `PointPos += PointVel·dt`, nothing else. The
+projectile carries a copy of the point during its chase (§5), and a straight line is the
+one thing two copies can't disagree about.
 
 The consequence is a short contest: at 600 px/s the point moves 10 px/frame and
 `PeelSpringMax = 60` is hit at `dist ≈ 97 px` (`4·(d/16)^1.5 = 60`), so a swipe-release
 resolves in ~10 frames, snap or break-out. That's a fine feel — a yank is short — and
 "snap" is the honest failure. If playtests want a longer window, the knob is the
-post-release spring (e.g. scale `PeelSpringMax` during `Releasing`), not point drag.
+post-release spring (e.g. scale `PeelSpringMax` after hand-off), not point drag.
 
 Don't expect T5 to succeed on fresh anchored ground: glue wear is time-integrated
 (`GlueWear += 0.4·share·dt`), so a single fast swipe on an unworked dirt block (base glue
@@ -241,55 +272,67 @@ playtesting wants one-swipe grabs on worked ground, that's a peel-knob change, s
 
 ## 5. Revised design
 
-The sketch's mechanism, with the follower and end condition pinned down. One rule, stated
-once:
+The sketch's mechanism, with the follower, the end condition, and the ownership pinned
+down. One rule, stated once:
 
-> **The pulling point `P`** is where the mouse is while LMB is down (soft-clamped to the
-> player in the carry phase), and flies off in a straight line at the mouse's velocity when
-> LMB comes up. **The ball**, from the moment it exists, follows `P` with a critically
-> damped, speed-capped tracker. When the ball's velocity has converged to `P`'s (or the
-> chase times out) `P` is destroyed and the ball is a free ballistic lob.
+> **The pulling point** is an entity. While LMB is down the action *drives* it — its
+> position is the mouse (soft-clamped to the player once blocks are in hand) and it paints
+> and pulls. On release the action *hands it off* with the mouse's velocity and exits; the
+> point flies straight and finishes whatever contest is still live. **The ball**, from the
+> moment it exists, follows the point with a critically damped, speed-capped tracker —
+> inside the point entity while held, inside the projectile after release. When the ball's
+> velocity has converged to the point's (or the chase times out) the point is gone and the
+> ball is a free ballistic lob.
 
-Everything sim-side is value-typed and snapshotted (`ActionVars` in the action,
-`EntityData` in the projectile). Names are suggestions.
+Everything sim-side is value-typed and snapshotted. Names are suggestions.
 
-**State added to `ActionVars`** (reuse `BallPos/BallVel` — `BlockGrabAction` never touches
-them today and only one action owns `vars` at a time):
+**`ActionVars`** (the action keeps only what it needs to drive and to report):
 
 | Field | Role |
 |---|---|
-| `BallPos`, `BallVel` | the held ball, carry phase |
-| `SwipeVel` | EMA of cursor world velocity (the point's release velocity) |
-| `PrevCursor` | last frame's `MouseWorldPosition` for the EMA |
-| `GrabPhase` | `Peel / Carry / Releasing` (replaces `OrbHeld` + implicit) |
-| `PointPos`, `PointVel` | the flying `P`, `Releasing` only |
-| `ReleaseTime` | seconds in `Releasing` |
+| `PullPointId` | `EntityId` of the point this activation spawned; resolved every frame |
+| `SwipeVel`, `PrevCursor` | EMA of cursor world velocity — the hand-off velocity |
+| `PeelCount`, `PeelStrain`, `OrbHeld` | **mirrors** copied from the entity each frame (existing fields, now read-only from the action's side) |
+| `PeelMembers`, `PeelSnapped`, `OrbBlocks`, `OrbType`, `ChargeTime` | **removed** — moved to the entity |
 
-**State added to `EntityData`** (LobbedArea slot): `PointPos`, `PointVel`, `Chasing`.
+**`PullPointEntity`** (`EntityKind.PullPoint`; `EntityData` for the scalars, sparse
+`PeelGroupComp` for the group):
 
-**Peel phase** — unchanged (spring endpoint = raw cursor), plus the `SwipeVel` EMA.
+| Field | Role |
+|---|---|
+| `PointPos`, `PointVel` | the point; position written by the action while driven, integrated after hand-off |
+| `Driven` | true while the action owns it |
+| `TargetPos`, `OwnerPos` | written by the action each driven frame (kernel/spring endpoint; `GrabReach` origin) |
+| `OwnerFaction`, `BlockType` | captured at spawn |
+| `BallPos`, `BallVel`, `Blocks`, `HarvestBlocks`, `BallType`, `CarryTime` | the held ball (`Blocks > 0` ⇔ orb held) |
+| `HandoffTime` | seconds since release; lifetime cap |
+| `PeelGroupComp` | members (25), count, strain, snapped |
 
-**Break-out while held** — seeds the ball at the group COM with zero velocity; the carry
-tracker then visibly pulls it out of the crater to the hand. No special case.
+**`LobbedAreaProjectile`** (`EntityData`, LobbedArea slot): `PointPos`, `PointVel`, `Chasing`.
 
-**Carry phase** — per frame:
-1. `P = player + softClamp(cursor − player, R)`, pushed out of solid (§4.5).
-2. `SmoothPen.CriticallyDampedStep(ref BallPos, ref BallVel, P, GrabBallSmoothTime, dt)`;
-   clamp `|BallVel| ≤ GrabBallMaxSpeed`.
-3. Bleed as today, with `GrabDissipateSeconds` from config.
-4. Draw the orb **at `BallPos`** (not at the hand).
+**Action, LMB down** — resolve the point (null ⇒ exit: it snapped or dissipated). Write
+`TargetPos` — raw cursor in the peel, `player + softClamp(cursor − player, R)` pushed out
+of solid (§4.5) once the ball is held — plus `OwnerPos`, and update the `SwipeVel` EMA.
+Mirror the summary back. Movement modifiers as today while `OrbHeld`.
 
-**Release, ball in hand** — `P` detaches: spawn the `LobbedAreaProjectile` at `BallPos`
-with `BallVel`, `PointPos = P`, `PointVel = SwipeVel`, `Chasing = true`. Consume intents,
-stamp recovery, exit. The action is done; the entity chases.
+**Action, LMB up or preempted** — `point.Release(SwipeVel)`; consume `Click`/`PressEdge`;
+stamp recovery if `HarvestBlocks > 0`; exit. Nothing else — the action is finished the
+frame the button comes up.
 
-**Release during peel** — enter `Releasing`: `PointPos = cursor`, `PointVel = SwipeVel`,
-consume intents now, drop movement modifiers. Each frame: `PointPos += PointVel·dt`; run
-prune → spring (endpoint `PointPos`) → wear → glue → break-out. Outcomes:
-- break-out ⇒ spawn the projectile at the **group COM** with zero velocity and the *same*
-  `(PointPos, PointVel, Chasing = true)`. Stamp recovery, exit. Identical call to the
-  carry-case spawn; only the ball's start differs.
-- snap, `ReleaseTime ≥ GrabReleaseMaxSeconds`, or LMB pressed again ⇒ exit empty.
+**Point, driven** — prune → paint (kernel at `TargetPos`, admission within `GrabReach` of
+`OwnerPos`) → spring with endpoint `TargetPos` → wear → glue → break-out. Break-out seeds
+the ball at the group COM with zero velocity; from then on the ball tracks `TargetPos`
+(`SmoothPen.CriticallyDampedStep`, `GrabBallSmoothTime`, `|BallVel| ≤ GrabBallMaxSpeed`)
+— the first frames visibly pull it out of the crater to the hand — and `Blocks` bleeds
+over `GrabDissipateSeconds`. Ball gone ⇒ die.
+
+**Point, released** — if a ball was in hand: spawn the projectile at `BallPos` with
+`BallVel` and `(PointPos, PointVel, Chasing = true)`, die. Otherwise: `PointPos +=
+PointVel·dt`; prune → spring with endpoint `PointPos` → wear → glue → break-out (no paint).
+Break-out ⇒ spawn the projectile at the **group COM** with zero velocity and the *same*
+`(PointPos, PointVel, Chasing = true)`, die. Snap, or `HandoffTime ≥ GrabPointMaxSeconds`
+⇒ die. The two spawns are the same call; only the ball's starting state differs — that is
+the uniformity, in code.
 
 **Projectile chase** (`LobbedAreaProjectile.ProjectileUpdate`, while `Chasing`): gravity 0,
 `IgnoreTiles`; `PointPos += PointVel·dt`; `CriticallyDampedStep(Body.Position, Body.Velocity,
@@ -316,7 +359,7 @@ the ball sits, never the throw.
 | `GrabCatchSpeed` | 40 | `\|BallVel − PointVel\|` below this ⇒ detach |
 | `GrabChaseMaxSeconds` | 0.25 | chase hard cap (point outran the ball ⇒ detach at cap speed) |
 | `GrabSwipeSmoothing` | 0.35 | EMA factor per frame |
-| `GrabReleaseMaxSeconds` | 0.25 | `Releasing` (contest) hard cap |
+| `GrabPointMaxSeconds` | 0.25 | point lifetime after hand-off — the contest's hard cap |
 
 **Rendering** (all render-only, none of it feeds the sim):
 
@@ -341,23 +384,26 @@ the ball sits, never the throw.
 
 ## 6. Phases
 
-Each is independently shippable and testable with `SimRunner` + `InputScript`
-(`MTile.Tests/Sim/`); the existing `BlockPeelTests` (6 tests) must stay green throughout —
-`FreeHangingBlock_OneSweep_GrabsAndThrows` is the one most likely to need its script
-adjusted, since its release becomes a swipe-velocity throw and the projectile now spends
-its first frames chasing rather than flying.
+Each is independently shippable. Phase 1 is a structural refactor with **no feel change**
+— it exists so the existing `BlockPeelTests` (6 tests) can be re-pointed at the entity and
+stay green before any behaviour moves. Phase 1 also extends `SimRunner` (§4.3) with a
+spawner and an entity-update pass; from then on every phase is testable with
+`SimRunner` + `InputScript`. `FreeHangingBlock_OneSweep_GrabsAndThrows` is the one most
+likely to need its script adjusted in Phase 2, since its release becomes a swipe-velocity
+throw and the projectile spends its first frames chasing rather than flying.
 
 | Phase | Delivers | Touches | Test |
 |---|---|---|---|
 | 0 | T1: `DissipateSeconds` → `GrabDissipateSeconds` knob | `MovementConfig.cs`, `configs/movement_config.json`, `ActionStates.cs:2776,3144` | `RemainingBlocks` at t = knob/2 is half |
-| 1 | T4: held ball (`BallPos/BallVel` tracker to the clamped point, drawn at ball), `SwipeVel` EMA, projectile chase (`PointPos/PointVel/Chasing` in `EntityData`, gravity/tiles flip at detach), solid-cell guard | `ActionStates.cs` carry phase + `Exit`; `ActionVars.cs`; `LobbedAreaProjectile.cs`; `EcsComponents.cs`, `EntityFactory.cs` | static release ⇒ ball detaches within a few frames at ≈0 relative speed and falls; 300 px/s leftward swipe ⇒ ball detaches flying left at ~300 px/s; swipe past `R` is not attenuated; running player + static mouse ⇒ ball carries the run speed; snapshot round-trip of a chasing projectile |
-| 2 | T5: `Releasing` phase (contest only); intents/recovery/modifiers on the release frame; break-out spawns the same chasing projectile from the COM | `ActionStates.cs` `CheckConditions/Update/Exit` split | free-hanging block, release 3 frames before break-out ⇒ still throws, and **its detach velocity equals the carry-case throw for the same swipe** (the uniformity test); anchored stone ⇒ exits empty within cap; no `EnergyBall` fires on the release frame |
-| 3 | T3: `MassOrbTextures`, shared `DrawOrb`, projectile sized by budget | `Drawing/`, `LobbedAreaProjectile.cs`, `ActionStates.cs:3149`, `Game1.cs` load | visual — screenshot via `/run` |
-| 4 | T2: trail + landing burst | `CosmeticUpdateSystem.cs`, `PresentationEvents`, `Effects.cs` | visual; verify no double-burst on a rollback re-sim (the `(frame,id)` dedup) |
+| 1 | **Pull-point entity refactor, feel-identical.** `PullPointEntity` + `PeelGroupComp` + `EntityKind`/`EntityFactory` case; `IEntitySpawner.Resolve`; peel mechanics re-homed onto the entity; action drives + mirrors; overlay-draw interface; `SimRunner` spawner + entity pass. Release still throws as today (aimed, `ThrowSpeed`); a release before break-out still ends with nothing (`Release` ⇒ point dies immediately in this phase) | `Entities/PullPointEntity.cs` (new), `EcsComponents.cs`, `EntityKind.cs`, `EntityFactory.cs`, `Entity.cs` (`IEntitySpawner`), `Simulation.cs`, `ActionStates.cs`, `ActionVars.cs`, `Game1.cs:1039`, `MTile.Tests/Sim/SimRunner.cs` | all 6 `BlockPeelTests` green unchanged in intent; **rollback mid-peel**: snapshot at frame N with a live driven point, step on, restore, re-step ⇒ identical `PeelCount`/glue (`SnapshotRoundTrip` pattern); the throw in `…GrabsAndThrows` now actually asserted |
+| 2 | T4: held ball in the point (tracker to the clamped target, drawn at ball), `SwipeVel` EMA, hand-off velocity, projectile chase (`PointPos/PointVel/Chasing`, gravity/tiles flip at detach), solid-cell guard | `PullPointEntity.cs`, `ActionStates.cs`, `LobbedAreaProjectile.cs`, `EcsComponents.cs` | static release ⇒ ball detaches within a few frames at ≈0 relative speed and falls; 300 px/s leftward swipe ⇒ ball detaches flying left at ~300 px/s; swipe past `R` is not attenuated; running player + static mouse ⇒ ball carries the run speed; snapshot round-trip of a chasing projectile |
+| 3 | T5: the point lives `GrabPointMaxSeconds` after hand-off and finishes the contest; break-out spawns the same chasing projectile from the COM | `PullPointEntity.cs` | free-hanging block, release 3 frames before break-out ⇒ still throws, and **its detach velocity equals the carry-case throw for the same swipe** (the uniformity test); **a slash on the frame after release enters and the throw still lands** (the §4.3 test); anchored stone ⇒ point dies empty within cap; no `EnergyBall` fires on the release frame |
+| 4 | T3: `MassOrbTextures`, shared `DrawOrb`, projectile sized by budget | `Drawing/`, `LobbedAreaProjectile.cs`, `PullPointEntity` overlay, `Game1.cs` load | visual — screenshot via `/run` |
+| 5 | T2: trail + landing burst | `CosmeticUpdateSystem.cs`, `PresentationEvents`, `Effects.cs` | visual; verify no double-burst on a rollback re-sim (the `(frame,id)` dedup) |
 
-Phases 0-2 are sim changes: `dotnet build MTile.Core.csproj` plus
+Phases 0-3 are sim changes: `dotnet build MTile.Core.csproj` plus
 `dotnet test --filter "FullyQualifiedName~BlockPeel"` while iterating (not the full suite).
-Both hosts compile the same source — nothing above uses a DesktopGL-only API, but Phase 3's
+Both hosts compile the same source — nothing above uses a DesktopGL-only API, but Phase 4's
 texture build should be checked under KNI (`/web-publish` smoke).
 
 ---
@@ -379,3 +425,10 @@ texture build should be checked under KNI (`/web-publish` smoke).
    than the player's true velocity. Usually indistinguishable; if a fast turn-around ever
    throws "backwards", measure the swipe as screen-space deltas (`PlayerInput.MousePosition`
    is also in the ring) scaled by camera zoom, and add `Body.Velocity` explicitly.
+5. **Preemption and re-press.** If something preempts the grab while LMB is still down
+   (only `GrabAction` 48 and `GuardRetaliate` 55 sit above 46), should `Exit` hand the point
+   off with the current swipe velocity (the hand leaves) or kill it (the grab was
+   interrupted)? Default: hand off — it's what the player's hand did. And a Shift+LMB
+   re-press while the previous point is still contesting: default ignore (precondition
+   fails while `PullPointId` resolves); if that feels sticky, let the re-press kill the old
+   point instead.
