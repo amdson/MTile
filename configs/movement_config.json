@@ -66,5 +66,15 @@
   "PeelWeightSand": 0.8,
   "PeelWeightFoam": 0.4,
   // Carried orb bleeds to nothing over this many seconds.
-  "GrabDissipateSeconds": 2.0
+  "GrabDissipateSeconds": 2.0,
+  // Block throw (Plans/BLOCK_THROW_PLAN.md §5): held rest position, ball tracker, detach.
+  "GrabHandDistance": 16.8,
+  "GrabHandLean": 20,
+  "GrabBallSmoothTime": 0.08,
+  "GrabChaseSmoothTime": 0.05,
+  "GrabBallMaxSpeed": 800,
+  "GrabCatchSpeed": 40,
+  "GrabChaseMaxSeconds": 0.25,
+  "GrabSwipeSmoothing": 0.35,
+  "GrabPointMaxSeconds": 0.25
 }

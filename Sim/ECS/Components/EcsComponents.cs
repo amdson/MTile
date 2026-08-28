@@ -83,13 +83,18 @@ public struct EntityData
     public TileType            TileType;    // LobbedArea + MassBall + PullPoint (orb material)
     public float               BuildMass;   // MassBall — remaining mass to leak
 
-    // PullPointEntity (Plans/BLOCK_THROW_PLAN.md). Budget doubles as the harvested orb
-    // block count; the peel group itself is the sparse PeelGroupComp.
-    public bool    Driven;       // the owning BlockGrabAction still drives the point
-    public Vector2 TargetPos;    // action-written each driven frame: kernel / spring endpoint
-    public Vector2 OwnerPos;     // action-written each driven frame: reach origin, hand anchor
-    public float   CarryTime;    // seconds the orb has been held (drives dissipation)
-    public float   HandoffTime;  // seconds since the action released the point
+    // PullPointEntity + the ball it spawns (Plans/BLOCK_THROW_PLAN.md). The peel group
+    // itself is the sparse PeelGroupComp. LinkedId is the point→ball / ball→point
+    // cross-reference (an id, never an object — objects are replaced on rehydrate).
+    public bool     Driven;       // point: the owning BlockGrabAction still drives it
+    public Vector2  TargetPos;    // point: action-written each driven frame (kernel / spring endpoint)
+    public Vector2  OwnerPos;     // point: action-written each driven frame (reach origin)
+    public float    HandoffTime;  // point: seconds since the action released it
+    public EntityId LinkedId;     // point: its ball; ball: its point
+    public bool     Tracking;     // ball: still following the point (gravity off, no hurtbox)
+    public int      HarvestBlocks;// ball: blocks at break-out (Budget is what's left)
+    public float    CarryTime;    // ball: seconds held while the point was driven (dissipation clock)
+    public float    ChaseTime;    // ball: seconds chasing a released point (detach cap)
 }
 
 // Everything a PlayerCharacter needs snapshotted EXCEPT its body pose (BodyStateComp)

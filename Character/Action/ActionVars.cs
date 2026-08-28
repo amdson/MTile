@@ -54,9 +54,12 @@ public struct ActionVars
     // (never the object: a rollback restore replaces it) plus a read-only summary
     // mirrored back each frame for the movement modifiers and the tests.
     public EntityId PullPointId;
-    public bool     OrbHeld;      // mirror: the point is carrying an orb
+    public Vector2  SwipeVel;     // EMA of cursor world velocity — the point's hand-off velocity
+    public Vector2  PrevCursor;   // last frame's MouseWorldPosition, for the EMA
+    public bool     OrbHeld;      // mirror: a ball is in hand (tracking a driven point)
     public int      PeelCount;    // mirror: live group size
     public float    PeelStrain;   // mirror: spring load / snap cap, 0..1
+    // (BallPos below doubles as the mirror of the held ball's position, for the animator.)
 
     // BlockPaintAction — the mass ball. Seeded at the cursor on RMB down, then
     // critically-damped toward it each frame, leaking mass into the cell beneath it.

@@ -2719,30 +2719,30 @@ public class GrenadeAction : ActionState
 //
 // The action is deliberately THIN (Plans/BLOCK_THROW_PLAN.md §4.3). On the press it
 // spawns a PullPointEntity and keeps its id; every held frame it DRIVES the point
-// (writes the cursor as TargetPos and the body as OwnerPos) and mirrors a summary back
-// into ActionVars; on release it throws whatever the point is carrying and HANDS THE
-// POINT OFF. All the mechanics — the paint kernel, the spring, tether/glue wear, the
-// break-out, the legacy drag-rip, the carried orb and its dissipation — live on the
-// entity, so nothing that must outlive the button is ever inside this action. See
-// PullPointEntity for the peel model itself.
+// (writes the cursor — or, once a clod is in hand, the held rest position — as
+// TargetPos and the body as OwnerPos) and mirrors a summary back into ActionVars; on
+// release it HANDS THE POINT OFF with the cursor's velocity and exits that frame. All
+// the mechanics — the paint kernel, the spring, tether/glue wear, the break-out, the
+// legacy drag-rip — live on the entity, and the ball is a LobbedAreaProjectile of its
+// own from the moment it breaks out, so nothing that must outlive the button is ever
+// inside this action.
 //
-// Two exits from the carry phase:
-//   • Release LMB  → the orb is thrown at the cursor as a LobbedAreaProjectile whose
-//                     budget is whatever blocks are left. It lands, erupts the stolen
-//                     material back into the world, and shoves what's nearby.
-//   • Keep holding → the orb dissipates linearly over GrabDissipateSeconds; the throw
-//                     budget bleeds with it, and at zero the point dies and the action
-//                     ends. So carrying terrain has a cost and the grab can't be banked.
+// THE THROW (§4.1/§4.2): the ball follows the point with a velocity-matching tracker.
+// Let go with the mouse still and the point stops, the ball is already on it, it drops.
+// Swipe and let go and the point flies at the swipe velocity — an EMA of the raw
+// cursor's world velocity, measured on the unclamped cursor even though the held ball
+// sits near the hand — and the ball converges to that velocity and detaches. Same
+// rule whether the clod was in hand or still in the ground when the button came up.
 //
-// The thrown payload deliberately reuses LobbedAreaProjectile rather than introducing
-// a new projectile: it already carries budget/material, snapshots them for rollback,
-// and does exactly the "erupt on landing + radial shove" this wants.
+// Keep holding and the clod dissipates over GrabDissipateSeconds; at zero the ball is
+// gone, the point dies, the action ends. Carrying terrain has a cost.
 //
 // Priority 46/46, above Beam/EnergyBall's 40/45 — both also live on Shift+LMB, and
 // this has to win the press frame AND still be holding the button when they'd
 // otherwise fire on release. The cursor-in-solid gate is what keeps the three from
 // fighting: on terrain you grab, off terrain you beam. Nothing preempts the carry
-// (46 Active), which is intentional — the orb is a commitment.
+// (46 Active), which is intentional — the orb is a commitment. A preempting exit
+// (GrabAction 48 / GuardRetaliate 55) hands the point off like a release.
 public class BlockGrabAction : ActionState
 {
     // Internal because GrabAction defers to this exact reach when deciding whether a
@@ -2753,10 +2753,9 @@ public class BlockGrabAction : ActionState
     private const float DragThreshold   = Chunk.TileSize * 0.75f;
     // How long the press waits for that drag / the first tethered cell before giving up.
     private const float GrabWindow      = 0.60f;
-    private const float ThrowSpeed      = 620f;
     private const float RecoverySeconds = 0.20f;
-    // Hand offset the throw spawns from, along the aim direction.
-    private const float HandDistance    = PlayerCharacter.Radius * 1.4f;
+    // The ball body's radius — the held rest position keeps that much above the feet.
+    private const float BallRadius      = 5f;
 
     public override int ActivePriority  => 46;
     public override int PassivePriority => 46;
@@ -2784,14 +2783,21 @@ public class BlockGrabAction : ActionState
     private static PullPointEntity Point(EnvironmentContext ctx, in ActionVars vars)
         => ctx.Spawner?.Resolve(vars.PullPointId) as PullPointEntity;
 
+    // The ball in hand: the point's ball, alive and still tracking a driven point.
+    private static LobbedAreaProjectile HeldBall(EnvironmentContext ctx, PullPointEntity point)
+    {
+        if (point == null || !point.HasBall) return null;
+        var ball = ctx.Spawner.Resolve(point.BallId) as LobbedAreaProjectile;
+        return ball != null && !ball.IsDead && ball.Tracking ? ball : null;
+    }
+
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        // Release always ends the state — Exit decides whether that release is a
-        // throw (orb in hand) or nothing (nothing peeled free / orb already gone).
+        // Release always ends the state — Exit hands the point off either way.
         if (!ctx.Input.LeftClick) return false;
         var point = Point(ctx, in vars);
         if (point == null) return false;                           // snapped / bled out
-        if (point.OrbHeld) return point.RemainingBlocks > 0;       // carrying until it bleeds out
+        if (point.HasBall) return HeldBall(ctx, point) != null;    // carrying until it bleeds out
         if (MovementConfig.Current.BlockPeelEnabled)
         {
             // A snapped spring kills the attempt outright; otherwise a live group
@@ -2809,6 +2815,8 @@ public class BlockGrabAction : ActionState
         vars.OrbHeld       = false;
         vars.PeelCount     = 0;
         vars.PeelStrain    = 0f;
+        vars.SwipeVel      = Vector2.Zero;
+        vars.PrevCursor    = ctx.Input.MouseWorldPosition;
         vars.CursorAtPress = ctx.Input.MouseWorldPosition;
         vars.IsGrounded    = ctx.TryGetGround(out _);
         vars.GrabDir       = new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
@@ -2824,33 +2832,69 @@ public class BlockGrabAction : ActionState
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState += ctx.Dt;
+        var cursor = ctx.Input.MouseWorldPosition;
 
-        // Live aim, so the throw direction is already known.
-        var aim = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+        // Live aim, and the swipe estimate: an EMA of the raw cursor's world velocity.
+        // World frame on purpose — the camera follows the player, so a running
+        // player's static mouse already carries the run (plan §4.2).
+        var aim = cursor - ctx.Body.Position;
         if (aim.LengthSquared() > 1e-4f) vars.GrabDir = Vector2.Normalize(aim);
+        if (ctx.Dt > 0f)
+        {
+            var inst = (cursor - vars.PrevCursor) / ctx.Dt;
+            vars.SwipeVel = Vector2.Lerp(vars.SwipeVel, inst, MovementConfig.Current.GrabSwipeSmoothing);
+        }
+        vars.PrevCursor = cursor;
 
         var point = Point(ctx, in vars);
         if (point == null) return;                                 // CheckConditions ends the state next frame
 
-        // Drive: the point paints/pulls at the cursor, measured from this body.
-        point.TargetPos     = ctx.Input.MouseWorldPosition;
+        // Drive: peel at the raw cursor; once a clod is in hand, the point becomes the
+        // held rest position and the ball tracks it there.
+        var ball   = HeldBall(ctx, point);
+        var target = ball != null ? RestPosition(ctx, ab, cursor) : cursor;
+        point.TargetPos     = target;
         point.OwnerPos      = ctx.Body.Position;
-        point.Body.Position = ctx.Input.MouseWorldPosition;
+        point.Body.Position = target;
+        point.Body.Velocity = Vector2.Zero;
 
-        if (!point.OrbHeld && !MovementConfig.Current.BlockPeelEnabled)
+        if (ball == null && !point.HasBall && !MovementConfig.Current.BlockPeelEnabled)
         {
             // Legacy drag-rip. The harvest is centered on CursorAtPress, not the
             // current cursor — the player marks the site with the press and the
             // drag is just the commit gesture, so a fast flick can't smear the dig.
-            var travel = ctx.Input.MouseWorldPosition - vars.CursorAtPress;
+            var travel = cursor - vars.CursorAtPress;
             if (travel.LengthSquared() >= DragThreshold * DragThreshold)
-                point.RipBlocks(ctx.Chunks, vars.CursorAtPress);
+                point.RipBlocks(ctx.Spawner, vars.CursorAtPress);
         }
 
-        // Mirror (one frame behind the entity's own update, which runs after the FSMs).
-        vars.OrbHeld    = point.OrbHeld;
+        // Mirror (one frame behind the entities' own updates, which run after the FSMs).
+        vars.OrbHeld    = ball != null;
         vars.PeelCount  = point.PeelCount;
         vars.PeelStrain = point.PeelStrain;
+        if (ball != null) vars.BallPos = ball.Body.Position;
+    }
+
+    // Where the held clod rests (plan §5 "Held rest position"): orbiting the body at
+    // GrabHandDistance in the cursor's direction, leaning outward by at most
+    // GrabHandLean as the cursor moves away. A soft constraint on where the ball SITS
+    // only — the throw is the cursor's velocity, so a tight hold still throws hard.
+    // Kept above the feet so the tracker isn't grinding a floor-pinned body into the
+    // ground when the cursor points down.
+    private static Vector2 RestPosition(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 cursor)
+    {
+        var cfg  = MovementConfig.Current;
+        var body = ctx.Body.Position;
+        var d    = cursor - body;
+        float r  = d.Length();
+        var dir  = r > 1e-3f ? d / r : new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
+        float hand = cfg.GrabHandDistance;
+        float lean = MathF.Max(1e-3f, cfg.GrabHandLean);
+        float rho  = hand + lean * MathF.Tanh(MathF.Max(0f, r - hand) / lean);
+        var target = body + dir * rho;
+        float floorY = body.Y + PlayerCharacter.Radius - BallRadius;
+        if (target.Y > floorY) target.Y = floorY;
+        return target;
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -2858,34 +2902,16 @@ public class BlockGrabAction : ActionState
         var point = Point(ctx, in vars);
         if (point != null)
         {
-            // A live orb at exit means the player let go: throw it. Fired from Exit
-            // (not Update) for the same reason BlockPaintAction's eruption upgrade
-            // fires there — the release that ends the state IS the trigger.
-            int blocks = point.RemainingBlocks;
-            if (point.OrbHeld && blocks > 0)
-            {
-                var toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-                var dir = toCursor.LengthSquared() < 1e-4f
-                    ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
-                    : Vector2.Normalize(toCursor);
-                var spawnPos = ctx.Body.Position + dir * HandDistance;
-                // Inherit the thrower's velocity so a running throw carries — the orb is
-                // a physical mass leaving the hand, not a fresh muzzle.
-                ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(
-                    spawnPos, ctx.Body.Velocity + dir * ThrowSpeed,
-                    blocks, point.OrbType,
-                    ctx.HitIds.Next(), ctx.Faction));
-            }
+            // Hand-off: the point flies on at the swipe velocity; a ball in hand
+            // chases it and detaches at that speed — the throw. A still mouse hands
+            // off ≈0 and the ball just drops. Preemption takes the same path (§7.5).
+            point.Release(vars.SwipeVel);
 
             // Recovery only for a grab that actually took something — a lapsed press
             // shouldn't cost the player lag.
-            if (point.OrbBlocks > 0)
+            if (point.HarvestBlocks > 0)
                 ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
                                       ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
-
-            // Hand-off. Phase 1: the point has nothing left to do once released.
-            point.Driven = false;
-            point.Kill();
         }
 
         // Spend the gesture either way, so the release frame can't also route a Click
@@ -2896,8 +2922,8 @@ public class BlockGrabAction : ActionState
         vars.PullPointId = EntityId.None;
     }
 
-    // Carrying terrain is heavy: hauling an orb slows the walk and drags in air. The
-    // pre-rip wait phase leaves movement alone, since nothing's been picked up yet.
+    // Carrying terrain is heavy: hauling a clod slows the walk and drags in air. The
+    // peel phase leaves movement alone, since nothing's been picked up yet.
     public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
     {
         if (!vars.OrbHeld) return;
@@ -2907,8 +2933,7 @@ public class BlockGrabAction : ActionState
         m.AirDrag      *= 1.2f;
     }
 
-    // Tether tint + carried orb are drawn by the PullPointEntity's overlay (it owns the
-    // group and the orb); nothing action-side to draw.
+    // Tether tint is drawn by the PullPointEntity's overlay; the ball draws itself.
 }
 
 // ---------- Grab — Shift + LMB: hold an opponent, then throw ---------------------

@@ -51,13 +51,15 @@ public class PullPointSnapshotTests(ITestOutputHelper output)
             if (e is PullPointEntity pt)
             {
                 var g = pt.Group;
-                sb.Append($"|driven{pt.Driven}|tgt{Bits(pt.TargetPos.X)},{Bits(pt.TargetPos.Y)}|orb{pt.OrbBlocks}|n{g.Count}|s{Bits(g.Strain)}|snap{g.Snapped}");
+                sb.Append($"|driven{pt.Driven}|tgt{Bits(pt.TargetPos.X)},{Bits(pt.TargetPos.Y)}|harv{pt.HarvestBlocks}|ball{pt.BallId.Index}.{pt.BallId.Generation}|n{g.Count}|s{Bits(g.Strain)}|snap{g.Snapped}");
                 for (int i = 0; i < g.Count; i++)
                 {
                     var m = g.Members[i];
                     sb.Append($"|m{m.Gtx},{m.Gty}:{Bits(m.Tether)},{Bits(m.GlueWear)}");
                 }
             }
+            if (e is LobbedAreaProjectile ball)
+                sb.Append($"|track{ball.Tracking}|pt{ball.PointId.Index}.{ball.PointId.Generation}|b{ball.Budget}/{ball.HarvestBlocks}|v{Bits(e.Body.Velocity.X)},{Bits(e.Body.Velocity.Y)}");
             sb.Append('\n');
         }
         for (int gtx = 4; gtx <= 11; gtx++) sb.Append((int)sim.Chunks.GetCellState(gtx, 3));
@@ -108,6 +110,73 @@ public class PullPointSnapshotTests(ITestOutputHelper output)
                 Assert.Equal(liveTrace[i], replayTrace[i]);
             }
             output.WriteLine($"Round-trip identical across {liveTrace.Count} frames after restore@{K}.");
+            output.WriteLine(liveTrace[^1]);
+        }
+        finally { cfg.BlockPeelEnabled = prev; }
+    }
+
+    // Floating solid at cell (4,0) over a floor — a free-hanging block pops in one
+    // sweep, so this scenario reaches a HELD BALL (tracking projectile + point linked
+    // by id) and then a release mid-chase. The round trip has to reproduce the
+    // point↔ball ids, the tracker state, the bleed clock and the detach.
+    private static ChunkMap FloatingBlock() => SimTerrain.FromAscii(@"
+        OOOOXOOOOOOO
+        OOOOOOOOOOOO
+        OOOOOOOOOOOO
+        XXXXXXXXXXXX
+        XXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+
+    private static PlayerInput ThrowInputAt(int frame)
+    {
+        var onBlock = new Vector2(72f, 8f);
+        var pullTo  = new Vector2(120f, 8f);
+        var hold    = new Vector2(100f, 30f);
+        if (frame < 10) return new PlayerInput { MouseWorldPosition = onBlock };
+        if (frame < 25) return new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = onBlock };
+        if (frame < 35) return new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = pullTo };
+        if (frame < 55) return new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = hold };
+        // Swipe left for 8 frames, then release.
+        if (frame < 63) return new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = hold + new Vector2(-5f * (frame - 54), 0f) };
+        return new PlayerInput { MouseWorldPosition = hold + new Vector2(-40f, 0f) };
+    }
+
+    [Theory]
+    [InlineData(45)]   // ball in hand, tracking a driven point
+    [InlineData(60)]   // mid-swipe, still held
+    [InlineData(64)]   // just released: point flying, ball chasing
+    public void HeldBallAndThrow_SnapshotRestore_ReproducesBitForBit(int k)
+    {
+        const int N = 110;
+        var cfg  = MovementConfig.Current;
+        bool prev = cfg.BlockPeelEnabled;
+        cfg.BlockPeelEnabled = true;
+        try
+        {
+            var sim = new Simulation(FloatingBlock(), new Vector2(72f, 40f), _ => { });
+            for (int f = 0; f < k; f++) sim.Step(ThrowInputAt(f));
+
+            bool sawBall = false;
+            foreach (var e in sim.Entities) if (e is LobbedAreaProjectile) sawBall = true;
+            Assert.True(sawBall, "a ball should exist at the snapshot frame");
+
+            var snap = sim.Snapshot();
+            var liveTrace = new List<string>();
+            for (int f = k; f < N; f++) { sim.Step(ThrowInputAt(f)); liveTrace.Add(Probe(sim)); }
+
+            sim.Restore(snap);
+            var replayTrace = new List<string>();
+            for (int f = k; f < N; f++) { sim.Step(ThrowInputAt(f)); replayTrace.Add(Probe(sim)); }
+
+            for (int i = 0; i < liveTrace.Count; i++)
+            {
+                if (liveTrace[i] != replayTrace[i])
+                {
+                    output.WriteLine($"Divergence at replay frame {k + i}:");
+                    output.WriteLine("LIVE:\n"   + liveTrace[i]);
+                    output.WriteLine("REPLAY:\n" + replayTrace[i]);
+                }
+                Assert.Equal(liveTrace[i], replayTrace[i]);
+            }
             output.WriteLine(liveTrace[^1]);
         }
         finally { cfg.BlockPeelEnabled = prev; }

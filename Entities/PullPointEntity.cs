@@ -7,15 +7,22 @@ namespace MTile;
 // The block-grab pulling point (Plans/BLOCK_THROW_PLAN.md §4.3). Spawned by
 // BlockGrabAction on the Shift+LMB press; the action DRIVES it while the button is
 // held (writes TargetPos/OwnerPos each frame, reads a summary back) and HANDS IT OFF
-// on release. Everything that must outlive the button — the peel group, the pull
-// contest, the carried orb — lives here rather than in the action, so a follow-up
+// on release with the cursor's velocity. Everything that must outlive the button — the
+// peel group, the pull contest — lives here rather than in the action, so a follow-up
 // action pressed right after the release can neither be eaten by the grab's priority
 // lock nor kill a result the player already perceives as committed.
 //
 // Its Body IS the point: IgnoreTiles, weightless, no hurtbox (nobody can slash the
 // cursor, and force fields act on the hurtbox set). While driven the action sets
 // Body.Position outright; after hand-off Body.Velocity carries the swipe and physics
-// integrates the straight line for free.
+// integrates the straight line for free — no drag (§4.4), so a ball that had to chase
+// from the crater detaches at the same speed as one that was already in hand.
+//
+// The BALL is not modelled here (§4.7): at break-out the point spawns a
+// LobbedAreaProjectile in its Tracking phase — a body of its own that follows this
+// point with a velocity-matching tracker — and keeps only its id (LinkedId). The ball
+// owns its dissipation and the detach decision; the point dies once the ball reports
+// detached (or is gone), on snap, or at GrabPointMaxSeconds after hand-off.
 //
 // PEEL MECHANICS (ported verbatim from BlockGrabAction; BlockPeelEnabled). Paint and
 // pull are ONE phase, and the gaussian paint kernel is itself the mode switch. While
@@ -27,8 +34,9 @@ namespace MTile;
 // share erodes both the group→block tether (at zero the block drops from the group,
 // staying in the world) and the block→world glue (weight(material) × (core + outward
 // solid edges)). When the force beats the group's aggregate remaining glue, every
-// member is broken out at once and collapses into the carried orb. Pull harder than
+// member is broken out at once and collapses into the ball. Pull harder than
 // PeelSpringMax and the spring SNAPS — the whole attempt cancels and the point dies.
+// After hand-off the spring endpoint is the flying point and nothing paints.
 //
 // The group is a sparse snapshotted component (PeelGroupComp) marshalled in the
 // CaptureState/RestoreState overrides; the scalars ride EntityData like any entity.
@@ -37,10 +45,6 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
     // Reach from the owner's body center, in tiles so it tracks Chunk.TileSize like the
     // rest of the terrain verbs. BlockGrabAction/GrabAction gate the press on it too.
     public const float GrabReach = Chunk.TileSize * 6f;
-    // Hand offset for the carried orb, along the aim direction.
-    private const float HandDistance  = PlayerCharacter.Radius * 1.4f;
-    // Orb draw radius at full charge; scales with the blocks still held.
-    private const float OrbMaxRadius  = PlayerCharacter.Radius * 0.9f;
     // Harvest radius around the press site for the legacy drag-rip. 1.6 tiles ⇒ the
     // pressed cell plus its immediate neighbours, ~9 blocks on open ground.
     private const float LegacyRipRadiusTiles = 1.6f;
@@ -53,39 +57,21 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
     // ── Driven-phase inputs, written by the owning action every held frame ──────────
     public bool    Driven = true;
     public Vector2 TargetPos;   // kernel center / spring endpoint (the cursor, or the held rest position)
-    public Vector2 OwnerPos;    // reach origin + hand anchor
+    public Vector2 OwnerPos;    // reach origin
 
-    // ── The carried orb (abstract until Phase 2 makes it a body of its own) ─────────
-    public int      OrbBlocks;  // harvested at break-out; the throw budget before dissipation
-    public TileType OrbType;    // dominant harvested material (seeded with the press-time block type)
-    public float    CarryTime;  // seconds held — drives the linear bleed
-
-    public float HandoffTime;   // seconds since the action released the point
+    public TileType OrbType;    // material seed for the ball (press-time block type; dominant harvest after)
+    public int      HarvestBlocks;  // blocks taken at break-out — >0 ⇔ this grab took something (recovery gate)
+    public EntityId BallId;     // the ball spawned at break-out, EntityId.None until then
+    public float    HandoffTime;   // seconds since the action released the point
 
     private PeelGroupComp _group;
 
     // Read-only summary for the action / tests.
-    public bool  OrbHeld    => OrbBlocks > 0;
     public bool  Snapped    => _group.Snapped;
     public int   PeelCount  => _group.Count;
     public float PeelStrain => _group.Strain;
+    public bool  HasBall    => BallId.Index > 0;
     public PeelGroupComp Group => _group;   // struct copy — for test probes
-
-    // Blocks still in the orb: the harvest linearly bled down by carry time. Both the
-    // render size and the throw budget, so what you see is what you throw. Ceiling, not
-    // floor: the orb keeps its full count until the bleed has actually consumed a block
-    // (floor shorted every harvest by one on the first held frame, and made a 1-block
-    // orb unthrowable) and reaches zero exactly at GrabDissipateSeconds.
-    public int RemainingBlocks
-    {
-        get
-        {
-            if (OrbBlocks <= 0) return 0;
-            float frac = 1f - CarryTime / MathF.Max(1e-3f, MovementConfig.Current.GrabDissipateSeconds);
-            if (frac <= 0f) return 0;
-            return (int)MathF.Ceiling(OrbBlocks * frac);
-        }
-    }
 
     public PullPointEntity(Vector2 pos, Faction owner, TileType blockType)
         : base(new PhysicsBody(Polygon.CreateRegular(2f, 4), pos), health: 1f)
@@ -106,13 +92,24 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
 
     public void Kill() => Health = 0f;
 
+    // Hand-off: the action lets go. The point flies on at the cursor's velocity; any
+    // ball in hand is already an entity chasing it, and any unresolved contest keeps
+    // running against the flying endpoint.
+    public void Release(Vector2 swipeVel)
+    {
+        Driven        = false;
+        Body.Velocity = swipeVel;
+        HandoffTime   = 0f;
+    }
+
     // Legacy drag-rip (BlockPeelEnabled false): destroy every solid cell within
     // LegacyRipRadiusTiles of the press site and bank the count. BreakCell (not
     // DamageCell) because a grab takes the whole block. The dominant material becomes
-    // the orb's type, so a dig through mixed ground throws back whatever it was mostly
+    // the ball's type, so a dig through mixed ground throws back whatever it was mostly
     // made of. Returns false when nothing solid was left at the site.
-    public bool RipBlocks(ChunkMap chunks, Vector2 site)
+    public bool RipBlocks(IEntitySpawner spawner, Vector2 site)
     {
+        var chunks = (spawner as IChunkProvider)?.Chunks;
         if (chunks == null) return false;
         int  cx   = (int)MathF.Floor(site.X / Chunk.TileSize);
         int  cy   = (int)MathF.Floor(site.Y / Chunk.TileSize);
@@ -135,7 +132,7 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
             taken++;
         }
         if (taken == 0) return false;
-        SeedOrb(taken, DominantType(counts));
+        SpawnBall(spawner, site, taken, DominantType(counts));
         return true;
     }
 
@@ -148,42 +145,53 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
         return best;
     }
 
-    private void SeedOrb(int blocks, TileType type)
+    // The harvest becomes a ball: a LobbedAreaProjectile born at rest where the blocks
+    // were, tracking this point. Same call whether the point is still in hand or
+    // already flying — that is the uniformity between "release with the clod in hand"
+    // and "release while the blocks are still coming loose", in code.
+    private void SpawnBall(IEntitySpawner spawner, Vector2 at, int blocks, TileType type)
     {
-        OrbBlocks = blocks;
-        OrbType   = type;
-        CarryTime = 0f;
+        OrbType       = type;
+        HarvestBlocks = blocks;
+        var ball = LobbedAreaProjectile.MakeTracking(at, blocks, type, spawner.HitIds.Next(), Faction, Id);
+        spawner.SpawnEntity(ball);
+        BallId = ball.Id;
     }
 
     public override void Update(float dt, PlayerCharacter player, HitboxWorld hitboxes, IEntitySpawner spawner)
     {
         if (IsDead) return;
+        var cfg = MovementConfig.Current;
+
+        if (HasBall)
+        {
+            // The ball owns its life from here: it bleeds while held, chases after
+            // hand-off, and detaches. This point exists only as its target.
+            var ball = spawner.Resolve(BallId) as LobbedAreaProjectile;
+            if (ball == null || ball.IsDead || !ball.Tracking) Health = 0f;
+            return;
+        }
 
         if (!Driven)
         {
-            // Phase 1 (feel-identical): a released point has nothing left to do — the
-            // action already threw. Later phases finish the contest here.
+            HandoffTime += dt;
+            if (HandoffTime >= cfg.GrabPointMaxSeconds) { Health = 0f; return; }
+            // Phase 2: a released point with no ball has nothing to finish yet — the
+            // post-hand-off contest lands in Phase 3.
             Health = 0f;
             return;
         }
 
-        if (OrbHeld)
-        {
-            CarryTime += dt;
-            if (RemainingBlocks <= 0) Health = 0f;   // bled out — the action ends with it
-            return;
-        }
-
-        if (!MovementConfig.Current.BlockPeelEnabled) return;   // legacy: the action rips
+        if (!cfg.BlockPeelEnabled) return;   // legacy: the action rips
         var chunks = (spawner as IChunkProvider)?.Chunks;
         if (chunks == null) return;
-        UpdatePeel(chunks, dt);
+        UpdatePeel(chunks, spawner, dt);
     }
 
     // One frame of the paint/pull phase. Order is fixed and load-bearing for
     // determinism: prune → paint → spring → wear → compact → break-out, with every scan
     // in ascending index / row-major cell order.
-    private void UpdatePeel(ChunkMap chunks, float dt)
+    private void UpdatePeel(ChunkMap chunks, IEntitySpawner spawner, float dt)
     {
         var cfg = MovementConfig.Current;
 
@@ -249,7 +257,7 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
         }
 
         if (force >= glueTotal)
-            BreakOutGroup(chunks);
+            BreakOutGroup(chunks, spawner, com);
     }
 
     // Gaussian deposit around the target. Admission and accumulation share the kernel:
@@ -313,8 +321,9 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
     }
 
     // The pull beat the glue: every member breaks out at once and collapses into the
-    // carried orb — count is the throw budget, dominant material the orb's type.
-    private void BreakOutGroup(ChunkMap chunks)
+    // ball, born at the group's COM — count is the throw budget, dominant material the
+    // ball's type.
+    private void BreakOutGroup(ChunkMap chunks, IEntitySpawner spawner, Vector2 com)
     {
         Span<int> counts = stackalloc int[TileTypeCount];
         int taken = 0;
@@ -329,7 +338,7 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
         _group.Count  = 0;
         _group.Strain = 0f;
         if (taken == 0) return;
-        SeedOrb(taken, DominantType(counts));
+        SpawnBall(spawner, com, taken, DominantType(counts));
     }
 
     private int FindMember(int gtx, int gty)
@@ -356,25 +365,25 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
     protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
-        s.Driven      = Driven;
-        s.TargetPos   = TargetPos;
-        s.OwnerPos    = OwnerPos;
-        s.Budget      = OrbBlocks;
-        s.TileType    = OrbType;
-        s.CarryTime   = CarryTime;
-        s.HandoffTime = HandoffTime;
+        s.Driven        = Driven;
+        s.TargetPos     = TargetPos;
+        s.OwnerPos      = OwnerPos;
+        s.TileType      = OrbType;
+        s.HarvestBlocks = HarvestBlocks;
+        s.LinkedId      = BallId;
+        s.HandoffTime   = HandoffTime;
     }
 
     protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
-        Driven      = s.Driven;
-        TargetPos   = s.TargetPos;
-        OwnerPos    = s.OwnerPos;
-        OrbBlocks   = s.Budget;
-        OrbType     = s.TileType;
-        CarryTime   = s.CarryTime;
-        HandoffTime = s.HandoffTime;
+        Driven        = s.Driven;
+        TargetPos     = s.TargetPos;
+        OwnerPos      = s.OwnerPos;
+        OrbType       = s.TileType;
+        HarvestBlocks = s.HarvestBlocks;
+        BallId        = s.LinkedId;
+        HandoffTime   = s.HandoffTime;
     }
 
     // The group rides its own sparse store. Added lazily at first capture so a point
@@ -394,33 +403,18 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
 
     // ── Render ──────────────────────────────────────────────────────────────────────
     // Peel-phase feedback: tethered cells darken with tether strength, and the shade
-    // slides toward red as the spring nears its snap cap. Then the carried orb at the
-    // owner's hand, on the cursor side. Pure render — reads sim state, feeds nothing back.
+    // slides toward red as the spring nears its snap cap. The ball draws itself. Pure
+    // render — reads sim state, feeds nothing back.
     public void DrawOverlay(SpriteBatch sb, Texture2D pixel)
     {
-        if (IsDead) return;
-        if (!OrbHeld && _group.Count > 0)
+        if (IsDead || _group.Count == 0) return;
+        var tint = Color.Lerp(Color.Black, Color.DarkRed, _group.Strain);
+        for (int i = 0; i < _group.Count; i++)
         {
-            var tint = Color.Lerp(Color.Black, Color.DarkRed, _group.Strain);
-            for (int i = 0; i < _group.Count; i++)
-            {
-                var m = _group.Members[i];
-                float a = MathHelper.Clamp(0.12f + 0.35f * (m.Tether / 1.5f), 0f, 0.55f);
-                sb.Draw(pixel, new Rectangle(m.Gtx * Chunk.TileSize, m.Gty * Chunk.TileSize,
-                                             Chunk.TileSize, Chunk.TileSize), tint * a);
-            }
-            return;
+            var m = _group.Members[i];
+            float a = MathHelper.Clamp(0.12f + 0.35f * (m.Tether / 1.5f), 0f, 0.55f);
+            sb.Draw(pixel, new Rectangle(m.Gtx * Chunk.TileSize, m.Gty * Chunk.TileSize,
+                                         Chunk.TileSize, Chunk.TileSize), tint * a);
         }
-
-        if (!OrbHeld) return;
-        int blocks = RemainingBlocks;
-        if (blocks <= 0) return;
-
-        var aimRaw = TargetPos - OwnerPos;
-        var aim    = aimRaw.LengthSquared() > 1e-6f ? Vector2.Normalize(aimRaw) : Vector2.UnitX;
-        var hand   = OwnerPos + aim * HandDistance;
-        float r    = OrbMaxRadius * MathF.Sqrt((float)blocks / OrbBlocks);
-        int   d    = (int)MathF.Max(2f, r * 2f);
-        sb.Draw(pixel, new Rectangle((int)(hand.X - r), (int)(hand.Y - r), d, d), TilePalette.BaseColor(OrbType));
     }
 }

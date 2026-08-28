@@ -425,6 +425,28 @@ public class MovementConfig
     // grab ends empty (Plans/BLOCK_THROW_PLAN.md T1). Longer = the clod can be carried
     // further before it crumbles away.
     public float GrabDissipateSeconds { get; set; } = 2.0f;
+    // ── Block throw (Plans/BLOCK_THROW_PLAN.md §5) ───────────────────────────────
+    // Held rest position: the clod orbits the body at GrabHandDistance in the cursor's
+    // direction and leans outward by at most GrabHandLean (tanh-saturated) as the cursor
+    // moves away. Shapes only where the ball SITS — the throw is the cursor's velocity.
+    public float GrabHandDistance    { get; set; } = 1.4f * PlayerCharacter.Radius;
+    public float GrabHandLean        { get; set; } = 20f;
+    // The ball's critically damped tracker toward the pulling point: lag time constant
+    // while the point is in hand, tighter once it has been released (so detach comes
+    // fast), and the cap on the ball's speed in both — which is THE throw-speed cap.
+    public float GrabBallSmoothTime  { get; set; } = 0.08f;
+    public float GrabChaseSmoothTime { get; set; } = 0.05f;
+    public float GrabBallMaxSpeed    { get; set; } = 800f;
+    // Detach: the ball lets go of the released point once its velocity has converged to
+    // the point's (|Δv| below GrabCatchSpeed) or after GrabChaseMaxSeconds (the point
+    // outran the speed cap ⇒ the ball flies at the cap).
+    public float GrabCatchSpeed      { get; set; } = 40f;
+    public float GrabChaseMaxSeconds { get; set; } = 0.25f;
+    // Cursor-velocity EMA blend per frame (~4 frames of memory at 0.35): the point's
+    // hand-off velocity is this, measured on the raw cursor in world space.
+    public float GrabSwipeSmoothing  { get; set; } = 0.35f;
+    // Lifetime of a released point that still has a peel contest to finish.
+    public float GrabPointMaxSeconds { get; set; } = 0.25f;
 
     public float PeelWeight(TileType t) => t switch
     {
