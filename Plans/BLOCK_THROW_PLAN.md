@@ -240,8 +240,8 @@ playtesting wants one-swipe grabs on worked ground, that's a peel-knob change, s
 - **Clamp phase.** The sketch applies the soft clamp "with mouse down", i.e. also during the
   peel. The peel spring reads raw cursor distance and its six tests (`BlockPeelTests`) and
   every `Peel*` knob are tuned to that. Remapping the endpoint through `tanh` changes the
-  force curve (and makes far groups harder to snap on). **Apply the clamp to the carry-phase
-  ball target only**; leave the peel spring on the raw cursor.
+  force curve (and makes far groups harder to snap on). **Apply the soft constraint to the
+  held rest position only** (§5); leave the peel spring on the raw cursor.
 - **Ball inside terrain.** A 64 px carry radius around the player reaches into the floor
   (player standing on ground, cursor pointing down). A `LobbedAreaProjectile` spawned inside
   solid is velocity-halted on frame 1 ⇒ "lands" ⇒ deposits the mound + AOE at that cell. The
@@ -370,9 +370,9 @@ gravity 0, no hurtbox; `EntityData` for the scalars, sparse `PeelGroupComp` for 
 remaining, `TileType`).
 
 **Action, LMB down** — resolve the point (null ⇒ exit: it snapped or dissipated). Write
-`TargetPos` — raw cursor in the peel, `player + softClamp(cursor − player, R)` pushed out
-of solid (§4.5) once the ball is held — plus `OwnerPos`, and update the `SwipeVel` EMA.
-Mirror the summary back. Movement modifiers as today while `OrbHeld`.
+`TargetPos` — the raw cursor in the peel; the **held rest position** (below) once a ball is
+held — plus `OwnerPos`, and update the `SwipeVel` EMA. Mirror the summary back. Movement
+modifiers as today while `OrbHeld`.
 
 **Action, LMB up or preempted** — `point.Release(SwipeVel)`; consume `Click`/`PressEdge`;
 stamp recovery if `HarvestBlocks > 0`; exit. Nothing else — the action is finished the
@@ -405,16 +405,35 @@ a ball at rest in a crater would "land" on frame 1). Outcome: detach velocity �
 swipe velocity, capped — the same number whether the ball was in hand or in the ground
 when the button came up.
 
-**Soft clamp** (carry only, §4.5): `r' = R·tanh(r/R)` along the same direction. Identity-ish
-inside ~0.5R, asymptotes to `R`. A hard `min(r, R)` also works — the clamp only shapes where
-the ball sits, never the throw.
+**Held rest position** (carry only, §4.5) — the ball should *react* to the mouse without
+roaming: it orbits the player at hand distance in the cursor's direction, and leans
+outward a little as the cursor moves away. With `d = cursor − player`, `r = |d|`:
+
+    ρ(r)   = GrabHandDistance + GrabHandLean · tanh(max(0, r − GrabHandDistance) / GrabHandLean)
+    target = player + d̂ · ρ(r)
+
+Direction follows the cursor fully (the swing around the body is the strongest "it's
+reacting to me" cue); radius is pinned to the hand and yields at most `GrabHandLean` px
+(defaults: `1.4·Radius ≈ 17 px` — today's `HandDistance`, :2780 — and 20 px). The tracker
+does the animating: circle the mouse and the clod swings round with a lag; flick and it
+leans, then settles. Swap `tanh` for any saturating curve; it's one line. Two constraints
+on the target, not the ball: keep it above the player's feet (`y ≤ player.y + Radius −
+ballRadius`) so the tracker isn't grinding a floor-pinned body into the ground when the
+cursor points down, and fall back to the facing direction when `r ≈ 0`.
+
+This is a soft constraint on **where the ball rests**, and only that. The hand-off
+velocity is the mouse's (§4.2), so however tightly the ball is held, the throw is the full
+swipe — the two must stay decoupled or the lean would dilute the throw (`sech²` gain,
+§4.2). If the ball should ever roam further (a "hold it out over the ledge" verb), that's
+`GrabHandLean` up, not a different mechanism.
 
 **Knobs** (all `MovementConfig`, hot-reload, beside the `Peel*` block):
 
 | Knob | Default | Notes |
 |---|---|---|
 | `GrabDissipateSeconds` | 2.0 → try 4-5 | T1 |
-| `GrabCarryRadius` | 64 (`= BuildReach`) | soft clamp radius |
+| `GrabHandDistance` | 16.8 (`1.4·Radius`, today's `HandDistance`) | held rest orbit radius |
+| `GrabHandLean` | 20 | max outward lean of the held rest position toward the cursor |
 | `GrabBallSmoothTime` | 0.08 | held tracker; shorter than paint's 0.12 — it's in hand |
 | `GrabBallMaxSpeed` | 800 | cap on ball speed, held and chasing — **the** throw-speed cap (today's fixed `ThrowSpeed` is 620) |
 | `GrabChaseSmoothTime` | 0.05 | post-release tracker; tighter so detach comes fast |
@@ -458,7 +477,7 @@ throw and the projectile spends its first frames chasing rather than flying.
 |---|---|---|---|
 | 0 | T1: `DissipateSeconds` → `GrabDissipateSeconds` knob | `MovementConfig.cs`, `configs/movement_config.json`, `ActionStates.cs:2776,3144` | `RemainingBlocks` at t = knob/2 is half |
 | 1 | **Pull-point entity refactor, feel-identical.** `PullPointEntity` + `PeelGroupComp` + `EntityKind`/`EntityFactory` case; `IEntitySpawner.Resolve`; peel mechanics re-homed onto the entity; action drives + mirrors; overlay-draw interface; `SimRunner` spawner + entity pass. Release still throws as today (aimed, `ThrowSpeed`); a release before break-out still ends with nothing (`Release` ⇒ point dies immediately in this phase) | `Entities/PullPointEntity.cs` (new), `EcsComponents.cs`, `EntityKind.cs`, `EntityFactory.cs`, `Entity.cs` (`IEntitySpawner`), `Simulation.cs`, `ActionStates.cs`, `ActionVars.cs`, `Game1.cs:1039`, `MTile.Tests/Sim/SimRunner.cs` | all 6 `BlockPeelTests` green unchanged in intent; **rollback mid-peel**: snapshot at frame N with a live driven point, step on, restore, re-step ⇒ identical `PeelCount`/glue (`SnapshotRoundTrip` pattern); the throw in `…GrabsAndThrows` now actually asserted |
-| 2 | T4: the ball as a `Tracking` `LobbedAreaProjectile` spawned at break-out (own body, tiles on, gravity 0, velocity-only tracker), `PointId`/`BallId` coupling, hurtbox opt-out, `SwipeVel` EMA, hand-off velocity, detach rule, `BallPos` mirror for the animator | `PullPointEntity.cs`, `ActionStates.cs`, `LobbedAreaProjectile.cs`, `Entity.cs` (hurtbox opt-out), `EcsComponents.cs` | static release ⇒ ball detaches within a few frames at ≈0 relative speed and falls; 300 px/s leftward swipe ⇒ ball detaches flying left at ~300 px/s; swipe past `R` is not attenuated; running player + static mouse ⇒ ball carries the run speed; snapshot round-trip of a chasing projectile |
+| 2 | T4: the ball as a `Tracking` `LobbedAreaProjectile` spawned at break-out (own body, tiles on, gravity 0, velocity-only tracker), `PointId`/`BallId` coupling, hurtbox opt-out, `SwipeVel` EMA, held rest position (orbit + lean), hand-off velocity, detach rule, `BallPos` mirror for the animator | `PullPointEntity.cs`, `ActionStates.cs`, `LobbedAreaProjectile.cs`, `Entity.cs` (hurtbox opt-out), `EcsComponents.cs` | static release ⇒ ball detaches within a few frames at ≈0 relative speed and falls; 300 px/s leftward swipe ⇒ ball detaches flying left at ~300 px/s; a swipe far past the lean radius is not attenuated (held ball rests ≤ `GrabHandDistance + GrabHandLean` from the player yet throws at full swipe speed); running player + static mouse ⇒ ball carries the run speed; snapshot round-trip of a chasing projectile |
 | 3 | T5: the point lives `GrabPointMaxSeconds` after hand-off and finishes the contest; break-out spawns the same chasing projectile from the COM | `PullPointEntity.cs` | free-hanging block, release 3 frames before break-out ⇒ still throws, and **its detach velocity equals the carry-case throw for the same swipe** (the uniformity test); **a slash on the frame after release enters and the throw still lands** (the §4.3 test); anchored stone ⇒ point dies empty within cap; no `EnergyBall` fires on the release frame |
 | 4 | T3: `MassOrbTextures`, shared `DrawOrb`, projectile sized by budget | `Drawing/`, `LobbedAreaProjectile.cs`, `PullPointEntity` overlay, `Game1.cs` load | visual — screenshot via `/run` |
 | 5 | T2: trail + landing burst | `CosmeticUpdateSystem.cs`, `PresentationEvents`, `Effects.cs` | visual; verify no double-burst on a rollback re-sim (the `(frame,id)` dedup) |
