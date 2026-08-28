@@ -64,5 +64,7 @@
   "PeelWeightStone": 3.0,
   "PeelWeightDirt": 1.5,
   "PeelWeightSand": 0.8,
-  "PeelWeightFoam": 0.4
+  "PeelWeightFoam": 0.4,
+  // Carried orb bleeds to nothing over this many seconds.
+  "GrabDissipateSeconds": 2.0
 }

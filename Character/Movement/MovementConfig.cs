@@ -421,6 +421,11 @@ public class MovementConfig
     public float PeelWeightSand  { get; set; } = 0.8f;
     public float PeelWeightFoam  { get; set; } = 0.4f;
 
+    // Carry budget: the harvested orb bleeds linearly to nothing over this long, then the
+    // grab ends empty (Plans/BLOCK_THROW_PLAN.md T1). Longer = the clod can be carried
+    // further before it crumbles away.
+    public float GrabDissipateSeconds { get; set; } = 2.0f;
+
     public float PeelWeight(TileType t) => t switch
     {
         TileType.Stone => PeelWeightStone,

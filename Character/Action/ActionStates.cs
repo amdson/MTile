@@ -2742,7 +2742,7 @@ public class GrenadeAction : ActionState
 //   • Release LMB  → the orb is thrown at the cursor as a LobbedAreaProjectile whose
 //                     budget is whatever blocks are left. It lands, erupts the stolen
 //                     material back into the world, and shoves what's nearby.
-//   • Keep holding → the orb dissipates linearly over DissipateSeconds; the throw
+//   • Keep holding → the orb dissipates linearly over GrabDissipateSeconds; the throw
 //                     budget bleeds with it, and at zero the action just ends. So
 //                     carrying terrain has a cost and the grab can't be banked.
 //
@@ -2772,8 +2772,8 @@ public class BlockGrabAction : ActionState
     // Harvest radius around the press site. 1.6 tiles ⇒ the pressed cell plus its
     // immediate neighbours, ~9 blocks on open ground.
     private const float GrabRadiusTiles = 1.6f;
-    // Carry budget bleeds to nothing over this long, then the action ends empty.
-    private const float DissipateSeconds = 2.0f;
+    // Carry budget bleeds to nothing over MovementConfig.GrabDissipateSeconds, then the
+    // action ends empty.
     private const float ThrowSpeed      = 620f;
     private const float RecoverySeconds = 0.20f;
     // Hand offset for the carried orb, along the aim direction.
@@ -3141,7 +3141,7 @@ public class BlockGrabAction : ActionState
     private static int RemainingBlocks(in ActionVars vars)
     {
         if (!vars.OrbHeld) return 0;
-        float frac = 1f - vars.ChargeTime / DissipateSeconds;
+        float frac = 1f - vars.ChargeTime / MathF.Max(1e-3f, MovementConfig.Current.GrabDissipateSeconds);
         if (frac <= 0f) return 0;
         return (int)MathF.Floor(vars.OrbBlocks * frac);
     }
