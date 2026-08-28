@@ -178,9 +178,9 @@ on release.** The action becomes thin — input in, summary out:
 - **The entity owns the mechanics.** Paint → spring → wear → glue → break-out
   (`UpdatePeel`/`PaintTether`/`BaseGlue`/`BreakOutGroup`, :2869-3025) move onto the entity,
   re-parameterized on `(ref PeelGroupComp, target, ownerPos)` — a mechanical re-homing with
-  no behaviour change while driven. The held ball, its tracker and its dissipation live
-  there too: while held, the point entity *is* the orb.
-- **Hand off on release** (`Release(swipeVel)`: `Driven = false`, `PointVel = swipeVel`).
+  no behaviour change while driven. The ball is **not** modelled inside the point: from
+  break-out it is its own entity with its own `PhysicsBody` (§4.7).
+- **Hand off on release** (`Release(swipeVel)`: `Driven = false`, `Body.Velocity = swipeVel`).
   The action consumes intents, stamps recovery (only if something was harvested, as
   today), and exits **immediately**. The point flies straight, finishes any live contest,
   spawns the projectile, dies. No lingering lock; the slash goes through.
@@ -219,9 +219,8 @@ Costs to budget for, not discover:
 Drag on the point would break the uniformity: the peel-case ball starts in the crater and
 chases longer than the carry-case ball at the hand, so with a decaying point it detaches
 slower. A throw shouldn't be weaker because the blocks took a few frames to come loose. So
-the point coasts at constant velocity — `PointPos += PointVel·dt`, nothing else. The
-projectile carries a copy of the point during its chase (§5), and a straight line is the
-one thing two copies can't disagree about.
+the point coasts at constant velocity — its body has a velocity and no gravity, and
+physics integrates the straight line (§4.7). Nothing else touches it.
 
 The consequence is a short contest: at 600 px/s the point moves 10 px/frame and
 `PeelSpringMax = 60` is hit at `dist ≈ 97 px` (`4·(d/16)^1.5 = 60`), so a swipe-release
@@ -246,9 +245,11 @@ playtesting wants one-swipe grabs on worked ground, that's a peel-knob change, s
 - **Ball inside terrain.** A 64 px carry radius around the player reaches into the floor
   (player standing on ground, cursor pointing down). A `LobbedAreaProjectile` spawned inside
   solid is velocity-halted on frame 1 ⇒ "lands" ⇒ deposits the mound + AOE at that cell. The
-  current hand offset (1.4·R along aim) mostly dodges this by accident. Fix: the servo target
-  is additionally pushed out of solid (cheap: if the target cell is solid, fall back to
-  `body + aim·HandDistance`), and spawn refuses a solid cell the same way.
+  current hand offset (1.4·R along aim) mostly dodges this by accident. With the ball as a
+  real body that collides with tiles while held (§4.7) this mostly solves itself — the ball
+  can't be dragged into the floor, it slides along it — and the residual case is the
+  break-out seed, which starts in the (now empty) crater. Keep a spawn-time solid check as
+  belt-and-braces.
 - **Drop at the feet.** T4's "just drops down" means a zero-velocity projectile landing at
   the player's feet and erupting a `budget`-sized mound + AOE hitbox there. The hitbox is
   faction-filtered, but whether `TileMassField`'s sprout commit avoids the player's own
@@ -268,6 +269,62 @@ playtesting wants one-swipe grabs on worked ground, that's a peel-knob change, s
   ball with a trail that lands" reading is `LobbedAreaProjectile`, and nothing below
   changes that.
 
+### 4.7 Where the ball is modelled once it exists (peel done, LMB still down)
+
+Three candidates, and the codebase's conventions pick one:
+
+- **(a) Kinematic fields inside the point entity** (`BallPos/BallVel` in `EntityData`, no
+  body). Cheapest, but the ball is then invisible to everything that keys on
+  `Body.Position`: sprite sync (`CosmeticUpdateSystem.cs:119` `SyncSprite`), the
+  entity-walking trail pass, hurtboxes, tile collision. Every consumer needs a special case
+  for "the point entity's second position", and at release the ball changes identity into a
+  freshly spawned projectile, so render-side state (trail, sprite) starts over on the throw.
+- **(b) The point entity's own body is the ball.** Merges `PullPoint` and
+  `LobbedAreaProjectile` into one phased entity. Continuous identity, but the body is a
+  meaningless dormant thing during the peel, and the projectile's land/erupt/AOE logic
+  gets dragged into the point class.
+- **(c) The ball is its own entity from break-out — a `LobbedAreaProjectile` in a
+  `Tracking` phase.** Spawned at the group COM by the point in *both* break-out cases (still
+  driven, or after hand-off) with `PointId` = the point it tracks. **Recommended.**
+
+Under (c), concretely:
+
+- **Physics:** the ball's position and velocity are `Body.Position/Body.Velocity`, full
+  stop. While tracking, the tracker runs on a copy `(Body.Position, Body.Velocity)`, writes
+  **only `Body.Velocity`** back, and `PhysicsWorld.StepSwept` integrates the position
+  (`Simulation.cs:326-328`) — the same "set velocity, let physics move it" pattern
+  `MassBall` uses for its drag. Gravity 0 via `GravityScale` (`Entity.PreStep`), **tiles
+  ON**: a held clod is a physical object, it can't be dragged into the floor, and it slides
+  along a wall the mouse crosses. That is the §4.5 hazard handled by the solver instead of
+  a push-out hack. (`IgnoreTiles` stays available as a fallback knob if sliding-on-terrain
+  playtests badly.) The collision polygon is immutable (`EntityData.Polygon`), so it stays
+  the projectile's small disc regardless of the drawn radius.
+- **The point, likewise, is its own body:** `Body.Position` is the point, `IgnoreTiles`,
+  gravity 0. While driven the action writes `Body.Position = TargetPos` each frame; on
+  hand-off it sets `Body.Velocity = swipeVel` and physics integrates the straight line for
+  free — no `PointPos/PointVel` fields at all, and `BodyStateComp` snapshots it. The
+  projectile's chase copy from the earlier draft (`PointPos/PointVel` in its `EntityData`)
+  goes away: the ball resolves the live point by `PointId` and tracks its `Body.Position`.
+- **Animation / render:** the ball is an ordinary entity — its `Sprite` (the textured orb,
+  scaled by `Blocks`) syncs to `Body.Position` like every other sprite, the trail pass in
+  `CosmeticUpdateSystem` sees it from break-out onward, and it keeps one identity through
+  held → chase → flight → landing. For the skeleton (a hand-pin on the held clod, the
+  `VAULT_HAND_PIN_PLAN` pattern) the action mirrors `BallPos` into `ActionVars` alongside
+  `OrbHeld` — the animator already reads `CurrentActionVars`, so it needs no entity lookup.
+- **Hurtboxes:** `Entity.PublishHurtboxes` is *not* virtual (`Entity.cs:49-50`) — every
+  entity publishes one, and force fields act on the hurtbox set. Both the point (nobody
+  should be able to slash the cursor) and the tracking ball need an opt-out; add a
+  `PublishesHurtbox` flag or make the method virtual. Whether an opponent can knock the
+  clod out of your hand is a design question — default no.
+- **Lifecycle coupling:** the point stores `BallId`; the ball stores `PointId`. Entity
+  update order is spawn order (`Simulation.cs:293-297`), so the older point updates before
+  the ball each frame. The ball owns the detach decision (velocity converged or chase cap
+  ⇒ `Tracking = false`, gravity 1); the point dies when it resolves its ball and sees
+  `Tracking == false` (one frame later — harmless), or on its own lifetime cap. A ball
+  whose point has died (rollback edge, cap) detaches immediately.
+- **Dissipation while held:** `Blocks` bleeds on the ball entity; reaching zero kills the
+  ball, and the point (resolving a dead `BallId`) dies with it, which ends the action.
+
 ---
 
 ## 5. Revised design
@@ -278,11 +335,11 @@ down. One rule, stated once:
 > **The pulling point** is an entity. While LMB is down the action *drives* it — its
 > position is the mouse (soft-clamped to the player once blocks are in hand) and it paints
 > and pulls. On release the action *hands it off* with the mouse's velocity and exits; the
-> point flies straight and finishes whatever contest is still live. **The ball**, from the
-> moment it exists, follows the point with a critically damped, speed-capped tracker —
-> inside the point entity while held, inside the projectile after release. When the ball's
-> velocity has converged to the point's (or the chase times out) the point is gone and the
-> ball is a free ballistic lob.
+> point flies straight and finishes whatever contest is still live. **The ball** is its own
+> entity from the moment it breaks out, and follows the point with a critically damped,
+> speed-capped tracker — held or released, same code. When the ball's velocity has
+> converged to the point's (or the chase times out) the point is gone and the ball is a
+> free ballistic lob.
 
 Everything sim-side is value-typed and snapshotted. Names are suggestions.
 
@@ -292,23 +349,25 @@ Everything sim-side is value-typed and snapshotted. Names are suggestions.
 |---|---|
 | `PullPointId` | `EntityId` of the point this activation spawned; resolved every frame |
 | `SwipeVel`, `PrevCursor` | EMA of cursor world velocity — the hand-off velocity |
-| `PeelCount`, `PeelStrain`, `OrbHeld` | **mirrors** copied from the entity each frame (existing fields, now read-only from the action's side) |
-| `PeelMembers`, `PeelSnapped`, `OrbBlocks`, `OrbType`, `ChargeTime` | **removed** — moved to the entity |
+| `PeelCount`, `PeelStrain`, `OrbHeld`, `BallPos` | **mirrors** copied from the entities each frame (read-only from the action's side; `BallPos` is for the animator) |
+| `PeelMembers`, `PeelSnapped`, `OrbBlocks`, `OrbType`, `ChargeTime` | **removed** — moved to the entities |
 
-**`PullPointEntity`** (`EntityKind.PullPoint`; `EntityData` for the scalars, sparse
-`PeelGroupComp` for the group):
+**`PullPointEntity`** (`EntityKind.PullPoint`; its `Body` *is* the point — `IgnoreTiles`,
+gravity 0, no hurtbox; `EntityData` for the scalars, sparse `PeelGroupComp` for the group):
 
 | Field | Role |
 |---|---|
-| `PointPos`, `PointVel` | the point; position written by the action while driven, integrated after hand-off |
+| `Body.Position`, `Body.Velocity` | the point: position written by the action while driven; velocity set at hand-off, physics integrates |
 | `Driven` | true while the action owns it |
 | `TargetPos`, `OwnerPos` | written by the action each driven frame (kernel/spring endpoint; `GrabReach` origin) |
 | `OwnerFaction`, `BlockType` | captured at spawn |
-| `BallPos`, `BallVel`, `Blocks`, `HarvestBlocks`, `BallType`, `CarryTime` | the held ball (`Blocks > 0` ⇔ orb held) |
+| `BallId` | the ball entity spawned at break-out (`IsAlive` ⇔ orb held) |
 | `HandoffTime` | seconds since release; lifetime cap |
 | `PeelGroupComp` | members (25), count, strain, snapped |
 
-**`LobbedAreaProjectile`** (`EntityData`, LobbedArea slot): `PointPos`, `PointVel`, `Chasing`.
+**`LobbedAreaProjectile`** (`EntityData`, LobbedArea slot — its `Body` *is* the ball):
+`PointId`, `Tracking`, `HarvestBlocks`, `CarryTime` (plus the existing `Budget` = blocks
+remaining, `TileType`).
 
 **Action, LMB down** — resolve the point (null ⇒ exit: it snapped or dissipated). Write
 `TargetPos` — raw cursor in the peel, `player + softClamp(cursor − player, R)` pushed out
@@ -319,29 +378,32 @@ Mirror the summary back. Movement modifiers as today while `OrbHeld`.
 stamp recovery if `HarvestBlocks > 0`; exit. Nothing else — the action is finished the
 frame the button comes up.
 
-**Point, driven** — prune → paint (kernel at `TargetPos`, admission within `GrabReach` of
-`OwnerPos`) → spring with endpoint `TargetPos` → wear → glue → break-out. Break-out seeds
-the ball at the group COM with zero velocity; from then on the ball tracks `TargetPos`
-(`SmoothPen.CriticallyDampedStep`, `GrabBallSmoothTime`, `|BallVel| ≤ GrabBallMaxSpeed`)
-— the first frames visibly pull it out of the crater to the hand — and `Blocks` bleeds
-over `GrabDissipateSeconds`. Ball gone ⇒ die.
+**Point, driven** — `Body.Position = TargetPos`; prune → paint (kernel at `TargetPos`,
+admission within `GrabReach` of `OwnerPos`) → spring with endpoint `TargetPos` → wear →
+glue → break-out. Break-out spawns the ball (`LobbedAreaProjectile`, `Tracking = true`,
+`PointId = Id`) at the group COM with zero velocity, stores `BallId`, and clears the group.
+From then on the point just carries the target; the ball does the following. Ball dead
+(dissipated) ⇒ die.
 
-**Point, released** — if a ball was in hand: spawn the projectile at `BallPos` with
-`BallVel` and `(PointPos, PointVel, Chasing = true)`, die. Otherwise: `PointPos +=
-PointVel·dt`; prune → spring with endpoint `PointPos` → wear → glue → break-out (no paint).
-Break-out ⇒ spawn the projectile at the **group COM** with zero velocity and the *same*
-`(PointPos, PointVel, Chasing = true)`, die. Snap, or `HandoffTime ≥ GrabPointMaxSeconds`
-⇒ die. The two spawns are the same call; only the ball's starting state differs — that is
-the uniformity, in code.
+**Point, released** — `Body.Velocity = swipeVel`, physics flies it straight; no paint.
+If no ball yet: prune → spring with endpoint `Body.Position` → wear → glue → break-out,
+which is the *same spawn call* as the driven case — that is the uniformity, in code. Die
+when the ball reports `Tracking == false`, on snap, or at `HandoffTime ≥
+GrabPointMaxSeconds` (a ball still tracking a dead point detaches on its own).
 
-**Projectile chase** (`LobbedAreaProjectile.ProjectileUpdate`, while `Chasing`): gravity 0,
-`IgnoreTiles`; `PointPos += PointVel·dt`; `CriticallyDampedStep(Body.Position, Body.Velocity,
-PointPos, GrabChaseSmoothTime, dt)`, clamp `|Body.Velocity| ≤ GrabBallMaxSpeed`. Detach when
-`|Body.Velocity − PointVel| < GrabCatchSpeed` or `Age ≥ GrabChaseMaxSeconds`: `Chasing =
-false`, gravity 1, tiles on, and the existing land-and-erupt logic takes over (the
-`ArmDelay` land check must not run while chasing — a ball starting in a crater at rest would
-"land" on frame 1). Outcome: detach velocity ≈ `PointVel`, capped — the same number in both
-phases.
+**Ball, tracking** (`LobbedAreaProjectile.ProjectileUpdate` while `Tracking`): resolve the
+point (`PointId`); gravity 0, tiles on. Run `CriticallyDampedStep` on a copy of
+`(Body.Position, Body.Velocity)` toward `point.Body.Position` — `GrabBallSmoothTime` while
+the point is driven, `GrabChaseSmoothTime` after hand-off — write back **only**
+`Body.Velocity`, clamped to `GrabBallMaxSpeed`; physics integrates. The first frames after
+break-out visibly pull it out of the crater to the hand. `Budget` bleeds over
+`GrabDissipateSeconds` while the point is driven; zero ⇒ die. After hand-off, detach when
+`|Body.Velocity − point.Body.Velocity| < GrabCatchSpeed`, `Age − HandoffAge ≥
+GrabChaseMaxSeconds`, or the point is gone: `Tracking = false`, gravity 1, and the existing
+land-and-erupt logic takes over (the `ArmDelay` land check must not run while tracking —
+a ball at rest in a crater would "land" on frame 1). Outcome: detach velocity ≈ the point's
+swipe velocity, capped — the same number whether the ball was in hand or in the ground
+when the button came up.
 
 **Soft clamp** (carry only, §4.5): `r' = R·tanh(r/R)` along the same direction. Identity-ish
 inside ~0.5R, asymptotes to `R`. A hard `min(r, R)` also works — the clamp only shapes where
@@ -396,7 +458,7 @@ throw and the projectile spends its first frames chasing rather than flying.
 |---|---|---|---|
 | 0 | T1: `DissipateSeconds` → `GrabDissipateSeconds` knob | `MovementConfig.cs`, `configs/movement_config.json`, `ActionStates.cs:2776,3144` | `RemainingBlocks` at t = knob/2 is half |
 | 1 | **Pull-point entity refactor, feel-identical.** `PullPointEntity` + `PeelGroupComp` + `EntityKind`/`EntityFactory` case; `IEntitySpawner.Resolve`; peel mechanics re-homed onto the entity; action drives + mirrors; overlay-draw interface; `SimRunner` spawner + entity pass. Release still throws as today (aimed, `ThrowSpeed`); a release before break-out still ends with nothing (`Release` ⇒ point dies immediately in this phase) | `Entities/PullPointEntity.cs` (new), `EcsComponents.cs`, `EntityKind.cs`, `EntityFactory.cs`, `Entity.cs` (`IEntitySpawner`), `Simulation.cs`, `ActionStates.cs`, `ActionVars.cs`, `Game1.cs:1039`, `MTile.Tests/Sim/SimRunner.cs` | all 6 `BlockPeelTests` green unchanged in intent; **rollback mid-peel**: snapshot at frame N with a live driven point, step on, restore, re-step ⇒ identical `PeelCount`/glue (`SnapshotRoundTrip` pattern); the throw in `…GrabsAndThrows` now actually asserted |
-| 2 | T4: held ball in the point (tracker to the clamped target, drawn at ball), `SwipeVel` EMA, hand-off velocity, projectile chase (`PointPos/PointVel/Chasing`, gravity/tiles flip at detach), solid-cell guard | `PullPointEntity.cs`, `ActionStates.cs`, `LobbedAreaProjectile.cs`, `EcsComponents.cs` | static release ⇒ ball detaches within a few frames at ≈0 relative speed and falls; 300 px/s leftward swipe ⇒ ball detaches flying left at ~300 px/s; swipe past `R` is not attenuated; running player + static mouse ⇒ ball carries the run speed; snapshot round-trip of a chasing projectile |
+| 2 | T4: the ball as a `Tracking` `LobbedAreaProjectile` spawned at break-out (own body, tiles on, gravity 0, velocity-only tracker), `PointId`/`BallId` coupling, hurtbox opt-out, `SwipeVel` EMA, hand-off velocity, detach rule, `BallPos` mirror for the animator | `PullPointEntity.cs`, `ActionStates.cs`, `LobbedAreaProjectile.cs`, `Entity.cs` (hurtbox opt-out), `EcsComponents.cs` | static release ⇒ ball detaches within a few frames at ≈0 relative speed and falls; 300 px/s leftward swipe ⇒ ball detaches flying left at ~300 px/s; swipe past `R` is not attenuated; running player + static mouse ⇒ ball carries the run speed; snapshot round-trip of a chasing projectile |
 | 3 | T5: the point lives `GrabPointMaxSeconds` after hand-off and finishes the contest; break-out spawns the same chasing projectile from the COM | `PullPointEntity.cs` | free-hanging block, release 3 frames before break-out ⇒ still throws, and **its detach velocity equals the carry-case throw for the same swipe** (the uniformity test); **a slash on the frame after release enters and the throw still lands** (the §4.3 test); anchored stone ⇒ point dies empty within cap; no `EnergyBall` fires on the release frame |
 | 4 | T3: `MassOrbTextures`, shared `DrawOrb`, projectile sized by budget | `Drawing/`, `LobbedAreaProjectile.cs`, `PullPointEntity` overlay, `Game1.cs` load | visual — screenshot via `/run` |
 | 5 | T2: trail + landing burst | `CosmeticUpdateSystem.cs`, `PresentationEvents`, `Effects.cs` | visual; verify no double-burst on a rollback re-sim (the `(frame,id)` dedup) |
