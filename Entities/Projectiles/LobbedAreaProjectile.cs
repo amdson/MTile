@@ -100,7 +100,7 @@ public class LobbedAreaProjectile : Projectile
         Mass          = 0.8f;
         GravityScale  = 1f;
         Color         = Color.Sienna;
-        Sprite        = Sprites.Ball(BodyRadius);
+        Sprite        = new MassOrbSprite(tileType, Sprites.Ball(BodyRadius).Pose, BodyRadius);
         _budget       = budget;
         _harvest      = budget;
         _tileType     = tileType;
@@ -169,6 +169,10 @@ public class LobbedAreaProjectile : Projectile
             }
         }
         _detonated = true;
+        // Presentation: the landing splash (particles/audio) is edge-triggered, so it
+        // goes out as a sim event keyed by this entity's id — the render shell dedupes
+        // it against rollback replays (Presentation/PresentationEvents.cs).
+        spawner?.NotifyMassLanded(Id, Body.Position, _tileType, _budget);
     }
 
     // One frame of following the pulling point. Velocity-matching (critically damped),
@@ -222,15 +226,18 @@ public class LobbedAreaProjectile : Projectile
         Age          = 0f;
     }
 
-    // Drawn size tracks the blocks left, tinted by material — the held clod and the
-    // thrown one are the same object, so they can't disagree.
+    // Drawn radius, for the sprite and the trail: tracks the blocks left.
+    public float DrawRadius => MathF.Max(2f, OrbMaxRadius * MathF.Sqrt(MathF.Min(1f, _budget / OrbMaxBlocks)));
+
+    // Drawn size tracks the blocks left, tinted by material, rolling with its travel —
+    // the held clod and the thrown one are the same object, so they can't disagree.
     public override void SyncSprite()
     {
         base.SyncSprite();
-        if (Sprite == null) return;
-        float r = OrbMaxRadius * MathF.Sqrt(MathF.Min(1f, _budget / OrbMaxBlocks));
-        Sprite.Scale = MathF.Max(0.4f, r / BodyRadius);
-        Sprite.Tint  = TilePalette.BaseColor(_tileType);
+        if (Sprite is not MassOrbSprite orb) return;
+        orb.Radius = DrawRadius;
+        orb.Tint   = TilePalette.BaseColor(_tileType);
+        orb.Spin   = Body.Velocity.X / orb.Radius;   // rolling: ω = v/r, sign from direction
     }
 }
 

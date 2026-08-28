@@ -381,6 +381,12 @@ public class Game1 : Game
                                             (int)MathF.Floor(pos.X / Chunk.TileSize),
                                             (int)MathF.Floor(pos.Y / Chunk.TileSize)),
                          pos, (int)type);
+        // Entity ids are World-minted and restored with it, so (frame, id) is the same
+        // key on a rollback replay — the dedupe holds.
+        _sim.OnMassLanded += (id, pos, type, blocks) =>
+            _events.Emit(_sim.Frame,
+                         new PresentationId(PresentationKind.MassLand, id.Index, id.Generation),
+                         pos, (int)type | (Math.Min(blocks, 255) << 8));
 
         if (_config.FreezeFrame) ApplyFreezeFrame();
     }
@@ -401,6 +407,10 @@ public class Game1 : Game
                     break;
                 case PresentationKind.PlayerRespawn:
                     Effects.Puff(_particles, e.Position, Color.LimeGreen);
+                    break;
+                case PresentationKind.MassLand:
+                    Effects.MassSplash(_particles, e.Position,
+                        TilePalette.BaseColor((TileType)(e.Payload & 0xFF)), e.Payload >> 8);
                     break;
             }
             _audio.Present(in e);
@@ -522,6 +532,8 @@ public class Game1 : Game
                 _chunkRenderer.Atlas = TileTextureAtlas.Build(GraphicsDevice,
                     Texture2D.FromStream(GraphicsDevice, fs1),
                     Texture2D.FromStream(GraphicsDevice, fs2));
+                // The thrown clod's disc, cut from the same grain per material.
+                MassOrbTextures.Build(GraphicsDevice, _chunkRenderer.Atlas);
             }
         }
         catch (Exception) { /* cosmetic only — flat fills without it */ }

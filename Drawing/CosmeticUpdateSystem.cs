@@ -118,6 +118,19 @@ public sealed class CosmeticUpdateSystem
             if (e.Sprite == null) continue;
             e.SyncSprite();
             e.Sprite.Update(dt);
+            // A flying clod sheds crumbs in proportion to its speed. Re-derived from
+            // state every rendered frame, so a rollback needs nothing (the landing
+            // splash is the edge-triggered half — see PresentationKind.MassLand).
+            if (e is LobbedAreaProjectile ball && !ball.IsDead)
+            {
+                float speed = ball.Body.Velocity.Length();
+                if (speed > 80f)
+                {
+                    int n = (int)System.MathF.Min(3f, speed / 180f);
+                    Effects.DirtTrail(_particles, ball.Body.Position, ball.Body.Velocity, ball.DrawRadius,
+                                      TilePalette.BaseColor(ball.TileType), n);
+                }
+            }
         }
 
         // Air→ground transition: small dust puff at the local player's feet.

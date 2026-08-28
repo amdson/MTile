@@ -148,6 +148,9 @@ public interface IEntitySpawner
     // died and been swept (end of the Step it died in). Default null so spawner stubs
     // that never mint entities need no change.
     Entity Resolve(EntityId id) => null;
+    // A mass ball landed and erupted: a cosmetic event for the render shell (particle
+    // splash, audio). Default no-op — only Simulation forwards it, as OnMassLanded.
+    void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks) { }
 }
 
 // Render-only hook for entities that draw something beyond their Sprite in the

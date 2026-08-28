@@ -128,6 +128,11 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // rollback never resolves to a stranger.
     public Entity Resolve(EntityId id)
         => _world.IsAlive(id) && _world.Has<EntityRef>(id) ? _world.Get<EntityRef>(id).Obj : null;
+    // IEntitySpawner — cosmetic: a thrown/lobbed mass ball landed and erupted. Fired from
+    // inside Step; subscribers must key on (Frame, id) like the tile events do.
+    public event Action<EntityId, Vector2, TileType, int> OnMassLanded;
+    public void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks)
+        => OnMassLanded?.Invoke(id, pos, type, blocks);
 
     // Fired when the player dies and respawns. Game1 hooks this for the cosmetic puff;
     // the respawn itself happens inside Step so it stays deterministic.

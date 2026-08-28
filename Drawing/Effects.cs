@@ -77,6 +77,58 @@ public static class Effects
         }
     }
 
+    // Crumbs shed by a flying clod: spawned within its radius, thrown back against its
+    // travel and dropped by gravity, in the material's color. Called per rendered frame
+    // with a count scaled to speed (CosmeticUpdateSystem) — level-triggered, so a
+    // rollback needs nothing.
+    public static void DirtTrail(ParticleSystem ps, Vector2 pos, Vector2 vel, float radius, Color color, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            float ang = (float)(_rng.NextDouble() * MathHelper.TwoPi);
+            float rr  = (float)_rng.NextDouble() * radius;
+            var jitter = new Vector2(((float)_rng.NextDouble() - 0.5f), ((float)_rng.NextDouble() - 0.5f)) * 40f;
+            p.Position     = pos + new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * rr;
+            p.Velocity     = -vel * 0.2f + jitter;
+            p.Acceleration = new Vector2(0f, 240f);
+            p.MaxLife      = 0.25f + (float)_rng.NextDouble() * 0.25f;
+            p.Life         = p.MaxLife;
+            p.StartColor   = color;
+            p.EndColor     = color * 0f;
+            p.StartSize    = 2.5f;
+            p.EndSize      = 1f;
+            p.AngularVelocity = (float)(_rng.NextDouble() - 0.5) * 10f;
+            p.Kind         = ParticleKind.Square;
+        }
+    }
+
+    // A clod landing: a wide, low fan of chunks in the material's color, count scaled
+    // by the blocks it carried. Bigger and flatter than TileBreak — it's a splash, not
+    // a shatter.
+    public static void MassSplash(ParticleSystem ps, Vector2 pos, Color color, int blocks)
+    {
+        int count = Math.Clamp(6 + blocks * 2, 6, 40);
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            // Upward-biased fan: −160°..−20° from +x (y-down), heavier toward the sides.
+            float ang = MathHelper.ToRadians(-160f + (float)_rng.NextDouble() * 140f);
+            float spd = 60f + (float)_rng.NextDouble() * 120f;
+            p.Position        = pos;
+            p.Velocity        = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * spd;
+            p.Acceleration    = new Vector2(0f, 300f);
+            p.MaxLife         = 0.45f + (float)_rng.NextDouble() * 0.35f;
+            p.Life            = p.MaxLife;
+            p.StartColor      = color;
+            p.EndColor        = color * 0f;
+            p.StartSize       = 4f;
+            p.EndSize         = 1.5f;
+            p.AngularVelocity = (float)(_rng.NextDouble() - 0.5) * 12f;
+            p.Kind            = ParticleKind.Square;
+        }
+    }
+
     private static Vector2 Rotate(Vector2 v, float radians)
     {
         float c = MathF.Cos(radians), s = MathF.Sin(radians);
