@@ -16,6 +16,7 @@ public enum EntityKind
     StickyGrenade,
     LobbedArea,
     MassBall,       // eruption payload — coasting ball of build mass (see MassBall.cs)
+    PullPoint,      // block-grab pulling point: owns the peel group + carried orb (see PullPointEntity.cs)
     Brute,          // MVP EnemyEntity subtype (see Plans/ENEMY_CAPABILITY_FRAMEWORK.md)
     PracticeBall,   // juggling target — breaks on tile contact, respawns at its spawn point
 

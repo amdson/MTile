@@ -48,24 +48,15 @@ public struct ActionVars
 
     public Vector2 CursorAtPress;     // LobbedArea
 
-    // BlockGrabAction. OrbHeld splits the two phases: false = pressed on a block and
-    // still painting/pulling (or, legacy path, waiting for the drag that rips it out),
-    // true = carrying the orb. OrbBlocks is the block count harvested at break-out
-    // (the thrown eruption's budget before dissipation eats into it) and OrbType the
-    // material the orb is made of.
-    public bool     OrbHeld;
-    public int      OrbBlocks;
-    public TileType OrbType;
-
-    // BlockGrabAction peel phase (BlockPeelEnabled). The grab group is a fixed-capacity
-    // inline buffer so the whole thing rides the ActionVars struct copy through
-    // snapshot/restore — no reference-type state, no side table. Only [0, PeelCount)
-    // are live; removal compacts order-preservingly so iteration order is identical
-    // on both sides of a rollback.
-    public PeelMemberBuffer PeelMembers;
-    public int   PeelCount;
-    public float PeelStrain;   // spring load / snap cap, 0..1 — sim-written, read by Draw
-    public bool  PeelSnapped;  // spring exceeded its cap: the attempt is dead, end the state
+    // BlockGrabAction. The grab's mechanics — peel group, pull contest, carried orb —
+    // live on a PullPointEntity the action spawns on the press and drives while the
+    // button is held (Plans/BLOCK_THROW_PLAN.md §4.3). The action keeps only the id
+    // (never the object: a rollback restore replaces it) plus a read-only summary
+    // mirrored back each frame for the movement modifiers and the tests.
+    public EntityId PullPointId;
+    public bool     OrbHeld;      // mirror: the point is carrying an orb
+    public int      PeelCount;    // mirror: live group size
+    public float    PeelStrain;   // mirror: spring load / snap cap, 0..1
 
     // BlockPaintAction — the mass ball. Seeded at the cursor on RMB down, then
     // critically-damped toward it each frame, leaking mass into the cell beneath it.
@@ -83,30 +74,10 @@ public struct ActionVars
     public Vector2 GrabDir;           // GrabAction — hold focus / throw direction
 }
 
-// One cell of BlockGrabAction's peel group. Tether is the group→block bond (built by
-// the paint kernel, worn by this block's share of the spring force; ≤0 drops the block
-// from the group). GlueWear is accumulated damage to the block→world attachment —
-// stored as wear rather than remaining glue because the glue's BASE value is
-// recomputed live from material + outward edges, which change as neighbors join the
-// group or get broken by someone else.
-public struct PeelMember
-{
-    public int   Gtx, Gty;
-    public float Tether;
-    public float GlueWear;
-}
-
-// Fixed 25-slot inline buffer (C# 12 InlineArray): value semantics, so it snapshots
-// with the ActionVars struct copy. 25 is the design cap on group size — it bounds both
-// the per-frame peel cost and the rollback state, and "can't paint past the cap" is
-// itself a gameplay rule (no eviction; paint deliberately).
-[System.Runtime.CompilerServices.InlineArray(Capacity)]
-public struct PeelMemberBuffer
-{
-    public const int Capacity = 25;
-    private PeelMember _element0;
-}
-
+// (PeelMember / PeelMemberBuffer lived here while the peel group rode ActionVars; they
+// moved to Sim/ECS/Components/PeelGroupComp.cs with the group's move onto the
+// PullPointEntity.)
+//
 // (EruptionGestureState lived here — a deep-copyable capture of BlockEruptionAction's
 // SmoothPen + List<PathSample>, the last per-activation action state that couldn't ride
 // in the flat struct above. It went away with the one-shot eruption planners: the

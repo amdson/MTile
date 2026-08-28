@@ -2715,42 +2715,28 @@ public class GrenadeAction : ActionState
 
 // The mirror of the RMB build/eruption gesture: instead of pushing terrain out of the
 // world, this pulls it in. Shift+LMB press with the cursor on a solid cell within
-// reach starts a grab; how blocks come free depends on MovementConfig.BlockPeelEnabled.
+// reach starts a grab.
 //
-// PEEL MODE (BlockPeelEnabled, the live design): paint and pull are ONE phase, and the
-// gaussian paint kernel is itself the mode switch. While the held cursor sweeps over
-// terrain it deposits "tether" onto nearby solid cells (they join the grab group, cap
-// PeelMemberBuffer.Capacity); because the cursor is near the group, the player→group
-// spring — force superlinear in |mouse − group COM| — is slack. Sweep AWAY and the
-// kernel stops reaching terrain while the spring ramps: the pull. Each frame the
-// spring force is divided among members by tether share; that share erodes both the
-// group→block tether (at zero the block drops from the group, staying in the world)
-// and the block→world glue (weight(material) × (core + outward solid edges), the
-// viscoelastic attachment). When the force beats the group's aggregate remaining glue,
-// every member is broken out at once and collapses into the carried orb. Pull harder
-// than PeelSpringMax and the spring SNAPS — the whole attempt cancels, nothing
-// persists. Overpainting is therefore a hazard: every block added is more glue to
-// beat, and too many makes the group unliftable outright. A small or free-hanging
-// group (near-zero glue) pops in a single sweep-and-release.
-//
-// LEGACY MODE (flag off): press, then DRAG past a threshold — cells in a small radius
-// around the PRESS site are destroyed outright in one frame. Kept as the A/B baseline.
-// Either way the harvest becomes an orb carried in the hand, tinted with the material
-// it came from.
+// The action is deliberately THIN (Plans/BLOCK_THROW_PLAN.md §4.3). On the press it
+// spawns a PullPointEntity and keeps its id; every held frame it DRIVES the point
+// (writes the cursor as TargetPos and the body as OwnerPos) and mirrors a summary back
+// into ActionVars; on release it throws whatever the point is carrying and HANDS THE
+// POINT OFF. All the mechanics — the paint kernel, the spring, tether/glue wear, the
+// break-out, the legacy drag-rip, the carried orb and its dissipation — live on the
+// entity, so nothing that must outlive the button is ever inside this action. See
+// PullPointEntity for the peel model itself.
 //
 // Two exits from the carry phase:
 //   • Release LMB  → the orb is thrown at the cursor as a LobbedAreaProjectile whose
 //                     budget is whatever blocks are left. It lands, erupts the stolen
 //                     material back into the world, and shoves what's nearby.
 //   • Keep holding → the orb dissipates linearly over GrabDissipateSeconds; the throw
-//                     budget bleeds with it, and at zero the action just ends. So
-//                     carrying terrain has a cost and the grab can't be banked.
+//                     budget bleeds with it, and at zero the point dies and the action
+//                     ends. So carrying terrain has a cost and the grab can't be banked.
 //
-// The thrown payload deliberately reuses LobbedAreaProjectile (the deactivated
-// Shift+RMB ranged eruption) rather than introducing a new projectile: it already
-// carries budget/material/mode, snapshots them for rollback, and does exactly the
-// "erupt on landing + radial shove" this wants. Its EruptionPlannerMode comes from
-// ctx.EruptionMode, so the orb builds with whatever shape the player has selected.
+// The thrown payload deliberately reuses LobbedAreaProjectile rather than introducing
+// a new projectile: it already carries budget/material, snapshots them for rollback,
+// and does exactly the "erupt on landing + radial shove" this wants.
 //
 // Priority 46/46, above Beam/EnergyBall's 40/45 — both also live on Shift+LMB, and
 // this has to win the press frame AND still be holding the button when they'd
@@ -2759,30 +2745,18 @@ public class GrenadeAction : ActionState
 // (46 Active), which is intentional — the orb is a commitment.
 public class BlockGrabAction : ActionState
 {
-    // Reach from body center, in tiles so it tracks Chunk.TileSize like the rest of
-    // the terrain verbs (BlockReadyAction's BuildReach is the px-authored analogue).
     // Internal because GrabAction defers to this exact reach when deciding whether a
     // Shift+LMB press is aimed at terrain — one constant, so the two can't disagree.
-    internal const float GrabReach      = Chunk.TileSize * 6f;
-    // Cursor travel from the press point that counts as "a drag". Under this it's a
-    // click, and the action lapses without taking anything.
+    internal const float GrabReach      = PullPointEntity.GrabReach;
+    // Cursor travel from the press point that counts as "a drag" (legacy rip). Under
+    // this it's a click, and the action lapses without taking anything.
     private const float DragThreshold   = Chunk.TileSize * 0.75f;
-    // How long the press waits for that drag before giving up.
+    // How long the press waits for that drag / the first tethered cell before giving up.
     private const float GrabWindow      = 0.60f;
-    // Harvest radius around the press site. 1.6 tiles ⇒ the pressed cell plus its
-    // immediate neighbours, ~9 blocks on open ground.
-    private const float GrabRadiusTiles = 1.6f;
-    // Carry budget bleeds to nothing over MovementConfig.GrabDissipateSeconds, then the
-    // action ends empty.
     private const float ThrowSpeed      = 620f;
     private const float RecoverySeconds = 0.20f;
-    // Hand offset for the carried orb, along the aim direction.
+    // Hand offset the throw spawns from, along the aim direction.
     private const float HandDistance    = PlayerCharacter.Radius * 1.4f;
-    // Orb draw radius at full charge; scales with the blocks still held.
-    private const float OrbMaxRadius    = PlayerCharacter.Radius * 0.9f;
-    // Width of the material tally in RipBlocks. TileType is a contiguous byte enum;
-    // bump this when a value is added there.
-    private const int   TileTypeCount   = 4;
 
     public override int ActivePriority  => 46;
     public override int PassivePriority => 46;
@@ -2796,6 +2770,8 @@ public class BlockGrabAction : ActionState
         if (!ctx.Input.Shift || !ctx.Input.LeftClick) return false;
         if (ctx.Controller == null || ctx.Controller.GetPrevious(1).LeftClick) return false;  // press-edge only
         if (ab.Condition.RecoveryActive) return false;
+        // The grab is an entity; without a spawner (some headless harnesses) it can't exist.
+        if (ctx.Spawner == null) return false;
         // From-set: neutral/recovery, or over a live Guard (Shift is already down).
         if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
         // Terrain-only gesture: the cursor must be ON a block, and within arm's reach.
@@ -2803,19 +2779,26 @@ public class BlockGrabAction : ActionState
         return (ctx.Input.MouseWorldPosition - ctx.Body.Position).LengthSquared() <= GrabReach * GrabReach;
     }
 
+    // The point this activation spawned, or null once it has died (snapped, bled out,
+    // swept). Looked up by id every time — the object is replaced by a rollback restore.
+    private static PullPointEntity Point(EnvironmentContext ctx, in ActionVars vars)
+        => ctx.Spawner?.Resolve(vars.PullPointId) as PullPointEntity;
+
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         // Release always ends the state — Exit decides whether that release is a
         // throw (orb in hand) or nothing (nothing peeled free / orb already gone).
         if (!ctx.Input.LeftClick) return false;
-        if (vars.OrbHeld) return RemainingBlocks(in vars) > 0;     // carrying until it bleeds out
+        var point = Point(ctx, in vars);
+        if (point == null) return false;                           // snapped / bled out
+        if (point.OrbHeld) return point.RemainingBlocks > 0;       // carrying until it bleeds out
         if (MovementConfig.Current.BlockPeelEnabled)
         {
             // A snapped spring kills the attempt outright; otherwise a live group
             // keeps the state open past the press window — the pull takes as long
             // as it takes.
-            if (vars.PeelSnapped) return false;
-            return vars.PeelCount > 0 || vars.TimeInState < GrabWindow;
+            if (point.Snapped) return false;
+            return point.PeelCount > 0 || vars.TimeInState < GrabWindow;
         }
         return vars.TimeInState < GrabWindow;                      // still waiting for the drag
     }
@@ -2823,259 +2806,94 @@ public class BlockGrabAction : ActionState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState   = 0f;
-        vars.ChargeTime    = 0f;
         vars.OrbHeld       = false;
-        vars.OrbBlocks     = 0;
-        vars.OrbType       = ctx.ActiveBlockType;
+        vars.PeelCount     = 0;
+        vars.PeelStrain    = 0f;
         vars.CursorAtPress = ctx.Input.MouseWorldPosition;
         vars.IsGrounded    = ctx.TryGetGround(out _);
         vars.GrabDir       = new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
-        vars.PeelCount     = 0;
-        vars.PeelStrain    = 0f;
-        vars.PeelSnapped   = false;
+
+        var point = new PullPointEntity(ctx.Input.MouseWorldPosition, ctx.Faction, ctx.ActiveBlockType)
+        {
+            OwnerPos = ctx.Body.Position,
+        };
+        ctx.Spawner.SpawnEntity(point);      // assigns the id
+        vars.PullPointId = point.Id;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState += ctx.Dt;
 
-        // Live aim, so the orb rides the hand on the cursor side and the throw
-        // direction is already known to Draw (which has no cursor of its own).
+        // Live aim, so the throw direction is already known.
         var aim = ctx.Input.MouseWorldPosition - ctx.Body.Position;
         if (aim.LengthSquared() > 1e-4f) vars.GrabDir = Vector2.Normalize(aim);
 
-        if (!vars.OrbHeld)
+        var point = Point(ctx, in vars);
+        if (point == null) return;                                 // CheckConditions ends the state next frame
+
+        // Drive: the point paints/pulls at the cursor, measured from this body.
+        point.TargetPos     = ctx.Input.MouseWorldPosition;
+        point.OwnerPos      = ctx.Body.Position;
+        point.Body.Position = ctx.Input.MouseWorldPosition;
+
+        if (!point.OrbHeld && !MovementConfig.Current.BlockPeelEnabled)
         {
-            if (MovementConfig.Current.BlockPeelEnabled)
-            {
-                UpdatePeel(ctx, ref vars);
-                return;
-            }
             // Legacy drag-rip. The harvest is centered on CursorAtPress, not the
             // current cursor — the player marks the site with the press and the
             // drag is just the commit gesture, so a fast flick can't smear the dig.
             var travel = ctx.Input.MouseWorldPosition - vars.CursorAtPress;
             if (travel.LengthSquared() >= DragThreshold * DragThreshold)
-                RipBlocks(ctx, ref vars);
-            return;
+                point.RipBlocks(ctx.Chunks, vars.CursorAtPress);
         }
 
-        vars.ChargeTime += ctx.Dt;   // carry clock — drives the dissipation
+        // Mirror (one frame behind the entity's own update, which runs after the FSMs).
+        vars.OrbHeld    = point.OrbHeld;
+        vars.PeelCount  = point.PeelCount;
+        vars.PeelStrain = point.PeelStrain;
     }
-
-    // One frame of the paint/pull phase. Order is fixed and load-bearing for
-    // determinism: prune → paint → spring → wear → compact → break-out, with every
-    // scan in ascending index / row-major cell order.
-    private static void UpdatePeel(EnvironmentContext ctx, ref ActionVars vars)
-    {
-        if (ctx.Chunks == null) return;
-        var cfg = MovementConfig.Current;
-
-        // 1. Cells broken out from under us (another player, decay) leave the group.
-        for (int i = vars.PeelCount - 1; i >= 0; i--)
-            if (ctx.Chunks.GetCellState(vars.PeelMembers[i].Gtx, vars.PeelMembers[i].Gty) != TileState.Solid)
-                RemovePeelMember(ref vars, i);
-
-        // 2. Paint: deposit tether on solid cells under the kernel.
-        PaintTether(ctx, ref vars, cfg);
-
-        if (vars.PeelCount == 0) { vars.PeelStrain = 0f; return; }
-
-        // 3. The player→group spring, superlinear in cursor distance from the COM.
-        var com = Vector2.Zero;
-        for (int i = 0; i < vars.PeelCount; i++)
-            com += CellCenter(vars.PeelMembers[i].Gtx, vars.PeelMembers[i].Gty);
-        com /= vars.PeelCount;
-
-        float dist  = (ctx.Input.MouseWorldPosition - com).Length();
-        float force = cfg.PeelSpringCoeff * MathF.Pow(dist / Chunk.TileSize, cfg.PeelSpringPower);
-        vars.PeelStrain = Math.Clamp(force / MathF.Max(1e-3f, cfg.PeelSpringMax), 0f, 1f);
-
-        if (force > cfg.PeelSpringMax)
-        {
-            // Pulled harder than the grip holds: the spring snaps and the whole
-            // attempt dies. Nothing persists — glue wear resets with the group.
-            vars.PeelSnapped = true;
-            vars.PeelCount   = 0;
-            return;
-        }
-
-        // 4. Divide the force among members by tether share; each share erodes that
-        // member's tether AND its world glue.
-        float tetherSum = 0f;
-        for (int i = 0; i < vars.PeelCount; i++) tetherSum += vars.PeelMembers[i].Tether;
-        if (tetherSum <= 1e-6f) return;
-
-        for (int i = 0; i < vars.PeelCount; i++)
-        {
-            ref var m = ref vars.PeelMembers[i];
-            float share = force * m.Tether / tetherSum;
-            m.Tether   -= cfg.PeelTetherWear * share * ctx.Dt;
-            m.GlueWear += cfg.PeelGlueWear  * share * ctx.Dt;
-        }
-
-        // 5. Members whose tether wore through drop off — the block stays in the world.
-        for (int i = vars.PeelCount - 1; i >= 0; i--)
-            if (vars.PeelMembers[i].Tether <= 0f)
-                RemovePeelMember(ref vars, i);
-        if (vars.PeelCount == 0) return;
-
-        // 6. Aggregate remaining glue of the survivors vs the pull. Glue base is
-        // recomputed live (neighbors join the group / get broken), floored so an
-        // oversized group stays unliftable no matter how long it's worked.
-        float glueTotal = 0f;
-        for (int i = 0; i < vars.PeelCount; i++)
-        {
-            ref var m = ref vars.PeelMembers[i];
-            float baseGlue = BaseGlue(ctx, in vars, m.Gtx, m.Gty, cfg);
-            glueTotal += MathF.Max(baseGlue * cfg.PeelGlueFloor, baseGlue - m.GlueWear);
-        }
-
-        if (force >= glueTotal)
-            BreakOutGroup(ctx, ref vars);
-    }
-
-    // Gaussian deposit around the cursor. Admission and accumulation share the kernel:
-    // a cell is admitted when the kernel weight over it reaches PeelJoinThreshold (a
-    // real pass, not a graze at the skirt), and every member under the kernel keeps
-    // accumulating — "time spent over the block, weighted by a fast-die-off kernel".
-    // Cells beyond GrabReach of the body never join (same arm's-reach rule as the
-    // press gate), and a full buffer admits nobody: paint deliberately.
-    private static void PaintTether(EnvironmentContext ctx, ref ActionVars vars, MovementConfig cfg)
-    {
-        var   cursor = ctx.Input.MouseWorldPosition;
-        float sigma  = MathF.Max(1f, cfg.PeelKernelSigma);
-        float extent = 2.5f * sigma;
-        float inv2s2 = 1f / (2f * sigma * sigma);
-
-        int cx   = (int)MathF.Floor(cursor.X / Chunk.TileSize);
-        int cy   = (int)MathF.Floor(cursor.Y / Chunk.TileSize);
-        int span = (int)MathF.Ceiling(extent / Chunk.TileSize);
-
-        for (int dy = -span; dy <= span; dy++)
-        for (int dx = -span; dx <= span; dx++)
-        {
-            int gtx = cx + dx, gty = cy + dy;
-            if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
-
-            var center = CellCenter(gtx, gty);
-            float r2 = (center - cursor).LengthSquared();
-            if (r2 > extent * extent) continue;
-            if ((center - ctx.Body.Position).LengthSquared() > GrabReach * GrabReach) continue;
-
-            float weight = MathF.Exp(-r2 * inv2s2);
-            int idx = FindPeelMember(in vars, gtx, gty);
-            if (idx < 0)
-            {
-                if (weight < cfg.PeelJoinThreshold) continue;        // skirt graze — no admission
-                if (vars.PeelCount >= PeelMemberBuffer.Capacity) continue;
-                idx = vars.PeelCount++;
-                vars.PeelMembers[idx] = new PeelMember { Gtx = gtx, Gty = gty };
-            }
-            vars.PeelMembers[idx].Tether += cfg.PeelTetherRate * weight * ctx.Dt;
-        }
-    }
-
-    // Block→world attachment: weight(material) × (core + Σ outward edges), where an
-    // outward edge is a solid neighbor OUTSIDE the group — 1 for same material,
-    // PeelCrossMaterialEdge for different. Edges into the group don't anchor (the
-    // group moves as one), which is what makes painting a block's neighbors loosen it.
-    private static float BaseGlue(EnvironmentContext ctx, in ActionVars vars, int gtx, int gty, MovementConfig cfg)
-    {
-        var  myType = ctx.Chunks.GetCellType(gtx, gty);
-        float edges = 0f;
-        Span<int> nx = stackalloc int[4] { gtx, gtx + 1, gtx, gtx - 1 };
-        Span<int> ny = stackalloc int[4] { gty - 1, gty, gty + 1, gty };
-        for (int k = 0; k < 4; k++)
-        {
-            if (ctx.Chunks.GetCellState(nx[k], ny[k]) != TileState.Solid) continue;
-            if (FindPeelMember(in vars, nx[k], ny[k]) >= 0) continue;
-            edges += ctx.Chunks.GetCellType(nx[k], ny[k]) == myType ? 1f : cfg.PeelCrossMaterialEdge;
-        }
-        return cfg.PeelWeight(myType) * (cfg.PeelGlueCore + edges);
-    }
-
-    // The pull beat the glue: every member breaks out at once and collapses into the
-    // carried orb — count is the throw budget, dominant material the orb's type.
-    private static void BreakOutGroup(EnvironmentContext ctx, ref ActionVars vars)
-    {
-        Span<int> counts = stackalloc int[TileTypeCount];
-        int taken = 0;
-        for (int i = 0; i < vars.PeelCount; i++)
-        {
-            ref var m = ref vars.PeelMembers[i];
-            var type = ctx.Chunks.GetCellType(m.Gtx, m.Gty);
-            if (!ctx.Chunks.BreakCell(m.Gtx, m.Gty)) continue;
-            counts[(int)type]++;
-            taken++;
-        }
-        vars.PeelCount  = 0;
-        vars.PeelStrain = 0f;
-        if (taken == 0) return;
-
-        var best = vars.OrbType;
-        int bestN = 0;
-        for (int t = 0; t < TileTypeCount; t++)
-            if (counts[t] > bestN) { bestN = counts[t]; best = (TileType)t; }
-
-        vars.OrbType    = best;
-        vars.OrbBlocks  = taken;
-        vars.ChargeTime = 0f;
-        vars.OrbHeld    = true;
-    }
-
-    private static int FindPeelMember(in ActionVars vars, int gtx, int gty)
-    {
-        for (int i = 0; i < vars.PeelCount; i++)
-            if (vars.PeelMembers[i].Gtx == gtx && vars.PeelMembers[i].Gty == gty) return i;
-        return -1;
-    }
-
-    // Order-preserving removal (shift the tail down), so member iteration order is
-    // identical before and after a rollback restore.
-    private static void RemovePeelMember(ref ActionVars vars, int index)
-    {
-        for (int i = index; i < vars.PeelCount - 1; i++)
-            vars.PeelMembers[i] = vars.PeelMembers[i + 1];
-        vars.PeelCount--;
-    }
-
-    private static Vector2 CellCenter(int gtx, int gty) => new(
-        gtx * Chunk.TileSize + Chunk.TileSize * 0.5f,
-        gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        // A live orb at exit means the player let go: throw it. Fired from Exit (not
-        // Update) for the same reason BlockPaintAction's eruption upgrade fires there —
-        // the release that ends the state IS the trigger.
-        int blocks = RemainingBlocks(in vars);
-        if (vars.OrbHeld && blocks > 0 && ctx.Spawner != null)
+        var point = Point(ctx, in vars);
+        if (point != null)
         {
-            var toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-            var dir = toCursor.LengthSquared() < 1e-4f
-                ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
-                : Vector2.Normalize(toCursor);
-            var spawnPos = ctx.Body.Position + dir * HandDistance;
-            // Inherit the thrower's velocity so a running throw carries — the orb is a
-            // physical mass leaving the hand, not a fresh muzzle.
-            ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(
-                spawnPos, ctx.Body.Velocity + dir * ThrowSpeed,
-                blocks, vars.OrbType,
-                ctx.HitIds.Next(), ctx.Faction));
+            // A live orb at exit means the player let go: throw it. Fired from Exit
+            // (not Update) for the same reason BlockPaintAction's eruption upgrade
+            // fires there — the release that ends the state IS the trigger.
+            int blocks = point.RemainingBlocks;
+            if (point.OrbHeld && blocks > 0)
+            {
+                var toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+                var dir = toCursor.LengthSquared() < 1e-4f
+                    ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
+                    : Vector2.Normalize(toCursor);
+                var spawnPos = ctx.Body.Position + dir * HandDistance;
+                // Inherit the thrower's velocity so a running throw carries — the orb is
+                // a physical mass leaving the hand, not a fresh muzzle.
+                ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(
+                    spawnPos, ctx.Body.Velocity + dir * ThrowSpeed,
+                    blocks, point.OrbType,
+                    ctx.HitIds.Next(), ctx.Faction));
+            }
+
+            // Recovery only for a grab that actually took something — a lapsed press
+            // shouldn't cost the player lag.
+            if (point.OrbBlocks > 0)
+                ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
+                                      ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+
+            // Hand-off. Phase 1: the point has nothing left to do once released.
+            point.Driven = false;
+            point.Kill();
         }
 
         // Spend the gesture either way, so the release frame can't also route a Click
         // intent into EnergyBallAction.
         ctx.Intents.Consume(IntentType.Click, ctx.CurrentFrame);
         ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
-        vars.OrbHeld = false;
-
-        // Recovery only for a grab that actually took something — a lapsed press
-        // shouldn't cost the player lag.
-        if (vars.OrbBlocks > 0)
-            ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
-                                  ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+        vars.OrbHeld     = false;
+        vars.PullPointId = EntityId.None;
     }
 
     // Carrying terrain is heavy: hauling an orb slows the walk and drags in air. The
@@ -3089,94 +2907,8 @@ public class BlockGrabAction : ActionState
         m.AirDrag      *= 1.2f;
     }
 
-    // Destroy every solid cell within GrabRadiusTiles of the press site and bank the
-    // count. BreakCell (not DamageCell) because a grab takes the whole block — no
-    // partial-HP state is left behind. The dominant material becomes the orb's type,
-    // so a dig through mixed ground throws back whatever it was mostly made of.
-    private static void RipBlocks(EnvironmentContext ctx, ref ActionVars vars)
-    {
-        if (ctx.Chunks == null) return;
-
-        var  site   = vars.CursorAtPress;
-        int  cx     = (int)MathF.Floor(site.X / Chunk.TileSize);
-        int  cy     = (int)MathF.Floor(site.Y / Chunk.TileSize);
-        int  span   = (int)MathF.Ceiling(GrabRadiusTiles);
-        float r2    = GrabRadiusTiles * GrabRadiusTiles;
-
-        int taken = 0;
-        // Tally by material so the orb's color/payload reflects the bulk of the dig.
-        // A fixed array indexed by TileType (a contiguous byte enum) rather than a
-        // Dictionary: no per-frame allocation on the sim path, and the winner scan
-        // below has a fixed iteration order, which a Dictionary wouldn't guarantee.
-        Span<int> counts = stackalloc int[TileTypeCount];
-        for (int dy = -span; dy <= span; dy++)
-        for (int dx = -span; dx <= span; dx++)
-        {
-            if (dx * dx + dy * dy > r2) continue;
-            int gtx = cx + dx, gty = cy + dy;
-            if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
-            var type = ctx.Chunks.GetCellType(gtx, gty);
-            if (!ctx.Chunks.BreakCell(gtx, gty)) continue;
-            counts[(int)type]++;
-            taken++;
-        }
-
-        // Nothing solid left at the site (someone else broke it mid-press) — the grab
-        // lapses rather than handing over an empty orb.
-        if (taken == 0) return;
-
-        var best = vars.OrbType;
-        int bestN = 0;
-        for (int t = 0; t < TileTypeCount; t++)
-            if (counts[t] > bestN) { bestN = counts[t]; best = (TileType)t; }
-
-        vars.OrbType   = best;
-        vars.OrbBlocks = taken;
-        vars.ChargeTime = 0f;
-        vars.OrbHeld   = true;
-    }
-
-    // Blocks still in the orb: the harvest linearly bled down by carry time. This is
-    // both the render size and the throw budget, so what you see is what you throw.
-    private static int RemainingBlocks(in ActionVars vars)
-    {
-        if (!vars.OrbHeld) return 0;
-        float frac = 1f - vars.ChargeTime / MathF.Max(1e-3f, MovementConfig.Current.GrabDissipateSeconds);
-        if (frac <= 0f) return 0;
-        return (int)MathF.Floor(vars.OrbBlocks * frac);
-    }
-
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
-    {
-        // Peel-phase feedback: tethered cells darken with tether strength, and the
-        // shade slides toward red as the spring nears its snap cap. Pure render —
-        // reads the sim-written member buffer and strain, feeds nothing back.
-        if (!vars.OrbHeld && vars.PeelCount > 0)
-        {
-            var tint = Color.Lerp(Color.Black, Color.DarkRed, vars.PeelStrain);
-            for (int i = 0; i < vars.PeelCount; i++)
-            {
-                var m = vars.PeelMembers[i];
-                float a = MathHelper.Clamp(0.12f + 0.35f * (m.Tether / 1.5f), 0f, 0.55f);
-                sb.Draw(pixel, new Rectangle(m.Gtx * Chunk.TileSize, m.Gty * Chunk.TileSize,
-                                             Chunk.TileSize, Chunk.TileSize), tint * a);
-            }
-            return;
-        }
-
-        if (!vars.OrbHeld) return;
-        int blocks = RemainingBlocks(in vars);
-        if (blocks <= 0 || vars.OrbBlocks <= 0) return;
-
-        // GrabDir is last frame's aim (Update tracks the cursor), so the orb sits on
-        // the side the player is about to throw toward.
-        var aim  = vars.GrabDir.LengthSquared() > 1e-6f ? vars.GrabDir : Vector2.UnitX;
-        var hand = body.Position + aim * HandDistance;
-        float r  = OrbMaxRadius * MathF.Sqrt((float)blocks / vars.OrbBlocks);
-        int   d  = (int)MathF.Max(2f, r * 2f);
-        var color = TilePalette.BaseColor(vars.OrbType);
-        sb.Draw(pixel, new Rectangle((int)(hand.X - r), (int)(hand.Y - r), d, d), color);
-    }
+    // Tether tint + carried orb are drawn by the PullPointEntity's overlay (it owns the
+    // group and the orb); nothing action-side to draw.
 }
 
 // ---------- Grab — Shift + LMB: hold an opponent, then throw ---------------------

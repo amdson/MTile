@@ -15,7 +15,7 @@ namespace MTile;
 // action-state lists in the ctor (analogous to how PlayerCharacter builds its
 // registries). The lists' index order is the snapshot identity, so don't
 // reorder once instances exist in saves/replays.
-public abstract class EnemyEntity : Entity
+public abstract class EnemyEntity : Entity, IOverlayDrawable
 {
     private readonly List<EnemyMovementState> _movement;
     private readonly List<EnemyActionState>   _actions;

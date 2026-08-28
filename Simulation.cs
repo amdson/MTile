@@ -124,6 +124,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     public ChunkMap Chunks => _chunks;
     // IEntitySpawner — shared HitId source for AI / projectile-spawned hitboxes.
     public HitIdAllocator HitIds => _hitIds;
+    // IEntitySpawner — id → live entity. Generation-checked, so an id recycled after a
+    // rollback never resolves to a stranger.
+    public Entity Resolve(EntityId id)
+        => _world.IsAlive(id) && _world.Has<EntityRef>(id) ? _world.Get<EntityRef>(id).Obj : null;
 
     // Fired when the player dies and respawns. Game1 hooks this for the cosmetic puff;
     // the respawn itself happens inside Step so it stays deterministic.

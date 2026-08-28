@@ -72,6 +72,9 @@ public static class EntityFactory
             EntityKind.StickyGrenade => new StickyGrenadeProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.LobbedArea    => new LobbedAreaProjectile(body.Position, body.Velocity, d.Budget, d.TileType, d.HitId, d.Faction),
             EntityKind.MassBall      => new MassBall(body.Position, body.Velocity, d.BuildMass, d.TileType, d.Faction),
+            // Driven/orb/group state is overwritten by RestoreState (incl. the sparse
+            // PeelGroupComp) right after construction.
+            EntityKind.PullPoint     => new PullPointEntity(body.Position, d.Faction, d.TileType),
             // Budget is the penetration counter, restored through the same
             // EntityData slot LobbedArea uses (disjoint kinds, one slot).
             EntityKind.RailBolt      => new RailBoltProjectile(body.Position, body.Velocity, d.HitId, d.Faction, d.Budget),

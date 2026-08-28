@@ -96,13 +96,26 @@ public class BlockPeelTests(ITestOutputHelper output)
                 .For(10, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = pullTo })
                 .Forever(new PlayerInput { MouseWorldPosition = pullTo });
 
-            bool sawOrb = false;
+            bool sawOrb = false, sawThrow = false;
+            int floorAtRelease = -1;
             SimRunner.RunMulti(Build(script, terrain, new Vector2(72f, 40f), frames: 60),
-                onFrame: (f, ps) => { if (ps[0].CurrentActionVars.OrbHeld) sawOrb = true; });
+                onFrame: (f, ps) =>
+                {
+                    if (ps[0].CurrentActionVars.OrbHeld) sawOrb = true;
+                    // Release is frame 35; the thrown orb lands and erupts its budget
+                    // onto the floor a few frames later, so "floor untouched by the
+                    // GRAB" is measured here, not at the end.
+                    if (f == 35) floorAtRelease = SolidCount(terrain, 0, 11, 3, 4);
+                },
+                onFrameEntities: (f, ps, es) =>
+                {
+                    foreach (var e in es) if (e is LobbedAreaProjectile) sawThrow = true;
+                });
 
             Assert.True(sawOrb, "The pulled block should break out into a carried orb.");
+            Assert.True(sawThrow, "Releasing with the orb in hand should throw a LobbedAreaProjectile.");
             Assert.Equal(TileState.Empty, terrain.GetCellState(4, 0));
-            Assert.Equal(24, SolidCount(terrain, 0, 11, 3, 4));   // floor untouched
+            Assert.Equal(24, floorAtRelease);
         });
     }
 
@@ -253,9 +266,13 @@ public class BlockPeelTests(ITestOutputHelper output)
                 .For(10, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = dragTo })
                 .Forever(new PlayerInput { MouseWorldPosition = dragTo });
 
-            SimRunner.RunMulti(Build(script, terrain, new Vector2(120f, 40f), frames: 50));
+            // Measured at the release frame: the runner now really throws the orb, and
+            // the landing erupts its budget back into the ground a dozen frames later.
+            int atRelease = -1;
+            SimRunner.RunMulti(Build(script, terrain, new Vector2(120f, 40f), frames: 50),
+                onFrame: (f, ps) => { if (f == 25) atRelease = SolidCount(terrain, 0, 23, 3, 5); });
 
-            Assert.Equal(before - 6, SolidCount(terrain, 0, 23, 3, 5));
+            Assert.Equal(before - 6, atRelease);
         });
     }
 }

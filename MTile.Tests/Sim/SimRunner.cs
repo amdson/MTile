@@ -52,6 +52,43 @@ public class SimConfigMulti
     public Vector2          Gravity { get; init; } = new Vector2(0f, 600f);
 }
 
+// The multi-player runner's entity world: a spawner + chunk provider so actions that
+// own an entity (BlockGrabAction's pulling point, every projectile throw) work
+// headlessly. Ids are minted from firstIndex upward (players take 1..n); Resolve
+// matches the full id like Simulation's World does. Dead entities are swept at the end
+// of each frame, mirroring Simulation.Step — so Resolve returns a dying entity within
+// the frame it died and null from the next frame on.
+public sealed class HeadlessEntityWorld : IEntitySpawner, IChunkProvider
+{
+    private readonly List<Entity> _entities = new();
+    private int _nextIndex;
+
+    public ChunkMap        Chunks { get; }
+    public HitIdAllocator  HitIds { get; }
+    public IReadOnlyList<Entity> Entities => _entities;
+
+    public HeadlessEntityWorld(ChunkMap chunks, HitIdAllocator hitIds, int firstIndex)
+    {
+        Chunks     = chunks;
+        HitIds     = hitIds;
+        _nextIndex = firstIndex;
+    }
+
+    public void SpawnEntity(Entity e)
+    {
+        e.Id = new EntityId(_nextIndex++);
+        _entities.Add(e);
+    }
+
+    public Entity Resolve(EntityId id)
+    {
+        foreach (var e in _entities) if (e.Id == id) return e;
+        return null;
+    }
+
+    public void SweepDead() => _entities.RemoveAll(e => e.IsDead);
+}
+
 public static class SimRunner
 {
     public static SimFrame[] Run(SimConfig cfg)
@@ -105,9 +142,12 @@ public static class SimRunner
     //   onFrame    — fires AFTER each frame's full update (combat + physics applied);
     //                use to sample non-frame state (Combat.HitstunActive, Health, …).
     //   outPlayers — fires once at the end with the final PlayerCharacter[].
+    //   onFrameEntities — like onFrame, plus the live entity list (spawned projectiles,
+    //                the block-grab pulling point) after that frame's dead-sweep.
     public static SimFrame[][] RunMulti(SimConfigMulti cfg,
                                         Action<int, PlayerCharacter[]>? onFrame = null,
-                                        Action<PlayerCharacter[]>? outPlayers = null)
+                                        Action<PlayerCharacter[]>? outPlayers = null,
+                                        Action<int, PlayerCharacter[], IReadOnlyList<Entity>>? onFrameEntities = null)
     {
         int n = cfg.Players.Count;
         if (n == 0) return Array.Empty<SimFrame[]>();
@@ -143,10 +183,15 @@ public static class SimRunner
         // (stab pogo, etc.) actually fires in multi-player sim tests.
         for (int i = 0; i < n; i++) players[i].CombatSystem = combat;
 
-        IHittable ResolvePlayer(EntityId id)
+        // Entities (projectiles, the block-grab pulling point) — ids after the players'.
+        var world = new HeadlessEntityWorld(cfg.Terrain, hitIds, firstIndex: n + 1);
+        var entityScratch = new List<Entity>();
+        var bodyScratch   = new List<PhysicsBody>();
+
+        IHittable ResolveHittable(EntityId id)
         {
             foreach (var p in players) if (p.Id == id) return p;
-            return null;
+            return world.Resolve(id);
         }
 
         for (int f = 0; f < cfg.Frames; f++)
@@ -155,11 +200,13 @@ public static class SimRunner
 
             // Mirror Simulation.Step phase order: clear combat registries → publish
             // hurtboxes → run each player's Update (which publishes hitboxes +
-            // force fields) → CombatSystem.Apply → field forces → physics step.
+            // force fields) → entity Update → CombatSystem.Apply → field forces →
+            // physics step → dead-entity sweep.
             hitboxes.Clear();
             hurtboxes.Clear();
             fields.Clear();
             for (int i = 0; i < n; i++) players[i].PublishHurtboxes(hurtboxes);
+            foreach (var e in world.Entities) e.PublishHurtboxes(hurtboxes);
 
             // Inject input + update each player. Capture AppliedForce per-player
             // before StepSwept zeroes them.
@@ -169,23 +216,36 @@ public static class SimRunner
             {
                 var input = cfg.Players[i].Script.Get(f, prevs[i]);
                 ctrls[i].InjectInput(input);
-                players[i].Update(ctrls[i], cfg.Terrain, hitboxes, hurtboxes, cfg.Dt, forceFields: fields);
+                players[i].Update(ctrls[i], cfg.Terrain, hitboxes, hurtboxes, cfg.Dt, spawner: world, forceFields: fields);
                 fx[i] = players[i].Body.AppliedForce.X;
                 fy[i] = players[i].Body.AppliedForce.Y;
             }
 
-            combat.Apply(cfg.Terrain, hitboxes, hurtboxes, ResolvePlayer);
+            // Entities spawned by a sibling's Update skip their first frame, as in
+            // Simulation.Step; ones spawned by a player's action run this frame.
+            entityScratch.Clear();
+            entityScratch.AddRange(world.Entities);
+            foreach (var e in entityScratch) e.Update(cfg.Dt, players[0], hitboxes, world);
+
+            combat.Apply(cfg.Terrain, hitboxes, hurtboxes, ResolveHittable);
 
             PhysicsBody ResolveBody(EntityId id)
             {
                 foreach (var p in players) if (p.Id == id) return p.Body;
-                return null;
+                return world.Resolve(id)?.Body;
             }
             ForceFieldSystem.Apply(fields, hurtboxes, ResolveBody, cfg.Dt,
                 onGrabHeld: id => { foreach (var p in players) if (p.Id == id) p.Combat.MarkGrabbed(p.Frame); },
                 onThrown:   id => { foreach (var p in players) if (p.Id == id) p.Combat.RegisterThrown(p.Frame, cfg.Dt); });
 
-            PhysicsWorld.StepSwept(bodies, cfg.Terrain, cfg.Dt, cfg.Gravity);
+            // Entity gravity-scale opt-out, then every body (players + live entities,
+            // spawn order) through the solver.
+            foreach (var e in world.Entities) e.PreStep(cfg.Gravity);
+            bodyScratch.Clear();
+            bodyScratch.AddRange(bodies);
+            foreach (var e in world.Entities) bodyScratch.Add(e.Body);
+            PhysicsWorld.StepSwept(bodyScratch, cfg.Terrain, cfg.Dt, cfg.Gravity);
+            world.SweepDead();
 
             for (int i = 0; i < n; i++)
             {
@@ -202,6 +262,7 @@ public static class SimRunner
             }
 
             onFrame?.Invoke(f, players);
+            onFrameEntities?.Invoke(f, players, world.Entities);
         }
 
         outPlayers?.Invoke(players);

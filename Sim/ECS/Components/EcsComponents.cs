@@ -80,8 +80,16 @@ public struct EntityData
     public bool                Exploded;    // StickyGrenade
     public bool                Detonated;   // LobbedArea
     public int                 Budget;      // LobbedArea
-    public TileType            TileType;    // LobbedArea + MassBall
+    public TileType            TileType;    // LobbedArea + MassBall + PullPoint (orb material)
     public float               BuildMass;   // MassBall — remaining mass to leak
+
+    // PullPointEntity (Plans/BLOCK_THROW_PLAN.md). Budget doubles as the harvested orb
+    // block count; the peel group itself is the sparse PeelGroupComp.
+    public bool    Driven;       // the owning BlockGrabAction still drives the point
+    public Vector2 TargetPos;    // action-written each driven frame: kernel / spring endpoint
+    public Vector2 OwnerPos;     // action-written each driven frame: reach origin, hand anchor
+    public float   CarryTime;    // seconds the orb has been held (drives dissipation)
+    public float   HandoffTime;  // seconds since the action released the point
 }
 
 // Everything a PlayerCharacter needs snapshotted EXCEPT its body pose (BodyStateComp)

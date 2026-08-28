@@ -46,7 +46,9 @@ public class Entity : IHittable
         MaxHealth = health;
     }
 
-    public void PublishHurtboxes(HurtboxWorld world)
+    // Virtual so non-hittable helpers (a block-grab pulling point) can opt out — a
+    // hurtbox is also what force fields act on, so "no hurtbox" means "not a target".
+    public virtual void PublishHurtboxes(HurtboxWorld world)
         => world.Publish(new Hurtbox(Body.Bounds, Faction, Id));
 
     public virtual Vector2 OnHit(in Hitbox hit, in Hurtbox _)
@@ -91,7 +93,9 @@ public class Entity : IHittable
     // during a Step; these methods sync it to/from the components only at snapshot
     // boundaries. The component-set IS the snapshot — no separate per-entity struct
     // array. Symmetric with WriteState/ReadState, which marshal the subtype fields.
-    public void CaptureState(World world)
+    // Virtual for entities that carry a sparse component beyond EntityData (a peel
+    // group): they override, call base, and marshal their own store by Id.
+    public virtual void CaptureState(World world)
     {
         ref var d = ref world.Get<EntityData>(Id);
         d.Kind         = Kind;
@@ -107,7 +111,7 @@ public class Entity : IHittable
         world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
 
-    public void RestoreState(World world)
+    public virtual void RestoreState(World world)
     {
         var d = world.Get<EntityData>(Id);
         Health       = d.Health;
@@ -138,4 +142,19 @@ public interface IEntitySpawner
     // movement). Read-only sampling only — don't mutate from inside a state, so
     // sampling order doesn't matter for determinism.
     ChunkMap Chunks { get; }
+    // Look up a live entity by id. Actions that own a helper entity (BlockGrabAction's
+    // pulling point) keep the EntityId in their ActionVars — never the object, which a
+    // rollback restore replaces — and resolve it every frame. Null once the entity has
+    // died and been swept (end of the Step it died in). Default null so spawner stubs
+    // that never mint entities need no change.
+    Entity Resolve(EntityId id) => null;
+}
+
+// Render-only hook for entities that draw something beyond their Sprite in the
+// world-space overlay pass (enemy telegraphs, the block-grab tether tint). Game1
+// dispatches on it after the players' action overlays. Reads sim state, writes none.
+public interface IOverlayDrawable
+{
+    void DrawOverlay(Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
+                     Microsoft.Xna.Framework.Graphics.Texture2D pixel);
 }

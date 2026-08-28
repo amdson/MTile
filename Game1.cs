@@ -1033,11 +1033,11 @@ public class Game1 : Game
         foreach (var (p, _) in _sim.SecondaryPlayers)
             p.CurrentAction.Draw(_spriteBatch, _pixel, p.Body, p.CurrentActionVars);
 
-        // Enemy FSM telegraph/strike overlays — same world-space layer as the
-        // player's action draw, so windup tells read alongside the player's
-        // slash arcs.
+        // Entity overlays (enemy telegraphs/strikes, the block-grab tether tint + held
+        // orb) — same world-space layer as the player's action draw, so windup tells
+        // read alongside the player's slash arcs.
         foreach (var e in _sim.Entities)
-            if (e is EnemyEntity en) en.DrawOverlay(_spriteBatch, _pixel);
+            if (e is IOverlayDrawable od) od.DrawOverlay(_spriteBatch, _pixel);
         _prof.End(_sParticles, tFx);
 
         long tDbg = _prof.Begin();
