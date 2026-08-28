@@ -1,8 +1,27 @@
 # Block Throw Plan — `todo.txt` #2
 
-**Status: proposed, nothing built** (written 2026-08-28 from the todo entry and a read of
-the current code). The peel *grab* half shipped 2026-08-07 (`BACKLOG.md` 3.9/3.10 are its
-open tuning items); this plan is about the *throw* half.
+**Status: built through Phase 5** (written and implemented 2026-08-28; branch
+`worktree-block-throw-plan`). The peel *grab* half shipped 2026-08-07 (`BACKLOG.md` 3.9/3.10
+are its open tuning items); this plan is about the *throw* half. Playtest tuning and the
+§7 decisions are `BACKLOG.md` 3.11.
+
+**As built — deviations from the text below, all small:**
+- `RemainingBlocks` used *floor*, which shorted every harvest by one block on its first held
+  frame and made a 1-block clod unthrowable (a latent bug the old test never caught because
+  the headless runner had no spawner to throw with). It is *ceiling* now.
+- The headless `SimRunner.RunMulti` grew a `HeadlessEntityWorld` (spawner + entity update /
+  physics / sweep pass), as §4.3 option (a); the peel tests' terrain-count assertions moved
+  to the release frame because the thrown clod now really lands and erupts in the runner.
+- `Entity.CaptureState/RestoreState` became virtual (the point marshals its sparse group
+  there); `IEntitySpawner` gained `Resolve(EntityId)` and `NotifyMassLanded(...)` as
+  default-implemented members so spawner stubs needed no change.
+- The follow-up attack after a swipe-release enters as **Stab**, not Slash — a click while
+  the cursor is moving is the stab gesture. Same guarantee (§4.3), different name.
+- The landing splash is `PresentationKind.MassLand`, keyed by the ball's World id; the trail
+  is emitted from `CosmeticUpdateSystem`'s entity loop. The orb texture is cut from the
+  tile grain atlas at load (`MassOrbTextures`), drawn by `MassOrbSprite`.
+- Measured: a 300 px/s swipe detaches the held clod at −322 px/s and the one-motion
+  (release-before-break-out) clod at −319 px/s — the uniformity the point exists for.
 
 The todo entry, verbatim, is five tweaks plus a mechanism sketch. §1 restates the tweaks
 as goals, §2 pins what the code does today, §3 lays out the sketch, §4 is the critique
