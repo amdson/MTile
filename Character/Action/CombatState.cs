@@ -21,7 +21,27 @@ public class CombatState
     // a hard landing locks jump briefly but shouldn't turn walking to mush.
     public bool    HitstunMutesControl;
 
+    // Hitstop (Plans/HIT_FEEL_PLAN.md phase 1): a brief freeze of this player's own
+    // agency on a landed combat hit — PlayerCharacter.Update early-returns past FSM/
+    // action progression and force application while active (see the early-return
+    // right after Tick() below), same "expire-frame, not countdown" shape as
+    // HitstunActive so it replays identically across a rollback resimulation.
+    // Physics integration (gravity/terrain collision) is deliberately NOT suppressed —
+    // that would mean excluding this player's body from the shared per-frame physics
+    // batch in Simulation.Step, which is riskier to get right than freezing agency
+    // alone. Victim-only for V1 (see the plan's open question on symmetric attacker
+    // hitstop). Only set for real combat hits (muteControl == true in
+    // OnHitRegistered) — a self-inflicted crush/landing hit stuns Jump but shouldn't
+    // also freeze you mid-fall.
+    public bool    HitstopActive;     public int HitstopExpireFrame;
+
     public float   LastHitImpulse;    public int LastHitFrame;
+    // Direction the last hit's knockback pushed this player, for render-only cosmetics
+    // (directional knockback cue, weapon flash) that need more than the magnitude
+    // LastHitImpulse already carries. Set by PlayerCharacter.OnHit from the resolved
+    // knockback, not OnHitRegistered — the caller already has it there and this avoids
+    // growing OnHitRegistered's parameter list for a value it doesn't otherwise need.
+    public Vector2 LastHitDir;
 
     // Escalation percent (COMBAT_FEEL_PLAN Phase 5). Monotonic within a life — every
     // hit taken adds to it; it only resets on KO/respawn. Scales the knockback applied
@@ -161,6 +181,13 @@ public class CombatState
     private const float StunImpulseThreshold = 440f;
     private const float StunSeconds          = 0.6f;
 
+    // Hitstop tuning. Deliberately much shorter than hitstun — this is a freeze-frame
+    // punch, not a disadvantage window — scaled the same way (impulse-derived, clamped)
+    // so a light tap barely pauses and a heavy hit holds noticeably longer.
+    private const float HitstopSecondsPerImpulse = 0.00025f;
+    private const float MinHitstopSeconds        = 0.03f;
+    private const float MaxHitstopSeconds        = 0.12f;
+
     // While hitstunned, the victim's self-control is muted so knockback actually
     // displaces (COMBAT_FEEL_PLAN Phase 1). Applied by PlayerCharacter.Update as
     // movement-modifier scalars — the same channel actions use — together with
@@ -200,6 +227,17 @@ public class CombatState
             if (newStunExpire > StunExpireFrame) StunExpireFrame = newStunExpire;
             StunActive = true;
         }
+
+        // Real combat hits only — a self-inflicted crush/landing (muteControl=false)
+        // shouldn't also freeze the player mid-fall.
+        if (muteControl)
+        {
+            float hitstopSeconds = Math.Clamp(impulse * HitstopSecondsPerImpulse,
+                                              MinHitstopSeconds, MaxHitstopSeconds);
+            int newHitstopExpire = currentFrame + SimFrames.FromSeconds(hitstopSeconds, dt);
+            if (newHitstopExpire > HitstopExpireFrame) HitstopExpireFrame = newHitstopExpire;
+            HitstopActive = true;
+        }
     }
 
     // Successful tech (Phase 4): end the launch (hitstun + stun + control-mute) and
@@ -224,6 +262,7 @@ public class CombatState
         if (StunActive    && currentFrame >= StunExpireFrame)    StunActive    = false;
         if (GrabbedActive && currentFrame >= GrabbedExpireFrame) GrabbedActive = false;
         if (GuardCharged  && currentFrame >= GuardChargedExpireFrame) GuardCharged = false;
+        if (HitstopActive && currentFrame >= HitstopExpireFrame) HitstopActive = false;
     }
 
     // Filter incoming hit through Guard. Returns true if the hit was parried —
@@ -262,7 +301,9 @@ public class CombatState
         HitstunActive = o.HitstunActive; HitstunExpireFrame = o.HitstunExpireFrame;
         HitstunMutesControl = o.HitstunMutesControl;
         StunActive = o.StunActive; StunExpireFrame = o.StunExpireFrame;
+        HitstopActive = o.HitstopActive; HitstopExpireFrame = o.HitstopExpireFrame;
         LastHitImpulse = o.LastHitImpulse; LastHitFrame = o.LastHitFrame;
+        LastHitDir = o.LastHitDir;
         DamagePercent = o.DamagePercent;
         InvulnExpireFrame = o.InvulnExpireFrame;
         GrabbedActive = o.GrabbedActive; GrabbedExpireFrame = o.GrabbedExpireFrame;

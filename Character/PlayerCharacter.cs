@@ -182,6 +182,14 @@ public class PlayerCharacter : IHittable
 
         Body.Velocity += res.TargetDeltaV;
 
+        // For render-only cosmetics (directional knockback cue, weapon flash) that
+        // want more than LastHitImpulse's magnitude. Falls back to the hit's launch
+        // axis when the resolved knockback was ~zero (e.g. a heavy target barely
+        // budged) so the cue still has a direction to draw.
+        _abilities.Combat.LastHitDir = res.TargetDeltaV.LengthSquared() > 1e-4f
+            ? Vector2.Normalize(res.TargetDeltaV)
+            : hit.StrikeDir;
+
         // Register the hit for hitstun (every hit) + the stun-threshold check.
         // HitResult.Strength is the percent-scaled impulse magnitude (Impulse mode)
         // or the scaled closing speed (Collision mode) — pre-mass either way, so
@@ -467,6 +475,16 @@ public class PlayerCharacter : IHittable
         _abilities.Condition.Tick(_frame);
         // Expire hitstun / stun whose window closed.
         _abilities.Combat.Tick(_frame);
+
+        // Hitstop (Plans/HIT_FEEL_PLAN.md phase 1): freeze this player's own agency
+        // for a few frames after a landed combat hit. Everything above this line
+        // (frame counter, crush/health, hitstun/stun expiry — including this very
+        // timer) still ran; only FSM/action progression and force application are
+        // skipped, so the freeze itself still expires on schedule and a rollback
+        // resimulation reproduces the exact same frozen frames. Physics integration
+        // is untouched (falls under gravity, still collides with terrain) — this is
+        // a control freeze, not a full physics freeze.
+        if (_abilities.Combat.HitstopActive) return;
 
         // Edge-detect input gestures and enqueue intents. Done BEFORE the FSMs so
         // freshly-released clicks are visible to action preconditions this frame.
