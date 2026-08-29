@@ -476,15 +476,21 @@ public class PlayerCharacter : IHittable
         // Expire hitstun / stun whose window closed.
         _abilities.Combat.Tick(_frame);
 
-        // Hitstop (Plans/HIT_FEEL_PLAN.md phase 1): freeze this player's own agency
-        // for a few frames after a landed combat hit. Everything above this line
-        // (frame counter, crush/health, hitstun/stun expiry — including this very
-        // timer) still ran; only FSM/action progression and force application are
-        // skipped, so the freeze itself still expires on schedule and a rollback
-        // resimulation reproduces the exact same frozen frames. Physics integration
-        // is untouched (falls under gravity, still collides with terrain) — this is
-        // a control freeze, not a full physics freeze.
-        if (_abilities.Combat.HitstopActive) return;
+        // Hitstop (Plans/HIT_FEEL_PLAN.md phase 1): freeze the CURRENT ACTION's
+        // progression for a few frames after a landed combat hit — no new hitboxes,
+        // no ApplyActionForces recoil/lunge, guarded at those two call sites below.
+        // Deliberately NOT a blanket skip of this method:
+        //   - Movement state selection/Update (incl. TumbleState's tech-window check,
+        //     TumbleTechTests) must keep running every frame regardless — movement
+        //     must not read action state (CLAUDE.md), so it can't be affected by an
+        //     action-side freeze anyway, and gating it here broke tech resolution
+        //     under sustained hits.
+        //   - Action FSM SELECTION (incl. RecoveryAction's flinch eviction of a
+        //     mid-swing attack, HitEvictionTests) must also keep running every frame,
+        //     hitstop or not, or a fresh hit could never interrupt what it just hit —
+        //     only the chosen action's Update/ApplyActionForces freeze, not selection.
+        // Physics integration (gravity/terrain collision) is untouched either way.
+        bool hitstopFrozen = _abilities.Combat.HitstopActive;
 
         // Edge-detect input gestures and enqueue intents. Done BEFORE the FSMs so
         // freshly-released clicks are visible to action preconditions this frame.
@@ -648,8 +654,11 @@ public class PlayerCharacter : IHittable
 
         // Action gets to augment the body's force AFTER movement has written it but
         // BEFORE Action.Update — keeps Update free for FSM logic, lets the physics
-        // augmentation live in its own dedicated hook.
-        _currentAction.ApplyActionForces(ctx, in _actionVars);
+        // augmentation live in its own dedicated hook. Hitstop freezes this hook (no
+        // recoil/lunge assist while frozen) and the action's own Update below (no
+        // hitbox progression) — see the hitstopFrozen comment above for why nothing
+        // else is gated.
+        if (!hitstopFrozen) _currentAction.ApplyActionForces(ctx, in _actionVars);
 
         // Apply gravity-scale modifier as a counter-force, identical in shape to
         // Entity.PreStep. With GravityScale = 1 this is a no-op; with 0.3 the body
@@ -657,7 +666,7 @@ public class PlayerCharacter : IHittable
         if (ctx.Modifiers.GravityScale != 1f)
             Body.AppliedForce += Gravity * (ctx.Modifiers.GravityScale - 1f);
 
-        _currentAction.Update(ctx, _abilities, ref _actionVars);
+        if (!hitstopFrozen) _currentAction.Update(ctx, _abilities, ref _actionVars);
 
         // Block-economy upkeep, once per frame per player and AFTER the action ran, so a
         // placement action has had its chance to request charging. Runs unconditionally —
