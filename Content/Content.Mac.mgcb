@@ -101,11 +101,41 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/hit_connect_04.ogg;Sounds/hit_connect_04.xnb
 
+#begin ../Assets/Sounds/hit_connect_05.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/hit_connect_05.ogg;Sounds/hit_connect_05.xnb
+
+#begin ../Assets/Sounds/hit_connect_06.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/hit_connect_06.ogg;Sounds/hit_connect_06.xnb
+
+#begin ../Assets/Sounds/hit_connect_07.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/hit_connect_07.ogg;Sounds/hit_connect_07.xnb
+
 #begin ../Assets/Sounds/jump_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor
 /processorParam:Quality=Best
 /build:../Assets/Sounds/jump_01.ogg;Sounds/jump_01.xnb
+
+#begin ../Assets/Sounds/swing_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/swing_01.ogg;Sounds/swing_01.xnb
+
+#begin ../Assets/Sounds/swing_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/swing_02.ogg;Sounds/swing_02.xnb
 
 #begin ../Assets/Sounds/throw_01.ogg
 /importer:OggImporter

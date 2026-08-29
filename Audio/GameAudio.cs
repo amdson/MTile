@@ -98,6 +98,7 @@ public sealed class GameAudio
         if (p == null) return;
         WallScrape(p, index);
         HitConnect(p, index);
+        Swing(p, index);
         Jump(p, index);
         DoubleJump(p, index);
         ClimbEffort(p, index);
@@ -138,6 +139,21 @@ public sealed class GameAudio
                     pitch:    0.1f - 0.25f * t,
                     pos:      p.Body.Position);
     }
+
+    // Attack whoosh: entering a slash/stab action is a derivable edge, same reasoning as
+    // the movement-side Jump/DoubleJump below but off the ACTION ring (CurrentAction /
+    // GetPreviousAction) instead of the movement ring — attacks are actions, not
+    // movement states. Fires once per swing regardless of how many hitboxes it publishes.
+    private void Swing(PlayerCharacter p, int index)
+    {
+        if (!IsSwing(p.CurrentAction)) return;
+        if (IsSwing(p.GetPreviousAction(1))) return;
+
+        _mixer.Fire(new SoundId(SoundKind.Swing, index, p.Frame),
+                    simFrame: p.Frame, gain: 0.6f, pitch: Jitter(p.Frame), pos: p.Body.Position);
+    }
+
+    private static bool IsSwing(ActionState a) => a is SlashLikeAction || a is StabAction;
 
     // Entering a jump state is an edge, but a derivable one: the state ring is snapshotted,
     // so "current is a jump, previous frame was not" re-derives identically after a
