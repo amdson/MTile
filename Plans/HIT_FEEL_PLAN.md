@@ -140,6 +140,58 @@ mechanism, it's **inconsistent authoring** — some hitboxes probably have
    is intended before implementing; the `MinLaunch` floor is strictly simpler
    and reuses an existing knob.
 
+## Phase 2b — attacker recoil ("feel yourself get bumped back")
+
+This is the Newton's-third-law counterpart to phase 2, and the pipeline for
+it **already exists end-to-end** — it's just only wired to one move.
+
+- `CombatSystem.Apply`'s entity path unconditionally accumulates
+  `-delivered * hit.RecoilScale` into a per-`HitId` recoil inbox whenever a
+  hitbox connects with an entity (`World/CombatSystem.cs:171-172`) —
+  `delivered` is the same `HitResult.Impulse` `HitResolver.Resolve` computes
+  for the victim's own knockback (`Physics/HitResolver.cs:26-30`). This is
+  not tile-restricted despite most of the surrounding comments talking about
+  wall pogo; `RecoilBreakProtected`/`RecoilMinMaterialHP` are the only
+  genuinely tile-only gates (`World/Hitbox.cs:63,` "has no effect on entity
+  recoil").
+- **`RecoilScale` defaults to `0`** on every `Hitbox` (`Hitbox.cs:59,120`)
+  and is only ever set nonzero in one place: `StabAction`'s
+  `RecoilScale = 0.2f` (`ActionStates.cs:936`) on its primary (entity-eligible)
+  hitbox. Every slash-family move — `GroundSlash1/2/3`, `CrouchSlash`,
+  `AirSlash1/2`, `AirTurnSlash`, `GuardRetaliateAction`, `GrabbedSlash`, all
+  built on `SlashLikeAction`'s shared hitbox publish
+  (`ActionStates.cs:562-573`) — never sets it, so they're recoil-inert today
+  against players and terrain alike.
+- The read side is just as narrow: `PeekRecoil` has exactly one caller in the
+  whole codebase, `StabAction.ApplyActionForces`
+  (`ActionStates.cs:1116-1120`), which adds the recoil vector straight into
+  `ctx.Body.Velocity`. `ActionState.ApplyActionForces`'s base is a no-op, and
+  no other action overrides it.
+- To make this general rather than stab-only:
+  1. Author a small nonzero `RecoilScale` at `SlashLikeAction`'s shared
+     hitbox-publish site (`ActionStates.cs:562-573`) — one edit covers every
+     slash variant at once, matching "most hits."
+  2. Hoist the 3-line `PeekRecoil → Body.Velocity` consumer out of
+     `StabAction.ApplyActionForces` into `SlashLikeAction` (or a small shared
+     helper both call) instead of duplicating it per subclass.
+- **Check before tuning**: whether recoil "scales with larger hits" for free
+  depends on hitbox mode. `HitResult.Impulse` in **Impulse mode** is the raw
+  authored `KnockbackImpulse`, *not* scaled by the victim's `DamagePercent`
+  escalation (`HitResolver.cs:56-59` — only `TargetDeltaV`/`Strength` get the
+  `scale` factor); in **Collision mode** the impulse already bakes in the
+  percent-scaled closing speed (`HitResolver.cs:70`, `u *= scale`). So a
+  Collision-mode slash would already recoil harder as the fight escalates,
+  the way Stab's presumably does; an Impulse-mode one would give the same
+  recoil every time regardless of the target's accumulated percent — worth
+  confirming which mode the slash family is in before assuming the "larger
+  hits push back harder" framing falls out automatically.
+- **No test coverage today**: `MTile.Tests/Sim/AttackRecoilTests.cs` only
+  exercises the tile-recoil path — every `combat.Apply(...)` call in it
+  passes `_ => null` as the entity resolver, which short-circuits the entity
+  branch entirely. PvP recoil is unverified; add a scenario test (two
+  `SimPlayer`s, one lands a hit, assert the attacker's velocity picks up the
+  recoil next frame) alongside whatever lands here.
+
 ## Phase 3 — hit sounds
 
 Mostly asset work, per the note above:
@@ -209,9 +261,11 @@ decals can likely hang off that instead of inventing a third trigger path.
 
 Phase 0 → Phase 1 (hitstop) first, since it's the one sim-affecting change
 and worth validating/playtesting in isolation before stacking cosmetics on
-top. Phases 3-7 are independent of each other and of hitstop, and can be done
-in any order once phase 0 lands — phase 3 (sound) is unblocked today and
-doesn't even need phase 0.
+top. Phase 2b (attacker recoil) is small, self-contained, and also
+sim-affecting — good to land and playtest right after phase 1, before the
+cosmetic phases. Phases 3-7 are independent of each other and of
+hitstop/recoil, and can be done in any order once phase 0 lands — phase 3
+(sound) is unblocked today and doesn't even need phase 0.
 
 ## Open questions
 
@@ -220,5 +274,9 @@ doesn't even need phase 0.
 - Phase 2: is "backward knockback" the existing `MinLaunch`-floor reading, or
   a genuinely direction-overriding push regardless of the attack's authored
   launch vector? Changes the implementation, not just the tuning.
+- Phase 2b: confirm slash-family hitboxes' `KnockbackMode` (Impulse vs
+  Collision) before tuning `RecoilScale` — determines whether recoil grows
+  with the victim's escalating `DamagePercent` for free or needs that added
+  explicitly.
 - Hitstop scope: players only for V1, or should enemy `EnemyState<TVars>`
   hits freeze too?
