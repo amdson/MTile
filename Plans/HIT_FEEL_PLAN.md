@@ -1,5 +1,44 @@
 # Hit feel plan (2026-08-28)
 
+## Implementation status (2026-08-28)
+
+All phases (0-7) implemented. Full test suite: same 8 pre-existing failures
+as before this work (each independently confirmed via revert-check to
+predate it — see below), 530 passing.
+
+Two things worth knowing before playtesting:
+
+- **Hitstop's scope shrank from the original sketch.** Blanket-skipping
+  `PlayerCharacter.Update` while `HitstopActive` broke two real mechanics
+  found by the full suite: `HitEvictionTests` (skipping action *selection*
+  meant a fresh hit could never flinch-evict a mid-swing attack — nothing
+  could preempt what it just hit) and `TumbleTechTests` (skipping *movement*
+  Update blocked `TumbleState`'s tech-window check, an infinite lock under
+  sustained hits). Shipped version only freezes the current action's
+  `Update`/`ApplyActionForces` — movement Update and all FSM
+  selection/eviction run every frame regardless of hitstop. This still
+  freezes attacks (no hitbox progression, no recoil/lunge) but does not
+  freeze the victim's position/animation the way a from-scratch fighting-game
+  hitstop would. A true position freeze would mean excluding a body from
+  `Simulation.Step`'s shared physics batch for a few frames — doable, but a
+  separate, more careful change than fits under "small bundle."
+- **Two pre-existing bugs surfaced, not touched**: `GroundSlash1`/`GroundSlash2`
+  both have `HoldVictims => false` and default `StrikeSpeed` to `1f` (Collision
+  mode), while their class comments and `CombatFeelTests.HoldField_Slash1_*`
+  both assume `HoldVictims` is `true` and/or Impulse mode is the default for
+  these two moves. `HoldField_Slash1_KeepsVictimInRange_DespiteWalkingAway`
+  fails on `main` too (confirmed by reverting this session's changes and
+  re-running it) — unrelated to this work, left alone.
+- **Audio pipeline compromise**: `ffmpeg`/`pwsh` aren't available in the
+  sandbox this was implemented in, so the 5 new clips (`hit_connect_05..07`,
+  `swing_01/02`) were copied in as-is rather than run through
+  `build-sfx.ps1`'s loudness-match/mono/22.05kHz normalization, and
+  `Content.mgcb`/`Content.Mac.mgcb`/`SoundManifest.g.cs` were hand-edited to
+  match what `sync-sounds.ps1` would have generated. Re-run the real pipeline
+  once on a machine that has both tools.
+
+---
+
 Follow-up to `todo.txt` item 1. Scope: make a landed hit read as an impact —
 hitstop, a baseline shove, sound, and screen-space juice — scaled consistently
 by how hard the hit was. Excludes windup/follow-through animation authoring
