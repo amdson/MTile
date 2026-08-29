@@ -296,8 +296,9 @@ It also carries two **1-frame inboxes**, both snapshotted alongside the dedupe t
 
 `Entities/` is laid out by role: the base `Entity`/`EntityKind`/`EntityFactory` sit at its root,
 `Entities/Enemies/` holds the reusable enemy machinery (host, states, brains, blueprints) plus the
-stateless helpers `SurfaceProbe` (terrain anchoring), `EnemyAim` (aiming + line of sight) and
-`EnemyTelegraph` (telegraph drawing), `Entities/Enemies/Types/` holds the concrete enemies, and
+stateless helpers `SurfaceProbe` (terrain anchoring) and `EnemyAim` (aiming + line of sight);
+enemy states declare their wind-up tells via `EnemyState<TVars>.Telegraph` into the frame's
+`TelegraphList` (see [Drawing](#drawing-drawing)). `Entities/Enemies/Types/` holds the concrete enemies, and
 `Entities/Projectiles/` holds the projectile family. Namespaces are flat (`MTile`), so the folders
 are organisational only — moving a file between them needs no other change.
 
@@ -311,7 +312,9 @@ are organisational only — moving a file between them needs no other change.
 
 ## Drawing ([Drawing/](Drawing/))
 
-[`DrawContext`](Drawing/DrawContext.cs) wraps `SpriteBatch` + 1×1 pixel, exposes `Line/Rect/Ring/Disc/RotatedRect`. [`Sprite`](Drawing/Sprite.cs) is a `Pose`-based vector sprite; `AnimatedSprite` adds frame timing. [`ParticleSystem`](Drawing/ParticleSystem.cs) is a fixed-capacity pool (2048 in Game1). [`Trail`](Drawing/Trail.cs) is a fading ribbon (cursor trail + slash tip trails). [`Effects`](Drawing/Effects.cs) — preset spawners (`TileBreak`, `Puff`). **All drawing is cosmetic and downstream of the sim.**
+[`DrawContext`](Drawing/DrawContext.cs) wraps `SpriteBatch` + 1×1 pixel and is **the** immediate primitive API — `Line/Box/Rect/RotatedRect/Ring/Disc`; nothing else does `SpriteBatch.Draw(pixel, …)` transform math by hand. [`Sprite`](Drawing/Sprite.cs) is a `Pose`-based vector sprite; `AnimatedSprite` adds frame timing. [`ParticleSystem`](Drawing/ParticleSystem.cs) is a fixed-capacity pool (2048 in Game1). [`Trail`](Drawing/Trail.cs) is a fading ribbon (cursor trail + slash tip trails); it can `Draw` immediately or `Emit` into a telegraph list. [`Effects`](Drawing/Effects.cs) — preset spawners (`TileBreak`, `Puff`). **All drawing is cosmetic and downstream of the sim.**
+
+**Sim-side code never draws.** Player actions (`ActionState.Telegraph`), enemy FSM states (`EnemyState<TVars>.Telegraph`), and entities that implement `ITelegraphSource` *declare* their world-space overlay shapes — charge dots, pulse rings, wind-up tells, the block-grab tether tint — by appending to the frame's [`TelegraphList`](Presentation/TelegraphList.cs), a graphics-free shape buffer. `Game1.Draw` clears it, collects from the players' current actions then the entities, and [`TelegraphRenderer`](Drawing/TelegraphRenderer.cs) draws it through `DrawContext` in the world pass. Emission order is draw order. Because the list has no `Microsoft.Xna.Framework.Graphics` dependency, an action's visual is unit-testable headless (`MTile.Tests/Presentation/TelegraphListTests.cs`). Adding a telegraph to a new action or enemy means overriding `Telegraph` and calling `t.Rect/Box/Line/Ray/Ring` — never reaching for a `SpriteBatch`.
 
 The stack has grown well past that base layer:
 
@@ -351,7 +354,7 @@ Clips are selected by the JSON **`Type`** field — never the filename or `Name`
 
 Also in the shell: a `TimeScale` slow-mo accumulator, a freeze-frame corrector inspector driven by `Testing/freeze.json`, Ctrl+M stage save / F5 reload via `StageSaver.cs` (both disabled under a rollback session), and a worst-of-60-frames timing probe. **`Game1` is not actually thin** — ~870 lines, mostly render and HUD; `Plans/GAME1_REFACTOR_PLAN.md` tracks the remaining extraction.
 
-`Draw`: world transform from camera → chunks (damage-darkened) → platforms → growing sprouts → entities → players → particles/cursor trail → current action overlay → debug overlays (hitboxes, hurtboxes, orientation, constraints, health bars, gated by `GameConfig` toggles) → screen-space UI (state/action names, planner mode, block-picker HUD, health bars).
+`Draw`: backdrop → world batch: chunks (damage-darkened) → entities' sprites → player sprites → (batch split) sprite skins → debug skeleton/bodies → particles/cursor trail → **telegraph pass** (the players' `CurrentAction.Telegraph` + every `ITelegraphSource` entity into one `TelegraphList`, drawn by `TelegraphRenderer`) → debug overlays (hitboxes, hurtboxes, orientation, constraints, corrector/lattice trajectories, health bars, gated by `GameConfig` toggles) → batch `End` → dev demos → glow pass (`AttackGlowSystem`, own `PrimitiveBatch` pass) → screen-space HUD passes → screenshot capture.
 
 ## Tests ([MTile.Tests/](MTile.Tests/))
 

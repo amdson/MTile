@@ -78,6 +78,9 @@ public class Game1 : Game
     private int _devToneSeq;
     // Cursor trail — a fading ribbon trailing the world-space mouse position.
     private readonly Trail _cursorTrail = new(capacity: 24, lifetime: 0.22f);
+    // World-space overlay shapes declared by the players' actions and ITelegraphSource
+    // entities this frame; cleared and refilled in Draw, rendered by TelegraphRenderer.
+    private readonly TelegraphList _telegraphs = new();
     private CosmeticUpdateSystem _cosmetics;
 
     private FileSystemWatcher _movementConfigWatcher;
@@ -1033,23 +1036,23 @@ public class Game1 : Game
         long tFx = _prof.Begin();
         // Particles over gameplay but under debug overlays.
         _particles.Draw(_draw);
-        _cursorTrail.Draw(_spriteBatch, _pixel,
+        _cursorTrail.Draw(_draw,
             new Color(255, 240, 180, 220), new Color(255, 100, 40, 0),
             3f);
 
-        // Action overlay (slash arc, etc.) in world space, on top of the body.
-        // Secondary players too — the training dummy's slash arcs / stab ribbons
-        // are its attack telegraphs. Each PlayerCharacter owns its action-state
-        // instances, so the per-action trails don't cross-contaminate.
-        player.CurrentAction.Draw(_spriteBatch, _pixel, player.Body, player.CurrentActionVars);
+        // Telegraph pass, in world space on top of the bodies. Sim objects DECLARE
+        // shapes into one list — players' current actions (charge dots, pulse rings;
+        // secondary players too, since the training dummy's tells are its attack
+        // telegraphs), then ITelegraphSource entities (enemy wind-ups, the block-grab
+        // tether tint) — and TelegraphRenderer draws them. Nothing sim-side touches
+        // the SpriteBatch. Emission order is draw order: actions under entities.
+        _telegraphs.Clear();
+        player.CurrentAction.Telegraph(_telegraphs, player.Body, player.CurrentActionVars);
         foreach (var (p, _) in _sim.SecondaryPlayers)
-            p.CurrentAction.Draw(_spriteBatch, _pixel, p.Body, p.CurrentActionVars);
-
-        // Entity overlays (enemy telegraphs/strikes, the block-grab tether tint + held
-        // orb) — same world-space layer as the player's action draw, so windup tells
-        // read alongside the player's slash arcs.
+            p.CurrentAction.Telegraph(_telegraphs, p.Body, p.CurrentActionVars);
         foreach (var e in _sim.Entities)
-            if (e is IOverlayDrawable od) od.DrawOverlay(_spriteBatch, _pixel);
+            if (e is ITelegraphSource ts) ts.Telegraph(_telegraphs);
+        TelegraphRenderer.Draw(_draw, _telegraphs);
         _prof.End(_sParticles, tFx);
 
         long tDbg = _prof.Begin();

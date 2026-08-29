@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
@@ -81,7 +80,11 @@ public abstract class ActionState
 
     public abstract void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref ActionVars vars);
 
-    public virtual void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars) {}
+    // Declare this frame's world-space overlay shapes (charge dots, rings, cell
+    // flashes) into the frame's TelegraphList. Render-only: Game1 calls it once per
+    // rendered frame, Drawing/TelegraphRenderer draws the list. Never touches a
+    // SpriteBatch — see Presentation/TelegraphList.cs.
+    public virtual void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars) {}
 
     // Declare multiplicative scalars on movement knobs (walk speed, friction, …).
     // Called by PlayerCharacter once per frame between action selection and
@@ -353,7 +356,7 @@ public class RecoveryAction : ActionState
         m.GravityScale   *= 0.3f;
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         // Wind-up indicator (the old ReadyAction visual): pulsing dot offset
         // toward facing, colored by posture. Nothing drawn for a bare countdown.
@@ -363,7 +366,7 @@ public class RecoveryAction : ActionState
         float offset = ArcR * 0.5f * pulse;
         var pos = body.Position + new Vector2(vars.Facing * offset, 0f);
         var color = (vars.IsGrounded ? Color.Red : Color.DeepSkyBlue) * 0.7f;
-        sb.Draw(pixel, new Rectangle((int)pos.X - 2, (int)pos.Y - 2, 3, 3), color);
+        t.Rect(pos, 3f, color);
     }
 }
 
@@ -612,9 +615,9 @@ public abstract class SlashLikeAction : ActionState
     }
 
     // The slash apex is rendered as a glowing triangle + trail by Game1's glow pass
-    // (GlowRenderer), which needs its own PrimitiveBatch pass outside this SpriteBatch
-    // block. SlashTrail/SlashGlowColor expose what it needs; nothing to draw here.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars) { }
+    // (GlowRenderer, its own PrimitiveBatch pass, not the telegraph list).
+    // SlashTrail/SlashGlowColor expose what it needs; nothing to telegraph here.
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars) { }
 }
 
 // ---------- Ground combo: S1 → S2 → S3 -----------------------------------------
@@ -1266,9 +1269,9 @@ public class StabAction : ActionState
     }
 
     // The stab tip is rendered as a glowing sphere + trail by Game1's glow pass
-    // (GlowRenderer), which needs its own PrimitiveBatch pass outside this SpriteBatch
-    // block. TipTrail/StabColorFor expose what it needs; nothing to draw here.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars) { }
+    // (GlowRenderer, its own PrimitiveBatch pass, not the telegraph list).
+    // TipTrail/StabColorFor expose what it needs; nothing to telegraph here.
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars) { }
 }
 
 // Air spin-stab. Roadmap §1.6: a Stab swipe pointed opposite of facing while in
@@ -1369,7 +1372,7 @@ public class GuardAction : ActionState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars) { }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         // Shield indicator above the head. Charged-state cue is the
         // GuardRetaliateAction firing on click, not a Draw tint (Draw doesn't
@@ -1377,8 +1380,8 @@ public class GuardAction : ActionState
         const int W = 4;
         const int H = 12;
         var pos = body.Position;
-        var rect = new Rectangle((int)pos.X - W / 2, (int)pos.Y - (int)PlayerCharacter.Radius - H - 2, W, H);
-        sb.Draw(pixel, rect, Color.LightSteelBlue * 0.8f);
+        t.Box((int)pos.X - W / 2, (int)pos.Y - (int)PlayerCharacter.Radius - H - 2, W, H,
+              Color.LightSteelBlue * 0.8f);
     }
 }
 
@@ -1546,7 +1549,7 @@ public class PulseAction : ActionState
         }
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         if (vars.TimeInState < HitboxStartTime ||
             vars.TimeInState > HitboxStartTime + HitboxActiveDuration) return;
@@ -1558,7 +1561,7 @@ public class PulseAction : ActionState
         {
             float angle = i * MathHelper.TwoPi / Segments;
             var pos = body.Position + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * r;
-            sb.Draw(pixel, new Rectangle((int)pos.X - 2, (int)pos.Y - 2, 4, 4), color);
+            t.Rect(pos, 4f, color);
         }
     }
 }
@@ -1717,7 +1720,7 @@ public class BurstAction : ActionState
         }
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         if (vars.TimeInState < HitboxStartTime ||
             vars.TimeInState > HitboxStartTime + HitboxActiveDuration) return;
@@ -1727,7 +1730,7 @@ public class BurstAction : ActionState
         {
             float angle = i * MathHelper.TwoPi / Segments;
             var pos = body.Position + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * r;
-            sb.Draw(pixel, new Rectangle((int)pos.X - 2, (int)pos.Y - 2, 5, 5), color);
+            t.Rect(pos, 5f, color);
         }
     }
 
@@ -1915,13 +1918,11 @@ public class BlockPaintAction : ActionState
         m.MaxAirSpeed  *= 0.85f;
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         // The ball, plus a bright core, so the lag behind the cursor is legible.
-        sb.Draw(pixel, new Rectangle((int)vars.BallPos.X - 3, (int)vars.BallPos.Y - 3, 7, 7),
-                new Color(230, 200, 140));
-        sb.Draw(pixel, new Rectangle((int)vars.BallPos.X - 1, (int)vars.BallPos.Y - 1, 3, 3),
-                Color.White);
+        t.Rect(vars.BallPos, 7f, new Color(230, 200, 140));
+        t.Rect(vars.BallPos, 3f, Color.White);
     }
 }
 
@@ -1985,9 +1986,9 @@ public class BlockPlaceAction : ActionState
         vars.OriginCell = cell;
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
-        // Nothing to draw — the placed tile is the feedback.
+        // Nothing to show — the placed tile is the feedback.
     }
 }
 
@@ -2099,7 +2100,7 @@ public class BlockBurstAction : ActionState
 
     // A plus of expanding foam-white brackets over the target cells — the placement is
     // already visible as sprouting tiles, so this just marks the shape that was chosen.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         float u = MathHelper.Clamp(vars.TimeInState / Duration, 0f, 1f);
         var color = Color.Lerp(new Color(235, 245, 255), Color.Transparent, u);
@@ -2113,8 +2114,7 @@ public class BlockBurstAction : ActionState
             vars.OriginCell + new Vector2(-Chunk.TileSize, 0f),
         };
         foreach (var c in cells)
-            sb.Draw(pixel, new Rectangle((int)(c.X - half), (int)(c.Y - half),
-                                         (int)(half * 2f), (int)(half * 2f)), color);
+            t.Rect(c, half * 2f, color);
     }
 }
 
@@ -2462,7 +2462,7 @@ public class BeamAction : ActionState
         m.AirAccel     *= 0.6f;
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         if (!vars.Firing)
         {
@@ -2471,7 +2471,7 @@ public class BeamAction : ActionState
             float frac = vars.ChargeTime / MinChargeTime;
             int   r    = (int)(2 + 6 * frac);
             var col = Color.Lerp(new Color(80, 0, 100), Color.Magenta, frac);
-            sb.Draw(pixel, new Rectangle((int)body.Position.X - r, (int)body.Position.Y - r, r * 2, r * 2), col * 0.6f);
+            t.Rect(body.Position, r * 2f, col * 0.6f);
             return;
         }
         if (_segCount <= 0) return;
@@ -2488,7 +2488,7 @@ public class BeamAction : ActionState
             var   col = Color.Lerp(dimCol, coreCol, e) * 0.5f;
             int   r   = (int)(1f + 2f * e);
             var   p   = _segPos[i];
-            sb.Draw(pixel, new Rectangle((int)p.X - r, (int)p.Y - r, r * 2, r * 2), col);
+            t.Rect(p, r * 2f, col);
         }
 
         // Streaming particles: each mote's fading Trail ribbon, advanced in Update.
@@ -2496,7 +2496,7 @@ public class BeamAction : ActionState
         var head = new Color(255, 220, 255);
         var tail = new Color(180, 40, 220, 0);
         for (int m = 0; m < MoteCount; m++)
-            _motes[m].Draw(sb, pixel, head, tail, startWidth: 3.5f);
+            _motes[m].Emit(t, head, tail, startWidth: 3.5f);
     }
 }
 
@@ -2641,7 +2641,7 @@ public class LobbedAreaAction : ActionState
         m.GravityScale *= 0.5f;
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         // Charge ring at the player. Color ramps from olive → goldenrod as the
         // budget grows; past saturation it dims to indicate the budget dip.
@@ -2651,7 +2651,7 @@ public class LobbedAreaAction : ActionState
         Color col = saturated
             ? new Color(160, 120, 40)
             : Color.Lerp(new Color(80, 60, 20), Color.Goldenrod, frac);
-        sb.Draw(pixel, new Rectangle((int)body.Position.X - r, (int)body.Position.Y - r, r * 2, r * 2), col * 0.55f);
+        t.Rect(body.Position, r * 2f, col * 0.55f);
     }
 }
 
@@ -3111,12 +3111,12 @@ public class GrabAction : ActionState
             ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
     }
 
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in ActionVars vars)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         int facing = vars.GrabDir.X >= 0f ? 1 : -1;
         var focus = body.Position + (vars.GrabThrowing ? vars.GrabDir : new Vector2(facing, 0f)) * FocusDist;
         var color = vars.GrabThrowing ? Color.HotPink : Color.Magenta;
-        sb.Draw(pixel, new Rectangle((int)focus.X - 3, (int)focus.Y - 3, 6, 6), color * 0.8f);
+        t.Rect(focus, 6f, color * 0.8f);
     }
 }
 

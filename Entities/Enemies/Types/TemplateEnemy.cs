@@ -1,6 +1,5 @@
 using System;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
@@ -71,10 +70,12 @@ namespace MTile;
 //     Committed and the three durations. If a movement state needs to remember
 //     anything beyond a clock, it currently can't — see BACKLOG 5.15.
 //
-//  3. Draw GETS ALMOST NOTHING: (SpriteBatch, Texture2D, PhysicsBody, in vars).
-//     No context, no facing, no terrain. Anything the telegraph must show has
-//     to already be in vars (that's what LockedFacing / LockedAim are for) or
-//     reachable off the body (Position, Velocity).
+//  3. Telegraph GETS ALMOST NOTHING: (TelegraphList, PhysicsBody, in vars).
+//     No context, no facing, no terrain, and no SpriteBatch — you append shapes
+//     (Rect / Box / Ray / Ring) to the list and Drawing/TelegraphRenderer draws
+//     them. Anything the telegraph must show has to already be in vars (that's
+//     what LockedFacing / LockedAim are for) or reachable off the body
+//     (Position, Velocity).
 //
 //  4. CONTROLLERS MUST BE STATELESS. Config-only. There is nowhere to snapshot
 //     per-entity brain state, so no cooldown counters, no memory, no "did I just
@@ -189,7 +190,7 @@ public class TemplateMoveState : EnemyMovementState
 
     public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
     {
-        // Tick the clock yourself. Nothing does it for you, and Draw and every
+        // Tick the clock yourself. Nothing does it for you, and Telegraph and every
         // phase check downstream read it.
         v.TimeInState += ctx.Dt;
 
@@ -300,7 +301,7 @@ public class TemplateAction : EnemyActionState
 
     public override void Exit(in EnemyContext ctx, ref EnemyActionVars v) => v.Committed = false;
 
-    // Copies the durations into vars so Draw and the phase maths never reach
+    // Copies the durations into vars so Telegraph and the phase maths never reach
     // back into this object. Also called on snapshot restore, which is why the
     // numbers must come from here and not be inlined in Enter.
     public override void PopulateDurations(ref EnemyActionVars v)
@@ -342,29 +343,26 @@ public class TemplateAction : EnemyActionState
     // the sim, and it is the single highest-leverage thing you can spend effort
     // on. A hard attack with a clear tell reads as fair; the same attack without
     // one reads as broken.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
-        float t = v.TimeInState;
+        float time = v.TimeInState;
 
-        if (v.WindupDuration > 0f && t < v.WindupDuration)
+        if (v.WindupDuration > 0f && time < v.WindupDuration)
         {
             // Windup: a dot that grows and slides out toward the strike point,
             // so both "something is coming" and "when" are readable.
-            float p   = t / v.WindupDuration;                  // 0 → 1
+            float p   = time / v.WindupDuration;               // 0 → 1
             int   sz  = 2 + (int)(p * 5f);
             float off = 8f + p * (Reach + 4f);
             var   pos = body.Position + new Vector2(v.LockedFacing * off, 0f);
-            sb.Draw(pixel, new Rectangle((int)pos.X - sz / 2, (int)pos.Y - sz / 2, sz, sz),
-                    Color.Lerp(new Color(TelegraphColor, 90), TelegraphColor, p));
+            t.Rect(pos, sz, Color.Lerp(new Color(TelegraphColor, 90), TelegraphColor, p));
         }
-        else if (t < v.WindupDuration + v.ActiveDuration)
+        else if (time < v.WindupDuration + v.ActiveDuration)
         {
             // Strike: a slab exactly where the hitbox is.
             float half = Reach * 0.5f;
             var   c    = body.Position + new Vector2(v.LockedFacing * (8f + half), 0f);
-            sb.Draw(pixel, new Rectangle((int)(c.X - half), (int)(c.Y - HalfHeight),
-                                         (int)Reach, (int)(HalfHeight * 2f)),
-                    StrikeColor * 0.55f);
+            t.Box(c.X - half, c.Y - HalfHeight, Reach, HalfHeight * 2f, StrikeColor * 0.55f);
         }
         // Recovery draws nothing — the body sitting still already reads as
         // "open". Add something here if you want the punish window signposted.

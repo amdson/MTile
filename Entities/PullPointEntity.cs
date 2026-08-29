@@ -1,6 +1,5 @@
 using System;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
@@ -40,7 +39,7 @@ namespace MTile;
 //
 // The group is a sparse snapshotted component (PeelGroupComp) marshalled in the
 // CaptureState/RestoreState overrides; the scalars ride EntityData like any entity.
-public sealed class PullPointEntity : Entity, IOverlayDrawable
+public sealed class PullPointEntity : Entity, ITelegraphSource
 {
     // Reach from the owner's body center, in tiles so it tracks Chunk.TileSize like the
     // rest of the terrain verbs. BlockGrabAction/GrabAction gate the press on it too.
@@ -416,7 +415,7 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
     // Peel-phase feedback: tethered cells darken with tether strength, and the shade
     // slides toward red as the spring nears its snap cap. The ball draws itself. Pure
     // render — reads sim state, feeds nothing back.
-    public void DrawOverlay(SpriteBatch sb, Texture2D pixel)
+    public void Telegraph(TelegraphList t)
     {
         if (IsDead || _group.Count == 0) return;
         var tint = Color.Lerp(Color.Black, Color.DarkRed, _group.Strain);
@@ -424,8 +423,8 @@ public sealed class PullPointEntity : Entity, IOverlayDrawable
         {
             var m = _group.Members[i];
             float a = MathHelper.Clamp(0.12f + 0.35f * (m.Tether / 1.5f), 0f, 0.55f);
-            sb.Draw(pixel, new Rectangle(m.Gtx * Chunk.TileSize, m.Gty * Chunk.TileSize,
-                                         Chunk.TileSize, Chunk.TileSize), tint * a);
+            t.Box(m.Gtx * Chunk.TileSize, m.Gty * Chunk.TileSize,
+                  Chunk.TileSize, Chunk.TileSize, tint * a);
         }
     }
 }

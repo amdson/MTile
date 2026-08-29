@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
@@ -15,7 +14,7 @@ namespace MTile;
 // action-state lists in the ctor (analogous to how PlayerCharacter builds its
 // registries). The lists' index order is the snapshot identity, so don't
 // reorder once instances exist in saves/replays.
-public abstract class EnemyEntity : Entity, IOverlayDrawable
+public abstract class EnemyEntity : Entity, ITelegraphSource
 {
     private readonly List<EnemyMovementState> _movement;
     private readonly List<EnemyActionState>   _actions;
@@ -246,14 +245,14 @@ public abstract class EnemyEntity : Entity, IOverlayDrawable
         }
     }
 
-    // Overlay rendering — the FSM-side analogue of player.CurrentAction.Draw in
-    // Game1. Movement first, action on top (telegraphs are read most easily when
+    // Overlay telegraphs — the FSM-side analogue of player.CurrentAction.Telegraph
+    // in Game1. Movement first, action on top (telegraphs are read most easily when
     // they sit above the body+ground state).
-    public void DrawOverlay(SpriteBatch sb, Texture2D pixel)
+    public void Telegraph(TelegraphList t)
     {
-        _movement[_currentMovement].Draw(sb, pixel, Body, in _moveVars);
+        _movement[_currentMovement].Telegraph(t, Body, in _moveVars);
         if (_currentAction >= 0)
-            _actions[_currentAction].Draw(sb, pixel, Body, in _actionVars);
+            _actions[_currentAction].Telegraph(t, Body, in _actionVars);
     }
 
     // ── Snapshot/restore ────────────────────────────────────────────────────

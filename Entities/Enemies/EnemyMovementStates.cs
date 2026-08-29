@@ -1,6 +1,5 @@
 using System;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
@@ -612,18 +611,18 @@ public class EnemyHopState : EnemyMovementState
     // because at that point the arc IS the telegraph. A compression bar squashes
     // under the body while a ring tightens around it; both peak right as the
     // launch fires, so the player's cue to move is unambiguous.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyMovementVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyMovementVars v)
     {
-        float t = v.TimeInState;
-        if (t >= CrouchTime || CrouchTime <= 0f) return;
+        float time = v.TimeInState;
+        if (time >= CrouchTime || CrouchTime <= 0f) return;
 
-        float p = t / CrouchTime;                  // 0 → 1 across the crouch
+        float p = time / CrouchTime;               // 0 → 1 across the crouch
         var   c = body.Position;
 
         // Compression bar: widens and brightens as the legs load up.
         int w = 8 + (int)(p * 16f);
-        sb.Draw(pixel, new Rectangle((int)c.X - w / 2, (int)c.Y + 8, w, 2),
-                Color.Lerp(new Color(TelegraphColor, 90), TelegraphColor, p));
+        t.Box((int)c.X - w / 2, (int)c.Y + 8, w, 2,
+              Color.Lerp(new Color(TelegraphColor, 90), TelegraphColor, p));
 
         // Tightening ring — radius collapses 16 → 5 px, the visual inverse of
         // the launch that follows.
@@ -632,7 +631,7 @@ public class EnemyHopState : EnemyMovementState
         {
             float a  = i * MathHelper.TwoPi / 10f;
             var  pos = c + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
-            sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2), TelegraphColor * (0.35f + 0.65f * p));
+            t.Rect(pos, 2f, TelegraphColor * (0.35f + 0.65f * p));
         }
 
         // Final quarter: a white flash-up so the exact takeoff frame is readable.
@@ -640,7 +639,7 @@ public class EnemyHopState : EnemyMovementState
         {
             float fp = (p - 0.75f) / 0.25f;
             int   sz = 3 + (int)(fp * 4f);
-            sb.Draw(pixel, new Rectangle((int)c.X - sz / 2, (int)c.Y - sz / 2, sz, sz), Color.White * fp);
+            t.Rect(c, sz, Color.White * fp);
         }
     }
 }

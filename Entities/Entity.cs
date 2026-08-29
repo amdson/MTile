@@ -153,11 +153,6 @@ public interface IEntitySpawner
     void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks) { }
 }
 
-// Render-only hook for entities that draw something beyond their Sprite in the
-// world-space overlay pass (enemy telegraphs, the block-grab tether tint). Game1
-// dispatches on it after the players' action overlays. Reads sim state, writes none.
-public interface IOverlayDrawable
-{
-    void DrawOverlay(Microsoft.Xna.Framework.Graphics.SpriteBatch sb,
-                     Microsoft.Xna.Framework.Graphics.Texture2D pixel);
-}
+// Entities that show something beyond their Sprite in the world-space overlay pass
+// (enemy telegraphs, the block-grab tether tint) implement ITelegraphSource
+// (Presentation/TelegraphList.cs) and append shapes to the frame's TelegraphList.

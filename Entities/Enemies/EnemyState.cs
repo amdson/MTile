@@ -1,5 +1,4 @@
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
@@ -46,7 +45,9 @@ public abstract class EnemyState<TVars> where TVars : struct
     public virtual  void Exit  (in EnemyContext ctx, ref TVars v) {}
     public abstract void Update(in EnemyContext ctx, ref TVars v);
 
-    public virtual  void Draw  (SpriteBatch sb, Texture2D pixel, PhysicsBody body, in TVars v) {}
+    // Render-only: append this frame's overlay shapes (wind-up tells, strike zones)
+    // to `t`. Never touches a SpriteBatch — Drawing/TelegraphRenderer draws the list.
+    public virtual  void Telegraph(TelegraphList t, PhysicsBody body, in TVars v) {}
 }
 
 // Superset of every movement state's per-activation fields. Mutually exclusive

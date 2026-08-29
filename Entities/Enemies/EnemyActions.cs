@@ -1,11 +1,10 @@
 using System;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
 // MVP action-FSM states. One concrete action: a melee swing with the standard
-// Windup → Active → Recovery triad. Telegraph is purely a Draw concern, read
+// Windup → Active → Recovery triad. Telegraph is purely a render concern, read
 // off TimeInState / WindupDuration in EnemyActionVars — the sim never declares
 // a separate telegraph descriptor. See Plans/ENEMY_CAPABILITY_FRAMEWORK.md §3.
 
@@ -76,30 +75,27 @@ public class EnemyMeleeAction : EnemyActionState
             origin: ctx.Self.Body.Position));
     }
 
-    // Telegraph IS the Draw — read everything off vars, just like the player's
+    // Telegraph reads everything off vars, just like the player's
     // slash dot or stab tip. Windup: a growing dot offset toward facing, color
     // ramping toward TelegraphColor. Strike flash: a faint slab where the
     // hitbox sits. Recovery: nothing — the body sprite alone reads the lockout.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
-        float t = v.TimeInState;
-        if (v.WindupDuration > 0f && t < v.WindupDuration)
+        float time = v.TimeInState;
+        if (v.WindupDuration > 0f && time < v.WindupDuration)
         {
-            float p = t / v.WindupDuration;       // 0 → 1 across windup
+            float p = time / v.WindupDuration;       // 0 → 1 across windup
             int   sz = 2 + (int)(p * 4f);
             float off = 8f + p * 14f;
             var pos = body.Position + new Vector2(v.LockedFacing * off, 0f);
             var color = Color.Lerp(new Color(TelegraphColor, 100), TelegraphColor, p);
-            sb.Draw(pixel, new Rectangle((int)pos.X - sz / 2, (int)pos.Y - sz / 2, sz, sz), color);
+            t.Rect(pos, sz, color);
         }
-        else if (t < v.WindupDuration + v.ActiveDuration)
+        else if (time < v.WindupDuration + v.ActiveDuration)
         {
             float halfReach = HitboxReach * 0.5f;
             var c = body.Position + new Vector2(v.LockedFacing * (8f + halfReach), 0f);
-            sb.Draw(pixel, new Rectangle(
-                (int)(c.X - halfReach), (int)(c.Y - HitboxHalfHeight),
-                (int)HitboxReach, (int)(HitboxHalfHeight * 2f)),
-                StrikeColor * 0.55f);
+            t.Rect(c, new Vector2(HitboxReach, HitboxHalfHeight * 2f), StrikeColor * 0.55f);
         }
     }
 }
@@ -182,17 +178,17 @@ public class EnemyLungeAction : EnemyActionState
     //   0.80→1.00 anticipation recoil flash behind the body
     // Active: forward streak + 3 fanning speed lines. Recovery: nothing —
     // body sprite alone reads the post-strike lockout (same as the player slash).
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         const int BarMaxLen     = 64;
         const float HitZoneTickStart = 0.50f;
         const float RecoilStart      = 0.80f;
         var hot = Color.MediumPurple;
 
-        float t = v.TimeInState;
-        if (v.WindupDuration > 0f && t < v.WindupDuration)
+        float time = v.TimeInState;
+        if (v.WindupDuration > 0f && time < v.WindupDuration)
         {
-            float p = t / v.WindupDuration;
+            float p = time / v.WindupDuration;
 
             // Phase 1: danger bar — extends + brightens across full windup. Pulse
             // (fast sin) layers in starting at HitZoneTickStart so the late
@@ -201,10 +197,9 @@ public class EnemyLungeAction : EnemyActionState
             var origin = body.Position + new Vector2(v.LockedFacing * 12f, 0f);
             var start  = v.LockedFacing > 0 ? origin : origin + new Vector2(-barLen, 0f);
             float pulse = p < HitZoneTickStart ? 1f
-                : 0.55f + 0.45f * MathF.Abs(MathF.Sin(t * 32f));
-            sb.Draw(pixel,
-                new Rectangle((int)start.X, (int)start.Y - 1, barLen, 2),
-                hot * ((0.25f + 0.55f * p) * pulse));
+                : 0.55f + 0.45f * MathF.Abs(MathF.Sin(time * 32f));
+            t.Box((int)start.X, (int)start.Y - 1, barLen, 2,
+                  hot * ((0.25f + 0.55f * p) * pulse));
 
             // Phase 2: hit-zone tick marks at the tip — vertical ticks framing
             // the impact band so the player reads "this is where it hits".
@@ -213,8 +208,8 @@ public class EnemyLungeAction : EnemyActionState
                 float tickP = (p - HitZoneTickStart) / (1f - HitZoneTickStart);
                 int tickH = 4 + (int)(tickP * 4f);
                 float tipX = v.LockedFacing > 0 ? origin.X + barLen : origin.X - barLen;
-                sb.Draw(pixel, new Rectangle((int)tipX - 1, (int)origin.Y - tickH - 2, 2, tickH), hot * tickP);
-                sb.Draw(pixel, new Rectangle((int)tipX - 1, (int)origin.Y + 2,         2, tickH), hot * tickP);
+                t.Box((int)tipX - 1, (int)origin.Y - tickH - 2, 2, tickH, hot * tickP);
+                t.Box((int)tipX - 1, (int)origin.Y + 2,         2, tickH, hot * tickP);
             }
 
             // Phase 3: anticipation recoil — a pulsing mark BEHIND the body,
@@ -226,27 +221,22 @@ public class EnemyLungeAction : EnemyActionState
                 float anticip = MathF.Sin(rp * MathF.PI);
                 int sz = 3 + (int)(anticip * 5f);
                 var back = body.Position + new Vector2(-v.LockedFacing * (8f + anticip * 4f), 0f);
-                sb.Draw(pixel,
-                    new Rectangle((int)back.X - sz / 2, (int)back.Y - sz / 2, sz, sz),
-                    hot * (0.5f + 0.5f * anticip));
+                t.Rect(back, sz, hot * (0.5f + 0.5f * anticip));
             }
         }
-        else if (t < v.WindupDuration + v.ActiveDuration)
+        else if (time < v.WindupDuration + v.ActiveDuration)
         {
             // Active: main streak through the body PLUS three fanning speed
             // lines behind so the dash reads as motion rather than a teleport.
             var p = body.Position;
-            sb.Draw(pixel,
-                new Rectangle((int)(p.X - 14), (int)(p.Y - 1), 28, 2), hot * 0.75f);
+            t.Box((int)(p.X - 14), (int)(p.Y - 1), 28, 2, hot * 0.75f);
             for (int i = 0; i < 3; i++)
             {
                 int yOff   = -7 + i * 7;   // -7, 0, +7 vertical spread
                 int len    = 12 - i * 3;
                 int lineX  = (int)(p.X - v.LockedFacing * (10 + i * 5));
                 int startX = v.LockedFacing > 0 ? lineX - len : lineX;
-                sb.Draw(pixel,
-                    new Rectangle(startX, (int)(p.Y + yOff), len, 1),
-                    hot * (0.55f - i * 0.12f));
+                t.Box(startX, (int)(p.Y + yOff), len, 1, hot * (0.55f - i * 0.12f));
             }
         }
     }
@@ -336,27 +326,27 @@ public class EnemyShockwaveAction : EnemyActionState
     // a "tells where the burst will reach" marker. At 70%+ the ring pulses and
     // a bright core lights up underneath the brute. Active: bright filled disc
     // outline + 8 radial shock-lines fanning outward.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         var hot = Color.Gold;
-        float t = v.TimeInState;
+        float time = v.TimeInState;
         var c0  = body.Position;
 
-        if (v.WindupDuration > 0f && t < v.WindupDuration)
+        if (v.WindupDuration > 0f && time < v.WindupDuration)
         {
-            float p = t / v.WindupDuration;
+            float p = time / v.WindupDuration;
             int   r = (int)(HitRadius * p);
 
             // Ground ring — 16 samples around the perimeter so the radius reads
             // clearly even at small windup fractions.
             float pulse = p < 0.70f ? 1f
-                : 0.55f + 0.45f * MathF.Abs(MathF.Sin(t * 36f));
+                : 0.55f + 0.45f * MathF.Abs(MathF.Sin(time * 36f));
             var ringColor = Color.Lerp(new Color(hot, 60), hot, p) * pulse;
             for (int i = 0; i < 16; i++)
             {
                 float a = i * MathHelper.TwoPi / 16f;
                 var pos = c0 + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
-                sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2), ringColor);
+                t.Rect(pos, 2f, ringColor);
             }
 
             // Late-windup core glow under the brute — "the burst is loaded."
@@ -364,21 +354,19 @@ public class EnemyShockwaveAction : EnemyActionState
             {
                 float cp = (p - 0.70f) / 0.30f;
                 int sz = 4 + (int)(cp * 6f);
-                sb.Draw(pixel,
-                    new Rectangle((int)c0.X - sz / 2, (int)c0.Y - sz / 2, sz, sz),
-                    Color.White * (0.4f + 0.6f * cp));
+                t.Rect(c0, sz, Color.White * (0.4f + 0.6f * cp));
             }
         }
-        else if (t < v.WindupDuration + v.ActiveDuration)
+        else if (time < v.WindupDuration + v.ActiveDuration)
         {
             // Active: bright disc outline + 8 shock-lines fanning out.
-            float ap = (t - v.WindupDuration) / v.ActiveDuration;     // 0→1
+            float ap = (time - v.WindupDuration) / v.ActiveDuration;     // 0→1
             int r = (int)HitRadius;
             for (int i = 0; i < 24; i++)
             {
                 float a = i * MathHelper.TwoPi / 24f;
                 var pos = c0 + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
-                sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2), hot * (1f - ap * 0.4f));
+                t.Rect(pos, 2f, hot * (1f - ap * 0.4f));
             }
             for (int i = 0; i < 8; i++)
             {
@@ -388,7 +376,7 @@ public class EnemyShockwaveAction : EnemyActionState
                 for (int s = 6; s < lineLen; s += 3)
                 {
                     var pos = c0 + new Vector2(dx, dy) * s;
-                    sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2), hot * (0.8f - ap * 0.5f));
+                    t.Rect(pos, 2f, hot * (0.8f - ap * 0.5f));
                 }
             }
         }
@@ -474,14 +462,14 @@ public class EnemyPillarAction : EnemyActionState
     // Telegraph: candle markers at the future cells, growing in height +
     // alpha across the windup. Bottom-up phase ordering mirrors the sprout
     // commit order so the player can pre-read which rung lands first.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         if (v.WindupDuration <= 0f) return;
-        float t = v.TimeInState;
-        if (t >= v.WindupDuration + v.ActiveDuration) return;
+        float time = v.TimeInState;
+        if (time >= v.WindupDuration + v.ActiveDuration) return;
 
-        bool inWindup = t < v.WindupDuration;
-        float p = inWindup ? t / v.WindupDuration : 1f;
+        bool inWindup = time < v.WindupDuration;
+        float p = inWindup ? time / v.WindupDuration : 1f;
 
         var (baseTx, baseTy) = PillarBase(body.Position, v.LockedFacing);
         var hot = Color.SandyBrown;
@@ -493,15 +481,14 @@ public class EnemyPillarAction : EnemyActionState
             int cellX = baseTx * TS;
             int cellY = (baseTy - i) * TS;
             int barH  = 4 + (int)(phase * (TS - 4));
-            sb.Draw(pixel,
-                new Rectangle(cellX + TS / 2 - 2, cellY + TS - barH, 4, barH),
-                hot * (0.35f + 0.55f * phase));
+            t.Box(cellX + TS / 2 - 2, cellY + TS - barH, 4, barH,
+                  hot * (0.35f + 0.55f * phase));
             if (phase >= 0.95f)
             {
-                sb.Draw(pixel, new Rectangle(cellX,          cellY,            TS, 1), hot);
-                sb.Draw(pixel, new Rectangle(cellX,          cellY + TS - 1,   TS, 1), hot);
-                sb.Draw(pixel, new Rectangle(cellX,          cellY,            1,  TS), hot);
-                sb.Draw(pixel, new Rectangle(cellX + TS - 1, cellY,            1,  TS), hot);
+                t.Box(cellX,          cellY,            TS, 1, hot);
+                t.Box(cellX,          cellY + TS - 1,   TS, 1, hot);
+                t.Box(cellX,          cellY,            1,  TS, hot);
+                t.Box(cellX + TS - 1, cellY,            1,  TS, hot);
             }
         }
     }
@@ -595,38 +582,38 @@ public class EnemyBlockTrailAction : EnemyActionState
     // Telegraph: pre-placement ghost outlines at every future cell during
     // windup, with the imminent cell pulsing. As each threshold passes, that
     // cell's ghost stops drawing (the chunk renderer owns the real tile).
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         if (v.WindupDuration <= 0f && v.ActiveDuration <= 0f) return;
-        float t = v.TimeInState;
-        if (t >= v.WindupDuration + v.ActiveDuration) return;
+        float time = v.TimeInState;
+        if (time >= v.WindupDuration + v.ActiveDuration) return;
 
         var (rowTy, originTx) = TrailBase(body.Position, v.LockedFacing);
         var hot = Color.Khaki;
         const int TS = Chunk.TileSize;
 
         float interval = v.ActiveDuration / NumBlocks;
-        int nextIdx    = NextPendingIndex(t, in v);
+        int nextIdx    = NextPendingIndex(time, in v);
         for (int i = 0; i < NumBlocks; i++)
         {
             float threshold = v.WindupDuration + i * interval;
-            if (t >= threshold) continue;        // tile is real now
+            if (time >= threshold) continue;        // tile is real now
 
             int tx    = originTx + v.LockedFacing * i;
             int cellX = tx * TS;
             int cellY = rowTy * TS;
 
-            float baseAlpha = t < v.WindupDuration
-                ? 0.25f + 0.45f * (t / v.WindupDuration) * (1f - 0.12f * i)
+            float baseAlpha = time < v.WindupDuration
+                ? 0.25f + 0.45f * (time / v.WindupDuration) * (1f - 0.12f * i)
                 : 0.45f;
             float pulse = (i == nextIdx)
-                ? 0.55f + 0.45f * MathF.Abs(MathF.Sin(t * 26f))
+                ? 0.55f + 0.45f * MathF.Abs(MathF.Sin(time * 26f))
                 : 1f;
             var col = hot * (baseAlpha * pulse);
-            sb.Draw(pixel, new Rectangle(cellX,          cellY,            TS, 1), col);
-            sb.Draw(pixel, new Rectangle(cellX,          cellY + TS - 1,   TS, 1), col);
-            sb.Draw(pixel, new Rectangle(cellX,          cellY,            1,  TS), col);
-            sb.Draw(pixel, new Rectangle(cellX + TS - 1, cellY,            1,  TS), col);
+            t.Box(cellX,          cellY,            TS, 1, col);
+            t.Box(cellX,          cellY + TS - 1,   TS, 1, col);
+            t.Box(cellX,          cellY,            1,  TS, col);
+            t.Box(cellX + TS - 1, cellY,            1,  TS, col);
         }
     }
 
@@ -721,15 +708,15 @@ public class EnemySlamAction : EnemyActionState
     // Telegraph: short windup, so the visual is dense — overhead chevron forming
     // above the brute (anticipation "raised arms"), plus a downward target mark
     // that snaps into place under the body. Active: full vertical strike streak.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         var hot = Color.Crimson;
-        float t = v.TimeInState;
+        float time = v.TimeInState;
         var c0  = body.Position;
 
-        if (v.WindupDuration > 0f && t < v.WindupDuration)
+        if (v.WindupDuration > 0f && time < v.WindupDuration)
         {
-            float p = t / v.WindupDuration;
+            float p = time / v.WindupDuration;
 
             // Overhead chevron — two angled bars meeting above the body, growing
             // outward across the windup.
@@ -738,8 +725,8 @@ public class EnemySlamAction : EnemyActionState
             {
                 var l = c0 + new Vector2(-s,     -16 - s);
                 var r = c0 + new Vector2( s,     -16 - s);
-                sb.Draw(pixel, new Rectangle((int)l.X, (int)l.Y, 2, 2), hot * (0.4f + 0.6f * p));
-                sb.Draw(pixel, new Rectangle((int)r.X, (int)r.Y, 2, 2), hot * (0.4f + 0.6f * p));
+                t.Box((int)l.X, (int)l.Y, 2, 2, hot * (0.4f + 0.6f * p));
+                t.Box((int)r.X, (int)r.Y, 2, 2, hot * (0.4f + 0.6f * p));
             }
 
             // Downward target indicator under the body — appears at p > 0.4,
@@ -749,21 +736,16 @@ public class EnemySlamAction : EnemyActionState
                 float tp = (p - 0.4f) / 0.6f;
                 int mark = 6 + (int)(tp * 6f);
                 var t0 = c0 + new Vector2(0f, HitOffsetY);
-                sb.Draw(pixel, new Rectangle((int)t0.X - mark / 2, (int)t0.Y - 1, mark, 2), hot * tp);
-                sb.Draw(pixel, new Rectangle((int)t0.X - 1, (int)t0.Y - mark / 2, 2, mark), hot * tp);
+                t.Rect(t0, new Vector2(mark, 2f), hot * tp);
+                t.Rect(t0, new Vector2(2f, mark), hot * tp);
             }
         }
-        else if (t < v.WindupDuration + v.ActiveDuration)
+        else if (time < v.WindupDuration + v.ActiveDuration)
         {
             // Active: thick downward streak from body to hitbox center + impact slab.
-            sb.Draw(pixel,
-                new Rectangle((int)c0.X - 2, (int)c0.Y, 4, (int)HitOffsetY),
-                hot * 0.8f);
+            t.Box((int)c0.X - 2, (int)c0.Y, 4, (int)HitOffsetY, hot * 0.8f);
             var hc = c0 + new Vector2(0f, HitOffsetY);
-            sb.Draw(pixel,
-                new Rectangle((int)(hc.X - HitHalfWidth), (int)(hc.Y - HitHalfHeight),
-                              (int)(HitHalfWidth * 2f), (int)(HitHalfHeight * 2f)),
-                hot * 0.55f);
+            t.Rect(hc, new Vector2(HitHalfWidth * 2f, HitHalfHeight * 2f), hot * 0.55f);
         }
     }
 }
@@ -837,16 +819,16 @@ public class EnemySpinAction : EnemyActionState
     // Telegraph: 3 orbiting dots spinning around the brute. Spin rate ramps up
     // through windup; on active, the dots merge into a continuous ring + motion
     // streaks reading as a whirling sweep.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         var hot = Color.Aquamarine;
-        float t = v.TimeInState;
+        float time = v.TimeInState;
         var c0  = body.Position;
 
-        if (v.WindupDuration > 0f && t < v.WindupDuration)
+        if (v.WindupDuration > 0f && time < v.WindupDuration)
         {
-            float p = t / v.WindupDuration;
-            float spin = t * (8f + p * 24f);          // accelerates
+            float p = time / v.WindupDuration;
+            float spin = time * (8f + p * 24f);          // accelerates
             float r    = 12f + p * 8f;                // pulls outward as fists extend
             var col = Color.Lerp(new Color(hot, 80), hot, p);
             for (int i = 0; i < 3; i++)
@@ -854,20 +836,20 @@ public class EnemySpinAction : EnemyActionState
                 float a = spin + i * MathHelper.TwoPi / 3f;
                 var pos = c0 + new Vector2(MathF.Cos(a), MathF.Sin(a)) * r;
                 int sz = 3 + (int)(p * 2f);
-                sb.Draw(pixel, new Rectangle((int)pos.X - sz / 2, (int)pos.Y - sz / 2, sz, sz), col);
+                t.Rect(pos, sz, col);
             }
         }
-        else if (t < v.WindupDuration + v.ActiveDuration)
+        else if (time < v.WindupDuration + v.ActiveDuration)
         {
             // Active: 16-sample continuous ring at HitRadius + faster trailing
             // streaks behind each "fist" to read as motion blur.
-            float ap = (t - v.WindupDuration) / v.ActiveDuration;
-            float spin = t * 48f;
+            float ap = (time - v.WindupDuration) / v.ActiveDuration;
+            float spin = time * 48f;
             for (int i = 0; i < 16; i++)
             {
                 float a = i * MathHelper.TwoPi / 16f;
                 var pos = c0 + new Vector2(MathF.Cos(a), MathF.Sin(a)) * HitRadius;
-                sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2), hot * 0.6f);
+                t.Rect(pos, 2f, hot * 0.6f);
             }
             for (int i = 0; i < 3; i++)
             {
@@ -876,8 +858,7 @@ public class EnemySpinAction : EnemyActionState
                 {
                     float aa = a - s * 0.18f;
                     var pos = c0 + new Vector2(MathF.Cos(aa), MathF.Sin(aa)) * HitRadius;
-                    sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2),
-                        hot * ((1f - s * 0.18f) * (1f - ap * 0.3f)));
+                    t.Rect(pos, 2f, hot * ((1f - s * 0.18f) * (1f - ap * 0.3f)));
                 }
             }
         }
@@ -955,34 +936,30 @@ public class EnemyRangedAction : EnemyActionState
     //   0.7→1.0   secondary inner ring + bright pulsing core
     // Muzzle flash visible for ~5 frames after fire (covers Active + a slice
     // of Recovery so the "bang" reads at 30 fps).
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         const float CoreStart    = 0.70f;
         const float FlashSeconds = 0.18f;
         var hot = Color.LightCyan;
 
-        float t = v.TimeInState;
+        float time = v.TimeInState;
 
         // Post-fire muzzle flash — bright square at the body, fading out across
         // FlashSeconds. Reads as the "bang" frame of the shot.
-        if (t >= v.WindupDuration && t < v.WindupDuration + FlashSeconds)
+        if (time >= v.WindupDuration && time < v.WindupDuration + FlashSeconds)
         {
-            float fp = (t - v.WindupDuration) / FlashSeconds;
+            float fp = (time - v.WindupDuration) / FlashSeconds;
             float fa = 1f - fp;
             int sz  = 14 - (int)(fp * 8f);
             var c   = body.Position;
-            sb.Draw(pixel,
-                new Rectangle((int)c.X - sz / 2, (int)c.Y - sz / 2, sz, sz),
-                hot * fa);
-            sb.Draw(pixel,
-                new Rectangle((int)c.X - sz, (int)c.Y - 1, sz * 2, 2),
-                hot * (fa * 0.6f));
+            t.Rect(c, sz, hot * fa);
+            t.Rect(c, new Vector2(sz * 2, 2f), hot * (fa * 0.6f));
             return;
         }
 
-        if (v.WindupDuration <= 0f || t >= v.WindupDuration) return;
+        if (v.WindupDuration <= 0f || time >= v.WindupDuration) return;
 
-        float p = t / v.WindupDuration;
+        float p = time / v.WindupDuration;
         var ringColor = Color.Lerp(new Color(hot, 60), hot, p);
         var c0 = body.Position;
 
@@ -992,23 +969,23 @@ public class EnemyRangedAction : EnemyActionState
         {
             float a   = i * MathHelper.TwoPi / 12f;
             var pos   = c0 + new Vector2(MathF.Cos(a), MathF.Sin(a)) * outerR;
-            sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2), ringColor);
+            t.Rect(pos, 2f, ringColor);
         }
 
         // 6 inner particles orbiting and converging — start at radius 18, pulled
-        // to radius 4 at fire-time. Angular position rotates as a function of t
+        // to radius 4 at fire-time. Angular position rotates as a function of time
         // so the swirl reads as energy gathering rather than a static pattern.
         if (p > 0.2f)
         {
             float gather = (p - 0.2f) / 0.8f;       // 0 → 1 across the late windup
             float orbitR = 18f * (1f - gather) + 4f * gather;
-            float spin   = t * 12f;
+            float spin   = time * 12f;
             var particleColor = hot * (0.5f + 0.5f * gather);
             for (int i = 0; i < 6; i++)
             {
                 float a = i * MathHelper.TwoPi / 6f + spin;
                 var pos = c0 + new Vector2(MathF.Cos(a), MathF.Sin(a)) * orbitR;
-                sb.Draw(pixel, new Rectangle((int)pos.X - 1, (int)pos.Y - 1, 2, 2), particleColor);
+                t.Rect(pos, 2f, particleColor);
             }
         }
 
@@ -1019,9 +996,7 @@ public class EnemyRangedAction : EnemyActionState
             float cp     = (p - CoreStart) / (1f - CoreStart);
             float pulse  = MathF.Sin(cp * MathF.PI);
             int   coreSz = 3 + (int)(pulse * 5f);
-            sb.Draw(pixel,
-                new Rectangle((int)c0.X - coreSz / 2, (int)c0.Y - coreSz / 2, coreSz, coreSz),
-                Color.White * (0.4f + 0.6f * pulse));
+            t.Rect(c0, coreSz, Color.White * (0.4f + 0.6f * pulse));
         }
     }
 }

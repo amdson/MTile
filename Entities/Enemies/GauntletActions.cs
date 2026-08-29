@@ -1,13 +1,12 @@
 using System;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
 // Action-FSM states for the gauntlet trio (see EnemyFactory.RegisterBuiltIns for
 // the blueprints that use them). Same contract as EnemyActions.cs: flyweight
 // state objects, all per-activation data in EnemyActionVars, telegraph is
-// entirely a Draw concern read off TimeInState / WindupDuration.
+// entirely a Telegraph concern read off TimeInState / WindupDuration.
 //
 // What's new here relative to the MVP actions is the use of
 // EnemyActionVars.LockedAim — a 2D aim direction frozen at Enter. LockedFacing
@@ -109,33 +108,33 @@ public class EnemyRailShotAction : EnemyActionState
     //   * chevrons sliding inward along the line toward the muzzle
     //   * a muzzle core that swells, then strobes over the last 20%
     // After the shot, a brief recoil flash marks the release frame.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         var dir = v.LockedAim.LengthSquared() > 1e-4f ? v.LockedAim : new Vector2(v.LockedFacing, 0f);
         float angle = MathF.Atan2(dir.Y, dir.X);
         var   origin = body.Position + dir * MuzzleOffset;
-        float t = v.TimeInState;
+        float time = v.TimeInState;
 
         // Post-fire: short recoil bloom so the release frame is unmistakable.
         const float FlashSeconds = 0.20f;
-        if (t >= v.WindupDuration && t < v.WindupDuration + FlashSeconds)
+        if (time >= v.WindupDuration && time < v.WindupDuration + FlashSeconds)
         {
-            float fa = 1f - (t - v.WindupDuration) / FlashSeconds;
-            EnemyTelegraph.Line(sb, pixel, origin, angle, SightLength, 3f + fa * 5f, Color.White * (fa * 0.85f));
+            float fa = 1f - (time - v.WindupDuration) / FlashSeconds;
+            t.Ray(origin, angle, SightLength, 3f + fa * 5f, Color.White * (fa * 0.85f));
             int sz = 18 - (int)((1f - fa) * 12f);
-            sb.Draw(pixel, new Rectangle((int)origin.X - sz / 2, (int)origin.Y - sz / 2, sz, sz), Color.White * fa);
+            t.Rect(origin, sz, Color.White * fa);
             return;
         }
 
-        if (v.WindupDuration <= 0f || t >= v.WindupDuration) return;
+        if (v.WindupDuration <= 0f || time >= v.WindupDuration) return;
 
-        float p = t / v.WindupDuration;                     // 0 → 1 across windup
+        float p = time / v.WindupDuration;                     // 0 → 1 across windup
 
         // Sight line. Alpha and thickness both ramp so it's visible from the
         // first frame (you must be able to leave the line, not discover it late)
         // but only alarming near the end.
-        EnemyTelegraph.Line(sb, pixel, origin, angle, SightLength,
-                 1f + p * 3f, Color.Lerp(new Color(BeamColor, 70), BeamColor, p) * (0.35f + 0.65f * p));
+        t.Ray(origin, angle, SightLength,
+              1f + p * 3f, Color.Lerp(new Color(BeamColor, 70), BeamColor, p) * (0.35f + 0.65f * p));
 
         // Chevrons converging on the muzzle — five markers whose distance
         // collapses as the shot nears, giving the windup a legible "clock".
@@ -146,17 +145,16 @@ public class EnemyRailShotAction : EnemyActionState
             float d     = 40f + phase * 190f;
             var   c     = origin + dir * d;
             var   tint  = BeamColor * (0.25f + 0.75f * (1f - phase));
-            sb.Draw(pixel, new Rectangle((int)(c.X + perp.X * 5f) - 1, (int)(c.Y + perp.Y * 5f) - 1, 2, 2), tint);
-            sb.Draw(pixel, new Rectangle((int)(c.X - perp.X * 5f) - 1, (int)(c.Y - perp.Y * 5f) - 1, 2, 2), tint);
+            t.Rect(c + perp * 5f, 2f, tint);
+            t.Rect(c - perp * 5f, 2f, tint);
         }
 
         // Muzzle core: swells across the windup, then strobes on a fast square
         // wave over the last 20% — the "now" cue.
         int coreSz = 4 + (int)(p * 8f);
         var coreColor = Color.Lerp(BeamColor, Color.White, p);
-        if (p > 0.80f && (int)(t * 30f) % 2 == 0) coreSz += 5;
-        sb.Draw(pixel, new Rectangle((int)origin.X - coreSz / 2, (int)origin.Y - coreSz / 2, coreSz, coreSz),
-                coreColor * (0.5f + 0.5f * p));
+        if (p > 0.80f && (int)(time * 30f) % 2 == 0) coreSz += 5;
+        t.Rect(origin, coreSz, coreColor * (0.5f + 0.5f * p));
     }
 }
 
@@ -263,10 +261,10 @@ public class EnemyPounceSlamAction : EnemyActionState
     }
 
     // Speed-proportional tell, read straight off the live body velocity — the
-    // one piece of state Draw is handed besides vars. Chevrons stack under the
+    // one piece of state Telegraph is handed besides vars. Chevrons stack under the
     // body and the aura widens as the slam gets deadlier, so "how dangerous is
     // this right now" is legible without a HUD.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         float vy = body.Velocity.Y;
         if (vy <= MinFallSpeed) return;
@@ -278,7 +276,7 @@ public class EnemyPounceSlamAction : EnemyActionState
         // Danger aura — a widening slab under the body matching the hitbox.
         int w = (int)(HitboxHalfWidth * 2f);
         int h = (int)(HitboxReachDown * (0.6f + 0.8f * m));
-        sb.Draw(pixel, new Rectangle((int)c.X - w / 2, (int)c.Y + 4, w, h), tint * (0.20f + 0.35f * m));
+        t.Box((int)c.X - w / 2, (int)c.Y + 4, w, h, tint * (0.20f + 0.35f * m));
 
         // Stacked chevrons: one at the slowest lethal speed, up to four at full
         // momentum. Counting them is a direct read of incoming damage.
@@ -287,7 +285,7 @@ public class EnemyPounceSlamAction : EnemyActionState
         {
             int y = (int)c.Y + 10 + i * 5;
             int cw = 12 - i * 2;
-            sb.Draw(pixel, new Rectangle((int)c.X - cw / 2, y, cw, 2), tint * (0.9f - i * 0.18f));
+            t.Box((int)c.X - cw / 2, y, cw, 2, tint * (0.9f - i * 0.18f));
         }
     }
 }
@@ -375,30 +373,28 @@ public class EnemyLashAction : EnemyActionState
     // and brightening; the strike is the same axis at full width. Because both
     // use LockedAim, what the player sees during the wind-up is precisely the
     // volume that becomes dangerous — the telegraph can't drift off the attack.
-    public override void Draw(SpriteBatch sb, Texture2D pixel, PhysicsBody body, in EnemyActionVars v)
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         var dir = v.LockedAim.LengthSquared() > 1e-4f ? v.LockedAim : new Vector2(v.LockedFacing, 0f);
         float angle = MathF.Atan2(dir.Y, dir.X);
-        float t = v.TimeInState;
+        float time = v.TimeInState;
 
-        if (v.WindupDuration > 0f && t < v.WindupDuration)
+        if (v.WindupDuration > 0f && time < v.WindupDuration)
         {
-            float p = t / v.WindupDuration;
+            float p = time / v.WindupDuration;
             // Ease-out so most of the extension happens early and the last third
             // is a held, quivering aim — the part the player reacts to.
             float ext = Reach * (1f - (1f - p) * (1f - p));
-            EnemyTelegraph.Line(sb, pixel, body.Position, angle, ext, 1f + p * 2f,
-                                         Color.Lerp(new Color(LashColor, 80), LashColor, p));
+            t.Ray(body.Position, angle, ext, 1f + p * 2f,
+                  Color.Lerp(new Color(LashColor, 80), LashColor, p));
             // Tip barb — a bright dot at the strike point.
             var tip = body.Position + dir * ext;
             int sz = 2 + (int)(p * 4f);
-            sb.Draw(pixel, new Rectangle((int)tip.X - sz / 2, (int)tip.Y - sz / 2, sz, sz),
-                    Color.Lerp(LashColor, Color.White, p));
+            t.Rect(tip, sz, Color.Lerp(LashColor, Color.White, p));
             return;
         }
 
-        if (t < v.WindupDuration + v.ActiveDuration)
-            EnemyTelegraph.Line(sb, pixel, body.Position, angle, Reach, HalfWidth * 2f,
-                                         LashColor * 0.6f);
+        if (time < v.WindupDuration + v.ActiveDuration)
+            t.Ray(body.Position, angle, Reach, HalfWidth * 2f, LashColor * 0.6f);
     }
 }
