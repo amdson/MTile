@@ -42,13 +42,13 @@ of each feature re-deriving it a different way.
   landed hit always visibly moves a movable target, even when the closing
   speed was tiny." Phase 2 below is mostly a tuning pass on this, not new
   code.
-- **`HitConnect` sound is already wired**, just clipless —
+- **`HitConnect` sound is already wired AND already has clips** —
   `GameAudio.HitConnect` (`Audio/GameAudio.cs:127-140`) fires `SoundKind.HitConnect`
   scaled by `LastHitImpulse` every time a hit lands, gated on
-  `age <= StampWindowFrames`. `SoundKind.HitConnect` already exists in the
-  enum (`Audio/SoundKind.cs:29`). Dropping in `hit_connect_01.ogg` (+ `_02`,
-  `_03`, …) and running `sync-sounds.ps1` is most of phase 3 — see
-  `/audio-pipeline`.
+  `age <= StampWindowFrames`; `hit_connect_01..04.ogg` already exist in
+  `Assets/Sounds` and are already built into `Content.mgcb`. (Earlier draft
+  of this doc assumed this was clipless — it isn't. What's actually new is
+  the raw material dropped in the repo root just now; see phase 3 below.)
 - **Render-only edge-detect pattern** — `CosmeticUpdateSystem` already does
   exactly this for the landing puff (`_wasGroundedLastFrame`,
   `Drawing/CosmeticUpdateSystem.cs:28-30,136-141`): reads settled sim state
@@ -194,19 +194,68 @@ it **already exists end-to-end** — it's just only wired to one move.
 
 ## Phase 3 — hit sounds
 
-Mostly asset work, per the note above:
+Checked what's actually sitting in the repo root right now:
 
-- Drop `hit_connect_01.ogg` (`_02`, `_03`, …) into `Assets/Sounds`, run
-  `sync-sounds.ps1` (`/audio-pipeline` has the full recipe + `Content.mgcb`
-  regen step).
-- Optional refinement once clips exist: `GameAudio.HitConnect` currently maps
-  one continuous `t = LastHitImpulse/900` onto gain+pitch. Consider a small
-  tier split (e.g. a distinct clip or bigger pitch drop past the
-  `StunImpulseThreshold` in `CombatState.cs:161`) so a stun-crossing hit
-  sounds categorically heavier, not just louder — mirrors how `Land`
-  (`GameAudio.cs:158-170`) already scales gain off impact but is worth a
-  second clip tier for "hard" landings too, if that's cheap while touching
-  this code.
+- `hits/` — a 37-clip raw pack (`hit01.mp3.flac` … `hit37.mp3.flac`), untouched
+  source material.
+- `hit02.mp3.ogg`, `hit33.mp3.ogg`, `hit_big.mp3.ogg` — already Ogg Vorbis
+  (stereo, 44.1 kHz), evidently hand-picked from the `hits/` pack (`hit02`/
+  `hit33` line up with pack indices) plus one distinct "big hit" pick. Not
+  yet loudness-matched/mono/22.05 kHz to the pipeline spec
+  (`Plans/AUDIO_ASSET_LIST.md`) — they need to go through `build-sfx.ps1`
+  same as anything else, even though they're already `.ogg`; the script
+  accepts `.ogg` as valid input and will re-normalize it.
+- `swosh1.ogg`, `swosh2.ogg` — attack-swing whooshes. There's no `SoundKind`
+  for this yet; it's new wiring, not just new clips.
+
+None of this is committed and none of it is in `Audio/raw/` (gitignored
+intake dir, `.gitignore:42`) yet — it's loose in the repo root.
+
+### 3a. Expand `HitConnect` variety
+
+1. Move the desired picks into `Audio/raw/` and run `build-sfx.ps1`. **Watch
+   the numbering**: the script restarts variant numbering at `_01` for
+   whatever's in `Audio/raw` at run time (`scripts/build-sfx.ps1:74-76`) and
+   skips a destination that already exists unless `-Force` is passed
+   (`.ps1:83-86`) — so pointing `-Name hit_connect` at just the 3 new picks
+   would try to write `hit_connect_01..03.ogg` and silently no-op against the
+   4 that already exist. Either process the new files without `-Name`
+   (keeps each one's sanitized source name as the stem, no collision) and
+   hand-rename the outputs to continue the sequence at `hit_connect_05.ogg`,
+   `_06`, `_07`; or copy the existing 4 back into `Audio/raw` alongside the
+   new picks so one pass renumbers everything 01..07 consistently.
+2. The full 37-clip `hits/` pack is raw material, not something to bulk-add
+   — `Plans/AUDIO_PLAN.md` §5's round-robin variety is about avoiding
+   identical repeats, not maximizing clip count, and the 3 already-exported
+   picks look like the curated subset. Worth confirming with whoever picked
+   them whether more than those 3 are wanted before processing the whole
+   pack.
+3. Run `sync-sounds.ps1` to regenerate `Content.mgcb` + `SoundManifest.g.cs`.
+   No `GameAudio.cs` changes needed — `HitConnect` already round-robins
+   across however many `hit_connect_*` clips exist.
+
+### 3b. New: swing/whoosh sound
+
+This needs actual wiring, not just clips:
+
+1. Add a `SoundKind` entry (e.g. `Swing`) in `Audio/SoundKind.cs`. Insert it
+   **before** `Respawn`, not after — `SoundKinds.Count` is hardcoded as
+   `(int)SoundKind.Respawn + 1` (`SoundKind.cs:42`), so anything appended
+   after `Respawn` needs that line updated too; inserting earlier needs no
+   other change since nothing hardcodes a kind's numeric value.
+2. `build-sfx.ps1 -Name swing` on `swosh1.ogg`/`swosh2.ogg` → `swing_01.ogg`,
+   `swing_02.ogg` in `Assets/Sounds`, then `sync-sounds.ps1`.
+3. Trigger it in `GameAudio.cs` with a state-entry edge, the same pattern
+   `Jump`/`DoubleJump` already use (`GameAudio.cs:145-152,174-181`) — except
+   keyed off the **action** FSM, not movement: `PlayerCharacter` exposes
+   `CurrentAction`/`GetPreviousAction(int)` (`PlayerCharacter.cs:290,664`)
+   exactly parallel to `CurrentState`/`GetPreviousState`. Add a `Swing`
+   method to `GameAudio`, called from `Player()` (`GameAudio.cs:96-106`)
+   alongside the others: fire when `CurrentAction` is a `SlashLikeAction` or
+   `StabAction` and `GetPreviousAction(1)` isn't — same "derivable from the
+   snapshotted ring, so it's rollback-safe for free" reasoning the jump
+   sounds already rely on. Two clips round-robin automatically through
+   `_bank.Pick`, same as everywhere else.
 
 ## Phase 4 — screen shake
 
@@ -265,7 +314,9 @@ top. Phase 2b (attacker recoil) is small, self-contained, and also
 sim-affecting — good to land and playtest right after phase 1, before the
 cosmetic phases. Phases 3-7 are independent of each other and of
 hitstop/recoil, and can be done in any order once phase 0 lands — phase 3
-(sound) is unblocked today and doesn't even need phase 0.
+(sound) is unblocked today and doesn't even need phase 0. Within phase 3,
+3a (hit variety) is pure asset work and can happen any time; 3b (swing
+sound) is a few real code lines and can land alongside it or separately.
 
 ## Open questions
 
@@ -280,3 +331,6 @@ hitstop/recoil, and can be done in any order once phase 0 lands — phase 3
   explicitly.
 - Hitstop scope: players only for V1, or should enemy `EnemyState<TVars>`
   hits freeze too?
+- Phase 3a: is the whole 37-clip `hits/` pack meant to feed `HitConnect`, or
+  just the 3 already-exported picks (`hit02`, `hit33`, `hit_big`)? Assumed
+  the latter above.
