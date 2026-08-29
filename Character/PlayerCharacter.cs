@@ -182,6 +182,14 @@ public class PlayerCharacter : IHittable
 
         Body.Velocity += res.TargetDeltaV;
 
+        // For render-only cosmetics (directional knockback cue, weapon flash) that
+        // want more than LastHitImpulse's magnitude. Falls back to the hit's launch
+        // axis when the resolved knockback was ~zero (e.g. a heavy target barely
+        // budged) so the cue still has a direction to draw.
+        _abilities.Combat.LastHitDir = res.TargetDeltaV.LengthSquared() > 1e-4f
+            ? Vector2.Normalize(res.TargetDeltaV)
+            : hit.StrikeDir;
+
         // Register the hit for hitstun (every hit) + the stun-threshold check.
         // HitResult.Strength is the percent-scaled impulse magnitude (Impulse mode)
         // or the scaled closing speed (Collision mode) — pre-mass either way, so
@@ -468,6 +476,22 @@ public class PlayerCharacter : IHittable
         // Expire hitstun / stun whose window closed.
         _abilities.Combat.Tick(_frame);
 
+        // Hitstop (Plans/HIT_FEEL_PLAN.md phase 1): freeze the CURRENT ACTION's
+        // progression for a few frames after a landed combat hit — no new hitboxes,
+        // no ApplyActionForces recoil/lunge, guarded at those two call sites below.
+        // Deliberately NOT a blanket skip of this method:
+        //   - Movement state selection/Update (incl. TumbleState's tech-window check,
+        //     TumbleTechTests) must keep running every frame regardless — movement
+        //     must not read action state (CLAUDE.md), so it can't be affected by an
+        //     action-side freeze anyway, and gating it here broke tech resolution
+        //     under sustained hits.
+        //   - Action FSM SELECTION (incl. RecoveryAction's flinch eviction of a
+        //     mid-swing attack, HitEvictionTests) must also keep running every frame,
+        //     hitstop or not, or a fresh hit could never interrupt what it just hit —
+        //     only the chosen action's Update/ApplyActionForces freeze, not selection.
+        // Physics integration (gravity/terrain collision) is untouched either way.
+        bool hitstopFrozen = _abilities.Combat.HitstopActive;
+
         // Edge-detect input gestures and enqueue intents. Done BEFORE the FSMs so
         // freshly-released clicks are visible to action preconditions this frame.
         // Gestures are measured relative to the body so camera follow (player motion)
@@ -632,8 +656,11 @@ public class PlayerCharacter : IHittable
 
         // Action gets to augment the body's force AFTER movement has written it but
         // BEFORE Action.Update — keeps Update free for FSM logic, lets the physics
-        // augmentation live in its own dedicated hook.
-        _currentAction.ApplyActionForces(ctx, in _actionVars);
+        // augmentation live in its own dedicated hook. Hitstop freezes this hook (no
+        // recoil/lunge assist while frozen) and the action's own Update below (no
+        // hitbox progression) — see the hitstopFrozen comment above for why nothing
+        // else is gated.
+        if (!hitstopFrozen) _currentAction.ApplyActionForces(ctx, in _actionVars);
 
         // Apply gravity-scale modifier as a counter-force, identical in shape to
         // Entity.PreStep. With GravityScale = 1 this is a no-op; with 0.3 the body
@@ -641,7 +668,7 @@ public class PlayerCharacter : IHittable
         if (ctx.Modifiers.GravityScale != 1f)
             Body.AppliedForce += Gravity * (ctx.Modifiers.GravityScale - 1f);
 
-        _currentAction.Update(ctx, _abilities, ref _actionVars);
+        if (!hitstopFrozen) _currentAction.Update(ctx, _abilities, ref _actionVars);
 
         // Block-economy upkeep, once per frame per player and AFTER the action ran, so a
         // placement action has had its chance to request charging. Runs unconditionally —

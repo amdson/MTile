@@ -32,6 +32,7 @@ public enum SoundKind
     DoubleJump,
     Grunt,        // climb effort
     Throw,        // built, not yet wired — see GameAudio
+    Swing,        // attack whoosh — see GameAudio.Swing
 
     // Tier 3, but already flowing through the presentation seam.
     Respawn,

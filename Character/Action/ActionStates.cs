@@ -471,6 +471,13 @@ public abstract class SlashLikeAction : ActionState
     // usual knockback / hitstun (the struggle channel — see Hitbox.GrabStrengthDamage).
     // Only GrabbedSlash overrides this; every normal slash hits normally.
     protected virtual  float   GrabStrengthDamage  => 0f;
+    // Newton's-third-law attacker recoil (Plans/HIT_FEEL_PLAN.md phase 2b). Same
+    // mechanism StabAction already uses (Hitbox.RecoilScale + CombatSystem's per-HitId
+    // recoil inbox); ApplyActionForces below is the shared consumer for every slash
+    // variant. Ballpark of Stab's 0.2f, a touch lighter since slashes are quicker arm
+    // arcs rather than a full-body thrust. GrabbedSlash overrides to 0 — a struggle
+    // hit must have zero effect on either side, not just zero knockback.
+    protected virtual  float   RecoilScale         => 0.15f;
     // -----------------------------------------------------------------------
 
     protected float ArcRadius => BaseArcRadius * ArcRadiusScale;
@@ -568,6 +575,7 @@ public abstract class SlashLikeAction : ActionState
                 ctx.Faction, ctx.SelfId, SlashColor,
                 hitstunSecondsOverride: HitstunSecondsOverride,
                 grabStrengthDamage: GrabStrengthDamage,
+                recoilScale: RecoilScale,
                 mode: StrikeSpeed > 0f ? KnockbackMode.Collision : KnockbackMode.Impulse,
                 strikeDir: vars.AttackDir,
                 strikeVelocity: ctx.Body.Velocity + vars.AttackDir * StrikeSpeed,
@@ -618,6 +626,17 @@ public abstract class SlashLikeAction : ActionState
     // (GlowRenderer, its own PrimitiveBatch pass, not the telegraph list).
     // SlashTrail/SlashGlowColor expose what it needs; nothing to telegraph here.
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars) { }
+
+    // Newton's-third-law recoil from last frame's connecting hit (Plans/HIT_FEEL_PLAN.md
+    // phase 2b) — same 1-frame-inbox read StabAction.ApplyActionForces already does.
+    // Shared here so every slash variant gets it for free; RecoilScale (0 for
+    // GrabbedSlash) gates whether there's ever anything to read.
+    public override void ApplyActionForces(EnvironmentContext ctx, in ActionVars vars)
+    {
+        if (ctx.CombatSystem == null) return;
+        var recoil = ctx.CombatSystem.PeekRecoil(vars.HitId);
+        if (recoil != Vector2.Zero) ctx.Body.Velocity += recoil;
+    }
 }
 
 // ---------- Ground combo: S1 → S2 → S3 -----------------------------------------
@@ -3143,6 +3162,10 @@ public class GrabbedSlash : SlashLikeAction
     // The struggle channel: each connecting hit removes this much grab strength from
     // the grabber (GrabStrengthMax 3 ⇒ breaks on the 3rd). No hitstun is dealt.
     protected override float GrabStrengthDamage  => 1f;
+    // A struggle hit must have zero effect on either side, not just zero knockback —
+    // wearing a grab down should never also shove the grabber (see CombatState's
+    // struggle-channel comment).
+    protected override float RecoilScale         => 0f;
 
     // Beats NullAction; no combo. Normal slashes are gated off while grabbed, so this
     // is the only attack available.

@@ -75,6 +75,11 @@ public class Game1 : Game
     // Level-triggered sounds are re-derived each frame from sim state; edge-triggered
     // ones arrive through _events, already deduped against rollback replay.
     private readonly GameAudio _audio = new();
+    // Screen shake + directional/contact hit cosmetics (Plans/HIT_FEEL_PLAN.md phases
+    // 4-6). Render-only, like _particles/_audio beside it — reads sim state each frame,
+    // writes nothing back. Declared after _particles/_camera so this inline initializer
+    // can reference them (C# runs field initializers in declaration order).
+    private readonly HitFeelSystem _hitFeel;
     private int _devToneSeq;
     // Cursor trail — a fading ribbon trailing the world-space mouse position.
     private readonly Trail _cursorTrail = new(capacity: 24, lifetime: 0.22f);
@@ -168,6 +173,7 @@ public class Game1 : Game
         _config = GameConfig.Load(File.Exists(_configPath)
             ? Path.GetFullPath(_configPath) : _configPath);
         _camera.Zoom = _config.CameraZoom;
+        _hitFeel = new HitFeelSystem(_particles, _camera);
 
         _graphics = new GraphicsDeviceManager(this)
         {
@@ -407,6 +413,9 @@ public class Game1 : Game
             {
                 case PresentationKind.TileBreak:
                     Effects.TileBreak(_particles, e.Position, TilePalette.BaseColor((TileType)e.Payload));
+                    // Debris decal (Plans/HIT_FEEL_PLAN.md phase 7) — same edge-triggered
+                    // event, just a longer-lived burst so a break leaves something behind.
+                    Effects.Decal(_particles, e.Position, TilePalette.BaseColor((TileType)e.Payload));
                     break;
                 case PresentationKind.PlayerRespawn:
                     Effects.Puff(_particles, e.Position, Color.LimeGreen);
@@ -423,6 +432,9 @@ public class Game1 : Game
         // Level-triggered: re-derived from final sim state, so a rollback needs nothing.
         _audio.CollectLevel(_sim);
         _audio.EndFrame(_camera.Position, dt);
+        // Screen shake + hit cosmetics (Plans/HIT_FEEL_PLAN.md phases 4-6) — own
+        // frame-stamp edge-detect, same reasoning as _audio.CollectLevel above.
+        _hitFeel.Collect(_sim);
     }
 
     // TEMP EXPERIMENT: single-frame corrector inspector (GameConfig.FreezeFrame,
@@ -934,7 +946,7 @@ public class Game1 : Game
         using (_prof.Measure(_sBackdrop))
             _background?.Draw(_spriteBatch, _camera, _screenCenter);
 
-        _spriteBatch.Begin(transformMatrix: _camera.GetTransform(_screenCenter));
+        _spriteBatch.Begin(transformMatrix: _camera.GetDrawTransform(_screenCenter));
 
         var player = _sim.Player;
 
@@ -966,7 +978,7 @@ public class Game1 : Game
         long tSkins = _prof.Begin();
         if (_config.DrawPlayerSpriteSkin)
         {
-            var cam = _camera.GetTransform(_screenCenter);
+            var cam = _camera.GetDrawTransform(_screenCenter);
             bool split = false;
             var skin0 = SkinForPlayer(0);
             if (skin0 != null)
@@ -1163,20 +1175,20 @@ public class Game1 : Game
         // PrimitiveBatch layer (gradients / curves / surfaces) draws in world space on
         // top of the SpriteBatch pass. Demo card for now; real users (metaballs) land later.
         if (_config.DebugDrawPrimitiveDemo)
-            _devDemos.DrawPrimitiveDemo(_camera.GetTransform(_screenCenter),
+            _devDemos.DrawPrimitiveDemo(_camera.GetDrawTransform(_screenCenter),
                               new Vector2(player.Body.Position.X, player.Body.Position.Y - 80f));
 
         if (_config.DebugDrawDensityDemo)
-            _devDemos.DrawDensityDemo(_camera.GetTransform(_screenCenter),
+            _devDemos.DrawDensityDemo(_camera.GetDrawTransform(_screenCenter),
                             new Vector2(player.Body.Position.X, player.Body.Position.Y - 80f));
 
         if (_config.DebugDrawMetaballDemo && _metaballs != null)
-            _devDemos.DrawMetaballDemo(_camera.GetTransform(_screenCenter),
+            _devDemos.DrawMetaballDemo(_camera.GetDrawTransform(_screenCenter),
                              new Vector2(player.Body.Position.X, player.Body.Position.Y - 70f));
 
         // Glowing-shape pass (world space): the slash apex renders as a glowing triangle +
         // trail here, since the glow renderers need their own pass outside the SpriteBatch.
-        var camTransform = _camera.GetTransform(_screenCenter);
+        var camTransform = _camera.GetDrawTransform(_screenCenter);
         long tGlow = _prof.Begin();
         // Frozen during playback: the glow advances its own trail state from dt and reads
         // a live RigRoot, neither of which is valid while scrubbing a recorded take.

@@ -56,6 +56,59 @@ public static class Effects
         }
     }
 
+    // Directional knockback cue (Plans/HIT_FEEL_PLAN.md phase 5): a couple of streaks
+    // shot along the resolved knockback direction, so a hit's effect reads even when
+    // the camera doesn't follow. `strength` (0..1, same normalization HitFeelSystem
+    // and GameAudio.HitConnect use) scales count/speed/size — a light tap is barely
+    // visible, a heavy hit throws a visible streak.
+    public static void KnockbackCue(ParticleSystem ps, Vector2 pos, Vector2 dir, float strength)
+    {
+        if (dir.LengthSquared() > 1e-4f) dir.Normalize(); else dir = new Vector2(1f, 0f);
+        int count = 1 + (int)(strength * 3f);
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            float jit = ((float)_rng.NextDouble() - 0.5f) * 0.25f;
+            float spd = (140f + strength * 220f) * (0.8f + (float)_rng.NextDouble() * 0.4f);
+            p.Position     = pos + dir * (6f + i * 4f);
+            p.Velocity     = Rotate(dir, jit) * spd;
+            p.Acceleration = -p.Velocity * 2.5f;
+            p.MaxLife      = 0.10f + strength * 0.08f;
+            p.Life         = p.MaxLife;
+            p.StartColor   = Color.White;
+            p.EndColor     = new Color(255, 255, 255, 0);
+            p.StartSize    = 10f + strength * 14f;
+            p.EndSize      = 2f;
+            p.Kind         = ParticleKind.Line;
+        }
+    }
+
+    // Persistent-ish debris left at a hit/crush impact point (Plans/HIT_FEEL_PLAN.md
+    // phase 7). Pragmatic reuse of the particle pool as a stand-in for a real decal —
+    // near-zero launch velocity and a life measured in seconds (not the usual
+    // fractions-of-a-second particle burst) so the chunks settle and sit rather than
+    // fly apart, reading as debris left behind instead of a burst effect.
+    public static void Decal(ParticleSystem ps, Vector2 pos, Color color, int count = 3)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            float ang = (float)(_rng.NextDouble() * MathHelper.TwoPi);
+            float spd = 6f + (float)_rng.NextDouble() * 14f;
+            p.Position        = pos;
+            p.Velocity        = new Vector2(MathF.Cos(ang), MathF.Sin(ang)) * spd;
+            p.Acceleration    = new Vector2(0f, 60f);
+            p.MaxLife         = 2.2f + (float)_rng.NextDouble() * 1.2f;
+            p.Life            = p.MaxLife;
+            p.StartColor      = color;
+            p.EndColor        = color * 0f;
+            p.StartSize       = 2.5f + (float)_rng.NextDouble() * 1.5f;
+            p.EndSize         = p.StartSize * 0.8f;
+            p.AngularVelocity = (float)(_rng.NextDouble() - 0.5) * 2f;
+            p.Kind            = ParticleKind.Square;
+        }
+    }
+
     // Soft puff that grows + fades. Use for landings, jump-dust, sprout puffs.
     public static void Puff(ParticleSystem ps, Vector2 pos, Color color, int count = 5)
     {
