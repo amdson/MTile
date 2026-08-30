@@ -228,7 +228,7 @@ public class ZeusBoltAction : EnemyActionState
     // knock them far enough and the hill's own shoulder occludes them, which
     // silently ends the fight until they climb back. 520 / player Mass 2.5 ≈
     // 210 px/s — a shove down the slope, not an eviction from the encounter.
-    protected virtual float Knockback    => 520f;
+    protected virtual float Knockback    => 120f;
     protected virtual float Hitstun      => 0.30f;
 
     protected virtual Color ChargeColor => new(120, 150, 255);
@@ -359,7 +359,7 @@ public class ZeusStrikeAction : EnemyActionState
     // Below Stone's MaxHP on purpose: the flurry cannot dig, it only chews the
     // dirt crust. Also a light percent contribution on a body.
     protected virtual float Damage       => 0.9f;
-    protected virtual float Knockback    => 300f;
+    protected virtual float Knockback    => 150f;
     protected virtual float Hitstun      => 0.12f;
 
     // Angular spread around the player, in radians (~±7°). Big enough that
@@ -475,7 +475,7 @@ public class ZeusSweepAction : EnemyActionState
     protected virtual float HalfWidth    => 9f;
     protected virtual float Penetration  => 2.0f;
     protected virtual float Damage       => 2.1f;      // ≥ Stone MaxHP: the rake clears cells
-    protected virtual float Knockback    => 520f;
+    protected virtual float Knockback    => 50f;
     protected virtual float Hitstun      => 0.20f;
 
     // Total swept angle, centred on the locked aim (~±26°).
