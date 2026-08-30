@@ -14,6 +14,9 @@ namespace MTile.Tests.Sim;
 //      charge — the burst scales and the clod craters instead of leaving a mound.
 //   2. Standing near an eruption when it fires, it cashes itself in, which is the only
 //      way an eruption exceeds EruptMax — the block adds a whole meter of its own.
+//
+// The third sink — destroying the block where it stands, which detonates it — lives in
+// ChargedBlastTests, because it hangs off BreakCell rather than off either verb here.
 public class ChargedBlockUseTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 60f;

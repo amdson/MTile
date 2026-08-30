@@ -83,6 +83,23 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // particle system) react to feedback events without ChunkMap knowing about them.
     public System.Action<Microsoft.Xna.Framework.Vector2, TileType> OnTileBroken;
 
+    // Charged cells destroyed since the last drain, in world-space centers. Written by
+    // BreakCell, drained once per Step by Simulation, which turns each into a
+    // ChargedBlast entity. This is the only place the fact is knowable: BreakCell has
+    // to clear the charge flag (a cell rebuilt at the same coords must not inherit a
+    // ghost charge), so anything reading Charge afterwards always sees "no".
+    //
+    // A list rather than the OnTileBroken event because this is SIM state, not
+    // feedback: it has to spawn an entity deterministically, and OnTileBroken is a
+    // presentation channel that tests reassign wholesale. It is not snapshotted, and
+    // doesn't need to be — Simulation drains it inside the same Step that fills it, so
+    // like the force-field registry it is always empty at a frame boundary.
+    private readonly List<Microsoft.Xna.Framework.Vector2> _chargedBreaks = new();
+
+    public IReadOnlyList<Microsoft.Xna.Framework.Vector2> ChargedBreaks => _chargedBreaks;
+
+    public void ClearChargedBreaks() => _chargedBreaks.Clear();
+
     // Fires when a cell first becomes visible terrain — a Growing sprout appearing,
     // whether from an ordinary build or a forced burst. The mirror of OnTileBroken, and
     // like it, purely a feedback channel: ChunkMap knows nothing about its subscribers.
@@ -481,6 +498,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             if (node != null) Graph.Remove(node);
             WriteTile(chunk, tx, ty, TileState.Empty, sproutType, null);
             Damage.Clear(gtx, gty);
+            NoteChargedBreak(gtx, gty);
             Charge.Clear(gtx, gty);
             DropSupportFor(gtx, gty);
             OnTileBroken?.Invoke(CellCenter(gtx, gty), sproutType);
@@ -492,6 +510,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // restore brings the material back; the live cell's Type is irrelevant once Empty.
         WriteTile(chunk, tx, ty, TileState.Empty, brokenType, null);
         Damage.Clear(gtx, gty);
+        NoteChargedBreak(gtx, gty);
         Charge.Clear(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
         // a foam tile broken early would still trigger another BreakCell when
@@ -502,6 +521,13 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         DropSupportFor(gtx, gty);
         OnTileBroken?.Invoke(CellCenter(gtx, gty), brokenType);
         return true;
+    }
+
+    // Queue a blast if the cell about to go Empty was charged. Called from BreakCell
+    // immediately BEFORE Charge.Clear, which is the last moment the flag still exists.
+    private void NoteChargedBreak(int gtx, int gty)
+    {
+        if (Charge.IsCharged(gtx, gty)) _chargedBreaks.Add(CellCenter(gtx, gty));
     }
 
     // World-coord shim — kept for existing call sites that work in world space.

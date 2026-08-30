@@ -397,6 +397,10 @@ public class Game1 : Game
             _events.Emit(_sim.Frame,
                          new PresentationId(PresentationKind.MassLand, id.Index, id.Generation),
                          pos, (int)type | (Math.Min(blocks, 255) << 8));
+        _sim.OnChargedBlast += (id, pos, radius) =>
+            _events.Emit(_sim.Frame,
+                         new PresentationId(PresentationKind.ChargedBlast, id.Index, id.Generation),
+                         pos, (int)radius);
 
         if (_config.FreezeFrame) ApplyFreezeFrame();
     }
@@ -424,6 +428,9 @@ public class Game1 : Game
                 case PresentationKind.MassLand:
                     Effects.MassSplash(_particles, e.Position,
                         TilePalette.BaseColor((TileType)(e.Payload & 0xFF)), e.Payload >> 8);
+                    break;
+                case PresentationKind.ChargedBlast:
+                    Effects.Blast(_particles, e.Position, e.Payload);
                     break;
             }
             _audio.Present(in e);
