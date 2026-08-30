@@ -176,6 +176,11 @@ public class CombatState
     // longer than the window itself means a mash is off more often than it is on, so
     // guessing WHEN to guard stays the skill.
     public int     GuardCooldownExpireFrame;
+    // Set by a perfect block and consumed by the deactivation it pays for. A clean block
+    // spends the stance like any other — but it is the one drop that costs nothing, so
+    // reading the attack right lets you come straight back up for the next one, while a
+    // mistimed or speculative guard still eats the cooldown.
+    public bool    GuardBlockRefund;
     // Break recovery. Set when a hit gets through the guard; the stance can't come
     // back up until the countdown expires AND the button has been released (Tick).
     // The release half matters: without it, holding Shift through a break would hand
@@ -352,7 +357,9 @@ public class CombatState
     public void EndGuard(int currentFrame, float dt)
     {
         GuardActive = false;
-        int expire  = currentFrame + SimFrames.FromSeconds(GuardCooldownSeconds, dt);
+        // Earned: a perfect block re-arms immediately.
+        if (GuardBlockRefund) { GuardBlockRefund = false; return; }
+        int expire = currentFrame + SimFrames.FromSeconds(GuardCooldownSeconds, dt);
         if (expire > GuardCooldownExpireFrame) GuardCooldownExpireFrame = expire;
     }
 
@@ -366,8 +373,9 @@ public class CombatState
     //     (GuardOutcome.None, full damage and knockback). An out-of-cone hit still
     //     breaks the stance: the guard didn't meet it, so it isn't holding anything.
     //   - Guarding and hit inside the perfect window -> Absorbed. No damage, no
-    //     knockback, no hitstun, stance survives, and a weak hit also charges
-    //     GuardRetaliate.
+    //     knockback, no hitstun, and a weak hit also charges GuardRetaliate. The stance
+    //     drops (it stopped its hit) but pays no re-entry cooldown, so a player who
+    //     keeps reading correctly can block a flurry one hit at a time.
     //   - Guarding and hit late -> partial penetration ramping with how long the button
     //     has been held, and the guard BREAKS (see GuardBroken).
     //
@@ -408,6 +416,14 @@ public class CombatState
             LastParryFrame   = currentFrame;
             LastParryDir     = fromAttacker;
             LastParryCharged = charged;
+
+            // The block spends the stance: GuardAction drops out next frame (its
+            // CheckConditions requires GuardActive), and with the refund set it can
+            // come straight back up. So a clean block stops ONE hit and hands the
+            // player a fresh window for the next, rather than making a held guard
+            // an omni-directional shield again.
+            GuardActive      = false;
+            GuardBlockRefund = true;
             return GuardOutcome.Absorb;
         }
 
@@ -427,6 +443,7 @@ public class CombatState
     private void BreakGuard(int currentFrame, float dt)
     {
         GuardActive           = false;
+        GuardBlockRefund      = false;   // a break is never free
         GuardBroken           = true;
         GuardBreakExpireFrame = currentFrame + SimFrames.FromSeconds(GuardBreakRecoverySeconds, dt);
     }
@@ -451,6 +468,7 @@ public class CombatState
         GuardCharged = o.GuardCharged; GuardChargedExpireFrame = o.GuardChargedExpireFrame;
         GuardStartFrame = o.GuardStartFrame;
         GuardCooldownExpireFrame = o.GuardCooldownExpireFrame;
+        GuardBlockRefund = o.GuardBlockRefund;
         GuardBroken = o.GuardBroken; GuardBreakExpireFrame = o.GuardBreakExpireFrame;
         LastParryFrame = o.LastParryFrame; LastParryDir = o.LastParryDir;
         LastParryCharged = o.LastParryCharged;

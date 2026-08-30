@@ -215,6 +215,30 @@ public class HitEvictionTests(ITestOutputHelper output)
         Assert.DoesNotContain(true, hitstun);          // and it never registered
     }
 
+    // The clean block spends the stance but refunds the cooldown, so with Shift still
+    // held guard is back almost immediately — ready for the next hit of a flurry. This
+    // is the FSM half of the contract: a pure CombatState test can't catch GuardAction
+    // failing to drop out on the block, or failing to come back after it.
+    [Fact]
+    public void CleanBlock_DropsGuardThenRearmsImmediately()
+    {
+        var (actions, _, percent) = Run(AttackerStabScript(),
+                                        FacingVictimGuardingAt(27), frames: 60);
+
+        int guardFirst = First(actions, "GuardAction");
+        // The block ends that run of guard frames.
+        int lastOfRun = guardFirst;
+        while (lastOfRun + 1 < actions.Count && actions[lastOfRun + 1] == "GuardAction") lastOfRun++;
+        int back = First(actions, "GuardAction", lastOfRun + 1);
+        output.WriteLine($"guard {guardFirst}..{lastOfRun}, back@{back}, percent={percent}");
+
+        Assert.Equal(0f, percent);                     // it really was a clean block
+        Assert.True(back > 0, "Guard should come back up after a clean block.");
+        // The 0.15s cooldown is 4 frames at this dt; a refunded block skips it.
+        Assert.True(back - lastOfRun <= 2,
+            $"A clean block must refund the cooldown (gap {back - lastOfRun} frames).");
+    }
+
     // The point of the rework: parking on Shift is no longer invulnerability. The same
     // hit that a fresh guard eats completely leaks most of its percent through a guard
     // that has been held since the start of the run.

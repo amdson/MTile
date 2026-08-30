@@ -1340,6 +1340,10 @@ public class AirSpinStab : StabAction
 // (Combat.GuardOnCooldown) follows every ordinary deactivation for the mirror-image
 // reason: without it, mashing Shift would hand out a fresh window per press.
 //
+// A clean block spends the stance too — but it is the one deactivation that refunds
+// the cooldown (Combat.GuardBlockRefund), so guard can come straight back up for the
+// next hit. Blocking a flurry is a sequence of reads, not one button held down.
+//
 // A weak in-cone hit absorbed inside the perfect window sets Combat.GuardCharged,
 // arming GuardRetaliateAction (LMB-press while charged → fast forward slash).
 // Air-allowed per user note in the roadmap §9: yes, allow guard in air. The
@@ -1384,6 +1388,10 @@ public class GuardAction : ActionState
         // A break drops the stance the same frame it happens, so the shield indicator
         // disappears on contact instead of lingering over a guard that isn't guarding.
         if (ctx.Combat?.GuardBroken  == true) return false;
+        // ...and so does a clean block, which spends the stance rather than holding it.
+        // The refund it leaves behind means the precondition scan can bring guard back
+        // on the very next frame while Shift is still down.
+        if (ctx.Combat?.GuardActive  == false) return false;
         return true;
     }
 

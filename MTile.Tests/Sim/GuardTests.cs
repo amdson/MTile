@@ -8,7 +8,10 @@ namespace MTile.Tests;
 
 // Guard is a TIMED parry (CombatState.ResolveGuard), not a shield you hold: it absorbs
 // a hit outright only in the brief window after the stance comes up, leaks progressively
-// more the longer the button is held, and breaks on anything that leaks through.
+// more the longer the button is held, and breaks on anything that leaks through. Every
+// deactivation costs a re-entry cooldown EXCEPT a clean block, which spends the stance
+// but refunds the wait — so blocking a flurry is a run of correct reads, and a mash or a
+// mistimed guess is not.
 //
 // These tests pin both halves of that: the penetration curve itself, and the render-side
 // cue stamps (LastParryFrame / LastParryDir / LastParryCharged) that GameAudio.GuardBlock
@@ -57,8 +60,54 @@ public class GuardTests(ITestOutputHelper output)
         Assert.True(g.Absorbed);
         Assert.Equal(0f, g.DamageScale);
         Assert.Equal(0f, g.KnockbackScale);
-        Assert.True(c.GuardActive);      // a clean block keeps the stance up
+        // The block spends the stance — but not as a break, and not for a price.
+        Assert.False(c.GuardActive);
         Assert.False(c.GuardBroken);
+        Assert.True(c.GuardBlockRefund);
+    }
+
+    // The whole point of the refund: block, come straight back up, block again.
+    [Fact]
+    public void CleanBlockRefundsTheReEntryCooldown()
+    {
+        var c = Guarding();
+        int blockFrame = GuardFrame + 1;
+        HitAt(c, blockFrame);
+
+        c.EndGuard(blockFrame + 1, Dt);          // GuardAction drops out the next frame
+
+        Assert.False(c.GuardOnCooldown(blockFrame + 1));
+        Assert.False(c.GuardBlockRefund);        // consumed, not permanent
+
+        // Re-guard immediately and the next hit is blocked just as cleanly.
+        c.BeginGuard(blockFrame + 2);
+        Assert.True(HitAt(c, blockFrame + 3).Absorbed);
+    }
+
+    // ...but only ONE refund per block. A second deactivation pays like any other.
+    [Fact]
+    public void RefundDoesNotCarryPastTheDeactivationItPaysFor()
+    {
+        var c = Guarding();
+        HitAt(c, GuardFrame + 1);
+        c.EndGuard(GuardFrame + 2, Dt);          // free
+
+        c.BeginGuard(GuardFrame + 3);
+        c.EndGuard(GuardFrame + 4, Dt);          // released without blocking anything
+
+        Assert.True(c.GuardOnCooldown(GuardFrame + 5));
+    }
+
+    // A leak is not a block: breaking never refunds.
+    [Fact]
+    public void BreakingTheGuardCostsTheCooldownToo()
+    {
+        var c = Guarding();
+        HitAt(c, GuardFrame + 600);              // leaks through, breaks the stance
+
+        Assert.False(c.GuardBlockRefund);
+        c.EndGuard(GuardFrame + 601, Dt);
+        Assert.True(c.GuardOnCooldown(GuardFrame + 602));
     }
 
     [Fact]
@@ -261,9 +310,12 @@ public class GuardTests(ITestOutputHelper output)
     public void GuardStateSurvivesSnapshotRestore()
     {
         var c = Guarding();
-        HitAt(c, GuardFrame + 1);          // absorbed: stamps the cue, keeps the stance
-        var savedGuarding = c.Clone();
+        var savedGuarding = c.Clone();     // mid-stance, window still open
 
+        HitAt(c, GuardFrame + 1);          // absorbed: stamps the cue, spends the stance
+        var savedBlocked = c.Clone();
+
+        c.BeginGuard(GuardFrame + 2);
         HitAt(c, GuardFrame + 600);        // leaks + breaks
         var savedBroken = c.Clone();
 
@@ -271,14 +323,18 @@ public class GuardTests(ITestOutputHelper output)
         Assert.True(c.GuardActive);
         Assert.False(c.GuardBroken);
         Assert.Equal(GuardFrame, c.GuardStartFrame);
-        Assert.Equal(GuardFrame + 1, c.LastParryFrame);
-        Assert.True(c.LastParryDir.X > 0.99f);
-        Assert.True(c.LastParryCharged);
         // Restored mid-guard, the window is still measured from the original entry.
         Assert.True(HitAt(c, GuardFrame + 2).Absorbed);
 
+        c.CopyFrom(savedBlocked);
+        Assert.Equal(GuardFrame + 1, c.LastParryFrame);
+        Assert.True(c.LastParryDir.X > 0.99f);
+        Assert.True(c.LastParryCharged);
+        Assert.True(c.GuardBlockRefund);   // a rolled-back block keeps its refund
+
         c.CopyFrom(savedBroken);
         Assert.True(c.GuardBroken);
+        Assert.False(c.GuardBlockRefund);
         Assert.Equal(GuardFrame + 600 + BreakRecoveryFrames, c.GuardBreakExpireFrame);
     }
 
