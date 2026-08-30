@@ -54,13 +54,18 @@ public struct EntityData
     public Color   Color;
     public Faction Faction;
 
+    // Render-only hit-feel stamp (Plans/HIT_FEEL_PLAN.md) — mirrors CombatState's
+    // LastHit* fields on PlayerCharacter. HitGeneration advances once per landed
+    // hit (deterministic under replay: OnHit is called the same number of times
+    // for the same input sequence), which is all HitFeelSystem needs to edge-detect
+    // a new hit without a frame counter of its own.
+    public int     HitGeneration;
+    public float   LastHitImpulse;
+    public Vector2 LastHitDir;
+
     // Immutable construction inputs (rebuild a Generic entity's body on rehydrate).
     public Polygon      Polygon;
     public ImpactDamage Impact;
-
-    // Render-only hit stamp (Entity.LastHitId) — snapshotted so a rollback replay
-    // reproduces the same stamp and the white flash doesn't re-fire.
-    public int LastHitId;
 
     // Projectile base
     public float Age;

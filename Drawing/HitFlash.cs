@@ -8,7 +8,7 @@ namespace MTile;
 // time, and feed that to whichever draw path the target uses.
 //
 // Trigger + dedupe: the sim already stamps every hit — CombatState.LastHitFrame for
-// players, Entity.LastHitId for entities — and both are snapshotted, so a rollback
+// players, Entity.HitGeneration for entities — and both are snapshotted, so a rollback
 // replay reproduces the same stamp rather than minting a fresh one. Watching for a
 // stamp to ADVANCE is therefore edge-detection that survives rollback, the same trick
 // HitFeelSystem and GameAudio.HitConnect use. Nothing here writes back to the sim.
@@ -100,7 +100,7 @@ public sealed class HitFlashSystem
         var secondaries = sim.SecondaryPlayers;
         for (int i = 0; i < secondaries.Count; i++) Player(secondaries[i].Player);
 
-        foreach (var e in sim.Entities) _tracker.Stamp(e.Id, e.LastHitId);
+        foreach (var e in sim.Entities) _tracker.Stamp(e.Id, e.HitGeneration);
     }
 
     private void Player(PlayerCharacter p)

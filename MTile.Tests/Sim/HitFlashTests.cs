@@ -112,19 +112,21 @@ public class HitFlashTests
         var ball = new PracticeBall(new Vector2(100f, 20f));
         sim.SpawnEntity(ball);
         sim.Step(default);
-        Assert.Equal(0, ball.LastHitId);
+        Assert.Equal(0, ball.HitGeneration);
 
+        // HitGeneration counts landed hits rather than naming one, so the assertion is
+        // "it advanced", not "it equals this id" — the tracker only ever edge-detects.
         int hitId = sim.HitIds.Next();
         ball.OnHit(new Hitbox(ball.Body.Bounds, hitId, 0f, Vector2.Zero,
                               Faction.Player1, sim.Player.Id), default);
-        Assert.Equal(hitId, ball.LastHitId);
+        Assert.Equal(1, ball.HitGeneration);
 
         // The stamp is what the render shell edge-detects, so a restore has to bring it
         // back — otherwise a rollback replay re-fires the flash for hits already shown.
         var snap = sim.Snapshot();
-        ball.LastHitId = 0;
+        ball.HitGeneration = 0;
         sim.Restore(snap);
         var restored = Assert.IsType<PracticeBall>(sim.Resolve(ball.Id));
-        Assert.Equal(hitId, restored.LastHitId);
+        Assert.Equal(1, restored.HitGeneration);
     }
 }
