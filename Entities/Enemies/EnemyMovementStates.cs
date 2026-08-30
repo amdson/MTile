@@ -450,14 +450,10 @@ public class EnemyFlyState : EnemyMovementState
         // semantics (heavier = harder to push around).
         float budget = MaxAcceleration / mass * dt;
 
-        // Desired post-step velocity: cruise toward MoveDir, or zero to hover.
-        Vector2 desiredV = Vector2.Zero;
-        var move = ctx.Input.MoveDir;
-        if (move.LengthSquared() > 1e-4f)
-        {
-            move.Normalize();
-            desiredV = move * CruiseSpeed;
-        }
+        // Desired post-step velocity. Virtual so a subclass can vary it per frame
+        // (a dive that hovers during its wind-up and then commits at a different
+        // speed) — CruiseSpeed alone is a constant and can't express a phase.
+        Vector2 desiredV = DesiredVelocity(in ctx, in v);
 
         // PhysicsWorld will add gravStep to Velocity AFTER this Update returns.
         // To land at desiredV after gravity, we must set Velocity NOW such
@@ -471,6 +467,19 @@ public class EnemyFlyState : EnemyMovementState
         if (delta.LengthSquared() > budget * budget)
             delta *= budget / delta.Length();
         body.Velocity += delta;
+    }
+
+    // What the body should be moving at after this step: cruise along the brain's
+    // MoveDir, or zero to hover in place (which spends the whole budget cancelling
+    // gravity). Overriding this is the sanctioned way to build a flight mode with
+    // phases — see ShrikeDiveState — because it keeps the gravity-compensation and
+    // acceleration-budget maths above in exactly one place.
+    protected virtual Vector2 DesiredVelocity(in EnemyContext ctx, in EnemyMovementVars v)
+    {
+        var move = ctx.Input.MoveDir;
+        if (move.LengthSquared() <= 1e-4f) return Vector2.Zero;
+        move.Normalize();
+        return move * CruiseSpeed;
     }
 }
 

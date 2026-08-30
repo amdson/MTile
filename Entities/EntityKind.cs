@@ -44,6 +44,11 @@ public enum EntityKind
     // blueprint (no subclass); see EnemyFactory.RegisterBuiltIns.
     Bird,
 
+    // Shrike — the bird's hunting cousin. Patrols like a Bird until the player
+    // comes near, then hovers, dives, and detonates on whatever it reaches.
+    // Pure blueprint; see Entities/Enemies/Types/ShrikeEnemy.cs.
+    Shrike,
+
     // Copy-and-edit starting point for a new enemy — Entities/Enemies/Types/TemplateEnemy.cs.
     // Spawn it on the "sandbox" stage.
     Template,

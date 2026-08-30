@@ -112,6 +112,40 @@ public static class Sprites
         return sprite;
     }
 
+    // Shrike: the bird's hunting cousin, and it has to read as one at a glance
+    // WITHOUT being mistaken for one — the whole encounter design is that the
+    // player has to check every flock. So: same wing-beat silhouette, same size,
+    // but a red body, a longer span and beak, and a wider beat arc. The faster
+    // beat (0.08 vs the bird's 0.12) is the cue that carries at distance, where
+    // the colour of a 9px body doesn't.
+    public static AnimatedSprite Shrike(float radius)
+    {
+        var bodyColor = new Color(165, 45, 45);
+        var wingColor = new Color(230, 120, 100);
+        var eyeColor  = new Color(255, 230, 120);
+
+        // wing = vertical offset of the wingtips; negative is the upstroke. Same
+        // two-line span as Bird — the rig only has a left and a right wing, so
+        // "swept" can't be drawn here without the two lines crossing the body —
+        // but longer, and beating through a wider arc.
+        Pose Frame(float wing) => new Pose()
+            .Ring(Vector2.Zero, radius * 0.65f, bodyColor, 8, 1.5f)
+            .Disc(Vector2.Zero, radius * 0.3f, bodyColor)
+            .Line(new Vector2(-radius * 0.5f, 0f), new Vector2(-radius * 1.7f, wing), wingColor, 1.5f)
+            .Line(new Vector2( radius * 0.5f, 0f), new Vector2( radius * 1.4f, wing), wingColor, 1.5f)
+            // Longer beak than the bird's, and the eye sits forward on it.
+            .Line(new Vector2(radius * 0.5f, 0f), new Vector2(radius * 1.4f, 0f), eyeColor, 1f)
+            .Disc(new Vector2(radius * 0.35f, -radius * 0.25f), 1.5f, eyeColor);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(-radius * 0.8f), Frame(radius * 0.6f) },
+            frameDuration: 0.08f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
     // Bullet: tiny solid disc with a thin trailing line — a one-frame pose, no
     // animation needed. Rotation is unused (the disc reads identically at any
     // angle), so BulletProjectile doesn't bother syncing it.

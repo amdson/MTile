@@ -452,6 +452,15 @@ public static class Stages
         foreach (int k in new[] { 2, 4, 6, 8, 9 })
             SpawnBirdFlock(g, TowerDeckTileY(k), leftSide: k % 2 == 1);
 
+        // Shrikes on the decks the flocks leave empty, so the climb alternates
+        // between the hazard you route around and the one that comes to you, and
+        // the player meets the second kind alone before meeting it in a crowd.
+        // Two per deck rather than three: a shrike that connects craters the deck
+        // it went off over, and three of those would take the floor out from under
+        // the stair.
+        foreach (int k in new[] { 3, 5, 7 })
+            SpawnShrikePair(g, TowerDeckTileY(k), leftSide: k % 2 == 1);
+
         // Ammo on the plain either side of the tower, clear of the footprint — the same
         // reason the other stages carry it, and a free readout of where a beam is.
         float groundTop = TowerGroundTileY * Chunk.TileSize;
@@ -480,6 +489,21 @@ public static class Stages
                 new Vector2(laneStart + i * 18f, y + (i % 2 == 0 ? 0f : -20f))));
     }
 
+    // Two shrikes over one deck's stairwell, placed the same way as a bird flock —
+    // same lane, same altitude — because the point is that they look like one until
+    // one of them turns and hovers. See Entities/Enemies/Types/ShrikeEnemy.cs.
+    private static void SpawnShrikePair(Simulation g, int deckTileY, bool leftSide)
+    {
+        float y = (deckTileY - 7) * Chunk.TileSize;
+        float laneStart = leftSide
+            ? -(TowerDeckHalf - 1) * Chunk.TileSize
+            :  (TowerShaftHalf + 2) * Chunk.TileSize;
+
+        for (int i = 0; i < 2; i++)
+            g.SpawnEntity(EnemyFactory.Create(EntityKind.Shrike,
+                new Vector2(laneStart + i * 26f, y + (i % 2 == 0 ? 0f : -20f))));
+    }
+
     private static void PopulatePlain(Simulation g)
     {
         // Floor sits at world tile y = 6; a standing body centers roughly one
@@ -491,6 +515,12 @@ public static class Stages
         const float floorY = 6 * Chunk.TileSize - Chunk.TileSize;
         g.SpawnEntity(EnemyFactory.Create(EntityKind.Skirmisher, new Vector2(-100f, floorY)));
         g.SpawnEntity(EnemyFactory.Create(EntityKind.Skirmisher, new Vector2( 140f, floorY)));
+
+        // One shrike holding the air above them — the flat plain is the clearest
+        // place to read a dive, since there is no terrain for it to clip on the
+        // way in. Spawned to the right so its opening patrol leg carries it away
+        // from the player before it turns back and notices them.
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Shrike, new Vector2(180f, floorY - 90f)));
 
         // A couple of ammo balls so the player has something to chuck at the
         // brutes — mirrors the arena setup.

@@ -294,6 +294,12 @@ public static class EnemyFactory
             },
         });
 
+        // Shrike — the bird that hunts. Same silhouette as the Bird above and the
+        // opposite intent: it patrols until the player is close, hovers for a beat,
+        // then dives and detonates on whatever it reaches. Everything about it
+        // lives in Entities/Enemies/Types/ShrikeEnemy.cs.
+        Register(ShrikeEnemy.Blueprint);
+
         // Zeus — the statue on the hill. Everything about it lives in
         // Entities/Enemies/Types/ZeusEnemy.cs; this is the line that makes it
         // spawnable and snapshot-restorable.
