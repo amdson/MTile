@@ -422,7 +422,7 @@ public abstract class SlashLikeAction : ActionState
     // visibly pops instead of a dead connect.
     private   const   float    SlashStrikeMass     = 2.5f;
     private   const   float    SlashRestitution    = 0.5f;
-    private   const   float    SlashMinLaunch      = 180f;
+    private   const   float    SlashMinLaunch      = 180f;   // default for MinLaunch below
 
     // ----- per-variant knobs ------------------------------------------------
     protected abstract float   Duration            { get; }   // seconds
@@ -443,6 +443,31 @@ public abstract class SlashLikeAction : ActionState
     // the impulse Δv was KnockbackMagnitude; collision Δv = (1+e)·μ·u ≈ 0.75·u
     // at strike mass 1 ⇒ StrikeSpeed ≈ 1.33 × old magnitude.
     protected virtual  float   StrikeSpeed         => 1f;
+    // Fraction of the attacker's body velocity folded into the published
+    // StrikeVelocity. 1.0 (default) is the honest physical reading: you are swinging
+    // from a moving frame, so a slash driven into the target by your own momentum
+    // closes faster and hits harder.
+    //
+    // It is a knob because that reading has a blind spot — it assumes body velocity is
+    // only ever WEAKLY aligned with the swing. For every horizontal slash that holds:
+    // the dot product against a mostly-sideways AttackDir picks up run speed (~200 px/s)
+    // at most, and only when you run into your own swing. DownAirSlash breaks it. Its
+    // AttackDir points straight down, which is exactly where gravity has been
+    // accelerating you, so the term stops being a garnish on StrikeSpeed and starts
+    // dominating it: at terminal velocity the fall alone is nearly twice the swing.
+    // Knockback then scales linearly and WITHOUT BOUND in how long you fell before
+    // connecting, which is not a difficulty curve anyone chose.
+    //
+    // Damping the share rather than clamping the result keeps "a committed dive hits
+    // harder" as a real, readable mechanic — it just stops the height of the fall from
+    // being the dominant term in the hit.
+    protected virtual  float   StrikeBodyVelocityShare => 1f;
+    // Launch floor (px/s): a connect below this still visibly moves a movable target,
+    // so a hit never reads as a dead touch. This carries more weight than it looks —
+    // StrikeSpeed defaults to 1, so a variant that doesn't override it publishes
+    // Collision mode with a near-zero closing speed and this floor IS its knockback.
+    // Override to 0 only for a variant whose closing speed is large by construction.
+    protected virtual  float   MinLaunch           => SlashMinLaunch;
     protected abstract Color   SlashColor          { get; }
     protected abstract bool    RequireGround       { get; }
     protected abstract bool    RequireAir          { get; }
@@ -596,10 +621,11 @@ public abstract class SlashLikeAction : ActionState
                 recoilMinMaterialHP: RecoilMinMaterialHP,
                 mode: StrikeSpeed > 0f ? KnockbackMode.Collision : KnockbackMode.Impulse,
                 strikeDir: vars.AttackDir,
-                strikeVelocity: ctx.Body.Velocity + vars.AttackDir * StrikeSpeed,
+                strikeVelocity: ctx.Body.Velocity * StrikeBodyVelocityShare
+                                + vars.AttackDir * StrikeSpeed,
                 strikeMass: SlashStrikeMass,
                 restitution: SlashRestitution,
-                minLaunch: SlashMinLaunch,
+                minLaunch: MinLaunch,
                 origin: ctx.Body.Position));
         }
 
@@ -926,12 +952,14 @@ public class DownAirSlash : SlashLikeAction
     // of straight down — i.e. its normalized +y component is at least cos(30°).
     private const float AimCosThreshold  = 0.8660254f;
 
-    // Pogo tuning. PogoSpeed is calibrated against the jump: JumpVelocity (-100) plus
-    // JumpHoldForce (-1500) over MaxJumpHoldTime (0.12) nets roughly -280 px/s, so a
-    // 300 px/s bounce is "a free jump, slightly better" — enough to chain pogos off a
-    // line of enemies without trivializing vertical traversal.
-    private const float PogoSpeed        = 300f;
-    private const float PogoMaxSpeed     = 520f;
+    // Pogo tuning, calibrated against the jump: JumpVelocity (-100) plus JumpHoldForce
+    // (-1500) over MaxJumpHoldTime (0.12) nets roughly -280 px/s. The band sits BELOW
+    // that on purpose — a floor bounce is half a jump and even the ceiling barely
+    // matches one, so chaining pogos down a line of enemies is a way to stay up, not a
+    // cheaper elevator than jumping. (It ran 300/520 first, which put every connect at
+    // or above a full jump and made the down-air the best vertical movement in the kit.)
+    private const float PogoSpeed        = 140f;
+    private const float PogoMaxSpeed     = 270f;
     // ~3.3× the stock slash recoil. Below PogoSpeed this never shows (the floor wins);
     // it's what makes a heavy, fast-closing connect kick back harder than a light one.
     private const float PogoRecoilScale  = 0.50f;
@@ -948,6 +976,18 @@ public class DownAirSlash : SlashLikeAction
     protected override float SweepDirection       => +1f;
     protected override float KnockbackMagnitude   => 340f;
     protected override float StrikeSpeed          => 450f;
+    // The one slash that swings along gravity, so the only one for which the
+    // attacker's velocity is fully collinear with AttackDir — see the base class.
+    // Undamped, a terminal-velocity connect closed at ~1300 px/s against the 511 of a
+    // hovering one and the 795 of the hardest ground launcher, rising without bound in
+    // fall height. At 0.3 a dive still reads as heavier than a hover (511 → ~800) and
+    // tops out around that ground launcher instead of running past it.
+    protected override float StrikeBodyVelocityShare => 0.3f;
+    // No launch floor. The shared 180 exists for variants whose closing speed can be
+    // ~0 (StrikeSpeed defaults to 1); this one's is 450 before the dive is counted, so
+    // the floor could never bind — and a floor is the wrong shape for a move whose
+    // whole point is that the knockback tracks how hard you came down.
+    protected override float MinLaunch            => 0f;
     protected override float DamageScale          => 1.4f;
     protected override Color SlashColor           => Color.MediumSpringGreen;
     protected override bool  RequireGround        => false;
