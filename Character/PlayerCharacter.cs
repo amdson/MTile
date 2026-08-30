@@ -140,11 +140,15 @@ public class PlayerCharacter : IHittable
         // parrying/invulnerable player recoils the attacker exactly as before.
         if (_abilities.Combat.IsInvulnerable(_frame)) return hit.KnockbackImpulse;
 
-        // Guard parry — roadmap §1.5. If GuardActive and the hit lands in the
-        // front-cone, absorb completely: no damage, no knockback, no hitstun.
-        // Weak in-cone hits additionally charge GuardRetaliate (see CombatState.TryParry).
-        if (_abilities.Combat.TryParry(hit.KnockbackImpulse, hit.Damage, _abilities.Facing, _frame, _dt))
-            return hit.KnockbackImpulse;
+        // Guard — timing-based (CombatState.ResolveGuard). A front-cone hit arriving
+        // inside the window right after the stance came up is absorbed completely: no
+        // damage, no knockback, no hitstun, and a weak one also charges GuardRetaliate.
+        // Anything later leaks through — harder the longer the button has been held —
+        // and breaks the guard on the way in. `guard` scales the percent and the
+        // knockback below; it is (1, 1) when the guard wasn't involved.
+        var guard = _abilities.Combat.ResolveGuard(hit.KnockbackImpulse, hit.Damage,
+                                                   _abilities.Facing, _frame, _dt);
+        if (guard.Absorbed) return hit.KnockbackImpulse;
 
         // Struggle / grab-break (COMBAT_FEEL_PLAN Phase 6). A grabbed victim's exempt
         // slash erodes THIS player's grab strength instead of dealing knockback/percent/
@@ -164,7 +168,7 @@ public class PlayerCharacter : IHittable
         // hard you're slammed). So low % ⇒ pushed around harmlessly; high % ⇒ flung
         // into walls/floor hard enough to take crush damage. The hit's "damage" stat
         // is now its percent contribution; tile damage still uses it on the tile path.
-        _abilities.Combat.AddPercent(hit.Damage);
+        _abilities.Combat.AddPercent(hit.Damage * guard.DamageScale);
         float kbScale = _abilities.Combat.KnockbackScale;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity, kbScale);
 
@@ -176,11 +180,14 @@ public class PlayerCharacter : IHittable
         float armor = _currentAction?.ArmorProfile(in _actionVars) ?? 0f;
         if (armor > 0f && res.Strength < armor)
         {
-            Body.Velocity += res.TargetDeltaV * ArmorKnockbackScale;
+            Body.Velocity += res.TargetDeltaV * ArmorKnockbackScale * guard.KnockbackScale;
             return res.Impulse;
         }
 
-        Body.Velocity += res.TargetDeltaV;
+        // Scaled here rather than through HitResolver's `scale` because that also feeds
+        // Collision mode's MinLaunch floor, which would hand back most of the knockback
+        // a leaky guard just ate.
+        Body.Velocity += res.TargetDeltaV * guard.KnockbackScale;
 
         // For render-only cosmetics (directional knockback cue, weapon flash) that
         // want more than LastHitImpulse's magnitude. Falls back to the hit's launch
@@ -196,7 +203,10 @@ public class PlayerCharacter : IHittable
         // strength reads consistently across masses and high-% hits stun longer /
         // cross the stun / Tumble threshold. Hold-slashes still carry an explicit
         // HitstunSecondsOverride.
-        _abilities.Combat.OnHitRegistered(_frame, res.Strength, _dt,
+        // Strength rides the same knockback share: it IS the knockback magnitude
+        // (pre-mass), so leaving it whole while halving the actual velocity change
+        // would stun the victim as if nothing had been blocked.
+        _abilities.Combat.OnHitRegistered(_frame, res.Strength * guard.KnockbackScale, _dt,
                                           hit.HitstunSecondsOverride);
         return res.Impulse;
     }
@@ -475,7 +485,7 @@ public class PlayerCharacter : IHittable
         // Expire combo / recovery flags whose window closed since last frame.
         _abilities.Condition.Tick(_frame);
         // Expire hitstun / stun whose window closed.
-        _abilities.Combat.Tick(_frame);
+        _abilities.Combat.Tick(_frame, guardHeld: input.Shift);
 
         // Hitstop (Plans/HIT_FEEL_PLAN.md phase 1): freeze the CURRENT ACTION's
         // progression for a few frames after a landed combat hit — no new hitboxes,

@@ -3,16 +3,24 @@ using Xunit;
 
 namespace MTile.Tests;
 
-// The render-side guard-block cue (sound + sparks) is derived, not evented: it reads
-// the stamps CombatState.TryParry writes (LastParryFrame / LastParryDir /
-// LastParryCharged) exactly the way GameAudio.HitConnect and HitFeelSystem read
-// LastHitFrame. These tests pin that contract — if the stamps stop being written, or
-// stop surviving a snapshot restore, the cue silently stops firing (or double-fires
-// after a rollback) with nothing else in the suite noticing.
+// Guard is a TIMED parry (CombatState.ResolveGuard), not a shield you hold: it absorbs
+// a hit outright only in the brief window after the stance comes up, leaks progressively
+// more the longer the button is held, and breaks on anything that leaks through.
+//
+// These tests pin both halves of that: the penetration curve itself, and the render-side
+// cue stamps (LastParryFrame / LastParryDir / LastParryCharged) that GameAudio.GuardBlock
+// and HitFeelSystem derive the block sound and sparks from. If the stamps stop being
+// written, or stop surviving a snapshot restore, the cue silently stops firing (or
+// double-fires after a rollback) with nothing else in the suite noticing.
 public class GuardParryCueTests
 {
     private const float Dt = 1f / 60f;
-    private const int   Frame = 42;
+    private const int   GuardFrame = 42;
+
+    // Mirrors the private constants in CombatState — see the comments there.
+    private const int PerfectWindowFrames = 7;    // FromSeconds(0.12, 1/60)
+    private const int FalloffFrames       = 36;   // FromSeconds(0.60, 1/60)
+    private const int BreakRecoveryFrames = 30;   // FromSeconds(0.50, 1/60)
 
     // Weak enough to arm GuardRetaliate (GuardChargeMaxDamage is 1.0).
     private const float WeakDamage   = 0.5f;
@@ -21,7 +29,7 @@ public class GuardParryCueTests
     private static CombatState Guarding()
     {
         var c = new CombatState();
-        c.GuardActive = true;
+        c.BeginGuard(GuardFrame);
         return c;
     }
 
@@ -29,14 +37,34 @@ public class GuardParryCueTests
     // so the direction back toward the attacker is +X.
     private static Vector2 ImpulseFromTheRight => new Vector2(-200f, 0f);
 
+    private static GuardOutcome HitAt(CombatState c, int frame, float damage = WeakDamage,
+                                      int facing = 1)
+        => c.ResolveGuard(ImpulseFromTheRight, damage, facing, frame, Dt);
+
+    // ── The perfect window ──────────────────────────────────────────────────────
+
     [Fact]
-    public void ParryStampsFrameAndIncomingDirection()
+    public void HitInsideTheWindowIsAbsorbedCompletely()
     {
         var c = Guarding();
 
-        Assert.True(c.TryParry(ImpulseFromTheRight, WeakDamage, facing: 1, Frame, Dt));
+        var g = HitAt(c, GuardFrame + PerfectWindowFrames);
 
-        Assert.Equal(Frame, c.LastParryFrame);
+        Assert.True(g.Absorbed);
+        Assert.Equal(0f, g.DamageScale);
+        Assert.Equal(0f, g.KnockbackScale);
+        Assert.True(c.GuardActive);      // a clean block keeps the stance up
+        Assert.False(c.GuardBroken);
+    }
+
+    [Fact]
+    public void AbsorbedHitStampsFrameAndIncomingDirection()
+    {
+        var c = Guarding();
+
+        HitAt(c, GuardFrame + 1);
+
+        Assert.Equal(GuardFrame + 1, c.LastParryFrame);
         Assert.True(c.LastParryDir.X > 0.99f);          // unit vector toward the attacker
         Assert.Equal(1f, c.LastParryDir.Length(), 3);
     }
@@ -45,53 +73,183 @@ public class GuardParryCueTests
     public void ChargedFlagTracksWhetherRetaliateWasArmed()
     {
         var weak = Guarding();
-        weak.TryParry(ImpulseFromTheRight, WeakDamage, facing: 1, Frame, Dt);
+        HitAt(weak, GuardFrame + 1, WeakDamage);
         Assert.True(weak.GuardCharged);
         Assert.True(weak.LastParryCharged);
 
         var strong = Guarding();
-        strong.TryParry(ImpulseFromTheRight, StrongDamage, facing: 1, Frame, Dt);
+        HitAt(strong, GuardFrame + 1, StrongDamage);
         Assert.False(strong.GuardCharged);
-        Assert.False(strong.LastParryCharged);   // still a parry, just no counter cue
-        Assert.Equal(Frame, strong.LastParryFrame);
+        Assert.False(strong.LastParryCharged);   // still a clean block, just no counter
+        Assert.Equal(GuardFrame + 1, strong.LastParryFrame);
     }
 
-    // Out-of-cone hits are NOT parried, so they must leave no stamp behind — otherwise
-    // a hit that actually landed would also play the block clang.
+    // ── Penetration past the window ─────────────────────────────────────────────
+
     [Fact]
-    public void HitFromBehindLeavesNoStamp()
+    public void PenetrationRampsWithHowLongGuardWasHeld()
+    {
+        // One frame past the window leaks essentially nothing...
+        var early = Guarding();
+        var gEarly = HitAt(early, GuardFrame + PerfectWindowFrames + 1);
+        Assert.False(gEarly.Absorbed);
+        Assert.InRange(gEarly.DamageScale, 0f, 0.05f);
+
+        // ...halfway down the ramp, about half the saturated leak...
+        var mid = Guarding();
+        var gMid = HitAt(mid, GuardFrame + PerfectWindowFrames + FalloffFrames / 2);
+        Assert.InRange(gMid.DamageScale,    0.30f, 0.45f);
+        Assert.InRange(gMid.KnockbackScale, 0.20f, 0.30f);
+
+        // ...and it is monotonic in between.
+        Assert.True(gMid.DamageScale > gEarly.DamageScale);
+    }
+
+    [Fact]
+    public void HoldingGuardIndefinitelySaturates()
     {
         var c = Guarding();
 
-        Assert.False(c.TryParry(ImpulseFromTheRight, WeakDamage, facing: -1, Frame, Dt));
+        // Far beyond the falloff — this is the "just holding Shift forever" case.
+        var g = HitAt(c, GuardFrame + 600);
+
+        Assert.False(g.Absorbed);
+        Assert.Equal(0.75f, g.DamageScale,    3);
+        Assert.Equal(0.50f, g.KnockbackScale, 3);
+    }
+
+    // A leaked hit is still a hit that landed: it must not stamp the block cue, or the
+    // clean-parry clang would play over a hit that actually got through.
+    [Fact]
+    public void LeakedHitLeavesNoBlockCue()
+    {
+        var c = Guarding();
+
+        HitAt(c, GuardFrame + 600);
 
         Assert.Equal(0, c.LastParryFrame);
     }
 
+    // ── Break + recovery ────────────────────────────────────────────────────────
+
     [Fact]
-    public void UnguardedHitLeavesNoStamp()
-    {
-        var c = new CombatState();   // GuardActive false
-
-        Assert.False(c.TryParry(ImpulseFromTheRight, WeakDamage, facing: 1, Frame, Dt));
-
-        Assert.Equal(0, c.LastParryFrame);
-    }
-
-    // The cue dedupes on the frame stamp, so a rollback restore has to bring the stamp
-    // back with it — a dropped field would re-fire the block sound on every re-sim.
-    [Fact]
-    public void StampsSurviveSnapshotRestore()
+    public void AnythingThatGetsThroughBreaksTheGuard()
     {
         var c = Guarding();
-        c.TryParry(ImpulseFromTheRight, WeakDamage, facing: 1, Frame, Dt);
 
-        var saved = c.Clone();
-        c.LastParryFrame = 0; c.LastParryDir = Vector2.Zero; c.LastParryCharged = false;
-        c.CopyFrom(saved);
+        HitAt(c, GuardFrame + PerfectWindowFrames + 1);
 
-        Assert.Equal(Frame, c.LastParryFrame);
+        Assert.False(c.GuardActive);
+        Assert.True(c.GuardBroken);
+    }
+
+    // Out of the front cone the guard never met the hit, so it neither filters it nor
+    // survives it.
+    [Fact]
+    public void HitFromBehindIsUnfilteredAndStillBreaksTheGuard()
+    {
+        var c = Guarding();
+
+        var g = HitAt(c, GuardFrame + 1, WeakDamage, facing: -1);
+
+        Assert.False(g.Absorbed);
+        Assert.Equal(1f, g.DamageScale);
+        Assert.Equal(1f, g.KnockbackScale);
+        Assert.Equal(0, c.LastParryFrame);
+        Assert.True(c.GuardBroken);
+    }
+
+    [Fact]
+    public void UnguardedHitIsUnfiltered()
+    {
+        var c = new CombatState();   // never guarded
+
+        var g = HitAt(c, GuardFrame);
+
+        Assert.False(g.Absorbed);
+        Assert.Equal(1f, g.DamageScale);
+        Assert.Equal(1f, g.KnockbackScale);
+        Assert.False(c.GuardBroken);
+    }
+
+    // The recovery lockout needs BOTH halves. Without the release requirement, a player
+    // holding Shift through a break would get a fresh perfect window every recovery
+    // period, and "held indefinitely" would never actually saturate.
+    [Fact]
+    public void BreakRecoveryNeedsBothTheCountdownAndAReleasedButton()
+    {
+        var c = Guarding();
+        int breakFrame = GuardFrame + 600;
+        HitAt(c, breakFrame);
+        Assert.True(c.GuardBroken);
+
+        // Countdown still running, button still down.
+        c.Tick(breakFrame + BreakRecoveryFrames - 1, guardHeld: true);
+        Assert.True(c.GuardBroken);
+
+        // Countdown expired, but the button is still held.
+        c.Tick(breakFrame + BreakRecoveryFrames, guardHeld: true);
+        Assert.True(c.GuardBroken);
+
+        // Released.
+        c.Tick(breakFrame + BreakRecoveryFrames, guardHeld: false);
+        Assert.False(c.GuardBroken);
+    }
+
+    [Fact]
+    public void ReleasingEarlyDoesNotSkipTheCountdown()
+    {
+        var c = Guarding();
+        int breakFrame = GuardFrame + 600;
+        HitAt(c, breakFrame);
+
+        c.Tick(breakFrame + 1, guardHeld: false);
+
+        Assert.True(c.GuardBroken);
+    }
+
+    // Re-guarding after a break starts a fresh window — the stance is a new one.
+    [Fact]
+    public void ReGuardingAfterRecoveryRestoresThePerfectWindow()
+    {
+        var c = Guarding();
+        int breakFrame = GuardFrame + 600;
+        HitAt(c, breakFrame);
+        c.Tick(breakFrame + BreakRecoveryFrames, guardHeld: false);
+
+        int reGuardFrame = breakFrame + BreakRecoveryFrames + 5;
+        c.BeginGuard(reGuardFrame);
+
+        Assert.True(HitAt(c, reGuardFrame + 1).Absorbed);
+    }
+
+    // ── Snapshot ────────────────────────────────────────────────────────────────
+
+    // The whole timing model reads GuardStartFrame, and the cue dedupes on the parry
+    // stamp — a field dropped from CopyFrom would make a rolled-back guard mistime its
+    // own window or re-fire its block sound on every re-sim.
+    [Fact]
+    public void GuardStateSurvivesSnapshotRestore()
+    {
+        var c = Guarding();
+        HitAt(c, GuardFrame + 1);          // absorbed: stamps the cue, keeps the stance
+        var savedGuarding = c.Clone();
+
+        HitAt(c, GuardFrame + 600);        // leaks + breaks
+        var savedBroken = c.Clone();
+
+        c.CopyFrom(savedGuarding);
+        Assert.True(c.GuardActive);
+        Assert.False(c.GuardBroken);
+        Assert.Equal(GuardFrame, c.GuardStartFrame);
+        Assert.Equal(GuardFrame + 1, c.LastParryFrame);
         Assert.True(c.LastParryDir.X > 0.99f);
         Assert.True(c.LastParryCharged);
+        // Restored mid-guard, the window is still measured from the original entry.
+        Assert.True(HitAt(c, GuardFrame + 2).Absorbed);
+
+        c.CopyFrom(savedBroken);
+        Assert.True(c.GuardBroken);
+        Assert.Equal(GuardFrame + 600 + BreakRecoveryFrames, c.GuardBreakExpireFrame);
     }
 }

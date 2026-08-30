@@ -1327,10 +1327,18 @@ public class AirSpinStab : StabAction
 // ---------- Guard — hold Shift to parry incoming hits ---------------------------
 
 // Defensive posture. Held while Shift is down (with no L/R held — moving cancels
-// the guard). Sets Combat.GuardActive so PlayerCharacter.OnHit's parry path can
+// the guard). Calls Combat.BeginGuard so PlayerCharacter.OnHit's guard path can
 // run; applies a slowdown to walk/air speeds; draws a small shield indicator.
 //
-// A successful weak in-cone parry (Combat.TryParry) sets Combat.GuardCharged,
+// Guard is a TIMED parry, not a shield (CombatState.ResolveGuard): the stance only
+// absorbs a hit outright in the brief window right after it comes up, and leaks
+// progressively more the longer Shift is held, saturating at three quarters of the
+// percent and half the knockback. Anything that leaks through also BREAKS the guard,
+// which is why entry is refused while Combat.GuardBroken — the recovery countdown
+// after a break, which additionally requires the button to be released, so holding
+// Shift through a break can't farm fresh perfect windows.
+//
+// A weak in-cone hit absorbed inside the perfect window sets Combat.GuardCharged,
 // arming GuardRetaliateAction (LMB-press while charged → fast forward slash).
 // Air-allowed per user note in the roadmap §9: yes, allow guard in air. The
 // slowdown via modifiers is identical air-vs-ground; no separate movement state.
@@ -1351,6 +1359,7 @@ public class GuardAction : ActionState
         if (ctx.Input.Left || ctx.Input.Right) return false;  // no activation while pushing L/R
         if (ctx.Input.RightClick)    return false;            // Shift+RMB is the build gesture
         if (ctx.Combat?.BlocksAttack == true) return false;
+        if (ctx.Combat?.GuardBroken  == true) return false;   // still recovering from a break
         // Strict from-set: neutral or the tail of recovery — never over a live
         // action (reaching one is the eviction lookahead's call, not a priority race).
         if (!EntryOk(ctx, SimFrames.FromSeconds(MaxEntrySeconds, ctx.Dt))) return false;
@@ -1367,17 +1376,20 @@ public class GuardAction : ActionState
         if (ctx.Input.Left || ctx.Input.Right) return false;
         if (ctx.Input.RightClick) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
+        // A break drops the stance the same frame it happens, so the shield indicator
+        // disappears on contact instead of lingering over a guard that isn't guarding.
+        if (ctx.Combat?.GuardBroken  == true) return false;
         return true;
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        if (ctx.Combat != null) ctx.Combat.GuardActive = true;
+        ctx.Combat?.BeginGuard(ctx.CurrentFrame);
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        if (ctx.Combat != null) ctx.Combat.GuardActive = false;
+        ctx.Combat?.EndGuard();
     }
 
     // Slow walk, slower air. Gravity normal — guard doesn't levitate.

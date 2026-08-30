@@ -15,10 +15,10 @@ namespace MTile.Tests;
 //      percent still accrues, no hitstun registers, the stab completes.
 //   2. Flinch: a heavy hit (enemy stab, strength ~650) breaks the armor,
 //      registers, and evicts the victim's own stab mid-swing into Recovery.
-//   3. Guard break + tail-window escape: an out-of-cone hit evicts a live
-//      guard; with Shift still held, guard re-enters only once the hit
-//      disadvantage countdown reaches its 0.2s entry window — the victim
-//      visibly sits in the airlock for the bulk of the window first.
+//   3. Guard break: an out-of-cone hit evicts a live guard AND starts the break
+//      recovery (CombatState.GuardBroken), which holding Shift cannot wait out —
+//      the stance comes back only after the countdown AND a release of the
+//      button, so the victim can't just keep the shield pinned down.
 public class HitEvictionTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
@@ -151,19 +151,20 @@ public class HitEvictionTests(ITestOutputHelper output)
             $"Eviction must land the victim in RecoveryAction right after the hit (recovery@{recoveryFirst}, hit@{hitFrame}).");
     }
 
-    // ── 3. Guard break + the 0.2s tail-window re-entry ───────────────────────
-    [Fact]
-    public void GuardBrokenByHit_ReentersInTailWindow()
-    {
-        // Victim holds Shift the whole run: guard is live well before the hit.
-        // The attacker strikes from the LEFT while the victim faces RIGHT, so
-        // the hit is out of the parry cone and registers fully — evicting guard.
-        // With Shift still down, guard's precondition waits on EntryOk(0.2s):
-        // re-entry only once ≤6 frames of the ~21-frame disadvantage remain.
-        var victim = new InputScript()
+    // ── 3. Guard break + the release-gated recovery ──────────────────────────
+
+    // Victim holds Shift the whole run: guard is live well before the hit. The
+    // attacker strikes from the LEFT while the victim faces RIGHT, so the hit is out
+    // of the parry cone, registers fully, and breaks the guard.
+    private static InputScript HeldShiftVictim()
+        => new InputScript()
             .For   (5, default(PlayerInput))
             .Forever  (new PlayerInput { Shift = true });
-        var (actions, hitstun, _) = Run(AttackerStabScript(), victim, frames: 90);
+
+    [Fact]
+    public void GuardBrokenByHit_StaysDownWhileShiftIsHeld()
+    {
+        var (actions, hitstun, _) = Run(AttackerStabScript(), HeldShiftVictim(), frames: 90);
 
         int guardFirst = First(actions, "GuardAction");
         int hitFrame   = hitstun.IndexOf(true);
@@ -174,19 +175,92 @@ public class HitEvictionTests(ITestOutputHelper output)
         Assert.True(hitFrame > 0, "The stab should land (out-of-cone, no parry).");
 
         // Broken: the frames right after the hit are the airlock, not guard.
-        for (int f = hitFrame + 1; f <= hitFrame + 8 && f < actions.Count; f++)
-            Assert.True(actions[f] != "GuardAction",
-                $"frame {f}: guard must be evicted by the hit, got {actions[f]}.");
         int recoveryFirst = First(actions, "RecoveryAction", hitFrame);
         Assert.True(recoveryFirst >= 0 && recoveryFirst <= hitFrame + 2,
             $"Victim should sit in RecoveryAction after the guard break (recovery@{recoveryFirst}).");
 
-        // …and re-enters through the tail window, not after the whole countdown
-        // (hitstun caps at 0.7s = 21 frames; entry window 6 ⇒ ≈ 15 frames in).
+        // …and it stays broken for the rest of the run. Holding Shift is exactly what
+        // must NOT recover it: the recovery gate wants the button released, or a player
+        // could pin Shift down and be handed a fresh perfect-block window every time
+        // the countdown lapsed.
         int guardBack = First(actions, "GuardAction", hitFrame + 1);
-        output.WriteLine($"guard re-entry@{guardBack} (Δ {guardBack - hitFrame})");
-        Assert.True(guardBack > 0, "Held Shift should recover guard after the disadvantage window.");
-        Assert.True(guardBack - hitFrame >= 9 && guardBack - hitFrame <= 25,
-            $"Guard re-entry should land in the countdown's tail window (Δ {guardBack - hitFrame} frames).");
+        output.WriteLine($"guard re-entry@{guardBack} (want none)");
+        Assert.True(guardBack < 0,
+            $"Held Shift must not recover a broken guard (came back @{guardBack}).");
+    }
+
+    // ── The timing model, end to end through the action FSM ──────────────────
+    //
+    // The victim taps Left first so it FACES the attacker (facing follows horizontal
+    // intent while grounded, and guard refuses to activate with L/R held) — so unlike
+    // the break tests above, these hits arrive inside the parry cone. `guardAt` is when
+    // Shift goes down; the stab lands ≈ f29.
+    private static InputScript FacingVictimGuardingAt(int guardAt)
+        => new InputScript()
+            .For   (3, new PlayerInput { Left = true })
+            .For   (guardAt - 3, default(PlayerInput))
+            .Forever  (new PlayerInput { Shift = true });
+
+    [Fact]
+    public void GuardRaisedJustInTime_AbsorbsCompletely()
+    {
+        var (actions, hitstun, percent) = Run(AttackerStabScript(),
+                                              FacingVictimGuardingAt(27), frames: 60);
+
+        int guardFirst = First(actions, "GuardAction");
+        output.WriteLine($"guard@{guardFirst}, percent={percent}, hitstun={hitstun.IndexOf(true)}");
+
+        Assert.True(guardFirst >= 0, "Shift should raise the guard before the stab lands.");
+        Assert.Equal(0f, percent);                     // nothing got through
+        Assert.DoesNotContain(true, hitstun);          // and it never registered
+    }
+
+    // The point of the rework: parking on Shift is no longer invulnerability. The same
+    // hit that a fresh guard eats completely leaks most of its percent through a guard
+    // that has been held since the start of the run.
+    [Fact]
+    public void GuardHeldSinceLongBefore_LeaksTheHitThrough()
+    {
+        var (actions, hitstun, percent) = Run(AttackerStabScript(),
+                                              FacingVictimGuardingAt(4), frames: 60);
+
+        int guardFirst = First(actions, "GuardAction");
+        int hitFrame   = hitstun.IndexOf(true);
+        output.WriteLine($"guard@{guardFirst}, percent={percent}, hitstun@{hitFrame}");
+
+        Assert.True(guardFirst >= 0 && guardFirst < 20, "Guard should be live long before the hit.");
+        Assert.True(percent > 0f, "A stale guard must let damage through.");
+        Assert.True(hitFrame > 0, "…and the leaked hit still registers.");
+        // Broken by the hit it failed to stop, and held Shift can't bring it back.
+        int guardBack = First(actions, "GuardAction", hitFrame + 1);
+        Assert.True(guardBack < 0, $"Leaked hit should break the guard (came back @{guardBack}).");
+    }
+
+    // Release the button after the break and guard comes back — the countdown is a real
+    // recovery window, not a permanent disable.
+    [Fact]
+    public void GuardReturnsAfterReleasingTheButton()
+    {
+        // Hit lands ≈ f30 (see AttackerStabScript). Hold through it, release across the
+        // 0.5s (15-frame at this dt) recovery, then press again.
+        var victim = new InputScript()
+            .For   ( 5, default(PlayerInput))
+            .For   (35, new PlayerInput { Shift = true })
+            .For   (15, default(PlayerInput))
+            .Forever  (new PlayerInput { Shift = true });
+        var (actions, hitstun, _) = Run(AttackerStabScript(), victim, frames: 110);
+
+        int hitFrame  = hitstun.IndexOf(true);
+        int guardBack = First(actions, "GuardAction", hitFrame + 1);
+        output.WriteLine($"hit@{hitFrame}, guard re-entry@{guardBack}");
+
+        Assert.True(hitFrame > 0, "The stab should land (out-of-cone, no parry).");
+        // Nothing while Shift is still held after the break (f30-39)...
+        for (int f = hitFrame + 1; f < 40 && f < actions.Count; f++)
+            Assert.True(actions[f] != "GuardAction",
+                $"frame {f}: a broken guard must stay down while Shift is held.");
+        // ...and back on the first frame of the re-press, the release having cleared it.
+        Assert.True(guardBack >= 55,
+            $"Guard should come back only after the release + re-press (@{guardBack}).");
     }
 }
