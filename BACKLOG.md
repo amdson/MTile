@@ -210,9 +210,11 @@ fix those tests.
 
 Related ablation knobs, all hot-reloadable from `configs/movement_config.json`:
 `FoldEngine` ("qp" | "ref" | "lattice" | "lm"), `CorrectorVaultEnabled`, `FoldRedirectEnabled`.
-The "lattice" engine (`FoldLattice` + `LatticePathPlanner`, `Plans/LATTICE_PATH_PLANNER.md`) is
-phase 2 of that plan: weights untuned by playtest, no tracking-residual give-up yet (§4.3), crouch
-mounts 1-high blocks under it (edges carry no climb band — §3.3), jump states not yet on it (§7).
+The "lattice" engine (`LatticePathPlanner` + `LatticeTracker`, `Plans/LATTICE_PATH_PLANNER.md`) is
+the engine `movement_config.json` ships (2026-08-28); phases 0–2 built, jump/wall states on it, the
+maneuver states keep their own solves. What remains — engine decision (§4.9), perf gate, playtest
+tuning, curvature check, row 11 priority fix, cleanup — is itemized in
+`Plans/LATTICE_TODO2_AUDIT.md` §3.
 
 ---
 

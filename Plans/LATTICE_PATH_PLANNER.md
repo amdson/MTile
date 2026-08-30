@@ -1,6 +1,10 @@
 # Lattice Path Planner (todo #2)
 
-Status: **plan only — nothing built.** Written 2026-08-23 against `main` @ cc61c31.
+Status: **phases 0–2 BUILT and live** (`FoldEngine = "lattice"` is what
+`configs/movement_config.json` ships; `LatticePathPlanner.cs` + `LatticeTracker.cs`).
+Written 2026-08-23 against `main` @ cc61c31 as a plan; the revision notes in §1 and
+§5 record what was built and what changed. What remains — the engine decision, perf
+gate, playtest tuning, cleanup — is re-cut in [LATTICE_TODO2_AUDIT.md](LATTICE_TODO2_AUDIT.md).
 
 A short-horizon, configuration-space path planner to replace the hand-written
 reference-generation rules in the stand fold. The path is found by dynamic
