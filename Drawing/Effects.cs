@@ -212,6 +212,36 @@ public static class Effects
         }
     }
 
+    // A charged block going off: a fast, bright radial shell out to the blast's actual
+    // reach, so what the player sees is the hitbox ring rather than a generic puff. No
+    // gravity on the sparks — the shell should read as a pressure front leaving the
+    // epicentre, and arcing it downward would blur the radius the blast actually has.
+    public static void Blast(ParticleSystem ps, Vector2 pos, float radius)
+    {
+        const int Count = 28;
+        for (int i = 0; i < Count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            float ang  = (i / (float)Count) * MathHelper.TwoPi
+                       + (float)_rng.NextDouble() * 0.2f;
+            var dir = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
+            // Speed set so a spark covers roughly the blast radius over its life —
+            // the shell arrives where the ring hitboxes were.
+            float life = 0.22f + (float)_rng.NextDouble() * 0.16f;
+            float spd  = radius / life * (0.7f + (float)_rng.NextDouble() * 0.5f);
+            p.Position     = pos + dir * (radius * 0.15f);
+            p.Velocity     = dir * spd;
+            p.Acceleration = Vector2.Zero;
+            p.MaxLife      = life;
+            p.Life         = life;
+            p.StartColor   = new Color(255, 245, 210);
+            p.EndColor     = new Color(255, 140, 40) * 0f;
+            p.StartSize    = 5f;
+            p.EndSize      = 1f;
+            p.Kind         = ParticleKind.Square;
+        }
+    }
+
     private static Vector2 Rotate(Vector2 v, float radians)
     {
         float c = MathF.Cos(radians), s = MathF.Sin(radians);

@@ -82,6 +82,8 @@ public static class EntityFactory
             // Spawn-point placeholder — RestoreState's ReadState overwrites it from
             // the snapshotted Aim slot right after construction.
             EntityKind.PracticeBall  => new PracticeBall(body.Position),
+            // Fuse position (Age) and the fired flag come back through RestoreState.
+            EntityKind.ChargedBlast  => new ChargedBlast(body.Position, d.HitId),
             _ when EnemyFactory.IsRegistered(d.Kind) => EnemyFactory.Create(d.Kind, body.Position),
             _                        => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
         };

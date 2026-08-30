@@ -133,6 +133,11 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     public event Action<EntityId, Vector2, TileType, int> OnMassLanded;
     public void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks)
         => OnMassLanded?.Invoke(id, pos, type, blocks);
+    // IEntitySpawner — cosmetic: a destroyed charged block went off. Same (Frame, id)
+    // keying contract as OnMassLanded.
+    public event Action<EntityId, Vector2, float> OnChargedBlast;
+    public void NotifyChargedBlast(EntityId id, Vector2 pos, float radius)
+        => OnChargedBlast?.Invoke(id, pos, radius);
 
     // Fired when the player dies and respawns. Game1 hooks this for the cosmetic puff;
     // the respawn itself happens inside Step so it stays deterministic.
@@ -335,6 +340,28 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         _bodyScratch.Clear();
         foreach (var r in _world.Query<PhysicsBodyComponent>()) _bodyScratch.Add(r.Component1.Body);
         PhysicsWorld.StepSwept(_bodyScratch, _chunks, dt, Gravity);
+
+        // Charged blocks destroyed anywhere in this Step arm their blast. Drained HERE,
+        // at the very end, because the step breaks tiles in three different places —
+        // build/burst during the player update, attacks in CombatSystem.Apply, crush
+        // impact inside StepSwept — and this is the one point downstream of all of them.
+        // Draining inside the same Step that fills it is what keeps the queue off the
+        // snapshot: it is always empty at a frame boundary, so the only state that has
+        // to survive a rollback is the blast entity itself, which the ordinary entity
+        // snapshot already covers.
+        //
+        // A blast that breaks another charged cell queues that one on the NEXT step, so
+        // a chain cascades a fuse at a time instead of resolving in one frame. It always
+        // terminates: BreakCell clears the charge, so no cell can arm twice.
+        if (_chunks.ChargedBreaks.Count > 0)
+        {
+            // Snapshot the count first — SpawnEntity must not see a list being appended
+            // to, and nothing in a spawn can break a tile anyway.
+            var pending = _chunks.ChargedBreaks;
+            for (int i = 0; i < pending.Count; i++)
+                SpawnEntity(new ChargedBlast(pending[i], _hitIds.Next()));
+            _chunks.ClearChargedBreaks();
+        }
 
         // Sweep up entities that died this frame: collect dead ids, then destroy them in
         // the World (drops their EntityRef + PhysicsBodyComponent).
