@@ -56,6 +56,36 @@ public static class Effects
         }
     }
 
+    // Guard parry: a hit bounced off the shield. Sparks spray back along `dir` (which
+    // points toward the attacker) in a wide fan, cold steel-blue fading to white so it
+    // reads as deflection rather than as the warm HitSpark of a hit that landed.
+    // `charged` — the parry also armed GuardRetaliate — throws more, faster sparks, so
+    // the counter window has a visual tell of its own.
+    public static void GuardSpark(ParticleSystem ps, Vector2 pos, Vector2 dir, bool charged)
+    {
+        if (dir.LengthSquared() > 1e-4f) dir.Normalize(); else dir = new Vector2(1f, 0f);
+        int   count = charged ? 14 : 9;
+        float speed = charged ? 220f : 150f;
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            // Near-hemispherical fan (±75°) off the incoming axis — a deflection
+            // scatters, unlike HitSpark's tight cone along the strike direction.
+            float jit = ((float)_rng.NextDouble() - 0.5f) * 2.6f;
+            var   v   = Rotate(dir, jit) * (speed * (0.5f + (float)_rng.NextDouble()));
+            p.Position        = pos;
+            p.Velocity        = v;
+            p.Acceleration    = -v * 3.5f;
+            p.MaxLife         = 0.14f + (float)_rng.NextDouble() * 0.12f;
+            p.Life            = p.MaxLife;
+            p.StartColor      = charged ? Color.Cyan : Color.LightSteelBlue;
+            p.EndColor        = new Color(255, 255, 255, 0);
+            p.StartSize       = charged ? 8f : 6f;
+            p.EndSize         = 1f;
+            p.Kind            = ParticleKind.Line;
+        }
+    }
+
     // Directional knockback cue (Plans/HIT_FEEL_PLAN.md phase 5): a couple of streaks
     // shot along the resolved knockback direction, so a hit's effect reads even when
     // the camera doesn't follow. `strength` (0..1, same normalization HitFeelSystem

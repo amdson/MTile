@@ -141,6 +141,16 @@ public class CombatState
     public bool    GuardActive;
     public bool    GuardCharged;     public int GuardChargedExpireFrame;
 
+    // Render-only cue stamps for a successful parry, written by TryParry. Same "the
+    // stamp IS the identity" contract as LastHitFrame/LastHitDir (Audio/GameAudio.cs
+    // header): a rollback replays the same parry on the same sim frame, so a
+    // presentation system that dedupes on the frame number fires exactly once. No
+    // presentation event needed. LastParryDir points from the player TOWARD the
+    // attacker, so sparks spray back the way the hit came in.
+    public int     LastParryFrame;
+    public Vector2 LastParryDir;
+    public bool    LastParryCharged;   // that parry also armed GuardRetaliate
+
     // A parry only "charges" off weak incoming hits — strong attacks parry to
     // zero damage but don't reward a counter. Tuned so Slash1 (KbI 200, dmg = MaxHP/2
     // ≈ 1.5) DOES charge while Slash3 (KbI 380) and Stab (KbI 380) don't.
@@ -283,12 +293,17 @@ public class CombatState
         // dot > GuardConeCos => fromAttacker is within ±60° of facing direction.
         if (Vector2.Dot(fromAttacker, facingVec) < GuardConeCos) return false;
 
-        if (hitDamage <= GuardChargeMaxDamage)
+        bool charged = hitDamage <= GuardChargeMaxDamage;
+        if (charged)
         {
             int newExpire = currentFrame + SimFrames.FromSeconds(GuardChargedSeconds, dt);
             if (newExpire > GuardChargedExpireFrame) GuardChargedExpireFrame = newExpire;
             GuardCharged = true;
         }
+
+        LastParryFrame   = currentFrame;
+        LastParryDir     = fromAttacker;
+        LastParryCharged = charged;
         return true;
     }
 
@@ -310,5 +325,7 @@ public class CombatState
         GrabStrength = o.GrabStrength;
         GuardActive = o.GuardActive;
         GuardCharged = o.GuardCharged; GuardChargedExpireFrame = o.GuardChargedExpireFrame;
+        LastParryFrame = o.LastParryFrame; LastParryDir = o.LastParryDir;
+        LastParryCharged = o.LastParryCharged;
     }
 }

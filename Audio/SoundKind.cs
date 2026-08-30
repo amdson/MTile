@@ -34,6 +34,7 @@ public enum SoundKind
     Throw,        // built, not yet wired — see GameAudio
     Swing,        // attack whoosh — see GameAudio.Swing
     LaserBlast,   // the laser's burn, one shot per firing — see GameAudio.Laser
+    GuardBlock,   // a guard parry absorbed a hit — see GameAudio.GuardBlock
 
     // Tier 3, but already flowing through the presentation seam.
     Respawn,
@@ -77,6 +78,11 @@ public static class SoundKinds
     public static SoundKind Fallback(SoundKind k) => k switch
     {
         SoundKind.Land => SoundKind.Footstep,
+        // No guard_block clip cut yet. HitConnect is the nearest contact sound in the
+        // bank; GameAudio.GuardBlock pitches it up hard so a parry still reads as a
+        // bright clang rather than as taking the hit. Dropping guard_block_01.ogg into
+        // Assets/Sounds later takes over automatically, with no code change.
+        SoundKind.GuardBlock => SoundKind.HitConnect,
         _              => SoundKind.None,
     };
 

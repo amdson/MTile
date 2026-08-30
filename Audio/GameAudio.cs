@@ -98,6 +98,7 @@ public sealed class GameAudio
         if (p == null) return;
         WallScrape(p, index);
         HitConnect(p, index);
+        GuardBlock(p, index);
         Swing(p, index);
         Laser(p, index);
         Jump(p, index);
@@ -138,6 +139,25 @@ public sealed class GameAudio
                     simFrame: c.LastHitFrame,
                     gain:     0.55f + 0.45f * t,
                     pitch:    0.1f - 0.25f * t,
+                    pos:      p.Body.Position);
+    }
+
+    // A parry absorbed a hit. CombatState.LastParryFrame is the same kind of sim-side
+    // stamp HitConnect keys off, so this needs no event either. Pitched well up and
+    // kept short: it borrows the hit_connect clips (SoundKinds.Fallback) and has to
+    // read as "that bounced off" rather than as taking the hit — a charged parry
+    // (GuardRetaliate armed) rings brighter still, so the reward is audible.
+    private void GuardBlock(PlayerCharacter p, int index)
+    {
+        var c = p.Combat;
+        if (c == null || c.LastParryFrame <= 0) return;
+        int age = p.Frame - c.LastParryFrame;
+        if (age < 0 || age > StampWindowFrames) return;
+
+        _mixer.Fire(new SoundId(SoundKind.GuardBlock, index, c.LastParryFrame),
+                    simFrame: c.LastParryFrame,
+                    gain:     0.7f,
+                    pitch:    c.LastParryCharged ? 0.85f : 0.6f,
                     pos:      p.Body.Position);
     }
 

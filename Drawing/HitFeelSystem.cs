@@ -22,6 +22,7 @@ public sealed class HitFeelSystem
     // to frame (despawns reshuffle the list) — EntityId is the sim's actual stable
     // identity for exactly this reason (see Entity.Id's doc comment).
     private readonly Dictionary<int, int> _lastHandledFrame = new();
+    private readonly Dictionary<int, int> _lastHandledParryFrame = new();
     private readonly Dictionary<EntityId, int> _lastHandledGeneration = new();
 
     public HitFeelSystem(ParticleSystem particles, Camera camera)
@@ -43,7 +44,11 @@ public sealed class HitFeelSystem
     private void Player(PlayerCharacter p, int index)
     {
         var c = p?.Combat;
-        if (c == null || c.LastHitFrame <= 0) return;
+        if (c == null) return;
+
+        Parry(p, c, index);
+
+        if (c.LastHitFrame <= 0) return;
 
         _lastHandledFrame.TryGetValue(index, out int last);
         if (c.LastHitFrame == last) return;
@@ -55,6 +60,26 @@ public sealed class HitFeelSystem
         var   pos = p.Body.Position;
 
         React(pos, c.LastHitDir, t);
+    }
+
+    // Guard parry (Character/Action/CombatState.cs TryParry): the hit was absorbed
+    // entirely, so React()'s knockback streak and shake would be lying — nothing
+    // moved. Sparks only, thrown from the front of the body back along the incoming
+    // axis, plus a token shake so a block still registers in the hand. Edge-detected
+    // off LastParryFrame exactly as the hit path is off LastHitFrame.
+    private void Parry(PlayerCharacter p, CombatState c, int index)
+    {
+        if (c.LastParryFrame <= 0) return;
+
+        _lastHandledParryFrame.TryGetValue(index, out int last);
+        if (c.LastParryFrame == last) return;
+        _lastHandledParryFrame[index] = c.LastParryFrame;
+
+        var dir = c.LastParryDir;
+        var pos = p.Body.Position + dir * PlayerCharacter.Radius;
+
+        _camera.Shake(c.LastParryCharged ? 0.14f : 0.08f);
+        Effects.GuardSpark(_particles, pos, dir, c.LastParryCharged);
     }
 
     // Balloons/balls/future combat targets (Entities/Entity.cs) — anything hit
