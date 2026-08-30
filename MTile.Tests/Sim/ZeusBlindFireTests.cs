@@ -181,6 +181,48 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
         Assert.Equal(0f, sim.Player.Combat.DamagePercent);
     }
 
+    // 2c. Range. The column reaches anywhere on the stage — walking away is not an
+    //     answer to it. This is a two-part gate and the test would be worthless against
+    //     only one: ZeusThunderColumnAction.MaxRange had to become unbounded, AND
+    //     ZeusController.AlertRange had to stop clamping it, because EnemyEntity refuses
+    //     to select any new action while WantAttack is false. At the old AlertRange of
+    //     620 the column's own 900 was already dead code.
+    //
+    //     The beams are the control: they carry their own bands (bolt 80-640, strike
+    //     <=640, sweep 60-620) and must still be silent out here, which is what shows the
+    //     coarse gate was widened rather than the whole kit unleashed.
+    [Fact]
+    public void TheColumnReachesFarBeyondTheOldAlertRange()
+    {
+        // Flat open floor 140 tiles wide — no cover, so this is purely about distance.
+        const int Wide = 140, Floor = 7;
+        var rows = new List<string>();
+        for (int r = 0; r < Floor; r++) rows.Add(new string('.', Wide));
+        rows.Add(new string('X', Wide));
+        rows.Add(new string('X', Wide));
+        var chunks = SimTerrain.FromAscii(string.Join('\n', rows), originTileX: 0, originTileY: 0);
+
+        // ~1900px apart: triple the old 620 alert range, and past the old 900 MaxRange.
+        var zeusAt   = new Vector2(2 * TS + 8f, 5 * TS + 8f);
+        var playerAt = new Vector2(122 * TS + 8f, 6 * TS + 4f);
+        float dist   = (playerAt - zeusAt).Length();
+        Assert.True(dist > 1800f, $"the course is not long enough to prove anything ({dist:F0}px)");
+
+        var sim = new Simulation(chunks, playerAt,
+                                 g => g.SpawnEntity(EnemyFactory.Create(EntityKind.Zeus, zeusAt)));
+        var seen = Run(sim, playerAt, 4 * CycleFrames, output);
+
+        output.WriteLine($"at {dist:F0}px — actions: {string.Join(",", seen)}, " +
+                         $"damage: {sim.Player.Combat.DamagePercent}");
+        Assert.Contains("ZeusThunderColumnAction", seen);
+        Assert.True(sim.Player.Combat.DamagePercent > 0f,
+                    "the column opened but never connected at range.");
+
+        // The beams stay home. If these fired, the change widened far more than intended.
+        foreach (var beam in new[] { "ZeusBoltAction", "ZeusStrikeAction", "ZeusSweepAction" })
+            Assert.DoesNotContain(beam, seen);
+    }
+
     // 3. The memory. With the player visible, Zeus opens its ordinary repertoire; once
     //    the player ducks behind the wall it should KEEP opening it, aimed at where
     //    they last were — not fall silent. The beams are the tell, since those are the

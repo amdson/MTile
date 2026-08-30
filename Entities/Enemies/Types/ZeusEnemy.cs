@@ -192,7 +192,13 @@ internal static class ZeusBeam
 // must be (see EnemyController's contract).
 public sealed class ZeusController : EnemyController
 {
-    public float AlertRange { get; init; } = 620f;
+    // The coarse "is there anything to shoot at" gate. Effectively unbounded: EnemyEntity
+    // refuses to select any new action while WantAttack is false, so this is a CEILING on
+    // every per-action range band, not a band of its own — at 620 it silently clamped the
+    // thunder column's 900 and would clamp its unbounded reach now. The three beams carry
+    // their own bands (bolt 80-640, strike <=640, sweep 60-620) and are unaffected; the
+    // column is the only action that reaches past where this used to stop.
+    public float AlertRange { get; init; } = float.MaxValue;
 
     // ── Firing blind ────────────────────────────────────────────────────────
     // A rooted enemy cannot walk around the thing that broke its sight line, so
@@ -221,8 +227,10 @@ public sealed class ZeusController : EnemyController
         MoveDir    = Vector2.Zero,
         Jump       = false,
         AimWorld   = ctx.PlayerVisible ? ctx.Player.Body.Position : SearchPoint(in ctx),
-        // Proximity, not visibility. The statue keeps swinging at a player who is
-        // close and hidden; it stands down for one who has actually left.
+        // Neither proximity nor visibility any more — the per-action range bands are the
+        // real gate, and the statue never stands down. It keeps swinging at a player who
+        // is hidden, and now also at one who has walked away: the thunder column follows
+        // them, while the beams simply fail their own range checks.
         WantAttack = ctx.Dist <= AlertRange,
     };
 
@@ -676,7 +684,10 @@ public static class ZeusEnemy
         Color  = new Color(205, 200, 175),
         Sprite = Sprites.Zeus,
 
-        Controller = new ZeusController { AlertRange = 620f },
+        // No AlertRange override: the field's own default is the single source of
+        // truth for it, and setting it here is how the 620 quietly outlived the
+        // thunder column's 900 MaxRange and made that number dead code.
+        Controller = new ZeusController(),
 
         Movement = () => new()
         {

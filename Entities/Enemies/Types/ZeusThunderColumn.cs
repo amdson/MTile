@@ -41,10 +41,16 @@ public class ZeusThunderColumnAction : EnemyActionState
     protected virtual float Active   => 0.30f;
     protected virtual float Recovery => 1.30f;
 
-    // No MinRange, unlike the bolt: point blank is not a refuge from this one
-    // either. MaxRange is generous — this is what reaches a player who has broken
-    // sight and is picking their way up the blind face.
-    protected virtual float MaxRange => 900f;
+    // No MinRange, unlike the bolt: point blank is not a refuge from this one either.
+    // And no MaxRange worth the name — the column reaches anywhere on the stage. Walking
+    // away is not an answer to it; the answers are the three-tile sidestep and the roof.
+    //
+    // Note this only bites because ZeusController's coarse WantAttack gate was widened to
+    // match (EnemyEntity refuses to select ANY new action while WantAttack is false, so a
+    // per-action range wider than that gate is dead code — which is exactly what the old
+    // 900 was against an AlertRange of 620). The three beams keep their own bands, so
+    // they are still the close-quarters half of the kit; this is the one that follows you.
+    protected virtual float MaxRange => float.MaxValue;
 
     // Half a column's width. Three tiles across: wide enough that "roughly out of
     // it" is not good enough, narrow enough that a walk clears it inside the tell.
