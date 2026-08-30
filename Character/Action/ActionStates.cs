@@ -1590,6 +1590,7 @@ public class GuardAction : ActionState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         ctx.Combat?.BeginGuard(ctx.CurrentFrame);
+        vars.Facing = ab.Facing == 0 ? 1 : ab.Facing;
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -1606,7 +1607,17 @@ public class GuardAction : ActionState
         m.AirAccel     *= 0.8f;
     }
 
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars) { }
+    // Track facing for the telegraph. ResolveGuard tests the cone against the LIVE
+    // ab.Facing, so mirroring it every frame keeps the drawn arc honest even if
+    // something else turns the player mid-stance.
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.Facing = ab.Facing == 0 ? 1 : ab.Facing;
+    }
+
+    // How far out the cone arc sits, and how thick it reads.
+    private const float ArcRadius    = PlayerCharacter.Radius * 1.6f;
+    private const float ArcThickness = 2f;
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
@@ -1618,6 +1629,22 @@ public class GuardAction : ActionState
         var pos = body.Position;
         t.Box((int)pos.X - W / 2, (int)pos.Y - (int)PlayerCharacter.Radius - H - 2, W, H,
               Color.LightSteelBlue * 0.8f);
+
+        // ...and the covered arc, so "protected from WHERE" is readable at a glance
+        // instead of learned by getting hit from behind. Same 120° cone ResolveGuard
+        // tests (CombatState.GuardConeHalfAngle), centred on facing — the arc is the
+        // rule, not a decoration near it. Radial ticks at both ends close the wedge
+        // visually so the edge of coverage is a hard line rather than a fade.
+        int   facing = vars.Facing == 0 ? 1 : vars.Facing;
+        float centre = facing < 0 ? MathF.PI : 0f;
+        float half   = CombatState.GuardConeHalfAngle;
+        var   color  = Color.LightSteelBlue * 0.8f;
+        t.Arc(pos, ArcRadius, centre, half, color, segments: 12, thickness: ArcThickness);
+        for (int i = -1; i <= 1; i += 2)
+        {
+            var dir = new Vector2(MathF.Cos(centre + i * half), MathF.Sin(centre + i * half));
+            t.Line(pos + dir * (ArcRadius - 4f), pos + dir * (ArcRadius + 2f), color, ArcThickness);
+        }
     }
 }
 

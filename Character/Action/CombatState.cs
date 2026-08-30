@@ -207,7 +207,11 @@ public class CombatState
     private const float GuardChargeMaxDamage = 1.0f;
     private const float GuardChargedSeconds   = 0.8f;
     // Cone half-angle in radians — 60° each side of facing → 120° total coverage.
-    private const float GuardConeCos          = 0.5f;   // cos(60°)
+    // Public because GuardAction's telegraph draws exactly this cone: the arc the
+    // player sees and the arc ResolveGuard tests are the same number, so a retune
+    // here can't leave the indicator lying about what's covered.
+    public  const float GuardConeCos          = 0.5f;   // cos(60°)
+    public static readonly float GuardConeHalfAngle = MathF.Acos(GuardConeCos);
 
     // Guard timing (ResolveGuard). A hit landing within GuardPerfectWindowSeconds of
     // the stance coming up is absorbed completely — no damage, no knockback, no

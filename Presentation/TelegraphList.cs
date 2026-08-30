@@ -112,6 +112,28 @@ public sealed class TelegraphList
     public void Disc(Vector2 center, float radius, Color color)
         => RotatedRect(center, new Vector2(radius * 2f, radius * 2f), 0f, color);
 
+    // A slice of a Ring: the outline from `centerAngle - halfAngle` to
+    // `centerAngle + halfAngle` (radians, y-down like everything else). Composite, not
+    // a new kind — it emits `segments` Lines, the way Disc is really a RotatedRect —
+    // so TelegraphRenderer and DrawContext both stay as they are. The caller pays a
+    // handful of extra shapes for that; at the cone sizes this draws (a dozen segments
+    // over 120°) it is not worth a primitive of its own.
+    public void Arc(Vector2 center, float radius, float centerAngle, float halfAngle,
+                    Color color, int segments = 12, float thickness = 1f)
+    {
+        if (segments < 1) segments = 1;
+        float start = centerAngle - halfAngle;
+        float step  = (halfAngle * 2f) / segments;
+        var prev = center + new Vector2(MathF.Cos(start), MathF.Sin(start)) * radius;
+        for (int i = 1; i <= segments; i++)
+        {
+            float a = start + i * step;
+            var next = center + new Vector2(MathF.Cos(a), MathF.Sin(a)) * radius;
+            Line(prev, next, color, thickness);
+            prev = next;
+        }
+    }
+
     // ── Storage ────────────────────────────────────────────────────────────────
 
     private ref TelegraphShape Next()
