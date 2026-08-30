@@ -37,10 +37,18 @@ public readonly struct ForceField
     // committed, control-muted, can tech, and bounce hard off terrain — rather than
     // keeping full control. Mutually exclusive with IsGrab in practice.
     public readonly bool        IsThrow;
+    // Optional single-target lock. EntityId.None (the default) means "everyone the
+    // region covers", which is the right shape for an area hold. A grab is NOT an
+    // area effect — one pair of hands holds one body — so GrabAction latches its
+    // victim and stamps it here, and the system then skips every other hurtbox.
+    // The lock rides on the field rather than being enforced by shrinking the region
+    // because the geometry is what makes the hold FEEL right; only the target set is
+    // wrong.
+    public readonly EntityId    Only;
 
     public ForceField(BoundingBox region, Vector2 focus, float targetSpeed, float maxAccel,
                       Faction owner, EntityId source, Color? debugColor = null,
-                      bool isGrab = false, bool isThrow = false)
+                      bool isGrab = false, bool isThrow = false, EntityId only = default)
     {
         Region      = region;
         Focus       = focus;
@@ -51,6 +59,7 @@ public readonly struct ForceField
         DebugColor  = debugColor ?? Color.MediumPurple;
         IsGrab      = isGrab;
         IsThrow     = isThrow;
+        Only        = only;
     }
 }
 
@@ -91,6 +100,7 @@ public static class ForceFieldSystem
             {
                 if (hb.Owner == f.Owner) continue;          // self/team immune
                 if (hb.Target == f.Source) continue;        // never pull the publisher
+                if (!f.Only.IsNone && hb.Target != f.Only) continue;   // single-target lock (grab)
                 if (!HitboxWorld.Overlaps(f.Region, hb.Region)) continue;
                 var body = resolveBody(hb.Target);
                 if (body == null) continue;

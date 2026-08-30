@@ -138,4 +138,73 @@ public class GrabTests(ITestOutputHelper output)
         Assert.True(maxVx > 200f, $"Throw should fling the victim rightward (max Vx {maxVx:F1}).");
         Assert.True(sawStun, "Thrown victim should be stunned on exit (so they tumble/bounce, not act freely).");
     }
+
+    // ---- One grab holds ONE body -------------------------------------------------
+    //
+    // The hold is a ForceField, and a field is an area effect by default: before the
+    // single-target lock, every hurtbox the region covered got flagged GrabbedActive,
+    // pulled to the focus, and flung by the throw — one press grabbing a whole crowd.
+    // GrabAction now latches one victim (ActionVars.GrabVictim → ForceField.Only).
+    // Both stand inside the region: near at 95 (~25px right of the grabber, closest to
+    // the hold focus at ~89) and far at 112 (its hurtbox still overlaps the region,
+    // which reaches ~118).
+    private static readonly Vector2 NearVictimStart = new(95f, 20f);
+    private static readonly Vector2 FarVictimStart  = new(112f, 20f);
+
+    private static SimConfigMulti BuildTwoVictims(InputScript attacker) => new SimConfigMulti
+    {
+        Terrain = FlatGround(),
+        Frames  = 70,
+        Dt      = Dt,
+        Gravity = new Vector2(0f, Gravity),
+        Players = new[]
+        {
+            new SimPlayer { StartPosition = AttackerStart,    Script = attacker,                    },
+            new SimPlayer { StartPosition = NearVictimStart,  Script = InputScript.Always(default), Faction = Faction.Neutral },
+            new SimPlayer { StartPosition = FarVictimStart,   Script = InputScript.Always(default), Faction = Faction.Neutral },
+        },
+    };
+
+    [Fact]
+    public void Grab_HoldsOnlyOneVictim()
+    {
+        bool nearGrabbed = false, farGrabbed = false;
+        SimRunner.RunMulti(BuildTwoVictims(GrabHold()),
+            onFrame: (f, ps) =>
+            {
+                if (ps[1].Combat.GrabbedActive) nearGrabbed = true;
+                if (ps[2].Combat.GrabbedActive) farGrabbed  = true;
+            });
+
+        output.WriteLine($"near grabbed={nearGrabbed}, far grabbed={farGrabbed}");
+        Assert.True(nearGrabbed, "The victim nearest the hold focus should be grabbed.");
+        Assert.False(farGrabbed, "A grab must hold exactly one body — the second victim in range must stay free.");
+    }
+
+    // The lock carries through the throw: only the body actually held gets flung and
+    // stunned. (Same release timing as Throw_FlingsVictim.)
+    [Fact]
+    public void Throw_FlingsOnlyTheHeldVictim()
+    {
+        var attacker = new InputScript()
+            .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
+            .For(15, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight })
+            .Forever(new PlayerInput { MouseWorldPosition = MouseRight });
+
+        float nearVx = 0f, farVx = 0f;
+        bool farStunned = false;
+        SimRunner.RunMulti(BuildTwoVictims(attacker),
+            onFrame: (f, ps) =>
+            {
+                if (f < 25) return;
+                nearVx = MathF.Max(nearVx, ps[1].Body.Velocity.X);
+                farVx  = MathF.Max(farVx,  ps[2].Body.Velocity.X);
+                if (ps[2].Combat.StunActive) farStunned = true;
+            });
+
+        output.WriteLine($"near Vx={nearVx:F1}, far Vx={farVx:F1}, far stunned={farStunned}");
+        Assert.True(nearVx > 200f, $"The held victim should be flung (max Vx {nearVx:F1}).");
+        Assert.True(farVx < 50f, $"The unheld bystander must not be flung (max Vx {farVx:F1}).");
+        Assert.False(farStunned, "The unheld bystander must not be stunned by someone else's throw.");
+    }
 }

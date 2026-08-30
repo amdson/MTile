@@ -2966,8 +2966,11 @@ public class BlockGrabAction : ActionState
 // strong short-range ForceField in front of the grabber that flags whoever it holds
 // `GrabbedActive` (so their normal attacks/jump gate off; only struggle attacks fire).
 // It is stateless like every field: the "grab" persists only while this action keeps
-// broadcasting. It IGNORES guard for free (a field never goes through the OnHit/parry
-// path). Releasing RMB (or hitting the hold cap) flings the victim with a brief
+// broadcasting. What it is NOT is an area effect — a grab holds ONE body. The action
+// latches a single victim (vars.GrabVictim) and stamps it on the field (ForceField.Only)
+// so the region's geometry stays generous while the hold, the pull and the throw all
+// land on exactly that one opponent. It IGNORES guard for free (a field never goes
+// through the OnHit/parry path). Releasing RMB (or hitting the hold cap) flings the victim with a brief
 // high-speed directional field — into terrain at high percent that's the Phase 5 KO.
 //
 // Grab-break is a strength contest: the hold starts at GrabStrengthMax, and each
@@ -3041,18 +3044,39 @@ public class GrabAction : ActionState
     }
 
     // Any non-self hurtbox inside the region the hold field would cover. Same geometry
-    // as PublishHoldField below (focus in front along the aim, Range half-size), so the
-    // gate and the field can't disagree about who is grabbable. Hurtboxes for the frame
-    // are already published by the time the action FSM runs (Simulation.Step).
+    // as the hold field in Update (focus in front along the aim, Range half-size), so
+    // the gate and the field can't disagree about who is grabbable. Hurtboxes for the
+    // frame are already published by the time the action FSM runs (Simulation.Step).
     private static bool HasVictimInRange(EnvironmentContext ctx, PlayerAbilityState ab)
+        => !PickVictim(ctx, RegionAround(ctx.Body.Position + AimDir(ctx, ab) * FocusDist),
+                       EntityId.None).IsNone;
+
+    // The field's AABB, from its focus. One helper so the latch query and the published
+    // field are the same box by construction.
+    private static BoundingBox RegionAround(Vector2 focus)
+        => new BoundingBox(focus.X - Range, focus.Y - Range, focus.X + Range, focus.Y + Range);
+
+    // Which single body this grab has hold of. `current` is last frame's victim: it wins
+    // as long as it is still inside the region, so the hold never hops to whoever happens
+    // to drift closer mid-grab. Otherwise (a fresh grab, or the victim escaped) the
+    // nearest hurtbox to the focus is latched, which is also what re-lets a whiffing grab
+    // catch someone who walks into it. Nearest-to-focus with first-wins ties keeps the
+    // pick deterministic: it reads only published hurtbox geometry in registry order.
+    private static EntityId PickVictim(EnvironmentContext ctx, BoundingBox region, EntityId current)
     {
-        if (ctx.Hurtboxes == null) return false;
-        var focus = ctx.Body.Position + AimDir(ctx, ab) * FocusDist;
-        var region = new BoundingBox(
-            focus.X - Range, focus.Y - Range,
-            focus.X + Range, focus.Y + Range);
-        foreach (var _ in ctx.Hurtboxes.Overlapping(region, exclude: ctx.Faction)) return true;
-        return false;
+        if (ctx.Hurtboxes == null) return EntityId.None;
+        var focus  = new Vector2(region.CenterX, region.CenterY);
+        var best   = EntityId.None;
+        float bestD = float.MaxValue;
+        foreach (var hb in ctx.Hurtboxes.Overlapping(region, exclude: ctx.Faction))
+        {
+            if (hb.Target == ctx.SelfId) continue;
+            if (hb.Target == current) return current;        // keep hold of who we already have
+            var center = new Vector2(hb.Region.CenterX, hb.Region.CenterY);
+            float d = (center - focus).LengthSquared();
+            if (d < bestD) { bestD = d; best = hb.Target; }
+        }
+        return best;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -3072,6 +3096,7 @@ public class GrabAction : ActionState
         vars.ChargeTime   = 0f;
         vars.GrabThrowing = false;
         vars.GrabDir      = AimDir(ctx, ab);
+        vars.GrabVictim   = EntityId.None;   // latched in Update, off the field's own region
         if (ctx.Combat != null) ctx.Combat.GrabStrength = GrabStrengthMax;
     }
 
@@ -3091,11 +3116,17 @@ public class GrabAction : ActionState
             bool holding = ctx.Input.LeftClick && vars.TimeInState < GrabHoldMaxSeconds;
             if (holding)
             {
-                var focus = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;
+                var focus  = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;
+                var region = RegionAround(focus);
+                // One victim per grab: latch (or keep) a single target and hand it to the
+                // field, which then ignores every other body its region covers. Without
+                // this the field grabs the whole region at once — the hold flag, the pull
+                // and the throw all landing on every opponent standing nearby.
+                vars.GrabVictim = PickVictim(ctx, region, vars.GrabVictim);
                 if (ctx.ForceFields != null)
                     ctx.ForceFields.Publish(new ForceField(
-                        new BoundingBox(focus.X - Range, focus.Y - Range, focus.X + Range, focus.Y + Range),
-                        focus, PullSpeed, PullAccel, ctx.Faction, ctx.SelfId, Color.Magenta, isGrab: true));
+                        region, focus, PullSpeed, PullAccel, ctx.Faction, ctx.SelfId,
+                        Color.Magenta, isGrab: true, only: vars.GrabVictim));
                 return;
             }
             // Release or hold-cap → enter the throw.
@@ -3111,12 +3142,20 @@ public class GrabAction : ActionState
         {
             // Region hugs the held position; focus is far down GrabDir so the servo
             // drives the victim to ThrowSpeed away from the grabber.
-            var hold  = ctx.Body.Position + vars.GrabDir * FocusDist;
-            var focus = ctx.Body.Position + vars.GrabDir * 400f;
+            var hold   = ctx.Body.Position + vars.GrabDir * FocusDist;
+            var focus  = ctx.Body.Position + vars.GrabDir * 400f;
+            var region = RegionAround(hold);
+            // The throw flings the body this grab was holding — and only that body. A grab
+            // that never caught anyone may still latch here, so an opponent who walks into
+            // the release gets thrown; but once a victim is latched the throw never
+            // re-latches, because the fling carries the victim out of the region within a
+            // frame or two and a re-latch would then hand the same throw to the next body
+            // standing in it (that is the multi-victim bug, arriving one frame late).
+            if (vars.GrabVictim.IsNone)
+                vars.GrabVictim = PickVictim(ctx, region, EntityId.None);
             ctx.ForceFields.Publish(new ForceField(
-                new BoundingBox(hold.X - Range, hold.Y - Range, hold.X + Range, hold.Y + Range),
-                focus, ThrowSpeed, ThrowAccel, ctx.Faction, ctx.SelfId, Color.HotPink,
-                isGrab: false, isThrow: true));
+                region, focus, ThrowSpeed, ThrowAccel, ctx.Faction, ctx.SelfId, Color.HotPink,
+                isGrab: false, isThrow: true, only: vars.GrabVictim));
         }
     }
 

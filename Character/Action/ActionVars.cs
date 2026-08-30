@@ -89,6 +89,14 @@ public struct ActionVars
 
     public bool    GrabThrowing;      // GrabAction — false during the hold phase, true once releasing into the throw
     public Vector2 GrabDir;           // GrabAction — hold focus / throw direction
+    // GrabAction — the one body this grab has hold of. A grab is a pair of hands, not
+    // an area effect, so the action latches a single victim and stamps it on its force
+    // field (ForceField.Only); everyone else the field's region covers is ignored.
+    // EntityId.None while the grab is whiffing — it re-latches each frame until it
+    // catches someone, so walking into a live hold still gets you grabbed. Only the id
+    // is kept, never the object, for the same reason PullPointId is (rollback restore
+    // replaces the instance).
+    public EntityId GrabVictim;
 }
 
 // (PeelMember / PeelMemberBuffer lived here while the peel group rode ActionVars; they
