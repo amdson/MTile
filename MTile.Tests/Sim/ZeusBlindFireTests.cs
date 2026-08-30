@@ -149,36 +149,38 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
                     "the player was never hit through the wall — cover is still free.");
     }
 
-    // 2b. The other half of the same rule, and the reason the origin is where it is: a
-    //     roof stops the column even though a wall does not. Same course, same hidden
-    //     spot, one row of tiles added directly overhead — so the only thing that changed
-    //     is what is between the sky and the player.
+    // 2b. A roof is spent, not shelter. The column publishes HitTargets.All with an
+    //     origin at its own top, so the tile pass visits cells nearest that origin first
+    //     and skips unreachable ones (CombatSystem.cs:124-132) — it eats the ceiling
+    //     strictly top-down rather than damaging the whole 3400px shaft at once, and then
+    //     reaches the player behind it in the SAME frame the last layer breaks
+    //     (CombatSystem.cs:181-184).
     //
-    //     This is the counterplay the attack is built around. It is not passive cover:
-    //     the player has to spend build mass and put the ceiling up inside the 2.2s tell,
-    //     which is what keeps the column from degenerating into a strictly worse bolt now
-    //     that it can be answered at all.
+    //     So overhead cover buys frames, not safety. That is the deliberate trade: the
+    //     column is the answer to cover, and terrain is something it wins against. The
+    //     wall case above still holds for a different reason — a wall beside you was
+    //     never on the downward trace at all.
     [Fact]
-    public void RoofOverThePlayerBlocksTheColumn()
+    public void ColumnEatsThroughARoofRatherThanBeingStoppedByIt()
     {
         var chunks = Course(roofed: true);
-
-        // Sanity: the roof is overhead and the player is not buried in it, or "no damage"
-        // would prove nothing about occlusion.
         Assert.Equal(TileState.Solid, chunks.GetCellState(11, RoofRow));
-        Assert.NotEqual(TileState.Solid, chunks.GetCellState(11, 6));
 
         var sim = new Simulation(chunks, Hidden,
                                  g => g.SpawnEntity(EnemyFactory.Create(EntityKind.Zeus, ZeusPos)));
-
-        // The same four cycles that reliably draw blood in the uncovered case above.
         var seen = Run(sim, Hidden, 4 * CycleFrames, output);
 
-        output.WriteLine($"damage taken under a roof: {sim.Player.Combat.DamagePercent}");
-        // The column must still OPEN — this tests occlusion, not a precondition that
-        // quietly stopped firing, which would pass for entirely the wrong reason.
+        int roofLeft = 0;
+        for (int c = RoofColA; c <= RoofColB; c++)
+            if (chunks.GetCellState(c, RoofRow) == TileState.Solid) roofLeft++;
+
+        output.WriteLine($"roof tiles left: {roofLeft}/{RoofColB - RoofColA + 1}, " +
+                         $"damage: {sim.Player.Combat.DamagePercent}");
+
         Assert.Contains("ZeusThunderColumnAction", seen);
-        Assert.Equal(0f, sim.Player.Combat.DamagePercent);
+        Assert.True(roofLeft < RoofColB - RoofColA + 1, "the column did not break any roof tile");
+        Assert.True(sim.Player.Combat.DamagePercent > 0f,
+                    "the roof sheltered the player — the column should punch through it");
     }
 
     // 2c. Range. The column reaches anywhere on the stage — walking away is not an

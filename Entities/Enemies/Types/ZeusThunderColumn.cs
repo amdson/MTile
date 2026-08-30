@@ -14,25 +14,25 @@ namespace MTile;
 //   * It is occluded on the way DOWN, not on the way out. The box carries an
 //     `origin` at the top of the column rather than at Zeus, so CombatSystem's
 //     reachability trace runs vertically along the falling column. A wall beside
-//     you is therefore not cover — rock at your shoulder is nothing to a thing
-//     coming out of the sky — but a ROOF is. Build one and the column stops on it.
-//   * So the counterplay is horizontal or overhead, and either way it costs
-//     something: walk out of a three-tile band, or spend the mass to put a
-//     ceiling up inside the tell. Hiding behind terrain that happens to already
-//     be there is the one answer that does NOT work, which is the point.
-//   * The tell is sized for that: ColumnWindup is over two seconds with the
-//     full-height band drawn from the first frame, at final width. There is never
-//     a question of WHERE, only of whether you cleared it — or roofed it — in
-//     time. Two seconds is deliberately enough to place blocks, not just to run.
+//     you is therefore not cover at all — rock at your shoulder is nothing to a
+//     thing coming out of the sky — and a roof only delays it.
+//   * Because it publishes HitTargets.All, a ceiling is SPENT rather than held.
+//     The tile pass visits cells nearest the origin first and skips unreachable
+//     ones, so the column eats a roof strictly top-down and then reaches whoever
+//     is under it in the same frame the last layer breaks. Overhead cover buys
+//     frames; the only thing that buys safety is not being in the band.
+//   * That the origin exists is still what keeps this sane. With no origin every
+//     cell of the 3400px shaft took damage at once, which is the version that
+//     would have sawn the spire in half every cycle and dropped Zeus's own perch
+//     into the sea. Top-down and one layer at a time, it notches terrain instead:
+//     ~64.8 damage per cast, so dirt goes instantly, stone in four frames, and
+//     hardened rock needs two whole casts for a single tile.
+//   * So the counterplay is horizontal. ColumnWindup is over two seconds with the
+//     full-height band drawn from the first frame, at final width: there is never
+//     a question of WHERE, only of whether you cleared it in time.
 //   * It hurts: 54% of escalation per connect, against the heavy bolt's 39%. The
-//     attack that ignores your cover has to be the one you most want to not be hit
-//     by, or hiding stays correct.
-//
-// What it deliberately does NOT do is eat terrain. The beams all publish
-// HitTargets.All and bore through the hill; a full-height column doing the same
-// would saw the spire in half every cycle and drop the arena — and Zeus's own
-// perch — into the sea. So this one is EntitiesOnly. The fiction holds up: it is
-// lightning passing through, not a drill.
+//     attack that beats cover has to be the one you most want to not be hit by,
+//     or hiding stays correct.
 public class ZeusThunderColumnAction : EnemyActionState
 {
     // Long enough to be a decision rather than a reaction. The band is at full
@@ -73,14 +73,6 @@ public class ZeusThunderColumnAction : EnemyActionState
     protected virtual float SkyAbove    => 260f;
     protected virtual float ColumnDrop  => 3400f;
 
-    // The heaviest single hit Zeus has, and by a clear margin — the attack that
-    // ignores your cover has to be the one worth respecting, or hiding stays correct.
-    // In the units that actually land: CombatState.PercentPerDamage is 15, so this is
-    // 54% of escalation from one column, against the bolt's 39% and a storm strike's
-    // 13.5%. Deliberately NOT the ~75% that "double the bolt" would have given: at
-    // that point one connect plus the knockback scaling it unlocks (KnockbackScale
-    // rises 1.5% per percent) is most of an encounter, and a 2.2-second telegraph
-    // should cost you the exchange, not the fight.
     protected virtual float Damage    => 3.6f;
     // Straight down — it is a falling column, and being driven into the floor is
     // what the hit should read as. Kept well under the bolt's eviction threshold in
@@ -193,7 +185,7 @@ public class ZeusThunderColumnAction : EnemyActionState
             poly.GetBoundingBox(centre), v.HitId, Damage,
             new Vector2(0f, Knockback),
             Faction.Enemy, ctx.Self.Id, BoltColor,
-            targets: HitTargets.EntitiesOnly,
+            targets: HitTargets.All,
             shape: poly, shapePos: centre,
             hitstunSecondsOverride: Hitstun,
             origin: new Vector2(v.LockedAim.X, ColumnTop(ctx.Self.Body))));
