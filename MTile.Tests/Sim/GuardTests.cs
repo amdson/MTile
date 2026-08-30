@@ -1,5 +1,8 @@
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
+using MTile.Tests.Sim;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace MTile.Tests;
 
@@ -12,7 +15,7 @@ namespace MTile.Tests;
 // and HitFeelSystem derive the block sound and sparks from. If the stamps stop being
 // written, or stop surviving a snapshot restore, the cue silently stops firing (or
 // double-fires after a rollback) with nothing else in the suite noticing.
-public class GuardParryCueTests
+public class GuardTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 60f;
     private const int   GuardFrame = 42;
@@ -21,6 +24,7 @@ public class GuardParryCueTests
     private const int PerfectWindowFrames = 7;    // FromSeconds(0.12, 1/60)
     private const int FalloffFrames       = 36;   // FromSeconds(0.60, 1/60)
     private const int BreakRecoveryFrames = 30;   // FromSeconds(0.50, 1/60)
+    private const int CooldownFrames      = 9;    // FromSeconds(0.15, 1/60)
 
     // Weak enough to arm GuardRetaliate (GuardChargeMaxDamage is 1.0).
     private const float WeakDamage   = 0.5f;
@@ -223,6 +227,31 @@ public class GuardParryCueTests
         Assert.True(HitAt(c, reGuardFrame + 1).Absorbed);
     }
 
+    // ── Re-entry cooldown ───────────────────────────────────────────────────────
+
+    // Every deactivation, not just a break, locks re-entry briefly — otherwise the
+    // timing model is free to game by mashing Shift for a fresh window per press.
+    [Fact]
+    public void DeactivatingGuardStartsAReEntryCooldown()
+    {
+        var c = Guarding();
+        int releaseFrame = GuardFrame + 20;
+
+        c.EndGuard(releaseFrame, Dt);
+
+        Assert.True(c.GuardOnCooldown(releaseFrame));
+        Assert.True(c.GuardOnCooldown(releaseFrame + CooldownFrames - 1));
+        Assert.False(c.GuardOnCooldown(releaseFrame + CooldownFrames));
+    }
+
+    // The cooldown is longer than the window it protects, so a mash spends more frames
+    // locked out than guarding.
+    [Fact]
+    public void CooldownOutlastsThePerfectWindow()
+    {
+        Assert.True(CooldownFrames > PerfectWindowFrames);
+    }
+
     // ── Snapshot ────────────────────────────────────────────────────────────────
 
     // The whole timing model reads GuardStartFrame, and the cue dedupes on the parry
@@ -251,5 +280,67 @@ public class GuardParryCueTests
         c.CopyFrom(savedBroken);
         Assert.True(c.GuardBroken);
         Assert.Equal(GuardFrame + 600 + BreakRecoveryFrames, c.GuardBreakExpireFrame);
+    }
+
+    [Fact]
+    public void CooldownSurvivesSnapshotRestore()
+    {
+        var c = Guarding();
+        c.EndGuard(GuardFrame + 20, Dt);
+        var saved = c.Clone();
+
+        c.GuardCooldownExpireFrame = 0;
+        c.CopyFrom(saved);
+
+        Assert.True(c.GuardOnCooldown(GuardFrame + 21));
+    }
+
+    // ── The cooldown, wired through the action FSM ──────────────────────────────
+
+    // A pure-CombatState test can't catch GuardAction forgetting to read the cooldown,
+    // so this runs the real FSM: one player, no attacker, mashing Shift on a 1-frame
+    // release. Guard must sit out the lockout between presses instead of re-entering
+    // the moment the button comes back down.
+    [Fact]
+    public void MashingShiftCannotKeepGuardUp()
+    {
+        // dt is 1/30 here (SimConfigMulti's default), so the cooldown is 4 frames.
+        const float SimDt = 1f / 30f;
+        int cooldown = SimFrames.FromSeconds(0.15f, SimDt);
+
+        var terrain = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+
+        // Hold 6, release 1, hold forever — the tightest mash the input allows.
+        var script = new InputScript()
+            .For   (5, default(PlayerInput))
+            .For   (6, new PlayerInput { Shift = true })
+            .For   (1, default(PlayerInput))
+            .Forever  (new PlayerInput { Shift = true });
+
+        var guarded = new List<bool>();
+        SimRunner.RunMulti(new SimConfigMulti
+        {
+            Terrain = terrain,
+            Frames  = 40,
+            Dt      = SimDt,
+            Gravity = new Vector2(0f, 600f),
+            Players = new[] { new SimPlayer { StartPosition = new Vector2(60f, 20f), Script = script } },
+        },
+        onFrame: (f, ps) => guarded.Add(ps[0].CurrentActionName == "GuardAction"));
+
+        int first = guarded.IndexOf(true);
+        Assert.True(first >= 0, "Holding Shift should raise the guard at all.");
+
+        int lastOfFirstRun = first;
+        while (lastOfFirstRun + 1 < guarded.Count && guarded[lastOfFirstRun + 1]) lastOfFirstRun++;
+        int back = guarded.FindIndex(lastOfFirstRun + 1, g => g);
+        output.WriteLine($"guard {first}..{lastOfFirstRun}, back@{back}, cooldown={cooldown}");
+
+        Assert.True(back > 0, "Guard should come back after the cooldown.");
+        Assert.True(back - lastOfFirstRun > cooldown,
+            $"Re-press must wait out the cooldown (gap {back - lastOfFirstRun}, cooldown {cooldown}).");
     }
 }

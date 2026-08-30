@@ -1336,7 +1336,9 @@ public class AirSpinStab : StabAction
 // percent and half the knockback. Anything that leaks through also BREAKS the guard,
 // which is why entry is refused while Combat.GuardBroken — the recovery countdown
 // after a break, which additionally requires the button to be released, so holding
-// Shift through a break can't farm fresh perfect windows.
+// Shift through a break can't farm fresh perfect windows. A shorter cooldown
+// (Combat.GuardOnCooldown) follows every ordinary deactivation for the mirror-image
+// reason: without it, mashing Shift would hand out a fresh window per press.
 //
 // A weak in-cone hit absorbed inside the perfect window sets Combat.GuardCharged,
 // arming GuardRetaliateAction (LMB-press while charged → fast forward slash).
@@ -1360,6 +1362,9 @@ public class GuardAction : ActionState
         if (ctx.Input.RightClick)    return false;            // Shift+RMB is the build gesture
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (ctx.Combat?.GuardBroken  == true) return false;   // still recovering from a break
+        // ...and a brief lockout after ANY deactivation, so guard can't be mashed into
+        // continuous perfect-window coverage.
+        if (ctx.Combat?.GuardOnCooldown(ctx.CurrentFrame) == true) return false;
         // Strict from-set: neutral or the tail of recovery — never over a live
         // action (reaching one is the eviction lookahead's call, not a priority race).
         if (!EntryOk(ctx, SimFrames.FromSeconds(MaxEntrySeconds, ctx.Dt))) return false;
@@ -1389,7 +1394,7 @@ public class GuardAction : ActionState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        ctx.Combat?.EndGuard();
+        ctx.Combat?.EndGuard(ctx.CurrentFrame, ctx.Dt);
     }
 
     // Slow walk, slower air. Gravity normal — guard doesn't levitate.

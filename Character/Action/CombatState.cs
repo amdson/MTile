@@ -169,6 +169,13 @@ public class CombatState
     // is (currentFrame - GuardStartFrame): guard is a parry you time, not a shield
     // you hold.
     public int     GuardStartFrame;
+    // Re-entry cooldown, set every time the stance comes DOWN (EndGuard) — including a
+    // clean release, a movement cancel, or a break. Without it the timing model is free
+    // to game: tapping Shift over and over hands out a fresh perfect window per press,
+    // and mashing covers most frames with perfect blocks. Blocking re-entry for slightly
+    // longer than the window itself means a mash is off more often than it is on, so
+    // guessing WHEN to guard stays the skill.
+    public int     GuardCooldownExpireFrame;
     // Break recovery. Set when a hit gets through the guard; the stance can't come
     // back up until the countdown expires AND the button has been released (Tick).
     // The release half matters: without it, holding Shift through a break would hand
@@ -213,6 +220,9 @@ public class CombatState
     private const float GuardMaxKnockbackPenetration = 0.50f;
     // How long the stance stays down after something got through it.
     private const float GuardBreakRecoverySeconds    = 0.50f;
+    // ...and after any ordinary deactivation. Deliberately a touch longer than the
+    // perfect window (0.12 s), so mashing Shift buys less than half the frames.
+    private const float GuardCooldownSeconds         = 0.15f;
 
     // Hitstun tuning (COMBAT_FEEL_PLAN Phase 1). Hitstun scales with the incoming
     // knockback impulse — strong hits stun longer — instead of the old flat
@@ -337,7 +347,16 @@ public class CombatState
         GuardStartFrame = currentFrame;
     }
 
-    public void EndGuard() => GuardActive = false;
+    // Drop the stance and start the re-entry cooldown. Called from GuardAction.Exit, so
+    // it covers every way guard ends — released, cancelled by movement, or broken.
+    public void EndGuard(int currentFrame, float dt)
+    {
+        GuardActive = false;
+        int expire  = currentFrame + SimFrames.FromSeconds(GuardCooldownSeconds, dt);
+        if (expire > GuardCooldownExpireFrame) GuardCooldownExpireFrame = expire;
+    }
+
+    public bool GuardOnCooldown(int currentFrame) => currentFrame < GuardCooldownExpireFrame;
 
     // Filter an incoming hit through Guard. Returns how much of the hit survives the
     // stance; the caller applies the scales and, if Absorbed, skips the hit entirely.
@@ -431,6 +450,7 @@ public class CombatState
         GuardActive = o.GuardActive;
         GuardCharged = o.GuardCharged; GuardChargedExpireFrame = o.GuardChargedExpireFrame;
         GuardStartFrame = o.GuardStartFrame;
+        GuardCooldownExpireFrame = o.GuardCooldownExpireFrame;
         GuardBroken = o.GuardBroken; GuardBreakExpireFrame = o.GuardBreakExpireFrame;
         LastParryFrame = o.LastParryFrame; LastParryDir = o.LastParryDir;
         LastParryCharged = o.LastParryCharged;
