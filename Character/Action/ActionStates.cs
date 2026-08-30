@@ -1941,7 +1941,12 @@ public class BlockPaintAction : ActionState
         if (!ab.Meters.CanFireEruption) return;
         if (vars.BallVel.Length() < EruptReleaseSpeed) return;
 
-        float mass = ab.Meters.ConsumeEruptionMass(ctx.ActiveBlockType);
+        // Charged blocks around the launch site cash themselves into this eruption. Done
+        // only once every other gate has passed, so a release that doesn't erupt never
+        // silently discharges the wall the player was saving.
+        int   recruited = BlockEruptionHelpers.RecruitChargedBlocks(ctx.Chunks, vars.BallPos);
+        float mass = ab.Meters.ConsumeEruptionMass(ctx.ActiveBlockType,
+                                                   recruited * BuildMeters.EruptMax);
         if (mass <= 0f || ctx.Spawner == null) return;
         ctx.Spawner.SpawnEntity(new MassBall(
             vars.BallPos, vars.BallVel, mass, ctx.ActiveBlockType, ctx.Faction));
@@ -2281,6 +2286,47 @@ internal static class BlockEruptionHelpers
 
         ctx.Chunks.Charge.Set(gtx, gty);
         return true;
+    }
+
+    // ── Charged-block recruitment (the eruption's side of the bargain) ───────────
+    //
+    // An eruption fired near charged blocks pulls their charge into itself. This is the
+    // second use for a charge and the only way an eruption gets bigger than the meter:
+    // each recruited block throws a WHOLE EruptMax into the pot on top of whatever was
+    // banked, so a wall staged with two charges erupts three meters wide.
+    //
+    // The blocks DISCHARGE but are not broken. An eruption is a building verb — having
+    // it eat the wall the player spent four seconds charging would fight the thing it
+    // is for — and the tint going out is the feedback that the charge was spent.
+    //
+    // Scanned row-major over the bounding square in ascending cell order, so the count
+    // (and therefore the ball's mass) is identical on both peers and across a rollback
+    // replay.
+    private const float EruptRecruitRadiusTiles = 4.5f;
+
+    // Discharge every charged cell within the recruit radius of `at`; returns how many.
+    // Callers multiply by BuildMeters.EruptMax to get the charge units contributed.
+    public static int RecruitChargedBlocks(ChunkMap chunks, Vector2 at)
+    {
+        if (chunks == null) return 0;
+
+        int   cx     = (int)MathF.Floor(at.X / Chunk.TileSize);
+        int   cy     = (int)MathF.Floor(at.Y / Chunk.TileSize);
+        int   span   = (int)MathF.Ceiling(EruptRecruitRadiusTiles);
+        float radius = EruptRecruitRadiusTiles * Chunk.TileSize;
+        float r2     = radius * radius;
+
+        int taken = 0;
+        for (int dy = -span; dy <= span; dy++)
+        for (int dx = -span; dx <= span; dx++)
+        {
+            int gtx = cx + dx, gty = cy + dy;
+            if (!chunks.Charge.IsCharged(gtx, gty)) continue;
+            if (Vector2.DistanceSquared(CellCenter(gtx, gty), at) > r2) continue;
+            chunks.Charge.Clear(gtx, gty);
+            taken++;
+        }
+        return taken;
     }
 }
 

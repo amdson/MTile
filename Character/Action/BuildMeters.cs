@@ -175,12 +175,25 @@ public sealed class BuildMeters
         => BuildMove + EruptMove >= MaterialStrengths.BuildCostFor(type);
 
     // Convert the banked eruption charge into ball mass (tile-equivalents) and clear it.
-    public float ConsumeEruptionMass(TileType type)
+    //
+    // `bonusUnits` is charge the METER never held: charged blocks recruited from around
+    // the launch site each throw a whole EruptMax into the pot
+    // (BlockEruptionHelpers.RecruitChargedBlocks). It is added on top rather than
+    // clamped into EruptMax, which is the entire point of staging charges — an eruption
+    // fired next to two of them is three meters wide.
+    //
+    // MaxBallMass scales with the bonus for the same reason. The cap exists to stop a
+    // full charge of cheap material asking the cascade for ~960 tiles that mostly die in
+    // open air; it is a per-meter budget, so a three-meter eruption gets three times the
+    // budget rather than being quietly flattened back to one.
+    public float ConsumeEruptionMass(TileType type, float bonusUnits = 0f)
     {
-        float mass = EruptMove / MaterialStrengths.BuildCostFor(type);
+        float cost = MaterialStrengths.BuildCostFor(type);
+        float mass = (EruptMove + MathF.Max(0f, bonusUnits)) / cost;
+        float cap  = MaxBallMass * (1f + MathF.Max(0f, bonusUnits) / EruptMax);
         EruptMove  = 0f;
         ChargeHeld = 0f;
-        return MathF.Min(mass, MaxBallMass);
+        return MathF.Min(mass, cap);
     }
 
     // Spend the WHOLE banked charge to charge one block. All-or-nothing: returns false

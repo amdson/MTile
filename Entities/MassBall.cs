@@ -38,6 +38,12 @@ public class MassBall : Projectile
 
     public override EntityKind Kind => EntityKind.MassBall;
 
+    // Build mass left to leak, in tile-equivalents. Read-only view for tests and
+    // feedback — a supercharged eruption (charged blocks recruited at launch,
+    // BlockEruptionHelpers.RecruitChargedBlocks) is simply one of these carrying a
+    // number well past what a full meter alone could buy.
+    public float BuildMass => _mass;
+
     protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);

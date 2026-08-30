@@ -64,6 +64,22 @@ public class LobbedAreaProjectile : Projectile
     // the contact fuse and the damage it deals cover the same region, floored so a
     // nearly-crumbled clod still connects.
     private const float CoreMinHalfSize   = 10f;
+    // ── Charged clods (World/TileCharge.cs) ──────────────────────────────────────
+    // A charged tile costs a whole avalanche meter — two seconds of committed holding —
+    // so a clod with even one in it is a deliberately expensive object and the payoff
+    // has to read as such. Damage leads, knockback and reach follow more gently: the
+    // point is that a charged clod BREAKS things, not that it launches them to orbit.
+    private const float ChargedDamagePerBlock    = 1.5f;   // ×2.5 at one, ×4 at two
+    private const float ChargedKnockbackPerBlock = 0.6f;
+    private const float ChargedRadiusPerBlock    = 0.35f;
+    // Cap on how many charged tiles one clod can cash in. A grab that happened to peel
+    // a whole charged wall shouldn't produce a screen-clearing blast — the fantasy is a
+    // demolition charge, not a nuke.
+    private const int   ChargedMax               = 4;
+    // How far a charged clod's orb is pulled toward white. Same language as the tile
+    // tint in ChunkRenderer, so "this thing is charged" reads identically on the ground
+    // and in the air.
+    private const float ChargedTint              = 0.7f;
     private const float BodyRadius        = 5f;
     // Drawn radius at full charge; scales with √(blocks remaining) like the old held orb.
     private const float OrbMaxRadius      = PlayerCharacter.Radius * 0.9f;
@@ -79,6 +95,10 @@ public class LobbedAreaProjectile : Projectile
     private bool     _tracking;
     private EntityId _pointId;
     private int      _harvest;
+    // Charged tiles that went into this clod (grab path only). Fixed at break-out —
+    // the bleed eats Budget, never this, so a clod carried until it is nearly gone
+    // still detonates like the charge it was packed with.
+    private int      _charged;
     private float    _carryTime;
     private float    _chaseTime;
 
@@ -88,6 +108,9 @@ public class LobbedAreaProjectile : Projectile
     public EntityId PointId       => _pointId;
     public int      Budget        => _budget;
     public int      HarvestBlocks => _harvest;
+    public int      ChargedBlocks => _charged;
+    // Charged tiles this clod will actually cash in — the raw count, capped.
+    public int      EffectiveCharge => Math.Min(_charged, ChargedMax);
     public TileType TileType      => _tileType;
 
     // hitId/tileType are immutable (ctor) — recorded so Rehydrate can reconstruct via
@@ -102,6 +125,7 @@ public class LobbedAreaProjectile : Projectile
         s.Tracking      = _tracking;
         s.LinkedId      = _pointId;
         s.HarvestBlocks = _harvest;
+        s.ChargedBlocks = _charged;
         s.CarryTime     = _carryTime;
         s.ChaseTime     = _chaseTime;
     }
@@ -114,6 +138,7 @@ public class LobbedAreaProjectile : Projectile
         _tracking  = s.Tracking;
         _pointId   = s.LinkedId;
         _harvest   = s.HarvestBlocks;
+        _charged   = s.ChargedBlocks;
         _carryTime = s.CarryTime;
         _chaseTime = s.ChaseTime;
     }
@@ -133,12 +158,15 @@ public class LobbedAreaProjectile : Projectile
     }
 
     // A block grab's ball: born at rest, weightless, following `point` until detach.
-    public static LobbedAreaProjectile MakeTracking(Vector2 pos, int blocks, TileType tileType, int hitId, Faction owner, EntityId point)
+    // `charged` is how many of the harvested tiles were charged — the peel counts them
+    // before it breaks the cells, since BreakCell clears the flag.
+    public static LobbedAreaProjectile MakeTracking(Vector2 pos, int blocks, TileType tileType, int hitId, Faction owner, EntityId point, int charged = 0)
     {
         var ball = new LobbedAreaProjectile(pos, Vector2.Zero, blocks, tileType, hitId, owner)
         {
             _tracking    = true,
             _pointId     = point,
+            _charged     = charged,
             GravityScale = 0f,
         };
         return ball;
@@ -210,12 +238,26 @@ public class LobbedAreaProjectile : Projectile
     // whatever is at the center, and the radial segments catch everything around it.
     private void Detonate(HitboxWorld hitboxes, IEntitySpawner spawner)
     {
-        // 1) Eruption mound at the burst site. Chunks come from the spawner
-        // (Game1 implements both IEntitySpawner and IChunkProvider). Mid-air, the mass
-        // field has nothing to support a sprout, so it seeks terrain or dies out —
-        // a body hit doesn't leave a mound hanging in the sky.
+        // Charged tiles in the clod scale the whole burst. One is a big hit; the cap
+        // keeps a lucky harvest of a charged wall from clearing the screen.
+        int   charged = EffectiveCharge;
+        float dmgMul  = 1f + ChargedDamagePerBlock    * charged;
+        float kbMul   = 1f + ChargedKnockbackPerBlock * charged;
+        float radMul  = 1f + ChargedRadiusPerBlock    * charged;
+
+        // 1) Eruption mound at the burst site — but ONLY for an ordinary clod. Chunks
+        // come from the spawner (Game1 implements both IEntitySpawner and
+        // IChunkProvider). Mid-air, the mass field has nothing to support a sprout, so
+        // it seeks terrain or dies out — a body hit doesn't leave a mound hanging in
+        // the sky.
+        //
+        // A charged clod spends its material on the blast instead: it detonates rather
+        // than splatting, so it leaves a crater where a plain one leaves a mound. That
+        // is the trade the player buys with the meter, and it is the one rule that
+        // makes "charged" legible at the moment of impact — the same object either
+        // builds or destroys depending on what went into it.
         var chunks = (spawner as IChunkProvider)?.Chunks;
-        if (chunks != null && _budget > 0)
+        if (chunks != null && _budget > 0 && charged == 0)
         {
             // Material was captured at launch, so the mound is made of whatever the
             // player had selected when they threw.
@@ -239,28 +281,35 @@ public class LobbedAreaProjectile : Projectile
                 ? Vector2.Normalize(vel)
                 : new Vector2(0f, -1f);
             float core = MathF.Max(CoreMinHalfSize, DrawRadius);
-            // EntitiesOnly: the segments already carry the tile damage, and the center
-            // cell is where the mound above is being deposited — chipping it here would
-            // just fight the deposit.
+            // A plain clod's core is EntitiesOnly: the segments already carry the tile
+            // damage, and the center cell is where the mound above is being deposited —
+            // chipping it here would just fight the deposit. A charged clod deposits
+            // nothing, so that reason is gone and the core cuts terrain too, which is
+            // what actually punches the crater at the point of impact.
             hitboxes.Publish(new Hitbox(
                 new BoundingBox(center.X - core, center.Y - core, center.X + core, center.Y + core),
-                _hitId, ExplosionDamage,
-                coreDir * ExplosionKnockback,
+                _hitId, ExplosionDamage * dmgMul,
+                coreDir * (ExplosionKnockback * kbMul),
                 Faction, Id, Color.Goldenrod,
-                targets: HitTargets.EntitiesOnly,
+                targets: charged > 0 ? HitTargets.All : HitTargets.EntitiesOnly,
                 origin: center));
 
+            // The ring grows with the charge, and the segments grow with it — the boxes
+            // are spaced 2πR/N apart, so scaling R alone would just open gaps in the
+            // blast and let bodies stand between the segments of a bigger explosion.
+            float ringRadius = ExplosionRadius * radMul;
+            float segHalf    = SegmentHalfSize * radMul;
             for (int i = 0; i < ExplosionSegments; i++)
             {
                 float angle = i * MathHelper.TwoPi / ExplosionSegments;
                 var dir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-                var segCenter = center + dir * ExplosionRadius;
+                var segCenter = center + dir * ringRadius;
                 var region = new BoundingBox(
-                    segCenter.X - SegmentHalfSize, segCenter.Y - SegmentHalfSize,
-                    segCenter.X + SegmentHalfSize, segCenter.Y + SegmentHalfSize);
+                    segCenter.X - segHalf, segCenter.Y - segHalf,
+                    segCenter.X + segHalf, segCenter.Y + segHalf);
                 hitboxes.Publish(new Hitbox(
-                    region, _hitId, ExplosionDamage,
-                    dir * ExplosionKnockback,
+                    region, _hitId, ExplosionDamage * dmgMul,
+                    dir * (ExplosionKnockback * kbMul),
                     Faction, Id, Color.Goldenrod,
                     origin: center));
             }
@@ -348,7 +397,9 @@ public class LobbedAreaProjectile : Projectile
         base.SyncSprite();
         if (Sprite is not MassOrbSprite orb) return;
         orb.Radius = DrawRadius;
-        orb.Tint   = TilePalette.BaseColor(_tileType);
+        orb.Tint   = _charged > 0
+            ? Color.Lerp(TilePalette.BaseColor(_tileType), Color.White, ChargedTint)
+            : TilePalette.BaseColor(_tileType);
         orb.Spin   = Body.Velocity.X / orb.Radius;   // rolling: ω = v/r, sign from direction
     }
 }

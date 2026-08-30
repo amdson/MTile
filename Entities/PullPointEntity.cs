@@ -60,6 +60,7 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
 
     public TileType OrbType;    // material seed for the ball (press-time block type; dominant harvest after)
     public int      HarvestBlocks;  // blocks taken at break-out — >0 ⇔ this grab took something (recovery gate)
+    public int      ChargedBlocks;  // how many of those were charged tiles — the ball's blast scaling
     public EntityId BallId;     // the ball spawned at break-out, EntityId.None until then
     public float    HandoffTime;   // seconds since the action released the point
 
@@ -118,7 +119,7 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         // Fixed array indexed by TileType rather than a Dictionary: no per-frame
         // allocation on the sim path, and a fixed winner-scan order.
         Span<int> counts = stackalloc int[TileTypeCount];
-        int taken = 0;
+        int taken = 0, charged = 0;
         for (int dy = -span; dy <= span; dy++)
         for (int dx = -span; dx <= span; dx++)
         {
@@ -126,12 +127,16 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
             int gtx = cx + dx, gty = cy + dy;
             if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
             var type = chunks.GetCellType(gtx, gty);
+            // Read the charge BEFORE the break — BreakCell clears the flag, so asking
+            // afterwards always says no.
+            bool wasCharged = chunks.Charge.IsCharged(gtx, gty);
             if (!chunks.BreakCell(gtx, gty)) continue;
             counts[(int)type]++;
+            if (wasCharged) charged++;
             taken++;
         }
         if (taken == 0) return false;
-        SpawnBall(spawner, site, taken, DominantType(counts));
+        SpawnBall(spawner, site, taken, DominantType(counts), charged);
         return true;
     }
 
@@ -148,11 +153,12 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
     // were, tracking this point. Same call whether the point is still in hand or
     // already flying — that is the uniformity between "release with the clod in hand"
     // and "release while the blocks are still coming loose", in code.
-    private void SpawnBall(IEntitySpawner spawner, Vector2 at, int blocks, TileType type)
+    private void SpawnBall(IEntitySpawner spawner, Vector2 at, int blocks, TileType type, int charged)
     {
         OrbType       = type;
         HarvestBlocks = blocks;
-        var ball = LobbedAreaProjectile.MakeTracking(at, blocks, type, spawner.HitIds.Next(), Faction, Id);
+        ChargedBlocks = charged;
+        var ball = LobbedAreaProjectile.MakeTracking(at, blocks, type, spawner.HitIds.Next(), Faction, Id, charged);
         spawner.SpawnEntity(ball);
         BallId = ball.Id;
     }
@@ -336,19 +342,24 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
     private void BreakOutGroup(ChunkMap chunks, IEntitySpawner spawner, Vector2 com)
     {
         Span<int> counts = stackalloc int[TileTypeCount];
-        int taken = 0;
+        int taken = 0, charged = 0;
         for (int i = 0; i < _group.Count; i++)
         {
             ref var m = ref _group.Members[i];
             var type = chunks.GetCellType(m.Gtx, m.Gty);
+            // Charge is read before the break for the same reason as in RipBlocks:
+            // BreakCell clears it. A charged tile peeled into the clod is what turns
+            // the throw from a splat into a demolition charge (LobbedAreaProjectile).
+            bool wasCharged = chunks.Charge.IsCharged(m.Gtx, m.Gty);
             if (!chunks.BreakCell(m.Gtx, m.Gty)) continue;
             counts[(int)type]++;
+            if (wasCharged) charged++;
             taken++;
         }
         _group.Count  = 0;
         _group.Strain = 0f;
         if (taken == 0) return;
-        SpawnBall(spawner, com, taken, DominantType(counts));
+        SpawnBall(spawner, com, taken, DominantType(counts), charged);
     }
 
     private int FindMember(int gtx, int gty)
@@ -380,6 +391,7 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         s.OwnerPos      = OwnerPos;
         s.TileType      = OrbType;
         s.HarvestBlocks = HarvestBlocks;
+        s.ChargedBlocks = ChargedBlocks;
         s.LinkedId      = BallId;
         s.HandoffTime   = HandoffTime;
     }
@@ -392,6 +404,7 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         OwnerPos      = s.OwnerPos;
         OrbType       = s.TileType;
         HarvestBlocks = s.HarvestBlocks;
+        ChargedBlocks = s.ChargedBlocks;
         BallId        = s.LinkedId;
         HandoffTime   = s.HandoffTime;
     }

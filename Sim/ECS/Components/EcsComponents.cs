@@ -102,6 +102,7 @@ public struct EntityData
     public EntityId LinkedId;     // point: its ball; ball: its point
     public bool     Tracking;     // ball: still following the point (gravity off, no hurtbox)
     public int      HarvestBlocks;// ball: blocks at break-out (Budget is what's left)
+    public int      ChargedBlocks;// ball: how many of those were charged tiles (blast scaling)
     public float    CarryTime;    // ball: seconds held while the point was driven (dissipation clock)
     public float    ChaseTime;    // ball: seconds chasing a released point (detach cap)
 }
