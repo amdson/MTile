@@ -430,6 +430,11 @@ public abstract class SlashLikeAction : ActionState
     protected abstract float   SweepAngleDeg       { get; }   // total sweep (90, 150, …)
     protected abstract float   SweepDirection      { get; }   // +1 CCW, -1 CW (mirror)
     protected abstract float   KnockbackMagnitude  { get; }
+    // Multiplier on SlashDamagePerFrame. Damage is one number on both paths — tile
+    // HP carved AND the entity escalation percent added — so a variant that scales
+    // this bites harder in both senses. 1.0 for every stock slash; DownAirSlash
+    // raises it because it's the slowest, most committed swing in the air kit.
+    protected virtual  float   DamageScale         => 1f;
     // Collision-mode strike speed (px/s), stacked on the attacker's velocity at
     // publish. 0 (default) ⇒ the variant publishes legacy Impulse mode: the
     // hold-slashes (S1/S2) keep their designed tap so the hold field isn't
@@ -482,6 +487,13 @@ public abstract class SlashLikeAction : ActionState
     // arcs rather than a full-body thrust. GrabbedSlash overrides to 0 — a struggle
     // hit must have zero effect on either side, not just zero knockback.
     protected virtual  float   RecoilScale         => 0.15f;
+    // Tile-recoil gates (see Hitbox.RecoilBreakProtected / RecoilMinMaterialHP).
+    // Defaults reproduce the old behavior — every slash bounced off every cell it
+    // touched, which was harmless at RecoilScale 0.15. A variant that turns the
+    // recoil up wants these on, so it pogos off hard SURVIVING rock instead of off
+    // the dirt it just shattered.
+    protected virtual  bool    RecoilBreakProtected => false;
+    protected virtual  float   RecoilMinMaterialHP  => 0f;
     // -----------------------------------------------------------------------
 
     protected float ArcRadius => BaseArcRadius * ArcRadiusScale;
@@ -574,12 +586,14 @@ public abstract class SlashLikeAction : ActionState
             // KnockbackImpulse stays authored either way — parry cone, bullet
             // deflect, and the OnHit early-outs read it as the swing direction.
             ctx.Hitboxes.Publish(new Hitbox(
-                region, vars.HitId, SlashDamagePerFrame,
+                region, vars.HitId, SlashDamagePerFrame * DamageScale,
                 vars.AttackDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, SlashColor,
                 hitstunSecondsOverride: HitstunSecondsOverride,
                 grabStrengthDamage: GrabStrengthDamage,
                 recoilScale: RecoilScale,
+                recoilBreakProtected: RecoilBreakProtected,
+                recoilMinMaterialHP: RecoilMinMaterialHP,
                 mode: StrikeSpeed > 0f ? KnockbackMode.Collision : KnockbackMode.Impulse,
                 strikeDir: vars.AttackDir,
                 strikeVelocity: ctx.Body.Velocity + vars.AttackDir * StrikeSpeed,
@@ -872,6 +886,140 @@ public class AirTurnSlash : SlashLikeAction
     {
         // No combo follow-up — turn-around is one-and-done. Short recovery.
         ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.133f, f, dt);
+    }
+}
+
+// ---------- Down-air: the pogo chop --------------------------------------------
+
+// Overhead-to-downward chop, fired by an air click aimed into the BOTTOM SEXTANT —
+// the 60°-wide wedge centred on straight down. Before this existed, a downward air
+// click just produced a normal AirSlash1 with its arc rotated; now the aim reads as
+// a distinct move with its own clip, its own (heavier) damage, and a long commitment.
+//
+// The point of it is the POGO. Every slash already carries Newton's-third-law recoil
+// (Plans/HIT_FEEL_PLAN.md phase 2b): CombatSystem negates the impulse it delivered,
+// scales it by the hitbox's RecoilScale, and drops it in the attacker's per-HitId
+// inbox for ApplyActionForces to read one frame later. At the stock 0.15 that's a
+// nudge. Turned up to PogoRecoilScale, a connect below you throws you back UP.
+//
+// Two things stop the raw recoil from being a usable pogo on its own, and
+// ApplyActionForces below fixes both:
+//
+//   1. It scales with what you hit. Recoil is (1+e)·μ·u·RecoilScale, so a light
+//      enemy hands back a fraction of what a heavy one does — the bounce would be
+//      unpredictable exactly when the player needs to trust it. Hence PogoSpeed as
+//      a floor (and PogoMaxSpeed as a ceiling, so a heavy target doesn't fire you
+//      off the top of the screen).
+//   2. It's ADDITIVE, and you dive into a pogo with downward velocity. Adding 300
+//      px/s up to 400 px/s of fall still leaves you falling. So on an entity connect
+//      the vertical component is REPLACED, not added — and only ever in the upward
+//      direction (MathF.Min against the current Vy), so a hit can never brake an
+//      ascent that was already faster.
+//
+// Tile contacts deliberately keep the plain additive recoil instead: bouncing off
+// terrain is a smaller, more incidental effect than bouncing off a body, and it's
+// gated (RecoilBreakProtected + RecoilMinMaterialHP) so you only kick off hard rock
+// that SURVIVED the chop, never off the dirt you just carved through.
+public class DownAirSlash : SlashLikeAction
+{
+    // Aim wedge. A sextant is 60° wide, so the click direction must sit within 30°
+    // of straight down — i.e. its normalized +y component is at least cos(30°).
+    private const float AimCosThreshold  = 0.8660254f;
+
+    // Pogo tuning. PogoSpeed is calibrated against the jump: JumpVelocity (-100) plus
+    // JumpHoldForce (-1500) over MaxJumpHoldTime (0.12) nets roughly -280 px/s, so a
+    // 300 px/s bounce is "a free jump, slightly better" — enough to chain pogos off a
+    // line of enemies without trivializing vertical traversal.
+    private const float PogoSpeed        = 300f;
+    private const float PogoMaxSpeed     = 520f;
+    // ~3.3× the stock slash recoil. Below PogoSpeed this never shows (the floor wins);
+    // it's what makes a heavy, fast-closing connect kick back harder than a light one.
+    private const float PogoRecoilScale  = 0.50f;
+    // The hitbox carries ONE RecoilScale, and it feeds the tile path too — so turning
+    // it up for the entity pogo would also treble the bounce you get off stone, which
+    // is a change to terrain feel nobody asked for (a down-aimed air click used to
+    // bounce at the stock 0.15). This trims the tile share back to ≈ that: 0.50 × 0.35
+    // ≈ 0.175. Raise it toward 1.0 to make chopping off hard rock a real pogo too.
+    private const float TileRecoilShare  = 0.35f;
+
+    protected override float Duration             => 0.18f;   // the most committed air swing
+    protected override float ArcRadiusScale       => 1.25f;   // reach below the feet
+    protected override float SweepAngleDeg        => 70f;     // narrow — a chop, not a fan
+    protected override float SweepDirection       => +1f;
+    protected override float KnockbackMagnitude   => 340f;
+    protected override float StrikeSpeed          => 450f;
+    protected override float DamageScale          => 1.4f;
+    protected override Color SlashColor           => Color.MediumSpringGreen;
+    protected override bool  RequireGround        => false;
+    protected override bool  RequireAir           => true;
+    // The wedge is only 30° off vertical, so hemisphere-clamping X would barely
+    // change the direction — but it would also flatten a back-aimed chop into a
+    // perfectly vertical one, losing the bit of aim the player expressed.
+    protected override bool  AllowBackward        => true;
+
+    protected override float RecoilScale          => PogoRecoilScale;
+    protected override bool  RecoilBreakProtected => true;
+    protected override float RecoilMinMaterialHP  => 0.5f;    // same hardness floor the stab uses
+
+    // Beats AirSlash1 (30), AirTurnSlash (35) AND the AirSlash2 combo (50): aiming
+    // into the wedge is an explicit request for this move, and having the air combo
+    // silently eat it would make the pogo unreliable in exactly the situation you
+    // want it (mid-chain, over an enemy). Still under GuardRetaliate (55) and the
+    // grab family. Active stays at the shared slash 30, so nothing about how this
+    // gets preempted mid-swing changes.
+    public override int PassivePriority => 52;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!base.CheckPreConditions(ctx, ab)) return false;
+        // +y is down. Inside the wedge iff the click is below us and within 30° of
+        // vertical: dy/|d| >= cos(30°).
+        var raw = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+        float lenSq = raw.LengthSquared();
+        if (lenSq < 1e-4f) return false;
+        if (raw.Y <= 0f) return false;
+        return raw.Y >= AimCosThreshold * MathF.Sqrt(lenSq);
+    }
+
+    // One-and-done: no combo flag. The short recovery is the chain — it's what lets a
+    // landed pogo roll straight into the next down-air on the enemy below.
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
+    {
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.133f, f, dt);
+    }
+
+    // Replaces the base's plain `Velocity += recoil` on an ENTITY connect (see the
+    // class comment for why additive can't work there). Terrain-only contacts keep the
+    // additive form, scaled by TileRecoilShare.
+    public override void ApplyActionForces(EnvironmentContext ctx, in ActionVars vars)
+    {
+        if (ctx.CombatSystem == null) return;
+
+        // PeekHits is the count of entities this HitId connected with on the frame
+        // just resolved — the same 1-frame inbox PeekRecoil rides, and deduped per
+        // (HitId, target), so it reads non-zero exactly once per victim per attack.
+        if (ctx.CombatSystem.PeekHits(vars.HitId) <= 0)
+        {
+            // Nothing but terrain (or nothing at all): plain additive bounce, trimmed
+            // to the stock slash's strength so hard rock feels the way it always did.
+            var tile = ctx.CombatSystem.PeekRecoil(vars.HitId);
+            if (tile != Vector2.Zero) ctx.Body.Velocity += tile * TileRecoilShare;
+            return;
+        }
+
+        var recoil = ctx.CombatSystem.PeekRecoil(vars.HitId);
+        // Recoil opposes the swing, and the swing points (mostly) down, so -Y is the
+        // upward share. Clamp it into the pogo band; the floor is what makes a bounce
+        // off a featherweight still feel like a bounce.
+        float bounce = MathHelper.Clamp(MathF.Abs(recoil.Y), PogoSpeed, PogoMaxSpeed);
+        var v = ctx.Body.Velocity;
+        // Min, not assignment: y is down, so this only ever makes the velocity MORE
+        // upward. A player already rising faster than the pogo keeps their ascent.
+        v.Y = MathF.Min(v.Y, -bounce);
+        // Horizontal recoil is small (the chop is near-vertical) and reads fine added
+        // straight on — it's just the sideways lean of an off-axis hit.
+        v.X += recoil.X;
+        ctx.Body.Velocity = v;
     }
 }
 

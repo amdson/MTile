@@ -355,6 +355,7 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new GroundSlash3());      // 30/50  — combo
         _actionRegistry.Add(new AirSlash2());         // 30/50  — combo
         _actionRegistry.Add(new AirTurnSlash());      // 30/35  — air backward-click turnaround
+        _actionRegistry.Add(new DownAirSlash());      // 30/52  — air click in the bottom sextant → pogo chop
         _actionRegistry.Add(new AirSpinStab());       // 30/35  — air backward-swipe stab
         _actionRegistry.Add(new GuardAction());       // 35/40  — Shift held, no L/R, parry posture
         _actionRegistry.Add(new GuardRetaliateAction()); // 30/55 — click during GuardCharged
