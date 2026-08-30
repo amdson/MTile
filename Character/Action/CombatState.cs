@@ -3,6 +3,31 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
+// What a guard did to an incoming hit — the return of CombatState.ResolveGuard.
+// Absorbed is the perfect block (skip the hit entirely); otherwise the two scales say
+// how much of the hit survived the stance, and are 1 when the guard wasn't involved
+// at all. Kept as a value struct so OnHit can hold it across the whole resolution
+// without any allocation on the hit path.
+public readonly struct GuardOutcome
+{
+    public readonly bool  Absorbed;
+    public readonly float DamageScale;
+    public readonly float KnockbackScale;
+
+    public GuardOutcome(bool absorbed, float damageScale, float knockbackScale)
+    {
+        Absorbed       = absorbed;
+        DamageScale    = damageScale;
+        KnockbackScale = knockbackScale;
+    }
+
+    // The hit was never filtered — full damage, full knockback.
+    public static GuardOutcome None   => new GuardOutcome(false, 1f, 1f);
+    // Perfect block. The scales are zero too, so a caller that forgets to branch on
+    // Absorbed still applies nothing rather than everything.
+    public static GuardOutcome Absorb => new GuardOutcome(true, 0f, 0f);
+}
+
 // Defensive combat condition. Sibling of ConditionState (which holds *offensive*
 // combo flags like Slash2Ready). Lives on PlayerAbilityState; PlayerCharacter.OnHit
 // writes; movement/action FSMs read it via EnvironmentContext.Combat to gate jumps,
@@ -140,6 +165,28 @@ public class CombatState
     // window in which a successful low-damage parry has armed GuardRetaliate.
     public bool    GuardActive;
     public bool    GuardCharged;     public int GuardChargedExpireFrame;
+    // The frame the stance went up, written by BeginGuard. The whole timing model
+    // is (currentFrame - GuardStartFrame): guard is a parry you time, not a shield
+    // you hold.
+    public int     GuardStartFrame;
+    // Re-entry cooldown, set every time the stance comes DOWN (EndGuard) — including a
+    // clean release, a movement cancel, or a break. Without it the timing model is free
+    // to game: tapping Shift over and over hands out a fresh perfect window per press,
+    // and mashing covers most frames with perfect blocks. Blocking re-entry for slightly
+    // longer than the window itself means a mash is off more often than it is on, so
+    // guessing WHEN to guard stays the skill.
+    public int     GuardCooldownExpireFrame;
+    // Set by a perfect block and consumed by the deactivation it pays for. A clean block
+    // spends the stance like any other — but it is the one drop that costs nothing, so
+    // reading the attack right lets you come straight back up for the next one, while a
+    // mistimed or speculative guard still eats the cooldown.
+    public bool    GuardBlockRefund;
+    // Break recovery. Set when a hit gets through the guard; the stance can't come
+    // back up until the countdown expires AND the button has been released (Tick).
+    // The release half matters: without it, holding Shift through a break would hand
+    // out a fresh perfect window every recovery period, and "held indefinitely" would
+    // never reach the saturated penetration below.
+    public bool    GuardBroken;      public int GuardBreakExpireFrame;
 
     // Render-only cue stamps for a successful parry, written by TryParry. Same "the
     // stamp IS the identity" contract as LastHitFrame/LastHitDir (Audio/GameAudio.cs
@@ -161,6 +208,26 @@ public class CombatState
     private const float GuardChargedSeconds   = 0.8f;
     // Cone half-angle in radians — 60° each side of facing → 120° total coverage.
     private const float GuardConeCos          = 0.5f;   // cos(60°)
+
+    // Guard timing (ResolveGuard). A hit landing within GuardPerfectWindowSeconds of
+    // the stance coming up is absorbed completely — no damage, no knockback, no
+    // hitstun. Past that the guard leaks, and the leak ramps linearly over
+    // GuardFalloffSeconds to the saturation values: at worst three quarters of the
+    // percent and half the knockback come through. So a well-timed guard is a parry,
+    // and a guard held as a permanent shield decays into a mediocre damage reduction
+    // that still breaks on contact.
+    //
+    // 0.12 s is ~7 frames at 60 Hz — tight enough to be a read, loose enough to hit
+    // on reaction to a telegraph.
+    private const float GuardPerfectWindowSeconds    = 0.12f;
+    private const float GuardFalloffSeconds          = 0.60f;
+    private const float GuardMaxDamagePenetration    = 0.75f;
+    private const float GuardMaxKnockbackPenetration = 0.50f;
+    // How long the stance stays down after something got through it.
+    private const float GuardBreakRecoverySeconds    = 0.50f;
+    // ...and after any ordinary deactivation. Deliberately a touch longer than the
+    // perfect window (0.12 s), so mashing Shift buys less than half the frames.
+    private const float GuardCooldownSeconds         = 0.15f;
 
     // Hitstun tuning (COMBAT_FEEL_PLAN Phase 1). Hitstun scales with the incoming
     // knockback impulse — strong hits stun longer — instead of the old flat
@@ -262,7 +329,7 @@ public class CombatState
         if (expire > InvulnExpireFrame) InvulnExpireFrame = expire;
     }
 
-    public void Tick(int currentFrame)
+    public void Tick(int currentFrame, bool guardHeld)
     {
         if (HitstunActive && currentFrame >= HitstunExpireFrame)
         {
@@ -272,39 +339,113 @@ public class CombatState
         if (StunActive    && currentFrame >= StunExpireFrame)    StunActive    = false;
         if (GrabbedActive && currentFrame >= GrabbedExpireFrame) GrabbedActive = false;
         if (GuardCharged  && currentFrame >= GuardChargedExpireFrame) GuardCharged = false;
+        // Break recovery needs BOTH halves: the countdown, and the button back up.
+        if (GuardBroken && currentFrame >= GuardBreakExpireFrame && !guardHeld) GuardBroken = false;
         if (HitstopActive && currentFrame >= HitstopExpireFrame) HitstopActive = false;
     }
 
-    // Filter incoming hit through Guard. Returns true if the hit was parried —
-    // caller should skip damage/knockback/hitstun entirely. A weak in-cone hit
-    // also charges GuardRetaliate. Out-of-cone hits fall through to normal
-    // damage even while GuardActive (parry has a coverage window, not omnidir).
-    //
-    // facing: +1 = facing right, -1 = facing left. knockbackImpulse is the
-    // attack's directional impulse — the source direction is the opposite
-    // (attacker → player → so the "into the cone" vector is -knockbackImpulse).
-    public bool TryParry(in Vector2 knockbackImpulse, float hitDamage, int facing, int currentFrame, float dt)
+    // Bring the stance up, stamping the frame the timing window is measured from.
+    // GuardAction owns the calls; nothing else should touch GuardActive directly.
+    public void BeginGuard(int currentFrame)
     {
-        if (!GuardActive) return false;
-        if (knockbackImpulse.LengthSquared() < 1e-4f) return false;
+        GuardActive     = true;
+        GuardStartFrame = currentFrame;
+    }
+
+    // Drop the stance and start the re-entry cooldown. Called from GuardAction.Exit, so
+    // it covers every way guard ends — released, cancelled by movement, or broken.
+    public void EndGuard(int currentFrame, float dt)
+    {
+        GuardActive = false;
+        // Earned: a perfect block re-arms immediately.
+        if (GuardBlockRefund) { GuardBlockRefund = false; return; }
+        int expire = currentFrame + SimFrames.FromSeconds(GuardCooldownSeconds, dt);
+        if (expire > GuardCooldownExpireFrame) GuardCooldownExpireFrame = expire;
+    }
+
+    public bool GuardOnCooldown(int currentFrame) => currentFrame < GuardCooldownExpireFrame;
+
+    // Filter an incoming hit through Guard. Returns how much of the hit survives the
+    // stance; the caller applies the scales and, if Absorbed, skips the hit entirely.
+    //
+    // Three outcomes:
+    //   - Not guarding, or the hit came from outside the front cone -> nothing filtered
+    //     (GuardOutcome.None, full damage and knockback). An out-of-cone hit still
+    //     breaks the stance: the guard didn't meet it, so it isn't holding anything.
+    //   - Guarding and hit inside the perfect window -> Absorbed. No damage, no
+    //     knockback, no hitstun, and a weak hit also charges GuardRetaliate. The stance
+    //     drops (it stopped its hit) but pays no re-entry cooldown, so a player who
+    //     keeps reading correctly can block a flurry one hit at a time.
+    //   - Guarding and hit late -> partial penetration ramping with how long the button
+    //     has been held, and the guard BREAKS (see GuardBroken).
+    //
+    // facing: +1 = facing right, -1 = facing left. knockbackImpulse is the attack's
+    // directional impulse - the source direction is the opposite (attacker -> player,
+    // so the "into the cone" vector is -knockbackImpulse).
+    public GuardOutcome ResolveGuard(in Vector2 knockbackImpulse, float hitDamage, int facing,
+                                     int currentFrame, float dt)
+    {
+        if (!GuardActive) return GuardOutcome.None;
+        if (knockbackImpulse.LengthSquared() < 1e-4f) return GuardOutcome.None;
         var fromAttacker = -knockbackImpulse;
         fromAttacker.Normalize();
         var facingVec = new Vector2(facing == 0 ? 1f : facing, 0f);
-        // dot > GuardConeCos => fromAttacker is within ±60° of facing direction.
-        if (Vector2.Dot(fromAttacker, facingVec) < GuardConeCos) return false;
-
-        bool charged = hitDamage <= GuardChargeMaxDamage;
-        if (charged)
+        // dot > GuardConeCos => fromAttacker is within +/-60 deg of the facing direction.
+        if (Vector2.Dot(fromAttacker, facingVec) < GuardConeCos)
         {
-            int newExpire = currentFrame + SimFrames.FromSeconds(GuardChargedSeconds, dt);
-            if (newExpire > GuardChargedExpireFrame) GuardChargedExpireFrame = newExpire;
-            GuardCharged = true;
+            BreakGuard(currentFrame, dt);
+            return GuardOutcome.None;
         }
 
-        LastParryFrame   = currentFrame;
-        LastParryDir     = fromAttacker;
-        LastParryCharged = charged;
-        return true;
+        int age     = currentFrame - GuardStartFrame;
+        int perfect = SimFrames.FromSeconds(GuardPerfectWindowSeconds, dt);
+        if (age <= perfect)
+        {
+            // A clean parry. The charge stays gated on weak hits - a perfectly-timed
+            // block of a heavy attack is its own reward and doesn't also hand over the
+            // counter (the same GuardChargeMaxDamage reasoning as before, now on top
+            // of the timing requirement).
+            bool charged = hitDamage <= GuardChargeMaxDamage;
+            if (charged)
+            {
+                int newExpire = currentFrame + SimFrames.FromSeconds(GuardChargedSeconds, dt);
+                if (newExpire > GuardChargedExpireFrame) GuardChargedExpireFrame = newExpire;
+                GuardCharged = true;
+            }
+
+            LastParryFrame   = currentFrame;
+            LastParryDir     = fromAttacker;
+            LastParryCharged = charged;
+
+            // The block spends the stance: GuardAction drops out next frame (its
+            // CheckConditions requires GuardActive), and with the refund set it can
+            // come straight back up. So a clean block stops ONE hit and hands the
+            // player a fresh window for the next, rather than making a held guard
+            // an omni-directional shield again.
+            GuardActive      = false;
+            GuardBlockRefund = true;
+            return GuardOutcome.Absorb;
+        }
+
+        // Late. Linear ramp from "just missed the window" (leaks nothing) to the
+        // saturation values, reached GuardFalloffSeconds later and held from there on.
+        float falloff = MathF.Max(SimFrames.FromSeconds(GuardFalloffSeconds, dt), 1);
+        float t       = MathHelper.Clamp((age - perfect) / falloff, 0f, 1f);
+        BreakGuard(currentFrame, dt);
+        return new GuardOutcome(absorbed:       false,
+                                damageScale:    GuardMaxDamagePenetration    * t,
+                                knockbackScale: GuardMaxKnockbackPenetration * t);
+    }
+
+    // Something got through the stance. Drops it and starts the recovery countdown -
+    // GuardAction refuses to re-enter while GuardBroken, and Tick only clears the flag
+    // once the countdown has expired AND the button is back up.
+    private void BreakGuard(int currentFrame, float dt)
+    {
+        GuardActive           = false;
+        GuardBlockRefund      = false;   // a break is never free
+        GuardBroken           = true;
+        GuardBreakExpireFrame = currentFrame + SimFrames.FromSeconds(GuardBreakRecoverySeconds, dt);
     }
 
     // Snapshot/restore (roadmap goal 4 §E). All fields are value types — a clone is
@@ -325,6 +466,10 @@ public class CombatState
         GrabStrength = o.GrabStrength;
         GuardActive = o.GuardActive;
         GuardCharged = o.GuardCharged; GuardChargedExpireFrame = o.GuardChargedExpireFrame;
+        GuardStartFrame = o.GuardStartFrame;
+        GuardCooldownExpireFrame = o.GuardCooldownExpireFrame;
+        GuardBlockRefund = o.GuardBlockRefund;
+        GuardBroken = o.GuardBroken; GuardBreakExpireFrame = o.GuardBreakExpireFrame;
         LastParryFrame = o.LastParryFrame; LastParryDir = o.LastParryDir;
         LastParryCharged = o.LastParryCharged;
     }
