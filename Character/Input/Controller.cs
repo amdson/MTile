@@ -18,6 +18,9 @@ namespace MTile
         // F key: bound to GrenadeAction (Shift+RMB is reserved for LobbedAreaAction).
         // Polled by GrenadeAction's CheckPreConditions on press-edge.
         public bool F;
+        // Laser fire (R). Press-edge only — LaserAction reads the rising edge, so a
+        // held key fires once, not every frame.
+        public bool R;
         // 'P' toggles the eruption planner mode. Captured as raw key state so the
         // edge-detect (toggle on press) happens deterministically inside the sim,
         // not by polling hardware mid-update.
@@ -81,6 +84,7 @@ namespace MTile
                 Space = keyboardState.IsKeyDown(Keys.Space),
                 Shift = keyboardState.IsKeyDown(Keys.LeftShift) || keyboardState.IsKeyDown(Keys.RightShift),
                 F     = keyboardState.IsKeyDown(Keys.F),
+                R     = keyboardState.IsKeyDown(Keys.R),
                 P     = keyboardState.IsKeyDown(Keys.P),
                 Num1  = keyboardState.IsKeyDown(Keys.D1),
                 Num2  = keyboardState.IsKeyDown(Keys.D2),

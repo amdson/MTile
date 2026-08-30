@@ -351,6 +351,7 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new EnergyBallAction());     // 40/45 — Shift+LMB tap, preempts Guard briefly
         _actionRegistry.Add(new BeamAction());           // 40/45 — Shift+LMB hold, sustained beam after charge
         _actionRegistry.Add(new GrenadeAction());        // 40/45 — F press, throws sticky grenade
+        _actionRegistry.Add(new LaserAction());          // 40/45 — R press, scan + burn a rectangle through terrain
         // LobbedAreaAction (Shift+RMB charge) deactivated in COMBAT_FEEL_PLAN Phase 6
         // when Grab took that binding. Grab has since moved to Shift+LMB, so Shift+RMB
         // is free again — re-add the line to restore the ranged eruption. (Its

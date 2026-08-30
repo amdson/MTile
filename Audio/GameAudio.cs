@@ -99,6 +99,7 @@ public sealed class GameAudio
         WallScrape(p, index);
         HitConnect(p, index);
         Swing(p, index);
+        Laser(p, index);
         Jump(p, index);
         DoubleJump(p, index);
         ClimbEffort(p, index);
@@ -154,6 +155,23 @@ public sealed class GameAudio
     }
 
     private static bool IsSwing(ActionState a) => a is SlashLikeAction || a is StabAction;
+
+    // The laser lights partway INTO its activation, so entry is the wrong edge — but the
+    // sim already stamps the frame the burn started into ActionVars (LaserFireFrame), and
+    // that stamp is the identity. Same frame-stamp promotion as HitConnect: a rollback
+    // replay re-derives the same (frame, id) and the mixer drops the duplicate.
+    private void Laser(PlayerCharacter p, int index)
+    {
+        if (p.CurrentAction is not LaserAction) return;
+        var v = p.CurrentActionVars;
+        if (v.LaserFireFrame <= 0) return;
+        int age = p.Frame - v.LaserFireFrame;
+        if (age < 0 || age > StampWindowFrames) return;
+
+        _mixer.Fire(new SoundId(SoundKind.LaserBlast, index, v.LaserFireFrame),
+                    simFrame: v.LaserFireFrame, gain: 0.9f,
+                    pitch: Jitter(v.LaserFireFrame), pos: p.Body.Position);
+    }
 
     // Entering a jump state is an edge, but a derivable one: the state ring is snapshotted,
     // so "current is a jump, previous frame was not" re-derives identically after a

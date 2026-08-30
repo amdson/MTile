@@ -46,5 +46,6 @@ public static class InputCompare
         a.Num2       == b.Num2       &&
         a.Num3       == b.Num3       &&
         a.Num4       == b.Num4       &&
+        a.R          == b.R          &&
         a.MouseWorldPosition == b.MouseWorldPosition;
 }

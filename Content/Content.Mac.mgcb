@@ -39,7 +39,7 @@
 /build:DebugFont.Mac.spritefont;DebugFont
 
 #--------------------------- GENERATED SOUNDS -------------------------------#
-# Written by scripts/sync-sounds.ps1 — do not hand-edit; your changes will be lost.
+# Written by scripts/sync-sounds (.ps1/.sh) — do not hand-edit; your changes will be lost.
 
 #begin ../Assets/Sounds/dev_tone.ogg
 /importer:OggImporter
@@ -124,6 +124,12 @@
 /processor:SoundEffectProcessor
 /processorParam:Quality=Best
 /build:../Assets/Sounds/jump_01.ogg;Sounds/jump_01.xnb
+
+#begin ../Assets/Sounds/laser_blast_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/laser_blast_01.ogg;Sounds/laser_blast_01.xnb
 
 #begin ../Assets/Sounds/swing_01.ogg
 /importer:OggImporter
