@@ -94,7 +94,7 @@ public class CombatFeelTests(ITestOutputHelper output)
     // holds RIGHT (away from the attacker) — through the slash + recovery
     // continuation the field must pull them back toward the arc focus, so by the
     // end of the hold window they sit NO FURTHER than where they started.
-    [Fact]
+    [Fact(Skip = "Deactivated 2026-08-29: asserts the behaviour that was deliberately removed. Slash1 no longer retains victims — HoldVictims is off on every slash and the RecoveryAction combo-gap continuation is gone. Re-enable only if victim retention comes back, and rewrite the assertion against HoldVictims rather than the combo window.")]
     public void HoldField_Slash1_KeepsVictimInRange_DespiteWalkingAway()
     {
         var attackerStart = new Vector2(70f, 20f);

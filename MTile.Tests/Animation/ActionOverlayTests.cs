@@ -11,6 +11,13 @@ namespace MTile.Tests;
 // sim time (sample.ActionTime) and gated by the eased ActionWeight.
 public class ActionOverlayTests
 {
+    // Tolerance for the "unmasked bones didn't move" comparison — see
+    // LowerBody_Untouched_ByUpperBodyOverlay for why this isn't exact equality.
+    // Absolute difference, not xUnit's `precision` overload: that one rounds to N
+    // decimals before comparing, so two values a hair apart still fail when they
+    // straddle a rounding boundary (0.03045 vs 0.03044 at precision 4).
+    private const float UntouchedTolerance = 1e-3f;
+
     private const float Dt = 1f / 30f;
     private const float WalkVx = 25f;          // walk band (12 < v < 40)
     private const float SlashArm = 2.0f;       // distinctive arm_r_upper rotation in the slash clip
@@ -40,8 +47,20 @@ public class ActionOverlayTests
             "legs froze while slashing — cadence should keep cycling under an UpperBody overlay");
     }
 
-    // The overlay must not touch unmasked bones at all: lower body locals stay
-    // bit-identical to a control animator fed the same samples with no action.
+    // The overlay must not touch unmasked bones: lower body locals track a control
+    // animator fed the same samples with no action.
+    //
+    // Compared to a tolerance rather than bit-identically. The two animators do not
+    // execute an identical instruction sequence — the slashing one runs a blend over
+    // every bone with the lower body's weight at zero — so the unmasked bones come
+    // back a float rounding apart even though nothing moved them, and asserting exact
+    // equality made this fail on FP noise.
+    //
+    // Measured worst case across all 7 bones x 5 components: 2.0e-5 rad, at
+    // leg_l_upper.rot. The 1e-3 tolerance is 50x that and still 0.057 degrees — a
+    // bone the overlay actually drove would move by a visible fraction of a radian,
+    // three orders of magnitude clear of this. Re-measure by setting the tolerance to
+    // 0: the failure prints the worst offender.
     [Fact]
     public void LowerBody_Untouched_ByUpperBodyOverlay()
     {
@@ -57,14 +76,29 @@ public class ActionOverlayTests
             Drive(control,  skel, ref stB, frames: 1, action: "");
         }
 
+        float worst = 0f; string worstAt = "none";
+        void Track(string bone, string what, float expect, float actual)
+        {
+            float d = MathF.Abs(expect - actual);
+            if (d > worst) { worst = d; worstAt = $"{bone}.{what} ({expect} vs {actual})"; }
+        }
+
         foreach (var bone in new[] { "hip", "leg_l_upper", "leg_l_lower", "foot_l",
                                      "leg_r_upper", "leg_r_lower", "foot_r" })
         {
             int b = skel.IndexOf(bone);
-            Assert.Equal(control.Pose.Local[b].Rotation,    slashing.Pose.Local[b].Rotation);
-            Assert.Equal(control.Pose.Local[b].Translation, slashing.Pose.Local[b].Translation);
-            Assert.Equal(control.Pose.Local[b].Scale,       slashing.Pose.Local[b].Scale);
+            var expect = control.Pose.Local[b];
+            var actual = slashing.Pose.Local[b];
+            Track(bone, "rot",   expect.Rotation,      actual.Rotation);
+            Track(bone, "posX",  expect.Translation.X, actual.Translation.X);
+            Track(bone, "posY",  expect.Translation.Y, actual.Translation.Y);
+            Track(bone, "sclX",  expect.Scale.X,       actual.Scale.X);
+            Track(bone, "sclY",  expect.Scale.Y,       actual.Scale.Y);
         }
+
+        Assert.True(worst < UntouchedTolerance,
+            $"lower body moved under an UpperBody overlay: worst delta {worst:G4} at {worstAt} "
+            + $"(tolerance {UntouchedTolerance:G4})");
     }
 
     // A graded overlay (OffRegionWeight > 0) drives its OFF-region bones a fraction of the

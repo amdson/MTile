@@ -329,16 +329,13 @@ public class RecoveryAction : ActionState
             ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
             vars.Charging = false;
         }
-        // Hold-field continuation (COMBAT_FEEL_PLAN Phase 2): the stateless field
-        // dies with its publishing state, so the gap between a hold-slash and its
-        // combo follow-up would drop the victim. Recovery is the live state during
-        // that gap — while a combo window from a holding slash is open, keep
-        // broadcasting a weaker pull. vars.AttackDir survives from the slash's
-        // activation (RecoveryAction never writes vars), so the field stays aimed.
-        if ((ab.Condition.Slash2Ready || ab.Condition.Slash3Ready)
-            && vars.AttackDir != Vector2.Zero)
-            SlashLikeAction.PublishHoldField(ctx, vars.AttackDir,
-                SlashLikeAction.HoldFieldBaseRadius, strengthScale: 0.6f);
+        // (The hold-field continuation that used to live here is gone — see the
+        // HoldVictims note on SlashLikeAction. It ran off Slash2Ready/Slash3Ready
+        // rather than off HoldVictims, so it kept pulling victims through the combo
+        // gap after a slash that no longer holds during its own active frames. That
+        // made S1 retain a victim it had visibly released, which is the behaviour
+        // being removed. Restoring the feature means turning HoldVictims back on AND
+        // re-adding a continuation gated on the same flag, not on the combo window.)
     }
 
     // The old ReadyAction's charge slowdown — applied only while the wind-up hold
@@ -464,8 +461,15 @@ public abstract class SlashLikeAction : ActionState
     // a tiny impulse (they pull, not push) so they declare their hitstun explicitly.
     protected virtual  float   HitstunSecondsOverride => -1f;
     // When true, the slash broadcasts a holding ForceField each frame (see the
-    // HoldField* constants above). Ground combo openers (S1/S2) hold; finishers
-    // and pokes don't.
+    // HoldField* constants above).
+    //
+    // OFF for every slash today, deliberately: victim retention was cut (2026-08-29)
+    // because a slash that pulls its target back in reads as the hit not landing.
+    // The machinery below (PublishHoldField + the HoldField* constants) is kept wired
+    // but dormant, so re-enabling is flipping an override to true rather than
+    // rebuilding it. Note that GroundSlash1 still carries the low KnockbackMagnitude
+    // (60, "hold, don't shove") it was given as a holding slash — retune that if the
+    // no-hold S1 now feels weightless.
     protected virtual  bool    HoldVictims         => false;
     // When > 0, this slash erodes a grabber's grab strength instead of dealing the
     // usual knockback / hitstun (the struggle channel — see Hitbox.GrabStrengthDamage).
