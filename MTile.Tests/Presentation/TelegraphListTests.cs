@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 using MTile;
 using Xunit;
@@ -70,15 +71,68 @@ public class TelegraphListTests
     }
 
     [Fact]
-    public void GuardActionTelegraphsOneShieldBar()
+    public void ArcSpansTheRequestedWedgeAsLineSegments()
+    {
+        var t = new TelegraphList();
+        var centre = new Vector2(100f, 200f);
+        t.Arc(centre, radius: 10f, centerAngle: 0f, halfAngle: MathF.PI / 3f,
+              Color.White, segments: 6, thickness: 2f);
+
+        Assert.Equal(6, t.Count);
+        for (int i = 0; i < t.Count; i++)
+        {
+            Assert.Equal(TelegraphKind.Line, t[i].Kind);
+            Assert.Equal(2f, t[i].Thickness);
+            // Every vertex sits on the circle.
+            Assert.Equal(10f, (t[i].A - centre).Length(), 3);
+            Assert.Equal(10f, (t[i].B - centre).Length(), 3);
+        }
+        // Ends at -60 deg / +60 deg of the centre angle, and the chain is contiguous.
+        Assert.Equal(centre + new Vector2(MathF.Cos(-MathF.PI / 3f), MathF.Sin(-MathF.PI / 3f)) * 10f,
+                     t[0].A);
+        Assert.Equal(centre + new Vector2(MathF.Cos(MathF.PI / 3f), MathF.Sin(MathF.PI / 3f)) * 10f,
+                     t[5].B);
+        Assert.Equal(t[0].B, t[1].A);
+    }
+
+    [Fact]
+    public void GuardActionTelegraphsAShieldBarAndTheCoveredCone()
     {
         var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), new Vector2(100f, 200f));
         var t = new TelegraphList();
-        new GuardAction().Telegraph(t, body, default);
+        var vars = new ActionVars { Facing = 1 };
+        new GuardAction().Telegraph(t, body, in vars);
 
-        Assert.Equal(1, t.Count);
         Assert.Equal(TelegraphKind.Box, t[0].Kind);
         Assert.True(t[0].A.Y < body.Position.Y - PlayerCharacter.Radius, "shield bar sits above the head");
+
+        // The rest is the cone: arc segments plus the two end ticks, all Lines.
+        Assert.True(t.Count > 3);
+        for (int i = 1; i < t.Count; i++) Assert.Equal(TelegraphKind.Line, t[i].Kind);
+
+        // Every arc vertex lies inside the guarded cone: fromAttacker direction within
+        // GuardConeHalfAngle of facing is exactly what ResolveGuard absorbs.
+        float cos = MathF.Cos(CombatState.GuardConeHalfAngle);
+        for (int i = 1; i < t.Count - 2; i++)   // skip the two end ticks
+        {
+            var dir = t[i].A - body.Position;
+            dir.Normalize();
+            Assert.True(Vector2.Dot(dir, Vector2.UnitX) >= cos - 1e-3f,
+                        $"arc vertex {i} is outside the guarded cone");
+        }
+    }
+
+    [Fact]
+    public void GuardConeTelegraphMirrorsWithFacing()
+    {
+        var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), new Vector2(100f, 200f));
+        var left = new TelegraphList();
+        var vars = new ActionVars { Facing = -1 };
+        new GuardAction().Telegraph(left, body, in vars);
+
+        for (int i = 1; i < left.Count; i++)
+            Assert.True(left[i].A.X <= body.Position.X + 1e-3f,
+                        "a left-facing guard covers the left side");
     }
 
     [Fact]
