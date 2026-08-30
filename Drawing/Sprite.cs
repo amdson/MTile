@@ -13,6 +13,11 @@ public class Sprite
     public float   Rotation;
     public float   Scale   = 1f;
     public Color   Tint    = Color.White;
+    // 0..1 lerp toward white, on top of Tint. Render-only and owned by whoever draws:
+    // Drawing/HitFlash.cs sets it from the target's hit stamp each frame, and anything
+    // else wanting a flash (a pickup blink, an invulnerability strobe) can drive the
+    // same field.
+    public float   Flash;
     public bool    Visible = true;
     public Pose    Pose;
 
@@ -21,7 +26,7 @@ public class Sprite
     public virtual void Draw(DrawContext ctx)
     {
         if (!Visible || Pose == null) return;
-        Pose.Draw(ctx, new SpriteTransform(Position, Rotation, Scale), Tint);
+        Pose.Draw(ctx, new SpriteTransform(Position, Rotation, Scale), Tint, Flash);
     }
 }
 

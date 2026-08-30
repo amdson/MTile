@@ -346,6 +346,211 @@ public class BlockThrowTests(ITestOutputHelper output)
         });
     }
 
+    // ── Contact fuse: the thrown clod bursts on a body ────────────────────────────
+
+    // Throw the clod at an opponent standing in its path. It should burst ON them —
+    // damage + knockback along the throw — rather than sailing through to land behind.
+    // It also flies through its own thrower first, which is the faction exclusion.
+    [Fact]
+    public void ThrownClod_BurstsOnAnOpponent()
+    {
+        WithPeel(() =>
+        {
+            var hold   = new Vector2(100f, 30f);
+            var script = GrabThenHold(hold, 20);
+            var p = hold;
+            for (int i = 0; i < 8; i++)          // 300 px/s leftward swipe, then release
+            {
+                p += new Vector2(-300f * Dt, 0f);
+                script.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = p });
+            }
+            script.Forever(new PlayerInput { MouseWorldPosition = p });
+
+            // Target 48 px to the thrower's left — in the swipe's line, past the thrower.
+            var target = new Vector2(24f, 40f);
+            var cfg = new SimConfigMulti
+            {
+                Terrain = FloatingBlock(), Frames = 100, Dt = Dt, Gravity = new Vector2(0f, 600f),
+                Players = new[]
+                {
+                    new SimPlayer { StartPosition = Start,  Script = script },
+                    new SimPlayer { StartPosition = target, Script = InputScript.Always(default),
+                                    Faction = Faction.Player2 },
+                },
+            };
+
+            float hurtAt = -1f; int hurtFrame = -1, ballGoneFrame = -1;
+            float shove = 0f;
+            SimRunner.RunMulti(cfg, onFrameEntities: (f, ps, es) =>
+            {
+                if (hurtFrame < 0 && ps[1].Combat.DamagePercent > 0f)
+                {
+                    hurtFrame = f;
+                    hurtAt    = ps[1].Combat.DamagePercent;
+                    shove     = ps[1].Body.Velocity.X;
+                }
+                bool ball = false;
+                foreach (var e in es) if (e is LobbedAreaProjectile) ball = true;
+                if (!ball && hurtFrame >= 0 && ballGoneFrame < 0) ballGoneFrame = f;
+            });
+
+            output.WriteLine($"hurt@f{hurtFrame} pct={hurtAt:F1} vx={shove:F0} ballGone@f{ballGoneFrame}");
+            Assert.True(hurtFrame > 0, "the thrown clod should hit the opponent it was thrown at");
+            Assert.True(shove < -50f, $"the burst should shove them along the throw, got vx={shove:F0}");
+            Assert.True(ballGoneFrame >= 0 && ballGoneFrame - hurtFrame <= 2,
+                        $"the clod should be spent on contact (hit f{hurtFrame}, gone f{ballGoneFrame})");
+        });
+    }
+
+    // ── Terrain fuse: the clod breaks where it strikes ────────────────────────────
+
+    // FloatingBlock's grabbable block over a floor long enough that a 300 px/s throw
+    // lands on it rather than sailing off the edge.
+    private static ChunkMap WideFloor() => SimTerrain.FromAscii(@"
+        OOOOXOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOO
+        XXXXXXXXXXXXXXXXXXXXXXXX
+        XXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+
+
+    // A flat-out horizontal throw arcs into the floor with most of its speed intact.
+    // It should burst there — within a frame or two of the contact and within a tile
+    // of where it touched down — not skid along until friction has stopped it, which
+    // is what the old velocity-halt heuristic waited for.
+    [Fact]
+    public void ThrownClod_BurstsWhereItStrikesTheGround()
+    {
+        WithPeel(() =>
+        {
+            var hold   = new Vector2(100f, 30f);
+            var script = GrabThenHold(hold, 20);
+            var p = hold;
+            for (int i = 0; i < 8; i++)          // rightward, into the long stretch of floor
+            {
+                p += new Vector2(300f * Dt, 0f);
+                script.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = p });
+            }
+            script.Forever(new PlayerInput { MouseWorldPosition = p });
+
+            int contactFrame = -1, goneFrame = -1;
+            float contactX = 0f, contactSpeed = 0f, lastX = 0f;
+            SimRunner.RunMulti(Build(script, WideFloor(), 120),
+                onFrameEntities: (f, ps, es) =>
+                {
+                    LobbedAreaProjectile ball = null;
+                    foreach (var e in es) if (e is LobbedAreaProjectile b && !b.Tracking) ball = b;
+                    if (ball != null)
+                    {
+                        lastX = ball.Body.Position.X;
+                        // onFrameEntities runs after StepSwept, so this is the contact
+                        // impulse from the step that just ran.
+                        if (contactFrame < 0 && ball.Body.LastImpulseMagnitude > 0.01f)
+                        {
+                            contactFrame = f;
+                            contactX     = ball.Body.Position.X;
+                            contactSpeed = ball.Body.Velocity.Length();
+                        }
+                    }
+                    else if (contactFrame >= 0 && goneFrame < 0) goneFrame = f;
+                });
+
+            output.WriteLine($"first ground contact f{contactFrame} at x={contactX:F0} (|v|={contactSpeed:F0}), " +
+                             $"gone f{goneFrame} at x={lastX:F0}");
+            Assert.True(contactFrame > 0, "the thrown clod should reach the floor");
+            Assert.True(goneFrame > 0 && goneFrame - contactFrame <= 3,
+                        $"the clod should burst on contact, not after settling (contact f{contactFrame}, gone f{goneFrame})");
+            Assert.True(MathF.Abs(lastX - contactX) < Chunk.TileSize,
+                        $"it should break where it struck: touched at x={contactX:F0}, gone at x={lastX:F0}");
+        });
+    }
+
+    // Point-blank: a wall close enough that the clod reaches it DURING the post-release
+    // chase, before the ball has converged on the flying point. It must burst on the
+    // wall it struck. The chase used to swallow this — no fuse ran while tracking, and
+    // a stopped ball never converges on a point still flying, so the clod hung against
+    // the wall for the full GrabChaseMaxSeconds and then dropped to the floor.
+    [Fact]
+    public void ThrownClod_BurstsOnAWallHitDuringTheChase()
+    {
+        WithPeel(() =>
+        {
+            // Grab block at (4,0); wall column at gtx=3, rows 1-2 (x 48..64, y 16..48),
+            // two tiles left of the thrower — inside the chase window.
+            var terrain = SimTerrain.FromAscii(@"
+                OOOOXOOOOOOOOOOOOOOOOOOO
+                OOOXOOOOOOOOOOOOOOOOOOOO
+                OOOXOOOOOOOOOOOOOOOOOOOO
+                XXXXXXXXXXXXXXXXXXXXXXXX
+                XXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+
+            var hold   = new Vector2(100f, 30f);
+            var script = GrabThenHold(hold, 20);
+            var p = hold;
+            for (int i = 0; i < 8; i++)          // swipe left, into the wall
+            {
+                p += new Vector2(-300f * Dt, 0f);
+                script.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = p });
+            }
+            script.Forever(new PlayerInput { MouseWorldPosition = p });
+
+            int hitFrame = -1, goneFrame = -1;
+            bool hitWhileChasing = false;
+            var hitAt = Vector2.Zero;
+            var lastAt = Vector2.Zero;
+            SimRunner.RunMulti(Build(script, terrain, 120),
+                onFrameEntities: (f, ps, es) =>
+                {
+                    LobbedAreaProjectile ball = null;
+                    foreach (var e in es) if (e is LobbedAreaProjectile b) ball = b;
+                    if (ball != null)
+                    {
+                        lastAt = ball.Body.Position;
+                        if (hitFrame < 0 && ball.Body.LastImpulseMagnitude > 45f)
+                        {
+                            hitFrame = f;
+                            hitAt    = ball.Body.Position;
+                            hitWhileChasing = ball.Tracking;
+                        }
+                    }
+                    else if (hitFrame >= 0 && goneFrame < 0) goneFrame = f;
+                });
+
+            output.WriteLine($"struck f{hitFrame} at ({hitAt.X:F0},{hitAt.Y:F0}) chasing={hitWhileChasing}, " +
+                             $"gone f{goneFrame} at ({lastAt.X:F0},{lastAt.Y:F0})");
+            Assert.True(hitFrame > 0, "the thrown clod should reach the wall");
+            Assert.True(hitWhileChasing, "this scenario is only meaningful if the wall is hit mid-chase");
+            Assert.True(goneFrame > 0 && goneFrame - hitFrame <= 3,
+                        $"it should burst on the wall (struck f{hitFrame}, gone f{goneFrame})");
+            // The floor is at y=48; bursting on the wall means it never got there.
+            Assert.True(lastAt.Y < 40f, $"it should burst at the wall, not fall to the floor first (y={lastAt.Y:F0})");
+        });
+    }
+
+    // The mirror: the same throw doesn't burst on the thrower it flies straight through.
+    [Fact]
+    public void ThrownClod_PassesThroughItsOwnThrower()
+    {
+        WithPeel(() =>
+        {
+            var hold   = new Vector2(100f, 30f);
+            var script = GrabThenHold(hold, 20);
+            var p = hold;
+            for (int i = 0; i < 8; i++)
+            {
+                p += new Vector2(-300f * Dt, 0f);
+                script.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = p });
+            }
+            script.Forever(new PlayerInput { MouseWorldPosition = p });
+
+            float selfHurt = 0f;
+            SimRunner.RunMulti(Build(script, FloatingBlock(), 100),
+                onFrame: (f, ps) => selfHurt = MathF.Max(selfHurt, ps[0].Combat.DamagePercent));
+
+            Assert.Equal(0f, selfHurt);
+        });
+    }
+
     // Bookkeeping: a released grab leaves exactly one ball and no point behind, the
     // action exits on the release frame, and nothing routes the release into another
     // Shift+LMB action.

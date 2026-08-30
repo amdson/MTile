@@ -1,13 +1,14 @@
 1. Improve hit feel
 - Adjust knockback on hits. Differentiate between hits on ground and in air. 
 - Sounds for hits
-- Animation for hits, including hit flashes, distortion, etc
+- Animation for hits, including hit flashes, and particles, screenshake, etc
+- make hits stop at the point they collide with player? so it looks like they're actually interacting? 
 - Better animation, showing windup, follow-through, etc for hits. 
 - Particle effects for hits
 
-2. More reasonable corrector solver for movement that is a function callable from within the solve step
-- For standing, crouching, jumping, etc, pass in a target direction based on player inputs, a time horizon, abstract boundaries for the player based on hover constraints,  an abstract boundary definition representing admissible points for the player center. (e.g. CObstacleTemplate), and a list of operations available based on the player movmeent state and environment (e.g. redirect, corner force, standing force up, standing force right/left, etc)
-- solver should divide tiles in the plausible path of the player into a higher resolution grid points. say, 5x higher resolution than tiles, possibly with support for a hexgrid later. assume that player movement will never move in a direction more than threshold cosign distance from the requested direction, and add edges between points within a reasonable neighborhood in the lattice, either directed so that they can only match the requested direction, or filtered because they violate it by too much. 
-use dynamic programming on the points divided into shells by depth in the DAG to solve for the path that best A) matches the direction, B) obeys local curvature constraints (avoid zig-zags, etc), C) maintains hover constraints, etc,  D) stays within the admissable points. for B, it may be necessary to add direction state to the points, but I think the solve should still be over less than <5000 points. it will also be necessary to account for the current frame player velocity
-- use a simplified version of the current QP solver to calculate the best combination of forces from the available force operations to keep the player on the calculated path
-- export the calculated path for debugging purposes 
+2. I'd like to add a "block-charging mechanic" as an additional gameplay detail. It's currently possible to charge a block avalanche by holding rmb in the ground. I'd like to extend this by allowing the player to double right click in the ground to use the avalanche charge to "charge" the ground block the mouse is over
+- 
+
+3. I'd like to add a hud in the upper left corner showing the player's health, the player's percent, and available block charge. I'd like to only show the high level block reservoir charge. The avalanche charge indicator should shift to showing around the mouse. 
+
+4. I'd like to build a statue of zeus 

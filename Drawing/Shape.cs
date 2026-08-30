@@ -18,7 +18,10 @@ public readonly struct SpriteTransform
 // no per-frame allocation once a Pose is built up.
 public abstract class Shape
 {
-    public abstract void Draw(DrawContext ctx, in SpriteTransform t, Color tint);
+    // `flash` lerps the final colour toward white (0 = untouched). It rides alongside
+    // `tint` rather than folding into it because tint MULTIPLIES: it can darken a shape
+    // but never brighten one, so a hit flash can't be expressed as a tint.
+    public abstract void Draw(DrawContext ctx, in SpriteTransform t, Color tint, float flash = 0f);
 
     protected static Vector2 ToWorld(Vector2 local, in SpriteTransform t)
     {
@@ -29,6 +32,11 @@ public abstract class Shape
 
     protected static Color Multiply(Color a, Color b)
         => new(a.R * b.R / 255, a.G * b.G / 255, a.B * b.B / 255, a.A * b.A / 255);
+
+    // Tint first (multiply), then whiten — the whole point of the flash is that it
+    // survives whatever the tint did.
+    protected static Color Shade(Color c, Color tint, float flash)
+        => HitFlashTracker.Whiten(Multiply(c, tint), flash);
 }
 
 public sealed class LineShape : Shape
@@ -36,8 +44,8 @@ public sealed class LineShape : Shape
     public Vector2 A, B;
     public Color   Color = Color.White;
     public float   Thickness = 1f;
-    public override void Draw(DrawContext ctx, in SpriteTransform t, Color tint)
-        => ctx.Line(ToWorld(A, t), ToWorld(B, t), Multiply(Color, tint), Thickness * t.Scale);
+    public override void Draw(DrawContext ctx, in SpriteTransform t, Color tint, float flash = 0f)
+        => ctx.Line(ToWorld(A, t), ToWorld(B, t), Shade(Color, tint, flash), Thickness * t.Scale);
 }
 
 public sealed class RingShape : Shape
@@ -47,8 +55,8 @@ public sealed class RingShape : Shape
     public Color   Color = Color.White;
     public int     Segments = 16;
     public float   Thickness = 1f;
-    public override void Draw(DrawContext ctx, in SpriteTransform t, Color tint)
-        => ctx.Ring(ToWorld(Center, t), Radius * t.Scale, Multiply(Color, tint), Segments, Thickness * t.Scale);
+    public override void Draw(DrawContext ctx, in SpriteTransform t, Color tint, float flash = 0f)
+        => ctx.Ring(ToWorld(Center, t), Radius * t.Scale, Shade(Color, tint, flash), Segments, Thickness * t.Scale);
 }
 
 public sealed class DiscShape : Shape
@@ -56,8 +64,8 @@ public sealed class DiscShape : Shape
     public Vector2 Center;
     public float   Radius;
     public Color   Color = Color.White;
-    public override void Draw(DrawContext ctx, in SpriteTransform t, Color tint)
-        => ctx.Disc(ToWorld(Center, t), Radius * t.Scale, Multiply(Color, tint));
+    public override void Draw(DrawContext ctx, in SpriteTransform t, Color tint, float flash = 0f)
+        => ctx.Disc(ToWorld(Center, t), Radius * t.Scale, Shade(Color, tint, flash));
 }
 
 // Filled rotated rect. LocalRotation stacks with the sprite's own rotation.
@@ -67,8 +75,8 @@ public sealed class BoxShape : Shape
     public Vector2 Size;
     public float   LocalRotation;
     public Color   Color = Color.White;
-    public override void Draw(DrawContext ctx, in SpriteTransform t, Color tint)
-        => ctx.RotatedRect(ToWorld(Center, t), Size * t.Scale, LocalRotation + t.Rotation, Multiply(Color, tint));
+    public override void Draw(DrawContext ctx, in SpriteTransform t, Color tint, float flash = 0f)
+        => ctx.RotatedRect(ToWorld(Center, t), Size * t.Scale, LocalRotation + t.Rotation, Shade(Color, tint, flash));
 }
 
 // A single "frame" of art: an ordered list of Shape primitives in local space.
@@ -91,8 +99,8 @@ public sealed class Pose
     public Pose Box(Vector2 center, Vector2 size, float rotation, Color color)
         => Add(new BoxShape { Center = center, Size = size, LocalRotation = rotation, Color = color });
 
-    public void Draw(DrawContext ctx, in SpriteTransform t, Color tint)
+    public void Draw(DrawContext ctx, in SpriteTransform t, Color tint, float flash = 0f)
     {
-        foreach (var s in Shapes) s.Draw(ctx, t, tint);
+        foreach (var s in Shapes) s.Draw(ctx, t, tint, flash);
     }
 }

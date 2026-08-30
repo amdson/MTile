@@ -80,6 +80,7 @@ public class Game1 : Game
     // writes nothing back. Declared after _particles/_camera so this inline initializer
     // can reference them (C# runs field initializers in declaration order).
     private readonly HitFeelSystem _hitFeel;
+    private readonly HitFlashSystem _hitFlash = new();
     private int _devToneSeq;
     // Cursor trail — a fading ribbon trailing the world-space mouse position.
     private readonly Trail _cursorTrail = new(capacity: 24, lifetime: 0.22f);
@@ -435,6 +436,9 @@ public class Game1 : Game
         // Screen shake + hit cosmetics (Plans/HIT_FEEL_PLAN.md phases 4-6) — own
         // frame-stamp edge-detect, same reasoning as _audio.CollectLevel above.
         _hitFeel.Collect(_sim);
+        // White flash on everything hit this frame — same stamp-edge reasoning, but it
+        // persists and decays over the next few rendered frames, so it needs real dt.
+        _hitFlash.Collect(_sim, dt);
     }
 
     // TEMP EXPERIMENT: single-frame corrector inspector (GameConfig.FreezeFrame,
@@ -960,16 +964,26 @@ public class Game1 : Game
         // Entities before the player so the player overlays them when they overlap.
         foreach (var e in _sim.Entities)
         {
-            if (e.Sprite != null) e.Sprite.Draw(_draw);
-            else _debugOverlay.DrawPolygon(e.Body.Polygon, e.Body.Position, e.Color);
+            float flash = _hitFlash.Intensity(e.Id);
+            if (e.Sprite != null) { e.Sprite.Flash = flash; e.Sprite.Draw(_draw); }
+            else _debugOverlay.DrawPolygon(e.Body.Polygon, e.Body.Position,
+                                           HitFlashTracker.Whiten(e.Color, flash));
         }
         _prof.End(_sEntities, tEnt);
 
         if (_config.DrawPlayerSprites)
         {
-            if (player.Sprite != null) player.Sprite.Draw(_draw);
+            if (player.Sprite != null)
+            {
+                player.Sprite.Flash = _hitFlash.Intensity(player.Id);
+                player.Sprite.Draw(_draw);
+            }
             foreach (var (p, _) in _sim.SecondaryPlayers)
-                if (p.Sprite != null) p.Sprite.Draw(_draw);
+                if (p.Sprite != null)
+                {
+                    p.Sprite.Flash = _hitFlash.Intensity(p.Id);
+                    p.Sprite.Draw(_draw);
+                }
         }
         // Sprite skins: each player's bound artwork deformed over its rig's live pose,
         // resolved per player (P1/P2 can wear different bindings). Drawn between the
@@ -989,7 +1003,8 @@ public class Game1 : Game
                 else { root = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); facing = player.Facing; }
                 int dir = facing == 0 ? 1 : facing;
                 skin0.Draw(cam, _animator.Pose,
-                    Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)));
+                    Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)),
+                    flash: _hitFlash.Intensity(player.Id));
             }
             for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
             {
@@ -1003,7 +1018,8 @@ public class Game1 : Game
                 else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = p.Facing; }
                 int dir = facing == 0 ? 1 : facing;
                 skin.Draw(cam, anim.Pose,
-                    Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)));
+                    Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)),
+                    flash: _hitFlash.Intensity(p.Id));
             }
             if (split) _spriteBatch.Begin(transformMatrix: cam);
         }

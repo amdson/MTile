@@ -58,6 +58,10 @@ public struct EntityData
     public Polygon      Polygon;
     public ImpactDamage Impact;
 
+    // Render-only hit stamp (Entity.LastHitId) — snapshotted so a rollback replay
+    // reproduces the same stamp and the white flash doesn't re-fire.
+    public int LastHitId;
+
     // Projectile base
     public float Age;
     public float Lifetime;

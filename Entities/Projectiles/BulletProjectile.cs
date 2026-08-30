@@ -59,6 +59,7 @@ public class BulletProjectile : Projectile
 
     public override Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
+        LastHitId = hit.HitId;   // no base call on either branch below
         // Player slash/stab/pulse → deflect rather than absorb. Direction comes
         // from the hitbox's KnockbackImpulse (the slash's swing vector / stab
         // forward / pulse radial), so the bullet flies the way the player

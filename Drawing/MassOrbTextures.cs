@@ -92,7 +92,7 @@ public sealed class MassOrbSprite : Sprite
             return;
         }
         float scale = Radius * 2f / MassOrbTextures.Size;
-        ctx.SpriteBatch.Draw(tex, Position, null, Tint, Rotation,
+        ctx.SpriteBatch.Draw(tex, Position, null, HitFlashTracker.Whiten(Tint, Flash), Rotation,
             new Vector2(MassOrbTextures.Size * 0.5f, MassOrbTextures.Size * 0.5f),
             scale, SpriteEffects.None, 0f);
     }

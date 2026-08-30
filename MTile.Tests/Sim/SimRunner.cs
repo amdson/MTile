@@ -66,6 +66,10 @@ public sealed class HeadlessEntityWorld : IEntitySpawner, IChunkProvider
     public ChunkMap        Chunks { get; }
     public HitIdAllocator  HitIds { get; }
     public IReadOnlyList<Entity> Entities => _entities;
+    // The frame's hurtbox set, handed in by the runner so contact-fused entities (a
+    // thrown clod bursting on the body it touches) see the same list Simulation gives
+    // them. Set before the entity update pass; null is a legal "no bodies to touch".
+    public HurtboxWorld Hurtboxes { get; set; }
 
     public HeadlessEntityWorld(ChunkMap chunks, HitIdAllocator hitIds, int firstIndex)
     {
@@ -184,7 +188,7 @@ public static class SimRunner
         for (int i = 0; i < n; i++) players[i].CombatSystem = combat;
 
         // Entities (projectiles, the block-grab pulling point) — ids after the players'.
-        var world = new HeadlessEntityWorld(cfg.Terrain, hitIds, firstIndex: n + 1);
+        var world = new HeadlessEntityWorld(cfg.Terrain, hitIds, firstIndex: n + 1) { Hurtboxes = hurtboxes };
         var entityScratch = new List<Entity>();
         var bodyScratch   = new List<PhysicsBody>();
 

@@ -364,7 +364,12 @@ public sealed class SpriteSkin : IDisposable
     // `cameraTransform` the same world→screen matrix SpriteBatch gets. Must be called
     // OUTSIDE SpriteBatch Begin/End (it issues its own device draws, PrimitiveBatch-
     // style). fill=false deforms without rendering — for a wireframe-only overlay.
-    public void Draw(Matrix cameraTransform, SkeletonPose pose, in Affine2 root, bool fill = true)
+    // `flash` (0..1) whitens the whole skin — the hit flash, driven by
+    // Drawing/HitFlash.cs. It has to be a second additive pass rather than a tint:
+    // BasicEffect outputs texture × vertex colour, which can darken artwork but never
+    // brighten it.
+    public void Draw(Matrix cameraTransform, SkeletonPose pose, in Affine2 root, bool fill = true,
+                     float flash = 0f)
     {
         if (pose.Count != _skeleton.Count)
             throw new ArgumentException("Pose rig doesn't match the binding's rig.");
@@ -401,7 +406,40 @@ public sealed class SpriteSkin : IDisposable
                     layer.Verts, 0, layer.Verts.Length, layer.Indices, 0, layer.Indices.Length / 3);
             }
         }
+
+        if (flash <= 0f) return;
+
+        // Hit flash: the same deformed geometry again, added on top. Driving
+        // DiffuseColor past 1 saturates the channels, so a full-strength flash blows the
+        // silhouette out to white instead of merely brightening its own colours. The
+        // textures are premultiplied (see the loader), hence One/One rather than
+        // BlendState.Additive, whose SourceAlpha factor would apply alpha twice and
+        // eat the edges.
+        _gd.BlendState = AdditivePremultiplied;
+        _effect.DiffuseColor = new Vector3(MathHelper.Clamp(flash, 0f, 1f) * FlashGain);
+        foreach (var layer in _layers)
+        {
+            _effect.Texture = layer.Texture;
+            foreach (var pass in _effect.CurrentTechnique.Passes)
+            {
+                pass.Apply();
+                _gd.DrawUserIndexedPrimitives(PrimitiveType.TriangleList,
+                    layer.Verts, 0, layer.Verts.Length, layer.Indices, 0, layer.Indices.Length / 3);
+            }
+        }
+        _effect.DiffuseColor = Vector3.One;
+        _gd.BlendState       = BlendState.AlphaBlend;
     }
+
+    // How hard a full-strength flash pushes. >1 so mid-tone artwork saturates to white
+    // rather than just glowing in its own hue.
+    private const float FlashGain = 2.5f;
+
+    private static readonly BlendState AdditivePremultiplied = new()
+    {
+        ColorSourceBlend = Blend.One, ColorDestinationBlend = Blend.One,
+        AlphaSourceBlend = Blend.One, AlphaDestinationBlend = Blend.One,
+    };
 
     // Overlay layer triangle edges as SpriteBatch lines (editor debug view — shows
     // exactly which triangles twist, and that layers are truly disconnected).

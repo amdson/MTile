@@ -175,10 +175,10 @@ public class WallJumpingState : MovementState
 
         int dirAwayFromWall = _wallDir == 1 ? -1 : 1;
         ctx.Body.Velocity = new Vector2(dirAwayFromWall * MovementConfig.Current.WallJumpInitialVelX, MovementConfig.Current.WallJumpInitialVelY);
-        // Turn to face the launch direction. A wall-slide leaves Facing pointed at the wall
-        // (WallSlidingState), so without this the rig would moonwalk — drift away while still
-        // facing the wall — through the airborne jump until it next lands.
-        abilities.Facing = dirAwayFromWall;
+        // If they were already facing into the wall (the classic wall-slide jump), keep that
+        // facing instead of flipping to the launch direction. An away-press kickoff already
+        // faces away from the wall, so it's unaffected.
+        if (abilities.Facing != _wallDir) abilities.Facing = dirAwayFromWall;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)

@@ -35,6 +35,13 @@ public class Entity : IHittable
 
     public bool IsDead => Health <= 0f;
 
+    // Cosmetic read-only view for the render shell (Drawing/HitFlash.cs): the HitId of
+    // the most recent hit this entity took. HitIds come from the deterministic
+    // HitIdAllocator, so "it changed" is an edge-detect a rollback replay reproduces
+    // exactly — the entity-side analogue of CombatState.LastHitFrame. The sim never
+    // reads it back.
+    public int LastHitId;
+
     // Concrete-type tag for rehydration (see EntityFactory.Rehydrate). The base
     // Entity (balloons/balls) reports Generic; each polymorphic subtype overrides.
     public virtual EntityKind Kind => EntityKind.Generic;
@@ -53,6 +60,7 @@ public class Entity : IHittable
 
     public virtual Vector2 OnHit(in Hitbox hit, in Hurtbox _)
     {
+        LastHitId = hit.HitId;
         Health -= hit.Damage;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
         Body.Velocity += res.TargetDeltaV;
@@ -105,6 +113,7 @@ public class Entity : IHittable
         d.GravityScale = GravityScale;
         d.Color        = Color;
         d.Faction      = Faction;
+        d.LastHitId    = LastHitId;
         d.Polygon      = Body.Polygon;   // immutable shape
         d.Impact       = Body.Impact;    // immutable config
         WriteState(ref d);
@@ -120,6 +129,7 @@ public class Entity : IHittable
         GravityScale = d.GravityScale;
         Color        = d.Color;
         Faction      = d.Faction;
+        LastHitId    = d.LastHitId;
         ReadState(in d);
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
     }
@@ -148,6 +158,13 @@ public interface IEntitySpawner
     // died and been swept (end of the Step it died in). Default null so spawner stubs
     // that never mint entities need no change.
     Entity Resolve(EntityId id) => null;
+    // This frame's published hurtboxes. Entities are updated AFTER every hurtbox has
+    // been published, so an entity that must react to touching a body — a thrown clod
+    // bursting on the player it hits rather than sailing through to land — can query
+    // the set directly instead of waiting a frame for CombatSystem to dispatch. Read-only
+    // sampling; publishing from inside an entity update would be order-dependent.
+    // Default null so spawner stubs that never need it are unaffected.
+    HurtboxWorld Hurtboxes => null;
     // A mass ball landed and erupted: a cosmetic event for the render shell (particle
     // splash, audio). Default no-op — only Simulation forwards it, as OnMassLanded.
     void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks) { }
