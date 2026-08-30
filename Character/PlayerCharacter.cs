@@ -693,7 +693,11 @@ public class PlayerCharacter : IHittable
         // Block-economy upkeep, once per frame per player and AFTER the action ran, so a
         // placement action has had its chance to request charging. Runs unconditionally —
         // the reservoir has to regenerate whether or not a build action is live.
-        _abilities.Meters.Step(dt);
+        //
+        // RMB goes in raw so the meter can retire a charge the moment the button comes
+        // up, however the stroke ended — including a preempt, which never runs the paint
+        // action's Exit again (see BuildMeters.Step).
+        _abilities.Meters.Step(dt, ctx.Input.RightClick);
 
         _historyHead = (_historyHead + 1) % HistorySize;
         _stateHistory[_historyHead] = _currentState;

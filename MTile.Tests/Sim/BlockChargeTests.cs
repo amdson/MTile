@@ -182,6 +182,108 @@ public class BlockChargeTests(ITestOutputHelper output)
         Assert.True(after > before, "An uncharged hold in open air must still paint.");
     }
 
+    // ── Releasing the button clears the meter ───────────────────────────────────
+    //
+    // The lockout above is right for a LIVE hold and was wrong the moment the button
+    // came up. A banked charge used to bleed at EruptDecay 60/s, so a full meter sat
+    // above PaintLockoutMin for 3.7 seconds after release — nearly four seconds in which
+    // the player could not place a block, most of it holding a charge already too small
+    // to charge a block with. Release now empties the meter outright.
+
+    [Fact]
+    public void ReleasingTheButton_EmptiesTheMeterAtOnce()
+    {
+        var terrain = FlatGround();
+
+        float atRelease = 0f, oneFrameLater = 0f;
+        bool locksPaintAfter = true;
+        SimRunner.RunMulti(Build(new InputScript()
+                .For(6,   Rmb(false))
+                .For(130, Rmb(true))     // fill it the normal way
+                .Forever( Rmb(false)),   // and let go
+            terrain, frames: 145),
+            onFrame: (f, ps) =>
+            {
+                var m = ps[0].Abilities.Meters;
+                if (f == 135) atRelease     = m.EruptMove;
+                if (f == 138) oneFrameLater = m.EruptMove;
+                if (f >= 138) locksPaintAfter &= m.ChargeLocksPaint;
+            });
+
+        output.WriteLine($"meter {atRelease:F1} -> {oneFrameLater:F1}");
+        Assert.True(atRelease >= BuildMeters.BlockChargeMin,
+            $"Setup: the hold should have filled the meter; got {atRelease:F1}.");
+        Assert.Equal(0f, oneFrameLater);
+        Assert.False(locksPaintAfter, "An emptied meter must not still be locking out paint.");
+    }
+
+    // The complaint this fixes, end to end: charge a full meter, let go, and the very
+    // next stroke has to place blocks. Before the release-clear it painted nothing —
+    // ChargeLocksPaint was still true off the banked 240, so the hold was read as another
+    // charge — and stayed that way for about 3.7 seconds.
+    [Fact]
+    public void AfterAFullCharge_TheNextStrokePaintsImmediately()
+    {
+        var terrain = FlatGround();
+        int before = SolidCount(terrain, 0, 8, 0, 3);
+
+        SimRunner.RunMulti(Build(new InputScript()
+                .For(6,   Rmb(false))
+                .For(130, Rmb(true))                                            // charge, buried
+                .For(6,   new PlayerInput { MouseWorldPosition = InAir })       // release
+                .Forever(new PlayerInput { RightClick = true, MouseWorldPosition = InAir }),
+            terrain, frames: 190));
+
+        int after = SolidCount(terrain, 0, 8, 0, 3);
+        output.WriteLine($"solid {before} -> {after}");
+        Assert.True(after > before,
+            "A stroke started right after releasing a full charge must paint.");
+    }
+
+    // The reserve that keeps the double-click payable is deliberately invisible to
+    // everything else. If painting could reach it, emptying the meter on release would
+    // just have moved the accidental-spend problem the lockout was built to solve.
+    [Fact]
+    public void ThePaintStrokeAfterARelease_CannotSpendTheReserve()
+    {
+        var terrain = FlatGround();
+
+        float reserveAtEnd = -1f;
+        SimRunner.RunMulti(Build(new InputScript()
+                .For(6,   Rmb(false))
+                .For(130, Rmb(true))
+                .For(6,   new PlayerInput { MouseWorldPosition = InAir })
+                .Forever(new PlayerInput { RightClick = true, MouseWorldPosition = InAir }),
+            terrain, frames: 200),
+            // Sampled while the reserve is still inside its grace window and the stroke
+            // is actively painting: release lands on frame 136, the window is 1.0s (60
+            // frames) so it runs to ~196, and painting starts on frame 142.
+            onFrame: (f, ps) => { if (f == 170) reserveAtEnd = ps[0].Abilities.Meters.BankedCharge; });
+
+        output.WriteLine($"reserve mid-stroke = {reserveAtEnd:F1}");
+        Assert.True(reserveAtEnd >= BuildMeters.BlockChargeMin,
+            $"Painting must not eat the reserve; {reserveAtEnd:F1} left.");
+    }
+
+    // And it does expire — the reserve is a window for one gesture, not a second meter
+    // the player can sit on indefinitely.
+    [Fact]
+    public void TheReserve_ExpiresAfterItsWindow()
+    {
+        var terrain = FlatGround();
+
+        float reserve = -1f;
+        SimRunner.RunMulti(Build(new InputScript()
+                .For(6,   Rmb(false))
+                .For(130, Rmb(true))
+                .Forever( Rmb(false)),
+            terrain, frames: 260),
+            onFrame: (f, ps) => reserve = ps[0].Abilities.Meters.BankedCharge);
+
+        output.WriteLine($"reserve well past the window = {reserve:F1}");
+        Assert.Equal(0f, reserve);
+    }
+
     // Charge is sim state, not decoration: it has to survive a rollback like the rest of
     // the terrain, and it has to clear when the tile it's on is destroyed.
     [Fact]
