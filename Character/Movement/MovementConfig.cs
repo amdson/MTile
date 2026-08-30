@@ -420,6 +420,11 @@ public class MovementConfig
     public float PeelWeightDirt  { get; set; } = 1.5f;
     public float PeelWeightSand  { get; set; } = 0.8f;
     public float PeelWeightFoam  { get; set; } = 0.4f;
+    // Hardened rock is refused admission to the group outright (TileTypes.IsGrabbable),
+    // so this is unreachable today — it's here so that if that gate is ever relaxed the
+    // material lands at a glue no spring under PeelSpringMax can wear through, rather
+    // than silently inheriting the old `_ => Foam` default and peeling like scaffolding.
+    public float PeelWeightHardened { get; set; } = 1000f;
 
     // Carry budget: the harvested orb bleeds linearly to nothing over this long, then the
     // grab ends empty (Plans/BLOCK_THROW_PLAN.md T1). Longer = the clod can be carried
@@ -453,6 +458,7 @@ public class MovementConfig
         TileType.Stone => PeelWeightStone,
         TileType.Dirt  => PeelWeightDirt,
         TileType.Sand  => PeelWeightSand,
+        TileType.Hardened => PeelWeightHardened,
         _              => PeelWeightFoam,
     };
 

@@ -44,6 +44,12 @@ public static class MaterialStrengths
         [TileType.Dirt]  = new() { MaxHP = 1.0f, Restitution = 0.35f, BuildCost = 1.0f  },
         [TileType.Sand]  = new() { MaxHP = 0.5f, Restitution = 0.05f, BuildCost = 0.5f  },
         [TileType.Foam]  = new() { MaxHP = 0.5f, Restitution = 0.15f, BuildCost = 0.25f },
+        // Hardened rock is 10x stone, deliberately off the end of the scale the other
+        // four share: at SlashDamagePerFrame it is seconds of unbroken contact, not the
+        // fraction of a second stone costs. BuildCost is unreachable (TileTypes
+        // .IsPlaceable refuses the material at the picker) and set absurd so any future
+        // path that does get here prices it out rather than silently placing bedrock.
+        [TileType.Hardened] = new() { MaxHP = 20.0f, Restitution = 0.90f, BuildCost = 1e6f },
     };
 
     public static float MaxHPFor(TileType type)

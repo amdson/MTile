@@ -296,8 +296,16 @@ public class PlayerCharacter : IHittable
     // placement is ball-based only now, so there is nothing to switch between.
     private TileType _activeBlockType = TileType.Dirt;
     // Settable so Simulation can seed the initial selection from GameConfig;
-    // thereafter it's driven by this player's own input each frame.
-    public TileType ActiveBlockType { get => _activeBlockType; set => _activeBlockType = value; }
+    // thereafter it's driven by this player's own input each frame. Non-placeable
+    // materials are refused here rather than at each placement verb: build, paint,
+    // mass deposit and the eruption ball all read this one field, so this is the single
+    // choke point that keeps a GameConfig typo ("StartingBlockType": "Hardened") from
+    // handing the player bedrock. Snapshot restore writes the field directly, as it must.
+    public TileType ActiveBlockType
+    {
+        get => _activeBlockType;
+        set { if (TileTypes.IsPlaceable(value)) _activeBlockType = value; }
+    }
 
     public MovementState GetPreviousState(int framesBack)
     {

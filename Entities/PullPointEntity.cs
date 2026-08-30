@@ -47,9 +47,8 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
     // Harvest radius around the press site for the legacy drag-rip. 1.6 tiles ⇒ the
     // pressed cell plus its immediate neighbours, ~9 blocks on open ground.
     private const float LegacyRipRadiusTiles = 1.6f;
-    // Width of the material tally. TileType is a contiguous byte enum; bump this when
-    // a value is added there.
-    private const int TileTypeCount = 4;
+    // Width of the material tally, from the enum's own cardinality.
+    private const int TileTypeCount = TileTypes.Count;
 
     public override EntityKind Kind => EntityKind.PullPoint;
 
@@ -127,6 +126,7 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
             int gtx = cx + dx, gty = cy + dy;
             if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
             var type = chunks.GetCellType(gtx, gty);
+            if (!TileTypes.IsGrabbable(type)) continue;   // hardened rock isn't harvestable
             // Read the charge BEFORE the break — BreakCell clears the flag, so asking
             // afterwards always says no.
             bool wasCharged = chunks.Charge.IsCharged(gtx, gty);
@@ -298,6 +298,11 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         {
             int gtx = cx + dx, gty = cy + dy;
             if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
+            // Hardened rock takes no tether at all, so it can neither join the group nor
+            // be dragged along inside one. Rejecting it here (rather than giving it a
+            // huge glue) is what makes the kernel paint straight over a hardened seam
+            // and lift only the soft material around it.
+            if (!TileTypes.IsGrabbable(chunks.GetCellType(gtx, gty))) continue;
 
             var center = CellCenter(gtx, gty);
             float r2 = (center - cursor).LengthSquared();
