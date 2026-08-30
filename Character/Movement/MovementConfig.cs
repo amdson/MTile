@@ -474,6 +474,14 @@ public class MovementConfig
             using var stream = TitleContent.TryOpenRead(path);
             if (stream == null)
             {
+                // Say so. This config is sim-affecting, so a peer that silently falls
+                // back to defaults desyncs from one that loaded the file — immediately
+                // and permanently, since even the resting Y differs. That failure used
+                // to be completely quiet, which made it near-impossible to diagnose from
+                // the symptom (see the notes on Simulation.Checksum's desync guard).
+                Console.WriteLine($"[MovementConfig] {path} not found — running on DEFAULT " +
+                                  "movement tuning. In multiplayer this WILL desync unless " +
+                                  "every peer is missing it too.");
                 // On desktop, seed an editable copy next to the binary so dev hot-reload
                 // has something to watch. On web (TitleContainer-only), Save will no-op
                 // via its own try/catch; defaults stay in effect.

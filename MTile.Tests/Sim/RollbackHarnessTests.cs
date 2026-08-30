@@ -247,6 +247,389 @@ public class RollbackHarnessTests(ITestOutputHelper output)
                          $"desyncs=0; link sent={lossyLink.Sent} dropped={lossyLink.Dropped}.");
     }
 
+    // ── Terrain-aware repro ────────────────────────────────────────────────────────
+    // Probe() above fingerprints players + entities only, and Simulation.Checksum() —
+    // what the wire-level desync guard compares — covers bodies/health/entities and
+    // likewise stops short of terrain. So a terrain-only divergence is invisible to
+    // BOTH the existing tests and the runtime guard, while being the most visible
+    // thing on screen. This pair adds the terrain signature to the comparison.
+
+    // Same shape as SnapshotRoundTripTests.AppendTerrain: dense cell states over a
+    // window, live sprout nodes with exact age, and per-cell damage HP.
+    private static void AppendTerrain(ChunkMap chunks, StringBuilder sb)
+    {
+        for (int gty = -2; gty <= 8; gty++)
+        {
+            sb.Append("T");
+            for (int gtx = -6; gtx <= 22; gtx++)
+                sb.Append((int)chunks.GetCellState(gtx, gty));
+            sb.Append('\n');
+        }
+        foreach (var sp in chunks.ActiveSprouts)
+            sb.Append($"S{sp.Gtx},{sp.Gty}:{sp.Type}|age{Bits(sp.Age)}\n");
+        var dmg = new List<string>();
+        foreach (var d in chunks.Damage.Damaged) dmg.Add($"{d.Key.gtx},{d.Key.gty}={Bits(d.Value)}");
+        dmg.Sort();
+        foreach (var d in dmg) sb.Append("D").Append(d).Append('\n');
+    }
+
+    private static string ProbeFull(Simulation sim)
+    {
+        var sb = new StringBuilder(Probe(sim));
+        AppendTerrain(sim.Chunks, sb);
+        return sb.ToString();
+    }
+
+    // Like Script(), but deliberately hammers the terrain-editing verbs (place / break,
+    // with block-type switches) at a spot that tracks the player. Still a pure function
+    // of frame, so the clean and lossy runs see identical input streams.
+    private static Func<int, PlayerInput> TerrainScript(int seed, float baseX)
+    {
+        var rng = new Random(seed);
+        var cache = new Dictionary<int, PlayerInput>();
+        bool left = false, right = false, space = false; int hold = 0;
+        int built = -1;
+        PlayerInput Build(int f)
+        {
+            if (hold <= 0)
+            {
+                hold = rng.Next(6, 16);
+                int dir = rng.Next(3);
+                left = dir == 1; right = dir == 2;
+                space = rng.Next(4) == 0;
+            }
+            hold--;
+            int pick = rng.Next(4);
+            return new PlayerInput
+            {
+                Left = left, Right = right, Space = space,
+                LeftClick  = rng.Next(3) == 0,     // break
+                RightClick = rng.Next(3) == 0,     // place
+                Num1 = pick == 0, Num2 = pick == 1, Num3 = pick == 2, Num4 = pick == 3,
+                MouseWorldPosition = new Vector2(baseX + (f % 33), 24f + (f % 17)),
+            };
+        }
+        return f =>
+        {
+            if (cache.TryGetValue(f, out var pi)) return pi;
+            for (int g = built + 1; g <= f; g++) cache[g] = Build(g);
+            built = Math.Max(built, f);
+            return cache[f];
+        };
+    }
+
+    [Fact]
+    public void LatencyAndLoss_TerrainAlsoReconstructsTheReference()
+    {
+        const int N = 240;
+
+        var refLink = new LossyLink(seed: 1, minLat: 1, maxLat: 1, drop: 0.0);
+        var reference = new Harness(refLink, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        reference.RunTo(N);
+        string truth = ProbeFull(reference.A.Sim);
+
+        var lossyLink = new LossyLink(seed: 99, minLat: 3, maxLat: 9, drop: 0.25);
+        var lossy = new Harness(lossyLink, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        lossy.RunTo(N);
+
+        Assert.True(lossy.A.RollbackCount > 0 || lossy.B.RollbackCount > 0,
+            "Expected rollbacks under latency+loss");
+
+        string lossyA = ProbeFull(lossy.A.Sim);
+        string lossyB = ProbeFull(lossy.B.Sim);
+
+        output.WriteLine($"Rollbacks A={lossy.A.RollbackCount} B={lossy.B.RollbackCount}; " +
+                         $"desyncs A={lossy.A.DesyncCount} B={lossy.B.DesyncCount}.");
+        output.WriteLine(FirstDiff("A-vs-B", lossyA, lossyB));
+        output.WriteLine(FirstDiff("truth-vs-A", truth, lossyA));
+
+        Assert.Equal(lossyA, lossyB);
+        Assert.Equal(truth, lossyA);
+    }
+
+    // Report the first differing line so a failure names the divergence instead of
+    // dumping two multi-KB blobs.
+    private static string FirstDiff(string label, string x, string y)
+    {
+        if (x == y) return $"{label}: identical";
+        var a = x.Split('\n');
+        var b = y.Split('\n');
+        for (int i = 0; i < Math.Max(a.Length, b.Length); i++)
+        {
+            string la = i < a.Length ? a[i] : "<missing>";
+            string lb = i < b.Length ? b[i] : "<missing>";
+            if (la != lb) return $"{label}: first diff at line {i}:\n  {la}\n  {lb}";
+        }
+        return $"{label}: differ in length only";
+    }
+
+    // ── Burst loss: what actually threatens the protocol ───────────────────────────
+    // Independent per-packet loss (LossyLink) is the wrong model for a real link, where
+    // loss is correlated — a Wi-Fi hiccup or a hand-off drops a run of packets, not a
+    // scattering. That matters because the two constants defending against loss are very
+    // differently sized: BufferLen=60 frames (1s) of snapshot ring, but RedundancyWindow=8
+    // means frame f only rides in packets f..f+7. Lose all EIGHT and f is gone for good —
+    // no later packet carries it — so the tighter bound is 8 frames (~133ms), not 60.
+    //
+    // The stall cap makes a total blackout harmless: _highestRemote stops advancing, both
+    // peers stall, and they resume together. The dangerous shape is a burst that ends —
+    // frames f..f+7 lost, f+8 delivered — because _highestRemote jumps the hole and the
+    // sim walks on with an imputed input that can never be corrected.
+    private sealed class BurstLink
+    {
+        private struct Pending { public long DeliverTick; public InputPacket Packet; }
+        private readonly List<Pending> _toA = new(), _toB = new();
+        private readonly Random _rng;
+        private readonly int _lat, _burst, _gap;
+        private int _sinceBurst;
+        private int _burstLeft;
+        public int Sent, Dropped, Bursts;
+        public bool Blackout;   // hard-cut the B->A path (dead peer)
+
+        // Every `gap` packets, drop `burst` consecutive ones.
+        private readonly bool _oneWay;
+
+        // oneWay: drop only on the B→A path. A symmetric blackout is the SAFE shape —
+        // both peers' _highestRemote freeze, both stall, and they resume in step. One
+        // direction failing is what lets A keep hearing... nothing, and walk past a hole.
+        public BurstLink(int seed, int lat, int burst, int gap, bool oneWay = false)
+        { _rng = new Random(seed); _lat = lat; _burst = burst; _gap = gap; _oneWay = oneWay; }
+
+        public void SendToA(long now, in InputPacket p) => Enqueue(_toA, now, p, lossy: true);
+        public void SendToB(long now, in InputPacket p) => Enqueue(_toB, now, p, lossy: !_oneWay);
+
+        private void Enqueue(List<Pending> q, long now, in InputPacket p, bool lossy)
+        {
+            Sent++;
+            if (Blackout && lossy) { Dropped++; return; }
+            if (!lossy) { q.Add(new Pending { DeliverTick = now + _lat, Packet = p }); return; }
+            if (_burstLeft > 0) { _burstLeft--; Dropped++; return; }
+            if (++_sinceBurst >= _gap) { _sinceBurst = 0; _burstLeft = _burst - 1; Bursts++; Dropped++; return; }
+            q.Add(new Pending { DeliverTick = now + _lat, Packet = p });
+        }
+
+        public void DeliverDue(long now, List<InputPacket> toA, List<InputPacket> toB)
+        { Drain(_toA, now, toA); Drain(_toB, now, toB); }
+        public void DeliverAll(List<InputPacket> toA, List<InputPacket> toB)
+        { Drain(_toA, long.MaxValue, toA); Drain(_toB, long.MaxValue, toB); }
+        private static void Drain(List<Pending> q, long now, List<InputPacket> outList)
+        {
+            for (int i = q.Count - 1; i >= 0; i--)
+                if (q[i].DeliverTick <= now) { outList.Add(q[i].Packet); q.RemoveAt(i); }
+        }
+        public bool Idle => _toA.Count == 0 && _toB.Count == 0;
+    }
+
+    // Harness above is hardwired to LossyLink; this mirrors it over BurstLink.
+    private sealed class BurstHarness
+    {
+        public readonly RollbackSession A, B;
+        private readonly BurstLink _link;
+        private long _tick;
+        private readonly List<InputPacket> _toA = new(), _toB = new();
+
+        public BurstHarness(BurstLink link, Func<int, PlayerInput> sa, Func<int, PlayerInput> sb)
+        {
+            _link = link;
+            A = new RollbackSession(BuildSim(), 0, sa, p => _link.SendToB(_tick, p));
+            B = new RollbackSession(BuildSim(), 1, sb, p => _link.SendToA(_tick, p));
+        }
+
+        public void RunTo(int n)
+        {
+            int guard = 0, guardMax = Math.Max(4000, n * 80);
+            while ((A.Frame < n || B.Frame < n) && guard++ < guardMax)
+            {
+                _toA.Clear(); _toB.Clear();
+                _link.DeliverDue(_tick, _toA, _toB);
+                foreach (var p in _toA) A.Receive(p);
+                foreach (var p in _toB) B.Receive(p);
+                if (A.Frame < n) A.TryStep(); else A.ProcessInbox();
+                if (B.Frame < n) B.TryStep(); else B.ProcessInbox();
+                _tick++;
+            }
+            guard = 0;
+            do
+            {
+                _toA.Clear(); _toB.Clear();
+                _link.DeliverAll(_toA, _toB);
+                foreach (var p in _toA) A.Receive(p);
+                foreach (var p in _toB) B.Receive(p);
+                A.ProcessInbox(); B.ProcessInbox();
+            }
+            while ((!_link.Idle || !A.InboxEmpty || !B.InboxEmpty) && guard++ < 10000);
+        }
+        public bool Reached(int n) => A.Frame >= n && B.Frame >= n;
+
+        // Step both peers a fixed number of times with no target frame — for watching
+        // what a peer does when the other is simply gone.
+        public void RunFor(int steps)
+        {
+            for (int i = 0; i < steps; i++)
+            {
+                _toA.Clear(); _toB.Clear();
+                _link.DeliverDue(_tick, _toA, _toB);
+                foreach (var p in _toA) A.Receive(p);
+                foreach (var p in _toB) B.Receive(p);
+                A.TryStep(); B.TryStep();
+                _tick++;
+            }
+        }
+    }
+
+    [Theory]
+    // burst length in packets ≈ ms of outage at 60/s. 7 is inside RedundancyWindow=8;
+    // 8 and 12 are past it.
+    [InlineData(4,  120, false)]
+    [InlineData(7,  120, false)]
+    [InlineData(8,  120, false)]
+    [InlineData(12, 120, false)]
+    [InlineData(4,  120, true)]
+    [InlineData(8,  120, true)]
+    [InlineData(12, 120, true)]
+    [InlineData(20, 120, true)]
+    // Past MaxSendWindow (60): the re-send can no longer reach back far enough.
+    [InlineData(45,  150, true)]
+    [InlineData(90,  200, true)]
+    public void BurstLoss_ShowsWhereTheProtocolBreaks(int burst, int gap, bool oneWay)
+    {
+        const int N = 400;
+        var link = new BurstLink(seed: 7, lat: 2, burst: burst, gap: gap, oneWay: oneWay);
+        var h = new BurstHarness(link, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        h.RunTo(N);
+
+        string pa = h.Reached(N) ? ProbeFull(h.A.Sim) : "<did not reach N>";
+        string pb = h.Reached(N) ? ProbeFull(h.B.Sim) : "<did not reach N>";
+        bool agree = pa == pb;
+
+        output.WriteLine(
+            $"burst={burst} (~{burst * 1000 / 60}ms) gap={gap} oneWay={oneWay} bursts={link.Bursts} " +
+            $"dropped={link.Dropped}/{link.Sent} | reachedN={h.Reached(N)} " +
+            $"rollbacks A={h.A.RollbackCount} B={h.B.RollbackCount} " +
+            $"worstDepth A={h.A.WorstRollbackDepth} B={h.B.WorstRollbackDepth} " +
+            $"missed A={h.A.MissedRollbacks} B={h.B.MissedRollbacks} " +
+            $"desync A={h.A.DesyncCount} B={h.B.DesyncCount} | peersAgree={agree}");
+        if (!agree) output.WriteLine(FirstDiff("A-vs-B", pa, pb));
+
+        // Measurement, not a gate: the point is the printed table. The one hard
+        // invariant is that a rollback never needed a snapshot older than the ring —
+        // if that trips, BufferLen (not RedundancyWindow) is the binding constraint.
+        Assert.True(h.A.WorstRollbackDepth < RollbackSession.BufferLen
+                 && h.B.WorstRollbackDepth < RollbackSession.BufferLen,
+            $"rollback depth reached the {RollbackSession.BufferLen}-frame ring");
+    }
+
+    [Fact]
+    public void OneDirectionalBurst_PastRedundancyWindow_StillConverges()
+    {
+        // This diverged permanently before the stall gate moved onto _confirmedThrough
+        // and SendWindow became ack-driven. With a fixed redundancy window, frame f rode
+        // only in packets f..f+7; losing all eight in ONE direction (the other stays
+        // clean, so the far peer keeps producing frames and the old _highestRemote gate
+        // never engaged) made f unrecoverable, the imputed input stood forever, and the
+        // sims parted — with DesyncCount stuck at 0, because a permanent hole pins
+        // _confirmedThrough and CheckPendingChecksums skips every later claim.
+        //
+        // Now the sender re-sends from the peer's ack until it lands, and the receiver
+        // will not step past a frame it could no longer correct, so neither half of that
+        // can happen. Guarding both halves at once: peers must AGREE (no fork) and must
+        // REACH N (no deadlock — a stalled peer keeps transmitting so acks still flow).
+        const int N = 400;
+        var link = new BurstLink(seed: 7, lat: 2, burst: 12, gap: 120, oneWay: true);
+        var h = new BurstHarness(link, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        h.RunTo(N);
+        Assert.True(h.Reached(N), "peers deadlocked instead of healing the hole");
+        Assert.Equal(ProbeFull(h.A.Sim), ProbeFull(h.B.Sim));
+    }
+
+    [Fact]
+    public void DeadPeer_StallsRatherThanForking_AndReportsIt()
+    {
+        // A peer that goes away for good. The gate holds the survivor at
+        // _confirmedThrough + slack forever, which is correct — it must not invent a
+        // timeline it can never reconcile — but silence would read as a hang, so
+        // OnStallTimeout names the frame we are stuck behind.
+        const int Cut = 40;
+        var link = new BurstLink(seed: 3, lat: 1, burst: 1, gap: int.MaxValue);
+        var h = new BurstHarness(link, TerrainScript(11, 70f), TerrainScript(22, 95f));
+        h.RunTo(Cut);
+
+        int stalledAt = -1;
+        h.A.OnStallTimeout = f => stalledAt = f;
+
+        // Cut the B→A path entirely and let A spin well past the timeout.
+        link.Blackout = true;
+        int before = h.A.Frame;
+        h.RunFor(RollbackSession.StallTimeoutSteps + 60);
+
+        // The invariant is about distance from CONFIRMED input, not from the cut: packets
+        // already in flight keep confirming for a tick or two after the link dies, so the
+        // frame count advances slightly more than the slack.
+        int ahead = h.A.Frame - h.A.ConfirmedThrough;
+        output.WriteLine($"A advanced {h.A.Frame - before} frames after the cut, now {ahead} " +
+                         $"ahead of confirmed (gate allows {RollbackSession.InputFrameDelay + RollbackSession.StallSlack}); " +
+                         $"stalls={h.A.StallCount} timeoutAtFrame={stalledAt}");
+
+        Assert.True(ahead <= RollbackSession.InputFrameDelay + RollbackSession.StallSlack,
+            $"survivor ran {ahead} frames past the last confirmed input — further than it could correct");
+        Assert.True(stalledAt >= 0, "OnStallTimeout never fired for a dead peer");
+    }
+
+    [Fact]
+    public void Checksum_CatchesATerrainOnlyDifference()
+    {
+        // The guard used to fingerprint bodies/health/entities only, so two sims could
+        // hold visibly different worlds and report identical checksums forever. Change
+        // ONE tile, far from both players so no body is perturbed, and the checksum must
+        // move — while the player probe stays identical, proving it is the terrain that
+        // is being seen and not a knock-on physics difference.
+        var a = BuildSim();
+        var b = BuildSim();
+        for (int f = 0; f < 30; f++)
+        {
+            var i0 = Script(11)(f);
+            var i1 = Script(22)(f);
+            a.Step(i0, i1);
+            b.Step(i0, i1);
+        }
+        Assert.Equal(a.Checksum(), b.Checksum());   // identical inputs ⇒ identical state
+
+        // Floor()'s solid row is gty 3, spanning gtx -4..19; the players sit near gtx
+        // 3-7 and cannot reach the far right end in the frames run above.
+        Assert.True(b.Chunks.BreakCell(19, 3), "expected a solid cell to break");
+
+        Assert.NotEqual(a.Checksum(), b.Checksum());
+        Assert.Equal(Probe(a), Probe(b));           // bodies untouched — terrain alone moved
+    }
+
+    [Fact]
+    public void TerrainHash_IsOrderIndependentAndRestores()
+    {
+        // Two properties the fold depends on. Order-independence: the same edits applied
+        // in a different sequence must land on the same hash, because a rollback rebuilds
+        // the sparse tables and their iteration order is not something the wire guard
+        // should be sensitive to. Reversibility: undoing an edit must return the exact
+        // prior hash, which is what lets the journal rewind carry the hash for free.
+        var s1 = BuildSim();
+        var s2 = BuildSim();
+        ulong before = s1.Chunks.TerrainHash;
+
+        s1.Chunks.BreakCell(15, 3);
+        s1.Chunks.BreakCell(17, 3);
+        s2.Chunks.BreakCell(17, 3);
+        s2.Chunks.BreakCell(15, 3);
+        Assert.Equal(s1.Chunks.TerrainHash, s2.Chunks.TerrainHash);
+        Assert.NotEqual(before, s1.Chunks.TerrainHash);
+
+        // Material matters, not just occupancy: the same cell filled with two different
+        // tile types must not collide to the same hash.
+        var s3 = BuildSim();
+        var s4 = BuildSim();
+        s3.Chunks.ForceSprout(12, 1, TileType.Stone);
+        s4.Chunks.ForceSprout(12, 1, TileType.Sand);
+        Assert.NotEqual(s3.Chunks.TerrainHash, s4.Chunks.TerrainHash);
+    }
+
     [Fact]
     public void DesyncGuard_FiresWhenSimsDiverge()
     {

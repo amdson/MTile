@@ -58,6 +58,10 @@ public sealed class TileImpactAccumulator
     }
 
     // Snapshot/restore (roadmap goal 6). Dict copy = deep copy (value-typed entries).
+    // Live entries, without Capture()'s copy — Simulation.Checksum() folds these into
+    // the terrain fingerprint every frame and must not allocate on the sim hot path.
+    public IEnumerable<KeyValuePair<(int gtx, int gty), float>> Entries => _accum;
+
     public Dictionary<(int gtx, int gty), float> Capture() => new(_accum);
 
     public void Restore(Dictionary<(int gtx, int gty), float> src)

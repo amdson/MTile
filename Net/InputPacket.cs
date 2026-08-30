@@ -21,6 +21,13 @@ public struct InputPacket
     public int           ChecksumFrame;
     public ulong         Checksum;
 
+    // Cumulative ack: the highest frame F for which the sender has the RECEIVER's inputs
+    // for every frame 0..F (its own _confirmedThrough). The receiver uses it to decide how
+    // far back to re-send: a fixed redundancy window loses a frame for good once the run
+    // of drops exceeds it, whereas "everything since your ack" keeps re-sending until the
+    // peer says it landed. -1 means nothing confirmed yet.
+    public int           AckThrough;
+
     public int LastFrame => FirstFrame + Inputs.Length - 1;
 }
 

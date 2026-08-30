@@ -179,6 +179,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, CombatSystem = _combat };
         RegisterPlayer(_player);
         populate?.Invoke(this);
+        // Terrain arrives written straight into the chunks, so fold the loaded grid in
+        // once — otherwise the fingerprint covers only edits and two peers on different
+        // levels would agree until one of them dug.
+        _chunks.RecomputeTerrainHash();
     }
 
     public Simulation(GameConfig config, Stage stage)
@@ -211,6 +215,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
 
         // Hand control to the stage: it populates platforms, tickers, and entities.
         stage.Populate(this);
+        // As above: fold the loaded (and stage-populated) grid into the fingerprint once.
+        _chunks.RecomputeTerrainHash();
     }
 
     // ── Stage-facing API (called from Stage.Populate) ───────────────────────────
@@ -410,6 +416,36 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
 
         Mix((uint)_hitIds.Value);
         Mix((uint)_world.SlotCount);   // analogue of the old monotonic id counter
+
+        // Terrain. Previously absent, which made a terrain-only divergence invisible to
+        // the wire guard — and terrain is the half that never re-converges, since replay
+        // from a snapshot is the only correction the protocol has.
+        //
+        // The dense grid rides in as ChunkMap's incrementally-maintained TerrainHash (no
+        // per-frame scan). The sparse side-tables are folded in here because they tick
+        // every frame: each is XOR-accumulated so the fold is order-independent — these
+        // are Dictionary-backed, and a restore can reorder buckets while holding
+        // identical content, which an order-SENSITIVE fold would report as a desync.
+        ulong t = _chunks.TerrainHash;
+        static ulong CellF(int gtx, int gty, float v, ulong salt)
+        {
+            ulong k = (ulong)(uint)gtx * 0x9E3779B97F4A7C15UL
+                    ^ (ulong)(uint)gty * 0xC2B2AE3D27D4EB4FUL
+                    ^ (ulong)(uint)BitConverter.SingleToInt32Bits(v) * 0x165667B19E3779F9UL
+                    ^ salt;
+            k ^= k >> 33; k *= 0xFF51AFD7ED558CCDUL;
+            return k ^ (k >> 33);
+        }
+        foreach (var d in _chunks.Damage.Damaged) t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x01);
+        foreach (var d in _chunks.Foam.Entries)   t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x02);
+        foreach (var d in _chunks.Impact.Entries) t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x03);
+        foreach (var d in _chunks.Mass.Entries)   t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x04);
+        // Sprouts are a list, but fold them the same way: a rollback rebuilds it and the
+        // order it comes back in is not something the checksum should depend on.
+        foreach (var s in _chunks.ActiveSprouts)
+            t ^= CellF(s.Gtx, s.Gty, s.Age, 0x05 ^ ((ulong)(byte)s.Type << 8));
+
+        Mix((uint)t); Mix((uint)(t >> 32));
         return h;
     }
 

@@ -66,7 +66,13 @@ public static class MaterialStrengths
         try
         {
             using var stream = TitleContent.TryOpenRead(path);
-            if (stream == null) return;
+            if (stream == null)
+            {
+                // Sim-affecting: a peer on defaults diverges from one on the file.
+                Console.WriteLine($"[MaterialStrengths] {path} not found — running on DEFAULT " +
+                                  "tile strengths. Desyncs against any peer that loaded it.");
+                return;
+            }
             var opts = new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true,

@@ -151,6 +151,15 @@ public class Game1 : Game
     private KeyboardState _prevKeys;
     private string _toast;
     private float  _toastTtl;
+    // Sticky netcode banner (desync / unreachable peer). See the Draw block that renders
+    // it for why this is not a Toast.
+    private string _netAlert;
+    private Color  _netAlertColor = Color.OrangeRed;
+    // Frame the sim was on last Update, to notice a stall ending.
+    private int    _netLastFrame = -1;
+    // First frame the guard flagged. Later reports are downstream of it, so this is the
+    // one worth naming — and its presence marks the banner as un-clearable.
+    private int    _netFirstDesyncFrame = -1;
 
     // Frame-time probe (GameConfig.DebugFrameTimings): per-pass mean+worst over a
     // 60-frame window. This is the primary perf instrument for the WEB build, where no
@@ -344,6 +353,38 @@ public class Game1 : Game
                 _sim, _net.LocalPlayerIndex,
                 _ => _localInput,
                 pkt => _net.Send(MTile.Net.InputCodec.Encode(in pkt)));
+            // The desync guard had no subscriber anywhere in the codebase, so a
+            // divergence incremented a counter nobody read: the peers drifted apart on
+            // screen with nothing said in the log. Reporting it is the minimum; recovery
+            // is still open (Plans/INTERNET_READY_PLAN.md).
+            // The stall gate refuses to advance past a frame it could no longer correct,
+            // which is right, but an unreachable peer then looks like a freeze. Say which.
+            _session.OnStallTimeout = confirmed =>
+            {
+                Console.WriteLine($"[net] STALLED {MTile.Net.RollbackSession.StallTimeoutSteps} " +
+                                  $"steps waiting on the peer past frame {confirmed} — " +
+                                  "connection is likely gone.");
+                // Amber, and clearable: unlike a desync this can resolve on its own if
+                // the peer comes back, so Update drops it once the sim advances again.
+                if (_netFirstDesyncFrame < 0)
+                {
+                    _netAlert = "WAITING FOR PEER - no input past frame " + confirmed;
+                    _netAlertColor = Color.Orange;
+                }
+            };
+            _session.OnDesync = (frame, ours, theirs) =>
+            {
+                Console.WriteLine($"[net] DESYNC frame={frame} ours={ours:x16} " +
+                                  $"theirs={theirs:x16} count={_session.DesyncCount} " +
+                                  $"rollbacks={_session.RollbackCount}");
+                // Only the FIRST frame is diagnostic — every later one is downstream of
+                // it — so name that frame and then just count. Outranks a stall banner
+                // and is never cleared: there is no recovery path to clear it for.
+                if (_netFirstDesyncFrame < 0) _netFirstDesyncFrame = frame;
+                _netAlert = $"DESYNC since frame {_netFirstDesyncFrame} - players are in " +
+                            $"different worlds ({_session.DesyncCount} reports)";
+                _netAlertColor = Color.OrangeRed;
+            };
         }
 
         base.Initialize();
@@ -822,8 +863,28 @@ public class Game1 : Game
                 if (!_session.TryStep()) { _simAccum = 0f; break; }
                 _simAccum -= 1f;
                 netSteps++;
+                // Net trace: a periodic per-frame fingerprint both peers emit. The
+                // desync guard only compares checksums for frames that confirm on BOTH
+                // ends while still inside the snapshot ring, so a divergence can slip
+                // past it; lining these up by frame number across two logs shows the
+                // exact frame the sims parted. Off unless explicitly enabled.
+                if (_config.NetTrace && _sim.Frame % 30 == 0)
+                {
+                    var p0 = _sim.Player.Body.Position;
+                    var p1 = _sim.SecondaryPlayers.Count > 0
+                           ? _sim.SecondaryPlayers[0].Player.Body.Position : Vector2.Zero;
+                    Console.WriteLine($"[nettrace] f={_sim.Frame} sum={_sim.Checksum():x16} " +
+                                      $"p0={p0.X:F4},{p0.Y:F4} p1={p1.X:F4},{p1.Y:F4} " +
+                                      $"rb={_session.RollbackCount} ds={_session.DesyncCount}");
+                }
             }
             _prof.End(_sSim, tNetSim);   // includes any rollback resim this frame
+            // A stall banner is provisional — the peer may simply have been slow. Drop it
+            // once the sim actually advances again. A desync banner is not provisional and
+            // is deliberately not cleared here.
+            if (_netFirstDesyncFrame < 0 && _netAlert != null && _sim.Frame != _netLastFrame)
+                _netAlert = null;
+            _netLastFrame = _sim.Frame;
             long tNetCos = _prof.Begin();
             _cosmetics.Update(_sim, _config, dt, netSteps * Simulation.FixedDt,
                               mouseWorldPos, _screenCenter, LocalPlayer);
@@ -1270,6 +1331,19 @@ public class Game1 : Game
             _spriteBatch.Begin();
             _spriteBatch.DrawString(_debugFont, _toast, toastPos + new Vector2(1, 1), Color.Black);
             _spriteBatch.DrawString(_debugFont, _toast, toastPos, Color.Gold);
+            _spriteBatch.End();
+        }
+
+        // Netcode alert. Sticky rather than a Toast: a desync is not an event you can
+        // miss and shrug off — it means the two players are no longer in the same world,
+        // and nothing in the protocol recovers from it, so the banner stays up for the
+        // rest of the match. Drawn last so it sits over everything.
+        if (_netAlert != null)
+        {
+            var pos = new Vector2(8, 156);
+            _spriteBatch.Begin();
+            _spriteBatch.DrawString(_debugFont, _netAlert, pos + new Vector2(1, 1), Color.Black);
+            _spriteBatch.DrawString(_debugFont, _netAlert, pos, _netAlertColor);
             _spriteBatch.End();
         }
 

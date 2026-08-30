@@ -16,11 +16,12 @@ namespace MTile.Net;
 //   [1..4]   FirstFrame    (int32)
 //   [5..8]   ChecksumFrame (int32)
 //   [9..16]  Checksum      (uint64)
-//   [17]     Count         (byte)   — number of inputs in the redundancy window
-//   [18..]   Count × (ushort flags, float worldX, float worldY)
+//   [17..20] AckThrough    (int32)
+//   [21]     Count         (byte)   — number of inputs carried (see SendWindow)
+//   [22..]   Count × (ushort flags, float worldX, float worldY)
 public static class InputCodec
 {
-    public const int HeaderBytes = 18;
+    public const int HeaderBytes = 22;
     public const int InputBytes  = 10;
 
     // ── Flag bit layout (15 of 16 bits used) ──
@@ -80,6 +81,7 @@ public static class InputCodec
         WriteI32(buf, ref o, packet.FirstFrame);
         WriteI32(buf, ref o, packet.ChecksumFrame);
         WriteU64(buf, ref o, packet.Checksum);
+        WriteI32(buf, ref o, packet.AckThrough);
         buf[o++] = (byte)count;
         for (int i = 0; i < count; i++)
         {
@@ -102,6 +104,7 @@ public static class InputCodec
         int firstFrame    = ReadI32(buf, ref o);
         int checksumFrame = ReadI32(buf, ref o);
         ulong checksum    = ReadU64(buf, ref o);
+        int ackThrough    = ReadI32(buf, ref o);
         int count         = buf[o++];
         if (buf.Length != HeaderBytes + count * InputBytes) return false;
 
@@ -119,6 +122,7 @@ public static class InputCodec
             FirstFrame    = firstFrame,
             ChecksumFrame = checksumFrame,
             Checksum      = checksum,
+            AckThrough    = ackThrough,
             Inputs        = inputs,
         };
         return true;
