@@ -606,14 +606,21 @@ public static class ZeusEnemy
         Sides         = 6,
         Health        = 14f,
         Mass          = 80f,
-        // GravityScale 0 — the one non-obvious knob. Zeus's own beams excavate the
-        // hill, and aiming downslope means the ground it is standing on is the
-        // first thing a beam passes through. Under gravity the statue promptly
-        // digs its perch out from under itself and tumbles into its own crater,
-        // which ends the encounter without anyone touching it. Rooted in place is
-        // both the fix and the fiction: it is a statue, and the summit eroding
-        // out from under it is a feature.
+        // Rooted — the one non-obvious knob, and the literal one: the statue's position
+        // is level geometry, not simulation output. Zeus's own beams excavate the spire,
+        // and aiming downslope means the ground it stands on is the first thing a beam
+        // passes through, so under gravity it promptly digs its perch out from under
+        // itself and tumbles into its own crater, ending the encounter without anyone
+        // touching it. Weightlessness alone fixed only that one mover; Mass 80 damped a
+        // second (knockback) without stopping it, and left the residue drifting, since
+        // nothing brings a weightless body back to rest. Rooted stops all of them at
+        // once — velocity is zeroed every frame and the depenetration solver is out of
+        // the loop, so the summit can erode out from under the statue, the player can
+        // build a block into it, and it stays exactly where PopulateHill put it.
+        //
+        // Which is also the fiction. It is a statue.
         GravityScale  = 0f,
+        Rooted        = true,
         FrictionScale = 0.95f,
 
         Color  = new Color(205, 200, 175),

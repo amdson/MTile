@@ -33,6 +33,11 @@ public sealed class EnemyBlueprint
     public float Mass          { get; init; } = 1.2f;
     public float GravityScale  { get; init; } = 1f;
     public float FrictionScale { get; init; } = 0.12f;
+    // Nailed to the spot: no knockback, no drift, no settling, ever. See Entity.Rooted.
+    // This is a stronger statement than a big Mass, which only makes an enemy hard to
+    // shove — a rooted enemy is not shoved at all, and stays where it was spawned to the
+    // pixel. For emplacements and statues whose position is level geometry.
+    public bool  Rooted        { get; init; }
 
     // ── Rendering ───────────────────────────────────────────────────────────
     public Color Color { get; init; } = new(150, 30, 30);
@@ -80,6 +85,7 @@ public sealed class BlueprintEnemy : EnemyEntity
         Mass               = blueprint.Mass;
         GravityScale       = blueprint.GravityScale;
         Body.FrictionScale = blueprint.FrictionScale;
+        Rooted             = blueprint.Rooted;
         Color              = blueprint.Color;
         Sprite             = blueprint.Sprite(blueprint.Radius);
     }
