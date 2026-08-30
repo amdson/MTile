@@ -307,8 +307,14 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         foreach (var r in _world.Query<EntityRef>()) r.Component1.Obj.PublishHurtboxes(_hurtboxes);
 
         _player.Update(_controller, _chunks, _hitboxes, _hurtboxes, dt, this, _fields);
+        // Same spawner as the primary: every player's projectile/grab kit spawns
+        // entities, and the actions that do (BlockGrab, Grab, EnergyBall, Grenade,
+        // LobbedArea, BlockPaint) silently decline when handed a null one. Passing
+        // null here is why P2's block grab did nothing in multiplayer. Spawn order
+        // stays deterministic — primary first, then secondaries in list order — so
+        // ids match across peers under rollback.
         foreach (var (p, c) in _secondaryPlayers)
-            p.Update(c, _chunks, _hitboxes, _hurtboxes, dt, null, _fields);
+            p.Update(c, _chunks, _hitboxes, _hurtboxes, dt, this, _fields);
 
         // Collect the current entity set before updating so entities spawned during a
         // sibling's Update skip their first frame (matches the old count-snapshot).

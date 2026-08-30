@@ -141,6 +141,56 @@ public class TwoPlayerStepTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void SecondaryPlayer_CanBlockGrab_LikeThePrimary()
+    {
+        // Regression: Simulation.Step handed the secondary player a NULL IEntitySpawner,
+        // so every action in the kit that owns an entity — BlockGrab's pulling point,
+        // EnergyBall, Grenade, LobbedArea, BlockPaint's mass ball — silently declined
+        // for P2 in multiplayer. BlockGrabAction is the visible one: its
+        // CheckPreConditions returns false outright on a null spawner, so Shift+LMB on
+        // a block did nothing at all.
+        //
+        // SimRunner.RunMulti never caught this because the headless harness gives every
+        // player the same HeadlessEntityWorld — only the real Simulation was one-sided.
+        static void Grab(Simulation sim, PlayerCharacter grabber, bool asSecondary)
+        {
+            // Cursor on the floor cell under the grabber's feet: solid, and 18px away,
+            // well inside BlockGrabAction's 6-tile reach. Press-edge on frame 10, held.
+            for (int f = 0; f < 40; f++)
+            {
+                var press = new PlayerInput
+                {
+                    Shift              = f >= 10,
+                    LeftClick          = f >= 10,
+                    MouseWorldPosition = new Vector2(grabber.Body.Position.X, 3 * Chunk.TileSize + 8f),
+                };
+                sim.Step(asSecondary ? default : press, asSecondary ? press : default);
+            }
+        }
+
+        static PullPointEntity PointIn(Simulation sim)
+        {
+            foreach (var e in sim.Entities) if (e is PullPointEntity pp) return pp;
+            return null;
+        }
+
+        var solo = new Simulation(Floor(), new Vector2(40f, 38f));
+        solo.AddSecondaryPlayer(new Vector2(160f, 38f));
+        Grab(solo, solo.Player, asSecondary: false);
+        Assert.NotNull(PointIn(solo));                     // the control: P1 always worked
+
+        var sim = new Simulation(Floor(), new Vector2(40f, 38f));
+        var (p2, _) = sim.AddSecondaryPlayer(new Vector2(160f, 38f));
+        Grab(sim, p2, asSecondary: true);
+
+        var point = PointIn(sim);
+        Assert.True(point != null, "P2's Shift+LMB on a block should spawn a pulling point.");
+        // And it belongs to P2, not P1 — the point tracks its owner's body each frame.
+        Assert.Equal(p2.Body.Position.X, point.OwnerPos.X, 1);
+        output.WriteLine($"P2 grabbed: {p2.CurrentActionName}, point at {point.Body.Position}, owner {point.OwnerPos}.");
+    }
+
+    [Fact]
     public void TwoPlayerPath_SnapshotRestore_RoundTrips()
     {
         // Stage 1 must not regress rollback-safety: snapshot mid-run, keep going, then
