@@ -92,6 +92,9 @@ public static class TerrainLoader
                     case 'D': case 'd': t.IsSolid = true; t.Type = TileType.Dirt;  break;
                     case 'S': case 's': t.IsSolid = true; t.Type = TileType.Sand;  break;
                     case 'F': case 'f': t.IsSolid = true; t.Type = TileType.Foam;  break;
+                    // Hardened rock has no in-game source — authoring it here is the
+                    // only way it enters the world.
+                    case 'H': case 'h': t.IsSolid = true; t.Type = TileType.Hardened; break;
                     default:            t.IsSolid = false; break;
                 }
             }

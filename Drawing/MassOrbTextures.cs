@@ -30,7 +30,7 @@ public static class MassOrbTextures
         atlas.Texture.GetData(atlasPixels);
         int stride = atlas.Texture.Width;
 
-        const int typeCount = 4;   // TileType is a contiguous byte enum
+        const int typeCount = TileTypes.Count;
         var result = new Texture2D[typeCount];
         var pixels = new Color[Size * Size];
         float half = Size * 0.5f;

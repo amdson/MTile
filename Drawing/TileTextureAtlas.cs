@@ -70,7 +70,9 @@ public sealed class TileTextureAtlas
     // from the global cell coords so neighboring tiles don't repeat.
     public Rectangle SourceFor(TileType type, int gtx, int gty, int size)
     {
-        int patch = type == TileType.Stone ? 0 : _patchCount - 1;
+        // Both rock materials take the rock patch; hardened is distinguished by its
+        // (much darker) palette tint, not by a different grain.
+        int patch = type is TileType.Stone or TileType.Hardened ? 0 : _patchCount - 1;
         uint h = (uint)(gtx * 73856093) ^ (uint)(gty * 19349663);
         int range = PatchSize - size;
         int ox = (int)(h % (uint)range);

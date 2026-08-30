@@ -31,6 +31,7 @@ public static class StageSaver
         TileType.Dirt => 'D',
         TileType.Sand => 'S',
         TileType.Foam => 'F',
+        TileType.Hardened => 'H',
         _             => 'X',
     };
 

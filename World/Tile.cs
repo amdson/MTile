@@ -45,7 +45,7 @@ public enum TileState : byte
 }
 
 // Material type. Each type has its own max-HP (TileDamage.MaxHPFor) and render color
-// (Game1.GetTileBaseColor). Stored as a byte for compactness; default = Stone for
+// (TilePalette.BaseColor). Stored as a byte for compactness; default = Stone for
 // freshly-created tiles (sprout-spawned tiles, file-loaded chunks). Terrain generation
 // assigns types by depth.
 public enum TileType : byte
@@ -58,6 +58,33 @@ public enum TileType : byte
     // picker; not produced by terrain generation. Useful as scaffolding /
     // temporary cover during combat.
     Foam,
+    // Bedrock-grade stone: the terrain the player is meant to fight *within* rather
+    // than reshape. Order-of-magnitude the HP of stone, not placeable, and refused by
+    // the peel/grab entirely (TileTypes.IsGrabbable). Authored into levels with 'H';
+    // terrain generation never emits it.
+    Hardened,
+}
+
+// Enum-wide facts about TileType that several subsystems need to agree on. Lives here
+// rather than in MaterialStrengths because none of it is tunable: these are the rules
+// that make a material what it is, not numbers you'd want to hot-reload mid-match.
+public static class TileTypes
+{
+    // Width of every fixed-size per-material array in the codebase (material tallies,
+    // the orb texture table). TileType is a contiguous byte enum starting at 0, so this
+    // is its cardinality — asserted against Enum.GetValues by TileTypeTests.
+    public const int Count = 5;
+
+    // Can the player select this material in the block picker and build with it? The
+    // gate lives on PlayerCharacter.ActiveBlockType, which every placement verb
+    // (build, paint, mass deposit, eruption ball) reads, so one guard covers them all.
+    public static bool IsPlaceable(TileType t) => t != TileType.Hardened;
+
+    // Can a block grab take this material? Non-grabbable cells are never admitted to a
+    // peel group and are skipped by the legacy drag-rip, so they neither come loose nor
+    // anchor a group they aren't part of — a hardened cell embedded in dirt still reads
+    // as an outward edge to its neighbors, which is what makes it feel set in place.
+    public static bool IsGrabbable(TileType t) => t != TileType.Hardened;
 }
 
 public enum EdgeType : byte
