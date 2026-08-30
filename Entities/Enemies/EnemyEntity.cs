@@ -33,6 +33,24 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     private int _facing = 1;
     private int _frame;
 
+    // ── Target memory ───────────────────────────────────────────────────────
+    // Off by default and opt-in per blueprint, because it costs a terrain raycast
+    // every frame and most enemies have no use for it: a brute that cannot see you
+    // walks toward you anyway. Zeus needs it because it is rooted, so "the player
+    // stepped behind the shoulder" is a permanent state rather than something it can
+    // walk out of — without a memory it simply stops fighting.
+    public bool TracksTarget { get; set; }
+    private Vector2 _lastSeenPos;
+    private float   _lastSeenAge = -1f;      // < 0 ⇒ never looked (seed sentinel)
+    private bool    _playerVisible = true;
+
+    // Read-only views of the memory. The FSM reads these through EnemyContext; these
+    // exist for anything outside the per-frame context — tests, and a future HUD that
+    // wants to draw what the boss thinks it knows.
+    public Vector2 LastSeenPos   => _lastSeenPos;
+    public float   LastSeenAge   => MathF.Max(_lastSeenAge, 0f);
+    public bool    PlayerVisible => _playerVisible;
+
     // Read by EnemyMovementState.CheckPreConditions to detect "an attack is mid-flight"
     // — the only cross-FSM channel, mirroring MovementModifiers from player code.
     public bool IsActionCommitted => _currentAction >= 0 && _actionVars.Committed;
@@ -117,13 +135,18 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
 
         // Pre-input context — Facing/Input intentionally unset; the controller
         // doesn't read them (it produces them).
+        UpdateTargetMemory(dt, player, spawner);
+
         var ctx = new EnemyContext {
-            Dt       = dt,
-            Frame    = _frame,
-            Self     = this,
-            Player   = player,
-            Hitboxes = hitboxes,
-            Spawner  = spawner,
+            Dt            = dt,
+            Frame         = _frame,
+            Self          = this,
+            Player        = player,
+            Hitboxes      = hitboxes,
+            Spawner       = spawner,
+            PlayerVisible = _playerVisible,
+            LastSeenPos   = _lastSeenPos,
+            LastSeenAge   = MathF.Max(_lastSeenAge, 0f),
         };
 
         // Ask the brain what we want to do this frame.
@@ -158,6 +181,51 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         if (_currentAction >= 0)
             _actions[_currentAction].Update(ctx, ref _actionVars);
     }
+
+    // One terrain raycast per frame, and the only piece of an enemy's own history it
+    // is allowed to keep. Seeded on the first frame from wherever the player actually
+    // is, at full age — so a statue that has never had a clear look starts out firing
+    // vaguely rather than either perfectly or at the world origin.
+    //
+    // Enemies without TracksTarget report the player as permanently visible and their
+    // memory as exact, which is what every controller written before this saw.
+    private void UpdateTargetMemory(float dt, PlayerCharacter player, IEntitySpawner spawner)
+    {
+        if (!TracksTarget)
+        {
+            _playerVisible = true;
+            _lastSeenPos   = player.Body.Position;
+            _lastSeenAge   = 0f;
+            return;
+        }
+
+        if (_lastSeenAge < 0f)
+        {
+            _lastSeenPos = player.Body.Position;
+            _lastSeenAge = SeedAgeSeconds;
+        }
+
+        _playerVisible = EnemyAim.HasLineOfSight(
+            Body.Position, player.Body.Position, spawner?.Chunks, SightSkipPx);
+
+        if (_playerVisible)
+        {
+            _lastSeenPos = player.Body.Position;
+            _lastSeenAge = 0f;
+        }
+        else
+        {
+            _lastSeenAge += dt;
+        }
+    }
+
+    // Skipped near the caster so the cell an enemy is standing in (or embedded in)
+    // never occludes its own view. Matches the muzzle offsets the beam actions use.
+    private const float SightSkipPx = 16f;
+
+    // How stale a never-yet-seen sighting counts as. Anything past a controller's own
+    // fade window works; this just has to be "old".
+    private const float SeedAgeSeconds = 10f;
 
     // Action FSM selection: -1 is the resting state (no action active). The
     // current entry is dropped when CheckConditions returns false; a new entry
@@ -282,6 +350,8 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         // their own aim; no EnemyEntity path wrote it before, so it's free real
         // estate for the action FSM's locked 2D aim. Keeps the snapshot flat.
         s.Aim          = _actionVars.LockedAim;
+        s.LastSeenPos  = _lastSeenPos;
+        s.LastSeenAge  = _lastSeenAge;
     }
 
     protected override void ReadState(in EntityData s)
@@ -298,6 +368,8 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         _actionVars.LockedFacing = s.LockedFacing;
         _actionVars.LockedAim    = s.Aim;
         _actionVars.Committed    = _currentAction >= 0;
+        _lastSeenPos             = s.LastSeenPos;
+        _lastSeenAge             = s.LastSeenAge;
 
         // Re-derive durations from the flyweight so Draw / phase math reads the
         // same Windup/Active/Recovery values the live action would have stamped

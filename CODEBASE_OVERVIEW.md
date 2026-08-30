@@ -290,7 +290,7 @@ It also carries two **1-frame inboxes**, both snapshotted alongside the dedupe t
 
 ## Entities ([Entities/](Entities/))
 
-[`Entity`](Entities/Entity.cs) — `IHittable` non-player wrapper around a `PhysicsBody`. Fields: `Health, MaxHealth, Mass, GravityScale, Color, Faction, Sprite, Id`. `PreStep(gravity)` cancels/amplifies gravity by `(GravityScale - 1)`. `OnHit` applies damage + knockback `impulse / Mass`. `Update(dt, player, hitboxes, spawner)` is the AI hook (no-op for passive props). Snapshot via `CaptureState`/`RestoreState` into the `EntityData` value component + virtual `WriteState`/`ReadState`; `Kind` (`EntityKind`) tags the concrete type so `EntityFactory.Rehydrate` can reconstruct a despawned entity on restore.
+[`Entity`](Entities/Entity.cs) — `IHittable` non-player wrapper around a `PhysicsBody`. Fields: `Health, MaxHealth, Mass, GravityScale, Rooted, Color, Faction, Sprite, Id`. `PreStep(gravity)` cancels/amplifies gravity by `(GravityScale - 1)` — or, for a `Rooted` body, zeroes velocity and cancels gravity outright and takes the depenetration solver out of the loop via `IgnoreTiles`, so the body never moves and needs nothing on the snapshot. `OnHit` applies damage + knockback `impulse / Mass`. `Update(dt, player, hitboxes, spawner)` is the AI hook (no-op for passive props). Snapshot via `CaptureState`/`RestoreState` into the `EntityData` value component + virtual `WriteState`/`ReadState`; `Kind` (`EntityKind`) tags the concrete type so `EntityFactory.Rehydrate` can reconstruct a despawned entity on restore.
 
 `IEntitySpawner` (implemented by `Simulation`) lets AI spawn children mid-update and shares the `HitIdAllocator`.
 

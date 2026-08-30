@@ -82,6 +82,16 @@ public struct EntityData
     public float ActionTime;
     public int   LockedFacing;
 
+    // Target memory, for enemies whose blueprint sets TargetMemory (see
+    // EnemyEntity). LastSeenPos is the last player position the enemy actually had
+    // line of sight to and LastSeenAge is seconds since — negative means "never
+    // looked", which is the seed sentinel. Snapshotted because it is the only thing
+    // that makes an out-of-sight enemy's aim a function of history rather than of
+    // the current frame: restore it wrong and a rollback replays the same frames
+    // with a different target.
+    public Vector2 LastSeenPos;
+    public float   LastSeenAge;
+
     // Projectile subtype state
     public int                 HitId;
     public bool                Stuck;       // StickyGrenade

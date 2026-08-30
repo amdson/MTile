@@ -30,6 +30,12 @@ namespace MTile;
 //                             being either free (all identical, stand still and
 //                             it misses) or unfair (all perfect, standing still
 //                             is death).
+//   COLUMN (ZeusThunderColumnAction)
+//                             the cover-breaker. A pillar of lightning from sky to
+//                             ground at one x, over two seconds of tell, that neither
+//                             needs line of sight to open nor respects terrain when it
+//                             lands. It is the reason hiding is not a strategy; its own
+//                             file, since it shares none of the beam maths.
 //   SWEEP  (ZeusSweepAction)  the area one. Locks a centre angle, then rakes a
 //                             beam through an arc around it. Its counterplay is
 //                             vertical (jump the arc / drop below it), which is
@@ -75,6 +81,7 @@ internal static class ZeusBeam
     // past the window's end (and past the cycle boundary).
     //
     //   cf   0.. 40   BOLT   opens        (runs ~3.6s, lands ~frame 220)
+    //   cf 150..190   COLUMN opens        (runs ~3.8s; outranks the bolt's recovery)
     //   cf 240..400   STORM  opens        (~7 strikes at ~0.36s each)
     //   cf 430..470   SWEEP  opens        (runs ~3.0s, lands ~frame 610 → wraps)
     //   cf 520..600   STORM  opens        (a short second flurry)
@@ -187,13 +194,53 @@ public sealed class ZeusController : EnemyController
 {
     public float AlertRange { get; init; } = 620f;
 
+    // ── Firing blind ────────────────────────────────────────────────────────
+    // A rooted enemy cannot walk around the thing that broke its sight line, so
+    // "the player stepped behind the spire's shoulder" used to end the fight: every
+    // beam gates on line of sight to ctx.Input.AimWorld, so aiming at a player it
+    // could not see meant never opening an attack at all. The statue went quiet and
+    // the player strolled up the blind side.
+    //
+    // So when it cannot see, it shoots at where it last COULD — blurred. The blur is
+    // the whole point. Firing at the exact last sighting is worse than not firing:
+    // it is perfectly avoidable (stand anywhere but there) and perfectly repetitive
+    // (the same spot, shot after shot). A wide, re-rolled offset turns the memory
+    // into a search pattern: the player behind cover is being hunted rather than
+    // either hit or ignored, and moving is still the right answer.
+    //
+    // Spread grows with staleness, up to a cap. A sighting half a second old is
+    // nearly as good as sight; five seconds of hiding and the statue is raking a
+    // wide area on the strength of an old guess.
+    public float SearchSpread   { get; init; } = 26f;    // px, at a fresh sighting
+    public float MaxSpread      { get; init; } = 190f;   // px, once the memory is stale
+    public float MemoryFade     { get; init; } = 5f;     // seconds to reach MaxSpread
+    public float ReaimSeconds   { get; init; } = 0.7f;   // how often the guess is re-rolled
+
     public override EnemyInput Decide(in EnemyContext ctx) => new()
     {
         MoveDir    = Vector2.Zero,
         Jump       = false,
-        AimWorld   = ctx.Player.Body.Position,
+        AimWorld   = ctx.PlayerVisible ? ctx.Player.Body.Position : SearchPoint(in ctx),
+        // Proximity, not visibility. The statue keeps swinging at a player who is
+        // close and hidden; it stands down for one who has actually left.
         WantAttack = ctx.Dist <= AlertRange,
     };
+
+    // The blurred guess. Deterministic in (entity id, sighting age) and held steady
+    // for ReaimSeconds at a time — a per-frame re-roll would make every action's
+    // line-of-sight precondition flicker, so the statue would stutter instead of
+    // committing to a guess.
+    private Vector2 SearchPoint(in EnemyContext ctx)
+    {
+        float stale  = MathF.Min(ctx.LastSeenAge / MathF.Max(MemoryFade, 1e-4f), 1f);
+        float spread = MathHelper.Lerp(SearchSpread, MaxSpread, stale);
+
+        int salt = (int)(ctx.LastSeenAge / MathF.Max(ReaimSeconds, 1e-4f));
+        int id   = ctx.Self.Id.Index;
+        float ox = (ZeusBeam.Hash01(salt, id * 2 + 1) - 0.5f) * 2f * spread;
+        float oy = (ZeusBeam.Hash01(salt, id * 2 + 2) - 0.5f) * 2f * spread;
+        return ctx.LastSeenPos + new Vector2(ox, oy);
+    }
 }
 
 
@@ -621,6 +668,9 @@ public static class ZeusEnemy
         // Which is also the fiction. It is a statue.
         GravityScale  = 0f,
         Rooted        = true,
+        // Rooted is exactly why it needs a memory: it cannot walk around the shoulder
+        // the player stepped behind, so without one, breaking sight ends the fight.
+        TargetMemory  = true,
         FrictionScale = 0.95f,
 
         Color  = new Color(205, 200, 175),
@@ -638,6 +688,7 @@ public static class ZeusEnemy
             new ZeusBoltAction(),
             new ZeusStrikeAction(),
             new ZeusSweepAction(),
+            new ZeusThunderColumnAction(),
         },
     };
 }

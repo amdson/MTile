@@ -33,6 +33,10 @@ public sealed class EnemyBlueprint
     public float Mass          { get; init; } = 1.2f;
     public float GravityScale  { get; init; } = 1f;
     public float FrictionScale { get; init; } = 0.12f;
+    // Keep a memory of where the player was last actually visible (EnemyEntity's
+    // TracksTarget). Costs a terrain raycast per frame, so it is opt-in: worth it for
+    // anything rooted, which cannot walk around the cover that broke its sight line.
+    public bool  TargetMemory  { get; init; }
     // Nailed to the spot: no knockback, no drift, no settling, ever. See Entity.Rooted.
     // This is a stronger statement than a big Mass, which only makes an enemy hard to
     // shove — a rooted enemy is not shoved at all, and stays where it was spawned to the
@@ -86,6 +90,7 @@ public sealed class BlueprintEnemy : EnemyEntity
         GravityScale       = blueprint.GravityScale;
         Body.FrictionScale = blueprint.FrictionScale;
         Rooted             = blueprint.Rooted;
+        TracksTarget       = blueprint.TargetMemory;
         Color              = blueprint.Color;
         Sprite             = blueprint.Sprite(blueprint.Radius);
     }

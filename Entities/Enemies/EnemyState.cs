@@ -26,6 +26,14 @@ public struct EnemyContext
     // ctx.Player.Body.Position.
     public EnemyInput       Input;
 
+    // Sight and memory, filled by EnemyEntity.Update before Decide. Only meaningful
+    // when the blueprint set TargetMemory; otherwise PlayerVisible is true and
+    // LastSeenPos tracks the player exactly, so a controller written against these
+    // behaves identically on an enemy that does not pay for the raycast.
+    public bool     PlayerVisible;
+    public Vector2  LastSeenPos;
+    public float    LastSeenAge;      // seconds since the last clear sighting
+
     public Vector2 ToPlayer => Player.Body.Position - Self.Body.Position;
     public float   Dist     => ToPlayer.Length();
 }
