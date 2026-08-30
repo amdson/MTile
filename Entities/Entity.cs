@@ -33,6 +33,16 @@ public class Entity : IHittable
     // is what lets the combat dedupe table be snapshotted by id (see CombatSystem).
     public EntityId Id { get; set; }
 
+    // Render-only hit-feel stamp (Plans/HIT_FEEL_PLAN.md) — same "stamp advances,
+    // HitFeelSystem edge-detects" contract as CombatState.LastHit* on PlayerCharacter,
+    // just keyed on a per-hit counter instead of a frame number since a bare Entity
+    // has no frame clock of its own. Set by OnHit below; snapshotted in
+    // CaptureState/RestoreState so a rollback restore can't hand HitFeelSystem a
+    // stale direction/impulse for a hit that's about to be replayed differently.
+    public int     HitGeneration;
+    public float   LastHitImpulse;
+    public Vector2 LastHitDir;
+
     public bool IsDead => Health <= 0f;
 
     // Concrete-type tag for rehydration (see EntityFactory.Rehydrate). The base
@@ -54,6 +64,13 @@ public class Entity : IHittable
         Health -= hit.Damage;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
         Body.Velocity += res.TargetDeltaV;
+
+        LastHitDir = res.TargetDeltaV.LengthSquared() > 1e-4f
+            ? Vector2.Normalize(res.TargetDeltaV)
+            : hit.StrikeDir;
+        LastHitImpulse = res.Strength;
+        HitGeneration++;
+
         return res.Impulse;
     }
 
@@ -103,6 +120,9 @@ public class Entity : IHittable
         d.Faction      = Faction;
         d.Polygon      = Body.Polygon;   // immutable shape
         d.Impact       = Body.Impact;    // immutable config
+        d.HitGeneration  = HitGeneration;
+        d.LastHitImpulse = LastHitImpulse;
+        d.LastHitDir     = LastHitDir;
         WriteState(ref d);
         world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
@@ -116,6 +136,9 @@ public class Entity : IHittable
         GravityScale = d.GravityScale;
         Color        = d.Color;
         Faction      = d.Faction;
+        HitGeneration  = d.HitGeneration;
+        LastHitImpulse = d.LastHitImpulse;
+        LastHitDir     = d.LastHitDir;
         ReadState(in d);
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
     }
