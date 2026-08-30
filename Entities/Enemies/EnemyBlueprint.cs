@@ -256,6 +256,44 @@ public static class EnemyFactory
             },
         });
 
+        // Bird — flying hazard. Patrols left and right and hurts on contact; it
+        // has no awareness of the player at all beyond the touch itself, which is
+        // the point: it is terrain that moves, and the player routes around it.
+        //
+        // GravityScale 0 is what makes it a flier rather than something falling
+        // slowly. EnemyFlyState can hold altitude against gravity on its own
+        // acceleration budget, but only with margin at Mass ~1 — zeroing gravity
+        // instead spends that whole budget on the patrol, so the flight line stays
+        // dead level and cheap. Mass 0.8 keeps it swattable: a player slash still
+        // flings it, which is the counterplay.
+        //
+        // No EnemyStaggerState, deliberately. Stagger sets Committed, which drops
+        // EnemyFlyState (its preconditions are !IsActionCommitted) — a staggered
+        // bird would stop flying, and with GravityScale 0 it would hang motionless
+        // in the air instead of reacting. Knockback alone reads the hit.
+        Register(new EnemyBlueprint
+        {
+            Kind          = EntityKind.Bird,
+            Radius        = 9f,
+            Sides         = 5,
+            Health        = 2f,
+            Mass          = 0.8f,
+            GravityScale  = 0f,
+            FrictionScale = 0.05f,
+            Color         = new Color(70, 80, 110),
+            Sprite        = Sprites.Bird,
+            Controller    = new PatrolController { LegSeconds = 2.4f },
+            Movement = () => new()
+            {
+                new EnemyIdleState(),          // 0 — fallback
+                new EnemyFlyState(),
+            },
+            Actions = () => new()
+            {
+                new EnemyContactAction(),
+            },
+        });
+
         // Zeus — the statue on the hill. Everything about it lives in
         // Entities/Enemies/Types/ZeusEnemy.cs; this is the line that makes it
         // spawnable and snapshot-restorable.

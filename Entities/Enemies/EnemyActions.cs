@@ -100,6 +100,102 @@ public class EnemyMeleeAction : EnemyActionState
     }
 }
 
+// Contact damage — the entire attack kit of a creature that hurts by existing.
+// No windup and no telegraph: touching it IS the attack, so a tell would be
+// describing something that already happened.
+//
+// Three things here are deliberate and each breaks something if changed:
+//
+//   * Committed stays FALSE. Every other action in this file sets it on Enter to
+//     freeze the body mid-swing, but EnemyFlyState's preconditions are
+//     `!IsActionCommitted` — a committed contact hit would drop the bird out of
+//     flight and it would fall out of the sky the first time it touched anyone.
+//
+//   * Recovery is the re-hit cooldown, and it is the reason this is an action at
+//     all rather than a hitbox published from the movement state. CombatSystem
+//     dedupes by HitId, so one long-lived hitbox damages a target exactly once
+//     ever; a fresh HitId per Enter turns "sit inside the bird" into a repeating
+//     tick at Cooldown intervals, which is the behaviour a hazard needs.
+//
+//   * The hitbox is centred on the body and sized to it, so the damage region is
+//     the creature. The precondition below is only a cheap broad gate — actual
+//     overlap against the player's hurtbox is CombatSystem's call.
+public class EnemyContactAction : EnemyActionState
+{
+    // Half-extent of the damage box, as a multiple of the body radius the
+    // blueprint gave the entity. Slightly over 1 so contact registers on touch
+    // rather than on overlap.
+    protected virtual float BodyHalfExtent => 11f;
+    // Distance at which the action is allowed to start. Generous — it only has
+    // to be wide enough that the box gets published on the frame contact happens.
+    protected virtual float TriggerRange   => 34f;
+    // Percent contribution, NOT a fraction of anything: CombatState multiplies it by
+    // PercentPerDamage (15), so this is ~6% per touch. Deliberately well under the
+    // 1.0 a committed melee swing deals — brushing a hazard that repeats on a
+    // cooldown should sting, not trade evenly with an attack the player could read.
+    protected virtual float Damage         => 0.4f;
+    // Knockback is signed away from the creature at Enter, with a lift component
+    // so a hit reads as being knocked off rather than shoved into the floor.
+    protected virtual Vector2 Knockback    => new(340f, -240f);
+    // Active window is short; the gap to the next hit is Recovery.
+    protected virtual float ActiveWindow   => 0.10f;
+    protected virtual float Cooldown       => 0.85f;
+    protected virtual Color StrikeColor    => new(215, 120, 90);
+
+    // Low priority: this is what the creature does when it has nothing better to
+    // do, and any real attack a future blueprint pairs it with should win.
+    public override int ActivePriority  => 12;
+    public override int PassivePriority => 10;
+
+    public override bool CheckPreConditions(in EnemyContext ctx) => ctx.Dist < TriggerRange;
+
+    public override bool CheckConditions(in EnemyContext ctx, ref EnemyActionVars v)
+        => v.TimeInState < v.ActiveDuration + v.RecoveryDuration;
+
+    public override void Enter(in EnemyContext ctx, ref EnemyActionVars v)
+    {
+        // Push the player away from the creature, not along its facing: a bird
+        // clipped from behind should still knock the player backwards.
+        v.LockedFacing = ctx.ToPlayer.X >= 0f ? 1 : -1;
+        v.HitId        = ctx.Spawner.HitIds.Next();
+        // NOT Committed — see the header. Flight has to survive the hit.
+        PopulateDurations(ref v);
+    }
+
+    public override void PopulateDurations(ref EnemyActionVars v)
+    {
+        v.WindupDuration   = 0f;
+        v.ActiveDuration   = ActiveWindow;
+        v.RecoveryDuration = Cooldown;
+    }
+
+    public override void Update(in EnemyContext ctx, ref EnemyActionVars v)
+    {
+        v.TimeInState += ctx.Dt;
+        if (v.TimeInState >= v.ActiveDuration) return;   // cooling down
+
+        var c = ctx.Self.Body.Position;
+        var region = new BoundingBox(
+            c.X - BodyHalfExtent, c.Y - BodyHalfExtent,
+            c.X + BodyHalfExtent, c.Y + BodyHalfExtent);
+        ctx.Hitboxes?.Publish(new Hitbox(
+            region, v.HitId, Damage,
+            new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
+            Faction.Enemy, ctx.Self.Id, StrikeColor,
+            targets: HitTargets.EntitiesOnly,
+            origin: c));
+    }
+
+    // A brief flash on the body while the box is live. There is no windup tell to
+    // draw — by the time this renders, the hit has landed — so this exists to
+    // explain the damage after the fact, not to warn about it.
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
+    {
+        if (v.TimeInState >= v.ActiveDuration) return;
+        t.Rect(body.Position, new Vector2(BodyHalfExtent * 2f), StrikeColor * 0.5f);
+    }
+}
+
 // Forward lunge. Active window overrides Body.Velocity.X so the brute glides
 // into the player; the hitbox is published on the body itself so contact during
 // the dash damages on touch (à la StalkerEnemy.Lunge). Mid-range trigger

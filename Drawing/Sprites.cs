@@ -81,6 +81,37 @@ public static class Sprites
         return sprite;
     }
 
+    // Bird: a small body with two wings that beat between the two frames. The
+    // wings are the animation — a flying enemy that holds a fixed pose reads as a
+    // floating rock, and the beat rate is the only cue that separates it from one.
+    // Drawn around local origin like every other sprite here, so the entity's
+    // facing flip mirrors it for free.
+    public static AnimatedSprite Bird(float radius)
+    {
+        var bodyColor = new Color(70, 80, 110);
+        var wingColor = new Color(150, 165, 200);
+        var eyeColor  = new Color(240, 200, 90);
+
+        // wing = vertical offset of the wingtips: negative is the upstroke.
+        Pose Frame(float wing) => new Pose()
+            .Ring(Vector2.Zero, radius * 0.65f, bodyColor, 8, 1.5f)
+            .Disc(Vector2.Zero, radius * 0.3f, bodyColor)
+            // Wings sweep out from the shoulders to the tips.
+            .Line(new Vector2(-radius * 0.5f, 0f), new Vector2(-radius * 1.5f, wing), wingColor, 1.5f)
+            .Line(new Vector2( radius * 0.5f, 0f), new Vector2( radius * 1.5f, wing), wingColor, 1.5f)
+            // Beak along +X (the facing direction) and an eye above it.
+            .Line(new Vector2(radius * 0.6f, 0f), new Vector2(radius * 1.0f, 0f), eyeColor, 1f)
+            .Disc(new Vector2(radius * 0.3f, -radius * 0.25f), 1.5f, eyeColor);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(-radius * 0.7f), Frame(radius * 0.5f) },
+            frameDuration: 0.12f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
     // Bullet: tiny solid disc with a thin trailing line — a one-frame pose, no
     // animation needed. Rotation is unused (the disc reads identically at any
     // angle), so BulletProjectile doesn't bother syncing it.

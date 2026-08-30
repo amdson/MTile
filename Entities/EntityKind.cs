@@ -39,6 +39,10 @@ public enum EntityKind
     // (heavy bolt / strike storm / raking sweep); see ZeusEnemy.cs.
     Zeus,
 
+    // Bird — flying contact-damage hazard that patrols left and right. Pure
+    // blueprint (no subclass); see EnemyFactory.RegisterBuiltIns.
+    Bird,
+
     // Copy-and-edit starting point for a new enemy — Entities/Enemies/Types/TemplateEnemy.cs.
     // Spawn it on the "sandbox" stage.
     Template,

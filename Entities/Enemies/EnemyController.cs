@@ -153,6 +153,54 @@ public sealed class MoveTowardPlayerController : EnemyController
     }
 }
 
+// Patrol brain — sweeps left and right forever, ignoring the player entirely.
+// The bird's whole behaviour: it is a moving hazard, not a hunter, so nothing
+// here reads ctx.ToPlayer for movement.
+//
+// The reversal is a square wave on SIM TIME rather than a remembered heading,
+// because EnemyController implementations must be stateless (see the base
+// class): a `_goingRight` field would be per-entity mutable state with no
+// snapshot path, so a rollback would silently flip patrols mid-flight. Time is
+// derived from ctx.Frame, which the sim already restores exactly, and the wave
+// is a pure function of it — so a re-simulated frame always produces the same
+// heading it did the first time.
+//
+// A consequence worth knowing: the phase is global, so every bird alive turns
+// on the same beat, and one spawned mid-match inherits whatever phase the clock
+// is at (it makes one short first leg, then patrols normally). Both are fine for
+// a hazard; neither would be for anything that had to hold a specific lane.
+public sealed class PatrolController : EnemyController
+{
+    // Seconds spent going one way before reversing. At EnemyFlyState's cruise
+    // speed this is what sets the patrol's width — 2s at 80 px/s ≈ 160 px per leg.
+    public float LegSeconds { get; init; } = 2.0f;
+
+    // Aim forward along the patrol rather than at the player, so the sprite faces
+    // the way it is flying. A bird that flies left while facing right reads as a
+    // bug immediately, and nothing here needs a real aim vector — the contact
+    // hitbox is centred on the body, not thrown along an axis.
+    public override EnemyInput Decide(in EnemyContext ctx)
+    {
+        float t    = ctx.Frame * ctx.Dt;
+        float legs = t / MathF.Max(LegSeconds, 1e-3f);
+        // Even leg → right, odd leg → left. Frame is never negative, so plain
+        // truncation is the floor and the wave stays symmetric.
+        bool  right = ((int)legs & 1) == 0;
+        var   dir   = new Vector2(right ? 1f : -1f, 0f);
+
+        return new EnemyInput
+        {
+            MoveDir    = dir,
+            Jump       = false,
+            AimWorld   = ctx.Self.Body.Position + dir * 32f,
+            // The contact action has no range gate of its own worth speaking of —
+            // it fires when the player is already touching — so leaving this on
+            // permanently is what makes the bird dangerous the whole time.
+            WantAttack = true,
+        };
+    }
+}
+
 // Emplacement brain — never moves, always points at the player. MoveDir stays
 // zero so any locomotion state in the movement list simply never fires, which
 // is how a turret-shaped enemy is expressed in this framework: not a special
