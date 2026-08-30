@@ -290,6 +290,49 @@ public class ZeusHillTests(ITestOutputHelper output)
                     $"Zeus wandered off the summit to {zeus.Body.Position}.");
     }
 
+    // ── The spire is HARDENED rock, and the plain around it is not ───────────────
+    //
+    // The material is load-bearing design, not decoration: hardened is ungrabbable and
+    // unplaceable (Tile.IsGrabbable / IsPlaceable special-case it) at 10x stone HP, so a
+    // hardened spire is terrain the player fights WITHIN rather than with — the climb
+    // can't be short-cut by ripping a staircase out of the face or peeling the tower into
+    // throwable clods, which is what the block-throw kit does to any ordinary stone wall.
+    //
+    // Nothing else pins this. Every other assertion in this file goes through
+    // TileQuery.IsSolidAt, which is blind to type, so regenerating the tower with STONE
+    // would leave the whole suite green and silently hand the player back the shortcut.
+    [Fact]
+    public void SpireIsHardenedRock_AndTheGroundPlainIsNot()
+    {
+        string levels = LevelsDir();
+        var chunks = LoadTower(levels);
+
+        // Sample the spire body across its whole height, at the axis and just inside the
+        // face, so both the wide base and the needle are covered.
+        int hardened = 0;
+        for (int rise = 5; rise < Height; rise += 7)
+        {
+            int gty  = (GroundTileY - 1) - rise;
+            int half = HalfAt(gty);
+            foreach (int gtx in new[] { 0, half - 1, -(half - 1) })
+            {
+                Assert.Equal(TileState.Solid, chunks.GetCellState(gtx, gty));
+                var type = chunks.GetCellType(gtx, gty);
+                Assert.True(type == TileType.Hardened,
+                    $"spire at ({gtx},{gty}) is {type}, not Hardened — was gen-tower.py "
+                    + "regenerated with STONE? The climb depends on the face being ungrabbable.");
+                hardened++;
+            }
+        }
+        Assert.True(hardened > 50, $"sampled too little of the spire ({hardened} cells)");
+
+        // The plain is ordinary workable terrain — the contrast is the point, and it is
+        // what keeps the build/throw kit usable everywhere except the tower itself.
+        Assert.Equal(TileState.Solid, chunks.GetCellState(BaseHalf + 12, GroundTileY));
+        Assert.False(chunks.GetCellType(BaseHalf + 12, GroundTileY) == TileType.Hardened,
+            "the plain around the tower must stay ordinary terrain, not hardened");
+    }
+
     // ZeusBeam is internal to MTile.Core; mirror the one constant this file needs
     // rather than opening the type up for a test.
     private static class ZeusBeamWindows

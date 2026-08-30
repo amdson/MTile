@@ -43,6 +43,13 @@ SPIRE_HALF = 5                       # 11 tiles across for the needle above the 
 TAPER_RISE = 3                       # rows of rise per tile of run per side (3:1)
 
 STONE, DIRT, EMPTY = 'X', 'D', '.'
+# The spire body is HARDENED rock, not stone: it is bedrock-grade (10x stone HP),
+# unplaceable and — the part that matters here — UNGRABBABLE. That makes the tower
+# terrain the player fights *within* rather than *with*: the climb can't be short-cut
+# by ripping a staircase out of the face or peeling the spire into throwable clods,
+# which is what the block-throw kit does to any ordinary stone wall. The ground plane
+# below stays dirt-over-stone so the plain is still normal, workable terrain.
+HARD = 'H'
 
 # Where the taper runs out and the needle begins, as rows above the ground surface.
 SPIRE_RISE = (BASE_HALF - SPIRE_HALF) * TAPER_RISE     # 39
@@ -66,7 +73,7 @@ def tile_at(x, y):
     if y < TOP_Y:
         return EMPTY                                   # open sky above the summit
 
-    return STONE if abs(x) <= half_at(y) else EMPTY
+    return HARD if abs(x) <= half_at(y) else EMPTY
 
 
 def chunk_rows(cx, cy):
