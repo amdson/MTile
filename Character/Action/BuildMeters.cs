@@ -58,6 +58,20 @@ public sealed class BuildMeters
     // ordinary painting from erupting: no time spent biting into terrain, no charge, no
     // eruption, regardless of how the button comes up.
     public const float EruptMinToFire    = 40f;
+    // Floor for the block-charge gesture (double-RMB on a solid tile). Deliberately far
+    // above EruptMinToFire and at 3/4 of a full ramp: erupting is the cheap, improvised
+    // use of a charge, and charging a block is the expensive one you have to actually
+    // commit two seconds of holding to. It also keeps the two spends from competing at
+    // the margin — a charge big enough to charge a block was never a marginal eruption.
+    public const float BlockChargeMin    = EruptMax * 0.75f;
+    // Above this, a held RMB charges instead of painting — out in open air included. A
+    // banked charge is a commitment, and painting spent it by accident: sweeping the
+    // cursor out of the ground demoted the hold to a paint stroke, and SpendForTiles
+    // falls through to EruptMove once BuildMove runs dry, so a stroke you only meant as
+    // a wind-up quietly ate the charge. Small on purpose — it just has to cover a charge
+    // worth protecting, and the idle bleed crosses back under it in a third of a second,
+    // so ordinary painting is never more than a beat away.
+    public const float PaintLockoutMin   = EruptMinToFire * 0.5f;
 
     public float Build     = BuildMax;
     public float BuildMove = MoveMax;
@@ -74,6 +88,9 @@ public sealed class BuildMeters
 
     public float ChargeFraction => EruptMove / EruptMax;
     public bool  CanFireEruption => EruptMove >= EruptMinToFire;
+    // True when there's enough banked charge that a held RMB should keep charging rather
+    // than fall through to painting. See PaintLockoutMin.
+    public bool  ChargeLocksPaint => EruptMove >= PaintLockoutMin;
 
     // Single per-frame entry point. Call once per player per frame, after the action FSM
     // has had its chance to request charging.
@@ -164,6 +181,18 @@ public sealed class BuildMeters
         EruptMove  = 0f;
         ChargeHeld = 0f;
         return MathF.Min(mass, MaxBallMass);
+    }
+
+    // Spend the WHOLE banked charge to charge one block. All-or-nothing: returns false
+    // and touches nothing if the meter is short, so the caller can leave the gesture
+    // inert rather than half-paying for it. Unlike ConsumeEruptionMass this converts to
+    // nothing — the charge is the price of the flag, not a quantity the block stores.
+    public bool TrySpendForBlockCharge()
+    {
+        if (EruptMove < BlockChargeMin) return false;
+        EruptMove  = 0f;
+        ChargeHeld = 0f;
+        return true;
     }
 
     // Ceiling on a single ball's mass. Without it a full charge spent on foam would ask

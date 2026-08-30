@@ -22,6 +22,10 @@ public sealed class ChunkRenderer
     private const int TileGutter   = (Chunk.TileSize + 15) / 16;
     private const int TileDrawSize = Chunk.TileSize - TileGutter;
 
+    // How far a charged tile's fill is pulled toward white. Charge is binary, so this is
+    // one constant and not a ramp — the tint has to read as a state, not a quantity.
+    private const float ChargeTint = 0.7f;
+
     public ChunkRenderer(SpriteBatch spriteBatch, Texture2D pixel, Camera camera,
                          GraphicsDevice graphicsDevice)
     {
@@ -95,14 +99,20 @@ public sealed class ChunkRenderer
         // fill on top leaves the gutter showing through as a thin border line.
         // Separate from the fill pass so the batch switches texture once per chunk,
         // not once per tile.
+        //
+        // Charged tiles invert it: a white border instead of a black one. The fill tint
+        // alone can't carry the state for every material — foam's base color is already
+        // near-white — so the gutter does the work the fill can't.
         for (int tx = 0; tx < Chunk.Size; tx++)
             for (int ty = 0; ty < Chunk.Size; ty++)
             {
                 if (!chunk.Tiles[tx, ty].IsSolid) continue;
+                bool charged = chunks.Charge.IsCharged(
+                    chunk.ChunkPos.X * Chunk.Size + tx, chunk.ChunkPos.Y * Chunk.Size + ty);
                 _spriteBatch.Draw(_pixel, new Rectangle(
                     (int)(origin.X + tx * Chunk.TileSize),
                     (int)(origin.Y + ty * Chunk.TileSize),
-                    Chunk.TileSize, Chunk.TileSize), Color.Black);
+                    Chunk.TileSize, Chunk.TileSize), charged ? Color.White : Color.Black);
             }
 
         // Pass 2: palette-tinted fills, modulated by the rock grain atlas when present.
@@ -118,6 +128,11 @@ public sealed class ChunkRenderer
                 var color = dmgFrac > 0f
                     ? Color.Lerp(baseColor, Color.Black, dmgFrac * 0.7f)
                     : baseColor;
+                // Charge tints AFTER damage so a charged tile that's also cracked still
+                // reads as charged — the two are independent states, and the one the
+                // player spent a whole meter on is the one that has to survive the mix.
+                if (chunks.Charge.IsCharged(gtx, gty))
+                    color = Color.Lerp(color, Color.White, ChargeTint);
                 var dest = new Rectangle(
                     (int)(origin.X + tx * Chunk.TileSize),
                     (int)(origin.Y + ty * Chunk.TileSize),

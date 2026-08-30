@@ -20,6 +20,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // Sparse per-cell HP. Damaged tiles have an entry until they break or get cleared.
     public readonly TileDamage Damage = new();
 
+    // Sparse per-cell binary "charged" flag, set by the double-RMB block-charge gesture.
+    // Cleared on break alongside Damage so a rebuilt cell starts uncharged.
+    public readonly TileCharge Charge = new();
+
     // Per-cell accumulated impact impulse, with decay. PhysicsWorld routes
     // contact impulses through this so a spring-padded landing (player) accrues
     // damage over the frames the spring spreads the impulse across — see
@@ -477,6 +481,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             if (node != null) Graph.Remove(node);
             WriteTile(chunk, tx, ty, TileState.Empty, sproutType, null);
             Damage.Clear(gtx, gty);
+            Charge.Clear(gtx, gty);
             DropSupportFor(gtx, gty);
             OnTileBroken?.Invoke(CellCenter(gtx, gty), sproutType);
             return true;
@@ -487,6 +492,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // restore brings the material back; the live cell's Type is irrelevant once Empty.
         WriteTile(chunk, tx, ty, TileState.Empty, brokenType, null);
         Damage.Clear(gtx, gty);
+        Charge.Clear(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
         // a foam tile broken early would still trigger another BreakCell when
         // its timer expires (no-op on an empty cell, but a needless call).
@@ -513,6 +519,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         JournalMark = _journal.Mark,
         Graph       = Graph.Capture(),
         Damage      = Damage.Capture(),
+        Charge      = Charge.Capture(),
         Foam        = Foam.Capture(),
         Impact      = Impact.Capture(),
         Mass        = Mass.Capture(),
@@ -527,6 +534,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // 2. Restore the sparse structures by value.
         Graph.Restore(s.Graph);
         Damage.Restore(s.Damage);
+        Charge.Restore(s.Charge);
         Foam.Restore(s.Foam);
         Impact.Restore(s.Impact);
         Mass.Restore(s.Mass);

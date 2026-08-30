@@ -1880,8 +1880,20 @@ public class BlockPaintAction : ActionState
         vars.BallPos     = ctx.Input.MouseWorldPosition;   // seeded under the cursor
         vars.BallVel     = Vector2.Zero;
         // The mode is decided HERE and does not get re-derived per frame: cursor buried at
-        // the press means this hold is a charge, open air means it's a paint stroke.
-        vars.ChargeGesture = BlockEruptionHelpers.IsCursorInSolid(ctx);
+        // the press means this hold is a charge, open air means it's a paint stroke —
+        // UNLESS there's already a charge banked, in which case the hold is a charge
+        // wherever the cursor is. Painting draws from EruptMove once the working pool is
+        // dry, so a press in open air with a live charge used to spend it by accident.
+        vars.ChargeGesture = BlockEruptionHelpers.IsCursorInSolid(ctx)
+                          || ab.Meters.ChargeLocksPaint;
+
+        // Second click of a double-click, on a block, with a full meter banked: spend the
+        // whole charge to mark that block instead. Rides this action's Enter rather than
+        // living in an ActionState of its own because it is instantaneous — no duration to
+        // animate, no slot to hold — and the hold it arrives on is already this action's.
+        // A charged block still starts a charging hold from here, so a player who keeps
+        // the button down after the second click begins refilling immediately.
+        BlockEruptionHelpers.TryChargeBlock(ctx, ab);
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -1892,19 +1904,21 @@ public class BlockPaintAction : ActionState
 
         if (!vars.ChargeGesture) { Paint(ctx, ab, vars.BallPos, vars.BallVel.Length()); return; }
 
-        if (BlockEruptionHelpers.IsCursorInSolid(ctx))
+        if (BlockEruptionHelpers.IsCursorInSolid(ctx) || ab.Meters.ChargeLocksPaint)
         {
             // Charging: BuildMeters converts reservoir into eruption charge this frame.
+            // Out in open air too, once there's a charge worth protecting — the meter
+            // keeps filling instead of the hold demoting into a stroke that spends it.
             ab.Meters.ChargingRequested = true;
         }
         else
         {
-            // The cursor left the ground: the same hold simply becomes a paint stroke,
-            // keeping the ball it already has. Whether this stroke ends as an eruption
-            // is decided at RELEASE (see Exit), not here — so nothing is forfeited by
-            // sweeping around first. The demotion is deliberately one-way; a per-frame
-            // mode test would flip back to charging the instant the first painted tile
-            // under the cursor finalizes.
+            // The cursor left the ground with nothing banked: the same hold simply becomes
+            // a paint stroke, keeping the ball it already has. Whether this stroke ends as
+            // an eruption is decided at RELEASE (see Exit), not here — so nothing is
+            // forfeited by sweeping around first. The demotion is deliberately one-way; a
+            // per-frame mode test would flip back to charging the instant the first
+            // painted tile under the cursor finalizes.
             vars.ChargeGesture = false;
         }
     }
@@ -1918,7 +1932,12 @@ public class BlockPaintAction : ActionState
         if (ctx.Input.RightClick) return;
         // Released while still buried mid-charge: bank the charge for a later stroke
         // (it decays in BuildMeters) rather than erupting from inside the ground.
-        if (vars.ChargeGesture) return;
+        //
+        // Tested on the CURSOR rather than vars.ChargeGesture, which used to be the same
+        // question: a charged hold no longer demotes on leaving the ground (see Update),
+        // so ChargeGesture now stays true through exactly the airborne release that ought
+        // to erupt. The cursor is what the check always meant — "am I still in the wall?"
+        if (BlockEruptionHelpers.IsCursorInSolid(ctx)) return;
         if (!ab.Meters.CanFireEruption) return;
         if (vars.BallVel.Length() < EruptReleaseSpeed) return;
 
@@ -2200,6 +2219,69 @@ internal static class BlockEruptionHelpers
         => new Vector2(
             gtx * Chunk.TileSize + Chunk.TileSize * 0.5f,
             gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
+
+    // ── Block charge (double-RMB on a block, paid for with the whole meter) ──────
+    //
+    // The second spend for a banked avalanche charge. The first is the eruption (release
+    // a fast stroke); this one is the opposite gesture in every way — stationary, aimed
+    // at one cell, and all-or-nothing — so it is worth the whole meter and a gate well
+    // above the eruption's.
+    //
+    // Detected off the Controller ring rather than a latched timer, for the same reason
+    // everything else in the sim is: a rollback that rewinds the input rewinds the
+    // gesture with it, and there is no half-armed double-click left stranded across a
+    // reconcile. The ring is 32 frames, so the whole window has to fit inside that.
+
+    // Max frames the first click may be held. A double-click is two CLICKS: this is what
+    // rejects the far more common sequence of a long charging hold, a release, and one
+    // ordinary press — which is otherwise indistinguishable from click-release-click.
+    private const int DoubleClickHoldFrames = 12;   // 0.2s
+    // Max release gap between the two clicks.
+    private const int DoubleClickGapFrames  = 12;   // 0.2s
+
+    // True on the exact frame RMB goes down for the second time in a double-click.
+    public static bool IsRightDoubleClick(EnvironmentContext ctx)
+    {
+        var ctrl = ctx.Controller;
+        if (ctrl == null) return false;
+        if (!ctx.Input.RightClick) return false;
+        if (ctrl.GetPrevious(1).RightClick) return false;      // not a press edge
+
+        // Walk back through the gap, then through the first click's hold. Running off
+        // either budget means this press isn't the second half of a double-click.
+        int i = 1;
+        for (; i <= DoubleClickGapFrames; i++)
+            if (ctrl.GetPrevious(i).RightClick) break;
+        if (i > DoubleClickGapFrames) return false;            // gap too long / no prior press
+
+        // i is now the newest down-frame of the first click; look for where that press
+        // began. Finding its rising edge inside the budget means it was a click.
+        int end = i + DoubleClickHoldFrames;
+        for (i++; i <= end; i++)
+            if (!ctrl.GetPrevious(i).RightClick) return true;  // first click ended in time
+        return false;                                          // it was a hold, not a click
+    }
+
+    // Spend the full avalanche meter to charge the solid cell under the cursor. No-op
+    // (and no spend) if the gesture isn't a double-click, the cell isn't solid, the cell
+    // is already charged, or the meter is short. Returns true if a block was charged.
+    //
+    // No reach gate, deliberately: building the charge has none either — you can bury the
+    // cursor in any wall on screen and hold — so gating the spend would make the meter
+    // fillable at range and spendable only up close.
+    public static bool TryChargeBlock(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (ctx.Chunks == null || ab?.Meters == null) return false;
+        if (!IsRightDoubleClick(ctx)) return false;
+
+        var (gtx, gty) = CursorCell(ctx);
+        if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Solid) return false;
+        if (ctx.Chunks.Charge.IsCharged(gtx, gty)) return false;   // don't pay twice
+        if (!ab.Meters.TrySpendForBlockCharge()) return false;
+
+        ctx.Chunks.Charge.Set(gtx, gty);
+        return true;
+    }
 }
 
 
