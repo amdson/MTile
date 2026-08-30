@@ -3267,7 +3267,9 @@ public class BlockGrabAction : ActionState
 // strong short-range ForceField in front of the grabber that flags whoever it holds
 // `GrabbedActive` (so their normal attacks/jump gate off; only struggle attacks fire).
 // It is stateless like every field: the "grab" persists only while this action keeps
-// broadcasting. What it is NOT is an area effect — a grab holds ONE body. The action
+// broadcasting. The action leads with a StartupSeconds windup during which it is the
+// live action state but holds nobody — no field goes out, so the grab is a read the
+// opponent can jump or hit out of rather than an instant snap. What it is NOT is an area effect — a grab holds ONE body. The action
 // latches a single victim (vars.GrabVictim) and stamps it on the field (ForceField.Only)
 // so the region's geometry stays generous while the hold, the pull and the throw all
 // land on exactly that one opponent. It IGNORES guard for free (a field never goes
@@ -3282,7 +3284,14 @@ public class BlockGrabAction : ActionState
 // runs its hold→throw→recovery, so an opponent who reads it punishes the lag.
 public class GrabAction : ActionState
 {
-    private const float GrabHoldMaxSeconds = 1.2f;    // auto-throw if held this long
+    // Startup: the grab is committed and on screen, but holds NOTHING yet — no field is
+    // published, so no body is flagged, pulled or latched until it elapses. An instant
+    // hold made the grab an unreactable snap; this is the window the opponent reads.
+    private const float StartupSeconds     = 0.2f;
+    private const float GrabHoldMaxSeconds = 1.2f;    // auto-throw if held this long AFTER startup
+    // Wall-clock end of the hold phase. TimeInState runs across startup and hold both, so
+    // the cap has to include the windup or the startup would eat 0.2s of the hold.
+    private const float HoldEndSeconds     = StartupSeconds + GrabHoldMaxSeconds;
     // Grab strength the hold starts with; each connecting struggle slash erodes it by
     // GrabbedSlash.GrabStrengthDamage (1.0), so a fresh grab survives 2 struggles and
     // breaks on the 3rd. Bump for a stickier grab, lower for an easier mash-out.
@@ -3296,16 +3305,16 @@ public class GrabAction : ActionState
     private const float ThrowSpeed  = 520f;
 
     // Two phases with INDEPENDENT lengths, which is why the old fixed-duration remap could
-    // not express this: the hold runs until the player releases (up to GrabHoldMaxSeconds),
+    // not express this: the hold runs until the player releases (up to HoldEndSeconds),
     // then the throw runs its own ThrowSeconds. The authored clip devotes its tail to the
     // throw, so map the hold onto everything before HoldShare and the throw onto the rest —
     // a short hold jump-cuts forward to the throw, which is right: the throw pose must play
     // WHEN the throw happens, not whenever the clip's own clock reaches it.
-    private const float HoldShare = GrabHoldMaxSeconds / (GrabHoldMaxSeconds + ThrowSeconds);
+    private const float HoldShare = HoldEndSeconds / (HoldEndSeconds + ThrowSeconds);
     public override float AnimationProgress(in ActionVars vars)
         => vars.GrabThrowing
             ? HoldShare + (1f - HoldShare) * (vars.ChargeTime / ThrowSeconds)
-            : HoldShare * (vars.TimeInState / GrabHoldMaxSeconds);
+            : HoldShare * (vars.TimeInState / HoldEndSeconds);
     private const float ThrowAccel  = 12000f;
 
     // 48/48 — above BlockGrabAction (46/46), which shares the Shift+LMB press. The two
@@ -3414,7 +3423,14 @@ public class GrabAction : ActionState
         if (!vars.GrabThrowing)
         {
             vars.TimeInState += ctx.Dt;
-            bool holding = ctx.Input.LeftClick && vars.TimeInState < GrabHoldMaxSeconds;
+            // Windup. Nothing is grabbed yet: no field, so no GrabbedActive, no pull, and
+            // vars.GrabVictim stays None. The release check is deliberately BELOW this —
+            // the startup is a commitment and runs to completion, so a tap can't skip the
+            // windup to reach the throw early. It just arrives at the throw having held
+            // nobody, which is the existing whiff (and its recovery lag) either way.
+            if (vars.TimeInState < StartupSeconds) return;
+
+            bool holding = ctx.Input.LeftClick && vars.TimeInState < HoldEndSeconds;
             if (holding)
             {
                 var focus  = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;
@@ -3479,7 +3495,9 @@ public class GrabAction : ActionState
         int facing = vars.GrabDir.X >= 0f ? 1 : -1;
         var focus = body.Position + (vars.GrabThrowing ? vars.GrabDir : new Vector2(facing, 0f)) * FocusDist;
         var color = vars.GrabThrowing ? Color.HotPink : Color.Magenta;
-        t.Rect(focus, 6f, color * 0.8f);
+        // Dim through the windup so the cue reads as "winding up" rather than "holding you".
+        bool startup = !vars.GrabThrowing && vars.TimeInState < StartupSeconds;
+        t.Rect(focus, 6f, color * (startup ? 0.35f : 0.8f));
     }
 }
 

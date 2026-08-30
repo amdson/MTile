@@ -56,6 +56,31 @@ public class GrabTests(ITestOutputHelper output)
         Assert.True(sawGrabbed, "Victim should be flagged GrabbedActive while held.");
     }
 
+    // The grab leads with a windup: for StartupSeconds (0.2s) the grab is the live action
+    // state but publishes no field, so nobody is flagged, pulled or latched. Measured as
+    // the gap between the grab becoming the action and the victim first reading grabbed.
+    // 0.2s is 6 updates at this Dt, and TimeInState advances before the windup check, so
+    // the 6th update is the one that publishes: 5 whole frames hold nobody, and the field
+    // lands on the frame where elapsed time reaches 0.2s.
+    [Fact]
+    public void Grab_HoldsNobody_DuringStartup()
+    {
+        int grabStartFrame = -1, firstGrabbedFrame = -1;
+        SimRunner.RunMulti(Build(GrabHold(), InputScript.Always(default)),
+            onFrame: (f, ps) =>
+            {
+                if (grabStartFrame < 0 && ps[0].CurrentActionName == "GrabAction") grabStartFrame = f;
+                if (firstGrabbedFrame < 0 && ps[1].Combat.GrabbedActive) firstGrabbedFrame = f;
+            });
+
+        output.WriteLine($"grab active at frame {grabStartFrame}, victim grabbed at frame {firstGrabbedFrame}");
+        Assert.True(grabStartFrame >= 0, "Grab should have become the action state.");
+        Assert.True(firstGrabbedFrame >= 0, "Grab should still take hold once the startup elapses.");
+        Assert.True(firstGrabbedFrame - grabStartFrame >= 5,
+            $"Grab must hold nobody through its 0.2s startup; held after " +
+            $"{firstGrabbedFrame - grabStartFrame} frames ({(firstGrabbedFrame - grabStartFrame) * Dt:F3}s).");
+    }
+
     // Grab ignores guard: a guarding victim (Shift held) is still grabbed.
     [Fact]
     public void Grab_IgnoresGuard()
@@ -76,11 +101,15 @@ public class GrabTests(ITestOutputHelper output)
     {
         // Victim: idle until grabbed, then repeatedly tap LMB while facing left
         // (Left held + cursor to the left) so the struggle arc sweeps over the grabber.
+        // The idle must outlast the grab's startup (press-edge frame 10 + 0.2s = frame 16):
+        // click during the windup and the victim isn't grabbed yet, so it throws a NORMAL
+        // slash that stuns the grabber out of the grab — that's the startup's counterplay,
+        // covered by Grab_HoldsNobody_DuringStartup, not the mechanic under test here.
         var mouseLeft = new Vector2(0f, 20f);
         var click   = new PlayerInput { Left = true, LeftClick = true, MouseWorldPosition = mouseLeft };
         var noClick = new PlayerInput { Left = true, MouseWorldPosition = mouseLeft };
         var victim = new InputScript()
-            .For(14, default(PlayerInput))
+            .For(20, default(PlayerInput))
             .For(1, click).For(3, noClick)
             .For(1, click).For(3, noClick)
             .For(1, click).For(3, noClick)
