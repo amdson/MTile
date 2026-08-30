@@ -226,6 +226,47 @@ public static class Sprites
         return new Vector2(MathF.Cos(a), MathF.Sin(a)) * (radius * (1.0f + 0.35f * extend));
     }
 
+    // Zeus: a weathered stone statue, not a machine. The silhouette is a plinth
+    // (a wide base rectangle) under a robed torso with a raised arm, because the
+    // whole encounter reads as "the statue on the hill turns to look at you" and
+    // a mechanical shell would read as another Bastion. The only thing that
+    // animates is the eye-slit and the glow at the raised hand: stone doesn't
+    // move, and holding the body perfectly still is what makes the telegraphs —
+    // which are the actual animation — pop.
+    public static AnimatedSprite Zeus(float radius)
+    {
+        var stone = new Color(205, 200, 175);
+        var shade = new Color(140, 136, 118);
+        var spark = new Color(150, 200, 255);
+
+        Pose Frame(float glow) => new Pose()
+            // Plinth — wide, flat, and unmistakably sitting ON the ground.
+            .Box(new Vector2(0f, radius * 0.82f), new Vector2(radius * 1.9f, radius * 0.5f), 0f, shade)
+            .Box(new Vector2(0f, radius * 0.45f), new Vector2(radius * 1.5f, radius * 0.4f), 0f, stone)
+            // Robed torso: a tapered body, narrower at the shoulders.
+            .Line(new Vector2(-radius * 0.62f,  radius * 0.30f), new Vector2(-radius * 0.40f, -radius * 0.55f), stone, 2.5f)
+            .Line(new Vector2( radius * 0.62f,  radius * 0.30f), new Vector2( radius * 0.40f, -radius * 0.55f), stone, 2.5f)
+            .Line(new Vector2(-radius * 0.40f, -radius * 0.55f), new Vector2( radius * 0.40f, -radius * 0.55f), stone, 2f)
+            // Head, and the eye-slit that is the only live thing on the body.
+            .Ring(new Vector2(0f, -radius * 0.80f), radius * 0.28f, stone, 8, 2f)
+            .Box(new Vector2(0f, -radius * 0.80f), new Vector2(radius * 0.34f, 1.5f + glow), 0f, spark)
+            // Raised arm — bent at the elbow, hand held above the head. This is
+            // where every beam's muzzle visually belongs.
+            .Line(new Vector2( radius * 0.35f, -radius * 0.45f), new Vector2( radius * 0.80f, -radius * 0.85f), stone, 2f)
+            .Line(new Vector2( radius * 0.80f, -radius * 0.85f), new Vector2( radius * 0.70f, -radius * 1.35f), stone, 2f)
+            .Disc(new Vector2( radius * 0.70f, -radius * 1.40f), 1.8f + glow * 1.6f, spark)
+            // Lowered arm, tucked against the robe.
+            .Line(new Vector2(-radius * 0.35f, -radius * 0.45f), new Vector2(-radius * 0.72f,  radius * 0.10f), stone, 2f);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(0f), Frame(0.6f), Frame(1.2f), Frame(0.6f) },
+            frameDuration: 0.26f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
     // Brute: thicker hex body in dark red with a single big central eye and
     // angled "horn" lines on top. Two-frame idle pulse on the eye reads as a
     // slow breath.

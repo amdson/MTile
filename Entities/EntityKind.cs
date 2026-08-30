@@ -35,6 +35,10 @@ public enum EntityKind
 
     RailBolt,       // Bastion ordnance — fast, tile-breaking (see RailBoltProjectile)
 
+    // Zeus — rooted statue boss on the "hill" stage. Three laser attacks
+    // (heavy bolt / strike storm / raking sweep); see ZeusEnemy.cs.
+    Zeus,
+
     // Copy-and-edit starting point for a new enemy — Entities/Enemies/Types/TemplateEnemy.cs.
     // Spawn it on the "sandbox" stage.
     Template,

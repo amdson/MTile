@@ -1,0 +1,15 @@
+{
+  "//": "Hill — a cone of dirt-over-stone spanning three authored chunks (world tile x -12..28, peak at x 8 / tile y 3, base at tile y 13). Built for the Zeus encounter (Stages 'hill'): the statue is rooted on the one-tile crown with clear sightlines down both slopes, so the player's problem is climbing into a firing line rather than finding the boss. The profile is CONCAVE on purpose — steep at the crown, shallow at the foot (surface(u) = 3 + 10*(u/20)^0.65). A convex dome is the intuitive shape and is exactly wrong here: on a dome every chord from the apex to the slope runs underground, so a boss standing on top has line of sight to nothing but the sky and simply never fires. Concave inverts that and the summit sees its whole slope. Steps are capped at one tile per column so the whole hill is walkable. Authored rather than ruled because TerrainLoader's rule grammar is axis-aligned half-planes only; regenerate with the snippet in MTile.Tests/Sim/ZeusHillTests.cs's slope assertions as the guard. Rules fill everything else: bedrock under chunk row 0 (a beam that trenches the hill makes a pit, not a void), sealed walls to either side so a knockback launch can't drop the player out of the world, and open sky above tile y -12 so the walls don't read as a ceiling. Enemy placement lives in Stage.cs.",
+  "Extents": 3,
+  "ChunkFiles": {
+    "-1,0": "hill_left.txt",
+    "0,0":  "hill_mid.txt",
+    "1,0":  "hill_right.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 16",  "IsSolid": true  },
+    { "Condition": "x <= -17", "IsSolid": true  },
+    { "Condition": "x >= 32",  "IsSolid": true  },
+    { "Condition": "y <= -12", "IsSolid": false }
+  ]
+}

@@ -127,6 +127,19 @@ public static class Stages
             Populate      = PopulateSandbox,
         });
 
+        // ─── hill ─────────────────────────────────────────────────────────────
+        // Boss approach. One cone of dirt-over-stone (Levels/hill.json, crown at
+        // world x ≈ 136 / y ≈ 48) with a Zeus statue rooted on top. The player
+        // starts at the foot of the western slope, where the hill's own shoulder
+        // blocks Zeus's line of sight — so the encounter opens silently and starts
+        // the moment they crest into view. The climb IS the fight.
+        Register(new Stage {
+            Name          = "hill",
+            TerrainConfig = "hill.json",
+            PlayerSpawn   = new Vector2(-224f, 150f),
+            Populate      = PopulateHill,
+        });
+
         // ─── flat ─────────────────────────────────────────────────────────────
         // Empty, perfectly flat plain (floor at world tile y = 6, open sky, no
         // hills/chunk art, no entities or platforms). A clean testbed for the
@@ -399,6 +412,28 @@ public static class Stages
         g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(300f, 150f)));
         g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(1150f, 150f)));
         g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(1850f, 150f)));
+    }
+
+    // Zeus on the hill. Terrain geometry (Levels/hill.json + hill_*.txt) puts the
+    // crown's top surface at world tile (8, 3) → world y = 48, and a body rests
+    // one radius above that — Zeus is radius 16, hence the y below.
+    //
+    // The position has to be exact rather than approximately-above-the-ground:
+    // the blueprint sets GravityScale 0 (the statue must not fall into the crater
+    // its own beams dig), so nothing settles it. Move the crown in the terrain
+    // files and this number has to move with it.
+    private static void PopulateHill(Simulation g)
+    {
+        const float CrownTop = 3 * Chunk.TileSize;              // 48 — top of the peak tile
+        g.SpawnEntity(EnemyFactory.Create(EntityKind.Zeus, new Vector2(136f, CrownTop - 16f)));
+
+        // Ammo on the lower slopes — the statue has Mass 80 and no stagger state,
+        // so knockback is never the answer; these are here because the same balls
+        // are how the player practises the ranged game everywhere else, and
+        // because a beam that clips one is a free readout of where the beam is.
+        const float BaseTop = 13 * Chunk.TileSize;              // 208 — the flat ground
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(-160f, BaseTop - 48f)));
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2( 380f, BaseTop - 48f)));
     }
 
     private static void PopulatePlain(Simulation g)

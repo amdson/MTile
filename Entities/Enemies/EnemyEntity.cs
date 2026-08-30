@@ -44,6 +44,12 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
 
     public int Facing => _facing;
 
+    // Diagnostic only — the class name of the action currently running, or "" when
+    // idle. Mirrors PlayerCharacter.CurrentActionName; headless tests use it to
+    // assert which attack in a kit actually fired without reaching into the FSM.
+    public string CurrentActionName =>
+        _currentAction >= 0 ? _actions[_currentAction].GetType().Name : "";
+
     protected EnemyEntity(PhysicsBody body, float health,
                           List<EnemyMovementState> movement,
                           List<EnemyActionState>   actions,

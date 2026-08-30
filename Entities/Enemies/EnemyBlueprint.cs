@@ -256,6 +256,11 @@ public static class EnemyFactory
             },
         });
 
+        // Zeus — the statue on the hill. Everything about it lives in
+        // Entities/Enemies/Types/ZeusEnemy.cs; this is the line that makes it
+        // spawnable and snapshot-restorable.
+        Register(ZeusEnemy.Blueprint);
+
         // Template — the documented copy-and-edit starting point. Body, brain,
         // and both state lists live in Entities/Enemies/Types/TemplateEnemy.cs; this is the
         // one line that makes it spawnable and snapshot-restorable.
