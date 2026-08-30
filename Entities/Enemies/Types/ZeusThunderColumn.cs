@@ -41,9 +41,17 @@ public class ZeusThunderColumnAction : EnemyActionState
     protected virtual float Active   => 0.30f;
     protected virtual float Recovery => 1.30f;
 
-    // No MinRange, unlike the bolt: point blank is not a refuge from this one either.
-    // And no MaxRange worth the name — the column reaches anywhere on the stage. Walking
+    // No MaxRange worth the name — the column reaches anywhere on the stage. Walking
     // away is not an answer to it; the answers are the three-tile sidestep and the roof.
+    //
+    // MinRange is the outer edge of the beams' own bands (bolt 640, strike 640, sweep
+    // 620), because this is the attack for a player the rest of the kit cannot deal with.
+    // Inside it the beams have the shot and the column stands down: a column landing on
+    // top of a bolt is two heavy hits in one window with one telegraph between them, and
+    // it makes the close fight a coin flip rather than a read.
+    //
+    // But see the visibility clause in CheckPreConditions — this is NOT a plain distance
+    // gate. Close-and-hidden is precisely the state the column exists for.
     //
     // Note this only bites because ZeusController's coarse WantAttack gate was widened to
     // match (EnemyEntity refuses to select ANY new action while WantAttack is false, so a
@@ -51,6 +59,7 @@ public class ZeusThunderColumnAction : EnemyActionState
     // 900 was against an AlertRange of 620). The three beams keep their own bands, so
     // they are still the close-quarters half of the kit; this is the one that follows you.
     protected virtual float MaxRange => float.MaxValue;
+    protected virtual float MinRange => 640f;
 
     // Half a column's width. Three tiles across: wide enough that "roughly out of
     // it" is not good enough, narrow enough that a walk clears it inside the tell.
@@ -107,9 +116,21 @@ public class ZeusThunderColumnAction : EnemyActionState
     public override bool CheckPreConditions(in EnemyContext ctx)
     {
         if (!ZeusBeam.InWindow(ctx.Frame, WindowFrom, WindowTo)) return false;
-        // Distance only. No EnemyAim.HasLineOfSight call here, and that omission is
-        // the feature — this is the attack that opens when the statue is blind.
-        return ctx.Dist <= MaxRange;
+        if (ctx.Dist > MaxRange) return false;
+
+        // Stand down only when the rest of the set can ACTUALLY take the shot — close
+        // AND visible. Both halves matter, and a plain `ctx.Dist < MinRange` would be a
+        // bug rather than a simplification: every beam gates on EnemyAim.HasLineOfSight,
+        // so a player who is near but behind cover leaves them all shut, and a
+        // distance-only MinRange would hand that player total safety by standing the one
+        // unoccluded attack down as well. Near-and-hidden is the exact state this action
+        // was written for.
+        //
+        // Note there is still no HasLineOfSight call of its own here. Visibility is read
+        // to decide whether someone ELSE has the shot, never as a condition on taking it:
+        // when the column does fire, it fires blind.
+        if (ctx.Dist < MinRange && ctx.PlayerVisible) return false;
+        return true;
     }
 
     public override bool CheckConditions(in EnemyContext ctx, ref EnemyActionVars v)

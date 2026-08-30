@@ -223,6 +223,30 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
             Assert.DoesNotContain(beam, seen);
     }
 
+    // 2d. ...and it stands down when the rest of the kit can do the job. The column is
+    //     the answer to a player the beams cannot reach or cannot see; with one standing
+    //     in plain view at point blank they can do both, and stacking a column on top of
+    //     a bolt would put two heavy hits in one window behind a single telegraph.
+    //
+    //     The pairing with ThunderColumnOpensWithNoLineOfSight is the whole point, and
+    //     neither test means much alone: InTheOpen is ~30px from Zeus and Hidden is
+    //     ~160px, so BOTH are far inside MinRange (640). The only thing separating them
+    //     is visibility. A distance-only MinRange would pass this test and break that one
+    //     — and would hand a player who steps behind cover at close quarters complete
+    //     safety, since every beam is occluded there too.
+    [Fact]
+    public void ColumnStandsDownWhenTheBeamsCanTakeTheShot()
+    {
+        var sim  = Build(InTheOpen);
+        var seen = Run(sim, InTheOpen, 3 * CycleFrames, output);
+
+        Assert.DoesNotContain("ZeusThunderColumnAction", seen);
+        // The control: Zeus is not simply idle out here. Something fired, so the column's
+        // absence is a decision rather than a dead encounter.
+        var beams = new[] { "ZeusBoltAction", "ZeusStrikeAction", "ZeusSweepAction" };
+        Assert.Contains(beams, b => seen.Contains(b));
+    }
+
     // 3. The memory. With the player visible, Zeus opens its ordinary repertoire; once
     //    the player ducks behind the wall it should KEEP opening it, aimed at where
     //    they last were — not fall silent. The beams are the tell, since those are the
