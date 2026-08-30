@@ -8,17 +8,22 @@ namespace MTile;
 // ground. It is the answer to cover, and every one of its rules follows from
 // that job:
 //
-//   * It does not check line of sight, in either direction. It opens without
-//     one, and it hits without one — the box is published with no `origin`, so
-//     CombatSystem runs no terrain-reachability test on it and a player standing
-//     inside the spire is as exposed as one standing on it. Rock is not cover
-//     from the sky.
-//   * Its counterplay is therefore purely horizontal, and it is given away
-//     early: ColumnWindup is over two seconds with the full-height band drawn
-//     from the first frame, at final width. There is never a question of WHERE,
-//     only of whether you walked out of it in time. A two-second tell that
-//     cannot be dodged by hiding is fair; a short one would just be a tax on
-//     being behind a wall.
+//   * It does not check line of sight to OPEN. Every other Zeus attack gates its
+//     precondition on EnemyAim.HasLineOfSight and stays shut when the statue is
+//     blind; this one only checks range, so breaking sight does not buy silence.
+//   * It is occluded on the way DOWN, not on the way out. The box carries an
+//     `origin` at the top of the column rather than at Zeus, so CombatSystem's
+//     reachability trace runs vertically along the falling column. A wall beside
+//     you is therefore not cover — rock at your shoulder is nothing to a thing
+//     coming out of the sky — but a ROOF is. Build one and the column stops on it.
+//   * So the counterplay is horizontal or overhead, and either way it costs
+//     something: walk out of a three-tile band, or spend the mass to put a
+//     ceiling up inside the tell. Hiding behind terrain that happens to already
+//     be there is the one answer that does NOT work, which is the point.
+//   * The tell is sized for that: ColumnWindup is over two seconds with the
+//     full-height band drawn from the first frame, at final width. There is never
+//     a question of WHERE, only of whether you cleared it — or roofed it — in
+//     time. Two seconds is deliberately enough to place blocks, not just to run.
 //   * It hurts: 54% of escalation per connect, against the heavy bolt's 39%. The
 //     attack that ignores your cover has to be the one you most want to not be hit
 //     by, or hiding stays correct.
@@ -152,15 +157,19 @@ public class ZeusThunderColumnAction : EnemyActionState
         var poly   = Polygon.CreateRectangle(HalfWidth * 2f, ColumnDrop);
         var centre = ColumnCentre(ctx.Self.Body, in v);
 
-        // EntitiesOnly, and no `origin`: no terrain damage, and no terrain
-        // occlusion either. Both halves are deliberate — see the class comment.
+        // EntitiesOnly (no terrain damage — see the class comment), but WITH an origin,
+        // and the origin is the one at the top of the column rather than at Zeus. That is
+        // what makes the reachability trace run DOWNWARD along the column instead of
+        // outward from the statue, which is the whole difference between "a wall beside
+        // you is cover" (it isn't) and "a roof over you is cover" (it is).
         ctx.Hitboxes.Publish(new Hitbox(
             poly.GetBoundingBox(centre), v.HitId, Damage,
             new Vector2(0f, Knockback),
             Faction.Enemy, ctx.Self.Id, BoltColor,
             targets: HitTargets.EntitiesOnly,
             shape: poly, shapePos: centre,
-            hitstunSecondsOverride: Hitstun));
+            hitstunSecondsOverride: Hitstun,
+            origin: new Vector2(v.LockedAim.X, ColumnTop(ctx.Self.Body))));
     }
 
     // The tell. The band is drawn at FULL width for the whole windup — this attack

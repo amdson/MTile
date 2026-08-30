@@ -42,13 +42,19 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
     private const int WallColA = 6, WallColB = 7;
     private const int FloorRow = 7;
 
-    private static ChunkMap Course()
+    // Columns spanned by the roof in the roofed variant: wide enough to cover the
+    // three-tile column plus the +/-BlindJitter scatter either side of it.
+    private const int RoofRow = 4, RoofColA = 8, RoofColB = 14;
+
+    private static ChunkMap Course(bool roofed = false)
     {
         var rows = new List<string>();
         for (int r = 0; r < FloorRow; r++)
         {
             var line = new char[16];
             for (int c = 0; c < 16; c++) line[c] = (c == WallColA || c == WallColB) ? 'X' : '.';
+            if (roofed && r == RoofRow)
+                for (int c = RoofColA; c <= RoofColB; c++) line[c] = 'X';
             rows.Add(new string(line));
         }
         rows.Add(new string('X', 16));
@@ -120,9 +126,13 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
         Assert.Contains("ZeusThunderColumnAction", seen);
     }
 
-    // 2. ...and lands through the wall. The column is published with no `origin`, so
-    //    CombatSystem runs no terrain-reachability test on it. Damage here cannot have
-    //    come from anything else: the beams are occluded by the same wall.
+    // 2. ...and lands through the wall. The column IS occluded — it publishes an origin
+    //    — but that origin sits at the top of the column, so the reachability trace runs
+    //    straight DOWN and a wall standing beside the player is not on it. The sky above
+    //    the hidden spot (column 11) is open all the way up, which is why this still
+    //    connects. Damage here cannot have come from anything else: the beams trace from
+    //    Zeus and are occluded by the same wall. See RoofOverThePlayerBlocksTheColumn for
+    //    the other half — the cover that DOES work.
     [Fact]
     public void ThunderColumnDamagesAPlayerBehindCover()
     {
@@ -137,6 +147,38 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
         output.WriteLine($"damage taken behind cover: {sim.Player.Combat.DamagePercent}");
         Assert.True(sim.Player.Combat.DamagePercent > 0f,
                     "the player was never hit through the wall — cover is still free.");
+    }
+
+    // 2b. The other half of the same rule, and the reason the origin is where it is: a
+    //     roof stops the column even though a wall does not. Same course, same hidden
+    //     spot, one row of tiles added directly overhead — so the only thing that changed
+    //     is what is between the sky and the player.
+    //
+    //     This is the counterplay the attack is built around. It is not passive cover:
+    //     the player has to spend build mass and put the ceiling up inside the 2.2s tell,
+    //     which is what keeps the column from degenerating into a strictly worse bolt now
+    //     that it can be answered at all.
+    [Fact]
+    public void RoofOverThePlayerBlocksTheColumn()
+    {
+        var chunks = Course(roofed: true);
+
+        // Sanity: the roof is overhead and the player is not buried in it, or "no damage"
+        // would prove nothing about occlusion.
+        Assert.Equal(TileState.Solid, chunks.GetCellState(11, RoofRow));
+        Assert.NotEqual(TileState.Solid, chunks.GetCellState(11, 6));
+
+        var sim = new Simulation(chunks, Hidden,
+                                 g => g.SpawnEntity(EnemyFactory.Create(EntityKind.Zeus, ZeusPos)));
+
+        // The same four cycles that reliably draw blood in the uncovered case above.
+        var seen = Run(sim, Hidden, 4 * CycleFrames, output);
+
+        output.WriteLine($"damage taken under a roof: {sim.Player.Combat.DamagePercent}");
+        // The column must still OPEN — this tests occlusion, not a precondition that
+        // quietly stopped firing, which would pass for entirely the wrong reason.
+        Assert.Contains("ZeusThunderColumnAction", seen);
+        Assert.Equal(0f, sim.Player.Combat.DamagePercent);
     }
 
     // 3. The memory. With the player visible, Zeus opens its ordinary repertoire; once
