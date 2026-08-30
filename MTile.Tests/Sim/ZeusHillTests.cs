@@ -21,6 +21,7 @@ namespace MTile.Tests.Sim;
 //   * it is 37 across at the plain, 11 across in the needle, and solid in between
 //   * the taper never steps more than one tile per three rows, and never widens going up
 //   * nothing is built above the summit row, so the statue can see off its own tip
+//   * the statue does not move, no matter what is done to it
 //   * all three laser attacks open within one schedule cycle
 public class ZeusHillTests(ITestOutputHelper output)
 {
@@ -177,6 +178,53 @@ public class ZeusHillTests(ITestOutputHelper output)
                              $"something is built above the summit at ({gtx},{gty})");
     }
 
+    // Rooted, and provably so. The statue's position is level geometry — PopulateHill
+    // derives it from the summit row rather than writing a literal — so anything that
+    // moves Zeus moves the boss fight off its own arena. The failure mode is a slow
+    // drift that nobody notices until the statue is hanging beside the spire instead of
+    // standing on it, which is why this asserts an exact position rather than a
+    // tolerance: "barely moved" is the bug, just earlier.
+    //
+    // Both channels that can move a body are driven every frame — an impulse straight
+    // into Velocity (what knockback is) and a sustained AppliedForce (what a force field
+    // is) — and the player is pinned in Zeus's face the whole time so the statue is
+    // firing, which means its own beams are eating the summit out from under it.
+    [Fact]
+    public void ZeusDoesNotMoveHoweverHardItIsShoved()
+    {
+        var levels = LevelsDir();
+        if (levels == null) { output.WriteLine("Levels/ not found — skipping."); return; }
+        var chunks = LoadTower(levels);
+
+        var vantage = new Vector2(-160f, TopTileY * Chunk.TileSize - 20f);
+        var sim = new Simulation(chunks, vantage, Stages.Get("hill").Populate);
+
+        EnemyEntity zeus = null;
+        foreach (var e in sim.Entities)
+            if (e is EnemyEntity en && en.Kind == EntityKind.Zeus) zeus = en;
+        Assert.NotNull(zeus);
+        Assert.True(zeus.Rooted, "Zeus is not rooted — the blueprint knob is off.");
+
+        var start = zeus.Body.Position;
+        Assert.Equal(ZeusSpawn, start);
+
+        for (int f = 0; f < ZeusBeamWindows.CycleFrames; f++)
+        {
+            sim.Player.Body.Position = vantage;
+            sim.Player.Body.Velocity = Vector2.Zero;
+
+            zeus.Body.Velocity     = new Vector2(900f, -900f);
+            zeus.Body.AppliedForce = new Vector2(4000f, -4000f);
+
+            sim.Step(default);
+            Assert.True(zeus.Body.Position == start,
+                $"Zeus moved to {zeus.Body.Position} on frame {f} (spawned at {start}).");
+        }
+
+        // ...and it is genuinely at rest at the end, not merely back where it started.
+        Assert.Equal(Vector2.Zero, zeus.Body.Velocity);
+    }
+
     [Fact]
     public void ZeusOpensAllThreeLaserAttacksWithinOneCycle()
     {
@@ -207,9 +255,8 @@ public class ZeusHillTests(ITestOutputHelper output)
             if (e is EnemyEntity en && en.Kind == EntityKind.Zeus) zeus = en;
         Assert.NotNull(zeus);
 
-        // Settled on the summit, not sunk into it or hovering.
-        var spawnDrift = Vector2.Distance(zeus.Body.Position, ZeusSpawn);
-        Assert.True(spawnDrift < 4f, $"Zeus spawned {spawnDrift:F1}px off the summit.");
+        // Standing exactly where PopulateHill put it.
+        Assert.Equal(ZeusSpawn, zeus.Body.Position);
 
         // Two full schedule cycles, so the sweep (which opens late and runs past
         // the cycle boundary) definitely gets a turn.
@@ -236,9 +283,11 @@ public class ZeusHillTests(ITestOutputHelper output)
         Assert.Contains("ZeusStrikeAction", seen);
         Assert.Contains("ZeusSweepAction",  seen);
 
-        // The statue never moves off its post, whatever it fires.
-        Assert.True(Vector2.Distance(zeus.Body.Position, ZeusSpawn) < 8f,
-                    "Zeus wandered off the summit.");
+        // The statue never moves off its post, whatever it fires. Exactly, not nearly:
+        // it is rooted, and ZeusDoesNotMoveHoweverHardItIsShoved is where that is put
+        // under real pressure.
+        Assert.True(zeus.Body.Position == ZeusSpawn,
+                    $"Zeus wandered off the summit to {zeus.Body.Position}.");
     }
 
     // ZeusBeam is internal to MTile.Core; mirror the one constant this file needs

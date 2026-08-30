@@ -22,6 +22,32 @@ public class Entity : IHittable
     // 1 = full gravity, 0 = none (floating), 0.5 = half. PreStep adds a counter-force
     // to the global gravity so we don't have to touch PhysicsWorld.
     public float GravityScale = 1f;
+
+    // Nailed to the spot. Not "heavy", not "weightless" — a rooted body does not move,
+    // and the two halves of that have to travel together, which is why this is a
+    // property rather than a field anyone can set half of:
+    //
+    //   * PreStep zeroes Velocity and cancels gravity every frame. It runs immediately
+    //     before PhysicsWorld.StepSwept, downstream of knockback, force fields and the
+    //     entity's own Update, so it catches every writer without any of them knowing.
+    //   * IgnoreTiles takes the depenetration solver out of the loop, which is the one
+    //     mover PreStep cannot get in front of — it runs INSIDE StepSwept. Without it a
+    //     player who builds a block into a rooted body still shoves it out of the wall.
+    //
+    // Position is therefore constant from spawn. That is what keeps this off the
+    // snapshot: there is no anchor to remember, because a body that is never integrated
+    // has nothing to drift from. Mass is a separate question and still worth setting —
+    // it is what keeps the hit-feel stamp (LastHitDir/LastHitImpulse) proportionate.
+    public bool Rooted
+    {
+        get => _rooted;
+        set
+        {
+            _rooted = value;
+            if (value) Body.IgnoreTiles = true;
+        }
+    }
+    private bool _rooted;
     public Color Color        = Color.White;
     public Faction Faction { get; set; } = Faction.Neutral;
     // Optional visual. When null, Game1 falls back to drawing the body polygon outline.
@@ -82,6 +108,17 @@ public class Entity : IHittable
     // GravityScale = 1 this is a no-op; with 0, the body is weightless.
     public void PreStep(Vector2 globalGravity)
     {
+        if (_rooted)
+        {
+            // Discard whatever the frame accumulated and hand StepSwept a body whose net
+            // acceleration is exactly zero: it does `Velocity += AppliedForce * dt` then
+            // `Velocity += gravity * dt`, so cancelling gravity here leaves the velocity
+            // it integrates at 0 and the position unchanged. Assigning rather than adding
+            // is the point — a rooted body owes nothing to the forces pushing on it.
+            Body.Velocity     = Vector2.Zero;
+            Body.AppliedForce = -globalGravity;
+            return;
+        }
         if (GravityScale == 1f) return;
         Body.AppliedForce += globalGravity * (GravityScale - 1f);
     }
