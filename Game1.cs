@@ -522,7 +522,7 @@ public class Game1 : Game
         _debugFont.DefaultCharacter ??= '?';
         _draw = new DrawContext(_spriteBatch, _pixel);
         _debugOverlay = new DebugOverlayRenderer(_draw);
-        _hud = new HudRenderer(_spriteBatch, _pixel, _debugFont, GraphicsDevice);
+        _hud = new HudRenderer(_draw, _debugFont, GraphicsDevice);
         _prims = new PrimitiveBatch(GraphicsDevice);
         // Half-res field (downscale 2) — cheaper and softer; 8-bit Color until banding
         // proves we need HalfVector4 (RENDERING_UPGRADE_PLAN spike #0).
@@ -1218,7 +1218,7 @@ public class Game1 : Game
         _prof.End(_sGlow, tGlow);
 
         long tHud = _prof.Begin();
-        _hud.Draw(_sim, _animator, _config);
+        _hud.Draw(_sim, _animator);
         _recorder.DrawHud(_spriteBatch, _debugFont);
         string stepLine = _stepper.HudLine(_sim.Frame);
         if (stepLine != null)
