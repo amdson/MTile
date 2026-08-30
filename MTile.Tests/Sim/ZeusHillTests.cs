@@ -18,7 +18,7 @@ namespace MTile.Tests.Sim;
 // climbing 150 tiles into it. So:
 //
 //   * the spire is actually 150 tiles tall, and the statue is standing ON the summit
-//   * it is 37 across at the plain, 11 across in the needle, and solid in between
+//   * it is 37 across at the plain and 1 across at the tip, and solid in between
 //   * the taper never steps more than one tile per three rows, and never widens going up
 //   * nothing is built above the summit row, so the statue can see off its own tip
 //   * the statue does not move, no matter what is done to it
@@ -32,15 +32,22 @@ public class ZeusHillTests(ITestOutputHelper output)
     private const int Height      = 150;
     private const int TopTileY    = GroundTileY - Height;    // -137, the summit surface
     private const int BaseHalf    = 18;                      // 37 tiles across
-    private const int SpireHalf   = 5;                       // 11 tiles across
+    private const int SpireHalf   = 5;                       // 11 across at the handover
     private const int TaperRise   = 3;                       // rows of rise per tile of run
+    private const int SpireRise   = (BaseHalf - SpireHalf) * TaperRise;   // 39
+    private const int TopRise     = Height - 1;                           // 149
 
     private static readonly Vector2 ZeusSpawn = new(0f, TopTileY * Chunk.TileSize - 16f);
 
     // The width the generator claims at row gty. Written out again rather than imported
     // because the generator is Python — this IS the mirrored contract.
     private static int HalfAt(int gty)
-        => Math.Max(SpireHalf, BaseHalf - ((GroundTileY - 1) - gty) / TaperRise);
+    {
+        int rise = (GroundTileY - 1) - gty;
+        if (rise < SpireRise) return BaseHalf - rise / TaperRise;
+        int span = TopRise - SpireRise;
+        return (SpireHalf * (TopRise - rise) * 2 + span) / (2 * span);
+    }
 
     private static bool Solid(ChunkMap chunks, int gtx, int gty)
         => TileQuery.IsSolidAt(chunks, gtx * 16f + 8f, gty * 16f + 8f);
@@ -121,20 +128,23 @@ public class ZeusHillTests(ITestOutputHelper output)
     }
 
     // The silhouette. Every row is checked against the generator's width function, which
-    // catches the three ways a taper goes wrong at once: a wrong base, a step of the
-    // wrong size, and a needle that is not the width the flock lanes are measured from.
+    // catches the ways a taper goes wrong at once: a wrong base, a step of the wrong size,
+    // a tip that is not the width the summit is placed on, and — the one this shape exists
+    // to prevent — a stretch that stops narrowing and stands up as a pillar. A pillar
+    // hides its own face from its own tip, which is how Zeus ended up unable to see
+    // anyone on the last hundred tiles of its own tower.
     [Fact]
-    public void TaperIsThreeRiseToOneRunFromBaseToNeedle()
+    public void TaperNarrowsEveryStepFromThirtySevenWideToASingleTile()
     {
         var levels = LevelsDir();
         if (levels == null) { output.WriteLine("Levels/ not found — skipping."); return; }
         var chunks = LoadTower(levels);
 
-        // The two widths the design is stated in: 2*half + 1 tiles across.
+        // The widths the design is stated in: 2*half + 1 tiles across.
         Assert.Equal(37, 2 * BaseHalf  + 1);
         Assert.Equal(11, 2 * SpireHalf + 1);
-        Assert.Equal(BaseHalf,  MeasuredHalf(chunks, GroundTileY - 1));
-        Assert.Equal(SpireHalf, MeasuredHalf(chunks, TopTileY));
+        Assert.Equal(BaseHalf, MeasuredHalf(chunks, GroundTileY - 1));
+        Assert.Equal(0,        MeasuredHalf(chunks, TopTileY));          // a one-tile tip
 
         int prev = int.MaxValue;
         for (int gty = GroundTileY - 1; gty >= TopTileY; gty--)
@@ -153,10 +163,16 @@ public class ZeusHillTests(ITestOutputHelper output)
                 $"row {gty} is not solid to both faces");
         }
 
-        // The taper covers exactly the rise the ratio implies, and the needle is the rest.
-        int needleRise = (GroundTileY - 1) - TopTileY - (BaseHalf - SpireHalf) * TaperRise;
-        output.WriteLine($"taper {(BaseHalf - SpireHalf) * TaperRise} rows, needle {needleRise} rows");
-        Assert.True(needleRise > 0, "the taper runs past the summit");
+        // And it never stalls: no width may run for more than a quarter of the height,
+        // which is the pillar this shape replaced (111 rows of it) failing loudly.
+        int run = 0, longest = 0;
+        for (int gty = GroundTileY - 1; gty >= TopTileY; gty--)
+        {
+            run = HalfAt(gty) == HalfAt(gty + 1) ? run + 1 : 1;
+            longest = Math.Max(longest, run);
+        }
+        output.WriteLine($"longest constant-width run: {longest} rows");
+        Assert.True(longest < Height / 4, $"the spire stands up as a pillar for {longest} rows");
     }
 
     // Nothing above the tip. The old wide deck carried a rim parapet so the boss arena
