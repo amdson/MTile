@@ -40,6 +40,15 @@ public class InputParser
     // _activePressMouse is player-relative (mouse world pos − body pos at the press).
     private int     _activePressFrame   = -1;
     private Vector2 _activePressMouse;
+    // Was Shift down when this press STARTED? Shift+LMB belongs to the ranged/grab
+    // family (Beam, EnergyBall, Grab, BlockGrab), so a press that opened under Shift
+    // must not also emit the bare-LMB drag gestures — see the release-edge comment.
+    //
+    // Sampled at the press edge, not read at release, because the two differ in the
+    // case this exists for: a block throw ends with the player letting go of Shift and
+    // LMB together, in whichever order their hand happens to manage. Ownership of a
+    // gesture is decided by how it BEGAN.
+    private bool    _activePressShift;
 
     // Circle accumulators — reset on each press edge; consumed on release.
     private float   _cumAngle;
@@ -82,6 +91,7 @@ public class InputParser
             _lastPressEdgeEmitted = currentFrame;
             _activePressFrame     = currentFrame;
             _activePressMouse     = mouseRel;
+            _activePressShift     = cur.Shift;
             _cumAngle             = 0f;
             _hasLastDir           = false;
         }
@@ -115,12 +125,28 @@ public class InputParser
             int     holdFrames    = currentFrame - _activePressFrame;
             Vector2 swipe         = mouseRel - _activePressMouse;
             bool    holdIsClick   = holdFrames <= clickMaxHoldFrames;
-            bool    holdIsCircle  = holdFrames >  clickMaxHoldFrames
+            // A Shift-owned press emits Click but never Stab or Circle. Click is
+            // shared — EnergyBallAction is a Shift+LMB tap and needs it — but the two
+            // DRAG gestures are bare-LMB only, and a Shift+LMB drag is already somebody
+            // else's move (Beam, or the Grab/BlockGrab throw).
+            //
+            // This has to be suppressed at emission rather than gated in the consuming
+            // action, which is what StabAction's `if (ctx.Input.Shift) return false`
+            // tried. That check reads Shift at CONSUMPTION time, but intents live in
+            // IntentBuffer for MaxAgeFrames (120 ≈ 2 s). So a block throw emitted a Stab
+            // on the LMB release, StabAction correctly declined it while Shift was still
+            // down — and then the player let go of Shift a few frames later and the
+            // still-live intent fired a stab out of nowhere. PulseAction had the same
+            // latent bug with Circle and no guard at all.
+            bool    bareDrag      = !_activePressShift;
+            bool    holdIsCircle  = bareDrag
+                                  && holdFrames >  clickMaxHoldFrames
                                   && MathF.Abs(_cumAngle) >= CircleAngleThreshold;
             // Circle wins over Stab when both could match — a closed loop usually
             // ends near the press-center (small swipe) but a wide arc could end far,
             // and a circle "feels" like the right read in that case.
-            bool    holdIsStab    = holdFrames >  clickMaxHoldFrames
+            bool    holdIsStab    = bareDrag
+                                  && holdFrames >  clickMaxHoldFrames
                                   && swipe.LengthSquared() >= StabSwipeThresholdSq
                                   && !holdIsCircle;
 
@@ -151,6 +177,7 @@ public class InputParser
             // else: held long but no recognizable gesture ⇒ no intent.
 
             _activePressFrame = -1;
+            _activePressShift = false;
         }
     }
 
@@ -161,6 +188,7 @@ public class InputParser
     {
         ActivePressFrame     = _activePressFrame,
         ActivePressMouse     = _activePressMouse,
+        ActivePressShift     = _activePressShift,
         CumAngle             = _cumAngle,
         LastDir              = _lastDir,
         HasLastDir           = _hasLastDir,
@@ -175,6 +203,7 @@ public class InputParser
     {
         _activePressFrame     = s.ActivePressFrame;
         _activePressMouse     = s.ActivePressMouse;
+        _activePressShift     = s.ActivePressShift;
         _cumAngle             = s.CumAngle;
         _lastDir              = s.LastDir;
         _hasLastDir           = s.HasLastDir;
@@ -191,6 +220,7 @@ public struct InputParserState
 {
     public int     ActivePressFrame;
     public Vector2 ActivePressMouse;
+    public bool    ActivePressShift;
     public float   CumAngle;
     public Vector2 LastDir;
     public bool    HasLastDir;

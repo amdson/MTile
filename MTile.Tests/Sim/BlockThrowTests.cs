@@ -316,8 +316,9 @@ public class BlockThrowTests(ITestOutputHelper output)
         });
     }
 
-    // The reason the contest lives on the entity: a slash pressed the frame after the
-    // release enters immediately AND the throw still lands.
+    // The reason the contest lives on the entity: a slash pressed right after the release
+    // still enters — the flying pull-point doesn't swallow the player's next attack —
+    // AND the throw still lands.
     [Fact]
     public void SlashRightAfterRelease_EntersAndTheThrowStillLands()
     {
@@ -331,15 +332,26 @@ public class BlockThrowTests(ITestOutputHelper output)
                     .Forever(new PlayerInput { MouseWorldPosition = restAt });
                 var t = RunContest(script, FloatingBlock(), 100, output);
 
-                // A click while the cursor is still moving parses as the stab gesture
-                // (motion + click), so the follow-up lands as Stab rather than Slash —
-                // either is "an attack entered immediately", which is what matters.
+                // The follow-up is a genuine short click, so it lands as GroundSlash1 once
+                // BlockGrabAction's own recovery countdown finishes — about 7 frames after
+                // the release. It is NOT instant, and it must not be: this used to read
+                // `StabAction` two frames in, which was the Shift+LMB gesture bug (the
+                // throw's own long dragging press emitted a Stab intent that fired the
+                // moment Shift came up), and the window here was two frames wide because
+                // that phantom stab was filling it. InputParser now suppresses the drag
+                // gestures for a Shift-owned press; see InputParserGestureTests.
                 const int release = 33;
-                bool attacked = false;
-                for (int f = release; f <= release + 2 && f < t.Actions.Count; f++)
-                    if (t.Actions[f].Contains("Slash") || t.Actions[f].Contains("Stab")) attacked = true;
+                int attackFrame = -1;
+                for (int f = release; f < t.Actions.Count && f <= release + 12; f++)
+                    if (t.Actions[f].Contains("Slash")) { attackFrame = f; break; }
                 output.WriteLine(string.Join(",", t.Actions.GetRange(release - 1, 10)));
-                Assert.True(attacked, "the follow-up attack should enter within two frames of the release");
+                Assert.True(attackFrame > 0,
+                    "the follow-up slash should enter once the throw's recovery clears");
+                // The regression guard, at the integration level the unit tests can't see:
+                // the throw's drag must never resurface as a stab.
+                for (int f = release; f < t.Actions.Count && f <= release + 12; f++)
+                    Assert.False(t.Actions[f].Contains("Stab"),
+                        $"the block throw's drag must not parse as a stab (frame {f} = {t.Actions[f]})");
                 Assert.True(t.BallSpawnFrame > release, "the block should still come free after the release");
                 Assert.True(t.DetachFrame > 0 && t.DetachVel.X < -220f, $"and the throw should still fly, got vx={t.DetachVel.X:F0}");
             });
