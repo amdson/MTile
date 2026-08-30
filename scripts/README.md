@@ -13,6 +13,7 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 | [`sync-sounds.sh`](sync-sounds.sh) | Wire the built Ogg clips into the content pipeline + sound manifest (macOS/Linux). |
 | [`sync-sounds.ps1`](sync-sounds.ps1) | The same, on Windows. |
 | [`gen-tower.py`](gen-tower.py) | Regenerate the Zeus tower's terrain (`Levels/hill_*.txt`) from its geometry constants. |
+| [`test-group.py`](test-group.py) | Run one subsystem's slice of the xUnit suite instead of all ~724 tests. `list` / `<group>` / `full`. |
 | [`vm-bootstrap.sh`](vm-bootstrap.sh) | Bootstrap a fresh Ubuntu/Debian cloud VM for headless build + test. |
 | [`GCP_SETUP.md`](GCP_SETUP.md) | Operator notes for the GCP dev box that `vm-bootstrap.sh` provisions. |
 

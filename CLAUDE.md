@@ -41,16 +41,47 @@ Because the same source compiles under both DesktopGL and KNI, **don't use APIs 
 dotnet build MTile.sln
 dotnet run --project MTile.Desktop          # launches the game window
 
-# Tests
-dotnet test MTile.Tests/MTile.Tests.csproj
+# Tests — run the GROUP your change touches, not the whole suite (see below)
+scripts/test-group.py combat                # one group, ~2 s
+scripts/test-group.py combat animation      # several groups
+scripts/test-group.py list                  # what the groups contain
+scripts/test-group.py full                  # the periodic sweep, ~18 s
 dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName~SnapshotRoundTrip"   # single class/test
 dotnet watch test --project MTile.Tests/MTile.Tests.csproj   # re-run on change
 ```
 
+## Which tests to run
+
+The suite is ~724 tests across 136 classes. **Default to the group(s) your change touches**
+(`scripts/test-group.py <group>`) — that is seconds, and a spot change to one subsystem cannot
+break the others. Reach for `full` at the END of a piece of work, before committing, or when a
+change is genuinely cross-cutting (a shared base class, `Hitbox`/`HitResolver`, the ECS, a config
+loader). Do not run the whole suite after every edit.
+
+| Group | Run it when you touched | ≈ |
+|---|---|---|
+| `combat` | `Character/Action/`, `Character/Input/`, `Entities/`, `World/Hitbox.cs`, `World/CombatSystem.cs`, `Physics/HitResolver.cs`, `Presentation/` | 2 s / 238 |
+| `movement` | `Character/Movement/`, `Character/Sensing/` | 3 s / 177 |
+| `corrector` | `Character/Corrector/` (incl. the lattice + fold engines) | 9 s / 130 |
+| `terrain` | `World/` tiles + chunks, the block build/paint/burst/peel actions | 2 s / 151 |
+| `physics` | `Physics/` | 1 s / 20 |
+| `animation` | `Animation/`, `Skeletons/`, `SkeletonStates/`, `Drawing/` rig code | 1 s / 91 |
+| `simcore` | `Simulation.cs`, `Sim/`, `Net/`, `configs/`, `Stage.cs` | 4 s / 69 |
+
+Groups overlap on purpose and are matched on test-class NAME, not namespace (`GrabTests` is in
+`MTile.Tests`, `CaveMouthTests` in `MTile.Tests.Sim`). **When you add a test class, make sure its
+name matches a term in `scripts/test-group.py`** — a class matching nothing runs only in the full
+sweep, which is how group coverage silently rots.
+
+`full` excludes two slow outliers (`Zzz*` scratch harnesses and `BuriedInIntactTiles` — 2 tests that
+are most of the suite's wall clock). `full --slow` is the true everything-run; it takes minutes and
+is rarely what you want. Before declaring work done, check red tests against BACKLOG.md §5's
+known-failing table rather than assuming you broke them.
+
 Task-specific workflows live in skills under `.claude/skills/`, loaded on demand — invoke by name:
 `/web-publish` (KNI/Blazor build, publish to GitHub Pages, browser smoke tests), `/audio-pipeline`
 (SFX conversion and wiring a clip in), `/perf-profiling` (`MTile.Bench`, in-game frame profiler),
-`/test-slices` (targeted `--filter` sets instead of the full 489-test suite).
+`/test-slices` (the test grouping above in more detail, plus one-off `--filter` recipes).
 
 **Never plain-`dotnet publish` the web build** — it ships the 2.7 fps interpreted build instead of
 the ~40 fps AOT one. Always `pwsh scripts/publish-web.ps1`. Details: `/web-publish`.
