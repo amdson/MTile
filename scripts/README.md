@@ -8,8 +8,10 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 | [`publish-web.sh`](publish-web.sh) | AOT-publish the Blazor/KNI web build and push it to GitHub Pages (macOS/Linux). |
 | [`publish-web.ps1`](publish-web.ps1) | The same, on Windows. |
 | [`extract-sfx-candidates.ps1`](extract-sfx-candidates.ps1) | Pull the hand-picked SFX candidates out of the Sonniss zips into `Audio/candidates/`. |
-| [`build-sfx.ps1`](build-sfx.ps1) | Batch-convert hand-cut sound slices into game-ready Ogg. |
-| [`sync-sounds.ps1`](sync-sounds.ps1) | Wire the built Ogg clips into the content pipeline + sound manifest. |
+| [`build-sfx.sh`](build-sfx.sh) | Batch-convert hand-cut sound slices into game-ready Ogg (macOS/Linux). |
+| [`build-sfx.ps1`](build-sfx.ps1) | The same, on Windows. |
+| [`sync-sounds.sh`](sync-sounds.sh) | Wire the built Ogg clips into the content pipeline + sound manifest (macOS/Linux). |
+| [`sync-sounds.ps1`](sync-sounds.ps1) | The same, on Windows. |
 | [`vm-bootstrap.sh`](vm-bootstrap.sh) | Bootstrap a fresh Ubuntu/Debian cloud VM for headless build + test. |
 | [`GCP_SETUP.md`](GCP_SETUP.md) | Operator notes for the GCP dev box that `vm-bootstrap.sh` provisions. |
 
@@ -73,7 +75,17 @@ reproducible, it is safe to delete it to reclaim disk.
 
 Which file is a candidate for what: [`Plans/AUDIO_CANDIDATES.md`](../Plans/AUDIO_CANDIDATES.md).
 
-## `build-sfx.ps1` — raw slices → game-ready SFX
+## `build-sfx.sh` / `build-sfx.ps1` — raw slices → game-ready SFX
+
+Two implementations of one tool, same defaults and the same ffmpeg filter chain — keep
+them in step. Needs ffmpeg on PATH either way (`brew install ffmpeg`, or
+`winget install Gyan.FFmpeg`).
+
+```
+./scripts/build-sfx.sh --name tile_break --dry-run    # macOS/Linux: plan + filter chain
+./scripts/build-sfx.sh --name tile_break              # -> tile_break_01.ogg, _02, ...
+./scripts/build-sfx.sh --loop --name wall_scrape      # loops: no silence trim, no end fade
+```
 
 ```powershell
 pwsh scripts/build-sfx.ps1 -Name tile_break -DryRun   # print the plan + filter chain
@@ -104,7 +116,16 @@ clips are otherwise inert files on disk.
 Workflow, sourcing, and the full sound list: `Plans/AUDIO_ASSET_LIST.md`. Design:
 `Plans/AUDIO_PLAN.md`.
 
-## `sync-sounds.ps1` — clips on disk → clips in the game
+## `sync-sounds.sh` / `sync-sounds.ps1` — clips on disk → clips in the game
+
+The two must emit **byte-identical** output — they rewrite committed generated files
+(BOM included), so any divergence turns every hop between machines into a spurious diff.
+Needs no tooling beyond a shell.
+
+```
+./scripts/sync-sounds.sh --dry-run     # macOS/Linux: list what it sees, write nothing
+./scripts/sync-sounds.sh               # regenerate mgcb entries + manifest
+```
 
 ```powershell
 pwsh scripts/sync-sounds.ps1 -DryRun   # list what it sees, write nothing

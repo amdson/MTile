@@ -33,6 +33,7 @@ public enum SoundKind
     Grunt,        // climb effort
     Throw,        // built, not yet wired — see GameAudio
     Swing,        // attack whoosh — see GameAudio.Swing
+    LaserBlast,   // the laser's burn, one shot per firing — see GameAudio.Laser
 
     // Tier 3, but already flowing through the presentation seam.
     Respawn,
