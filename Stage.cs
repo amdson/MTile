@@ -179,7 +179,9 @@ public static class Stages
     {
         // Sinusoidal vertical bobber — tests landing on a vertically-moving surface.
         const float baseX = 180f, baseY = -140f, amp = 40f, period = 3f;
-        var movingRect = new MovingRectangle(new Vector2(baseX, baseY), 4f * Chunk.TileSize, Chunk.TileSize);
+        // Size in body-relative px, not tiles: this is a platform the player stands on,
+        // so it scales with the character, not with the terrain grid.
+        var movingRect = new MovingRectangle(new Vector2(baseX, baseY), 64f, 16f);
         g.AddPlatform(movingRect, Color.SteelBlue);
         // Ticker receives ABSOLUTE elapsed sim time (not dt) so platform motion is a
         // pure function of time — snapshot/restore just records the elapsed clock and
@@ -191,7 +193,8 @@ public static class Stages
 
         // Ferris-wheel cluster — four blocks rotating 90° apart around a shared
         // center. Each is its own provider so the solver sees them independently.
-        const float cx = -120f, cy = -150f, radius = 80f, fw = 2f * Chunk.TileSize, fh = Chunk.TileSize, fperiod = 6f;
+        // fw/fh are body-relative px (the 32x16 they were on the old 16 px grid), not tile multiples.
+        const float cx = -120f, cy = -150f, radius = 80f, fw = 32f, fh = 16f, fperiod = 6f;
         const int count = 4;
         var blocks = new MovingRectangle[count];
         for (int i = 0; i < count; i++)

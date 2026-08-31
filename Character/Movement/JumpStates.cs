@@ -9,6 +9,14 @@ namespace MTile;
 // forces; the ambient corrector's default redirect assist rides along except
 // where noted (CoveredJump owns its own contacts → Off).
 
+// Standing body clearance: the floor-to-ceiling gap a full jump needs overhead.
+// Below it the head would smack and CoveredJumpState owns the escape. This is a
+// BODY dimension in px — deliberately independent of Chunk.TileSize.
+internal static class JumpClearance
+{
+    public const float Headroom = 32f;
+}
+
 public class JumpingState : MovementState
 {
     public override int ActivePriority => MovementPriorities.JumpActive;
@@ -35,17 +43,17 @@ public class JumpingState : MovementState
             // vars.JumpFromCorner instead of a source FSD.
             if (!TryCornerLaunch(ctx, abilities, out _)) return false;
             return OnLattice || !(ctx.TryGetCeiling(out var c)
-                     && ctx.Body.Position.Y - c.Position.Y <= 2 * Chunk.TileSize);
+                     && ctx.Body.Position.Y - c.Position.Y <= JumpClearance.Headroom);
         }
         // Hitstun/stun lock-out is enforced centrally via RequiredCapabilities.Jump
         // (the selection loop drops jump candidates while BlocksJump). Movement
         // otherwise stays free — it only blocks the cheap vertical-reset option.
-        // Low ceiling (≤ 2 tiles) overhead: head would smack — defer to CoveredJumpState.
+        // Low ceiling (< body headroom) overhead: head would smack — defer to CoveredJumpState.
         // On the lattice engine there is no deferral: the DP plans the rise
         // from under the slab — the bevel escape near an edge, an honest
         // bonk deeper in — and CoveredJumpState yields (§7.3, row 3).
         if (!OnLattice && ctx.TryGetCeiling(out var ceiling)
-            && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
+            && ground.Position.Y - ceiling.Position.Y <= JumpClearance.Headroom) return false;
         return true;
     }
 
@@ -217,7 +225,7 @@ public class RunningJumpState : MovementState
         if (!ctx.TryGetGround(out var ground)) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
         if (ctx.TryGetCeiling(out var ceiling)
-            && ground.Position.Y - ceiling.Position.Y <= 2 * Chunk.TileSize) return false;
+            && ground.Position.Y - ceiling.Position.Y <= JumpClearance.Headroom) return false;
         return true;
     }
 
@@ -435,9 +443,10 @@ public class CoveredJumpState : MovementState
         if (!ctx.TryGetGround(out var ground)) return false;
         if (!ctx.TryGetCeiling(out var ceiling)) return false;   // must actually be under something
         if (!ctx.Input.Left && !ctx.Input.Right) return false;  // must be pressing a direction
-        // Only relevant for low ceilings (≤ 2 tiles). At 3+ tiles a regular jump fits with margin —
-        // JumpingState handles those, and its precondition is the complement of this one.
-        if (ground.Position.Y - ceiling.Position.Y > 2 * Chunk.TileSize) return false;
+        // Only relevant for ceilings inside the standing body headroom. Above it a regular
+        // jump fits with margin — JumpingState handles those, and its precondition is the
+        // complement of this one.
+        if (ground.Position.Y - ceiling.Position.Y > JumpClearance.Headroom) return false;
         return TryPickOpenDir(ctx, out _, out _);
     }
 

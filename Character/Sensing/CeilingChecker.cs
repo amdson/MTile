@@ -48,7 +48,9 @@ public static class CeilingChecker
         if (dir != 1 && dir != -1) return false;
         if (!TryFind(body, chunks, out var ceiling)) return false;
 
-        const int MaxScanTiles = 5;
+        // Scan reach is body-relative: 8 cells x 11 px tiles ~= 88 px (was 5 x 16 px).
+        // The count is fixed, NOT derived — recheck it if Chunk.TileSize changes again.
+        const int MaxScanTiles = 8;
         const int ts = Chunk.TileSize;
         float ceilingBottomY = ceiling.Position.Y;
         // Sample halfway up into the slab so a 1-tile-thick ceiling registers cleanly.

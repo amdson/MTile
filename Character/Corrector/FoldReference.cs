@@ -42,10 +42,11 @@ public static class FoldReference
     private const float DeformWeight = 1e-3f;   // regularizer: prefer the raw reference
     // Position-space deform authority: how far the path may deviate from the
     // reference (px), and how fast that deviation may build (px/s — the
-    // implied extra velocity; the old velocity-update cap's role). Half a
-    // tile of position authority covers ducks/steps the classification
-    // admits; anything needing more was already a give-up at row emission.
-    private const float DeformCap = Chunk.TileSize * 0.5f;
+    // implied extra velocity; the old velocity-update cap's role). 8 px of
+    // position authority covers ducks/steps the classification admits;
+    // anything needing more was already a give-up at row emission.
+    // Body-relative px, deliberately independent of Chunk.TileSize.
+    private const float DeformCap = 8f;
     private const float SlewCap   = 150f;
 
     // TEMP EXPERIMENT: redirect audit counters (write-only debug stats).

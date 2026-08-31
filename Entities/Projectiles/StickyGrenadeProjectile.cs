@@ -23,7 +23,7 @@ public class StickyGrenadeProjectile : Projectile
     private const float StickStopSpeed   = 28f;         // |v| below this → considered stuck
     private const float ArmDelay         = 0.04f;       // skip stop-check at t=0
     private const float BodyMass         = 0.6f;
-    private const float ExplosionRadius  = 3.5f * Chunk.TileSize;   // covers ~3.5 tiles each side
+    private const float ExplosionRadius  = 56f;         // px each side, tile-size independent
     private const int   ExplosionSegments = 12;
     private const float SegmentHalfSize  = 10f;
     private const float ExplosionKnockback = 430f;

@@ -504,13 +504,14 @@ public class EnemyPillarAction : EnemyActionState
     protected virtual float Recovery      => 0.55f;
     protected virtual float MinRange      => 60f;
     protected virtual float MaxRange      => 220f;
-    // Lateral offset in tiles from the enemy body to the pillar column. 3 →
-    // ~48 px in front, far enough that the pillar doesn't sprout under the
-    // enemy itself.
-    protected virtual int   ColumnOffset  => 3;
-    // Pillar height in tiles. 4 → 64 px, roughly twice a brute's diameter —
-    // reads as "a wall," not a stub.
-    protected virtual int   PillarHeight  => 4;
+    // Lateral offset in tiles from the enemy body to the pillar column. 4 →
+    // ~44 px in front, far enough that the pillar doesn't sprout under the
+    // enemy itself. Sized in PX, not tiles: was 3 on the old 16 px grid
+    // (48 px); rescaled for the 11 px grid to hold the same standoff.
+    protected virtual int   ColumnOffset  => 4;
+    // Pillar height in tiles. 6 → 66 px, roughly twice a brute's diameter —
+    // reads as "a wall," not a stub. Was 4 on the old 16 px grid (64 px).
+    protected virtual int   PillarHeight  => 6;
     protected virtual TileType TileType   => TileType.Stone;
 
     public override int ActivePriority  => 28;
@@ -630,9 +631,11 @@ public class EnemyBlockTrailAction : EnemyActionState
     protected virtual float    MinRange     => 50f;
     protected virtual float    MaxRange     => 200f;
     // Block count laid across the active window. Per-block placement
-    // threshold is at WindupDuration + i * (Active / NumBlocks).
-    protected virtual int      NumBlocks    => 5;
-    protected virtual int      StartOffset  => 2;
+    // threshold is at WindupDuration + i * (Active / NumBlocks). The trail is
+    // a PX-sized barrier, not a tile count: 7 → 77 px, matching the 5 blocks
+    // (80 px) it laid on the old 16 px grid. StartOffset likewise: 3 → 33 px.
+    protected virtual int      NumBlocks    => 7;
+    protected virtual int      StartOffset  => 3;
     protected virtual TileType TileType     => TileType.Dirt;
 
     public override int ActivePriority  => 28;

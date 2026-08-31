@@ -169,26 +169,29 @@ public class MovementConfig
     // Corridor probe (shared local-geometry sensing for the maneuver layer —
     // see Plans/CORRIDOR_MANEUVER_PLAN.md and Character/CorridorProbe.cs).
     // Columns of tiles scanned ahead of the body's leading face (capped at
-    // Corridor.MaxColumns). Deliberately short: ~2 blocks reads as character
-    // reflexes; more reads as autopilot.
-    public int   CorridorHorizonColumns { get; set; } = 4;
+    // Corridor.MaxColumns = 6, so this is the maximum). Deliberately short:
+    // ~6 columns / ~66 px reads as character reflexes; more reads as autopilot.
+    public int   CorridorHorizonColumns { get; set; } = 6;
     // Vertical search window around the standing base (px). Up must cover the
     // tallest measurable rise (CorridorMaxRise) plus headroom above it; down
     // bounds how deep a drop still counts as "floor" rather than NoFloor.
-    public float CorridorWindowUp   { get; set; } = 4f * Chunk.TileSize;
-    public float CorridorWindowDown { get; set; } = 2.5f * Chunk.TileSize;
-    // Minimum floor-to-ceiling gap (px) a column must offer to be traversable.
-    // Between 1 tile (impassable) and 2 tiles (tight standing fit).
-    public float CorridorMinGap { get; set; } = 1.5f * Chunk.TileSize;
-    // Largest single-column floor rise (px) that is still maneuver territory
-    // (mantle/arc-jump envelope, ~2.6 tiles). Above this the column is a wall.
-    public float CorridorMaxRise { get; set; } = 2.625f * Chunk.TileSize;
+    // Body-relative px, deliberately independent of Chunk.TileSize.
+    public float CorridorWindowUp   { get; set; } = 64f;
+    public float CorridorWindowDown { get; set; } = 40f;
+    // Minimum floor-to-ceiling gap a column must offer to be traversable — a
+    // tight standing body fit. Body-relative px, independent of Chunk.TileSize.
+    public float CorridorMinGap { get; set; } = 24f;
+    // Largest single-column floor rise that is still maneuver territory (the
+    // mantle/arc-jump envelope). Above this the column is a wall.
+    // Body-relative px, independent of Chunk.TileSize.
+    public float CorridorMaxRise { get; set; } = 42f;
 
     // Mantle (deliberate flush-step climb — see MantleState, Plans/CORRIDOR_MANEUVER_PLAN.md).
-    // Rise band in px the mantle accepts (the 1-block vault band: 0.5..1.2 tiles, matching
+    // Rise band in px the mantle accepts (the leg-reach vault band, matching
     // ExposedUpperCornerChecker's). Steeper is arc-jump territory; shallower is a walk-over.
-    public float MantleMinRise { get; set; } = 0.5f * Chunk.TileSize;
-    public float MantleMaxRise { get; set; } = 1.25f * Chunk.TileSize;
+    // Body-relative px, deliberately independent of Chunk.TileSize.
+    public float MantleMinRise { get; set; } = 8f;
+    public float MantleMaxRise { get; set; } = 20f;
     // Body face must be within this many px of the step lip — the mantle is the flush/slow
     // fallback for the case the ramps' steep-angle taper refuses, not a running maneuver.
     public float MantleFlushDistance { get; set; } = 6f;
@@ -204,7 +207,8 @@ public class MovementConfig
     // to MantleState.
     // Body face may be up to this many px from the lip when the hop fires — unlike the
     // mantle's flush gate, the arc wants a little run-up room so entry speed carries over.
-    public float ArcJumpTriggerDistance { get; set; } = 1.25f * Chunk.TileSize;
+    // Body-relative px, deliberately independent of Chunk.TileSize.
+    public float ArcJumpTriggerDistance { get; set; } = 20f;
     // Extra apex height (px) above the landing gate the entry hop budgets for, so the
     // ballistic rollout crosses the lip with a small clearance instead of grazing it.
     public float ArcJumpApexMargin { get; set; } = 4f;
@@ -218,9 +222,9 @@ public class MovementConfig
     public float CorrectorMargin                { get; set; } = 2f;
     public float CorrectorDeltaWeight           { get; set; } = 5f;
     // Body face within this many px of the rise lip before the vault fires — larger
-    // than ArcJumpTriggerDistance because the corrector plans the whole arc (2 tiles,
-    // the corridor plan's reflex-vs-autopilot boundary).
-    public float CorrectorClimbTriggerDistance  { get; set; } = 2f * Chunk.TileSize;
+    // than ArcJumpTriggerDistance because the corrector plans the whole arc.
+    // Body-relative px, deliberately independent of Chunk.TileSize.
+    public float CorrectorClimbTriggerDistance  { get; set; } = 32f;
     // Ambient corrector mode (plan step 7 — replaces the ambient reflex ramps).
     // Runs during free movement under a held direction: free-coast predict over a
     // short horizon, passable-feature rows only, redirect-only solve, applied iff
@@ -261,26 +265,31 @@ public class MovementConfig
     public float FoldHoverOffset                { get; set; } = 10f;
     public float CrouchHoverOffset              { get; set; } = 0f;
     // Climb band: how far above the support anchor the envelope may bind a
-    // floor. 1-high ledges (1 tile) must bind for Standing; a crouch covers only
-    // surface roughness. NOTE: movement_config.json overrides this in px — keep
-    // it in sync (or delete the JSON key) when tweaking Chunk.TileSize.
-    public float FoldClimbReachUp               { get; set; } = 1.25f * Chunk.TileSize;
+    // floor — a leg reach, so it is body-relative px and deliberately
+    // independent of Chunk.TileSize. Low ledges must bind for Standing; a
+    // crouch covers only surface roughness. movement_config.json also carries
+    // this key at the same value (20); no TileSize caveat applies any more.
+    public float FoldClimbReachUp               { get; set; } = 20f;
     public float CrouchClimbReachUp             { get; set; } = 4f;
     // Lattice engine (FoldProfile.RiseCost): the state's price per px CLIMBED
     // on the planned path, traded against LatticeProgressWeight at the goal;
     // drops are free (gravity delivers them). The binding case is the body
     // PRESSED AGAINST the obstacle, where standing still earns nothing and
     // the window's whole progress (7 × 56 = 392) is the climb's reward:
-    // Standing 16 mounts a 16 px block (256 < 392) and refuses a 32 px wall
-    // (512 > 392); Crouch 30 refuses the block too (480 > 392) — a crouch
-    // does not mount ledges.
+    // Standing 16 buys a climb ceiling of 392/16 ≈ 24.5 px — it mounts a
+    // 2-tile (22 px) step (352 < 392) and refuses a 3-tile (33 px) wall
+    // (528 > 392); Crouch 30 refuses the 2-tile step too (660 > 392) — a
+    // crouch does not mount ledges. The ceiling is in PX and unchanged by
+    // Chunk.TileSize; only the tile counts it corresponds to moved.
     public float FoldRiseCost                   { get; set; } = 16f;
     public float CrouchRiseCost                 { get; set; } = 30f;
     // Duck budget — FoldClimbReachUp's downward mirror for the ref engine's
     // wall classification: a frontal obstacle whose duck-under needs at most
     // this much descent is entered by ducking; anything deeper is a give-up
-    // (raw carry into an honest bonk). px, same TileSize caveat as above.
-    public float FoldDuckReach                  { get; set; } = 1.0f * Chunk.TileSize;
+    // (raw carry into an honest bonk). Body-relative px, deliberately
+    // independent of Chunk.TileSize; movement_config.json carries the same
+    // value (16), so no sync caveat applies any more.
+    public float FoldDuckReach                  { get; set; } = 16f;
     // Fixed inner iteration budget of the per-tick fold solve (determinism
     // requires it fixed; raise for convergence, costs linearly).
     public int   FoldIterations                 { get; set; } = 16;
@@ -320,14 +329,19 @@ public class MovementConfig
     public float FoldLmMaxForce                 { get; set; } = 8000f;
     // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — the FoldEngine
     // "lattice" reference generator, also the freeze-frame oracle. Window =
-    // the cone's footprint from the seed: LookaheadTiles along u, ±L·tanθ
+    // the cone's footprint from the seed: LookaheadPx along u, ±L·tanθ
     // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3) and
     // is set to "90° − ε" so every forward offset is an edge — climbing is
     // priced by RiseWeight, never filtered (with the ±3 offset table any
     // value ≤ 0.316 admits the same edges). Sim-affecting under "lattice" —
     // hot-reload is gated like every movement knob.
-    public float LatticeLookaheadTiles          { get; set; } = 3.5f;
-    public int   LatticeCellsPerTile            { get; set; } = 5;
+    // Planning lookahead along u — a physical distance, so body-relative px
+    // and deliberately independent of Chunk.TileSize.
+    public float LatticeLookaheadPx             { get; set; } = 56f;
+    // DP grid cell = Chunk.TileSize / this ⇒ ~3.7 px per cell. Tuned for the
+    // physical cell size, not the tile count: raising it past the intended
+    // resolution inflates the node count quadratically. Clamped to [2,8].
+    public int   LatticeCellsPerTile            { get; set; } = 3;
     public float LatticeConeCos                 { get; set; } = 0.05f;
     // Progress worth per px along u, traded against the edge costs at the
     // goal (argmax of w·progress − cost over every reachable node). Bounded by
@@ -396,7 +410,8 @@ public class MovementConfig
     public float PeelKernelSigma   { get; set; } = 0.7f * Chunk.TileSize;
     public float PeelTetherRate    { get; set; } = 3.0f;
     public float PeelJoinThreshold { get; set; } = 0.25f;
-    // Player→group spring: F = Coeff * (|mouse − group COM| / TileSize)^Power.
+    // Player→group spring: F = Coeff * (|mouse − group COM| / 16px)^Power. The
+    // divisor is a FIXED px scale, not Chunk.TileSize — see PullPointEntity.
     // Exceeding Max snaps the spring and cancels the whole attempt instantly.
     public float PeelSpringCoeff { get; set; } = 4f;
     public float PeelSpringPower { get; set; } = 1.5f;

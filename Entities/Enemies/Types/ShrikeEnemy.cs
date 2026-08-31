@@ -221,10 +221,11 @@ public class ShrikeDetonateAction : EnemyActionState
     // without ever "touching" it (PracticeBall.ContactPad, same number).
     protected virtual float ContactPad   => 1.5f;
 
-    // Blast reach. Matches ChargedBlast at 2.5 tiles: big enough that a dodge has
-    // to be a real one, small enough that the crater shapes a hole rather than
+    // Blast reach, px — tile-size independent. Matches ChargedBlast at 40 px
+    // (2.5 tiles on the old 16 px grid): big enough that a dodge has to be a
+    // real one, small enough that the crater shapes a hole rather than
     // clearing a room.
-    protected virtual float RadiusTiles  => 2.5f;
+    protected virtual float RadiusPx     => 40f;
     protected virtual int   Segments     => 10;
 
     // One number for both channels, as StickyGrenadeProjectile does. Against a
@@ -239,7 +240,7 @@ public class ShrikeDetonateAction : EnemyActionState
     // the epicentre needs a box of its own or the one place the blast doesn't
     // reach is the point of impact. Straight up (y-down), because the common
     // case is a player who has just been reached at head height.
-    protected virtual float CoreHalfSize => 0.9f * Chunk.TileSize;
+    protected virtual float CoreHalfSize => 14.4f;   // px, tile-size independent
     protected virtual Color BlastColor   => new(255, 170, 90);
 
     // Nothing else is registered on this enemy, so the absolute numbers matter
@@ -291,7 +292,7 @@ public class ShrikeDetonateAction : EnemyActionState
     private void Detonate(in EnemyContext ctx, in EnemyActionVars v)
     {
         var   center   = ctx.Self.Body.Position;
-        float radius   = RadiusTiles * Chunk.TileSize;
+        float radius   = RadiusPx;
         var   hitboxes = ctx.Hitboxes;
 
         if (hitboxes != null)

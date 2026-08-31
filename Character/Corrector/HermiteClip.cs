@@ -188,15 +188,17 @@ public sealed class HermiteClipDocument
         {
             Name = name,
             Entry = Vector2.Zero,
-            // ONE TILE up and across — a neutral, grid-legible starting box. This used to be
-            // 26×−40, which is RefLedgeW/RefLedgeH verbatim: every arc made in the editor
-            // silently started life ledge-pull-shaped (2.5 tiles of rise), and any that
-            // never had its anchors retouched still is. Author the real span deliberately.
-            Gate  = new Vector2(Chunk.TileSize, -Chunk.TileSize),
+            // A 16×16 px up-and-across box — a neutral starting vault arc. The span is
+            // a MANEUVER SHAPE sized to the player's body, so it is body-relative px and
+            // deliberately independent of Chunk.TileSize. This used to be 26×−40, which
+            // is RefLedgeW/RefLedgeH verbatim: every arc made in the editor silently
+            // started life ledge-pull-shaped, and any that never had its anchors
+            // retouched still is. Author the real span deliberately.
+            Gate  = new Vector2(16f, -16f),
             Keys =
             {
-                new HermiteClipKey { X = 0f,             Y = 0f,              TX = Chunk.TileSize,        TY = -2f * Chunk.TileSize },
-                new HermiteClipKey { X = Chunk.TileSize, Y = -Chunk.TileSize, TX = 1.5f * Chunk.TileSize, TY = 0f },
+                new HermiteClipKey { X = 0f,   Y = 0f,    TX = 16f, TY = -32f },
+                new HermiteClipKey { X = 16f,  Y = -16f,  TX = 24f, TY = 0f   },
             },
         };
         doc.RederiveT();

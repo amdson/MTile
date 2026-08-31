@@ -14,11 +14,16 @@
   //                          break-through). 0 = stick.
   // BounceImpulseThreshold:  below this |vnRel|, no bounce — body sticks
   //                          (prevents quiver near rest).
+  //
+  // Every DamagePerUnitImpulse below was multiplied by 16/11 = 1.4545 when the tile
+  // grid went from 16px to 11px: the impact face is a fixed physical width, so it now
+  // touches 1.4545x more cells and each cell's share of the split would otherwise drop
+  // by the same factor.
 
   "player": {
     "Mass": 5.5,
     "ImpulseThreshold": 100,
-    "DamagePerUnitImpulse": 0.0008,
+    "DamagePerUnitImpulse": 0.001164,
     "BreakThreshold": 800,
     "NormalRetainOnBreak": 0.6,
     "BounceRestitution": 0.35,
@@ -28,7 +33,7 @@
   "ball": {
     "Mass": 2.5,
     "ImpulseThreshold": 200,
-    "DamagePerUnitImpulse": 0.1,
+    "DamagePerUnitImpulse": 0.14545,
     "BreakThreshold": 1100,
     "NormalRetainOnBreak": 0.6,
     "BounceRestitution": 0,
@@ -38,7 +43,7 @@
   "energy_ball": {
     "Mass": 1.2,
     "ImpulseThreshold": 50,
-    "DamagePerUnitImpulse": 0.04,
+    "DamagePerUnitImpulse": 0.058182,
     "BreakThreshold": 80,
     "NormalRetainOnBreak": 0.55,
     "BounceRestitution": 0,

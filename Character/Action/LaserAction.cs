@@ -46,7 +46,7 @@ public class LaserAction : ActionState
     private const float RecoverySeconds = 0.30f;
 
     // ── Geometry ──────────────────────────────────────────────────────────────────
-    private const float MaxLength   = 26f * Chunk.TileSize;      // 416px — the box's far end
+    private const float MaxLength   = 416f;                      // px, tile-size independent — the box's far end
     private const float HalfWidth   = 10f;                       // 20px across ≈ 1.25 tiles
     private const float MuzzleOffset = PlayerCharacter.Radius * 1.2f;
     // Front speed. Sized so an unobstructed shot reaches the far end at ~0.26s, leaving

@@ -66,12 +66,18 @@ public static class ImpactSpringField
     // Radius has to leave room for the biggest crater the model wants to make, or the
     // window edge starts deciding the shape instead of the physics — at 5 a hard hit came
     // out as a flat-sided rectangle, clipped rather than tapered.
+    // Radius is in CELLS, so the physical window it buys shrinks with TileSize: at the old
+    // 16px grid, Radius 7 gave a span of 2·7+1 = 15 cells = 240px. On the 11px grid the
+    // same 7 would collapse to 165px and start clipping craters that used to taper, so it
+    // is 10 here — span 21 = 231px, the closest to 240 without overshooting the cost (the
+    // scratch buffers are Span·Span, 441 cells vs the old 225).
     // Rounds must be at least Radius — a Jacobi sweep advances influence exactly one hop,
     // so fewer would leave the outer ring permanently zero — but it also has to be enough
     // for the field to converge, and convergence gets slower as Beta rises. At Beta = 9,
     // five rounds is nowhere near settled and the crater comes out narrower than a much
     // softer material would give, which is the opposite of what the parameter means.
-    public const int Radius = 7;
+    // 20 ≥ 10, so Rounds still clears the Radius floor with room for convergence.
+    public const int Radius = 10;
     public const int Rounds = 20;
 
     private const int Span = 2 * Radius + 1;
@@ -87,7 +93,12 @@ public static class ImpactSpringField
     // tile HP. Calibrated so a single Dirt cell gives way at roughly the speed it used to
     // under the old per-cell impulse cap, leaving the low-speed feel alone; the crater is
     // what the surplus above that now buys.
-    private const float HpPerUnitEnergy = 1.0f / 245000f;
+    // The calibration is per CELL, but what the impact should buy is a physical VOLUME of
+    // rock, and a fixed area holds (16/11)² = 2.116x more cells on the 11px grid than on
+    // the 16px grid this was tuned against. So the original 1/245000 is scaled by that
+    // factor to keep the same energy carving the same physical crater:
+    //     1/245000 · (16/11)² = 1/115800.
+    private const float HpPerUnitEnergy = 1.0f / 115800f;
 
     // Below this share of a cell's remaining strength, an impact does nothing at all.
     // Real materials deform elastically under light load and spring back; only past the

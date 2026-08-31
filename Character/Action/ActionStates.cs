@@ -2323,11 +2323,15 @@ public class BlockBurstAction : ActionState
     private const float Duration      = 0.26f;
     // Where the foam appears. Beyond BlockReadyAction.BuildReach on purpose — this is
     // the ranged option, so it stays useful past where drag-building gives out.
-    private const float BurstReach    = Chunk.TileSize * 8f;
+    // Px, deliberately independent of tile size: calibrated against the player and
+    // combat spacing, not the grid.
+    private const float BurstReach    = 128f;
     private const float RecoverySeconds = 0.18f;
-    // Mass dropped on the (force-sprouted) center cell. Four units is exactly one per
-    // neighbour once the center forwards them, i.e. the plus. See Enter.
-    private const float MassInjection = 4f * TileMassField.Threshold;
+    // Mass dropped on the (force-sprouted) center cell. Denominated in tile-equivalents,
+    // so it rescales with the grid: 4 tiles at the old 16px grid = 8.5 at the 11px grid;
+    // same physical volume. At the old grid that was exactly one unit per neighbour once
+    // the center forwards them, i.e. the plus. See Enter.
+    private const float MassInjection = 8.5f * TileMassField.Threshold;
 
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
@@ -2533,7 +2537,8 @@ internal static class BlockEruptionHelpers
     // Scanned row-major over the bounding square in ascending cell order, so the count
     // (and therefore the ball's mass) is identical on both peers and across a rollback
     // replay.
-    private const float EruptRecruitRadiusTiles = 4.5f;
+    // Px, deliberately independent of tile size (4.5 tiles at the old 16px grid).
+    private const float EruptRecruitRadiusPx = 72f;
 
     // Discharge every charged cell within the recruit radius of `at`; returns how many.
     // Callers multiply by BuildMeters.EruptMax to get the charge units contributed.
@@ -2543,9 +2548,8 @@ internal static class BlockEruptionHelpers
 
         int   cx     = (int)MathF.Floor(at.X / Chunk.TileSize);
         int   cy     = (int)MathF.Floor(at.Y / Chunk.TileSize);
-        int   span   = (int)MathF.Ceiling(EruptRecruitRadiusTiles);
-        float radius = EruptRecruitRadiusTiles * Chunk.TileSize;
-        float r2     = radius * radius;
+        int   span   = (int)MathF.Ceiling(EruptRecruitRadiusPx / Chunk.TileSize);
+        float r2     = EruptRecruitRadiusPx * EruptRecruitRadiusPx;
 
         int taken = 0;
         for (int dy = -span; dy <= span; dy++)
@@ -3157,7 +3161,8 @@ public class BlockGrabAction : ActionState
     internal const float GrabReach      = PullPointEntity.GrabReach;
     // Cursor travel from the press point that counts as "a drag" (legacy rip). Under
     // this it's a click, and the action lapses without taking anything.
-    private const float DragThreshold   = Chunk.TileSize * 0.75f;
+    // Px, deliberately independent of tile size.
+    private const float DragThreshold   = 12f;
     // How long the press waits for that drag / the first tethered cell before giving up.
     private const float GrabWindow      = 0.60f;
     private const float RecoverySeconds = 0.20f;

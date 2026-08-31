@@ -53,7 +53,7 @@ public class LobbedAreaProjectile : Projectile
     // picks the core hit's knockback direction.
     private const float StillSpeed        = 30f;
     private const float ArmDelay          = 0.04f;
-    private const float ExplosionRadius   = 3f * Chunk.TileSize;
+    private const float ExplosionRadius   = 48f;   // px, tile-size independent
     private const int   ExplosionSegments = 10;
     private const float SegmentHalfSize   = 9f;
     private const float ExplosionKnockback = 320f;

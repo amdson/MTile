@@ -274,7 +274,7 @@ public class ZeusBoltAction : EnemyActionState
     protected virtual float MinRange     => 80f;
     protected virtual float MaxRange     => 640f;
     protected virtual float MuzzleOffset => 18f;
-    protected virtual float MaxLength    => 30f * Chunk.TileSize;   // 480px
+    protected virtual float MaxLength    => 480f;                   // px, tile-size independent
     protected virtual float HalfWidth    => 13f;                    // ~1.6 tiles across
     // TileMaxHP-units eaten per frame. Stone is 2.0, so ~1.5 stone cells of depth
     // per frame → the full 27 active frames trench roughly the whole MaxLength.
@@ -413,7 +413,7 @@ public class ZeusStrikeAction : EnemyActionState
 
     protected virtual float MaxRange     => 640f;
     protected virtual float MuzzleOffset => 16f;
-    protected virtual float MaxLength    => 30f * Chunk.TileSize;
+    protected virtual float MaxLength    => 480f;   // px, tile-size independent
     protected virtual float HalfWidth    => 5f;
     // A strike scars the hill rather than tunnelling it — one dirt cell of depth
     // per frame, and stone (2.0) stops it in one.
@@ -535,7 +535,7 @@ public class ZeusSweepAction : EnemyActionState
     protected virtual float MinRange     => 60f;
     protected virtual float MaxRange     => 620f;
     protected virtual float MuzzleOffset => 18f;
-    protected virtual float MaxLength    => 28f * Chunk.TileSize;
+    protected virtual float MaxLength    => 448f;   // px, tile-size independent
     protected virtual float HalfWidth    => 9f;
     protected virtual float Penetration  => 2.0f;
     protected virtual float Damage       => 2.1f;      // ≥ Stone MaxHP: the rake clears cells

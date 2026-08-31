@@ -50,7 +50,9 @@
   // Block peel (Shift+LMB grab) — see MovementConfig for each knob's role. Hot-reloads.
   // false restores the legacy one-frame drag-rip.
   "BlockPeelEnabled": true,
-  "PeelKernelSigma": 11.2,
+  // PeelKernelSigma is omitted on purpose: it decides how many TILES come away from a
+  // grab, so it must track tile size, and the code default (0.7 * Chunk.TileSize in
+  // MovementConfig.cs) does that. The old 11.2 literal here was a frozen 0.7*16.
   "PeelTetherRate": 3.0,
   "PeelJoinThreshold": 0.25,
   "PeelSpringCoeff": 4,

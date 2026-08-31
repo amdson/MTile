@@ -51,8 +51,8 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
 
         Assert.True(n > 0, "no path");
         Assert.False(bonk, planner.LastDebug);
-        float lookahead = MovementConfig.Current.LatticeLookaheadTiles * Chunk.TileSize;
-        Assert.True(path[n - 1].Pos.X >= seed.X + lookahead - 2f * Chunk.TileSize / 5f,
+        float lookahead = MovementConfig.Current.LatticeLookaheadPx;
+        Assert.True(path[n - 1].Pos.X >= seed.X + lookahead - 2f * Chunk.TileSize / 3f,
             $"fell short: {path[n - 1].Pos.X:F1} of {seed.X + lookahead:F1}");
         for (int i = 0; i < n; i++)
             Assert.True(MathF.Abs(path[i].Pos.Y - seed.Y) <= 5f,

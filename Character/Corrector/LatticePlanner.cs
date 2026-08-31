@@ -29,7 +29,7 @@ namespace MTile;
 public static class LatticePlanner
 {
     private const int   EdgeTicks   = 3;       // ticks integrated per edge
-    private const float CellSize    = Chunk.TileSize / 3f;   // ~5.3px dedup lattice
+    private const float CellSize    = 5.33f;   // px dedup lattice — body-relative, independent of Chunk.TileSize
     private const float VBin        = 40f;     // px/s dedup velocity bin
     private const int   FSamples    = 5;       // force-box samples per axis
     private const int   BeamWidth   = 128;     // best-cost survivors per layer

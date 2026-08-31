@@ -160,7 +160,9 @@ public static class GroundChecker
         if (dir != 1 && dir != -1) return false;
         if (!TryFind(body, chunks, PlayerCharacter.Radius, PlayerCharacter.Radius, out var ground)) return false;
 
-        const int MaxScanTiles = 5;
+        // Scan reach is body-relative: 8 cells x 11 px tiles ~= 88 px (was 5 x 16 px).
+        // The count is fixed, NOT derived — recheck it if Chunk.TileSize changes again.
+        const int MaxScanTiles = 8;
         const int ts = Chunk.TileSize;
         float floorTopY = ground.Position.Y;
         // Sample halfway into the floor tile so a 1-tile-thick platform registers cleanly.

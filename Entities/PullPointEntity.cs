@@ -41,12 +41,16 @@ namespace MTile;
 // CaptureState/RestoreState overrides; the scalars ride EntityData like any entity.
 public sealed class PullPointEntity : Entity, ITelegraphSource
 {
-    // Reach from the owner's body center, in tiles so it tracks Chunk.TileSize like the
-    // rest of the terrain verbs. BlockGrabAction/GrabAction gate the press on it too.
-    public const float GrabReach = Chunk.TileSize * 6f;
-    // Harvest radius around the press site for the legacy drag-rip. 1.6 tiles ⇒ the
-    // pressed cell plus its immediate neighbours, ~9 blocks on open ground.
-    private const float LegacyRipRadiusTiles = 1.6f;
+    // Reach from the owner's body center, in px — an arm's reach, calibrated against the
+    // player, so it is deliberately independent of Chunk.TileSize (6 tiles at the old
+    // 16px grid). BlockGrabAction/GrabAction gate the press on it too.
+    public const float GrabReach = 96f;
+    // Harvest radius around the press site for the legacy drag-rip, in px and likewise
+    // tile-size independent (1.6 tiles at the old 16px grid ⇒ the pressed cell plus its
+    // immediate neighbours, ~9 blocks on open ground).
+    // px scale the peel spring normalizes against (the old 16 px tile width).
+    private const float SpringDistanceScale = 16f;
+    private const float LegacyRipRadiusPx = 25.6f;
     // Width of the material tally, from the enum's own cardinality.
     private const int TileTypeCount = TileTypes.Count;
 
@@ -102,7 +106,7 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
     }
 
     // Legacy drag-rip (BlockPeelEnabled false): destroy every solid cell within
-    // LegacyRipRadiusTiles of the press site and bank the count. BreakCell (not
+    // LegacyRipRadiusPx of the press site and bank the count. BreakCell (not
     // DamageCell) because a grab takes the whole block. The dominant material becomes
     // the ball's type, so a dig through mixed ground throws back whatever it was mostly
     // made of. Returns false when nothing solid was left at the site.
@@ -112,8 +116,9 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         if (chunks == null) return false;
         int  cx   = (int)MathF.Floor(site.X / Chunk.TileSize);
         int  cy   = (int)MathF.Floor(site.Y / Chunk.TileSize);
-        int  span = (int)MathF.Ceiling(LegacyRipRadiusTiles);
-        float r2  = LegacyRipRadiusTiles * LegacyRipRadiusTiles;
+        float rt  = LegacyRipRadiusPx / Chunk.TileSize;
+        int  span = (int)MathF.Ceiling(rt);
+        float r2  = rt * rt;
 
         // Fixed array indexed by TileType rather than a Dictionary: no per-frame
         // allocation on the sim path, and a fixed winner-scan order.
@@ -228,7 +233,11 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         com /= _group.Count;
 
         float dist  = (TargetPos - com).Length();
-        float force = cfg.PeelSpringCoeff * MathF.Pow(dist / Chunk.TileSize, cfg.PeelSpringPower);
+        // Normalize the (physical, px) cursor->COM distance by a FIXED px length, not
+        // Chunk.TileSize: PeelSpringCoeff/Power/Max are calibrated against this scale,
+        // so letting it track tile size would silently stiffen the spring (~1.75x at
+        // the 11 px grid, at Power 1.5) for the same real drag.
+        float force = cfg.PeelSpringCoeff * MathF.Pow(dist / SpringDistanceScale, cfg.PeelSpringPower);
         _group.Strain = Math.Clamp(force / MathF.Max(1e-3f, cfg.PeelSpringMax), 0f, 1f);
 
         if (force > cfg.PeelSpringMax)

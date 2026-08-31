@@ -34,8 +34,8 @@ public class ChargedBlast : Entity
     // area-denial burst (StickyGrenade sits at 3.5 tiles, a charged clod further
     // still). Two and a half tiles takes out the block's immediate neighbours and
     // little else, so charging a wall shapes a hole rather than clearing a room.
-    private const float RadiusTiles     = 2.5f;
-    private const float Radius          = RadiusTiles * Chunk.TileSize;
+    // Px, deliberately independent of tile size (2.5 tiles at the old 16px grid).
+    private const float Radius          = 40f;
     private const int   Segments        = 12;
 
     // ── Crater channel ──────────────────────────────────────────────────────────
@@ -68,7 +68,7 @@ public class ChargedBlast : Entity
     // The core is a separate box because the ring can't cover its own centre: the
     // segments sit ON the ring, so without this the epicentre — the cell that actually
     // held the charge — is the one place the blast doesn't reach.
-    private const float CoreHalfSize    = 0.9f * Chunk.TileSize;
+    private const float CoreHalfSize    = 14.4f;   // px, tile-size independent
     // Straight up (y-down). A body standing on the charged block is the common case,
     // and the core's job there is to pop them off it; the ring handles anyone stood to
     // one side, with a direction that actually points away from the blast.

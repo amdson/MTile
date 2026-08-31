@@ -12,23 +12,23 @@ public static class ExposedUpperCornerChecker
 {
     private const float ProbeSlack = 18f;
 
-    // ParkourState vault precondition band, in tile heights above the body's
+    // ParkourState vault precondition band, in px above the body's
     // "standing base" — the Y where the body's feet would rest if grounded at
     // its current (X, Y):
     //   StandingBaseY = body.Position.Y + 2 * PlayerCharacter.Radius
     //                 = body center + (halfH + floatHeight)   (apex-to-floor in standing pose)
     // A corner whose WorldTop sits inside
-    //   [StandingBaseY - MaxClimbHeightTiles*TS, StandingBaseY - MinClimbHeightTiles*TS]
+    //   [StandingBaseY - MaxClimbHeightPx, StandingBaseY - MinClimbHeightPx]
     // is "vault-able": shallow enough to crest from the current altitude, tall
     // enough to actually be a step rather than the floor or a flush wall corner.
     //
-    // 0.5..1.2 brackets the canonical 1-block vault (TS) with small play margin.
-    // It excludes:
-    //   - 0-block (flush) corners — the body would just walk over.
-    //   - 2-block+ corners — the wall above the step is in the way (TallWall).
+    // This is a LEG REACH band: body-relative px, deliberately independent of
+    // Chunk.TileSize. It excludes:
+    //   - flush corners — the body would just walk over.
+    //   - corners taller than the reach — the wall above the step is in the way (TallWall).
     //   - corners the body has already crested (above the upper bound of the band).
-    private const float MinClimbHeightTiles = 0.5f;
-    private const float MaxClimbHeightTiles = 1.2f;
+    private const float MinClimbHeightPx = 8f;
+    private const float MaxClimbHeightPx = 19.2f;
 
     // ParkourState precondition: is there a vault-able upper corner on `wallDir`?
     // Picks the shallowest qualifying corner — largest WorldTop inside the band.
@@ -37,8 +37,8 @@ public static class ExposedUpperCornerChecker
         corner = default;
         var bounds = body.Bounds;
         float standingBaseY = body.Position.Y + 2f * PlayerCharacter.Radius;
-        float bandTop    = standingBaseY - MaxClimbHeightTiles * Chunk.TileSize;
-        float bandBottom = standingBaseY - MinClimbHeightTiles * Chunk.TileSize;
+        float bandTop    = standingBaseY - MaxClimbHeightPx;
+        float bandBottom = standingBaseY - MinClimbHeightPx;
 
         var probe = bounds.StripBeside(wallDir, ProbeSlack).WithVerticalRange(bandTop, bandBottom);
         float bodyFace = bounds.Side(wallDir);

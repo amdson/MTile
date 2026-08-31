@@ -179,7 +179,7 @@ public sealed class LatticePathPlanner
         float cosTheta = Math.Clamp(cfg.LatticeConeCos, 0.05f, 0.99f);
         int   perTile  = Math.Clamp(cfg.LatticeCellsPerTile, 2, 8);
         _cell = (float)Chunk.TileSize / perTile;
-        float L = cfg.LatticeLookaheadTiles * Chunk.TileSize;
+        float L = cfg.LatticeLookaheadPx;
 
         // Admitted offsets under the cone (§3.3). The cone is nearly 90° by
         // default (cosθ 0.05): every forward offset in the table is an edge and
