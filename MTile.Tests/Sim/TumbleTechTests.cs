@@ -87,9 +87,11 @@ public class TumbleTechTests(ITestOutputHelper output)
         var violations = new List<int>();
         for (int f = 0; f < 24; f++)
         {
-            // Impulse 300 < StunImpulseThreshold (350): hitstun only, no stun/tumble —
-            // isolates the WallCling capability gate.
-            player.Combat.OnHitRegistered(player.Frame + 1, 300f, Dt);
+            // Under CombatState.StunImpulseThreshold (280): hitstun only, no stun and
+            // no tumble — isolates the WallCling capability gate. Was 300, which the
+            // knockback pass turned into a stunning hit when the threshold came down
+            // from 440 with the rest of the numbers.
+            player.Combat.OnHitRegistered(player.Frame + 1, 200f, Dt);
 
             ctrl.InjectInput(new PlayerInput { Right = true });
             terrain.TickSprouts(Dt);
@@ -102,7 +104,7 @@ public class TumbleTechTests(ITestOutputHelper output)
         }
 
         Assert.True(sawHitstun, "Hitstun injection failed — never observed.");
-        Assert.False(player.Combat.StunActive, "Impulse 300 should not have stunned.");
+        Assert.False(player.Combat.StunActive, "Impulse 200 should not have stunned.");
         Assert.Empty(violations);
     }
 
@@ -123,7 +125,7 @@ public class TumbleTechTests(ITestOutputHelper output)
         var states = new List<string>(24);
         for (int f = 0; f < 24; f++)
         {
-            player.Combat.OnHitRegistered(player.Frame + 1, 500f, Dt);   // > 350 ⇒ stun
+            player.Combat.OnHitRegistered(player.Frame + 1, 500f, Dt);   // > 280 ⇒ stun
 
             ctrl.InjectInput(new PlayerInput { Right = true });
             terrain.TickSprouts(Dt);

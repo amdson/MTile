@@ -84,12 +84,21 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
     // Steps `frames`, pinning the player where the caller wants them (Zeus's column
     // knocks for 260 and its beams for more; letting the body get thrown around would
     // make "was the player visible" a different question every frame). Returns every
-    // action name Zeus opened.
-    private static HashSet<string> Run(Simulation sim, Vector2 pin, int frames,
-                                       ITestOutputHelper output = null)
+    // action name Zeus opened, and the PEAK damage the player had taken at any point.
+    //
+    // Peak, not the value at the end, because a pinned player who never fights back
+    // eventually dies: hits chip HP directly now, Simulation respawns on HP ≤ 0, and a
+    // respawn zeroes Combat.DamageTaken. Reading the tally after a long run would
+    // report "took no damage" for a player the boss actually killed — which is exactly
+    // backwards, and is what these tests started doing when the escalation model (under
+    // which a beam could never kill anyone, because direct hits cost no HP at all) was
+    // replaced.
+    private static (HashSet<string> Seen, float PeakDamage) Run(
+        Simulation sim, Vector2 pin, int frames, ITestOutputHelper output = null)
     {
         var zeus = FindZeus(sim);
         var seen = new HashSet<string>();
+        float peak = 0f;
         for (int f = 0; f < frames; f++)
         {
             sim.Player.Body.Position = pin;
@@ -97,9 +106,10 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
             sim.Step(default);
             string a = zeus.CurrentActionName;
             if (a.Length > 0) seen.Add(a);
+            if (sim.Player.Combat.DamageTaken > peak) peak = sim.Player.Combat.DamageTaken;
         }
-        output?.WriteLine($"actions: {string.Join(",", seen)}");
-        return seen;
+        output?.WriteLine($"actions: {string.Join(",", seen)}; peak damage {peak:F2}");
+        return (seen, peak);
     }
 
     private const int CycleFrames = 600;
@@ -121,7 +131,7 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
     public void ThunderColumnOpensWithNoLineOfSight()
     {
         var sim  = Build(Hidden);
-        var seen = Run(sim, Hidden, 2 * CycleFrames, output);
+        var (seen, _) = Run(sim, Hidden, 2 * CycleFrames, output);
 
         Assert.Contains("ZeusThunderColumnAction", seen);
     }
@@ -137,15 +147,15 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
     public void ThunderColumnDamagesAPlayerBehindCover()
     {
         var sim = Build(Hidden);
-        Assert.Equal(0f, sim.Player.Combat.DamagePercent);
+        Assert.Equal(0f, sim.Player.Combat.DamageTaken);
 
         // Several cycles: the column's blind aim is scattered by ±BlindJitter, so it is
         // not meant to connect every single time — only reliably enough that standing
         // still behind a wall is a losing plan.
-        Run(sim, Hidden, 4 * CycleFrames, output);
+        var (_, damage) = Run(sim, Hidden, 4 * CycleFrames, output);
 
-        output.WriteLine($"damage taken behind cover: {sim.Player.Combat.DamagePercent}");
-        Assert.True(sim.Player.Combat.DamagePercent > 0f,
+        output.WriteLine($"damage taken behind cover: {damage}");
+        Assert.True(damage > 0f,
                     "the player was never hit through the wall — cover is still free.");
     }
 
@@ -168,18 +178,18 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
 
         var sim = new Simulation(chunks, Hidden,
                                  g => g.SpawnEntity(EnemyFactory.Create(EntityKind.Zeus, ZeusPos)));
-        var seen = Run(sim, Hidden, 4 * CycleFrames, output);
+        var (seen, damage) = Run(sim, Hidden, 4 * CycleFrames, output);
 
         int roofLeft = 0;
         for (int c = RoofColA; c <= RoofColB; c++)
             if (chunks.GetCellState(c, RoofRow) == TileState.Solid) roofLeft++;
 
         output.WriteLine($"roof tiles left: {roofLeft}/{RoofColB - RoofColA + 1}, " +
-                         $"damage: {sim.Player.Combat.DamagePercent}");
+                         $"damage: {damage}");
 
         Assert.Contains("ZeusThunderColumnAction", seen);
         Assert.True(roofLeft < RoofColB - RoofColA + 1, "the column did not break any roof tile");
-        Assert.True(sim.Player.Combat.DamagePercent > 0f,
+        Assert.True(damage > 0f,
                     "the roof sheltered the player — the column should punch through it");
     }
 
@@ -212,12 +222,12 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
 
         var sim = new Simulation(chunks, playerAt,
                                  g => g.SpawnEntity(EnemyFactory.Create(EntityKind.Zeus, zeusAt)));
-        var seen = Run(sim, playerAt, 4 * CycleFrames, output);
+        var (seen, damage) = Run(sim, playerAt, 4 * CycleFrames, output);
 
         output.WriteLine($"at {dist:F0}px — actions: {string.Join(",", seen)}, " +
-                         $"damage: {sim.Player.Combat.DamagePercent}");
+                         $"damage: {damage}");
         Assert.Contains("ZeusThunderColumnAction", seen);
-        Assert.True(sim.Player.Combat.DamagePercent > 0f,
+        Assert.True(damage > 0f,
                     "the column opened but never connected at range.");
 
         // The beams stay home. If these fired, the change widened far more than intended.
@@ -240,7 +250,7 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
     public void ColumnStandsDownWhenTheBeamsCanTakeTheShot()
     {
         var sim  = Build(InTheOpen);
-        var seen = Run(sim, InTheOpen, 3 * CycleFrames, output);
+        var (seen, _) = Run(sim, InTheOpen, 3 * CycleFrames, output);
 
         Assert.DoesNotContain("ZeusThunderColumnAction", seen);
         // The control: Zeus is not simply idle out here. Something fired, so the column's
@@ -260,13 +270,13 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
 
         // Long enough in the open for a sighting to be recorded and the schedule to
         // come round: this is what puts something IN the memory.
-        var whileVisible = Run(sim, InTheOpen, CycleFrames, output);
+        var (whileVisible, _) = Run(sim, InTheOpen, CycleFrames, output);
         Assert.True(whileVisible.Count > 0, "Zeus never attacked a player standing in plain view.");
 
         // Now duck behind the wall and stay there. The remembered spot is out in the
         // open on Zeus's side, so Zeus can still see the spot it is shooting at — which
         // is the entire mechanism.
-        var whileHidden = Run(sim, Hidden, 2 * CycleFrames, output);
+        var (whileHidden, _) = Run(sim, Hidden, 2 * CycleFrames, output);
 
         var beams = new[] { "ZeusBoltAction", "ZeusStrikeAction", "ZeusSweepAction" };
         Assert.Contains(beams, b => whileHidden.Contains(b));

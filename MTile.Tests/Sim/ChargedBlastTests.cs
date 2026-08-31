@@ -88,23 +88,23 @@ public class ChargedBlastTests(ITestOutputHelper output)
         var terrain = Slab();
         var sim = Settled(terrain, CellCenter(18, 2), frames: 10);   // standing on the slab
 
-        float before = sim.Player.Combat.DamagePercent;
+        float before = sim.Player.Combat.DamageTaken;
         terrain.Charge.Set(19, 3);
         terrain.BreakCell(19, 3);
         for (int f = 0; f < 30; f++) sim.Step(new PlayerInput());
 
-        float after = sim.Player.Combat.DamagePercent;
+        float after = sim.Player.Combat.DamageTaken;
         output.WriteLine($"damage {before} -> {after}");
         Assert.True(after > before, "a body next to a detonating charged block should be hit");
 
-        // And it lands ONCE, at a heavy-but-not-absurd weight. The band is wide, but it
-        // is the guard that matters: the crater channel runs on tile HP (tens) while
-        // this one runs on percent contribution (~15× the number), so a blast that
-        // accidentally shares a constant between them — or double-dips because the
-        // shared HitId stopped deduping the core against the ring — shows up here as a
+        // And it lands ONCE, at a heavy-but-not-absurd weight: BlastDamage is 1.5 HP,
+        // three light slashes, out of a pool of 5. The guard is what matters — the
+        // crater channel runs on tile HP at a much larger number, so a blast that
+        // accidentally shares a constant between the two, or double-dips because the
+        // shared HitId stopped deduping the core against the ring, shows up here as a
         // hit several times heavier than any melee move in the game.
         float dealt = after - before;
-        Assert.InRange(dealt, 10f, 35f);
+        Assert.InRange(dealt, 1.0f, 2.5f);
     }
 
     // A body well outside the blast radius is untouched — the control for the test
@@ -115,12 +115,12 @@ public class ChargedBlastTests(ITestOutputHelper output)
         var terrain = Slab();
         var sim = Settled(terrain, CellCenter(2, 2), frames: 10);
 
-        float before = sim.Player.Combat.DamagePercent;
+        float before = sim.Player.Combat.DamageTaken;
         terrain.Charge.Set(19, 3);
         terrain.BreakCell(19, 3);
         for (int f = 0; f < 30; f++) sim.Step(new PlayerInput());
 
-        Assert.Equal(before, sim.Player.Combat.DamagePercent);
+        Assert.Equal(before, sim.Player.Combat.DamageTaken);
     }
 
     // The fuse is the whole reason this is an entity rather than hitboxes published at

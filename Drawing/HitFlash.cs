@@ -13,8 +13,8 @@ namespace MTile;
 // stamp to ADVANCE is therefore edge-detection that survives rollback, the same trick
 // HitFeelSystem and GameAudio.HitConnect use. Nothing here writes back to the sim.
 //
-// Why a stamp and not "health went down": a hit that only knocks back (players take
-// DamagePercent, not HP) would never register, and the stamp costs nothing extra —
+// Why a stamp and not "health went down": a hit absorbed by a guard, or one that
+// only knocks back, would never register — and the stamp costs nothing extra, since
 // the sim was already recording it for audio.
 public sealed class HitFlashTracker
 {

@@ -24,11 +24,10 @@ public class EnergyBallProjectile : Projectile
     private const float HitboxHalfSize     = 5f;
     private const float CollisionStopSpeed = 30f;
     private const float ArmDelay           = 0.03f;
-    // Sits in line with the brute's melee/lunge knockback (460/540) so a
-    // ranged punish reads like a thrown body-check on hit rather than a poke.
-    // vs player Mass 2.5 → 216 px/s; vs Brute Mass 1.2 → 450 px/s; vs Stalker
-    // Mass 1.0 → 540 px/s.
-    private const float KnockbackImpulse   = 540f;
+    // Sits in line with the creature melee/lunge knockback (250/300) so a ranged
+    // punish reads like the same family of hit. vs player Mass 2.5 → 132 px/s;
+    // vs Brute Mass 1.2 → 275 px/s; vs Stalker Mass 1.0 → 330 px/s.
+    private const float KnockbackImpulse   = 330f;
 
     private readonly int _hitId;
 

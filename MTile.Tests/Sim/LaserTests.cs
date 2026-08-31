@@ -62,7 +62,7 @@ public class LaserTests(ITestOutputHelper output)
         public bool  Fired;
         public float MaxReach;
         public float MinPower = float.MaxValue;
-        public float VictimPercent;
+        public float VictimDamage;
     }
 
     private static Trace Run(ChunkMap terrain, InputScript script,
@@ -93,7 +93,7 @@ public class LaserTests(ITestOutputHelper output)
                 }
             }
             if (ps.Length > 1)
-                trace.VictimPercent = MathF.Max(trace.VictimPercent, ps[1].Combat.DamagePercent);
+                trace.VictimDamage = MathF.Max(trace.VictimDamage, ps[1].Combat.DamageTaken);
         });
         return trace;
     }
@@ -157,7 +157,7 @@ public class LaserTests(ITestOutputHelper output)
     }
 
     // A body standing inside the swept box, well within reach, takes the hit through the
-    // ordinary hitbox path (escalation percent).
+    // ordinary hitbox path (escalation damage).
     [Fact]
     public void Laser_DamagesABodyInsideTheBox()
     {
@@ -168,9 +168,9 @@ public class LaserTests(ITestOutputHelper output)
             Faction       = Faction.Player2,
         };
         var trace = Run(Course('O'), FireRight(AimRight), new[] { victim });
-        output.WriteLine($"reach={trace.MaxReach:F0}px victimPercent={trace.VictimPercent:F1}");
+        output.WriteLine($"reach={trace.MaxReach:F0}px victimDamage={trace.VictimDamage:F1}");
 
-        Assert.True(trace.VictimPercent > 0f, "a body inside the laser box took no damage");
+        Assert.True(trace.VictimDamage > 0f, "a body inside the laser box took no damage");
     }
 
     // …and one standing past the point where the budget ran out does not: the box only
@@ -187,8 +187,8 @@ public class LaserTests(ITestOutputHelper output)
         };
         var terrain = Course('X');
         var trace = Run(terrain, FireRight(AimRight), new[] { victim });
-        output.WriteLine($"reach={trace.MaxReach:F0}px depth={TunnelDepth(terrain)} victimPercent={trace.VictimPercent:F1}");
+        output.WriteLine($"reach={trace.MaxReach:F0}px depth={TunnelDepth(terrain)} victimDamage={trace.VictimDamage:F1}");
 
-        Assert.Equal(0f, trace.VictimPercent);
+        Assert.Equal(0f, trace.VictimDamage);
     }
 }

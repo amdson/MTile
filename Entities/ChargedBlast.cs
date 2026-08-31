@@ -58,13 +58,13 @@ public class ChargedBlast : Entity
     private const float CraterRimDamage  = 14f;
 
     // ── Body channel ────────────────────────────────────────────────────────────
-    // A percent contribution, scaled by CombatState.PercentPerDamage (15) — so this is
-    // ~22%, about three light slashes, landed once. Heavy, as a whole avalanche meter
-    // should be, but well short of the ~45% that the raw tile-damage numbers above
-    // would have delivered if the two channels shared a constant. They read as one
-    // explosion and are on completely different scales; that is why they are separate.
+    // HP straight off the body — 1.5 is three light slashes, or 30% of a player's
+    // pool, landed once. Heavy, as a whole avalanche meter should be, but well short
+    // of what the raw tile-damage numbers above would deliver if the two channels
+    // shared a constant. They read as one explosion and are on completely different
+    // scales; that is why they are separate.
     private const float BlastDamage     = 1.5f;
-    private const float BlastKnockback  = 640f;
+    private const float BlastKnockback  = 400f;
     // The core is a separate box because the ring can't cover its own centre: the
     // segments sit ON the ring, so without this the epicentre — the cell that actually
     // held the charge — is the one place the blast doesn't reach.

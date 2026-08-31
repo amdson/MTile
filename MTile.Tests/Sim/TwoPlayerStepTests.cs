@@ -132,12 +132,12 @@ public class TwoPlayerStepTests(ITestOutputHelper output)
             sim.Step(p1In, default);
         }
 
-        // Direct hits feed the escalation percent now (Phase 5), not HP. P2 should
-        // accrue percent from P1's slashes; P1 stays at 0 (self-immune).
-        Assert.True(p2.Combat.DamagePercent > 0f,
-            $"P2 should accrue percent from slashes (got {p2.Combat.DamagePercent}).");
-        Assert.Equal(0f, p1.Combat.DamagePercent);   // attacker never hits itself
-        output.WriteLine($"P2 percent {p2.Combat.DamagePercent}; P1 at {p1.Combat.DamagePercent}.");
+        // A landed hit comes straight off the victim's HP. P2 should lose some to
+        // P1's slashes; P1 stays untouched (self-immune).
+        Assert.True(p2.Combat.DamageTaken > 0f,
+            $"P2 should lose HP to the slashes (got {p2.Combat.DamageTaken}).");
+        Assert.Equal(0f, p1.Combat.DamageTaken);   // attacker never hits itself
+        output.WriteLine($"P2 lost {p2.Combat.DamageTaken} HP; P1 lost {p1.Combat.DamageTaken}.");
     }
 
     [Fact]

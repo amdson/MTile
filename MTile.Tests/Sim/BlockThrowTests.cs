@@ -395,10 +395,10 @@ public class BlockThrowTests(ITestOutputHelper output)
             float shove = 0f;
             SimRunner.RunMulti(cfg, onFrameEntities: (f, ps, es) =>
             {
-                if (hurtFrame < 0 && ps[1].Combat.DamagePercent > 0f)
+                if (hurtFrame < 0 && ps[1].Combat.DamageTaken > 0f)
                 {
                     hurtFrame = f;
-                    hurtAt    = ps[1].Combat.DamagePercent;
+                    hurtAt    = ps[1].Combat.DamageTaken;
                     shove     = ps[1].Body.Velocity.X;
                 }
                 bool ball = false;
@@ -557,7 +557,7 @@ public class BlockThrowTests(ITestOutputHelper output)
 
             float selfHurt = 0f;
             SimRunner.RunMulti(Build(script, FloatingBlock(), 100),
-                onFrame: (f, ps) => selfHurt = MathF.Max(selfHurt, ps[0].Combat.DamagePercent));
+                onFrame: (f, ps) => selfHurt = MathF.Max(selfHurt, ps[0].Combat.DamageTaken));
 
             Assert.Equal(0f, selfHurt);
         });

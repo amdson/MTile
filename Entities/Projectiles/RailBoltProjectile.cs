@@ -32,16 +32,20 @@ public class RailBoltProjectile : Projectile
     // windup is the counterplay, the flight is the consequence.
     private const float Speed              = 1500f;
     private const float LifeSeconds        = 0.85f;
-    // Above Stone's MaxHP (2.0) so one pass clears a cell. Also the percent
-    // contribution on an entity hit — heavy, matched to the telegraph's length.
+    // Above Stone's MaxHP (2.0) so one pass clears a cell — a terrain requirement,
+    // which is why the body number below is authored separately rather than sharing it.
     private const float DamagePerFrame     = 2.6f;
+    // Heavy on a body too — 30% of a player's pool for the one attack in the set with
+    // a full wind-up to read — but three of them, not two.
+    private const float BodyDamage         = 1.5f;
     private const float HitboxHalfSize     = 6f;
     private const float CollisionStopSpeed = 200f;   // high: the bolt is fast, "slowed" means "blocked"
     private const float ArmDelay           = 0.03f;
-    // Launches the player hard along the flight line. vs player Mass 2.5 →
-    // ~380 px/s, i.e. a real displacement that can throw them into geometry
-    // (which is where the actual HP loss comes from — see CrushDamage).
-    private const float KnockbackImpulse   = 950f;
+    // Shoves the player along the flight line — vs player Mass 2.5, ~140 px/s.
+    // Was 950 (~380 px/s), sized when a hit cost no HP directly and the launch
+    // into geometry WAS the damage. Hits chip HP on their own now, so the bolt
+    // no longer has to fling you into a wall to matter.
+    private const float KnockbackImpulse   = 350f;
     // How many terrain halts the bolt survives. 3 ≈ a pillar's worth.
     private const int   DefaultBudget      = 3;
 
@@ -122,7 +126,7 @@ public class RailBoltProjectile : Projectile
             dir * KnockbackImpulse,
             Faction, Id, Color,
             // All, not EntitiesOnly — this is the whole point of the bolt.
-            targets: HitTargets.All,
+            targets: HitTargets.All, bodyDamage: BodyDamage,
             origin: p));
     }
 }

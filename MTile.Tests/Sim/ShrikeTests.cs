@@ -145,8 +145,8 @@ public class ShrikeTests(ITestOutputHelper output)
         // solver and for a shrike that overshoots once and comes back around.
         for (int f = 0; f < 90; f++) sim.Step(default);
 
-        float pct = sim.Player.Combat.DamagePercent;
-        output.WriteLine($"percent after the dive = {pct:F1}, shrike dead = {shrike.IsDead}");
+        float pct = sim.Player.Combat.DamageTaken;
+        output.WriteLine($"HP lost to the dive = {pct:F2}, shrike dead = {shrike.IsDead}");
 
         Assert.True(pct > 0f, "The dive never landed a blast on the player.");
         // It is a one-shot creature: the blast is also its death.

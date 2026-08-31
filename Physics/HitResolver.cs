@@ -16,7 +16,7 @@ namespace MTile;
 public enum KnockbackMode { Impulse, Collision }
 
 // Output contract shared by both modes so everything downstream (hitstun, recoil
-// inbox, escalation) stays mode-blind. If a caller ever needs to branch on the
+// inbox, damage) stays mode-blind. If a caller ever needs to branch on the
 // mode, the abstraction has leaked — extend this struct instead.
 public readonly struct HitResult
 {
@@ -29,8 +29,8 @@ public readonly struct HitResult
     // Impulse mode this is the raw authored KnockbackImpulse (preserving the old
     // recoil behavior exactly); in Collision mode it's the resolved J·n.
     public readonly Vector2 Impulse;
-    // Scalar attack strength for hitstun / stun-threshold / parry gates, in the
-    // same px/s-equivalent units CombatState's constants were tuned against:
+    // Scalar attack strength for hitstun / stun-threshold / armor gates, in the
+    // same px/s-equivalent units CombatState's constants are tuned against:
     // |KnockbackImpulse|·scale in Impulse mode, the (scaled) closing speed u in
     // Collision mode. Pre-mass, so strength reads consistently across masses.
     public readonly float Strength;
@@ -44,10 +44,17 @@ public readonly struct HitResult
 }
 
 // Pure hit → momentum resolution. Stateless and deterministic — safe to call from
-// any OnHit without snapshot implications. `scale` is the game-feel multiplier
-// applied on top of the authored numbers (the player's escalation KnockbackScale);
-// it scales the impulse in Impulse mode and the closing speed in Collision mode,
-// so Strength (and therefore stun thresholds) follows it consistently in both.
+// any OnHit without snapshot implications.
+//
+// `scale` is a game-feel multiplier on top of the authored numbers: it scales the
+// impulse in Impulse mode and the closing speed in Collision mode, so Strength (and
+// therefore the stun threshold) follows it consistently in both. It exists because
+// PlayerCharacter.OnHit used to pass the escalation KnockbackScale through it —
+// knockback grew with how much punishment the victim had already taken. Escalation
+// is gone and NO production caller passes this today; knockback is now a flat
+// property of the attack. Kept (and still tested) as the seam any future "this hit
+// lands harder than it says" effect should go through, rather than being smuggled
+// into HitResolver.
 public static class HitResolver
 {
     public static HitResult Resolve(in Hitbox hit, float targetMass, Vector2 targetVelocity,

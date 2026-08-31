@@ -12,7 +12,7 @@ namespace MTile.Tests;
 //
 //   1. Armor: a light slash landing inside a stab's armored window (windup +
 //      strike, threshold 300 vs Slash1 strength ~200) does NOT interrupt —
-//      percent still accrues, no hitstun registers, the stab completes.
+//      damage still lands, no hitstun registers, the stab completes.
 //   2. Flinch: a heavy hit (enemy stab, strength ~650) breaks the armor,
 //      registers, and evicts the victim's own stab mid-swing into Recovery.
 //   3. Guard break: an out-of-cone hit evicts a live guard AND starts the break
@@ -58,12 +58,12 @@ public class HitEvictionTests(ITestOutputHelper output)
             .Forever   (new PlayerInput { MouseWorldPosition = release });
     }
 
-    private (List<string> actions, List<bool> hitstun, float percent)
+    private (List<string> actions, List<bool> hitstun, float damage)
         Run(InputScript attacker, InputScript victim, int frames)
     {
         var actions = new List<string>(frames);
         var hitstun = new List<bool>(frames);
-        float percent = 0f;
+        float damage = 0f;
         SimRunner.RunMulti(new SimConfigMulti
         {
             Terrain = FlatGround(),
@@ -82,8 +82,8 @@ public class HitEvictionTests(ITestOutputHelper output)
             actions.Add(ps[1].CurrentActionName);
             hitstun.Add(ps[1].Combat.HitstunActive);
         },
-        outPlayers: ps => percent = ps[1].Combat.DamagePercent);
-        return (actions, hitstun, percent);
+        outPlayers: ps => damage = ps[1].Combat.DamageTaken);
+        return (actions, hitstun, damage);
     }
 
     private static int First(List<string> a, string name, int from = 0)
@@ -113,15 +113,15 @@ public class HitEvictionTests(ITestOutputHelper output)
 
         // Victim: stab enters f15 — the attacker's slash lands 1–2 frames into
         // the victim's armored wind-up.
-        var (actions, hitstun, percent) = Run(attacker, VictimStabScript(6), frames: 60);
+        var (actions, hitstun, damage) = Run(attacker, VictimStabScript(6), frames: 60);
 
         int stabFirst  = First(actions, "StabAction");
         int stabFrames = Count(actions, "StabAction");
-        output.WriteLine($"victim stab@{stabFirst} for {stabFrames}f, percent={percent}");
+        output.WriteLine($"victim stab@{stabFirst} for {stabFrames}f, damage={damage}");
 
         Assert.True(stabFirst >= 0, "Victim's stab gesture should fire StabAction.");
-        Assert.True(percent > 0f,
-            "The attacker's slash should still CONNECT (armor takes the damage as percent).");
+        Assert.True(damage > 0f,
+            "The attacker's slash should still CONNECT (armor eats the knockback, not the damage).");
         Assert.DoesNotContain(true, hitstun);   // armored ⇒ never registers ⇒ no hitstun
         // Not interrupted: the stab runs its full 18-frame activation.
         Assert.True(stabFrames >= 16,
@@ -204,14 +204,14 @@ public class HitEvictionTests(ITestOutputHelper output)
     [Fact]
     public void GuardRaisedJustInTime_AbsorbsCompletely()
     {
-        var (actions, hitstun, percent) = Run(AttackerStabScript(),
+        var (actions, hitstun, damage) = Run(AttackerStabScript(),
                                               FacingVictimGuardingAt(27), frames: 60);
 
         int guardFirst = First(actions, "GuardAction");
-        output.WriteLine($"guard@{guardFirst}, percent={percent}, hitstun={hitstun.IndexOf(true)}");
+        output.WriteLine($"guard@{guardFirst}, damage={damage}, hitstun={hitstun.IndexOf(true)}");
 
         Assert.True(guardFirst >= 0, "Shift should raise the guard before the stab lands.");
-        Assert.Equal(0f, percent);                     // nothing got through
+        Assert.Equal(0f, damage);                     // nothing got through
         Assert.DoesNotContain(true, hitstun);          // and it never registered
     }
 
@@ -222,7 +222,7 @@ public class HitEvictionTests(ITestOutputHelper output)
     [Fact]
     public void CleanBlock_DropsGuardThenRearmsImmediately()
     {
-        var (actions, _, percent) = Run(AttackerStabScript(),
+        var (actions, _, damage) = Run(AttackerStabScript(),
                                         FacingVictimGuardingAt(27), frames: 60);
 
         int guardFirst = First(actions, "GuardAction");
@@ -230,9 +230,9 @@ public class HitEvictionTests(ITestOutputHelper output)
         int lastOfRun = guardFirst;
         while (lastOfRun + 1 < actions.Count && actions[lastOfRun + 1] == "GuardAction") lastOfRun++;
         int back = First(actions, "GuardAction", lastOfRun + 1);
-        output.WriteLine($"guard {guardFirst}..{lastOfRun}, back@{back}, percent={percent}");
+        output.WriteLine($"guard {guardFirst}..{lastOfRun}, back@{back}, damage={damage}");
 
-        Assert.Equal(0f, percent);                     // it really was a clean block
+        Assert.Equal(0f, damage);                     // it really was a clean block
         Assert.True(back > 0, "Guard should come back up after a clean block.");
         // The 0.15s cooldown is 4 frames at this dt; a refunded block skips it.
         Assert.True(back - lastOfRun <= 2,
@@ -240,20 +240,20 @@ public class HitEvictionTests(ITestOutputHelper output)
     }
 
     // The point of the rework: parking on Shift is no longer invulnerability. The same
-    // hit that a fresh guard eats completely leaks most of its percent through a guard
+    // hit that a fresh guard eats completely leaks most of its damage through a guard
     // that has been held since the start of the run.
     [Fact]
     public void GuardHeldSinceLongBefore_LeaksTheHitThrough()
     {
-        var (actions, hitstun, percent) = Run(AttackerStabScript(),
+        var (actions, hitstun, damage) = Run(AttackerStabScript(),
                                               FacingVictimGuardingAt(4), frames: 60);
 
         int guardFirst = First(actions, "GuardAction");
         int hitFrame   = hitstun.IndexOf(true);
-        output.WriteLine($"guard@{guardFirst}, percent={percent}, hitstun@{hitFrame}");
+        output.WriteLine($"guard@{guardFirst}, damage={damage}, hitstun@{hitFrame}");
 
         Assert.True(guardFirst >= 0 && guardFirst < 20, "Guard should be live long before the hit.");
-        Assert.True(percent > 0f, "A stale guard must let damage through.");
+        Assert.True(damage > 0f, "A stale guard must let damage through.");
         Assert.True(hitFrame > 0, "…and the leaked hit still registers.");
         // Broken by the hit it failed to stop, and held Shift can't bring it back.
         int guardBack = First(actions, "GuardAction", hitFrame + 1);

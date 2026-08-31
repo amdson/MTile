@@ -208,8 +208,8 @@ public class GauntletEnemyTests(ITestOutputHelper output)
     }
 
     // Drop a Pouncer from `height` px directly above a stationary player and
-    // return the percent it inflicted. The player is left on the floor with no
-    // input, so the only thing that can raise its percent is the slam.
+    // return the HP it took off. The player is left on the floor with no input, so
+    // the only thing that can hurt it is the slam.
     private static float DropAndMeasurePercent(float height)
     {
         var playerSpawn = new Vector2(160f, FloorTopY - 12f);
@@ -226,9 +226,9 @@ public class GauntletEnemyTests(ITestOutputHelper output)
         for (int f = 0; f < 200; f++)
         {
             sim.Step(Idle);
-            if (sim.Player.Combat.DamagePercent > 0f) break;
+            if (sim.Player.Combat.DamageTaken > 0f) break;
         }
-        return sim.Player.Combat.DamagePercent;
+        return sim.Player.Combat.DamageTaken;
     }
 
     // ── Latcher ──────────────────────────────────────────────────────────────
@@ -279,11 +279,11 @@ public class GauntletEnemyTests(ITestOutputHelper output)
             if (latcher.Body.Position.Y > worstY) worstY = latcher.Body.Position.Y;
         }
 
-        Assert.True(sim.Player.Combat.DamagePercent > 0f,
+        Assert.True(sim.Player.Combat.DamageTaken > 0f,
             "Latcher never connected from an inverted position.");
         Assert.True(worstY < 56f,
             $"Latcher fell off the ceiling while attacking (lowest y {worstY:F1}).");
-        output.WriteLine($"Lowest y {worstY:F1}; player at {sim.Player.Combat.DamagePercent:F2}%.");
+        output.WriteLine($"Lowest y {worstY:F1}; player at {sim.Player.Combat.DamageTaken:F2}%.");
     }
 
     // ── Framework ────────────────────────────────────────────────────────────
@@ -386,7 +386,7 @@ public class GauntletEnemyTests(ITestOutputHelper output)
         var p = sim.Player;
         sb.Append($"P|{Bits(p.Body.Position.X)},{Bits(p.Body.Position.Y)};")
           .Append($"{Bits(p.Body.Velocity.X)},{Bits(p.Body.Velocity.Y)}|")
-          .Append($"{p.CurrentStateName}/{p.CurrentActionName}|pct{Bits(p.Combat.DamagePercent)}\n");
+          .Append($"{p.CurrentStateName}/{p.CurrentActionName}|pct{Bits(p.Combat.DamageTaken)}\n");
         foreach (var e in sim.Entities)
             sb.Append($"E{e.Id}:{e.Kind}|{Bits(e.Body.Position.X)},{Bits(e.Body.Position.Y)};")
               .Append($"{Bits(e.Body.Velocity.X)},{Bits(e.Body.Velocity.Y)}|hp{Bits(e.Health)}\n");

@@ -130,6 +130,9 @@ public struct PlayerData
     public float Health;
     public float HitInvulnRemaining;
     public int   LastCrushFrame;
+    // Last frame ANY HP was lost (hit or crush) — anchors the out-of-combat regen
+    // delay, so it has to survive a rollback like LastCrushFrame does.
+    public int   LastDamageFrame;
     public int   Frame;
 
     // FSM current selection + history rings, as registry indices.

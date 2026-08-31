@@ -68,25 +68,22 @@ public class CombatState
     // growing OnHitRegistered's parameter list for a value it doesn't otherwise need.
     public Vector2 LastHitDir;
 
-    // Escalation percent (COMBAT_FEEL_PLAN Phase 5). Monotonic within a life — every
-    // hit taken adds to it; it only resets on KO/respawn. Scales the knockback applied
-    // TO this player (KnockbackScale below), so early hits barely move you and high-%
-    // hits launch you — into terrain, where the real HP damage happens via the crush
-    // path. HP itself is a fast-regenerating pool; this percent is the lasting
-    // pressure. Snapshotted (CopyFrom). No blast zones — KO is HP→0 from hard splats.
-    public float DamagePercent;
-    // Per point of a move's Hitbox.Damage, how many percent points an incoming hit
-    // adds. Tuned so a light slash (Damage 0.5) adds ~7-8%.
-    private const float PercentPerDamage    = 15f;
-    // Knockback multiplier per percent point: applied = base × (1 + pct × this). At
-    // 100% knockback is ~2.5×, at 200% ~4×.
-    private const float KnockbackPerPercent = 0.015f;
-
-    // Multiplier on incoming knockback at the current percent (Phase 5).
-    public float KnockbackScale => 1f + DamagePercent * KnockbackPerPercent;
-    // Register an incoming hit's contribution to the escalation percent. `hitDamage`
-    // is the move's Hitbox.Damage (no longer applied to HP directly for players).
-    public void AddPercent(float hitDamage) => DamagePercent += hitDamage * PercentPerDamage;
+    // Cumulative HP this player has lost within the current life — every source
+    // (a landed hit, a crush impact) adds to it, and only a KO/respawn resets it.
+    // Health itself regenerates, so it cannot answer "has this player been hurt,
+    // and how badly" a few seconds after the fact; this can. Read by tests and by
+    // presentation; nothing in the sim branches on it. Snapshotted (CopyFrom).
+    //
+    // It replaced DamagePercent, the escalation meter this field's slot used to
+    // hold. That model routed every direct hit into a monotonic percent which
+    // scaled knockback, so hits pushed you around harder and harder and HP only
+    // came off when the resulting launch slammed you into terrain. Two things went
+    // wrong with it in play: knockback everywhere ended up enormous (a 100% player
+    // eats 2.5x launches from a light poke), and damage became indirect enough that
+    // a clean hit read as no consequence. Hits now cost HP directly — the same rule
+    // entities have always followed — and this meter is just the tally.
+    public float DamageTaken;
+    public void AddDamage(float hp) { if (hp > 0f) DamageTaken += hp; }
 
     // Short i-frame window, currently granted by a successful tech (Phase 4).
     // PlayerCharacter.OnHit early-returns while the current frame is before this.
@@ -199,11 +196,12 @@ public class CombatState
     public bool    LastParryCharged;   // that parry also armed GuardRetaliate
 
     // A parry only "charges" off weak incoming hits — strong attacks parry to
-    // zero damage but don't reward a counter. Tuned so Slash1 (KbI 200, dmg = MaxHP/2
-    // ≈ 1.5) DOES charge while Slash3 (KbI 380) and Stab (KbI 380) don't.
-    // Threshold compares against Hitbox.Damage, NOT KnockbackImpulse, so an attack
-    // with high knockback but low per-frame damage (e.g. a beam, sustained) still
-    // qualifies.
+    // zero damage but don't reward a counter. Threshold compares against
+    // Hitbox.Damage (HP off the victim), NOT the knockback, so an attack that
+    // shoves hard but barely hurts still qualifies. At 1.0 the whole slash kit
+    // (0.5), the stab (0.25) and a creature's melee swing (1.0) charge, while the
+    // heavy end — a brute's dive (1.6), a charged blast (1.5), a rail bolt or a
+    // Zeus laser (2.6) — parries clean but hands back no counter.
     private const float GuardChargeMaxDamage = 1.0f;
     private const float GuardChargedSeconds   = 0.8f;
     // Cone half-angle in radians — 60° each side of facing → 120° total coverage.
@@ -236,15 +234,22 @@ public class CombatState
     // Hitstun tuning (COMBAT_FEEL_PLAN Phase 1). Hitstun scales with the incoming
     // knockback impulse — strong hits stun longer — instead of the old flat
     // 8-frame window: seconds = impulse × HitstunSecondsPerImpulse, clamped to
-    // [Min, Max]. Reference points: Slash1's reduced 60-impulse hold-hit relies on
-    // its HitstunSecondsOverride (it would floor at Min); Slash3/Stab (380) →
-    // ~0.51 s; Pulse (450) → ~0.61 s; crush impulses (700+) cap at Max so a hard
-    // landing isn't a full second of lockout.
+    // [Min, Max]. Reference points at the CURRENT strike speeds: Slash3 (u 300)
+    // → 0.66 s, GuardRetaliate (380) → cap, Stab (650) → cap, an enemy lunge
+    // (~270) → 0.59 s; crush impulses (700+) cap so a hard landing isn't a full
+    // second of lockout. Slash1's tiny hold-hit relies on its
+    // HitstunSecondsOverride (it would floor at Min).
+    //
+    // Was 0.00135 when every strike hit ~1.65× harder. Hitstun is the disadvantage
+    // window, and nothing about it was wrong — so when the knockback pass below cut
+    // the impulses feeding this, the rate went up to keep the WINDOWS where they
+    // were. Dropping knockback and shortening hitstun with it would have quietly
+    // deleted combo pressure too.
     //
     // Follow-up hits while hitstun is still active extend by only
     // HitstunExtensionScale × the fresh window — diminishing, so a true
     // stun-lock cannot grow unbounded (same principle as the old 8+4+4).
-    private const float HitstunSecondsPerImpulse = 0.00135f;
+    private const float HitstunSecondsPerImpulse = 0.0022f;
     private const float MinHitstunSeconds        = 0.10f;
     private const float MaxHitstunSeconds        = 0.70f;
     private const float HitstunExtensionScale    = 0.5f;
@@ -252,20 +257,25 @@ public class CombatState
     // Stun tuning. Threshold compares against HitResult.Strength (pre-mass): the
     // authored impulse magnitude for Impulse-mode hits, the closing speed u for
     // Collision-mode hits — so attack strength controls stun-vs-not independent
-    // of target Mass either way. Collision u runs ≈ 1.33× the old impulse
-    // numbers (the parity mapping), so the threshold moved 350 → 440 to keep the
-    // designed spectrum: hold-slashes (60–80), CrouchSlash/AirTurn (u 320+vel),
-    // AirSlash1/2 (u 240/375) stay hitstun-only at baseline — though a fast dive
-    // can push a swing over the line, which is speed earning the stun. Slash3
-    // (u 500), GuardRetaliate (u 560), Stab (u 950), Pulse (impulse 450), and
-    // Bullet (1200) cross and flag StunActive on top.
-    private const float StunImpulseThreshold = 440f;
+    // of target Mass either way.
+    //
+    // Rescaled 440 → 280 alongside the knockback cut, which is what keeps the
+    // designed spectrum rather than collapsing it: with every strike speed down
+    // ~40%, holding 440 would have left the stab as the only move in the game that
+    // stuns. At 280 the same moves cross as before — Slash3 (u 300),
+    // GuardRetaliate (380), Stab (650), Pulse (impulse 300) — while the hold
+    // slashes (60–80), CrouchSlash/AirTurn (200), AirSlash1/2 (150/230) and, by
+    // design, every creature attack stay hitstun-only. A fast dive can still push
+    // a swing over the line, which is speed earning the stun.
+    private const float StunImpulseThreshold = 280f;
     private const float StunSeconds          = 0.6f;
 
     // Hitstop tuning. Deliberately much shorter than hitstun — this is a freeze-frame
     // punch, not a disadvantage window — scaled the same way (impulse-derived, clamped)
     // so a light tap barely pauses and a heavy hit holds noticeably longer.
-    private const float HitstopSecondsPerImpulse = 0.00025f;
+    // Rate raised with HitstunSecondsPerImpulse and for the same reason — the
+    // freeze-frame should read the same after the knockback cut.
+    private const float HitstopSecondsPerImpulse = 0.0004f;
     private const float MinHitstopSeconds        = 0.03f;
     private const float MaxHitstopSeconds        = 0.12f;
 
@@ -464,7 +474,7 @@ public class CombatState
         HitstopActive = o.HitstopActive; HitstopExpireFrame = o.HitstopExpireFrame;
         LastHitImpulse = o.LastHitImpulse; LastHitFrame = o.LastHitFrame;
         LastHitDir = o.LastHitDir;
-        DamagePercent = o.DamagePercent;
+        DamageTaken = o.DamageTaken;
         InvulnExpireFrame = o.InvulnExpireFrame;
         GrabbedActive = o.GrabbedActive; GrabbedExpireFrame = o.GrabbedExpireFrame;
         GrabStrength = o.GrabStrength;

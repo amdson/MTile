@@ -26,7 +26,7 @@ public class StickyGrenadeProjectile : Projectile
     private const float ExplosionRadius  = 3.5f * Chunk.TileSize;   // covers ~3.5 tiles each side
     private const int   ExplosionSegments = 12;
     private const float SegmentHalfSize  = 10f;
-    private const float ExplosionKnockback = 700f;
+    private const float ExplosionKnockback = 430f;
     // Per-frame damage during the (one-frame) explosion. Tile damage scales
     // against TileMaxHP — set near TileMaxHP so a Sand cell pops, Dirt cracks,
     // Stone chips. Entity damage is just this raw value (no per-frame

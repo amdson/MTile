@@ -19,11 +19,17 @@ public class EnemyMeleeAction : EnemyActionState
     protected virtual float   VerticalSlack     => 24f;
     protected virtual float   HitboxReach       => 22f;
     protected virtual float   HitboxHalfHeight  => 12f;
+    // A full HP off the player's pool of 5 — five clean swings down you.
     protected virtual float   Damage            => 1.0f;
-    // Knockback impulse — Entity.OnHit divides by target mass, so a player at
-    // Mass 2.5 gains (X/2.5, Y/2.5) px/s. Tuned to actually launch the player
-    // (~180 px/s horizontal + ~70 up) rather than nudge them.
-    protected virtual Vector2 Knockback         => new(460f, -180f);
+    // Knockback impulse — OnHit divides by target mass, so a player at Mass 2.5
+    // gains (X/2.5, Y/2.5) px/s. Creature hits deliberately DON'T launch: this is
+    // ~100 px/s of shove and ~44 up, half a run's worth, enough that a hit reads as
+    // contact and interrupts what you were doing without taking the fight away from
+    // you. Was (460, -180) — a body-check off every routine swing, which combined
+    // with the escalation multiplier to make basic enemies feel like cannons. The
+    // launching is the player's job (Stab), and the resulting |impulse| ≈ 120 stays
+    // under the 280 stun threshold, so no creature swing stuns on its own.
+    protected virtual Vector2 Knockback         => new(250f, -110f);
     protected virtual Color   TelegraphColor    => Color.Red;
     protected virtual Color   StrikeColor       => Color.OrangeRed;
 
@@ -129,14 +135,15 @@ public class EnemyContactAction : EnemyActionState
     // Distance at which the action is allowed to start. Generous — it only has
     // to be wide enough that the box gets published on the frame contact happens.
     protected virtual float TriggerRange   => 34f;
-    // Percent contribution, NOT a fraction of anything: CombatState multiplies it by
-    // PercentPerDamage (15), so this is ~6% per touch. Deliberately well under the
-    // 1.0 a committed melee swing deals — brushing a hazard that repeats on a
+    // HP straight off the target, like every other hitbox. Deliberately well under
+    // the 1.0 a committed melee swing deals — brushing a hazard that repeats on a
     // cooldown should sting, not trade evenly with an attack the player could read.
     protected virtual float Damage         => 0.4f;
     // Knockback is signed away from the creature at Enter, with a lift component
-    // so a hit reads as being knocked off rather than shoved into the floor.
-    protected virtual Vector2 Knockback    => new(340f, -240f);
+    // so a hit reads as being knocked off rather than shoved into the floor. Light
+    // (was (340, -240)) — walking into a creature should push you off it, not punt
+    // you across the room.
+    protected virtual Vector2 Knockback    => new(190f, -140f);
     // Active window is short; the gap to the next hit is Recovery.
     protected virtual float ActiveWindow   => 0.10f;
     protected virtual float Cooldown       => 0.85f;
@@ -212,9 +219,11 @@ public class EnemyLungeAction : EnemyActionState
     protected virtual float HitHalfWidth => 12f;
     protected virtual float HitHalfHeight=> 12f;
     protected virtual float Damage       => 0.9f;
-    // Heavier than the melee swing — a lunge is a committed dash, so the launch
-    // reads as a body-check (~210 px/s horizontal + ~95 up against player Mass 2.5).
-    protected virtual Vector2 Knockback  => new(540f, -240f);
+    // Heavier than the melee swing — a lunge is a committed dash, so it shoves
+    // noticeably harder (~120 px/s horizontal + ~56 up against player Mass 2.5).
+    // Still short of a launch, and still under the stun threshold: the creature
+    // kit trades in interruption and chip, not in juggles.
+    protected virtual Vector2 Knockback  => new(300f, -140f);
 
     public override int ActivePriority  => 30;
     public override int PassivePriority => 24;
@@ -751,8 +760,12 @@ public class EnemySlamAction : EnemyActionState
     protected virtual float HitHalfWidth  => 18f;
     protected virtual float HitHalfHeight => 16f;
     protected virtual float HitOffsetY    => 16f;       // hitbox sits below the body
+    // The kit's heaviest single blow — a third of the player's pool per connect.
     protected virtual float Damage        => 1.6f;
-    protected virtual Vector2 Knockback   => new(650f, -200f);
+    // ...and correspondingly its hardest shove (~145 px/s + 45 up), but a shove:
+    // this is a diving body-slam, not a launcher. |impulse| ≈ 380 does clear the
+    // 280 stun threshold, which is the one creature attack that should.
+    protected virtual Vector2 Knockback   => new(360f, -110f);
 
     public override int ActivePriority  => 34;
     public override int PassivePriority => 30;          // wins vs melee/lunge when airborne

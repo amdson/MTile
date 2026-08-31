@@ -33,11 +33,11 @@ public abstract class ActionState
 
     // Involuntary-eviction price knob — CommitProfile's twin (HIT_AIRLOCK_PLAN §4).
     // Strength threshold below which an incoming hit does NOT interrupt this
-    // action: armored hits still add their full escalation percent and recoil the
-    // attacker, but arrive at heavily scaled knockback and never register
-    // hitstun/stun — so no flinch eviction and no disadvantage window. Compared
-    // against HitResult.Strength (pre-mass, the same units as CombatState's stun
-    // threshold; reference points: Slash1 ~200, Slash3 ~500, Stab ~950).
+    // action: armored hits still cost their full HP and recoil the attacker, but
+    // arrive at heavily scaled knockback and never register hitstun/stun — so no
+    // flinch eviction and no disadvantage window. Compared against
+    // HitResult.Strength (pre-mass, the same units as CombatState's stun
+    // threshold; reference points: Slash1 ~100, Slash3 ~300, Stab ~650).
     // Default 0 = no armor: any hit flinches.
     public virtual float ArmorProfile(in ActionVars vars) => 0f;
 
@@ -422,7 +422,10 @@ public abstract class SlashLikeAction : ActionState
     // visibly pops instead of a dead connect.
     private   const   float    SlashStrikeMass     = 2.5f;
     private   const   float    SlashRestitution    = 0.5f;
-    private   const   float    SlashMinLaunch      = 180f;   // default for MinLaunch below
+    // Was 180 — half the player's run speed handed out for merely connecting, which
+    // is a good part of why the light slashes read as hitting a beach ball. The floor
+    // is here so a connect is never a dead touch, not so a poke is a launch.
+    private   const   float    SlashMinLaunch      = 100f;   // default for MinLaunch below
 
     // ----- per-variant knobs ------------------------------------------------
     protected abstract float   Duration            { get; }   // seconds
@@ -430,9 +433,9 @@ public abstract class SlashLikeAction : ActionState
     protected abstract float   SweepAngleDeg       { get; }   // total sweep (90, 150, …)
     protected abstract float   SweepDirection      { get; }   // +1 CCW, -1 CW (mirror)
     protected abstract float   KnockbackMagnitude  { get; }
-    // Multiplier on SlashDamagePerFrame. Damage is one number on both paths — tile
-    // HP carved AND the entity escalation percent added — so a variant that scales
-    // this bites harder in both senses. 1.0 for every stock slash; DownAirSlash
+    // Multiplier on SlashDamagePerFrame. Damage is one number on every path — tile
+    // HP carved, and HP off a player or entity — so a variant that scales this bites
+    // harder in every sense. 1.0 for every stock slash; DownAirSlash
     // raises it because it's the slowest, most committed swing in the air kit.
     protected virtual  float   DamageScale         => 1f;
     // Collision-mode strike speed (px/s), stacked on the attacker's velocity at
@@ -754,8 +757,8 @@ public class GroundSlash3 : SlashLikeAction
     protected override float ArcRadiusScale      => 1.30f;
     protected override float SweepAngleDeg       => 160f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 380f;
-    protected override float StrikeSpeed         => 500f;    // launcher — 1.33 × the old 380
+    protected override float KnockbackMagnitude  => 230f;
+    protected override float StrikeSpeed         => 300f;    // the combo launcher — 225 px/s on a player
     protected override Color SlashColor          => Color.OrangeRed;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -786,8 +789,8 @@ public class CrouchSlash : SlashLikeAction
     protected override float ArcRadiusScale      => 1.45f;
     protected override float SweepAngleDeg       => 90f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 240f;
-    protected override float StrikeSpeed         => 320f;
+    protected override float KnockbackMagnitude  => 150f;
+    protected override float StrikeSpeed         => 200f;
     protected override Color SlashColor          => Color.Goldenrod;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -826,8 +829,8 @@ public class AirSlash1 : SlashLikeAction
     protected override float ArcRadiusScale      => 0.90f;
     protected override float SweepAngleDeg       => 110f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 180f;
-    protected override float StrikeSpeed         => 240f;
+    protected override float KnockbackMagnitude  => 110f;
+    protected override float StrikeSpeed         => 150f;
     protected override Color SlashColor          => Color.DeepSkyBlue;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
@@ -846,8 +849,8 @@ public class AirSlash2 : SlashLikeAction
     protected override float ArcRadiusScale      => 1.10f;
     protected override float SweepAngleDeg       => 140f;
     protected override float SweepDirection      => -1f;
-    protected override float KnockbackMagnitude  => 280f;
-    protected override float StrikeSpeed         => 375f;
+    protected override float KnockbackMagnitude  => 170f;
+    protected override float StrikeSpeed         => 230f;
     protected override Color SlashColor          => Color.DeepSkyBlue;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
@@ -878,8 +881,8 @@ public class AirTurnSlash : SlashLikeAction
     protected override float ArcRadiusScale      => 1.40f;   // long reach
     protected override float SweepAngleDeg       => 60f;     // narrow
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 240f;
-    protected override float StrikeSpeed         => 320f;
+    protected override float KnockbackMagnitude  => 150f;
+    protected override float StrikeSpeed         => 200f;
     protected override Color SlashColor          => Color.Violet;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
@@ -974,8 +977,8 @@ public class DownAirSlash : SlashLikeAction
     protected override float ArcRadiusScale       => 1.25f;   // reach below the feet
     protected override float SweepAngleDeg        => 70f;     // narrow — a chop, not a fan
     protected override float SweepDirection       => +1f;
-    protected override float KnockbackMagnitude   => 340f;
-    protected override float StrikeSpeed          => 450f;
+    protected override float KnockbackMagnitude   => 210f;
+    protected override float StrikeSpeed          => 300f;
     // The one slash that swings along gravity, so the only one for which the
     // attacker's velocity is fully collinear with AttackDir — see the base class.
     // Undamped, a terminal-velocity connect closed at ~1300 px/s against the 511 of a
@@ -1129,11 +1132,16 @@ public class StabAction : ActionState
     // Collision-mode striker (HitResolver.Resolve): the stab is a virtual body
     // flying at StrikeSpeed along the thrust, on top of the attacker's real
     // velocity — so a dive stab genuinely hits (and pogos) harder than a
-    // standing poke. 650 keeps parity with the old tuned PvP launch: a
-    // stationary player target takes (1+e)·u/2 ≈ 488 px/s ≈ the old
-    // 1140/2.5 = 456, and Strength = u clears the 440 stun threshold, so a
-    // clean stab still launches AND stuns (→ Tumble). (First pass used 950 —
-    // 1.56× the old player launch, way too hot.)
+    // standing poke. A stationary player target takes (1+e)·u/2 ≈ 488 px/s, and
+    // Strength = u clears the stun threshold, so a clean stab launches AND stuns
+    // (→ Tumble).
+    //
+    // Deliberately UNTOUCHED by the knockback pass that cut every slash ~40% and
+    // halved the launch floor. The stab is the designated launcher of the kit —
+    // slow, committed, single-target, telegraphed by a whole wind-up — and the
+    // point of pulling the rest down was to let it read that way instead of being
+    // one shove among many. It is now ~2.2× GroundSlash3's launch, where it used
+    // to be ~1.3×.
     private const float StrikeSpeed           = 650f;
     // Entity-collision restitution + minimum visible launch for a connect on a
     // fleeing target.
@@ -1255,12 +1263,17 @@ public class StabAction : ActionState
     }
 
     // Superarmor through the wind-up + strike (HIT_AIRLOCK_PLAN §4): light pokes
-    // (Slash1 strength ~200) can't stuff a committed stab; Slash3 (~500), another
-    // stab (~950), or anything stun-tier still breaks it. Armored hits land at
-    // scaled-down knockback and full percent (see PlayerCharacter.OnHit) — no
-    // flinch, no hitstun. The tail (retract/settle) is unarmored: a whiffed stab
-    // is punishable as before.
-    private const float ArmorStrength = 300f;
+    // (Slash1 strength ~100) can't stuff a committed stab; another stab (~650) or
+    // anything stun-tier still breaks it. Armored hits land at scaled-down
+    // knockback and full damage (see PlayerCharacter.OnHit) — no flinch, no
+    // hitstun. The tail (retract/settle) is unarmored: a whiffed stab is
+    // punishable as before.
+    //
+    // 300 → 190 with the knockback pass, which cut every strength number feeding
+    // this comparison by ~40%. Left at 300 the stab would have become unstuffable
+    // by anything but another stab — armor that was tuned to lose to the combo
+    // finisher (Slash3, now u 300) would silently have started beating it.
+    private const float ArmorStrength = 190f;
     public override float ArmorProfile(in ActionVars vars)
         => vars.TimeInState < HurtboxStartTime + HurtboxActiveDuration ? ArmorStrength : 0f;
 
@@ -1660,8 +1673,8 @@ public class GuardRetaliateAction : SlashLikeAction
     protected override float ArcRadiusScale      => 1.20f;
     protected override float SweepAngleDeg       => 70f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 420f;     // top-end — counters reward heavily
-    protected override float StrikeSpeed         => 560f;
+    protected override float KnockbackMagnitude  => 280f;     // top of the slash kit — counters reward heavily
+    protected override float StrikeSpeed         => 380f;
     protected override Color SlashColor          => Color.Cyan;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => false;
@@ -1714,7 +1727,9 @@ public class PulseAction : ActionState
     // Segment AABB half-size. Larger → fewer gaps between segments at full radius,
     // but more tile overlap per frame. ~70% of body radius is a clean balance.
     private const float SegmentHalfSize      = PlayerCharacter.Radius * 0.7f;
-    private const float KnockbackMagnitude   = 450f;
+    // Impulse mode, so this is the raw impulse: 300 / Mass 2.5 = 120 px/s of shove,
+    // and it stays just over the 280 stun threshold, so the pulse still stuns.
+    private const float KnockbackMagnitude   = 300f;
     // Damage per frame matches SlashLikeAction.SlashDamagePerFrame so a sand tile
     // crumbles in one ring-pass and dirt cracks meaningfully — same feel as a slash.
     private const float DamagePerFrame       = TileDamage.TileMaxHP / 2f;
@@ -1833,13 +1848,13 @@ public class PulseAction : ActionState
 
 // The "shove" out of a wind-up: hold LMB (→ ReadyAction) and click RMB to detonate a
 // burst in front of the body. Design intent is displacement, not damage —
-// it clears terrain and throws whatever it touches, but barely moves the percent
-// meter, so it reads as a movement/space-making tool rather than a kill move.
+// it clears terrain and throws whatever it touches, but takes very little HP off
+// it, so it reads as a movement/space-making tool rather than a kill move.
 //
 // Two hitboxes per segment, sharing one HitId (same trick as StabAction):
 //   • TilesOnly    — full TileMaxHP per frame, so dirt breaks on a single shell pass.
-//   • EntitiesOnly — tiny percent contribution, big Impulse knockback.
-// One box can't do both: Hitbox.Damage feeds the tile HP pool and the entity percent
+//   • EntitiesOnly — tiny HP contribution, big Impulse knockback.
+// One box can't do both: Hitbox.Damage feeds the tile HP pool and the body damage
 // pool alike, so "breaks blocks but tickles players" needs the split.
 //
 // Priority 30/30 matches the other attacks. Passive 30 clears the wind-up's Active 10
@@ -1858,13 +1873,14 @@ public class BurstAction : ActionState
     private const float StartDist          = PlayerCharacter.Radius * 1.5f;
     private const float EndDist            = PlayerCharacter.Radius * 2.5f;
     private const float SegmentHalfSize      = PlayerCharacter.Radius * 1.0f;
-    // Hard shove — above GroundSlash3's 380 launch, since knockback is the whole point.
-    private const float KnockbackMagnitude   = 700f;
+    // Hard shove — kept above GroundSlash3, since knockback is the whole point of
+    // the move. Came down 700 → 430 with the rest of the kit, holding that ratio.
+    private const float KnockbackMagnitude   = 430f;
     // Full tile HP per frame ⇒ dirt (1.0) breaks on one shell contact, stone (2.0)
     // needs the two frames the shell dwells over a cell.
     private const float TileDamagePerFrame   = TileDamage.TileMaxHP;
-    // ~30% of a slash's percent contribution: enough to register a hit, not enough
-    // to build a kill. Entities are HitId-deduped, so this lands exactly once.
+    // ~30% of a slash's damage: enough to register a hit, not enough to build a
+    // kill. Bodies are HitId-deduped, so this lands exactly once.
     private const float EntityDamage         = 0.15f;
     // Declared rather than derived: the impulse is huge but the hit is meant to
     // displace, not to lock the victim down for a follow-up.
@@ -2642,7 +2658,7 @@ public class BeamAction : ActionState
     private const int   MaxSteps         = (int)(MaxBeamLength / StepSize) + 1;
     private const float SegmentHalfSize  = 6f;
     private const float DamagePerFrame   = TileDamage.TileMaxHP * 0.45f;   // full-energy damage; breaks Stone in 2-3 frames of overlap
-    private const float KnockbackImpulse = 320f;
+    private const float KnockbackImpulse = 200f;
     private const float RecoverySeconds  = 0.2f;
 
     // --- Energy model (the "strength through blocks / air" math) ---------------
@@ -3341,7 +3357,7 @@ public class BlockGrabAction : ActionState
 // so the region's geometry stays generous while the hold, the pull and the throw all
 // land on exactly that one opponent. It IGNORES guard for free (a field never goes
 // through the OnHit/parry path). Releasing RMB (or hitting the hold cap) flings the victim with a brief
-// high-speed directional field — into terrain at high percent that's the Phase 5 KO.
+// high-speed directional field — hard enough into terrain and the crush path bills them.
 //
 // Grab-break is a strength contest: the hold starts at GrabStrengthMax, and each
 // connecting struggle slash erodes it (the struggle hit deliberately deals no stun —

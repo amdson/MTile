@@ -73,7 +73,14 @@ public class ZeusThunderColumnAction : EnemyActionState
     protected virtual float SkyAbove    => 260f;
     protected virtual float ColumnDrop  => 3400f;
 
-    protected virtual float Damage    => 3.6f;
+    // Tile-carving number: high because the column EATS terrain — a roof over you is
+    // spent, not held — and dirt/stone have to go in a cast or two.
+    protected virtual float Damage     => 3.6f;
+    // What it takes off whoever is standing in it. A fifth of the pool, deliberately
+    // well under the bolt: the column is the attack you cannot hide from, so it has
+    // to be the one that pressures rather than the one that kills. Sharing the 3.6
+    // would make being caught by a blind-fired column a two-hit death.
+    protected virtual float BodyDamage => 1.0f;
     // Straight down — it is a falling column, and being driven into the floor is
     // what the hit should read as. Kept well under the bolt's eviction threshold in
     // spirit: enough to cost the player their footing on the face, not enough to
@@ -185,7 +192,7 @@ public class ZeusThunderColumnAction : EnemyActionState
             poly.GetBoundingBox(centre), v.HitId, Damage,
             new Vector2(0f, Knockback),
             Faction.Enemy, ctx.Self.Id, BoltColor,
-            targets: HitTargets.All,
+            targets: HitTargets.All, bodyDamage: BodyDamage,
             shape: poly, shapePos: centre,
             hitstunSecondsOverride: Hitstun,
             origin: new Vector2(v.LockedAim.X, ColumnTop(ctx.Self.Body))));

@@ -189,8 +189,8 @@ public class EnemyPounceSlamAction : EnemyActionState
     protected virtual float RefFallSpeed    => 560f;
     protected virtual float MinDamage       => 0.8f;
     protected virtual float MaxDamage       => 2.4f;
-    protected virtual float MinKnockback    => 320f;
-    protected virtual float MaxKnockback    => 780f;
+    protected virtual float MinKnockback    => 200f;
+    protected virtual float MaxKnockback    => 380f;
     protected virtual float HitboxHalfWidth => 15f;
     protected virtual float HitboxReachDown => 16f;
     protected virtual Color SlamColor       => new(255, 200, 90);
@@ -310,7 +310,7 @@ public class EnemyLashAction : EnemyActionState
     protected virtual float Reach       => 58f;
     protected virtual float HalfWidth   => 7f;
     protected virtual float Damage      => 1.3f;
-    protected virtual float Knockback   => 430f;
+    protected virtual float Knockback   => 260f;
     // Extra upward bias so a lash from a ceiling still launches the player
     // sideways-and-clear rather than straight into the floor.
     protected virtual float UpBias      => 150f;

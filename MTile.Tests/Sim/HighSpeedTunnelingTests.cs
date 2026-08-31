@@ -35,8 +35,11 @@ namespace MTile.Tests.Sim;
 // REACHABILITY — the threshold in this flat-slab harness, measured by
 // EmbedThresholdIsAboveNormalPlaySpeeds below, is ~14800 px/s into Stone and ~7900
 // into Sand/Foam. A survey of the codebase puts the player's realistic ceiling near
-// 2000-3200 px/s (knockback at 100-200% DamagePercent) and the fastest body in the
-// game, RailBoltProjectile, at 1500 px/s. So this defect is real and deterministic
+// 2000-3200 px/s — that figure dates from the escalation model, whose knockback
+// multiplier reached 2.5-4× at high percent; with escalation gone and every strike
+// speed cut, the hardest hit in the game (a stab) launches at ~550 px/s, so the
+// headroom here only grew — and the fastest body in the game, RailBoltProjectile,
+// at 1500 px/s. So this defect is real and deterministic
 // but the flat-wall trigger sits above normal play; a ~20k-trial fuzz of a real
 // PlayerCharacter at 300-3200 px/s over walls, corners, slots, pillars, stairs and
 // bumpy corridors produced no embedding at all.

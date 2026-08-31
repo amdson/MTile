@@ -228,12 +228,12 @@ public class ShrikeDetonateAction : EnemyActionState
     protected virtual int   Segments     => 10;
 
     // One number for both channels, as StickyGrenadeProjectile does. Against a
-    // body it is a percent contribution (CombatState scales by PercentPerDamage
-    // = 15, so ~18% — a heavy hit that is not a kill); against tiles it is raw
-    // HP against TileMaxHP, so it pops dirt and sand and chips stone. They read
-    // as one explosion because they are one set of hitboxes.
+    // body it is HP (1.2 of a player's 5 — a heavy hit that is not a kill);
+    // against tiles it is HP against TileMaxHP, so it pops dirt and sand and
+    // chips stone. They read as one explosion because they are one set of
+    // hitboxes.
     protected virtual float Damage       => TileDamage.TileMaxHP * 1.2f;
-    protected virtual float Knockback    => 620f;
+    protected virtual float Knockback    => 300f;
 
     // The ring can't cover its own centre — the segments sit ON the ring — so
     // the epicentre needs a box of its own or the one place the blast doesn't

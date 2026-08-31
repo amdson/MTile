@@ -158,10 +158,14 @@ internal static class ZeusBeam
     // HitTargets.All: the tile path chews terrain, the entity path hits bodies.
     // `origin` is the muzzle, so a body tucked behind the lip of a cell just
     // outside the beam's width is still occluded.
+    // `damage` carves tiles; `bodyDamage` is what the beam takes off whoever it
+    // catches. Every Zeus beam authors both, because the tile number is pinned from
+    // below by Stone's MaxHP — a beam that leaves half-chewed cells behind reads as
+    // broken — and that floor is most of a player's health bar.
     public static void Publish(in EnemyContext ctx, ref EnemyActionVars v,
                                Vector2 muzzle, Vector2 dir, float length,
-                               float halfWidth, float damage, float knockback,
-                               float hitstun, Color color)
+                               float halfWidth, float damage, float bodyDamage,
+                               float knockback, float hitstun, Color color)
     {
         if (ctx.Hitboxes == null || length < 1f) return;
 
@@ -173,7 +177,7 @@ internal static class ZeusBeam
             poly.GetBoundingBox(centre, rotation), v.HitId, damage,
             dir * knockback,
             Faction.Enemy, ctx.Self.Id, color,
-            targets: HitTargets.All,
+            targets: HitTargets.All, bodyDamage: bodyDamage,
             shape: poly, shapePos: centre, shapeRotation: rotation,
             hitstunSecondsOverride: hitstun,
             origin: muzzle));
@@ -276,9 +280,12 @@ public class ZeusBoltAction : EnemyActionState
     // per frame → the full 27 active frames trench roughly the whole MaxLength.
     protected virtual float Penetration  => 3.0f;
     // At/above Stone's MaxHP so a cell inside the box clears outright rather than
-    // being left half-chewed. Doubles as the percent contribution on a body hit.
+    // being left half-chewed. That floor is a terrain requirement, not a statement
+    // about how much a bolt should hurt — hence the separate body number.
     protected virtual float Damage       => 2.6f;
-    // Deliberately well under RailBoltProjectile's 950. A hit here is supposed to
+    // A quarter of a player's pool: the signature attack, four of them down you.
+    protected virtual float BodyDamage   => 1.25f;
+    // Deliberately well under RailBoltProjectile's. A hit here is supposed to
     // cost the player their POSITION on the slope, not their whole approach:
     // knock them far enough and the hill's own shoulder occludes them, which
     // silently ends the fight until they climb back. 520 / player Mass 2.5 ≈
@@ -333,7 +340,7 @@ public class ZeusBoltAction : EnemyActionState
         var dir    = ZeusBeam.Dir(in v);
         var muzzle = ctx.Self.Body.Position + dir * MuzzleOffset;
         float len  = ZeusBeam.Reach(ctx.Spawner?.Chunks, muzzle, dir, MaxLength, Penetration);
-        ZeusBeam.Publish(in ctx, ref v, muzzle, dir, len, HalfWidth, Damage, Knockback, Hitstun, BeamColor);
+        ZeusBeam.Publish(in ctx, ref v, muzzle, dir, len, HalfWidth, Damage, BodyDamage, Knockback, Hitstun, BeamColor);
     }
 
     // Windup: the full swathe as a faint wash (so the player can see the WIDTH
@@ -412,8 +419,10 @@ public class ZeusStrikeAction : EnemyActionState
     // per frame, and stone (2.0) stops it in one.
     protected virtual float Penetration  => 1.0f;
     // Below Stone's MaxHP on purpose: the flurry cannot dig, it only chews the
-    // dirt crust. Also a light percent contribution on a body.
+    // dirt crust.
     protected virtual float Damage       => 0.9f;
+    // Chip: the flurry is a rake that pressures position, not a kill move.
+    protected virtual float BodyDamage   => 0.45f;
     protected virtual float Knockback    => 150f;
     protected virtual float Hitstun      => 0.12f;
 
@@ -476,7 +485,7 @@ public class ZeusStrikeAction : EnemyActionState
         var dir    = ZeusBeam.Dir(in v);
         var muzzle = ctx.Self.Body.Position + dir * MuzzleOffset;
         float len  = ZeusBeam.Reach(ctx.Spawner?.Chunks, muzzle, dir, MaxLength, Penetration);
-        ZeusBeam.Publish(in ctx, ref v, muzzle, dir, len, HalfWidth, Damage, Knockback, Hitstun, StrikeColor);
+        ZeusBeam.Publish(in ctx, ref v, muzzle, dir, len, HalfWidth, Damage, BodyDamage, Knockback, Hitstun, StrikeColor);
     }
 
     // A hairline that brightens across 11 frames, then the strike as a solid
@@ -530,6 +539,7 @@ public class ZeusSweepAction : EnemyActionState
     protected virtual float HalfWidth    => 9f;
     protected virtual float Penetration  => 2.0f;
     protected virtual float Damage       => 2.1f;      // ≥ Stone MaxHP: the rake clears cells
+    protected virtual float BodyDamage   => 0.8f;      // …but on a body it is a graze, not the bolt
     protected virtual float Knockback    => 50f;
     protected virtual float Hitstun      => 0.20f;
 
@@ -600,7 +610,7 @@ public class ZeusSweepAction : EnemyActionState
         // the rake could only ever land once no matter how long it stayed on you.
         // Hitstun is what keeps that from being a per-frame damage faucet.
         v.HitId = ctx.Spawner.HitIds.Next();
-        ZeusBeam.Publish(in ctx, ref v, muzzle, dir, len, HalfWidth, Damage, Knockback, Hitstun, BeamColor);
+        ZeusBeam.Publish(in ctx, ref v, muzzle, dir, len, HalfWidth, Damage, BodyDamage, Knockback, Hitstun, BeamColor);
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)

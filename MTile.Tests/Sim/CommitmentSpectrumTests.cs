@@ -55,12 +55,12 @@ public class CommitmentSpectrumTests(ITestOutputHelper output)
 
     // Runs the combo and reports: did the attacker's hit-confirm latch while slashing,
     // did GroundSlash2 fire, and what was the victim's final HP.
-    private (bool sawConnected, bool sawS2, float victimPercent) RunCombo(Vector2 victimStart)
+    private (bool sawConnected, bool sawS2, float victimDamage) RunCombo(Vector2 victimStart)
     {
         var cfg = BuildCombo(victimStart);
         var actions = new HashSet<string>();
         bool sawConnected = false;
-        float victimPercent = 0f;
+        float victimDamage = 0f;
         SimRunner.RunMulti(cfg,
             onFrame: (f, ps) =>
             {
@@ -68,20 +68,19 @@ public class CommitmentSpectrumTests(ITestOutputHelper output)
                 if (ps[0].CurrentActionName.Contains("Slash") && ps[0].CurrentActionVars.AttackConnected)
                     sawConnected = true;
             },
-            // Direct hits no longer chip HP (Phase 5) — a landed slash shows up as the
-            // victim's escalation percent rising.
-            outPlayers: ps => victimPercent = ps[1].Combat.DamagePercent);
-        output.WriteLine($"actions: {string.Join(",", actions)}; connected={sawConnected}; victim % {victimPercent}");
-        return (sawConnected, actions.Contains("GroundSlash2"), victimPercent);
+            // A landed slash shows up as HP off the victim.
+            outPlayers: ps => victimDamage = ps[1].Combat.DamageTaken);
+        output.WriteLine($"actions: {string.Join(",", actions)}; connected={sawConnected}; victim -{victimDamage} HP");
+        return (sawConnected, actions.Contains("GroundSlash2"), victimDamage);
     }
 
     // S1 connects (victim in range): the hit-confirm latches AttackConnected, the
-    // victim's percent rises, and the chain into S2 fires.
+    // victim loses HP, and the chain into S2 fires.
     [Fact]
     public void HitConnects_ConfirmLatches_AndChains()
     {
-        var (sawConnected, sawS2, victimPercent) = RunCombo(victimStart: new Vector2(95f, 20f));
-        Assert.True(victimPercent > 0f, "S1 should have connected (victim percent should rise).");
+        var (sawConnected, sawS2, victimDamage) = RunCombo(victimStart: new Vector2(95f, 20f));
+        Assert.True(victimDamage > 0f, "S1 should have connected (the victim should have lost HP).");
         Assert.True(sawConnected, "AttackConnected should latch when the slash lands.");
         Assert.True(sawS2, "S1 should chain into GroundSlash2.");
     }
@@ -91,8 +90,8 @@ public class CommitmentSpectrumTests(ITestOutputHelper output)
     [Fact]
     public void Whiff_NoConfirm_ButStillChains()
     {
-        var (sawConnected, sawS2, victimPercent) = RunCombo(victimStart: new Vector2(320f, 20f));
-        Assert.Equal(0f, victimPercent);              // truly whiffed
+        var (sawConnected, sawS2, victimDamage) = RunCombo(victimStart: new Vector2(320f, 20f));
+        Assert.Equal(0f, victimDamage);               // truly whiffed
         Assert.False(sawConnected, "AttackConnected must stay false on a whiff.");
         Assert.True(sawS2, "Chaining is ungated right now — a whiffed S1 still chains into S2.");
     }

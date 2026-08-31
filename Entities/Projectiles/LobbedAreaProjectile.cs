@@ -56,7 +56,7 @@ public class LobbedAreaProjectile : Projectile
     private const float ExplosionRadius   = 3f * Chunk.TileSize;
     private const int   ExplosionSegments = 10;
     private const float SegmentHalfSize   = 9f;
-    private const float ExplosionKnockback = 520f;
+    private const float ExplosionKnockback = 320f;
     private const float ExplosionDamage   = TileDamage.TileMaxHP * 0.8f;
     // The core hit, at the blast's center — the radial segments ring the center at
     // ExplosionRadius, so without this the body actually struck (which sits AT the

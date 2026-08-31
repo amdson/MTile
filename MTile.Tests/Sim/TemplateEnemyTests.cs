@@ -56,13 +56,13 @@ public class TemplateEnemyTests(ITestOutputHelper output)
             $"Template didn't close the distance (Δx {startX - bot.Body.Position.X:F1}px).");
 
         // Arms work: the attack actually published a hitbox that connected.
-        // DamagePercent is the monotonic percent meter — a hit is the only thing
+        // DamageTaken is the running HP-lost tally — a hit is the only thing
         // that can raise it while the player never moves or attacks.
-        Assert.True(sim.Player.Combat.DamagePercent > 0f,
+        Assert.True(sim.Player.Combat.DamageTaken > 0f,
             "Template never landed a hit.");
 
         output.WriteLine($"Closed {startX - bot.Body.Position.X:F0}px; " +
-                         $"player at {sim.Player.Combat.DamagePercent:F2}%.");
+                         $"player at {sim.Player.Combat.DamageTaken:F2}%.");
     }
 
     [Fact]
@@ -123,7 +123,7 @@ public class TemplateEnemyTests(ITestOutputHelper output)
         var p  = sim.Player;
         sb.Append($"P|{Bits(p.Body.Position.X)},{Bits(p.Body.Position.Y)};")
           .Append($"{Bits(p.Body.Velocity.X)},{Bits(p.Body.Velocity.Y)}|")
-          .Append($"{p.CurrentStateName}/{p.CurrentActionName}|pct{Bits(p.Combat.DamagePercent)}\n");
+          .Append($"{p.CurrentStateName}/{p.CurrentActionName}|pct{Bits(p.Combat.DamageTaken)}\n");
         foreach (var e in sim.Entities)
             sb.Append($"E{e.Id}:{e.Kind}|{Bits(e.Body.Position.X)},{Bits(e.Body.Position.Y)};")
               .Append($"{Bits(e.Body.Velocity.X)},{Bits(e.Body.Velocity.Y)}|hp{Bits(e.Health)}\n");

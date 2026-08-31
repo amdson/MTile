@@ -101,9 +101,9 @@ public class BirdTests(ITestOutputHelper output)
         var sim = WithBird(new Vector2(0f, 20f), new Vector2(0f, 20f));
         for (int f = 0; f < 30; f++) sim.Step(default);
 
-        float pct = sim.Player.Combat.DamagePercent;
-        output.WriteLine($"percent after contact = {pct:F1}");
-        Assert.True(pct > 0f, "Touching the bird should raise the player's escalation percent.");
+        float hp = sim.Player.Combat.DamageTaken;
+        output.WriteLine($"HP lost to contact = {hp:F2}");
+        Assert.True(hp > 0f, "Touching the bird should cost the player HP.");
     }
 
     // The cooldown IS the mechanic. Too fast and standing next to a bird is instant
@@ -112,18 +112,27 @@ public class BirdTests(ITestOutputHelper output)
     [Fact]
     public void ContactDamageRepeatsOnItsCooldownAndNotEveryFrame()
     {
-        var sim = WithBird(new Vector2(0f, 20f), new Vector2(0f, 20f));
+        var sim  = WithBird(new Vector2(0f, 20f), new Vector2(0f, 20f));
+        var bird = FindBird(sim);
 
         var hitFrames = new List<int>();
         float last = 0f;
         for (int f = 0; f < 240; f++)
         {
+            // Pin the player ON the bird. The question here is the COOLDOWN, and a
+            // free body answers a different one: the first touch knocks the player off
+            // the bird's lane and whether they drift back into it is a fact about the
+            // knockback number, not about the hazard's timing. (This test used to pass
+            // by that accident — contact knockback was hard enough to carry the player
+            // along with the patrol — and stopped when the knockback pass halved it.)
+            sim.Player.Body.Position = bird.Body.Position;
+            sim.Player.Body.Velocity = Vector2.Zero;
             sim.Step(default);
-            float pct = sim.Player.Combat.DamagePercent;
-            if (pct > last) { hitFrames.Add(f); last = pct; }
+            float hp = sim.Player.Combat.DamageTaken;
+            if (hp > last) { hitFrames.Add(f); last = hp; }
         }
 
-        output.WriteLine($"hit frames: {string.Join(",", hitFrames)} (final {last:F1}%)");
+        output.WriteLine($"hit frames: {string.Join(",", hitFrames)} (total {last:F2} HP)");
         Assert.True(hitFrames.Count >= 2, $"Sustained contact should tick more than once; got {hitFrames.Count}.");
 
         // ActiveWindow 0.10s + Cooldown 0.85s = 0.95s ~= 57 frames at FixedDt.
@@ -143,7 +152,7 @@ public class BirdTests(ITestOutputHelper output)
         Assert.NotNull(bird);
 
         for (int f = 0; f < 30; f++) sim.Step(default);
-        Assert.True(sim.Player.Combat.DamagePercent > 0f, "precondition: the bird should have hit by now");
+        Assert.True(sim.Player.Combat.DamageTaken > 0f, "precondition: the bird should have hit by now");
 
         float xAfterHit = bird.Body.Position.X;
         for (int f = 0; f < 60; f++) sim.Step(default);

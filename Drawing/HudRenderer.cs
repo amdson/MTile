@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
-// Screen-space HUD: the always-on player panel (health / percent / blocks) bottom-left,
+// Screen-space HUD: the always-on player panel (health / blocks) bottom-left,
 // plus the cursor marker, state/action/anim debug text, the block-picker swatches and
 // the build-meter bars. Owns its own SpriteBatch.Begin/End pass (untransformed, screen
 // pixels) — call Draw once per frame after the world-space passes have ended.
@@ -33,8 +33,8 @@ public sealed class HudRenderer
         var mousePos = sim.CurrentInput.MousePosition;
         _spriteBatch.Draw(_pixel, new Rectangle(mousePos.X - 2, mousePos.Y - 2, 5, 5), Color.Red);
         DrawAvalancheCharge(sim);
-        // Always on: health, percent and blocks are what the player steers by, so unlike
-        // the readouts below they are not behind a GameConfig debug flag.
+        // Always on: health and blocks are what the player steers by, so unlike the
+        // readouts below they are not behind a GameConfig debug flag.
         DrawPlayerHud(sim);
         _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8,  8), Color.White);
         _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, 24), Color.White);
@@ -185,37 +185,38 @@ public sealed class HudRenderer
 
     // ── The player panel ─────────────────────────────────────────────────────────
     //
-    // Health, escalation percent and blocks-in-hand, stacked bottom-left. Laid out
-    // bottom-up from a single cursor so a row can change height (the percent scales with
-    // the font; the blocks row with the swatch) without any row below it moving.
+    // Health and blocks-in-hand, stacked bottom-left. Laid out bottom-up from a single
+    // cursor so a row can change height (the blocks row with the swatch) without any
+    // row below it moving.
+    //
+    // There used to be a third row here, a big escalation-percent readout above the
+    // health bar. It went with the percent model itself: hits chip HP directly now, so
+    // the health bar IS the damage meter and a second number would just be the same
+    // information with the wrong units.
     private const int   PanelX       = 12;
     private const int   PanelBottom  = 12;
     private const int   PanelW       = 132;
     private const int   RowGap       = 6;
     private const int   HealthBarH   = 12;
-    private const float PercentScale = 1.9f;
     private const int   SwatchS      = 14;
 
     private void DrawPlayerHud(Simulation sim)
     {
         var vp = _graphicsDevice.Viewport;
-        int percentH = (int)(_debugFont.LineSpacing * PercentScale);
         int blocksH  = Math.Max(SwatchS, _debugFont.LineSpacing);
 
         int y = vp.Height - PanelBottom - blocksH;
         DrawBlocksRow(sim, PanelX, y, blocksH);
 
-        y -= RowGap + percentH;
-        DrawPercentRow(sim, PanelX, y);
-
         y -= RowGap + HealthBarH;
         DrawHealthRow(sim, PanelX, y);
     }
 
-    // Health is HP, not percent, and there is very little of it — MaxHealth is 3, lost
-    // only to crush impact into terrain. A smooth bar at that resolution reads as noise,
-    // so it is segmented at 1 HP: a lost point is a visibly lost chunk. Regen (which
-    // refills continuously) is what makes the leading segment partial.
+    // Health is the whole damage model now: every landed hit comes off it (a stock
+    // slash is 0.5 of MaxHealth 5), plus crush impact into terrain. There is little
+    // enough of it that a smooth bar reads as noise, so it is segmented at 1 HP — a
+    // lost point is a visibly lost chunk — and the slow out-of-combat regen is what
+    // makes the leading segment partial.
     private void DrawHealthRow(Simulation sim, int x, int y)
     {
         var p = sim.Player;
@@ -240,16 +241,6 @@ public sealed class HudRenderer
         Frame(x, y, PanelW, HealthBarH);
         _spriteBatch.DrawString(_debugFont, $"HP {p.Health:0.#}/{p.MaxHealth:0.#}",
             new Vector2(x + PanelW + 8, y - 2), new Color(200, 200, 210));
-    }
-
-    // Escalation percent (COMBAT_FEEL_PLAN Phase 5) — the monotonic meter that scales
-    // incoming knockback. Tinted hotter as it climbs, saturating at 200%.
-    private void DrawPercentRow(Simulation sim, int x, int y)
-    {
-        float pct = sim.Player.Combat.DamagePercent;
-        var color = Color.Lerp(Color.White, Color.OrangeRed, MathHelper.Clamp(pct / 200f, 0f, 1f));
-        _spriteBatch.DrawString(_debugFont, $"{pct:F0}%", new Vector2(x, y), color,
-            0f, Vector2.Zero, PercentScale, SpriteEffects.None, 0f);
     }
 
     // Blocks in hand: the reservoir converted into placeable tiles of the CURRENTLY

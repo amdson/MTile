@@ -81,7 +81,7 @@ public class CombatHitstunTests(ITestOutputHelper output)
 
         var hitstunPerFrame = new List<bool>(cfg.Frames);
         bool sawHitstun = false;
-        float? finalVictimPercent = null;
+        float? finalVictimDamage = null;
 
         var traces = SimRunner.RunMulti(cfg,
             onFrame: (f, ps) =>
@@ -90,7 +90,7 @@ public class CombatHitstunTests(ITestOutputHelper output)
                 hitstunPerFrame.Add(h);
                 if (h) sawHitstun = true;
             },
-            outPlayers: ps => finalVictimPercent = ps[1].Combat.DamagePercent);
+            outPlayers: ps => finalVictimDamage = ps[1].Combat.DamageTaken);
 
         SimReport.WriteCsv(traces[0], "hitstun_attacker", outputDir: null);
         SimReport.WriteCsv(traces[1], "hitstun_victim",   outputDir: null);
@@ -100,15 +100,15 @@ public class CombatHitstunTests(ITestOutputHelper output)
         for (int f = 0; f < hitstunPerFrame.Count; f++)
         {
             if (!hitstunPerFrame[f]) continue;
-            output.WriteLine($"first hitstun at frame {f}, victim state={traces[1][f].State}, percent={finalVictimPercent}");
+            output.WriteLine($"first hitstun at frame {f}, victim state={traces[1][f].State}, damage={finalVictimDamage}");
             break;
         }
 
         // 1) The slash must actually land. Direct hits no longer chip HP (Phase 5) —
-        //    connection is observed via the victim's escalation percent rising.
-        Assert.NotNull(finalVictimPercent);
-        Assert.True(finalVictimPercent > 0f,
-            $"Slash never connected — victim percent stayed at {finalVictimPercent}. Check geometry / mouse direction.");
+        //    connection is observed via the victim's escalation damage rising.
+        Assert.NotNull(finalVictimDamage);
+        Assert.True(finalVictimDamage > 0f,
+            $"Slash never connected — victim damage stayed at {finalVictimDamage}. Check geometry / mouse direction.");
 
         // 2) Hitstun must have fired at some point.
         Assert.True(sawHitstun, "Expected Combat.HitstunActive to be true at some frame after the slash landed.");

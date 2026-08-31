@@ -250,14 +250,13 @@ public class TemplateAction : EnemyActionState
     protected virtual float   Reach         => 34f;
     protected virtual float   HalfHeight    => 12f;
 
-    // Damage is a PERCENT contribution against a player (it feeds the monotonic
-    // DamagePercent that scales knockback — HP is only lost to crush impacts),
-    // and raw HP against an entity. Both from this one field.
+    // Damage is HP straight off whatever this connects with — a player, another
+    // entity — and material carved out of a tile. One field, every channel.
     protected virtual float   Damage        => 1.0f;
 
     // Knockback impulse; the target's Mass divides it (player Mass is 2.5, so
     // this lands as ~168 px/s sideways and ~64 up). Negative Y is up.
-    protected virtual Vector2 Knockback     => new(420f, -160f);
+    protected virtual Vector2 Knockback     => new(250f, -110f);
 
     protected virtual Color   TelegraphColor => Color.Magenta;
     protected virtual Color   StrikeColor    => Color.HotPink;

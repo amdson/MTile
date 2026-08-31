@@ -3,7 +3,7 @@
   "Stage": "hill",
   "WindowWidth": 1000,
   "WindowHeight": 900,
-  "Fullscreen": false,
+  "Fullscreen": true,
   "DebugDrawHitboxes":          false,
   "DebugDrawHurtboxes":         false,
   "DebugDrawPlayerOrientation": false,

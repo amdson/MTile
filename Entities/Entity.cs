@@ -90,7 +90,7 @@ public class Entity : IHittable
 
     public virtual Vector2 OnHit(in Hitbox hit, in Hurtbox _)
     {
-        Health -= hit.Damage;
+        Health -= hit.BodyDamage;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
         Body.Velocity += res.TargetDeltaV;
 

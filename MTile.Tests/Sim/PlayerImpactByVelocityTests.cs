@@ -285,6 +285,10 @@ public class PlayerImpactByVelocityTests
             else if (type == TileType.Stone) stoneBroken++;
         };
 
+        // Health at the moment the pillar runs out — i.e. what the SAND cost. After
+        // that the body is still falling and meets the stone catch floor, which is a
+        // different question and is asked separately below.
+        float healthThroughSand = startHealth;
         for (int f = 0; f < 120; f++)
         {
             ctrl.InjectInput(new PlayerInput());
@@ -292,14 +296,27 @@ public class PlayerImpactByVelocityTests
             chunks.Impact.Tick(Dt);
             player.Update(ctrl, chunks, new HitboxWorld(), new HurtboxWorld(), Dt);
             PhysicsWorld.StepSwept(bodies, chunks, Dt, Gravity);
+            if (sandBroken < 6) healthThroughSand = player.Health;
         }
 
         _out.WriteLine($"sandBroken={sandBroken}, stoneBroken={stoneBroken}, " +
-                       $"health: {startHealth} → {player.Health}, finalY={player.Body.Position.Y:F2}");
+                       $"health: {startHealth} → {healthThroughSand} (through sand) → " +
+                       $"{player.Health}, finalY={player.Body.Position.Y:F2}");
 
         Assert.True(sandBroken >= 3,
             $"expected ≥3 sand layers broken from terminal velocity, got {sandBroken}");
         Assert.Equal(0, stoneBroken);
-        Assert.Equal(startHealth, player.Health);
+        // The claim this test is named for: ploughing through sand is free, however
+        // fast you arrive, because PhysicsWorld caps the body's per-hit Δv at the
+        // tile face's absorption capacity and sand's cap never reaches
+        // CrushImpulseThreshold.
+        Assert.Equal(startHealth, healthThroughSand);
+        // The stone catch floor underneath is NOT free — the body still has fall left
+        // in it when the pillar runs out — but it is a modest bill, not a maiming.
+        // (This assertion used to read `Assert.Equal(startHealth, player.Health)` and
+        // passed only because HP regen was fast enough to erase the landing inside the
+        // 120-frame window. Direct-damage combat slowed regen to a trickle, which is
+        // what exposed it.)
+        Assert.InRange(startHealth - player.Health, 0f, 1f);
     }
 }

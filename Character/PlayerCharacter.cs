@@ -54,9 +54,15 @@ public class PlayerCharacter : IHittable
     // self-damage filter. Real solo play never touches this — the default stands.
     public Faction Faction { get; set; } = MTile.Faction.Player1;
 
-    // Combat stats. MaxHealth tuned so a Stalker takes ~4 lunges to down the
-    // player; Mass divides incoming knockback impulses (heavier = less yeet).
-    public float   MaxHealth = 3f;
+    // Combat stats. Mass divides incoming knockback impulses (heavier = less yeet).
+    //
+    // MaxHealth is the pool a hit now comes straight out of (see OnHit): a stock
+    // slash is 0.5, so 10 clean connects, a S1→S2→S3 string is 1.5 and a Stalker
+    // lunge is 1.0. It was 3 under the escalation model, where direct hits cost no
+    // HP at all and the pool only ever drained to crush impacts — 3 was sized for a
+    // channel that fired a handful of times per life. A pool that every hit bites
+    // has to be deeper to leave room for a fight, hence 5.
+    public float   MaxHealth = 5f;
     public float   Health;
     public float   Mass      = 2.5f;
     // Spawn protection only (COMBAT_FEEL_PLAN Phase 1). The old post-HIT invuln is
@@ -101,22 +107,31 @@ public class PlayerCharacter : IHittable
     private const float CrushDamagePerImpulse = 0.003f;
     private const float CrushCooldownSeconds  = 0.2f;   // ≈ the original 6 frames at 30 fps
     // Sprout crush (a growing block wedged us against terrain, so physics destroyed it).
-    // Flat HP per destroyed cell against MaxHealth = 3, so ~6 crush events down you at
-    // one cell each — punishing enough that being walled in is a real threat, survivable
-    // enough that a single bad sprout is not a death sentence.
+    // Flat HP per destroyed cell — one cell costs the same as taking a stock slash,
+    // punishing enough that being walled in is a real threat, survivable enough that a
+    // single bad sprout is not a death sentence.
     private const float SproutCrushDamage = 0.5f;
     // Impulse magnitude reported to OnHitRegistered for hitstun/stun scaling. A squeeze
     // has no real |vnRel| to report, so this stands in for "how hard that felt" — just
     // over CrushImpulseThreshold, so it reads as a solid hit and nothing more.
     private const float SproutCrushImpulseFeel = 750f;
     private int _lastCrushFrame = int.MinValue / 2;
+    // The last frame this player lost HP from ANY source — a landed hit or a crush.
+    // Anchors the regen delay below. Separate from _lastCrushFrame, which is the
+    // crush path's own re-bill cooldown and must not be pushed forward by an
+    // ordinary hit.
+    private int _lastDamageFrame = int.MinValue / 2;
 
-    // Fast HP regen (COMBAT_FEEL_PLAN Phase 5). HP is a quick-recovering pool now that
-    // direct hits don't chip it — the lasting pressure is the monotonic DamagePercent.
-    // Regen pauses briefly after an HP loss (crush is the only HP-loss path, so its
-    // frame anchors the delay — already snapshotted, no extra field needed).
-    private const float HealthRegenPerSecond = 0.8f;
-    private const float RegenDelaySeconds    = 1.0f;
+    // Out-of-combat HP regen. Deliberately a slow trickle behind a long delay, not
+    // the fast pool it was: under the escalation model direct hits cost no HP, so a
+    // brisk 0.8/s refill only ever undid a crush landing, and the lasting pressure
+    // lived in the (never-regenerating) percent meter. Now that every hit bites HP,
+    // that same rate would erase a clean slash in well under a second and hand the
+    // damage model straight back its irrelevance. At 0.15/s behind a 3 s delay,
+    // disengaging for ten seconds buys back one slash — enough that a fight you walk
+    // away from isn't permanent, not enough to out-heal one you're still in.
+    private const float HealthRegenPerSecond = 0.15f;
+    private const float RegenDelaySeconds    = 3.0f;
     // The dt this player is being stepped at, captured at the top of Update.
     // OnHit fires from CombatSystem.Apply (after all updates, same frame), so it
     // reads the current frame's value. Not snapshotted — rewritten every Update.
@@ -146,7 +161,7 @@ public class PlayerCharacter : IHittable
         // Anything later leaks through — harder the longer the button has been held —
         // and breaks the guard on the way in. `guard` scales the percent and the
         // knockback below; it is (1, 1) when the guard wasn't involved.
-        var guard = _abilities.Combat.ResolveGuard(hit.KnockbackImpulse, hit.Damage,
+        var guard = _abilities.Combat.ResolveGuard(hit.KnockbackImpulse, hit.BodyDamage,
                                                    _abilities.Facing, _frame, _dt);
         if (guard.Absorbed) return hit.KnockbackImpulse;
 
@@ -161,16 +176,24 @@ public class PlayerCharacter : IHittable
             return hit.KnockbackImpulse;
         }
 
-        // Escalation model (COMBAT_FEEL_PLAN Phase 5): a direct combat hit does NOT
-        // chip HP — it raises this player's monotonic DamagePercent and applies
-        // knockback scaled by that percent. Real HP loss comes from the resulting
-        // hard impact into terrain (the crush path in Update, which scales with how
-        // hard you're slammed). So low % ⇒ pushed around harmlessly; high % ⇒ flung
-        // into walls/floor hard enough to take crush damage. The hit's "damage" stat
-        // is now its percent contribution; tile damage still uses it on the tile path.
-        _abilities.Combat.AddPercent(hit.Damage * guard.DamageScale);
-        float kbScale = _abilities.Combat.KnockbackScale;
-        var res = HitResolver.Resolve(in hit, Mass, Body.Velocity, kbScale);
+        // A landed hit costs HP, directly and immediately — the same rule Entity.OnHit
+        // has always applied, so a player and a creature read the same hitbox the same
+        // way. BodyDamage is Damage for almost every attack; the handful that have to
+        // carve stone to do their job declare a separate, smaller body number (see
+        // Hitbox.BodyDamage).
+        //
+        // This replaced the escalation model (COMBAT_FEEL_PLAN Phase 5), in which a
+        // direct hit chipped no HP at all: it raised a monotonic percent, the percent
+        // scaled knockback, and HP only came off when the resulting launch slammed you
+        // into terrain. The indirection cost more than it bought — a clean hit read as
+        // nothing happening, and the knockback multiplier (2.5× at 100%) made the whole
+        // game feel like it was made of beach balls. Crush damage survives as its own
+        // channel below; it just isn't the only way to lose HP any more.
+        float hpLoss = hit.BodyDamage * guard.DamageScale;
+        Health -= hpLoss;
+        _abilities.Combat.AddDamage(hpLoss);
+        _lastDamageFrame = _frame;
+        var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
 
         // Superarmor (Plans/HIT_AIRLOCK_PLAN.md §4): the live action may tank
         // hits below its armor threshold. Percent still accrued above (armor
@@ -198,11 +221,9 @@ public class PlayerCharacter : IHittable
             : hit.StrikeDir;
 
         // Register the hit for hitstun (every hit) + the stun-threshold check.
-        // HitResult.Strength is the percent-scaled impulse magnitude (Impulse mode)
-        // or the scaled closing speed (Collision mode) — pre-mass either way, so
-        // strength reads consistently across masses and high-% hits stun longer /
-        // cross the stun / Tumble threshold. Hold-slashes still carry an explicit
-        // HitstunSecondsOverride.
+        // HitResult.Strength is the impulse magnitude (Impulse mode) or the closing
+        // speed (Collision mode) — pre-mass either way, so strength reads consistently
+        // across masses. Hold-slashes still carry an explicit HitstunSecondsOverride.
         // Strength rides the same knockback share: it IS the knockback magnitude
         // (pre-mass), so leaving it whole while halving the actual velocity change
         // would stun the victim as if nothing had been blocked.
@@ -220,8 +241,11 @@ public class PlayerCharacter : IHittable
         Body.Velocity = Vector2.Zero;
         Health        = MaxHealth;
         _hitInvulnRemaining = HitInvulnDuration;
-        // KO resets the escalation percent — the only thing that clears it (Phase 5).
-        _abilities.Combat.DamagePercent = 0f;
+        // A KO ends the life, so the running damage tally starts over with it — and
+        // the regen delay clears too, or a fresh spawn would be locked out of regen
+        // by the hit that killed the last one.
+        _abilities.Combat.DamageTaken = 0f;
+        _lastDamageFrame = int.MinValue / 2;
     }
     
     private readonly PlayerAbilityState _abilities = new();
@@ -443,7 +467,10 @@ public class PlayerCharacter : IHittable
             && _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt))
         {
             float excess = Body.LastImpulseMagnitude - CrushImpulseThreshold;
-            Health -= excess * CrushDamagePerImpulse;
+            float crushHp = excess * CrushDamagePerImpulse;
+            Health -= crushHp;
+            _abilities.Combat.AddDamage(crushHp);
+            _lastDamageFrame = _frame;
             // Short fixed hitstun (the old 8-frames-at-30fps feel) and NO control
             // mute: a hard landing briefly gates jump ("give me a sec") but doesn't
             // turn walking to mush — that treatment is for combat hits.
@@ -461,18 +488,20 @@ public class PlayerCharacter : IHittable
         else if (Body.SproutCrushCount > 0
             && _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt))
         {
-            Health -= SproutCrushDamage * Body.SproutCrushCount;
+            float sproutHp = SproutCrushDamage * Body.SproutCrushCount;
+            Health -= sproutHp;
+            _abilities.Combat.AddDamage(sproutHp);
+            _lastDamageFrame = _frame;
             _abilities.Combat.OnHitRegistered(_frame, SproutCrushImpulseFeel, dt,
                 hitstunSecondsOverride: 0.27f, muteControl: false);
             _lastCrushFrame = _frame;
         }
 
-        // Fast HP regen (Phase 5): HP recovers quickly once you've been clear of hard
-        // impacts for RegenDelaySeconds. Crush is the only HP-loss path, so its frame
-        // (_lastCrushFrame) anchors the delay. The monotonic DamagePercent does NOT
-        // regen — it's the lasting pressure that eventually makes any hit lethal.
+        // Out-of-combat regen: HP trickles back once you've been clear of damage —
+        // hits included, not just crushes — for RegenDelaySeconds. Combat.DamageTaken
+        // does NOT regen; it's the running tally of the whole life.
         if (Health < MaxHealth
-            && _frame - _lastCrushFrame >= SimFrames.FromSeconds(RegenDelaySeconds, dt))
+            && _frame - _lastDamageFrame >= SimFrames.FromSeconds(RegenDelaySeconds, dt))
             Health = MathF.Min(MaxHealth, Health + HealthRegenPerSecond * dt);
 
         var input = controller.Current;
@@ -738,6 +767,7 @@ public class PlayerCharacter : IHittable
         d.Health             = Health;
         d.HitInvulnRemaining = _hitInvulnRemaining;
         d.LastCrushFrame     = _lastCrushFrame;
+        d.LastDamageFrame    = _lastDamageFrame;
         d.Frame              = _frame;
         d.StateIndex         = _stateRegistry.IndexOf(_currentState);
         d.ActionIndex        = _actionRegistry.IndexOf(_currentAction);
@@ -760,6 +790,7 @@ public class PlayerCharacter : IHittable
         Health              = s.Health;
         _hitInvulnRemaining = s.HitInvulnRemaining;
         _lastCrushFrame     = s.LastCrushFrame;
+        _lastDamageFrame    = s.LastDamageFrame;
         _frame              = s.Frame;
 
         _currentState  = _stateRegistry[s.StateIndex];

@@ -19,7 +19,10 @@ public class BulletProjectile : Projectile
     private const float DamagePerFrame     = 0.5f;
     private const float HitboxHalfSize     = 4f;
     private const float CollisionStopSpeed = 30f;        // |v| below this = "we hit something"
-    private const float KnockbackImpulse   = 1200f;      // shoves the player hard on hit
+    // Was 1200 — the hardest shove in the game, off a turret plinking at range.
+    // 400 vs player Mass 2.5 is 160 px/s: a real interruption that still leaves
+    // you standing where you were shot.
+    private const float KnockbackImpulse   = 400f;
     private const float ArmDelay           = 0.04f;      // skip stop-check at t=0 (just spawned)
     private const float DeflectSpeed       = 520f;       // post-deflect bullet speed
 

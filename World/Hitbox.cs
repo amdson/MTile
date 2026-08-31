@@ -39,6 +39,23 @@ public readonly struct Hitbox
     public readonly BoundingBox Region;            // broad-phase AABB; always present
     public readonly int         HitId;             // stable across an attack's broadcast window
     public readonly float       Damage;            // amount applied per intersection event
+    // What this hit takes off a BODY (player or entity), when that differs from what
+    // it takes out of a tile. Defaults to Damage, which is right for almost everything.
+    //
+    // The two used to be the same number by necessity and it mostly worked, because
+    // under the escalation model a hit's Damage against a player wasn't HP at all — it
+    // was a percent contribution, scaled by a separate exchange rate. Direct HP damage
+    // removed that rate and left the two readings sharing a scale they were never
+    // tuned to share: a beam that has to carve at 2.6 so it clears a stone cell
+    // outright (Stone MaxHP is 2.0) would otherwise two-shot a 5 HP player. The
+    // terrain-penetrating attacks — Zeus's bolt/sweep/column, the rail bolt — set
+    // this; everyone else leaves it alone.
+    //
+    // The alternative was the two-hitbox split (TilesOnly + EntitiesOnly on a shared
+    // HitId) that StabAction and ForceBurst use. That stays the right tool when the
+    // two channels want different GEOMETRY as well; this is for when only the number
+    // differs.
+    public readonly float       BodyDamage;
     public readonly Vector2     KnockbackImpulse;  // px/s · mass-units; target's mass divides this
     public readonly Faction     Owner;             // for self-damage filtering
     public readonly EntityId    Source;            // attacker entity — back-attribution for recoil / AI
@@ -75,7 +92,7 @@ public readonly struct Hitbox
     public readonly float       HitstunSecondsOverride;
     // Struggle / grab-break channel (COMBAT_FEEL_PLAN Phase 6). When > 0, this hit
     // erodes the GRABBER's grab strength by this amount instead of dealing the usual
-    // knockback / percent / hitstun — PlayerCharacter.OnHit branches on it and returns
+    // knockback / damage / hitstun — PlayerCharacter.OnHit branches on it and returns
     // early. Default 0 ⇒ a normal hit. Only the exempt GrabbedSlash sets it.
     public readonly float       GrabStrengthDamage;
     // ── Knockback model (Plans/HIT_MOMENTUM_PLAN.md) ────────────────────────────
@@ -115,7 +132,8 @@ public readonly struct Hitbox
     // Input cheat-sheet (details on the fields above):
     //   Identity   region (broad AABB) · hitId (dedupe key) · owner/source · targets
     //              · shape/shapePos/shapeRotation (optional narrow-phase polygon)
-    //   Effect     damage · knockbackImpulse (Impulse-mode Δv·mass; in Collision
+    //   Effect     damage (tiles) · bodyDamage (players/entities; defaults to damage)
+    //              · knockbackImpulse (Impulse-mode Δv·mass; in Collision
     //              mode a direction hint only — parry cone, bullet deflect)
     //              · hitstunSecondsOverride · grabStrengthDamage (struggle channel)
     //   Recoil     recoilScale (0 = off) · recoilBreakProtected · recoilMinMaterialHP
@@ -127,6 +145,7 @@ public readonly struct Hitbox
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
                   Color? debugColor = null, HitTargets targets = HitTargets.All,
+                  float bodyDamage = -1f,
                   Polygon shape = null, Vector2 shapePos = default, float shapeRotation = 0f,
                   float recoilScale = 0f, bool recoilBreakProtected = false,
                   float recoilMinMaterialHP = 0f, float hitstunSecondsOverride = -1f,
@@ -142,6 +161,7 @@ public readonly struct Hitbox
         Region               = region;
         HitId                = hitId;
         Damage               = damage;
+        BodyDamage           = bodyDamage < 0f ? damage : bodyDamage;
         KnockbackImpulse     = knockbackImpulse;
         Owner                = owner;
         Source               = source;
