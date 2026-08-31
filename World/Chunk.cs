@@ -5,7 +5,7 @@ namespace MTile;
 public class Chunk
 {
     public const int Size = 16;
-    public const int TileSize = 11;   // 2/3-scale blocks (was 16). Player Radius/StandingHeight deliberately unchanged.
+    public const int TileSize = 10;   // 2/3-scale blocks (was 16). Player Radius/StandingHeight deliberately unchanged.
 
     public Point ChunkPos;
     public readonly Tile[,] Tiles = new Tile[Size, Size];
