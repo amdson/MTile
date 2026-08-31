@@ -58,6 +58,32 @@ public static class TileFilters
             t.WorldCenterX - wallDir * Chunk.TileSize,
             t.WorldCenterY);
 
+    // Nothing solid stands between the body's facing face and this tile, across
+    // the body's own height. BodyFacingNeighborEmpty is the same idea at ONE
+    // tile's range: it establishes that a tile is the outer edge of its own
+    // slab, but says nothing about a SEPARATE slab standing in front of that
+    // one. A side probe reaches ~18 px — 1.6 tiles at TileSize 11, where it was
+    // 1.1 at 16 — so it comfortably looks over a knee-high block to the wall
+    // behind it, and reports that far wall's corner as the ledge in front of
+    // the body. The body cannot get there: the near block is in the way.
+    //
+    // The window is the body's own vertical extent, which is the honest
+    // question — "could this body pass through the space between?" — and NOT
+    // the corner's height alone, since a reach that is clear at the hands can
+    // still be blocked at the knees.
+    public static TilePredicate NothingBetween(BoundingBox body, int wallDir) =>
+        (chunks, t) =>
+        {
+            const float Skin = 0.5f;   // keeps the body's own column and the tile itself out
+            float face  = body.Side(wallDir);
+            float inner = wallDir == +1 ? t.WorldLeft : t.WorldRight;
+            if (wallDir * (inner - face) <= Skin) return true;   // corner is AT the face
+            var between = wallDir == +1
+                ? new BoundingBox(face  + Skin, body.Top, inner - Skin, body.Bottom)
+                : new BoundingBox(inner + Skin, body.Top, face  - Skin, body.Bottom);
+            return !TileQuery.Tiles(chunks, between).Any();
+        };
+
     // The tile diagonally above-and-toward-the-body is empty. Rejects inverted
     // notches: a top-exposed tile tucked under a wall extending up-and-out has
     // a solid above-inward neighbor, and isn't a real outer corner.

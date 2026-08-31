@@ -305,4 +305,75 @@ public class ExposedCornerEdgeSelectionTests(ITestOutputHelper output)
         Assert.Equal(slabLeft,   corner.InnerEdge.X);
         Assert.Equal(slabBottom, corner.InnerEdge.Y);
     }
+
+    // ── Reach: a corner set BEHIND something the body is up against ───────
+    //
+    // BodyFacingNeighborEmpty makes a tile the outer edge of its OWN slab. It
+    // says nothing about a separate slab standing in front of that one, and the
+    // side probe reaches ~18 px — 1.6 tiles at TileSize 11, where it was 1.1 at
+    // 16 — so it looks straight over a knee-high block to the wall behind it and
+    // reports THAT corner as the ledge in front of the body. The grab then pins
+    // the body to a corner it cannot get to, with the near block in the way.
+    //
+    // The geometry is derived from the body rather than written as fixed rows:
+    // which row the head lands in depends on TileSize, and this file's other
+    // fixtures were authored at 16.
+    //
+    //        far  near                     (wallDir = -1; mirrored for +1)
+    //         #    .     ← head row: the wall behind, top exposed
+    //         #    .
+    //         #    #     ← the knee-high block the body is standing against
+    //   ###############  ← ground
+    private static (ChunkMap Terrain, PhysicsBody Body, float FarInnerX, float FarTopY)
+        AlcoveBehindABlock(int wallDir, bool withBlock)
+    {
+        const int GroundRow = 6, Cols = 12;
+        const float groundTop = GroundRow * TS;
+
+        int nearCol = wallDir == -1 ? 5 : 6;
+        float faceX = wallDir == -1 ? (nearCol + 1) * TS : nearCol * TS;
+        var body = MakeBodyAtWall(wallFaceX: faceX, wallDir: wallDir, groundTop: groundTop);
+
+        int headRow = (int)MathF.Floor(body.Bounds.Top / TS);
+        int feetRow = (int)MathF.Floor((body.Bounds.Bottom - 0.5f) / TS);
+        int farCol  = nearCol + wallDir;   // one column further from the body
+
+        var grid = new char[GroundRow + 1][];
+        for (int r = 0; r <= GroundRow; r++)
+        {
+            grid[r] = new char[Cols];
+            for (int c = 0; c < Cols; c++) grid[r][c] = r == GroundRow ? 'X' : '.';
+        }
+        for (int r = headRow; r <= feetRow; r++) grid[r][farCol] = 'X';   // the wall behind
+        if (withBlock) grid[feetRow][nearCol] = 'X';                      // the block in front
+
+        var terrain = SimTerrain.FromAscii(
+            string.Join("\n", grid.Select(r => new string(r))), originTileX: 0, originTileY: 0);
+        float farInnerX = wallDir == -1 ? (farCol + 1) * TS : farCol * TS;
+        return (terrain, body, farInnerX, headRow * TS);
+    }
+
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(+1)]
+    public void AboveHead_CornerBehindABlockTheBodyIsAgainst_IsNotAGrab(int wallDir)
+    {
+        // Control: with the space in front clear, the alcove's corner IS the ledge.
+        var open = AlcoveBehindABlock(wallDir, withBlock: false);
+        bool foundOpen = ExposedUpperCornerChecker.TryFindAboveHead(
+            open.Body, open.Terrain, wallDir, out var openCorner);
+        output.WriteLine($"open: found={foundOpen} corner={openCorner.InnerEdge} " +
+                         $"expected=({open.FarInnerX},{open.FarTopY})");
+        Assert.True(foundOpen, "a clear reach to the alcove corner should still be a ledge");
+        Assert.Equal(open.FarInnerX, openCorner.InnerEdge.X);
+        Assert.Equal(open.FarTopY,   openCorner.InnerEdge.Y);
+
+        // Put a block in the way and the same corner is out of reach.
+        var blocked = AlcoveBehindABlock(wallDir, withBlock: true);
+        bool foundBlocked = ExposedUpperCornerChecker.TryFindAboveHead(
+            blocked.Body, blocked.Terrain, wallDir, out var blockedCorner);
+        output.WriteLine($"blocked: found={foundBlocked} corner={blockedCorner.InnerEdge}");
+        Assert.False(foundBlocked,
+            $"grabbed a corner behind the block in front of the body: {blockedCorner.InnerEdge}");
+    }
 }
