@@ -11,7 +11,8 @@ namespace MTile;
 // and never notices anyone. The Shrike is the same silhouette with the opposite
 // intent — it patrols the same way until the player crosses into its detection
 // range, then hovers for a beat and dives, and whatever it reaches first, player
-// or rock, it goes off on.
+// or rock, it goes off on. A swoop that misses ends in a pull-up and another
+// hover, so every pass is announced before it happens, not just the first.
 //
 // Reusing the bird's shape is the point: the two share an outline, so a player
 // who has learned to route around birds has to look twice at every flock. The
@@ -117,9 +118,24 @@ public sealed class ShrikeController : EnemyController
 // and has to arc back around for another pass — which is the "attempt" in
 // "attempts to dive bomb", and it costs no extra state to get.
 //
-// Phase timeline (t = TimeInState):
-//   [0, WindupSeconds)   hover in place, ring telegraph — the tell
-//   thereafter           full speed along the brain's MoveDir
+// The pass is a CYCLE, not a one-shot wind-up. Every swoop is preceded by its own
+// hover, so a shrike that missed pulls up, hangs, telegraphs, and only then comes
+// again:
+//
+//   phase = TimeInState mod (WindupSeconds + DiveSeconds)
+//   [0, WindupSeconds)              hover in place, ring telegraph — the tell
+//   [WindupSeconds, CycleSeconds)   full speed along the brain's MoveDir
+//
+// Cycling matters more than the first hover did. The state deliberately survives
+// an overshoot (see AbortSlack), so under the old one-shot timeline a shrike that
+// missed never hovered again — it just became a permanent 300px/s heat-seeker with
+// no tell for every pass after the first. That is what read as "too fast": not the
+// dive speed, the absence of any punctuation between dives.
+//
+// The phase is derived from TimeInState rather than kept in a field on purpose:
+// TimeInState is the only movement var EnemyEntity snapshots, so a cycle counter
+// would silently desync a rollback (same reason EnemyHopState solves its own cycle
+// this way).
 public class ShrikeDiveState : EnemyFlyState
 {
     // Must match ShrikeController.DetectRange — the brain only points at the
@@ -132,11 +148,31 @@ public class ShrikeDiveState : EnemyFlyState
     // restarts the wind-up hover forever and the shrike never actually arrives.
     public float AbortSlack    { get; init; } = 1.7f;
 
-    // The tell. Long enough to read as "that one has noticed me" and to step out
-    // of the line, short enough that it still reads as a swoop.
-    public float WindupSeconds { get; init; } = 0.35f;
+    // The tell, once per pass. Long enough to read as "that one has noticed me"
+    // and to step out of the line, short enough that it still reads as a swoop.
+    // Note the body spends the first ~0.18s of it braking out of the previous
+    // dive (300px/s against the acceleration budget below), so the fully-still
+    // portion a player actually reads is shorter than the number.
+    public float WindupSeconds { get; init; } = 0.5f;
+
+    // How long one swoop runs before the bird pulls up and telegraphs again. At
+    // DiveSpeed this is ~120px of travel — roughly DiveRange, so a dive launched
+    // from the edge of detection still arrives in a single pass and the cycle only
+    // shows itself when the shrike actually missed.
+    public float DiveSeconds   { get; init; } = 0.45f;
 
     public float DiveSpeed     { get; init; } = 300f;
+
+    private float CycleSeconds => MathF.Max(WindupSeconds + DiveSeconds, 1e-3f);
+
+    // Where in the hover/dive cycle t falls. Plain float modulo (no MathF.IEEERemainder,
+    // no accumulate-and-subtract counter) so it stays a pure, replay-stable function
+    // of TimeInState.
+    private float Phase(float t)
+    {
+        float c = CycleSeconds;
+        return t - c * MathF.Floor(t / c);
+    }
 
     // Roughly 4× the patrol's budget, but well under DiveSpeed — that ratio IS
     // the turn radius. Raise it and the shrike becomes a heat-seeker that can't
@@ -161,8 +197,9 @@ public class ShrikeDiveState : EnemyFlyState
     protected override Vector2 DesiredVelocity(in EnemyContext ctx, in EnemyMovementVars v)
     {
         // Wind-up: hold station. Hovering rather than coasting is what makes the
-        // tell legible — the bird visibly stops, then goes.
-        if (v.TimeInState < WindupSeconds) return Vector2.Zero;
+        // tell legible — the bird visibly stops, then goes. Runs before EVERY
+        // swoop, not just the first.
+        if (Phase(v.TimeInState) < WindupSeconds) return Vector2.Zero;
 
         var dir = ctx.Input.MoveDir;
         if (dir.LengthSquared() <= 1e-4f) return Vector2.Zero;
@@ -173,11 +210,13 @@ public class ShrikeDiveState : EnemyFlyState
     // The wind-up tell: a ring that closes in on the body as the hover runs out,
     // so both "this one has picked you" and "how long you have" are readable.
     // Telegraph sees only (list, body, vars), which is why the phase is measured
-    // off TimeInState and not off anything about the player.
+    // off TimeInState and not off anything about the player. Draws once per cycle,
+    // so the second and third passes are as readable as the first.
     public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyMovementVars v)
     {
-        if (v.TimeInState >= WindupSeconds) return;
-        float p = v.TimeInState / MathF.Max(WindupSeconds, 1e-3f);   // 0 → 1
+        float phase = Phase(v.TimeInState);
+        if (phase >= WindupSeconds) return;
+        float p = phase / MathF.Max(WindupSeconds, 1e-3f);   // 0 → 1
         t.Ring(body.Position, MathHelper.Lerp(26f, 10f, p),
                Color.Lerp(new Color(255, 120, 90, 90), new Color(255, 120, 90), p), 10, 1.5f);
     }
