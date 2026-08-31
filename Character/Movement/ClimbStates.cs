@@ -116,17 +116,46 @@ public abstract class ClimbManeuverBase : MovementState
 
         ManeuverCorrector.Run(ctx, probe, _dir, entrySpeed, default, out int rowCount,
                               FeasibilityIterations);
+        if (Delivers(ctx, rowCount > 0 ? s.TickDv : null, entrySpeed, rise, targetY)) return true;
+
+        // Second look, uncorrected — the case where the SOLVE is what refuses.
+        // A body standing flush against the step it wants to climb is already
+        // inside the clearance margin of that step's own face at tick 0, so the
+        // solve spends its budget pushing back off a CONTACT instead of steering
+        // around an obstacle, and pays for the pushback out of the hop's rise:
+        // the corrected arc scrapes along the lip where the flown arc clears it.
+        // (A 2-block step is the case that bites — too tall for the mantle band,
+        // too short for a hang — so "walk up to it, then hold Up" refused.)
+        //
+        // This cannot green-light a jam. The raw arc counts only if it reaches
+        // the gate with NO unavoided impact anywhere along it, which is an arc
+        // the solver had nothing to fix in the first place. An arc that would
+        // actually hit something still truncates before the gate and still
+        // refuses — the slab-over-approach anchor keeps that honest.
+        if (rowCount == 0) return false;   // no correction ran: nothing to second-guess
+        probe.Position = ctx.Body.Position;
+        probe.Velocity = new Vector2(ctx.Body.Velocity.X,
+                                     MathF.Min(ctx.Body.Velocity.Y, -vy0));
+        return Delivers(ctx, null, entrySpeed, rise, targetY);
+    }
+
+    // Rolls the arc out from ctx.Corrector.ProbeBody under an optional per-tick
+    // correction and asks the delivery question: does some sample BEFORE any
+    // unavoided impact reach the gate band past the lip? CorrectorRefusalResidual
+    // is the gate tolerance — the spring settles a couple px below the exact line.
+    private bool Delivers(EnvironmentContext ctx, Vector2[] tickDv, float entrySpeed,
+                          in CorridorCorner rise, float targetY)
+    {
+        var cfg = MovementConfig.Current;
+        var s   = ctx.Corrector;
         int H = Math.Min(cfg.CorrectorHorizon, BallisticPredictor.MaxHorizon);
         int n = BallisticPredictor.PredictGuided(
-            probe, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
-            ctx.Gravity, ctx.Dt, H, s.Samples, rowCount > 0 ? s.TickDv : null);
+            s.ProbeBody, ctx.Chunks, _dir, entrySpeed, startGrounded: false,
+            ctx.Gravity, ctx.Dt, H, s.Samples, tickDv);
         ClearanceConstraintBuilder.Build(
-            ctx.Chunks, probe.Polygon, s.Samples, n,
+            ctx.Chunks, s.ProbeBody.Polygon, s.Samples, n,
             cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation,
             s.Rows, out int truncatedAt);
-        // Delivered: some sample BEFORE any unavoided impact reaches the gate band
-        // past the lip. CorrectorRefusalResidual is the gate tolerance — the spring
-        // settles a couple px below the exact gate line.
         int usable = Math.Min(truncatedAt, n);
         for (int k = 0; k < usable; k++)
         {
@@ -336,12 +365,24 @@ public class ArcJumpState : ClimbManeuverBase
     protected override float RiseBandMax => MovementConfig.Current.CorridorMaxRise;
     protected override bool  RequiresRunningEntry => false;
 
-    // movement_todo #6: the 2-block arc is a DELIBERATE move — genuinely
-    // running in (≥ ArcJumpRunSpeed) with Up held. Standing/slow near a
-    // 2-block ledge with Up held routes to LedgeGrab instead (its Passive 42
-    // wins automatically once this precondition refuses the still case).
+    // movement_todo #6: the 2-block arc is a DELIBERATE move — Up held, and
+    // either genuinely running in (≥ ArcJumpRunSpeed) or facing a lip there is
+    // no other way up.
+    //
+    // The run gate exists only to hand the standstill to LedgeGrab (Passive 42),
+    // and that hand-off is real only when there is something to HANG from: the
+    // grab probes at head height, so a rise shorter than StandingHeight has no
+    // graspable corner and refusing there just leaves the player standing at the
+    // wall with Up held and nothing bidding. That gap is not hypothetical — the
+    // band between MantleMaxRise and StandingHeight is exactly where a 2-block
+    // step lands once TileSize is small enough (22 px at TileSize 11), so the
+    // whole hold-Up-to-climb-a-2-block-ledge case fell into it.
+    //
+    // Speed still decides whenever both moves are genuinely available: run at a
+    // hangable ledge and you arc it, walk up to one and you hang.
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
         => ctx.Input.Up
-           && _dir * ctx.Body.Velocity.X >= MovementConfig.Current.ArcJumpRunSpeed
+           && (_dir * ctx.Body.Velocity.X >= MovementConfig.Current.ArcJumpRunSpeed
+               || !ctx.TryGetLedgeCorner(_dir, out _))
            && base.CheckPreConditions(ctx, abilities);
 }
