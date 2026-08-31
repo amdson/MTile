@@ -1,5 +1,9 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
@@ -105,5 +109,70 @@ public class ConfigLayoutTests(ITestOutputHelper output)
                 $"Desktop build didn't stage configs/{name}. The <None Link=\"configs\\...\"> " +
                 "rule in MTile.Desktop.csproj has to mirror the source sub-path.");
         output.WriteLine("Desktop output mirrors configs/.");
+    }
+
+    // VALUE parity, the twin of the path parity above. Every loader no-ops on a
+    // missing file, so MovementConfig's C# property initialisers are both the
+    // missing-file fallback AND what this whole assembly runs on — nothing in
+    // the test host calls MovementConfig.Load (deliberately: it swaps a
+    // process-wide static, and this assembly is un-parallelised precisely
+    // because that kind of mutation leaks). So any key whose shipped value
+    // differs from its C# default is tuning the GAME uses and no test ever sees.
+    //
+    // Not hypothetical: FoldEngine sat at "qp" here while the game shipped
+    // "lattice", so every corrector and movement test was validating a solver
+    // that does not ship. Compared by reflection rather than by calling Load,
+    // to keep the no-static-mutation property the rest of this file documents.
+    [Fact]
+    public void ShippedMovementConfigMatchesTheCodeDefaultsTestsRunOn()
+    {
+        var root = RepoRoot();
+        if (root == null) { output.WriteLine("Repo root not found — skipping."); return; }
+
+        var path = Path.Combine(root, "configs", "movement_config.json");
+        Assert.True(File.Exists(path), path);
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions
+        {
+            AllowTrailingCommas = true,
+            CommentHandling     = JsonCommentHandling.Skip,
+        });
+
+        var fresh = new MovementConfig();
+        var props = typeof(MovementConfig)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .ToDictionary(p => p.Name, p => p);
+
+        var diffs = new List<string>();
+        int bound = 0;
+        foreach (var kv in doc.RootElement.EnumerateObject())
+        {
+            if (!props.TryGetValue(kv.Name, out var prop)) continue;   // json-only keys aren't this test's business
+            bound++;
+
+            string shipped = kv.Value.ValueKind switch
+            {
+                JsonValueKind.String => kv.Value.GetString(),
+                JsonValueKind.True   => "True",
+                JsonValueKind.False  => "False",
+                _                    => kv.Value.GetRawText(),
+            };
+            string dflt = Convert.ToString(prop.GetValue(fresh), CultureInfo.InvariantCulture);
+
+            bool same =
+                double.TryParse(dflt,    NumberStyles.Any, CultureInfo.InvariantCulture, out double a) &&
+                double.TryParse(shipped, NumberStyles.Any, CultureInfo.InvariantCulture, out double b)
+                    ? Math.Abs(a - b) < 1e-6
+                    : string.Equals(dflt, shipped, StringComparison.Ordinal);
+
+            if (!same) diffs.Add($"{kv.Name}: shipped={shipped}, C# default={dflt}");
+        }
+
+        output.WriteLine($"{bound} movement_config keys bound to MovementConfig; {diffs.Count} diverge.");
+        foreach (var d in diffs) output.WriteLine("  " + d);
+
+        Assert.True(diffs.Count == 0,
+            "configs/movement_config.json disagrees with MovementConfig's C# defaults, so the suite " +
+            "is testing tuning the game does not ship: " + string.Join("; ", diffs));
     }
 }
