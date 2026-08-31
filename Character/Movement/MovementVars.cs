@@ -70,6 +70,10 @@ public struct MovementVars
     public float EntrySpeed;        // Parkour
     public bool  ExitingAirborne;   // Dropdown
     public CoveredJumpPhase CoveredPhase;  // CoveredJump
+    public Vector2 CarryVelocity;   // TerrainCarried: current ride target (live push, else the
+                                    //   lead-weighted nearby-mass motion)
+    public float   CarryHoldX;      // TerrainCarried: evidence grace keeping the state alive
+                                    //   across momentary query gaps
     public Vector2 MantleCorner;    // Mantle: the step lip being climbed (from the corridor probe)
     public float MantleTargetY;     // Mantle: body-center Y to deliver into the landing gate
     public float MantleEntryY;      // Mantle: body-center Y at entry (for AnimationProgress)

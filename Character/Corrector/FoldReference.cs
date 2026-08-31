@@ -79,7 +79,10 @@ public static class FoldReference
         var body = ctx.Body;
 
         if (ctx.Modifiers.PreserveExternalVelocity) return false;          // knockback
-        if (-body.Velocity.Y > cfg.SpringMaxRiseSpeed) return false;       // launched
+        // Launched — support-relative (BACKLOG 5.8): a body riding a rising
+        // floor (sprout lift) is anchored in the floor's frame, not ballistic.
+        float supportVy = ctx.TryGetGround(out var supportFsd) ? supportFsd.SurfaceVelocity.Y : 0f;
+        if (-(body.Velocity.Y - supportVy) > cfg.SpringMaxRiseSpeed) return false;
         if (body.Velocity.Y > cfg.MaxGroundEngageVnRel) return false;      // plunging
 
         template = CObstacleTemplate.For(body.Polygon);

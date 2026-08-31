@@ -409,6 +409,7 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new TumbleState());
         _stateRegistry.Add(new StandingState());
         _stateRegistry.Add(new CrouchedState());
+        _stateRegistry.Add(new TerrainCarriedState());
         _stateRegistry.Add(new JumpingState());
         _stateRegistry.Add(new RunningJumpState());
         _stateRegistry.Add(new DoubleJumpingState());

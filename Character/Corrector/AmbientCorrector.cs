@@ -181,6 +181,33 @@ public static class AmbientCorrector
             if (yTop < bandMinY || yTop > bandMaxY) continue;
             if (yTop < env) { env = yTop; found = true; }
         }
+
+        // Growing sprout volumes are floor too (BACKLOG 5.8): the support a body
+        // is actually riding while a block grows under it. Each face volume is a
+        // tile-sized box centred on the lerped position (the same shape
+        // GroundChecker and the physics contacts see), so the same beveled
+        // C-obstacle math applies — and the envelope rises smoothly with the
+        // growth instead of snapping a full tile when the sprout completes.
+        // Without this the fold's floor model and the probe's disagree for the
+        // whole growth window, and the solve pulls DOWN against the lift.
+        // Zero-cost when nothing is growing (the common case).
+        var growing = chunks.Graph.Growing;
+        for (int i = 0; i < growing.Count; i++)
+        {
+            var sp = growing[i];
+            foreach (var face in TileSproutNode.FaceOrder)
+            {
+                if ((sp.Faces & face) == 0) continue;
+                var c = sp.VolumeCenter(face);
+                if (MathF.Abs(x - c.X) > t.XExtent + half) continue;
+                if (TileQuery.IsSolidAt(chunks, c.X, c.Y - ts)) continue;   // not standable
+                float ry = t.TopSurfaceRy(x - c.X, out bool valid);
+                if (!valid) continue;
+                float yTop = c.Y + ry;
+                if (yTop < bandMinY || yTop > bandMaxY) continue;
+                if (yTop < env) { env = yTop; found = true; }
+            }
+        }
         return env;
     }
 
@@ -286,7 +313,15 @@ public static class AmbientCorrector
         // not "overshoot"), no walk-speed tracking against launch momentum.
         // Hard clearance rows still protect the arc, and the landing catch
         // re-binds on descent through the anchor query below.
-        bool launched = -ctx.Body.Velocity.Y > cfg.SpringMaxRiseSpeed;
+        //
+        // SURFACE-RELATIVE (BACKLOG 5.8): rise is measured against the support
+        // surface's own velocity, so a body riding a floor that is itself
+        // rising (a sprout growing under it, ~110 px/s) is STANDING in the
+        // floor's frame, not launched — the static-floor case collapses to the
+        // old absolute form. Same convention as StandingState's entry gate,
+        // the jumps' source frame, and the physics contacts.
+        float supportVy = ctx.TryGetGround(out var supportFsd) ? supportFsd.SurfaceVelocity.Y : 0f;
+        bool launched = -(ctx.Body.Velocity.Y - supportVy) > cfg.SpringMaxRiseSpeed;
 
         // Elective latch bookkeeping: a positive latch (committed R1 climb)
         // decays each frame and is refreshed by an accepted climb; a negative

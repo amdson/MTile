@@ -117,10 +117,20 @@ public class StandingState : MovementState
     {
         // Supported = floor within reach AND not rising beyond what support
         // could push (SpringMaxRiseSpeed). Without the rise gate, a body flung
-        // upward while near a floor (a sprout growing under it, a pop-out)
-        // keeps the hold — zero gravity — and rides its launch indefinitely.
+        // upward while near a floor (a pop-out) keeps the hold — zero gravity —
+        // and rides its launch indefinitely.
+        //
+        // The rise is SURFACE-RELATIVE (BACKLOG 5.8): a body carried up by a
+        // rising floor (a sprout growing under it, ~110 px/s — faster than the
+        // 80 px/s gate) is standing in the floor's frame, not launched. The
+        // absolute form declared it ballistic, dropped the hold, and left raw
+        // contact resolution to bulldoze the body up against full gravity —
+        // the sprout-lift jitter. Static floors have zero SurfaceVelocity and
+        // collapse to the old form. Entry (IsStandingGround) already measured
+        // relative; support now agrees with it.
         bool supported = ctx.TryGetGround(out var ground)
-            && -ctx.Body.Velocity.Y <= MovementConfig.Current.SpringMaxRiseSpeed;
+            && -(ctx.Body.Velocity.Y - ground.SurfaceVelocity.Y)
+                <= MovementConfig.Current.SpringMaxRiseSpeed;
         if (!supported) return Vector2.Zero;
         float dist = ground.Position.Y - ctx.Body.Position.Y;
         // The hold FADES across the spring's old support range: full inside
@@ -135,8 +145,14 @@ public class StandingState : MovementState
         var force = new Vector2(0f, -ctx.Gravity.Y * holdScale);
         if (ctx.Intent.CurrentHorizontal == 0 && ctx.Dt > 0f)
         {
+            // Station friction brakes toward the SURFACE's tangential velocity,
+            // not toward world-zero — the contact-scoped frame (BACKLOG 5.7's
+            // tangential carry, applied to the feedforward friction term): a
+            // floor sliding sideways under planted feet carries the body with
+            // it instead of the friction fighting the ride.
             float cap = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
-            force.X = Math.Clamp(-ctx.Body.Velocity.X / ctx.Dt, -cap, cap) * holdScale;
+            float vxRel = ctx.Body.Velocity.X - ground.SurfaceVelocity.X;
+            force.X = Math.Clamp(-vxRel / ctx.Dt, -cap, cap) * holdScale;
         }
         return force;
     }

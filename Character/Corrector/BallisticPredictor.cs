@@ -88,16 +88,17 @@ public static class BallisticPredictor
         for (int k = 0; k < steps; k++)
         {
             var bounds = polygon.GetBoundingBox(pos);
-            bool haveFloor = TryProbeFloor(chunks, bounds, floatHeight, out float floorY);
+            bool haveFloor = TryProbeFloor(chunks, bounds, floatHeight, out float floorY, out Vector2 floorVel);
             // Supported ≠ merely "probe sees a floor": the probe reaches ~40px
             // down (float height + slack), but support engages only within
             // SupportReach — a ballistic pass-by above that is honest free
             // flight — and only below the FSD-era engagement speed gate: a
             // plunge past MaxGroundEngageVnRel lands via the raw swept-impact
             // path, never the hold (mirrors the live TryGetGround gate).
+            // Rise is floor-relative (BACKLOG 5.8), mirroring live FoldBaseline.
             bool grounded = haveFloor && floorY - pos.Y <= SupportReach
                 && vel.Y <= cfg.MaxGroundEngageVnRel
-                && -vel.Y <= cfg.SpringMaxRiseSpeed;
+                && -(vel.Y - floorVel.Y) <= cfg.SpringMaxRiseSpeed;
 
             var force = Vector2.Zero;
             if (grounded)
@@ -117,8 +118,9 @@ public static class BallisticPredictor
                 force.Y -= gravity.Y * holdScale;
                 if (inputDirX == 0 && dt > 0f)
                 {
+                    // Surface-tangential frame, mirroring live FoldBaseline.
                     float frictionCap = cfg.GroundFriction * modifiers.GroundFriction;
-                    force.X = Math.Clamp(-vel.X / dt, -frictionCap, frictionCap) * holdScale;
+                    force.X = Math.Clamp(-(vel.X - floorVel.X) / dt, -frictionCap, frictionCap) * holdScale;
                 }
             }
             else
@@ -256,11 +258,16 @@ public static class BallisticPredictor
     // that starts within the strip). Sprouts and external shape providers are
     // deliberately out of scope: the coast is predicted against static terrain.
     private static bool TryProbeFloor(ChunkMap chunks, BoundingBox bounds, float floatHeight, out float floorY)
+        => TryProbeFloor(chunks, bounds, floatHeight, out floorY, out _);
+
+    private static bool TryProbeFloor(ChunkMap chunks, BoundingBox bounds, float floatHeight,
+                                      out float floorY, out Vector2 floorVel)
     {
         const float HorizontalInset = 2f;   // = GroundChecker.HorizontalInset
         var probe = bounds.InsetHorizontal(HorizontalInset).StripBelow(floatHeight + GroundChecker.ProbeSlack);
 
         floorY = float.MaxValue;
+        floorVel = Vector2.Zero;
         int ts = Chunk.TileSize;
         int colMin = (int)MathF.Floor(probe.Left / ts);
         int colMax = (int)MathF.Floor(probe.Right / ts);
@@ -277,6 +284,28 @@ public static class BallisticPredictor
             float top = gty * ts;
             if (top < probe.Top - 1f) continue;   // wall rising through the strip, not a floor
             if (top < floorY) floorY = top;
+        }
+
+        // Growing sprout volumes, mirroring GroundChecker's branch: the moving
+        // support the live tick is actually riding, carrying its velocity so
+        // the coast's grounded gate can measure rise in the floor's frame
+        // (BACKLOG 5.8). The coast does not project the growth forward — the
+        // world is frozen per solve, refreshed every frame like the envelope.
+        const float half = Chunk.TileSize * 0.5f;
+        var growing = chunks.Graph.Growing;
+        for (int i = 0; i < growing.Count; i++)
+        {
+            var sp = growing[i];
+            foreach (var face in TileSproutNode.FaceOrder)
+            {
+                if ((sp.Faces & face) == 0) continue;
+                var c = sp.VolumeCenter(face);
+                if (c.X + half <= probe.Left || c.X - half >= probe.Right) continue;
+                if (c.Y + half <= probe.Top  || c.Y - half >= probe.Bottom) continue;
+                float top = c.Y - half;
+                if (top < probe.Top - 1f) continue;
+                if (top < floorY) { floorY = top; floorVel = sp.VolumeVelocity(face); }
+            }
         }
         return floorY != float.MaxValue;
     }

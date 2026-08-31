@@ -43,6 +43,17 @@ public static class MovementPriorities
     public const int DropdownActive   = 20;
     public const int DropdownPassive  = 20;
 
+    // Terrain-carried: the body is being displaced by growing terrain with a real
+    // horizontal component (mass sweeping the player, not just a floor rising —
+    // pure vertical lift stays Standing's). Environmental like Dropdown, one notch
+    // above it: preempts the whole free/ground band, but loses to stun (25 — hits
+    // win), the climb assists (29 — a vault over the crest still fires), and every
+    // deliberate jump (30–48 — jumping out of the wave is the payoff move).
+    // Active == Passive: as easy to leave as to enter; it holds only while the
+    // push itself persists (CheckConditions).
+    public const int TerrainCarriedActive  = 22;
+    public const int TerrainCarriedPassive = 22;
+
     // Stun: heavy-hit lock-out. Preempts the free/ground band so the muted air-control
     // profile applies on a stun-flagged hit, but its Passive (25) sits BELOW the active
     // jumps (50+) — a player hit mid-jump finishes the arc, entering Stunned only once

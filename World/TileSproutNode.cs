@@ -103,12 +103,43 @@ public sealed class TileSproutNode
         Gtx * Chunk.TileSize + Chunk.TileSize * 0.5f,
         Gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
 
-    // Each supporting face emits its own full-size tile volume, translating from
-    // that parent's cell center into this cell over Lifetime. Multi-face sprouts
-    // therefore push out of every parent symmetrically; the volumes overlap in
-    // the middle, which is harmless — collision takes the union.
+    // Each supporting face emits a full-size tile volume translating into this
+    // cell over Lifetime.
+    //
+    // SINGLE-face sprouts: the volume slides from that parent's cell center —
+    // unchanged, the common case.
+    //
+    // MULTI-face sprouts used to emit one axis-aligned volume per parent, which
+    // meant a diagonally growing cell (parents below + left) presented two
+    // surfaces whose velocities were each purely axis-aligned — a body riding
+    // ON TOP of the growth only ever touched the upward-moving one and was
+    // carried straight up, out of a diagonally advancing stream. Now the set
+    // faces combine into ONE volume translating along the SUMMED parent offset
+    // (the diagonal predecessor, for a corner sprout): its surface velocity is
+    // the true crest motion, so contacts, the ground probe, and the carry
+    // aggregation all see the diagonal directly. Every set face reports the
+    // same combined volume — consumers iterate faces, and the duplicates are
+    // harmless (min-selection, collision union, crush dedupes by cell).
+    // Opposed faces cancel the sum (Below+Above, all four): those fall back to
+    // the symmetric per-face volumes.
+    private bool TryCombinedOffset(out Vector2 o)
+    {
+        o = Vector2.Zero;
+        int n = 0;
+        foreach (var f in FaceOrder)
+        {
+            if ((Faces & f) == 0) continue;
+            var p = FaceOffset(f);
+            o += new Vector2(p.X, p.Y);
+            n++;
+        }
+        return n > 1 && o.LengthSquared() > 0.5f;
+    }
+
     public Vector2 VolumeStart(SproutFaces face)
     {
+        if (TryCombinedOffset(out var co))
+            return CellCenter + co * Chunk.TileSize;
         var o = FaceOffset(face);
         return CellCenter + new Vector2(o.X, o.Y) * Chunk.TileSize;
     }
@@ -118,6 +149,8 @@ public sealed class TileSproutNode
 
     public Vector2 VolumeVelocity(SproutFaces face)
     {
+        if (TryCombinedOffset(out var co))
+            return -co * (Chunk.TileSize / Lifetime);
         var o = FaceOffset(face);
         return new Vector2(-o.X, -o.Y) * (Chunk.TileSize / Lifetime);
     }

@@ -67,8 +67,12 @@ public static class LatticeTracker
         bool near     = dist <= CorrectorChannels.LegReach;
         // Rising faster than support could ever push: the body is leaving the
         // floor, so there is nothing to plant against (StandingState's entry
-        // rule, and the climb family's launch gate).
-        bool ballistic = -body.Velocity.Y > cfg.SpringMaxRiseSpeed;
+        // rule, and the climb family's launch gate). Support-relative
+        // (BACKLOG 5.8): a floor rising under the body is a moving frame the
+        // legs can still plant in, not a launch.
+        bool ballistic = -(body.Velocity.Y
+            - (ctx.TryGetGround(out var supportFsd) ? supportFsd.SurfaceVelocity.Y : 0f))
+            > cfg.SpringMaxRiseSpeed;
         bool anchored = dist <= BallisticPredictor.SupportReach;
 
         // ── The plan ─────────────────────────────────────────────────────

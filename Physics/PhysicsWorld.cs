@@ -55,7 +55,17 @@ public static class PhysicsWorld
             body.Constraints.RemoveAll(c =>
             {
                 if (c is not SurfaceDistance sd) return false;
-                if (Vector2.Dot(body.Position - sd.Position, sd.Normal) > 2f * Epsilon) return true;
+                // Separation tolerance: 2ε for static surfaces, PLUS one step of the
+                // surface's own advance along the normal for moving ones. A body
+                // carried by a growing surface moves away from the (instantaneous)
+                // stamp by surfaceSpeed·dt within the very step that stamped it —
+                // the surface closes that gap before the next resolve, and the
+                // anchor advection at the top of the next step re-trues it. Without
+                // the allowance, moving-surface contacts died at the end of every
+                // step and the movement layer never saw a push.
+                float allow = 2f * Epsilon
+                    + MathF.Max(0f, Vector2.Dot(sd.SurfaceVelocity, sd.Normal)) * dt;
+                if (Vector2.Dot(body.Position - sd.Position, sd.Normal) > allow) return true;
                 // Query-driven refresh: re-probe each frame so a moving source surface's
                 // current velocity overwrites the snapshot stamped at collision time.
                 if (!TryFindContactSurface(chunks, bodyBounds, sd.Normal, out var surfaceVel)) return true;
@@ -212,6 +222,18 @@ public static class PhysicsWorld
             // get reset — readers expect "impulse during the most recent StepSwept".
             foreach (var c in body.Constraints) c.LastImpulse = Vector2.Zero;
 
+            // Advect each solver-owned contact's anchor with its surface: the plane
+            // it represents is MOVING, and both the carry-zero distance check below
+            // and the end-of-step separation prune measure against this point. Left
+            // static, a body riding a moving surface (a growing sprout's push)
+            // "separates" from the stale stamp by surfaceSpeed·dt every frame and
+            // the contact is pruned mid-push — which is why moving-surface contacts
+            // never survived to be seen by the movement layer. Static surfaces have
+            // zero velocity and are untouched; the query-driven refresh at the
+            // bottom of the step re-trues both position drift and velocity.
+            foreach (var c in body.Constraints)
+                if (c is SurfaceDistance msd) msd.Position += msd.SurfaceVelocity * dt;
+
             foreach (var c in body.Constraints)
             {
                 if (c is not SurfaceContact sc) continue;
@@ -250,7 +272,17 @@ public static class PhysicsWorld
             body.Constraints.RemoveAll(c =>
             {
                 if (c is not SurfaceDistance sd) return false;
-                if (Vector2.Dot(body.Position - sd.Position, sd.Normal) > 2f * Epsilon) return true;
+                // Separation tolerance: 2ε for static surfaces, PLUS one step of the
+                // surface's own advance along the normal for moving ones. A body
+                // carried by a growing surface moves away from the (instantaneous)
+                // stamp by surfaceSpeed·dt within the very step that stamped it —
+                // the surface closes that gap before the next resolve, and the
+                // anchor advection at the top of the next step re-trues it. Without
+                // the allowance, moving-surface contacts died at the end of every
+                // step and the movement layer never saw a push.
+                float allow = 2f * Epsilon
+                    + MathF.Max(0f, Vector2.Dot(sd.SurfaceVelocity, sd.Normal)) * dt;
+                if (Vector2.Dot(body.Position - sd.Position, sd.Normal) > allow) return true;
                 // Query-driven refresh: re-probe each frame so a moving source surface's
                 // current velocity overwrites the snapshot stamped at collision time.
                 if (!TryFindContactSurface(chunks, bodyBounds, sd.Normal, out var surfaceVel)) return true;
@@ -640,13 +672,26 @@ public static class PhysicsWorld
                 ? new BoundingBox(bodyBounds.Right,         bodyBounds.Top, bodyBounds.Right + probe, bodyBounds.Bottom)
                 : new BoundingBox(bodyBounds.Left - probe,  bodyBounds.Top, bodyBounds.Left,          bodyBounds.Bottom);
 
+        // Among the shapes behind the face, refresh from the one advancing on the
+        // body fastest along the contact normal. First-found was wrong whenever a
+        // moving shape shares the strip with static terrain — a sprout growing out
+        // of a wall has the edge-flush wall tile enumerate first, which zeroed the
+        // contact's velocity every frame and erased the push from every reader
+        // (the carry aggregation included). All-static strips still return zero.
+        bool found = false;
+        float bestVn = float.MinValue;
+        surfaceVelocity = Vector2.Zero;
         foreach (var shape in WorldQuery.SolidShapesInRect(chunks, strip))
         {
-            surfaceVelocity = shape.Velocity;
-            return true;
+            float vn = Vector2.Dot(shape.Velocity, normal);
+            if (!found || vn > bestVn)
+            {
+                found = true;
+                bestVn = vn;
+                surfaceVelocity = shape.Velocity;
+            }
         }
-        surfaceVelocity = Vector2.Zero;
-        return false;
+        return found;
     }
 
 }
