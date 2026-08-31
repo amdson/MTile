@@ -6,71 +6,124 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests.Sim;
 
-// movement_todo #6 + #4: the 2-block arc is a DELIBERATE move — it fires only
-// when running in (≥ ArcJumpRunSpeed) with Up held. Standing at a 2-block
-// ledge holding Up grabs it instead. And a gripped corner is a push-off
-// point: an inward/neutral jump press from a hang launches off the corner.
+// movement_todo #6 + #4: the tall arc is a DELIBERATE move — Up held, and either
+// running in (≥ ArcJumpRunSpeed) or standing at a step there is no other way up.
+// Standing at a step tall enough to HANG from grabs it instead. And a gripped
+// corner is a push-off point: an inward/neutral jump press from a hang launches
+// off the corner.
+//
+// Every fixture here is sized in PX off the config bands and the body, never in
+// blocks: which move owns a step is a question about rise height vs. the mantle
+// band and the body's standing height, and TileSize has already moved twice
+// under these tests (16 → 11 → 10). Two tile heights are what matters:
+//
+//   ArcRise   — the SHORTEST step too tall to mantle, and still below head
+//               height: nothing to hang from, so the arc owns it at any speed.
+//   HangRise  — a step taller than the body: the grab probe finds its corner
+//               above the head, so a standing entry hangs instead.
 public class DeliberateClimbTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 60f;
     private static readonly Vector2 Gravity = new(0f, 600f);
+    private const int TS = Chunk.TileSize;
 
-    // Flat runway (floor top y=64) into a 2-block rise (top y=32) at x=224.
-    private static ChunkMap TwoBlockLedge()
+    // Shortest whole-tile rise above MantleMaxRise (the arc band's floor).
+    private static int ArcRise => (int)(MovementConfig.Current.MantleMaxRise / TS) + 1;
+    // Shortest whole-tile rise above the standing body — a hangable lip.
+    private static int HangRise => (int)(PlayerCharacter.StandingHeight / TS) + 1;
+
+    private const int FloorRow = 8, StepCol = 14;
+
+    // Flat runway into a rise of `riseTiles` tiles at column StepCol.
+    private static ChunkMap Ledge(int riseTiles)
     {
-        var rows = new string[6];
-        for (int r = 0; r < 6; r++)
+        var rows = new string[FloorRow + 2];
+        for (int r = 0; r < rows.Length; r++)
         {
             var sb = new System.Text.StringBuilder(30);
             for (int c = 0; c < 30; c++)
-                sb.Append(r >= 4 || (r >= 2 && c >= 14) ? 'X' : 'O');
+                sb.Append(r >= FloorRow || (r >= FloorRow - riseTiles && c >= StepCol) ? 'X' : 'O');
             rows[r] = sb.ToString();
         }
         return SimTerrain.FromAscii(string.Join("\n", rows), originTileX: 0, originTileY: 0);
     }
 
-    private SimFrame[] Run(Vector2 start, InputScript script, int frames = 300) =>
+    private static float FloorTopY => FloorRow * TS;
+    private static float StepTopY(int riseTiles) => (FloorRow - riseTiles) * TS;
+    // Body center when standing on a surface at `topY`.
+    private static float StandingCenterY(float topY) => topY - 2f * PlayerCharacter.Radius;
+
+    private SimFrame[] Run(int riseTiles, InputScript script, int frames = 300, float startX = 100f) =>
         SimRunner.Run(new SimConfig
         {
-            Terrain = TwoBlockLedge(), StartPosition = start,
+            Terrain = Ledge(riseTiles),
+            StartPosition = new Vector2(startX, StandingCenterY(FloorTopY)),
             Script = script, Frames = frames, Dt = Dt, Gravity = Gravity,
         });
 
-    [Fact]
-    public void RunningIn_WithUpHeld_ArcJumpsTheTwoBlockLedge()
+    private void Dump(SimFrame[] frames)
     {
-        var frames = Run(new Vector2(100f, 43f),
-                         InputScript.Always(new PlayerInput { Right = true, Up = true }));
-        output.WriteLine($"states: {string.Join(", ", frames.Select(f => f.State).Distinct())}");
+        output.WriteLine($"TS={TS} arcRise={ArcRise * TS}px hangRise={HangRise * TS}px " +
+                         $"standingHeight={PlayerCharacter.StandingHeight:F1} stepX={StepCol * TS}");
+        output.WriteLine("states: " + string.Join(", ", frames.Select(f => f.State).Distinct()));
+        foreach (var f in frames.Where(f => f.Transition))
+            output.WriteLine($"  f{f.Frame}: {f.State} x={f.X:F1} y={f.Y:F1} vx={f.Vx:F0}");
+    }
+
+    // True once the body is standing on top of the step (at rest height, past the lip).
+    private static bool OnTop(SimFrame f, int riseTiles) =>
+        f.X > StepCol * TS && f.Y <= StandingCenterY(StepTopY(riseTiles)) + 2f;
+
+    [Fact]
+    public void RunningIn_WithUpHeld_ArcJumpsTheStep()
+    {
+        var frames = Run(ArcRise, InputScript.Always(new PlayerInput { Right = true, Up = true }));
+        Dump(frames);
         Assert.Contains(frames, f => f.State.Contains("ArcJump"));
-        // Delivered: on the raised floor at some point (the run keeps going
-        // and eventually leaves the map — irrelevant here).
-        Assert.Contains(frames, f => f.X is > 240f and < 470f && f.Y < 40f);
+        Assert.Contains(frames, f => OnTop(f, ArcRise));
     }
 
     [Fact]
     public void RunningIn_WithoutUp_TheArcStaysHome()
     {
-        var frames = Run(new Vector2(100f, 43f),
-                         InputScript.Always(new PlayerInput { Right = true }));
-        var last = frames[^1];
-        output.WriteLine($"states: {string.Join(", ", frames.Select(f => f.State).Distinct())}");
-        output.WriteLine($"final x={last.X:F1} y={last.Y:F1}");
+        var frames = Run(ArcRise, InputScript.Always(new PlayerInput { Right = true }));
+        Dump(frames);
         Assert.DoesNotContain(frames, f => f.State.Contains("ArcJump"));
-        // 2-block walls without Up are simply walls.
-        Assert.True(last.Y > 40f, $"climbed the ledge without Up (y={last.Y:F1})");
+        // A step above the mantle band, without Up, is simply a wall.
+        Assert.DoesNotContain(frames, f => OnTop(f, ArcRise));
+    }
+
+    // The case the arc's run gate used to swallow: walk up to a step too tall to
+    // mantle and too short to hang from, come to rest against its face, THEN hold
+    // Up. There is no hangable corner to defer to, so the arc takes the standstill.
+    // Two things had to give for this to work — the run gate (which handed every
+    // standstill to a grab that cannot see a below-head lip) and the entry
+    // feasibility probe (which judged an arc starting inside the step's own
+    // clearance margin, and let the pushback eat the hop's rise).
+    [Fact]
+    public void StandingFlushAtAnUnhangableStep_UpHeld_ArcsOverIt()
+    {
+        var frames = Run(ArcRise, new InputScript()
+            .For(60, new PlayerInput { Right = true })                  // walk in, stall on the face
+            .Forever(new PlayerInput { Right = true, Up = true }));
+        Dump(frames);
+
+        int stalledAt = 59;
+        Assert.True(MathF.Abs(frames[stalledAt].Vx) < 5f,
+            $"fixture assumes the walk-in has stalled by f{stalledAt} (vx={frames[stalledAt].Vx:F1})");
+        Assert.Contains(frames, f => f.State.Contains("ArcJump"));
+        Assert.Contains(frames, f => OnTop(f, ArcRise));
     }
 
     [Fact]
-    public void StandingAtTheLedge_UpHeld_GrabsInsteadOfArcing()
+    public void StandingAtAHangableLedge_UpHeld_GrabsInsteadOfArcing()
     {
-        // Walk into the face (stalling against it — vx ≈ 0), then hold Up:
-        // must grab, not arc — the run gate refuses a stalled entry.
-        var frames = Run(new Vector2(180f, 43f),
-                         new InputScript()
-                             .For(60, new PlayerInput { Right = true })
-                             .Forever(new PlayerInput { Right = true, Up = true }));
-        output.WriteLine($"states: {string.Join(", ", frames.Select(f => f.State).Distinct())}");
+        // Walk into the face (stalling against it — vx ≈ 0), then hold Up: the
+        // lip is above head height, so the hang owns it and the arc stands down.
+        var frames = Run(HangRise, new InputScript()
+            .For(60, new PlayerInput { Right = true })
+            .Forever(new PlayerInput { Right = true, Up = true }));
+        Dump(frames);
         Assert.DoesNotContain(frames, f => f.State.Contains("ArcJump"));
         Assert.Contains(frames, f => f.State.Contains("LedgeGrab"));
     }
@@ -84,14 +137,13 @@ public class DeliberateClimbTests(ITestOutputHelper output)
         // Fixed timing (Until inflates downstream segment offsets by its
         // 9999-frame placeholder): the walk-in stalls by ~f55, the Up edge
         // grabs around f68, 12 frames settle the hang, then jump.
-        var frames = Run(new Vector2(180f, 43f),
-                         new InputScript()
-                             .For(60, new PlayerInput { Right = true })
-                             .For(8, new PlayerInput { Right = true, Up = true })
-                             .For(12, new PlayerInput { Up = true })
-                             .For(6, new PlayerInput { Up = true, Space = true })
-                             .Forever(default),
-                         frames: 300);
+        var frames = Run(HangRise, new InputScript()
+            .For(60, new PlayerInput { Right = true })
+            .For(8,  new PlayerInput { Right = true, Up = true })
+            .For(12, new PlayerInput { Up = true })
+            .For(6,  new PlayerInput { Up = true, Space = true })
+            .Forever(default));
+        Dump(frames);
 
         int grabAt = Array.FindIndex(frames, f => f.State.Contains("LedgeGrab"));
         Assert.True(grabAt > 0, "never grabbed the ledge");
@@ -99,7 +151,6 @@ public class DeliberateClimbTests(ITestOutputHelper output)
         int jumpAt = Array.FindIndex(after, f => f.State == "JumpingState");
         float maxRise = after.Select(f => -f.Vy).Max();
         output.WriteLine($"grab f{grabAt}, jump at +{jumpAt}, max rise {maxRise:F1}");
-        output.WriteLine($"states after grab: {string.Join(", ", after.Select(f => f.State).Distinct())}");
         Assert.True(jumpAt > 0, "jump press from the hang never launched (dead input?)");
         Assert.DoesNotContain(after.Take(jumpAt + 2), f => f.State.Contains("WallJump"));
         Assert.True(maxRise > 90f, $"corner launch too weak: rise {maxRise:F1}");
