@@ -89,6 +89,42 @@ public sealed class AttackGlowSystem
             foreach (var (p, _) in sim.SecondaryPlayers)
                 RenderActionGlow(cam, p.CurrentAction, p.CurrentActionVars);
         }
+
+        // Charge glow rides its own orb pass either way — it's a stationary circle on
+        // the body, not a motion streak, so the reaction–diffusion field (built for
+        // swept segments that linger) is the wrong tool for it.
+        RenderChargeGlow(cam, player);
+        foreach (var (p, _) in sim.SecondaryPlayers)
+            RenderChargeGlow(cam, p);
+    }
+
+    // The stab-charge wind-up (RecoveryAction's ready posture): a circle of glow
+    // centred on the body that intensifies and widens along the charge curve, snaps
+    // to a white flash through the release sweet spot, and dims to the settle level
+    // on an overhold. All inputs are sim state (vars.TimeInState is the charge
+    // clock), so the effect is deterministic and rollback-consistent; hue matches
+    // the stab the charge becomes (gold grounded / purple airborne).
+    private void RenderChargeGlow(Matrix cam, PlayerCharacter player)
+    {
+        if (player.CurrentAction is not RecoveryAction) return;
+        var vars = player.CurrentActionVars;
+        if (!vars.Charging) return;
+
+        float t = vars.TimeInState;
+        float f = RecoveryAction.ChargeFraction(t);
+        // Slow breath so the orb reads as building energy rather than a static decal.
+        float pulse = 0.92f + 0.08f * MathF.Sin(t * MathF.PI * 4f);
+        float aura  = PlayerCharacter.Radius * (1.1f + 1.2f * f) * pulse;
+        float core  = PlayerCharacter.Radius * (0.25f + 0.45f * f);
+        var   hue   = vars.IsGrounded ? Color.Goldenrod : Color.MediumPurple;
+        float inten = 0.25f + 0.55f * f;
+        if (RecoveryAction.InSweetSpot(t))
+        {
+            hue    = Color.White;
+            inten  = 1f;
+            aura  *= 1.25f;
+        }
+        _glow.DrawChargeOrb(cam, player.Body.Position, aura, core, hue, inten);
     }
 
     // The world position the attack glow chases this frame, or false when no attack clip

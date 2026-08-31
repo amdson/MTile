@@ -155,6 +155,34 @@ public sealed class GlowRenderer
                        + (-p0 + 3f * p1 - 3f * p2 + p3) * t3);
     }
 
+    // A stationary glowing orb — soft aura, whitened inner halo, hot sphere core — with a
+    // thin ring at the aura rim so the glow reads as a deliberate CIRCLE, not just bloom.
+    // The stab-charge indicator (AttackGlowSystem.RenderChargeGlow); no trail, so it gets
+    // its own pass rather than piggybacking on a ribbon head. This is also what finally
+    // makes CoreSphere reachable outside the never-passed GlowCore.Sphere branch
+    // (BACKLOG 5.17).
+    public void DrawChargeOrb(Matrix cam, Vector2 center, float auraRadius, float coreSize,
+                              Color color, float intensity)
+    {
+        if (auraRadius <= 0.1f || intensity <= 0f) return;
+        _prims.Begin(cam, PrimitiveType.TriangleList, BlendState.Additive);
+        GlowDisc(center, auraRadius, color * (0.5f * intensity));
+        GlowDisc(center, auraRadius * 0.45f, Color.Lerp(color, Color.White, 0.3f) * intensity);
+        CoreSphere(center, coreSize, Color.Lerp(color, Color.White, 0.45f) * intensity);
+        // Rim ring: a chain of small discs along the aura's edge — additive dabs blend
+        // into a soft circle outline that tracks the growing radius.
+        const int ringSegs = 24;
+        float dabR = MathF.Max(1.5f, auraRadius * 0.12f);
+        Color ringCol = color * (0.35f * intensity);
+        for (int i = 0; i < ringSegs; i++)
+        {
+            float a = MathHelper.TwoPi * i / ringSegs;
+            GlowDisc(center + new Vector2(MathF.Cos(a), MathF.Sin(a)) * auraRadius,
+                     dabR, ringCol, segments: 8);
+        }
+        _prims.End();
+    }
+
     // Render a glowing triangle trailing along `trail`: an aura disc at each trail sample
     // (shrinking + fading with age) plus a soft triangle core at the head. `intensity`
     // (0..1) scales the whole effect's brightness — keep it low for a subtle glow.
