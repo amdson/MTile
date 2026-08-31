@@ -164,7 +164,19 @@ public class NullAction : ActionState
 // and when.
 public class RecoveryAction : ActionState
 {
-    private const float MaxChargeHold = 1.0f;   // stuck-button cap on the wind-up hold
+    // ── Charge curve (BuildMeters-style ramp → sweet spot → settle) ──────────
+    // The wind-up hold is a timing minigame, not a monotonic bank: charge ramps
+    // linearly to full over ChargeRampSeconds, holds full through a short sweet
+    // spot, then SETTLES at SettleFraction for as long as the button stays down.
+    // Releasing inside the sweet spot is the reward for precise timing; over-
+    // holding is punished with the flat settle, never a bleed to zero (unlike
+    // BuildMeters' EruptDecay — a held stab charge is a stance, not a resource).
+    // The fraction is stamped into vars.StabCharge on exit; StabAction maps it
+    // to a damage multiplier.
+    public const float ChargeRampSeconds = 1.0f;   // linear 0 → 1 (the old MaxChargeHold)
+    public const float SweetSpotSeconds  = 0.1f;   // full-charge window after the ramp
+    public const float SettleFraction    = 0.6f;   // flat value for an overheld charge
+
     private const int   PassiveBase   = 45;     // countdown handoff / wind-up entry bid
     // Flinch bid — above every action's Active (Grab is 48), so a registered hit
     // always interrupts. Universality is deliberate: "this move can't be
@@ -285,11 +297,30 @@ public class RecoveryAction : ActionState
         }
     }
 
+    // Charge fraction at hold-time `t` — the curve documented on the constants
+    // above. Public so tests and the HUD/animation layer can read the same shape.
+    public static float ChargeFraction(float t)
+    {
+        if (t <= 0f) return 0f;
+        if (t < ChargeRampSeconds) return t / ChargeRampSeconds;
+        if (t <= ChargeRampSeconds + SweetSpotSeconds) return 1f;
+        return SettleFraction;
+    }
+
+    // Inside the full-charge release window? Shared by the telegraph dot and the
+    // render-side charge glow (AttackGlowSystem) so the flash and the curve can
+    // never disagree about where the sweet spot is.
+    public static bool InSweetSpot(float t)
+        => t >= ChargeRampSeconds && t <= ChargeRampSeconds + SweetSpotSeconds;
+
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         if (ab.Condition.RecoveryActive || ctx.HitDisadvantageFrames() > 0) return true;
-        // Index 0 — the READY posture: persist only while a held LMB charge lives.
-        return vars.Charging && ctx.Input.LeftClick && vars.TimeInState < MaxChargeHold;
+        // Index 0 — the READY posture: persist while a held LMB charge lives. No
+        // time cap — an overheld charge settles at SettleFraction rather than
+        // dumping the player out of the stance (the old MaxChargeHold did, which
+        // under charge-scaled stabs would have meant "held longer, got weaker").
+        return vars.Charging && ctx.Input.LeftClick;
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -313,22 +344,19 @@ public class RecoveryAction : ActionState
     {
         vars.TimeInState += ctx.Dt;
 
-        bool charge = ChargeInputLive(ctx);
-        if (charge && !vars.Charging)
+        // Latch a charge START off a live PressEdge; once latched, the charge
+        // persists on the raw button alone. The distinction matters past ~2 s:
+        // the PressEdge intent ages out of the IntentBuffer, but a player deep
+        // in the settle is still charging — dropping them there would be the
+        // old MaxChargeHold cliff wearing a different hat.
+        if (ChargeInputLive(ctx) && !vars.Charging)
         {
             vars.Charging    = true;
-            vars.TimeInState = 0f;   // charge clock — drives the cap + pulse indicator
+            vars.TimeInState = 0f;   // charge clock — drives the curve + pulse indicator
             vars.IsGrounded  = ctx.TryGetGround(out _);
             vars.Facing      = ab.Facing == 0 ? 1 : ab.Facing;
         }
-        else if (!charge) vars.Charging = false;
-
-        // Stuck-button cap: spend the press so the wind-up can't re-arm forever.
-        if (vars.Charging && vars.TimeInState >= MaxChargeHold)
-        {
-            ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
-            vars.Charging = false;
-        }
+        else if (!ctx.Input.LeftClick || ctx.Input.Shift) vars.Charging = false;
         // (The hold-field continuation that used to live here is gone — see the
         // HoldVictims note on SlashLikeAction. It ran off Slash2Ready/Slash3Ready
         // rather than off HoldVictims, so it kept pulling victims through the combo
@@ -336,6 +364,23 @@ public class RecoveryAction : ActionState
         // made S1 retain a victim it had visibly released, which is the behaviour
         // being removed. Restoring the feature means turning HoldVictims back on AND
         // re-adding a continuation gated on the same flag, not on the combo window.)
+    }
+
+    // Hand the finished charge to whatever fires off the release. The stamp goes
+    // through ActionVars (never the intent — InputParser measures gestures, the
+    // state owns what "charging" means), and Exit is the right moment: on the
+    // release frame this state fails CheckConditions and exits BEFORE the
+    // selection loop picks the stab, with NullAction's no-op Enter bridging in
+    // between — so StabAction.Enter reads a stamp that is 0 frames old. The
+    // freshness gate on the consumer side is what keeps a charge whose release
+    // resolved into something else (a circle → Pulse) from riding a buffered
+    // stab intent seconds later.
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        if (!vars.Charging) return;
+        vars.StabCharge      = ChargeFraction(vars.TimeInState);
+        vars.StabChargeFrame = ctx.CurrentFrame;
+        vars.Charging        = false;
     }
 
     // The old ReadyAction's charge slowdown — applied only while the wind-up hold
@@ -350,20 +395,30 @@ public class RecoveryAction : ActionState
         m.WalkAccel      *= 0.7f;
         m.GroundFriction *= 1.3f;
         m.MaxAirSpeed    *= 0.7f;
-        m.GravityScale   *= 0.3f;
+        // Floaty hover only through the ramp + sweet spot. The hold is uncapped
+        // now, so a settle-length dip would be a free 0.3-gravity glide for as
+        // long as LMB stays down — the charge stance outstays its wind-up, the
+        // hover must not.
+        if (vars.TimeInState < ChargeRampSeconds + SweetSpotSeconds)
+            m.GravityScale *= 0.3f;
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         // Wind-up indicator (the old ReadyAction visual): pulsing dot offset
         // toward facing, colored by posture. Nothing drawn for a bare countdown.
+        // The dot grows with the charge fraction and flashes white through the
+        // sweet spot — the release-timing cue the whole curve exists for.
         if (!vars.Charging) return;
         const float ArcR = PlayerCharacter.Radius * 1.5f;
         float pulse  = MathF.Sin(vars.TimeInState * MathF.PI * 4f) * 0.5f + 0.5f;
         float offset = ArcR * 0.5f * pulse;
         var pos = body.Position + new Vector2(vars.Facing * offset, 0f);
-        var color = (vars.IsGrounded ? Color.Red : Color.DeepSkyBlue) * 0.7f;
-        t.Rect(pos, 3f, color);
+        float f = ChargeFraction(vars.TimeInState);
+        bool sweet = InSweetSpot(vars.TimeInState);
+        var color = sweet ? Color.White
+                          : (vars.IsGrounded ? Color.Red : Color.DeepSkyBlue) * 0.7f;
+        t.Rect(pos, 3f + 3f * f, color);
     }
 }
 
@@ -1175,6 +1230,15 @@ public class StabAction : ActionState
     // 50–100 px/s and stays near baseline.
     private const float BoostReferenceSpeed = 400f;
 
+    // Charge scaling (RecoveryAction's wind-up curve → vars.StabCharge → this).
+    // Damage-only, on both boxes: a sweet-spot release doubles what the stab
+    // takes off a body AND digs per frame, without inflating the box geometry
+    // (that stays the dive boost's job) or the launch — StrikeSpeed keeps its
+    // "deliberately untouched" calibration against the parry/recoil/stun stack.
+    // The curve makes the effective range: tap ≈ 1×, full ramp + sweet spot 2×,
+    // overheld settle 1.6×.
+    private const float MaxChargeBoost = 2.0f;
+
 
     // Tip ribbon — short lifetime so the trail snaps with the strike rather than
     // lingering past the retract. Render-only; not part of ActionVars.
@@ -1260,6 +1324,16 @@ public class StabAction : ActionState
             float t = MathHelper.Clamp(velAlongStab / BoostReferenceSpeed, 0f, 1f);
             vars.Boost = MathHelper.Lerp(MinBoost, MaxBoost, t);
         }
+
+        // Wind-up charge → damage multiplier. Honored only when the stamp is at
+        // most a frame old — the direct release path stamps and fires in the
+        // SAME frame (Recovery exits → Null bridges → Stab enters), so anything
+        // older is a leftover from a hold that resolved into a different move,
+        // reached here on a buffered intent. Consumed either way so it can't
+        // feed a second stab.
+        bool chargeFresh = vars.StabCharge > 0f && ctx.CurrentFrame - vars.StabChargeFrame <= 1;
+        vars.ChargeBoost = chargeFresh ? MathHelper.Lerp(1f, MaxChargeBoost, vars.StabCharge) : 1f;
+        vars.StabCharge  = 0f;
     }
 
     // Superarmor through the wind-up + strike (HIT_AIRLOCK_PLAN §4): light pokes
@@ -1390,7 +1464,7 @@ public class StabAction : ActionState
             // is computed from the rotated polygon so the cell sweep in CombatSystem
             // still reads correctly.
             float rotation = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
-            float dmg = DamagePerFrame * vars.Boost;
+            float dmg = DamagePerFrame * vars.Boost * vars.ChargeBoost;
 
             // Each box grows from the body out to the LIVE tip (vars.TipExt, the same
             // curve that drives the visible thrust + glow), floored so a point-blank

@@ -36,6 +36,13 @@ public struct ActionVars
     public Vector2 StabDir;           // Stab / AirSpinStab
     public float   InitialStabAngle;  // Stab
     public float   Boost;             // Stab (air-dive multiplier on damage + block box size)
+    public float   StabCharge;        // Recovery → Stab handoff: charge fraction [0,1] stamped by
+                                      // RecoveryAction.Exit when a wind-up hold ends. Consumed (zeroed)
+                                      // by StabAction.Enter, and only honored when StabChargeFrame is
+                                      // at most 1 frame old — a buffered stab firing seconds later must
+                                      // not inherit a charge from a hold that resolved into something else.
+    public int     StabChargeFrame;   // frame StabCharge was stamped (the freshness gate above)
+    public float   ChargeBoost;       // Stab — damage multiplier resolved from StabCharge at Enter
     public float   TipExt;            // Stab — live tip extension; drives the per-frame
                                       // hitbox lengths (sim) AND the glow tip (render)
 

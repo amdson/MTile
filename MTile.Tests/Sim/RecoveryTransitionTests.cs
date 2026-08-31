@@ -214,4 +214,95 @@ public class RecoveryTransitionTests(ITestOutputHelper output)
         Assert.True(slashFirst - stabFirst >= 24,
             $"Slash fired early (Δ {slashFirst - stabFirst} frames) — it must wait out the whole tail.");
     }
+
+    // ── 5. The charge curve: ramp → sweet spot → settle ──────────────────────
+    [Fact]
+    public void ChargeFraction_RampsSpikesAndSettles()
+    {
+        float ramp  = RecoveryAction.ChargeRampSeconds;
+        float sweet = RecoveryAction.SweetSpotSeconds;
+
+        Assert.Equal(0f,   RecoveryAction.ChargeFraction(0f));
+        Assert.Equal(0.5f, RecoveryAction.ChargeFraction(ramp * 0.5f), 3);
+        // Sweet spot: full charge across the whole window.
+        Assert.Equal(1f, RecoveryAction.ChargeFraction(ramp));
+        Assert.Equal(1f, RecoveryAction.ChargeFraction(ramp + sweet * 0.5f));
+        Assert.Equal(1f, RecoveryAction.ChargeFraction(ramp + sweet));
+        // Overheld: settles flat, forever — no decay to zero.
+        Assert.Equal(RecoveryAction.SettleFraction, RecoveryAction.ChargeFraction(ramp + sweet + 0.01f));
+        Assert.Equal(RecoveryAction.SettleFraction, RecoveryAction.ChargeFraction(10f));
+    }
+
+    // ── 6. No more 1s cap: an overheld charge keeps the ready posture ────────
+    // The old MaxChargeHold spent the press at 1.0s and dumped the player out of
+    // the wind-up — under charge scaling that would read "held longer, got
+    // nothing". Now the stance persists as long as LMB is down (past PressEdge's
+    // IntentBuffer lifetime too, which the button-latch continuation exists for)
+    // and the release still fires the stab.
+    [Fact]
+    public void OverheldCharge_KeepsReadyPosture_AndStillFiresStabOnRelease()
+    {
+        const int holdFrames = 75;   // 2.5s at 30fps — well past ramp + sweet spot
+        var script = new InputScript()
+            .For   (15, new PlayerInput { MouseWorldPosition = PressMouse })
+            .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = PressMouse })
+            .For   (holdFrames - 1, new PlayerInput { LeftClick = true, MouseWorldPosition = ReleaseMouse })
+            .Forever   (new PlayerInput { MouseWorldPosition = ReleaseMouse });
+
+        var names = Trace(script, frames: 15 + holdFrames + 30);
+        int release = 15 + holdFrames;
+        // The whole hold (a couple of frames of entry slack aside) sits in the
+        // charge posture — never dropping to NullAction mid-hold.
+        for (int f = 18; f < release; f++)
+            Assert.True(names[f] == "RecoveryAction",
+                $"frame {f}: overheld charge should hold the ready posture, got {names[f]}.");
+        int stabFirst = First(names, "StabAction", release - 1);
+        Assert.True(stabFirst >= 0 && stabFirst - release <= 2,
+            $"Release after an overhold should still fire the stab promptly (release≈f{release}, stab@f{stabFirst}).");
+    }
+
+    // ── 7. Charge scales stab damage: tap < settle < sweet spot ──────────────
+    // The wind-up's charge fraction (stamped by RecoveryAction.Exit, consumed by
+    // StabAction.Enter) multiplies the stab's damage between 1× and 2×. A
+    // grounded stab connect costs the victim DamagePerFrame (TileMaxHP/4) times
+    // that multiplier, once (HitId dedupe), so victim HP measures the handoff
+    // end to end.
+    [Theory]
+    [InlineData( 9, 0.25f * (1f + 8f / 30f))]  // tap: 0.27s into the ramp → ~1.27×
+    [InlineData(32, 0.50f)]                    // sweet spot: 1.03s → full 2×
+    [InlineData(60, 0.40f)]                    // overheld: 1.97s → settled 1.6×
+    public void ChargedStab_DamageFollowsTheCurve(int holdFrames, float expectedLoss)
+    {
+        var script = new InputScript()
+            .For   (15, new PlayerInput { MouseWorldPosition = PressMouse })
+            .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = PressMouse })
+            .For   (holdFrames - 1, new PlayerInput { LeftClick = true, MouseWorldPosition = ReleaseMouse })
+            .Forever   (new PlayerInput { MouseWorldPosition = ReleaseMouse });
+
+        var cfg = new SimConfigMulti
+        {
+            Terrain = FlatGround(),
+            Frames  = 15 + holdFrames + 30,
+            Dt      = Dt,
+            Gravity = new Vector2(0f, 600f),
+            Players = new[]
+            {
+                new SimPlayer { StartPosition = Start, Script = script },
+                new SimPlayer { StartPosition = new Vector2(95f, 20f), Script = new InputScript(),
+                                Faction = Faction.Neutral },
+            },
+        };
+
+        float startHp = -1f, finalHp = -1f;
+        SimRunner.RunMulti(cfg, onFrame: (f, ps) =>
+        {
+            if (f == 0) startHp = ps[1].Health;
+            finalHp = ps[1].Health;
+        });
+
+        float loss = startHp - finalHp;
+        output.WriteLine($"hold {holdFrames}f → victim lost {loss:F3} HP (expected {expectedLoss:F3})");
+        Assert.True(loss > 0f, "Stab never connected — no HP loss observed.");
+        Assert.Equal(expectedLoss, loss, 2);
+    }
 }
