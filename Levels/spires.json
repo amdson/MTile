@@ -1,0 +1,49 @@
+{
+  "//": "Endless procedural world (Stages 'spires'). The presence of the WorldGen block is what makes it endless: TerrainLoader installs a WorldGenerator instead of stamping out the Extents box, and Simulation.Step streams chunks around the players forever. Shape is a heightfield of three summed noise channels — a rolling base, sharp ridged hills, and rare mega-spires whose amplitude is gated by a much slower rarity mask, so most of the map is walkable plain-and-hill and the thousand-tile towers arrive in clusters every few thousand tiles. No overhangs by construction (height is a function of x alone), which is what lets a chunk be generated from its own position with no neighbour state and no seams. Materials layer sand over dirt over stone, with the soil thinning out on high ground and steep faces so the spires are bare rock, plus dirt/sand pockets scattered through the deep stone. Change Seed for a different world; everything else is shape tuning, and none of it is hot-reloaded (a mid-match change would desync rollback peers).",
+  "WorldGen": {
+    "Seed": 1337,
+    "GroundLevel": 0,
+
+    "BaseScale": 0.010,
+    "BaseOctaves": 4,
+    "BaseAmplitude": 12,
+
+    "HillScale": 0.022,
+    "HillOctaves": 3,
+    "HillFloor": 0.55,
+    "HillSharpness": 2.2,
+    "HillAmplitude": 70,
+
+    "SpireScale": 0.0018,
+    "SpireOctaves": 2,
+    "SpireFloor": 0.55,
+    "SpireSharpness": 3.0,
+    "SpireAmplitude": 2800,
+
+    "SpireMaskScale": 0.00055,
+    "SpireMaskOctaves": 2,
+    "SpireMaskFloor": 0.38,
+    "SpireMaskSharpness": 2.0,
+
+    "MaxHeight": 3200,
+
+    "SoilFadeStart": 70,
+    "SoilFadeSpan": 190,
+    "SlopeFadeStart": 1.1,
+    "SlopeFadeSpan": 1.9,
+
+    "AridScale": 0.006,
+    "SandMin": 0.6,
+    "SandRange": 4.4,
+    "DirtMin": 3,
+    "DirtRange": 9,
+
+    "PocketScale": 0.035,
+    "PocketOctaves": 3,
+    "DirtPocketLevel": 0.42,
+    "SandPocketLevel": 0.62,
+
+    "StreamRadiusX": 8,
+    "StreamRadiusY": 6
+  }
+}

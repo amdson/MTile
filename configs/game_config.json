@@ -1,6 +1,6 @@
 ﻿{
-  // options: "start" | "hill" | "arena" | "plain" | "gauntlet" (left-to-right combat run) | "sandbox" (one Template enemy — see Entities/Enemies/Types/TemplateEnemy.cs) | "training" | "flat" | "corridor" (bumpy tunnel) | "gym" (1-high ledges, CorrectorScenario applies)
-  "Stage": "hill",
+  // options: "spires" (endless procedural world - spiky hills + rare thousand-tile spires, Levels/spires.json) | "start" | "hill" | "arena" | "plain" | "gauntlet" (left-to-right combat run) | "sandbox" (one Template enemy — see Entities/Enemies/Types/TemplateEnemy.cs) | "training" | "flat" | "corridor" (bumpy tunnel) | "gym" (1-high ledges, CorrectorScenario applies)
+  "Stage": "spires",
   "WindowWidth": 1000,
   "WindowHeight": 900,
   "Fullscreen": true,

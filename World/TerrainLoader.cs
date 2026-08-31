@@ -23,6 +23,11 @@ public class TerrainConfig
     public Dictionary<string, string> ChunkFiles { get; set; } = new();
     public List<TerrainRule> Rules { get; set; } = new();
     public PerlinConfig Perlin { get; set; } = null; // when set, replaces Rules for unassigned chunks
+    // When set, the level is ENDLESS: Extents/Rules/Perlin are ignored and chunks are
+    // streamed in around the players by Simulation.Step instead of being materialized
+    // once inside a box. ChunkFiles still apply — an authored chunk overrides the
+    // generator at its position.
+    public WorldGenConfig WorldGen { get; set; } = null;
     // Player position (world px) for stages captured in-game (StageSaver). Read by the
     // saved-stage registration, ignored by the terrain loader itself.
     public float[] PlayerSpawn { get; set; } = null;
@@ -48,6 +53,25 @@ public static class TerrainLoader
             if (stream == null) return;
             var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
             config = JsonSerializer.Deserialize<TerrainConfig>(stream, opts);
+        }
+
+        // Endless level: install the generator and load only the authored overrides.
+        // Walking the Extents box here would be worse than pointless — it would stamp
+        // empty chunks over the origin, and EnsureChunk skips anything already loaded,
+        // so those holes would never fill in.
+        if (config.WorldGen != null)
+        {
+            chunks.Generator = new WorldGenerator(config.WorldGen);
+            foreach (var (key, filename) in config.ChunkFiles)
+            {
+                var parts = key.Split(',');
+                if (parts.Length != 2 || !int.TryParse(parts[0], out int fx) || !int.TryParse(parts[1], out int fy))
+                    continue;
+                var authored = new Chunk { ChunkPos = new Point(fx, fy) };
+                LoadChunkFromFile(authored, string.IsNullOrEmpty(dir) ? filename : $"{dir}/{filename}");
+                chunks[authored.ChunkPos] = authored;
+            }
+            return;
         }
 
         for (int cx = -config.Extents; cx <= config.Extents; cx++)

@@ -48,6 +48,16 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // instead (they tick every frame). See TerrainJournal.
     private readonly TerrainJournal _journal = new();
 
+    // Procedural source for chunks nobody has loaded yet. Null (every authored stage)
+    // means the world is exactly the chunks the level file listed and anything beyond
+    // them reads as empty air; non-null (see WorldGenerator) makes the world endless —
+    // Simulation.Step streams a radius of chunks around each player through EnsureChunk.
+    //
+    // Not part of the snapshot: it is immutable config, and generation is pure, so a
+    // rollback drops streamed chunks via the journal and the replay regenerates them
+    // identically.
+    public IChunkGenerator Generator;
+
     public ChunkMap() => _breakCellAction = (gx, gy) => BreakCell(gx, gy);
 
     // Lazily materialize a chunk, journaling the creation so a restore can drop it.
@@ -169,6 +179,68 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     }
 
     public bool TryGet(Point pos, out Chunk chunk) => _dict.TryGetValue(pos, out chunk);
+
+    public int LoadedChunkCount => _dict.Count;
+
+    // ── Streamed (endless) terrain ──────────────────────────────────────────────
+    // Materialize a chunk from the Generator if it isn't loaded yet. No-ops without a
+    // generator, and never touches a chunk that already exists — so an authored chunk
+    // file, or one the players have already dug into, always wins over generated tiles.
+    //
+    // The generator writes the tile array directly rather than going through WriteTile:
+    // journaling 256 inverse-deltas per chunk would swamp the log, and it isn't needed.
+    // The chunk's own creation IS journaled, so a rewind past this point drops the whole
+    // chunk in one entry — the cells go with it. What that costs is the terrain
+    // fingerprint, which the direct writes bypass, so both directions are folded in by
+    // hand here and in DropChunk.
+    public bool EnsureChunk(Point pos)
+    {
+        if (Generator == null || _dict.ContainsKey(pos)) return false;
+        var chunk = GetOrCreateChunk(pos);
+        Generator.Generate(chunk);
+        TerrainHash ^= ChunkHash(chunk);
+        return true;
+    }
+
+    // Stream in every chunk within `radius` chunks of a world position. Called from the
+    // sim step with player positions — which is deliberate: the streamed set has to be a
+    // function of sim state alone, or two rollback peers would load different worlds.
+    public void StreamAround(Vector2 worldPos, int radiusX, int radiusY)
+    {
+        if (Generator == null) return;
+        int cx = (int)Math.Floor(worldPos.X / ChunkPixelSize);
+        int cy = (int)Math.Floor(worldPos.Y / ChunkPixelSize);
+        for (int x = cx - radiusX; x <= cx + radiusX; x++)
+            for (int y = cy - radiusY; y <= cy + radiusY; y++)
+                EnsureChunk(new Point(x, y));
+    }
+
+    // XOR of every cell in a chunk — the fingerprint contribution of the chunk as a
+    // whole. Self-inverse, so the same call both folds a generated chunk in and takes
+    // a dropped one back out.
+    private static ulong ChunkHash(Chunk chunk)
+    {
+        ulong h = 0;
+        for (int tx = 0; tx < Chunk.Size; tx++)
+            for (int ty = 0; ty < Chunk.Size; ty++)
+            {
+                ref var t = ref chunk.Tiles[tx, ty];
+                h ^= CellHash(chunk.ChunkPos, tx, ty, t.State, t.Type);
+            }
+        return h;
+    }
+
+    // Journal inverse for a lazily-created chunk. Before streaming, a journaled
+    // creation was always an EMPTY chunk (its cells arrived as separate, separately
+    // reverted tile writes) so dropping it needed no fingerprint work; a generated
+    // chunk carries 256 cells that were never journaled individually, so its
+    // contribution has to come back out explicitly.
+    private void DropChunk(Point pos)
+    {
+        if (!_dict.TryGetValue(pos, out var chunk)) return;
+        TerrainHash ^= ChunkHash(chunk);
+        _dict.Remove(pos);
+    }
 
     public IEnumerator<Chunk> GetEnumerator() => _dict.Values.GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
@@ -601,7 +673,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     {
         // 1. Roll the dense grid back by undoing journaled writes/creations past the
         //    mark. RevertTile clears Sprout refs (re-linked in step 3).
-        _journal.RewindTo(s.JournalMark, RevertTile, pos => _dict.Remove(pos));
+        _journal.RewindTo(s.JournalMark, RevertTile, DropChunk);
 
         // 2. Restore the sparse structures by value.
         Graph.Restore(s.Graph);

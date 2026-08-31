@@ -179,6 +179,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, CombatSystem = _combat };
         RegisterPlayer(_player);
         populate?.Invoke(this);
+        // Same as the stage ctor: a generator-backed ChunkMap starts empty, so fill the
+        // player's neighbourhood before frame 0. The spawn point is NOT surface-snapped
+        // here — this ctor's caller passed an exact position and is entitled to it.
+        StreamTerrain();
         // Terrain arrives written straight into the chunks, so fold the loaded grid in
         // once — otherwise the fingerprint covers only edits and two peers on different
         // levels would agree until one of them dug.
@@ -198,6 +202,15 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         TerrainLoader.Load(cfgPath, _chunks);
 
         _playerSpawn = stage.PlayerSpawn;
+        // Endless levels have no authored ground to aim a spawn at — the surface under
+        // any given X is whatever the noise says. Drop the stage's spawn onto that
+        // surface (keeping its X) rather than leaving it buried in a hillside or
+        // hanging a thousand tiles over a valley. Respawn reuses the corrected point.
+        if (_chunks.Generator is WorldGenerator gen)
+            _playerSpawn = new Vector2(
+                _playerSpawn.X,
+                (gen.SurfaceY((int)MathF.Floor(_playerSpawn.X / Chunk.TileSize)) * Chunk.TileSize) - SpawnClearancePx);
+
         MarkWorldStores();
         _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, CombatSystem = _combat };
         RegisterPlayer(_player);
@@ -215,8 +228,27 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
 
         // Hand control to the stage: it populates platforms, tickers, and entities.
         stage.Populate(this);
+        // Endless levels start with nothing loaded at all, so fill the players' first
+        // neighbourhood before frame 0 — otherwise the opening step runs against empty
+        // air and everyone falls through the world.
+        StreamTerrain();
         // As above: fold the loaded (and stage-populated) grid into the fingerprint once.
         _chunks.RecomputeTerrainHash();
+    }
+
+    // How far above the generated surface an endless level's spawn point sits, in px.
+    private const float SpawnClearancePx = 4 * Chunk.TileSize;
+
+    // Pull in the chunks around every player on an endless level. No-op without a
+    // generator installed (every authored stage). Player positions are sim state and
+    // nothing else feeds in, so peers — and a rollback replay — stream the same set.
+    private void StreamTerrain()
+    {
+        if (_chunks.Generator is not WorldGenerator gen) return;
+        int rx = gen.Config.StreamRadiusX;
+        int ry = gen.Config.StreamRadiusY;
+        _chunks.StreamAround(_player.Body.Position, rx, ry);
+        foreach (var (p, _) in _secondaryPlayers) _chunks.StreamAround(p.Body.Position, rx, ry);
     }
 
     // ── Stage-facing API (called from Stage.Populate) ───────────────────────────
@@ -281,6 +313,12 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         const float dt = FixedDt;
         _elapsed += dt;
         _frame++;
+
+        // Endless terrain streams in FIRST, so everything downstream this frame — the
+        // sprout tick, collision, every tile query — sees the same world. Runs off the
+        // players' positions as of the end of last frame, which is exactly the state a
+        // rollback replay restores, so the streamed set replays identically.
+        StreamTerrain();
 
         // Block-picker (1-4) and planner-mode toggle (P) are now interpreted per-player
         // inside PlayerCharacter.Update from its own input — no global planner statics.

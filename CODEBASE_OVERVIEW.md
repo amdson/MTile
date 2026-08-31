@@ -112,7 +112,7 @@ Topology target is **same-build P2P** (desktop↔desktop or WASM↔WASM), so `fl
 
 ## Stages ([Stage.cs](Stage.cs))
 
-A `Stage` bundles "what to load at start": `TerrainConfig` (filename in `Levels/`), `PlayerSpawn`, and a `Populate(Simulation)` delegate that spawns entities + registers platform tickers. `Stages` is a code registry (stages contain behavior, not just data); `configs/game_config.json`'s `Stage` field selects one by name. Seven stages today: `start` (the original test world — moving platform, ferris-wheel cluster, balloons/balls, one stalker), `arena` (bounded combat room — stalkers, turrets, ammo balls), `plain`, `training`, `corridor` (the corrector stress harness — pairs with `PlayerCharacter.RestrictToFallAndStand()`, which strips the movement registry to Falling+Standing), `gym`, and `flat`.
+A `Stage` bundles "what to load at start": `TerrainConfig` (filename in `Levels/`), `PlayerSpawn`, and a `Populate(Simulation)` delegate that spawns entities + registers platform tickers. `Stages` is a code registry (stages contain behavior, not just data); `configs/game_config.json`'s `Stage` field selects one by name. Eight stages today: `spires` (the endless procedural world — see `WorldGenerator` below), `start` (the original test world — moving platform, ferris-wheel cluster, balloons/balls, one stalker), `arena` (bounded combat room — stalkers, turrets, ammo balls), `plain`, `training`, `corridor` (the corrector stress harness — pairs with `PlayerCharacter.RestrictToFallAndStand()`, which strips the movement registry to Falling+Standing), `gym`, and `flat`.
 
 ## Physics ([Physics/](Physics/))
 
@@ -161,6 +161,11 @@ Dictionary of `Point → Chunk`. Each chunk = 16×16 tiles; each tile = 16px (`C
 
 ### `TerrainLoader`
 Reads `Levels/*.json` (chunk-position → ASCII filename map + Perlin config). ASCII files use `X` for solid (Stone), anything else empty. Procedural chunks use 1D Perlin height + depth-layered types (Sand crust → Dirt mid → Stone deep).
+
+### `WorldGenerator` — endless streamed terrain
+A level that carries a `WorldGen` block (`Levels/spires.json`, stage `spires`) is **infinite** instead of an `Extents` box: `TerrainLoader` installs a `WorldGenerator` on the `ChunkMap` and `Simulation.Step` calls `ChunkMap.StreamAround` for each player, materializing chunks ahead of them forever. Shape is a heightfield summing three noise channels — rolling base, ridged spiky hills, and rare mega-spires whose amplitude is gated by a slower rarity mask, so most of the map is plain-and-hill and thousand-tile towers arrive every few thousand tiles. Materials layer sand over dirt over stone, thinning out with elevation and slope (spire flanks are bare rock), with dirt/sand pockets through the deep stone from `ValueNoise2D`.
+
+Two invariants make this safe under rollback. **Generation is pure** — a chunk depends only on its position and the immutable config, so when a restore drops streamed chunks the replay regenerates them identically. And **height is a function of x alone**, so there are no overhangs and neighbouring chunks agree at their seam without either one consulting the other. The generated cells are written outside the terrain journal (256 inverse-deltas per chunk would swamp the log; the journaled chunk *creation* already undoes them wholesale), which is why `ChunkMap.EnsureChunk`/`DropChunk` fold the chunk's `TerrainHash` contribution in and out by hand. Gates: `MTile.Tests/Sim/InfiniteTerrainTests.cs`.
 
 ## Character ([Character/](Character/))
 

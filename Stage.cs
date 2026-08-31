@@ -166,6 +166,22 @@ public static class Stages
             PlayerSpawn   = new Vector2(0f, -200f),
             Populate      = _ => { },
         });
+
+        // ─── spires ───────────────────────────────────────────────────────────
+        // Endless procedural world (Levels/spires.json): rolling ground, spiky
+        // hills, and rare mega-spires running to thousands of tiles, in mixed
+        // sand / dirt / stone. Chunks stream in around the player as they travel,
+        // so there is no edge of the world in any direction.
+        //
+        // The spawn Y here is nominal: an endless level has no authored ground, so
+        // Simulation drops the spawn onto whatever surface the generator puts under
+        // this X. Only the X matters, and it picks the neighbourhood you start in.
+        Register(new Stage {
+            Name          = "spires",
+            TerrainConfig = "spires.json",
+            PlayerSpawn   = new Vector2(0f, 0f),
+            Populate      = _ => { },
+        });
     }
 
     public static void Register(Stage s) => _registry[s.Name] = s;
