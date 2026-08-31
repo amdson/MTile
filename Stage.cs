@@ -75,15 +75,24 @@ public static class Stages
         });
 
         // ─── corridor ─────────────────────────────────────────────────────────
-        // Ambient-corrector stress harness: flat runway (floor tile y = 6) feeding
-        // into a 64-tile bumpy tunnel (corridor.txt × 4 chunks, world x 256..1280):
-        // 3-tile interior, floor bumps at col ≡ 1 (mod 4), ceiling bumps at
-        // col ≡ 3 (mod 4). Full state machine; the fall/stand-only acceptance
-        // traces apply RestrictToFallAndStand themselves (BumpyTunnelSpeedTests).
+        // Ambient-corrector stress harness: flat runway (floor tile y = 6, top at
+        // 66 px) feeding into a 64-tile bumpy tunnel (4 chunks, world x 176..880).
+        // Rebuilt for the 11 px grid — the old 3-tile interior was 33 px against a
+        // 32.8 px standing body, which is what broke the run.
+        //   interior  rows y 2..5, 4 tiles = 44 px, slab ceiling at y = 1
+        //   floor bumps   (row y 5) at global col ≡ 0 (mod 6)
+        //   ceiling bumps (row y 2) at global col ≡ 3 (mod 6)
+        // The period-6 pattern does NOT divide the 16-wide chunk, so the tunnel is
+        // three phase variants cycling every 3 chunks (chunk start x mod 6 is 4, 2,
+        // 0, then 4 again) — that is the only reason there are three files rather
+        // than one tiled four times. Full state machine; the fall/stand-only
+        // acceptance traces apply RestrictToFallAndStand themselves
+        // (BumpyTunnelSpeedTests, which still encodes the OLD 3-tile mod-4 shape).
         Register(new Stage {
             Name          = "corridor",
             TerrainConfig = "corridor.json",
-            PlayerSpawn   = new Vector2(0f, 60f),
+            // Feet sit at center + 2*Radius = 60 px, a 6 px drop onto the 66 px floor.
+            PlayerSpawn   = new Vector2(0f, 36f),
             Populate      = _ => { },
         });
 
