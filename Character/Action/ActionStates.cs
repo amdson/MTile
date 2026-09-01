@@ -434,13 +434,19 @@ public class RecoveryAction : ActionState
 // Apex (max extent) is along `_slashDir` at t=0.5 — that's where the hurtbox sits.
 public abstract class SlashLikeAction : ActionState
 {
-    // Damage window expressed as fractions of Duration so the window scales when
-    // the slash duration is tuned. Window covers ~20%–70% of the slash, with the
-    // hitbox apex (max radial extent) sitting at the 50% mark.
-    private const float HurtboxStartFraction  = 0.20f;
-    private const float HurtboxActiveFraction = 0.50f;
-    // Per-frame damage tuned so 2 frames of active window at 30 fps total ≈ TileMaxHP.
-    // (Slashes now fire fast enough that the active window is ~2 frames, not 4.)
+    // Damage window in ABSOLUTE seconds (Lucina-anchored retime, 2026-09-01): startup
+    // and active length are authored per variant as frames-at-60 (`5f / 60f`) so the
+    // overrides read like frame data. The old shape — fractions of Duration, 20%–70% —
+    // put the hitbox ~2 frames after the click on every slash, below the perceptual
+    // floor for a wind-up (Smash's fastest jab is frame 5); now each variant declares
+    // startup in the 4–10f band and a 3–4f active moment. Defaults keep the legacy
+    // fraction shape for variants that don't override (GrabbedSlash — the struggle
+    // mash is its own rhythm and wasn't retimed).
+    protected virtual float HurtboxStartSeconds  => Duration * 0.20f;
+    protected virtual float HurtboxActiveSeconds => Duration * 0.50f;
+    // Per-frame damage: with the retime the active window is ~3 frames at 60 fps, so a
+    // full pass totals ~1.5 TileMaxHP — sand crumbles, dirt cracks hard, same feel band
+    // as before the retime (which totalled ~2).
     private const float SlashDamagePerFrame   = TileDamage.TileMaxHP / 2f;
     // Hitbox scale bump per roadmap §1.7 (1.75× — was 1.0×). Combat felt
     // unrewarding with apex-only hitboxes that just barely covered the dot's
@@ -656,8 +662,8 @@ public abstract class SlashLikeAction : ActionState
             && ctx.CombatSystem.PeekHits(vars.HitId) > 0)
             vars.AttackConnected = true;
 
-        float windowStart = Duration * HurtboxStartFraction;
-        float windowEnd   = windowStart + Duration * HurtboxActiveFraction;
+        float windowStart = HurtboxStartSeconds;
+        float windowEnd   = windowStart + HurtboxActiveSeconds;
         if (vars.TimeInState >= windowStart && vars.TimeInState <= windowEnd && ctx.Hitboxes != null)
         {
             var apex = ctx.Body.Position + vars.AttackDir * ArcRadius;
@@ -750,9 +756,12 @@ public abstract class SlashLikeAction : ActionState
 // explicit override, not the (now tiny) impulse.
 public class GroundSlash1 : SlashLikeAction
 {
-    // Slashes are fast — Duration tuned so the active damage window is ~2 frames at 30 fps.
-    // Variants scale around this baseline for combo-feel variety.
-    protected override float Duration            => 0.14f;
+    // Lucina-anchored retime (2026-09-01): jab-shaped — 5f startup / 3f active /
+    // 12f swing + 10f recovery ≈ her Jab 1's 5/2/25. The old 2f startup was below
+    // the perceptual floor; a slash needs to READ as swing–hit–follow-through.
+    protected override float Duration            => 0.20f;
+    protected override float HurtboxStartSeconds  => 5f / 60f;
+    protected override float HurtboxActiveSeconds => 3f / 60f;
     protected override float ArcRadiusScale      => 1.0f;
     protected override float SweepAngleDeg       => 100f;
     protected override float SweepDirection      => +1f;
@@ -768,15 +777,20 @@ public class GroundSlash1 : SlashLikeAction
         // chain right now — the S2 window opens whether or not S1 landed. To make
         // the combo hit-confirmed (Phase 3 whiff-punish), wrap the Slash2Ready set in
         // `if (connected)`.
+        // Note the Dancing-Blade rhythm falls out of the Duration alone: the flag only
+        // exists once S1 EXITS (12f in), so the earliest S2 is frame ~13 — no explicit
+        // transition gate needed.
         ConditionState.SetForSeconds(ref c.Slash2Ready, ref c.Slash2ExpireFrame, 1.0f, f, dt);
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.1f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.167f, f, dt);
     }
 }
 
 // Combo step 2 — mirror-handedness sweep, slightly faster, slightly harder hit.
 public class GroundSlash2 : SlashLikeAction
 {
-    protected override float Duration            => 0.13f;
+    protected override float Duration            => 0.18f;   // retime: 4f/3f, quicker mid-combo beat
+    protected override float HurtboxStartSeconds  => 4f / 60f;
+    protected override float HurtboxActiveSeconds => 3f / 60f;
     protected override float ArcRadiusScale      => 1.05f;
     protected override float SweepAngleDeg       => 110f;
     protected override float SweepDirection      => -1f;
@@ -801,14 +815,16 @@ public class GroundSlash2 : SlashLikeAction
     {
         // `connected` tracked but not gating — see GroundSlash1.OnExitSetFlags.
         ConditionState.SetForSeconds(ref c.Slash3Ready, ref c.Slash3ExpireFrame, 1.0f, f, dt);
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.1f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.167f, f, dt);
     }
 }
 
 // Combo finisher — wide 160° CCW sweep, longer reach, hot color, big knockback.
 public class GroundSlash3 : SlashLikeAction
 {
-    protected override float Duration            => 0.18f;
+    protected override float Duration            => 0.27f;   // retime: ftilt-shaped finisher — 8f/4f
+    protected override float HurtboxStartSeconds  => 8f / 60f;
+    protected override float HurtboxActiveSeconds => 4f / 60f;
     protected override float ArcRadiusScale      => 1.30f;
     protected override float SweepAngleDeg       => 160f;
     protected override float SweepDirection      => +1f;
@@ -829,8 +845,9 @@ public class GroundSlash3 : SlashLikeAction
     }
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        // End of chain — no further combo flag.
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.167f, f, dt);
+        // End of chain — no further combo flag. The finisher pays the long tail
+        // (retime: 18f — the launch is the reward, the lag is the price).
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.30f, f, dt);
     }
 }
 
@@ -840,7 +857,9 @@ public class GroundSlash3 : SlashLikeAction
 // when not crouched so the regular slash takes over.
 public class CrouchSlash : SlashLikeAction
 {
-    protected override float Duration            => 0.16f;
+    protected override float Duration            => 0.23f;   // retime: dtilt-shaped — 7f/3f, quick tail
+    protected override float HurtboxStartSeconds  => 7f / 60f;
+    protected override float HurtboxActiveSeconds => 3f / 60f;
     protected override float ArcRadiusScale      => 1.45f;
     protected override float SweepAngleDeg       => 90f;
     protected override float SweepDirection      => +1f;
@@ -868,10 +887,11 @@ public class CrouchSlash : SlashLikeAction
         return true;
     }
 
-    // No combo flag set on exit — crouch slash terminates the chain.
+    // No combo flag set on exit — crouch slash terminates the chain. Short tail
+    // (dtilt-like): the low poke is the safest normal in the kit.
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.167f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.15f, f, dt);
     }
 }
 
@@ -880,7 +900,9 @@ public class CrouchSlash : SlashLikeAction
 // Opening air slash. Tighter & faster than ground S1, blue.
 public class AirSlash1 : SlashLikeAction
 {
-    protected override float Duration            => 0.12f;
+    protected override float Duration            => 0.20f;   // retime: fair-shaped — 6f/3f
+    protected override float HurtboxStartSeconds  => 6f / 60f;
+    protected override float HurtboxActiveSeconds => 3f / 60f;
     protected override float ArcRadiusScale      => 0.90f;
     protected override float SweepAngleDeg       => 110f;
     protected override float SweepDirection      => +1f;
@@ -893,14 +915,16 @@ public class AirSlash1 : SlashLikeAction
     {
         // `connected` tracked but not gating — see GroundSlash1.OnExitSetFlags.
         ConditionState.SetForSeconds(ref c.AirSlash2Ready, ref c.AirSlash2ExpireFrame, 1.0f, f, dt);
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.1f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.167f, f, dt);
     }
 }
 
 // Air combo finisher — bigger CW sweep, more knockback.
 public class AirSlash2 : SlashLikeAction
 {
-    protected override float Duration            => 0.14f;
+    protected override float Duration            => 0.23f;   // retime: bair-shaped finisher — 7f/4f
+    protected override float HurtboxStartSeconds  => 7f / 60f;
+    protected override float HurtboxActiveSeconds => 4f / 60f;
     protected override float ArcRadiusScale      => 1.10f;
     protected override float SweepAngleDeg       => 140f;
     protected override float SweepDirection      => -1f;
@@ -921,7 +945,7 @@ public class AirSlash2 : SlashLikeAction
     }
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.133f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.23f, f, dt);
     }
 }
 
@@ -932,7 +956,9 @@ public class AirSlash2 : SlashLikeAction
 // in air picks this instead of being clamped to perpendicular AirSlash1.
 public class AirTurnSlash : SlashLikeAction
 {
-    protected override float Duration            => 0.11f;
+    protected override float Duration            => 0.20f;   // retime: 7f/3f
+    protected override float HurtboxStartSeconds  => 7f / 60f;
+    protected override float HurtboxActiveSeconds => 3f / 60f;
     protected override float ArcRadiusScale      => 1.70f;   // long reach
     protected override float SweepAngleDeg       => 60f;     // narrow
     protected override float SweepDirection      => +1f;
@@ -968,8 +994,8 @@ public class AirTurnSlash : SlashLikeAction
 
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        // No combo follow-up — turn-around is one-and-done. Short recovery.
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.133f, f, dt);
+        // No combo follow-up — turn-around is one-and-done.
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.20f, f, dt);
     }
 }
 
@@ -1028,7 +1054,9 @@ public class DownAirSlash : SlashLikeAction
     // ≈ 0.175. Raise it toward 1.0 to make chopping off hard rock a real pogo too.
     private const float TileRecoilShare  = 0.35f;
 
-    protected override float Duration             => 0.18f;   // the most committed air swing
+    protected override float Duration             => 0.27f;   // the most committed air swing (retime: 10f/4f, dair-shaped)
+    protected override float HurtboxStartSeconds  => 10f / 60f;
+    protected override float HurtboxActiveSeconds => 4f / 60f;
     protected override float ArcRadiusScale       => 1.25f;   // reach below the feet
     protected override float SweepAngleDeg        => 70f;     // narrow — a chop, not a fan
     protected override float SweepDirection       => +1f;
@@ -1079,11 +1107,11 @@ public class DownAirSlash : SlashLikeAction
         return raw.Y >= AimCosThreshold * MathF.Sqrt(lenSq);
     }
 
-    // One-and-done: no combo flag. The short recovery is the chain — it's what lets a
-    // landed pogo roll straight into the next down-air on the enemy below.
+    // One-and-done: no combo flag. The recovery is the chain pace — a landed pogo can
+    // still roll into the next down-air on the enemy below, one readable beat later.
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.133f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.23f, f, dt);
     }
 
     // Replaces the base's plain `Velocity += recoil` on an ENTITY connect (see the
@@ -1128,21 +1156,17 @@ public class DownAirSlash : SlashLikeAction
 public class StabAction : ActionState
 {
     private const float Duration              = 0.60f;
-    // Active window spans the strike + hold of the visual curve (TipExtension): the
-    // box opens as the tip starts whipping forward out of the wind-up, SWEEPS OUTWARD
-    // with the tip (each box's length tracks vars.TipExt below) through the strike,
-    // then dwells at full reach through the early hold. In normalized state-time that's
-    // ≈ 0.18–0.55 of Duration (WindupEnd → mid-hold). The hold tail matters now that
-    // the boxes grow: the far cells are only covered late in the sweep, so the window
-    // has to stay open long enough (≥ TileMaxHP/DamagePerFrame frames at full reach)
-    // for them to break — otherwise the proportional box would dig only the near cells.
-    // Startup bumped 0.12 → 0.18 s (≈11 frames at 60 fps) as part of the Phase 3
-    // commitment spectrum: the stab is now a launcher (3× knockback below), so it
-    // earns a real wind-up — whiffing it is punishable, landing it is a kill move.
-    // (Entities are HitId-deduped, so the longer window doesn't multi-hit them; it
-    // only gives tiles more frames to break and makes a point-blank connect easier.)
+    // Active window: opens as the tip whips forward out of the wind-up and now closes
+    // just past full extension — a MOMENT, not a smear (Lucina-anchored retime
+    // 2026-09-01: 7 active frames, fsmash-shaped, where the old 22-frame window meant
+    // the hit could land anywhere in a third of a second and read as mush). The boxes
+    // still sweep outward with the live tip (vars.TipExt); DamagePerFrame doubled below
+    // to keep the dig — far cells see ~2-3 frames at full reach, so dirt still breaks
+    // at the tip while stone survives past mid-reach (a depth gradient, not a loss).
+    // Startup 0.18 s (≈11f) unchanged — that number was already fsmash-tier and is what
+    // makes the launcher readable.
     private const float HurtboxStartTime      = 0.18f;
-    private const float HurtboxActiveDuration = 0.37f;
+    private const float HurtboxActiveDuration = 7f / 60f;
 
     // Lunge window: a short forward-glide phase AFTER the hitbox active window
     // (0.25–0.40) and BEFORE the settle (0.55–0.60). During this window the
@@ -1183,7 +1207,9 @@ public class StabAction : ActionState
     // and bullet deflection (BulletProjectile.OnHit) read it as the attack's
     // direction, and the parry/invuln early-outs echo it back as recoil.
     private const float KnockbackMagnitude    = 1140f;
-    private const float DamagePerFrame        = TileDamage.TileMaxHP / 4f;
+    // Doubled with the active-window cut (22f → 7f) so the channel still digs — see
+    // the window comment above.
+    private const float DamagePerFrame        = TileDamage.TileMaxHP / 2f;
     // Collision-mode striker (HitResolver.Resolve): the stab is a virtual body
     // flying at StrikeSpeed along the thrust, on top of the attacker's real
     // velocity — so a dive stab genuinely hits (and pogos) harder than a
@@ -1352,7 +1378,8 @@ public class StabAction : ActionState
         => vars.TimeInState < HurtboxStartTime + HurtboxActiveDuration ? ArmorStrength : 0f;
 
     // Larger recovery than slashes — stab can't roll directly into anything.
-    private const float RecoverySeconds     = 0.3f;
+    // 0.3 → 0.4 (retime): the designated launcher pays the biggest whiff tail.
+    private const float RecoverySeconds     = 0.4f;
     // Recovery price of bailing during the wind-up: nothing was swung, so the
     // cancel is nearly free — just enough that guard-flicker can't zero it out.
     private const float WindupEvictSeconds  = 0.10f;
@@ -1743,7 +1770,9 @@ public class GuardAction : ActionState
 // regular slashes so the click goes here instead of a normal GroundSlash1.
 public class GuardRetaliateAction : SlashLikeAction
 {
-    protected override float Duration            => 0.10f;
+    protected override float Duration            => 0.17f;   // retime: 4f/3f — counters stay fast (Lucina's is frame 4)
+    protected override float HurtboxStartSeconds  => 4f / 60f;
+    protected override float HurtboxActiveSeconds => 3f / 60f;
     protected override float ArcRadiusScale      => 1.20f;
     protected override float SweepAngleDeg       => 70f;
     protected override float SweepDirection      => +1f;
@@ -1779,7 +1808,7 @@ public class GuardRetaliateAction : SlashLikeAction
 
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.1f, f, dt);
+        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.13f, f, dt);
     }
 }
 
@@ -1793,8 +1822,11 @@ public class GuardRetaliateAction : SlashLikeAction
 public class PulseAction : ActionState
 {
     private const float Duration             = 0.70f;
-    private const float HitboxStartTime      = 0.15f;
-    private const float HitboxActiveDuration = 0.40f;
+    // Retime (2026-09-01): startup 9f → 12f (usmash-tier wind-up) and the ring sweep
+    // tightened 24f → 18f — an AoE wave earns a wider window than a strike, but the
+    // old 0.4s smear had no moment of contact in it at all.
+    private const float HitboxStartTime      = 0.20f;
+    private const float HitboxActiveDuration = 0.30f;
     private const int   Segments             = 12;
     private const float StartRadius          = PlayerCharacter.Radius * 1.2f;
     private const float EndRadius            = PlayerCharacter.Radius * 5.0f;
@@ -1938,9 +1970,10 @@ public class PulseAction : ActionState
 public class BurstAction : ActionState
 {
     private const float Duration             = 0.42f;
-    // Fast detonation: the shell sweeps out over ~0.2s, well short of Pulse's 0.4s.
-    private const float HitboxStartTime      = 0.06f;
-    private const float HitboxActiveDuration = 0.22f;
+    // Fast detonation, but readable (retime 2026-09-01): 4f → 6f of arming, and the
+    // shell's sweep cut 13f → 8f so the shove is a bang, not a wash.
+    private const float HitboxStartTime      = 0.10f;
+    private const float HitboxActiveDuration = 0.133f;
     // 20 segments at EndRadius keeps the shell gap-free: spacing at r = 6R is
     // 2π·6R/20 ≈ 1.9R, just under each segment's 2R width.
     private const int   Segments             = 5;
@@ -2646,64 +2679,9 @@ internal static class BlockEruptionHelpers
 // release-time upgrade — banked charge + fast ball at RMB-up detaches the live paint
 // ball as the MassBall.)
 
-// ---------- Ranged: EnergyBall (Shift + LMB tap) --------------------------------
-
-// Roadmap §4.1. Short action that spawns one EnergyBallProjectile toward the
-// cursor and sets a brief recovery. Priority sits ABOVE GuardAction's Active 35
-// so a Shift+click during a guard stance momentarily preempts the guard to fire,
-// then the FSM re-evaluates and Guard re-arms on the next frame.
-public class EnergyBallAction : ActionState
-{
-    private const float Duration        = 0.15f;
-    private const float RecoverySeconds = 0.133f;
-    // Distance ahead of the player center where the projectile spawns. Keeps
-    // the ball from immediately overlapping the player's body/hurtbox.
-    private const float SpawnOffset    = PlayerCharacter.Radius * 1.2f;
-
-    public override int ActivePriority  => 40;
-    public override int PassivePriority => 45;
-
-    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-    {
-        if (!ctx.Input.Shift) return false;
-        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
-        if (ctx.Combat?.BlocksAttack == true) return false;
-        if (ab.Condition.RecoveryActive)    return false;
-        // From-set: neutral/recovery, or straight out of a live Guard (the Shift+
-        // click during a guard stance — this action's documented role).
-        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
-        return true;
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => vars.TimeInState < Duration;
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.TimeInState = 0f;
-        ctx.Intents.Consume(IntentType.Click, ctx.CurrentFrame);
-
-        if (ctx.Spawner == null) return;
-        Vector2 toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-        Vector2 dir = toCursor.LengthSquared() < 1e-4f
-            ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
-            : Vector2.Normalize(toCursor);
-        var spawnPos = ctx.Body.Position + dir * SpawnOffset;
-        ctx.Spawner.SpawnEntity(new EnergyBallProjectile(spawnPos, dir, ctx.HitIds.Next(), ctx.Faction));
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.TimeInState += ctx.Dt;
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
-    }
-}
+// (EnergyBallAction — the Shift+LMB tap projectile — was removed 2026-09-01. It was
+// an early-commit move with zero startup and no identity next to the beam; the
+// EnergyBallProjectile entity itself survives, fired by enemies in EnemyActions.)
 
 // ---------- Ranged: Beam (Shift + LMB hold) -------------------------------------
 
@@ -2719,9 +2697,9 @@ public class EnergyBallAction : ActionState
 // firing. Press-edge + per-frame LMB poll matches the intended feel.
 //
 // Click coexistence: when a short Shift+LMB tap releases inside the charge
-// window, BeamAction.CheckConditions returns false (LMB released), BeamAction
-// exits without firing, and the same release frame's Click intent routes to
-// EnergyBallAction. So short Shift+LMB = energy ball, long Shift+LMB = beam.
+// window, BeamAction.CheckConditions returns false (LMB released) and the beam
+// exits without firing. (That short tap used to route to EnergyBallAction —
+// removed 2026-09-01 — so now it just pays the recovery stamp and does nothing.)
 public class BeamAction : ActionState
 {
     private const float MinChargeTime    = 0.35f;
@@ -3140,61 +3118,9 @@ public class LobbedAreaAction : ActionState
     }
 }
 
-// ---------- Ranged: StickyGrenade (F key press) ---------------------------------
-
-// Roadmap §4.4 — sticky-grenade throw. F press-edge spawns a grenade toward
-// the cursor. Shift+RMB was the original roadmap binding but that gesture is
-// now taken by LobbedAreaAction (charge + release for ranged eruption); F is
-// the unambiguous fallback. No charging — single-tap throw at fixed velocity.
-public class GrenadeAction : ActionState
-{
-    private const float Duration       = 0.15f;
-    private const float RecoverySeconds = 0.167f;
-    private const float SpawnOffset    = PlayerCharacter.Radius * 1.2f;
-
-    public override int ActivePriority  => 40;
-    public override int PassivePriority => 45;
-
-    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-    {
-        if (!ctx.Input.F) return false;
-        var prev = ctx.Controller.GetPrevious(1);
-        if (prev.F) return false;
-        if (ctx.Combat?.BlocksAttack == true) return false;
-        if (ab.Condition.RecoveryActive)    return false;
-        // From-set: neutral/recovery, or over a live Guard (F throw keeps its
-        // old ability to preempt the stance).
-        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
-        return true;
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => vars.TimeInState < Duration;
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.TimeInState = 0f;
-        if (ctx.Spawner == null) return;
-        Vector2 toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-        Vector2 dir = toCursor.LengthSquared() < 1e-4f
-            ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
-            : Vector2.Normalize(toCursor);
-        var spawnPos = ctx.Body.Position + dir * SpawnOffset;
-        ctx.Spawner.SpawnEntity(new StickyGrenadeProjectile(spawnPos, dir, ctx.HitIds.Next(), ctx.Faction));
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.TimeInState += ctx.Dt;
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
-    }
-}
+// (GrenadeAction — the F-key sticky-grenade throw — was removed 2026-09-01,
+// superseded by the dirt-drag/block-throw move. StickyGrenadeProjectile stays as
+// dormant entity infrastructure; nothing spawns it today.)
 
 // ---------- Block Grab — Shift + LMB on terrain: peel blocks out, throw them -----
 

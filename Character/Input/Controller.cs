@@ -15,8 +15,9 @@ namespace MTile
         public Vector2 MouseWorldPosition;
         public bool Space;
         public bool Shift;
-        // F key: bound to GrenadeAction (Shift+RMB is reserved for LobbedAreaAction).
-        // Polled by GrenadeAction's CheckPreConditions on press-edge.
+        // F key. Currently unbound (it threw the sticky grenade, removed 2026-09-01 —
+        // superseded by the dirt-drag move); still sampled so the input record's
+        // shape stays stable for replays.
         public bool F;
         // R key. Currently unbound (it fired the laser, removed 2026-08-31); still
         // sampled so the input record's shape stays stable for replays.

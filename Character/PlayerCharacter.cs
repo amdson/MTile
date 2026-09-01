@@ -391,9 +391,7 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new AirSpinStab());       // 30/35  — air backward-swipe stab
         _actionRegistry.Add(new GuardAction());       // 35/40  — Shift held, no L/R, parry posture
         _actionRegistry.Add(new GuardRetaliateAction()); // 30/55 — click during GuardCharged
-        _actionRegistry.Add(new EnergyBallAction());     // 40/45 — Shift+LMB tap, preempts Guard briefly
         _actionRegistry.Add(new BeamAction());           // 40/45 — Shift+LMB hold, sustained beam after charge
-        _actionRegistry.Add(new GrenadeAction());        // 40/45 — F press, throws sticky grenade
         // LobbedAreaAction (Shift+RMB charge) deactivated in COMBAT_FEEL_PLAN Phase 6
         // when Grab took that binding. Grab has since moved to Shift+LMB, so Shift+RMB
         // is free again — re-add the line to restore the ranged eruption. (Its
@@ -727,6 +725,18 @@ public class PlayerCharacter : IHittable
         // up, however the stroke ended — including a preempt, which never runs the paint
         // action's Exit again (see BuildMeters.Step).
         _abilities.Meters.Step(dt, ctx.Input.RightClick);
+
+        // Attacker-side hitstop (symmetric hitlag, 2026-09-01): if this player's live
+        // attack connected on the frame just resolved, freeze the attacker for the same
+        // window CombatSystem granted the victim. Read AFTER Update/ApplyActionForces so
+        // this frame's recoil/pogo has already been applied — the freeze then starts
+        // next frame via hitstopFrozen, one frame behind the victim's, and pauses the
+        // action clock (TimeInState), which also pauses the overlay clip: the crunch.
+        if (CombatSystem != null)
+        {
+            float stop = CombatSystem.PeekHitstop(_actionVars.HitId);
+            if (stop > 0f) _abilities.Combat.ApplyHitstop(_frame, stop, dt);
+        }
 
         _historyHead = (_historyHead + 1) % HistorySize;
         _stateHistory[_historyHead] = _currentState;

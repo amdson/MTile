@@ -527,6 +527,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
             Dedupe               = _combat.CaptureDedupe(),
             HitConfirm           = _combat.CaptureHitConfirm(),
             Recoil               = _combat.CaptureRecoil(),
+            AttackerHitstop      = _combat.CaptureHitstop(),
             Platforms            = platforms,
             Terrain              = _chunks.CaptureTerrain(),
         };
@@ -604,5 +605,6 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         // snapshot (the attacker reads both in its next ApplyActionForces).
         _combat.RestoreHitConfirm(snap.HitConfirm);
         _combat.RestoreRecoil(snap.Recoil);
+        _combat.RestoreHitstop(snap.AttackerHitstop);
     }
 }
