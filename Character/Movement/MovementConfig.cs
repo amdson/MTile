@@ -317,7 +317,7 @@ public class MovementConfig
     // rollback loop); "lattice" = the ref engine's tail riding the lattice
     // path DP's reference (FoldLattice / LatticePathPlanner; the Lattice*
     // knobs above tune it). Hot-reloadable A/B while playtesting.
-    public string FoldEngine                    { get; set; } = "qp";
+    public string FoldEngine                    { get; set; } = "lattice";
     // TrajectoryLm tuning: fixed LM iteration budget (fixed for determinism,
     // like FoldIterations), residual weights, and the cap on the applied
     // tick-0 correction (px/s² — the lone actuation bound the LM path has).
