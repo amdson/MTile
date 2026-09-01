@@ -56,6 +56,7 @@ public static class ExposedUpperCornerChecker
             .Where(TileFilters.BodyFacingNeighborEmpty(wallDir))
             .Where(TileFilters.UpperDiagonalClear(wallDir))
             .Where(TileFilters.WorldTopInRange(bandTop, bandBottom))
+            .Where(TileFilters.NothingBetween(bounds, wallDir))
             .MaxBy(t => t.WorldTop);
 
         if (best is not { } b) return false;
@@ -80,6 +81,7 @@ public static class ExposedUpperCornerChecker
             .Where(TileFilters.TopExposed)
             .Where(TileFilters.BodyFacingNeighborEmpty(wallDir))
             .Where(TileFilters.UpperDiagonalClear(wallDir))
+            .Where(TileFilters.NothingBetween(bounds, wallDir))
             .MaxBy(t => t.WorldTop);
 
         if (best is not { } b) return false;
