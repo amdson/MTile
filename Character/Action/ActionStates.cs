@@ -3118,69 +3118,9 @@ public class LobbedAreaAction : ActionState
     }
 }
 
-// ---------- Ranged: StickyGrenade (F key press) ---------------------------------
-
-// Roadmap §4.4 — sticky-grenade throw. F press-edge spawns a grenade toward
-// the cursor. Shift+RMB was the original roadmap binding but that gesture is
-// now taken by LobbedAreaAction (charge + release for ranged eruption); F is
-// the unambiguous fallback. No charging — single-tap throw at fixed velocity.
-public class GrenadeAction : ActionState
-{
-    // Retime (2026-09-01): the throw used to spawn in Enter — zero startup, the one
-    // thing every move in the kit is no longer allowed to have. The grenade now
-    // leaves the hand at WindupSeconds (6f), aimed at THAT frame's cursor, so the
-    // wind-up is also a small aim window.
-    private const float Duration       = 0.20f;
-    private const float WindupSeconds  = 0.10f;
-    private const float RecoverySeconds = 0.20f;
-    private const float SpawnOffset    = PlayerCharacter.Radius * 1.2f;
-
-    public override int ActivePriority  => 40;
-    public override int PassivePriority => 45;
-
-    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-    {
-        if (!ctx.Input.F) return false;
-        var prev = ctx.Controller.GetPrevious(1);
-        if (prev.F) return false;
-        if (ctx.Combat?.BlocksAttack == true) return false;
-        if (ab.Condition.RecoveryActive)    return false;
-        // From-set: neutral/recovery, or over a live Guard (F throw keeps its
-        // old ability to preempt the stance).
-        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
-        return true;
-    }
-
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => vars.TimeInState < Duration;
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.TimeInState = 0f;
-        vars.Firing      = false;   // spawn latch — the throw happens in Update at WindupSeconds
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.TimeInState += ctx.Dt;
-        if (vars.Firing || vars.TimeInState < WindupSeconds) return;
-        vars.Firing = true;
-        if (ctx.Spawner == null) return;
-        Vector2 toCursor = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-        Vector2 dir = toCursor.LengthSquared() < 1e-4f
-            ? new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f)
-            : Vector2.Normalize(toCursor);
-        var spawnPos = ctx.Body.Position + dir * SpawnOffset;
-        ctx.Spawner.SpawnEntity(new StickyGrenadeProjectile(spawnPos, dir, ctx.HitIds.Next(), ctx.Faction));
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
-    }
-}
+// (GrenadeAction — the F-key sticky-grenade throw — was removed 2026-09-01,
+// superseded by the dirt-drag/block-throw move. StickyGrenadeProjectile stays as
+// dormant entity infrastructure; nothing spawns it today.)
 
 // ---------- Block Grab — Shift + LMB on terrain: peel blocks out, throw them -----
 

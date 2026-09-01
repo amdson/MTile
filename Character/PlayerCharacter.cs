@@ -392,7 +392,6 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new GuardAction());       // 35/40  — Shift held, no L/R, parry posture
         _actionRegistry.Add(new GuardRetaliateAction()); // 30/55 — click during GuardCharged
         _actionRegistry.Add(new BeamAction());           // 40/45 — Shift+LMB hold, sustained beam after charge
-        _actionRegistry.Add(new GrenadeAction());        // 40/45 — F press, throws sticky grenade
         // LobbedAreaAction (Shift+RMB charge) deactivated in COMBAT_FEEL_PLAN Phase 6
         // when Grab took that binding. Grab has since moved to Shift+LMB, so Shift+RMB
         // is free again — re-add the line to restore the ranged eruption. (Its
