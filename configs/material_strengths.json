@@ -19,9 +19,9 @@
   // per-tile price has to drop by that factor to keep the build economy where it was.
   // At the move meter's refill rate stone now lands ~8.5 tiles/sec — the same physical
   // area per second as the old ~4/sec at 16px tiles.
-  "Stone": { "MaxHP": 12.0, "BuildCost": 1.89  },
-  "Dirt":  { "MaxHP": 1.0, "BuildCost": 0.47  },
-  "Sand":  { "MaxHP": 0.5, "BuildCost": 0.24  },
+  "Stone": { "MaxHP": 12.0, "BuildCost": 1.94  },
+  "Dirt":  { "MaxHP": 2.0, "BuildCost": 0.77  },
+  "Sand":  { "MaxHP": 0.5, "BuildCost": 0.44  },
   "Foam":  { "MaxHP": 0.5, "BuildCost": 0.12 },
 
   // Hardened rock — bedrock-grade, 10x stone. Not player-placeable (so BuildCost is

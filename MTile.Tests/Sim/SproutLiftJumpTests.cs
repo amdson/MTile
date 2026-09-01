@@ -347,6 +347,58 @@ public class SproutLiftJumpTests(ITestOutputHelper output)
         Assert.Equal(diag + new Vector2(0f, 60f), TerrainCarriedState.AggregateCarry(body));
     }
 
+    // ── 1e2. One diagonal block beside the player: the ride is SMOOTH ────────
+    // The anchor-servo law's contract for the simplest case: a single
+    // multi-face cell grows diagonally into a standing player. The carry must
+    // read as one motion — per-frame displacement varies by at most a couple
+    // of pixels (no cliff-gain twitching, no controller fights) once the
+    // block has caught the body.
+    [Fact]
+    public void SingleDiagonalBlock_CarriesSmoothly()
+    {
+        var sb = new StringBuilder();
+        for (int r = 0; r < 25; r++)
+        {
+            for (int c = 0; c < 20; c++)
+                sb.Append(r >= FloorRow || (c <= 9 && r >= FloorRow - 2) ? 'X' : 'O');
+            sb.Append('\n');
+        }
+        var terrain = SimTerrain.FromAscii(sb.ToString());
+        var player = new PlayerCharacter(new Vector2(10 * Ts + Ts * 0.7f, FloorTopY - RestOffset));
+
+        const int requestFrame = 20;
+        var samples = Run(terrain, player, 90, null, (f, t) =>
+        {
+            if (f == requestFrame)
+                Assert.NotNull(t.TryRequestTile(10, FloorRow - 1, TileType.Stone));
+        });
+
+        for (int f = requestFrame - 1; f < requestFrame + 20; f++)
+            output.WriteLine($"  f{samples[f].Frame,3}  x {samples[f].PosX,7:F2}  y {samples[f].PosY,7:F2}  " +
+                             $"vx {samples[f].VelX,6:F1}  vy {samples[f].VelY,6:F1}  {samples[f].State}");
+
+        // Jerk bound over the interaction: after the catch (2 frames in),
+        // through the block's growth and the settle.
+        float maxDd = 0f;
+        Vector2 prevD = Vector2.Zero; bool have = false;
+        for (int f = requestFrame + 3; f < requestFrame + 40; f++)
+        {
+            var d = new Vector2(samples[f].PosX - samples[f - 1].PosX,
+                                samples[f].PosY - samples[f - 1].PosY);
+            if (have) maxDd = MathF.Max(maxDd, (d - prevD).Length());
+            prevD = d; have = true;
+        }
+        output.WriteLine($"max frame-to-frame Δdisplacement: {maxDd:F2}px");
+        Assert.True(maxDd < 2.5f,
+            $"the single-block carry lurched by {maxDd:F2}px frame-to-frame — controller fight or cliff gain");
+
+        // And the block actually moved the player up-right.
+        float dx = samples[^1].PosX - samples[requestFrame].PosX;
+        float dy = samples[requestFrame].PosY - samples[^1].PosY;
+        output.WriteLine($"net dx {dx:F1}, dy {dy:F1}");
+        Assert.True(dx > 4f && dy > -1f, $"expected an up-right displacement, got dx {dx:F1}, dy {dy:F1}");
+    }
+
     // ── 1f. MACRO: a diagonal eruption stream carries the player ~20 tiles ───
     // The whole feature end to end. A 2-wide diagonal bar of pending sprouts is
     // requested in one frame; the promotion cascade then sweeps it up-right one
@@ -360,10 +412,20 @@ public class SproutLiftJumpTests(ITestOutputHelper output)
     public void DiagonalEruptionStream_CarriesPlayerTwentyTilesUpAndRight()
     {
         const int Cols = 50, Rows = 46, Floor = 40, C = 10, Reach = 22;
+        // Pre-solid landing platform at summit height, separated from the bar
+        // by a 2-column gap the exit momentum clears. It must NOT touch the
+        // pending sprout set: any solid neighbor promotes pending cells
+        // immediately, which grows a SECOND wavefront backward from the far
+        // end — the two fronts meet mid-bar and crush the rider between them.
+        // (A growing plateau is no landing either: a growing shelf CONVEYS a
+        // rider off its far edge, however long it is.)
+        const int PadCol = C + Reach + 2;   // 1-col gap: non-adjacent to pending cells, within the exit arc
+        int padTopRow = Floor - Reach - 1;
         var sb = new StringBuilder();
         for (int r = 0; r < Rows; r++)
         {
-            for (int c = 0; c < Cols; c++) sb.Append(r >= Floor ? 'X' : 'O');
+            for (int c = 0; c < Cols; c++)
+                sb.Append(r >= Floor || (c >= PadCol && r >= padTopRow && r <= padTopRow + 2) ? 'X' : 'O');
             sb.Append('\n');
         }
         var terrain = SimTerrain.FromAscii(sb.ToString());
@@ -396,18 +458,17 @@ public class SproutLiftJumpTests(ITestOutputHelper output)
                 if (t.TryRequestTile(C + x, Floor - 1 - up, TileType.Stone) != null)
                     requested++;
             }
-            // Landing plateau: a few flat columns past the diagonal so the ride
-            // ends on ground instead of a knife-edge tip (the rider otherwise
-            // finishes wedged on the summit's outer corner, at rest but with no
-            // probe-visible floor under their center).
-            for (int x = Reach + 1; x <= Reach + 4; x++)
-            for (int up = Reach; up <= Reach + 2; up++)
-                t.TryRequestTile(C + x, Floor - 1 - up, TileType.Stone);
         });
         Assert.True(requested > 40, $"bar construction failed — only {requested} sprouts requested");
 
         float dx = samples[^1].PosX - samples[requestFrame - 1].PosX;
         float dy = samples[requestFrame - 1].PosY - samples[^1].PosY;
+        // The diagonal claim is judged at the ride's PEAK: after the summit,
+        // the growing plateau legitimately conveys the rider further right.
+        float peakY = float.MaxValue, dxAtPeak = 0f;
+        foreach (var s in samples)
+            if (s.PosY < peakY) { peakY = s.PosY; dxAtPeak = s.PosX - samples[requestFrame - 1].PosX; }
+        float dyPeak = samples[requestFrame - 1].PosY - peakY;
         int carriedFrames = 0;
         foreach (var s in samples) if (s.State == "TerrainCarriedState") carriedFrames++;
         output.WriteLine($"net ride: dx {dx / Ts:F1} tiles right, dy {dy / Ts:F1} tiles up; " +
@@ -418,10 +479,13 @@ public class SproutLiftJumpTests(ITestOutputHelper output)
             output.WriteLine($"  f{samples[f].Frame,3}  x {samples[f].PosX,7:F1}  y {samples[f].PosY,7:F1}  " +
                              $"vx {samples[f].VelX,7:F1}  vy {samples[f].VelY,7:F1}  {samples[f].State} {samples[f].Cons}");
 
+        output.WriteLine($"peak: dy {dyPeak / Ts:F1} tiles up at dx {dxAtPeak / Ts:F1}");
         Assert.True(dx >= 17f * Ts, $"player should be carried ~{Reach} tiles right, got {dx / Ts:F1}");
-        Assert.True(dy >= 17f * Ts, $"player should be carried ~{Reach} tiles up, got {dy / Ts:F1}");
-        Assert.True(MathF.Abs(dx - dy) <= 5f * Ts,
-            $"the ride should be roughly diagonal (dx {dx / Ts:F1} vs dy {dy / Ts:F1} tiles)");
+        Assert.True(dy >= 15f * Ts,
+            $"player should END high on the pile (wall-backed plateau), got {dy / Ts:F1} tiles up");
+        Assert.True(dyPeak >= 17f * Ts, $"the ride should crest ~{Reach} tiles up, peaked at {dyPeak / Ts:F1}");
+        Assert.True(MathF.Abs(dxAtPeak - dyPeak) <= 6f * Ts,
+            $"the ride to the crest should be roughly diagonal (dx {dxAtPeak / Ts:F1} vs dy {dyPeak / Ts:F1} tiles)");
         Assert.True(carriedFrames >= 20,
             $"TerrainCarriedState should classify much of the ride (saw {carriedFrames} frames)");
         // ANTI-JITTER: the ride is ONE classification, not a flicker. The

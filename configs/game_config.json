@@ -4,7 +4,7 @@
   "WindowWidth": 1000,
   "WindowHeight": 900,
   "Fullscreen": true,
-  "DebugDrawHitboxes":          false,
+  "DebugDrawHitboxes":          true,
   "DebugDrawHurtboxes":         false,
   "DebugDrawPlayerOrientation": false,
   "DebugDrawBodies":            false,

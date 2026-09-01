@@ -756,7 +756,7 @@ public class GroundSlash1 : SlashLikeAction
     protected override float ArcRadiusScale      => 1.0f;
     protected override float SweepAngleDeg       => 100f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 60f;     // was 200 — hold, don't shove
+    protected override float KnockbackMagnitude  => 60f; 
     protected override Color SlashColor          => Color.Red;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -780,7 +780,7 @@ public class GroundSlash2 : SlashLikeAction
     protected override float ArcRadiusScale      => 1.05f;
     protected override float SweepAngleDeg       => 110f;
     protected override float SweepDirection      => -1f;
-    protected override float KnockbackMagnitude  => 80f;     // was 260 — still holding
+    protected override float KnockbackMagnitude  => 40f;  
     protected override Color SlashColor          => Color.Red;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -812,7 +812,7 @@ public class GroundSlash3 : SlashLikeAction
     protected override float ArcRadiusScale      => 1.30f;
     protected override float SweepAngleDeg       => 160f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 230f;
+    protected override float KnockbackMagnitude  => 140f;
     protected override float StrikeSpeed         => 300f;    // the combo launcher — 225 px/s on a player
     protected override Color SlashColor          => Color.OrangeRed;
     protected override bool  RequireGround       => true;
@@ -851,7 +851,7 @@ public class CrouchSlash : SlashLikeAction
     protected override bool  RequireAir          => false;
 
     // Beats GroundSlash1 (30/30) on ties without out-prioritizing Slash2/3 combos (50).
-    public override int PassivePriority => 32;
+    public override int PassivePriority => 32; 
 
     protected override bool CombosOk(ConditionState c) => true;
 
@@ -933,7 +933,7 @@ public class AirSlash2 : SlashLikeAction
 public class AirTurnSlash : SlashLikeAction
 {
     protected override float Duration            => 0.11f;
-    protected override float ArcRadiusScale      => 1.40f;   // long reach
+    protected override float ArcRadiusScale      => 1.70f;   // long reach
     protected override float SweepAngleDeg       => 60f;     // narrow
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 150f;
