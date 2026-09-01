@@ -312,6 +312,50 @@ public class ActionOverlayTests
             $"declined clip should hold its end ({SlashArm}); got {noRemap.Pose.Local[armR].Rotation}");
     }
 
+    // A clip with a SettleShare splits its timeline: the action's reported progress sweeps
+    // only the swing, and the tail plays down the recovery countdown AFTER the action has
+    // exited — while the FSM sits in RecoveryAction, which binds nothing itself. SettleSlash
+    // ramps 0.5 → SlashArm with SettleShare 0.5, so the swing ends at the midpoint and the
+    // settle walks the rest; without the settle the overlay would simply fade out from there.
+    [Fact]
+    public void Overlay_SettlePlaysThroughRecoveryCountdown()
+    {
+        var skel = SkeletonExamples.Biped();
+        int armR = skel.IndexOf("arm_r_upper");
+        float Mid = 0.5f * (0.5f + SlashArm);
+
+        // Swing at full reported progress: the clip sits at the END OF THE SWING (τ = 0.5).
+        var anim = NewAnimator(skel);
+        var st = new DriveState { ActionTime = 0.14f, FreezeActionTime = true, ActionProgress = 1f };
+        Drive(anim, skel, ref st, frames: 40, action: "SettleSlash");
+        Assert.True(MathF.Abs(anim.Pose.Local[armR].Rotation - Mid) < 0.1f,
+            $"swing should end at the clip midpoint ({Mid}); got {anim.Pose.Local[armR].Rotation}");
+
+        // Recovery: 20 frames counting down. Held near the end, the settle has walked the
+        // tail to the clip's final pose — and the overlay stayed bound, not faded.
+        st.RecoveryFramesLeft = 20;
+        for (int i = 0; i < 19; i++) { Drive(anim, skel, ref st, frames: 1, action: "RecoveryAction"); st.RecoveryFramesLeft--; }
+        Drive(anim, skel, ref st, frames: 30, action: "RecoveryAction");   // hold at 1 frame left
+        Assert.True(anim.OverlayActive, "the settle should keep the overlay bound through recovery");
+        Assert.True(MathF.Abs(anim.Pose.Local[armR].Rotation - SlashArm) < 0.15f,
+            $"settle should reach the clip's end pose ({SlashArm}); got {anim.Pose.Local[armR].Rotation}");
+
+        // Countdown over → the overlay releases and fades.
+        st.RecoveryFramesLeft = 0;
+        Drive(anim, skel, ref st, frames: 60, action: "RecoveryAction");
+        Assert.False(anim.OverlayActive, "with no countdown left the overlay should fade out");
+
+        // Control: the same recovery frames after a clip with NO settle just fade from the
+        // swing's end — the arm never reaches SlashArm.
+        var plain = NewAnimator(skel);
+        var stP = new DriveState { ActionTime = 0.14f, FreezeActionTime = true, ActionProgress = 1f };
+        Drive(plain, skel, ref stP, frames: 40, action: "RampSlash");
+        stP.RecoveryFramesLeft = 20;
+        Drive(plain, skel, ref stP, frames: 20, action: "RecoveryAction");
+        Assert.True(plain.State.ActionWeight < 0.5f,
+            $"a clip without a settle should be fading through recovery; weight {plain.State.ActionWeight}");
+    }
+
     // --- harness ------------------------------------------------------------
 
     private struct DriveState
@@ -322,6 +366,8 @@ public class ActionOverlayTests
         // null = the action declines to report progress (the animator uses the clip's own
         // Duration). Nullable rather than a -1 field so `new DriveState()` means "declined".
         public float? ActionProgress;
+        // Frames left on the self-recovery countdown fed to the sample (0 = none).
+        public int   RecoveryFramesLeft;
     }
 
     private static CharacterAnimator NewAnimator(Skeleton skel)
@@ -331,6 +377,7 @@ public class ActionOverlayTests
             BuildSlashClip(skel, "slash1", "GroundSlash1", armStart: SlashArm, armEnd: SlashArm),
             BuildSlashClip(skel, "slash3", "GroundSlash3", armStart: -1.5f,   armEnd: -1.5f),
             BuildSlashClip(skel, "ramp",   "RampSlash",    armStart: 0.5f,    armEnd: SlashArm),
+            BuildSlashClip(skel, "settle", "SettleSlash",  armStart: 0.5f,    armEnd: SlashArm, settleShare: 0.5f),
         });
 
     // Walk forward at WalkVx feeding `action`; ActionTime advances with dt unless frozen.
@@ -342,7 +389,8 @@ public class ActionOverlayTests
             st.X += WalkVx * Dt;
             anim.Update(new CharacterAnimSample(
                 new Vector2(st.X, 0f), new Vector2(WalkVx, 0f), +1, true,
-                "WalkState", action, Dt, st.ActionTime, st.ActionProgress ?? -1f));
+                "WalkState", action, Dt, st.ActionTime, st.ActionProgress ?? -1f,
+                recoveryFramesLeft: st.RecoveryFramesLeft));
             if (!st.FreezeActionTime) st.ActionTime += Dt;
         }
     }
@@ -400,12 +448,12 @@ public class ActionOverlayTests
     // UpperBody overlay clip ramping arm_r_upper from armStart to armEnd. No contacts —
     // action overlays are constraint-free by design.
     private static AnimationDocument BuildSlashClip(Skeleton skel, string name, string type,
-                                                    float armStart, float armEnd)
+                                                    float armStart, float armEnd, float settleShare = 0f)
     {
         var clip = new AnimationDocument
         {
             Name = name, Type = type, Duration = 0.14f, Loop = false,
-            Region = AnimRegion.UpperBody,
+            Region = AnimRegion.UpperBody, SettleShare = settleShare,
         };
         clip.Keyframes.Add(ArmKf(skel, 0f, armStart));
         clip.Keyframes.Add(ArmKf(skel, 1f, armEnd));

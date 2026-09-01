@@ -75,6 +75,13 @@ public readonly struct CharacterAnimSample
     // clip at its own authored seconds (right for held, open-ended actions like Guard,
     // whose clip loops).
     public readonly float   ActionProgress;
+    // Frames left on the player's OWN recovery countdown (ConditionState's RecoveryActive
+    // stamp — the end-lag an attack's Exit priced in), 0 when none is running. Deliberately
+    // excludes hit disadvantage: a flinch plays the hitstun clip, not the attack's settle.
+    // While `Action` is RecoveryAction and this is > 0, the animator keeps the LAST attack's
+    // overlay bound and plays its settle segment (AnimationDocument.SettleShare) down the
+    // countdown, so end-lag is drawn as the swing's follow-through.
+    public readonly int     RecoveryFramesLeft;
     // Normalized progress [0,1] of a guided maneuver (CurrentState.AnimationProgress) — drives a
     // movement overlay whose clip time is SPATIAL, not a clock (a vault's hands track body-vs-
     // corner). 0 for states with no natural progress. See CharacterAnimator.ResolveMovementOverlays.
@@ -131,11 +138,12 @@ public readonly struct CharacterAnimSample
         SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default,
         bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None,
         int surfaceCount = -1, bool? surfacesNear = null, bool lowCeiling = false,
-        float groundGap = 0f)
+        float groundGap = 0f, int recoveryFramesLeft = 0)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
         ActionProgress = actionProgress; MovementProgress = movementProgress; Pins = pins;
+        RecoveryFramesLeft = recoveryFramesLeft;
         Surfaces = surfaces; SurfaceCount = surfaceCount; HasGrip = hasGrip; GripTarget = gripTarget;
         HasAim = hasAim; AimDir = aimDir; Tag = tag; LowCeiling = lowCeiling; GroundGap = groundGap;
         // Default (hand-built samples, tests): surfaces present ⇒ near — the pre-terrain behavior.
@@ -228,6 +236,15 @@ public readonly struct CharacterAnimSample
                 groundGap = MathF.Max(0f, (g.Position.Y - pos.Y) - g.MinDistance);
         }
 
+        // The self-recovery countdown, read the way EnvironmentContext.RecoveryIndex reads
+        // it minus the hit-disadvantage merge. Suppressed outright while a hit's stun/
+        // hitstun runs — the flinch owns the body then, not the interrupted swing's tail.
+        int recoveryLeft = 0;
+        var cond = p.Abilities?.Condition;
+        if (cond != null && cond.RecoveryActive
+            && p.Combat?.HitstunActive != true && p.Combat?.StunActive != true)
+            recoveryLeft = Math.Max(0, cond.RecoveryExpireFrame - p.Frame);
+
         return new(pos, p.Body.Velocity, facing, p.IsGrounded,
                p.CurrentStateName, p.CurrentActionName, dt,
                p.CurrentActionVars.TimeInState,
@@ -236,6 +253,6 @@ public readonly struct CharacterAnimSample
                surfaces: surfaces, surfaceCount: count, surfacesNear: near,
                hasGrip: hasGrip, gripTarget: gripTarget,
                hasAim: hasAim, aimDir: aimDir, tag: tag, lowCeiling: lowCeiling,
-               groundGap: groundGap);
+               groundGap: groundGap, recoveryFramesLeft: recoveryLeft);
     }
 }

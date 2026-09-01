@@ -171,6 +171,19 @@ public sealed partial class CharacterAnimator
     private readonly OverlayStack _overlays;
     private readonly float[] _baseBlend;            // alias of _overlays.BaseBlend (per-bone Π(1−w))
 
+    // The settle: the last attack overlay seen, held so its SettleShare tail can play down
+    // the recovery countdown after the action itself has exited (the FSM is in
+    // RecoveryAction then, which binds nothing of its own). _settleTotal is the longest
+    // countdown observed since the swing — the sample carries frames LEFT, not the stamp's
+    // length, so progress is measured against the first (largest) reading. Render-only
+    // memory, like the rest of the animator; an eviction into recovery jump-cuts to the
+    // settle's start, the same rule Grab's throw segment documents.
+    private string            _settleKey;
+    private AnimationDocument _settleClip;
+    private int               _settleTotal;
+    private Vector2           _settleAim;      // the swing's aim, kept so the settle doesn't un-aim
+    private bool              _settleHasAim;
+
     // The move-driver registry (Animation/MoveDriver.cs): per-situation animation policy —
     // clip selection, time mode, entry, and per-frame contributions (overlays, pins, future
     // constraint blocks). First Matches() in order wins; _frame is its contribution scratch,
@@ -501,12 +514,22 @@ public sealed partial class CharacterAnimator
         //     is whatever progress the action REPORTS (ActionState.AnimationProgress — sweeps
         //     once over the activation however long it lasts), falling back to the clip's own
         //     seconds when the action declines to say. Slots 1+ serve the driver's requests.
+        //     A clip with a SettleShare splits that timeline: the action's progress sweeps only
+        //     the swing [0, 1−share]; the settle tail plays afterwards, down the recovery
+        //     countdown (ResolveSettle), so the follow-through IS the end-lag.
         string actKey = IsOverlayAction(s.Action) ? s.Action : null;
         AnimationDocument actClip =
             actKey != null && _actionClips.TryGetValue(actKey, out var ac) ? ac : null;
-        float actTau = actClip == null ? 0f
-            : s.ActionProgress >= 0f ? MathHelper.Clamp(s.ActionProgress, 0f, 1f)
-            : AnimationSampler.NormalizedTime(actClip, s.ActionTime);
+        float actTau = 0f;
+        if (actClip != null)
+        {
+            actTau = s.ActionProgress >= 0f ? MathHelper.Clamp(s.ActionProgress, 0f, 1f)
+                   : AnimationSampler.NormalizedTime(actClip, s.ActionTime);
+            if (s.ActionProgress >= 0f) actTau *= 1f - SettleShareOf(actClip);
+            _settleKey = actKey; _settleClip = actClip; _settleTotal = 0;   // arm the settle
+        }
+        else if (!ResolveSettle(in s, out actKey, out actClip, out actTau))
+            _settleClip = null;
         _overlays.Update(actKey, actClip, actTau, _frame.Overlays, dt);
         _state.ActionWeight = _overlays.ActionWeight;   // upper-body stiffness ramp + tests
 
@@ -794,6 +817,34 @@ public sealed partial class CharacterAnimator
         => !string.IsNullOrEmpty(action)
            && action != "None" && action != "NullAction"
            && action != "ReadyAction" && action != "RecoveryAction";
+
+    private static float SettleShareOf(AnimationDocument clip)
+        => MathHelper.Clamp(clip.SettleShare, 0f, 0.95f);
+
+    // Is this frame a settle frame: the FSM sits in RecoveryAction with the player's own
+    // countdown still running, and the last swing's clip authored a settle tail? Distinct
+    // from a settle BEING DRAWN — the ease can still be fading a swing that authored none.
+    private bool SettleWanted(in CharacterAnimSample s)
+        => s.Action == "RecoveryAction" && s.RecoveryFramesLeft > 0
+           && _settleClip != null && SettleShareOf(_settleClip) > 0f;
+
+    // Keep the last swing's overlay bound through the recovery countdown, its τ walking the
+    // settle tail [1−share, 1] as the frames run out. False when there's nothing to settle
+    // (no countdown, no tail authored, or the FSM moved on) — the caller then unbinds and
+    // the ordinary fade-out takes over.
+    private bool ResolveSettle(in CharacterAnimSample s, out string key,
+                               out AnimationDocument clip, out float tau)
+    {
+        key = null; clip = null; tau = 0f;
+        if (!SettleWanted(in s)) return false;
+        _settleTotal = Math.Max(_settleTotal, s.RecoveryFramesLeft);
+        float progress = 1f - (float)s.RecoveryFramesLeft / _settleTotal;
+        float share    = SettleShareOf(_settleClip);
+        key  = _settleKey;
+        clip = _settleClip;
+        tau  = (1f - share) + share * progress;
+        return true;
+    }
 
     // The current clip's normalized sample time under its TimeMode: cadence/idle clips play
     // off the wrapped phase; one-shots off normalized ClipTime (held at the end); progress-
@@ -1231,9 +1282,17 @@ public sealed partial class CharacterAnimator
     private void ResolveActionAim(in CharacterAnimSample s)
     {
         _aimActive = false;
-        if (!s.HasAim || _aimBoneL < 0 || _aimBoneR < 0) return;
-        if (s.AimDir.LengthSquared() < 1e-6f) return;
-        _aimDir    = Vector2.Normalize(s.AimDir);
+        if (_aimBoneL < 0 || _aimBoneR < 0) return;
+        // Through the settle the FSM is in RecoveryAction, which has no aim of its own — the
+        // stab's arm would snap back to horizontal for its follow-through. Hold the swing's
+        // aim until the settle ends.
+        bool hasAim = s.HasAim;
+        var  aim    = s.AimDir;
+        if (!hasAim && SettleWanted(in s) && _settleHasAim) { hasAim = true; aim = _settleAim; }
+        else if (!SettleWanted(in s)) { _settleHasAim = hasAim; _settleAim = aim; }
+        if (!hasAim) return;
+        if (aim.LengthSquared() < 1e-6f) return;
+        _aimDir    = Vector2.Normalize(aim);
         _aimFacing = s.Facing == 0 ? 1 : s.Facing;
         _aimActive = true;
     }

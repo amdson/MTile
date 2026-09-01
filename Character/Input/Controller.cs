@@ -18,8 +18,8 @@ namespace MTile
         // F key: bound to GrenadeAction (Shift+RMB is reserved for LobbedAreaAction).
         // Polled by GrenadeAction's CheckPreConditions on press-edge.
         public bool F;
-        // Laser fire (R). Press-edge only — LaserAction reads the rising edge, so a
-        // held key fires once, not every frame.
+        // R key. Currently unbound (it fired the laser, removed 2026-08-31); still
+        // sampled so the input record's shape stays stable for replays.
         public bool R;
         // 'P' toggles the eruption planner mode. Captured as raw key state so the
         // edge-detect (toggle on press) happens deterministically inside the sim,

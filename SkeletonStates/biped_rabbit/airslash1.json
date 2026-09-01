@@ -5,6 +5,7 @@
   "Duration": 0.12,
   "Loop": true,
   "Region": "UpperBody",
+  "SettleShare": 0.36,
   "ExtraBones": [
     {
       "Name": "knife",
