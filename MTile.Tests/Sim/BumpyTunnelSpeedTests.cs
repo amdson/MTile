@@ -96,10 +96,12 @@ public class BumpyTunnelSpeedTests(ITestOutputHelper output)
 
         var last = frames[^1];
         float avgVx = (last.X - frames[0].X) / (last.T - frames[0].T);
-        output.WriteLine($"\n  avg forward speed: {avgVx:F1} px/s (flat-ground run ≈ 150), final x={last.X:F1} of {W * 16}");
+        output.WriteLine($"\n  avg forward speed: {avgVx:F1} px/s (flat-ground run ≈ 150), final x={last.X:F1} of {W * Chunk.TileSize}");
     }
 
-    // Headless twin of the "corridor" STAGE: fall/stand only (restricted here;
+    // Headless twin of the "corridor" STAGE (kept in sync with Levels/corridor_p*.txt:
+    // 4-tile interior, floor bumps at col = 0 mod 6, ceiling bumps at col = 3 mod 6).
+    // Fall/stand only (restricted here;
     // the stage itself runs the full FSM), flat runway feeding the offset-bump tunnel — the
     // stand-fold experiment's acceptance trace. Standing has no spring/FSD here;
     // hover, bump crests, ceiling ducks, and landings are all the ambient
@@ -117,9 +119,9 @@ public class BumpyTunnelSpeedTests(ITestOutputHelper output)
             b[r, c] = r switch
             {
                 6 => 'X',                                        // floor
-                2 when tunnel => 'X',                            // ceiling
-                3 when tunnel && c % 4 == 3 => 'X',              // top bumps
-                5 when tunnel && c % 4 == 1 => 'X',              // bottom bumps
+                1 when tunnel => 'X',                            // ceiling slab
+                2 when tunnel && c % 6 == 3 => 'X',              // top bumps
+                5 when tunnel && c % 6 == 0 => 'X',              // bottom bumps
                 _ => 'O',
             };
         }
@@ -131,7 +133,8 @@ public class BumpyTunnelSpeedTests(ITestOutputHelper output)
         }
         var terrain = SimTerrain.FromAscii(string.Join("\n", rows), originTileX: 0, originTileY: 0);
 
-        var sim = new Simulation(terrain, new Vector2(24f, 74f),
+        // Feet rest at center + 2*Radius, i.e. on the 6*TileSize floor top.
+        var sim = new Simulation(terrain, new Vector2(24f, 6f * Chunk.TileSize - 2f * PlayerCharacter.Radius),
                                  Stages.Get("corridor").Populate);
         sim.Player.RestrictToFallAndStand();
         sim.Player.CorrectorDebug.CaptureTrajectories = true;   // contact-push introspection
@@ -159,7 +162,8 @@ public class BumpyTunnelSpeedTests(ITestOutputHelper output)
             trace.Add((f, body.Position.X));
         }
         float avgVx = (trace[^1].x - 24f) / (400 / 60f);
-        output.WriteLine($"\n  avg forward speed: {avgVx:F1} px/s, final x={trace[^1].x:F1} (tunnel mouth at 256, end at {W * 16})");
+        output.WriteLine($"\n  avg forward speed: {avgVx:F1} px/s, final x={trace[^1].x:F1} " +
+                         $"(tunnel mouth at {16 * Chunk.TileSize}, end at {W * Chunk.TileSize})");
         output.WriteLine($"  peak |z0| = {maxDv:F1} px/s (as force {maxDv * 60f:F0} px/s², gravity=600) at frame {maxDvFrame}");
     }
 
