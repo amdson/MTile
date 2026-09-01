@@ -42,6 +42,10 @@ public sealed class SimSnapshot
     // Newton's-third-law bounce the attacker applies next frame (PeekRecoil).
     public Dictionary<int, Microsoft.Xna.Framework.Vector2> Recoil;
 
+    // Attacker-hitstop inbox — same frame-N→N+1 message shape, carrying the freeze
+    // (seconds) the attacker stamps on itself next frame (PeekHitstop, symmetric hitlag).
+    public Dictionary<int, float> AttackerHitstop;
+
     // Moving-platform poses, in registration order. Position+velocity is enough since
     // the tickers re-derive motion purely from Elapsed.
     public PlatformState[] Platforms;

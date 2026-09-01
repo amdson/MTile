@@ -43,6 +43,14 @@ public sealed class CombatSystem
     // polls PeekHits each of its active/recovery frames sees the connection exactly
     // once and can latch a "did I hit?" flag (COMBAT_FEEL_PLAN Phase 3 hit-confirm).
     private readonly Dictionary<int, int> _entityHitsByHitId = new();
+    // Attacker-hitstop inbox (symmetric hitlag, 2026-09-01) — the freeze (seconds)
+    // each HitId's connects earned this frame, max-merged across victims from the same
+    // curve the victim gets (CombatState.HitstopSecondsFor). Same 1-frame N→N+1
+    // lifecycle as the recoil inbox: PlayerCharacter reads PeekHitstop at the END of
+    // its next Update (after recoil is applied, so the freeze can't eat the pogo) and
+    // stamps its own CombatState. Struggle hits (GrabStrengthDamage > 0) contribute
+    // nothing — a struggle must have zero effect on either side. Snapshotted below.
+    private readonly Dictionary<int, float> _hitstopByHitId = new();
     // Per-hitbox scratch: the Solid cells it overlaps, keyed for nearest-first
     // ordering when the hitbox is occluded (see TileReach).
     private readonly List<(float key, int gtx, int gty)> _scratchCells = new();
@@ -56,6 +64,11 @@ public sealed class CombatSystem
     public int PeekHits(int hitId)
         => _entityHitsByHitId.TryGetValue(hitId, out var n) ? n : 0;
 
+    // Attacker hitstop earned by this HitId's connects on the LAST resolved frame,
+    // in seconds (0 = none). See _hitstopByHitId.
+    public float PeekHitstop(int hitId)
+        => _hitstopByHitId.TryGetValue(hitId, out var s) ? s : 0f;
+
     // `resolve` maps a hurtbox's owning EntityId back to the live IHittable so OnHit
     // can be dispatched. The dedupe table and snapshots key on EntityId (value
     // identity), but the actual damage callback still needs the object. Callers own
@@ -66,6 +79,7 @@ public sealed class CombatSystem
         _liveHitIds.Clear();
         _recoilByHitId.Clear();
         _entityHitsByHitId.Clear();
+        _hitstopByHitId.Clear();
 
         foreach (var hit in hitboxes.All)
         {
@@ -193,6 +207,12 @@ public sealed class CombatSystem
                     alreadyHit.Add(hb.Target);
                     _entityHitsByHitId.TryGetValue(hit.HitId, out var prevHits);
                     _entityHitsByHitId[hit.HitId] = prevHits + 1;
+                    if (hit.GrabStrengthDamage <= 0f)
+                    {
+                        float stop = CombatState.HitstopSecondsFor(delivered.Length());
+                        _hitstopByHitId.TryGetValue(hit.HitId, out var curStop);
+                        if (stop > curStop) _hitstopByHitId[hit.HitId] = stop;
+                    }
                     if (hit.RecoilScale > 0f)
                         AccumulateRecoil(hit.HitId, -delivered * hit.RecoilScale);
                 }
@@ -244,6 +264,15 @@ public sealed class CombatSystem
     public Dictionary<int, int> CaptureHitConfirm() => new(_entityHitsByHitId);
 
     public Dictionary<int, Vector2> CaptureRecoil() => new(_recoilByHitId);
+
+    public Dictionary<int, float> CaptureHitstop() => new(_hitstopByHitId);
+
+    public void RestoreHitstop(Dictionary<int, float> data)
+    {
+        _hitstopByHitId.Clear();
+        if (data == null) return;
+        foreach (var (hitId, s) in data) _hitstopByHitId[hitId] = s;
+    }
 
     public void RestoreRecoil(Dictionary<int, Vector2> data)
     {

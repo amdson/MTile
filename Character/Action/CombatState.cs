@@ -275,9 +275,18 @@ public class CombatState
     // so a light tap barely pauses and a heavy hit holds noticeably longer.
     // Rate raised with HitstunSecondsPerImpulse and for the same reason — the
     // freeze-frame should read the same after the knockback cut.
-    private const float HitstopSecondsPerImpulse = 0.0004f;
-    private const float MinHitstopSeconds        = 0.03f;
-    private const float MaxHitstopSeconds        = 0.12f;
+    // Floor raised 0.03 → 0.067 (4 frames) and the band steepened with the symmetric-
+    // hitlag pass (2026-09-01, Lucina-anchored): Smash freezes BOTH bodies 5–14 frames
+    // on every connect, and at the old floor a slash's 2-frame victim-only pause read
+    // as nothing. A jab-tier hit now holds 4 frames; the launchers ~10.
+    private const float HitstopSecondsPerImpulse = 0.0005f;
+    private const float MinHitstopSeconds        = 0.067f;
+    private const float MaxHitstopSeconds        = 0.167f;
+
+    // THE hitstop curve — shared by the victim path (OnHitRegistered) and by
+    // CombatSystem's attacker-side inbox, so both parties freeze for the same window.
+    public static float HitstopSecondsFor(float impulse)
+        => Math.Clamp(impulse * HitstopSecondsPerImpulse, MinHitstopSeconds, MaxHitstopSeconds);
 
     // While hitstunned, the victim's self-control is muted so knockback actually
     // displaces (COMBAT_FEEL_PLAN Phase 1). Applied by PlayerCharacter.Update as
@@ -321,14 +330,17 @@ public class CombatState
 
         // Real combat hits only — a self-inflicted crush/landing (muteControl=false)
         // shouldn't also freeze the player mid-fall.
-        if (muteControl)
-        {
-            float hitstopSeconds = Math.Clamp(impulse * HitstopSecondsPerImpulse,
-                                              MinHitstopSeconds, MaxHitstopSeconds);
-            int newHitstopExpire = currentFrame + SimFrames.FromSeconds(hitstopSeconds, dt);
-            if (newHitstopExpire > HitstopExpireFrame) HitstopExpireFrame = newHitstopExpire;
-            HitstopActive = true;
-        }
+        if (muteControl) ApplyHitstop(currentFrame, HitstopSecondsFor(impulse), dt);
+    }
+
+    // Max-merge a hitstop window ending `seconds` from now. Two callers: the victim
+    // path above, and PlayerCharacter's attacker-side read of CombatSystem.PeekHitstop
+    // — the symmetric half, so a landed attack freezes the one who swung it too.
+    public void ApplyHitstop(int currentFrame, float seconds, float dt)
+    {
+        int expire = currentFrame + SimFrames.FromSeconds(seconds, dt);
+        if (expire > HitstopExpireFrame) HitstopExpireFrame = expire;
+        HitstopActive = true;
     }
 
     // Successful tech (Phase 4): end the launch (hitstun + stun + control-mute) and
