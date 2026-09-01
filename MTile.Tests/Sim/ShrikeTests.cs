@@ -98,7 +98,7 @@ public class ShrikeTests(ITestOutputHelper output)
         Assert.True(maxY - minY < 1f, $"Shrike lost {maxY - minY:F2}px of altitude — is GravityScale still 0?");
     }
 
-    // The wind-up is the whole tell. ShrikeDiveState hovers for WindupSeconds (0.35)
+    // The wind-up is the whole tell. ShrikeDiveState hovers for WindupSeconds (0.5)
     // before it commits, and a regression that skips the hover produces an attack the
     // player cannot react to — which reads as "the game cheated", not as difficulty.
     [Fact]
@@ -111,7 +111,7 @@ public class ShrikeTests(ITestOutputHelper output)
         var shrike = FindShrike(sim);
         Assert.NotNull(shrike);
 
-        // 0.35s of wind-up ≈ 21 frames. Sample just inside it (18) and well past it.
+        // 0.5s of wind-up = 30 frames. Sample just inside it (27) and well past it.
         float distAt(int frames)
         {
             for (int f = 0; f < frames; f++) sim.Step(default);
@@ -119,8 +119,8 @@ public class ShrikeTests(ITestOutputHelper output)
         }
 
         float d0      = (start - sim.Player.Body.Position).Length();
-        float dHover  = distAt(18);
-        float dCommit = distAt(12);          // 30 frames total — 0.5s, past the wind-up
+        float dHover  = distAt(27);
+        float dCommit = distAt(18);          // 45 frames total — 0.75s, mid-dive
 
         output.WriteLine($"dist: start {d0:F1} → end of hover {dHover:F1} → mid-dive {dCommit:F1}");
 
@@ -129,9 +129,60 @@ public class ShrikeTests(ITestOutputHelper output)
         // what must NOT happen is a dive's worth of travel.
         Assert.True(d0 - dHover < 20f,
             $"Shrike closed {d0 - dHover:F1}px during its wind-up — is it still hovering?");
-        // Then it commits, and 0.15s of dive covers far more ground than the whole hover.
+        // Then it commits, and 0.3s of dive covers far more ground than the whole hover.
         Assert.True(dHover - dCommit > 25f,
             $"Shrike only closed {dHover - dCommit:F1}px after the wind-up — did the dive fire?");
+    }
+
+    // …and it hovers again before EVERY subsequent pass, not just the first. The dive
+    // state deliberately survives an overshoot (AbortSlack), so a one-shot wind-up left
+    // a shrike that missed permanently committed — a 300px/s heat-seeker with no tell
+    // for the rest of its life, which is the version that read as "too fast". Here the
+    // player runs away from the first swoop; what must happen is that the bird pulls up,
+    // stops, telegraphs again, and only then makes its second pass.
+    [Fact]
+    public void PullsUpAndTelegraphsAgainBetweenPasses()
+    {
+        // Shrike 120px to the player's right, both above the floor. The player holds
+        // left for the whole run, so the first dive lands behind them and a second pass
+        // is actually needed.
+        var sim    = WithShrike(new Vector2(120f, 20f), new Vector2(0f, FloorTopY - 10f));
+        var shrike = FindShrike(sim);
+        Assert.NotNull(shrike);
+        var running = new PlayerInput { Left = true };
+
+        // A hover window is a stretch of frames spent essentially stationary. The
+        // pull-up out of a 300px/s dive takes ~0.18s against the acceleration budget,
+        // so the threshold is well below cruise (80) to avoid counting the ramp.
+        const float HoverSpeed = 30f;
+        int hovers = 0, hoversAfterADive = 0;
+        bool inHover = false, hasDived = false;
+        float peak = 0f;
+
+        for (int f = 0; f < 180 && !shrike.IsDead; f++)
+        {
+            sim.Step(running);
+            float speed = shrike.Body.Velocity.Length();
+            peak = MathF.Max(peak, speed);
+            if (speed > 250f) hasDived = true;
+
+            if (speed < HoverSpeed)
+            {
+                if (!inHover) { hovers++; if (hasDived) hoversAfterADive++; inHover = true; }
+            }
+            else inHover = false;
+        }
+
+        output.WriteLine($"hover windows = {hovers} (after a dive: {hoversAfterADive}), " +
+                         $"peak speed = {peak:F0}px/s, dead = {shrike.IsDead}");
+
+        // It really is diving between the hovers — otherwise "it paused a lot" would
+        // also pass for a shrike that never attacks at all.
+        Assert.True(peak > 250f, $"Shrike never reached dive speed (peak {peak:F0}px/s).");
+        // The discriminator: the old one-shot wind-up produced exactly zero of these.
+        Assert.True(hoversAfterADive >= 1,
+            $"Shrike never pulled up after committing — is the wind-up still one-shot? " +
+            $"({hovers} hover window(s), none after a dive)");
     }
 
     [Fact]
