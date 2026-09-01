@@ -77,6 +77,15 @@ public sealed class AnimationDocument
     // 30% without taking them over. Omitted on save when 0 so legacy files round-trip clean.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public float                   OffRegionWeight { get; set; } = 0f;
+    // Action overlays only: the share of this clip's [0,1] timeline that is the SETTLE — the
+    // follow-through played over the action's recovery countdown rather than over the action
+    // itself. The swing (the part the action's reported progress sweeps) is [0, 1−SettleShare];
+    // the tail [1−SettleShare, 1] is remapped onto the frames RecoveryAction counts down after
+    // the action exits, so end-lag reads as the same motion finishing instead of an idle. 0
+    // (default, omitted on save) = the whole clip plays inside the action, the pre-settle
+    // behavior. See CharacterAnimator's action-overlay resolve.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public float                   SettleShare { get; set; } = 0f;
     // Name of a reference trajectory (ReferenceClips/<name>.json, falling back to the
     // baked ReferenceClipRegistry defaults) this clip rides for EDITOR visualization:
     // while scrubbing, the Demo editor drives the body's placement against the fixed

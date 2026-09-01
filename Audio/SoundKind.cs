@@ -33,7 +33,7 @@ public enum SoundKind
     Grunt,        // climb effort
     Throw,        // built, not yet wired — see GameAudio
     Swing,        // attack whoosh — see GameAudio.Swing
-    LaserBlast,   // the laser's burn, one shot per firing — see GameAudio.Laser
+    LaserBlast,   // orphaned — the laser action was removed; kept so the manifest stays stable
     GuardBlock,   // a guard parry absorbed a hit — see GameAudio.GuardBlock
 
     // Tier 3, but already flowing through the presentation seam.

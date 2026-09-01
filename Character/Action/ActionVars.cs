@@ -49,23 +49,10 @@ public struct ActionVars
     public Vector2 OriginCell;        // BlockPlace (last placed cell), BlockBurst (target cell)
     public Vector2 CursorPosition;     // BlockReady
 
-    public float   FiringTime;        // Beam, Laser
-    public bool    Firing;            // Beam, Laser
-    public Vector2 BeamDir;           // Beam, Laser — aim direction. Beam locks it the frame firing starts;
-                                      // Laser tracks the cursor through its scan and locks at the shot
-                                      // (sim state either way: it drives hitbox placement).
-
-    // LaserAction. The shot is a budget that pays for the blocks it eats, so the two
-    // numbers that decide where it stops are per-activation sim state:
-    //   Power — TileMaxHP-units left; each destroyed cell costs its material's MaxHP.
-    //   Reach — how far down the scan rectangle the burn front has travelled (px from
-    //           the muzzle). Frozen the moment Power hits zero — that IS the endpoint.
-    // FireFrame stamps the sim frame the beam lit, so the render shell can key a
-    // one-shot on it and stay idempotent under rollback (see GameAudio's frame-stamp
-    // promotion). 0 = not firing yet.
-    public float   LaserPower;
-    public float   LaserReach;
-    public int     LaserFireFrame;
+    public float   FiringTime;        // Beam
+    public bool    Firing;            // Beam
+    public Vector2 BeamDir;           // Beam — aim direction, locked the frame firing starts
+                                      // (sim state: it drives hitbox placement).
 
     public Vector2 CursorAtPress;     // LobbedArea
 

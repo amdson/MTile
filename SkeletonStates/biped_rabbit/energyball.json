@@ -5,6 +5,7 @@
   "Duration": 0.15,
   "Loop": true,
   "Region": "UpperBody",
+  "SettleShare": 0.45,
   "Keyframes": [
     {
       "Time": 0,
