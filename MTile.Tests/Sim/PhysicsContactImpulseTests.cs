@@ -74,8 +74,11 @@ public class PhysicsContactImpulseTests(ITestOutputHelper output)
             OOOOOOXOOO
             OOOOOOXOOO");
 
-        // Wall left face at x = 6*16 = 96. Body half-width = 8 (16x16 rectangle).
-        var body = NewBody(new Vector2(70f, 32f));
+        // Wall left face at x = 6 * Chunk.TileSize. Body half-width = 8 (16x16 rectangle);
+        // start 26px short of the wall face (same approach gap as before the grid change —
+        // it's just clearance to drive across, not a grid-relative distance).
+        float wallFaceX = 6 * Chunk.TileSize;
+        var body = NewBody(new Vector2(wallFaceX - 26f, 32f));
         var bodies = new List<PhysicsBody> { body };
         // Zero gravity so the wall is the only constraint that ever forms.
         var noGravity = Vector2.Zero;

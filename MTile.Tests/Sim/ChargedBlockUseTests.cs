@@ -36,9 +36,9 @@ public class ChargedBlockUseTests(ITestOutputHelper output)
         XXXXXXXXXXXX
         XXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-    private static readonly Vector2 OnBlock = new(72f, 8f);    // cell (4,0) center
-    private static readonly Vector2 PullTo  = new(120f, 8f);   // 3 tiles out: beats core glue
-    private static readonly Vector2 GrabStart = new(72f, 40f);
+    private static readonly Vector2 OnBlock = CellCenter(4, 0);
+    private static readonly Vector2 PullTo  = CellCenter(7, 0);   // 3 tiles out: beats core glue
+    private static readonly Vector2 GrabStart = CellCenter(4, 2); // open row, same column, just above the floor
 
     private static SimConfigMulti Build(InputScript script, ChunkMap terrain, int frames, Vector2 start) =>
         new SimConfigMulti

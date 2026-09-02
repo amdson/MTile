@@ -74,8 +74,9 @@ public class SproutGraphTests(ITestOutputHelper output)
         // Direction check: n2's only solid neighbour is (1,2), so it grows out of
         // its left face — the volume starts on n1's cell centre and lands on its own.
         Assert.Equal(SproutFaces.Left, n2.Faces);
-        Assert.Equal(new Vector2(24f, 40f), n2.VolumeStart(SproutFaces.Left));  // cell (1,2)
-        Assert.Equal(new Vector2(40f, 40f), n2.CellCenter);                     // cell (2,2)
+        float half = Chunk.TileSize / 2f;
+        Assert.Equal(new Vector2(1 * Chunk.TileSize + half, 2 * Chunk.TileSize + half), n2.VolumeStart(SproutFaces.Left));  // cell (1,2)
+        Assert.Equal(new Vector2(2 * Chunk.TileSize + half, 2 * Chunk.TileSize + half), n2.CellCenter);                     // cell (2,2)
 
         // After another Lifetime: n2 finalizes, n3 promotes.
         terrain.TickSprouts(Lifetime);
@@ -103,9 +104,10 @@ public class SproutGraphTests(ITestOutputHelper output)
         Assert.Equal(SproutFaces.Left | SproutFaces.Below, n.Faces);
 
         // Two volumes, one out of each parent cell, converging on the target cell.
-        Assert.Equal(new Vector2(8f,  56f), n.VolumeStart(SproutFaces.Left));   // cell (0,3)
-        Assert.Equal(new Vector2(24f, 72f), n.VolumeStart(SproutFaces.Below));  // cell (1,4)
-        Assert.Equal(new Vector2(24f, 56f), n.CellCenter);                      // cell (1,3)
+        float half = Chunk.TileSize / 2f;
+        Assert.Equal(new Vector2(0 * Chunk.TileSize + half, 3 * Chunk.TileSize + half), n.VolumeStart(SproutFaces.Left));   // cell (0,3)
+        Assert.Equal(new Vector2(1 * Chunk.TileSize + half, 4 * Chunk.TileSize + half), n.VolumeStart(SproutFaces.Below));  // cell (1,4)
+        Assert.Equal(new Vector2(1 * Chunk.TileSize + half, 3 * Chunk.TileSize + half), n.CellCenter);                      // cell (1,3)
 
         // Equal speeds along opposing axes — neither face leads.
         Assert.Equal(Chunk.TileSize / Lifetime, n.VolumeVelocity(SproutFaces.Left).X,  3);

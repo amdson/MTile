@@ -180,11 +180,14 @@ public class SnapshotRoundTripTests(ITestOutputHelper output)
         const int K = 18;    // snapshot mid-build (sprouts growing / just finalizing)
         const int N = 80;
 
+        // Floor top is row 3 (see Floor()); the cursor sweeps just above it so the
+        // drag-build targets open, ground-adjacent cells rather than the solid floor.
+        float floorTopY = 3 * Chunk.TileSize;
         PlayerInput Build(int frame) => new()
         {
             // Drag-build held frames 8..36, cursor sweeping ground-adjacent cells.
             RightClick         = frame >= 8 && frame <= 36,
-            MouseWorldPosition = new Vector2(24f + (frame - 8) * 2f, 40f),
+            MouseWorldPosition = new Vector2(24f + (frame - 8) * 2f, floorTopY - 8f),
             Num4               = frame == 8,   // select Foam once at the start
         };
 

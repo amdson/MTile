@@ -24,6 +24,22 @@ public class TerrainNoPenSproutTests
     private const float Scale = 0.6f;
     private const float TS = Chunk.TileSize;
 
+    // Solid rows at gty 10..12 → ground line y = FloorOriginTileY * TS.
+    private const int FloorOriginTileY = 10;
+    private static readonly float FloorTopY = FloorOriginTileY * TS;
+
+    // Sprouts live at gty = FloorOriginTileY - 1, growing UP out of the floor: the
+    // exposed top face starts at the floor line (progress 0) and moves up by one full
+    // tile height as progress goes to 1.
+    private static float SproutTopY(float progress) => FloorTopY - TS * progress;
+
+    // Animator root position for the standing-pose tests below. X centered over the
+    // sprouted columns (gx 4..8); Y keeps the same fixed 20px offset above the floor
+    // line the original 16px-grid authoring used (feet land near the ground regardless
+    // of Chunk.TileSize — the skeleton's own dimensions don't scale with the tile grid).
+    private static readonly float PosX = 6.5f * TS;
+    private static readonly float PosY = FloorTopY - 20f;
+
     // Solid rows at gty 10..12 → ground line y = 160.
     private static ChunkMap Floor(int widthTiles = 60, int originTileY = 10)
     {
@@ -66,26 +82,27 @@ public class TerrainNoPenSproutTests
     [Fact]
     public void Extract_GrowingSprout_EmitsMovingLeadingFace()
     {
-        // Row of sprouts in cells gty=9 (y 144..160) growing UP out of the floor.
-        // At 50% the volumes span y 152..168, so the exposed top face is at y = 152 —
-        // 8px above the ground line the plain tile scan would report.
+        // Row of sprouts in cells gty=9 growing UP out of the floor. At 50% the exposed
+        // top face is at SproutTopY(0.5) — half a tile above the ground line the plain
+        // tile scan would report.
         var chunks = SproutRow(4, 8, 9, 0.5f);
         var anim = NewAnimator();
-        var pos = new Vector2(100f, 140f);
+        var pos = new Vector2(PosX, PosY);
         WarmIdle(anim, pos);
 
         var buf = new SolverSurface[8];
         int n = TerrainSurfaces.Extract(chunks, anim, pos, +1, Scale, buf, out bool near);
 
+        float sproutTopY = SproutTopY(0.5f);
         bool sproutTop = false, groundTop = false;
         for (int i = 0; i < n; i++)
         {
             _o.WriteLine($"plane {i}: p=({buf[i].Point.X:0.#},{buf[i].Point.Y:0.#}) n=({buf[i].Normal.X},{buf[i].Normal.Y}) mask={buf[i].BoneMask:x}");
             if (buf[i].Normal.Y >= -0.9f) continue;
-            if (MathF.Abs(buf[i].Point.Y - 152f) < 0.01f) sproutTop = true;
-            if (MathF.Abs(buf[i].Point.Y - 160f) < 0.01f) groundTop = true;
+            if (MathF.Abs(buf[i].Point.Y - sproutTopY) < 0.01f) sproutTop = true;
+            if (MathF.Abs(buf[i].Point.Y - FloorTopY) < 0.01f) groundTop = true;
         }
-        Assert.True(sproutTop, "no up-facing plane at the growing volume's leading face (y=152)");
+        Assert.True(sproutTop, $"no up-facing plane at the growing volume's leading face (y={sproutTopY})");
         // The floor under the sprouts is covered by them, so its own top face is now
         // interior — but the floor extends past the row, so a y=160 plane is legitimate
         // only if it comes from a cell outside gx 4..8. Either way the sprout plane is
@@ -114,26 +131,26 @@ public class TerrainNoPenSproutTests
     [Fact]
     public void Extract_TipInsideGrowingVolume_GetsUpwardExit()
     {
-        // A foot standing on the floor (y≈160) with a nearly-complete sprout row on top of
-        // it: the tip is INSIDE the volume (y 144..160 at progress 1) and its cell is
-        // Sprouting, so neither the buried-tile branch nor the free-face scan can see it.
+        // A foot standing on the floor with a nearly-complete sprout row on top of it:
+        // the tip is INSIDE the volume and its cell is Sprouting, so neither the
+        // buried-tile branch nor the free-face scan can see it.
         var chunks = SproutRow(4, 8, 9, 0.95f);
         var anim = NewAnimator();
-        var pos = new Vector2(100f, 140f);
+        var pos = new Vector2(PosX, PosY);
         WarmIdle(anim, pos);
 
         var buf = new SolverSurface[8];
         int n = TerrainSurfaces.Extract(chunks, anim, pos, +1, Scale, buf, out bool near);
         Assert.True(n >= 1, "no surfaces at all with a sprout closing over the feet");
 
-        // Volume top at progress 0.95 = 144 + 16*0.05 = 144.8.
+        float volumeTopY = SproutTopY(0.95f);
         bool exitUp = false;
         for (int i = 0; i < n; i++)
         {
             _o.WriteLine($"plane {i}: p=({buf[i].Point.X:0.##},{buf[i].Point.Y:0.##}) n=({buf[i].Normal.X},{buf[i].Normal.Y}) mask={buf[i].BoneMask:x}");
-            if (buf[i].Normal.Y < -0.9f && MathF.Abs(buf[i].Point.Y - 144.8f) < 0.05f) exitUp = true;
+            if (buf[i].Normal.Y < -0.9f && MathF.Abs(buf[i].Point.Y - volumeTopY) < 0.05f) exitUp = true;
             // Never an exit DOWN through the floor, nor sideways into the neighbouring volume.
-            Assert.False(buf[i].Normal.Y > 0.9f && buf[i].Point.Y > 158f,
+            Assert.False(buf[i].Normal.Y > 0.9f && buf[i].Point.Y > FloorTopY - 2f,
                 $"exit plane pushes the tip down into the floor (y={buf[i].Point.Y})");
         }
         Assert.True(exitUp, "a tip buried in the growing volume got no upward exit plane");

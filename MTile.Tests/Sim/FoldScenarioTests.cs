@@ -16,6 +16,7 @@ public class FoldScenarioTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 60f;
     private static readonly Vector2 Gravity = new(0f, 600f);
+    private const float T = Chunk.TileSize;
 
     private static (PlayerCharacter player, List<PhysicsBody> bodies, Controller ctrl, ChunkMap terrain)
         Harness(string ascii, Vector2 start, int originTileY = 0)
@@ -41,10 +42,12 @@ public class FoldScenarioTests(ITestOutputHelper output)
     [Fact]
     public void RestOnFlat_NoInput_Motionless()
     {
-        // Floor row 8 (top 128); rest hover center ≈ 128 − 20.4 ≈ 107.6.
+        // Floor row 8; spawn a little above the floor top so the body has
+        // settled to its resting hover well before the assertion window.
+        float floorTopY = 8 * T;
         var (p, bodies, ctrl, terrain) = Harness(
             string.Join("\n", Enumerable.Repeat("OOOOOOOOOOOOOOOO", 8).Append("XXXXXXXXXXXXXXXX")),
-            new Vector2(100f, 106f));
+            new Vector2(100f, floorTopY - 22f));
 
         var trace = new List<SimFrame>();
         for (int f = 0; f < 120; f++) trace.Add(Step(p, bodies, ctrl, terrain, default, f));
@@ -63,29 +66,40 @@ public class FoldScenarioTests(ITestOutputHelper output)
     [Fact]
     public void OneHighLedge_HoldRight_ClimbsAndContinues()
     {
-        // Floor row 8 (top 128); ledge cols 10.. (top 112). Lower hover ≈ 107.6,
-        // upper hover ≈ 91.6.
+        // Floor row 8; ledge cols 10.. row 7 (one tile tall). Widened to 40
+        // cols (vs. the old 24) so there's a generous plateau to sample
+        // after the climb transient, now that a tile is only 11px.
+        const int Cols = 40;
         var rows = new string[9];
         for (int r = 0; r < 9; r++)
         {
             var sb = new StringBuilder();
-            for (int c = 0; c < 24; c++)
+            for (int c = 0; c < Cols; c++)
                 sb.Append(r == 8 || (r == 7 && c >= 10) ? 'X' : 'O');
             rows[r] = sb.ToString();
         }
-        var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(40f, 106f));
+        float floorTopY = 8 * T;
+        float ledgeTopY = 7 * T;
+        var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(40f, floorTopY - 22f));
 
         var trace = new List<SimFrame>();
         for (int f = 0; f < 240; f++)
             trace.Add(Step(p, bodies, ctrl, terrain, new PlayerInput { Right = true }, f));
 
-        // Measure while ON the upper plateau (the short test map ends at 384 —
-        // the body legitimately runs off the far edge afterward).
-        var onTop = trace.Where(fr => fr.X > 220f && fr.X < 350f).ToArray();
+        // Measure well past the ledge (clear of the climb transient) and
+        // well before the map's far edge — the body legitimately runs off
+        // the far edge afterward.
+        float ledgeStartX = 10 * T;
+        float mapEndX = Cols * T;
+        var onTop = trace.Where(fr => fr.X > ledgeStartX + 60f && fr.X < mapEndX - 60f).ToArray();
+        // Riding the upper floor should sit well above (numerically below)
+        // the midpoint between the two floor tops — a one-tile difference
+        // regardless of the corrector's absolute hover offset.
+        float midY = (floorTopY + ledgeTopY) / 2f;
         output.WriteLine($"final x={trace[^1].X:F1}; plateau frames={onTop.Length} " +
-                         $"minY={(onTop.Length > 0 ? onTop.Min(fr => fr.Y) : float.NaN):F1} (upper hover ≈ 91.6)");
+                         $"minY={(onTop.Length > 0 ? onTop.Min(fr => fr.Y) : float.NaN):F1} (ledge top={ledgeTopY:F1}, midY={midY:F1})");
         Assert.True(onTop.Length > 10, $"did not climb + continue: final x={trace[^1].X:F1}");
-        Assert.True(onTop.Count(fr => fr.Y < 97f) > 10,
+        Assert.True(onTop.Count(fr => fr.Y < midY) > 10,
             $"never rode the upper floor: plateau y min={onTop.Min(fr => fr.Y):F1}");
     }
 
@@ -101,7 +115,8 @@ public class FoldScenarioTests(ITestOutputHelper output)
                 sb.Append(r == 8 || (r >= 6 && c >= 10) ? 'X' : 'O');
             rows[r] = sb.ToString();
         }
-        var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(40f, 106f));
+        float floorTopY = 8 * T;
+        var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(40f, floorTopY - 22f));
 
         var trace = new List<SimFrame>();
         for (int f = 0; f < 240; f++)
@@ -109,9 +124,13 @@ public class FoldScenarioTests(ITestOutputHelper output)
 
         float minY = trace.Min(fr => fr.Y);
         var last = trace[^1];
-        output.WriteLine($"final x={last.X:F1} minY={minY:F1} (wall face at 160, lower hover ≈ 107.6)");
-        Assert.True(last.X < 160f, $"passed through a 2-high wall: x={last.X:F1}");
-        Assert.True(minY > 99f, $"gained height against a 2-high wall: minY={minY:F1}");
+        float wallFaceX = 10 * T;
+        // No height gain: must not rise more than half a tile above the
+        // floor's resting height.
+        float noRiseFloor = floorTopY - T / 2f;
+        output.WriteLine($"final x={last.X:F1} minY={minY:F1} (wall face at {wallFaceX:F1}, floor top {floorTopY:F1})");
+        Assert.True(last.X < wallFaceX, $"passed through a 2-high wall: x={last.X:F1}");
+        Assert.True(minY > noRiseFloor, $"gained height against a 2-high wall: minY={minY:F1}");
     }
 
     // ── Elective refusal: a climbable ledge under a low ceiling ──────────────
@@ -123,7 +142,8 @@ public class FoldScenarioTests(ITestOutputHelper output)
     public void OneHighLedgeUnderCeiling_HoldRight_HonestBonk_NoHalfScramble()
     {
         // Ledge at row 7 cols 10.., ceiling at row 5 over the ledge region:
-        // gap above the ledge top = 1 tile (16px) — nothing can stand there.
+        // gap above the ledge top is 1 tile (rows 5 and 7 are two rows
+        // apart) — nothing can stand there, regardless of tile size.
         var rows = new string[9];
         for (int r = 0; r < 9; r++)
         {
@@ -132,7 +152,8 @@ public class FoldScenarioTests(ITestOutputHelper output)
                 sb.Append(r == 8 || (r == 7 && c >= 10) || (r == 5 && c >= 9) ? 'X' : 'O');
             rows[r] = sb.ToString();
         }
-        var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(40f, 106f));
+        float floorTopY = 8 * T;
+        var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(40f, floorTopY - 22f));
 
         var trace = new List<SimFrame>();
         for (int f = 0; f < 240; f++)
@@ -142,11 +163,15 @@ public class FoldScenarioTests(ITestOutputHelper output)
         float minY = tail.Min(fr => fr.Y);
         float maxY = tail.Max(fr => fr.Y);
         var last = trace[^1];
-        output.WriteLine($"final x={last.X:F1}; stalled-tail y ∈ [{minY:F1}, {maxY:F1}] (lower hover ≈ 107.6)");
-        Assert.True(last.X < 160f, $"climbed through the ceiling gap: x={last.X:F1}");
+        float stepX = 10 * T;
+        // No half-scramble: must not rise more than half a tile above the
+        // floor's resting height.
+        float noRiseFloor = floorTopY - T / 2f;
+        output.WriteLine($"final x={last.X:F1}; stalled-tail y ∈ [{minY:F1}, {maxY:F1}] (floor top {floorTopY:F1})");
+        Assert.True(last.X < stepX, $"climbed through the ceiling gap: x={last.X:F1}");
         // No half-scramble: the stalled body holds its ground-level hover — it
         // does not ride partway up the step and hover against the wall.
-        Assert.True(minY > 101f, $"half-scramble: stalled body lifted to y={minY:F1}");
+        Assert.True(minY > noRiseFloor, $"half-scramble: stalled body lifted to y={minY:F1}");
         Assert.True(maxY - minY < 6f, $"stall oscillates {maxY - minY:F1}px");
     }
 
@@ -154,8 +179,8 @@ public class FoldScenarioTests(ITestOutputHelper output)
     [Fact]
     public void LipStepOff_FallIsBallistic()
     {
-        // Upper floor rows cols 0..9 (top 112 at row 7), lower floor row 8+ none —
-        // open pit after the lip, floor far below at row 14 (top 224).
+        // Upper floor cols 0..9 (top at row 7), lower floor row 8+ none —
+        // open pit after the lip, floor far below at row 14.
         var rows = new string[15];
         for (int r = 0; r < 15; r++)
         {
@@ -164,15 +189,19 @@ public class FoldScenarioTests(ITestOutputHelper output)
                 sb.Append((r == 7 && c <= 9) || r == 14 ? 'X' : 'O');
             rows[r] = sb.ToString();
         }
-        var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(100f, 90f));
+        float upperFloorTopY = 7 * T;
+        float lowerFloorTopY = 14 * T;
+        var (p, bodies, ctrl, terrain) = Harness(string.Join("\n", rows), new Vector2(100f, upperFloorTopY - 22f));
 
         var trace = new List<SimFrame>();
         for (int f = 0; f < 180; f++)
             trace.Add(Step(p, bodies, ctrl, terrain, new PlayerInput { Right = true }, f));
 
-        // Find the unbound fall: frames past the lip (x > 170, clear of the edge
+        // Find the unbound fall: frames past the lip (clear of the edge
         // taper) still well above the lower floor's support reach.
-        var falling = trace.Where(fr => fr.X > 170f && fr.Y < 190f && fr.Vy > 5f).ToArray();
+        float lipEdgeX = 10 * T;
+        float clearOfLowerFloorY = lowerFloorTopY - 34f;
+        var falling = trace.Where(fr => fr.X > lipEdgeX + 10f && fr.Y < clearOfLowerFloorY && fr.Vy > 5f).ToArray();
         Assert.True(falling.Length >= 5, "never got a clean falling window");
         for (int i = 1; i < falling.Length; i++)
         {
@@ -183,7 +212,7 @@ public class FoldScenarioTests(ITestOutputHelper output)
             Assert.True(dvy > 6f && dvy < 14f,
                 $"fall not ballistic at f={falling[i].Frame}: Δvy={dvy:F2} (gravity step = 10)");
         }
-        Assert.True(trace[^1].Y > 190f, "never landed in the pit");
+        Assert.True(trace[^1].Y > clearOfLowerFloorY, "never landed in the pit");
     }
 
     // ── Corridor endurance: the bumpy tunnel is traversed at speed ───────────

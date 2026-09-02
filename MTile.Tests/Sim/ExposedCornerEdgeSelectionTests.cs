@@ -31,7 +31,7 @@ namespace MTile.Tests;
 // not at any downstream ramp math.
 public class ExposedCornerEdgeSelectionTests(ITestOutputHelper output)
 {
-    private const float TS = Chunk.TileSize; // 16
+    private const float TS = Chunk.TileSize;
 
     // Build a standing body whose facing face (Right for wallDir=+1, Left for wallDir=-1)
     // sits exactly at wallFaceX, floating Radius above groundTop — matching the standing
@@ -171,17 +171,22 @@ public class ExposedCornerEdgeSelectionTests(ITestOutputHelper output)
     [Fact]
     public void LowerCorner_WideSlab_FromRight_PicksRightEdge()
     {
-        // Slab at row 1 (Y=[16, 32]) so it overlaps the body's [Top, CenterY] probe
-        // when the body stands floating above row 3 ground (groundTop=48).
+        // Slab at row 1 so it overlaps the body's [Top, CenterY] probe when the body
+        // stands floating above the ground. That probe band sits a fixed body-relative
+        // 2R..3R above the body's standing base (independent of TileSize), so on the
+        // shrunk grid the slab needs three empty rows of clearance above the ground —
+        // not one — for its bottom to still land inside the band.
         var terrain = SimTerrain.FromAscii(@"
             .........
             ..XXXXX..
             .........
+            .........
+            .........
             XXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        const float groundTop  = 3 * TS;   // 48
-        const float slabBottom = 2 * TS;   // 32 (= bottom of row 1)
-        const float slabRight  = 7 * TS;   // 112
+        const float groundTop  = 5 * TS;
+        const float slabBottom = 2 * TS;   // bottom of row 1
+        const float slabRight  = 7 * TS;
 
         var body = MakeBodyAtWall(wallFaceX: slabRight, wallDir: -1, groundTop: groundTop);
 
@@ -285,15 +290,20 @@ public class ExposedCornerEdgeSelectionTests(ITestOutputHelper output)
     [Fact]
     public void LowerCorner_WideSlab_FromLeft_PicksLeftEdge()
     {
+        // See LowerCorner_WideSlab_FromRight_PicksRightEdge: three empty rows of
+        // clearance are needed above the ground for the slab's bottom to land inside
+        // the body-relative probe band on the shrunk grid.
         var terrain = SimTerrain.FromAscii(@"
             .........
             ..XXXXX..
             .........
+            .........
+            .........
             XXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        const float groundTop  = 3 * TS;
+        const float groundTop  = 5 * TS;
         const float slabBottom = 2 * TS;
-        const float slabLeft   = 2 * TS;   // 32
+        const float slabLeft   = 2 * TS;
 
         var body = MakeBodyAtWall(wallFaceX: slabLeft, wallDir: +1, groundTop: groundTop);
 

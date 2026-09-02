@@ -25,17 +25,25 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
 
     public void Dispose() => MovementConfig.Current.FoldEngine = _prevEngine;
 
+    // 6 open rows above the floor (66 px at the 11 px grid, comfortably more
+    // than the ~33 px standing body) plus a long, 64-tile floor — the old
+    // 3-open-row/24-col shape gave only 48 px of headroom and 384 px of
+    // floor at 16 px tiles; at 11 px tiles that shrank to 33 px / 264 px,
+    // tight enough to matter for a run that walks the body for 180 frames.
     private static ChunkMap Flat() => SimTerrain.FromAscii(@"
-        OOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOO
-        XXXXXXXXXXXXXXXXXXXXXXXX");
+        OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+        XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
 
     private static readonly PlayerInput HoldRight = new() { Right = true };
 
     private static Vector2 Spawn()
     {
-        float floorTop = 3 * Chunk.TileSize;
+        float floorTop = 6 * Chunk.TileSize;
         return new Vector2(4 * Chunk.TileSize, floorTop - 2f * PlayerCharacter.Radius);
     }
 
@@ -65,7 +73,7 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
     public void HoldsHover_AndMakesProgress_OnFlatGround()
     {
         var sim = new Simulation(Flat(), Spawn());
-        float floorTop = 3 * Chunk.TileSize;
+        float floorTop = 6 * Chunk.TileSize;
         float startX = sim.Player.Body.Position.X;
 
         for (int f = 0; f < 180; f++)
@@ -94,10 +102,14 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
         Assert.True(MathF.Abs(v.Y) < 5f, $"bobbing: vy={v.Y:F2}");
     }
 
-    // The bumpy tunnel (the in-game "corridor" stage shape): 3-tile interior,
-    // alternating floor/ceiling bumps — every crossing is a duck or step-up.
-    // Under the lattice engine the path itself threads them (plan §7
-    // scenario 1); the deform only mops up quantization.
+    // The bumpy tunnel (the in-game "corridor" stage shape). Rebuilt for the
+    // 11 px grid the same way Stage.cs's corridor was: a 4-tile (44 px)
+    // interior — slab ceiling at row 1, floor bumps (row 5) at col ≡ 0
+    // (mod 6), ceiling bumps (row 2) at col ≡ 3 (mod 6) — since the old
+    // 3-tile/mod-4 shape (48 px interior at 16 px tiles) no longer fits the
+    // unchanged ~33 px body at 11 px tiles. Under the lattice engine the
+    // path itself threads them (plan §7 scenario 1); the deform only mops
+    // up quantization.
     [Fact]
     public void BumpyTunnel_HoldRight_TraversesAtSpeed()
     {
@@ -113,9 +125,9 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
                 sb.Append(r switch
                 {
                     6 => 'X',
-                    2 when tunnel => 'X',
-                    3 when tunnel && c % 4 == 3 => 'X',
-                    5 when tunnel && c % 4 == 1 => 'X',
+                    1 when tunnel => 'X',
+                    2 when tunnel && c % 6 == 3 => 'X',
+                    5 when tunnel && c % 6 == 0 => 'X',
                     _ => 'O',
                 });
             }
@@ -128,8 +140,9 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
 
         float x = sim.Player.Body.Position.X;
         float avg = (x - 24f) / (600f / 60f);
+        float mouthX = 16 * ts, deepX = 600f * ts / 16f;
         output.WriteLine($"tunnel: x={x:F1} avg={avg:F1} px/s");
-        Assert.True(x > 600f, $"stalled in the tunnel at x={x:F1} (mouth at 256)");
+        Assert.True(x > deepX, $"stalled in the tunnel at x={x:F1} (mouth at {mouthX:F0})");
         Assert.True(avg > 55f, $"tunnel traversal too slow: {avg:F1} px/s");
     }
 
@@ -189,7 +202,11 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
 
     // The duck-in: the path dips under the lip (the ceiling test of
     // LatticePathPlannerTests, now driving a body) and the servo rides it
-    // into the corridor.
+    // into the corridor. The low section is 3 tiles (33 px) — the same
+    // physical clearance as the old 2-tile/32 px gap at 16 px tiles, just
+    // above CrouchedState's auto-crouch threshold (~31.3 px) so this stays
+    // a path-level duck rather than a real crouch; the raw 2-tile/22 px gap
+    // at 11 px tiles would force a genuine crouch instead.
     [Fact]
     public void HoldRight_DucksIntoLowCorridor()
     {
@@ -197,8 +214,8 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
         var chunks = SimTerrain.FromAscii(@"
             XXXXXXXXXXXXXXXXXXXXXXXX
             OOOOOOOOOOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOOOOOOOOOO
             OOOOOOOOXXXXXXXXXXXXXXXX
+            OOOOOOOOOOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOOOOOOOOOO
             XXXXXXXXXXXXXXXXXXXXXXXX");

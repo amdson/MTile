@@ -52,7 +52,7 @@ public class TumbleTechTests(ITestOutputHelper output)
     public void Sanity_NoHit_FallingIntoWall_WallSlides()
     {
         var terrain = RightWall();
-        const float wallLeft = 10 * 16;
+        const float wallLeft = 10 * Chunk.TileSize;
         var player = new PlayerCharacter(new Vector2(wallLeft - HalfWidth(), 60f));
         var bodies = new List<PhysicsBody> { player.Body };
         var ctrl = new Controller();
@@ -154,7 +154,7 @@ public class TumbleTechTests(ITestOutputHelper output)
         for (int r = 0; r < 10; r++) sb.Append(new string('O', 12)).Append('\n');
         for (int r = 0; r < 3;  r++) sb.Append(new string('X', 12)).Append('\n');
         var terrain = SimTerrain.FromAscii(sb.ToString());
-        const float floorTop = 10 * 16;   // y = 160
+        const float floorTop = 10 * Chunk.TileSize;
 
         // Spawn well above the floor so there's a clear "high, outside window" phase
         // before the descent reaches the tech window.

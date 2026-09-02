@@ -59,12 +59,16 @@ public class HitFlashTests
             XXXXXXXXXXXXXXXXXXXXXXXX
             XXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        var sim = new Simulation(chunks, new Vector2(60f, 40f));
-        var (p2, _) = sim.AddSecondaryPlayer(new Vector2(200f, 40f));
+        // Floor top is row 3; float everyone in the open gap above it, well clear of
+        // the solid ground (standing convention: floorTop - 2*Radius).
+        float floorTop = 3f * Chunk.TileSize;
+        float y = floorTop - 2f * PlayerCharacter.Radius;
+        var sim = new Simulation(chunks, new Vector2(60f, y));
+        var (p2, _) = sim.AddSecondaryPlayer(new Vector2(200f, y));
         p2.Faction = Faction.Player2;
 
         // A thrown clod on a course into p2 — the same path the block throw takes.
-        sim.SpawnEntity(new LobbedAreaProjectile(new Vector2(120f, 40f), new Vector2(400f, 0f),
+        sim.SpawnEntity(new LobbedAreaProjectile(new Vector2(120f, y), new Vector2(400f, 0f),
                                                  budget: 6, tileType: TileType.Dirt,
                                                  hitId: sim.HitIds.Next(), owner: Faction.Player1));
 

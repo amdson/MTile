@@ -84,7 +84,10 @@ public class CorrectorSnapshotTests(ITestOutputHelper output)
         var course = SimTerrain.FromAscii(@"
             OOOOOOOOXXOOOOXXOOOOXXOOOOXXOOOOXXOOOOXX
             XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 5);
-        var sim = new Simulation(course, new Vector2(12f, 72f));
+        // Floor top is the solid row (ascii row 1, absolute tile row 6); rest above it by
+        // the standard 2*Radius clearance used throughout MTile.Tests.Sim.
+        float floorTop = 6f * Chunk.TileSize;
+        var sim = new Simulation(course, new Vector2(12f, floorTop - 2f * PlayerCharacter.Radius));
 
         // Warm-up (JIT + first-touch).
         for (int f = 0; f < 60; f++) sim.Step(HoldRight);

@@ -52,13 +52,19 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
         framesSincePress < JumpHoldFrames ? (right ? RightJump : Jump) : (right ? Right : default);
 
     // ── Row 1: bumpy corridor ────────────────────────────────────────────
-    // Alternating 1-high bumps and 1-low lips in a 3-tile corridor; hold
-    // right. Traverses at speed, never leaves the standing fold to crouch.
+    // Alternating 1-high bumps and 1-low lips in a 4-tile (44 px) corridor;
+    // hold right. Traverses at speed, never leaves the standing fold to
+    // crouch. Geometry mirrors the "corridor" Stage rebuild (Stage.cs):
+    // slab ceiling at row 1, interior rows 2-5 (44 px, fits the ~33 px
+    // body with margin), floor bumps (row 5) at col ≡ 0 (mod 6), ceiling
+    // bumps (row 2) at col ≡ 3 (mod 6) — the old 3-tile/mod-4 shape (48 px
+    // interior at 16 px tiles) no longer fits the unchanged body at 11 px
+    // tiles.
     [Fact]
     public void Row01_BumpyCorridor_TraversesAtSpeed_WithoutCrouching()
     {
         var chunks = Terrain(7, 64, (r, c) =>
-            r == 6 || (c >= 16 && (r == 2 || (r == 3 && c % 4 == 3) || (r == 5 && c % 4 == 1))));
+            r == 6 || (c >= 16 && (r == 1 || (r == 2 && c % 6 == 3) || (r == 5 && c % 6 == 0))));
         var sim = new Simulation(chunks, OnFloor(24f, 6));
         bool crouched = false;
         for (int f = 0; f < 600; f++)
@@ -67,25 +73,28 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
             crouched |= sim.Player.CurrentStateName.Contains("Crouch");
         }
         float x = sim.Player.Body.Position.X, avg = (x - 24f) / 10f;
+        float mouthX = 16 * Ts, deepX = 600f * Ts / 16f;
         output.WriteLine($"row1: x={x:F1} avg={avg:F1} px/s crouched={crouched}");
-        Assert.True(x > 600f, $"stalled in the corridor at x={x:F1} (mouth at 256)");
+        Assert.True(x > deepX, $"stalled in the corridor at x={x:F1} (mouth at {mouthX:F0})");
         Assert.True(avg > 55f, $"too slow: {avg:F1} px/s");
         Assert.False(crouched, "the path is the duck — no crouch state change");
     }
 
-    // ── Row 2: jump into a 2-high tunnel ─────────────────────────────────
-    // Tunnel (ceiling row 3, floor row 6: 32 px interior) from x = 224. The
-    // player walks right and jumps at x = 70 so the running-jump arc (≈ 54 px
-    // apex) arrives on its descent above the mouth's free band (centers
-    // y ∈ [78.4, 83.6]); the Fall-state solve with hover off + the corner
+    // ── Row 2: jump into a low tunnel ────────────────────────────────────
+    // Tunnel (ceiling row 1, floor row 6: 44 px interior — the old
+    // ceiling-row-3/32 px shape no longer fits the ~33 px body at 11 px
+    // tiles, same widening as Row 1) from x = 154. The player walks right
+    // and jumps at x = 70 so the running-jump arc arrives on its descent
+    // above the mouth; the Fall-state solve with hover off + the corner
     // channel must bring the body in low and clean. Diagnostic line prints
-    // the arrival height at the lip's C-obstacle edge (x = 210).
+    // the arrival height at the lip's C-obstacle edge.
     [Fact]
     public void Row02_JumpIntoTunnel_EntersLowAndClean()
     {
-        var chunks = Terrain(7, 48, (r, c) => r == 6 || (r == 3 && c >= 14));
+        var chunks = Terrain(7, 48, (r, c) => r == 6 || (r == 1 && c >= 14));
         var sim = new Simulation(chunks, OnFloor(40f, 6));
         const float jumpX = 70f, mouthX = 14 * Ts, lipX = mouthX - 14f;
+        float ceilBottom = 2 * Ts, floorTop = 6 * Ts;
         int pressed = -1; float yAtLip = float.NaN;
         for (int f = 0; f < 240; f++)
         {
@@ -95,23 +104,28 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
             if (float.IsNaN(yAtLip) && q.X >= lipX) yAtLip = q.Y;
         }
         var end = sim.Player.Body.Position;
-        output.WriteLine($"row2: y at lip edge={yAtLip:F1} (band 78.4..83.6), end=({end.X:F1},{end.Y:F1})");
+        output.WriteLine($"row2: y at lip edge={yAtLip:F1} (band {ceilBottom + 12.4f:F1}..{floorTop - 10.4f:F1}), end=({end.X:F1},{end.Y:F1})");
         Assert.True(pressed >= 0, "never reached the jump point");
         Assert.True(end.X > mouthX + 3 * Ts, $"did not enter the tunnel: x={end.X:F1} (mouth at {mouthX})");
-        Assert.True(end.Y > 64f + 12.4f && end.Y < 96f - 10.4f,
+        Assert.True(end.Y > ceilBottom + 12.4f && end.Y < floorTop - 10.4f,
             $"not riding inside the tunnel: y={end.Y:F1}");
     }
 
     // ── Row 3: covered jump ──────────────────────────────────────────────
-    // 2-high slab over x < 128, floor row 6. NEAR: body 3 px inside the
-    // slab's end, under the last tile's corner bevel — the (1,−1) climb is
-    // admissible and the body rises out to the right. FAR: body deep under
-    // the slab — no rising edge, honest bonk, no shuffle toward the exit.
+    // Slab over x < slabEdgeX (8 tiles), floor row 6 — CornerPlantReach
+    // (26 px) sets the near/far split, not the old tile count, so it holds
+    // regardless of Chunk.TileSize. NEAR: body 3 px inside the slab's end,
+    // under the last tile's corner bevel — the (1,−1) climb is admissible
+    // and the body rises out to the right. FAR: body 48 px under the slab
+    // (well past the 26 px reach) — no rising edge, honest bonk, no
+    // shuffle toward the exit.
+    private const float SlabEdgeX = 8 * Ts;
+
     [Fact]
     public void Row03_CoveredJump_NearEdge_RisesOutDiagonally()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (r == 3 && c < 8));
-        var sim = new Simulation(chunks, OnFloor(125f, 6));
+        var sim = new Simulation(chunks, OnFloor(SlabEdgeX - 3f, 6));
         float minY = float.MaxValue, xAtMin = 0f;
         for (int f = 0; f < 90; f++)
         {
@@ -120,15 +134,15 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
             if (p.Y < minY) { minY = p.Y; xAtMin = p.X; }
         }
         output.WriteLine($"row3 near: apex y={minY:F1} at x={xAtMin:F1}");
-        Assert.True(minY < 64f - 10.4f, $"never cleared the slab: apex y={minY:F1} (slab bottom 64)");
-        Assert.True(xAtMin > 128f + 6f, $"rose without clearing the slab's edge: x={xAtMin:F1}");
+        Assert.True(minY < 4 * Ts - 10.4f, $"never cleared the slab: apex y={minY:F1} (slab bottom {4 * Ts})");
+        Assert.True(xAtMin > SlabEdgeX + 6f, $"rose without clearing the slab's edge: x={xAtMin:F1}");
     }
 
     [Fact]
     public void Row03_CoveredJump_FarFromEdge_BonksWithoutShuffling()
     {
         var chunks = Terrain(7, 24, (r, c) => r == 6 || (r == 3 && c < 8));
-        var start = OnFloor(80f, 6);
+        var start = OnFloor(SlabEdgeX - 48f, 6);
         var sim = new Simulation(chunks, start);
         float minY = float.MaxValue, maxDx = 0f;
         for (int f = 0; f < 90; f++)
@@ -139,7 +153,7 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
             maxDx = MathF.Max(maxDx, MathF.Abs(p.X - start.X));
         }
         output.WriteLine($"row3 far: apex y={minY:F1} max |dx|={maxDx:F1}");
-        Assert.True(minY > 64f + 10.4f - 2f, $"passed the slab: apex y={minY:F1}");
+        Assert.True(minY > 4 * Ts + 10.4f - 2f, $"passed the slab: apex y={minY:F1}");
         Assert.True(maxDx < 6f, $"shuffled {maxDx:F1} px toward the exit — the cutoff should bonk");
     }
 
@@ -171,14 +185,17 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
         Assert.True(MathF.Abs(p.Y - rest) < 8f, $"should stand at the wall, not climb: y={p.Y:F1}");
     }
 
-    // ── Row 7: free-standing 2-high wall ─────────────────────────────────
-    // The path routes over (accepted); the legs cannot deliver a 32 px rise
-    // from a walk, so the give-up must turn it into row 6's honest stop —
-    // the body ends AT the wall at hover, not floating up its face.
+    // ── Row 7: free-standing wall too tall to mount ──────────────────────
+    // The path routes over (accepted); the legs cannot deliver the rise
+    // from a walk (unchanged in px — MovementConfig forces don't scale
+    // with Chunk.TileSize), so the give-up must turn it into row 6's
+    // honest stop — the body ends AT the wall at hover, not floating up
+    // its face. Wall is 3 tiles tall above the floor (33 px, the same
+    // physical height as the old 2-tile/32 px wall at 16 px tiles).
     [Fact]
     public void Row07_FreeStandingTwoHighWall_GiveUpIsHonestStop()
     {
-        var chunks = Terrain(7, 24, (r, c) => r == 6 || (c == 12 && r >= 4));
+        var chunks = Terrain(7, 24, (r, c) => r == 6 || (c == 12 && r >= 3));
         var sim = new Simulation(chunks, OnFloor(40f, 6));
         float minY = float.MaxValue;
         for (int f = 0; f < 300; f++) { sim.Step(Right); minY = MathF.Min(minY, sim.Player.Body.Position.Y); }
@@ -420,7 +437,11 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     [InlineData(false)]
     public void Row17_WallJump_ArcIsTheStates(bool into)
     {
-        var chunks = Terrain(10, 40, (r, c) => r == 9 || c == 24);
+        // 14 rows / floor row 12 keeps ~110 px of wall face above the floor
+        // (was 112 px at 9 rows / 16 px tiles) — the "into" arc needs to
+        // rise, fall back onto the wall, and reslide before the floor cuts
+        // it off; the shrunk-tile floor left only ~77 px, too little room.
+        var chunks = Terrain(14, 40, (r, c) => r == 12 || c == 24);
         float faceX = 24 * Ts;
         var start = new Vector2(faceX - 14f - 1f, 2 * Ts);
         var slide = Right;

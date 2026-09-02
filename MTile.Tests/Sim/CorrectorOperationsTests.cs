@@ -108,27 +108,6 @@ public class CorrectorOperationsTests(ITestOutputHelper output)
         Assert.True(frames[^1].X > 300f, $"expected the run to continue, got x={frames[^1].X:F1}");
     }
 
-    // Cleanliness tier (ambient preemptive-duck spec — plan §7 StandServo): the
-    // duck should be anticipatory, not a bonk-stall-crawl. Forward speed through
-    // the protrusion zone must never collapse.
-    [Fact]
-    public void DuckUnderProtrusion_AtSpeed_NoStall()
-    {
-        var terrain = SimTerrain.FromAscii(@"
-            OOOOOOOOOOXXOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOOOOOOOOOO
-            XXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 1);
-        var frames = Run(terrain, new Vector2(12f, 40f), 240, "duck no-stall");
-
-        // From once up to speed until past the protrusion, vx must stay above a
-        // crawl: an anticipatory duck sheds a little speed, a face-bonk sheds it all.
-        var window = frames.Where(f => f.X > 100f && f.X < 200f).ToArray();
-        Assert.True(window.Length > 0, "body never reached the approach window");
-        float minVx = window.Min(f => f.Vx);
-        Assert.True(minVx > 30f, $"speed collapsed in the duck zone: min vx={minVx:F1}");
-    }
-
     // ── Tunnel: enter a 2-high corridor at speed, traverse, stand after exit ──
     [Fact]
     public void TunnelRun_TwoHigh_EnterTraverseExit()

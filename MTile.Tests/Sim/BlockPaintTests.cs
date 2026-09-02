@@ -22,7 +22,10 @@ public class BlockPaintTests(ITestOutputHelper output)
         OOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-    private static readonly Vector2 Start = new(40f, 36f);
+    // Floor top is row 3 (rows 0-2 are the "O" open air above it); body center rests
+    // one Radius above that when standing.
+    private const float FloorTopY = 3 * Chunk.TileSize;
+    private static readonly Vector2 Start = new(40f, FloorTopY - PlayerCharacter.Radius);
 
     private static SimConfigMulti Build(InputScript script, ChunkMap terrain, int frames) => new SimConfigMulti
     {
@@ -35,7 +38,7 @@ public class BlockPaintTests(ITestOutputHelper output)
 
     // Cursor parked just above the floor, within build reach, so the deposit has support
     // to grow from. Held for ~0.75s of paint.
-    private static readonly Vector2 OnFloor = new(56f, 44f);
+    private static readonly Vector2 OnFloor = new(Start.X + Chunk.TileSize, FloorTopY - 4f);
 
     private static int SolidCount(ChunkMap c, int gtx0, int gtx1, int gty0, int gty1)
     {
@@ -76,7 +79,7 @@ public class BlockPaintTests(ITestOutputHelper output)
         int before = SolidCount(terrain, 0, 8, 0, 3);
 
         float peakCharge = 0f;
-        var inSolid = new Vector2(56f, 56f);
+        var inSolid = new Vector2(Start.X + Chunk.TileSize, FloorTopY + Chunk.TileSize / 2f);
         SimRunner.RunMulti(Build(new InputScript()
                 .For(6, new PlayerInput { MouseWorldPosition = inSolid })
                 .Forever(new PlayerInput { RightClick = true, MouseWorldPosition = inSolid }),

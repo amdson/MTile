@@ -48,7 +48,16 @@ public class HighSpeedTunnelingTests
     private readonly ITestOutputHelper _out;
     public HighSpeedTunnelingTests(ITestOutputHelper o) => _out = o;
 
-    private const float WallFaceX = 160f;   // 10 empty columns, then solid
+    // 10 empty columns, then solid. Derived from Chunk.TileSize rather than pinned:
+    // at TileSize=16 this was the literal 160f previously hardcoded here.
+    private static readonly float WallFaceX = 10 * Chunk.TileSize;
+    // Body start X: same 40px pre-wall clearance the original 120f gave against the
+    // old 160f wall face (leaving a 28px gap from the body's leading edge, since
+    // Radius=12). At TileSize=16 the open gap (160px) comfortably contained this;
+    // at TileSize=11 the open gap is only 110px, so the start X must be rederived
+    // from WallFaceX rather than kept as the old absolute 120f, which now spawns the
+    // body already inside the wall.
+    private static readonly float StartX = WallFaceX - 40f;
 
     private static ChunkMap Slab(TileType type = TileType.Stone)
     {
@@ -91,7 +100,7 @@ public class HighSpeedTunnelingTests
     public void FastBodyNeverEndsInsideSolidTerrain(float speed)
     {
         var chunks = Slab();
-        var body = PlayerBody(new Vector2(120f, 200f));
+        var body = PlayerBody(new Vector2(StartX, 200f));
         body.Velocity = new Vector2(speed, 0f);
         var bodies = new List<PhysicsBody> { body };
 
@@ -129,7 +138,7 @@ public class HighSpeedTunnelingTests
         for (int speed = 2000; speed <= 24000; speed += 500)
         {
             var chunks = Slab();
-            var body = PlayerBody(new Vector2(120f, 200f));
+            var body = PlayerBody(new Vector2(StartX, 200f));
             body.Velocity = new Vector2(speed, 0f);
             var bodies = new List<PhysicsBody> { body };
 
@@ -165,7 +174,7 @@ public class HighSpeedTunnelingTests
             for (int speed = 500; speed <= 24000 && firstEmbed < 0; speed += 100)
             {
                 var chunks = Slab(type);
-                var body = PlayerBody(new Vector2(120f, 200f));
+                var body = PlayerBody(new Vector2(StartX, 200f));
                 body.Velocity = new Vector2(speed, 0f);
                 var bodies = new List<PhysicsBody> { body };
 

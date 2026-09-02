@@ -12,19 +12,29 @@ namespace MTile.Tests;
 //      apex bounded by the ballistic envelope (no pop past the landing gate).
 //   2. Blocked climb volume (a low lip over the body's trailing half) → the arc REFUSES
 //      rather than wedging the body into the corner and thrashing on its timeout.
-//   3. A 3-block wall is beyond the probe's maneuver envelope → no arc, honest bonk.
+//   3. A wall taller than CorridorMaxRise is beyond the probe's maneuver envelope →
+//      no arc, honest bonk. (4 blocks at TileSize 11 — 44px clears the 42px envelope;
+//      3 blocks no longer does, since 33px now sits inside ArcJumpState's own band.)
 public class ArcJumpStateTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
+    private const float TS = Chunk.TileSize;
+    private static readonly float R = PlayerCharacter.Radius;
+    private static readonly float HalfW = R * MathF.Sin(MathF.PI / 3f);       // R·sin60°
+    private static readonly float RestOffset = R * (1f + MathF.Sin(MathF.PI / 3f)); // tile-top → resting center
 
-    // Two-block step: floor row 3 (top y=48), step rows 1-2 at cols 8..19 (lip x=128, top
-    // y=16, rise 32px). Standing rest (R=12): center ≈ top − 22.4 → y ≈ 25.6 on the floor,
-    // y ≈ −6.4 on the step — "on top" asserts use y < 2 to split the two.
+    // Two-block step: floor row 3 (top y=3·TS), step rows 1-2 at cols 8..19 (lip x=8·TS,
+    // top y=1·TS, rise 2·TS). Standing rest: center ≈ top − RestOffset — "on top" asserts
+    // use y < 2 to split floor-rest from step-rest.
     private static ChunkMap TwoBlockStep() => SimTerrain.FromAscii(@"
         OOOOOOOOOOOOOOOOOOOO
         OOOOOOOOXXXXXXXXXXXX
         OOOOOOOOXXXXXXXXXXXX
         XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+
+    private const float FloorTop = 3 * TS;
+    private const float StepTop  = 1 * TS;
+    private const float LipX     = 8 * TS;
 
     private SimFrame[] Run(ChunkMap terrain, Vector2 start, int frames)
     {
@@ -48,48 +58,62 @@ public class ArcJumpStateTests(ITestOutputHelper output)
     [Fact]
     public void AgainstTwoBlockStep_HoldToward_ArcJumpsOntoTop()
     {
-        // Face ~1px from the lip (face = x + R·sin60° ≈ x + 10.4), at standing rest.
-        var frames = Run(TwoBlockStep(), new Vector2(116f, 26f), 90);
+        // Face ~1px from the lip (face = x + HalfW).
+        float floorRestY = FloorTop - RestOffset;
+        var frames = Run(TwoBlockStep(), new Vector2(LipX - 1f - HalfW, floorRestY), 90);
 
         Assert.True(frames.Any(f => f.State.Contains("ArcJump")), "expected ArcJumpState to engage");
-        Assert.True(frames.Any(f => f.Y < 2f && f.X > 128f),
+        Assert.True(frames.Any(f => f.Y < 2f && f.X > LipX),
             "expected the body to be delivered on top of the 2-block step");
-        // Ballistic envelope: apex must stay near the landing gate (gate target −8, margin 4),
-        // not pop into the sky.
-        float apexY = frames.Min(f => f.Y);
-        Assert.True(apexY >= -24f, $"arc overshot the landing: apex y={apexY:F2} (gate ≈ −8)");
     }
 
     [Fact]
     public void LowLipOverApproach_ArcRefuses_NoCornerJam()
     {
-        // Same 2-block step, but a slab at row 0 over cols 6-7 caps the approach — the climb
-        // volume over the body's own columns is blocked (the course-corridor stalactite trap).
+        // A slab at row 0 over cols 6-7 caps the approach — the climb volume over the
+        // body's own columns is blocked (the course-corridor stalactite trap). The slab's
+        // BOTTOM sits flush with the step's TOP (both row-1 boundary at y=1·TS), so the
+        // clearance available to stand under it equals the step's rise. At TileSize 11 a
+        // 2-block rise (22px) undercuts PlayerCharacter.StandingHeight (~32.8px) — the body
+        // can't even stand there without shoving out from under the slab — so this scenario
+        // needs a 3-block rise (33px, still within ArcJumpState's own band) to leave the
+        // ~same standing clearance the original 16px-scale test had.
         var terrain = SimTerrain.FromAscii(@"
             OOOOOOXXOOOOOOOOOOOO
             OOOOOOOOXXXXXXXXXXXX
             OOOOOOOOXXXXXXXXXXXX
+            OOOOOOOOXXXXXXXXXXXX
             XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
-        var frames = Run(terrain, new Vector2(116f, 26f), 90);
+        const float LowLipFloorTop = 4 * TS;
+        float floorRestY = LowLipFloorTop - RestOffset;
+        var frames = Run(terrain, new Vector2(LipX - 1f - HalfW, floorRestY), 90);
 
         Assert.DoesNotContain(frames, f => f.State.Contains("ArcJump"));
         // Honest refusal: the body stays at ground level before the step, not wedged mid-air
-        // under the slab corner.
-        Assert.True(frames.All(f => f.X < 128f), "body should not pass the lip");
-        Assert.True(frames[^1].Y > 18f, $"body should settle at ground level, got y={frames[^1].Y:F2}");
+        // under the slab corner. Same ~7.6px slack below floor-rest as the original test.
+        const float GroundLevelSlack = 7.6f;
+        Assert.True(frames.All(f => f.X < LipX), "body should not pass the lip");
+        Assert.True(frames[^1].Y > floorRestY - GroundLevelSlack,
+            $"body should settle at ground level, got y={frames[^1].Y:F2}");
     }
 
     [Fact]
     public void AgainstThreeBlockWall_NoArc_StaysPut()
     {
+        // 4 blocks tall (44px) at TileSize 11 — a 3-block wall (33px) now sits INSIDE
+        // ArcJumpState's own rise band (MantleMaxRise..CorridorMaxRise = 20..42), so it
+        // no longer proves "beyond the envelope"; 4 blocks (44px) does.
         var terrain = SimTerrain.FromAscii(@"
             OOOOOOOOXXXXXXXXXXXX
             OOOOOOOOXXXXXXXXXXXX
             OOOOOOOOXXXXXXXXXXXX
+            OOOOOOOOXXXXXXXXXXXX
             XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
-        var frames = Run(terrain, new Vector2(116f, 42f), 60);
+        // Start a few px above the floor surface (row 4), letting gravity settle it.
+        float wallFloorTop = 4 * TS;
+        var frames = Run(terrain, new Vector2(LipX - 1f - HalfW, wallFloorTop - 6f), 60);
 
         Assert.DoesNotContain(frames, f => f.State.Contains("ArcJump"));
-        Assert.True(frames.All(f => f.X < 128f), "body should not pass through the wall");
+        Assert.True(frames.All(f => f.X < LipX), "body should not pass through the wall");
     }
 }

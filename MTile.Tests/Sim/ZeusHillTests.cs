@@ -50,7 +50,8 @@ public class ZeusHillTests(ITestOutputHelper output)
     }
 
     private static bool Solid(ChunkMap chunks, int gtx, int gty)
-        => TileQuery.IsSolidAt(chunks, gtx * 16f + 8f, gty * 16f + 8f);
+        => TileQuery.IsSolidAt(chunks, gtx * (float)Chunk.TileSize + Chunk.TileSize / 2f,
+                                        gty * (float)Chunk.TileSize + Chunk.TileSize / 2f);
 
     // Topmost solid row in a column, scanning the whole tower band plus the sky above it.
     private static int SurfaceTileY(ChunkMap chunks, int gtx)

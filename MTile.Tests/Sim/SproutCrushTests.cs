@@ -78,7 +78,10 @@ public class SproutCrushTests(ITestOutputHelper output)
             OOOOO
             XXXXX");
 
-        var body = PlayerBody(new Vector2(40f, 52f));   // resting on the floor at y=64
+        // Floor top = row 4 (Chunk.TileSize-scaled); start a few px above it and let
+        // physics settle the rest of the way, same as the original fixed offset.
+        float floorTopY = 4 * Chunk.TileSize;
+        var body = PlayerBody(new Vector2(40f, floorTopY - 12f));
         var bodies = new List<PhysicsBody> { body };
 
         // Settle onto the floor first.

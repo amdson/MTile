@@ -13,9 +13,15 @@ namespace MTile.Tests;
 // covered-jump out of stun. The capability mask (RequiredCapabilities.Jump applied in the
 // selection loop) now gates it like the rest of the jump family.
 //
-// Geometry is the left-facing corridor from CoveredJumpLeftCorridorTests: ceiling slab
-// with its exit corner at x=80, floor top at y=80, body at startX=80 holding Left+Space
-// sticks out past the corner and (without stun) covered-jumps.
+// Geometry mirrors the left-facing corridor from CoveredJumpLeftCorridorTests, rebuilt for
+// the 11px grid: ceiling slab with its exit corner at col 5 (x = 5·TileSize), floor top at
+// row 5, leaving a 2-tile-row interior (rows 3-4, 22px). CoveredJumpState's own precondition
+// caps how tall a ceiling counts as "covered" at JumpClearance.Headroom (32px) — a taller
+// interior (e.g. 4 rows / 44px) reads as an ordinary jump instead, which is what the first
+// pass at this file got wrong. 22px is snug for the body but is exactly the auto-crouch band
+// (CrouchedState's standingClearance test), which is the scenario CoveredJump is built for.
+// Body at startX = corner holding Left+Space sticks out past the corner and (without stun)
+// covered-jumps.
 public class CoveredJumpStunGateTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
@@ -30,7 +36,9 @@ public class CoveredJumpStunGateTests(ITestOutputHelper output)
         XXXXXXXXXXXXXXXXXXXX
         XXXXXXXXXXXXXXXXXXXX";
 
-    private static readonly Vector2 Start = new(80f, 60.5f);
+    private const float CornerX  = 5f * Chunk.TileSize;
+    private const float FloorTop = 5f * Chunk.TileSize;
+    private static readonly Vector2 Start = new(CornerX, FloorTop - PlayerCharacter.Radius);
     private static readonly PlayerInput SpaceLeft = new() { Left = true, Space = true };
 
     // Control: with no stun, this exact setup DOES covered-jump — so the gated case below

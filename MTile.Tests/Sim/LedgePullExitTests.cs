@@ -107,17 +107,21 @@ public class LedgePullExitTests(ITestOutputHelper output)
     [Fact]
     public void PullTimeout_RegrabsInsteadOfFallingOut()
     {
-        // Floating overhang one tile above the lip (row 0, directly in the body's
-        // mantle path) so the pull physically can't crest the corner — the body
-        // stalls under it until MaxLipManeuverTime expires, then sags back to the hang.
-        // (Lip is row 2 with the 3-tall R=12 wall; same one-tile gap as before.)
+        // Floating overhang directly in the body's mantle path, positioned at the
+        // row containing StandingLineY (the head height the body would reach if it
+        // crested the lip) — so the pull physically can't crest the corner. The
+        // body's grown to ~3 tiles tall on this grid, so StandingLineY now sits a
+        // row above the lip's row0 (was row0 itself on the old 2-tile-tall body);
+        // an extra empty row keeps the same physical "can't fit" gap below it.
+        // (Lip is row 2 with the 3-tall R=12 wall, same as BuildLedgeTerrain.)
         var terrain = SimTerrain.FromAscii(@"
             .........X
+            ..........
             ..........
             .........X
             .........X
             .........X
-            XXXXXXXXXX", originTileX: 0, originTileY: 0);
+            XXXXXXXXXX", originTileX: 0, originTileY: -1);
         var cfg = new SimConfig
         {
             Terrain       = terrain,

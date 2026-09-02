@@ -99,7 +99,12 @@ public class JumpFromCompressedTests(ITestOutputHelper output)
             OOOOOOOOOOOOOOOO
             XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        var player = new PlayerCharacter(new Vector2(80f, 141f));
+        // Rest pose: empirically-settled offset of ~19px above the floor top (shared
+        // convention with BlockEruptionTests) — the exact value only gates the early-exit
+        // below, so a close estimate is enough for correctness.
+        float floorTopY = 10 * Chunk.TileSize;
+        float restY = floorTopY - 19f;
+        var player = new PlayerCharacter(new Vector2(80f, restY));
         var bodies = new List<PhysicsBody> { player.Body };
         var ctrl = new Controller();
         var hb = new HitboxWorld();
@@ -124,7 +129,7 @@ public class JumpFromCompressedTests(ITestOutputHelper output)
 
             if (!player.CurrentStateName.Contains("Standing")) sawAirborne = true;
             if (sawAirborne && player.CurrentStateName.Contains("Standing")
-                && MathF.Abs(player.Body.Position.Y - 141f) < 2f) break;
+                && MathF.Abs(player.Body.Position.Y - restY) < 2f) break;
         }
         Assert.Contains("Standing", player.CurrentStateName);
 

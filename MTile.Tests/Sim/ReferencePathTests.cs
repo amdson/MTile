@@ -197,12 +197,19 @@ public class ReferencePathTests(ITestOutputHelper output)
         OOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXX";
 
+    // Platform top (row 5) and drop edge (col 10) in world px, TileSize-derived.
+    private const float PlatformTop = 5f * TS;
+    private const float DropEdgeX   = 10f * TS;
+
     private SimFrame[] RunDrop()
     {
         var cfg = new SimConfig
         {
             Terrain       = SimTerrain.FromAscii(DropTerrain, originTileX: 0, originTileY: 0),
-            StartPosition = new Vector2(157f, 60.5f),
+            // Standing near the platform surface (19.5px above its top — the same
+            // rest gap regardless of TileSize, since it comes from body Radius/hover,
+            // not the tile grid), a few px shy of the drop edge.
+            StartPosition = new Vector2(DropEdgeX - 3f, PlatformTop - 19.5f),
             StartVelocity = Vector2.Zero,
             Script        = InputScript.Always(new PlayerInput { Down = true }),
             Frames        = 45,
@@ -223,13 +230,14 @@ public class ReferencePathTests(ITestOutputHelper output)
         int airborne = Array.FindIndex(trace, f => f.State.Contains("Falling"));
         Assert.True(airborne > 0, "dropdown never went airborne");
 
-        // Landed on the lower floor (top y=128, rest ≈ 105.6), close to the wall
-        // under the platform edge (x=160) — DropdownExitVelMult still softens the
+        // Landed on the lower floor (top y = 8·TS, rest ≈ top − 22), close to the
+        // wall under the platform edge — DropdownExitVelMult still softens the
         // slip-off, clip or no clip.
+        float lowerFloorTop = 8f * TS;
         var last = trace[^1];
-        Assert.True(last.Y > 100f, $"never descended to the lower floor: y={last.Y:F1}");
-        Assert.True(last.X > 160f && last.X < 210f,
-            $"landed at x={last.X:F1} — expected just past the edge (160..210)");
+        Assert.True(last.Y > lowerFloorTop - 28f, $"never descended to the lower floor: y={last.Y:F1}");
+        Assert.True(last.X > DropEdgeX && last.X < DropEdgeX + 50f,
+            $"landed at x={last.X:F1} — expected just past the edge ({DropEdgeX:F0}..{DropEdgeX + 50f:F0})");
     }
 
     [Fact]
@@ -240,7 +248,7 @@ public class ReferencePathTests(ITestOutputHelper output)
         {
             var trace = RunDrop();
             Assert.Contains(trace, f => f.State.Contains("Dropdown"));
-            Assert.True(trace[^1].Y > 100f, $"bespoke drop never reached the floor: y={trace[^1].Y:F1}");
+            Assert.True(trace[^1].Y > 8f * TS - 28f, $"bespoke drop never reached the floor: y={trace[^1].Y:F1}");
         }
         finally
         {

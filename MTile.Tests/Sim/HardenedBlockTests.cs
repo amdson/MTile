@@ -60,6 +60,24 @@ public class HardenedBlockTests(ITestOutputHelper output)
         chunk.Tiles[gtx - cx * Chunk.Size, gty - cy * Chunk.Size].Type = type;
     }
 
+    // World-space center of tile (gtx, gty) on whatever Chunk.TileSize is compiled in.
+    private static Vector2 CellCenter(int gtx, int gty) =>
+        new(gtx * Chunk.TileSize + Chunk.TileSize / 2f, gty * Chunk.TileSize + Chunk.TileSize / 2f);
+
+    // First solid row in every terrain this file builds (row index 3) — floor top in
+    // world px, for placing a standing player regardless of Chunk.TileSize.
+    private const int FloorRow = 3;
+    private static readonly float FloorTopY = FloorRow * Chunk.TileSize;
+    // A player parked 8px above the floor top settles onto it within the first
+    // physics step (matches the original 16px-grid authoring: floor top 48, start 40).
+    private static readonly float StandingY = FloorTopY - PlayerCharacter.Radius + 4f;
+
+    // PullPointEntity.SpringDistanceScale is a fixed 16px normalization for the peel
+    // spring, deliberately independent of Chunk.TileSize — so a drag distance
+    // authored as "N tiles out" means N*16 px of cursor travel, not N*Chunk.TileSize,
+    // on any grid.
+    private const float SpringDistanceScaleTile = 16f;
+
     private static void WithPeel(bool enabled, Action run)
     {
         var cfg   = MovementConfig.Current;
@@ -137,8 +155,8 @@ public class HardenedBlockTests(ITestOutputHelper output)
         {
             var terrain = FloatingBlock();
             SetType(terrain, 4, 0, TileType.Hardened);
-            var onBlock = new Vector2(72f, 8f);    // cell (4,0) center
-            var pullTo  = new Vector2(120f, 8f);   // 3 tiles out — enough to lift stone
+            var onBlock = CellCenter(4, 0);
+            var pullTo  = onBlock + new Vector2(3 * SpringDistanceScaleTile, 0f);   // 3 tiles out — enough to lift stone
 
             var script = new InputScript()
                 .For(10, new PlayerInput { MouseWorldPosition = onBlock })
@@ -148,7 +166,7 @@ public class HardenedBlockTests(ITestOutputHelper output)
 
             bool sawGrab = false, sawOrb = false, sawThrow = false;
             int maxPeel = 0;
-            SimRunner.RunMulti(Build(script, terrain, new Vector2(72f, 40f), frames: 60),
+            SimRunner.RunMulti(Build(script, terrain, new Vector2(onBlock.X, StandingY), frames: 60),
                 onFrame: (f, ps) =>
                 {
                     if (ps[0].CurrentActionName == "BlockGrabAction") sawGrab = true;
@@ -188,8 +206,8 @@ public class HardenedBlockTests(ITestOutputHelper output)
             SetType(terrain, 4, 0, TileType.Hardened);
             SetType(terrain, 5, 0, TileType.Stone);
 
-            var onPair = new Vector2(88f, 8f);     // cell (5,0) center
-            var pullTo = new Vector2(152f, 8f);    // 4 tiles out — the seam adds glue
+            var onPair = CellCenter(5, 0);
+            var pullTo = onPair + new Vector2(4 * SpringDistanceScaleTile, 0f);   // 4 tiles out — the seam adds glue
 
             var script = new InputScript()
                 .For(10, new PlayerInput { MouseWorldPosition = onPair })
@@ -198,7 +216,7 @@ public class HardenedBlockTests(ITestOutputHelper output)
                 .Forever(new PlayerInput { MouseWorldPosition = pullTo });
 
             bool sawOrb = false;
-            SimRunner.RunMulti(Build(script, terrain, new Vector2(88f, 40f), frames: 60),
+            SimRunner.RunMulti(Build(script, terrain, new Vector2(onPair.X, StandingY), frames: 60),
                 onFrame: (f, ps) => { if (ps[0].CurrentActionVars.OrbHeld) sawOrb = true; });
 
             Assert.True(sawOrb, "The stone half of the pair should still peel out.");
@@ -217,8 +235,10 @@ public class HardenedBlockTests(ITestOutputHelper output)
         {
             var terrain = DeepGround();
             int before  = SolidCount(terrain, 0, 23, 3, 5);
-            var onSurf  = new Vector2(120f, 52f);   // cell (7,3)
-            var dragTo  = new Vector2(140f, 52f);   // past the 12px drag threshold
+            // x at the cell-7 center; y sits just under the floor top (the same 4px-into-
+            // the-tile offset the original 16px-grid authoring used: floor top 48, y 52).
+            var onSurf  = new Vector2(CellCenter(7, FloorRow).X, FloorTopY + 4f);   // cell (7,3)
+            var dragTo  = onSurf + new Vector2(20f, 0f);   // past the 12px drag threshold (px, tile-size independent)
 
             // Two of the cells the rip disc would otherwise take, hardened.
             SetType(terrain, 7, 3, TileType.Hardened);
@@ -231,12 +251,19 @@ public class HardenedBlockTests(ITestOutputHelper output)
                 .Forever(new PlayerInput { MouseWorldPosition = dragTo });
 
             int atRelease = -1;
-            SimRunner.RunMulti(Build(script, terrain, new Vector2(120f, 40f), frames: 50),
+            SimRunner.RunMulti(Build(script, terrain, new Vector2(onSurf.X, StandingY), frames: 50),
                 onFrame: (f, ps) => { if (f == 25) atRelease = SolidCount(terrain, 0, 23, 3, 5); });
 
-            // The all-stone case takes 6 (BlockPeelTests.FlagOff_LegacyDragRip_StillWorks);
-            // hardening two of them leaves 4.
-            Assert.Equal(before - 4, atRelease);
+            // The rip disc is PullPointEntity.LegacyRipRadiusPx (25.6px, fixed — tile-size
+            // independent) around the press cell (7,3). At TileSize=16 that is 1.6 tiles,
+            // covering only row 3 (5 grabbable after hardening (7,3)) and row 4 likewise
+            // (4 grabbable) — the "6" the all-stone case takes
+            // (BlockPeelTests.FlagOff_LegacyDragRip_StillWorks) minus the 2 hardened,
+            // leaving 4. At TileSize=11 the same 25.6px is 2.33 tiles, wide enough to also
+            // reach row 5: the disc now covers 5 cols x rows {3,4} (5 each) plus 3 cols x
+            // row 5 (13 solid cells total before hardening), and (7,3)/(7,4) are each one
+            // of the 5 in their row, so hardening removes exactly 2, leaving 11.
+            Assert.Equal(before - 11, atRelease);
             Assert.Equal(TileState.Solid, terrain.GetCellState(7, 3));
             Assert.Equal(TileState.Solid, terrain.GetCellState(7, 4));
         });

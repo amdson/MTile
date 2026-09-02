@@ -13,7 +13,11 @@ namespace MTile.Tests.Sim;
 public class CorrectorAnchorTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
+    private const float TS = Chunk.TileSize;
     private static readonly Vector2 Up = new(0f, -1f);
+    private static readonly float R = PlayerCharacter.Radius;
+    private static readonly float HalfW = R * MathF.Sin(MathF.PI / 3f);             // R·sin60°
+    private static readonly float RestOffset = R * (1f + MathF.Sin(MathF.PI / 3f)); // tile-top → resting center
 
     private SimFrame[] Run(ChunkMap terrain, Vector2 start, int frames)
     {
@@ -85,8 +89,11 @@ public class CorrectorAnchorTests(ITestOutputHelper output)
         {
             // Running + Up: the arc's deliberate-entry gate (movement_todo #6)
             // must be satisfied so this test isolates the slab feasibility.
+            // Face ~1px from the lip (x=8·TS), standing rest on the floor (row 3).
+            float lipX = 8 * TS;
+            float floorRestY = 3 * TS - RestOffset;
             var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6),
-                                       new Vector2(116f, 26f))
+                                       new Vector2(lipX - 1f - HalfW, floorRestY))
                        { Velocity = new Vector2(100f, 0f) };
             var ctx = new EnvironmentContext
             {

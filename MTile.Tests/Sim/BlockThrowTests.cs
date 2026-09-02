@@ -24,9 +24,15 @@ public class BlockThrowTests(ITestOutputHelper output)
         XXXXXXXXXXXX
         XXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-    private static readonly Vector2 OnBlock = new(72f, 8f);    // cell (4,0) center
-    private static readonly Vector2 PullTo  = new(120f, 8f);   // 3 tiles out: beats core glue
-    private static readonly Vector2 Start   = new(72f, 40f);
+    // Cell (4,0) center on the current Chunk.TileSize grid.
+    private static readonly Vector2 OnBlock = new(4 * Chunk.TileSize + Chunk.TileSize / 2f, Chunk.TileSize / 2f);
+    // 48 px out: an absolute pull distance (not tile-scaled) that beats the free block's
+    // core-only glue and stays far under the snap cap — both are px-tuned config, not
+    // grid-relative, so this must not shrink with the tile grid.
+    private static readonly Vector2 PullTo  = OnBlock + new Vector2(48f, 0f);
+    // Cell (4,2) center: one row below the block, mid-gap, clear of both the block above
+    // and the floor below.
+    private static readonly Vector2 Start   = new(4 * Chunk.TileSize + Chunk.TileSize / 2f, 2 * Chunk.TileSize + Chunk.TileSize / 2f);
 
     private static SimConfigMulti Build(InputScript script, ChunkMap terrain, int frames) => new SimConfigMulti
     {
@@ -238,9 +244,13 @@ public class BlockThrowTests(ITestOutputHelper output)
     {
         WithPeel(() =>
         {
-            // Reference: clod in hand, same 8-frame swipe, release.
-            var held = GrabThenHold(new Vector2(100f, 30f), 20);
-            var hp = new Vector2(100f, 30f);
+            // Reference: clod in hand, same 8-frame swipe, release. Parked at the same
+            // offset from Start the old grid used ((100,30) was (28,-10) off Start(72,40));
+            // an absolute (100,30) would put the swipe on the wrong side of Start on the
+            // shrunk grid and desync this from the one-motion case below.
+            var holdPoint = Start + new Vector2(28f, -10f);
+            var held = GrabThenHold(holdPoint, 20);
+            var hp = holdPoint;
             for (int i = 0; i < 8; i++)
             {
                 hp += new Vector2(-300f * Dt, 0f);
@@ -368,7 +378,10 @@ public class BlockThrowTests(ITestOutputHelper output)
     {
         WithPeel(() =>
         {
-            var hold   = new Vector2(100f, 30f);
+            // Parked at the same offset from Start the old grid used ((100,30) was
+            // (28,-10) off the old Start(72,40)); an absolute (100,30) sits on the wrong
+            // side of the shrunk Start and throws off the swipe's line to `target` below.
+            var hold   = Start + new Vector2(28f, -10f);
             var script = GrabThenHold(hold, 20);
             var p = hold;
             for (int i = 0; i < 8; i++)          // 300 px/s leftward swipe, then release
@@ -378,8 +391,10 @@ public class BlockThrowTests(ITestOutputHelper output)
             }
             script.Forever(new PlayerInput { MouseWorldPosition = p });
 
-            // Target 48 px to the thrower's left — in the swipe's line, past the thrower.
-            var target = new Vector2(24f, 40f);
+            // Target 48 px (absolute — the throw's flight is a px-tuned velocity/gravity
+            // arc, not grid-relative) to the thrower's left — in the swipe's line, past
+            // the thrower, and at Start's row so it isn't embedded in the gap's terrain.
+            var target = Start - new Vector2(48f, 0f);
             var cfg = new SimConfigMulti
             {
                 Terrain = FloatingBlock(), Frames = 100, Dt = Dt, Gravity = new Vector2(0f, 600f),
@@ -487,8 +502,8 @@ public class BlockThrowTests(ITestOutputHelper output)
     {
         WithPeel(() =>
         {
-            // Grab block at (4,0); wall column at gtx=3, rows 1-2 (x 48..64, y 16..48),
-            // two tiles left of the thrower — inside the chase window.
+            // Grab block at (4,0); wall column at gtx=3, rows 1-2 — one tile left of the
+            // block's column, inside the chase window.
             var terrain = SimTerrain.FromAscii(@"
                 OOOOXOOOOOOOOOOOOOOOOOOO
                 OOOXOOOOOOOOOOOOOOOOOOOO
@@ -496,10 +511,20 @@ public class BlockThrowTests(ITestOutputHelper output)
                 XXXXXXXXXXXXXXXXXXXXXXXX
                 XXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-            var hold   = new Vector2(100f, 30f);
+            // Parked at the same offset from Start the old grid used ((100,30) was
+            // (28,-10) off the old Start(72,40)); keeps the swipe's line consistent with
+            // the other throw tests on the shrunk grid.
+            // 10 frames (not the other tests' 8): the swipe must still be PRESSED when
+            // the ball first touches the wall, so the drag absorbs that first contact
+            // silently (the held branch doesn't fuse) and release lands one frame later,
+            // when the fuse check reads that fresh impulse while still tracking. Two
+            // frames shorter and the ball's velocity has already converged to the
+            // point's before it reaches the wall, so it detaches (a plain ballistic
+            // drop) before ever touching it — the scenario this test exists to cover.
+            var hold   = Start + new Vector2(28f, -10f);
             var script = GrabThenHold(hold, 20);
             var p = hold;
-            for (int i = 0; i < 8; i++)          // swipe left, into the wall
+            for (int i = 0; i < 10; i++)          // swipe left, into the wall
             {
                 p += new Vector2(-300f * Dt, 0f);
                 script.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = p });
@@ -534,8 +559,9 @@ public class BlockThrowTests(ITestOutputHelper output)
             Assert.True(hitWhileChasing, "this scenario is only meaningful if the wall is hit mid-chase");
             Assert.True(goneFrame > 0 && goneFrame - hitFrame <= 3,
                         $"it should burst on the wall (struck f{hitFrame}, gone f{goneFrame})");
-            // The floor is at y=48; bursting on the wall means it never got there.
-            Assert.True(lastAt.Y < 40f, $"it should burst at the wall, not fall to the floor first (y={lastAt.Y:F0})");
+            // The floor top is at row 3; bursting on the wall means it never got there.
+            float floorTop = 3f * Chunk.TileSize;
+            Assert.True(lastAt.Y < floorTop - 1f, $"it should burst at the wall, not fall to the floor first (y={lastAt.Y:F0}, floorTop={floorTop:F0})");
         });
     }
 

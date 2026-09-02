@@ -33,6 +33,7 @@ public class RunningOverUnderImpactTests
     public RunningOverUnderImpactTests(ITestOutputHelper o) => _out = o;
 
     private const float Dt = 1f / 30f;
+    private const float TS = Chunk.TileSize;
     private static readonly Vector2 Gravity = new(0f, 600f);
 
     // Vault terrain: 4 rows, 20 cols. Floor row 3. Single-block vault platform
@@ -108,8 +109,8 @@ public class RunningOverUnderImpactTests
         int curFrame = -1;
         terrain.OnTileBroken = (wc, type) =>
         {
-            int gtx = (int)MathF.Floor(wc.X / 16f);
-            int gty = (int)MathF.Floor(wc.Y / 16f);
+            int gtx = (int)MathF.Floor(wc.X / TS);
+            int gty = (int)MathF.Floor(wc.Y / TS);
             broken.Add(new BrokeEvent(curFrame, gtx, gty, type));
         };
 
@@ -160,11 +161,16 @@ public class RunningOverUnderImpactTests
 
     // ── Running OVER a single-block step ──
 
+    // VaultTerrain floor is row 3 (top y = 3·TS); start 1 radius above it, same
+    // convention as SimulationTests.HoldRight_VaultOneBlock, so gravity settles
+    // the body onto the floor instead of spawning it embedded in the ground.
+    private static readonly Vector2 VaultStart = new(12f, 3 * TS - PlayerCharacter.Radius);
+
     [Fact]
     public void RunningOver_StoneStep_DoesNotBreakAnyStone()
     {
         var terrain = VaultTerrain(vaultType: TileType.Stone, floorType: TileType.Stone);
-        var r = RunRightward(terrain, new Vector2(12f, 36f), 120, "running over stone step");
+        var r = RunRightward(terrain, VaultStart, 120, "running over stone step");
 
         Assert.True(r.VisitedParkour, "expected ParkourState during vault");
         Assert.Empty(r.Broken);
@@ -174,7 +180,7 @@ public class RunningOverUnderImpactTests
     public void RunningOver_DirtStep_DoesNotBreakAnyDirt()
     {
         var terrain = VaultTerrain(vaultType: TileType.Dirt, floorType: TileType.Dirt);
-        var r = RunRightward(terrain, new Vector2(12f, 36f), 120, "running over dirt step");
+        var r = RunRightward(terrain, VaultStart, 120, "running over dirt step");
 
         Assert.True(r.VisitedParkour, "expected ParkourState during vault");
         Assert.Empty(r.Broken);
@@ -186,7 +192,7 @@ public class RunningOverUnderImpactTests
     public void RunningOver_SandStep_InvestigationOnly()
     {
         var terrain = VaultTerrain(vaultType: TileType.Sand, floorType: TileType.Sand);
-        var r = RunRightward(terrain, new Vector2(12f, 36f), 120, "running over sand step");
+        var r = RunRightward(terrain, VaultStart, 120, "running over sand step");
 
         Assert.True(r.VisitedParkour, "expected ParkourState during vault (fixture sanity)");
         _out.WriteLine($"Sand vault: {r.Broken.Count} cells broke. (informational; no assert)");

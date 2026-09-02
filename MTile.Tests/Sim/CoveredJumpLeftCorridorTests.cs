@@ -8,16 +8,17 @@ namespace MTile.Tests;
 
 // Reproduces the "CoveredJump occasionally doesn't activate" bug for a left-facing corridor.
 // Spec from the user: the jump should fire any time a portion of the body's bounding box is
-// sticking out from under the overcrop. Half-width hex body: X extent ±6.
-// Corridor here has its left exit corner at x=80; "any portion sticking out" means
-// body.Bounds.Left < 80, i.e. body center X < 86.
+// sticking out from under the overcrop.
+// Corridor here has its left exit corner at x = 5 * Chunk.TileSize (the slab's left edge);
+// "any portion sticking out" means body.Bounds.Left < corner.X.
 public class CoveredJumpLeftCorridorTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
     private const float Gravity = 600f;
 
     // Mirror of HoldSpaceRight_CoveredJumpOutOfTunnel. Ceiling slab at cols 5..19,
-    // so its LEFT edge (the exit corner) is at x = 5 * 16 = 80. Floor top at y=80.
+    // so its LEFT edge (the exit corner) is at x = 5 * Chunk.TileSize. Floor top at
+    // y = 5 * Chunk.TileSize (row 5); ceiling bottom at y = 3 * Chunk.TileSize (row 2's bottom).
     private const string Terrain = @"
         OOOOOOOOOOOOOOOOOOOO
         OOOOOOOOOOOOOOOOOOOO
@@ -27,29 +28,36 @@ public class CoveredJumpLeftCorridorTests(ITestOutputHelper output)
         XXXXXXXXXXXXXXXXXXXX
         XXXXXXXXXXXXXXXXXXXX";
 
-    // For each startX in the "sticking out" range, CoveredJump must activate.
-    // body.Bounds.Left = startX − 8.23; corner is at x=80; sticking out ↔ body.Left < 80
-    //                                                       ↔ startX < 88.23.
+    private const float Corner = 5 * Chunk.TileSize;
+
+    // For each startX in the "sticking out" range, CoveredJump must activate. The body-scale
+    // geometry (hex half-width, sticking-out threshold) doesn't depend on tile size, so these
+    // are the original left-corridor fixture's startX values shifted by the corner's move
+    // (was 5*16=80, now 5*Chunk.TileSize) — the same relative offsets from the corner.
     [Theory]
-    [InlineData(85.5f)]   // body.Left = 79.5 — barely sticking out (0.5 px)
-    [InlineData(85.0f)]   // body.Left = 79 — 1 px sticking out
-    [InlineData(82.0f)]   // body.Left = 76 — 4 px sticking out
-    [InlineData(80.0f)]   // body center at corner; half body sticking out
-    [InlineData(79.5f)]   // body center just past corner into open air
-    [InlineData(78.0f)]   // body center 2 px past corner
-    [InlineData(75.0f)]   // body center 5 px past corner; most of body in open air
-    [InlineData(75.5f)]   // body.Right = 81.5 — ~1.5 px still under the slab (the ceiling
-                          // probe's 2px horizontal inset sets the detection floor; below
-                          // ~0.5px of probed overlap a plain jump is the correct read)
+    [InlineData(Corner + 5.5f)]   // barely sticking out (0.5 px)
+    [InlineData(Corner + 5.0f)]   // 1 px sticking out
+    [InlineData(Corner + 2.0f)]   // 4 px sticking out
+    [InlineData(Corner + 0.0f)]   // body center at corner; half body sticking out
+    [InlineData(Corner - 0.5f)]   // body center just past corner into open air
+    [InlineData(Corner - 2.0f)]   // body center 2 px past corner
+    [InlineData(Corner - 5.0f)]   // body center 5 px past corner; most of body in open air
+    [InlineData(Corner - 4.5f)]   // still mostly under the slab — the shallowest "sticking out"
+                                  // case in this fixture besides the 0.5px one
     public void HoldSpaceLeft_StickingOutOfLeftFacingCorridor_FiresCoveredJump(float startX)
     {
         var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
 
+        float ceilingBottomY = 3 * Chunk.TileSize;
+        float floorTopY      = 5 * Chunk.TileSize;
+
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            // Standing-rest center.Y for floor at y=80: matches the right-facing test's value.
-            StartPosition = new Vector2(startX, 60.5f),
+            // Anywhere in the open interior band settles under gravity within the run —
+            // start at the band's midpoint so it drops onto the floor and compresses
+            // against the low ceiling regardless of the exact starting offset.
+            StartPosition = new Vector2(startX, (ceilingBottomY + floorTopY) / 2f),
             StartVelocity = Vector2.Zero,
             Script        = InputScript.Always(new PlayerInput { Left = true, Space = true }),
             Frames        = 30,
@@ -76,8 +84,8 @@ public class CoveredJumpLeftCorridorTests(ITestOutputHelper output)
         }
 
         Assert.True(fired,
-            $"startX={startX} (body.Left≈{startX-8.23f:F2}, corner=80.0): body has " +
-            $"{80f-(startX-6f):F2} px sticking out past corner — CoveredJump should fire.");
+            $"startX={startX}, corner={Corner:F1}: body should have part of its bounds " +
+            $"sticking out past the corner — CoveredJump should fire.");
     }
 
     // Pins the new precondition: CoveredJump requires a direction to be held.

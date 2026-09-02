@@ -37,7 +37,8 @@ public class StandingJitterTests
     private const float Dt = 1f / 30f;
     private static readonly Vector2 Gravity = new(0f, 600f);
     private const int FloorRow = 20;
-    private const float FloorTopY = FloorRow * 16f;
+    private const float Ts = Chunk.TileSize;
+    private const float FloorTopY = FloorRow * Ts;
 
     private static ChunkMap WidePlatform()
     {
@@ -104,7 +105,7 @@ public class StandingJitterTests
     public void StandingPlayer_NoSprouts_BodyYIsFlat()
     {
         var terrain = WidePlatform();
-        const float spawnX = 10 * 16f + 8f;
+        const float spawnX = 10 * Ts + Ts / 2f;
         var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - RestOffset));
 
         var samples = RunWithLog(terrain, player, 40);
@@ -132,7 +133,7 @@ public class StandingJitterTests
     {
         var terrain = WidePlatform();
         const int playerCol = 10;
-        float spawnX = playerCol * 16f + 8f;
+        float spawnX = playerCol * Ts + Ts / 2f;
         var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - RestOffset));
 
         // Frame 8: player has settled standing on the floor. Request a sprout
@@ -195,7 +196,7 @@ public class StandingJitterTests
     {
         var terrain = WidePlatform();
         const int playerCol = 10;
-        float spawnX = playerCol * 16f + 8f;
+        float spawnX = playerCol * Ts + Ts / 2f;
         var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - RestOffset));
 
         const int requestFrame = 8;
@@ -256,11 +257,11 @@ public class StandingJitterTests
         Assert.True(chainEndFrame > requestFrame, "expected the sprout chain to finalize within the run");
 
         // Settled y after the full chain — body should be standing on row 17.
-        // Expected: floor top at row 17 = 17·16 = 272, minus the standing rest offset
+        // Expected: floor top at row 17 = 17·11 = 187, minus the standing rest offset
         // (R·(1+sin60°) ≈ 22.4 at R=12). The fold's hover rest sits ~1.5px lower
         // than the old spring equilibrium (C-surface − 10 vs minDistance − sag),
         // so the slack band is widened one px on the low side.
-        float expected = 17 * 16f - RestOffset;
+        float expected = 17 * Ts - RestOffset;
         float settledAfter = samples[^1].PosY;
         _out.WriteLine($"settled y after stacked chain: {settledAfter:F3} (expected ~{expected:F1})");
         Assert.InRange(settledAfter, expected - 3f, expected + 4f);
@@ -315,7 +316,7 @@ public class StandingJitterTests
     {
         var terrain = WidePlatform();
         const int playerCol = 10;
-        float spawnX = playerCol * 16f + 8f;
+        float spawnX = playerCol * Ts + Ts / 2f;
         var player = new PlayerCharacter(new Vector2(spawnX, FloorTopY - RestOffset));
 
         const int requestFrame = 8;

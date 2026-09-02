@@ -69,12 +69,13 @@ public class SimulationTests(ITestOutputHelper output)
             OOOOOOOOXXXXXXXXOOOO
             XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        // Ground top = row 3 = y:48. Player center.Y = 48 - 12 = 36.
-        // Start at X=12 (one radius from left edge), approaching platform at X=128.
+        // Ground top = row 3 (Chunk.TileSize-scaled). Player center.Y = groundTop - Radius,
+        // touching the ground from above. Start at X=12 (one radius from left edge).
+        float groundTopY = 3 * Chunk.TileSize;
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            StartPosition = new Vector2(12f, 36f),
+            StartPosition = new Vector2(12f, groundTopY - PlayerCharacter.Radius),
             Script        = InputScript.Always(new PlayerInput { Right = true }),
             Frames        = 180,
             Dt            = Dt,
@@ -362,10 +363,16 @@ public class SimulationTests(ITestOutputHelper output)
             OOOOOOOOXXXXXXXXOOOO
             XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
+        // Wall face = col 8's left edge; "touching" = wallFace - Radius (same idiom as the
+        // touching-block vault tests). Ground top = row 3; rest offset (19.5) is a physics
+        // constant, not grid-scaled — see the standing-rest height used elsewhere in this file.
+        float wallFaceX  = 8 * Chunk.TileSize;
+        float touchingX  = wallFaceX - PlayerCharacter.Radius;
+        float groundTopY = 3 * Chunk.TileSize;
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            StartPosition = new Vector2(116f, 24f),
+            StartPosition = new Vector2(touchingX, groundTopY - 19.5f),
             StartVelocity = new Vector2(0f, 0f),
             Script        = InputScript.Always(new PlayerInput { Right = true, Down = true }),
             Frames        = 60,
@@ -520,14 +527,17 @@ public class SimulationTests(ITestOutputHelper output)
             OOOOOOOOXXXXXXXXOOOO
             XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        // Ground top y=48; start a bit back at standing-rest height, running right
-        // at walking speed, so the body is settled in StandingState before it
-        // reaches the step face at x=128.
+        // Ground top / wall face scaled off Chunk.TileSize; start a few tiles back at
+        // standing-rest height (rest offset 19.5 is a physics constant, unaffected by grid
+        // scale — see the other standing-rest positions in this file), running right at
+        // walking speed, so the body is settled in StandingState before it reaches the wall.
         const float WalkSpeed = 100f; // MovementConfig default MaxWalkSpeed
+        float groundTopY = 3 * Chunk.TileSize;
+        float wallFaceX  = 8 * Chunk.TileSize;
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            StartPosition = new Vector2(60f, 29f),
+            StartPosition = new Vector2(wallFaceX - 4 * Chunk.TileSize, groundTopY - 19.5f),
             StartVelocity = new Vector2(WalkSpeed, 0f),
             Script        = InputScript.Always(new PlayerInput { Right = true }),
             Frames        = 90,
@@ -583,8 +593,9 @@ public class SimulationTests(ITestOutputHelper output)
         // and is independent of approach speed — a fixed vy budget, not a ratio.
         // (The old 1.4× ratio bar leaned on the pre-fold walk cap's overshoot
         // equilibrium inflating the denominator; the fold walks at the true
-        // configured speed.)
-        float hopBudget = BallisticPredictor.BallisticVy(26f);   // rise 16 + margin 4 + hover/lip slack
+        // configured speed.) Rise = one-tile step height (Chunk.TileSize) + the
+        // standing hover clearance (FoldHoverOffset) the vault climbs through.
+        float hopBudget = BallisticPredictor.BallisticVy(Chunk.TileSize + MovementConfig.Current.FoldHoverOffset);
         float peakAllowed = MathF.Sqrt(entrySpeed * entrySpeed + hopBudget * hopBudget) + 5f;
         Assert.True(peakSpeed <= peakAllowed,
             $"|v| spiked past the authored hop: peak={peakSpeed:F1}, entry={entrySpeed:F1} (want ≤ {peakAllowed:F1})");
@@ -695,12 +706,16 @@ public class SimulationTests(ITestOutputHelper output)
             XXXXXXXXOOOOOOOO
             XXXXXXXXOOOOOOOO", originTileX: 0, originTileY: 0);
 
-        // Start at col 6 (x=104), standing-rest height (y≈60.5), at rest. Edge is at x=128 ⇒ body
-        // must slide ~32px before its left vertex clears the corner.
+        // Edge is at col 8's left face (Chunk.TileSize-scaled). Start a short, TileSize-independent
+        // 24px short of it (near the edge but not already hanging over it — IsHangingOver requires
+        // the bounding box to have crossed), at standing-rest height (rest offset 19.5 is a physics
+        // constant, unaffected by grid scale — see the other standing-rest positions in this file).
+        float platformEdgeX = 8 * Chunk.TileSize;
+        float platformTopY  = 5 * Chunk.TileSize;
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            StartPosition = new Vector2(104f, 60.5f),
+            StartPosition = new Vector2(platformEdgeX - 24f, platformTopY - 19.5f),
             StartVelocity = new Vector2(0f, 0f),
             Script        = InputScript.Always(new PlayerInput { Right = true, Down = true }),
             Frames        = 60,
@@ -723,11 +738,12 @@ public class SimulationTests(ITestOutputHelper output)
         for (int i = dropEnd + 1; i < frames.Length; i++) if (frames[i].State.Contains("Falling")) { fellAfter = true; break; }
         Assert.True(fellAfter, "Expected FallingState after the dropdown");
 
-        // Body actually fell off and past the edge — final position is below the platform top (80)
-        // by a wide margin, and well past the edge x=128.
+        // Body actually fell off and past the edge — final position is below the platform top
+        // by a wide margin, and well past the edge (same 72px "well past" margin as before,
+        // an absolute travel distance independent of grid scale).
         var last = frames[^1];
         Assert.True(last.Y > 200f, $"Body should be well below platform — final Y={last.Y:F1}");
-        Assert.True(last.X > 200f, $"Body should be well past edge — final X={last.X:F1}");
+        Assert.True(last.X > platformEdgeX + 72f, $"Body should be well past edge — final X={last.X:F1}");
     }
 
     // ── Walk into a wall too tall to vault ─────────────────────────────────

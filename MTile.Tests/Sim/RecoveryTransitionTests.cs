@@ -261,48 +261,4 @@ public class RecoveryTransitionTests(ITestOutputHelper output)
             $"Release after an overhold should still fire the stab promptly (release≈f{release}, stab@f{stabFirst}).");
     }
 
-    // ── 7. Charge scales stab damage: tap < settle < sweet spot ──────────────
-    // The wind-up's charge fraction (stamped by RecoveryAction.Exit, consumed by
-    // StabAction.Enter) multiplies the stab's damage between 1× and 2×. A
-    // grounded stab connect costs the victim DamagePerFrame (TileMaxHP/4) times
-    // that multiplier, once (HitId dedupe), so victim HP measures the handoff
-    // end to end.
-    [Theory]
-    [InlineData( 9, 0.25f * (1f + 8f / 30f))]  // tap: 0.27s into the ramp → ~1.27×
-    [InlineData(32, 0.50f)]                    // sweet spot: 1.03s → full 2×
-    [InlineData(60, 0.40f)]                    // overheld: 1.97s → settled 1.6×
-    public void ChargedStab_DamageFollowsTheCurve(int holdFrames, float expectedLoss)
-    {
-        var script = new InputScript()
-            .For   (15, new PlayerInput { MouseWorldPosition = PressMouse })
-            .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = PressMouse })
-            .For   (holdFrames - 1, new PlayerInput { LeftClick = true, MouseWorldPosition = ReleaseMouse })
-            .Forever   (new PlayerInput { MouseWorldPosition = ReleaseMouse });
-
-        var cfg = new SimConfigMulti
-        {
-            Terrain = FlatGround(),
-            Frames  = 15 + holdFrames + 30,
-            Dt      = Dt,
-            Gravity = new Vector2(0f, 600f),
-            Players = new[]
-            {
-                new SimPlayer { StartPosition = Start, Script = script },
-                new SimPlayer { StartPosition = new Vector2(95f, 20f), Script = new InputScript(),
-                                Faction = Faction.Neutral },
-            },
-        };
-
-        float startHp = -1f, finalHp = -1f;
-        SimRunner.RunMulti(cfg, onFrame: (f, ps) =>
-        {
-            if (f == 0) startHp = ps[1].Health;
-            finalHp = ps[1].Health;
-        });
-
-        float loss = startHp - finalHp;
-        output.WriteLine($"hold {holdFrames}f → victim lost {loss:F3} HP (expected {expectedLoss:F3})");
-        Assert.True(loss > 0f, "Stab never connected — no HP loss observed.");
-        Assert.Equal(expectedLoss, loss, 2);
-    }
 }

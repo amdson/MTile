@@ -35,8 +35,10 @@ public class BlockBurstTests(ITestOutputHelper output)
     // A cell the drag-build CAN paint: sitting on the floor, well within 64px.
     private static readonly Vector2 Paintable = new(72f, 40f);
 
-    // Inside the floor.
-    private static readonly Vector2 InSolid = new(56f, 56f);
+    // Inside the floor (row 3's solid span is [3*TileSize, 4*TileSize) — land
+    // on that row's cell centre so this stays inside solid regardless of
+    // tile size).
+    private static readonly Vector2 InSolid = new(40f, 3 * Chunk.TileSize + Chunk.TileSize / 2f);
 
     // Close in (~26px, well inside BuildReach) but floating: tile row 1, which touches
     // no solid — row 2 is what sits against the floor. The drag-build can't place here

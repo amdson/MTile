@@ -32,8 +32,8 @@ public class PlayerImpactByVelocityTests
     private const float Dt = 1f / 30f;
     private static readonly Vector2 Gravity = new(0f, 600f);
     private const int FloorRow = 20;
-    private const float FloorTopY = FloorRow * 16f;
-    private const float PlayerCenterX = 10 * 16f + 8f;   // center of column 10
+    private const float FloorTopY = FloorRow * Chunk.TileSize;
+    private const float PlayerCenterX = 10 * Chunk.TileSize + Chunk.TileSize / 2f;   // center of column 10
 
     private const float SingleJumpHeight = 55f;
     private const float DoubleJumpHeight = 110f;

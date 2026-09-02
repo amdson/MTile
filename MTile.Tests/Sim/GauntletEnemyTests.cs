@@ -33,18 +33,22 @@ public class GauntletEnemyTests(ITestOutputHelper output)
 
     private const float FloorTopY = 3 * Chunk.TileSize;   // 48
 
-    // Roofed corridor: ceiling occupies tile rows 0-1, floor row 5, interior
-    // rows 2-4 (48px of headroom — the player stands ~33px).
+    // Roofed corridor: ceiling occupies tile rows 0-1, floor row 6, interior
+    // rows 2-5 (four tiles of headroom, comfortably above the standing-fold
+    // envelope so the player doesn't auto-crouch and cramp the Latcher's swing).
     private static ChunkMap Tunnel() => SimTerrain.FromAscii(@"
         XXXXXXXXXXXXXXXXXXXXXXXX
         XXXXXXXXXXXXXXXXXXXXXXXX
         OOOOOOOOOOOOOOOOOOOOOOOO
         OOOOOOOOOOOOOOOOOOOOOOOO
         OOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXXXXXX", originTileX: -4, originTileY: 0);
 
-    private const float CeilingBottomY = 2 * Chunk.TileSize;   // 32
-    private const float TunnelFloorTopY = 5 * Chunk.TileSize;  // 80
+    private const float CeilingBottomY = 2 * Chunk.TileSize;
+    private const float TunnelFloorTopY = 6 * Chunk.TileSize;
+    // Anything past the corridor's vertical midpoint means the Latcher let go.
+    private const float TunnelMidpointY = (CeilingBottomY + TunnelFloorTopY) / 2f;
 
     private static readonly PlayerInput Idle = default;
 
@@ -133,15 +137,21 @@ public class GauntletEnemyTests(ITestOutputHelper output)
     {
         // A wall of stone standing on the floor, and a bolt fired straight into
         // it from the left. The bolt must open a hole (cover is consumable) and
-        // must NOT keep going forever (the level is not).
+        // must NOT keep going forever (the level is not). A blank buffer row
+        // separates the wall from the floor: the bolt's fixed HitboxHalfSize (6,
+        // 12px tall) is now taller than a single 11px tile, so a level shot
+        // through the wall's row unavoidably grazes the row above/below it —
+        // the buffer keeps that graze off the floor the last assert checks.
         var chunks = SimTerrain.FromAscii(@"
             OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOOOOOOOOOXOOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOOOOOOOOOXOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
             XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: -4, originTileY: 0);
 
-        // Wall column: ascii col 23 with originTileX -4 ⇒ tile x 19, rows 1-2.
+        // Wall column: ascii col 23 with originTileX -4 ⇒ tile x 19, rows 1-2. Floor is row 4.
         const int WallTx = 19;
+        const int FloorTy = 4;
         int solidBefore = CountSolid(chunks, WallTx - 1, WallTx + 1, 1, 2);
         Assert.Equal(2, solidBefore);
 
@@ -162,7 +172,7 @@ public class GauntletEnemyTests(ITestOutputHelper output)
 
         // The floor under the flight path is untouched: the bolt travels level,
         // so a level shot must not trench the ground it flew over.
-        Assert.True(CountSolid(chunks, 0, 15, 3, 3) == 16,
+        Assert.True(CountSolid(chunks, 0, 15, FloorTy, FloorTy) == 16,
             "Rail bolt damaged floor cells it never intersected.");
         output.WriteLine($"Wall cells {solidBefore} → {solidAfter}.");
     }
@@ -251,9 +261,7 @@ public class GauntletEnemyTests(ITestOutputHelper output)
             if (latcher.Body.Position.Y > worstY) worstY = latcher.Body.Position.Y;
         }
 
-        // Ceiling underside is 32; the floor is at 80. Anything past the midpoint
-        // means it let go.
-        Assert.True(worstY < 56f,
+        Assert.True(worstY < TunnelMidpointY,
             $"Latcher peeled off the ceiling (lowest y {worstY:F1}, floor at {TunnelFloorTopY}).");
         output.WriteLine($"Held ceiling for 300 frames; lowest y {worstY:F1}.");
     }
@@ -281,7 +289,7 @@ public class GauntletEnemyTests(ITestOutputHelper output)
 
         Assert.True(sim.Player.Combat.DamageTaken > 0f,
             "Latcher never connected from an inverted position.");
-        Assert.True(worstY < 56f,
+        Assert.True(worstY < TunnelMidpointY,
             $"Latcher fell off the ceiling while attacking (lowest y {worstY:F1}).");
         output.WriteLine($"Lowest y {worstY:F1}; player at {sim.Player.Combat.DamageTaken:F2}%.");
     }

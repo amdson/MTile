@@ -128,8 +128,11 @@ public class PullPointSnapshotTests(ITestOutputHelper output)
 
     private static PlayerInput ThrowInputAt(int frame)
     {
-        var onBlock = new Vector2(72f, 8f);
-        var pullTo  = new Vector2(120f, 8f);
+        // Cell (4,0) center on the current Chunk.TileSize grid.
+        var onBlock = new Vector2(4 * Chunk.TileSize + Chunk.TileSize / 2f, Chunk.TileSize / 2f);
+        // 48 px out (absolute, not tile-scaled — beats the free block's core-only glue,
+        // a px-tuned config threshold unrelated to the grid).
+        var pullTo  = onBlock + new Vector2(48f, 0f);
         var hold    = new Vector2(100f, 30f);
         if (frame < 10) return new PlayerInput { MouseWorldPosition = onBlock };
         if (frame < 25) return new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = onBlock };
@@ -152,7 +155,10 @@ public class PullPointSnapshotTests(ITestOutputHelper output)
         cfg.BlockPeelEnabled = true;
         try
         {
-            var sim = new Simulation(FloatingBlock(), new Vector2(72f, 40f), _ => { });
+            // Cell (4,2) center: one row below the block, mid-gap, clear of both the
+            // block above and the floor below.
+            var start = new Vector2(4 * Chunk.TileSize + Chunk.TileSize / 2f, 2 * Chunk.TileSize + Chunk.TileSize / 2f);
+            var sim = new Simulation(FloatingBlock(), start, _ => { });
             for (int f = 0; f < k; f++) sim.Step(ThrowInputAt(f));
 
             bool sawBall = false;

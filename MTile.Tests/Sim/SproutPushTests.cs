@@ -174,16 +174,23 @@ public class SproutPushTests(ITestOutputHelper output)
             OOOOOOOOOOOXOOOOOOOO
             XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        bool ok = terrain.TrySpawnSprout(168f, 40f);
+        // Sprout cell (col 10, row 2) centre, TileSize-derived (was the literal
+        // (168, 40) baked in for a 16px tile).
+        float ts = Chunk.TileSize;
+        var sproutCenter = new Vector2(10f * ts + ts * 0.5f, 2f * ts + ts * 0.5f);
+        bool ok = terrain.TrySpawnSprout(sproutCenter.X, sproutCenter.Y);
         Assert.True(ok);
 
+        // The sprout's finalised AABB left face sits at the col-10 tile boundary.
+        float faceX = 10f * ts;
+
         // Start moving right at walk speed, holding Right, well clear of the
-        // sprout's final face (x=160). The walk would carry the body past 160
-        // in ~3 frames if the sprout didn't intercept it.
+        // sprout's final face. The walk would carry the body past the face
+        // in a few frames if the sprout didn't intercept it.
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            StartPosition = new Vector2(140f, 52f),
+            StartPosition = new Vector2(faceX - 20f, 4f * ts - 12f),
             StartVelocity = new Vector2(100f, 0f),
             Script        = InputScript.Always(new PlayerInput { Right = true }),
             Frames        = 30,
@@ -197,15 +204,16 @@ public class SproutPushTests(ITestOutputHelper output)
 
         var last = frames[^1];
         float maxX = frames.Max(f => f.X);
-        output.WriteLine($"final X={last.X:F2}, max X={maxX:F2} (start 140.00, walking right)");
-        // Sprout final AABB left face at x=160 ⇒ ideal body-centre limit is
-        // 160 - 8.23 ≈ 151.77. In practice the body dithers against the face
-        // (ParkourState keeps trying to vault the growing block), nosing ~3 px
-        // past that line every cycle — it did so even in historically-green
-        // runs, where the final frame just happened to land on the retreat
-        // phase of the oscillation. Assert the real contract: the body never
-        // meaningfully advances past the sprout face at ANY frame.
-        Assert.True(maxX <= 156f,
-            $"Player walked through a leftward-sprouting block — max X={maxX:F2} (expected ≤ 156)");
+        output.WriteLine($"final X={last.X:F2}, max X={maxX:F2} (start {faceX - 20f:F2}, walking right)");
+        // Ideal body-centre limit is faceX minus the body's horizontal half-width.
+        // In practice the body dithers against the face (ParkourState keeps trying
+        // to vault the growing block), nosing a few px past that line every cycle —
+        // it did so even in historically-green runs, where the final frame just
+        // happened to land on the retreat phase of the oscillation. Assert the real
+        // contract: the body never meaningfully advances past the sprout face at
+        // ANY frame (same absolute overshoot allowance as before — it comes from
+        // the body's geometry, not the tile grid).
+        Assert.True(maxX <= faceX - 4f,
+            $"Player walked through a leftward-sprouting block — max X={maxX:F2} (expected ≤ {faceX - 4f:F2})");
     }
 }

@@ -26,32 +26,37 @@ public class CombatHitstunTests(ITestOutputHelper output)
             OOOOOOOOOOOOOOOOOOOOOOOOOOOO
             XXXXXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        // Place attacker at x=70, victim at x=95 (≈25 px apart). Slash apex sits
-        // at attacker.X + ArcRadius ≈ 84 and the hitbox half-width is ArcRadius/2,
-        // so the active region is roughly x∈[77,91]. Victim body left edge ≈ 85.5,
-        // so the slash clips the victim's hurtbox cleanly.
-        var attackerStart = new Vector2(70f, 20f);
-        var victimStart   = new Vector2(95f, 20f);
+        // Place attacker at x=70, victim at x=95 (≈25 px apart) — weapon-reach geometry,
+        // independent of the tile grid. Y = floor top - Radius (touching from above, so
+        // both start at rest with no fall-settle needed). Floor top = row 2, scaled off
+        // Chunk.TileSize.
+        float floorTopY = 2 * Chunk.TileSize;
+        var attackerStart = new Vector2(70f, floorTopY - PlayerCharacter.Radius);
+        var victimStart   = new Vector2(95f, floorTopY - PlayerCharacter.Radius);
         // Mouse far to the right of the attacker so SlashLikeAction.ComputeSlashDir
         // returns (+1, 0). PlayerCharacter.Facing defaults to +1 — no input needed
         // to orient the attacker.
         var mouseAhead    = new Vector2(200f, 28f);
 
-        // Attacker: 15-frame settle, then one click (1 frame LMB-down at frame 15).
-        // Release at frame 16 fires Click intent → GroundSlash1 enters frame 16.
-        // Slash duration 0.14s ≈ 4 frames; hitbox active first ~2 frames (16–17).
-        // Hold mouse position the whole time so slashDir stays right.
+        // Attacker: 13-frame settle, then one click (1 frame LMB-down at frame 13).
+        // Both players now start already touching the floor (no fall-settle needed,
+        // per the Y formula above), which lands the slash a couple ticks sooner than
+        // the old fall-then-land rig this test was originally timed against — trimmed
+        // here so the hit still lands (hitstun first true at frame 16) strictly BEFORE
+        // the victim's first jump-press edge below. Gating only works one-directional:
+        // HitstunActive read at frame N reflects the hit resolved during frame N-1, so
+        // a jump pressed the very same frame the hit lands is not yet gated — the hit
+        // must land at least one frame ahead of the press to prove the gate.
         var attackerScript = new InputScript()
-            .For   (15, new PlayerInput { MouseWorldPosition = mouseAhead })
+            .For   (13, new PlayerInput { MouseWorldPosition = mouseAhead })
             .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = mouseAhead })
             .Forever   (new PlayerInput { MouseWorldPosition = mouseAhead });
 
         // Victim: idle until frame 17, then pulse Space (1f on, 3f off) repeatedly.
-        // The slash hits in frame 16 (CombatSystem.Apply at end of frame); from
-        // frame 17 onward Combat.HitstunActive is true for ~8 frames. Each Space
-        // press-edge raises JumpJustPressed for one frame; without the hitstun
-        // gate, victim would enter JumpingState. With the gate, they stay
-        // grounded.
+        // Hitstun is already active by frame 16 (see above), so every Space
+        // press-edge below raises JumpJustPressed while HitstunActive is true.
+        // Without the hitstun gate, victim would enter JumpingState. With the
+        // gate, they stay grounded.
         var jumpPressed = new PlayerInput { Space = true };
         var noInput = default(PlayerInput);
         var victimScript = new InputScript()
@@ -288,11 +293,14 @@ public class CombatHitstunTests(ITestOutputHelper output)
             OOOOOOOOOOOOOOOO
             XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        // Drop from y=20 onto floor top at y=512: ~492 px fall, impact vy ≈ 770.
+        // Floor top = row 32 (Chunk.TileSize-scaled). Drop the same ~492px fall used before the
+        // grid change (impact vy depends only on fall height and gravity, both grid-independent) —
+        // impact vy ≈ 770, comfortably past the 700 CrushImpulseThreshold.
+        float floorTopY = 32 * Chunk.TileSize;
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            StartPosition = new Vector2(120f, 20f),
+            StartPosition = new Vector2(120f, floorTopY - 492f),
             Script        = InputScript.Always(default),
             Frames        = 60,
             Dt            = Dt,

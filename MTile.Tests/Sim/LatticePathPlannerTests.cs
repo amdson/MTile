@@ -38,14 +38,24 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
             new Vector2(1f, 0f), hover: true, MovementConfig.Current.FoldHoverOffset,
             MovementConfig.Current.FoldRiseCost, path, out cost, out bonk);
 
-    // Flat floor at tile row 6 (top face y = 96): rest center ≈ 75.6.
+    // Flat floor at tile row 6 (top face y = 6·TileSize).
+    private const int FloorRow = 6;
     private static ChunkMap FlatFloor() =>
-        SimTerrain.FromAscii(new string('X', 40), originTileX: 0, originTileY: 6);
+        SimTerrain.FromAscii(new string('X', 40), originTileX: 0, originTileY: FloorRow);
+
+    // Hover rest height above a floor whose top face sits at world y F: the
+    // hexagon's bottom vertex touches the floor at F − Radius (the flat-top
+    // facet's tile-half-extent support cancels against the tile-center
+    // offset, so this is exact and TileSize-independent — verified against
+    // CObstacleTemplate.Build/TopSurfaceRy), and hover parks HoverOffset
+    // above that touch point.
+    private static float HoverY(float floorTopFaceY) =>
+        floorTopFaceY - PlayerCharacter.Radius - MovementConfig.Current.FoldHoverOffset;
 
     [Fact]
     public void FlatWalk_HugsHover_ReachesFarBand()
     {
-        var seed = new Vector2(100f, 75f);
+        var seed = new Vector2(100f, HoverY(FloorRow * Chunk.TileSize));
         var (planner, body, path) = Setup(seed);
         int n = Solve(planner, FlatFloor(), body, seed, path, out _, out bool bonk);
 
@@ -180,7 +190,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
 
     private static void SeedVelocity_FixesInitialDirection_Body()
     {
-        var seed = new Vector2(100f, 75f);
+        var seed = new Vector2(100f, HoverY(FloorRow * Chunk.TileSize));
         var (planner, body, path) = Setup(seed);
         int n = Solve(planner, FlatFloor(), body, seed, new Vector2(100f, -100f), path,
                       out _, out bool bonk);
@@ -211,7 +221,7 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
 
     private static void SeedVelocity_SlowIsNotForced_Body()
     {
-        var seed = new Vector2(100f, 75f);
+        var seed = new Vector2(100f, HoverY(FloorRow * Chunk.TileSize));
         var (planner, body, path) = Setup(seed);
         int n = Solve(planner, FlatFloor(), body, seed, new Vector2(10f, -10f), path,
                       out _, out _);

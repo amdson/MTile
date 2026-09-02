@@ -31,7 +31,8 @@ public class BounceTests
     private const float Dt = 1f / 30f;
     private static readonly Vector2 Gravity = new(0f, 600f);
     private const int FloorRow = 20;
-    private const float FloorTopY = FloorRow * 16f;
+    private const float T = Chunk.TileSize;
+    private const float FloorTopY = FloorRow * T;
 
     private static ChunkMap WidePlatform()
     {
@@ -107,7 +108,7 @@ public class BounceTests
     public void VerticalBounce_BareBodyOnStone_ReachesTwoDistinctApexes()
     {
         var terrain = WidePlatform();
-        var body = BounceBox(new Vector2(10 * 16f + 8f, FloorTopY - 200f), restitution: 0.6f);
+        var body = BounceBox(new Vector2(10 * T + T / 2f, FloorTopY - 200f), restitution: 0.6f);
 
         var ys      = new List<float>();
         var vys     = new List<float>();
@@ -134,10 +135,11 @@ public class BounceTests
             $"expected at least 2 distinct bounces, saw {bounces.Count}");
 
         // After settling, body should be at rest near floor top - half-height.
-        // Box body half-height = 8, floor top = 320 ⇒ rest y ≈ 312 (no
-        // FSD spring on a bare body, so it sits flush against the tile).
+        // Box body half-height = 8, floor top = FloorTopY ⇒ rest y ≈
+        // FloorTopY - 8 (no FSD spring on a bare body, so it sits flush
+        // against the tile).
         float restY = ys[^1];
-        Assert.InRange(restY, 311f, 313f);
+        Assert.InRange(restY, FloorTopY - 9f, FloorTopY - 7f);
     }
 
     // Restitution = 1 (perfect elastic) bouncing on a static surface should
@@ -149,7 +151,7 @@ public class BounceTests
     {
         var terrain = WidePlatform();
         float startY = FloorTopY - 100f;   // 100 px above floor
-        var body = BounceBox(new Vector2(10 * 16f + 8f, startY), restitution: 1f);
+        var body = BounceBox(new Vector2(10 * T + T / 2f, startY), restitution: 1f);
 
         float minY = body.Position.Y;   // highest point reached (smallest y)
         Step(body, terrain, 60, (f, b) =>
@@ -170,13 +172,13 @@ public class BounceTests
     public void NoBounce_BelowThreshold_BodyStops()
     {
         var terrain = WidePlatform();
-        var body = BounceBox(new Vector2(10 * 16f + 8f, FloorTopY - 20f),
+        var body = BounceBox(new Vector2(10 * T + T / 2f, FloorTopY - 20f),
                              restitution: 0.6f, threshold: 200f);
 
         Step(body, terrain, 30);
 
         // Body should be at rest atop the floor.
-        Assert.InRange(body.Position.Y, 311f, 313f);
+        Assert.InRange(body.Position.Y, FloorTopY - 9f, FloorTopY - 7f);
         Assert.InRange(body.Velocity.Y,  -1f,   1f);
     }
 
@@ -187,9 +189,10 @@ public class BounceTests
     public void HorizontalBounce_BareBodyIntoWall_VxReverses()
     {
         var terrain = WallAndFloor();
-        // Spawn 5 tiles left of the wall (col 12 starts at x=192), at row 18 ⇒
-        // y center = 18*16+8 = 296. Aim straight at the wall.
-        var body = BounceBox(new Vector2(7 * 16f + 8f, 18 * 16f + 8f), restitution: 0.6f);
+        // Spawn 5 tiles left of the wall (col 12 starts at x=12*T), at row 18.
+        // Aim straight at the wall.
+        float wallLeftFace = 12 * T;
+        var body = BounceBox(new Vector2(7 * T + T / 2f, 18 * T + T / 2f), restitution: 0.6f);
         body.Velocity = new Vector2(500f, 0f);
 
         var noGravity = Vector2.Zero;
@@ -206,7 +209,7 @@ public class BounceTests
             if (body.Position.X > maxXReached) maxXReached = body.Position.X;
         }
 
-        _out.WriteLine($"max x reached: {maxXReached:F2} (wall left face at x=192)");
+        _out.WriteLine($"max x reached: {maxXReached:F2} (wall left face at x={wallLeftFace:F2})");
         _out.WriteLine($"vx trace: [{string.Join(", ", vxs.ConvertAll(v => v.ToString("F1")))}]");
 
         // vx must flip sign (positive → negative) at some point, and at the
@@ -219,7 +222,7 @@ public class BounceTests
 
         // The body's max-x must be ≤ wall's left face + a small overshoot
         // (Epsilon push-out from the solver).
-        Assert.InRange(maxXReached, 180f, 192f);
+        Assert.InRange(maxXReached, wallLeftFace - 12f, wallLeftFace);
     }
 
     // Stacking restitution on horizontal: vx after bounce should be roughly
@@ -228,7 +231,7 @@ public class BounceTests
     public void HorizontalBounce_RestitutionScalesVelocity()
     {
         var terrain = WallAndFloor();
-        var body = BounceBox(new Vector2(7 * 16f + 8f, 18 * 16f + 8f), restitution: 0.6f);
+        var body = BounceBox(new Vector2(7 * T + T / 2f, 18 * T + T / 2f), restitution: 0.6f);
         body.Velocity = new Vector2(500f, 0f);
 
         var bodies = new List<PhysicsBody> { body };

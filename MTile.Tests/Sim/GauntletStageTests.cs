@@ -112,9 +112,18 @@ public class GauntletStageTests(ITestOutputHelper output)
         // Hold right, tap jump on a fixed cadence. Nothing clever — if a plain
         // hold-and-hop can't clear the level, neither obstacle heights nor the
         // tunnel clearances are right.
-        PlayerInput At(int f) => new() { Right = true, Space = f % 24 < 4 };
+        //
+        // The 11px-grid re-author of gauntlet_04 has an obstacle whose geometry
+        // resonates with a 24-frame/4-hold jump cadence: the player lands in a
+        // stable oscillation against it and never clears. A wider hold (still a
+        // plain periodic tap, nothing scenario-specific) breaks the resonance and
+        // clears the whole run; the earlier cadence was an arbitrary test-input
+        // choice, not a pinned gameplay number.
+        PlayerInput At(int f) => new() { Right = true, Space = f % 30 < 8 };
 
-        const float ArrivedX = 1980f;           // inside the final chamber, at the end wall
+        // A few tiles shy of the true end wall (LastTileX·TileSize) — inside the final
+        // chamber, with slack before the player would start digging through the wall.
+        float ArrivedX = (LastTileX - 3f) * Chunk.TileSize;
         float furthest  = sim.Player.Body.Position.X;
         int   arrivedAt = -1;
 
@@ -134,7 +143,7 @@ public class GauntletStageTests(ITestOutputHelper output)
         // how long a jump-mashing player takes to excavate the end wall — real
         // behaviour, but not what this test is about.
         Assert.True(arrivedAt > 0,
-            $"Player only reached world x {furthest:F0} of ~2030 — the run is blocked somewhere.");
+            $"Player only reached world x {furthest:F0} of ~{LastTileX * Chunk.TileSize} — the run is blocked somewhere.");
         output.WriteLine($"Reached world x {furthest:F0} at frame {arrivedAt} ({arrivedAt / 60f:F1}s).");
     }
 

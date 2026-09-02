@@ -206,8 +206,9 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
     [Fact]
     public void TheColumnReachesFarBeyondTheOldAlertRange()
     {
-        // Flat open floor 140 tiles wide — no cover, so this is purely about distance.
-        const int Wide = 140, Floor = 7;
+        // Flat open floor, wide enough at TS=11 to still put ~1900px between the two —
+        // no cover, so this is purely about distance.
+        const int Wide = 200, Floor = 7;
         var rows = new List<string>();
         for (int r = 0; r < Floor; r++) rows.Add(new string('.', Wide));
         rows.Add(new string('X', Wide));
@@ -216,7 +217,7 @@ public class ZeusBlindFireTests(ITestOutputHelper output)
 
         // ~1900px apart: triple the old 620 alert range, and past the old 900 MaxRange.
         var zeusAt   = new Vector2(2 * TS + 8f, 5 * TS + 8f);
-        var playerAt = new Vector2(122 * TS + 8f, 6 * TS + 4f);
+        var playerAt = new Vector2(177 * TS + 8f, 6 * TS + 4f);
         float dist   = (playerAt - zeusAt).Length();
         Assert.True(dist > 1800f, $"the course is not long enough to prove anything ({dist:F0}px)");
 

@@ -45,14 +45,14 @@ public class StairClimbTests(ITestOutputHelper output)
     {
         const int Steps = 10;
         var terrain = Stairs(Steps);
-        int floorRowTop = (Steps + 6 - 2) * 16;          // runway floor surface y
-        float startY = floorRowTop - 12f;
-        float plateauY = floorRowTop - Steps * 16;        // plateau surface y
+        int floorRowTop = (Steps + 6 - 2) * Chunk.TileSize;   // runway floor surface y
+        float startY = floorRowTop - PlayerCharacter.Radius;
+        float plateauY = floorRowTop - Steps * Chunk.TileSize; // plateau surface y
 
         var frames = SimRunner.Run(new SimConfig
         {
             Terrain = terrain,
-            StartPosition = new Vector2(24f, startY),
+            StartPosition = new Vector2(Chunk.TileSize + Chunk.TileSize / 2f, startY),
             StartVelocity = Vector2.Zero,
             Script = InputScript.Always(new PlayerInput { Right = true }),
             Frames = 600,
@@ -66,11 +66,11 @@ public class StairClimbTests(ITestOutputHelper output)
         for (int i = 1; i < frames.Length; i++)
         {
             // Reached the plateau: standing height above the top surface.
-            if (topFrame < 0 && frames[i].X > (8 + Steps) * 16 + 8
+            if (topFrame < 0 && frames[i].X > (8 + Steps) * Chunk.TileSize + Chunk.TileSize / 2f
                              && frames[i].Y < plateauY - 8f) topFrame = i;
             // Backslide: dropping a full step's height after having climbed
             // onto the stairs is a fall-and-retry, not a smooth climb.
-            if (topFrame < 0 && frames[i].X > 9 * 16
+            if (topFrame < 0 && frames[i].X > 9 * Chunk.TileSize
                              && frames[i].Y > frames[i - 1].Y + 0.5f) backslides++;
             maxY = MathF.Max(maxY, frames[i].Y);
         }

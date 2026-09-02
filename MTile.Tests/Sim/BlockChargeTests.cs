@@ -25,11 +25,20 @@ public class BlockChargeTests(ITestOutputHelper output)
         OOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-    private static readonly Vector2 Start = new(40f, 36f);
+    // Cell (TargetGtx, TargetGty) is the floor row of FlatGround; derive its world coords
+    // from Chunk.TileSize instead of pinning them to the old 16px grid.
+    private const int TargetGtx = 3, TargetGty = 3;
+    private static readonly float FloorTopY = TargetGty * Chunk.TileSize;
+    private static readonly float TargetCellCenterX = TargetGtx * Chunk.TileSize + Chunk.TileSize / 2f;
+    private static readonly float TargetCellCenterY = TargetGty * Chunk.TileSize + Chunk.TileSize / 2f;
+
+    // Standing rest height above the floor: floatHeight (= R) + hexagon bottom extent (R·sin60°).
+    private static readonly float RestOffset = PlayerCharacter.Radius * (1f + MathF.Sin(MathF.PI / 3f));
+
+    private static readonly Vector2 Start = new(TargetCellCenterX - Chunk.TileSize, FloorTopY - RestOffset);
 
     // Buried in the floor row (gty 3), well inside a solid cell.
-    private static readonly Vector2 InSolid = new(56f, 56f);
-    private const int TargetGtx = 3, TargetGty = 3;
+    private static readonly Vector2 InSolid = new(TargetCellCenterX, TargetCellCenterY);
 
     private static SimConfigMulti Build(InputScript script, ChunkMap terrain, int frames) => new SimConfigMulti
     {
@@ -42,7 +51,7 @@ public class BlockChargeTests(ITestOutputHelper output)
 
     // Open air just above the floor, inside build reach — so a demoted stroke here would
     // visibly paint, which is what the lockout tests are measuring the absence of.
-    private static readonly Vector2 InAir = new(56f, 44f);
+    private static readonly Vector2 InAir = new(TargetCellCenterX, TargetCellCenterY - Chunk.TileSize);
 
     private static PlayerInput Rmb(bool down) => new()
         { RightClick = down, MouseWorldPosition = InSolid };

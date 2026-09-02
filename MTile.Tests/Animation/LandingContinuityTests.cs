@@ -41,7 +41,9 @@ public class LandingContinuityTests
             Terrain = chunks, Frames = 240,
             Players = { new SimPlayer
             {
-                StartPosition = new Vector2(40f, 140f),
+                // 20px above the floor top (originTileY=10) — falls, lands, and is well
+                // into a steady run before the f>=90 measurement window starts.
+                StartPosition = new Vector2(40f, 10 * Chunk.TileSize - 20f),
                 Script        = InputScript.Always(new PlayerInput { Right = true }),
             } },
         };

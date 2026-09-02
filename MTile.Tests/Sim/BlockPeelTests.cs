@@ -87,8 +87,10 @@ public class BlockPeelTests(ITestOutputHelper output)
         WithPeel(true, () =>
         {
             var terrain = FloatingBlock();
-            var onBlock = new Vector2(72f, 8f);    // cell (4,0) center
-            var pullTo  = new Vector2(120f, 8f);   // 3 tiles out: beats core glue, far under the snap cap
+            float ts = Chunk.TileSize;
+            var onBlock = new Vector2(4f * ts + ts * 0.5f, 0f * ts + ts * 0.5f);   // cell (4,0) center
+            var pullTo  = new Vector2(onBlock.X + 3f * ts, onBlock.Y);   // 3 tiles out: beats core glue, far under the snap cap
+            float floorTop = 3f * ts;   // floor at rows 3-4
 
             var script = new InputScript()
                 .For(10, new PlayerInput { MouseWorldPosition = onBlock })
@@ -98,7 +100,7 @@ public class BlockPeelTests(ITestOutputHelper output)
 
             bool sawOrb = false, sawThrow = false;
             int floorAtRelease = -1;
-            SimRunner.RunMulti(Build(script, terrain, new Vector2(72f, 40f), frames: 60),
+            SimRunner.RunMulti(Build(script, terrain, new Vector2(onBlock.X, floorTop - ts * 0.5f), frames: 60),
                 onFrame: (f, ps) =>
                 {
                     if (ps[0].CurrentActionVars.OrbHeld) sawOrb = true;
@@ -228,8 +230,9 @@ public class BlockPeelTests(ITestOutputHelper output)
         {
             var terrain = DeepGround();
             for (int gtx = 6; gtx <= 8; gtx++) SetType(terrain, gtx, 3, TileType.Sand);
-            var onSurf = new Vector2(120f, 52f);
-            var pullTo = new Vector2(120f, 20f);
+            float ts = Chunk.TileSize;
+            var onSurf = new Vector2(7f * ts + ts * 0.5f, 3f * ts + ts * 0.25f);   // inside the sand patch (col 7, row 3)
+            var pullTo = new Vector2(onSurf.X, onSurf.Y - 2f * ts);   // ~2 tiles: real pull, well under stone's glue
 
             var script = new InputScript()
                 .For(10, new PlayerInput { MouseWorldPosition = onSurf })
@@ -237,19 +240,54 @@ public class BlockPeelTests(ITestOutputHelper output)
                 .For(30, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = pullTo })
                 .Forever(new PlayerInput { MouseWorldPosition = pullTo });
 
+            // Capture the patch's state the instant BreakOutGroup clears it (the frame
+            // OrbHeld first goes true). A few frames later the thrown orb — released
+            // when the script drops Shift/LeftClick — falls straight back down (pullTo
+            // shares onSurf's X) and its landing erupts mass back into this same
+            // column, so checking terrain at the end of the run conflates "did the
+            // pull free the patch" with unrelated regrowth from the orb landing on it.
             bool sawOrb = false;
-            SimRunner.RunMulti(Build(script, terrain, new Vector2(120f, 40f), frames: 80),
-                onFrame: (f, ps) => { if (ps[0].CurrentActionVars.OrbHeld) sawOrb = true; });
+            TileState[] atBreak = null;
+            SimRunner.RunMulti(Build(script, terrain, new Vector2(120f, 3f * ts - ts * 0.5f), frames: 80),
+                onFrame: (f, ps) =>
+                {
+                    if (ps[0].CurrentActionVars.OrbHeld && !sawOrb)
+                    {
+                        sawOrb = true;
+                        atBreak = new[] { terrain.GetCellState(6, 3), terrain.GetCellState(7, 3), terrain.GetCellState(8, 3) };
+                    }
+                });
 
             Assert.True(sawOrb, "Sand's weak glue should lose to the same pull stone resisted.");
-            for (int gtx = 6; gtx <= 8; gtx++)
-                Assert.Equal(TileState.Empty, terrain.GetCellState(gtx, 3));
+            for (int i = 0; i < 3; i++)
+                Assert.Equal(TileState.Empty, atBreak[i]);
         });
     }
 
+    // Legacy rip radius is a fixed PX constant (PullPointEntity.LegacyRipRadiusPx =
+    // 25.6), not a tile count — so how many grid cells it covers depends on
+    // Chunk.TileSize. Mirrors RipBlocks' own footprint scan instead of pinning a
+    // cell count baked in for the old grid.
+    private const float LegacyRipRadiusPx = 25.6f;
+    private static int CountWithinLegacyRadius(ChunkMap terrain, Vector2 site)
+    {
+        int cx = (int)MathF.Floor(site.X / Chunk.TileSize);
+        int cy = (int)MathF.Floor(site.Y / Chunk.TileSize);
+        float rt = LegacyRipRadiusPx / Chunk.TileSize;
+        int span = (int)MathF.Ceiling(rt);
+        float r2 = rt * rt;
+        int n = 0;
+        for (int dy = -span; dy <= span; dy++)
+        for (int dx = -span; dx <= span; dx++)
+        {
+            if (dx * dx + dy * dy > r2) continue;
+            if (terrain.GetCellState(cx + dx, cy + dy) == TileState.Solid) n++;
+        }
+        return n;
+    }
+
     // Flag off: the legacy one-frame drag-rip — press, drag past the threshold, and
-    // the 1.6-tile radius around the press site is destroyed outright (6 solid cells
-    // on this flat surface).
+    // the fixed-px radius around the press site is destroyed outright.
     [Fact]
     public void FlagOff_LegacyDragRip_StillWorks()
     {
@@ -257,8 +295,10 @@ public class BlockPeelTests(ITestOutputHelper output)
         {
             var terrain = DeepGround();
             int before  = SolidCount(terrain, 0, 23, 3, 5);
+            float ts = Chunk.TileSize;
             var onSurf  = new Vector2(120f, 52f);
             var dragTo  = new Vector2(140f, 52f);   // 20px > the 12px drag threshold
+            int expectedRipped = CountWithinLegacyRadius(terrain, onSurf);
 
             var script = new InputScript()
                 .For(10, new PlayerInput { MouseWorldPosition = onSurf })
@@ -269,10 +309,10 @@ public class BlockPeelTests(ITestOutputHelper output)
             // Measured at the release frame: the runner now really throws the orb, and
             // the landing erupts its budget back into the ground a dozen frames later.
             int atRelease = -1;
-            SimRunner.RunMulti(Build(script, terrain, new Vector2(120f, 40f), frames: 50),
+            SimRunner.RunMulti(Build(script, terrain, new Vector2(120f, 3f * ts - ts * 0.5f), frames: 50),
                 onFrame: (f, ps) => { if (f == 25) atRelease = SolidCount(terrain, 0, 23, 3, 5); });
 
-            Assert.Equal(before - 6, atRelease);
+            Assert.Equal(before - expectedRipped, atRelease);
         });
     }
 }

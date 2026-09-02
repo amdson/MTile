@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Microsoft.Xna.Framework;
 using MTile.Tests.Sim;
 using Xunit;
@@ -20,25 +21,56 @@ public class DownAirSlashTests(ITestOutputHelper output)
     private const float Dt      = 1f / 30f;
     private const float Gravity = 600f;
 
-    // Rows 0-3 empty (room to fall through), row 4 solid ground.
-    private static ChunkMap FlatGround() => SimTerrain.FromAscii(@"
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        XXXXXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+    // Number of open rows needed above a solid floor row so the floor TOP sits at or
+    // just below `targetY` px, on whatever Chunk.TileSize is compiled in. Originally
+    // authored (at TileSize=16) as exact row counts — 4/7/16 — chosen so the floor
+    // landed exactly on 64/112/256 px; this reproduces the same targets on any grid
+    // so the fall-before-landing timing this file depends on doesn't change with a
+    // tile rescale.
+    private static int FloorRows(float targetY) => (int)MathF.Ceiling(targetY / Chunk.TileSize);
 
-    // Victim stands on the ground row (tiles 64..80 ⇒ feet at y=64, centre at 52).
-    private static readonly Vector2 VictimStart = new(95f, 52f);
-    // Attacker starts 45 px above the victim's head, falling in under gravity. The
-    // arc apex sits ArcRadius (12 · 1.5 · 1.75 · 1.25 ≈ 39) below the body with a
-    // ±19.7 region, so the box sweeps the victim during the active window.
-    private static readonly Vector2 AttackerStart = new(95f, 7f);
+    private static string Ground(int openRows, int width = 28)
+    {
+        string open  = new string('O', width);
+        string solid = new string('X', width);
+        return string.Join("\n", Enumerable.Repeat(open, openRows).Append(solid));
+    }
+
+    // Open rows down to a floor whose top sits at ~64 px (as it did at TileSize=16),
+    // giving the same room to fall through before landing.
+    private static ChunkMap FlatGround() => SimTerrain.FromAscii(Ground(FloorRows(64f)), originTileX: 0, originTileY: 0);
+
+    private static readonly float FloorTopY = FloorRows(64f) * Chunk.TileSize;
+    // Same mirrored ArcRadius as DownAirSlash (Radius · 1.5 · 1.75 · ArcRadiusScale),
+    // independent of Chunk.TileSize.
+    private const float ArcReach = PlayerCharacter.Radius * 1.5f * 1.75f * 1.25f;
+    // Frames from the click edge to the hitbox opening: one frame for the FSM to
+    // pick up the click and enter the action, then HurtboxStartSeconds (10/60s) of
+    // travel at this test's Dt — both independent of the grid.
+    private const int HurtboxOpenLag = 1 + 5; // 1 + (10f/60f) / Dt, Dt = 1/30
+
+    // Displacement of a body under constant gravity `g` over `n` fixed-dt steps,
+    // starting from rest (semi-implicit Euler: v += g*dt; pos += v*dt each step,
+    // matching PhysicsWorld.StepSwept) — i.e. how far a falling body travels
+    // before the hitbox opens.
+    private static float FreefallDrop(int n) => Dt * (Gravity * Dt * n * (n + 1) / 2f);
+
+    // The fold corrector holds a standing body at FoldHoverOffset above ground
+    // contact, not "floor top minus Radius" (CORRECTOR_CONSOLIDATION_PLAN §3.1) —
+    // this is the actual settled centre height, so the victim starts at rest
+    // instead of drifting into position over the first several frames.
+    private static readonly Vector2 VictimStart =
+        new(95f, FloorTopY - PlayerCharacter.Radius - MovementConfig.Current.FoldHoverOffset);
+    // Attacker starts high enough that, falling from rest, its swing apex
+    // (ArcReach below the body) reaches the victim's head exactly as the hitbox
+    // opens (HurtboxOpenLag frames after the ClickAfter(4, …) click below).
+    private static readonly Vector2 AttackerStart =
+        new(95f, VictimStart.Y - ArcReach - FreefallDrop(4 + HurtboxOpenLag));
 
     // Straight below the attacker — dead centre of the sextant.
     private static readonly Vector2 MouseBelow = new(95f, 300f);
     // Level with the attacker and far to the right — well outside the wedge.
-    private static readonly Vector2 MouseRight = new(300f, 7f);
+    private static readonly Vector2 MouseRight = new(300f, AttackerStart.Y);
 
     // Idle for `delay` frames (so the fall carries the attacker into range), then one
     // click press-edge, then hold the aim. A single edge: the Click intent fires once.
@@ -140,26 +172,9 @@ public class DownAirSlashTests(ITestOutputHelper output)
     [Fact]
     public void DownAirWhiff_NoPogo()
     {
-        // 16 empty rows (256 px) before the ground row — the attacker starts at y=7
-        // and is still ~40 px above it after all 25 frames of fall.
-        var tall = SimTerrain.FromAscii(@"
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOO
-            XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        // Open rows down to a floor at ~256 px (as at TileSize=16) — the attacker
+        // starts well above it and is still ~40 px clear after all 25 frames of fall.
+        var tall = SimTerrain.FromAscii(Ground(FloorRows(256f), width: 16), originTileX: 0, originTileY: 0);
 
         var cfg = new SimConfigMulti
         {
@@ -191,32 +206,34 @@ public class DownAirSlashTests(ITestOutputHelper output)
     // aimed straight down at someone standing on the floor is absorbed by the ground
     // normal inside the same step, and the test would read ~140 px/s no matter how hard
     // the strike actually was.
-    private static ChunkMap OpenShaft() => SimTerrain.FromAscii(@"
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-        XXXXXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+    private static ChunkMap OpenShaft() => SimTerrain.FromAscii(Ground(FloorRows(112f)), originTileX: 0, originTileY: 0);
 
     // Δv actually applied to the victim on the frame the hit lands, for an attacker
     // entering the swing at `diveSpeed`. Measured as a velocity DELTA rather than a
     // peak so it isn't confounded by the victim's own fall; one gravity step (20 px/s
     // at this dt) rides along, which is noise against the hundreds being compared.
+    //
+    // Both attacker and victim free-fall from rest here (ClickAfter(0, …) clicks on
+    // frame 0, so HurtboxOpenLag is the whole delay), so their shared gravity term
+    // cancels: attackerY(HurtboxOpenLag) - victimY(HurtboxOpenLag) works out to
+    // (attackerY0 - victimY0) + diveSpeed * HurtboxOpenLag * Dt. Solve attackerY0 so
+    // that gap is -ArcReach right as the hitbox opens (the swing apex meets the
+    // victim), same geometry as AttackerStart above but with the extra dive term.
+    private static float AttackerY0(float victimY0, float diveSpeed)
+        => victimY0 - ArcReach - diveSpeed * HurtboxOpenLag * Dt;
+
     private float AppliedKnockback(float diveSpeed)
     {
+        const float victimY0 = 52f;
         var cfg = new SimConfigMulti
         {
             Terrain = OpenShaft(), Frames = 30, Dt = Dt, Gravity = new Vector2(0f, Gravity),
             Players = new[]
             {
-                new SimPlayer { StartPosition = new Vector2(95f, 7f),
+                new SimPlayer { StartPosition = new Vector2(95f, AttackerY0(victimY0, diveSpeed)),
                                 StartVelocity = new Vector2(0f, diveSpeed),
                                 Script = ClickAfter(0, MouseBelow) },
-                new SimPlayer { StartPosition = new Vector2(95f, 52f), Faction = Faction.Neutral,
+                new SimPlayer { StartPosition = new Vector2(95f, victimY0), Faction = Faction.Neutral,
                                 Script = InputScript.Always(default) },
             },
         };

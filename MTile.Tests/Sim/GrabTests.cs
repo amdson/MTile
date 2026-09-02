@@ -23,9 +23,12 @@ public class GrabTests(ITestOutputHelper output)
         OOOOOOOOOOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-    private static readonly Vector2 AttackerStart = new(70f, 20f);
-    private static readonly Vector2 VictimStart   = new(95f, 20f);   // ~25px right, inside grab range
-    private static readonly Vector2 MouseRight    = new(220f, 20f);
+    // Resting Y: body center sits Radius above the floor top (ground starts at tile row
+    // 2 in FlatGround), matching how the body settles once gravity pulls it onto the floor.
+    private static readonly float RestY = 2f * Chunk.TileSize - PlayerCharacter.Radius;
+    private static readonly Vector2 AttackerStart = new(70f, RestY);
+    private static readonly Vector2 VictimStart   = new(95f, RestY);   // ~25px right, inside grab range
+    private static readonly Vector2 MouseRight    = new(220f, RestY);
 
     // Attacker settles, then holds Shift+LMB (aim right) — press-edge at frame 10 fires
     // the grab, which then holds while LMB stays down.
@@ -177,8 +180,8 @@ public class GrabTests(ITestOutputHelper output)
     // Both stand inside the region: near at 95 (~25px right of the grabber, closest to
     // the hold focus at ~89) and far at 112 (its hurtbox still overlaps the region,
     // which reaches ~118).
-    private static readonly Vector2 NearVictimStart = new(95f, 20f);
-    private static readonly Vector2 FarVictimStart  = new(112f, 20f);
+    private static readonly Vector2 NearVictimStart = new(95f, RestY);
+    private static readonly Vector2 FarVictimStart  = new(112f, RestY);
 
     private static SimConfigMulti BuildTwoVictims(InputScript attacker) => new SimConfigMulti
     {

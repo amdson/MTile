@@ -13,19 +13,33 @@ namespace MTile.Tests.Sim;
 public class CorrectorTrajectoryCaptureTests(ITestOutputHelper output)
 {
     // Tunnel-vault course — guarantees nonzero rows mid-flight, so Solved captures too.
+    // Approach side (cols 0..7) has 4 open rows above its floor — plain headroom. Past
+    // the lip (col 8+) the floor rises one tile, leaving only 3 open rows (≈33px) above
+    // the raised step — just under PlayerCharacter's ~32.78px standing height, so
+    // clearing it forces the reflex vault rather than a walk-through. Same relative
+    // squeeze the original 16px-grid authoring gave (2 rows ≈ 32px against the same
+    // body height).
     private static ChunkMap TunnelStep() => SimTerrain.FromAscii(@"
         XXXXXXXXXXXXXXXXXXXX
         OOOOOOOOOOOOOOOOOOOO
         OOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOO
         OOOOOOOOXXXXXXXXXXXX
         XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 2);
+
+    // Approach-side floor is the terrain's last row (gty 7 given originTileY 2 above
+    // five preceding rows). Standing rest offset (R + R·sin60°) is a body-scale
+    // constant, unrelated to Chunk.TileSize.
+    private static readonly float ApproachFloorTopY = 7 * Chunk.TileSize;
+    private static readonly float StandingRestOffset =
+        PlayerCharacter.Radius + PlayerCharacter.Radius * MathF.Sin(MathF.PI / 3f);
 
     private static readonly PlayerInput HoldRight = new() { Right = true };
 
     [Fact]
     public void CaptureOn_PublishesAllThree_AndExpiresAfterManeuver()
     {
-        var sim = new Simulation(TunnelStep(), new Vector2(12f, 72f));
+        var sim = new Simulation(TunnelStep(), new Vector2(12f, ApproachFloorTopY - StandingRestOffset));
         sim.Player.CorrectorDebug.CaptureTrajectories = true;
 
         bool sawReference = false, sawBallistic = false, sawSolved = false;

@@ -117,7 +117,9 @@ public class JumpingStateTests(ITestOutputHelper output)
             OOOOOOOOOOOOOOOO
             XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        var player = new PlayerCharacter(new Vector2(80f, 20f));
+        // Floor top is row 2 (2 * TileSize); spawn with the body's bottom vertex exactly
+        // touching it, same as the original 16px-grid setup (floorTop 32 - Radius 12 = 20).
+        var player = new PlayerCharacter(new Vector2(80f, 2 * Chunk.TileSize - PlayerCharacter.Radius));
         var bodies = new List<PhysicsBody> { player.Body };
         var ctrl = new Controller();
         var hitboxes  = new HitboxWorld();

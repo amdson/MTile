@@ -29,9 +29,9 @@ public class BlockEruptionTests(ITestOutputHelper output)
     public void ChargeUnderground_SweepUp_StaysOnePaintAction()
     {
         // 16-wide column, top 10 rows air, bottom 6 rows solid. Player stands
-        // on top of row 10 at y=141 (same rest pose as JumpFromCompressedTests).
-        // Cursor charge target: row 12 (y in [192..208]) — comfortably inside
-        // the solid floor. Sweep target: row 5 (y in [80..96]) — air above.
+        // on top of row 10 (rest pose shared with JumpFromCompressedTests: floorTop
+        // - 19, an empirically-settled offset). Cursor charge target: row 12,
+        // comfortably inside the solid floor. Sweep target: row 5, air above.
         var terrain = SimTerrain.FromAscii(@"
             OOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOO
@@ -50,7 +50,8 @@ public class BlockEruptionTests(ITestOutputHelper output)
             XXXXXXXXXXXXXXXX
             XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        var player = new PlayerCharacter(new Vector2(80f, 141f));
+        float floorTopY = 10 * Chunk.TileSize;
+        var player = new PlayerCharacter(new Vector2(80f, floorTopY - 19f));
         var bodies = new List<PhysicsBody> { player.Body };
         var ctrl   = new Controller();
         var hb     = new HitboxWorld();
@@ -58,8 +59,8 @@ public class BlockEruptionTests(ITestOutputHelper output)
         const float dt = 1f / 30f;
         var g = new Vector2(0f, 600f);
 
-        Vector2 cursorInSolid = new(80f, 200f);   // row 12, solid
-        Vector2 cursorInAir   = new(80f, 88f);    // row 5,  air
+        Vector2 cursorInSolid = new(80f, 12 * Chunk.TileSize + Chunk.TileSize / 2f);   // row 12, solid
+        Vector2 cursorInAir   = new(80f, 5 * Chunk.TileSize + Chunk.TileSize / 2f);    // row 5,  air
 
         // 1) Settle (no input). Lets the player land + StandingState take over.
         for (int i = 0; i < 30; i++)

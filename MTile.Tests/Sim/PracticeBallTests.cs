@@ -14,7 +14,7 @@ public class PracticeBallTests(ITestOutputHelper output)
     private const float Dt = 1f / 60f;
     private static readonly Vector2 Gravity = new(0f, 600f);
     private const int FloorRow = 20;
-    private const float FloorTopY = FloorRow * 16f;
+    private const float FloorTopY = FloorRow * (float)Chunk.TileSize;
 
     private static ChunkMap FlatFloor()
     {
@@ -56,11 +56,26 @@ public class PracticeBallTests(ITestOutputHelper output)
     public void FallsToFloor_BreaksAndRespawnsAtSpawn()
     {
         var terrain = FlatFloor();
-        var spawn   = new Vector2(10 * 16f + 8f, FloorTopY - 5 * 16f);
+        var spawn   = new Vector2(10 * (float)Chunk.TileSize + Chunk.TileSize / 2f, FloorTopY - 5 * (float)Chunk.TileSize);
         var ball    = EntityFactory.Practice(spawn);
+
+        // How far the ball actually has to fall before it can touch the floor —
+        // derived from the scenario geometry (spawn/floor), not a literal pixel
+        // count, so it scales with Chunk.TileSize.
+        float dropDistance = FloorTopY - spawn.Y;
 
         float maxY = spawn.Y;               // deepest descent seen (Y-down)
         bool respawned = false;
+        // Consecutive frames spent "at rest" (near-zero velocity) inside the
+        // contact band without being back at spawn. One such frame is expected
+        // and harmless: the swept solver can resolve the floor contact (zeroing
+        // velocity) a frame before the entity's own Update() re-probes and calls
+        // Break() — Update runs before the physics step each frame, so there is
+        // an inherent one-frame latency between "solver stopped it" and "Break()
+        // fires". Two or more in a row means it genuinely settled instead of
+        // breaking.
+        int consecutiveRestFrames = 0;
+        int maxConsecutiveRestFrames = 0;
         Run(ball, terrain, frames: 120, perFrame: f =>
         {
             if (ball.Body.Position.Y > maxY) maxY = ball.Body.Position.Y;
@@ -68,19 +83,26 @@ public class PracticeBallTests(ITestOutputHelper output)
             // so the respawn frame already carries one tick of gravity — "dead-
             // stopped" here means "far slower than any fall that reached the
             // floor" (impact velocity is ~350+ px/s; one gravity tick is 10).
-            if (!respawned && maxY > spawn.Y + 40f
+            if (!respawned && maxY > spawn.Y + dropDistance * 0.5f
                 && Vector2.Distance(ball.Body.Position, spawn) < 2f
                 && ball.Body.Velocity.Length() < 20f)
                 respawned = true;
+
+            bool atRestNearFloor = ball.Body.Velocity.Length() < 20f
+                && ball.Body.Position.Y > FloorTopY - PracticeBallRestingClearance
+                && Vector2.Distance(ball.Body.Position, spawn) > 2f;
+            consecutiveRestFrames = atRestNearFloor ? consecutiveRestFrames + 1 : 0;
+            if (consecutiveRestFrames > maxConsecutiveRestFrames) maxConsecutiveRestFrames = consecutiveRestFrames;
         });
 
         output.WriteLine($"deepest Y = {maxY:0.0} (spawn {spawn.Y:0.0}, floor top {FloorTopY:0.0})");
-        Assert.True(maxY > spawn.Y + 40f, "ball never fell — test setup broken");
+        Assert.True(maxY > spawn.Y + dropDistance * 0.5f, "ball never fell — test setup broken");
         Assert.True(respawned, "ball touched the floor but never respawned at its spawn point");
-        // And it must not be resting on the floor at the end — a fresh fall is in
-        // progress or it just respawned; either way it sits above the contact band.
-        Assert.True(ball.Body.Position.Y < FloorTopY - PracticeBallRestingClearance,
-            $"ball is resting near the floor (Y={ball.Body.Position.Y:0.0})");
+        // A single frame of solver-stopped-then-not-yet-broken is the expected
+        // Update-before-physics latency (see comment above); anything more means
+        // it settled into a resting contact instead of breaking.
+        Assert.True(maxConsecutiveRestFrames <= 1,
+            $"ball settled into a resting contact near the floor instead of breaking ({maxConsecutiveRestFrames} consecutive frames at rest)");
     }
 
     // Ball radius (6) + contact pad — anything closer than this to the floor top

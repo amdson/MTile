@@ -85,18 +85,20 @@ public class FoldRefEngineTests : IDisposable
         Assert.True(MathF.Abs(v.Y) < 5f, $"bobbing: vy={v.Y:F2}");
     }
 
-    // The bumpy tunnel (the in-game "corridor" stage shape): 3-tile interior,
-    // alternating floor/ceiling bumps — every crossing is a duck or step-up
-    // solved by the vertical deform. The squeeze over each floor bump
-    // (interior 32px < body 24 + hover 10) is served by hover compression
-    // emerging from the ceiling rows.
+    // The bumpy tunnel (the in-game "corridor" stage shape): normally a
+    // 5-tile interior, alternating floor/ceiling bumps knock it down to a
+    // 4-tile squeeze — every crossing is a duck or step-up solved by the
+    // vertical deform. (At the 11px grid a 2-tile squeeze — the old
+    // interior — no longer clears the unchanged body+hover budget at all,
+    // so this needs the wider interior to stay a live squeeze rather than
+    // an impossible one.)
     [Fact]
     public void BumpyTunnel_HoldRight_TraversesAtSpeed()
     {
-        const int W = 64;
+        const int W = 96;
         int ts = Chunk.TileSize;
-        var rows = new string[7];
-        for (int r = 0; r < 7; r++)
+        var rows = new string[9];
+        for (int r = 0; r < 9; r++)
         {
             var sb = new System.Text.StringBuilder(W);
             for (int c = 0; c < W; c++)
@@ -104,23 +106,23 @@ public class FoldRefEngineTests : IDisposable
                 bool tunnel = c >= 16;
                 sb.Append(r switch
                 {
-                    6 => 'X',
+                    8 => 'X',
                     2 when tunnel => 'X',
                     3 when tunnel && c % 4 == 3 => 'X',
-                    5 when tunnel && c % 4 == 1 => 'X',
+                    7 when tunnel && c % 4 == 1 => 'X',
                     _ => 'O',
                 });
             }
             rows[r] = sb.ToString();
         }
         var sim = new Simulation(SimTerrain.FromAscii(string.Join("\n", rows)),
-                                 new Vector2(24f, 6 * ts - 2f * PlayerCharacter.Radius));
+                                 new Vector2(24f, 8 * ts - 2f * PlayerCharacter.Radius));
 
         for (int f = 0; f < 600; f++) sim.Step(HoldRight);
 
         float x = sim.Player.Body.Position.X;
         float avg = (x - 24f) / (600f / 60f);
-        Assert.True(x > 600f, $"stalled in the tunnel at x={x:F1} (mouth at 256)");
+        Assert.True(x > 600f, $"stalled in the tunnel at x={x:F1} (mouth at {16 * ts})");
         Assert.True(avg > 55f, $"tunnel traversal too slow: {avg:F1} px/s");
     }
 
@@ -190,11 +192,15 @@ public class FoldRefEngineTests : IDisposable
     public void HoldRight_DucksIntoLowCorridor()
     {
         int ts = Chunk.TileSize;
+        // The lip drops the ceiling from row 1 down (instead of row 3): at
+        // the 11px grid a 2-tile duck-under (the old shape) no longer
+        // clears the unchanged body+hover budget, so the low corridor needs
+        // 4 tiles of clearance to stay a live duck rather than a wall.
         var chunks = SimTerrain.FromAscii(@"
             XXXXXXXXXXXXXXXXXXXXXXXX
-            OOOOOOOOOOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOOOOOOOOOO
             OOOOOOOOXXXXXXXXXXXXXXXX
+            OOOOOOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOOOOOOOOOO
             OOOOOOOOOOOOOOOOOOOOOOOO
             XXXXXXXXXXXXXXXXXXXXXXXX");

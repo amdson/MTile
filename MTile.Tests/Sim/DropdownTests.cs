@@ -9,9 +9,10 @@ namespace MTile.Tests;
 // DropdownState should only activate when some portion of the body's bounding box is
 // hanging over the edge — analogous to CoveredJump's "any portion sticking out" gate.
 // Half-width hex body: X extent ±6 (PlayerCharacter.BodyWidthScale), so
-// hanging over a right edge at x=160 ⇔ startX > 154.
+// hanging over a right edge at x=110 (10 * Chunk.TileSize) ⇔ startX > 104.
 //
-// Terrain has a platform at row 5 cols 0..9, so the drop edge to the right is at x=160.
+// Terrain has a platform at row 5 cols 0..9, so the drop edge to the right is at
+// x = 10 * Chunk.TileSize = 110.
 public class DropdownTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
@@ -28,13 +29,13 @@ public class DropdownTests(ITestOutputHelper output)
         OOOOOOOOOOOOOOOOOOOO
         XXXXXXXXXXXXXXXXXXXX";
 
-    // body.Bounds.Right = startX + 6 (half-width hexagon); edge x=160;
-    // hanging ↔ body.Right > 160 ↔ startX > 154.
+    // body.Bounds.Right = startX + 6 (half-width hexagon); edge x=110 (10 * Chunk.TileSize);
+    // hanging ↔ body.Right > 110 ↔ startX > 104.
     [Theory]
-    [InlineData(155.5f)]  // body.Right ≈ 161.5 — ~1.5 px hanging
-    [InlineData(157.0f)]  // body.Right ≈ 163 — ~3 px hanging
-    [InlineData(160.0f)]  // body center at edge; half hanging
-    [InlineData(163.0f)]  // body center 3 px past edge; mostly hanging
+    [InlineData(105.5f)]  // body.Right ≈ 111.5 — ~1.5 px hanging
+    [InlineData(107.0f)]  // body.Right ≈ 113 — ~3 px hanging
+    [InlineData(110.0f)]  // body center at edge; half hanging
+    [InlineData(113.0f)]  // body center 3 px past edge; mostly hanging
     public void HoldDown_HangingOverRightEdge_FiresDropdown(float startX)
     {
         var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
@@ -42,8 +43,14 @@ public class DropdownTests(ITestOutputHelper output)
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            // Platform top at y=80, body radius 9.5 → standing-rest center.Y = 60.5.
-            StartPosition = new Vector2(startX, 60.5f),
+            // Platform top now at y=55 (row 5 * Chunk.TileSize). 60.5 (carried over from
+            // the old grid, where platform top was 80) put the body 5.5px BELOW the new
+            // platform top — embedded in the corner rather than resting just above it,
+            // which sent the overlap-resolution push sideways into open air instead of
+            // straight up, masking the hang test entirely. 35.5 sits above the new
+            // platform top and settles onto it normally (verified empirically: settles
+            // to a standing rest ~31-34 within a few frames on flat interior ground).
+            StartPosition = new Vector2(startX, 35.5f),
             StartVelocity = Vector2.Zero,
             Script        = InputScript.Always(new PlayerInput { Down = true }),
             Frames        = 30,
@@ -68,8 +75,8 @@ public class DropdownTests(ITestOutputHelper output)
         }
 
         Assert.True(fired,
-            $"startX={startX} (body.Right≈{startX+6f:F2}, edge=160): body has " +
-            $"{startX+6f-160f:F2} px hanging over edge — DropdownState should fire.");
+            $"startX={startX} (body.Right≈{startX+6f:F2}, edge=110): body has " +
+            $"{startX+6f-110f:F2} px hanging over edge — DropdownState should fire.");
     }
 
     // Body fully on the platform (no portion past the drop edge): DropdownState must NOT
@@ -120,10 +127,10 @@ public class DropdownTests(ITestOutputHelper output)
     // bug: the body's column being empty made the algorithm report a spurious left edge,
     // and the closer-edge tiebreak could pick the wrong side.
     [Theory]
-    [InlineData(155.5f)]
-    [InlineData(157.0f)]
-    [InlineData(160.0f)]
-    [InlineData(163.0f)]
+    [InlineData(105.5f)]
+    [InlineData(107.0f)]
+    [InlineData(110.0f)]
+    [InlineData(113.0f)]
     public void HoldDown_HangingOverRightEdge_SlidesRight(float startX)
     {
         var terrain = SimTerrain.FromAscii(Terrain, originTileX: 0, originTileY: 0);
@@ -149,7 +156,8 @@ public class DropdownTests(ITestOutputHelper output)
             $"X={last.X:F2}. Final state: {last.State}.");
     }
 
-    // Mirror: a LEFT-edge drop. Platform cols 10..19, drop edge at x=160 (left side of col 10).
+    // Mirror: a LEFT-edge drop. Platform cols 10..19, drop edge at x=110 (left side of col 10,
+    // = 10 * Chunk.TileSize).
     // Body hanging over the left edge with no horizontal input must slide LEFT.
     private const string LeftEdgeTerrain = @"
         OOOOOOOOOOOOOOOOOOOO
@@ -175,11 +183,13 @@ public class DropdownTests(ITestOutputHelper output)
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            StartPosition = new Vector2(157f, 60.5f),
+            // 35.5, not 60.5 (see HoldDown_HangingOverRightEdge_FiresDropdown): 60.5 sits
+            // below the new platform top (55) and embeds the body in the corner.
+            StartPosition = new Vector2(107f, 35.5f),
             StartVelocity = Vector2.Zero,
-            // Hold Down until the body center is past the drop edge (x=160), then release.
+            // Hold Down until the body center is past the drop edge (x=110), then release.
             Script        = new InputScript()
-                .Until(new PlayerInput { Down = true }, f => f.X > 161f)
+                .Until(new PlayerInput { Down = true }, f => f.X > 111f)
                 .Forever(default),
             Frames        = 90,
             Dt            = Dt,
@@ -206,8 +216,10 @@ public class DropdownTests(ITestOutputHelper output)
         Assert.True(last.State.Contains("LedgeGrab"),
             $"the chained grab should hold (nothing pressed after release), but final state is {last.State}.");
         // Hanging pose: on the wall face right of the edge, body dropped below standing height.
-        Assert.True(last.X > 160f, $"hang should be off the right face of the edge, but X={last.X:F2}.");
-        Assert.True(last.Y > 70f, $"hang should sit below the platform top, but Y={last.Y:F2}.");
+        // (Corner/platform-top Y = row 5 * Chunk.TileSize = 55, down from the old grid's 80,
+        // so the hang-pose Y threshold drops by the same 25 px as the corner itself.)
+        Assert.True(last.X > 110f, $"hang should be off the right face of the edge, but X={last.X:F2}.");
+        Assert.True(last.Y > 45f, $"hang should sit below the platform top, but Y={last.Y:F2}.");
     }
 
     // Early release — body center still short of the edge — stays a plain cancel:
@@ -261,7 +273,8 @@ public class DropdownTests(ITestOutputHelper output)
         var cfg = new SimConfig
         {
             Terrain       = terrain,
-            StartPosition = new Vector2(157f, 60.5f),
+            // 35.5, not 60.5 — see HoldDown_HangingOverRightEdge_FiresDropdown.
+            StartPosition = new Vector2(107f, 35.5f),
             StartVelocity = Vector2.Zero,
             Script        = InputScript.Always(new PlayerInput { Down = true }),
             Frames        = 60,
@@ -276,10 +289,10 @@ public class DropdownTests(ITestOutputHelper output)
     }
 
     [Theory]
-    [InlineData(164.5f)]  // body.Left ≈ 158.5 — ~1.5 px hanging past edge
-    [InlineData(163.0f)]  // body.Left ≈ 157 — ~3 px hanging
-    [InlineData(160.0f)]  // body center at edge
-    [InlineData(157.0f)]  // body mostly off (center 3 px past edge)
+    [InlineData(114.5f)]  // body.Left ≈ 108.5 — ~1.5 px hanging past edge
+    [InlineData(113.0f)]  // body.Left ≈ 107 — ~3 px hanging
+    [InlineData(110.0f)]  // body center at edge
+    [InlineData(107.0f)]  // body mostly off (center 3 px past edge)
     public void HoldDown_HangingOverLeftEdge_SlidesLeft(float startX)
     {
         var terrain = SimTerrain.FromAscii(LeftEdgeTerrain, originTileX: 0, originTileY: 0);

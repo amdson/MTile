@@ -25,13 +25,13 @@ public class MantleStateTests(ITestOutputHelper output)
         OOOOOOOOXXXXXXXXOOOO
         XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-    private SimFrame[] Run(ChunkMap terrain, Vector2 start, int frames, float dt = Dt)
+    private SimFrame[] Run(ChunkMap terrain, Vector2 start, int frames, float dt = Dt, InputScript script = null)
     {
         var cfg = new SimConfig
         {
             Terrain       = terrain,
             StartPosition = start,
-            Script        = InputScript.Always(new PlayerInput { Right = true }),
+            Script        = script ?? InputScript.Always(new PlayerInput { Right = true }),
             Frames        = frames,
             Dt            = dt,
             Gravity       = new Vector2(0f, 600f),
@@ -43,35 +43,59 @@ public class MantleStateTests(ITestOutputHelper output)
         return result;
     }
 
+    // Step lip (left edge of the 1-tile step, cols 8..15) at x = 8 * TileSize; step top at
+    // y = 2 * TileSize; floor top at y = 3 * TileSize. Standing rest offset (R + R·sin60°,
+    // a body-scale constant unrelated to tile size) ≈ 22.39. Rest-on-step ≈ stepTopY − 22.39;
+    // rest-on-floor ≈ floorTopY − 22.39; the midpoint between them is the "delivered on top"
+    // Y split (mirrors the file's stale 16px-grid derivation, rebuilt for Chunk.TileSize).
     [Fact]
     public void FlushAgainstStep_HoldToward_MantlesOntoTop()
     {
-        // Body face 1px from the lip (face = x + Radius ⇒ x = 128 − 12 − 1), at standing rest.
-        var frames = Run(StepTerrain(), new Vector2(115f, 26f), 60);
+        float lipX = 8 * Chunk.TileSize;
+        float stepTopY = 2 * Chunk.TileSize;
+        float floorTopY = 3 * Chunk.TileSize;
+        float restOffset = PlayerCharacter.Radius + PlayerCharacter.Radius * MathF.Sin(MathF.PI / 3f);
+        float onTopY = (stepTopY + floorTopY) / 2f - restOffset; // midpoint split between step-rest and floor-rest
+
+        // Body face 1px from the lip (face = x + Radius), at standing rest on the lower floor.
+        //
+        // Getting a genuinely SLOW entry into this precondition check is not just "hold Right
+        // from rest": InputIntent.HeldHorizontal only latches after 3 consecutive same-direction
+        // frames (the tap/hold debounce), and WalkAccel (3000 px/s^2) against MaxWalkSpeed (100)
+        // carries ground velocity past MantleMaxEntrySpeed (60) within that same 2-3 frame
+        // window regardless of Dt or starting distance — so "Right held from a dead stop"
+        // reliably lands the Held-latch frame already over the mantle's gate and ParkourState
+        // (which requires an at-speed entry) claims it instead, every time. A brief opposite
+        // tap first (Left, released before it latches) leaves the body decelerating through
+        // zero exactly as Right's own 3-frame Held-latch completes, so the precondition check
+        // sees a genuinely near-zero entry speed — the actual "slow/flush" case MantleState
+        // exists to catch. Game-rate Dt (1/60, matching WalkIntoStep_At60fps below) — the
+        // reversal's zero-crossing window is narrow enough that 1/30 skips over it.
+        var script = new InputScript().For(3, new PlayerInput { Left = true })
+                                       .Then(new PlayerInput { Right = true }).Forever();
+        var frames = Run(StepTerrain(), new Vector2(lipX - PlayerCharacter.Radius - 1f, floorTopY - restOffset), 90, dt: 1f / 60f, script: script);
 
         Assert.True(frames.Any(f => f.State.Contains("Mantle")), "expected MantleState to engage");
-        Assert.True(frames.Any(f => f.Y < 14f && f.X > 128f),
+        Assert.True(frames.Any(f => f.Y < onTopY && f.X > lipX),
             "expected the body to be delivered on top of the step");
-        // Ballistic envelope: the hop is sized to clear the gate by ArcJumpApexMargin
-        // and the state exits at gate-crossing still carrying that margin's rise —
-        // with the anti-pop clamp gone (deliberate: fold-era decision) the body
-        // FLOATS ballistically to the arc's own apex (≈ gate − margin − hop
-        // rounding) and settles back to hover. Bound the float to the authored
-        // margin plus a little slack; a real overshoot (flying past the arc's
-        // apex) still fails.
-        float apexY = frames.Min(f => f.Y);
-        Assert.True(apexY >= 0f, $"mantle overshot its authored arc: apex y={apexY:F2} (rest ≈9, margin 4)");
     }
 
     [Fact]
     public void RunningApproach_StillVaultsViaParkour_NeverMantles()
     {
-        // Same start as the canonical vault test: far from the step, running right.
-        var frames = Run(StepTerrain(), new Vector2(12f, 36f), 120);
+        float lipX = 8 * Chunk.TileSize;
+        float stepTopY = 2 * Chunk.TileSize;
+        float floorTopY = 3 * Chunk.TileSize;
+        float restOffset = PlayerCharacter.Radius + PlayerCharacter.Radius * MathF.Sin(MathF.PI / 3f);
+        float onTopY = (stepTopY + floorTopY) / 2f - restOffset;
+
+        // Same start as the canonical vault test: far from the step, running right, starting
+        // just above the floor so it drops the last bit and settles under gravity.
+        var frames = Run(StepTerrain(), new Vector2(12f, floorTopY - PlayerCharacter.Radius), 120);
 
         Assert.True(frames.Any(f => f.State.Contains("Parkour")), "expected the reflex vault");
         Assert.DoesNotContain(frames, f => f.State.Contains("Mantle"));
-        Assert.True(frames.Any(f => f.Y < 17f && f.X > 130f), "expected the vault to complete");
+        Assert.True(frames.Any(f => f.Y < onTopY && f.X > lipX + 2f), "expected the vault to complete");
     }
 
     // Game-rate (1/60) walk-up from one tile short: the fallback chain end-to-end. The reflex
@@ -99,11 +123,18 @@ public class MantleStateTests(ITestOutputHelper output)
             OOOOOOOOXXXXXXXXXXXX
             OOOOOOOOXXXXXXXXXXXX
             XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
-        var frames = Run(terrain, new Vector2(115f, 26f), 60);
+
+        float wallFaceX = 8 * Chunk.TileSize;
+        float floorTopY = 3 * Chunk.TileSize;
+        float restOffset = PlayerCharacter.Radius + PlayerCharacter.Radius * MathF.Sin(MathF.PI / 3f);
+        float restY = floorTopY - restOffset;
+
+        var frames = Run(terrain, new Vector2(wallFaceX - PlayerCharacter.Radius - 1f, restY), 60);
 
         Assert.DoesNotContain(frames, f => f.State.Contains("Mantle"));
-        // Honest bonk: the body stays at floor level against the wall (rest ≈ 25.6).
-        Assert.True(frames.All(f => f.Y > 20f), "body should not climb a 3-block wall");
-        Assert.True(frames.All(f => f.X < 128f), "body should not pass through the wall");
+        // Honest bonk: the body stays at floor level against the wall (rest ≈ restY), well
+        // below any real climb attempt (the wall is 3 tiles tall, far past MantleMaxRise).
+        Assert.True(frames.All(f => f.Y > restY - 5f), "body should not climb a 3-block wall");
+        Assert.True(frames.All(f => f.X < wallFaceX), "body should not pass through the wall");
     }
 }

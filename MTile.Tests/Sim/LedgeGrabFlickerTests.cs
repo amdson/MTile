@@ -24,14 +24,19 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 30f;
     private const float Gravity = 600f;
-    private const float TS = Chunk.TileSize; // 16
+    private const float TS = Chunk.TileSize;
 
-    // Layout for the bug repro: 1-tile-tall wall at col 9 row 1 above row-3 ground.
-    // When the body stands on row-3 ground its head-Y (~19.5) sits inside row 1's
-    // y range — the wall's TOP is a ledge corner; its BOTTOM is an overcrop corner
-    // that ExposedLowerCornerChecker reports for ParkourState's duck precondition.
+    // Layout for the bug repro: a 2-tile-tall floating wall at col 9 (rows 1-2) above
+    // row-4 ground, with a 1-tile gap (row 3) separating the wall's underside from the
+    // floor. On the 11px grid the body (Radius 12, ~3 tiles tall) needs a taller floating
+    // slab than the original 1-tile version to still land chest-height on it — a single
+    // tile is too short relative to the now-taller body and the body just straddles/
+    // bounces on the tile's own span instead of exercising the corner checker. The
+    // wall's bottom is a ledge corner; the underside is an overcrop corner that
+    // ExposedLowerCornerChecker reports for ParkourState's duck precondition.
     private static ChunkMap BuildShortLedgeTerrain() => SimTerrain.FromAscii(@"
             ..........
+            .........X
             .........X
             ..........
             XXXXXXXXXX", originTileX: 0, originTileY: 0);
@@ -56,7 +61,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
     public void RunRightNoUp_NoStateFlicker()
     {
         var terrain = BuildShortLedgeTerrain();
-        const float groundTop = 3 * TS;
+        const float groundTop = 4 * TS;
         var cfg = new SimConfig
         {
             Terrain       = terrain,
@@ -76,7 +81,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
     public void RunRightAndHoldUp_NoStateFlicker()
     {
         var terrain = BuildShortLedgeTerrain();
-        const float groundTop = 3 * TS;
+        const float groundTop = 4 * TS;
         var cfg = new SimConfig
         {
             Terrain       = terrain,
@@ -97,7 +102,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
     public void StandAtShortLedge_HoldRightAndTapUp_NoStateFlicker()
     {
         var terrain = BuildShortLedgeTerrain();
-        const float groundTop = 3 * TS;
+        const float groundTop = 4 * TS;
         const float wallLeft  = 9 * TS;
         float halfW = 10.392f;   // R·sin60° at R=12
         var script = new InputScript()

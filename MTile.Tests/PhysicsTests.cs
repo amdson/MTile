@@ -88,7 +88,8 @@ public class PhysicsTests
     {
         // Arrange
         var chunks = new ChunkMap();
-        var chunk = new Chunk { ChunkPos = new Point(-1, 0) }; // Chunk covers X from -512 to 0, Y from 0 to 512
+        // Chunk covers X from -(Size*TileSize) to 0, Y from 0 to (Size*TileSize).
+        var chunk = new Chunk { ChunkPos = new Point(-1, 0) };
         for (int tx = 0; tx < Chunk.Size; tx++)
         for (int ty = 0; ty < Chunk.Size; ty++)
         {
@@ -98,8 +99,10 @@ public class PhysicsTests
 
         var hex = CreateHexagon();
         // Place just to the right of the chunk (-1, 0) boundaries (X > 0). Radius ~40.
-        // Edge is at hexPos.X - 34.64. Let's put it at X = 50.
-        var body = new PhysicsBody(hex, new Vector2(50f, 256f)); 
+        // Edge is at hexPos.X - 34.64. Let's put it at X = 50, and at the chunk's mid-height
+        // so the hex's vertical extent stays inside the solid rows regardless of TileSize.
+        float midY = Chunk.Size * Chunk.TileSize / 2f;
+        var body = new PhysicsBody(hex, new Vector2(50f, midY));
         body.Velocity = new Vector2(-1000f, 0f); // Fast moving left
 
         var bodies = new System.Collections.Generic.List<PhysicsBody> { body };
@@ -130,9 +133,10 @@ public class PhysicsTests
         chunks[chunk.ChunkPos] = chunk;
 
         var hex = CreateHexagon();
-        
-        // Place the hex at X = 80, moving left.
-        var body = new PhysicsBody(hex, new Vector2(80f, 256f)); 
+
+        // Place the hex at X = 80, moving left, at the chunk's mid-height.
+        float midY = Chunk.Size * Chunk.TileSize / 2f;
+        var body = new PhysicsBody(hex, new Vector2(80f, midY));
         body.Velocity = new Vector2(-1000f, 0f);
 
         var bodies = new System.Collections.Generic.List<PhysicsBody> { body };
@@ -140,9 +144,12 @@ public class PhysicsTests
         // Act
         PhysicsWorld.StepSwept(bodies, chunks, 0.1f, Vector2.Zero);
 
-        // Assert
-        Assert.True(body.Position.X >= 66.6f, $"Hexagon phased through the wall! Final position: {body.Position}");
-        Assert.True(Math.Abs(body.Position.Y - 256f) < 0.1f, $"Hexagon slid vertically! Final position: {body.Position}");
+        // Assert: the wall's right edge is at X = 2 * TileSize; hex rests with its left
+        // vertex (34.64 from center) against it.
+        float wallRight = 2 * Chunk.TileSize;
+        float expectedMinX = wallRight + 34.64f - 1f;
+        Assert.True(body.Position.X >= expectedMinX, $"Hexagon phased through the wall! Final position: {body.Position}");
+        Assert.True(Math.Abs(body.Position.Y - midY) < 0.1f, $"Hexagon slid vertically! Final position: {body.Position}");
     }
 
     [Fact]
@@ -160,10 +167,12 @@ public class PhysicsTests
 
         var hex = CreateHexagon();
 
-        // Chunk is 16 tiles × 16 px = 256 px wide, spans X∈[0, 256]. Put hex at X=400 moving
-        // left at -1000 px/s; unobstructed it would travel -200 px to X=200 (well inside the
-        // chunk). The swept resolver must stop it before phasing in.
-        var body = new PhysicsBody(hex, new Vector2(400f, 128f));
+        // Chunk is Size tiles × TileSize px wide, spans X∈[0, chunkWidth]. Put the hex well to
+        // the right, moving left at -1000 px/s with plenty of travel budget to unobstructedly
+        // overshoot into the chunk. The swept resolver must stop it before phasing in.
+        float chunkWidth = Chunk.Size * Chunk.TileSize;
+        float midY = Chunk.Size * Chunk.TileSize / 2f;
+        var body = new PhysicsBody(hex, new Vector2(chunkWidth + 144f, midY));
         body.Velocity = new Vector2(-1000f, 0f);
 
         var bodies = new System.Collections.Generic.List<PhysicsBody> { body };
@@ -172,8 +181,9 @@ public class PhysicsTests
         PhysicsWorld.StepSwept(bodies, chunks, 0.2f, Vector2.Zero);
 
         // Assert: hex left vertex at X=center−34.64 should rest against the chunk's right edge
-        // at X=256 → center at 256 + 34.64 ≈ 290.64.
-        Assert.True(body.Position.X >= 290f, $"Hexagon phased into the chunk! Final position: {body.Position}");
+        // at X=chunkWidth → center at chunkWidth + 34.64.
+        float expectedMinX = chunkWidth + 34.64f - 1f;
+        Assert.True(body.Position.X >= expectedMinX, $"Hexagon phased into the chunk! Final position: {body.Position}");
     }
 
     [Fact]

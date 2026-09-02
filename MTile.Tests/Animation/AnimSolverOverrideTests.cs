@@ -113,12 +113,15 @@ public class AnimSolverOverrideTests
     // --- the signal ---------------------------------------------------------------
 
     // CharacterAnimSample.From now flags LowCeiling for a GROUNDED, non-crouched body: an
-    // upright run through a 2-high (32px) corridor — which Standing threads at fold hover
-    // with ~1px of head-room, no auto-crouch — fires it; the same run under a 3-high roof
-    // (~17px of head-room, the bumpy corridor's ordinary interior) does not.
+    // upright run through a 3-high (33px) corridor — which Standing threads at fold hover
+    // with ~2px of head-room, no auto-crouch — fires it; the same run under a 4-high roof
+    // (~13px of head-room, the corridor stage's ordinary interior) does not. (Rebuilt for
+    // the 11px grid: the body's fold-hover standing envelope, FoldHoverOffset +
+    // (StandingHeight - Radius) ≈ 30.8px, is unchanged by TileSize, so what used to be a
+    // 2-vs-3-tile split at 16px tiles is now a 3-vs-4-tile split at 11px tiles.)
     [Theory]
-    [InlineData(2, true)]
-    [InlineData(3, false)]
+    [InlineData(3, true)]
+    [InlineData(4, false)]
     public void SampleFrom_UprightRunInCorridor_FlagsLowCeilingOnlyWhenTileIsRightOverhead(int gapTiles, bool expect)
     {
         const int W = 60;
