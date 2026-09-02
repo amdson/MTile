@@ -172,28 +172,62 @@ Each encodes a specific missing capability. Un-skip as the capability lands.
 
 ### Known-failing tests (pre-existing baseline)
 
-**A clean full run is `651 passed / 5 failed / 12 skipped` (668 total), verified twice on
-2026-08-30.** These 5 fail on `main` and are *not* a regression from whatever you just changed.
-Check a new failure against this list before bisecting; only a name **not** here is worth chasing.
+**A clean full run is `738 passed / 42 failed / 12 skipped` (792 total), verified twice on
+2026-09-02** — after the TileSize 16→11 change and the `59ddb62` test triage. These fail on `main`
+and are *not* a regression from whatever you just changed. Check a new failure against this list
+before bisecting; only a name **not** here is worth chasing.
 
 Match on the **test name**, not the counts. A skipped `[Theory]` collapses to a single reported
 entry regardless of how many `InlineData` rows it has, so skipping or un-skipping one shifts the
 totals by more than the number of tests involved — the totals are a rough sanity check, not a
 tripwire.
 
-Unlike the skipped tests above, these are live asserts — they run, and they fail.
+Unlike the skipped tests above, these are live asserts — they run, and they fail. Three clusters:
+
+**A. The pre-tile-size baseline (5 tests, carried over from 2026-08-30).** The 4 `redirect` rows
+go green or red with the §6 "Redirect audit" decision; the anim-solver row is a real IK-dilution
+issue, not noise.
 
 | Test (`MTile.Tests/…`) | Symptom | Cluster |
 |---|---|---|
-| `Sim/CorrectorExperimentsTests.cs:107` `AmbientAirGraze_PreservesSpeedThroughCorner` | "ambient should preserve most speed through the graze: minVx=0" | corrector |
-| `Sim/CorrectorExperimentsTests.cs:131` `Vault_DtInvariantDelivery(dt: 0.0333)` | "rest height off-gate at dt=0.033333335: y=11.94" | corrector |
-| `Sim/CaveMouthTests.cs:116` `NearMiss_DucksUnderTheLip_AndEntersClean` | "1 face-smack frames ABOVE the mouth — the trim didn't duck" | corrector |
-| `Sim/CaveMouthTests.cs:137` `AimedWellAboveTheMouth_BonksHonestly` | "no face contact above the mouth — the assist steered a bad fall into the cave" | corrector |
-| `Animation/ParkourGripSolverTests.cs:85` `Solver_ParkourGrip_HandReachesLedgeCornerThroughOverlay` | "RENDERED hand off the corner (2.64px) — smoothing diluting the pin again?" | anim solver |
+| `Sim/CorrectorExperimentsTests.cs:78` `AmbientAirGraze_PreservesSpeedThroughCorner` | "ambient should preserve most speed through the graze: minVx=0" | redirect |
+| `Sim/CorrectorExperimentsTests.cs:116` `Vault_DtInvariantDelivery` | Was only the dt=0.0333 row; since the grid change **both** dt rows fail. | redirect |
+| `Sim/CaveMouthTests.cs:83` `NearMiss_DucksUnderTheLip_AndEntersClean` | "face-smack frames ABOVE the mouth — the trim didn't duck" | redirect |
+| `Sim/CaveMouthTests.cs:129` `AimedWellAboveTheMouth_BonksHonestly` | "no face contact above the mouth — the assist steered a bad fall into the cave" | redirect |
+| `Animation/ParkourGripSolverTests.cs:20` `Solver_ParkourGrip_HandReachesLedgeCornerThroughOverlay` | "RENDERED hand off the corner — smoothing diluting the pin again?" | anim solver |
 
-- **corrector (4)** — the fallout §6 "Redirect audit" refers to; these go green or red with the
-  redirect decision, so they stay failing until that lands one way or the other.
-- **anim solver (1)** — the IK pin is diluted by smoothing; a real solver issue, not noise.
+**B. The corrector bundle (23 tests, 11 classes) — awaiting the owner's MANUAL pass on the 11px
+grid.** Hand-calibrated maneuver-delivery judgment calls the owner explicitly reserved (2026-09-02).
+**Do not auto-fix, retune, or delete these** — each needs a by-feel decision on what the maneuver
+should even do at the new body:tile ratio.
+
+| Class (`MTile.Tests/…`) | Failing tests | Note |
+|---|---|---|
+| `Sim/CorrectorOperationsTests.cs:54,72,92,113,135` | VaultChain_TwoSteps_BothTakenInStride; Staircase_ThreeRises_ClimbedWithoutStall; DuckUnderProtrusion_AtSpeed_PassesThrough; TunnelRun_TwoHigh_EnterTraverseExit; DropIntoTunnelMouth_LandsAndTraverses | Delivery windows hand-calibrated to old-grid geometry (~10px clearances, absolute X/Y bands). |
+| `Sim/LatticeScenarioTests.cs:92,142,438` | Row02_JumpIntoTunnel_EntersLowAndClean; Row03_CoveredJump_FarFromEdge_BonksWithoutShuffling; Row17_WallJump_ArcIsTheStates(into: True) | Scenario-row geometry vs the new ratio. |
+| `Sim/LatticePathPlannerTests.cs:73,95,145` | BlockAhead_PathClimbsOver; CeilingAhead_PathDucksUnder; FreeStandingTwoHighWall_NotWorthClimbing | Planner cost/feasibility calls changed with tile scale. |
+| `Sim/FoldScenarioTests.cs:108,142` | TwoHighWall_HoldRight_BonksNoHeightGain; OneHighLedgeUnderCeiling_HoldRight_HonestBonk_NoHalfScramble | Honest-bonk expectations vs new wall heights. |
+| `Sim/Fold{Ref,Lm}EngineTests.cs:56,55` | HoldsHover_AndMakesProgress_OnFlatGround (×2 engines) | Setup already TileSize-derived — the hover invariants themselves fail, i.e. real dynamics change. (Lm's speed-floor assert was removed in triage; the remaining red is the hover band.) |
+| `Sim/BallisticPredictorTests.cs:108,148` | GroundRun_SteadyState_HoldsHoverBandAtWalkSpeed; Landing_FallOntoFlat_HoldRight_SettlesToHover | Same: TileSize-derived setup, hover dynamics changed. |
+| `Sim/ClearanceConstraintTests.cs:97,153` | Tunnel_CeilingGraze_EmitsDownwardRow; Staircase_SideOfStep_EmitsSideRow_NotInteriorFaces | Emitted-constraint expectations vs new clearances. |
+| `Sim/CorridorProbeTests.cs:119,157` | Staircase45_RiseCornerPerColumn; ThreeBlockWall_TruncatesTallRise | Probe-corner cases still red after the mechanical rebuild of their siblings. |
+| `Sim/CorrectorAnchorTests.cs:45` | TunnelVault_FlattenedArc_ClearsBothAndLandsInGate | Ceiling was authored 3px inside the arc's ballistic apex + tight absolute-Y bounds. |
+| `Sim/CorrectorSnapshotTests.cs:82` | CorrectorCost_VaultHeavyCourse_StaysUnderBudget | The 5.9 Debug-marginal perf budget (spawn was fixed in triage; the 0.5ms ceiling is still exceeded in Debug). |
+
+**C. Tile-size needs-human (14 tests)** — triage established each needs a design decision or a
+game-code change, not a test edit.
+
+| Test (`MTile.Tests/…`) | Why it's red |
+|---|---|
+| `Sim/DeliberateClimbTests.cs:87,104` RunningIn_WithoutUp_TheArcStaysHome; StandingFlushAtAnUnhangableStep_UpHeld_ArcsOverIt | Design pinch: at TS=11 only a 2-tile step (22px) fits between MantleMaxRise (20px) and StandingHeight (~33px) — 2px of arc-band headroom — and body radius (12px) > TileSize (11px) makes a flush body overlap the faced platform. |
+| `Sim/SproutLiftJumpTests.cs:86,357,412,514` SproutLift_CarriesStandingPlayer_SmoothlyOneTile; SingleDiagonalBlock_CarriesSmoothly; DiagonalEruptionStream_CarriesPlayerTwentyTilesUpAndRight; JumpOffRisingSprout_InheritsFloorVelocity | The 5.8 anchor-servo carry (actively tuned) — ride dynamics genuinely changed at the new ratio; retune with the feature, not as test rot. |
+| `Sim/SimulationTests.cs:614` HoldSpaceRight_CoveredJumpOutOfTunnel | The old 2-tile gap (32px) sat just ABOVE the auto-crouch threshold (~31px) — the scenario's whole point. A 2-row gap is now 22px (below it); no tile count reproduces the straddle at TS=11. Design call. |
+| `Sim/TrainingStageTests.cs:36` Dummy_SlashesAndStabs_WithoutWandering | Game-code fix: `Stage.cs` `PopulateTraining` hardcodes the dummy home at (8, 75) for the old 96px floor top (now 66px). |
+| `Sim/PlayerImpactByVelocityTests.cs:196` Terminal_OntoStone_BouncesNoBreak | Real over-breaking: terminal-fall KE→HP (≈16) now exceeds Stone.MaxHP (12), so the tile breaks instead of bouncing — the (16/11)² impact/material rescale is a tuning decision (see §5 impact rows). |
+| `JumpingStateTests.cs:113` Jump_OnExit_RemovesSourceFsd | Triage rescaled the embedded spawn but it's still red — undiagnosed, needs a sim-run look. |
+| `Sim/SproutCrushTests.cs:72` SproutGrowingIntoPinnedBody_IsDestroyed | Same: setup rescaled, still red — undiagnosed. |
+| `Sim/SproutGraphTests.cs:96` Request_WithTwoSolidNeighbours_GrowsOutOfBothFaces | Same: setup rescaled, still red — undiagnosed. |
+| `Sim/InfiniteTerrainTests.cs:281` SimStep_StreamsAheadOfAWalkingPlayer_AndTheGroundIsAlwaysThere | Fully TileSize-derived; the walk-and-stream dynamics themselves changed. |
 
 **Resolved from this table 2026-08-30** (kept as a record of what the list used to hold):
 `ActionOverlayTests.LowerBody_Untouched_ByUpperBodyOverlay` was asserting float *equality* on
