@@ -114,8 +114,12 @@ public class LedgePullExitTests(ITestOutputHelper output)
         // row above the lip's row0 (was row0 itself on the old 2-tile-tall body);
         // an extra empty row keeps the same physical "can't fit" gap below it.
         // (Lip is row 2 with the 3-tall R=12 wall, same as BuildLedgeTerrain.)
+        // The overhang spans 3 columns: with PullCompleted's 0.7R buffer a
+        // single-tile overhang left a notch the body could squeeze into beside it,
+        // "completing" the pull below the block — this test is about a pull that
+        // genuinely cannot crest.
         var terrain = SimTerrain.FromAscii(@"
-            .........X
+            .......XXX
             ..........
             ..........
             .........X

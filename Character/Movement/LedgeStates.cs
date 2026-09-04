@@ -67,10 +67,11 @@ public class LedgeGrabState : MovementState
     private bool PullCompleted(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         var corner = abilities.GrabbedCorner;
-        bool atStandingHeight = ctx.Body.Position.Y < corner.Y - 2f * PlayerCharacter.Radius;
+        var buffer = 0.7f * PlayerCharacter.Radius; 
+        bool atStandingHeight = ctx.Body.Position.Y - buffer < corner.Y - 2f * PlayerCharacter.Radius;
         bool pastCorner       = _wallDir == 1
-            ? ctx.Body.Position.X > corner.X
-            : ctx.Body.Position.X < corner.X;
+            ? ctx.Body.Position.X > corner.X - buffer
+            : ctx.Body.Position.X < corner.X + buffer;
         return atStandingHeight && pastCorner;
     }
 

@@ -86,6 +86,10 @@ public class MassBall : Projectile
 
         int gtx = (int)MathF.Floor(Body.Position.X / Chunk.TileSize);
         int gty = (int)MathF.Floor(Body.Position.Y / Chunk.TileSize);
-        chunks.Mass.Deposit(chunks, gtx, gty, leak, _tileType);
+        // Wave provenance: the ball IS the wave. Direction locks on the first
+        // touch (drag is scalar and there's no gravity, so it never changes);
+        // the tag rides the mass through spill → request → the schedule gate.
+        chunks.TouchWave(Id, Body.Velocity);
+        chunks.Mass.Deposit(chunks, gtx, gty, leak, _tileType, Id);
     }
 }

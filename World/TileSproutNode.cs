@@ -45,6 +45,14 @@ public sealed class TileSproutNode
     // a Growing node means the sprout has lost all support and is cancelled.
     public SproutFaces Faces;
 
+    // Avalanche provenance (AVALANCHE_RIDING_V2 Parts 2–3). None = ordinary
+    // building, which follows today's rules exactly. A tagged node records which
+    // wave requested it and WHEN (ChunkMap.SproutClock seconds): the schedule gate
+    // holds a tagged ghost Pending until RequestTime + AvalancheSurfaceLag, so
+    // growth replays the wave's recorded sweep instead of racing ahead of it.
+    public EntityId WaveId;
+    public float    RequestTime;
+
     public float Lifetime;
     public float Age;
 

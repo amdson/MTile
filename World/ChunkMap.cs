@@ -34,6 +34,21 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // Fed live by the RMB paint gesture; see TileMassField.
     public readonly TileMassField Mass = new();
 
+    // Avalanche provenance (AVALANCHE_RIDING_V2 Part 2): per-wave constant
+    // direction, fed by MassBall via TouchWave. Sim state, snapshotted.
+    public readonly AvalancheWaves Waves = new();
+
+    // Terrain-local clock for the avalanche schedule gate: accumulated in
+    // TickSprouts, so it advances in lockstep with sprout ages and survives a
+    // rollback the same way (snapshotted + restored). Wave-tagged nodes stamp
+    // RequestTime against it and promote only once it passes RequestTime + lag.
+    public float SproutClock { get; private set; }
+
+    // Register/refresh a wave's identity from its ball. Called on every deposit;
+    // direction locks on the first nonzero-velocity touch (the ball never turns).
+    public void TouchWave(EntityId wave, Vector2 velocity)
+        => Waves.Touch(wave, velocity, SproutClock);
+
     // Per-cell decay timer for Foam tiles. Registered on Foam-sprout finalize,
     // ticked alongside sprouts, cleared on BreakCell so a foam tile broken
     // early (by damage / overwrite) doesn't fire a second BreakCell later.
@@ -365,7 +380,14 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // it touches an existing sprout (Pending or Growing) it becomes a Pending
     // ghost and waits for a neighbour to solidify. With no neighbour of either
     // kind there's nothing to build from and the request is rejected.
-    public TileSproutNode TryRequestTile(int gtx, int gty, TileType type = TileType.Stone)
+    //
+    // Wave-tagged requests (avalanches) differ in ONE way: even with solid
+    // support they park as a stamped Pending ghost until the schedule gate says
+    // their moment in the wave's recorded sweep has arrived (TickSprouts'
+    // due-scan). The accept/reject decision is IDENTICAL to the untagged path —
+    // that is what keeps the final avalanche shape invariant under the gate.
+    public TileSproutNode TryRequestTile(int gtx, int gty, TileType type = TileType.Stone,
+                                         EntityId wave = default)
     {
         if (GetCellState(gtx, gty) != TileState.Empty) return null;
         if (Graph.TryGet(gtx, gty, out _)) return null;   // already requested
@@ -375,10 +397,23 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
 
         if (faces != SproutFaces.None)
         {
+            if (!wave.IsNone && MovementConfig.Current.AvalancheSurfaceLag > 0f)
+            {
+                // Supported but not due: park stamped. The due-scan re-derives
+                // SolidFaces at promotion time, so support changes in the gap
+                // are honoured.
+                var parked = Graph.AddPending(chunkPos, tx, ty, gtx, gty);
+                parked.Type        = type;
+                parked.WaveId      = wave;
+                parked.RequestTime = SproutClock;
+                return parked;
+            }
             var chunk = GetOrCreateChunk(chunkPos);
             var node = Graph.AddGrowing(chunkPos, tx, ty, gtx, gty,
                 faces, MovementConfig.Current.SproutLifetime);
-            node.Type = type;
+            node.Type   = type;
+            node.WaveId = wave;
+            node.RequestTime = SproutClock;
             WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
             OnTilePlaced?.Invoke(CellCenter(gtx, gty), type);
             return node;
@@ -390,7 +425,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // Chunk auto-creation deferred to promotion. Type is stamped on the node
         // so it survives the Pending→Growing handoff.
         var pending = Graph.AddPending(chunkPos, tx, ty, gtx, gty);
-        pending.Type = type;
+        pending.Type        = type;
+        pending.WaveId      = wave;
+        pending.RequestTime = SproutClock;
         return pending;
     }
 
@@ -446,6 +483,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // independent of sprout finalization. Do it first so a foam cell that
         // expires this frame is broken before subsequent passes (impact / damage)
         // try to read it as solid.
+        // The avalanche schedule clock advances with the sprouts it gates.
+        SproutClock += dt;
+        Waves.Tick(SproutClock);
+
         Foam.Tick(dt, _breakCellAction);
         // Bleed stale partial build mass so the table stays bounded (see TileMassField).
         Mass.Tick(dt);
@@ -461,47 +502,91 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             if (n.IsComplete)
                 (finalize ??= new List<TileSproutNode>()).Add(n);
         }
-        if (finalize == null) return;
 
-        // Pass 1 — commit the completed ring.
         float overshoot = 0f;
-        foreach (var n in finalize)
+        if (finalize != null)
         {
-            if (_dict.TryGetValue(n.ChunkPos, out var chunk))
-                WriteTile(chunk, n.Tx, n.Ty, TileState.Solid, chunk.Tiles[n.Tx, n.Ty].Type, null);
-            // Foam tiles get a decay timer registered the moment they finalize;
-            // see FoamDecay. Other types never enter the decay map.
-            if (n.Type == TileType.Foam)
-                Foam.Register(n.Gtx, n.Gty);
-            Graph.Remove(n);
+            // Pass 1 — commit the completed ring.
+            foreach (var n in finalize)
+            {
+                if (_dict.TryGetValue(n.ChunkPos, out var chunk))
+                    WriteTile(chunk, n.Tx, n.Ty, TileState.Solid, chunk.Tiles[n.Tx, n.Ty].Type, null);
+                // Foam tiles get a decay timer registered the moment they finalize;
+                // see FoamDecay. Other types never enter the decay map.
+                if (n.Type == TileType.Foam)
+                    Foam.Register(n.Gtx, n.Gty);
+                Graph.Remove(n);
 
-            // Age crossed Lifetime this tick. Carry the largest overshoot
-            // (Age − Lifetime ∈ [0, dt)) into the next ring's starting Age so
-            // growth is continuous across the handoff instead of resuming from
-            // t=0 (which would put the new volumes exactly atop the just-Solid
-            // cells for one frame). Uniform across a ring, which shares a clock.
-            overshoot = MathF.Max(overshoot, n.Age - n.Lifetime);
+                // Age crossed Lifetime this tick. Carry the largest overshoot
+                // (Age − Lifetime ∈ [0, dt)) into the next ring's starting Age so
+                // growth is continuous across the handoff instead of resuming from
+                // t=0 (which would put the new volumes exactly atop the just-Solid
+                // cells for one frame). Uniform across a ring, which shares a clock.
+                overshoot = MathF.Max(overshoot, n.Age - n.Lifetime);
+            }
+
+            // Pass 2 — promote every ghost adjacent to a cell that just solidified.
+            // O(4) per completed sprout, so no scan over the ghost set. Wave-tagged
+            // ghosts additionally wait for the schedule gate; a not-yet-due ghost
+            // stays Pending and the due-scan below picks it up when its time comes
+            // (its supporting neighbour is Solid by then, so SolidFaces finds it).
+            foreach (var n in finalize)
+            foreach (var face in TileSproutNode.FaceOrder)
+            {
+                var o = TileSproutNode.FaceOffset(face);
+                int cgtx = n.Gtx + o.X, cgty = n.Gty + o.Y;
+                if (!Graph.TryGet(cgtx, cgty, out var ghost)) continue;
+                if (ghost.Status != TileSproutStatus.Pending) continue;
+                if (!WaveDue(ghost)) continue;
+
+                if (!Graph.TryPromote(ghost, SolidFaces(cgtx, cgty),
+                                      MovementConfig.Current.SproutLifetime, overshoot))
+                    continue;
+
+                // Materialize the chunk + tile state now that the ghost is physical.
+                var ghostChunk = GetOrCreateChunk(ghost.ChunkPos);
+                WriteTile(ghostChunk, ghost.Tx, ghost.Ty, TileState.Sprouting, ghost.Type, ghost);
+            }
         }
 
-        // Pass 2 — promote every ghost adjacent to a cell that just solidified.
-        // O(4) per completed sprout, so no scan over the ghost set.
-        foreach (var n in finalize)
-        foreach (var face in TileSproutNode.FaceOrder)
+        // Pass 3 — the avalanche due-scan (AVALANCHE_RIDING_V2 Part 3). Wave-tagged
+        // ghosts whose scheduled moment has arrived promote off whatever solid
+        // support exists NOW. This is the event-driven promotion's counterpart for
+        // ghosts that were parked (supported at request time) or that came due
+        // after their neighbour finalized. Linear over live ghosts, which only
+        // exist while something is building; iteration order is the Pending list's
+        // insertion order, deterministic and restore-preserved.
+        if (Graph.Pending.Count > 0)
         {
-            var o = TileSproutNode.FaceOffset(face);
-            int cgtx = n.Gtx + o.X, cgty = n.Gty + o.Y;
-            if (!Graph.TryGet(cgtx, cgty, out var ghost)) continue;
-            if (ghost.Status != TileSproutStatus.Pending) continue;
+            _dueScratch.Clear();
+            foreach (var g in Graph.Pending)
+                if (!g.WaveId.IsNone && WaveDue(g)) _dueScratch.Add(g);
+            foreach (var ghost in _dueScratch)
+            {
+                // Start age carries how far past due this tick overran, mirroring
+                // pass 1's overshoot: growth is continuous against the schedule.
+                float late = MathF.Min(
+                    SproutClock - (ghost.RequestTime + MovementConfig.Current.AvalancheSurfaceLag), dt);
+                if (!Graph.TryPromote(ghost, SolidFaces(ghost.Gtx, ghost.Gty),
+                                      MovementConfig.Current.SproutLifetime, MathF.Max(0f, late)))
+                    continue;   // no solid support yet — stays pending for pass 2 / a later scan
 
-            if (!Graph.TryPromote(ghost, SolidFaces(cgtx, cgty),
-                                  MovementConfig.Current.SproutLifetime, overshoot))
-                continue;
-
-            // Materialize the chunk + tile state now that the ghost is physical.
-            var ghostChunk = GetOrCreateChunk(ghost.ChunkPos);
-            WriteTile(ghostChunk, ghost.Tx, ghost.Ty, TileState.Sprouting, ghost.Type, ghost);
+                var ghostChunk = GetOrCreateChunk(ghost.ChunkPos);
+                WriteTile(ghostChunk, ghost.Tx, ghost.Ty, TileState.Sprouting, ghost.Type, ghost);
+            }
         }
     }
+
+    // The avalanche schedule gate: untagged nodes are always due (today's rules);
+    // a wave-tagged node is due once the clock passes its recorded request moment
+    // plus the surfacing lag. Replaying the recorded deposition order is what keeps
+    // growth sweeping WITH the wave instead of racing ahead of it (and is the whole
+    // back-ignition fix — a far wall can only parent its neighbours on schedule).
+    private bool WaveDue(TileSproutNode n)
+        => n.WaveId.IsNone
+        || SproutClock >= n.RequestTime + MovementConfig.Current.AvalancheSurfaceLag;
+
+    private readonly List<TileSproutNode> _dueScratch = new();
 
     // A cell was cleared. Any Growing sprout that was pushing out of it loses that
     // face; a sprout that loses its last face has nothing left to grow from and is
@@ -667,6 +752,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Foam        = Foam.Capture(),
         Impact      = Impact.Capture(),
         Mass        = Mass.Capture(),
+        Waves       = Waves.Capture(),
+        SproutClock = SproutClock,
     };
 
     public void RestoreTerrain(TerrainSnapshot s)
@@ -682,6 +769,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Foam.Restore(s.Foam);
         Impact.Restore(s.Impact);
         Mass.Restore(s.Mass);
+        Waves.Restore(s.Waves);
+        SproutClock = s.SproutClock;
 
         // 3. Re-link tile→sprout refs. Every Growing node's cell is Sprouting at the
         //    restored frame (grid and graph were captured together), so this rebuilds

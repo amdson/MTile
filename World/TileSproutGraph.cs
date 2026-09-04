@@ -89,6 +89,8 @@ public sealed class TileSproutGraph
                 Faces    = n.Faces,
                 Lifetime = n.Lifetime,
                 Age      = n.Age,
+                WaveId      = n.WaveId,
+                RequestTime = n.RequestTime,
             };
         }
         return new SproutGraphData { Nodes = nodes };
@@ -110,6 +112,8 @@ public sealed class TileSproutGraph
                 Faces    = d.Faces,
                 Lifetime = d.Lifetime,
                 Age      = d.Age,
+                WaveId      = d.WaveId,
+                RequestTime = d.RequestTime,
             };
             _nodes[(d.Gtx, d.Gty)] = n;
             if (d.Status == TileSproutStatus.Growing) _growing.Add(n); else _pending.Add(n);

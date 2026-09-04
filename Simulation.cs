@@ -483,11 +483,16 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         foreach (var d in _chunks.Damage.Damaged) t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x01);
         foreach (var d in _chunks.Foam.Entries)   t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x02);
         foreach (var d in _chunks.Impact.Entries) t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x03);
-        foreach (var d in _chunks.Mass.Entries)   t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x04);
+        foreach (var d in _chunks.Mass.Entries)
+            t ^= CellF(d.Key.gtx, d.Key.gty, d.Value.Amount,
+                       0x04 ^ ((ulong)(uint)d.Value.Wave.Index << 16));
         // Sprouts are a list, but fold them the same way: a rollback rebuilds it and the
-        // order it comes back in is not something the checksum should depend on.
+        // order it comes back in is not something the checksum should depend on. Wave
+        // provenance rides in the salt so two peers disagreeing on a sprout's avalanche
+        // (which changes WHEN it grows, via the schedule gate) surfaces immediately.
         foreach (var s in _chunks.ActiveSprouts)
-            t ^= CellF(s.Gtx, s.Gty, s.Age, 0x05 ^ ((ulong)(byte)s.Type << 8));
+            t ^= CellF(s.Gtx, s.Gty, s.Age,
+                       0x05 ^ ((ulong)(byte)s.Type << 8) ^ ((ulong)(uint)s.WaveId.Index << 16));
 
         Mix((uint)t); Mix((uint)(t >> 32));
         return h;

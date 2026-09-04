@@ -67,11 +67,28 @@ public class LedgeRegrabDriftTests(ITestOutputHelper output)
         float tailMaxAbsVx = frames.Where(f => f.Frame >= 120).Max(f => MathF.Abs(f.Vx));
         output.WriteLine($"pull={pullFrames,2} endX={last.X,8:F2} endVx={last.Vx,7:F2} tailMaxVx={tailMaxAbsVx:F2} state={last.State}");
 
-        // Settled, not coasting: tail horizontal velocity is ~zero and the body is at
-        // the hang X, not somewhere off in the distance.
+        // Settled, not coasting — the drift bug is a tail that never stops moving,
+        // so the velocity bound applies to every outcome.
         Assert.True(tailMaxAbsVx < 2f, $"pull={pullFrames}: still drifting, tailMaxAbsVx={tailMaxAbsVx:F2}");
-        Assert.True(MathF.Abs(last.X - HangX) < 6f,
-            $"pull={pullFrames}: ended at X={last.X:F2}, not near the hang X≈{HangX}");
+
+        // Two legitimate outcomes. Short pulls release mid-maneuver and must settle
+        // back at the hang. Long pulls now cross PullCompleted's 0.7R buffer before
+        // the release lands, so the pull legitimately finishes: the body crests and
+        // settles standing ON the lip (not the floor below), which is the desired
+        // earlier-completion feel — not drift.
+        if (last.State == "LedgeGrabState")
+        {
+            Assert.True(MathF.Abs(last.X - HangX) < 6f,
+                $"pull={pullFrames}: ended at X={last.X:F2}, not near the hang X≈{HangX}");
+        }
+        else
+        {
+            Assert.Equal("StandingState", last.State);
+            Assert.True(last.X > HangX + 2f,
+                $"pull={pullFrames}: completed pull ended at X={last.X:F2}, not onto the lip past the hang X≈{HangX}");
+            Assert.True(last.Y < 2 * TS,
+                $"pull={pullFrames}: ended standing at Y={last.Y:F2} — the floor below, not the lip");
+        }
     }
 
     // A plain fresh grab (no pull involved) still rests against the wall — the 2D

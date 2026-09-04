@@ -56,8 +56,8 @@ public class TerrainCarriedState : MovementState
     // Entry: the horizontal component of the live contact push must be real —
     // this is what separates "swept by mass" from "standing on a rising
     // floor" (the plain elevator stays Standing's, tracked by the fold).
-    private const float EnterHorizontalPush = 25f;   // px/s
-    private const float StayHorizontalPush  = 8f;    // px/s
+    private const float EnterHorizontalPush = 3f;   // px/s
+    private const float StayHorizontalPush  = 3f;    // px/s
     // Evidence grace: bridges momentary query gaps (a promotion tick between
     // cascade slices) without letting the state outlive a finished stream.
     private const float EvidenceGraceSeconds = 0.25f;
@@ -66,14 +66,14 @@ public class TerrainCarriedState : MovementState
     // upcoming cells, not just the one about to scoop the rider), which both
     // smooths the target and strengthens the centering bias's read on where
     // the mass actually is.
-    private const float MassProbeReach = Chunk.TileSize * 2.0f;
+    private const float MassProbeReach = Chunk.TileSize * 4.0f;
     // The servo field's shape: desired standing-off distance from a volume's
     // face along its motion, and the ramp slope — each px of extra lead
     // shaves AnchorKp px/s off the target, so a 155 px/s diagonal volume's
     // field reaches zero ~20px ahead (inside the probe) instead of cliffing
     // over half a tile. The standoff keeps the rider visibly proud of the
     // crest rather than skimming the faces.
-    private const float AnchorStandoff = 4.5f;   // px
+    private const float AnchorStandoff = 12.5f;   // px
     private const float AnchorKp       = 10f;    // (px/s) per px of lead
     // Flow-average normalization bias, in units of one full-strength
     // contributor's weight. The target is the distance-weighted MEAN of the
@@ -83,7 +83,7 @@ public class TerrainCarriedState : MovementState
     // cells is exactly the front's advance rate); at the fringe, where flow
     // is thinning on one side, Σw is small and the bias pulls the target
     // down — a mild centering force easing the rider back into the stream.
-    private const float FlowCenterBias = 0.35f;
+    private const float FlowCenterBias = 0.5f;
 
     public override int ActivePriority  => MovementPriorities.TerrainCarriedActive;
     public override int PassivePriority => MovementPriorities.TerrainCarriedPassive;
@@ -127,8 +127,13 @@ public class TerrainCarriedState : MovementState
     // target (station-keeping brake) but is still very much riding a live
     // stream, so evidence and target must stay separate values.
     internal static Vector2 RideTarget(EnvironmentContext ctx, out bool massNearby)
+        => RideTarget(ctx, out massNearby, out _);
+
+    internal static Vector2 RideTarget(EnvironmentContext ctx, out bool massNearby,
+                                       out bool waveNearby)
     {
         massNearby = false;
+        waveNearby = false;
         var body = ctx.Body;
         var b = body.Polygon.GetBoundingBox(body.Position);
         var probe = new BoundingBox(b.Left - MassProbeReach, b.Top - MassProbeReach,
@@ -143,9 +148,17 @@ public class TerrainCarriedState : MovementState
         // way an argmax selection could.
         Vector2 flow = Vector2.Zero;
         float wSum = 0f;
+        // Direction conditioning (AVALANCHE_RIDING_V2 Part 4): the first
+        // wave-tagged contributor names the wave, and the mean flow is ROTATED
+        // onto that wave's recorded constant direction after the loop. The
+        // volumes only ever push axis-aligned, so at shallow wave angles the
+        // mean points mostly up — the recorded direction is the truth about
+        // where the mass is going. Magnitude stays the locally-evidenced field
+        // value (rotate, never scale up).
+        EntityId rideWave = default;
+        var growing = ctx.Chunks.Graph.Growing;
         Span<Vector2> seen = stackalloc Vector2[8];
         int seenCount = 0;
-        var growing = ctx.Chunks.Graph.Growing;
         for (int i = 0; i < growing.Count; i++)
         {
             var sp = growing[i];
@@ -175,13 +188,37 @@ public class TerrainCarriedState : MovementState
                 float w = Math.Clamp(1f - dist / MassProbeReach, 0.05f, 1f);
                 flow += dirV * (s * w);
                 wSum += w;
+                if (!sp.WaveId.IsNone)
+                {
+                    waveNearby = true;
+                    if (rideWave.IsNone) rideWave = sp.WaveId;
+                }
             }
         }
-        return wSum > 0f ? flow / (wSum + FlowCenterBias) : Vector2.Zero;
+        if (wSum <= 0f) return Vector2.Zero;
+        flow /= wSum + FlowCenterBias;
+
+        if (!rideWave.IsNone
+            && ctx.Chunks.Waves.TryGetDirection(rideWave, out var waveDir)
+            && flow.LengthSquared() > 1f)
+            flow = flow.Length() * waveDir;
+        return flow;
     }
 
+    // PROTOTYPE ENTRY (AVALANCHE_RIDING_V2 Part 4, user-directed 2026-09-04):
+    // any approaching WAVE-TAGGED volume inside the probe starts a ride —
+    // deliberately the simplest possible gate, to find out whether the carry
+    // itself works before designing an intent-shaped entry. Scoped to
+    // avalanches on purpose: untagged building (manual paint, enemy pillars,
+    // the plain vertical elevator) keeps the old push-threshold entry, so
+    // Standing's tuned fold hover still owns those. Within the probe radius
+    // (~4 tiles of a live wave) the old "no proximity theft" guarantee is
+    // traded away — that's the experiment.
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-        => MathF.Abs(AggregateCarry(ctx.Body).X) > EnterHorizontalPush;
+    {
+        RideTarget(ctx, out _, out bool waveNearby);
+        return waveNearby || MathF.Abs(AggregateCarry(ctx.Body).X) > EnterHorizontalPush;
+    }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {

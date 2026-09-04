@@ -391,6 +391,13 @@ public class MovementConfig
     // over this window, then commits as a regular solid tile.
     public float SproutLifetime { get; set; } = 0.1f;
 
+    // Avalanche schedule gate (AVALANCHE_RIDING_V2 Part 3): how long after the
+    // mass ball's recorded passage a wave-tagged cell may begin growing. The one
+    // knob that turns the isotropic shell into a front sweeping in deposition
+    // order — 0 disables the gate entirely (wave requests behave like manual
+    // building). Seconds; does not scale with Chunk.TileSize.
+    public float AvalancheSurfaceLag { get; set; } = 0.25f;
+
     // Double Jump
     public float DoubleJumpVelocity { get; set; } = -100f;
     public float DoubleJumpHoldForce { get; set; } = -1500f;
