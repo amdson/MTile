@@ -5,8 +5,8 @@
   "Duration": 0.7,
   "Loop": false,
   "Region": "UpperBody",
-  "SettleShare": 0.45,
   "OffRegionWeight": 0.3,
+  "SettleShare": 0.45,
   "Keyframes": [
     {
       "Time": 0,
