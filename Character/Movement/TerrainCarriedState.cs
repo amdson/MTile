@@ -74,7 +74,24 @@ public class TerrainCarriedState : MovementState
     // over half a tile. The standoff keeps the rider visibly proud of the
     // crest rather than skimming the faces.
     private const float AnchorStandoff = 12.5f;   // px
-    private const float AnchorKp       = 10f;    // (px/s) per px of lead
+    private const float AnchorKp       = 4f;     // (px/s) per px of lead — soft
+    // enough that a cell handoff (the next volume's face starts a tile back,
+    // lead jumps by ~Ts) swings the target by ~4·Ts ≈ 45 px/s, not the full
+    // face speed. Stiffer Kp made every handoff a brake-then-sprint cycle.
+    // Catch-up headroom: inside the standoff the field may exceed the face's
+    // own speed by this factor, so the SERVO re-opens the gap smoothly. The
+    // old rule ("never above the volume's own speed — catch-up is the contact
+    // solver's job") meant a body that slipped inside standoff rode at kiss
+    // distance forever, taking an impulsive −110 contact delivery every few
+    // frames — the diagonal-ride jitter.
+    private const float CatchupHeadroom = 1.25f;
+    // Per-frame low-pass on the servo target (time constant ~50ms at 60Hz).
+    // The strongest-field magnitude steps when a volume finalizes and its
+    // successor's ramp starts a tile back — a rhythmic dip-and-recover every
+    // handoff. The filter turns those steps into breathing, and makes the
+    // entry transient a ramp instead of a first-frame yank. State lives in
+    // CarryVelocity (already in MovementVars, snapshot-covered).
+    private const float TargetSmoothing = 0.3f;
     // Flow-average normalization bias, in units of one full-strength
     // contributor's weight. The target is the distance-weighted MEAN of the
     // nearby fields divided by (Σw + bias): deep in a stream the bias is
@@ -127,13 +144,20 @@ public class TerrainCarriedState : MovementState
     // target (station-keeping brake) but is still very much riding a live
     // stream, so evidence and target must stay separate values.
     internal static Vector2 RideTarget(EnvironmentContext ctx, out bool massNearby)
-        => RideTarget(ctx, out massNearby, out _);
+        => RideTarget(ctx, out massNearby, out _, out _);
 
+    // `support` is the flow average's own weight sum, saturated at one
+    // full-strength contributor: a 0..1 "how much mass is actually near the
+    // body" scalar. 1 deep in a stream, fading toward 0 at the probe fringe —
+    // the gravity hold and the entry/stay gates scale with it, so a rider who
+    // drifts off the mass sags and releases instead of hovering on the hold
+    // over empty air.
     internal static Vector2 RideTarget(EnvironmentContext ctx, out bool massNearby,
-                                       out bool waveNearby)
+                                       out bool waveNearby, out float support)
     {
         massNearby = false;
         waveNearby = false;
+        support = 0f;
         var body = ctx.Body;
         var b = body.Polygon.GetBoundingBox(body.Position);
         var probe = new BoundingBox(b.Left - MassProbeReach, b.Top - MassProbeReach,
@@ -156,6 +180,7 @@ public class TerrainCarriedState : MovementState
         // where the mass is going. Magnitude stays the locally-evidenced field
         // value (rotate, never scale up).
         EntityId rideWave = default;
+        float fieldMax = 0f;
         var growing = ctx.Chunks.Graph.Growing;
         Span<Vector2> seen = stackalloc Vector2[8];
         int seenCount = 0;
@@ -182,12 +207,14 @@ public class TerrainCarriedState : MovementState
                 var dirV = vel / speed;
                 float lead = Vector2.Dot(body.Position - c, dirV)
                              - half - PlayerCharacter.Radius;
-                float s = Math.Clamp(speed + AnchorKp * (AnchorStandoff - lead), 0f, speed);
+                float s = Math.Clamp(speed + AnchorKp * (AnchorStandoff - lead),
+                                     0f, speed * CatchupHeadroom);
                 float dist = MathF.Max(0f, Vector2.Distance(body.Position, c)
                                            - half - PlayerCharacter.Radius);
                 float w = Math.Clamp(1f - dist / MassProbeReach, 0.05f, 1f);
                 flow += dirV * (s * w);
                 wSum += w;
+                fieldMax = MathF.Max(fieldMax, s * w);
                 if (!sp.WaveId.IsNone)
                 {
                     waveNearby = true;
@@ -196,12 +223,22 @@ public class TerrainCarriedState : MovementState
             }
         }
         if (wSum <= 0f) return Vector2.Zero;
+        support = MathF.Min(1f, wSum);
         flow /= wSum + FlowCenterBias;
 
+        // Wave rides: direction from the wave's recorded constant (the volumes
+        // only push axis-aligned), magnitude from the STRONGEST single
+        // distance-weighted field — not the mean. Averaging in far volumes'
+        // faded fields forces the equilibrium lead on the NEAR face down into
+        // contact range (the mean says −60 while the face closes at −110),
+        // and the contact solver's impulsive catch-up was the diagonal-ride
+        // sawtooth. The strongest contribution is self-regulating: its own
+        // lead ramp fades as the body pulls ahead, and the distance weight
+        // fades it at the fringe, so there is neither suction nor a shove.
         if (!rideWave.IsNone
             && ctx.Chunks.Waves.TryGetDirection(rideWave, out var waveDir)
-            && flow.LengthSquared() > 1f)
-            flow = flow.Length() * waveDir;
+            && fieldMax > 1f)
+            flow = fieldMax * waveDir;
         return flow;
     }
 
@@ -214,17 +251,26 @@ public class TerrainCarriedState : MovementState
     // Standing's tuned fold hover still owns those. Within the probe radius
     // (~4 tiles of a live wave) the old "no proximity theft" guarantee is
     // traded away — that's the experiment.
+    // Support gates, in units of full-strength flow contributors (see
+    // RideTarget's `support`). Entry wants the body genuinely at the stream
+    // (~within a couple of tiles of real volumes); the stay gate is looser so
+    // an established ride survives the thin moments, with the sag of the faded
+    // gravity hold — not a state pop — doing the visible releasing.
+    private const float EnterSupport = 0.35f;
+    private const float StaySupport  = 0.15f;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        RideTarget(ctx, out _, out bool waveNearby);
-        return waveNearby || MathF.Abs(AggregateCarry(ctx.Body).X) > EnterHorizontalPush;
+        RideTarget(ctx, out _, out bool waveNearby, out float support);
+        return (waveNearby && support >= EnterSupport)
+            || MathF.Abs(AggregateCarry(ctx.Body).X) > EnterHorizontalPush;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         if (MathF.Abs(AggregateCarry(ctx.Body).X) > StayHorizontalPush) return true;
-        RideTarget(ctx, out bool massNearby);
-        return massNearby || vars.CarryHoldX > 0f;
+        RideTarget(ctx, out _, out _, out float support);
+        return support >= StaySupport || vars.CarryHoldX > 0f;
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -236,6 +282,14 @@ public class TerrainCarriedState : MovementState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
+        // Jump handoff (AVALANCHE_RIDING_V2 Part 4): deposit the ride's flow
+        // velocity for JumpingState.Enter, which runs immediately after this
+        // Exit when a jump preempts the ride. The rider floats AnchorStandoff
+        // proud of the crest, so the jump's contact probe often finds nothing —
+        // without this the launch frame is the world's and the carrier's
+        // vertical momentum is erased.
+        vars.JumpCarrySource = vars.CarryVelocity;
+        vars.JumpCarryFrame  = ctx.CurrentFrame;
         vars.CarryVelocity = Vector2.Zero;
         vars.CarryHoldX    = 0f;
     }
@@ -244,16 +298,20 @@ public class TerrainCarriedState : MovementState
     {
         vars.TimeInState += ctx.Dt;
 
-        var target = RideTarget(ctx, out bool massNearby);
+        var target = RideTarget(ctx, out _, out _, out float support);
+        target = Vector2.Lerp(vars.CarryVelocity, target, TargetSmoothing);
         vars.CarryVelocity = target;
-        vars.CarryHoldX = massNearby || MathF.Abs(AggregateCarry(ctx.Body).X) > 1f
+        vars.CarryHoldX = support >= StaySupport || MathF.Abs(AggregateCarry(ctx.Body).X) > 1f
             ? EvidenceGraceSeconds : vars.CarryHoldX - ctx.Dt;
 
         // Gravity hold (feedforward, the same baseline Standing runs) so the
         // servo shapes RELATIVE motion instead of fighting gravity at dt
         // leverage. FoldBaseline is surface-relative, so it holds over the
-        // rising volume itself.
-        var force = new Vector2(0f, StandingState.FoldBaseline(ctx).Y);
+        // rising volume itself. SCALED BY SUPPORT: full hold only with real
+        // mass under the probe — a rider steering off the stream sags with
+        // distance instead of hovering on the hold over empty air, and the
+        // sag (not a state pop) is what releases the ride at the fringe.
+        var force = new Vector2(0f, StandingState.FoldBaseline(ctx).Y * support);
 
         // The one servo: acceleration-capped velocity tracking on both axes.
         // X always runs — with a zero target it IS station friction, the

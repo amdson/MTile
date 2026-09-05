@@ -85,10 +85,12 @@ public sealed class TileMassField
 
         var key = (gtx, gty);
         _mass.TryGetValue(key, out var bucket);
-        // First contribution owns the bucket; an empty/new bucket adopts this
-        // deposit's wave. From here on `wave` IS the owner — commits and spills
-        // below carry it, not the caller's tag.
-        if (bucket.Amount >= EpsAmount) wave = bucket.Wave;
+        // First REAL wave owns the bucket. An untagged bucket (manual paint —
+        // notably the live stroke that precedes an eruption at the same cells)
+        // is claimed by the first tagged deposit: otherwise the eruption's mass
+        // merges in as None, commits ungated, and the backward race survives
+        // exactly where the wave launches. Two real waves stay first-wins.
+        if (bucket.Amount >= EpsAmount && !bucket.Wave.IsNone) wave = bucket.Wave;
         float cur = bucket.Amount + amount;
 
         // Drain in whole units rather than handling one crossing per call. A painter

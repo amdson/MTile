@@ -74,6 +74,10 @@ public struct MovementVars
                                     //   lead-weighted nearby-mass motion)
     public float   CarryHoldX;      // TerrainCarried: evidence grace keeping the state alive
                                     //   across momentary query gaps
+    public Vector2 JumpCarrySource; // TerrainCarried → Jump handoff: the ride's flow velocity
+                                    //   at exit, so a jump launches in the carrier's frame even
+                                    //   with no live contact (the rider floats off the crest)
+    public int     JumpCarryFrame;  // frame the handoff was written; consumed within a few
     public Vector2 MantleCorner;    // Mantle: the step lip being climbed (from the corridor probe)
     public float MantleTargetY;     // Mantle: body-center Y to deliver into the landing gate
     public float MantleEntryY;      // Mantle: body-center Y at entry (for AnimationProgress)

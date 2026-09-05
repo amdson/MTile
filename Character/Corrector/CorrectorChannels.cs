@@ -53,7 +53,8 @@ public static class CorrectorChannels
     // CornerAssist is lift-only for the same reason. The redirect disc may
     // still shed speed — passivity is its physical semantics (a deflection off
     // planted feet) — and exists only near the ground.
-    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed)
+    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed,
+                                float supportVy = 0f)
     {
         var cfg = MovementConfig.Current;
         float LegForce = cfg.FoldLegForce, WalkForce = cfg.FoldDriveForce;
@@ -64,7 +65,18 @@ public static class CorrectorChannels
         // the jump tuning, not a knob). FoldLegPushFadeSpeed is an authority
         // fade, not a speed limit; at 400 it never binds, so a corner-served
         // channel could hand a jump rise no jump could produce.
-        float RiseMax = cfg.MaxAssistRiseSpeed;
+        //
+        // SUPPORT-RELATIVE (BACKLOG 5.8, extended to the caps): the ceiling is
+        // what a jump can author IN THE LAUNCH FRAME. On a static floor this
+        // collapses to the old absolute form; launching off a surface that is
+        // itself rising (an avalanche crest, a growing sprout at ~110 px/s),
+        // the frame's own rise raises the world-frame ceiling — otherwise the
+        // legs treat inherited carrier momentum as overshoot and a ride jump
+        // peaks at exactly the flat-ground jump's speed. The landing-catch
+        // fade below stays ABSOLUTE on purpose: the descending gate is what
+        // the impact-materials spec is tuned against.
+        float frameRise = MathF.Max(0f, -supportVy);
+        float RiseMax = cfg.MaxAssistRiseSpeed + frameRise;
         Span<bool> near = stackalloc bool[BallisticPredictor.MaxHorizon];
         for (int k = 0; k < n; k++)
         {
@@ -144,7 +156,7 @@ public static class CorrectorChannels
             //    impact-materials spec (bounce/break by drop height) is tuned
             //    against. Softening plunges would silently retune terrain
             //    damage as a side effect of locomotion.
-            float sep = MathF.Max(0f, -s.Samples[k].Vel.Y);
+            float sep = MathF.Max(0f, -(s.Samples[k].Vel.Y - supportVy));
             float catchScale = Math.Clamp(
                 (cfg.MaxGroundEngageVnRel + CatchFadeBand - s.Samples[k].Vel.Y)
                     / CatchFadeBand, 0f, 1f);

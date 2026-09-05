@@ -257,6 +257,72 @@ public class AvalancheRideTests(ITestOutputHelper output)
         foreach (var s in ride) Assert.False(float.IsNaN(s.Vel.X) || float.IsNaN(s.Vel.Y));
     }
 
+    // ── Jump mid-ride launches in the carrier's frame (mechanism test) ───────
+    // The rider floats AnchorStandoff proud of the crest, so a jump's contact
+    // probe often finds no moving source — the carried state's exit handoff
+    // (MovementVars.JumpCarrySource) must supply the carrier frame instead.
+    // Steep wave (75deg) for a strong upward carrier component; Y-down, so the
+    // ride jump's launch vy must be MORE NEGATIVE than the flat jump's by a
+    // real margin. Mechanism, not tuning: the margin is far below the carrier
+    // speed the servo demonstrably tracks (see the sweep's 75deg rows).
+    [Fact]
+    public void JumpMidRide_LaunchesInCarrierFrame()
+    {
+        const float angleDeg = 75f;
+        float rad = angleDeg * MathF.PI / 180f;
+        float speed = 25f * Ts;
+        float budget = 60f;
+        var origin = OriginAt(PlayerCol, FloorRow);
+        var waveDir = Vector2.Normalize(new Vector2(MathF.Cos(rad), -MathF.Sin(rad)));
+
+        // Probe: find an established carried frame (a few frames into the ride,
+        // once the servo tracks the crest rather than the entry transient).
+        var probeTerrain = AvalancheHarness.BuildFlatFloor(Cols, Rows, FloorRow);
+        var probePlayer = AvalancheHarness.SpawnStandingAt(PlayerCol, FloorRow);
+        var probeWave = new ScriptedWave(origin, rad, speed, budget);
+        var probeSamples = AvalancheHarness.RunScriptedRide(probeTerrain, probePlayer, probeWave, waveDir, SweepFrames);
+        int firstCarried = probeSamples.FindIndex(s => s.State == "TerrainCarriedState");
+        Assert.True(firstCarried >= 0, "probe run was never carried — can't test the mid-ride jump");
+        int jf = firstCarried + 8;
+
+        List<AvalancheFrame> RunJump(bool withWave)
+        {
+            var terrain = AvalancheHarness.BuildFlatFloor(Cols, Rows, FloorRow);
+            var player = AvalancheHarness.SpawnStandingAt(PlayerCol, FloorRow);
+            var wave = new ScriptedWave(origin, rad, withWave ? speed : 0f, withWave ? budget : 0f);
+            return AvalancheHarness.RunScriptedRide(terrain, player, wave, waveDir, SweepFrames,
+                f => new PlayerInput { Space = f >= jf && f < jf + 6 });
+        }
+
+        var flat = RunJump(withWave: false);
+        var ride = RunJump(withWave: true);
+
+        // The jump must actually fire out of the ride.
+        int rideJumpFrame = ride.FindIndex(jf, s => s.State.Contains("Jump"));
+        Assert.True(rideJumpFrame >= 0 && rideJumpFrame <= jf + 3,
+            $"jump never fired out of the ride (pressed at {jf}, first jump state at {rideJumpFrame})");
+        int flatJumpFrame = flat.FindIndex(jf, s => s.State.Contains("Jump"));
+        Assert.True(flatJumpFrame >= 0, "flat-ground control jump never fired");
+
+        // Launch vy: most-upward velocity within a few frames of the press.
+        float LaunchVy(List<AvalancheFrame> t, int from)
+        {
+            float best = float.PositiveInfinity;
+            for (int i = from; i < Math.Min(from + 5, t.Count); i++) best = MathF.Min(best, t[i].Vel.Y);
+            return best;
+        }
+        float flatVy = LaunchVy(flat, flatJumpFrame);
+        float rideVy = LaunchVy(ride, rideJumpFrame);
+        output.WriteLine($"flat launch vy={flatVy:F1}   ride launch vy={rideVy:F1}   " +
+                         $"(carrier vy at press: {ride[jf - 1].Vel.Y:F1})");
+        for (int i = Math.Max(0, jf - 2); i <= Math.Min(ride.Count - 1, jf + 14); i++)
+            output.WriteLine($"  ride f{i}: {ride[i].State,-22} vy={ride[i].Vel.Y,7:F1} fy={ride[i].Force.Y,8:F0}  |  flat: {flat[i].State,-14} vy={flat[i].Vel.Y,7:F1}");
+
+        const float Margin = 25f;   // px/s — well under the ~100 px/s carrier vy at 75deg
+        Assert.True(rideVy <= flatVy - Margin,
+            $"mid-ride jump launched at vy={rideVy:F1} vs flat {flatVy:F1} — carrier momentum was not inherited");
+    }
+
     // ── No proximity theft: a wave passing well clear of a standing player
     //    must never grab them (hard assertion — spirit invariant #5). ────────
     [Fact]

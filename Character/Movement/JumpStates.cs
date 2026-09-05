@@ -133,6 +133,16 @@ public class JumpingState : MovementState
         // With no source at all this is a corner launch — corners are static, so
         // the frame is the world's.
         float sourceVy = _source?.SurfaceVelocity.Y ?? 0f;
+        // Terrain-ride handoff: a jump preempting TerrainCarriedState launches in
+        // the CARRIER's frame. The outgoing ride deposits its flow velocity on
+        // exit (same frame as this Enter); take the more-upward of it and any
+        // live contact so carrier momentum survives the standoff gap without
+        // ever double-counting a contact that reports the same surface.
+        if (vars.JumpCarryFrame > 0 && ctx.CurrentFrame - vars.JumpCarryFrame <= 3)
+        {
+            sourceVy = MathF.Min(sourceVy, vars.JumpCarrySource.Y);
+            vars.JumpCarryFrame = 0;
+        }
         ctx.Body.Velocity.Y = sourceVy + MovementConfig.Current.JumpVelocity;
         vars.JumpFromCorner = _source == null;
     }

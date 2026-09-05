@@ -70,9 +70,8 @@ public static class LatticeTracker
         // rule, and the climb family's launch gate). Support-relative
         // (BACKLOG 5.8): a floor rising under the body is a moving frame the
         // legs can still plant in, not a launch.
-        bool ballistic = -(body.Velocity.Y
-            - (ctx.TryGetGround(out var supportFsd) ? supportFsd.SurfaceVelocity.Y : 0f))
-            > cfg.SpringMaxRiseSpeed;
+        float supportVy = ctx.TryGetGround(out var supportFsd) ? supportFsd.SurfaceVelocity.Y : 0f;
+        bool ballistic = -(body.Velocity.Y - supportVy) > cfg.SpringMaxRiseSpeed;
         bool anchored = dist <= BallisticPredictor.SupportReach;
 
         // ── The plan ─────────────────────────────────────────────────────
@@ -242,7 +241,7 @@ public static class LatticeTracker
             pr.H = H; pr.Dt = dt;
             pr.CoastVel = s.CoastVel;
             pr.Rows = s.Rows; pr.RowCount = rowCount;
-            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed);
+            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed, supportVy);
             for (int k = 0; k < H; k++)
             {
                 s.ChannelMask[2][k] = false;   // CornerAssist: not carried over
