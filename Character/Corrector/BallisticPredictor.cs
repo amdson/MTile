@@ -41,12 +41,15 @@ public static class BallisticPredictor
     // grounded classification, and the ambient envelope's anchor band — the
     // three MUST agree or the solver plans against a baseline the live tick
     // doesn't apply (the zero-g floater bug).
-    public const float SupportReach = 25f;
+    // BodyHeightTrim on both: the C-surface tracks the polygon bottom, which the
+    // 2026-09-04 shrink raised by 4.8px — the trim keeps the PHYSICAL engagement
+    // reach below the body unchanged (29.8/28.8 here ≡ the old 25/24).
+    public const float SupportReach = 25f + PlayerCharacter.BodyHeightTrim;
 
     // Inside this floor distance the gravity hold is FULL strength; it fades
     // linearly to zero at SupportReach (≈ the old spring's zero-force length
     // vs its rest length — a body floating above hover must feel gravity).
-    public const float HoldFullDist = 2f * PlayerCharacter.Radius;
+    public const float HoldFullDist = 2f * PlayerCharacter.Radius + PlayerCharacter.BodyHeightTrim;
 
     // Free-fall launch speed that coasts exactly `rise` px upward — the shared
     // ballistic-envelope primitive (hop sizing, crest caps). Formerly

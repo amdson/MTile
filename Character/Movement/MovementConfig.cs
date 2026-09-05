@@ -262,7 +262,11 @@ public class MovementConfig
     // stay in code: they are stability/semantics, not feel.
     // Hover clearance above the C-obstacle top surface for the standing fold
     // (≈ the old spring equilibrium) and for the crouch (0 = resting on it).
-    public float FoldHoverOffset                { get; set; } = 10f;
+    // 14.8 = the historical 10 + PlayerCharacter.BodyHeightTrim (4.8): the
+    // 2026-09-04 polygon shrink shortened the body from the bottom, and the
+    // hover grew by the same amount so the standing center ride height and
+    // ground-to-head height are unchanged.
+    public float FoldHoverOffset                { get; set; } = 14.8f;
     public float CrouchHoverOffset              { get; set; } = 0f;
     // Climb band: how far above the support anchor the envelope may bind a
     // floor — a leg reach, so it is body-relative px and deliberately

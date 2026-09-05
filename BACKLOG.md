@@ -177,6 +177,15 @@ Each encodes a specific missing capability. Un-skip as the capability lands.
 and are *not* a regression from whatever you just changed. Check a new failure against this list
 before bisecting; only a name **not** here is worth chasing.
 
+**2026-09-04 body-polygon shrink update** (−20% tall bottom-anchored / −3% wide, hover +4.8 —
+see `PlayerCharacter.BodyHeightTrim`): the table below shifted by net ±0. Went **green**:
+`SimulationTests.HoldSpaceRight_CoveredJumpOutOfTunnel` and
+`InfiniteTerrainTests.SimStep_StreamsAheadOfAWalkingPlayer_AndTheGroundIsAlwaysThere` (both were
+cluster-C rows). Newly **red** (cluster D below): `ArcJumpStateTests.AgainstTwoBlockStep…` and
+`BallisticPredictorTests.GroundRun_WalksAtConfiguredSpeed_QuirkRetired`. A clean full run on
+2026-09-04 is `773 passed / 41 failed / 12 skipped` (826 total — the suite has also grown since
+the 2026-09-02 count; totals remain a rough check, not a tripwire).
+
 Match on the **test name**, not the counts. A skipped `[Theory]` collapses to a single reported
 entry regardless of how many `InlineData` rows it has, so skipping or un-skipping one shifts the
 totals by more than the number of tests involved — the totals are a rough sanity check, not a
@@ -221,13 +230,23 @@ game-code change, not a test edit.
 |---|---|
 | `Sim/DeliberateClimbTests.cs:87,104` RunningIn_WithoutUp_TheArcStaysHome; StandingFlushAtAnUnhangableStep_UpHeld_ArcsOverIt | Design pinch: at TS=11 only a 2-tile step (22px) fits between MantleMaxRise (20px) and StandingHeight (~33px) — 2px of arc-band headroom — and body radius (12px) > TileSize (11px) makes a flush body overlap the faced platform. |
 | `Sim/SproutLiftJumpTests.cs:86,357,412` SproutLift_CarriesStandingPlayer_SmoothlyOneTile; SingleDiagonalBlock_CarriesSmoothly; DiagonalEruptionStream_CarriesPlayerTwentyTilesUpAndRight | The 5.8 anchor-servo carry (actively tuned) — ride dynamics genuinely changed at the new ratio; retune with the feature, not as test rot. (JumpOffRisingSprout_InheritsFloorVelocity went green with the support-relative rise caps, avalanche-ride work 2026-09-04.) |
-| `Sim/SimulationTests.cs:614` HoldSpaceRight_CoveredJumpOutOfTunnel | The old 2-tile gap (32px) sat just ABOVE the auto-crouch threshold (~31px) — the scenario's whole point. A 2-row gap is now 22px (below it); no tile count reproduces the straddle at TS=11. Design call. |
 | `Sim/TrainingStageTests.cs:36` Dummy_SlashesAndStabs_WithoutWandering | Game-code fix: `Stage.cs` `PopulateTraining` hardcodes the dummy home at (8, 75) for the old 96px floor top (now 66px). |
 | `Sim/PlayerImpactByVelocityTests.cs:196` Terminal_OntoStone_BouncesNoBreak | Real over-breaking: terminal-fall KE→HP (≈16) now exceeds Stone.MaxHP (12), so the tile breaks instead of bouncing — the (16/11)² impact/material rescale is a tuning decision (see §5 impact rows). |
 | `JumpingStateTests.cs:113` Jump_OnExit_RemovesSourceFsd | Triage rescaled the embedded spawn but it's still red — undiagnosed, needs a sim-run look. |
 | `Sim/SproutCrushTests.cs:72` SproutGrowingIntoPinnedBody_IsDestroyed | Same: setup rescaled, still red — undiagnosed. |
 | `Sim/SproutGraphTests.cs:96` Request_WithTwoSolidNeighbours_GrowsOutOfBothFaces | Same: setup rescaled, still red — undiagnosed. |
-| `Sim/InfiniteTerrainTests.cs:281` SimStep_StreamsAheadOfAWalkingPlayer_AndTheGroundIsAlwaysThere | Fully TileSize-derived; the walk-and-stream dynamics themselves changed. |
+(Two former cluster-C rows went green with the 2026-09-04 body shrink and were removed:
+`Sim/SimulationTests.cs:614` HoldSpaceRight_CoveredJumpOutOfTunnel and
+`Sim/InfiniteTerrainTests.cs:281` SimStep_StreamsAheadOfAWalkingPlayer_AndTheGroundIsAlwaysThere.)
+
+**D. The 2026-09-04 body-shrink pair (2 tests)** — consequences of the polygon shrink
+(bottom-anchored −20% height, so standing ground clearance grew ~9.6→~14.4px while the legs'
+physical reach below the center is unchanged).
+
+| Test (`MTile.Tests/…`) | Why it's red |
+|---|---|
+| `Sim/ArcJumpStateTests.cs:58` AgainstTwoBlockStep_HoldToward_ArcJumpsOntoTop | The trimmed body bottom now clears a 2-tile (22px) step top within the legs' push ceiling, so StandingState walks straight up it and ArcJumpState never engages (delivery-on-top itself still happens — the trace shows step-rest by frame 20). Whether 2-high walls should stay maneuver-gated/honest-bonk territory is the same design call as the cluster-B `FoldScenarioTests.TwoHighWall` row — decide them together. |
+| `Sim/BallisticPredictorTests.cs:201` GroundRun_WalksAtConfiguredSpeed_QuirkRetired | Walk equilibrium settled at 102.1 px/s vs the 100±1.5 pin (was ≤101.5 pre-shrink). Probe shows it is hover-offset-independent (102.1 at hover 8–14.8), so the ~0.6 shift comes from the polygon/C-template geometry leaking x through the channel QP — needs a solver-side look, not a tolerance bump. |
 
 **Resolved from this table 2026-08-30** (kept as a record of what the list used to hold):
 `ActionOverlayTests.LowerBody_Untouched_ByUpperBodyOverlay` was asserting float *equality* on

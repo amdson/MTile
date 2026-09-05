@@ -179,9 +179,13 @@ public class CrouchedState : MovementState
         // 2-high/32px corridors auto-crouch even though the hover-held body
         // threads them upright with ~1px to spare (the restricted corridor
         // harness proves it at full walk speed). Crouch only when the gap is
-        // genuinely below the hover-standing envelope.
+        // genuinely below the hover-standing envelope. BodyHeightTrim backs out
+        // the 2026-09-04 polygon shrink: the hover offset grew by exactly the
+        // trim, so the physical envelope — and this threshold — is unchanged
+        // (without it, 3-high/33px corridors would start auto-crouching).
         float standingClearance = MovementConfig.Current.FoldHoverOffset
-            + (PlayerCharacter.StandingHeight - PlayerCharacter.Radius);
+            + (PlayerCharacter.StandingHeight - PlayerCharacter.Radius)
+            - PlayerCharacter.BodyHeightTrim;
         return ctx.TryGetGround(out var ground)
             && ctx.TryGetCeiling(out var ceiling)
             && ground.Position.Y - ceiling.Position.Y < standingClearance + 0.5f;

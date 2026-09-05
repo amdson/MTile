@@ -15,22 +15,45 @@ public class PlayerCharacter : IHittable
     // test fixture geometry.
     public const float Radius = 12f;
 
-    // Body silhouette: a regular hexagon squeezed to half width (twice as tall as
-    // wide). The slim profile is a core gameplay attribute — it threads 1-tile
-    // gaps and reads as a nimble runner; collision, the C-obstacle template, and
-    // the corrector's clearance geometry all derive from this one polygon.
-    public const float BodyWidthScale = 0.5f;
+    // Body silhouette: a regular hexagon squeezed to 0.485 width and 0.8 height.
+    // The slim profile is a core gameplay attribute — it threads 1-tile gaps and
+    // reads as a nimble runner; collision, the C-obstacle template, and the
+    // corrector's clearance geometry all derive from this one polygon.
+    //
+    // 2026-09-04 shrink (−3% wide, −20% tall, was 0.5 / 1.0): sized so a CROUCH
+    // (extent 19.2px) threads the 11px grid's 2-high/22px corridors. The height
+    // trim is anchored at the TOP vertex — the polygon shortens from the bottom,
+    // still spanning y ∈ [−Radius, −Radius + 2·Radius·BodyHeightScale] in body
+    // space — and FoldHoverOffset grew by the same BodyHeightTrim (4.8px), so the
+    // standing center ride height and ground-to-head height are UNCHANGED. Only
+    // the crouch envelope dropped.
+    public const float BodyWidthScale  = 0.485f;
+    public const float BodyHeightScale = 0.8f;
+    // How much shorter the polygon got (4.8px) — exactly the amount FoldHoverOffset
+    // grew to keep the standing envelope fixed. Because the C-obstacle floor surface
+    // tracks the polygon BOTTOM, every "distance from the C-surface" constant that
+    // encodes a physical leg length (SupportReach, HoldFullDist, LegReach) grew by
+    // this trim too; conversely, subtract it wherever a pre-shrink formula pairs
+    // FoldHoverOffset with the old body extent (auto-crouch).
+    public const float BodyHeightTrim = 2f * Radius * (1f - BodyHeightScale);
 
     public static Polygon CreateBodyPolygon()
     {
         var verts = Polygon.CreateRegular(Radius, 6).GetVertices(Vector2.Zero);
-        for (int i = 0; i < verts.Length; i++) verts[i].X *= BodyWidthScale;
+        for (int i = 0; i < verts.Length; i++)
+        {
+            verts[i].X *= BodyWidthScale;
+            // Scale about the top vertex (y = −Radius) so the head stays put.
+            verts[i].Y = verts[i].Y * BodyHeightScale - Radius * (1f - BodyHeightScale);
+        }
         return new Polygon(verts);
     }
 
-    // Standing head height above the floor: float height (= Radius) + the hexagon body's
-    // full vertical extent (2 · R·sin60°). Used by auto-crouch to decide whether standing
-    // fits under a ceiling.
+    // Standing head height above the floor (legacy envelope constant, ≈32.8px). Kept
+    // numerically IDENTICAL through the 2026-09-04 polygon shrink — the hover offset
+    // grew by BodyHeightTrim so the physical standing envelope is unchanged, and every
+    // climb/mantle/corridor band calibrated against this value still holds. No longer
+    // derivable from the current polygon; treat it as pinned.
     public static readonly float StandingHeight = Radius + 2f * Radius * MathF.Sin(MathF.PI / 3f);
 
     // Stable identity for snapshot/restore (IHittable.Id). Assigned by

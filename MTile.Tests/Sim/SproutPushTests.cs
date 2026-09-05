@@ -167,17 +167,24 @@ public class SproutPushTests(ITestOutputHelper output)
     [Fact]
     public void SproutGrowsLeft_AgainstRightInput_BlocksAdvance()
     {
+        // 3-high host wall (was 2-high): since the 2026-09-04 body shrink the
+        // legs deliver the lattice's documented 2-tile mount (FoldRiseCost:
+        // 352 < 392), so a 2-high wall no longer pins the body against the
+        // sprout — it vaults over and the push contract is never exercised. A
+        // 3-tile wall (528 > 392) is refused, keeping the body against the
+        // growing face, which is what this test is about.
         var terrain = SimTerrain.FromAscii(@"
             OOOOOOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOXOOOOOOOO
             OOOOOOOOOOOXOOOOOOOO
             OOOOOOOOOOOXOOOOOOOO
             XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
-        // Sprout cell (col 10, row 2) centre, TileSize-derived (was the literal
-        // (168, 40) baked in for a 16px tile).
+        // Sprout cell (col 10, row 1) centre, TileSize-derived (was the literal
+        // (168, 40) baked in for a 16px tile). Row 1 (y 11..22) still overlaps
+        // the standing body band (~10.4..29.6) after the shrink.
         float ts = Chunk.TileSize;
-        var sproutCenter = new Vector2(10f * ts + ts * 0.5f, 2f * ts + ts * 0.5f);
+        var sproutCenter = new Vector2(10f * ts + ts * 0.5f, 1f * ts + ts * 0.5f);
         bool ok = terrain.TrySpawnSprout(sproutCenter.X, sproutCenter.Y);
         Assert.True(ok);
 

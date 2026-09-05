@@ -44,13 +44,15 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         SimTerrain.FromAscii(new string('X', 40), originTileX: 0, originTileY: FloorRow);
 
     // Hover rest height above a floor whose top face sits at world y F: the
-    // hexagon's bottom vertex touches the floor at F − Radius (the flat-top
-    // facet's tile-half-extent support cancels against the tile-center
-    // offset, so this is exact and TileSize-independent — verified against
-    // CObstacleTemplate.Build/TopSurfaceRy), and hover parks HoverOffset
-    // above that touch point.
+    // hexagon's bottom vertex touches the floor at F − (Radius − BodyHeightTrim)
+    // — the 2026-09-04 shrink is bottom-anchored, so the bottom vertex sits
+    // Radius − trim below the center (the flat-top facet's tile-half-extent
+    // support cancels against the tile-center offset, so this is exact and
+    // TileSize-independent — verified against CObstacleTemplate.Build/
+    // TopSurfaceRy), and hover parks HoverOffset above that touch point.
     private static float HoverY(float floorTopFaceY) =>
-        floorTopFaceY - PlayerCharacter.Radius - MovementConfig.Current.FoldHoverOffset;
+        floorTopFaceY - (PlayerCharacter.Radius - PlayerCharacter.BodyHeightTrim)
+        - MovementConfig.Current.FoldHoverOffset;
 
     [Fact]
     public void FlatWalk_HugsHover_ReachesFarBand()

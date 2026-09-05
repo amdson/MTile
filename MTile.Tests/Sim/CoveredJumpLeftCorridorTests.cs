@@ -34,9 +34,14 @@ public class CoveredJumpLeftCorridorTests(ITestOutputHelper output)
     // geometry (hex half-width, sticking-out threshold) doesn't depend on tile size, so these
     // are the original left-corridor fixture's startX values shifted by the corner's move
     // (was 5*16=80, now 5*Chunk.TileSize) — the same relative offsets from the corner.
+    // HalfWidth tracks the body polygon: Radius·sin60°·BodyWidthScale ≈ 5.04 since the
+    // 2026-09-04 shrink (the shallow rows below are authored as offsets from it, so a body
+    // width change moves them instead of silently un-sticking them).
+    private const float HalfWidth = 5.04f;
+
     [Theory]
-    [InlineData(Corner + 5.5f)]   // barely sticking out (0.5 px)
-    [InlineData(Corner + 5.0f)]   // 1 px sticking out
+    [InlineData(Corner + HalfWidth - 0.5f)]   // barely sticking out (0.5 px)
+    [InlineData(Corner + HalfWidth - 1.0f)]   // 1 px sticking out
     [InlineData(Corner + 2.0f)]   // 4 px sticking out
     [InlineData(Corner + 0.0f)]   // body center at corner; half body sticking out
     [InlineData(Corner - 0.5f)]   // body center just past corner into open air

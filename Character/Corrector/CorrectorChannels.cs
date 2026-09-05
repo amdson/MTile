@@ -33,7 +33,10 @@ public static class CorrectorChannels
     // 2026-08-24; it was HoverDist + 20 = 42 px, and a falling body could
     // hang at leg reach for 25 px of height where Standing was not yet
     // active).
-    internal const float LegReach    = PlayerCharacter.Radius + GroundChecker.ProbeSlack;   // 17 px
+    // BodyHeightTrim: the C-surface tracks the polygon bottom, which the 2026-09-04
+    // shrink raised by 4.8px — the trim keeps the legs' PHYSICAL reach unchanged.
+    internal const float LegReach    = PlayerCharacter.Radius + GroundChecker.ProbeSlack
+                                       + PlayerCharacter.BodyHeightTrim;   // 21.8 px (17 pre-shrink)
     private const float WeakTraction = 800f;             // scenario: deliberately underpowered legs-forward
     // Channel authority caps live in MovementConfig (Fold*Force — the hot-
     // reloadable tuning surface); the constants left here are structural.

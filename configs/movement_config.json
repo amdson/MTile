@@ -13,7 +13,7 @@
   "FoldLmEffortWeight": 0.02,
   "FoldLmMaxForce": 8000,
   // Fold tuning surface (see MovementConfig for each knob's role) — hot-reloads.
-  "FoldHoverOffset": 10,
+  "FoldHoverOffset": 14.8,
   "CrouchHoverOffset": 0,
   "FoldClimbReachUp": 20,
   "CrouchClimbReachUp": 4,
