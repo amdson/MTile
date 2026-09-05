@@ -441,11 +441,23 @@ public sealed class SpriteSkin : IDisposable
         AlphaSourceBlend = Blend.One, AlphaDestinationBlend = Blend.One,
     };
 
-    // Overlay layer triangle edges as SpriteBatch lines (editor debug view — shows
-    // exactly which triangles twist, and that layers are truly disconnected).
-    // Positions come from the LAST Draw call this frame, so call Draw first (fill:false
-    // for wireframe-only). Interior edges draw twice; irrelevant at editor scale.
-    // `onlyLayer` restricts to one layer by name (the editor's selected-layer highlight).
+    // Bounds of the last Draw's deformed mesh, including art beyond the rig (ears,
+    // weapons, clothing). Draw(..., fill: false) measures without submitting triangles.
+    public void GetDrawBounds(out Vector2 min, out Vector2 max)
+    {
+        min = new Vector2(float.MaxValue);
+        max = new Vector2(float.MinValue);
+        foreach (var layer in _layers)
+        foreach (var vertex in layer.Verts)
+        {
+            var p = new Vector2(vertex.Position.X, vertex.Position.Y);
+            min = Vector2.Min(min, p);
+            max = Vector2.Max(max, p);
+        }
+    }
+
+    // Overlay layer triangle edges as SpriteBatch lines. Positions come from the
+    // last Draw (fill:false for wireframe-only); onlyLayer selects an editor layer.
     public void DrawWireframe(DrawContext ctx, Color color, float thickness = 1f, string onlyLayer = null)
     {
         foreach (var layer in _layers)

@@ -5,6 +5,7 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 
 | Script | Purpose |
 |---|---|
+| [`MTile.Demo --strip`](../MTile.Demo/STRIPS.md) | Export animation PNG panels: raw stick figures, sprite skins, gameplay takes, or a live rabbit staircase simulation. |
 | [`publish-web.sh`](publish-web.sh) | AOT-publish the Blazor/KNI web build and push it to GitHub Pages (macOS/Linux). |
 | [`publish-web.ps1`](publish-web.ps1) | The same, on Windows. |
 | [`extract-sfx-candidates.ps1`](extract-sfx-candidates.ps1) | Pull the hand-picked SFX candidates out of the Sonniss zips into `Audio/candidates/`. |

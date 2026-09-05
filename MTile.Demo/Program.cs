@@ -1,5 +1,21 @@
 using MTileDemo;
 
+// Batch export has its own strict parser; do not let exporter options become clip names.
+if (System.Array.IndexOf(args, "--strip") >= 0)
+{
+    try
+    {
+        using var exporter = new SpriteStripGame(args);
+        exporter.Run();
+    }
+    catch (System.Exception e)
+    {
+        System.Console.Error.WriteLine("strip: " + e.Message);
+        System.Environment.ExitCode = 1;
+    }
+    return;
+}
+
 // Standalone skeleton tooling — entirely separate from the main game (Game1).
 //
 // Animation editor:      dotnet run --project MTile.Demo [-- --rig <skeleton>]

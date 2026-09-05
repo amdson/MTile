@@ -1,5 +1,8 @@
 # MTile.Demo — Skeleton Animation Editor
 
+For batch PNG panels of raw clips, sprite skins, recorded takes, or a live staircase climb,
+see [Animation PNG strips](STRIPS.md) (`--strip`).
+
 A standalone tool for authoring the skeletal animations the game plays (walk, idle,
 jump, …). It edits `AnimationDocument` JSON files in the repo's
 `SkeletonStates/<rigName>/` folder (one dir per base rig) — the same files
