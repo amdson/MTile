@@ -44,13 +44,15 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         SimTerrain.FromAscii(new string('X', 40), originTileX: 0, originTileY: FloorRow);
 
     // Hover rest height above a floor whose top face sits at world y F: the
-    // hexagon's bottom vertex touches the floor at F − Radius (the flat-top
-    // facet's tile-half-extent support cancels against the tile-center
-    // offset, so this is exact and TileSize-independent — verified against
-    // CObstacleTemplate.Build/TopSurfaceRy), and hover parks HoverOffset
-    // above that touch point.
+    // hexagon's bottom vertex touches the floor at F − (Radius − BodyHeightTrim)
+    // — the 2026-09-04 shrink is bottom-anchored, so the bottom vertex sits
+    // Radius − trim below the center (the flat-top facet's tile-half-extent
+    // support cancels against the tile-center offset, so this is exact and
+    // TileSize-independent — verified against CObstacleTemplate.Build/
+    // TopSurfaceRy), and hover parks HoverOffset above that touch point.
     private static float HoverY(float floorTopFaceY) =>
-        floorTopFaceY - PlayerCharacter.Radius - MovementConfig.Current.FoldHoverOffset;
+        floorTopFaceY - (PlayerCharacter.Radius - PlayerCharacter.BodyHeightTrim)
+        - MovementConfig.Current.FoldHoverOffset;
 
     [Fact]
     public void FlatWalk_HugsHover_ReachesFarBand()
@@ -270,6 +272,86 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
         Assert.Equal(c1, c2);
         Assert.Equal(b1, b2);
         for (int i = 0; i < n1; i++) Assert.Equal(path[i].Pos, path2[i].Pos);
+    }
+
+    // ── The tightest passable passage (Plans/LATTICE_PLANNING_OBJECTIONS.md
+    // objections 1–3): a 2-high corridor leaves the 19.2 px body 2.8 px of
+    // vertical room. Floor top at row 6 (y=66); ceiling mass rows ≤ 3 (bottom
+    // face y=44) from tile x=MouthCol on; the opening is rows 4–5 = 22 px.
+    // The body-center band inside is (44 + 12, 66 − 7.2) = (56, 58.8).
+    private const int MouthCol = 12;
+    private static ChunkMap TwoHighCorridor()
+    {
+        var sb = new StringBuilder();
+        for (int r = 0; r <= FloorRow; r++)
+        {
+            for (int x = 0; x < 30; x++)
+                sb.Append(r >= FloorRow || (x >= MouthCol && r < FloorRow - 2) ? 'X' : 'O');
+            if (r < FloorRow) sb.Append('\n');
+        }
+        return SimTerrain.FromAscii(sb.ToString(), originTileX: 0, originTileY: 0);
+    }
+    private static float CorridorTop    => (FloorRow - 2) * Chunk.TileSize + PlayerCharacter.Radius;
+    private static float CorridorBottom => FloorRow * Chunk.TileSize - (PlayerCharacter.Radius - PlayerCharacter.BodyHeightTrim);
+
+    // PINS LatticePathPlanner.Clearance (a free cell center must exist in the
+    // 2.8 px band — at half a cell of inflation there was none, at any
+    // resolution up to 5 cells/tile) and the UPPER end of LatticeHoverWeight
+    // (with hover on, the forced 12.8 px sag must not out-price progress —
+    // per-node pricing at 3 refused it even where the geometry allowed).
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TwoHighCorridor_SeedInside_RoutesThrough(bool hover)
+    {
+        var chunks = TwoHighCorridor();
+        Assert.True(CorridorBottom > CorridorTop, "fixture must physically fit the body");
+        var seed = new Vector2((MouthCol + 3) * Chunk.TileSize, 0.5f * (CorridorTop + CorridorBottom));
+        var (planner, body, path) = Setup(seed);
+        int n = planner.Solve(chunks, body.Polygon, seed, new Vector2(100f, 0f), Vector2.UnitX,
+            hover, MovementConfig.Current.FoldHoverOffset, MovementConfig.Current.FoldRiseCost,
+            path, out _, out bool bonk);
+        Assert.True(n >= 2, $"no route through a passable corridor (hover={hover}): {planner.LastDebug}");
+        Assert.False(bonk, $"refused a passable corridor (hover={hover}): {planner.LastDebug}");
+        for (int i = 0; i < n; i++)
+            Assert.True(path[i].Pos.Y > CorridorTop && path[i].Pos.Y < CorridorBottom,
+                $"node {i} at y={path[i].Pos.Y:F2} is outside the physical band ({CorridorTop:F1}, {CorridorBottom:F1})");
+    }
+
+    // The standing approach: from hover height before the mouth the route
+    // must dip and end INSIDE the corridor — objection 1's "no path at the
+    // mouth" is what left entry to the fallback drive and the auto-crouch.
+    [Fact]
+    public void TwoHighCorridor_ApproachAtHover_RoutesIn()
+    {
+        var chunks = TwoHighCorridor();
+        var seed = new Vector2(MouthCol * Chunk.TileSize - 24f, HoverY(FloorRow * Chunk.TileSize));
+        var (planner, body, path) = Setup(seed);
+        int n = Solve(planner, chunks, body, seed, path, out _, out bool bonk);   // hover on
+        Assert.True(n >= 2 && !bonk, $"standing approach did not route into the corridor: {planner.LastDebug}");
+        var last = path[n - 1].Pos;
+        Assert.True(last.X >= (MouthCol + 2) * Chunk.TileSize, $"route ends before the corridor: x={last.X:F1}");
+        Assert.True(last.Y > CorridorTop && last.Y < CorridorBottom,
+            $"route ends outside the corridor band: y={last.Y:F2} ({CorridorTop:F1}, {CorridorBottom:F1})");
+    }
+
+    // PINS the LOWER end of LatticeHoverWeight: a body two cells below hover
+    // on flat ground must find the rise back worth paying inside the window.
+    // Below ~0.29 per px (rise 16 / window 56) it never does, and the body
+    // rides low forever after any dip.
+    [Fact]
+    public void SaggedSeed_ClimbsBackWithinWindow()
+    {
+        var chunks = FlatFloor();
+        float cell = (float)Chunk.TileSize / MovementConfig.Current.LatticeCellsPerTile;
+        float hoverY = HoverY(FloorRow * Chunk.TileSize);
+        var seed = new Vector2(100f, hoverY + 2f * cell);
+        var (planner, body, path) = Setup(seed);
+        int n = Solve(planner, chunks, body, seed, path, out _, out bool bonk);
+        Assert.True(n >= 2 && !bonk, planner.LastDebug);
+        float endY = path[n - 1].Pos.Y;
+        output.WriteLine($"seed {seed.Y - hoverY:F2} below hover → ends {endY - hoverY:F2} below ({planner.LastDebug})");
+        Assert.True(endY - hoverY < cell, $"path stayed sagged: ends {endY - hoverY:F2} px below hover ({planner.LastDebug})");
     }
 
     // TEMP EXPERIMENT (phase-1 gate): µs/solve + alloc/solve, printed. Mirrors

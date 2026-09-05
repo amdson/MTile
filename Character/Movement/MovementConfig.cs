@@ -262,7 +262,11 @@ public class MovementConfig
     // stay in code: they are stability/semantics, not feel.
     // Hover clearance above the C-obstacle top surface for the standing fold
     // (≈ the old spring equilibrium) and for the crouch (0 = resting on it).
-    public float FoldHoverOffset                { get; set; } = 10f;
+    // 14.8 = the historical 10 + PlayerCharacter.BodyHeightTrim (4.8): the
+    // 2026-09-04 polygon shrink shortened the body from the bottom, and the
+    // hover grew by the same amount so the standing center ride height and
+    // ground-to-head height are unchanged.
+    public float FoldHoverOffset                { get; set; } = 14.8f;
     public float CrouchHoverOffset              { get; set; } = 0f;
     // Climb band: how far above the support anchor the envelope may bind a
     // floor — a leg reach, so it is body-relative px and deliberately
@@ -348,7 +352,25 @@ public class MovementConfig
     // "mount a 1-high block, refuse a 2-high wall" at SteepWeight 30:
     // roughly (5, 9). The §4.1 taste number.
     public float LatticeProgressWeight          { get; set; } = 7f;
-    public float LatticeHoverWeight             { get; set; } = 3f;     // per px (linear, like RiseCost)
+    // Hover: price per px of sag from the hover height, per px of path
+    // (linear, like RiseCost). Hover is deliberately WEAKER than progress
+    // everywhere, so a forced sag never refuses a passable route — the
+    // planner takes any admissible passage and the state crouches inside it.
+    // The trades this weight sits in (2026-09-05; progress 7, rise 16 per px):
+    //   corridor entry   a 2-high corridor forces a 12.8 px sag on the 19.2 px
+    //                    body; entering must cost less per px than it
+    //                    progresses: w_h·12.8 < 7 ⇒ w_h < 0.55;
+    //   climb-back       after a duck, rising d px back to hover costs 16·d
+    //                    once, against w_h·d per px of path spent sagged; the
+    //                    DP climbs iff that pays back inside the 56 px window:
+    //                    16/w_h < 56 ⇒ w_h > 0.29 (below it the body rides low
+    //                    forever after any dip);
+    //   wall refusal     rise against progress only — untouched by this weight.
+    // 0.4 sits mid-range: climb-back pays off within ~40 px (≈ 20 at the old
+    // per-node 3). Resolution-independent now that hover is priced per px.
+    // Both ends are pinned by LatticePathPlannerTests (TwoHighCorridor_* and
+    // SaggedSeed_ClimbsBackWithinWindow).
+    public float LatticeHoverWeight             { get; set; } = 0.4f;
     public float LatticeSeedWeight              { get; set; } = 0f;
     // Seed run (§3.5): the path's first SeedRunPx are FORCED along the body's
     // current velocity direction (quantized to the nearest admitted offset)

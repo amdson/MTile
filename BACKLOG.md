@@ -30,6 +30,7 @@ Status key: **OPEN** · **PARTIAL** · **DONE** (kept for the record, delete fre
 | 1.9 | "Normal movement should never break blocks. Generate a set of tests for when players run into wall, crouch, drop down, etc" | **DONE** | `MTile.Tests/Sim/RunningOverUnderImpactTests.cs`. Mechanism is threshold isolation (player `ImpulseThreshold` 700 vs running impulse ≈250), not an explicit guard. |
 | 1.10 | "the player's standing state jitters when they're pushed up by blocks right now. possibly because the moving rectangles disappear momentarily when the tile sprouts convert to solid tiles?" | **DONE** | `MTile.Tests/Sim/StandingJitterTests.cs` pins it. |
 | 1.11 | "make tile generation speed a parameter in game config (the rate at which tile sprouts grow)" | **DONE** | `MovementConfig.SproutLifetime` (default 0.1f). |
+| 1.12 | **2-high corridor entry on the lattice engine** (`Plans/LATTICE_PLANNING_OBJECTIONS.md`, `Plans/TWO_HIGH_CORRIDOR_ENTRY_REPORT.md`). | **PARTIAL** | 2026-09-05: objections 1–4 resolved without new knobs — (1) `LatticePathPlanner.Clearance` (0.5 px) is the engine's ONE clearance number, used for the DP stamp and the tracker's tile rows in place of the half-cell "margin = band" inflation and `CorrectorMargin`; the band is documented as a following tolerance, not a clearance; (2) hover priced per px of path, like rise and progress, with `LatticeHoverWeight` 3/node → 0.4/px — hover is now weaker than progress everywhere (corridor entry needs < 0.55, climb-back inside the window needs > 0.29; both ends pinned by `LatticePathPlannerTests`); (3) `LatticeOutcome` (Route / Refused / NoRoute) tags every tracker solve so tests can tell a planned entry from the fallback drive. Probe sweep after: 1-tile step 12/12 with median impulse 0 and worst 52 px/s (was worst 132); level walk 2/12 (was 0); level jump 20/24 (was 0, but all still take the ~150 px/s ceiling hit); 2-tile jump 2/24 (unchanged). Gates: `Sim/LatticeCorridorEntryTests.cs`. **Open — the level walk-in at running speed**: the DP now routes and dips 12.8 px over ~15 px of run, but the tracker's 5-tick horizon lags it ~3.5 px at 100 px/s, the body clips the lintel wall, and from a body pressed against the lip the forward-only cone has no edge (objection 9: no vertical offsets), so it stands there — a dynamics/horizon decision, not representability (the two level rows of the gate are skipped on it). Also measured: the 1-tile step's remaining 52 px/s bump at phase 0 comes from the corridor row's cell center sitting 0.83 px under the ceiling boundary and 1.97 above the floor's; the probe's 8-cells/tile ablation puts it at 0 for both phases — the resolution question, deliberately not taken (4× nodes, every lattice test shifts). |
 
 ### Vault / ledge / duck wishlist
 
@@ -168,6 +169,7 @@ Each encodes a specific missing capability. Un-skip as the capability lands.
 | `Sim/OneBlockTriggerSweepTests.cs:27` | Assert-free diagnostic sweep, manual only — not a defect. |
 | `HoldRight_CourseCorridor` | Regression: vault lost upward exit carry, body traps in pit. |
 | `Sim/CombatFeelTests.cs` `HoldField_Slash1_KeepsVictimInRange…` | Asserts victim retention, which was deliberately removed 2026-08-30 — Slash1 no longer holds. Rewrite against `HoldVictims` if retention ever returns. |
+| `Sim/LatticeCorridorEntryTests.cs` `HoldRight_EntersPlanned_WithoutASmack(step: 0, …)` ×2 | The level 2-high walk-in: planned (Route on every approach frame) but the tracker lags the dip into the lintel wall — §1.12's open dynamics question. Un-skip when it is decided. |
 | `Sim/DiveDrillTests.cs` `DivingDoesNotBuryThePlayer` | Impact/drill depth not being codified until the game-feel pass. Same root cause as the `PlayerImpactByVelocityTests` rows above — un-skip them together. |
 
 ### Known-failing tests (pre-existing baseline)
@@ -176,6 +178,15 @@ Each encodes a specific missing capability. Un-skip as the capability lands.
 2026-09-02** — after the TileSize 16→11 change and the `59ddb62` test triage. These fail on `main`
 and are *not* a regression from whatever you just changed. Check a new failure against this list
 before bisecting; only a name **not** here is worth chasing.
+
+**2026-09-04 body-polygon shrink update** (−20% tall bottom-anchored / −3% wide, hover +4.8 —
+see `PlayerCharacter.BodyHeightTrim`): the table below shifted by net ±0. Went **green**:
+`SimulationTests.HoldSpaceRight_CoveredJumpOutOfTunnel` and
+`InfiniteTerrainTests.SimStep_StreamsAheadOfAWalkingPlayer_AndTheGroundIsAlwaysThere` (both were
+cluster-C rows). Newly **red** (cluster D below): `ArcJumpStateTests.AgainstTwoBlockStep…` and
+`BallisticPredictorTests.GroundRun_WalksAtConfiguredSpeed_QuirkRetired`. A clean full run on
+2026-09-04 is `773 passed / 41 failed / 12 skipped` (826 total — the suite has also grown since
+the 2026-09-02 count; totals remain a rough check, not a tripwire).
 
 Match on the **test name**, not the counts. A skipped `[Theory]` collapses to a single reported
 entry regardless of how many `InlineData` rows it has, so skipping or un-skipping one shifts the
@@ -191,7 +202,7 @@ issue, not noise.
 | Test (`MTile.Tests/…`) | Symptom | Cluster |
 |---|---|---|
 | `Sim/CorrectorExperimentsTests.cs:78` `AmbientAirGraze_PreservesSpeedThroughCorner` | "ambient should preserve most speed through the graze: minVx=0" | redirect |
-| `Sim/CorrectorExperimentsTests.cs:116` `Vault_DtInvariantDelivery` | Was only the dt=0.0333 row; since the grid change **both** dt rows fail. | redirect |
+| `Sim/CorrectorExperimentsTests.cs:116` `Vault_DtInvariantDelivery` | Was only the dt=0.0333 row; since the grid change both dt rows failed; since the 2026-09-05 lattice clearance change (§1.12) only the **dt=0.0167** row fails. | redirect |
 | `Sim/CaveMouthTests.cs:83` `NearMiss_DucksUnderTheLip_AndEntersClean` | "face-smack frames ABOVE the mouth — the trim didn't duck" | redirect |
 | `Sim/CaveMouthTests.cs:129` `AimedWellAboveTheMouth_BonksHonestly` | "no face contact above the mouth — the assist steered a bad fall into the cave" | redirect |
 | `Animation/ParkourGripSolverTests.cs:20` `Solver_ParkourGrip_HandReachesLedgeCornerThroughOverlay` | "RENDERED hand off the corner — smoothing diluting the pin again?" | anim solver |
@@ -221,13 +232,23 @@ game-code change, not a test edit.
 |---|---|
 | `Sim/DeliberateClimbTests.cs:87,104` RunningIn_WithoutUp_TheArcStaysHome; StandingFlushAtAnUnhangableStep_UpHeld_ArcsOverIt | Design pinch: at TS=11 only a 2-tile step (22px) fits between MantleMaxRise (20px) and StandingHeight (~33px) — 2px of arc-band headroom — and body radius (12px) > TileSize (11px) makes a flush body overlap the faced platform. |
 | `Sim/SproutLiftJumpTests.cs:86,357,412` SproutLift_CarriesStandingPlayer_SmoothlyOneTile; SingleDiagonalBlock_CarriesSmoothly; DiagonalEruptionStream_CarriesPlayerTwentyTilesUpAndRight | The 5.8 anchor-servo carry (actively tuned) — ride dynamics genuinely changed at the new ratio; retune with the feature, not as test rot. (JumpOffRisingSprout_InheritsFloorVelocity went green with the support-relative rise caps, avalanche-ride work 2026-09-04.) |
-| `Sim/SimulationTests.cs:614` HoldSpaceRight_CoveredJumpOutOfTunnel | The old 2-tile gap (32px) sat just ABOVE the auto-crouch threshold (~31px) — the scenario's whole point. A 2-row gap is now 22px (below it); no tile count reproduces the straddle at TS=11. Design call. |
 | `Sim/TrainingStageTests.cs:36` Dummy_SlashesAndStabs_WithoutWandering | Game-code fix: `Stage.cs` `PopulateTraining` hardcodes the dummy home at (8, 75) for the old 96px floor top (now 66px). |
 | `Sim/PlayerImpactByVelocityTests.cs:196` Terminal_OntoStone_BouncesNoBreak | Real over-breaking: terminal-fall KE→HP (≈16) now exceeds Stone.MaxHP (12), so the tile breaks instead of bouncing — the (16/11)² impact/material rescale is a tuning decision (see §5 impact rows). |
 | `JumpingStateTests.cs:113` Jump_OnExit_RemovesSourceFsd | Triage rescaled the embedded spawn but it's still red — undiagnosed, needs a sim-run look. |
 | `Sim/SproutCrushTests.cs:72` SproutGrowingIntoPinnedBody_IsDestroyed | Same: setup rescaled, still red — undiagnosed. |
 | `Sim/SproutGraphTests.cs:96` Request_WithTwoSolidNeighbours_GrowsOutOfBothFaces | Same: setup rescaled, still red — undiagnosed. |
-| `Sim/InfiniteTerrainTests.cs:281` SimStep_StreamsAheadOfAWalkingPlayer_AndTheGroundIsAlwaysThere | Fully TileSize-derived; the walk-and-stream dynamics themselves changed. |
+(Two former cluster-C rows went green with the 2026-09-04 body shrink and were removed:
+`Sim/SimulationTests.cs:614` HoldSpaceRight_CoveredJumpOutOfTunnel and
+`Sim/InfiniteTerrainTests.cs:281` SimStep_StreamsAheadOfAWalkingPlayer_AndTheGroundIsAlwaysThere.)
+
+**D. The 2026-09-04 body-shrink pair (2 tests)** — consequences of the polygon shrink
+(bottom-anchored −20% height, so standing ground clearance grew ~9.6→~14.4px while the legs'
+physical reach below the center is unchanged).
+
+| Test (`MTile.Tests/…`) | Why it's red |
+|---|---|
+| ~~`Sim/ArcJumpStateTests.cs:58` AgainstTwoBlockStep_HoldToward_ArcJumpsOntoTop~~ — **went green 2026-09-05** with the lattice clearance change (§1.12); row kept for the record | The trimmed body bottom now clears a 2-tile (22px) step top within the legs' push ceiling, so StandingState walks straight up it and ArcJumpState never engages (delivery-on-top itself still happens — the trace shows step-rest by frame 20). Whether 2-high walls should stay maneuver-gated/honest-bonk territory is the same design call as the cluster-B `FoldScenarioTests.TwoHighWall` row — decide them together. |
+| `Sim/BallisticPredictorTests.cs:201` GroundRun_WalksAtConfiguredSpeed_QuirkRetired | Walk equilibrium settled at 102.1 px/s vs the 100±1.5 pin (was ≤101.5 pre-shrink). Probe shows it is hover-offset-independent (102.1 at hover 8–14.8), so the ~0.6 shift comes from the polygon/C-template geometry leaking x through the channel QP — needs a solver-side look, not a tolerance bump. |
 
 **Resolved from this table 2026-08-30** (kept as a record of what the list used to hold):
 `ActionOverlayTests.LowerBody_Untouched_ByUpperBodyOverlay` was asserting float *equality* on

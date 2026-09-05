@@ -3,6 +3,11 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
+// LatticeTracker's per-solve verdict on the plan (its regime note defines
+// each). Diagnostics only: rewritten every solve, cleared every frame, read
+// by tests and overlays, never by sim logic.
+public enum LatticeOutcome : byte { None, NoRoute, Refused, Route }
+
 // Pooled per-player scratch for the corrector's predict → build → solve loop.
 // Pure derived data, fully rewritten every solve — never snapshot state. The
 // only cross-frame corrector state lives in MovementVars: ManeuverChannelPrev
@@ -96,6 +101,13 @@ public sealed class CorrectorScratch
     // never snapshot state.
     public readonly LatticePathPlanner Lattice = new();
     public readonly CoastSample[] LatticePath = new CoastSample[LatticePathPlanner.MaxPath];
+    // Write-only freshness markers for LatticePath, set by LatticeTracker after each
+    // solve so RENDER-side consumers (the step planner's prediction adapter,
+    // Drawing/LatticePathSampler.cs) can tell a live path from stale scratch. Never
+    // read by the sim, never snapshot — pure diagnostics, like everything here.
+    public int LatticePathCount;
+    public int LatticePathFrame;
+    public LatticeOutcome LatticeOutcome;
     // LatticeTracker's bead scratch: the reference polyline (body + path
     // nodes) with cumulative arc length, and the corrected displacement per
     // tick between outer passes. Pure per-solve derived data.
@@ -103,5 +115,9 @@ public sealed class CorrectorScratch
     public readonly float[]   BeadArc   = new float[LatticePathPlanner.MaxPath + 1];
     public readonly Vector2[] TrackDelta = new Vector2[BallisticPredictor.MaxHorizon];
 
-    public void BeginFrame() { BallisticCount = 0; SolvedCount = 0; ContactCount = 0; Ledger.Clear(); }
+    public void BeginFrame()
+    {
+        BallisticCount = 0; SolvedCount = 0; ContactCount = 0; LatticeOutcome = LatticeOutcome.None;
+        Ledger.Clear();
+    }
 }

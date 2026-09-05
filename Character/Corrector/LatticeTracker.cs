@@ -86,12 +86,42 @@ public static class LatticeTracker
         Vector2 u = fold.Rising
             ? Vector2.Normalize(new Vector2(dir * cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, -cfg.FoldLegPushFadeSpeed))
             : new Vector2(dir, 0f);
+        bool bonk = false;
         int count = planning
             ? s.Lattice.Solve(ctx.Chunks, body.Polygon, body.Position, body.Velocity,
                 u, fold.Hover, fold.HoverOffset, fold.RiseCost,
-                s.LatticePath, out _, out _)
+                s.LatticePath, out _, out bonk)
             : 0;
+        // Freshness markers for render-side path consumers (LatticePathSampler) —
+        // write-only diagnostics, never read by the sim.
+        s.LatticePathCount = count;
+        s.LatticePathFrame = ctx.CurrentFrame;
+        // The plan's verdict, for tests and overlays (objection 4 of
+        // Plans/LATTICE_PLANNING_OBJECTIONS.md). The tracker's behaviour per
+        // regime is deliberate and identical to before the tag existed:
+        //   Route    the far band was worth reaching: follow the polyline,
+        //            its last segment extended as a ray (the carry past the
+        //            window's edge);
+        //   Refused  the DP found routes but none worth their cost (a wall
+        //            too tall, a step a crouch won't mount), or nothing
+        //            beyond the seed: the path up to the refusal is followed
+        //            and its last segment extended INTO the refused obstacle
+        //            — the tile rows brake, physics impacts. The honest bonk,
+        //            never a planned stop;
+        //   NoRoute  no polyline at all (seed snap failed, degenerate
+        //            window): drive along intent under the progress row with
+        //            no band — walk into it.
+        // Only a Route entry is evidence the PLANNER did the work; the
+        // corridor entry tests assert on it, so a fallback entry can no
+        // longer pass as a planned one.
+        s.LatticeOutcome = !planning ? LatticeOutcome.None
+            : count == 0 ? LatticeOutcome.NoRoute
+            : count >= 2 && !bonk ? LatticeOutcome.Route
+            : LatticeOutcome.Refused;
         float cell = (float)Chunk.TileSize / Math.Clamp(cfg.LatticeCellsPerTile, 2, 8);
+        // Half a cell: how far the body may stray from the polyline — the
+        // path's resolution, a FOLLOWING tolerance. Not a clearance: the
+        // tiles are the wall rows below, at LatticePathPlanner.Clearance.
         float band = 0.5f * cell;
         bool havePath = count >= 2;
         bool hoverColumn = !havePath && fold.Hover && anchored;
@@ -161,9 +191,13 @@ public static class LatticeTracker
         // normals: the tuck/legs take their gradient from the actual face,
         // and the redirect can plant against it. All faces (the DP already
         // decided bonk-vs-route, so no anti-autopilot filter). Built once;
-        // every bead pass starts from them.
+        // every bead pass starts from them. Margin = the engine's one
+        // clearance number (LatticePathPlanner.Clearance), not
+        // CorrectorMargin: that 2 px is the 10-tick ballistic engines'
+        // prediction insurance, and on both faces of a 22 px corridor it
+        // asked for 23.2 — the floor and ceiling rows could never both hold.
         int wallRows = ClearanceConstraintBuilder.Build(ctx.Chunks, body.Polygon, s.DeliverySamples, H,
-            cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation, s.Rows, out _,
+            LatticePathPlanner.Clearance, ClearanceConstraintBuilder.DefaultDeepViolation, s.Rows, out _,
             verticalFacesOnly: false);
         wallRows = Math.Min(wallRows, ClearanceConstraintBuilder.MaxEvents - (3 * H + 1));
 
