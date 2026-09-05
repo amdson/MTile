@@ -215,7 +215,10 @@ public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
     [Fact]
     public void Row08_LedgeDrop_FullCarry_NoDive_Rebinds()
     {
-        var chunks = Terrain(7, 40, (r, c) => r == 6 || (r == 3 && c < 10));
+        // 56 columns (616 px): at ~102 px/s the body is near x=456 by frame
+        // 240, and the old 40-column (440 px) floor ended under it — the
+        // "rebound" was being read 16 px past the terrain's edge, mid-fall.
+        var chunks = Terrain(7, 56, (r, c) => r == 6 || (r == 3 && c < 10));
         var sim = new Simulation(chunks, OnFloor(40f, 3));
         float maxVy = 0f;
         for (int f = 0; f < 240; f++) { sim.Step(Right); maxVy = MathF.Max(maxVy, sim.Player.Body.Velocity.Y); }

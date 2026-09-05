@@ -20,7 +20,7 @@ namespace MTile;
 //     increases along every edge), so one pass over nodes sorted by p is a
 //     valid DP order;
 //   - cost: per-edge RISE (px climbed — table-invariant; drops are free),
-//     per-node hover toward the surface below (state-supplied on/off flag),
+//     hover toward the surface below per px of path (state-supplied on/off),
 //     seed-edge velocity bias (§3.4–3.5);
 //   - goal: the reachable node maximizing progress·w_prog − cost; a bonk is
 //     a route that is not worth its cost (§3.4, revised).
@@ -39,6 +39,24 @@ public sealed class LatticePathPlanner
 {
     public const int MaxCells = 4096;   // pooled scratch bound; window clamps to fit
     public const int MaxPath  = 256;    // ≥ any monotone path across a MaxCells window
+    // The ONE clearance number of the lattice engine (px): the DP stamps every
+    // C-obstacle inflated by this, and LatticeTracker's tile rows demand this
+    // much room off every face. Deliberately tiny — the tiles are hard rows
+    // in the tracker's QP, so inflation here has no safety role; it only
+    // keeps the path from riding flush. It is NOT the tracker's band (half a
+    // cell around the path): the band is a path-FOLLOWING tolerance, not a
+    // clearance. Inflating by the band (the 2026-08-24 "margin = band" rule,
+    // adopted before the tracker had tile rows) made the tightest passable
+    // corridor unrepresentable. The arithmetic: a 2-high corridor leaves the
+    // 19.2 px body 2.8 px of vertical room; at 3 cells per tile the cell
+    // centers below a tile-top floor sit 1.83, 5.5, 9.17, 12.83 px under it
+    // and the corridor's free band is 7.2–10 px, so the 9.17 center stays
+    // free for any inflation ≤ 0.83 px (the grid is world-aligned and divides
+    // the tile, so this is arithmetic, not luck). The tracker's floor and
+    // ceiling rows need 2·Clearance < 2.8. LatticePathPlannerTests'
+    // TwoHighCorridor_* tests guard both. Body-relative px, deliberately
+    // independent of Chunk.TileSize.
+    public const float Clearance = 0.5f;
     private const float LateralTieBreak = 0.05f;   // per px perpendicular to u — an ε, not a knob
 
     // ── Primitive offset table (§3.3): |dx|,|dy| ≤ Radius, gcd = 1 ───────────
@@ -194,13 +212,10 @@ public sealed class LatticePathPlanner
         BuildWindow(seed, u, L);
         if (_w <= 0 || _h <= 0) return 0;
 
-        // The obstacle margin IS the tracker's band (half a cell): the DP keeps
-        // path nodes this far outside the true C-obstacle, and the tracker
-        // lets the body stray this far from the path — one allowance, counted
-        // once. (CorrectorMargin, the qp/ref engines' 2 px, had been added on
-        // top of the band: two allowances, and a corridor seam narrowed to a
-        // single cell — LATTICE_SCENARIOS.md fifth pass.)
-        _margin = 0.5f * _cell;
+        // Obstacles inflated by Clearance (see the const): the path is
+        // guidance and the tiles are the tracker's hard rows, so the DP need
+        // only keep its nodes off the faces — not a band's worth clear of them.
+        _margin = Clearance;
         StampObstacles(chunks, body, perTile, _margin);
         SweepFloorBelow();
 
@@ -307,10 +322,17 @@ public sealed class LatticePathPlanner
                     float dev = _floorBelow[m] - hoverOffset;
                     // Linear, like the rise cost: the "rise back to hover" vs
                     // "stay sagged" trade then compares w_rise against
-                    // w_hover × nodes, independent of how large the sag is (a
-                    // quadratic hover against a linear rise crossed at ~7 px —
-                    // inside the hover band, measured 2026-08-24).
-                    c += wHover * MathF.Abs(dev);
+                    // w_hover × distance, independent of how large the sag is
+                    // (a quadratic hover against a linear rise crossed at ~7
+                    // px — inside the hover band, measured 2026-08-24). Priced
+                    // per px of PATH, like rise (per px climbed) and progress
+                    // (per px along u). Charged per node it changed price with
+                    // the cell size and the offset table — a (3,1) edge paid a
+                    // third of three (1,0) edges for the same sag — so the
+                    // corridor-entry and climb-back trades that
+                    // MovementConfig.LatticeHoverWeight encodes moved whenever
+                    // the resolution did.
+                    c += wHover * MathF.Abs(dev) * o.Len * _cell;
                 }
                 if (atSeed && vHat != Vector2.Zero)
                     c += wSeed * (1f - Vector2.Dot(o.Unit, vHat));
