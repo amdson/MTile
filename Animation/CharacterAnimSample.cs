@@ -44,7 +44,7 @@ public readonly struct SolverSurface
 // Parkour/Mantle/ArcJump are the three CLIMB states (ClimbStates.cs), split by entry speed and
 // rise band; they share the hands overlay and grip machinery but each gets its own clip so the
 // speed vault, the flush climb and the two-block arc can be authored apart.
-public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump, LedgeJump, Dropdown, Mantle, ArcJump }
+public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump, LedgeJump, Dropdown, Mantle, ArcJump, StepUp }
 
 // A read-only snapshot of everything the animation layer is allowed to look at,
 // gathered once per render frame. This is the *one-way* boundary between the sim
@@ -131,6 +131,16 @@ public readonly struct CharacterAnimSample
     // 0 (supported) for hand-built samples/tests.
     public readonly float   GroundGap;
 
+    // Terrain, for the step planner's finite-tread queries (SupportQuery) — render-only
+    // read, same one-way direction as every other sim read here. Null in hand-built
+    // samples/tests and on hosts that don't wire it: the planner then simply never runs.
+    public readonly ChunkMap Chunks;
+
+    // Predicted body position `dtAhead` seconds from now, supplied by the host (the
+    // lattice-path adapter, Drawing/LatticePathSampler.cs). Null → the planner falls
+    // back to velocity extrapolation. NOT BallisticPredictor (owner's call, 2026-09-05).
+    public readonly Func<float, Vector2> PredictAt;
+
     public CharacterAnimSample(
         Vector2 position, Vector2 velocity, int facing, bool grounded,
         string movementState, string action, float dt, float actionTime = 0f,
@@ -138,7 +148,8 @@ public readonly struct CharacterAnimSample
         SolverSurface[] surfaces = null, bool hasGrip = false, Vector2 gripTarget = default,
         bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None,
         int surfaceCount = -1, bool? surfacesNear = null, bool lowCeiling = false,
-        float groundGap = 0f, int recoveryFramesLeft = 0)
+        float groundGap = 0f, int recoveryFramesLeft = 0, ChunkMap chunks = null,
+        Func<float, Vector2> predictAt = null)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
@@ -146,6 +157,7 @@ public readonly struct CharacterAnimSample
         RecoveryFramesLeft = recoveryFramesLeft;
         Surfaces = surfaces; SurfaceCount = surfaceCount; HasGrip = hasGrip; GripTarget = gripTarget;
         HasAim = hasAim; AimDir = aimDir; Tag = tag; LowCeiling = lowCeiling; GroundGap = groundGap;
+        Chunks = chunks; PredictAt = predictAt;
         // Default (hand-built samples, tests): surfaces present ⇒ near — the pre-terrain behavior.
         SurfacesNear = surfacesNear ?? (surfaces != null && (surfaceCount < 0 ? surfaces.Length : surfaceCount) > 0);
     }
@@ -173,11 +185,19 @@ public readonly struct CharacterAnimSample
     // same buffer's spare capacity so the sample carries one combined list.
     public static CharacterAnimSample From(PlayerCharacter p, float dt,
                                            SolverSurface[] surfaceBuf = null, int surfaceCount = 0,
-                                           bool terrainNear = false, ChunkMap chunks = null)
+                                           bool terrainNear = false, ChunkMap chunks = null,
+                                           Func<float, Vector2> predictAt = null)
     {
         var pos = p.Body.Position;
         int facing = p.Facing;
         AnimTag tag = p.CurrentState?.AnimationTag ?? AnimTag.None;
+        // The sim already chains climbs across stairs. Give that whole traversal one
+        // cadence instead of restarting Parkour/Jump at every riser. Explicit jumps,
+        // crouches, reactions and taller ledge maneuvers retain their own animation.
+        if (chunks != null
+            && p.CurrentState is StandingState or FallingState or ParkourState or MantleState
+            && IsAscendingStairs(pos, p.Body.Velocity, facing, chunks))
+            tag = AnimTag.StepUp;
 
         // Is there a solid ceiling right overhead? Reuse CeilingChecker.TryFind — the exact
         // query CrouchedState.CheckConditions uses to stay crouched with Down released (a 20px
@@ -253,6 +273,36 @@ public readonly struct CharacterAnimSample
                surfaces: surfaces, surfaceCount: count, surfacesNear: near,
                hasGrip: hasGrip, gripTarget: gripTarget,
                hasAim: hasAim, aimDir: aimDir, tag: tag, lowCeiling: lowCeiling,
-               groundGap: groundGap, recoveryFramesLeft: recoveryLeft);
+               groundGap: groundGap, recoveryFramesLeft: recoveryLeft,
+               chunks: chunks, predictAt: predictAt);
+    }
+
+    private static bool IsAscendingStairs(Vector2 position, Vector2 velocity, int facing, ChunkMap chunks)
+    {
+        if (facing is not (1 or -1)
+            || velocity.X * facing <= GroundLocomotionDriver.WalkSpeedThreshold
+            || velocity.Y > GroundLocomotionDriver.WalkSpeedThreshold) return false;
+
+        const int ts = Chunk.TileSize;
+        int col = (int)MathF.Floor(position.X / ts);
+        int row = (int)MathF.Floor(position.Y / ts);
+        // Two consecutive one-high/one-wide risers distinguish stairs from a single
+        // vault or a wall. Search only beneath/alongside the feet, not distant terrain.
+        for (int back = 0; back <= 2; back++)
+        for (int y = row; y <= row + (int)MathF.Ceiling(2 * PlayerCharacter.Radius / ts) + 1; y++)
+        {
+            int x = col - facing * back;
+            bool stair = true;
+            for (int step = 0; step < 3; step++)
+            {
+                float cx = (x + facing * step + 0.5f) * ts;
+                float cy = (y - step + 0.5f) * ts;
+                if (!TileQuery.IsSolidAt(chunks, cx, cy)
+                    || TileQuery.IsSolidAt(chunks, cx, cy - ts))
+                { stair = false; break; }
+            }
+            if (stair) return true;
+        }
+        return false;
     }
 }

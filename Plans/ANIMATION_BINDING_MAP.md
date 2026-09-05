@@ -27,6 +27,7 @@ not name matching.
 
 | State | AnimTag | AnimClip | Clip file | Reference arc |
 |---|---|---|---|---|
+| Standing / Falling / Parkour / Mantle near ascending 1×1 stairs | StepUp (render sample override) | StepUp | `stepup.json` (both rigs) | — |
 | `FallingState` | *None* | Fall / Jump (by v.y) | `fall.json` / `jump.json` | — |
 | `StandingState` | *None* | Idle/Walk/WalkBack/Run/RunTurn/Land | speed fan-out, 6 files | — |
 | `CrouchedState` | Crouch | Crouch / CrouchWalk / DuckUnder | 3 files | — |
@@ -57,8 +58,16 @@ Speed fan-out ([MoveDriver.cs:125-165](../Animation/MoveDriver.cs#L125-L165)): `
 against facing). `GroundGap > 2px` holds the cycle frozen. The Land override on a near-idle
 touchdown is core-side ([CharacterAnimator.cs:409](../Animation/CharacterAnimator.cs#L409)).
 
-Five states carry no tag — `Falling`, `Standing`, and all three single-jump states animate
-purely off velocity through the terminal drivers.
+`CharacterAnimSample.From` recognizes two consecutive exposed one-tile risers while moving
+upstairs and overrides Standing/Falling/Parkour/Mantle with `StepUp`. The cadence-driven
+cycle survives their per-riser transitions and uses foot contacts without the climb hand
+overlay. Explicit jump states retain their own clips. The override requires nearby terrain;
+the recorded tag preserves it for take playback. Flat ground, isolated ledges, descending,
+stopping and moving against facing retain their normal selection.
+
+The stair clip's stance foot moves backward and downward in rig space as the body climbs
+forward and upward; a level-ground digest's constant-stance-height hint does not apply.
+Contact drop keys precede toe-off to avoid pinning the cadence at the swing reversal.
 
 ## Action states
 

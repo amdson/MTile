@@ -99,6 +99,7 @@ public static class MoveDrivers
                                               IReadOnlyDictionary<string, AnimationDocument> actionClips)
         => new IMoveDriver[]
         {
+            new TagClipDriver(AnimTag.StepUp, AnimClip.StepUp, ClipTimeMode.CadencePhase),
             new ParkourDriver(rig, actionClips),
             new CrouchDriver(),
             new TagClipDriver(AnimTag.WallSlide,  AnimClip.WallSlide),
