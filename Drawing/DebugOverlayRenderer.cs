@@ -154,6 +154,37 @@ public sealed class DebugOverlayRenderer
         if (count > 0) _draw.Disc(samples[count - 1].Pos, 2.5f, Color.Aqua);
     }
 
+    // Step-planner plans (Animation/StepPlanner.cs, P2 observability): per planned
+    // foot, the selected tread (bar), the current target (disc — filled during stance,
+    // small during swing), the preferred/authored landing wish (hollow ring), and a
+    // rejection tick when the foot is Unplanned. Colors split feet by index so left
+    // and right read apart. Render-only.
+    public void DrawStepPlan(StepPlanner planner)
+    {
+        for (int i = 0; i < planner.FeetCount; i++)
+        {
+            var p = planner.Plans[i];
+            var color = i == 0 ? Color.Orange : Color.Violet;
+            if (p.HasSupport)
+                DrawLine(new Vector2(p.Support.X0, p.Support.Y),
+                         new Vector2(p.Support.X1, p.Support.Y), color * 0.9f, 2);
+            _draw.Disc(p.Preferred, 2f, color * 0.35f);
+            switch (p.State)
+            {
+                case FootPlanState.Stance:
+                    _draw.Disc(p.Target, 3f, color);
+                    break;
+                case FootPlanState.Swing:
+                    _draw.Disc(p.Target, 1.5f, color * 0.9f);
+                    break;
+                default:   // Unplanned — mark the wish with a rejection cross
+                    DrawLine(p.Preferred + new Vector2(-3, -3), p.Preferred + new Vector2(3, 3), Color.Red, 1);
+                    DrawLine(p.Preferred + new Vector2(-3, 3), p.Preferred + new Vector2(3, -3), Color.Red, 1);
+                    break;
+            }
+        }
+    }
+
     // A captured corrector trajectory (reference / ballistic / solved) as a plain
     // polyline with an endpoint dot. Grounded samples get a short floor tick so
     // the supported stretch reads apart from flight. Render-only.

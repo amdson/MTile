@@ -148,6 +148,15 @@ public class AnimSolverConfig
     public float HorizOffsetLimit { get; set; } = 4f;   // |d.x| cap (world px) — small sway, and the hard backstop on travel absorption
     public float MaxPhaseStep    { get; set; } = 0.25f; // max Δφ advanced per frame (< one stance window)
     public float FeatherWidth    { get; set; } = 0.12f; // phase span of the planted-foot crossover
+
+    // ── Step planner (Plans/ANIMATION_STEP_PLANNER_IMPL.md — knob budget: these 3) ──
+    // Master A/B for the whole planner path; off = every clip on the legacy SelfPlant
+    // lifecycle even when opted in. Render-only, so live-toggling is always safe.
+    public bool  PlannerEnabled      { get; set; } = true;
+    // Landing selection: score bonus (px) for keeping the previously selected tread.
+    public float PlannerHysteresis   { get; set; } = 4f;
+    // Swing progress after which a still-valid landing target is frozen.
+    public float PlannerLateSwingLock { get; set; } = 0.8f;
     // Once a contact's feather RELEASE has begun, its weight also fades by time over at most
     // this many seconds (min of the two) — so a low-speed cadence stall can't hold the old
     // foot's grip forever (the foot-swap deadlock; see CharacterAnimator.RefreshContacts).
@@ -203,6 +212,9 @@ public class AnimSolverConfig
         FeatherWidth            = src.FeatherWidth;
         ContactReleaseTime      = src.ContactReleaseTime;
         ContactEngageTime       = src.ContactEngageTime;
+        PlannerEnabled          = src.PlannerEnabled;
+        PlannerHysteresis       = src.PlannerHysteresis;
+        PlannerLateSwingLock    = src.PlannerLateSwingLock;
     }
 
     public static void Load(string path)

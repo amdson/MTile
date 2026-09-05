@@ -1187,6 +1187,11 @@ public class Game1 : Game
         if (_config.DebugDrawCObstacles)
             _debugOverlay.DrawCObstacles(_sim.Chunks, player.Body.Polygon, player.Body.Position, 160f);
 
+        // Step-planner plans: treads, foot targets, landing wishes, rejections.
+        // Draws nothing until a clip opts in via PlannedSupport labels.
+        if (_config.DebugDrawStepPlanner && _animator != null)
+            _debugOverlay.DrawStepPlan(_animator.Planner);
+
         // Predicted coast (BallisticPredictor) from the player's current state under the
         // currently-held input. Pure render-local rollout — identity modifiers (action
         // modifiers aren't reproduced here; the overlay approximates the baseline coast).

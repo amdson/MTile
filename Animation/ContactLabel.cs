@@ -1,15 +1,22 @@
 namespace MTile;
 
 // Where a contact's world target comes from when the locomotion solver pins it.
-//   SelfPlant — captured from the rig itself: on the frame the contact's weight
-//               first goes nonzero, the node's current world position is captured
-//               and held (a planted foot that must not slip).
-//   External  — a fixed world point supplied by the sim/level over a time window
-//               (e.g. the corner a ParkourState vault must keep a hand on).
+//   SelfPlant      — captured from the rig itself: on the frame the contact's weight
+//                    first goes nonzero, the node's current world position is captured
+//                    and held (a planted foot that must not slip).
+//   External       — a fixed world point supplied by the sim/level over a time window
+//                    (e.g. the corner a ParkourState vault must keep a hand on).
+//   PlannedSupport — opt-in for the step planner (Plans/ANIMATION_STEP_PLANNER_PLAN.md):
+//                    the interval REQUESTS terrain support for this node and the runtime
+//                    (StepPlanner) chooses the support point. Feet in a clip carrying any
+//                    PlannedSupport label are planner-owned: RefreshContacts' SelfPlant
+//                    capture/release lifecycle skips them. On clips that never opt in,
+//                    behavior is unchanged.
 public enum ContactSource
 {
     SelfPlant,
     External,
+    PlannedSupport,
 }
 
 // One contact annotation on an animation keyframe: a named skeleton node that should

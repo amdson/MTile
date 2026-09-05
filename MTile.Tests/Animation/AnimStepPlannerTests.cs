@@ -1,0 +1,220 @@
+using System;
+using System.Collections.Generic;
+using Microsoft.Xna.Framework;
+using MTile.Tests.Sim;
+using Xunit;
+
+namespace MTile.Tests;
+
+// SupportQuery + StepPlanner (step planner P2 — Plans/ANIMATION_STEP_PLANNER_IMPL.md):
+// finite treads with stable identity, and the planner's stance/swing lifecycle driven
+// headless over ascii terrain — selection near the preferred landing, hysteresis,
+// late-swing lock, invalidation after tile removal, and honest Unplanned reporting.
+public class AnimStepPlannerTests(Xunit.Abstractions.ITestOutputHelper output)
+{
+    private const int TS = Chunk.TileSize;
+
+    // ── SupportQuery ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void QueryTreads_EmitsPerCellTops_WithStableIds()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOOOOOO
+            OOOOOOOO
+            XXXXXXXX
+            XXXXXXXX", originTileX: 0, originTileY: 0);
+        Span<SupportSegment> dst = stackalloc SupportSegment[32];
+        int n = SupportQuery.QueryTreads(chunks, new Vector2(4 * TS, 2 * TS), 1.6f * TS, dst);
+        Assert.True(n >= 3, $"expected several treads, got {n}");
+        var ids = new HashSet<long>();
+        for (int i = 0; i < n; i++)
+        {
+            Assert.Equal(2 * TS, dst[i].Y, 3);            // only the exposed row-2 tops
+            Assert.Equal(TS, dst[i].X1 - dst[i].X0, 3);   // per-cell, unmerged
+            Assert.True(ids.Add(dst[i].Id), "tread ids must be unique");
+            Assert.True(SupportQuery.Revalidate(chunks, dst[i]));
+        }
+    }
+
+    [Fact]
+    public void Revalidate_FailsAfterBreak_AndForInteriorCells()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOO
+            XXXX
+            XXXX", originTileX: 0, originTileY: 0);
+        var tread = new SupportSegment { X0 = TS, X1 = 2 * TS, Y = TS, Id = SupportSegment.PackId(1, 1) };
+        Assert.True(SupportQuery.Revalidate(chunks, tread));
+        // Interior cell (solid above) is never a tread.
+        var interior = new SupportSegment { Id = SupportSegment.PackId(1, 2) };
+        Assert.False(SupportQuery.Revalidate(chunks, interior));
+        chunks.BreakCell(1, 1);
+        Assert.False(SupportQuery.Revalidate(chunks, tread));
+    }
+
+    // ── StepPlanner ──────────────────────────────────────────────────────────
+
+    // The tiny rig + clip from AnimStrideTrackTests: foot tip rests ~(4,10) rig units
+    // below/ahead of the body. One stance [0.1, 0.6), one swing [0.6, 1.1).
+    private static Skeleton TinyRig()
+    {
+        var b = new SkeletonBuilder("tiny");
+        int hip = b.AddRoot("hip", 0f, 4f);
+        b.Add("foot", hip, MathHelper.PiOver2, 10f);
+        return b.Build();
+    }
+
+    private static ClipStrideTrack Track()
+    {
+        var doc = new AnimationDocument
+        {
+            Name = "gait", Type = "Misc", Skeleton = "tiny", Loop = true, Duration = 0.8f,
+            Keyframes = new List<AnimationKeyframe>
+            {
+                Key(0.1f, 0.00f, true), Key(0.3f, 0.10f, true),
+                Key(0.6f, 0.25f, false), Key(0.8f, 0.05f, false),
+            },
+        };
+        Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
+        return track;
+
+        static AnimationKeyframe Key(float t, float hipRot, bool planted) => new()
+        {
+            Time = t,
+            Bones = new List<PoseBoneEntry> { new() { Bone = "hip", Rotation = hipRot } },
+            Contacts = planted
+                ? new List<ContactLabel> { new() { Node = "foot", Source = ContactSource.PlannedSupport } }
+                : null,
+        };
+    }
+
+    private static PlannerInputs Inputs(ClipStrideTrack track, ChunkMap chunks, Vector2 body,
+                                        Vector2 vel, float phase, float rate = 1.25f)
+        => new()
+        {
+            BodyPos = body, BodyVel = vel, Facing = 1, Scale = 2f,
+            Phase = phase, NominalRate = rate, Dt = 1f / 60f,
+            Track = track, Chunks = chunks, PredictAt = null,
+        };
+
+    // Walk the phase through a full cycle over a flat floor: stance frames must plant
+    // on the floor top with one stable tread; swing frames must select a landing.
+    [Fact]
+    public void FlatFloor_StanceAndSwing_PlanOnTheFloorTop()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        float floorTop = 3 * TS;
+        var track = Track();
+        var planner = new StepPlanner();
+
+        float phase = 0.15f;                  // inside the stance
+        var body = new Vector2(60f, floorTop - 20f);
+        var vel = new Vector2(80f, 0f);
+        long stanceId = 0; int stanceFrames = 0, swingPlanned = 0;
+        for (int f = 0; f < 60; f++)
+        {
+            planner.Update(Inputs(track, chunks, body, vel, phase));
+            Assert.Equal(1, planner.FeetCount);
+            var p = planner.Plans[0];
+            if (p.State == FootPlanState.Unplanned)
+                output.WriteLine($"f={f,2} phase={phase:0.000} Unplanned reject={p.Reject}");
+            if (p.State == FootPlanState.Stance)
+            {
+                stanceFrames++;
+                Assert.True(p.HasSupport, $"stance without support at f={f} (reject {p.Reject})");
+                Assert.Equal(floorTop, p.Target.Y, 3);
+                if (stanceId == 0) stanceId = p.Support.Id;
+                else Assert.Equal(stanceId, p.Support.Id);   // fixed while planted
+            }
+            else if (stanceId != 0) stanceId = 0;            // stance ended; next cycle replants elsewhere
+            if (p.State == FootPlanState.Swing)
+            {
+                swingPlanned++;
+                Assert.Equal(floorTop, p.Support.Y, 3);       // landing on the floor
+                // The planner preserves the authored swing SHAPE, which may graze or
+                // dip sub-tile amounts below the surface (ground-hold's business); it
+                // only guarantees no tile-scale penetration (SwingProbeLift).
+                Assert.True(p.Target.Y <= floorTop + 3.5f,
+                    $"swing target sank tile-deep under the floor: {p.Target.Y:0.0} vs {floorTop}");
+            }
+            phase = (phase + 1.25f / 60f) % 1f;
+            body.X += vel.X / 60f;
+        }
+        Assert.True(stanceFrames > 10, $"stance never held ({stanceFrames})");
+        Assert.True(swingPlanned > 10, $"swing never planned a landing ({swingPlanned})");
+    }
+
+    [Fact]
+    public void StanceSupport_ReleasesWhenTheTileBreaks()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOOOOOO
+            OOOOOOOO
+            XXXXXXXX", originTileX: 0, originTileY: 0);
+        float floorTop = 2 * TS;
+        var track = Track();
+        var planner = new StepPlanner();
+        var body = new Vector2(30f, floorTop - 20f);
+
+        planner.Update(Inputs(track, chunks, body, Vector2.Zero, phase: 0.2f));
+        var p = planner.Plans[0];
+        Assert.Equal(FootPlanState.Stance, p.State);
+        var (gtx, gty) = SupportSegment.UnpackId(p.Support.Id);
+        chunks.BreakCell(gtx, gty);
+
+        planner.Update(Inputs(track, chunks, body, Vector2.Zero, phase: 0.21f));
+        p = planner.Plans[0];
+        // The broken tread is gone; the planner may fail over to a neighboring tread
+        // (touchdown re-selection) but must never keep the dead one.
+        if (p.HasSupport) Assert.NotEqual(SupportSegment.PackId(gtx, gty), p.Support.Id);
+    }
+
+    [Fact]
+    public void NoTerrain_ReportsUnplanned_NoFabricatedSupport()
+    {
+        var chunks = SimTerrain.FromAscii("OOOO\nOOOO", originTileX: 0, originTileY: 0);
+        var track = Track();
+        var planner = new StepPlanner();
+        planner.Update(Inputs(track, chunks, new Vector2(20f, 10f), Vector2.Zero, phase: 0.2f));
+        var p = planner.Plans[0];
+        Assert.Equal(FootPlanState.Unplanned, p.State);
+        Assert.False(p.HasSupport);
+        Assert.Equal(StepReject.NoSupport, p.Reject);
+    }
+
+    // Late in the swing, a valid selected landing must not switch even if the body
+    // drifts toward a different tread.
+    [Fact]
+    public void LateSwing_LocksTheSelectedLanding()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        float floorTop = 2 * TS;
+        var track = Track();
+        var planner = new StepPlanner();
+        var vel = new Vector2(60f, 0f);
+
+        // Mid-swing (phase 0.85 → u ≈ 0.5): select a landing.
+        var body = new Vector2(60f, floorTop - 20f);
+        planner.Update(Inputs(track, chunks, body, vel, phase: 0.85f));
+        var mid = planner.Plans[0];
+        Assert.Equal(FootPlanState.Swing, mid.State);
+        Assert.True(mid.HasSupport);
+
+        // Late swing (u > lock): teleport the body a tread to the right — the held
+        // landing stays. Phase 0.05 wraps into the swing's tail [0.6, 1.1) → u = 0.9.
+        body.X += TS;
+        planner.Update(Inputs(track, chunks, body, vel, phase: 0.05f));
+        var late = planner.Plans[0];
+        Assert.Equal(FootPlanState.Swing, late.State);
+        Assert.True(late.HasSupport);
+        Assert.Equal(mid.Support.Id, late.Support.Id);
+    }
+}

@@ -34,6 +34,11 @@ public sealed class CosmeticUpdateSystem
     // animator's Update before the next extraction overwrites it.
     private readonly SolverSurface[] _terrainScratch = new SolverSurface[8];
 
+    // Step-planner prediction adapters (Drawing/LatticePathSampler.cs) — one per
+    // animator so each delegate is allocated once and rebound per frame.
+    private readonly LatticePathSampler       _pathSampler       = new();
+    private readonly List<LatticePathSampler> _secondarySamplers = new();
+
     public CosmeticUpdateSystem(CharacterAnimator animator, List<CharacterAnimator> secondaryAnimators,
                                 List<AnimationDocument> skeletonAnims, float skeletonScale,
                                 Camera camera, ParticleSystem particles, Trail cursorTrail,
@@ -93,16 +98,22 @@ public sealed class CosmeticUpdateSystem
             int tc = TerrainSurfaces.Extract(sim.Chunks, _animator, player.Body.Position,
                                              player.Facing, _skeletonScale, _terrainScratch,
                                              out bool near);
-            _animator.Update(CharacterAnimSample.From(player, simDt, _terrainScratch, tc, near, sim.Chunks));
+            _pathSampler.Bind(player);
+            _animator.Update(CharacterAnimSample.From(player, simDt, _terrainScratch, tc, near,
+                                                      sim.Chunks, _pathSampler.PredictAt));
             // Secondary players (training dummy, P2) get their own animators so
             // each rig tracks its own body, facing, and action timing.
+            while (_secondarySamplers.Count < sim.SecondaryPlayers.Count)
+                _secondarySamplers.Add(new LatticePathSampler());
             for (int i = 0; i < sim.SecondaryPlayers.Count; i++)
             {
                 var sp = sim.SecondaryPlayers[i].Player;
                 tc = TerrainSurfaces.Extract(sim.Chunks, _secondaryAnimators[i], sp.Body.Position,
                                              sp.Facing, _skeletonScale, _terrainScratch, out near);
+                _secondarySamplers[i].Bind(sp);
                 _secondaryAnimators[i].Update(
-                    CharacterAnimSample.From(sp, simDt, _terrainScratch, tc, near, sim.Chunks));
+                    CharacterAnimSample.From(sp, simDt, _terrainScratch, tc, near,
+                                             sim.Chunks, _secondarySamplers[i].PredictAt));
             }
             if (Profiler != null && AnimSlot >= 0) Profiler.End(AnimSlot, tAnim);
         }

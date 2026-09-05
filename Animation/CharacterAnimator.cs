@@ -12,7 +12,7 @@ namespace MTile;
 // and Fall. Parkour/Mantle/ArcJump/LedgePull are the four guided lip maneuvers — one clip each
 // (they were a single shared "Vault" clip until 2026-08-04; see Plans/ANIMATION_BINDING_MAP.md).
 // EVERY value here must have a clip file whose Type matches, or binding throws at construction.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Parkour, Run, WallSlide, Hang, Hitstun, Tumble, WallJumpKick, DoubleJumpFlip, RunTurn, Land, LedgeJump, Dropdown, Mantle, ArcJump, LedgePull }
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Parkour, Run, WallSlide, Hang, Hitstun, Tumble, WallJumpKick, DoubleJumpFlip, RunTurn, Land, LedgeJump, Dropdown, Mantle, ArcJump, LedgePull, StepUp }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -261,12 +261,46 @@ public sealed partial class CharacterAnimator
     public Skeleton           Skeleton => _skeleton;
     public SkeletonPose       Pose     => _pose;
     public CharacterAnimState State    => _state;
+
+    // The step planner (Plans/ANIMATION_STEP_PLANNER_IMPL.md). Runs for CadencePhase
+    // clips that opted in via PlannedSupport labels; P2 scope — its plans feed the
+    // debug overlay and diagnostics only, the solve does not consume them yet.
+    public readonly StepPlanner Planner = new();
+    // Stride tracks cached per DOCUMENT REFERENCE — an editor-reloaded doc is a new
+    // reference and recompiles; a failed compile caches null (legacy path, no respam).
+    private readonly Dictionary<AnimationDocument, ClipStrideTrack> _strideCache = new();
+
+    private ClipStrideTrack StrideTrackFor(AnimationDocument doc)
+    {
+        if (doc == null) return null;
+        if (!_strideCache.TryGetValue(doc, out var t))
+        {
+            if (!ClipStrideTrack.TryCompile(doc, _skeleton, out t, out _)) t = null;
+            _strideCache[doc] = t;
+        }
+        return t;
+    }
+
+    // Non-null only on frames the planner ran for the active clip: those feet are
+    // PLANNER-OWNED — RefreshContacts skips its SelfPlant capture/release lifecycle for
+    // them and mirrors the planner's stance plans into _contacts instead (P3 handover).
+    // Null (planner off / clip not opted in / no terrain) = the legacy path, bit-for-bit.
+    private ClipStrideTrack _curPlanTrack;
+    private bool PlannerOwned(int bone) => _curPlanTrack?.ForBone(bone) != null;
     // The solver config the LAST Update actually solved with — Current plus whatever the
     // move driver overrode that frame (FrameInputs.Solver). Diagnostics / tests.
     public AnimSolverConfig   SolverConfig => _frame.Solver;
     // The cadence's current per-frame phase rate Δφ (last solved / coasted step; the
     // legacy velocity-derived rate right after a clip change). Diagnostics / tests.
     public float              PhaseStep    => _prevPhaseStep;
+
+    // Planner-owned contact count — diagnostics / tests only (proves the P3 handover
+    // actually mirrors stance plans into the solve's contact list; the total count is
+    // the Diagnostics partial's ContactCount).
+    public int PlannedContactCount
+    {
+        get { int n = 0; foreach (var c in _contacts) if (c.Source == ContactSource.PlannedSupport) n++; return n; }
+    }
 
     // Per-bone angle correction Δθ (radians) the solver applied this frame, by bone
     // index — the IK channel on top of the authored blend. Zero on frames with no
@@ -391,6 +425,7 @@ public sealed partial class CharacterAnimator
         _coreGeom = new ISolveConstraint[]
         {
             new PlantedContactsConstraint(this),   // 2 rows/contact: H no-slip (Δφ) + V ground hold (δ)
+            new SwingTargetConstraint(this),       // 2 rows/planned swing foot: soft follow toward the landing
             new FixedPointConstraint(this),        // 2 rows/pin: both-axis hard external pin (Δθ IK)
             new NoPenetrationConstraint(this),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
             new ActionAimConstraint(this),         // 1 row: re-aim the action overlay along the input dir (Δθ)
@@ -467,6 +502,7 @@ public sealed partial class CharacterAnimator
             _state.Clip = clip;
             _state.ClipTime = 0f;
             _contacts.Clear();        // contacts belong to the clip that just ended
+            Planner.Reset();          // (P4 will preserve compatible stances by foot identity)
             // Δφ momentum across the switch: the velocity-derived legacy rate (the same
             // estimate the rate floor / fallback advance use — at or below any authored
             // cadence), NOT 0. With the acceleration box (MaxPhaseAccel) a zero seed would
@@ -608,6 +644,30 @@ public sealed partial class CharacterAnimator
         // (Δφ − Δφ_prev) · _phaseAccelNorm is the phase acceleration in units of PhaseAccelRef
         // cycles/s² — dimensionless and dt-invariant, like every other row.
         _phaseAccelNorm = 1f / (MathF.Max(dt, 1e-4f) * MathF.Max(dt, 1e-4f) * PhaseAccelRef);
+
+        // Step planner: runs for opted-in CadencePhase clips with terrain in the sample.
+        // P2 scope — plans reach the debug overlay and diagnostics only; RefreshContacts
+        // and the solve below are untouched until P3's ownership handover.
+        var planTrack = locomotion && hasClip && s.Chunks != null
+                        && AnimSolverConfig.Current.PlannerEnabled
+            ? StrideTrackFor(anim) : null;
+        if (planTrack != null && planTrack.Feet.Length > 0)
+        {
+            Planner.Update(new PlannerInputs
+            {
+                BodyPos = s.Position, BodyVel = s.Velocity,
+                Facing = s.Facing, Scale = _scale,
+                Phase = _state.Phase,
+                NominalRate = dt > 0f ? _prevPhaseStep / dt : 0f, Dt = dt,
+                Track = planTrack, Chunks = s.Chunks, PredictAt = s.PredictAt,
+            });
+            _curPlanTrack = planTrack;   // RefreshContacts' ownership predicate this frame
+        }
+        else
+        {
+            if (Planner.FeetCount > 0) Planner.Reset();
+            _curPlanTrack = null;        // opted-in clips degrade to SelfPlant semantics
+        }
 
         if (locomotion && hasClip && HasContacts(anim))
         {
@@ -979,6 +1039,14 @@ public sealed partial class CharacterAnimator
         for (int i = _contacts.Count - 1; i >= 0; i--)
         {
             var c = _contacts[i];
+            // Planner-owned bones: the SelfPlant lifecycle below never touches them.
+            // Their contacts are maintained by the plan mirror at the end (stance =
+            // upsert, anything else = prompt removal — the documented toe-off rule).
+            if (PlannerOwned(c.Bone))
+            {
+                if (c.Source != ContactSource.PlannedSupport) _contacts.RemoveAt(i);   // handover
+                continue;
+            }
             float w = WeightOf(c.Bone);
             w = MathF.Min(w, c.Weight + timeRamp);
             if (DWeightOf(c.Bone) < 0f) w = MathF.Min(w, c.Weight - timeFade);
@@ -996,7 +1064,7 @@ public sealed partial class CharacterAnimator
 
         bool needWorld = false;
         foreach (var (bone, w, _) in _weightBuf)
-            if (w > 1e-3f && ActiveIndex(bone) < 0) { needWorld = true; break; }
+            if (w > 1e-3f && ActiveIndex(bone) < 0 && !PlannerOwned(bone)) { needWorld = true; break; }
         if (needWorld)
         {
             AnimationSampler.SampleSmooth(clip, phase, _kfA, _kfB, _kfC, _kfD, _scratch);
@@ -1006,12 +1074,35 @@ public sealed partial class CharacterAnimator
 
         foreach (var (bone, w, _) in _weightBuf)
         {
-            if (w <= 1e-3f || ActiveIndex(bone) >= 0) continue;   // held ones updated above
+            if (w <= 1e-3f || ActiveIndex(bone) >= 0 || PlannerOwned(bone)) continue;   // held ones updated above
             Vector2 tip = _scratch.WorldOf(bone).Translation;     // bone's far end = contact tip
             _contacts.Add(new ActiveContact { Bone = bone, Target = SnapToSupport(bone, tip),
                                               Weight = MathF.Min(w, timeRamp),   // capture SMALL, ramp in
                                               Source = ContactSource.SelfPlant });
         }
+
+        // ── Plan mirror (planner-owned feet only) ────────────────────────────────
+        // Stance with support ⇒ one PlannedSupport contact at the plan's fixed point,
+        // weight = the planner's engage ramp (same config constants as the legacy path).
+        // Everything else ⇒ no contact: toe-off lets go promptly, per the release-slew
+        // decision above — the swing is the SwingTargetConstraint's job, never a plant.
+        if (_curPlanTrack != null)
+            for (int i = 0; i < Planner.FeetCount; i++)
+            {
+                ref readonly var p = ref Planner.Plans[i];
+                int at = ActiveIndex(p.Bone);
+                bool want = p.State == FootPlanState.Stance && p.HasSupport && p.Weight > 1e-3f;
+                if (!want)
+                {
+                    if (at >= 0) _contacts.RemoveAt(at);
+                    continue;
+                }
+                var mirrored = new ActiveContact { Bone = p.Bone, Target = p.Target,
+                                                   Weight = p.Weight,
+                                                   Source = ContactSource.PlannedSupport };
+                if (at >= 0) _contacts[at] = mirrored;
+                else _contacts.Add(mirrored);
+            }
     }
 
     // Snap a freshly captured plant onto the terrain face that supports it.

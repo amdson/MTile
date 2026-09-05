@@ -17,7 +17,7 @@ using MTile;
 //   dotnet run --project MTile.Probe -- addcom [clip] [--dry]    stamp grounded COM anchors (all clips, or one)
 //   dotnet run --project MTile.Probe -- new <name> <type> [--dur s] [--from clip[@t]] [--noloop]
 //   dotnet run --project MTile.Probe -- addkey <clip> <t> [--from clip[@t]]   pose = own-clip sample at t (shape-preserving) or a copy
-//   dotnet run --project MTile.Probe -- contact <clip> <t> <node|none>        set the keyframe's planted contact
+//   dotnet run --project MTile.Probe -- contact <clip> <t> <node|none> [planned] [--add]   set the keyframe's contact (planned = step-planner opt-in; --add keeps other nodes)
 //   dotnet run --project MTile.Probe -- rot <clip> <t> <bone> <value> [--deg] escape hatch: set one bone's rotation
 //   dotnet run --project MTile.Probe -- retime <clip> <t> <newT> | delkey <clip> <t> | dur <clip> <seconds>
 //   dotnet run --project MTile.Probe -- ik <clip> <keyTime> <tip> <dx,dy> [--to] [--chain a,b] [--write]
@@ -76,6 +76,7 @@ static class Probe
                 case "new":    return NewClip(args);
                 case "addkey": return AddKey(args);
                 case "contact": return Contact(args);
+                case "stride": return Stride(args);
                 case "rot":    return Rot(args);
                 case "retime": return Retime(args);
                 case "delkey": return DelKey(args);
@@ -420,21 +421,69 @@ static class Probe
         return 0;
     }
 
-    // contact <clip> <t> <node|none> — set the keyframe's planted contact (SelfPlant).
+    // contact <clip> <t> <node|none> [planned] [--add] — set the keyframe's planted contact.
+    // Default source is SelfPlant; the `planned` token writes Source=PlannedSupport (the
+    // step-planner opt-in). Default replaces the keyframe's contact list (the historical
+    // single-contact behavior); --add merges the node in, keeping other nodes' labels —
+    // needed for double-support keys.
     static int Contact(string[] args)
     {
         var clip = Find(Arg(args, 1));
         var (kf, _) = NearestKey(clip, ParseF(Arg(args, 2)));
         string node = Arg(args, 3);
+        var source = HasFlag(args, "planned") ? ContactSource.PlannedSupport : ContactSource.SelfPlant;
         if (string.Equals(node, "none", StringComparison.OrdinalIgnoreCase))
             kf.Contacts = new List<ContactLabel>();
         else
         {
             if (_rig.IndexOf(node) < 0) throw new ArgumentException($"no bone '{node}' in rig");
-            kf.Contacts = new List<ContactLabel> { new() { Node = node, Weight = 1f } };
+            var label = new ContactLabel { Node = node, Weight = 1f, Source = source };
+            if (HasFlag(args, "--add") && kf.Contacts != null)
+                kf.Contacts.RemoveAll(l => l.Node == node);
+            else
+                kf.Contacts = new List<ContactLabel>();
+            kf.Contacts.Add(label);
         }
         AnimationStore.Save(clip, _statesDir);
-        Console.WriteLine($"key t={kf.Time:0.000} contacts = {(kf.Contacts.Count == 0 ? "none" : node)}");
+        string desc = kf.Contacts.Count == 0 ? "none"
+            : string.Join(", ", kf.Contacts.ConvertAll(l => $"{l.Node}({l.Source})"));
+        Console.WriteLine($"key t={kf.Time:0.000} contacts = {desc}");
+        return 0;
+    }
+
+    // stride <clip> — read-only: compile and dump the clip's stride tracks
+    // (Animation/ClipStrideTrack.cs). The step-planner's phase-P1 observability: stance
+    // events, body-relative preferred placements (rig units, com-frame), swing residual
+    // envelope, or the compile error keeping the clip on the legacy path.
+    static int Stride(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        if (!ClipStrideTrack.TryCompile(clip, _rig, out var track, out string err))
+        {
+            Console.WriteLine($"{clip.Name}: COMPILE ERROR — {err} (clip stays on the legacy path)");
+            return 1;
+        }
+        if (track.Feet.Length == 0)
+        {
+            Console.WriteLine($"{clip.Name}: no PlannedSupport labels — not opted in.");
+            return 0;
+        }
+        Console.WriteLine($"{clip.Name}: {track.Feet.Length} planned feet");
+        foreach (var f in track.Feet)
+        {
+            Console.WriteLine($"  {f.Node}:");
+            foreach (var st in f.Stances)
+                Console.WriteLine($"    stance td={st.Touchdown:0.000} lo={st.Liftoff:0.000}"
+                    + (st.Persistent ? "  PERSISTENT" : "")
+                    + $"  tdOff=({st.TdOffset.X:0.0},{st.TdOffset.Y:0.0})"
+                    + $" loOff=({st.LoOffset.X:0.0},{st.LoOffset.Y:0.0})");
+            foreach (var sw in f.Swings)
+            {
+                float peak = 0f;
+                foreach (var r in sw.Residuals) peak = MathF.Max(peak, -r.Y);   // y-down: lift is −Y
+                Console.WriteLine($"    swing  {sw.Start:0.000} -> {sw.End:0.000}  peak lift {peak:0.0} rig units");
+            }
+        }
         return 0;
     }
 

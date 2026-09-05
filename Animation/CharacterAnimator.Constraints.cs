@@ -128,6 +128,60 @@ public sealed partial class CharacterAnimator
         }
     }
 
+    // Two rows per SWINGING planner-owned foot (step planner P3): √(TierContact·SwingShare)
+    // · (tip − swingTarget), both axes. A soft "follow the authored swing toward the planned
+    // landing" pull — deliberately NOT a planted contact: no d.x/δ columns (the root must not
+    // chase a swinging foot), no SkipPair collision exemption, no no-slip cadence semantics.
+    // Δθ bends the leg along the path; the Δφ column (via the point primitive) gives the
+    // bounded timing correction the plan allows, boxed by the momentum prior as usual.
+    // Targets are frozen per frame (StepPlanner runs once, before the solve).
+    private const float SwingShare = 0.35f;   // structural: well under a planted contact's 1.0
+    private sealed class SwingTargetConstraint : ISolveConstraint
+    {
+        private readonly CharacterAnimator _a;
+        public SwingTargetConstraint(CharacterAnimator a) => _a = a;
+
+        public int Residuals(ReadOnlySpan<float> x, Span<float> r)
+        {
+            int n = 0;
+            var planner = _a.Planner;
+            for (int i = 0; i < planner.FeetCount; i++)
+            {
+                ref readonly var p = ref planner.Plans[i];
+                if (p.State != FootPlanState.Swing || !p.HasSupport) continue;
+                Vector2 tip = _a._scratch.WorldOf(p.Bone).Translation;
+                float sw = MathF.Sqrt(_a._frame.Solver.TierContact * SwingShare) * _a._invCharLen;
+                r[n++] = sw * (tip.X - p.Target.X);
+                r[n++] = sw * (tip.Y - p.Target.Y);
+            }
+            return n;
+        }
+
+        public int Jacobian(ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
+        {
+            int nv = IdxTheta0 + _a._skeleton.Count;
+            var colX = _a._colX.AsSpan(0, nv);
+            var colY = _a._colY.AsSpan(0, nv);
+            int row = row0;
+            var planner = _a.Planner;
+            for (int i = 0; i < planner.FeetCount; i++)
+            {
+                ref readonly var p = ref planner.Plans[i];
+                if (p.State != FootPlanState.Swing || !p.HasSupport) continue;
+                Vector2 tip = _a._scratch.WorldOf(p.Bone).Translation;
+                float sw = MathF.Sqrt(_a._frame.Solver.TierContact * SwingShare) * _a._invCharLen;
+                _a.PointJacobianColumns(p.Bone, tip, colX, colY);
+                for (int v = 0; v < nv; v++)
+                {
+                    jac[row * stride + v]       = sw * colX[v];
+                    jac[(row + 1) * stride + v] = sw * colY[v];
+                }
+                row += 2;
+            }
+            return row - row0;
+        }
+    }
+
     // Two rows per external pin: √TierHard·(tipX − targetX) and √TierHard·(tipY + δ − targetY) —
     // a both-axis HARD pin holding a bone's far tip at a fixed world point. This is the first
     // constraint that genuinely drives Δθ (IK): the arm/leg bends so the pinned tip reaches the

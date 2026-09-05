@@ -65,7 +65,7 @@
         {
           "Node": "foot_l",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
@@ -139,7 +139,7 @@
         {
           "Node": "foot_l",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
@@ -213,7 +213,7 @@
         {
           "Node": "foot_r",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
@@ -287,7 +287,7 @@
         {
           "Node": "foot_r",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
@@ -361,7 +361,7 @@
         {
           "Node": "foot_l",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [

@@ -20,5 +20,8 @@
   "MaxPhaseStep": 0.25,
   "FeatherWidth": 0.12,
   "ContactReleaseTime": 0.1,
-  "ContactEngageTime": 0.08
+  "ContactEngageTime": 0.08,
+  "PlannerEnabled": true,
+  "PlannerHysteresis": 4,
+  "PlannerLateSwingLock": 0.8
 }

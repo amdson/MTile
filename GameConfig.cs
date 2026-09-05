@@ -42,6 +42,10 @@ public sealed class GameConfig
     //   Contacts   — per-clearance-row push arrows: the δv each contact shoved
     //                into the correction applied this frame (orange-red)
     public bool DebugDrawCorrectorContacts  { get; set; } = false;
+    // Step-planner plans (Animation/StepPlanner.cs): selected treads, foot targets,
+    // preferred landings, rejection crosses. Draws nothing until a clip opts in via
+    // PlannedSupport labels, so on by default is free.
+    public bool DebugDrawStepPlanner        { get; set; } = true;
     // C-space obstacle boundary near the player (exposed template facets: axis
     // faces steel blue, corner bevels orange) — what the row builder plans against.
     public bool DebugDrawCObstacles         { get; set; } = false;

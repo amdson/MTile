@@ -91,6 +91,10 @@ public static class LatticeTracker
                 u, fold.Hover, fold.HoverOffset, fold.RiseCost,
                 s.LatticePath, out _, out _)
             : 0;
+        // Freshness markers for render-side path consumers (LatticePathSampler) —
+        // write-only diagnostics, never read by the sim.
+        s.LatticePathCount = count;
+        s.LatticePathFrame = ctx.CurrentFrame;
         float cell = (float)Chunk.TileSize / Math.Clamp(cfg.LatticeCellsPerTile, 2, 8);
         float band = 0.5f * cell;
         bool havePath = count >= 2;

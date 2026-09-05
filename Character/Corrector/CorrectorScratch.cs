@@ -96,6 +96,12 @@ public sealed class CorrectorScratch
     // never snapshot state.
     public readonly LatticePathPlanner Lattice = new();
     public readonly CoastSample[] LatticePath = new CoastSample[LatticePathPlanner.MaxPath];
+    // Write-only freshness markers for LatticePath, set by LatticeTracker after each
+    // solve so RENDER-side consumers (the step planner's prediction adapter,
+    // Drawing/LatticePathSampler.cs) can tell a live path from stale scratch. Never
+    // read by the sim, never snapshot — pure diagnostics, like everything here.
+    public int LatticePathCount;
+    public int LatticePathFrame;
     // LatticeTracker's bead scratch: the reference polyline (body + path
     // nodes) with cumulative arc length, and the corrected displacement per
     // tick between outer passes. Pure per-solve derived data.
