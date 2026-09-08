@@ -1,0 +1,8 @@
+{
+  "//": "Live view of the 'stairs' stage (rise-1/run-1 staircase). No freeze — boots at the spawn on the approach floor with the sprite skin on. Pair with MTILE_SCREENSHOT for a scene snapshot, or just play it.",
+  "Stage": "stairs",
+  "AnimationRig": "biped_rabbit",
+  "CameraZoom": 3.0,
+  "WindowWidth": 1280,
+  "WindowHeight": 800
+}

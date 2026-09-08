@@ -1,0 +1,13 @@
+{
+  "//": "Rise-1/run-1 staircase testbed (stage 'stairs'). Flat approach (floor top at world tile y 13), ten one-tile risers at x 8..17 (tops y 12 down to 3), then a long flat landing at y 3. Mirrors the strip exporter's --scenario stairs geometry so the in-game stage and the headless rehearsal agree. The y >= 13 rule continues the approach floor left of the authored chunks.",
+  "Extents": 4,
+  "ChunkFiles": {
+    "0,0": "stairs_p0.txt",
+    "1,0": "stairs_p1.txt",
+    "2,0": "stairs_land.txt",
+    "3,0": "stairs_land.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 13", "IsSolid": true }
+  ]
+}

@@ -109,6 +109,21 @@ public static class Stages
             Populate      = _ => { },
         });
 
+        // ─── stairs ───────────────────────────────────────────────────────────
+        // Rise-1/run-1 staircase testbed (Levels/stairs.json): flat approach
+        // (floor top at tile y 13), ten one-tile risers at tile x 8..17, long
+        // flat landing at y 3. Same geometry as the strip exporter's
+        // --scenario stairs, so the in-game feel and the headless animator
+        // rehearsal are looking at the same climb. Testing/stairs_freeze.json
+        // freezes the corrector at the stair base.
+        Register(new Stage {
+            Name          = "stairs",
+            TerrainConfig = "stairs.json",
+            // Feet land on the approach floor (top at 13*11 = 143 px).
+            PlayerSpawn   = new Vector2(33f, 113f),
+            Populate      = _ => { },
+        });
+
         // ─── gauntlet ─────────────────────────────────────────────────────────
         // Left-to-right combat run: eight authored chunks (world x 0..2048)
         // strung as gallery → terraces → tunnel → chamber, each section built

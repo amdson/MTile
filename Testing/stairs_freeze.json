@@ -1,0 +1,20 @@
+{
+  "//": "Freeze-frame corrector inspector at the base of the 'stairs' staircase: walking speed rightward into the first riser (stairs start at tile x 8 = 88 px). Shows the tick's captured trajectories + lattice path over the risers. Edit + F5 re-freezes.",
+  "Stage": "stairs",
+  "AnimationRig": "biped_rabbit",
+  "CameraZoom": 3.0,
+  "WindowWidth": 1280,
+  "WindowHeight": 800,
+  "DrawPlayerSprites": false,
+  "DrawPlayerSpriteSkin": false,
+  "DebugDrawBodies": true,
+  "DebugDrawCObstacles": true,
+
+  "FreezeFrame": true,
+  "FreezeFramePosX": 66,
+  "FreezeFramePosY": 119,
+  "FreezeFrameVelX": 100,
+  "FreezeFrameVelY": 0,
+  "FreezeFrameInputX": 1,
+  "FreezeFrameDown": false
+}
