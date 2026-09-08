@@ -80,3 +80,13 @@ clothing, etc.). Per-panel render targets prevent neighboring frames from bleedi
 The output is opaque with a dark background and frame labels, intended for inspection.
 Open the PNG directly or use an image-viewing tool to compare the sequence. The probe-driven
 numeric checks remain useful alongside these visuals; raw clips alone cannot verify foot planting.
+
+Clip exports include their sprite attachments. Add `--trails` to accumulate their
+motion ribbons between sampled frames; omit it for isolated poses. This uses the
+raw clip's Duration, not the gameplay action/recovery clock. Recorded takes do
+not yet contain attachment clocks and do not export these effects.
+
+For a 60 Hz runtime animator rehearsal, use `--scenario slash-combo --frames 64`
+(or `--scenario slash1 --frames 28` to inspect the first move's unchained recovery).
+These include attachment clocks and support `--trails` and `--facing -1`. They use
+immediate action transitions and fixed recovery samples, without combat/hitstop.

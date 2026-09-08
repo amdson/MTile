@@ -16,7 +16,7 @@ public sealed class SpriteStripGame : Game
     private readonly string _output, _clipName, _takePath, _bindingPath, _rigName, _scenario;
     private readonly int _frames = 12, _columns = 4, _size = 240, _facing = 1;
     private readonly float _start = 0, _end = -1;
-    private readonly bool _world, _overlay;
+    private readonly bool _world, _overlay, _trails;
     private readonly List<Frame> _panels = new();
     private SpriteBatch _batch;
     private Texture2D _pixel;
@@ -24,12 +24,16 @@ public sealed class SpriteStripGame : Game
     private DrawContext _draw;
     private SkeletonPose _pose, _skinPose;
     private SpriteSkin _skin;
+    private SpriteAttachmentRenderer _attachments;
+    private readonly List<AttachmentSample> _attachmentSamples = new();
     private AnimTake _take;
     private Vector2 _min, _max;
     private bool _exported;
 
     private sealed record Frame(BoneTransform[] Pose, Vector2 Root, Vector2 Camera,
-        float Scale, int Facing, string Label, int Terrain = -1);
+        float Scale, int Facing, string Label, int Terrain = -1,
+        AnimationDocument Clip = null, float Tau = 0,
+        AttachmentSample[] Effects = null, float Seconds = 0);
 
     public SpriteStripGame(string[] args)
     {
@@ -55,6 +59,7 @@ public sealed class SpriteStripGame : Game
                 case "--end": _end = Real(); break;
                 case "--world": _world = true; break;
                 case "--overlay": _overlay = true; break;
+                case "--trails": _trails = true; break;
                 default:
                     if (args[i].StartsWith("--") || _clipName != null)
                         throw new ArgumentException("Unknown argument: " + args[i]);
@@ -65,7 +70,8 @@ public sealed class SpriteStripGame : Game
             throw new ArgumentException("--strip requires an output .png path.");
         if (new[] { _clipName, _takePath, _scenario }.Count(s => s != null) != 1)
             throw new ArgumentException("Supply a clip name, --load <take.json>, OR --scenario stairs.");
-        if (_scenario != null && _scenario != "stairs") throw new ArgumentException("Unknown scenario: " + _scenario);
+        if (_scenario != null && _scenario is not ("stairs" or "slash-combo" or "slash1"))
+            throw new ArgumentException("Unknown scenario: " + _scenario);
         if (!columnsSpecified) _columns = Math.Min(_columns, _frames);
         if (_frames < 2 || _frames > 64 || _columns < 1 || _columns > _frames || _size < 128 || _size > 1024
             || _columns * _size > 8192 || ((_frames + _columns - 1) / _columns) * _size > 8192)
@@ -99,13 +105,15 @@ public sealed class SpriteStripGame : Game
     protected override void LoadContent()
     {
         _batch = new SpriteBatch(GraphicsDevice);
+        _attachments = new SpriteAttachmentRenderer(GraphicsDevice, Path.Combine(RepoRoot(), "Assets", "AnimationEffects"));
         _pixel = new Texture2D(GraphicsDevice, 1, 1);
         _pixel.SetData(new[] { Color.White });
         _draw = new DrawContext(_batch, _pixel);
         _font = Content.Load<SpriteFont>("DebugFont");
         var rig = SkeletonExamples.Load(_rigName);
         var clips = AnimationStore.LoadAll(Path.Combine(RepoRoot(), "SkeletonStates", _rigName));
-        if (_scenario != null) CaptureStairs(rig, clips);
+        if (_scenario is "slash-combo" or "slash1") CaptureSlashCombo(rig, clips);
+        else if (_scenario != null) CaptureStairs(rig, clips);
         else if (_takePath == null) SampleClip(rig, clips);
         else ReplayTake(rig, clips);
         if (_bindingPath != null)
@@ -153,7 +161,7 @@ public sealed class SpriteStripGame : Game
             float t = MathHelper.Lerp(_start, end, i / (float)(clip.Loop && _end < 0 ? _frames : _frames - 1));
             AnimationSampler.SampleSmooth(clip, t, scratch[0], scratch[1], scratch[2], scratch[3], _pose);
             _panels.Add(new Frame(_pose.CloneLocal(), Vector2.Zero, Vector2.Zero, 1, _facing,
-                $"{clip.Name}  t={t:0.000}"));
+                $"{clip.Name}  t={t:0.000}", Clip: clip, Tau: t));
         }
     }
 
@@ -188,6 +196,46 @@ public sealed class SpriteStripGame : Game
                 panel++;
             }
         }
+    }
+
+    // Animator rehearsal at 60 Hz: actual action progress clocks, immediate combo
+    // transitions and recovery. No combat simulation or hitstop is synthesized.
+    private void CaptureSlashCombo(Skeleton rig, List<AnimationDocument> clips)
+    {
+        const float dt = 1f / 60;
+        AnimSolverConfig.Load(Path.Combine(RepoRoot(), "configs", "anim_solver_config.json"));
+        var anim = new CharacterAnimator(rig, Game1.SkeletonScale, clips);
+        _pose = anim.Skeleton.CreatePose();
+        var sequence = new List<Frame>();
+        var effects = new List<AttachmentSample>();
+        void Tick(string action, float progress, int recovery, bool capture)
+        {
+            anim.Update(new CharacterAnimSample(Vector2.Zero, Vector2.Zero, _facing, true,
+                "StandingState", action, dt, actionProgress: progress, recoveryFramesLeft: recovery));
+            if (!capture) return;
+            anim.SampleAttachments(effects);
+            sequence.Add(new Frame(anim.Pose.CloneLocal(),
+                AttackGlowSystem.RigRoot(Vector2.Zero, _facing, anim, Game1.SkeletonScale),
+                Vector2.Zero, Game1.SkeletonScale, _facing,
+                $"f{sequence.Count} {action} {progress:0.00}", Effects: effects.ToArray(), Seconds: sequence.Count * dt));
+        }
+        for (int i = 0; i < 45; i++) Tick("ReadyAction", -1, 0, false);
+        ActionState[] actions = _scenario == "slash1"
+            ? new ActionState[] { new GroundSlash1() }
+            : new ActionState[] { new GroundSlash1(), new GroundSlash2(), new GroundSlash3() };
+        foreach (var action in actions)
+            for (int f = 0; ; f++)
+            {
+                var vars = new ActionVars { TimeInState = f * dt };
+                float progress = action.AnimationProgress(in vars);
+                if (progress >= 1) break;
+                Tick(action.GetType().Name, progress, 0, true);
+            }
+        int recoveryFrames = _scenario == "slash1" ? 10 : 18;
+        for (int f = recoveryFrames; f > 0; f--) Tick("RecoveryAction", -1, f, true);
+        for (int f = 0; f < 6; f++) Tick("ReadyAction", -1, 0, true);
+        for (int i = 0; i < _frames; i++)
+            _panels.Add(sequence[(int)Math.Round(i * (sequence.Count - 1) / (double)(_frames - 1))]);
     }
 
     private void CaptureStairs(Skeleton rig, List<AnimationDocument> clips)
@@ -277,6 +325,14 @@ public sealed class SpriteStripGame : Game
                 SyncSkin();
                 _skin.Draw(Matrix.Identity, _skinPose, root);
             }
+            _attachmentSamples.Clear();
+            if (frame.Effects != null) _attachmentSamples.AddRange(frame.Effects);
+            else AttachmentSampling.Append(frame.Clip, frame.Tau, 1, _attachmentSamples, _pose.Skeleton);
+            float effectDt = i > 0 && frame.Clip != null
+                ? (frame.Tau - _panels[i - 1].Tau) * frame.Clip.Duration
+                : i > 0 ? frame.Seconds - _panels[i - 1].Seconds : 0;
+            _attachments.Draw(Matrix.Identity, _pose, root, _attachmentSamples,
+                _trails ? this : null, effectDt);
             _batch.Begin();
             if (_skin == null || _overlay) SkeletonRenderer.Draw(_draw, _pose, root);
             _draw.Box(Vector2.Zero, new Vector2(_size, 28), new Color(34, 42, 54));
@@ -294,7 +350,8 @@ public sealed class SpriteStripGame : Game
         strip.SetData(pixels);
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_output)));
         using (var file = File.Create(_output)) strip.SaveAsPng(file, strip.Width, strip.Height);
-        string source = _scenario != null ? "live " + _scenario : _take == null ? "raw clip" : "replayed take";
+        string source = _scenario is "slash-combo" or "slash1" ? "animator rehearsal " + _scenario
+            : _scenario != null ? "live " + _scenario : _take == null ? "raw clip" : "replayed take";
         Console.WriteLine($"Saved {Path.GetFullPath(_output)} ({strip.Width}x{strip.Height}, {_panels.Count} panels, {_rigName}, {source}).");
         Exit();
     }
@@ -308,6 +365,7 @@ public sealed class SpriteStripGame : Game
     protected override void UnloadContent()
     {
         _skin?.Dispose(); _batch?.Dispose(); _pixel?.Dispose();
+        _attachments?.Dispose();
         base.UnloadContent();
     }
 }
