@@ -241,9 +241,12 @@ public sealed class ParkourDriver : IMoveDriver
         _gripBone = rig.IndexOf(GripBoneName);
     }
 
-    // Serves all three climb states. They share the hands overlay and the grip pin — the
-    // reach-and-push-off is the same gesture whatever the entry speed — but each selects its
-    // own base clip so the speed vault, the flush climb and the two-block arc can diverge.
+    // Serves all three climb states for BASE clip selection, but the hands overlay and
+    // the grip pin are the TWO-BLOCK arc's alone (2026-09-05, owner's call): bringing
+    // the arms down onto the corner reads right for a 2-high climb — a single 1-tile
+    // step (speed vault or flush mantle) should stay a legs-only stride, no arm
+    // gesture. Ledge pulls keep their own hand treatment via the ledge_pull reference
+    // clip (LedgeStates), untouched by this driver.
     public bool Matches(in CharacterAnimSample s, in CharacterAnimState st)
         => s.Tag is AnimTag.Parkour or AnimTag.Mantle or AnimTag.ArcJump;
 
@@ -257,6 +260,7 @@ public sealed class ParkourDriver : IMoveDriver
 
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst)
     {
+        if (s.Tag != AnimTag.ArcJump) return;   // 1-tile climbs: legs only (see Matches)
         if (_hands != null)
             dst.Overlays.Add(new OverlayRequest(HandsClipName, _hands,
                                                 MathHelper.Clamp(s.MovementProgress, 0f, 1f)));

@@ -205,7 +205,7 @@ issue, not noise.
 | `Sim/CorrectorExperimentsTests.cs:116` `Vault_DtInvariantDelivery` | Was only the dt=0.0333 row; since the grid change both dt rows failed; since the 2026-09-05 lattice clearance change (§1.12) only the **dt=0.0167** row fails. | redirect |
 | `Sim/CaveMouthTests.cs:83` `NearMiss_DucksUnderTheLip_AndEntersClean` | "face-smack frames ABOVE the mouth — the trim didn't duck" | redirect |
 | `Sim/CaveMouthTests.cs:129` `AimedWellAboveTheMouth_BonksHonestly` | "no face contact above the mouth — the assist steered a bad fall into the cave" | redirect |
-| `Animation/ParkourGripSolverTests.cs:20` `Solver_ParkourGrip_HandReachesLedgeCornerThroughOverlay` | "RENDERED hand off the corner — smoothing diluting the pin again?" | anim solver |
+| ~~`Animation/ParkourGripSolverTests.cs:20` `Solver_ParkourGrip_HandReachesLedgeCornerThroughOverlay`~~ — **went green 2026-09-05**: the ClimbHands overlay + corner pin became ArcJump-only (1-tile Parkour/Mantle are legs-only, owner's call) and the fixture retargeted to the ArcJump tag, where the rendered hand reaches the corner — the dilution red was specific to the Parkour clip's composed pose; row kept for the record | "RENDERED hand off the corner — smoothing diluting the pin again?" | anim solver |
 
 **B. The corrector bundle (23 tests, 11 classes) — awaiting the owner's MANUAL pass on the 11px
 grid.** Hand-calibrated maneuver-delivery judgment calls the owner explicitly reserved (2026-09-02).

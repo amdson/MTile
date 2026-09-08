@@ -22,6 +22,9 @@ public class ParkourGripSolverTests
         var clips = AnimationStore.LoadAll(StatesDir());
         var skel  = SkeletonExamples.Biped();
         var anim  = new CharacterAnimator(skel, 0.6f, clips);
+        // Fixture drives AnimTag.ArcJump (2026-09-05): the ClimbHands overlay + corner pin
+        // are the two-block arc's alone now — 1-tile Parkour/Mantle are legs-only — so the
+        // pin-through-overlay mechanism this test guards lives on the ArcJump tag.
         int hand  = anim.Skeleton.IndexOf("arm_l_lower");
         int up    = anim.Skeleton.IndexOf("arm_l_upper");
         int chest = anim.Skeleton.IndexOf("chest");
@@ -36,7 +39,7 @@ public class ParkourGripSolverTests
         // it, so the required correction is small and steady — a clean read of whether the pin
         // reaches an overlay-owned bone at all.
         for (int i = 0; i < 24; i++)
-            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ParkourState", "", dt, tag: AnimTag.Parkour,
+            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ArcJumpState", "", dt, tag: AnimTag.ArcJump,
                 movementProgress: progress));
 
         anim.TryComReference(out var comL);
@@ -48,7 +51,7 @@ public class ParkourGripSolverTests
         float maxReach = 0f, maxArm = 0f, maxChest = 0f, maxJacErr = 0f, maxRendered = 0f; int solves = 0;
         for (int i = 0; i < 24; i++)
         {
-            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ParkourState", "", dt, tag: AnimTag.Parkour,
+            anim.Update(new CharacterAnimSample(pos, Vector2.Zero, facing, false, "ArcJumpState", "", dt, tag: AnimTag.ArcJump,
                 movementProgress: progress, hasGrip: true, gripTarget: corner));
             string rep = anim.SolveScaleReport();
             if (rep == "(no solve)") continue;
