@@ -173,14 +173,9 @@ public sealed class StepPlanner
                 {
                     plan.HasSupport = TrySelect(inp, treads, plan.Preferred, bodyAtTd, maxReach,
                                                 held: st.HasSupport ? st.SupportId : long.MinValue,
-                                                out var seg, out var pt, out plan.Reject);
-                    if (plan.HasSupport)
-                    {
-                        // Reject a landing whose swing path crosses solid cells.
-                        if (SwingBlocked(swing, st.Takeoff, pt, dir, inp.Scale, inp.Chunks))
-                        { plan.HasSupport = false; plan.Reject = StepReject.SwingBlocked; }
-                        else { st.SupportId = seg.Id; st.SupportPoint = pt; }
-                    }
+                                                out var seg, out var pt, out plan.Reject,
+                                                swing, st.Takeoff, dir);
+                    if (plan.HasSupport) { st.SupportId = seg.Id; st.SupportPoint = pt; }
                     st.HasSupport = plan.HasSupport;
                 }
 
@@ -286,27 +281,37 @@ public sealed class StepPlanner
     }
 
     // Pick the best feasible tread around `wish`: lowest |clamped point − wish|, a
-    // hysteresis bonus for the held tread, hard reach gate against `bodyRef`.
+    // hysteresis bonus for the held tread, hard reach gate against `bodyRef`, and —
+    // when a swing is in flight (`swing` non-null) — a swing-path clearance gate, so
+    // an over-ambitious wish degrades to the best CLEARABLE tread rather than to no
+    // plan at all.
     private bool TrySelect(in PlannerInputs inp, Span<SupportSegment> treads, Vector2 wish,
                            Vector2 bodyRef, float maxReach, long held,
-                           out SupportSegment best, out Vector2 point, out StepReject reject)
+                           out SupportSegment best, out Vector2 point, out StepReject reject,
+                           StrideSwing? swing = null, Vector2 takeoff = default, int dir = 1)
     {
         best = default; point = default;
         int n = SupportQuery.QueryTreads(inp.Chunks, wish, QueryRadius, treads);
         if (n == 0) { reject = StepReject.NoSupport; return false; }
         float hysteresis = AnimSolverConfig.Current.PlannerHysteresis;
         float bestScore = float.MaxValue;
-        bool anyInReach = false;
+        bool anyInReach = false, anyClear = false;
         for (int i = 0; i < n; i++)
         {
             Vector2 p = treads[i].Clamp(wish.X);
             if ((p - bodyRef).Length() > maxReach) continue;
             anyInReach = true;
             float score = (p - wish).Length() - (treads[i].Id == held ? hysteresis : 0f);
-            if (score < bestScore) { bestScore = score; best = treads[i]; point = p; }
+            if (score >= bestScore) continue;
+            if (swing.HasValue && SwingBlocked(swing.Value, takeoff, p, dir, inp.Scale, inp.Chunks))
+                continue;
+            anyClear = true;
+            bestScore = score; best = treads[i]; point = p;
         }
-        reject = anyInReach ? StepReject.None : StepReject.Unreachable;
-        return anyInReach;
+        reject = !anyInReach ? StepReject.Unreachable
+               : !anyClear && swing.HasValue ? StepReject.SwingBlocked
+               : StepReject.None;
+        return swing.HasValue ? anyClear : anyInReach;
     }
 
     private static SupportSegment MakeSegment(long id, ChunkMap chunks)

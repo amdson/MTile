@@ -48,44 +48,44 @@
         },
         {
           "Bone": "hip_l",
-          "Rotation": -3.701769,
+          "Rotation": -3.9483402,
           "Stretch": -0.19999994
         },
         {
           "Bone": "hip_r",
-          "Rotation": 0.49160415,
+          "Rotation": 0.15053906,
           "Stretch": -0.19999994
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -2.7836516
+          "Rotation": -3.1969628
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 2.0874622
+          "Rotation": 2.294768
         },
         {
           "Bone": "foot_l",
-          "Rotation": -1.3605008
+          "Rotation": -1.375448
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.0832558
+          "Rotation": 1.1285185
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.6393244
+          "Rotation": 1.6176714
         },
         {
           "Bone": "foot_r",
-          "Rotation": -1.2935895
+          "Rotation": -1.3160335
         }
       ],
       "Contacts": [
         {
           "Node": "foot_l",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
@@ -100,7 +100,7 @@
       ]
     },
     {
-      "Time": 0.28,
+      "Time": 0.24,
       "Bones": [
         {
           "Bone": "hip",
@@ -140,44 +140,44 @@
         },
         {
           "Bone": "hip_l",
-          "Rotation": -3.387305,
+          "Rotation": -3.4273467,
           "Stretch": 0.9643818
         },
         {
           "Bone": "hip_r",
-          "Rotation": -1.4193931,
+          "Rotation": -1.323192,
           "Stretch": 0.9643818
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -2.4441054
+          "Rotation": -2.5376468
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 1.851624
+          "Rotation": 1.9740239
         },
         {
           "Bone": "foot_l",
-          "Rotation": -1.3684846
+          "Rotation": -1.3724331
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.2663115
+          "Rotation": 1.4588542
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 2.1519134
+          "Rotation": 2.6956565
         },
         {
           "Bone": "foot_r",
-          "Rotation": -1.3329717
+          "Rotation": -1.3274081
         }
       ],
       "Contacts": [
         {
           "Node": "foot_l",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
@@ -192,7 +192,7 @@
       ]
     },
     {
-      "Time": 0.43,
+      "Time": 0.38,
       "Bones": [
         {
           "Bone": "hip",
@@ -213,7 +213,7 @@
         },
         {
           "Bone": "shoulder_r",
-          "Rotation": 1.57,
+          "Rotation": 1.3491975,
           "Stretch": 0.740637
         },
         {
@@ -222,49 +222,49 @@
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": -0.9392083
+          "Rotation": -0.55
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 1.4053495
+          "Rotation": 0.95
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -0.4728986
+          "Rotation": -0.5
         },
         {
           "Bone": "hip_l",
-          "Rotation": -3.271551,
+          "Rotation": -3.3076696,
           "Stretch": 0.56924546
         },
         {
           "Bone": "hip_r",
-          "Rotation": -1.1502522,
+          "Rotation": -1.4126555,
           "Stretch": 0.56924546
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -1.6995789
+          "Rotation": -1.7672993
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 1.0195867
+          "Rotation": 1.0543648
         },
         {
           "Bone": "foot_l",
-          "Rotation": -1.3666908
+          "Rotation": -1.3700372
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 0.9179046
+          "Rotation": 0.72159344
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 2.1371064
+          "Rotation": 2.3615394
         },
         {
           "Bone": "foot_r",
-          "Rotation": -1.3401148
+          "Rotation": -1.3480889
         }
       ],
       "Contacts": [],
@@ -322,44 +322,44 @@
         },
         {
           "Bone": "hip_l",
-          "Rotation": -3.2950017,
+          "Rotation": -3.4183247,
           "Stretch": 0.4449482
         },
         {
           "Bone": "hip_r",
-          "Rotation": -0.9422356,
+          "Rotation": -1.0396361,
           "Stretch": 0.4449482
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -1.5356091
+          "Rotation": -2.081485
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0.8262244
+          "Rotation": 1.8757219
         },
         {
           "Bone": "foot_l",
-          "Rotation": -1.3660784
+          "Rotation": -1.4021704
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 0.82005113
+          "Rotation": 0.79749495
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 2.0467427
+          "Rotation": 2.3264272
         },
         {
           "Bone": "foot_r",
-          "Rotation": -1.342396
+          "Rotation": -1.3445376
         }
       ],
       "Contacts": [
         {
           "Node": "foot_r",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
@@ -374,7 +374,7 @@
       ]
     },
     {
-      "Time": 0.78,
+      "Time": 0.74,
       "Bones": [
         {
           "Bone": "hip",
@@ -414,44 +414,44 @@
         },
         {
           "Bone": "hip_l",
-          "Rotation": -3.994571,
+          "Rotation": -4.1140366,
           "Stretch": 0.53393304
         },
         {
           "Bone": "hip_r",
-          "Rotation": -0.5431129,
+          "Rotation": -0.54009664,
           "Stretch": 0.53393304
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -2.9132643
+          "Rotation": -3.6289067
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 2.3072195
+          "Rotation": 2.9125881
         },
         {
           "Bone": "foot_l",
-          "Rotation": -1.3708079
+          "Rotation": -1.4393528
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.3621356
+          "Rotation": 1.3779893
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 1.7020373
+          "Rotation": 1.750187
         },
         {
           "Bone": "foot_r",
-          "Rotation": -1.3548242
+          "Rotation": -1.3551635
         }
       ],
       "Contacts": [
         {
           "Node": "foot_r",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
@@ -466,7 +466,7 @@
       ]
     },
     {
-      "Time": 0.93,
+      "Time": 0.88,
       "Bones": [
         {
           "Bone": "hip",
@@ -508,37 +508,37 @@
         },
         {
           "Bone": "hip_l",
-          "Rotation": -3.8206282,
+          "Rotation": -4.1673145,
           "Stretch": -0.024374342
         },
         {
           "Bone": "hip_r",
-          "Rotation": 0.3250599,
+          "Rotation": 0.37980017,
           "Stretch": -0.024374342
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -2.8768692
+          "Rotation": -3.3722312
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 2.2025826
+          "Rotation": 2.2562263
         },
         {
           "Bone": "foot_l",
-          "Rotation": -1.3630382
+          "Rotation": -1.3789519
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.165053
+          "Rotation": 1.210663
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.83829916
+          "Rotation": 0.8467511
         },
         {
           "Bone": "foot_r",
-          "Rotation": -1.3087064
+          "Rotation": -1.3075778
         }
       ],
       "Contacts": [],
@@ -596,44 +596,44 @@
         },
         {
           "Bone": "hip_l",
-          "Rotation": -3.701769,
+          "Rotation": -3.9483402,
           "Stretch": -0.19999994
         },
         {
           "Bone": "hip_r",
-          "Rotation": 0.49160415,
+          "Rotation": 0.15053906,
           "Stretch": -0.19999994
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -2.7836516
+          "Rotation": -3.1969628
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 2.0874622
+          "Rotation": 2.294768
         },
         {
           "Bone": "foot_l",
-          "Rotation": -1.3605008
+          "Rotation": -1.375448
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.0832558
+          "Rotation": 1.1285185
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.6393244
+          "Rotation": 1.6176714
         },
         {
           "Bone": "foot_r",
-          "Rotation": -1.2935895
+          "Rotation": -1.3160335
         }
       ],
       "Contacts": [
         {
           "Node": "foot_l",
           "Weight": 1,
-          "Source": "SelfPlant"
+          "Source": "PlannedSupport"
         }
       ],
       "Additions": [
