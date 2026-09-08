@@ -81,7 +81,9 @@ known-failing table rather than assuming you broke them.
 Task-specific workflows live in skills under `.claude/skills/`, loaded on demand — invoke by name:
 `/web-publish` (KNI/Blazor build, publish to GitHub Pages, browser smoke tests), `/audio-pipeline`
 (SFX conversion and wiring a clip in), `/perf-profiling` (`MTile.Bench`, in-game frame profiler),
-`/test-slices` (the test grouping above in more detail, plus one-off `--filter` recipes).
+`/test-slices` (the test grouping above in more detail, plus one-off `--filter` recipes),
+`/screenshot` (PNG frame captures for visual review — `MTILE_SCREENSHOT` on the game,
+`MTILE_SHOT` on the demo tools, freeze-frame scenario configs, the `--strip` exporter).
 
 **Never plain-`dotnet publish` the web build** — it ships the 2.7 fps interpreted build instead of
 the ~40 fps AOT one. Always `pwsh scripts/publish-web.ps1`. Details: `/web-publish`.
