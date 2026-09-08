@@ -104,7 +104,11 @@ public sealed class DemoGame : Game
     private int  _dragAdd      = -1;          // addition being dragged
     private bool _dragAddTip;                 // dragging a vector's tip vs its origin
     // Text-input naming for a pending addition or a new bone (label-on-create).
-    private enum NameTarget { None, Addition, Bone }
+    private enum NameTarget { None, Addition, Bone, Effect }
+    private string _effectBone;
+    private AnimAttachment _selectedAttachment;
+    private SpriteAttachmentRenderer _attachments;
+    private readonly List<AttachmentSample> _attachmentSamples = new();
     private NameTarget   _naming = NameTarget.None;
     private string       _nameBuffer = "";
     private AnimAddition _pendingAddition;
@@ -190,6 +194,8 @@ public sealed class DemoGame : Game
         // still opens the legacy rig and its own SkeletonStates/biped/ clip dir.
         _baseSkeleton = SkeletonExamples.Load(_rigArg ?? SkeletonExamples.RabbitName);
         _dir = Path.Combine(FindStatesDir(), _baseSkeleton.Name);
+        _attachments = new SpriteAttachmentRenderer(GraphicsDevice,
+            Path.GetFullPath(Path.Combine(_dir, "..", "..", "Assets", "AnimationEffects")));
         LoadViewState();
         if (_bindingArg != null)
         {
@@ -287,6 +293,40 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.P)) BeginAddAddition(AnimAdditionKind.Point, mp);
         if (Pressed(kb, Keys.V)) BeginAddAddition(AnimAdditionKind.Vector, mp);
         if (Pressed(kb, Keys.B)) BeginAddBone(mp, toBase: kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift));
+        if (Pressed(kb, Keys.E) && Doc != null)
+        {
+            var joints = _pose.ComputeWorld(_root);
+            int b = PickJoint(joints, mp);
+            // A zero-length socket shares its parent's location. Prefer an existing
+            // effect there so E edits it instead of adding a duplicate on the hand.
+            float nearest = PickR * PickR;
+            if (Doc.Attachments != null)
+                foreach (var a in Doc.Attachments)
+                {
+                    int ab = _skeleton.IndexOf(a.Bone);
+                    if (ab < 0) continue;
+                    float d = Vector2.DistanceSquared(joints[ab].Translation, mp);
+                    if (d < nearest) { nearest = d; b = ab; }
+                }
+            if (b >= 0)
+            {
+                _effectBone = _skeleton.Bones[b].Name;
+                _selectedAttachment = Doc.Attachments?.Find(a => a.Bone == _effectBone);
+                if (kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift))
+                {
+                    if (_selectedAttachment != null) { Doc.Attachments.Remove(_selectedAttachment); _dirty = true; }
+                    _selectedAttachment = null;
+                }
+                else { _naming = NameTarget.Effect; _nameBuffer = _selectedAttachment?.Effect ?? "knife"; }
+            }
+        }
+        if (_selectedAttachment != null && Doc?.Attachments?.Contains(_selectedAttachment) == true)
+        {
+            if (Pressed(kb, Keys.U) && _scrubT < _selectedAttachment.End)
+            { _selectedAttachment.Start = _scrubT; _dirty = true; }
+            if (Pressed(kb, Keys.I) && _scrubT > _selectedAttachment.Start)
+            { _selectedAttachment.End = _scrubT; _dirty = true; }
+        }
         if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
         if (Pressed(kb, Keys.OemTilde)) _showGrid = !_showGrid;
         if (Pressed(kb, Keys.O)) _showBodyPoly = !_showBodyPoly;
@@ -760,6 +800,12 @@ public sealed class DemoGame : Game
             _skin.Draw(Matrix.Identity, _skinPose, _root, fill: _showSkin);
         }
 
+        _attachmentSamples.Clear();
+        AttachmentSampling.Append(Doc, _scrubT, 1, _attachmentSamples, _skeleton);
+        if (!_playing) _attachments.ClearHistory();
+        _attachments.Draw(Matrix.Identity, _pose, _root, _attachmentSamples,
+            _playing ? this : null, (float)gameTime.ElapsedGameTime.TotalSeconds);
+
         _spriteBatch.Begin();
         DrawSidebar();
         DrawEditor();
@@ -1208,7 +1254,19 @@ public sealed class DemoGame : Game
     private void CommitName()
     {
         string name = string.IsNullOrWhiteSpace(_nameBuffer) ? DefaultName() : _nameBuffer.Trim();
-        if (_naming == NameTarget.Addition && _pendingAddition != null && Doc != null && _activeKey >= 0)
+        if (_naming == NameTarget.Effect && Doc != null)
+        {
+            Doc.Attachments ??= new List<AnimAttachment>();
+            if (_selectedAttachment == null)
+            {
+                _selectedAttachment = new AnimAttachment { Bone = _effectBone,
+                    End = 1 - MathHelper.Clamp(Doc.SettleShare, 0, .95f) };
+                Doc.Attachments.Add(_selectedAttachment);
+            }
+            _selectedAttachment.Effect = name;
+            _dirty = true;
+        }
+        else if (_naming == NameTarget.Addition && _pendingAddition != null && Doc != null && _activeKey >= 0)
         {
             _pendingAddition.Name = name;
             var kf = Doc.Keyframes[_activeKey];
@@ -1229,6 +1287,7 @@ public sealed class DemoGame : Game
 
     private string DefaultName()
     {
+        if (_naming == NameTarget.Effect) return "knife";
         if (_naming == NameTarget.Bone) return UniqueBoneName("bone");
         string stem = _pendingAddition?.Kind == AnimAdditionKind.Vector ? "vector" : "point";
         int n = Doc?.Keyframes[_activeKey].Additions?.Count ?? 0;
@@ -1413,6 +1472,12 @@ public sealed class DemoGame : Game
         float y = TrackY;
         Fill(new Rectangle(SidebarW, (int)y - 28, W - SidebarW, 56), new Color(28, 30, 38));
         _draw.Line(new Vector2(TrackX0, y), new Vector2(TrackX1, y), new Color(80, 85, 100), 2f);
+        if (doc.Attachments != null)
+            foreach (var a in doc.Attachments)
+            {
+                _draw.Line(new Vector2(TimeToX(a.Start), y + 14), new Vector2(TimeToX(a.End), y + 14), Color.LightCyan, 3);
+                _spriteBatch.DrawString(_font, $"{a.Bone}: {a.Effect}", new Vector2(TimeToX(a.Start), y + 24), Color.LightCyan);
+            }
 
         // Keyframe bars.
         for (int i = 0; i < doc.Keyframes.Count; i++)
@@ -1490,6 +1555,7 @@ public sealed class DemoGame : Game
         ("View",     "` block grid on/off (1 cell = 1 game tile, anchored to the floor line)    O physics hexagon at the com"),
         ("Obstacle", "drag the brown block to reposition it (the four lip-maneuver clips)"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
+        ("Effect",   "E over joint: attach/name effect (knife)    Shift+E remove    U/I set selected effect start/end at playhead"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
         ("Skin",     "G sprite skin on/off    W mesh wireframe    X skeleton on/off    (launch with --usebind <binding>)"),
         ("File",     "Ctrl-S save  (writes clips + rig)"),
@@ -1518,7 +1584,8 @@ public sealed class DemoGame : Game
     private void DrawNamingOverlay()
     {
         if (_naming == NameTarget.None) return;
-        string what = _naming == NameTarget.Bone ? "bone"
+        string what = _naming == NameTarget.Effect ? $"effect on {_effectBone}"
+                    : _naming == NameTarget.Bone ? "bone"
                     : _pendingAddition?.Kind == AnimAdditionKind.Vector ? "vector" : "point";
         var box = new Rectangle(SidebarW + 40, H / 2 - 26, 420, 52);
         Fill(box, new Color(18, 20, 28));
@@ -1566,6 +1633,8 @@ public sealed class DemoGame : Game
 
     private void SelectAnimation(int i)
     {
+        _selectedAttachment = null;
+        _attachments?.ClearHistory();
         _playing = false;
         _selected = i;
         // Keep the selected row on screen (positions the initial open-by-name jump and
@@ -1694,6 +1763,12 @@ public sealed class DemoGame : Game
             Duration = src.Duration,
             Loop     = src.Loop,
             Region   = src.Region,
+            SettleShare = src.SettleShare,
+            OffRegionWeight = src.OffRegionWeight,
+            ReferenceArc = src.ReferenceArc,
+            ExtraBones = src.ExtraBones?.ConvertAll(b => new SkeletonBoneRecord
+                { Name = b.Name, Parent = b.Parent, Rotation = b.Rotation, Length = b.Length }),
+            Attachments = src.Attachments?.ConvertAll(a => a.Clone()),
         };
         foreach (var kf in src.Keyframes)
             copy.Keyframes.Add(new AnimationKeyframe
@@ -1855,6 +1930,13 @@ public sealed class DemoGame : Game
         idx = idx < 0 ? 0 : ((idx + dir) % n + n) % n;
         doc.Type = _typeOptions[idx];
         _dirty = true;
+    }
+
+    protected override void UnloadContent()
+    {
+        _attachments?.Dispose();
+        _skin?.Dispose();
+        base.UnloadContent();
     }
 
 }

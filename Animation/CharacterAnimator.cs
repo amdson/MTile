@@ -828,6 +828,15 @@ public sealed partial class CharacterAnimator
     // Whether an action overlay clip is currently bound and playing (vs faded out).
     public bool OverlayActive => _overlays.ActionBound;
 
+    // The same clip clocks and final pose used by the skeleton, including settle.
+    // Unbound overlays contribute no attachments while their pose eases away.
+    public void SampleAttachments(List<AttachmentSample> output)
+    {
+        output.Clear();
+        AttachmentSampling.Append(_curDoc, _curComT, 1f, output, _skeleton);
+        _overlays.AppendAttachments(output);
+    }
+
     // World position of a named bone's origin under the same root Draw() uses, WITHOUT
     // drawing the rig — lets a host anchor a render effect (e.g. the slash glow) to an
     // animated bone. `fromOverlay` reads the RAW action-overlay pose (the authored

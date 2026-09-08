@@ -24,6 +24,8 @@ public sealed class AttackGlowSystem
     // can stamp the swept SEGMENT (prev→cur) rather than isolated dabs.
     private Vector2 _knifeFieldPrev;
     private bool    _knifeFieldActive;
+    // The host suppresses the legacy slash only when its clip attachment asset loaded.
+    public Predicate<PlayerCharacter> ReplacesSlash { get; set; }
 
     public AttackGlowSystem(CharacterAnimator animator, GlowRenderer glow,
                             GlowTrailField glowField, float skeletonScale)
@@ -81,13 +83,16 @@ public sealed class AttackGlowSystem
 
             // Secondary players keep the lightweight primitive glow (no per-player field).
             foreach (var (p, _) in sim.SecondaryPlayers)
-                RenderActionGlow(cam, p.CurrentAction, p.CurrentActionVars);
+                if (p.CurrentAction is not SlashLikeAction || ReplacesSlash?.Invoke(p) != true)
+                    RenderActionGlow(cam, p.CurrentAction, p.CurrentActionVars);
         }
         else
         {
-            RenderActionGlow(cam, player.CurrentAction, player.CurrentActionVars, _knifeTrail);
+            if (player.CurrentAction is not SlashLikeAction || ReplacesSlash?.Invoke(player) != true)
+                RenderActionGlow(cam, player.CurrentAction, player.CurrentActionVars, _knifeTrail);
             foreach (var (p, _) in sim.SecondaryPlayers)
-                RenderActionGlow(cam, p.CurrentAction, p.CurrentActionVars);
+                if (p.CurrentAction is not SlashLikeAction || ReplacesSlash?.Invoke(p) != true)
+                    RenderActionGlow(cam, p.CurrentAction, p.CurrentActionVars);
         }
 
         // Charge glow rides its own orb pass either way — it's a stationary circle on
@@ -141,6 +146,7 @@ public sealed class AttackGlowSystem
     private bool TryAttackTipPos(PlayerCharacter player, out Vector2 tip)
     {
         tip = default;
+        if (player.CurrentAction is SlashLikeAction && ReplacesSlash?.Invoke(player) == true) return false;
         if (!_animator.OverlayActive) return false;
 
         if (player.CurrentAction is StabAction)

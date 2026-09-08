@@ -46,6 +46,7 @@ public sealed class OverlayStack
         public bool[]             Mask;       // Region bone mask (held through the fade-out)
         public float              OffWeight;  // Clip.OffRegionWeight for bones outside Mask (0 = hard mask)
         public float              Weight;     // eased opacity 0..1
+        public float              Tau;
         public bool               Active;     // composed this frame (Weight>eps && Mask!=null)
         public readonly SkeletonPose Pose;    // last-sampled overlay pose (persisted for the fade-out)
         public readonly float[]   BoneWeight; // per-bone opacity ((Mask?1:OffWeight)*Weight) — compose scratch
@@ -78,6 +79,16 @@ public sealed class OverlayStack
     // The raw action-overlay pose (authored attack trajectory at its τ, full weight, no pose
     // smoothing) — for hosts anchoring effects to the full authored motion (the slash glow).
     public SkeletonPose ActionPose   => _slots[0].Pose;
+
+    public void AppendAttachments(List<AttachmentSample> output)
+    {
+        for (int i = _slots.Length - 1; i >= 0; i--)
+        {
+            var s = _slots[i];
+            if (s.Clip != null && s.Active)
+                AttachmentSampling.Append(s.Clip, s.Tau, s.Weight, output, _rig, s.BoneWeight);
+        }
+    }
 
     public bool    AnyActive { get; private set; }   // any slot composed this frame
     // Per-bone Π(1−w): the base layer's surviving coefficient under the active overlays. The
@@ -178,6 +189,7 @@ public sealed class OverlayStack
     private void Ease(Slot slot, AnimationDocument clip, float tau, float dt)
     {
         bool bound = clip != null;
+        slot.Tau = tau;
         float wRate = bound ? EaseIn : EaseOut;
         slot.Weight += ((bound ? 1f : 0f) - slot.Weight) * (1f - MathF.Exp(-wRate * dt));
         if (bound)

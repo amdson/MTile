@@ -180,3 +180,11 @@ default (deep-copied, so editing one keyframe's marks doesn't change the other's
 | **Escape** | Quit |
 
 Edits are kept in memory until `Ctrl-S`; the header shows `*unsaved*` while dirty.
+
+### Clip sprite attachments
+
+Hover a joint and press **E** to assign an effect name (`knife` is supplied).
+**Shift+E** removes it. After selecting with E, **U / I** set its start/end to
+this clip's playhead time. **Ctrl+S** saves. Space previews the moving trail;
+scrubbing previews a single blade frame. See [KNIFE_ATTACHMENTS.md](../Plans/KNIFE_ATTACHMENTS.md)
+for orientation, JSON fields, and shared PNG strip assets.

@@ -42,7 +42,8 @@ GROUPS = {
              "ChargedBlockUse","BlockCharge","ChargedBlast","PullPoint","Avalanche"],
  "physics": ["Physics","HighSpeedTunneling","NoPenetrationSolver","FixedPointSolver","QrStep"],
  "animation": ["Anim","Pose","Skeleton","BoneMask","CharacterAnimator","MlsDeformer",
-               "SpriteBinding","Smoothing","MotionProbe","ParkourGrip","TerrainNoPen"],
+               "SpriteBinding","Smoothing","MotionProbe","ParkourGrip","TerrainNoPen",
+               "Attachment","SlashCombo"],
  "simcore": ["Snapshot","Rollback","InputCodec","Simulation","TwoPlayerStep","ConfigLayout",
              "TraceExport","StageSaver","Rtc","PracticeBall","TrainingStage","GauntletStage"],
 }

@@ -1,0 +1,20 @@
+{
+  "Image": "knife.png",
+  "FrameWidth": 320,
+  "FrameHeight": 160,
+  "FrameCount": 8,
+  "PivotX": 16,
+  "PivotY": 80,
+  "RigUnitsPerPixel": 0.06,
+  "TipPixels": [
+    46,
+    198,
+    238,
+    222,
+    225,
+    244,
+    229,
+    39
+  ],
+  "TrailSeconds": 0.065
+}

@@ -103,6 +103,10 @@ public sealed class AnimationDocument
     // the active clip's set; the runtime layers the union across all bound clips.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<SkeletonBoneRecord> ExtraBones { get; set; }
+    // Render attachments sampled on this clip's normalized timeline. Bone is an
+    // existing joint (or a clip-local orientation bone); Effect names a shared asset.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<AnimAttachment> Attachments { get; set; }
     public List<AnimationKeyframe> Keyframes { get; set; } = new();
 
     [JsonIgnore] public string FilePath { get; set; }

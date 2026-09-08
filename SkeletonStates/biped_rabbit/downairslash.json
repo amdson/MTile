@@ -6,11 +6,14 @@
   "Loop": true,
   "Region": "UpperBody",
   "SettleShare": 0.34,
+  "Attachments": [
+    { "Bone": "knife", "Effect": "knife", "Start": 0, "End": 0.66 }
+  ],
   "ExtraBones": [
     {
       "Name": "knife",
       "Parent": "arm_r_lower",
-      "Rotation": -1.5707964,
+      "Rotation": 0,
       "Length": 0
     }
   ],
@@ -88,7 +91,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -175,7 +178,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -262,7 +265,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -349,7 +352,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [

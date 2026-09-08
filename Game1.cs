@@ -66,6 +66,7 @@ public class Game1 : Game
     private ChunkRenderer _chunkRenderer;
     private GlowTrailField _glowField;
     private AttackGlowSystem _attackGlow;
+    private SpriteAttachmentRenderer _attachments;
     private readonly ParticleSystem _particles = new(capacity: 2048);
     // Edge-triggered sim events on their way to the render shell, deduped by
     // (sim frame, id) so a rollback replay doesn't re-present them. Particles and audio
@@ -687,6 +688,15 @@ public class Game1 : Game
             catch (Exception) { _background = null; }
         }
         _attackGlow = new AttackGlowSystem(_animator, _glow, _glowField, SkeletonScale);
+        _attachments = new SpriteAttachmentRenderer(GraphicsDevice);
+        _attackGlow.ReplacesSlash = p =>
+        {
+            if (ReferenceEquals(p, _sim.Player)) return _attachments.ReplacesEffect(_animator, "knife");
+            for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
+                if (ReferenceEquals(p, _sim.SecondaryPlayers[i].Player))
+                    return _attachments.ReplacesEffect(_secondaryAnimators[i], "knife");
+            return false;
+        };
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
                                               _camera, _particles, _cursorTrail, _attackGlow)
         {
@@ -1282,7 +1292,22 @@ public class Game1 : Game
         // Frozen during playback: the glow advances its own trail state from dt and reads
         // a live RigRoot, neither of which is valid while scrubbing a recorded take.
         if (!_recorder.IsPlayback)
+        {
             _attackGlow.Draw(camTransform, _sim, _config, (float)gameTime.ElapsedGameTime.TotalSeconds);
+            float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
+            var root = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale);
+            _attachments.DrawAnimator(camTransform, _animator,
+                Affine2.FromTRS(root, 0, new Vector2((player.Facing == 0 ? 1 : player.Facing) * SkeletonScale, SkeletonScale)), dt);
+            for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
+            {
+                var p = _sim.SecondaryPlayers[i].Player;
+                var anim = _secondaryAnimators[i];
+                root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale);
+                _attachments.DrawAnimator(camTransform, anim,
+                    Affine2.FromTRS(root, 0, new Vector2((p.Facing == 0 ? 1 : p.Facing) * SkeletonScale, SkeletonScale)), dt);
+            }
+        }
+        else _attachments.ClearHistory();
 
         if (_config.DebugDrawGlowDemo)
             _devDemos.DrawGlowDemo(camTransform,
@@ -1371,6 +1396,7 @@ public class Game1 : Game
 
     protected override void UnloadContent()
     {
+        _attachments?.Dispose();
         _animTrace.Stop();   // flush a trace left running at exit
         foreach (var skin in _spriteSkins.Values) skin?.Dispose();
         _spriteSkins.Clear();
