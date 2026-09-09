@@ -12,9 +12,9 @@
   "BackgroundStyle":            "trees", //trees / mountain
   "DrawPlayerSprites":          false, 
   "DrawPlayerSpriteSkin":       true, 
-  "AnimationRig":               "biped_rabbit", 
-  // "PlayerSpriteBinding":        "pumpkin_man_downsampled", 
-  "PlayerSpriteBindings":       ["rabbit", "badger"],
+  "AnimationRig":               "biped", // "biped_rabbit" for the strutted rig + rabbit/badger skins
+  // "PlayerSpriteBinding":        "pumpkin_man_downsampled",
+  "PlayerSpriteBindings":       ["pumpkin_man_downsampled"], // rabbit/badger bindings need AnimationRig biped_rabbit
   "DebugDrawSkeleton":          false,
   "RunAnimationSolver":         true,
   "CameraZoom":                 5.0,
@@ -28,7 +28,7 @@
   // Physics-debug overlays whose CODE defaults are true — listed here so normal play
   // boots clean and flipping them is a config edit, not a code hunt:
   "DebugDrawCoast":              false, // aqua ballistic coast rollout + clearance rows
-  "DebugDrawStepPlanner":        false, // planned foot targets/treads overlay
+  "DebugDrawStepPlanner":        true, // planned foot targets/treads overlay
   "DebugDrawCorrectorContacts":  false, // contact points + impulse (dv) arrows
   "DebugDrawCorridor":           false, // corridor probe scan
   "DebugDrawHealthBars":        false,
