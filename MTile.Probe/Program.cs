@@ -26,6 +26,7 @@ using MTile;
 //       Prints solved angles + miss; unreachable targets report the closest reachable point.
 //       Dry-run by default — --write saves the solved angles back into the clip.
 //   dotnet run --project MTile.Probe -- retarget <dstRig> [clip] [--dry]   convert the pool (or one clip) to another rig
+//   dotnet run --project MTile.Probe -- port <dstRig> <clip> [--dry] [bakeyaw knobs]   retarget one clip + bakeyaw + digest
 //   dotnet run --project MTile.Probe -- stretch <clip> <t> <bone> <s>   set one bone's length stretch on a keyframe
 //   dotnet run --project MTile.Probe -- refarc <clip> <arcName|none>    bind a ReferenceClips arc for editor placement
 //   dotnet run --project MTile.Probe -- bakeyaw [clip] [--view deg] [--swap s] [--ref rad] [--shoulderamp f] [--dry]
@@ -82,6 +83,7 @@ static class Probe
                 case "delkey": return DelKey(args);
                 case "dur":    return Dur(args);
                 case "retarget": return Retarget(Arg(args, 1), HasFlag(args, "--dry"), FirstNonFlag(args, 2));
+                case "port":   return Port(args);
                 case "stretch": return StretchCmd(args);
                 case "bakeyaw": return BakeYaw(args);
                 case "refarc": return RefArc(args);
@@ -638,6 +640,44 @@ static class Probe
         Console.WriteLine($"# worst direction deviation: {worstDir:0.000000} rad at {worstAt}"
                         + (worstDir > 1e-3f ? "  <-- NOT direction-preserving; inspect the rig diff" : "  (direction-preserving)"));
         return worstDir > 1e-3f ? 1 : 0;
+    }
+
+    // port <dstRig> <clip> [--dry] [--view deg] [--swap s] [--ref rad] [--shoulderamp f]
+    // [--noshoulders] — the one-shot single-clip pipeline: retarget the named clip from
+    // the CURRENT rig (--rig, default biped) to <dstRig>, re-point the working pool at
+    // the destination, bakeyaw the ported clip there (skipped when the dst rig has no
+    // hip struts; knobs pass through), and print its digest. --dry stops after the
+    // retarget dry run — nothing is written, so there is nothing to bake or digest.
+    static int Port(string[] args)
+    {
+        string dstName  = Arg(args, 1);
+        string clipName = FirstNonFlag(args, 2)
+                          ?? throw new ArgumentException("port needs a clip name: port <dstRig> <clip>");
+        bool dry = HasFlag(args, "--dry");
+        int rc = Retarget(dstName, dry, clipName);
+        if (rc != 0) return rc;   // not direction-preserving — stop before baking
+        if (dry) { Console.WriteLine("# port: dry — bakeyaw/digest skipped (nothing written)"); return 0; }
+
+        // Switch the working pool to the destination, exactly as --rig <dstRig> would.
+        _rig = SkeletonExamples.Load(dstName);
+        _statesDir = Path.Combine(_statesRoot, _rig.Name);
+        _all = AnimationStore.LoadAll(_statesDir);
+
+        if (_rig.IndexOf("hip_l") >= 0 && _rig.IndexOf("hip_r") >= 0)
+        {
+            var fwd = new List<string> { "bakeyaw", clipName };
+            for (int i = 2; i < args.Length; i++)
+                if (args[i].StartsWith("-", StringComparison.Ordinal))
+                {
+                    fwd.Add(args[i]);
+                    if (args[i] is "--view" or "--swap" or "--ref" or "--shoulderamp" && i + 1 < args.Length)
+                        fwd.Add(args[++i]);
+                }
+            rc = BakeYaw(fwd.ToArray());
+            if (rc != 0) return rc;
+        }
+        else Console.WriteLine($"# port: rig '{_rig.Name}' has no hip struts — bakeyaw skipped");
+        return Digest(clipName);
     }
 
     // stretch <clip> <t> <bone> <s> — set one bone's per-keyframe length stretch
