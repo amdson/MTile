@@ -25,7 +25,8 @@ using MTile;
 //       solve the limb's angles to reach it; --to makes dx,dy an absolute root-local target.
 //       Prints solved angles + miss; unreachable targets report the closest reachable point.
 //       Dry-run by default — --write saves the solved angles back into the clip.
-//   dotnet run --project MTile.Probe -- retarget <dstRig> [clip] [--dry]   convert the pool (or one clip) to another rig
+//   dotnet run --project MTile.Probe -- retarget <dstRig> [clip] [--dry] [--out <dir>]   convert the pool (or one clip) to another rig
+//   Global flags: --rig <name> (rig + clip dir, default biped)   --dir <name> (clip dir override, e.g. rabbit_derived)
 //   dotnet run --project MTile.Probe -- port <dstRig> <clip> [--dry] [bakeyaw knobs]   retarget one clip + bakeyaw + digest
 //   dotnet run --project MTile.Probe -- stretch <clip> <t> <bone> <s>   set one bone's length stretch on a keyframe
 //   dotnet run --project MTile.Probe -- refarc <clip> <arcName|none>    bind a ReferenceClips arc for editor placement
@@ -49,19 +50,28 @@ static class Probe
         try
         {
             // Global `--rig <name>` (default biped) picks the rig AND its clip dir;
-            // stripped before dispatch so positional command args stay stable.
+            // `--dir <name>` overrides just the clip dir (a pool that isn't named after
+            // its rig, e.g. the generated rabbit_derived/ on the biped_rabbit rig).
+            // Both stripped before dispatch so positional command args stay stable.
             string rigName = SkeletonExamples.BipedName;
+            string dirName = null;
             var argList = new List<string>(args);
             int ri = argList.IndexOf("--rig");
             if (ri >= 0 && ri + 1 < argList.Count)
             {
                 rigName = argList[ri + 1];
                 argList.RemoveRange(ri, 2);
-                args = argList.ToArray();
             }
+            int di = argList.IndexOf("--dir");
+            if (di >= 0 && di + 1 < argList.Count)
+            {
+                dirName = argList[di + 1];
+                argList.RemoveRange(di, 2);
+            }
+            args = argList.ToArray();
             _rig = SkeletonExamples.Load(rigName);
             _statesRoot = FindUp("SkeletonStates");
-            _statesDir = Path.Combine(_statesRoot, _rig.Name);
+            _statesDir = Path.Combine(_statesRoot, dirName ?? _rig.Name);
             _all = AnimationStore.LoadAll(_statesDir);
 
             string cmd = args.Length > 0 ? args[0].ToLowerInvariant() : "list";
@@ -82,7 +92,9 @@ static class Probe
                 case "retime": return Retime(args);
                 case "delkey": return DelKey(args);
                 case "dur":    return Dur(args);
-                case "retarget": return Retarget(Arg(args, 1), HasFlag(args, "--dry"), FirstNonFlag(args, 2));
+                case "retarget": return Retarget(Arg(args, 1), HasFlag(args, "--dry"),
+                                                 FirstPositional(args, 2, "--out"),
+                                                 FlagValue(args, "--out"));
                 case "port":   return Port(args);
                 case "stretch": return StretchCmd(args);
                 case "bakeyaw": return BakeYaw(args);
@@ -547,11 +559,12 @@ static class Probe
         return 0;
     }
 
-    // retarget <dstRig> [clip] [--dry] — convert the CURRENT rig's pool (--rig, default
-    // biped) — or just the one named clip — to a rig that INSERTS fixed bones
-    // (shoulder/pelvis struts) between existing parents and children, writing to
-    // SkeletonStates/<dstRig>/. Name a clip when porting one new authoring: the pool
-    // form OVERWRITES every destination clip, including ones re-authored since.
+    // retarget <dstRig> [clip] [--dry] [--out <dirName>] — convert the CURRENT rig's
+    // pool (--rig, default biped) — or just the one named clip — to a rig that INSERTS
+    // fixed bones (shoulder/pelvis struts) between existing parents and children,
+    // writing to SkeletonStates/<dstRig>/ (or SkeletonStates/<dirName>/ with --out, for
+    // generated pools like rabbit_derived/). Name a clip when porting one new authoring:
+    // the pool form OVERWRITES every destination clip, including ones re-authored since.
     //
     // Assumption: inserted bones are never animated — they hold their bind rotation.
     // Authored rotations are FULL local angles, so a bone whose parent chain gained
@@ -560,12 +573,12 @@ static class Probe
     // copies through untouched. Verified per keyframe by comparing every shared bone's
     // world DIRECTION across the two rigs — positions legitimately shift by the strut
     // geometry, directions must not.
-    static int Retarget(string dstName, bool dry, string only = null)
+    static int Retarget(string dstName, bool dry, string only = null, string outName = null)
     {
         var dst = SkeletonExamples.Load(dstName);
         if (string.Equals(dst.Name, _rig.Name, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException("source and destination rig are the same — pass --rig <src> retarget <dst>");
-        string outDir = Path.Combine(_statesRoot, dst.Name);
+        string outDir = Path.Combine(_statesRoot, outName ?? dst.Name);
 
         // Per-dst-bone rotation offset: bind rotations of the inserted (dst-only)
         // ancestors between the bone and its nearest ancestor that the source rig has.
@@ -651,7 +664,7 @@ static class Probe
     static int Port(string[] args)
     {
         string dstName  = Arg(args, 1);
-        string clipName = FirstNonFlag(args, 2)
+        string clipName = FirstPositional(args, 2, "--view", "--swap", "--ref", "--shoulderamp")
                           ?? throw new ArgumentException("port needs a clip name: port <dstRig> <clip>");
         bool dry = HasFlag(args, "--dry");
         int rc = Retarget(dstName, dry, clipName);
@@ -918,6 +931,18 @@ static class Probe
     {
         for (int i = from; i < a.Length; i++)
             if (!a[i].StartsWith("-", StringComparison.Ordinal)) return a[i];
+        return null;
+    }
+
+    // Like FirstNonFlag, but skips the VALUE token following any of `valuedFlags` —
+    // for commands mixing a positional with value-taking flags (retarget --out <dir>).
+    static string FirstPositional(string[] a, int from, params string[] valuedFlags)
+    {
+        for (int i = from; i < a.Length; i++)
+        {
+            if (Array.IndexOf(valuedFlags, a[i]) >= 0) { i++; continue; }
+            if (!a[i].StartsWith("-", StringComparison.Ordinal)) return a[i];
+        }
         return null;
     }
 
