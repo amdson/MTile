@@ -9,7 +9,7 @@
     {
       "Name": "knife",
       "Parent": "arm_r_lower",
-      "Rotation": -1.5707964,
+      "Rotation": 0,
       "Length": 0
     }
   ],
@@ -71,7 +71,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -142,7 +142,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -213,7 +213,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -284,7 +284,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -355,7 +355,7 @@
         },
         {
           "Bone": "knife",
-          "Rotation": -1.5707964
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -368,6 +368,28 @@
           "Dy": 0
         }
       ]
+    }
+  ],
+  "Attachments": [
+    {
+      "Bone": "knife",
+      "Effect": "knife",
+      "Start": 0.2051,
+      "End": 0.7949,
+      "FrameTimes": [
+        0.2051,
+        0.2547,
+        0.3126,
+        0.3603,
+        0.5096,
+        0.6615,
+        0.7072,
+        0.7656
+      ],
+      "TrailStart": 0.3603,
+      "TrailEnd": 0.6615,
+      "TrailWidth": 1.0,
+      "TrailOpacity": 0.8
     }
   ]
 }
