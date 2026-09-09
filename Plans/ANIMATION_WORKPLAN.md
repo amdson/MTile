@@ -94,6 +94,53 @@ identity) and §10 (hand/foot resource claims) reference. Order within the
 chunk: resolver first (with legacy `ContactLabel.Node` compatibility), UI
 second, helper-feet removal last — that migration is the long tail.
 
+### 3.5. Prior-based kinematics drag mode in the editor (user request, 2026-09-09)
+
+A header-toggled editor mode where dragging a joint node runs interactive IK
+steps pulling the clicked node toward the mouse — biased toward the previous
+position and the pose's original rotations — instead of the direct
+rotate-one-bone edit. Speeds up posing a lot; genuinely small, because
+`Animation/PoseIk.cs` (the probe `ik` command's solver) is already 90% of it:
+LM over a limb chain, seed prior, per-joint bounds, graceful miss on
+unreachable targets, editor-safe (offline-class, never in the game loop).
+
+**Solve shape** (per frame while the drag is held, chain vars only, n ≤ 4):
+
+- Target rows: clicked node's tip vs mouse in rig root-local space (2 rows).
+- Prior A — *original pose*: weight toward the **drag-start** authored
+  rotations (PoseIk's existing seed prior). Elastic minimal-change; error
+  can't accumulate across the drag because the anchor never moves.
+- Prior B — *previous position*: warm-start each frame's solve from the last
+  frame's solution plus a small weight toward it. Continuity/damping so the
+  limb doesn't snap between LM basins mid-drag.
+- Fold-sign guard ("elbows don't bend backwards"): one-sided bound on
+  `*_lower` bones keeping the bend on the drag-start side of straight —
+  the same grid-IK either-fold hazard the probe workflow already documents.
+  Pragmatic now; when runtime §8 defines rig-level preferred-bend/joint-limit
+  metadata, this mode should consume that definition instead of its own
+  (interface note — don't let two anatomical-limit vocabularies grow).
+
+**Editor integration** (`MTile.Demo/DemoGame.cs`):
+
+- Clickable header box (DrawHeader ~:1498) toggles the mode; picking priority
+  header-first per the authoring plan's rules. Distinct hover/drag node color.
+- Drag routing: in-mode, the `_dragBone` branch (~:469) calls the solve
+  instead of `EditBone`; write-back hits the active keyframe's rotations
+  exactly as today, so save/dirty/undo-by-Escape semantics are unchanged.
+  Escape mid-drag restores the drag-start pose (authoring plan: cancelable
+  drags). Draw the target cross + miss distance while held.
+- Chain policy: start with `PoseIk.DefaultChain` (limb up to hip/chest).
+  Evaluate feel; a held modifier extending the chain through the torso
+  (graded prior weights up-chain, root always excluded) is the follow-up if
+  limb-only pulls feel too local. Root/com drags keep their existing gestures.
+- Hoist one solver instance + arrays out of the per-frame path (PoseIk
+  allocates per call — fine for the probe, not for a 60 Hz drag).
+
+Scope: roughly a day. Depends on nothing (PoseIk and LM core are standalone);
+touches the same DemoGame interaction code chunk 3's extraction will move, so
+land it either before extraction (it's small, migrates along) or as part of
+the extracted interaction component — not concurrently.
+
 ### 5. Timing & stopping — runtime §4, §5
 
 One prototype-shaped chunk behind an A/B switch. Partly unblocked already:
