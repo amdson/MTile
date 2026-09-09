@@ -51,6 +51,12 @@ dotnet run --project MTile.Demo -- --load Takes/<name>.take.json
 
 # Reference-clip editor (maneuver Hermite arcs, authored in game pixels)
 dotnet run --project MTile.Demo -- --ref parkour
+
+# Remap all clips e.g.
+ dotnet run --project MTile.Probe -- --rig biped retarget biped_rabbit 
+ # Remap one clip e.g. 
+ dotnet run --project MTile.Probe -- --rig biped retarget biped_rabbit 
+
 ```
 
 | Flag | Modes it applies to | Meaning |
