@@ -19,6 +19,46 @@ derivative today. The finite-difference phase-column oracle test is as much the
 deliverable as the fix. §1's measured baseline (perf + quality traces, versions
 recorded) is what every later chunk's acceptance criteria compare against.
 
+### 1.5. Functional solve core — restructure the residual assembly (user request, 2026-09-09)
+
+Rework the cadence solve's constraint layer into an explicit, JAX-like functional
+style: pure functions of explicit parameters, transparent composition, and
+machine-checked hand Jacobians. The current architecture is already close — the
+objective is a flat block list (`CharacterAnimator.cs` `_coreGeom`/`_corePriors`/
+`_frameComposite`) and `LeastSquaresSolver.Minimize` takes plain delegates — but
+every `ISolveConstraint` closes over CharacterAnimator's mutable private state
+(`_scratch`, `_baseBlend`, `_angVel`, `_solveRoot`, `_contacts`), with a hidden
+"forward pass ran first" contract. Three moves:
+
+1. **Freeze the problem explicitly.** One function per solve builds an immutable
+   `SolveProblem` (contacts/targets/weights, swing targets, pins, config
+   snapshot, base-pose samples, baseBlend, solve root). Mostly relocating fields
+   the row-count-stability contract already forces to be frozen — just scattered
+   and implicit today.
+2. **The forward pass returns a value.** `Forward(in SolveProblem, x, scratch)
+   → PoseEval` (world transforms + angular velocities) instead of side-effecting
+   animator fields. Preallocated caller-owned scratch for perf; purity by
+   convention.
+3. **Blocks become pure static functions.** Each constraint is
+   `(in SolveProblem, in PoseEval, x, rows)` plus its paired analytic Jacobian;
+   the objective is a printable list of named blocks. `PointJacobianColumns`
+   survives as-is, parameterized on `PoseEval`.
+
+Payoff beyond legibility: a per-block finite-difference checker
+(`FdCheck(problem, block, x)`) falls out for free — it IS chunk 1's §2 oracle —
+and per-block cost printing makes "which term fights which" one loop.
+Explicitly out of scope: autodiff (no `jax.grad` in C#; hand Jacobians stay,
+now machine-checked; dual-number source-gen is a separate future project).
+
+Scope: ~2k lines (`CharacterAnimator.Constraints.cs` wholesale + orchestration
+seams; the LM core and FK untouched), mechanical, behavior-preserving — guard
+with a golden-trace test (record residual/Jacobian vectors for recorded frames
+pre-refactor, assert bit-identical after). Sits right after chunk 1 because
+chunk 1's FD oracle builds on it, chunk 5's timing solve should be born in the
+new style, and chunk 8's "solve only constrained chains" becomes filtering an
+explicit block list. **Do not interleave with chunk 2** — both rewrite
+`CharacterAnimator.Constraints.cs`; either order, but pick one.
+
 ### 2. One placement model — runtime §3 + authoring "Coordinate and ownership contract"
 
 **The hinge between the two plans.** Each currently defers to the other — the
@@ -91,10 +131,13 @@ Needs chunk 1's baseline to prove anything.
 ## Sequencing
 
 ```
-1 → 2 → (3 ∥ 4 ∥ 5, with 6's design doc alongside) → 6 impl → 7 → 8
+1 → 1.5 → 2 → (3 ∥ 4 ∥ 5, with 6's design doc alongside) → 6 impl → 7 → 8
 ```
 
-Chunks 3, 4, 5 are genuinely parallel once 2 lands.
+Chunks 3, 4, 5 are genuinely parallel once 2 lands. 1.5 and 2 touch the same
+file (`CharacterAnimator.Constraints.cs`) and must run sequentially in either
+order; 1.5-first is listed because chunk 1's FD oracle wants the per-block
+harness, and chunk 2's edits are smaller to redo in the new style than vice versa.
 
 ## Friction points (where toes get stepped on)
 
