@@ -40,14 +40,15 @@ public sealed class DemoGame : Game
     private SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
     private Affine2      _root;
     private Vector2      _playerOffset;   // view pan (whole scene: rig + com + floor + refs). Arrows nudge, Home resets.
-    // PER-KEYFRAME reference placement: a root-space "edref" Point addition (rig units,
-    // scene frame) authored by dragging the com marker — the PLAYER ensemble (com marker +
-    // skeleton) offsets from the scene anchor by its interpolated value, while the ground
-    // references (floor line, obstacle block) stay put. Scrubbing shows the body arcing over
-    // the fixed scenery (e.g. parkour clearing its block). Editor-only visualization: it
-    // saves with the clip and rides the additions machinery (K inherits, retime follows),
-    // but the runtime reads additions by name and ignores this one.
-    private const string EdRefName = "edref";
+    // PER-KEYFRAME body path (Animation/BodyPath.cs — the com anchor's scene position,
+    // formerly the editor-only "edref" track): authored by dragging the com marker — the
+    // PLAYER ensemble (com marker + skeleton) offsets from the scene anchor by its
+    // interpolated value, while the ground references (floor line, obstacle block) stay
+    // put. Scrubbing shows the body arcing over the fixed scenery (e.g. parkour clearing
+    // its block). Saves with the clip and rides the additions machinery (K inherits,
+    // retime follows); gameplay placement doesn't consume it yet (see BodyPath's
+    // runtime-status note).
+    private const string BodyPathName = BodyPath.ChannelName;
     private bool _warnedArcPlacement;   // one-shot hint when a com drag is refused (arc owns placement)
     private bool _showGrid = true;      // block-sized grid under the scene (` toggles)
     private bool _showBodyPoly;         // the game's physics hexagon at the com anchor (O toggles)
@@ -615,7 +616,7 @@ public sealed class DemoGame : Game
         // — the com ring and the keyframe dots (which never included edref) disagreed.
         Vector2 refOff = _refArc != null
             ? ArcOffset(_scrubT) * RigScale
-            : TryPointAt(_scrubT, EdRefName, out var r) ? r * RigScale : Vector2.Zero;
+            : TryPointAt(_scrubT, BodyPathName, out var r) ? r * RigScale : Vector2.Zero;
         _anchor = _sceneAnchor + refOff;
         _comAnchored = TryComAt(_scrubT, out var com);
         Vector2 rootT = _comAnchored ? _anchor - com * RigScale : _anchor;
@@ -982,7 +983,7 @@ public sealed class DemoGame : Game
         for (int i = 0; i < adds.Count; i++)
         {
             var a = adds[i];
-            if (a.Name == EdRefName) continue;   // hidden channel — placement, not a marker
+            if (a.Name == BodyPathName) continue;   // hidden channel — placement, not a marker
             Vector2 o = AdditionOriginWorld(a, world);
             Color col = !editable             ? new Color(90, 140, 130)
                       : i == _selectedAdd     ? Color.White
@@ -1383,7 +1384,7 @@ public sealed class DemoGame : Game
         for (int i = 0; i < adds.Count; i++)
         {
             var a = adds[i];
-            if (a.Name == EdRefName) continue;   // hidden channel — the com marker is its proxy
+            if (a.Name == BodyPathName) continue;   // hidden channel — the com marker is its proxy
             if (a.Kind == AnimAdditionKind.Vector)
             {
                 float dt = Vector2.DistanceSquared(AdditionTipWorld(a, world), mp);
@@ -1421,17 +1422,17 @@ public sealed class DemoGame : Game
                 }
                 return;
             }
-            var refAdd = ActiveKeyPoint(EdRefName);
+            var refAdd = ActiveKeyPoint(BodyPathName);
             if (refAdd == null)
             {
                 // Seed from the value currently displayed (the sampled/held track, or zero)
                 // so the first drag continues smoothly instead of jumping.
-                TryPointAt(_scrubT, EdRefName, out var seed);
+                TryPointAt(_scrubT, BodyPathName, out var seed);
                 var kf = Doc.Keyframes[_activeKey];
                 kf.Additions ??= new List<AnimAddition>();
                 kf.Additions.Add(refAdd = new AnimAddition
                 {
-                    Name = EdRefName, Kind = AnimAdditionKind.Point, Px = seed.X, Py = seed.Y,
+                    Name = BodyPathName, Kind = AnimAdditionKind.Point, Px = seed.X, Py = seed.Y,
                 });
             }
             var dm = (mp - new Vector2(_prevMs.X, _prevMs.Y)) / RigScale;

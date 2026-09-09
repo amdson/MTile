@@ -7,7 +7,12 @@
   "Region": "UpperBody",
   "SettleShare": 0.466,
   "Attachments": [
-    { "Bone": "knife", "Effect": "knife", "Start": 0, "End": 0.534 }
+    {
+      "Bone": "knife",
+      "Effect": "knife",
+      "Start": 0,
+      "End": 0.534
+    }
   ],
   "ExtraBones": [
     {
@@ -199,9 +204,9 @@
           "Dy": 0
         },
         {
-          "Name": "edref",
+          "Name": "body_path",
           "Kind": "Point",
-          "Px": 2.9802322E-08,
+          "Px": 2.9802322e-08,
           "Py": 8.199998,
           "Dx": 0,
           "Dy": 0
@@ -298,9 +303,9 @@
           "Dy": 0
         },
         {
-          "Name": "edref",
+          "Name": "body_path",
           "Kind": "Point",
-          "Px": 2.9802322E-08,
+          "Px": 2.9802322e-08,
           "Py": 8.199998,
           "Dx": 0,
           "Dy": 0

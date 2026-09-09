@@ -93,7 +93,7 @@
           "Dy": 0
         },
         {
-          "Name": "edref",
+          "Name": "body_path",
           "Kind": "Point",
           "Px": 0,
           "Py": 10.799996,
@@ -188,7 +188,7 @@
           "Dy": 0
         },
         {
-          "Name": "edref",
+          "Name": "body_path",
           "Kind": "Point",
           "Px": 0,
           "Py": 10.799996,
@@ -283,7 +283,7 @@
           "Dy": 0
         },
         {
-          "Name": "edref",
+          "Name": "body_path",
           "Kind": "Point",
           "Px": 0,
           "Py": 10.799996,
