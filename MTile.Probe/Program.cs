@@ -25,7 +25,7 @@ using MTile;
 //       solve the limb's angles to reach it; --to makes dx,dy an absolute root-local target.
 //       Prints solved angles + miss; unreachable targets report the closest reachable point.
 //       Dry-run by default — --write saves the solved angles back into the clip.
-//   dotnet run --project MTile.Probe -- retarget <dstRig> [--dry]   convert the pool to another rig
+//   dotnet run --project MTile.Probe -- retarget <dstRig> [clip] [--dry]   convert the pool (or one clip) to another rig
 //   dotnet run --project MTile.Probe -- stretch <clip> <t> <bone> <s>   set one bone's length stretch on a keyframe
 //   dotnet run --project MTile.Probe -- refarc <clip> <arcName|none>    bind a ReferenceClips arc for editor placement
 //   dotnet run --project MTile.Probe -- bakeyaw [clip] [--view deg] [--swap s] [--ref rad] [--shoulderamp f] [--dry]
@@ -81,7 +81,7 @@ static class Probe
                 case "retime": return Retime(args);
                 case "delkey": return DelKey(args);
                 case "dur":    return Dur(args);
-                case "retarget": return Retarget(Arg(args, 1), HasFlag(args, "--dry"));
+                case "retarget": return Retarget(Arg(args, 1), HasFlag(args, "--dry"), FirstNonFlag(args, 2));
                 case "stretch": return StretchCmd(args);
                 case "bakeyaw": return BakeYaw(args);
                 case "refarc": return RefArc(args);
@@ -545,9 +545,11 @@ static class Probe
         return 0;
     }
 
-    // retarget <dstRig> [--dry] — convert every clip in the CURRENT rig's pool (--rig,
-    // default biped) to a rig that INSERTS fixed bones (shoulder/pelvis struts) between
-    // existing parents and children, writing to SkeletonStates/<dstRig>/.
+    // retarget <dstRig> [clip] [--dry] — convert the CURRENT rig's pool (--rig, default
+    // biped) — or just the one named clip — to a rig that INSERTS fixed bones
+    // (shoulder/pelvis struts) between existing parents and children, writing to
+    // SkeletonStates/<dstRig>/. Name a clip when porting one new authoring: the pool
+    // form OVERWRITES every destination clip, including ones re-authored since.
     //
     // Assumption: inserted bones are never animated — they hold their bind rotation.
     // Authored rotations are FULL local angles, so a bone whose parent chain gained
@@ -556,7 +558,7 @@ static class Probe
     // copies through untouched. Verified per keyframe by comparing every shared bone's
     // world DIRECTION across the two rigs — positions legitimately shift by the strut
     // geometry, directions must not.
-    static int Retarget(string dstName, bool dry)
+    static int Retarget(string dstName, bool dry, string only = null)
     {
         var dst = SkeletonExamples.Load(dstName);
         if (string.Equals(dst.Name, _rig.Name, StringComparison.OrdinalIgnoreCase))
@@ -587,6 +589,7 @@ static class Probe
         int n = 0;
         foreach (var clip in _all)
         {
+            if (only != null && !clip.Name.Equals(only, StringComparison.OrdinalIgnoreCase)) continue;
             // Keep the source-frame values for verification, then convert in place.
             var orig = new Dictionary<AnimationKeyframe, List<PoseBoneEntry>>();
             foreach (var kf in clip.Keyframes)
@@ -629,7 +632,9 @@ static class Probe
             Console.WriteLine($"{clip.Name,-18} {clip.Keyframes.Count,3} keys  maxDirDev={clipWorst:0.000000} rad  {(dry ? "(dry)" : "written")}");
             n++;
         }
-        Console.WriteLine($"# {(dry ? "would write" : "wrote")} {n} clips to {outDir}");
+        if (only != null && n == 0)
+            throw new ArgumentException($"no clip named '{only}' in rig '{_rig.Name}'s pool");
+        Console.WriteLine($"# {(dry ? "would write" : "wrote")} {n} clip(s) to {outDir}");
         Console.WriteLine($"# worst direction deviation: {worstDir:0.000000} rad at {worstAt}"
                         + (worstDir > 1e-3f ? "  <-- NOT direction-preserving; inspect the rig diff" : "  (direction-preserving)"));
         return worstDir > 1e-3f ? 1 : 0;
