@@ -153,17 +153,32 @@ public class AnimSolverTests
     // to a central finite difference of the same residual (the Δφ column is skipped only at a
     // keyframe boundary, where ∂/∂φ genuinely jumps — the §3.5 kink). Sign of the facing-flip
     // lever arm is covered by running both directions. A wrong column shows up as O(1) error.
+    //
+    // biped_rabbit clips animate Stretch (the hip struts foreshorten, and swing past the depth
+    // axis to negative length), so their sampled pose moves by local TRANSLATION as well as
+    // rotation — the Δφ column must carry that channel too. The overlay rows paint an upper-
+    // body slash over the run, so the base-clip columns carry the Π(1−w) attenuation.
     [Theory]
-    [InlineData("walk", 25f, +1)]
-    [InlineData("walk", 25f, -1)]
-    [InlineData("run",  90f, +1)]
-    [InlineData("run",  90f, -1)]
-    public void Solver_AnalyticJacobian_MatchesFiniteDifference(string clipName, float speed, int facing)
+    [InlineData("biped",        "walk", 25f, +1, null)]
+    [InlineData("biped",        "walk", 25f, -1, null)]
+    [InlineData("biped",        "run",  90f, +1, null)]
+    [InlineData("biped",        "run",  90f, -1, null)]
+    [InlineData("biped_rabbit", "walk", 25f, +1, null)]
+    [InlineData("biped_rabbit", "walk", 25f, -1, null)]
+    [InlineData("biped_rabbit", "run",  90f, +1, null)]
+    [InlineData("biped_rabbit", "run",  90f, -1, null)]
+    [InlineData("biped_rabbit", "run",  90f, +1, "groundslash1")]
+    [InlineData("biped_rabbit", "run",  90f, -1, "groundslash1")]
+    public void Solver_AnalyticJacobian_MatchesFiniteDifference(string rig, string clipName, float speed,
+                                                                int facing, string overlayName)
     {
-        var clip = AnimationStore.LoadAll(StatesDir()).Find(d => d.Name == clipName);
-        Assert.True(clip != null, $"{clipName}.json not found");
-        var skel = SkeletonExamples.Biped();
-        var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
+        var clips = AnimationStore.LoadAll(StatesDir(rig));
+        var clip = clips.Find(d => d.Name == clipName);
+        Assert.True(clip != null, $"{rig}/{clipName}.json not found");
+        var overlay = overlayName == null ? null : clips.Find(d => d.Name == overlayName);
+        Assert.True(overlayName == null || overlay != null, $"{rig}/{overlayName}.json not found");
+        var skel = SkeletonExamples.Load(rig);
+        var anim = new CharacterAnimator(skel, 0.6f, overlay == null ? new[] { clip } : new[] { clip, overlay });
 
         float dt = 1f / 30f, vx = speed * facing, x = 0f, worst = 0f;
         int checks = 0, wc = -1, wr = -1; float wfd = 0f, wan = 0f;
@@ -171,7 +186,8 @@ public class AnimSolverTests
         {
             x += vx * dt;
             anim.Update(new CharacterAnimSample(
-                new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState", "", dt));
+                new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState",
+                overlay?.Type ?? "", dt, actionProgress: overlay == null ? -1f : (i % 30) / 30f));
             float e = anim.MaxJacobianError();
             if (e >= 0f) { checks++; if (e > worst) { worst = e; wc = anim.DbgWorstCol; wr = anim.DbgWorstRow; wfd = anim.DbgFd; wan = anim.DbgAnal; } }
         }
@@ -182,15 +198,60 @@ public class AnimSolverTests
         Assert.True(worst < 5e-3f, $"analytic Jacobian disagrees with finite differences by {worst:0.000000} (rel) at col {wc} row {wr} (fd {wfd:0.0000} vs anal {wan:0.0000})");
     }
 
-    private static string StatesDir()
+    // --- One placement model (runtime plan §3 / workplan chunk 2) -----------------------
+
+    // The pose the solver optimized must be the pose drawn, IN WORLD SPACE: on every solve
+    // frame each solved tip (BuildSolvePose at the accepted x, plus d) equals the rendered tip
+    // under the host's RigRoot. Two ways this used to break: the solve root anchored com at the
+    // ENTRY phase while the draw samples it at the advanced phase (run: com.Y bobs with phase),
+    // and the solve root ignored com.X while the draw subtracts it (rabbit crouchwalk authors a
+    // moving com.X). The FD oracle rides along — the root's ∂/∂φ term is only right if the
+    // anchor derivative is.
+    [Theory]
+    [InlineData("biped",        "run",        90f, +1, false)]
+    [InlineData("biped",        "run",        90f, -1, false)]
+    [InlineData("biped_rabbit", "run",        90f, +1, false)]
+    [InlineData("biped_rabbit", "crouchwalk", 40f, +1, true)]
+    [InlineData("biped_rabbit", "crouchwalk", 40f, -1, true)]
+    public void Solver_SolvedPose_IsTheRenderedPose(string rig, string clipName, float speed, int facing, bool crouch)
+    {
+        const float scale = 0.6f;
+        var clip = AnimationStore.LoadAll(StatesDir(rig)).Find(d => d.Name == clipName);
+        Assert.True(clip != null, $"{rig}/{clipName}.json not found");
+        var anim = new CharacterAnimator(SkeletonExamples.Load(rig), scale, new[] { clip });
+
+        float dt = 1f / 60f, vx = speed * facing, x = 0f, worstGap = 0f, worstJac = 0f;
+        int solves = 0;
+        for (int i = 0; i < 90; i++)
+        {
+            x += vx * dt;
+            var pos = new Vector2(x, 0f);
+            anim.Update(new CharacterAnimSample(pos, new Vector2(vx, 0f), facing, true,
+                crouch ? "CrouchedState" : "WalkState", "", dt, tag: crouch ? AnimTag.Crouch : AnimTag.None));
+            if (!anim.SolvedThisFrame) continue;
+            solves++;
+            var root = Affine2.FromTRS(AttackGlowSystem.RigRoot(pos, facing, anim, scale), 0f,
+                                       new Vector2(facing * scale, scale));
+            var world = anim.Pose.ComputeWorld(root);
+            for (int b = 0; b < anim.Skeleton.Count; b++)
+                worstGap = MathF.Max(worstGap, (world[b].Translation - anim.SolvedBoneTipWorld(b)).Length());
+            worstJac = MathF.Max(worstJac, anim.MaxJacobianError());
+        }
+
+        Assert.True(solves > 0, "no solve ran — nothing validated");
+        Assert.True(worstGap < 1e-2f, $"solved vs rendered tip disagree by {worstGap:0.0000} px");
+        Assert.True(worstJac < 5e-3f, $"analytic Jacobian disagrees with finite differences by {worstJac:0.000000} (rel)");
+    }
+
+    private static string StatesDir(string rig = "biped")
     {
         var d = new DirectoryInfo(AppContext.BaseDirectory);
         while (d != null)
         {
-            string c = Path.Combine(d.FullName, "SkeletonStates", "biped");
+            string c = Path.Combine(d.FullName, "SkeletonStates", rig);
             if (Directory.Exists(c)) return c;
             d = d.Parent;
         }
-        return "SkeletonStates/biped";
+        return "SkeletonStates/" + rig;
     }
 }

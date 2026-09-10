@@ -186,11 +186,16 @@ public static class AnimationSampler
     // derivative of SampleSmooth, hence the ∂(clip pose)/∂φ the analytic cadence Jacobian
     // chains through FK. Continuous everywhere (including the loop seam for a cyclic clip);
     // zero in the clamped end regions (the pose is held). a/b/c/d scratch as in SampleSmooth.
+    // `transVel` (optional) receives the matching local-TRANSLATION velocity dT/dt — nonzero
+    // only where the clip animates Stretch (SampleSmooth's smoothstep blend of the bracketing
+    // keys' translations). Rotation-only clips leave it all zero.
     public static void SampleAngularVelocity(AnimationDocument doc, float t,
                                              SkeletonPose a, SkeletonPose b, SkeletonPose c,
-                                             SkeletonPose d, Span<float> vel)
+                                             SkeletonPose d, Span<float> vel,
+                                             Span<Vector2> transVel = default)
     {
         vel.Clear();
+        transVel.Clear();
         var ks = doc?.Keyframes;
         if (ks == null || ks.Count < 2) return;
         // A one-shot HOLDS outside [first,last] → zero velocity there. A cyclic clip has no
@@ -213,6 +218,11 @@ public static class AnimationSampler
             Tangents(br, a, b, c, d, k, out float dCurr, out float si, out float si1);
             vel[k] = h01p * dCurr * invH + h10p * si + h11p * si1;
         }
+        // d/dt of Lerp(T_b, T_c, h01(u)) = (T_c − T_b)·h01′(u)/h (zero-width interval → step, 0).
+        float dBlend = br.h <= 1e-6f ? 0f : h01p * invH;
+        int tcount = Math.Min(b.Count, transVel.Length);
+        for (int k = 0; k < tcount; k++)
+            transVel[k] = (c.Local[k].Translation - b.Local[k].Translation) * dBlend;
     }
 
     // Whether a clip is a seamless cycle. Two authoring styles qualify:

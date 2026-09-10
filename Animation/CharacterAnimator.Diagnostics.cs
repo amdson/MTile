@@ -27,15 +27,11 @@ public sealed partial class CharacterAnimator
         // difference of tip.x loses it to catastrophic cancellation. The Jacobian is
         // translation-invariant, so shift the whole solve to the origin (zero the root
         // translation; subtract it from each captured target) for the oracle, then restore.
-        float ox = _solveRoot.Tx, oy = _solveRoot.Ty;
-        var savedRoot = _solveRoot;
-        _solveRoot = new Affine2(_solveRoot.M11, _solveRoot.M12, _solveRoot.M21, _solveRoot.M22, 0f, 0f);
-        for (int i = 0; i < _contacts.Count; i++)
-        { var c = _contacts[i]; c.Target = new Vector2(c.Target.X - ox, c.Target.Y - oy); _contacts[i] = c; }
-        for (int i = 0; i < _pins.Count; i++)
-        { var p = _pins[i]; _pins[i] = (p.bone, new Vector2(p.target.X - ox, p.target.Y - oy)); }
-        for (int i = 0; i < _surfaces.Count; i++)
-        { var sf = _surfaces[i]; _surfaces[i] = new SolverSurface(new Vector2(sf.Point.X - ox, sf.Point.Y - oy), sf.Normal, sf.Margin); }
+        var p = _problem;
+        float ox = p.Body.X, oy = p.Body.Y;
+        var savedBody = p.Body;
+        p.Body = Vector2.Zero;               // SolveForward rebuilds the root from it per evaluation
+        ShiftTargets(p, -ox, -oy);
 
         var x = new float[n];
         Array.Copy(_solveVars, x, n);
@@ -43,8 +39,9 @@ public sealed partial class CharacterAnimator
         // the old triple-kept row formulas were a recurring bug source, and driver-contributed
         // blocks would invalidate them anyway).
         int m = CompositeRowLayout(x, n, out int npStart, out int npCount, out int floorRow, out _);
+        var blockRows = BlockRows(x, n);     // row → block, for the per-block attribution (DbgWorstBlock)
         var anal = new float[m * n];
-        CadenceJacobian(x, anal, n);             // dense fill (we cleared by fresh alloc)
+        SolveObjective.Jacobian(_problem, _eval,x, anal, n);             // dense fill (we cleared by fresh alloc)
 
         var rp = new float[m];
         var rm = new float[m];
@@ -62,17 +59,17 @@ public sealed partial class CharacterAnimator
         int b0 = _skeleton.Count;
         const float kneeBand = 0.5f;   // > any single-column FD tip displacement (lever × h)
         int npRow = npStart;
-        foreach (var s in _surfaces)
+        foreach (var s in p.Surfaces)
             for (int b = 0; b < b0; b++, npRow++)
             {
-                Vector2 tip = _scratch.WorldOf(b).Translation;   // _scratch left at x by CadenceJacobian
+                Vector2 tip = _eval.Pose.WorldOf(b).Translation;   // _scratch left at x by CadenceJacobian
                 float gap = s.Normal.X * (tip.X + x[IdxDx] - s.Point.X)
                           + s.Normal.Y * (tip.Y + x[IdxDy] - s.Point.Y);
                 if (MathF.Abs(s.Margin - gap) < kneeBand) skipRow[npRow] = true;
             }
         // The phase-rate floor row has the same one-sided knee, at Δφ == floor: an FD step in
         // the Δφ column that straddles it sees half the slope. Band covers the largest φ FD step.
-        if (floorRow >= 0 && _phaseFloor > 1e-5f && MathF.Abs(x[IdxPhi] - _phaseFloor) < 0.02f)
+        if (floorRow >= 0 && p.PhaseFloor > 1e-5f && MathF.Abs(x[IdxPhi] - p.PhaseFloor) < 0.02f)
             skipRow[floorRow] = true;
 
         float worst = 0f;
@@ -84,7 +81,7 @@ public sealed partial class CharacterAnimator
             // blows past the oracle tolerance in legitimately-authored ~0.01-phase intervals.
             // δ/Δθ are low-curvature but their residuals are differences of large world
             // coordinates, so they need a LARGER h to clear the float32 cancellation floor.
-            float h = j == 0 ? PhiFdStep(_solveClip, Wrap01(_solvePhi + x[0])) : 1e-2f;
+            float h = j == 0 ? PhiFdStep(_problem.Clip, _problem.TimeAt(_problem.Phi + x[0])) : 1e-2f;
             // The C1 spline makes ∂/∂φ CONTINUOUS (the analytic column is exact everywhere),
             // but acceleration still jumps at a keyframe boundary (C1, not C2), so a central
             // difference that STRADDLES one carries O(h) error and can't serve as the oracle
@@ -93,13 +90,13 @@ public sealed partial class CharacterAnimator
             // continuity the analytic value is then correct at the boundaries too.
             if (j == 0)
             {
-                int i0 = IntervalAt(_solveClip, Wrap01(_solvePhi + x[0]));
-                if (IntervalAt(_solveClip, Wrap01(_solvePhi + x[0] + h)) != i0 ||
-                    IntervalAt(_solveClip, Wrap01(_solvePhi + x[0] - h)) != i0) continue;
+                int i0 = IntervalAt(_problem.Clip, _problem.TimeAt(_problem.Phi + x[0]));
+                if (IntervalAt(_problem.Clip, _problem.TimeAt(_problem.Phi + x[0] + h)) != i0 ||
+                    IntervalAt(_problem.Clip, _problem.TimeAt(_problem.Phi + x[0] - h)) != i0) continue;
             }
             float save = x[j];
-            x[j] = save + h; CadenceResiduals(x, rp);
-            x[j] = save - h; CadenceResiduals(x, rm);
+            x[j] = save + h; SolveObjective.Residuals(_problem, _eval,x, rp);
+            x[j] = save - h; SolveObjective.Residuals(_problem, _eval,x, rm);
             // Δφ column: Richardson-extrapolate the central difference with a second, half-
             // size step. Within one keyframe interval the C1 spline is a CUBIC, and a central
             // difference of a cubic carries EXACTLY h²·f‴/6 of error — (4·D(h/2) − D(h))/3
@@ -109,8 +106,8 @@ public sealed partial class CharacterAnimator
             // in a ~0.01-wide interval). The ±h/2 points lie inside the same interval as ±h.
             if (j == 0)
             {
-                x[j] = save + 0.5f * h; CadenceResiduals(x, rp2);
-                x[j] = save - 0.5f * h; CadenceResiduals(x, rm2);
+                x[j] = save + 0.5f * h; SolveObjective.Residuals(_problem, _eval,x, rp2);
+                x[j] = save - 0.5f * h; SolveObjective.Residuals(_problem, _eval,x, rm2);
             }
             x[j] = save;
             for (int i = 0; i < m; i++)
@@ -124,20 +121,30 @@ public sealed partial class CharacterAnimator
                 // lever, missing term) is O(10–100%). Normalizing by the magnitude separates
                 // the two cleanly. (+1 keeps small-entry columns from blowing up on noise.)
                 float e = MathF.Abs(fd - a) / (1f + MathF.Abs(a));
-                if (e > worst) { worst = e; DbgWorstCol = j; DbgWorstRow = i; DbgFd = fd; DbgAnal = a; }
+                if (e > worst) { worst = e; DbgWorstCol = j; DbgWorstRow = i; DbgFd = fd; DbgAnal = a; DbgWorstBlock = BlockNameAt(blockRows, i); }
             }
         }
 
-        _solveRoot = savedRoot;            // restore the shifted solve context
-        for (int i = 0; i < _contacts.Count; i++)
-        { var c = _contacts[i]; c.Target = new Vector2(c.Target.X + ox, c.Target.Y + oy); _contacts[i] = c; }
-        for (int i = 0; i < _pins.Count; i++)
-        { var p = _pins[i]; _pins[i] = (p.bone, new Vector2(p.target.X + ox, p.target.Y + oy)); }
-        for (int i = 0; i < _surfaces.Count; i++)
-        { var sf = _surfaces[i]; _surfaces[i] = new SolverSurface(new Vector2(sf.Point.X + ox, sf.Point.Y + oy), sf.Normal, sf.Margin); }
+        p.Body = savedBody;                // restore the shifted problem
+        ShiftTargets(p, ox, oy);
         return worst;
     }
     internal int DbgWorstCol, DbgWorstRow; internal float DbgFd, DbgAnal;
+    internal string DbgWorstBlock;   // the block owning DbgWorstRow — the oracle's per-block attribution
+
+    // Translate the frozen problem's world targets (contacts, swing targets, pins, surfaces) by
+    // (dx, dy): the oracle's origin shift and its undo.
+    private static void ShiftTargets(SolveProblem p, float dx, float dy)
+    {
+        for (int i = 0; i < p.Contacts.Count; i++)
+        { var c = p.Contacts[i]; c.Target = new Vector2(c.Target.X + dx, c.Target.Y + dy); p.Contacts[i] = c; }
+        for (int i = 0; i < p.Swings.Count; i++)
+        { var s = p.Swings[i]; p.Swings[i] = (s.Bone, new Vector2(s.Target.X + dx, s.Target.Y + dy)); }
+        for (int i = 0; i < p.Pins.Count; i++)
+        { var pn = p.Pins[i]; p.Pins[i] = (pn.Bone, new Vector2(pn.Target.X + dx, pn.Target.Y + dy)); }
+        for (int i = 0; i < p.Surfaces.Count; i++)
+        { var sf = p.Surfaces[i]; p.Surfaces[i] = new SolverSurface(new Vector2(sf.Point.X + dx, sf.Point.Y + dy), sf.Normal, sf.Margin); }
+    }
 
     // DIAGNOSTIC (tests/tuning only): at the last frame's solve point, report the magnitudes
     // that set the weight tiers (§11.4) — the relative gradient/column scales the priors must
@@ -158,9 +165,9 @@ public sealed partial class CharacterAnimator
         // geom = rows before the prior tail (contacts + pins + no-pen + aim + contributed).
         int m = CompositeRowLayout(x, n, out int npStart, out int npCount, out _, out int geom);
         var jac = new float[m * n];          // zeroed by fresh alloc; CadenceJacobian fills it
-        CadenceJacobian(x, jac, n);          // also leaves _scratch world at the solved x
+        SolveObjective.Jacobian(_problem, _eval,x, jac, n);          // also leaves _scratch world at the solved x
         var r = new float[m];
-        CadenceResiduals(x, r);
+        SolveObjective.Residuals(_problem, _eval,x, r);
 
         // Column L2 norms over the geometric rows only (the FK-coupled sensitivity).
         float ColNorm(int v) { float s = 0f; for (int i = 0; i < geom; i++) { float e = jac[i * n + v]; s += e * e; } return MathF.Sqrt(s); }
@@ -180,7 +187,7 @@ public sealed partial class CharacterAnimator
         for (int i = 0; i < _pins.Count; i++)
         {
             var (bone, target) = _pins[i];
-            Vector2 tip = _scratch.WorldOf(bone).Translation;
+            Vector2 tip = _eval.Pose.WorldOf(bone).Translation;
             tip.X += _solveVars[IdxDx]; tip.Y += _solveVars[IdxDy];
             sb.Append($"  | pin[{Name(bone)}] reach={(tip - target).Length(),5:0.00}px");
         }
@@ -195,8 +202,8 @@ public sealed partial class CharacterAnimator
         if (_aimActive)
         {
             // The solved aim vector vs the target û* — the angle error left after the solve.
-            Vector2 v = _scratch.WorldOf(_aimBoneR).Translation - _scratch.WorldOf(_aimBoneL).Translation;
-            float ang = MathF.Atan2(v.X * _aimTarget.Y - v.Y * _aimTarget.X, v.X * _aimTarget.X + v.Y * _aimTarget.Y);
+            Vector2 v = _eval.Pose.WorldOf(_aimBoneR).Translation - _eval.Pose.WorldOf(_aimBoneL).Translation;
+            float ang = MathF.Atan2(v.X * _problem.AimTarget.Y - v.Y * _problem.AimTarget.X, v.X * _problem.AimTarget.X + v.Y * _problem.AimTarget.Y);
             sb.Append($"  | aim errDeg={ang * 180f / MathF.PI,6:0.0}");
         }
         return sb.ToString();
@@ -210,8 +217,8 @@ public sealed partial class CharacterAnimator
     internal Vector2 SolvedBoneTipWorld(int bone)
     {
         if (!_haveCorr) return Vector2.Zero;
-        BuildSolvePose(_solveVars.AsSpan(0, IdxTheta0 + _skeleton.Count));
-        Vector2 tip = _scratch.WorldOf(bone).Translation;
+        SolveForward.Run(_problem, _solveVars.AsSpan(0, IdxTheta0 + _skeleton.Count), _eval);
+        Vector2 tip = _eval.Pose.WorldOf(bone).Translation;
         tip.X += _solveVars[IdxDx];
         tip.Y += _solveVars[IdxDy];
         return tip;
@@ -224,7 +231,7 @@ public sealed partial class CharacterAnimator
     {
         if (!_haveCorr || !_aimActive) return float.NaN;
         Vector2 v = SolvedBoneTipWorld(_aimBoneR) - SolvedBoneTipWorld(_aimBoneL);   // δ cancels in the difference
-        Vector2 u = _aimTarget;
+        Vector2 u = _problem.AimTarget;
         return MathF.Atan2(v.X * u.Y - v.Y * u.X, v.X * u.X + v.Y * u.Y);
     }
 
@@ -272,7 +279,7 @@ public sealed partial class CharacterAnimator
     // residuals at the solved x and sums the squares per block, which is the only way to tell
     // those apart.
     //
-    // Off by default: it costs one extra pose rebuild per frame, and it re-runs BuildSolvePose,
+    // Off by default: it costs one extra pose rebuild per frame, and it re-runs the forward pass,
     // so it must be called while the solver's final x is still the live pose state (i.e. from
     // inside the solve, not after Update has moved on). Diagnostics only.
     public static bool CaptureResidualBreakdown;
@@ -309,16 +316,14 @@ public sealed partial class CharacterAnimator
         // Same preconditions CadenceJacobian establishes: composed pose at φ+Δφ, and ω_j for
         // the Δφ channel. Without these the blocks read stale FK state.
         var x = _solveVars.AsSpan(0, n);
-        BuildSolvePose(x);
-        AnimationSampler.SampleAngularVelocity(_solveClip, Wrap01(_solvePhi + x[IdxPhi]),
-                                               _kfA, _kfB, _kfC, _kfD,
-                                               _angVel.AsSpan(0, _skeleton.Count));
+        SolveForward.Run(_problem, x, _eval);
+        SolveForward.Velocities(_problem, _problem.TimeAt(_problem.Phi + x[IdxPhi]), _eval);
 
         Array.Clear(_bdJac, 0, _maxResiduals * nv);
         int row = 0;
-        foreach (var c in _frameComposite)
+        foreach (var c in _problem.Blocks)
         {
-            int k = c.Jacobian(x, _bdJac, nv, row);
+            int k = c.Jacobian(_problem, _eval, x, _bdJac, nv, row);
             var colSq = new float[n];
             for (int i = row; i < row + k; i++)
                 for (int a = 0; a < n; a++)
@@ -326,7 +331,7 @@ public sealed partial class CharacterAnimator
                     float v = _bdJac[i * nv + a];
                     colSq[a] += v * v;
                 }
-            LastColumnBreakdown.Add((c.GetType().Name, colSq));
+            LastColumnBreakdown.Add((c.Name, colSq));
             row += k;
         }
     }
@@ -340,15 +345,15 @@ public sealed partial class CharacterAnimator
         LastSolveDx = _solveVars[IdxDx];
         LastSolveDphi = _solveVars[IdxPhi];
         var x = _solveVars.AsSpan(0, n);
-        BuildSolvePose(x);
+        SolveForward.Run(_problem, x, _eval);
         var r = new float[_maxResiduals];
         int row = 0;
-        foreach (var c in _frameComposite)
+        foreach (var c in _problem.Blocks)
         {
-            int k = c.Residuals(x, r.AsSpan(row));
+            int k = c.Residuals(_problem, _eval, x, r.AsSpan(row));
             float s = 0f;
             for (int i = 0; i < k; i++) s += r[row + i] * r[row + i];
-            LastResidualBreakdown.Add((c.GetType().Name, k, s));
+            LastResidualBreakdown.Add((c.Name, k, s));
             row += k;
         }
     }
@@ -374,8 +379,8 @@ public sealed partial class CharacterAnimator
         var d = new AnimFrameDebug
         {
             Solved   = _haveCorr,
-            Clip     = _solveClip?.Name,
-            Phase    = _solvePhi,
+            Clip     = _problem.Clip?.Name,
+            Phase    = _problem.Phi,
             Contacts = new AnimFrameDebug.ContactDbg[_contacts.Count],
             Pins     = new AnimFrameDebug.PinDbg[_pins.Count],
             Surfaces = _surfaces.ToArray(),
@@ -400,7 +405,7 @@ public sealed partial class CharacterAnimator
             d.AimActive = _aimActive;
             if (_aimActive)
             {
-                d.AimTarget = _aimTarget;
+                d.AimTarget = _problem.AimTarget;
                 float err = AimAngleError();
                 d.AimErrDeg = float.IsNaN(err) ? 0f : err * 180f / MathF.PI;
             }
@@ -410,28 +415,51 @@ public sealed partial class CharacterAnimator
         string BoneName(int b) => b >= 0 && b < _skeleton.Count ? _skeleton.Bones[b].Name : "?";
     }
 
-    // Row layout of this frame's composite objective (diagnostics only — allocates): walks
-    // _frameComposite once, evaluating each block's residuals at x into a scratch, and
-    // records the offsets the oracle/report need. Replaces the old hand-maintained row
+    // Per-block row ranges of this frame's objective at x (diagnostics only — allocates): one
+    // forward pass, then each block's residual count in list order. Leaves _eval at the pose for x.
+    private (string Name, int Start, int Count)[] BlockRows(float[] x, int n)
+    {
+        var xs = new ReadOnlySpan<float>(x, 0, n);
+        SolveForward.Run(_problem, xs, _eval);
+        var tmp = new float[_maxResiduals];
+        var blocks = _problem.Blocks;
+        var rows = new (string, int, int)[blocks.Count];
+        int m = 0;
+        for (int k = 0; k < blocks.Count; k++)
+        {
+            int cnt = blocks[k].Residuals(_problem, _eval, xs, tmp.AsSpan(m));
+            rows[k] = (blocks[k].Name, m, cnt);
+            m += cnt;
+        }
+        return rows;
+    }
+
+    private static string BlockNameAt((string Name, int Start, int Count)[] rows, int row)
+    {
+        foreach (var b in rows) if (row >= b.Start && row < b.Start + b.Count) return b.Name;
+        return "?";
+    }
+
+    // Row layout of this frame's composite objective (diagnostics only — allocates): the
+    // offsets the oracle/report need, off BlockRows. Replaces the old hand-maintained row
     // arithmetic, which had to be kept in sync in three places and breaks the moment a move
-    // driver contributes a constraint block. Leaves _scratch at the pose for x.
+    // driver contributes a constraint block.
     //   npStart/npCount — the NoPenetrationConstraint block (knee-skip + maxResid report)
     //   floorRow        — the PhaseRateFloorConstraint row (its knee-skip)
     //   geomRows        — rows before the prior tail (= offset of PlaybackContinuityConstraint)
     private int CompositeRowLayout(float[] x, int n, out int npStart, out int npCount,
                                    out int floorRow, out int geomRows)
     {
-        var xs = new ReadOnlySpan<float>(x, 0, n);
-        BuildSolvePose(xs);
-        var tmp = new float[_maxResiduals];
+        var rows = BlockRows(x, n);
+        var blocks = _problem.Blocks;
         int m = 0; npStart = 0; npCount = 0; floorRow = -1; geomRows = -1;
-        foreach (var c in _frameComposite)
+        for (int k = 0; k < rows.Length; k++)
         {
-            if (c is PlaybackContinuityConstraint && geomRows < 0) geomRows = m;
-            int cnt = c.Residuals(xs, tmp.AsSpan(m));
-            if      (c is NoPenetrationConstraint)  { npStart = m; npCount = cnt; }
-            else if (c is PhaseRateFloorConstraint) floorRow = m;
-            m += cnt;
+            var c = blocks[k];
+            if (c is PlaybackContinuityConstraint && geomRows < 0) geomRows = rows[k].Start;
+            if      (c is NoPenetrationConstraint)  { npStart = rows[k].Start; npCount = rows[k].Count; }
+            else if (c is PhaseRateFloorConstraint) floorRow = rows[k].Start;
+            m = rows[k].Start + rows[k].Count;
         }
         if (geomRows < 0) geomRows = m;
         return m;
@@ -469,4 +497,32 @@ public sealed partial class CharacterAnimator
         return MathHelper.Clamp(0.02f * w, 1e-4f, 1e-3f);
     }
 
+    // TEST HOOK (golden traces — AnimSolverGoldenTraceTests): the composite objective's residual
+    // vector and dense Jacobian at the last solve's accepted x, and again at a fixed off-optimum
+    // perturbation of it (so inactive-set knees and off-solution branches are exercised too).
+    // Allocates. Null when no solve ran this frame.
+    internal sealed class SolveTrace
+    {
+        public int N, M; public float[] X, R, J, R2, J2;
+        public (string Name, int Start, int Count)[] Layout;   // block row ranges (diagnostic labels, not stored)
+        public string BlockOf(int row) => BlockNameAt(Layout, row);
+    }
+    internal SolveTrace CaptureSolveTrace()
+    {
+        if (!_haveCorr || _ls == null) return null;
+        int n = IdxTheta0 + _skeleton.Count;
+        var x = new float[n];
+        Array.Copy(_solveVars, x, n);
+        int m = CompositeRowLayout(x, n, out _, out _, out _, out _);
+        var t = new SolveTrace { N = n, M = m, X = x, R = new float[m], J = new float[m * n], R2 = new float[m], J2 = new float[m * n],
+                                 Layout = BlockRows(x, n) };
+        SolveObjective.Jacobian(_problem, _eval,x, t.J, n);
+        SolveObjective.Residuals(_problem, _eval,x, t.R);
+        var x2 = new float[n];
+        for (int i = 0; i < n; i++) x2[i] = x[i] + ((i & 1) == 0 ? 0.02f : -0.02f);
+        SolveObjective.Jacobian(_problem, _eval,x2, t.J2, n);
+        SolveObjective.Residuals(_problem, _eval,x2, t.R2);
+        SolveForward.Run(_problem, x, _eval);   // leave the scratch at the accepted x, like the other hooks
+        return t;
+    }
 }

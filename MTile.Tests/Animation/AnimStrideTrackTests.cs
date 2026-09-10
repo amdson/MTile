@@ -154,10 +154,10 @@ public class AnimStrideTrackTests
         Assert.Empty(track.Feet);
     }
 
-    // The placement convention: offsets are rig-unit, facing +1, com.Y-shifted, so
+    // The placement convention: offsets are rig-unit, facing +1, com-shifted (both axes), so
     //     world = bodyPos + (dir·scale·off.X, scale·off.Y)
-    // must equal FK under the live solve-root T(bodyX, bodyY − com.Y·scale)·S(dir·scale, scale)
-    // (CharacterAnimator.Update step 2). Verified on the REAL walk clip + biped rig,
+    // must equal FK under the live solve-root T(body + BodyPath.RootOffset(c))·S(dir·scale, scale)
+    // (CharacterAnimator.SolveRootAt). Verified on the REAL walk clip + biped rig,
     // labels flipped to PlannedSupport in memory (no file writes).
     [Theory]
     [InlineData(1, 2.0f)]
@@ -186,10 +186,10 @@ public class AnimStrideTrackTests
             var a = rig.CreatePose(); var b = rig.CreatePose(); var c = rig.CreatePose();
             var d = rig.CreatePose(); var dst = rig.CreatePose();
             AnimationSampler.SampleSmooth(walk, st.Touchdown, a, b, c, d, dst);
-            float comY = 0f;
-            if (AnimAdditionSampler.SamplePoint(walk, st.Touchdown, "com", out var com)) comY = com.Y;
-            var root = Affine2.FromTRS(new Vector2(body.X, body.Y - comY * scale), 0f,
-                                       new Vector2(dir * scale, scale));
+            Vector2 rootPos = body;
+            if (BodyPath.TrySampleAnchor(walk, st.Touchdown, out var com, out _))
+                rootPos += BodyPath.RootOffset(com, dir, scale);
+            var root = Affine2.FromTRS(rootPos, 0f, new Vector2(dir * scale, scale));
             Vector2 viaLiveRoot = dst.ComputeWorld(root)[f.Bone].Translation;
 
             Assert.True((viaTrack - viaLiveRoot).Length() < 1e-3f,

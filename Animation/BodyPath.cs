@@ -16,16 +16,32 @@ namespace MTile;
 // names one, else this track, else the clip is stationary (missing intent — callers
 // must distinguish that from an authored zero path).
 //
-// RUNTIME STATUS (pre-rewrite, kept as-is on purpose): gameplay placement ignores this
-// channel entirely and anchors to the sim body via the "com" addition alone — and does
-// so INCONSISTENTLY across consumers today: the draw root subtracts dir·com.X and com.Y
-// (AttackGlowSystem.RigRoot), while the cadence solve root (CharacterAnimator step 2)
-// and ClipStrideTrack offsets subtract only com.Y. Nonzero authored com.X therefore
-// shifts draw vs solve by up to a few px. The placement rewrite should collapse all
-// three onto one convention; until then, do not add new com.X-dependent behavior.
+// RUNTIME PLACEMENT (one convention, 2026-09-10 — workplan chunk 2): gameplay placement
+// ignores p(t) (the sim body B is the authority; adding p would double-count travel) and
+// hangs the rig off B by the pose anchor c(t), BOTH axes, facing/scale applied:
+//     rigRoot(t)   = B − facingAndScale(c(t))            — RootOffset below
+//     worldPoint   = B + facingAndScale(q(t) − c(t))
+// Every consumer routes through RootOffset/TrySampleAnchor: the draw root
+// (AttackGlowSystem.RigRoot), the cadence + static solve root (CharacterAnimator.SolveRootAt,
+// re-anchored at each candidate phase), and ClipStrideTrack's body-relative offsets. The
+// editor's com-anchored placement (root = anchor − com·scale) is the same math.
 public static class BodyPath
 {
     public const string ChannelName = "body_path";
+    public const string AnchorName  = "com";   // the pose anchor c(t), rig units, root-local
+
+    // c(t) and its t-derivative (sparse C1 track — AnimAdditionSampler.SamplePoint). False
+    // when the clip authors no anchor; callers keep their own fallback placement.
+    public static bool TrySampleAnchor(AnimationDocument doc, float t, out Vector2 c, out Vector2 dc)
+        => AnimAdditionSampler.SamplePoint(doc, t, AnchorName, out c, out dc);
+
+    // World offset from the sim body to the rig root for anchor c: −facingAndScale(c). Linear
+    // in c, so it maps an anchor velocity ċ to the root's velocity the same way.
+    public static Vector2 RootOffset(Vector2 c, int facing, float scale)
+    {
+        int dir = facing == 0 ? 1 : facing;
+        return new Vector2(-(dir * c.X * scale), -(c.Y * scale));
+    }
 
     // p(phase) if the clip authored a body path (phase clamped to [0,1]; the sparse
     // sampler holds endpoints — no cyclic wrap, so p(1) is the true final position).

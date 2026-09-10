@@ -10,13 +10,13 @@ namespace MTile;
 // liftoff phases), where the clip prefers it relative to the body, and the authored
 // swing shape between stances. Consumed by StepPlanner; never hand-edited.
 //
-// PLACEMENT CONVENTION (must match the live solve-root, CharacterAnimator.Update step 2:
-// root = T(BodyX, BodyY − com.Y·scale) · S(dir·scale, scale)): offsets here are stored in
-// RIG UNITS at facing +1 with the per-phase authored `com` anchor's Y subtracted, so the
-// runtime placement is exactly
+// PLACEMENT CONVENTION (BodyPath's one contract — the live solve-root and the draw root:
+// root = T(body + RootOffset(c)) · S(dir·scale, scale)): offsets here are stored in RIG
+// UNITS at facing +1 with the per-phase authored `com` anchor c subtracted (both axes), so
+// the runtime placement is exactly
 //     world = bodyPos + (dir · scale · off.X, scale · off.Y).
 // `com` is the authored placement anchor, not a measured center of mass; a clip without
-// one falls back to com.Y = 0, mirroring the live comBaseY fallback.
+// one falls back to c = 0, mirroring the live SolveRootAt fallback.
 //
 // STANCE SEMANTICS mirror WeightedContactsAtPhase: a keyframe's contacts hold over
 // [t_k, t_{k+1}) — so a stance is a maximal run of consecutive keyframes labeling the
@@ -119,7 +119,7 @@ public sealed class ClipStrideTrack
             AnimationSampler.SampleSmooth(doc, p, a, b, c, d, dst);
             var w = dst.ComputeWorld(Affine2.Identity);
             Vector2 tip = w[bone].Translation;
-            if (AnimAdditionSampler.SamplePoint(doc, p, "com", out var com)) tip.Y -= com.Y;
+            if (BodyPath.TrySampleAnchor(doc, p, out var com, out _)) tip -= com;
             return tip;
         }
 

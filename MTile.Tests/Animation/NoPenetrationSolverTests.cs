@@ -39,7 +39,7 @@ public class NoPenetrationSolverTests
         // hand (and anything further out) penetrates. Solid is on +X (the wall the body faces);
         // outward normal points back toward −X (open space).
         anim.TryComReference(out var comL);
-        var root = Affine2.FromTRS(new Vector2(pos.X, pos.Y - comL.Y * 0.6f), 0f, new Vector2(0.6f, 0.6f));
+        var root = Affine2.FromTRS(pos + BodyPath.RootOffset(comL, facing, 0.6f), 0f, new Vector2(0.6f, 0.6f));
         float natHandX = anim.Pose.ComputeWorld(root)[hand].Translation.X;
         const float margin = 0.5f;
         float wallX = natHandX - 1.5f;

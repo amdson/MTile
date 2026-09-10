@@ -88,7 +88,8 @@ public sealed partial class CharacterAnimator
     private readonly SkeletonPose _pose;    // live output, eased each frame
     private readonly SkeletonPose _target;  // target assembled this frame
     private readonly SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
-    private readonly SkeletonPose _scratch;     // solve scratch: the composed, Δθ-corrected pose
+    private readonly SkeletonPose _scratch;     // pose scratch: contact capture, pose matching, the static
+                                                // solve's dormancy check (the solve's own pose is _eval.Pose)
     // DESIGN INVARIANT (decision 2026-07-14): every constraint evaluates the FINAL composed,
     // Δθ-corrected pose — the one that gets drawn. No constraint reads an intermediate pose,
     // and there is exactly ONE solve per frame over the full objective; conflicts between
@@ -99,38 +100,30 @@ public sealed partial class CharacterAnimator
     // surfacing it as a weight problem). The foot-swap stall that motivated them is fixed at
     // its actual root — contact RELEASE bookkeeping (see RefreshContacts' time fade).
 
-    // A planted contact the cadence solver pins this frame: a bone whose tip should
-    // stay at Target (world). Captured when the label appears, held until it drops.
-    private struct ActiveContact
-    {
-        public int           Bone;
-        public Vector2       Target;
-        public float         Weight;
-        public ContactSource Source;
-    }
+    // The planted contacts the cadence solver pins this frame (ActiveContact — SolveProblem.cs):
+    // captured when a label appears, held until it drops (RefreshContacts owns the lifecycle);
+    // the solve reads a FROZEN copy (FreezeProblem).
     private readonly List<ActiveContact> _contacts = new();
     // External fixed-point pins resolved from this frame's sample (bone index + world target).
     // Held at the HARD tier by FixedPointConstraint; frozen for the duration of one solve.
     private readonly List<(int bone, Vector2 target)> _pins = new();
-    private const int MaxPins = 4;   // sizes the residual scratch; excess pins are dropped
+    private const int MaxPins = SolveProblem.MaxPins;
     // No-penetration half-planes resolved from this frame's sample. Frozen for one solve; each
     // emits one row per rig bone (NoPenetrationConstraint) — the limbs the solver pushes out.
     private readonly List<SolverSurface> _surfaces = new();
-    private const int MaxSurfaces = 8;   // sizes the residual scratch; excess surfaces are dropped
-                                         // (terrain extraction emits a handful + the wall plane)
-    // How near an upward-facing face must be to a toe to count as SUPPORTING its plant. One
-    // meaning, two users that must agree: SnapToSupport captures the target onto such a face,
-    // and NoPenetrationConstraint.SkipPair mutes its own row against the same face because the
-    // contact now owns it. If they disagreed, a plant could be snapped to a face that still
-    // fires a no-pen row against it, or held off a face that stays muted.
-    private const float ContactSupportBand = 8f;
+    private const int MaxSurfaces = SolveProblem.MaxSurfaces;
+    // Support band shared with NoPenetrationConstraint.SkipPair — documented on SolveProblem.
+    private const float ContactSupportBand = SolveProblem.ContactSupportBand;
+    // Variable layout of x (documented on SolveProblem).
+    private const int IdxPhi = SolveProblem.IdxPhi, IdxDy = SolveProblem.IdxDy,
+                      IdxDx = SolveProblem.IdxDx, IdxTheta0 = SolveProblem.IdxTheta0;
     // Whether any surface can plausibly engage this frame (sample.SurfacesNear) — gates the
     // off-locomotion static solve so dormant terrain planes don't defeat the fast path.
     private bool _surfacesNear;
     // Scratch for feathered contact weights: (bone, w, dw/dφ) at some phase. Filled by
     // WeightedContactsAtPhase — at the entry phase for RefreshContacts' capture/release
-    // bookkeeping, then at each candidate φ+Δφ inside the solve (BuildSolvePose) so the
-    // contact rows read a LIVE weight (§4.2).
+    // bookkeeping (the solve itself reads the FROZEN per-contact weight — see
+    // PlantedContactsConstraint).
     private readonly List<(int bone, float weight, float dweight)> _weightBuf = new();
     private float _prevPhaseStep;   // Δφ_prev for the momentum prior
 
@@ -157,10 +150,7 @@ public sealed partial class CharacterAnimator
     private readonly float[]      _thetaEmitted;
     private readonly float[]      _lambdaSmooth;
     private readonly float[]      _easeB;
-    // Per-solve smoothness targets t_i = wrapAngle(emitted_i − composedEntry_i): last frame's
-    // deviation from THIS frame's composed base at the entry phase. Filled at each solve start
-    // (FillSmoothTargets, after BuildSolvePose at x = 0); constant for the whole Minimize.
-    private readonly float[]      _smoothTarget;
+    //   (the per-solve smoothness targets t_i live in _problem.SmoothTarget — FillSmoothTargets)
     private bool                  _haveEmitted;   // false until the first frame has been drawn
     // private float                 _leanEase;      // eased locomotion lean (post-solve additive)
 
@@ -213,11 +203,8 @@ public sealed partial class CharacterAnimator
     private readonly float[]             _solveVars, _solveLo, _solveHi;
     private readonly LeastSquaresSolver.ResidualFn _cadenceResiduals;
     private readonly LeastSquaresSolver.JacobianFn _cadenceJacobian;   // analytic J (replaces FD)
-    private readonly float[]             _angVel;   // per-bone clip dθ/dt scratch for the Jacobian
-    private readonly float[]             _colX, _colY;   // ∂p/∂x column scratch for the point Jacobian
-    private readonly float[]             _colX2, _colY2;  // second point-Jacobian scratch (the aim's other hand)
     private readonly bool[]              _isCore;        // bone is torso (hip/chest/head) → stiff Tikhonov λ_θ
-    // The composite objective, assembled per frame into _frameComposite: the geometric core
+    // The composite objective, assembled per frame into _problem.Blocks: the geometric core
     // head (contacts, pins, no-pen, aim), then any driver-contributed blocks (FrameInputs.
     // Constraints — still inside the geometric band), then the prior tail (continuity, rate
     // floor, com, Tikhonov, smoothness). List order IS the residual/Jacobian row order the LM
@@ -225,12 +212,15 @@ public sealed partial class CharacterAnimator
     // block offsets by walking this list (no more triple-maintained row arithmetic).
     private readonly ISolveConstraint[]      _coreGeom;
     private readonly ISolveConstraint[]      _corePriors;
-    private readonly List<ISolveConstraint>  _frameComposite = new();
     private readonly int                     _maxResiduals;   // LM core's row capacity (diag scratch sizing)
-    // Per-solve context the residual closure reads (set just before each Minimize call).
-    private AnimationDocument _solveClip;
-    private float             _solvePhi;
-    private Affine2           _solveRoot;
+    // THE SOLVE CORE (workplan chunk 1.5 — SolveProblem.cs / SolveObjective.cs / SolveConstraints.cs):
+    // every solve FREEZES its inputs into _problem (FreezeProblem), and every residual/Jacobian
+    // evaluation is then a pure function of (_problem, x) writing its forward pass into _eval.
+    // Both are preallocated once; the LM core is handed closures over them (_cadenceResiduals /
+    // _cadenceJacobian). Between solves _problem keeps the LAST solve's inputs, which is what
+    // the diagnostics (SolvedBoneTipWorld, MaxJacobianError, …) re-evaluate.
+    private readonly SolveProblem _problem;
+    private readonly PoseEval     _eval;
     private float             _phaseFloor;        // speed-derived Δφ floor for PhaseRateFloorConstraint (0 = inert)
     private float             _phaseAccelBox;     // this frame's |Δφ − Δφ_prev| bound = MaxPhaseAccel·dt² (0 = no box)
     private float             _phaseAccelNorm;    // 1/(dt²·PhaseAccelRef): (Δφ − Δφ_prev)·norm = acceleration in PhaseAccelRef units
@@ -248,10 +238,10 @@ public sealed partial class CharacterAnimator
     private bool              _haveCorr;          // a Δθ-correction solve ran this frame
 
     // Action-aim state (the stab re-aim, §STAB_AIM_PLAN), resolved each frame in step 1.7 and
-    // frozen for the solve. _aimTarget (û*) is captured once at solve start from the Δθ=0 pose.
+    // frozen for the solve. û* is captured once at solve start from the Δθ=0 pose into
+    // _problem.AimTarget (CaptureAimTarget).
     private bool    _aimActive;
     private Vector2 _aimDir;       // world input aim direction (unit) this frame
-    private Vector2 _aimTarget;    // frozen target unit vector û* the live aim vector is driven onto
     private int     _aimFacing;    // facing the reference rotation is measured from
     private readonly int _aimBoneL, _aimBoneR;   // the L→R hand pair whose vector encodes the aim
 
@@ -365,7 +355,6 @@ public sealed partial class CharacterAnimator
         _thetaEmitted = new float[rig.Count];
         _lambdaSmooth = new float[rig.Count];
         _easeB        = new float[rig.Count];
-        _smoothTarget = new float[rig.Count];
         _overlays  = new OverlayStack(rig, _regionMasks);
         _baseBlend = _overlays.BaseBlend;   // alias — the Jacobian reads the stack's array directly
 
@@ -389,11 +378,8 @@ public sealed partial class CharacterAnimator
         _solveVars = new float[nv];
         _solveLo   = new float[nv];
         _solveHi   = new float[nv];
-        _angVel    = new float[rig.Count];
-        _colX      = new float[nv];
-        _colY      = new float[nv];
-        _colX2     = new float[nv];
-        _colY2     = new float[nv];
+        _problem   = new SolveProblem(rig);
+        _eval      = new PoseEval(rig, nv);
         // The rig's REACH: longest root→tip cumulative bone length, in world px. The unit the
         // pixel residuals are expressed in (see _invCharLen). Computed once; topological bone
         // order (parents precede children) makes this a single pass.
@@ -416,27 +402,32 @@ public sealed partial class CharacterAnimator
             string nm = rig.Bones[i].Name;
             _isCore[i] = nm == "hip" || nm == "chest" || nm == "head";
         }
-        _cadenceResiduals = CadenceResiduals;
-        _cadenceJacobian  = CadenceJacobian;
+        // The problem's per-animator constants (everything else is frozen per solve).
+        _problem.Overlays  = _overlays;  _problem.BaseBlend    = _baseBlend;
+        _problem.Scale     = scale;      _problem.InvCharLen   = _invCharLen;
+        _problem.IsCore    = _isCore;    _problem.LambdaSmooth = _lambdaSmooth;
+        _problem.AimBoneL  = _aimBoneL;  _problem.AimBoneR     = _aimBoneR;
+        _cadenceResiduals = (x, r)           => SolveObjective.Residuals(_problem, _eval, x, r);
+        _cadenceJacobian  = (x, jac, stride) => SolveObjective.Jacobian(_problem, _eval, x, jac, stride);
         // The composite objective's core blocks (§11), assembled with any driver contributions
-        // into _frameComposite each frame (step 1.8). Order is load-bearing: it IS the
+        // into _problem.Blocks each frame (step 1.8). Order is load-bearing: it IS the
         // residual/Jacobian row order the LM core and the FD-vs-analytic oracle assume.
-        // Preallocated once → zero per-frame allocation.
+        // Stateless blocks, preallocated once → zero per-frame allocation.
         _coreGeom = new ISolveConstraint[]
         {
-            new PlantedContactsConstraint(this),   // 2 rows/contact: H no-slip (Δφ) + V ground hold (δ)
-            new SwingTargetConstraint(this),       // 2 rows/planned swing foot: soft follow toward the landing
-            new FixedPointConstraint(this),        // 2 rows/pin: both-axis hard external pin (Δθ IK)
-            new NoPenetrationConstraint(this),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
-            new ActionAimConstraint(this),         // 1 row: re-aim the action overlay along the input dir (Δθ)
+            new PlantedContactsConstraint(),   // 2 rows/contact: H no-slip (Δφ) + V ground hold (δ)
+            new SwingTargetConstraint(),       // 2 rows/planned swing foot: soft follow toward the landing
+            new FixedPointConstraint(),        // 2 rows/pin: both-axis hard external pin (Δθ IK)
+            new NoPenetrationConstraint(),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
+            new ActionAimConstraint(),         // 1 row: re-aim the action overlay along the input dir (Δθ)
         };
         _corePriors = new ISolveConstraint[]
         {
-            new PlaybackContinuityConstraint(this),// 1 row: Δφ momentum prior
-            new PhaseRateFloorConstraint(this),    // 1 row: one-sided Δφ ≥ speed-derived floor (anti-collapse)
-            new ComOffsetConstraint(this),         // 2 rows: soft com pulls δ, d.x → baseline
-            new PosePriorConstraint(this),         // N rows: Tikhonov on each Δθ (toward 0)
-            new ThetaSmoothnessConstraint(this),   // N rows: final angle toward last EMITTED (the in-solve ease)
+            new PlaybackContinuityConstraint(),// 1 row: Δφ momentum prior
+            new PhaseRateFloorConstraint(),    // 1 row: one-sided Δφ ≥ speed-derived floor (anti-collapse)
+            new ComOffsetConstraint(),         // 2 rows: soft com pulls δ, d.x → baseline
+            new PosePriorConstraint(),         // N rows: Tikhonov on each Δθ (toward 0)
+            new ThetaSmoothnessConstraint(),   // N rows: final angle toward last EMITTED (the in-solve ease)
         };
 
         // Bind each clip category to the first authored animation whose Type matches
@@ -530,6 +521,7 @@ public sealed partial class CharacterAnimator
         }
         else _state.ClipTime += dt;
         _timeMode = mode;
+        _problem.WrapPhase = mode is ClipTimeMode.CadencePhase or ClipTimeMode.IdleBob or ClipTimeMode.Hold;
         bool locomotion = mode == ClipTimeMode.CadencePhase;   // the cadence-solvable clip family
 
         // 1.4 The driver's contributions to this frame's solve inputs — overlay requests,
@@ -621,10 +613,10 @@ public sealed partial class CharacterAnimator
         //     driver-contributed blocks (still inside the geometric band, before the priors),
         //     then the prior tail. The list is FROZEN for the frame — both solves and the
         //     diagnostics walk it, and its order is the LM core's row order.
-        _frameComposite.Clear();
-        foreach (var c in _coreGeom)           _frameComposite.Add(c);
-        foreach (var c in _frame.Constraints)  _frameComposite.Add(c);
-        foreach (var c in _corePriors)         _frameComposite.Add(c);
+        _problem.Blocks.Clear();
+        foreach (var c in _coreGeom)           _problem.Blocks.Add(c);
+        foreach (var c in _frame.Constraints)  _problem.Blocks.Add(c);
+        foreach (var c in _corePriors)         _problem.Blocks.Add(c);
 
         // 2. Advance the locomotion phase. A Walk/WalkBack clip with contact labels is
         //    cadence-driven: the solver picks Δφ so the planted foot doesn't slip
@@ -671,21 +663,17 @@ public sealed partial class CharacterAnimator
 
         if (locomotion && hasClip && HasContacts(anim))
         {
-            int dir = s.Facing == 0 ? 1 : s.Facing;
-            // Solve-root: hip placed at the body center, plus the com baseline Draw uses
-            // (rootY = BodyY − com.Y·scale), so contact targets are captured at the SAME
-            // height the pose is drawn and the solved δ perturbs about it. The horizontal
-            // no-slip is unaffected by the Y shift. scale/facing match Draw so foot travel
-            // and body motion share world units.
-            float comBaseY = 0f;
-            if (SampleNamedPoint(anim, _state.Phase, "com", out var comL))
-                comBaseY = -comL.Y * _scale;
-            var root = Affine2.FromTRS(new Vector2(s.Position.X, s.Position.Y + comBaseY), 0f,
-                                       new Vector2(dir * _scale, _scale));
+            // Solve-root: the draw's placement (BodyPath.RootOffset — body minus the pose anchor
+            // c, both axes, facing/scale applied), so contact targets are captured in the SAME
+            // frame the pose is drawn and the solved d perturbs about it. This entry-phase root
+            // is RefreshContacts' capture frame; inside the solve SolveForward.Run re-anchors at
+            // each candidate φ+Δφ, because the drawn root samples c at the ADVANCED phase.
+            _problem.Clip = anim; _problem.Body = s.Position; _problem.Dir = s.Facing == 0 ? 1 : s.Facing;
+            var root = SolveForward.RootAt(_problem, _state.Phase);
             RefreshContacts(anim, _state.Phase, dt, root);
             if (_contacts.Count > 0)
             {
-                float dphi = SolvePhaseStepLm(anim, _state.Phase, root);
+                float dphi = SolvePhaseStepLm(anim, _state.Phase);
                 _state.Phase   = Wrap01(_state.Phase + dphi);
                 _prevPhaseStep = dphi;
             }
@@ -750,7 +738,7 @@ public sealed partial class CharacterAnimator
         // 3.6 The smoothing/correction channel — ONE of two mutually exclusive paths, both
         //     minimizing the same objective (polish item 1):
         //     · An LM solve ran (_haveCorr): its Δθ already balances the geometric rows against
-        //       the smoothness prior; apply it onto the COMPOSED pose (matching BuildSolvePose's
+        //       the smoothness prior; apply it onto the COMPOSED pose (matching SolveForward.Run's
         //       order, so the drawn skeleton is the one the solver optimized; post-compose means
         //       a pin can bend an overlay-owned bone — the vault hand).
         //     · No geometric rows this frame: the objective is diagonal per bone and its optimum
@@ -863,14 +851,7 @@ public sealed partial class CharacterAnimator
     // the ground" rule, which can't ever let both feet leave the ground (a run's flight
     // phase). Returns false for clips that don't author one (the host then falls back).
     public bool TryComReference(out Vector2 comLocal)
-        => SampleNamedPoint(_curDoc, _curComT, "com", out comLocal);
-
-    // Named root-space Point track at normalized time t — the shared sparse-channel C1
-    // sampler (AnimAdditionSampler.SamplePoint): only keyframes that author the point are
-    // its keys, so gaps bridge smoothly instead of hold-then-snap, and motion between
-    // authored keys is Catmull-Rom like the pose spline. Allocation-free.
-    private static bool SampleNamedPoint(AnimationDocument doc, float t, string name, out Vector2 p)
-        => AnimAdditionSampler.SamplePoint(doc, t, name, out p);
+        => BodyPath.TrySampleAnchor(_curDoc, _curComT, out comLocal, out _);
 
     // --- clip selection ------------------------------------------------------
     // (Clip selection policy lives in the move drivers — Animation/MoveDriver.cs. The old
@@ -1152,9 +1133,9 @@ public sealed partial class CharacterAnimator
     // The foot's vertical arc (lift over the stance) is intrinsic to the cadence and is
     // reconciled by the ground-hold row + δ — penalizing it in the no-slip term made the
     // arc dominate at walk speed and froze the cadence (see PlantedContactsConstraint).
-    private float SolvePhaseStepLm(AnimationDocument clip, float phi, in Affine2 root)
+    private float SolvePhaseStepLm(AnimationDocument clip, float phi)
     {
-        _solveClip = clip; _solvePhi = phi; _solveRoot = root;
+        // (Clip/Body/Dir were placed by the caller, step 2, before RefreshContacts captured.)
         var cfg = _frame.Solver;
         int n = IdxTheta0 + _skeleton.Count;  // x = [Δφ, δ, d.x, Δθ_0…]
 
@@ -1180,8 +1161,7 @@ public sealed partial class CharacterAnimator
         _solveLo[IdxDx]  = -cfg.HorizOffsetLimit; _solveHi[IdxDx]  = cfg.HorizOffsetLimit;
         for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
         Array.Clear(_solveVars, 0, n);        // d, Δθ start at 0 (baseline pose); Δφ seeded below
-        FillSmoothTargets(n);                 // freeze t_i (emitted deviation) before any residual eval
-        CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
+        FreezeProblem(clip, phi, _phaseFloor, n);   // every input the rows read, incl. t_i and û* off the x = 0 pose
 
         // The cadence objective is NON-CONVEX in Δφ: a planted foot's horizontal track
         // is non-monotonic over a stance arc (it can drift forward before sweeping back),
@@ -1230,16 +1210,11 @@ public sealed partial class CharacterAnimator
     private void SolveStaticPose(AnimationDocument anim, in CharacterAnimSample s)
     {
         var cfg = _frame.Solver;
-        int dir = s.Facing == 0 ? 1 : s.Facing;
         float phi = SampleT(anim, in s);
-        float comBaseY = 0f;
-        if (SampleNamedPoint(anim, phi, "com", out var comL)) comBaseY = -comL.Y * _scale;
-        var root = Affine2.FromTRS(new Vector2(s.Position.X, s.Position.Y + comBaseY), 0f,
-                                   new Vector2(dir * _scale, _scale));
 
         _contacts.Clear();                  // no planted contacts on this path
-        _solveClip = anim; _solvePhi = phi; _solveRoot = root;
-        _phaseFloor = 0f;                   // Δφ locked below — the rate-floor row must stay inert
+        _problem.Clip = anim; _problem.Body = s.Position; _problem.Dir = s.Facing == 0 ? 1 : s.Facing;
+        var root = SolveForward.RootAt(_problem, _problem.TimeAt(phi));   // the dormancy pre-check below reads it directly
         int n = IdxTheta0 + _skeleton.Count;
         _solveLo[IdxPhi] = 0f;                    _solveHi[IdxPhi] = 0f;   // Δφ locked — no cadence here
         _solveLo[IdxDy]  = -cfg.VertOffsetLimit;  _solveHi[IdxDy]  = cfg.VertOffsetLimit;
@@ -1261,7 +1236,7 @@ public sealed partial class CharacterAnimator
             // clip may plant tips slightly past a plane before the smoothness ease pulls
             // them back to last frame's (already-solved, clear) emitted pose. Checking
             // the drawn candidate makes skip ⇒ the drawn pose really is clear.
-            AnimationSampler.SampleSmooth(_solveClip, Wrap01(_solvePhi), _kfA, _kfB, _kfC, _kfD, _scratch);
+            AnimationSampler.SampleSmooth(anim, _problem.TimeAt(phi), _kfA, _kfB, _kfC, _kfD, _scratch);
             _overlays.Compose(_scratch);
             if (_haveEmitted)
                 for (int i = 0; i < _skeleton.Count; i++)
@@ -1269,7 +1244,7 @@ public sealed partial class CharacterAnimator
                     float g = MathHelper.WrapAngle(_scratch.Local[i].Rotation - _thetaEmitted[i]);
                     _scratch.Local[i].Rotation = _thetaEmitted[i] + _easeB[i] * g;
                 }
-            _scratch.ComputeWorld(_solveRoot);
+            _scratch.ComputeWorld(root);
             float worst = float.MinValue;
             foreach (var srf in _surfaces)
                 for (int b = 0; b < _skeleton.Count; b++)
@@ -1282,8 +1257,7 @@ public sealed partial class CharacterAnimator
                 }
             if (worst <= StaticSolveSlack) return;   // all rows dormant — nothing to solve
         }
-        FillSmoothTargets(n);                 // freeze t_i (emitted deviation) before any residual eval
-        CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
+        FreezeProblem(anim, phi, 0f, n);      // floor 0: Δφ is locked, the rate-floor row must stay inert
 
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n),
@@ -1302,52 +1276,36 @@ public sealed partial class CharacterAnimator
         return _ls.Cost(_cadenceResiduals, s.Slice(0, n));
     }
 
-    // The cadence solve's forward pass: build the COMPOSED, corrected world pose for a
-    // candidate x = [Δφ, δ, Δθ…] and leave it in _scratch (world buffer valid under
-    // _solveRoot). One place so the residual and the (coming) analytic Jacobian evaluate
-    // the SAME skeleton. Order mirrors Update's draw exactly: sample the base clip at
-    // φ+Δφ, add the per-bone Δθ, then paint the action overlay on top (the linear blend).
-    //
-    // Jacobian note (next step, ANIMATION_SOLVER_PLAN): the analytic columns read straight
-    // off the buffer this leaves behind — for a contact tip p on bone b, ∂p/∂Δθ_j is the
-    // 2D lever arm perp(p − origin_j) for each ancestor joint j (0 otherwise), scaled by
-    // the blend's (1−_overlayWeight[j]); ∂p/∂Δφ chains the same FK over a d-sample-by-φ
-    // companion; δ and the priors are constant columns. So this method is the substrate
-    // both paths share — keep the FK/compose/sample ordering here authoritative.
-    private void BuildSolvePose(ReadOnlySpan<float> x)
+    // FREEZE this solve's problem (SolveProblem.cs): copy every input a residual or Jacobian may
+    // read — the geometric rows (contacts, planner swing targets, pins, surfaces, the aim), the
+    // config snapshot, the prior anchors — then capture the two reference-pose targets (t_i, û*)
+    // off the x = 0 forward pass. The placement (Clip/Body/Dir) is the caller's: it was set
+    // before RefreshContacts captured its targets in that frame. `n` = the variable count, and
+    // _solveVars must be all-zero (the reference-pose captures evaluate it). After this nothing
+    // writes _problem until the solve ends; the forward pass and every block are pure in it.
+    private void FreezeProblem(AnimationDocument clip, float phi, float phaseFloor, int n)
     {
-        AnimationSampler.SampleSmooth(_solveClip, Wrap01(_solvePhi + x[0]), _kfA, _kfB, _kfC, _kfD, _scratch);
-        _overlays.Compose(_scratch);                                              // overlay first (linear)
-        int bones = _skeleton.Count;
-        // Δθ is applied onto the COMPOSED pose, not the base — so the IK correction survives an
-        // overlay that fully owns a bone (a vault hand owned by the ClimbHands overlay). Pre-compose
-        // Δθ would be overwritten by the overlay paint's lerp and the pin couldn't bend that limb.
-        for (int i = 0; i < bones; i++) _scratch.Local[i].Rotation += x[IdxTheta0 + i];   // post-compose IK
-        _scratch.ComputeWorld(_solveRoot);
-    }
-
-    // The composite objective (§11.3), ASSEMBLED per frame into `_frameComposite` (step 1.8:
-    // core geometric head + driver contributions + prior tail): one shared forward pass
-    // (BuildSolvePose) leaves _scratch's world buffer valid, then each constraint emits its
-    // rows. Row order = list order (load-bearing: the LM core and the FD-vs-analytic oracle
-    // assume a fixed row order; the list is frozen for the frame).
-    private int CadenceResiduals(ReadOnlySpan<float> x, Span<float> r)
-    {
-        BuildSolvePose(x);            // _scratch world is now the composed, corrected pose at φ+Δφ
-        int row = 0;
-        foreach (var c in _frameComposite) row += c.Residuals(x, r.Slice(row));
-        return row;
-    }
-
-    private void CadenceJacobian(ReadOnlySpan<float> x, Span<float> jac, int stride)
-    {
-        BuildSolvePose(x);                       // _scratch world = composed pose at φ+Δφ
-        // ω_j: per-bone angular velocity of the BASE clip at φ+Δφ — the Δφ channel, read by
-        // PointJacobianColumns. Sampled once here so every constraint shares it.
-        AnimationSampler.SampleAngularVelocity(_solveClip, Wrap01(_solvePhi + x[IdxPhi]),
-                                               _kfA, _kfB, _kfC, _kfD, _angVel.AsSpan(0, _skeleton.Count));
-        int row = 0;
-        foreach (var c in _frameComposite) row += c.Jacobian(x, jac, stride, row);
+        var p = _problem;
+        p.Clip = clip; p.Phi = phi;
+        p.Contacts.Clear(); p.Contacts.AddRange(_contacts);
+        p.Pins.Clear();     p.Pins.AddRange(_pins);
+        p.Surfaces.Clear(); p.Surfaces.AddRange(_surfaces);
+        p.Swings.Clear();
+        for (int i = 0; i < Planner.FeetCount; i++)
+        {
+            ref readonly var pl = ref Planner.Plans[i];
+            if (pl.State == FootPlanState.Swing && pl.HasSupport) p.Swings.Add((pl.Bone, pl.Target));
+        }
+        p.AimActive      = _aimActive;
+        p.Cfg            = _frame.Solver;
+        p.PhaseFloor     = phaseFloor;
+        p.PhaseAccelNorm = _phaseAccelNorm;
+        p.PrevPhaseStep  = _prevPhaseStep;
+        p.EaseBase       = _easeBase;
+        p.DyEmitted      = _dyEmitted;
+        p.DxEmitted      = _dxEmitted;
+        FillSmoothTargets(n);                 // freeze t_i (emitted deviation) before any residual eval
+        CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
     }
 
     private int ActiveIndex(int bone)
@@ -1399,7 +1357,7 @@ public sealed partial class CharacterAnimator
 
     // Freeze this solve's smoothness targets t_i = wrapAngle(emitted_i − composedEntry_i): the
     // deviation of last frame's EMITTED pose from THIS frame's composed base at the entry phase
-    // (Δφ = Δθ = 0 — BuildSolvePose at the zeroed vars leaves that base in _scratch.Local).
+    // (Δφ = Δθ = 0 — SolveForward.Run at the zeroed vars leaves that base in _eval.Pose.Local).
     // The ThetaSmoothnessConstraint pulls each Δθ_i toward t_i, which is exactly the retired
     // ease's "follow from where you were" — measured in DEVIATION space so clip playback is
     // free (see the constraint's comment). Before the first drawn frame the targets are 0
@@ -1407,10 +1365,11 @@ public sealed partial class CharacterAnimator
     // is all-zero, before the Δφ seed search evaluates any residual.
     private void FillSmoothTargets(int n)
     {
-        if (!_haveEmitted) { Array.Clear(_smoothTarget, 0, _skeleton.Count); return; }
-        BuildSolvePose(_solveVars.AsSpan(0, n));   // all-zero ⇒ composed base at the entry phase
+        var t = _problem.SmoothTarget;
+        if (!_haveEmitted) { Array.Clear(t, 0, _skeleton.Count); return; }
+        SolveForward.Run(_problem, _solveVars.AsSpan(0, n), _eval);   // all-zero ⇒ composed base at the entry phase
         for (int i = 0; i < _skeleton.Count; i++)
-            _smoothTarget[i] = MathHelper.WrapAngle(_thetaEmitted[i] - _scratch.Local[i].Rotation);
+            t[i] = MathHelper.WrapAngle(_thetaEmitted[i] - _eval.Pose.Local[i].Rotation);
     }
 
     // Freeze the aim target û* for this frame's solve: the authored reference aim (the L→R hand
@@ -1420,20 +1379,20 @@ public sealed partial class CharacterAnimator
     private void CaptureAimTarget(int n)
     {
         if (!_aimActive) return;
-        BuildSolvePose(_solveVars.AsSpan(0, n));   // _solveVars == 0 here ⇒ Δθ=0, Δφ=0 reference pose
-        Vector2 pL = _scratch.WorldOf(_aimBoneL).Translation;
-        Vector2 pR = _scratch.WorldOf(_aimBoneR).Translation;
+        SolveForward.Run(_problem, _solveVars.AsSpan(0, n), _eval);   // _solveVars == 0 here ⇒ Δθ=0, Δφ=0 reference pose
+        Vector2 pL = _eval.Pose.WorldOf(_aimBoneL).Translation;
+        Vector2 pR = _eval.Pose.WorldOf(_aimBoneR).Translation;
         Vector2 aRef = pR - pL;
         // R takes f=(facing,0) → _aimDir: cosθ = f·d = facing·d.x, sinθ = f×d = facing·d.y (both unit).
         float c = _aimFacing * _aimDir.X, sgn = _aimFacing * _aimDir.Y;
         Vector2 rot = new Vector2(aRef.X * c - aRef.Y * sgn, aRef.X * sgn + aRef.Y * c);
         float len = rot.Length();
-        _aimTarget = len > 1e-6f ? rot / len : new Vector2(_aimFacing, 0f);
+        _problem.AimTarget = len > 1e-6f ? rot / len : new Vector2(_aimFacing, 0f);
     }
 
     private void Rot(int bone, float delta)       { if (bone >= 0) _target.Local[bone].Rotation    += delta; }
     private void Translate(int bone, Vector2 d)    { if (bone >= 0) _target.Local[bone].Translation += d;     }
     private void Scale(int bone, Vector2 d)        { if (bone >= 0) _target.Local[bone].Scale       += d;     }
 
-    private static float Wrap01(float x) => x - MathF.Floor(x);
+    private static float Wrap01(float x) => SolveProblem.Wrap01(x);
 }

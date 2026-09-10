@@ -43,7 +43,7 @@ public class ParkourGripSolverTests
                 movementProgress: progress));
 
         anim.TryComReference(out var comL);
-        var root = Affine2.FromTRS(new Vector2(pos.X, pos.Y - comL.Y * 0.6f), 0f, new Vector2(facing * 0.6f, 0.6f));
+        var root = Affine2.FromTRS(pos + BodyPath.RootOffset(comL, facing, 0.6f), 0f, new Vector2(facing * 0.6f, 0.6f));
         Vector2 natHand = anim.Pose.ComputeWorld(root)[hand].Translation;
         var corner = natHand + new Vector2(1.5f, -1.5f);
         _o.WriteLine($"natHand=({natHand.X:0.00},{natHand.Y:0.00}) corner=({corner.X:0.00},{corner.Y:0.00})");

@@ -49,8 +49,13 @@ public static class AnimAdditionSampler
     // arcs are one-shots, and a constant track is unaffected). Holds the nearest end value
     // outside the authored range. Allocation-free. False if nothing authors the point.
     public static bool SamplePoint(AnimationDocument doc, float t, string name, out Vector2 p)
+        => SamplePoint(doc, t, name, out p, out _);
+
+    // SamplePoint plus its exact t-derivative dp/dt (the same Hermite segment; zero where the
+    // track holds an end value).
+    public static bool SamplePoint(AnimationDocument doc, float t, string name, out Vector2 p, out Vector2 dp)
     {
-        p = default;
+        p = default; dp = default;
         var ks = doc?.Keyframes;
         if (ks == null || ks.Count == 0) return false;
 
@@ -84,6 +89,9 @@ public static class AnimAdditionSampler
         float h00 = 2f * u3 - 3f * u2 + 1f, h10 = u3 - 2f * u2 + u;
         float h01 = -2f * u3 + 3f * u2,     h11 = u3 - u2;
         p = h00 * p0 + h * h10 * m0 + h01 * p1 + h * h11 * m1;
+        float h00p = 6f * u2 - 6f * u, h10p = 3f * u2 - 4f * u + 1f;
+        float h01p = -6f * u2 + 6f * u, h11p = 3f * u2 - 2f * u;
+        dp = (h00p * p0 + h01p * p1) / h + h10p * m0 + h11p * m1;   // (1/h)·dp/du
         return true;
     }
 

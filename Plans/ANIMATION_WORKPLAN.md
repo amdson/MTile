@@ -203,4 +203,18 @@ harness, and chunk 2's edits are smaller to redo in the new style than vice vers
 
 - `Animation/BodyPath.cs` + the `edref` → `body_path` migration (7 clips): the
   shared placement sampler and cycle-displacement query that chunks 2, 3, 5,
-  and 7 consume. Runtime placement still anchors via `com` alone until chunk 2.
+  and 7 consume.
+- Chunk 1 (2026-09-10): the stretch channel in the Δφ column (`SampleAngularVelocity`'s
+  `transVel`, the FD oracle now covers the rabbit clips + an overlay) and the baseline
+  harness (`MTile.Bench --anim-baseline`, `MTile.Bench/anim_baseline.txt`).
+- Chunk 2 (2026-09-10): one placement contract — `BodyPath.TrySampleAnchor` /
+  `RootOffset` (full `com`, both axes) behind the draw root, the solve root (re-anchored
+  at each candidate phase, with ∂root/∂φ in the Jacobian), and `ClipStrideTrack`. No clip
+  migration was needed (the draw already used the full anchor). Open: `SwingTargetConstraint`
+  still omits the d offset — see runtime §3.
+- Chunk 1.5 (2026-09-10, landed AFTER chunk 2): the functional solve core —
+  `Animation/SolveProblem.cs` (frozen problem + `PoseEval`), `SolveObjective.cs` (forward
+  pass + objective + point primitive), `SolveConstraints.cs` (stateless blocks). Guarded by
+  `AnimSolverGoldenTraceTests` (330 frames bit-identical through the refactor); the FD oracle
+  reports the offending block (`DbgWorstBlock`). Not done: a separate per-block `FdCheck`
+  entry point — the guarded oracle's per-block attribution covers the plan's intent.

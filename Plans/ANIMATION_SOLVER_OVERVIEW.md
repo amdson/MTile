@@ -125,14 +125,20 @@ Tune from `SolveScaleReport()` numbers, not first principles.
 - Headline tests: `AnimSolverTests` (Jacobian parity, well-posedness, vertical offset),
   `FixedPointSolverTests`, `NoPenetrationSolverTests`, `VaultGripSolverTests`,
   `ActionAimSolverTests`, `SmoothingTests`, `SeamGuardTests`.
+- `AnimSolverGoldenTraceTests` — bit-identical replay of the objective (x, residuals, Jacobian
+  at the accepted x and at a perturbation) over six scripted scenarios against
+  `MTile.Tests/Animation/Golden/*.bin.gz`. The guard for behavior-preserving refactors of the
+  solve core; regenerate with `MTILE_GOLDEN_RECORD=1` only when the objective is MEANT to change.
 
 ## Key files
 
 | File | Role |
 |---|---|
-| `Animation/CharacterAnimator.cs` | Update pipeline, clip binding, contacts, overlay stack, solve orchestration |
-| `Animation/CharacterAnimator.Constraints.cs` | The constraint blocks + `PointJacobianColumns`/`Lever` |
-| `Animation/CharacterAnimator.Diagnostics.cs` | FD oracle, SolveScaleReport, debug hooks |
+| `Animation/CharacterAnimator.cs` | Update pipeline, clip binding, contacts, overlay stack, solve orchestration (`FreezeProblem`, the LM call, the Δφ seed search) |
+| `Animation/SolveProblem.cs` | `SolveProblem` (the frozen inputs of one solve, incl. the block list) + `PoseEval` (the forward pass's output) + `ISolveConstraint` |
+| `Animation/SolveObjective.cs` | `SolveForward` (the forward pass: pose, root, Δφ velocities) + `SolveObjective` (residuals/Jacobian over the blocks, `PointJacobianColumns`/`Lever`) |
+| `Animation/SolveConstraints.cs` | The constraint blocks — stateless pure functions of `(SolveProblem, PoseEval, x)` |
+| `Animation/CharacterAnimator.Diagnostics.cs` | FD oracle (per-block attribution), SolveScaleReport, golden-trace capture, debug hooks |
 | `Animation/LeastSquaresSolver.cs` | Allocation-free box-bounded LM (portable MathF) |
 | `Animation/AnimationSampler.cs` | C1 sampling + angular velocity + IsCyclic + SeamMismatch guard |
 | `Animation/AnimSolverConfig.cs` + `configs/anim_solver_config.json` | All weights/limits, hot-reloaded |
