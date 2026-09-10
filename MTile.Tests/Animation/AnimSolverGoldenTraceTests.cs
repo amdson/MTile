@@ -33,6 +33,10 @@ namespace MTile.Tests;
 // fix (SolveProblem.TimeAt): the arc-jump base clip is a 0.45 s clock-mode one-shot held at
 // t = 1 through the grip, and the static solve used to correct its FIRST frame (Wrap01(1) = 0),
 // so the hand needed 0.3–0.6 rad of Δθ to reach a corner 1.5 px away; it now needs ~1e-4.
+// Re-recorded again for the timing stage (chunk 5, T1): the four locomotion scenarios changed
+// by design — Δφ is now locked at 0 in the joint solve (the row layout is unchanged, the
+// momentum/floor rows read 0), contacts are captured at the phase the timing stage produced,
+// and the solved x has no Δφ component.
 public class AnimSolverGoldenTraceTests
 {
     private readonly ITestOutputHelper _o;

@@ -8,6 +8,9 @@ namespace MTile.Tests;
 
 public class AnimSolverTests
 {
+    private readonly Xunit.Abstractions.ITestOutputHelper _o;
+    public AnimSolverTests(Xunit.Abstractions.ITestOutputHelper o) => _o = o;
+
     // --- the least-squares core, in isolation -------------------------------
 
     // Unconstrained: minimize (x-3)² + (y+1)² → (3, -1). Proves the LM loop, normal
@@ -49,11 +52,12 @@ public class AnimSolverTests
 
     // Well-posedness of the Δθ channel under in-solve smoothing (polish item 1 changed this
     // test's premise). Δθ is no longer ~0 on unconstrained bones: the smoothness rows use it
-    // to EASE every bone's deviation — in particular it BRIDGES the once-per-stride Δφ hop
-    // (the pose no longer teleports at a foot-swap; Δθ spans the jump, then decays under the
-    // Tikhonov/smoothness balance). So the proof is now: corrections stay BOUNDED (well inside
-    // the box — no drift to the wall = still well-posed) and DECAY (a bridge is transient:
-    // between hops the steady-state Δθ returns to ~the smoothing lag, not a growing offset).
+    // to EASE every bone's deviation, and with the timing stage owning the phase (chunk 5)
+    // the planted foot's residual stance mismatch lands in a small leg trim that rises and
+    // falls with every stance. So the proof is: corrections stay BOUNDED (well inside the
+    // box — no drift to the wall = still well-posed) and do NOT ACCUMULATE (the stance
+    // pattern repeats at the same amplitude cycle after cycle; a growing offset would show
+    // as the later cycles' peak exceeding the earlier ones').
     [Theory]
     [InlineData("walk", 25f, +1)]
     [InlineData("walk", 25f, -1)]
@@ -66,25 +70,22 @@ public class AnimSolverTests
         var skel = SkeletonExamples.Biped();
         var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
 
+        const int frames = 90;
         float dt = 1f / 30f, vx = speed * facing, x = 0f, maxAll = 0f;
         float prev = anim.State.Phase, totalPhase = 0f;
-        int decayFrames = 0, sampleFrames = 0;
-        float prevMaxTheta = 0f;
-        for (int i = 0; i < 60; i++)
+        float earlyPeak = 0f, latePeak = 0f;   // max |Δθ| over the middle third vs the last third
+        for (int i = 0; i < frames; i++)
         {
             x += vx * dt;
             anim.Update(new CharacterAnimSample(
                 new Vector2(x, 0f), new Vector2(vx, 0f), facing, true, "WalkState", "", dt));
-            float frameMax = 0f;
+            float frameMax = 0f; int maxBone = -1;
             for (int b = 0; b < anim.Skeleton.Count; b++)
-                frameMax = MathF.Max(frameMax, MathF.Abs(anim.AngleCorrection(b)));
+                if (MathF.Abs(anim.AngleCorrection(b)) > frameMax) { frameMax = MathF.Abs(anim.AngleCorrection(b)); maxBone = b; }
             maxAll = MathF.Max(maxAll, frameMax);
-            if (i > 5)
-            {
-                sampleFrames++;
-                if (frameMax <= prevMaxTheta + 1e-4f) decayFrames++;   // shrinking or flat
-            }
-            prevMaxTheta = frameMax;
+            _o.WriteLine($"f{i,2}: max|Δθ| {frameMax:0.0000} ({(maxBone >= 0 ? anim.Skeleton.Bones[maxBone].Name : "-")})  Δφ {anim.PhaseStep:0.0000} φ {anim.State.Phase:0.000}  d=({anim.HorizontalOffset:0.00},{anim.VerticalOffset:0.00})  contacts {anim.ContactCount}");
+            if (i >= frames / 3 && i < 2 * frames / 3) earlyPeak = MathF.Max(earlyPeak, frameMax);
+            if (i >= 2 * frames / 3)                   latePeak  = MathF.Max(latePeak,  frameMax);
             float p = anim.State.Phase, d = p - prev; if (d < -0.5f) d += 1f;
             totalPhase += d; prev = p;
         }
@@ -94,10 +95,9 @@ public class AnimSolverTests
         // ...corrections stay well inside the box (no drift to the wall — well-posed)...
         float box = AnimSolverConfig.Current.AngleCorrLimit;
         Assert.True(maxAll < 0.5f * box, $"max |Δθ| = {maxAll:0.0000} rad — approaching the box ({box})");
-        // ...and they DECAY on most frames (bridges are transient spikes, not accumulation:
-        // a hop bridge grows |Δθ| for a frame, then the smoothing releases it over the next few).
-        Assert.True(decayFrames > sampleFrames / 2,
-            $"|Δθ| grew on {sampleFrames - decayFrames}/{sampleFrames} frames — corrections accumulating?");
+        // ...and they do not ACCUMULATE: the last cycles peak no higher than the earlier ones.
+        Assert.True(latePeak <= 1.25f * earlyPeak + 0.01f,
+            $"|Δθ| peak grew from {earlyPeak:0.0000} to {latePeak:0.0000} rad — corrections accumulating?");
     }
 
     // --- Phase 3: solved vertical offset δ (ComOffset + vertical ground) -----
@@ -221,7 +221,7 @@ public class AnimSolverTests
         var anim = new CharacterAnimator(SkeletonExamples.Load(rig), scale, new[] { clip });
 
         float dt = 1f / 60f, vx = speed * facing, x = 0f, worstGap = 0f, worstJac = 0f;
-        int solves = 0;
+        int solves = 0; string jacWhere = "";
         for (int i = 0; i < 90; i++)
         {
             x += vx * dt;
@@ -235,12 +235,13 @@ public class AnimSolverTests
             var world = anim.Pose.ComputeWorld(root);
             for (int b = 0; b < anim.Skeleton.Count; b++)
                 worstGap = MathF.Max(worstGap, (world[b].Translation - anim.SolvedBoneTipWorld(b)).Length());
-            worstJac = MathF.Max(worstJac, anim.MaxJacobianError());
+            float e = anim.MaxJacobianError();
+            if (e > worstJac) { worstJac = e; jacWhere = $"col {anim.DbgWorstCol} row {anim.DbgWorstRow} [{anim.DbgWorstBlock}] fd {anim.DbgFd:0.0000} vs anal {anim.DbgAnal:0.0000} at frame {i}"; }
         }
 
         Assert.True(solves > 0, "no solve ran — nothing validated");
         Assert.True(worstGap < 1e-2f, $"solved vs rendered tip disagree by {worstGap:0.0000} px");
-        Assert.True(worstJac < 5e-3f, $"analytic Jacobian disagrees with finite differences by {worstJac:0.000000} (rel)");
+        Assert.True(worstJac < 5e-3f, $"analytic Jacobian disagrees with finite differences by {worstJac:0.000000} (rel): {jacWhere}");
     }
 
     private static string StatesDir(string rig = "biped")

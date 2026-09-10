@@ -69,6 +69,19 @@ public sealed class ClipStrideTrack
 
     public FootStrideTrack[] Feet;   // one per opted-in node; empty compile = no opt-in (legal, legacy path)
 
+    // AUTHORED BODY TRAVEL PER CYCLE (the timing stage, Plans/ANIMATION_TIMING_STAGE.md), rig
+    // units at facing +1, signed (negative = the feet move forward under the body, a
+    // backpedal). During a stance the foot's body-relative offset runs TdOffset → LoOffset,
+    // so the body travels (Td.X − Lo.X) over Liftoff − Touchdown cycles; the mean rate
+    // Σ travel / Σ span over every stance of every foot is the per-cycle distance — robust
+    // to double support and flight, since one foot's stances cover only its own stance
+    // fraction and the body moves at the same speed through flight. One constant rate per
+    // cycle on purpose: a per-segment travel curve was measured (2026-09-10) and its within-
+    // cycle variation came from the spline's easing between keys, not authored intent.
+    // HasTravel is false when no foot has a non-persistent stance.
+    public float CycleTravel;
+    public bool  HasTravel;
+
     public FootStrideTrack ForBone(int bone)
     {
         foreach (var f in Feet) if (f.Bone == bone) return f;
@@ -77,8 +90,12 @@ public sealed class ClipStrideTrack
 
     // Compile the clip's stride tracks. Returns false with `error` on any structural
     // violation; returns true with Feet.Length == 0 when the clip simply doesn't opt in.
+    // `anySource` compiles every labeled node regardless of ContactSource — the TIMING
+    // stage's gait track (GaitTiming: authored stride length from stance offsets), which
+    // owns no foot and so needs no ownership discipline. The planner's track (default)
+    // stays PlannedSupport-only.
     public static bool TryCompile(AnimationDocument doc, Skeleton rig,
-                                  out ClipStrideTrack track, out string error)
+                                  out ClipStrideTrack track, out string error, bool anySource = false)
     {
         track = null; error = null;
         var ks = doc?.Keyframes;
@@ -98,17 +115,18 @@ public sealed class ClipStrideTrack
         {
             if (k.Contacts == null) continue;
             foreach (var l in k.Contacts)
-                if (l.Source == ContactSource.PlannedSupport && !nodes.Contains(l.Node))
+                if ((anySource || l.Source == ContactSource.PlannedSupport) && !nodes.Contains(l.Node))
                     nodes.Add(l.Node);
         }
         if (nodes.Count == 0) { track = new ClipStrideTrack { Feet = Array.Empty<FootStrideTrack>() }; return true; }
-        foreach (var k in ks)
-        {
-            if (k.Contacts == null) continue;
-            foreach (var l in k.Contacts)
-                if (l.Source != ContactSource.PlannedSupport && nodes.Contains(l.Node))
-                { error = $"node '{l.Node}' mixes PlannedSupport with {l.Source} labels"; return false; }
-        }
+        if (!anySource)
+            foreach (var k in ks)
+            {
+                if (k.Contacts == null) continue;
+                foreach (var l in k.Contacts)
+                    if (l.Source != ContactSource.PlannedSupport && nodes.Contains(l.Node))
+                    { error = $"node '{l.Node}' mixes PlannedSupport with {l.Source} labels"; return false; }
+            }
 
         // FK scratch for offset sampling (compile-time only; allocation is fine here).
         var a = rig.CreatePose(); var b = rig.CreatePose(); var c = rig.CreatePose();
@@ -221,6 +239,15 @@ public sealed class ClipStrideTrack
         }
 
         track = new ClipStrideTrack { Feet = feet.ToArray() };
+        float travel = 0f, span = 0f;
+        foreach (var f in track.Feet)
+            foreach (var st in f.Stances)
+            {
+                if (st.Persistent) continue;
+                travel += st.TdOffset.X - st.LoOffset.X;
+                span   += st.Liftoff - st.Touchdown;
+            }
+        if (span > 1e-4f) { track.CycleTravel = travel / span; track.HasTravel = true; }
         return true;
     }
 }

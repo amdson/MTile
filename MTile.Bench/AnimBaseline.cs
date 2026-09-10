@@ -24,8 +24,9 @@ namespace MTile.Bench;
 // PERF is animator-only (Stopwatch around anim.Update, nothing else), per-frame min over
 // Reps runs (the sim + animator are deterministic, so each rep replays the same frames and
 // min strips scheduler noise per frame). Solver counters are per LM-solve frame. seed_evals
-// is DERIVED, not counted: SolvePhaseStepLm's coarse Δφ search costs 11 residual evaluations
-// (the warm-start candidate + 10 grid seeds) per cadence solve, outside Minimize's counters.
+// is DERIVED, not counted: the pre-timing-stage cadence solve's coarse Δφ search cost 11
+// residual evaluations per cadence solve outside Minimize's counters; the timing stage
+// (GaitTiming) replaced it, so the column now reads 0 and stays only so old baselines compare.
 //
 // QUALITY is measured on the RENDERED pose, placed with AttackGlowSystem.RigRoot exactly as
 // Game1 draws it — so tgt_err (rendered contact tip vs its solve target) exposes any
@@ -211,7 +212,7 @@ internal static class AnimBaseline
         double S(Func<Frame, double> f) => solved.Length == 0 ? 0 : solved.Average(i => f(q[i]));
         m["iters"] = S(f => f.Iters); m["res_evals"] = S(f => f.Res); m["jac_evals"] = S(f => f.Jac);
         m["rejected"] = S(f => f.Rej);
-        m["seed_evals"] = solved.Length == 0 ? 0 : 11.0 * cad / solved.Length;
+        m["seed_evals"] = 0.0;   // no seed search since the timing stage (see the header note)
         m["rows_mean"] = S(f => f.Rows);
         m["rows_max"] = solved.Length == 0 ? 0 : solved.Max(i => q[i].Rows);
         m["vars"] = solved.Length == 0 ? 0 : q[solved[0]].Vars;

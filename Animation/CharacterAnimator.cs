@@ -125,7 +125,24 @@ public sealed partial class CharacterAnimator
     // bookkeeping (the solve itself reads the FROZEN per-contact weight — see
     // PlantedContactsConstraint).
     private readonly List<(int bone, float weight, float dweight)> _weightBuf = new();
-    private float _prevPhaseStep;   // Δφ_prev for the momentum prior
+    private float _prevPhaseStep;   // last frame's phase advance Δφ (cycles/frame)
+    // The timing stage's state (GaitTiming — Plans/ANIMATION_TIMING_STAGE.md): last frame's
+    // rate (cycles/s) and the full result, for the planner's pace estimate and diagnostics.
+    private float        _rate;
+    private TimingResult _lastTiming;
+    public  TimingResult LastTiming => _lastTiming;
+    // Any-source stride tracks for the timing stage, cached per document like _strideCache.
+    private readonly Dictionary<AnimationDocument, ClipStrideTrack> _gaitCache = new();
+    private ClipStrideTrack GaitTrackFor(AnimationDocument doc)
+    {
+        if (doc == null) return null;
+        if (!_gaitCache.TryGetValue(doc, out var t))
+        {
+            if (!ClipStrideTrack.TryCompile(doc, _skeleton, out t, out _, anySource: true)) t = null;
+            _gaitCache[doc] = t;
+        }
+        return t;
+    }
 
     // Authored clips keyed by category, matched from the loaded animations' Type.
     // When a clip has an authored animation it plays that; otherwise the procedural
@@ -221,8 +238,6 @@ public sealed partial class CharacterAnimator
     // the diagnostics (SolvedBoneTipWorld, MaxJacobianError, …) re-evaluate.
     private readonly SolveProblem _problem;
     private readonly PoseEval     _eval;
-    private float             _phaseFloor;        // speed-derived Δφ floor for PhaseRateFloorConstraint (0 = inert)
-    private float             _phaseAccelBox;     // this frame's |Δφ − Δφ_prev| bound = MaxPhaseAccel·dt² (0 = no box)
     private float             _phaseAccelNorm;    // 1/(dt²·PhaseAccelRef): (Δφ − Δφ_prev)·norm = acceleration in PhaseAccelRef units
     // The root offset d = (δ, d.x) as EMITTED (drawn) last frame — the temporal anchor for the
     // com block's smoothness rows and the value the host reads (VerticalOffset /
@@ -494,12 +509,10 @@ public sealed partial class CharacterAnimator
             _state.ClipTime = 0f;
             _contacts.Clear();        // contacts belong to the clip that just ended
             Planner.Reset();          // (P4 will preserve compatible stances by foot identity)
-            // Δφ momentum across the switch: the velocity-derived legacy rate (the same
-            // estimate the rate floor / fallback advance use — at or below any authored
-            // cadence), NOT 0. With the acceleration box (MaxPhaseAccel) a zero seed would
-            // freeze the legs for a ramp at every Walk↔Run / Fall→Run switch even though the
-            // body never stopped; without the box it's just a better momentum-prior target.
+            // Rate across the switch: the velocity-derived nominal (the timing stage
+            // recomputes the rate from travel every frame; this only seeds continuity).
             _prevPhaseStep = speed * dt * PhasePerPixel;
+            _rate          = speed * PhasePerPixel;
             // Entry override: a driver may place the new clip's start — MatchPose scans the
             // cycle for the phase closest to the pose already on screen (fall → run's flight
             // arc), StartT places it explicitly (future run→vault footing). StartT < 0 keeps
@@ -618,28 +631,34 @@ public sealed partial class CharacterAnimator
         foreach (var c in _frame.Constraints)  _problem.Blocks.Add(c);
         foreach (var c in _corePriors)         _problem.Blocks.Add(c);
 
-        // 2. Advance the locomotion phase. A Walk/WalkBack clip with contact labels is
-        //    cadence-driven: the solver picks Δφ so the planted foot doesn't slip
-        //    against the body's real motion. Everything else keeps the old rate.
-        // Speed-derived Δφ floor for this frame's solve (PhaseRateFloorConstraint) and the
-        // flight coast below. 0.5 × the legacy distance rate: well under any legitimate
-        // cadence (authored sweeps run ≲ 100 px/phase ⇒ solved steps ≥ the full legacy rate),
-        // so it only catches collapse — a weak-weight contact frame solving Δφ ≈ 0, which the
-        // coast would then replay for a whole no-contact window (the mid-flight phase lock).
-        // Scales with |vx|, so stopping/decelerating legitimately drops the floor to 0.
-        _phaseFloor = 0.5f * speed * dt * PhasePerPixel;
-        // This frame's cadence acceleration box (AnimSolverConfig.MaxPhaseAccel, cycles/s² —
-        // the per-frame step may move by at most a·dt²). Read AFTER the driver's Contribute
-        // so a per-frame override reaches it; shared by the solve box and the flight coast.
-        _phaseAccelBox = _frame.Solver.MaxPhaseAccel > 0f ? _frame.Solver.MaxPhaseAccel * dt * dt : 0f;
         // Normalization for the soft acceleration row (PlaybackContinuityConstraint):
-        // (Δφ − Δφ_prev) · _phaseAccelNorm is the phase acceleration in units of PhaseAccelRef
-        // cycles/s² — dimensionless and dt-invariant, like every other row.
+        // inert now that Δφ is locked in every solve (retired in timing-stage step T5).
         _phaseAccelNorm = 1f / (MathF.Max(dt, 1e-4f) * MathF.Max(dt, 1e-4f) * PhaseAccelRef);
 
-        // Step planner: runs for opted-in CadencePhase clips with terrain in the sample.
-        // P2 scope — plans reach the debug overlay and diagnostics only; RefreshContacts
-        // and the solve below are untouched until P3's ownership handover.
+        // 2. TIMING — advance the locomotion phase FIRST (Plans/ANIMATION_TIMING_STAGE.md;
+        //    the timing stage is the phase's one owner, ANIMATION_OWNERSHIP_CONTRACT.md Rule
+        //    A): this frame's actual body travel over the clip's authored cycle distance.
+        //    Every CadencePhase clip advances this way, labeled or not; the planner, the
+        //    contact refresh and the pose solve below all evaluate at the RESULTING phase.
+        float phiEntry = _state.Phase;   // the smoothness rows measure deviation from THIS phase's base
+        if (locomotion && hasClip)
+        {
+            _lastTiming = GaitTiming.Advance(new TimingInputs
+            {
+                Clip = anim, Gait = GaitTrackFor(anim),
+                Phase = _state.Phase, PrevRate = _rate, Dt = dt,
+                Pos = s.Position, PrevPos = _hasPrev ? _prev.Position : s.Position,
+                Facing = s.Facing, Scale = _scale, MaxStep = _frame.Solver.MaxPhaseStep,
+            });
+            _state.Phase   = Wrap01(_state.Phase + _lastTiming.DeltaPhase);
+            _prevPhaseStep = _lastTiming.DeltaPhase;
+            _rate          = _lastTiming.Rate;
+        }
+        else if (_timeMode == ClipTimeMode.IdleBob) _state.Phase = Wrap01(_state.Phase + dt * IdleBobHz);
+
+        // Step planner: runs for opted-in CadencePhase clips with terrain in the sample, at
+        // the phase the timing stage produced, paced by its rate. Its stance plans are
+        // mirrored into the contact list by RefreshContacts (P3 ownership handover).
         var planTrack = locomotion && hasClip && s.Chunks != null
                         && AnimSolverConfig.Current.PlannerEnabled
             ? StrideTrackFor(anim) : null;
@@ -650,7 +669,7 @@ public sealed partial class CharacterAnimator
                 BodyPos = s.Position, BodyVel = s.Velocity,
                 Facing = s.Facing, Scale = _scale,
                 Phase = _state.Phase,
-                NominalRate = dt > 0f ? _prevPhaseStep / dt : 0f, Dt = dt,
+                NominalRate = _rate, Dt = dt,
                 Track = planTrack, Chunks = s.Chunks, PredictAt = s.PredictAt,
             });
             _curPlanTrack = planTrack;   // RefreshContacts' ownership predicate this frame
@@ -661,46 +680,19 @@ public sealed partial class CharacterAnimator
             _curPlanTrack = null;        // opted-in clips degrade to SelfPlant semantics
         }
 
+        // 2.2 Contacts at the resulting phase, then the POSE solve (root offset + limbs; Δφ
+        //     locked). Solve-root: the draw's placement (BodyPath.RootOffset — body minus the
+        //     pose anchor c, both axes, facing/scale applied), so contact targets are captured
+        //     in the SAME frame the pose is drawn and the solved d perturbs about it.
         if (locomotion && hasClip && HasContacts(anim))
         {
-            // Solve-root: the draw's placement (BodyPath.RootOffset — body minus the pose anchor
-            // c, both axes, facing/scale applied), so contact targets are captured in the SAME
-            // frame the pose is drawn and the solved d perturbs about it. This entry-phase root
-            // is RefreshContacts' capture frame; inside the solve SolveForward.Run re-anchors at
-            // each candidate φ+Δφ, because the drawn root samples c at the ADVANCED phase.
             _problem.Clip = anim; _problem.Body = s.Position; _problem.Dir = s.Facing == 0 ? 1 : s.Facing;
             var root = SolveForward.RootAt(_problem, _state.Phase);
             RefreshContacts(anim, _state.Phase, dt, root);
-            if (_contacts.Count > 0)
-            {
-                float dphi = SolvePhaseStepLm(anim, _state.Phase);
-                _state.Phase   = Wrap01(_state.Phase + dphi);
-                _prevPhaseStep = dphi;
-            }
-            else
-            {
-                // Flight: a run's no-contact window has no planted foot to pin against,
-                // so there's nothing for the cadence solver to do. Coast the cycle at the
-                // last solved step's momentum, floored at the speed-derived rate — the last
-                // solved step can be both COLLAPSED (a weak fade/capture frame solved ≈ 0;
-                // replaying it locks the phase mid-flight until the next contact's feather,
-                // which a crawling phase may never reach) and STALE (speed changed since it
-                // was solved; no solve runs in flight to notice). The floor tracks current
-                // |vx| each frame and is stored back so the momentum survives the window.
-                float coast = MathF.Max(_prevPhaseStep, _phaseFloor);
-                // The floor may lift a collapsed rate only as fast as the acceleration box
-                // allows — same ramp rule as the solve (0 = no box).
-                if (_phaseAccelBox > 0f) coast = MathF.Min(coast, _prevPhaseStep + _phaseAccelBox);
-                _state.Phase   = Wrap01(_state.Phase + coast);
-                _prevPhaseStep = coast;
-            }
+            if (_contacts.Count > 0) SolvePoseLm(anim, _state.Phase, phiEntry);
+            // Flight (no planted contact): nothing to fit; the phase already advanced by travel.
         }
-        else
-        {
-            _contacts.Clear();
-            if (locomotion)            _state.Phase = Wrap01(_state.Phase + speed * dt * PhasePerPixel);
-            else if (_timeMode == ClipTimeMode.IdleBob) _state.Phase = Wrap01(_state.Phase + dt * IdleBobHz);
-        }
+        else _contacts.Clear();
 
         // 2.5 Off-locomotion solve (Phase 3): the cadence path above only runs the LM solve
         //     for a locomotion clip with planted contacts (pins/surfaces/aim ride that SAME
@@ -1126,65 +1118,26 @@ public sealed partial class CharacterAnimator
         return best < ContactSupportBand ? new Vector2(tip.X, tip.Y + drop) : tip;
     }
 
-    // The cadence solve: horizontal foot no-slip + a playback-continuity prior (plus the
-    // full composite objective — pins, surfaces, aim, priors), minimized over
-    // x = [Δφ, δ, Δθ…] by the general LM core. Δφ ∈ [0, MaxPhaseStep].
-    // NOTE (historical): only the HORIZONTAL component of a planted contact drives Δφ.
-    // The foot's vertical arc (lift over the stance) is intrinsic to the cadence and is
-    // reconciled by the ground-hold row + δ — penalizing it in the no-slip term made the
-    // arc dominate at walk speed and froze the cadence (see PlantedContactsConstraint).
-    private float SolvePhaseStepLm(AnimationDocument clip, float phi)
+    // The locomotion POSE solve: the full composite objective (planted-foot no-slip + ground
+    // hold, swing targets, pins, surfaces, aim, priors) minimized over the root offset d and
+    // the per-bone Δθ by the general LM core, at the phase the timing stage already resolved
+    // (Δφ locked to 0 — the timing stage owns it; the column is removed in chunk 8's diet).
+    // NOTE (historical): only the HORIZONTAL component of a planted contact ever drove the
+    // cadence. The foot's vertical arc (lift over the stance) is intrinsic to the cycle and is
+    // reconciled by the ground-hold row + δ (see PlantedContactsConstraint).
+    private void SolvePoseLm(AnimationDocument clip, float phi, float phiEntry)
     {
-        // (Clip/Body/Dir were placed by the caller, step 2, before RefreshContacts captured.)
+        // (Clip/Body/Dir were placed by the caller, step 2.2, before RefreshContacts captured.)
         var cfg = _frame.Solver;
         int n = IdxTheta0 + _skeleton.Count;  // x = [Δφ, δ, d.x, Δθ_0…]
 
-        float phiLo = 0f, phiHi = cfg.MaxPhaseStep;
-        // Rate floor as a BOX rather than a penalty row (PhaseFloorMode 2): same anti-collapse
-        // guarantee, enforced exactly, and it removes the row whose √λ/floor Jacobian is the
-        // whole 1e6 diagonal ratio. Clamped below MaxPhaseStep so the box can never invert.
-        if (cfg.PhaseFloorMode == 2 && _phaseFloor > 1e-5f)
-            phiLo = MathF.Min(_phaseFloor, cfg.MaxPhaseStep);
-        // Acceleration box: |Δφ − Δφ_prev| ≤ MaxPhaseAccel — the cadence RAMPS, it doesn't
-        // hop (AnimSolverConfig.MaxPhaseAccel). This is the OUTERMOST bound: the rate floor
-        // may raise the lower edge inside it, but never past its ceiling, so a collapsed
-        // rate climbs back to the floor at the capped acceleration instead of snapping.
-        if (_phaseAccelBox > 0f)
-        {
-            float aHi = MathF.Min(cfg.MaxPhaseStep, _prevPhaseStep + _phaseAccelBox);
-            float aLo = MathF.Max(0f,               _prevPhaseStep - _phaseAccelBox);
-            phiHi = aHi;
-            phiLo = MathF.Min(MathF.Max(phiLo, aLo), aHi);
-        }
-        _solveLo[IdxPhi] = phiLo;                 _solveHi[IdxPhi] = phiHi;
+        _solveLo[IdxPhi] = 0f;                    _solveHi[IdxPhi] = 0f;   // Δφ locked — timing owns it
         _solveLo[IdxDy]  = -cfg.VertOffsetLimit;  _solveHi[IdxDy]  = cfg.VertOffsetLimit;
         _solveLo[IdxDx]  = -cfg.HorizOffsetLimit; _solveHi[IdxDx]  = cfg.HorizOffsetLimit;
         for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
-        Array.Clear(_solveVars, 0, n);        // d, Δθ start at 0 (baseline pose); Δφ seeded below
-        FreezeProblem(clip, phi, _phaseFloor, n);   // every input the rows read, incl. t_i and û* off the x = 0 pose
+        Array.Clear(_solveVars, 0, n);        // d, Δθ start at 0 (baseline pose)
+        FreezeProblem(clip, phi, phiEntry, 0f, n);   // every input the rows read, incl. t_i (entry base) and û*
 
-        // The cadence objective is NON-CONVEX in Δφ: a planted foot's horizontal track
-        // is non-monotonic over a stance arc (it can drift forward before sweeping back),
-        // so the gradient at Δφ=0 may point into the Δφ<0 wall while the true minimum
-        // sits further inside the bracket. A purely local descent stalls there. Globalize
-        // with a cheap coarse seed search (1-D only), keeping the momentum warm-start
-        // (Δφ_prev) as a candidate so steady-state locomotion stays smooth, then let LM
-        // refine. δ and the Δθ corrections need no seeding — under their (com / Tikhonov)
-        // priors they are convex about 0 — so they ride along at 0 while we pick the Δφ
-        // basin, then LM refines the whole vector jointly (ANIMATION_SOLVER_PLAN §3.5).
-        // Seeds are clamped into the Δφ box (the floor raises its bottom, the acceleration
-        // box narrows both edges) so the basin pick can't land where the solve can't go.
-        float best     = MathHelper.Clamp(_prevPhaseStep, phiLo, phiHi);
-        float bestCost = CadenceCostAt(best, n);
-        const int seeds = 9;
-        for (int k = 0; k <= seeds; k++)
-        {
-            float s = MathHelper.Clamp(cfg.MaxPhaseStep * k / seeds, phiLo, phiHi);
-            float c = CadenceCostAt(s, n);
-            if (c < bestCost) { bestCost = c; best = s; }
-        }
-
-        _solveVars[0] = best;   // already inside the box
         // Δθ starts at 0 (not warm-started): the θ-smoothness prior supplies the temporal
         // continuity from the COST side (its target is last frame's EMITTED pose), and a
         // box-clamped warm seed would stick the solution at the wall.
@@ -1193,7 +1146,6 @@ public sealed partial class CharacterAnimator
                      vectorize: _frame.Solver.CadenceVectorize);
         CaptureBreakdown(n);
         _haveCorr = true;
-        return _solveVars[0];
     }
 
     // Off-locomotion solve (Phase 3): satisfy this frame's external pins + no-penetration
@@ -1201,7 +1153,7 @@ public sealed partial class CharacterAnimator
     // planted-foot no-slip here — so only δ (the body bob) and the per-bone Δθ (the IK that
     // bends limbs off a wall / onto a pin) move. The base pose is sampled at the SAME phase /
     // clip-time step 3 draws at, so the solved Δθ line up when applied there. Mirrors
-    // SolvePhaseStepLm's root construction (com baseline so capture/solve/draw share a frame).
+    // SolvePoseLm's root construction (com baseline so capture/solve/draw share a frame).
     // Dormancy slack for the static solve's pre-check: a masked tip must press past its
     // plane by more than this (px) before the LM solve engages. Sub-pixel sink for one
     // frame is invisible; the solve, once it runs, still resolves to the full margin.
@@ -1257,23 +1209,13 @@ public sealed partial class CharacterAnimator
                 }
             if (worst <= StaticSolveSlack) return;   // all rows dormant — nothing to solve
         }
-        FreezeProblem(anim, phi, 0f, n);      // floor 0: Δφ is locked, the rate-floor row must stay inert
+        FreezeProblem(anim, phi, phi, 0f, n); // floor 0: Δφ is locked, the rate-floor row must stay inert
 
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n),
                      ftol: cfg.StaticFtol, vectorize: cfg.StaticVectorize);
         CaptureBreakdown(n);
         _haveCorr = true;
-    }
-
-    // Cost at a candidate Δφ with d and the angle corrections held at 0 (Δφ seed search).
-    private float CadenceCostAt(float dphi, int n)
-    {
-        System.Diagnostics.Debug.Assert(n <= 80, "CadenceCostAt scratch undersized for this rig");
-        Span<float> s = stackalloc float[80];   // ≥ IdxTheta0 + rig bone count; d/Δθ entries stay 0
-        s.Clear();
-        s[0] = dphi;
-        return _ls.Cost(_cadenceResiduals, s.Slice(0, n));
     }
 
     // FREEZE this solve's problem (SolveProblem.cs): copy every input a residual or Jacobian may
@@ -1283,7 +1225,11 @@ public sealed partial class CharacterAnimator
     // before RefreshContacts captured its targets in that frame. `n` = the variable count, and
     // _solveVars must be all-zero (the reference-pose captures evaluate it). After this nothing
     // writes _problem until the solve ends; the forward pass and every block are pure in it.
-    private void FreezeProblem(AnimationDocument clip, float phi, float phaseFloor, int n)
+    // `phiEntry` is the phase the frame ENTERED with (before the timing stage advanced it):
+    // the smoothness targets t_i are measured against the base pose there, so this frame's
+    // clip playback (base(φ) − base(φ_entry)) stays free of the smoothing rows — charging it
+    // was the absolute-pose smoothing that dragged the cadence (ThetaSmoothnessConstraint).
+    private void FreezeProblem(AnimationDocument clip, float phi, float phiEntry, float phaseFloor, int n)
     {
         var p = _problem;
         p.Clip = clip; p.Phi = phi;
@@ -1300,11 +1246,13 @@ public sealed partial class CharacterAnimator
         p.Cfg            = _frame.Solver;
         p.PhaseFloor     = phaseFloor;
         p.PhaseAccelNorm = _phaseAccelNorm;
-        p.PrevPhaseStep  = _prevPhaseStep;
+        p.PrevPhaseStep  = 0f;   // Δφ is locked at 0 in every solve: the continuity row is inert (T5 deletes it)
         p.EaseBase       = _easeBase;
         p.DyEmitted      = _dyEmitted;
         p.DxEmitted      = _dxEmitted;
-        FillSmoothTargets(n);                 // freeze t_i (emitted deviation) before any residual eval
+        p.Phi = phiEntry;
+        FillSmoothTargets(n);                 // freeze t_i (emitted deviation from the ENTRY base) before any residual eval
+        p.Phi = phi;
         CaptureAimTarget(n);                  // freeze û* from the reference pose before any residual eval
     }
 
