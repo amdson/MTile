@@ -40,6 +40,7 @@ internal static class Program
         // inflates the numbers and buries the table in scrollback.
         SimTrace.Enabled = false;
 
+        if (Array.IndexOf(args, "--anim-baseline") >= 0) return AnimBaseline.Run(args);
         if (Array.IndexOf(args, "--corrector") >= 0) { CorrectorDiag.Run(); return 0; }
         if (Array.IndexOf(args, "--ftol") >= 0) { JtJDiff.Run(); AnimDiag.Run(); return 0; }
         if (Array.IndexOf(args, "--simd") >= 0) { FtolStudy.SimdCheck(); return 0; }

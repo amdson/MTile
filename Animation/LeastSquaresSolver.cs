@@ -62,6 +62,8 @@ public sealed class LeastSquaresSolver
     public int LastIterations { get; private set; }
     public int LastResidualEvals { get; private set; }
     public int LastJacobianEvals { get; private set; }
+    // Trust-loop trials evaluated and rejected (cost did not drop) — each one is a wasted pose rebuild.
+    public int LastRejectedTrials { get; private set; }
     // Row count m of the last solve. The core's own cost is O(iters · n² · m) in the normal
     // equations, so m is the lever on everything the callbacks don't explain.
     public int LastRows { get; private set; }
@@ -217,7 +219,7 @@ public sealed class LeastSquaresSolver
     {
         int n = x.Length;
         if (ftol < 0f) ftol = Ftol;   // negative = "use the process-wide default"
-        LastIterations = 0; LastResidualEvals = 1; LastJacobianEvals = 0;
+        LastIterations = 0; LastResidualEvals = 1; LastJacobianEvals = 0; LastRejectedTrials = 0;
         LastResidualTicks = LastJacobianTicks = LastAlgebraTicks = 0;
         long _t0 = ProfileCallbacks ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
         long _tAll = _t0;
@@ -420,6 +422,7 @@ public sealed class LeastSquaresSolver
                 if (ProfileCallbacks) LastResidualTicks += System.Diagnostics.Stopwatch.GetTimestamp() - _t0;
                 LastResidualEvals++;
                 float trial = SumSq(_rTrial, m2);
+                if (trial >= cost) LastRejectedTrials++;
                 if (trial < cost)
                 {
                     for (int a = 0; a < n; a++) x[a] = _xTrial[a];
