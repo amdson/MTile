@@ -129,8 +129,11 @@ public sealed partial class CharacterAnimator
     // The timing stage's state (GaitTiming — Plans/ANIMATION_TIMING_STAGE.md): last frame's
     // rate (cycles/s) and the full result, for the planner's pace estimate and diagnostics.
     private float        _rate;
-    private TimingResult _lastTiming;
+    private TimingResult _lastTiming;   // carries the stopping policy's state frame to frame
     public  TimingResult LastTiming => _lastTiming;
+    // The cadence clip family the stopping policy may hold through a settle (step 1).
+    private static bool IsCadenceClip(AnimClip c)
+        => c is AnimClip.Walk or AnimClip.WalkBack or AnimClip.Run or AnimClip.CrouchWalk or AnimClip.StepUp;
     // Any-source stride tracks for the timing stage, cached per document like _strideCache.
     private readonly Dictionary<AnimationDocument, ClipStrideTrack> _gaitCache = new();
     private ClipStrideTrack GaitTrackFor(AnimationDocument doc)
@@ -499,6 +502,21 @@ public sealed partial class CharacterAnimator
         // locomotion cycle, and any tagged state wins outright. Re-evaluated per frame, so
         // speeding up or leaving the ground cancels it naturally.
         if (_state.LandTime > 0f && clip == AnimClip.Idle) { clip = AnimClip.Land; mode = ClipTimeMode.Clock; }
+        // SETTLING (timing stage T3, core-side like the Land override): while the stopping
+        // policy is finishing the last step, a cadence clip is held through the driver's Idle
+        // choice so the landing completes on the locomotion clip; Idle takes over once the
+        // phase holds (SupportedIdle) and the contacts release through the ordinary handoff.
+        //     The entry test is evaluated HERE on this frame's speed (GaitTiming.WantsSettle,
+        //     the same predicate the stage applies): an abrupt stop drops below the idle band
+        //     in the frame the driver first picks Idle, before any Settling state exists.
+        if (clip == AnimClip.Idle && IsCadenceClip(_state.Clip) && _clips.ContainsKey(_state.Clip))
+        {
+            float spd = MathF.Abs(s.Velocity.X), prevSpeed = _hasPrev ? MathF.Abs(_prev.Velocity.X) : spd;
+            bool settling = _lastTiming.State == TimingState.Settling
+                || (_lastTiming.State == TimingState.Traveling
+                    && GaitTiming.WantsSettle(s.Grounded, spd, prevSpeed, _frame.Solver.SettleSpeed));
+            if (settling) { clip = _state.Clip; mode = ClipTimeMode.CadencePhase; }
+        }
 
         float speed   = MathF.Abs(s.Velocity.X);
         bool hasClip  = _clips.TryGetValue(clip, out var anim);
@@ -507,8 +525,6 @@ public sealed partial class CharacterAnimator
         {
             _state.Clip = clip;
             _state.ClipTime = 0f;
-            _contacts.Clear();        // contacts belong to the clip that just ended
-            Planner.Reset();          // (P4 will preserve compatible stances by foot identity)
             // Rate across the switch: the velocity-derived nominal (the timing stage
             // recomputes the rate from travel every frame; this only seeds continuity).
             _prevPhaseStep = speed * dt * PhasePerPixel;
@@ -531,6 +547,9 @@ public sealed partial class CharacterAnimator
             // _thetaEmitted deliberately PERSISTS across the switch — the smoothness prior
             // measures the final angle against it, which is exactly what crossfades the pose
             // gap between the old and new clip (the retired ease's snap-then-follow, in-solve).
+            // Contacts: transfer the stance support the incoming clip can carry at the entry
+            // phase; release the rest (ANIMATION_OWNERSHIP_CONTRACT.md §4).
+            TransferContacts(hasClip && mode == ClipTimeMode.CadencePhase ? anim : null, _state.Phase, in s);
         }
         else _state.ClipTime += dt;
         _timeMode = mode;
@@ -643,18 +662,28 @@ public sealed partial class CharacterAnimator
         float phiEntry = _state.Phase;   // the smoothness rows measure deviation from THIS phase's base
         if (locomotion && hasClip)
         {
+            var cfgT = _frame.Solver;
             _lastTiming = GaitTiming.Advance(new TimingInputs
             {
                 Clip = anim, Gait = GaitTrackFor(anim),
                 Phase = _state.Phase, PrevRate = _rate, Dt = dt,
                 Pos = s.Position, PrevPos = _hasPrev ? _prev.Position : s.Position,
-                Facing = s.Facing, Scale = _scale, MaxStep = _frame.Solver.MaxPhaseStep,
+                Facing = s.Facing, Scale = _scale, MaxStep = cfgT.MaxPhaseStep,
+                State = _lastTiming.State, SettleRemaining = _lastTiming.SettleRemaining,
+                SettleTimeLeft = _lastTiming.SettleTimeLeft,
+                Speed = speed, PrevSpeed = _hasPrev ? MathF.Abs(_prev.Velocity.X) : speed, Grounded = s.Grounded,
+                SettleSpeed = cfgT.SettleSpeed, SettleExitSpeed = cfgT.SettleExitSpeed,
+                IdleSpeed = GroundLocomotionDriver.WalkSpeedThreshold, SettleTime = cfgT.SettleTime,
             });
             _state.Phase   = Wrap01(_state.Phase + _lastTiming.DeltaPhase);
             _prevPhaseStep = _lastTiming.DeltaPhase;
             _rate          = _lastTiming.Rate;
         }
-        else if (_timeMode == ClipTimeMode.IdleBob) _state.Phase = Wrap01(_state.Phase + dt * IdleBobHz);
+        else
+        {
+            if (_timeMode == ClipTimeMode.IdleBob) _state.Phase = Wrap01(_state.Phase + dt * IdleBobHz);
+            _lastTiming.State = TimingState.Traveling;   // off the cadence family the policy is idle
+        }
 
         // Step planner: runs for opted-in CadencePhase clips with terrain in the sample, at
         // the phase the timing stage produced, paced by its rate. Its stance plans are
@@ -1085,6 +1114,40 @@ public sealed partial class CharacterAnimator
                 if (at >= 0) _contacts[at] = mirrored;
                 else _contacts.Add(mirrored);
             }
+    }
+
+    // A CLIP SWITCH's contact handoff (ANIMATION_OWNERSHIP_CONTRACT.md §4; timing-stage T4).
+    // A stance contact TRANSFERS to `incoming` iff the same bone is a support owner there (a
+    // label of any source), the entry phase falls inside that bone's stance in the incoming
+    // clip (never into an incoming swing just because the name matches), and the target is
+    // within the incoming gait's reach of the body. Ownership follows the incoming clip's
+    // label source (a self-plant foot becomes planner-owned across run → walk, and back), and
+    // the planner adopts the transferred support point so it does not re-select and pop.
+    // Everything else releases promptly — the emitted-offset ease and the Δθ smoothness prior
+    // carry the visual continuity, as at any toe-off. `incoming` null = no cadence clip.
+    private void TransferContacts(AnimationDocument incoming, float phase, in CharacterAnimSample s)
+    {
+        var gait = incoming != null ? GaitTrackFor(incoming) : null;
+        var planTrack = incoming != null && s.Chunks != null && AnimSolverConfig.Current.PlannerEnabled
+            ? StrideTrackFor(incoming) : null;
+        Span<(int Bone, Vector2 Target, float Weight)> adopted = stackalloc (int, Vector2, float)[StepPlanner.MaxFeet];
+        int nAdopted = 0;
+        for (int i = _contacts.Count - 1; i >= 0; i--)
+        {
+            var c = _contacts[i];
+            var ft = gait?.ForBone(c.Bone);
+            bool keep = ft != null && ft.StanceAt(phase, out _) >= 0
+                        && (c.Target - s.Position).Length() <= ft.MaxReachRig * _scale;
+            if (!keep) { _contacts.RemoveAt(i); continue; }
+            bool planned = planTrack?.ForBone(c.Bone) != null;
+            c.Source = planned ? ContactSource.PlannedSupport : ContactSource.SelfPlant;
+            _contacts[i] = c;
+            if (planned && nAdopted < adopted.Length) adopted[nAdopted++] = (c.Bone, c.Target, c.Weight);
+        }
+        Planner.Rebind(planTrack, adopted.Slice(0, nAdopted), s.Chunks);
+        // A transferred planner-owned foot whose point found no tread under it is dropped by
+        // the mirror on this frame's RefreshContacts (Rebind left it Unplanned) — the
+        // documented toe-off rule, not a special case.
     }
 
     // Snap a freshly captured plant onto the terrain face that supports it.

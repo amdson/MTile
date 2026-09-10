@@ -140,6 +140,25 @@ incoming clip labels the same bone, the entry phase falls inside that bone's sta
 incoming clip, and the target is still valid support within reach. Everything else
 releases. Needed for run → walk → idle settling and for stairs (run ↔ step-up).
 
+**T3 + T4 landed (2026-09-10).** T4: `CharacterAnimator.TransferContacts` +
+`StepPlanner.Rebind` (adoption of a transferred support point); `AnimContactTransferTests`
+covers run → walk across the self-plant → planner ownership boundary and the release into
+Idle. T3: `GaitTiming`'s three-state policy with `SettleSpeed` 20 / `SettleExitSpeed` 30 /
+`SettleTime` 0.15 s (AnimSolverConfig), and the core-side hold of the cadence clip through
+the driver's Idle choice while settling — the entry test runs on the switch frame's own
+speed (`GaitTiming.WantsSettle`), because an abrupt stop drops below the idle band in the
+frame Idle is first chosen. Measured (bench notes `timing=` and `idle_switch_swing_u=`):
+the stops settle in ~7% of the window and hold; the trailing foot's swing progress at the
+Idle switch fell from 0.47–0.86 to ~0.31 — a run clip has no double-support phase, so one
+finished step always leaves the other foot mid-swing for the idle blend to bring down (the
+plan's "simplest pilot"; a stopping clip is the next step if that reads badly). Costs: the
+finish schedule re-accelerates the phase after a dead stop (`rate_jump_max` on the stop rows
+70 → 130–195 cycles/s²; rate continuity would cap it), and the settle frames trade some
+slip/penetration for the finished step (rabbit abrupt stop +14: `slip_max` 1.2 → 3.0 px,
+`pen_max` 0.1 → 2.4 px). The pulse-width walk scenario now settles on 40% of its frames
+because its speed chatters through `SettleSpeed` — a tuning question (raise the hysteresis
+or lower `SettleSpeed` toward the idle band), left to the owner.
+
 ### T5 — retire what the timing stage now owns
 
 | Mechanism | Owner after this chunk | Action |

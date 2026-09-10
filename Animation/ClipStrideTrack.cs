@@ -61,6 +61,33 @@ public sealed class FootStrideTrack
                                         // authored gait in the same com frame the offsets
                                         // live in (a raw bone-length sum measures from the
                                         // hip joint, not the com anchor, and undershoots).
+
+    // The stance containing `phase` (index into Stances, u = progress inside it), or -1.
+    public int StanceAt(float phase, out float u)
+    {
+        for (int i = 0; i < Stances.Length; i++)
+        {
+            var s = Stances[i];
+            if (s.Persistent) { u = 0f; return i; }
+            float span = s.Liftoff - s.Touchdown;
+            float du = phase - s.Touchdown; du -= MathF.Floor(du);
+            if (du < span) { u = du / span; return i; }
+        }
+        u = 0f; return -1;
+    }
+
+    // The swing containing `phase` (index into Swings, u = progress inside it), or -1.
+    public int SwingAt(float phase, out float u)
+    {
+        for (int i = 0; i < Swings.Length; i++)
+        {
+            var w = Swings[i];
+            float span = w.End - w.Start;
+            float du = phase - w.Start; du -= MathF.Floor(du);
+            if (du < span) { u = du / span; return i; }
+        }
+        u = 0f; return -1;
+    }
 }
 
 public sealed class ClipStrideTrack

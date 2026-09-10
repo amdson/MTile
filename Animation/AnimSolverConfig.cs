@@ -170,6 +170,15 @@ public class AnimSolverConfig
     // yanked the root down to the new foot (the landing jerk). ~5 frames at 60 fps.
     public float ContactEngageTime { get; set; } = 0.08f;
 
+    // ── Timing stage — the stopping policy (GaitTiming, Plans/ANIMATION_TIMING_STAGE.md T3) ──
+    // Grounded and slowing below SettleSpeed (px/s) enters Settling: the nearest landing is
+    // finished over at most SettleTime seconds, then the phase holds (SupportedIdle) once the
+    // body is inside the driver's idle band. Speed above SettleExitSpeed restarts travel-driven
+    // timing from wherever the phase is (hysteresis: exit > enter).
+    public float SettleSpeed     { get; set; } = 20f;
+    public float SettleExitSpeed { get; set; } = 30f;
+    public float SettleTime      { get; set; } = 0.15f;
+
     private static AnimSolverConfig _current = new AnimSolverConfig();
 
     [JsonIgnore]
@@ -215,6 +224,9 @@ public class AnimSolverConfig
         PlannerEnabled          = src.PlannerEnabled;
         PlannerHysteresis       = src.PlannerHysteresis;
         PlannerLateSwingLock    = src.PlannerLateSwingLock;
+        SettleSpeed             = src.SettleSpeed;
+        SettleExitSpeed         = src.SettleExitSpeed;
+        SettleTime              = src.SettleTime;
     }
 
     public static void Load(string path)

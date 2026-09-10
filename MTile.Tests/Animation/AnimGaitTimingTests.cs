@@ -132,6 +132,50 @@ public class AnimGaitTimingTests
         Assert.Equal(vx * dt * 119 / cycleDist, cycles, 2);
     }
 
+    // The stopping policy (T3): a run that stops dead settles — the nearest landing is
+    // finished on the time schedule, then the phase holds; a restart resumes travel timing.
+    [Fact]
+    public void Stop_SettlesToTheNearestLanding_ThenHolds_ThenRestarts()
+    {
+        var (clip, skel) = Load("biped", "run");
+        ClipStrideTrack.TryCompile(clip, skel, out var gait, out _, anySource: true);
+        var cfg = new AnimSolverConfig();
+        TimingInputs In(TimingResult prev, float phase, float dx, float speed, float prevSpeed) => new()
+        {
+            Clip = clip, Gait = gait, Phase = phase, Dt = 1f / 60f, MaxStep = 0.25f,
+            PrevPos = Vector2.Zero, Pos = new Vector2(dx, 0f), Facing = +1, Scale = Scale,
+            State = prev.State, SettleRemaining = prev.SettleRemaining, SettleTimeLeft = prev.SettleTimeLeft,
+            Speed = speed, PrevSpeed = prevSpeed, Grounded = true,
+            SettleSpeed = cfg.SettleSpeed, SettleExitSpeed = cfg.SettleExitSpeed, IdleSpeed = 12f, SettleTime = cfg.SettleTime,
+        };
+        // Pick a phase where a foot is mid-swing, so there is a landing to finish.
+        float phase = 0.15f;
+        Assert.True(GaitTiming.NearestLanding(gait, phase) > 0.02f, "expected a swinging foot at the test phase");
+        float landing = phase + GaitTiming.NearestLanding(gait, phase);
+
+        var r = new TimingResult();
+        // Stop dead: speed 0, no travel.
+        r = GaitTiming.Advance(In(r, phase, 0f, 0f, 90f));
+        Assert.Equal(TimingState.Settling, r.State);
+        int frames = 0; float ph = phase;
+        while (r.State == TimingState.Settling && frames < 60)
+        {
+            ph += r.DeltaPhase;
+            r = GaitTiming.Advance(In(r, ph, 0f, 0f, 0f));
+            frames++;
+        }
+        ph += r.DeltaPhase;
+        Assert.Equal(TimingState.SupportedIdle, r.State);
+        Assert.True(frames <= cfg.SettleTime * 60f + 2, $"settle took {frames} frames");
+        Assert.Equal(landing, ph, 3);                      // parked exactly on the landing
+        r = GaitTiming.Advance(In(r, ph, 0f, 0f, 0f));
+        Assert.Equal(0f, r.DeltaPhase);                    // and holds there
+        // Restart: above the exit speed, travel timing resumes from the held phase.
+        r = GaitTiming.Advance(In(r, ph, 1.5f, 90f, 0f));
+        Assert.Equal(TimingState.Traveling, r.State);
+        Assert.True(r.DeltaPhase > 0f);
+    }
+
     private static (AnimationDocument, Skeleton) Load(string rig, string clipName)
     {
         var clip = AnimationStore.LoadAll(Path.Combine(FindDir("SkeletonStates"), rig)).Find(d => d.Name == clipName);

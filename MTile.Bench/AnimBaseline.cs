@@ -178,6 +178,9 @@ internal static class AnimBaseline
         public AnimClip Clip;
         public string Action;
         public bool LowCeiling;
+        public TimingState Timing;    // the stopping policy's state this frame
+        public float IdleSwitchSwingU; // on the frame a cadence clip switched to Idle: the max swing
+                                       // progress of any foot at that phase (a "suspended foot"); else -1
         public (int Bone, Vector2 Target, float Weight)[] Contacts;
         public Vector2[] Tips;        // rendered world tip of every bone
         public float Pen;             // max vertical depth of any rendered tip under an upward face
@@ -276,10 +279,15 @@ internal static class AnimBaseline
                          .Select(g => $"{g.Key}:{100.0 * g.Count() / win.Length:0}%");
         var actions = win.Select(i => q[i].Action).Where(x => x != null).Distinct();
         int low = win.Count(i => q[i].LowCeiling);
+        int settle = win.Count(i => q[i].Timing == TimingState.Settling);
+        int idleHold = win.Count(i => q[i].Timing == TimingState.SupportedIdle);
+        var switches = win.Where(i => q[i].IdleSwitchSwingU >= 0f).Select(i => q[i].IdleSwitchSwingU).ToArray();
         string notes = (sc.NoteFrame >= 0 ? $"release_phase={q[sc.NoteFrame].Phase:0.00} " : "")
                      + "clips=" + string.Join(",", clipMix)
                      + (actions.Any() ? " actions=" + string.Join(",", actions) : "")
-                     + (low > 0 ? $" lowceil={100.0 * low / win.Length:0}%" : "");
+                     + (low > 0 ? $" lowceil={100.0 * low / win.Length:0}%" : "")
+                     + (settle + idleHold > 0 ? $" timing=settle:{100.0 * settle / win.Length:0}%,hold:{100.0 * idleHold / win.Length:0}%" : "")
+                     + (switches.Length > 0 ? $" idle_switch_swing_u={switches.Max():0.00}" : "");
         return (m, notes);
     }
 
@@ -322,6 +330,16 @@ internal static class AnimBaseline
             }
             fr.Phase = anim.State.Phase;
             fr.Clip = anim.State.Clip;
+            fr.Timing = anim.LastTiming.State;
+            fr.IdleSwitchSwingU = -1f;
+            if (f > 0 && fr.Clip == AnimClip.Idle && frames[f - 1].Clip != AnimClip.Idle
+                && GaitFor(frames[f - 1].Clip, skel, clips) is { } gait)
+            {
+                // The phase Idle entered with is the cadence clip's last phase (it persists).
+                float u = 0f;
+                foreach (var ft in gait.Feet) if (ft.SwingAt(anim.State.Phase, out float su) >= 0) u = MathF.Max(u, su);
+                fr.IdleSwitchSwingU = u;
+            }
             fr.Dx = anim.HorizontalOffset; fr.Dy = anim.VerticalOffset;
             fr.DTh = anim.BaselineMaxAbsDTheta;
             fr.Action = s.Action is { Length: > 0 } act && act != "NullAction" && act != "None" ? act : null;
@@ -360,6 +378,19 @@ internal static class AnimBaseline
         for (int k = 0; k < 8 && chunks.GetCellState(gx, top - 1) == TileState.Solid; k++) top--;
         for (int k = 0; k < 8 && chunks.GetCellState(gx, bot + 1) == TileState.Solid; k++) bot++;
         return MathF.Min(pt.Y - top * TS, (bot + 1) * TS - pt.Y);
+    }
+
+    // Any-source stride track of the clip bound to `clip` (null for clips without labels).
+    private static readonly Dictionary<(string, AnimClip), ClipStrideTrack> _gaits = new();
+    private static ClipStrideTrack GaitFor(AnimClip clip, Skeleton skel, List<AnimationDocument> clips)
+    {
+        var key = (skel.Name, clip);
+        if (_gaits.TryGetValue(key, out var t)) return t;
+        var rig = SkeletonComposition.WithClipBones(skel, clips);
+        var doc = clips.Find(d => d.Skeleton == rig.Name && string.Equals(d.Type, clip.ToString(), StringComparison.OrdinalIgnoreCase));
+        t = doc != null && ClipStrideTrack.TryCompile(doc, rig, out var track, out _, anySource: true) && track.Feet.Length > 0 ? track : null;
+        _gaits[key] = t;
+        return t;
     }
 
     private static int[] FootBones(Skeleton skel, List<AnimationDocument> clips)

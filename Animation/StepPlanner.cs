@@ -215,29 +215,41 @@ public sealed class StepPlanner
 
     private static float Wrap(float x) => x - MathF.Floor(x);
 
-    private static int FindStance(FootStrideTrack ft, float phase, out float u)
-    {
-        for (int i = 0; i < ft.Stances.Length; i++)
-        {
-            var s = ft.Stances[i];
-            if (s.Persistent) { u = 0f; return i; }
-            float span = s.Liftoff - s.Touchdown;
-            float du = Wrap(phase - s.Touchdown);
-            if (du < span) { u = du / span; return i; }
-        }
-        u = 0f; return -1;
-    }
+    private static int FindStance(FootStrideTrack ft, float phase, out float u) => ft.StanceAt(phase, out u);
+    private static int FindSwing(FootStrideTrack ft, float phase, out float u)  => ft.SwingAt(phase, out u);
 
-    private static int FindSwing(FootStrideTrack ft, float phase, out float u)
+    // A CLIP SWITCH (ANIMATION_OWNERSHIP_CONTRACT.md §4, planner P4): rebind to the incoming
+    // clip's track. Feet the caller transferred (`adopted`: bone, world support point, weight)
+    // keep their stance support — the planner takes the point as its fixed support on the
+    // tread that carries it — so a run → walk switch mid-stance does not re-select and pop.
+    // Everything else starts Unplanned (a foot never transfers into an incoming swing: the
+    // caller only offers feet that are in stance at the entry phase).
+    public void Rebind(ClipStrideTrack track, ReadOnlySpan<(int Bone, Vector2 Target, float Weight)> adopted, ChunkMap chunks)
     {
-        for (int i = 0; i < ft.Swings.Length; i++)
+        Reset();
+        if (track == null || chunks == null) return;
+        FeetCount = Math.Min(track.Feet.Length, MaxFeet);
+        Span<SupportSegment> treads = stackalloc SupportSegment[MaxTreads];
+        for (int fi = 0; fi < FeetCount; fi++)
         {
-            var w = ft.Swings[i];
-            float span = w.End - w.Start;
-            float du = Wrap(phase - w.Start);
-            if (du < span) { u = du / span; return i; }
+            int bone = track.Feet[fi].Bone;
+            foreach (var a in adopted)
+            {
+                if (a.Bone != bone) continue;
+                int n = SupportQuery.QueryTreads(chunks, a.Target, Chunk.TileSize, treads);
+                for (int i = 0; i < n; i++)
+                {
+                    var t = treads[i];
+                    if (a.Target.X < t.X0 || a.Target.X > t.X1 || MathF.Abs(t.Y - a.Target.Y) > SolveProblem.ContactSupportBand) continue;
+                    _feet[fi] = new FootState { State = FootPlanState.Stance, HasSupport = true,
+                                                SupportId = t.Id, SupportPoint = a.Target, Weight = a.Weight };
+                    Plans[fi] = new FootPlan { Bone = bone, State = FootPlanState.Stance, Target = a.Target,
+                                               Support = t, HasSupport = true, Weight = a.Weight };
+                    break;
+                }
+                break;
+            }
         }
-        u = 0f; return -1;
     }
 
     // The authored body-relative offset at swing progress u (chord between the authored
