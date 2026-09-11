@@ -293,54 +293,6 @@ public sealed class ActionAimConstraint : ISolveConstraint
     }
 }
 
-// One row: √PhaseAccelPrior · (Δφ − Δφ_prev) / (dt² · PhaseAccelRef) — the cadence
-// ACCELERATION penalty (playback continuity / momentum). Δφ − Δφ_prev is the phase
-// acceleration in cycles/frame²; dividing by dt² makes it cycles/s² (so the row means the
-// same thing at 30 and 60 fps) and by PhaseAccelRef (100 cycles/s² ≈ the run's re-contact
-// hop at 60 fps) makes it O(1) like every other dimensionless row — λ = 1 charges one full
-// hop about what one pixel of planted-foot slip costs (√TierContact/reach ≈ 1). The old
-// PhaseStepPrior was this row without the normalization: in raw phase/frame units a 0.03
-// hop cost 8·0.03² ≈ 0.007 against 1.0 for 1px of slip, so at 8 it never did anything.
-public sealed class PlaybackContinuityConstraint : ISolveConstraint
-{
-    public string Name => "PlaybackContinuityConstraint";
-    public int Residuals(SolveProblem p, PoseEval e, ReadOnlySpan<float> x, Span<float> r)
-    { r[0] = MathF.Sqrt(p.Cfg.PhaseAccelPrior) * p.PhaseAccelNorm * (x[IdxPhi] - p.PrevPhaseStep); return 1; }
-    public int Jacobian(SolveProblem p, PoseEval e, ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
-    { jac[row0 * stride + IdxPhi] = MathF.Sqrt(p.Cfg.PhaseAccelPrior) * p.PhaseAccelNorm; return 1; }
-}
-
-// One row: √PhaseFloorPrior · max(0, 1 − Δφ/floor) — the one-sided phase-rate floor.
-// A hinge (NoPen-style knee: inactive ⇒ 0 residual AND 0 Jacobian, count stays 1) that
-// props the solved step up toward the speed-derived floor when nothing else drives it —
-// a weak-weight contact (feather fade / fresh zero-residual capture) otherwise lets Δφ
-// collapse, and the flight coast then replays that collapsed value for the whole
-// no-contact window. Deficit is normalized by the floor so the row is O(1) like the
-// other dimensionless rows. floor ≤ ~1e-5 (standstill / static solve) disables the row.
-public sealed class PhaseRateFloorConstraint : ISolveConstraint
-{
-    public string Name => "PhaseRateFloorConstraint";
-    public int Residuals(SolveProblem p, PoseEval e, ReadOnlySpan<float> x, Span<float> r)
-    {
-        var cfg = p.Cfg;
-        float fl = p.PhaseFloor;
-        if (cfg.PhaseFloorMode == 2 || fl <= 1e-5f) { r[0] = 0f; return 1; }  // box mode: the bound does it
-        float def = cfg.PhaseFloorMode == 1 ? fl - x[IdxPhi] : 1f - x[IdxPhi] / fl;
-        r[0] = def > 0f ? MathF.Sqrt(cfg.PhaseFloorPrior) * def : 0f;
-        return 1;
-    }
-    public int Jacobian(SolveProblem p, PoseEval e, ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
-    {
-        var cfg = p.Cfg;
-        float fl = p.PhaseFloor;
-        if (cfg.PhaseFloorMode == 2 || fl <= 1e-5f) return 1;
-        if (x[IdxPhi] < fl)
-            jac[row0 * stride + IdxPhi] = -MathF.Sqrt(cfg.PhaseFloorPrior)
-                                        * (cfg.PhaseFloorMode == 1 ? 1f : 1f / fl);
-        return 1;
-    }
-}
-
 // Two rows: √ComWeightY · δ and √ComWeightX · d.x — the soft com ties pulling the root
 // offset d → baseline. The Y row lets a no-contact flight frame settle to the com anchor
 // (both feet free to leave the ground). The X row is the ABSOLUTE anti-absorption guard on

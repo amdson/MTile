@@ -91,9 +91,6 @@ public sealed class SolveProblem
     // ── Weights and prior anchors ─────────────────────────────────────────────────────
     public AnimSolverConfig Cfg;          // this frame's EFFECTIVE config (driver overrides applied)
     public float   InvCharLen;            // 1/reach: px rows → dimensionless
-    public float   PhaseFloor;            // speed-derived Δφ floor (0 = the rate-floor row is inert)
-    public float   PhaseAccelNorm;        // (Δφ − Δφ_prev)·norm = acceleration in PhaseAccelRef units
-    public float   PrevPhaseStep;         // Δφ_prev for the momentum prior
     public float   EaseBase;              // b: the base ease factor the com smoothness rows derive λs from
     public float   DyEmitted, DxEmitted;  // last frame's EMITTED root offset — the com smoothness anchor
     public bool[]  IsCore;                // torso bones take CorePosePrior, the rest LimbPosePrior

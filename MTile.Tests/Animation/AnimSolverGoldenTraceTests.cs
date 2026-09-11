@@ -36,7 +36,9 @@ namespace MTile.Tests;
 // Re-recorded again for the timing stage (chunk 5, T1): the four locomotion scenarios changed
 // by design — Δφ is now locked at 0 in the joint solve (the row layout is unchanged, the
 // momentum/floor rows read 0), contacts are captured at the phase the timing stage produced,
-// and the solved x has no Δφ component.
+// and the solved x has no Δφ component. Re-recorded once more for T5: the momentum and
+// rate-floor rows (both identically zero since T1) were deleted, so every scenario's row
+// layout shrank by two; nothing else changed.
 public class AnimSolverGoldenTraceTests
 {
     private readonly ITestOutputHelper _o;

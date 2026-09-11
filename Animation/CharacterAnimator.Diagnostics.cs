@@ -38,7 +38,7 @@ public sealed partial class CharacterAnimator
         // Row layout derived by walking this frame's composite (no hand-maintained arithmetic —
         // the old triple-kept row formulas were a recurring bug source, and driver-contributed
         // blocks would invalidate them anyway).
-        int m = CompositeRowLayout(x, n, out int npStart, out int npCount, out int floorRow, out _);
+        int m = CompositeRowLayout(x, n, out int npStart, out int npCount, out _);
         var blockRows = BlockRows(x, n);     // row → block, for the per-block attribution (DbgWorstBlock)
         var anal = new float[m * n];
         SolveObjective.Jacobian(_problem, _eval,x, anal, n);             // dense fill (we cleared by fresh alloc)
@@ -67,10 +67,6 @@ public sealed partial class CharacterAnimator
                           + s.Normal.Y * (tip.Y + x[IdxDy] - s.Point.Y);
                 if (MathF.Abs(s.Margin - gap) < kneeBand) skipRow[npRow] = true;
             }
-        // The phase-rate floor row has the same one-sided knee, at Δφ == floor: an FD step in
-        // the Δφ column that straddles it sees half the slope. Band covers the largest φ FD step.
-        if (floorRow >= 0 && p.PhaseFloor > 1e-5f && MathF.Abs(x[IdxPhi] - p.PhaseFloor) < 0.02f)
-            skipRow[floorRow] = true;
 
         float worst = 0f;
         for (int j = 0; j < n; j++)
@@ -163,7 +159,7 @@ public sealed partial class CharacterAnimator
         var x = new float[n];
         Array.Copy(_solveVars, x, n);
         // geom = rows before the prior tail (contacts + pins + no-pen + aim + contributed).
-        int m = CompositeRowLayout(x, n, out int npStart, out int npCount, out _, out int geom);
+        int m = CompositeRowLayout(x, n, out int npStart, out int npCount, out int geom);
         var jac = new float[m * n];          // zeroed by fresh alloc; CadenceJacobian fills it
         SolveObjective.Jacobian(_problem, _eval,x, jac, n);          // also leaves _scratch world at the solved x
         var r = new float[m];
@@ -445,20 +441,17 @@ public sealed partial class CharacterAnimator
     // arithmetic, which had to be kept in sync in three places and breaks the moment a move
     // driver contributes a constraint block.
     //   npStart/npCount — the NoPenetrationConstraint block (knee-skip + maxResid report)
-    //   floorRow        — the PhaseRateFloorConstraint row (its knee-skip)
-    //   geomRows        — rows before the prior tail (= offset of PlaybackContinuityConstraint)
-    private int CompositeRowLayout(float[] x, int n, out int npStart, out int npCount,
-                                   out int floorRow, out int geomRows)
+    //   geomRows        — rows before the prior tail (= offset of ComOffsetConstraint)
+    private int CompositeRowLayout(float[] x, int n, out int npStart, out int npCount, out int geomRows)
     {
         var rows = BlockRows(x, n);
         var blocks = _problem.Blocks;
-        int m = 0; npStart = 0; npCount = 0; floorRow = -1; geomRows = -1;
+        int m = 0; npStart = 0; npCount = 0; geomRows = -1;
         for (int k = 0; k < rows.Length; k++)
         {
             var c = blocks[k];
-            if (c is PlaybackContinuityConstraint && geomRows < 0) geomRows = rows[k].Start;
-            if      (c is NoPenetrationConstraint)  { npStart = rows[k].Start; npCount = rows[k].Count; }
-            else if (c is PhaseRateFloorConstraint) floorRow = rows[k].Start;
+            if (c is ComOffsetConstraint && geomRows < 0) geomRows = rows[k].Start;
+            if (c is NoPenetrationConstraint) { npStart = rows[k].Start; npCount = rows[k].Count; }
             m = rows[k].Start + rows[k].Count;
         }
         if (geomRows < 0) geomRows = m;
@@ -513,7 +506,7 @@ public sealed partial class CharacterAnimator
         int n = IdxTheta0 + _skeleton.Count;
         var x = new float[n];
         Array.Copy(_solveVars, x, n);
-        int m = CompositeRowLayout(x, n, out _, out _, out _, out _);
+        int m = CompositeRowLayout(x, n, out _, out _, out _);
         var t = new SolveTrace { N = n, M = m, X = x, R = new float[m], J = new float[m * n], R2 = new float[m], J2 = new float[m * n],
                                  Layout = BlockRows(x, n) };
         SolveObjective.Jacobian(_problem, _eval,x, t.J, n);

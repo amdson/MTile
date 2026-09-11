@@ -24,21 +24,10 @@ internal static class ColumnDiag
 
     private static readonly HashSet<string> PriorBlocks = new()
     {
-        "PlaybackContinuityConstraint", "PhaseRateFloorConstraint", "ComOffsetConstraint",
-        "PosePriorConstraint", "ThetaSmoothnessConstraint",
+        "ComOffsetConstraint", "PosePriorConstraint", "ThetaSmoothnessConstraint",
     };
 
-    public static void Run()
-    {
-        foreach (int mode in new[] { 0, 1, 2 })
-        {
-            AnimSolverConfig.Current.PhaseFloorMode = mode;
-            Console.WriteLine();
-            Console.WriteLine($"=== PhaseFloorMode = {mode} ===");
-            RunOne();
-        }
-        AnimSolverConfig.Current.PhaseFloorMode = 0;
-    }
+    public static void Run() => RunOne();
 
     private static void RunOne()
     {

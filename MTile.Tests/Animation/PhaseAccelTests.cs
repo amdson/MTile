@@ -23,7 +23,7 @@ public class PhaseAccelTests
     // band at 30 and 60 fps (the raw-phase-unit PhaseStepPrior it replaced was 4× weaker at
     // half the frame rate). The band itself is what the row leaves through: the clip's
     // authored re-contact hop (~50–140 cycles/s²), well under the ~850 of a quarter-cycle
-    // skip, which the row is there to remove (see AnimSolverConfig.PhaseAccelPrior).
+    // skip (the retired seed search could produce one; travel timing cannot).
     [Fact]
     public void SoftPrior_IsFrameRateInvariant()
     {

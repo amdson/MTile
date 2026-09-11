@@ -204,14 +204,7 @@ internal static class FtolStudy
 
     public static void DoubleCheck()
     {
-        foreach (int mode in new[] { 0, 1, 2 })
-        {
-            AnimSolverConfig.Current.PhaseFloorMode = mode;
-            Console.WriteLine();
-            Console.WriteLine("=== PhaseFloorMode = " + mode + " ===");
-            DoubleCheckOne();
-        }
-        AnimSolverConfig.Current.PhaseFloorMode = 0;
+        DoubleCheckOne();
     }
 
     private static void DoubleCheckOne()

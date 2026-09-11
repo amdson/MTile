@@ -425,7 +425,7 @@ internal static class AnimBaseline
             $"# configs/movement_config.json sha256={Sha(File.ReadAllBytes(Path.Combine(root, "configs", "movement_config.json")))}",
             // Proof the file above is what ran (the code defaults differ): a few of its tiers.
             $"# solver cfg in effect: TierContact={AnimSolverConfig.Current.TierContact} TierHard={AnimSolverConfig.Current.TierHard} "
-            + $"CorePosePrior={AnimSolverConfig.Current.CorePosePrior} PhaseFloorPrior={AnimSolverConfig.Current.PhaseFloorPrior} "
+            + $"CorePosePrior={AnimSolverConfig.Current.CorePosePrior} SettleSpeed={AnimSolverConfig.Current.SettleSpeed} "
             + $"ComWeightY={AnimSolverConfig.Current.ComWeightY} ComWeightX={AnimSolverConfig.Current.ComWeightX}",
         };
         foreach (string rig in new[] { "biped", "biped_rabbit" })

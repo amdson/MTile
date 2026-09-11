@@ -175,6 +175,12 @@ or lower `SettleSpeed` toward the idle band), left to the owner.
 `MTile.Bench` tools that read the retired knobs (`ColumnDiag` PhaseFloorMode sweep,
 `FtolStudy`) are updated or dropped with them.
 
+**T5 landed (2026-09-11):** `PlaybackContinuityConstraint`, `PhaseRateFloorConstraint`, the
+knobs `PhaseAccelPrior` / `PhaseFloorPrior` / `PhaseFloorMode` / `MaxPhaseAccel` (and their
+json keys), the clip-switch rate seed, and the bench sweeps over `PhaseFloorMode` are gone.
+Δφ's column and box remain (chunk 8). The golden traces were re-recorded for the two-row
+layout change; the bench numbers are unchanged (the rows were identically zero).
+
 ## Order of work and acceptance
 
 1. T1 + Δφ locked + T4 (the transfer is needed before settling can be judged). Golden

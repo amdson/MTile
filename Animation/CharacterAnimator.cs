@@ -241,7 +241,6 @@ public sealed partial class CharacterAnimator
     // the diagnostics (SolvedBoneTipWorld, MaxJacobianError, …) re-evaluate.
     private readonly SolveProblem _problem;
     private readonly PoseEval     _eval;
-    private float             _phaseAccelNorm;    // 1/(dt²·PhaseAccelRef): (Δφ − Δφ_prev)·norm = acceleration in PhaseAccelRef units
     // The root offset d = (δ, d.x) as EMITTED (drawn) last frame — the temporal anchor for the
     // com block's smoothness rows and the value the host reads (VerticalOffset /
     // HorizontalOffset). On a solve frame it is the solved d; on a no-solve frame (flight,
@@ -249,10 +248,6 @@ public sealed partial class CharacterAnimator
     // of snapping to the baseline — the one-frame root pop at contact release/capture.
     private float             _dyEmitted, _dxEmitted;
     private float             _easeBase;          // this frame's base ease factor b = 1 − exp(−Stiffness·dt)
-    // Reference phase acceleration (cycles/s²) the soft acceleration row is normalized by —
-    // about one re-contact hop of the run at 60 fps (0.03/frame · 3600). Makes PhaseAccelPrior
-    // O(1): λ = 1 ⇒ one such hop costs ≈ 1px of planted-foot slip.
-    private const float       PhaseAccelRef = 100f;
     private bool              _haveCorr;          // a Δθ-correction solve ran this frame
 
     // Action-aim state (the stab re-aim, §STAB_AIM_PLAN), resolved each frame in step 1.7 and
@@ -441,9 +436,7 @@ public sealed partial class CharacterAnimator
         };
         _corePriors = new ISolveConstraint[]
         {
-            new PlaybackContinuityConstraint(),// 1 row: Δφ momentum prior
-            new PhaseRateFloorConstraint(),    // 1 row: one-sided Δφ ≥ speed-derived floor (anti-collapse)
-            new ComOffsetConstraint(),         // 2 rows: soft com pulls δ, d.x → baseline
+            new ComOffsetConstraint(),         // 4 rows: soft com pulls δ, d.x → baseline + their smoothness
             new PosePriorConstraint(),         // N rows: Tikhonov on each Δθ (toward 0)
             new ThetaSmoothnessConstraint(),   // N rows: final angle toward last EMITTED (the in-solve ease)
         };
@@ -525,10 +518,8 @@ public sealed partial class CharacterAnimator
         {
             _state.Clip = clip;
             _state.ClipTime = 0f;
-            // Rate across the switch: the velocity-derived nominal (the timing stage
-            // recomputes the rate from travel every frame; this only seeds continuity).
-            _prevPhaseStep = speed * dt * PhasePerPixel;
-            _rate          = speed * PhasePerPixel;
+            // (The rate needs no seed across the switch: the timing stage recomputes it from
+            //  travel every frame, and the planner's pace estimate reads that.)
             // Entry override: a driver may place the new clip's start — MatchPose scans the
             // cycle for the phase closest to the pose already on screen (fall → run's flight
             // arc), StartT places it explicitly (future run→vault footing). StartT < 0 keeps
@@ -649,10 +640,6 @@ public sealed partial class CharacterAnimator
         foreach (var c in _coreGeom)           _problem.Blocks.Add(c);
         foreach (var c in _frame.Constraints)  _problem.Blocks.Add(c);
         foreach (var c in _corePriors)         _problem.Blocks.Add(c);
-
-        // Normalization for the soft acceleration row (PlaybackContinuityConstraint):
-        // inert now that Δφ is locked in every solve (retired in timing-stage step T5).
-        _phaseAccelNorm = 1f / (MathF.Max(dt, 1e-4f) * MathF.Max(dt, 1e-4f) * PhaseAccelRef);
 
         // 2. TIMING — advance the locomotion phase FIRST (Plans/ANIMATION_TIMING_STAGE.md;
         //    the timing stage is the phase's one owner, ANIMATION_OWNERSHIP_CONTRACT.md Rule
@@ -1199,7 +1186,7 @@ public sealed partial class CharacterAnimator
         _solveLo[IdxDx]  = -cfg.HorizOffsetLimit; _solveHi[IdxDx]  = cfg.HorizOffsetLimit;
         for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
         Array.Clear(_solveVars, 0, n);        // d, Δθ start at 0 (baseline pose)
-        FreezeProblem(clip, phi, phiEntry, 0f, n);   // every input the rows read, incl. t_i (entry base) and û*
+        FreezeProblem(clip, phi, phiEntry, n);   // every input the rows read, incl. t_i (entry base) and û*
 
         // Δθ starts at 0 (not warm-started): the θ-smoothness prior supplies the temporal
         // continuity from the COST side (its target is last frame's EMITTED pose), and a
@@ -1272,7 +1259,7 @@ public sealed partial class CharacterAnimator
                 }
             if (worst <= StaticSolveSlack) return;   // all rows dormant — nothing to solve
         }
-        FreezeProblem(anim, phi, phi, 0f, n); // floor 0: Δφ is locked, the rate-floor row must stay inert
+        FreezeProblem(anim, phi, phi, n);
 
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n),
@@ -1292,7 +1279,7 @@ public sealed partial class CharacterAnimator
     // the smoothness targets t_i are measured against the base pose there, so this frame's
     // clip playback (base(φ) − base(φ_entry)) stays free of the smoothing rows — charging it
     // was the absolute-pose smoothing that dragged the cadence (ThetaSmoothnessConstraint).
-    private void FreezeProblem(AnimationDocument clip, float phi, float phiEntry, float phaseFloor, int n)
+    private void FreezeProblem(AnimationDocument clip, float phi, float phiEntry, int n)
     {
         var p = _problem;
         p.Clip = clip; p.Phi = phi;
@@ -1307,9 +1294,6 @@ public sealed partial class CharacterAnimator
         }
         p.AimActive      = _aimActive;
         p.Cfg            = _frame.Solver;
-        p.PhaseFloor     = phaseFloor;
-        p.PhaseAccelNorm = _phaseAccelNorm;
-        p.PrevPhaseStep  = 0f;   // Δφ is locked at 0 in every solve: the continuity row is inert (T5 deletes it)
         p.EaseBase       = _easeBase;
         p.DyEmitted      = _dyEmitted;
         p.DxEmitted      = _dxEmitted;
