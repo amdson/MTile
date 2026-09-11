@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -100,6 +101,8 @@ static class Probe
                 case "bakeyaw": return BakeYaw(args);
                 case "refarc": return RefArc(args);
                 case "motion": return Motion(args);
+                case "feetreport": return FeetReport(args);
+                case "dropfeet": return DropFeet(args);
                 default:
                     Console.Error.WriteLine($"unknown command '{cmd}'. try: list | digest | diff | report | anim | addcom | ik"
                                           + " | new | addkey | contact | rot | retime | delkey | dur | retarget | stretch | bakeyaw | motion");
@@ -214,8 +217,8 @@ static class Probe
         foreach (var clip in _all)
         {
             if (only != null && !string.Equals(clip.Name, only, StringComparison.OrdinalIgnoreCase)) continue;
-            float toeL = MotionProbe.Sample(clip, _rig, "foot_l", 0f).Tip.Y;
-            float toeR = MotionProbe.Sample(clip, _rig, "foot_r", 0f).Tip.Y;
+            float toeL = MotionProbe.Sample(clip, _rig, MotionProbe.SupportBone(_rig, "l"), 0f).Tip.Y;
+            float toeR = MotionProbe.Sample(clip, _rig, MotionProbe.SupportBone(_rig, "r"), 0f).Tip.Y;
             float sole = MathF.Max(toeL, toeR);                  // lower foot (Y-down → larger Y)
             float comY = sole - worldGround / scale;
             foreach (var kf in clip.Keyframes)
@@ -454,14 +457,14 @@ static class Probe
             if (_rig.IndexOf(node) < 0) throw new ArgumentException($"no bone '{node}' in rig");
             var label = new ContactLabel { Node = node, Weight = 1f, Source = source };
             if (HasFlag(args, "--add") && kf.Contacts != null)
-                kf.Contacts.RemoveAll(l => l.Node == node);
+                kf.Contacts.RemoveAll(l => l.Key == node);
             else
                 kf.Contacts = new List<ContactLabel>();
             kf.Contacts.Add(label);
         }
         AnimationStore.Save(clip, _statesDir);
         string desc = kf.Contacts.Count == 0 ? "none"
-            : string.Join(", ", kf.Contacts.ConvertAll(l => $"{l.Node}({l.Source})"));
+            : string.Join(", ", kf.Contacts.ConvertAll(l => $"{l.Key}({l.Source})"));
         Console.WriteLine($"key t={kf.Time:0.000} contacts = {desc}");
         return 0;
     }
@@ -899,7 +902,7 @@ static class Probe
             // MotionProbe's strut-aware knee test.
             int ui = rig.IndexOf($"leg_{s}_upper");
             Vector2 sock = ui >= 0 && rig.Bones[ui].Parent >= 0 ? w[rig.Bones[ui].Parent].Translation : hip;
-            Vector2 knee = P($"leg_{s}_upper"), ankle = P($"leg_{s}_lower"), toe = P($"foot_{s}");
+            Vector2 knee = P($"leg_{s}_upper"), ankle = P($"leg_{s}_lower"), toe = P(MotionProbe.SupportBone(_rig, s));
             Vector2 d = ankle - sock; float L = d.Length();
             float side = L > 1e-4f ? ((knee.X - sock.X) * d.Y - (knee.Y - sock.Y) * d.X) / L : 0f;
             string dir = side > 0.2f ? "knee-FWD" : side < -0.2f ? "knee-RECURV" : "knee-straight";
@@ -943,6 +946,129 @@ static class Probe
             var p = m.BodyAt(t); var r = m.RootAt(t, out bool anchored);
             Console.WriteLine($"  t={t:0.00}  p=({p.X,7:0.00},{p.Y,7:0.00})  root=({r.X,7:0.00},{r.Y,7:0.00}){(anchored ? "" : "  (no com)")}");
         }
+        return 0;
+    }
+
+    // feetreport [clip] — the helper-feet migration's DRY-RUN report (Plans/
+    // ANIMATION_SCENE_AUTHORING_PLAN.md "Remove the stick figure's helper feet", step 2):
+    // every reference to foot_l/foot_r in the rig's pool — posed entries (rotation / stretch),
+    // contact labels, additions parented to a foot, attachments and extra bones hung from
+    // one — plus the trajectory delta between each foot's tip and the intended lower-leg
+    // endpoint at keys and 32 intermediate samples. Reports; changes nothing.
+    static int FeetReport(string[] args)
+    {
+        string only = args.Length > 1 ? args[1] : null;
+        string[] feet = { "foot_l", "foot_r" };
+        string[] legs = { "leg_l_lower", "leg_r_lower" };
+        int fl = _rig.IndexOf("foot_l"), fr = _rig.IndexOf("foot_r");
+        if (fl < 0 && fr < 0) { Console.WriteLine($"rig '{_rig.Name}' has no foot_l/foot_r — nothing to migrate"); return 0; }
+        Console.WriteLine($"# rig {_rig.Name}: foot_l len {_rig.Bones[fl].Length:0.###} rot {_rig.Bones[fl].Rotation:0.###}; foot_r len {_rig.Bones[fr].Length:0.###}");
+        Console.WriteLine($"# rig points: {(_rig.Points.Count == 0 ? "none" : string.Join(", ", _rig.Points.Select(p => $"{p.Id}={p.Bone}.{p.End}")))}");
+        var pose = _rig.CreatePose(); var a = _rig.CreatePose(); var b = _rig.CreatePose(); var c = _rig.CreatePose(); var d = _rig.CreatePose();
+        int clips = 0, posed = 0, animated = 0, contacts = 0, adds = 0, atts = 0, extras = 0;
+        float worstAll = 0f; string worstAt = "-";
+        foreach (var clip in _all)
+        {
+            if (only != null && !clip.Name.Equals(only, StringComparison.OrdinalIgnoreCase)) continue;
+            clips++;
+            int cPosed = 0, cAnim = 0, cContacts = 0, cAdds = 0;
+            foreach (var kf in clip.Keyframes)
+            {
+                if (kf.Bones != null)
+                    foreach (var e in kf.Bones)
+                        if (Array.IndexOf(feet, e.Bone) >= 0)
+                        {
+                            cPosed++;
+                            int bi = _rig.IndexOf(e.Bone);
+                            if (MathF.Abs(MathHelper.WrapAngle(e.Rotation - _rig.Bones[bi].Rotation)) > 1e-4f || (e.Stretch.HasValue && MathF.Abs(e.Stretch.Value - 1f) > 1e-4f)) cAnim++;
+                        }
+                if (kf.Contacts != null) foreach (var l in kf.Contacts) if (Array.IndexOf(feet, l.Node) >= 0) cContacts++;
+                if (kf.Additions != null) foreach (var ad in kf.Additions) if (Array.IndexOf(feet, ad.Parent) >= 0) cAdds++;
+            }
+            int cAtts = clip.Attachments?.Count(x => Array.IndexOf(feet, x.Bone) >= 0) ?? 0;
+            int cExtras = clip.ExtraBones?.Count(x => Array.IndexOf(feet, x.Parent) >= 0) ?? 0;
+            // Trajectory delta: foot tip vs lower-leg end, keys + intermediates.
+            float worst = 0f, worstT = 0f;
+            for (int i = 0; i <= 32; i++)
+            {
+                float t = i / 32f;
+                AnimationSampler.SampleSmooth(clip, t, a, b, c, d, pose);
+                var w = pose.ComputeWorld(Affine2.Identity);
+                for (int side = 0; side < 2; side++)
+                {
+                    int f = _rig.IndexOf(feet[side]), lg = _rig.IndexOf(legs[side]);
+                    if (f < 0 || lg < 0) continue;
+                    float dist = Vector2.Distance(w[f].Translation, w[lg].Translation);
+                    if (dist > worst) { worst = dist; worstT = t; }
+                }
+            }
+            if (worst > worstAll) { worstAll = worst; worstAt = $"{clip.Name}@{worstT:0.00}"; }
+            posed += cPosed; animated += cAnim; contacts += cContacts; adds += cAdds; atts += cAtts; extras += cExtras;
+            Console.WriteLine($"{clip.Name,-18} posed {cPosed,2} (animated {cAnim,2})  contacts {cContacts,2}  adds {cAdds}  atts {cAtts}  extras {cExtras}  tip-vs-leg max {worst:0.000} rig ({worst * Game1.SkeletonScale:0.00}px)");
+        }
+        Console.WriteLine($"# {clips} clips: {posed} posed foot entries ({animated} animated off bind), {contacts} contact labels, {adds} additions, {atts} attachments, {extras} extra bones on a foot");
+        Console.WriteLine($"# worst tip-vs-lower-leg delta {worstAll:0.000} rig = {worstAll * Game1.SkeletonScale:0.00}px at {worstAt}");
+        return 0;
+    }
+
+    // dropfeet [--write] [clip] — the migration (steps 3–4): contact labels on foot_l/foot_r
+    // become point labels on the rig's support points (support_l/support_r), foot pose
+    // entries are removed, additions/attachments/extra bones hung from a foot are re-parented
+    // to the lower leg with the foot's bind transform composed in (same world placement).
+    // Dry by default; --write saves. The rig file itself is edited separately (the feet are
+    // dropped from Skeletons/<rig>.json once every clip resolves without them).
+    static int DropFeet(string[] args)
+    {
+        bool write = HasFlag(args, "--write");
+        // --labels-only: a rig that KEEPS its foot bones (the rabbit's serve its silhouette)
+        // only moves its contact labels onto the support points; poses stay as authored.
+        bool labelsOnly = HasFlag(args, "--labels-only");
+        string only = null;
+        for (int i = 1; i < args.Length; i++) if (!args[i].StartsWith("-")) { only = args[i]; break; }
+        var map = new Dictionary<string, (string leg, string point)>
+        { ["foot_l"] = ("leg_l_lower", "support_l"), ["foot_r"] = ("leg_r_lower", "support_r") };
+        foreach (var kv in map)
+            if (_rig.IndexOf(kv.Key) >= 0 && !_rig.Points.Any(p => p.Id == kv.Value.point))
+                throw new ArgumentException($"rig '{_rig.Name}' has no point '{kv.Value.point}' — add it to Skeletons/{_rig.Name}.json first");
+        int n = 0;
+        foreach (var clip in _all)
+        {
+            if (only != null && !clip.Name.Equals(only, StringComparison.OrdinalIgnoreCase)) continue;
+            int changed = 0;
+            foreach (var kf in clip.Keyframes)
+            {
+                if (kf.Bones != null && !labelsOnly) changed += kf.Bones.RemoveAll(e => map.ContainsKey(e.Bone));
+                if (kf.Contacts != null)
+                    foreach (var l in kf.Contacts)
+                        if (l.Node != null && map.TryGetValue(l.Node, out var m)) { l.Point = m.point; l.Node = null; changed++; }
+                if (kf.Additions != null && !labelsOnly)
+                    foreach (var ad in kf.Additions)
+                        if (ad.Parent != null && map.TryGetValue(ad.Parent, out var m))
+                        {
+                            int f = _rig.IndexOf(ad.Parent);
+                            var fb = _rig.Bones[f];
+                            // foot frame → leg frame: p_leg = R(θf)·(p + (len_f, 0))
+                            Vector2 P(float x, float y) { float cs = MathF.Cos(fb.Rotation), sn = MathF.Sin(fb.Rotation); x += fb.Length; return new Vector2(cs * x - sn * y, sn * x + cs * y); }
+                            var o = P(ad.Px, ad.Py); var tip = P(ad.Px + ad.Dx, ad.Py + ad.Dy);
+                            ad.Px = o.X; ad.Py = o.Y; ad.Dx = tip.X - o.X; ad.Dy = tip.Y - o.Y; ad.Parent = m.leg; changed++;
+                        }
+            }
+            if (clip.Attachments != null && !labelsOnly)
+                foreach (var at in clip.Attachments)
+                    if (at.Bone != null && map.TryGetValue(at.Bone, out var m))
+                    { at.Rotation += _rig.Bones[_rig.IndexOf(at.Bone)].Rotation; at.Bone = m.leg; changed++; }
+            if (clip.ExtraBones != null && !labelsOnly)
+                foreach (var eb in clip.ExtraBones)
+                    if (eb.Parent != null && map.TryGetValue(eb.Parent, out var m))
+                    { var fb = _rig.Bones[_rig.IndexOf(eb.Parent)]; eb.Rotation = MathHelper.WrapAngle(eb.Rotation + fb.Rotation); eb.Parent = m.leg; changed++; }
+            if (changed > 0)
+            {
+                n++;
+                Console.WriteLine($"{clip.Name,-18} {changed} change(s){(write ? "" : " (dry)")}");
+                if (write) AnimationStore.Save(clip, _statesDir);
+            }
+        }
+        Console.WriteLine($"# {(write ? "migrated" : "would migrate")} {n} clip(s)");
         return 0;
     }
 

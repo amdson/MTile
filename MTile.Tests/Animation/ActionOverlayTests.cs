@@ -83,8 +83,8 @@ public class ActionOverlayTests
             if (d > worst) { worst = d; worstAt = $"{bone}.{what} ({expect} vs {actual})"; }
         }
 
-        foreach (var bone in new[] { "hip", "leg_l_upper", "leg_l_lower", "foot_l",
-                                     "leg_r_upper", "leg_r_lower", "foot_r" })
+        foreach (var bone in new[] { "hip", "leg_l_upper", "leg_l_lower",
+                                     "leg_r_upper", "leg_r_lower" })
         {
             int b = skel.IndexOf(bone);
             var expect = control.Pose.Local[b];
@@ -400,9 +400,9 @@ public class ActionOverlayTests
     private static AnimationDocument BuildWalkClip(Skeleton skel)
     {
         var clip = new AnimationDocument { Name = "walk", Type = "Walk", Duration = 0.8f, Loop = true };
-        clip.Keyframes.Add(LocoKf(skel, 0f,   legL:  1.0f, legR: -1.0f, plant: "foot_r"));
-        clip.Keyframes.Add(LocoKf(skel, 0.5f, legL: -1.0f, legR:  1.0f, plant: "foot_l"));
-        clip.Keyframes.Add(LocoKf(skel, 1f,   legL:  1.0f, legR: -1.0f, plant: "foot_r"));
+        clip.Keyframes.Add(LocoKf(skel, 0f,   legL:  1.0f, legR: -1.0f, plant: "leg_r_lower"));
+        clip.Keyframes.Add(LocoKf(skel, 0.5f, legL: -1.0f, legR:  1.0f, plant: "leg_l_lower"));
+        clip.Keyframes.Add(LocoKf(skel, 1f,   legL:  1.0f, legR: -1.0f, plant: "leg_r_lower"));
         return clip;
     }
 

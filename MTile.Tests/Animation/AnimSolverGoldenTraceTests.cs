@@ -38,7 +38,11 @@ namespace MTile.Tests;
 // momentum/floor rows read 0), contacts are captured at the phase the timing stage produced,
 // and the solved x has no Δφ component. Re-recorded once more for T5: the momentum and
 // rate-floor rows (both identically zero since T1) were deleted, so every scenario's row
-// layout shrank by two; nothing else changed.
+// layout shrank by two; nothing else changed. Re-recorded for chunk 4's helper-feet removal:
+// the biped rig lost foot_l/foot_r (two fewer Δθ variables, two fewer no-pen rows per
+// surface), its planted contacts moved 0.15 px onto the lower legs' ends (support_l/r), and
+// the terrain tips are enumerated in a different order (support points appended), which
+// reorders the no-pen rows — the rabbit scenarios changed only by that ordering.
 public class AnimSolverGoldenTraceTests
 {
     private readonly ITestOutputHelper _o;

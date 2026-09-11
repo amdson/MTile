@@ -57,6 +57,15 @@ public sealed class DemoGame : Game
     private readonly ScenePreview   _preview   = new();
     private readonly SceneMenu      _menu      = new();
     private SkeletonPose _ghostPose;            // scratch for keyframe ghosts
+    // ENDPOINT MENU (Plans/ANIMATION_SCENE_AUTHORING_PLAN.md "Endpoint menus"): click an
+    // endpoint (a bone's far tip) to select it and show a small "v" affordance beside it;
+    // right-click opens the same menu directly. Items add elements (knife), named points,
+    // and contact annotations for a scope, backed by EndpointResolver / NamedPoint.
+    private readonly SceneMenu _endpointMenu = new() { Label = "v" };
+    private int     _selectedEndpoint = -1;     // bone whose End is selected
+    private bool    _contactWholeClip;          // edit scope: this key → next key (default) or the whole clip
+    private Vector2 _pressPos;                  // where the left button went down (click vs drag)
+    private string  _selectedPointId;           // a clip point selected from the menu (Delete removes it)
     // The clip's reference trajectory (Doc.ReferenceArc), loaded on clip select: the
     // authored maneuver arc (ReferenceClips/<name>.json, else the baked registry default)
     // that drives the body's scene placement while scrubbing. Null = no arc.
@@ -101,7 +110,7 @@ public sealed class DemoGame : Game
     private int  _dragAdd      = -1;          // addition being dragged
     private bool _dragAddTip;                 // dragging a vector's tip vs its origin
     // Text-input naming for a pending addition or a new bone (label-on-create).
-    private enum NameTarget { None, Addition, Bone, Effect }
+    private enum NameTarget { None, Addition, Bone, Effect, Point }
     private string _effectBone;
     private AnimAttachment _selectedAttachment;
     private SpriteAttachmentRenderer _attachments;
@@ -298,6 +307,7 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.Delete) || Pressed(kb, Keys.Back))
         {
             if (_guides.Tool == GuideTool.Select && _guides.Selected(Doc) != null) _guides.DeleteSelected(Doc, ref _dirty);
+            else if (_selectedPointId != null) RemoveSelectedPoint();
             else if (_selectedAdd >= 0) RemoveSelectedAddition();
             else DeleteActiveKeyframe();
         }
@@ -379,6 +389,30 @@ public sealed class DemoGame : Game
         var world = _pose.ComputeWorld(_root);
         _hoverBone = (!_playing && mp.X >= SidebarW && !InSlider(mp) && _dragBone < 0) ? PickJoint(world, mp) : _dragBone;
 
+        // Endpoint menu affordance: a small button beside the selected endpoint; right-click on
+        // any endpoint selects it and opens the menu directly.
+        if (_selectedEndpoint >= _skeleton.Count) _selectedEndpoint = -1;
+        if (_selectedEndpoint >= 0)
+        {
+            Vector2 ep = world[_selectedEndpoint].Translation;
+            _endpointMenu.Button = new Rectangle((int)ep.X + 8, (int)ep.Y - 20, 16, 16);
+        }
+        else { _endpointMenu.Button = Rectangle.Empty; _endpointMenu.Open = false; }
+        BuildEndpointMenu(world);
+        bool rightPressed = ms.RightButton == ButtonState.Pressed && _prevMs.RightButton == ButtonState.Released;
+        if (rightPressed && !_playing && mp.X >= SidebarW && !InSlider(mp) && Doc != null)
+        {
+            int b = PickJoint(world, mp);
+            if (b >= 0)
+            {
+                _selectedEndpoint = b;
+                Vector2 ep = world[b].Translation;
+                _endpointMenu.Button = new Rectangle((int)ep.X + 8, (int)ep.Y - 20, 16, 16);
+                BuildEndpointMenu(world);
+                _endpointMenu.Open = true;
+            }
+        }
+
         // Clip-list scrolling: wheel over the sidebar (2 rows per notch), or drag the thumb.
         int wheel = ms.ScrollWheelValue - _prevMs.ScrollWheelValue;
         if (wheel != 0 && mp.X < SidebarW)
@@ -387,8 +421,11 @@ public sealed class DemoGame : Game
 
         if (leftPressed)
         {
-            // Header UI first (deterministic picking priority), then the working area.
+            // Header UI first (deterministic picking priority), then the endpoint popup, then
+            // the working area.
+            _pressPos = mp;
             if (_menu.HandlePress(mp)) { }
+            else if (_endpointMenu.Button != Rectangle.Empty && _endpointMenu.HandlePress(mp)) { }
             else if (mp.X < SidebarW)
             {
                 // The scrollbar strip owns the sidebar's right edge when the list overflows;
@@ -500,7 +537,12 @@ public sealed class DemoGame : Game
             }
         }
 
-        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragSidebarThumb = false; _guides.Release(groundY); }
+        if (leftUp)
+        {
+            // A click on a joint (press + release without moving) selects that endpoint.
+            if (_dragBone >= 0 && Vector2.Distance(mp, _pressPos) < 3f) _selectedEndpoint = _dragBone;
+            _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragSidebarThumb = false; _guides.Release(groundY);
+        }
 
         _prevMs = ms;
         _prevKb = kb;
@@ -752,6 +794,7 @@ public sealed class DemoGame : Game
         DrawHelpOverlay();
         DrawNamingOverlay();
         _menu.Draw(_draw, _spriteBatch, _font);
+        if (_endpointMenu.Button != Rectangle.Empty) _endpointMenu.Draw(_draw, _spriteBatch, _font);
         _spriteBatch.End();
 
         if (capturing)
@@ -869,6 +912,15 @@ public sealed class DemoGame : Game
 
         var world = _pose.ComputeWorld(_root);
         if (!showRig) return;
+        // The selected endpoint's segment reads highlighted (at a shared joint this says which
+        // bone's END is the target), and the endpoint itself gets a bright ring.
+        if (_selectedEndpoint >= 0 && _selectedEndpoint < world.Length)
+        {
+            int par = _skeleton.Bones[_selectedEndpoint].Parent;
+            Vector2 from = par >= 0 ? world[par].Translation : new Vector2(_root.Tx, _root.Ty);
+            _draw.Line(from, world[_selectedEndpoint].Translation, new Color(150, 200, 255) * 0.6f, 6f);
+            _draw.Ring(world[_selectedEndpoint].Translation, 8f, new Color(150, 200, 255), 16, 1.5f);
+        }
         var contacts = _activeKey >= 0 ? Doc.Keyframes[_activeKey].Contacts : null;
         for (int i = 0; i < world.Length; i++)
         {
@@ -876,7 +928,7 @@ public sealed class DemoGame : Game
             if (_activeKey < 0) { _draw.Ring(p, 4f, new Color(90, 95, 110), 10, 1f); continue; }
 
             // Contact-labeled nodes get a green halo behind the normal marker.
-            if (HasContact(contacts, _skeleton.Bones[i].Name))
+            if (HasContactOnBone(contacts, i))
                 _draw.Disc(p, 8f, new Color(70, 220, 110));
 
             if (i == _dragBone)       _draw.Disc(p, 6f, Color.White);
@@ -937,10 +989,11 @@ public sealed class DemoGame : Game
         }
     }
 
-    private static bool HasContact(List<ContactLabel> contacts, string node)
+    // Does a label on this keyframe resolve to bone `i` (a legacy node or a named point)?
+    private bool HasContactOnBone(List<ContactLabel> contacts, int i)
     {
         if (contacts == null) return false;
-        foreach (var c in contacts) if (c.Node == node) return true;
+        foreach (var c in contacts) if (EndpointResolver.BoneOf(_skeleton, Doc, c) == i) return true;
         return false;
     }
 
@@ -981,8 +1034,11 @@ public sealed class DemoGame : Game
             if (kf.Contacts != null)
                 foreach (var c in kf.Contacts)
                 {
+                    // Mirror both the legacy node and a point id (support_l ↔ support_r).
                     string m = MirrorBoneName(c.Node);
                     if (m != null) c.Node = m;
+                    string mp = MirrorBoneName(c.Point);
+                    if (mp != null) c.Point = mp;
                 }
         }
         _dirty = true;
@@ -1002,18 +1058,162 @@ public sealed class DemoGame : Game
         return null;
     }
 
-    // Toggle a SelfPlant contact label on a node for the active keyframe.
+    // Toggle a No-slip (SelfPlant) contact on a bone's End for the active keyframe — the M+click
+    // quick path. Writes a point label when the rig/clip names that endpoint, else the legacy node.
     private void ToggleContact(int bone)
     {
         if (Doc == null || _activeKey < 0 || bone < 0) return;
         var kf = Doc.Keyframes[_activeKey];
-        kf.Contacts ??= new List<ContactLabel>();
-        string node = _skeleton.Bones[bone].Name;
-        int idx = -1;
-        for (int i = 0; i < kf.Contacts.Count; i++) if (kf.Contacts[i].Node == node) { idx = i; break; }
+        int idx = IndexOfContactOnBone(kf.Contacts, bone);
         if (idx >= 0) kf.Contacts.RemoveAt(idx);
-        else          kf.Contacts.Add(new ContactLabel { Node = node, Weight = 1f });
+        else { kf.Contacts ??= new List<ContactLabel>(); kf.Contacts.Add(LabelFor(bone, ContactSource.SelfPlant)); }
         _dirty = true;
+    }
+
+    private int IndexOfContactOnBone(List<ContactLabel> contacts, int bone)
+    {
+        if (contacts == null) return -1;
+        for (int i = 0; i < contacts.Count; i++) if (EndpointResolver.BoneOf(_skeleton, Doc, contacts[i]) == bone) return i;
+        return -1;
+    }
+
+    // The named point at a bone's End (rig first, then the clip), or null.
+    private NamedPoint PointFor(int bone)
+    {
+        string name = _skeleton.Bones[bone].Name;
+        static bool At(NamedPoint p, string n) => p.Bone == n && p.End == BoneEnd.End && p.Ox == 0f && p.Oy == 0f;
+        foreach (var p in _skeleton.Points) if (At(p, name)) return p;
+        if (Doc?.Points != null) foreach (var p in Doc.Points) if (At(p, name)) return p;
+        return null;
+    }
+
+    // A contact label for a bone's End: by point id when one exists, else the legacy node.
+    private ContactLabel LabelFor(int bone, ContactSource src)
+    {
+        var p = PointFor(bone);
+        return p != null ? new ContactLabel { Point = p.Id, Weight = 1f, Source = src }
+                         : new ContactLabel { Node = _skeleton.Bones[bone].Name, Weight = 1f, Source = src };
+    }
+
+    // Make sure the bone's End has a named point (a "contact point"), creating a clip point
+    // when neither the rig nor the clip names it. One setup step for a simple plant.
+    private NamedPoint EnsureContactPoint(int bone)
+    {
+        var p = PointFor(bone);
+        if (p != null) return p;
+        Doc.Points ??= new List<NamedPoint>();
+        string stem = _skeleton.Bones[bone].Name + "_tip";
+        string id = stem; for (int n = 2; Doc.Points.Exists(x => x.Id == id) || _skeleton.IndexOf(id) >= 0; n++) id = $"{stem}{n}";
+        p = new NamedPoint { Id = id, Bone = _skeleton.Bones[bone].Name, End = BoneEnd.End, Role = "contact" };
+        Doc.Points.Add(p);
+        _dirty = true;
+        return p;
+    }
+
+    // Set (source) or clear (null) the contact on a bone's End over the edit scope: the active
+    // key's interval (this key → next key, the keyframe contact convention; an interpolated
+    // playhead first samples a key there) or every keyframe of the clip.
+    private void ApplyContact(int bone, ContactSource? src)
+    {
+        if (Doc == null || bone < 0) return;
+        if (src != null) EnsureContactPoint(bone);
+        if (!_contactWholeClip && _activeKey < 0) SampleKeyframe();
+        var keys = _contactWholeClip ? Doc.Keyframes : new List<AnimationKeyframe> { Doc.Keyframes[_activeKey] };
+        foreach (var kf in keys)
+        {
+            int idx = IndexOfContactOnBone(kf.Contacts, bone);
+            if (idx >= 0) kf.Contacts.RemoveAt(idx);
+            if (src != null) { kf.Contacts ??= new List<ContactLabel>(); kf.Contacts.Add(LabelFor(bone, src.Value)); }
+            if (kf.Contacts != null && kf.Contacts.Count == 0) kf.Contacts = null;
+        }
+        _dirty = true;
+    }
+
+    // "Add knife" in one operation: a clip-local orientation bone at the endpoint plus the
+    // knife attachment on it (the existing ExtraBones + Attachments mechanisms, exactly the
+    // shape groundslash1 authors by hand), selected so U/I trim its window.
+    private void AddKnife(int bone)
+    {
+        if (Doc == null) return;
+        string name = UniqueBoneName("knife");
+        Doc.ExtraBones ??= new List<SkeletonBoneRecord>();
+        Doc.ExtraBones.Add(new SkeletonBoneRecord { Name = name, Parent = _skeleton.Bones[bone].Name, Rotation = 0f, Length = 0f });
+        RebuildWorkingRig();
+        Doc.Attachments ??= new List<AnimAttachment>();
+        _selectedAttachment = new AnimAttachment { Bone = name, Effect = "knife", Start = _scrubT,
+                                                   End = 1f - MathHelper.Clamp(Doc.SettleShare, 0f, 0.95f) };
+        if (_selectedAttachment.End <= _selectedAttachment.Start) _selectedAttachment.Start = 0f;
+        Doc.Attachments.Add(_selectedAttachment);
+        _selectedEndpoint = _skeleton.IndexOf(name);
+        _dirty = true;
+    }
+
+    private void RemoveSelectedPoint()
+    {
+        if (Doc?.Points == null || _selectedPointId == null) return;
+        // A point's dependent annotations go with it (reported), never left dangling.
+        int deps = 0;
+        foreach (var kf in Doc.Keyframes)
+            if (kf.Contacts != null) { deps += kf.Contacts.RemoveAll(c => c.Point == _selectedPointId); if (kf.Contacts.Count == 0) kf.Contacts = null; }
+        Doc.Points.RemoveAll(p => p.Id == _selectedPointId);
+        if (Doc.Points.Count == 0) Doc.Points = null;
+        Console.WriteLine($"removed point '{_selectedPointId}'" + (deps > 0 ? $" and {deps} contact annotation(s) on it" : ""));
+        _selectedPointId = null;
+        _dirty = true;
+    }
+
+    // The endpoint popup's items for the selected endpoint, rebuilt each frame.
+    private void BuildEndpointMenu(Affine2[] world)
+    {
+        _endpointMenu.Clear();
+        int b = _selectedEndpoint;
+        if (Doc == null || b < 0 || b >= _skeleton.Count) { _endpointMenu.Title = null; return; }
+        string bone = _skeleton.Bones[b].Name;
+        var pt = PointFor(b);
+        _endpointMenu.Title = $"{bone} end" + (pt != null ? $"  [{pt.Id}]" : "");
+        // Shared joint: other bones whose End coincides with this one (a child bone's Start is
+        // its parent's End, so the alternative targets here are siblings / the parent).
+        var overlapping = new List<int>();
+        for (int i = 0; i < world.Length; i++)
+            if (i != b && Vector2.DistanceSquared(world[i].Translation, world[b].Translation) < PickR * PickR) overlapping.Add(i);
+        if (overlapping.Count > 0)
+            _endpointMenu.Add($"Target: cycle ({_skeleton.Bones[overlapping[0]].Name} ...)", () => _selectedEndpoint = overlapping[0]);
+        _endpointMenu.Add("Add knife", () => AddKnife(b));
+        _endpointMenu.Add("Add custom element...", () =>
+        {
+            _effectBone = bone; _selectedAttachment = Doc.Attachments?.Find(a => a.Bone == bone);
+            _naming = NameTarget.Effect; _nameBuffer = _selectedAttachment?.Effect ?? "";
+        });
+        _endpointMenu.Add(pt != null ? $"Contact point: {pt.Id}" : "Add contact point", () => { EnsureContactPoint(b); }, pt != null);
+        _endpointMenu.Add("Add named marker...", () => { _pendingBoneParent = b; _naming = NameTarget.Point; _nameBuffer = ""; });
+        _endpointMenu.Separator();
+        int here = _activeKey >= 0 ? IndexOfContactOnBone(Doc.Keyframes[_activeKey].Contacts, b) : -1;
+        ContactSource? cur = here >= 0 ? Doc.Keyframes[_activeKey].Contacts[here].Source : null;
+        _endpointMenu.Add("Contact: No slip",         () => ApplyContact(b, ContactSource.SelfPlant),      cur == ContactSource.SelfPlant);
+        _endpointMenu.Add("Contact: Planned support", () => ApplyContact(b, ContactSource.PlannedSupport), cur == ContactSource.PlannedSupport);
+        _endpointMenu.Add("Contact: External pin",    () => ApplyContact(b, ContactSource.External),       cur == ContactSource.External);
+        _endpointMenu.Add("Contact: Clear",           () => ApplyContact(b, null), false, cur != null || _contactWholeClip);
+        _endpointMenu.Add(_contactWholeClip ? "Scope: whole clip" : "Scope: this key -> next key", () => _contactWholeClip = !_contactWholeClip);
+        // Attached items at this endpoint: effects on the bone (or a knife bone hung from it) and
+        // the clip's own points here — selecting one makes U/I, Shift+E or Delete act on it.
+        bool any = false;
+        if (Doc.Attachments != null)
+            foreach (var a in Doc.Attachments)
+            {
+                int ab = _skeleton.IndexOf(a.Bone);
+                if (ab < 0 || (ab != b && _skeleton.Bones[ab].Parent != b)) continue;
+                if (!any) { _endpointMenu.Separator(); any = true; }
+                var att = a;
+                _endpointMenu.Add($"Effect: {a.Effect} on {a.Bone} [{a.Start:0.00}-{a.End:0.00}]", () => { _selectedAttachment = att; _selectedPointId = null; }, _selectedAttachment == a);
+            }
+        if (Doc.Points != null)
+            foreach (var p in Doc.Points)
+            {
+                if (p.Bone != bone) continue;
+                if (!any) { _endpointMenu.Separator(); any = true; }
+                var pp = p;
+                _endpointMenu.Add($"Point: {p.Id}{(p.Role != null ? " (" + p.Role + ")" : "")}  (Del removes)", () => { _selectedPointId = pp.Id; _selectedAttachment = null; }, _selectedPointId == p.Id);
+            }
     }
 
     // === labeled additions (points / vectors) + new bones ====================
@@ -1073,6 +1273,14 @@ public sealed class DemoGame : Game
         {
             AddBone(name, _pendingBoneParent, _pendingBoneLocal, _pendingBoneBase);
         }
+        else if (_naming == NameTarget.Point && Doc != null && _pendingBoneParent >= 0 && _pendingBoneParent < _skeleton.Count)
+        {
+            Doc.Points ??= new List<NamedPoint>();
+            string id = name; for (int n = 2; Doc.Points.Exists(x => x.Id == id) || _skeleton.IndexOf(id) >= 0; n++) id = $"{name}{n}";
+            Doc.Points.Add(new NamedPoint { Id = id, Bone = _skeleton.Bones[_pendingBoneParent].Name, End = BoneEnd.End, Role = "marker" });
+            _selectedPointId = id;
+            _dirty = true;
+        }
         EndNaming();
     }
 
@@ -1083,6 +1291,7 @@ public sealed class DemoGame : Game
     {
         if (_naming == NameTarget.Effect) return "knife";
         if (_naming == NameTarget.Bone) return UniqueBoneName("bone");
+        if (_naming == NameTarget.Point) return "marker";
         string stem = _pendingAddition?.Kind == AnimAdditionKind.Vector ? "vector" : "point";
         int n = Doc?.Keyframes[_activeKey].Additions?.Count ?? 0;
         return $"{stem}{n}";
@@ -1276,6 +1485,32 @@ public sealed class DemoGame : Game
                 _spriteBatch.DrawString(_font, $"{a.Bone}: {a.Effect}", new Vector2(TimeToX(a.Start), y + 24), Color.LightCyan);
             }
 
+        // Contact bars: each keyframe's labels hold over [t_k, t_{k+1}) (the interval
+        // convention), colored by source — no slip green, planned support blue, external
+        // pin orange — one row per contact identity, under the track.
+        {
+            var rows = new List<string>();
+            for (int k = 0; k < doc.Keyframes.Count; k++)
+            {
+                var kf = doc.Keyframes[k];
+                if (kf.Contacts == null) continue;
+                float t1 = k + 1 < doc.Keyframes.Count ? doc.Keyframes[k + 1].Time : 1f;
+                foreach (var c in kf.Contacts)
+                {
+                    string key = c.Key ?? "?";
+                    int row = rows.IndexOf(key); if (row < 0) { rows.Add(key); row = rows.Count - 1; }
+                    if (row > 3) continue;
+                    var col = c.Source == ContactSource.PlannedSupport ? new Color(90, 150, 240)
+                            : c.Source == ContactSource.External       ? new Color(240, 160, 70)
+                                                                       : new Color(70, 220, 110);
+                    float by = y + 20 + row * 5;
+                    _draw.Line(new Vector2(TimeToX(kf.Time), by), new Vector2(TimeToX(t1), by), col * (0.4f + 0.6f * c.Weight), 3f);
+                }
+            }
+            for (int r = 0; r < rows.Count && r < 4; r++)
+                _spriteBatch.DrawString(_font, rows[r], new Vector2(TrackX1 + 4, y + 14 + r * 5), new Color(150, 160, 175));
+        }
+
         // Keyframe bars.
         for (int i = 0; i < doc.Keyframes.Count; i++)
         {
@@ -1360,6 +1595,7 @@ public sealed class DemoGame : Game
         ("Scene",    "Scene menu (top right): add/select/duplicate/delete/hide/lock guides, snap, motion source, path/ghosts, frame/follow view"),
         ("Obstacle", "legacy clips: drag the brown block to reposition it; editing it in guide mode makes it this clip's own scene"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
+        ("Endpoint", "click a joint = select its endpoint, then the small v (or right-click) opens: add knife / element / contact point / marker, contact no-slip / planned / external / clear, scope"),
         ("Effect",   "E over joint: attach/name effect (knife)    Shift+E remove    U/I set selected effect start/end at playhead"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
         ("Skin",     "G sprite skin on/off    W mesh wireframe    X skeleton on/off    (launch with --usebind <binding>)"),
@@ -1390,6 +1626,7 @@ public sealed class DemoGame : Game
     {
         if (_naming == NameTarget.None) return;
         string what = _naming == NameTarget.Effect ? $"effect on {_effectBone}"
+                    : _naming == NameTarget.Point ? "named marker"
                     : _naming == NameTarget.Bone ? "bone"
                     : _pendingAddition?.Kind == AnimAdditionKind.Vector ? "vector" : "point";
         var box = new Rectangle(SidebarW + 40, H / 2 - 26, 420, 52);
@@ -1525,7 +1762,7 @@ public sealed class DemoGame : Game
         }
         if (src == null) return null;
         var copy = new List<ContactLabel>(src.Count);
-        foreach (var c in src) copy.Add(new ContactLabel { Node = c.Node, Weight = c.Weight, Source = c.Source });
+        foreach (var c in src) copy.Add(c.Clone());
         return copy;
     }
 
@@ -1573,6 +1810,7 @@ public sealed class DemoGame : Game
             ReferenceArc = src.ReferenceArc,
             Motion   = src.Motion,
             Scene    = src.Scene?.Clone(),
+            Points   = src.Points?.ConvertAll(p => p.Clone()),
             ExtraBones = src.ExtraBones?.ConvertAll(b => new SkeletonBoneRecord
                 { Name = b.Name, Parent = b.Parent, Rotation = b.Rotation, Length = b.Length }),
             Attachments = src.Attachments?.ConvertAll(a => a.Clone()),
@@ -1612,7 +1850,7 @@ public sealed class DemoGame : Game
     {
         if (src == null) return null;
         var copy = new List<ContactLabel>(src.Count);
-        foreach (var c in src) copy.Add(new ContactLabel { Node = c.Node, Weight = c.Weight, Source = c.Source });
+        foreach (var c in src) copy.Add(c.Clone());
         return copy;
     }
 

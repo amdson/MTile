@@ -45,20 +45,12 @@
           "Rotation": 0.85
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.5
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.4
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         }
       ],
       "Additions": [
@@ -112,20 +104,12 @@
           "Rotation": 0.2
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.55
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.15
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         }
       ],
       "Additions": [
@@ -179,20 +163,12 @@
           "Rotation": 1.2
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -0.9
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.92
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.28
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -0.9
         }
       ],
       "Additions": [

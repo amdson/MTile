@@ -428,3 +428,44 @@ reversible and listed so they can be reviewed in one place.
   (`AnimSceneTests.RootAt_MatchesTheLegacyEditorPlacement`) that checks the shared
   `ClipMotion` query against the old placement formulas on the shipped clips. The
   interaction itself needs the manual editor check the plan already calls for.
+
+## Implementation decisions log (chunk 4, 2026-09-11)
+
+- **Endpoint data**: `BoneEnd { Start, End }`, `NamedPoint { Id, Bone, End, Role, Ox, Oy, Label }`
+  (`Animation/Endpoints.cs`). Rig-level points live in `Skeletons/<rig>.json` `Points`
+  (`Skeleton.Points`, carried through composition); clip-level points in
+  `AnimationDocument.Points`. `ContactLabel.Point` references a point id; `Node` stays as the
+  legacy reference and resolves to that bone's End. A label with both that disagree is
+  rejected by the resolver. Contact consumers pin bone tips only: a point that is not an
+  exact End is ignored by the solver (reported through `BoneOf(..., out exactTip)`).
+- **Support points**: `support_l` / `support_r` with role `support`. On the biped they are
+  the lower legs' ends; on the rabbit they are its foot tips, because the rabbit keeps its
+  foot bones (its skin binds to them) — retargeting maps by point id, so a biped clip's
+  `support_l` label lands on the rabbit's own point without a mapping table.
+- **Helper-feet removal (biped only)**: the dry-run report (`probe feetreport`) showed every
+  foot tip exactly 0.246 rig units (0.15 px at game scale) from the lower-leg end in all 47
+  clips, with 161 posed foot entries animated off bind but nothing else hung from the feet
+  (no additions, attachments or extra bones). That is under the one-pixel gate, so the
+  migration ran to completion: `probe dropfeet --write` relabeled 36 contacts to the
+  support points and dropped 392 foot pose entries; the two foot bones were removed from
+  `Skeletons/biped.json`; the two biped sprite bindings lost their stale foot entries (the
+  skin skips unknown bones anyway); `rabbit_derived` was regenerated. The hand-authored
+  rabbit pool only had its labels moved (`dropfeet --labels-only`).
+- **Code that assumed a foot bone** now asks the rig: `TerrainSurfaces` adds the support
+  points' bones to the policed tips; `MotionProbe.SupportBone` picks the toe per side
+  (support point, else `foot_*` where it exists, else the lower leg); `addcom` uses it.
+  `PoseIk.DefaultChain` is unchanged (the chain simply ends at the lower leg).
+- **Editor endpoint menu**: click a joint to select its End and show a small `v` beside it;
+  right-click opens the menu directly. Items: cycle target at a shared joint, Add knife (one
+  operation: clip-local orientation bone + attachment, the groundslash1 shape), Add custom
+  element (naming prompt), Add contact point (creates a clip point only when neither the rig
+  nor the clip names the endpoint), Add named marker, Contact No slip / Planned support /
+  External pin / Clear, and the scope toggle (this key → next key, or the whole clip; an
+  interpolated playhead first samples a key). Attached items list the effects and clip
+  points here; Delete removes a selected clip point together with its dependent labels
+  (reported). M+click still toggles No slip, writing a point label when one exists.
+  Timeline: colored contact bars per label over its keyframe interval (green no-slip, blue
+  planned, orange external), keyed at the track's right edge. Range handles were deferred,
+  as the plan allows.
+- **Not done**: the sampling-error gate on `Bake arc` is a printed report; a Knife asset
+  chooser (the only asset is `knife`); helper-foot removal on the rabbit rig.

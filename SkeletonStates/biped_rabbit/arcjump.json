@@ -84,7 +84,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -186,7 +186,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -204,7 +204,7 @@
           "Name": "body_path",
           "Kind": "Point",
           "Px": -11.4,
-          "Py": 6.5863132e-06,
+          "Py": 6.5863132E-06,
           "Dx": 0,
           "Dy": 0
         }
@@ -288,7 +288,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }

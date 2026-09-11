@@ -29,6 +29,10 @@ public sealed class SkeletonDocument
 {
     public string                   Name  { get; set; } = "biped";
     public List<SkeletonBoneRecord> Bones { get; set; } = new();
+    // Shared anatomical named points (EndpointResolver): e.g. the left/right support points
+    // at the lower legs' ends. Null/omitted on rigs that define none.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public List<NamedPoint>         Points { get; set; }
 }
 
 public static class SkeletonStore
@@ -38,6 +42,8 @@ public static class SkeletonStore
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        // NamedPoint.End reads/writes as "Start"/"End" rather than 0/1.
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
     };
 
     // Load Skeletons/<name>.json from `dir`. Returns null if missing or malformed
@@ -84,6 +90,11 @@ public static class SkeletonStore
     public static SkeletonDocument Capture(string name, Skeleton skel)
     {
         var doc = new SkeletonDocument { Name = name };
+        if (skel.Points != null && skel.Points.Count > 0)
+        {
+            doc.Points = new List<NamedPoint>();
+            foreach (var p in skel.Points) doc.Points.Add(p.Clone());
+        }
         for (int i = 0; i < skel.Count; i++)
         {
             var b = skel.Bones[i];
@@ -131,6 +142,14 @@ public static class SkeletonStore
                 : b.Add(r.Name, indexByName[r.Parent], r.Rotation, r.Length);
             indexByName[r.Name] = idx;
         }
+        if (doc.Points != null)
+            foreach (var p in doc.Points)
+            {
+                if (p?.Id == null || p.Bone == null) continue;
+                if (!indexByName.ContainsKey(p.Bone))
+                    throw new InvalidDataException($"Skeleton '{doc.Name}': point '{p.Id}' names unknown bone '{p.Bone}'.");
+                b.AddPoint(p.Clone());
+            }
         return b.Build();
     }
 }

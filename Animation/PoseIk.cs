@@ -20,7 +20,7 @@ public static class PoseIk
     }
 
     // Default chain for a tip: the bone plus its ancestors up to (excluding) the torso —
-    // the limb itself. foot_l → [leg_l_upper, leg_l_lower, foot_l]; a hand
+    // the limb itself. leg_l_lower → [leg_l_upper, leg_l_lower]; a hand
     // (arm_*_lower) → [arm_*_upper, arm_*_lower]. Root-most first.
     public static int[] DefaultChain(Skeleton rig, int tip)
     {

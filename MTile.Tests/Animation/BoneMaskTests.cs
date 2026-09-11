@@ -19,7 +19,7 @@ public class BoneMaskTests
     private static readonly string[] UpperBones =
         { "chest", "head", "arm_l_upper", "arm_l_lower", "arm_r_upper", "arm_r_lower" };
     private static readonly string[] LowerBones =
-        { "hip", "leg_l_upper", "leg_l_lower", "foot_l", "leg_r_upper", "leg_r_lower", "foot_r" };
+        { "hip", "leg_l_upper", "leg_l_lower", "leg_r_upper", "leg_r_lower" };
 
     [Fact]
     public void Biped_UpperBody_IsChestSubtree()

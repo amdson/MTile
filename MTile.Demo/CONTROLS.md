@@ -179,7 +179,7 @@ pins them for no-slip locomotion. See
 
 | Input | Action |
 |---|---|
-| **M + click** a node | Toggle a `SelfPlant` contact on that node (active keyframe) |
+| **M + click** a node | Toggle a No-slip (`SelfPlant`) contact on that endpoint (active keyframe) — a point label when the rig or clip names it, else the legacy node |
 
 Contact-labeled nodes are drawn with a **green halo** on the active keyframe. Sampling
 a new keyframe with **K** inherits the contact marks in effect at the playhead by
@@ -214,6 +214,27 @@ default (deep-copied, so editing one keyframe's marks doesn't change the other's
 | **Escape** | Close the Scene menu / cancel a guide placement or drag / leave guide mode — and, with nothing to cancel, quit |
 
 Edits are kept in memory until `Ctrl-S`; the header shows `*unsaved*` while dirty.
+
+## Endpoints (contacts, points, elements)
+
+Click a **joint** (a bone's far end) to select that endpoint; a small **v** appears beside
+it, and **right-click** on any joint opens the same menu directly. The selected bone's
+segment is highlighted, so at a shared joint you can see which bone's END is the target
+(the first item cycles among overlapping targets).
+
+| Menu item | Action |
+|---|---|
+| Add knife | One operation: a clip-local orientation bone at the endpoint plus the `knife` attachment on it, selected so **U / I** trim its window |
+| Add custom element… | Name an effect attached to this bone (the same as **E**) |
+| Add contact point / Contact point: `<id>` | Names this endpoint (a clip point) when neither the rig nor the clip already does; the rig's `support_l` / `support_r` are the feet |
+| Add named marker… | A named point here with no contact behavior |
+| Contact: No slip / Planned support / External pin / Clear | Set or clear the contact on this endpoint over the scope. No slip = `SelfPlant` (capture and hold a world point); Planned support requests a terrain target from the step planner; External pin needs a target supplied by gameplay |
+| Scope: this key → next key / whole clip | The keyframe contact convention (a label holds until the next key) or every keyframe. On an interpolated playhead a key is sampled there first |
+| Effect: … / Point: … | Select an attached item (then **U / I**, **Shift+E**, or **Delete** for a clip point — its contact annotations go with it) |
+
+Contact labels reference the rig's or clip's **named points** (`Point`); legacy labels by
+bone name (`Node`) keep working. Contact bars under the timeline show each label's interval
+colored by source: green no slip, blue planned support, orange external pin.
 
 ### Clip sprite attachments
 

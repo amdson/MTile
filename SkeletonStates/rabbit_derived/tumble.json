@@ -45,20 +45,12 @@
           "Rotation": 2.1103716
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -2.6763842
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.4080369
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.8407601
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -2.6209376
         },
         {
           "Bone": "hip_l",
@@ -132,20 +124,12 @@
           "Rotation": 1.8111631
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -2.6929464
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.3686932
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.9743517
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -2.5788534
         },
         {
           "Bone": "hip_l",
@@ -219,20 +203,12 @@
           "Rotation": 1.8145002
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -2.6792212
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.2035826
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.4238331
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -2.5880227
         },
         {
           "Bone": "hip_l",
@@ -306,20 +282,12 @@
           "Rotation": 1.9259219
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -2.6691587
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.8130682
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.9307745
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -2.6035283
         },
         {
           "Bone": "hip_l",
@@ -393,20 +361,12 @@
           "Rotation": 2.1103716
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -2.6763842
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.4080369
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.8407601
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -2.6209376
         },
         {
           "Bone": "hip_l",

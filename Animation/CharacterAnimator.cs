@@ -987,17 +987,19 @@ public sealed partial class CharacterAnimator
         // FD-vs-analytic oracle must skip, like the keyframe boundary — see FeatherRegionAt).
         float du = inWindow && u > 0f && u < 1f ? 1f / feather : 0f;
 
-        AddWeighted(ks[i].Contacts, 1f - u, -du);
-        if (u > 0f) AddWeighted(ks[j].Contacts, u, du);
+        AddWeighted(clip, ks[i].Contacts, 1f - u, -du);
+        if (u > 0f) AddWeighted(clip, ks[j].Contacts, u, du);
     }
 
-    private void AddWeighted(List<ContactLabel> labels, float scale, float dscale)
+    private void AddWeighted(AnimationDocument clip, List<ContactLabel> labels, float scale, float dscale)
     {
         if (labels == null || scale <= 0f) return;
         foreach (var l in labels)
         {
-            int b = _skeleton.IndexOf(l.Node);
-            if (b < 0) continue;
+            // Labels resolve through the endpoint resolver (a named point or the legacy node);
+            // the solver pins bone TIPS, so a point that is not an exact End is ignored here.
+            int b = EndpointResolver.BoneOf(_skeleton, clip, l, out bool exactTip);
+            if (b < 0 || !exactTip) continue;
             float w  = l.Weight * scale;
             float dw = l.Weight * dscale;
             int at = -1;

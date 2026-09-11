@@ -47,20 +47,12 @@
           "Rotation": 0.62
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.62
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.2
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         }
       ],
       "Additions": [
@@ -114,20 +106,12 @@
           "Rotation": 0.62
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.62
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.2
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         }
       ],
       "Additions": [

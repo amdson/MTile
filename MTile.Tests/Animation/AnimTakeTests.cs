@@ -167,9 +167,9 @@ public class AnimTakeTests
     private static AnimationDocument WalkClip(Skeleton skel)
     {
         var clip = new AnimationDocument { Name = "walk", Type = "Walk", Duration = 0.8f, Loop = true };
-        clip.Keyframes.Add(Kf(skel, 0f,   legL:  1.0f, legR: -1.0f, plant: "foot_r"));
-        clip.Keyframes.Add(Kf(skel, 0.5f, legL: -1.0f, legR:  1.0f, plant: "foot_l"));
-        clip.Keyframes.Add(Kf(skel, 1f,   legL:  1.0f, legR: -1.0f, plant: "foot_r"));
+        clip.Keyframes.Add(Kf(skel, 0f,   legL:  1.0f, legR: -1.0f, plant: "leg_r_lower"));
+        clip.Keyframes.Add(Kf(skel, 0.5f, legL: -1.0f, legR:  1.0f, plant: "leg_l_lower"));
+        clip.Keyframes.Add(Kf(skel, 1f,   legL:  1.0f, legR: -1.0f, plant: "leg_r_lower"));
         return clip;
     }
 

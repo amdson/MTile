@@ -28,12 +28,18 @@ public sealed class Skeleton
     // refuses clips whose AnimationDocument.Skeleton doesn't match the rig it owns.
     public readonly string Name;
     public readonly Bone[] Bones;
+    // Shared anatomical NAMED POINTS (EndpointResolver): stable ids + roles for locations on
+    // the rig (the left/right support points at the lower legs' ends). Empty when none.
+    public readonly IReadOnlyList<NamedPoint> Points;
     private readonly Dictionary<string, int> _byName;
 
-    public Skeleton(string name, Bone[] bones)
+    public Skeleton(string name, Bone[] bones) : this(name, bones, null) { }
+
+    public Skeleton(string name, Bone[] bones, IReadOnlyList<NamedPoint> points)
     {
         Name  = name  ?? throw new ArgumentNullException(nameof(name));
         Bones = bones ?? throw new ArgumentNullException(nameof(bones));
+        Points = points ?? Array.Empty<NamedPoint>();
         _byName = new Dictionary<string, int>(bones.Length);
         for (int i = 0; i < bones.Length; i++)
         {
@@ -65,7 +71,7 @@ public sealed class Skeleton
         var arr = new Bone[Bones.Length + 1];
         Array.Copy(Bones, arr, Bones.Length);
         arr[Bones.Length] = new Bone(name, parentIndex, rotation, length);
-        return new Skeleton(Name, arr);
+        return new Skeleton(Name, arr, Points);
     }
 }
 
@@ -74,9 +80,12 @@ public sealed class Skeleton
 public sealed class SkeletonBuilder
 {
     private readonly List<Bone> _bones = new();
+    private readonly List<NamedPoint> _points = new();
     private readonly string     _name;
 
     public SkeletonBuilder(string name) { _name = name; }
+
+    public void AddPoint(NamedPoint p) => _points.Add(p);
 
     public int Add(string name, int parent, float rotation, float length = 0f)
     {
@@ -91,5 +100,5 @@ public sealed class SkeletonBuilder
     public int AddRoot(string name, float rotation, float length = 0f)
         => Add(name, -1, rotation, length);
 
-    public Skeleton Build() => new(_name, _bones.ToArray());
+    public Skeleton Build() => new(_name, _bones.ToArray(), _points.Count > 0 ? _points.ToArray() : null);
 }

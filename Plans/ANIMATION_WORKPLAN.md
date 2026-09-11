@@ -218,3 +218,17 @@ harness, and chunk 2's edits are smaller to redo in the new style than vice vers
   `AnimSolverGoldenTraceTests` (330 frames bit-identical through the refactor); the FD oracle
   reports the offending block (`DbgWorstBlock`). Not done: a separate per-block `FdCheck`
   entry point — the guarded oracle's per-block attribution covers the plan's intent.
+- Chunk 5 (2026-09-10/11): the timing stage (`Animation/GaitTiming.cs`) owns the phase —
+  travel over the authored stride, the stopping policy, contact handoff at clip switches
+  (`TransferContacts` + `StepPlanner.Rebind`); the solve-side phase mechanisms are gone.
+  Plans/ANIMATION_TIMING_STAGE.md has the numbers and the open tuning questions. Chunk 6's
+  design half is Plans/ANIMATION_OWNERSHIP_CONTRACT.md.
+- Chunk 3 (2026-09-11): `AnimationDocument.Scene` / `.Motion`, the shared `ClipMotion`
+  query, and the editor's four scene components (placement, guide editing, preview, the
+  Scene menu). Decisions logged in the authoring plan; interaction needs a manual editor pass
+  (no display on the build VM).
+- Chunk 4 (2026-09-11): the endpoint resolver (`Animation/Endpoints.cs`, rig/clip
+  `NamedPoint`s, `ContactLabel.Point`), the editor's endpoint menu (knife / points /
+  contacts / scope) with contact bars, and the helper-feet removal on the biped
+  (`probe feetreport` / `dropfeet`; 0.15 px support delta; `rabbit_derived` regenerated).
+  The rabbit keeps its feet with support points at their tips.

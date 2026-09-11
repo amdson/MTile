@@ -50,8 +50,10 @@ public static class TerrainSurfaces
     // the bone's FAR tip under the joint chain). Torso bones are deliberately absent — the
     // body proper is the physics engine's job; this keeps rows scarce and avoids a plane
     // near the hip bending the whole spine.
+    // The support points (EndpointResolver, role "support") are added per rig: on the stick
+    // figure they ARE the lower-leg ends; on a rig with real feet they are the foot tips.
     private static readonly string[] TipNames =
-        { "foot_l", "foot_r", "leg_l_lower", "leg_r_lower", "arm_l_lower", "arm_r_lower", "head" };
+        { "leg_l_lower", "leg_r_lower", "arm_l_lower", "arm_r_lower", "head" };
 
     // A tip within this clearance of a plane can plausibly engage within one solve —
     // reported via `near` so the animator's off-locomotion static solve only runs when
@@ -77,9 +79,19 @@ public static class TerrainSurfaces
         Span<Vector2> facesP = stackalloc Vector2[4];
         Span<Vector2> facesN = stackalloc Vector2[4];
         Span<float>   facesD = stackalloc float[4];
-        foreach (string name in TipNames)
+        int tipCount = TipNames.Length, supportCount = 0;
+        Span<int> tips = stackalloc int[TipNames.Length + 4];
+        for (int i = 0; i < TipNames.Length; i++) tips[i] = anim.Skeleton.IndexOf(TipNames[i]);
+        foreach (var sp in EndpointResolver.WithRole(anim.Skeleton, "support"))
         {
-            int b = anim.Skeleton.IndexOf(name);
+            int sb = anim.Skeleton.IndexOf(sp.Bone);
+            if (sb < 0 || tipCount + supportCount >= tips.Length) continue;
+            bool dup = false; for (int i = 0; i < tipCount; i++) if (tips[i] == sb) dup = true;
+            if (!dup) tips[tipCount + supportCount++] = sb;
+        }
+        for (int ti = 0; ti < tipCount + supportCount; ti++)
+        {
+            int b = tips[ti];
             if (b < 0) continue;
             Vector2 q = world[b].Translation;
 

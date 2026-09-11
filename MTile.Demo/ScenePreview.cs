@@ -99,7 +99,7 @@ internal sealed class ScenePreview
                 var world = ghost.ComputeWorld(root);
                 foreach (var cl in kf.Contacts)
                 {
-                    int bi = rig.IndexOf(cl.Node);
+                    int bi = EndpointResolver.BoneOf(rig, doc, cl);
                     if (bi >= 0) draw.Disc(world[bi].Translation, 4f, new Color(70, 220, 110) * 0.7f);
                 }
             }

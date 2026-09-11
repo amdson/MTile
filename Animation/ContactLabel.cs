@@ -27,7 +27,16 @@ public enum ContactSource
 // solver's least-squares loss. See Plans/ANIMATION_LOCOMOTION_PLAN.md.
 public sealed class ContactLabel
 {
-    public string        Node   { get; set; }                    // bone name; point = its tip
+    public string        Node   { get; set; }                    // LEGACY: bone name; point = its tip
+    // The named point this contact pins (EndpointResolver / NamedPoint) — the rig's or the
+    // clip's. Optional during the migration off helper bones: a label may carry Node, Point,
+    // or both when they agree; conflicting records are rejected by the resolver.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string        Point  { get; set; }
     public float         Weight { get; set; } = 1f;              // planted strength, [0,1]
     public ContactSource Source { get; set; } = ContactSource.SelfPlant;
+
+    // The identity a consumer groups labels by: the point id, else the legacy node name.
+    [System.Text.Json.Serialization.JsonIgnore] public string Key => Point ?? Node;
+    public ContactLabel Clone() => new() { Node = Node, Point = Point, Weight = Weight, Source = Source };
 }

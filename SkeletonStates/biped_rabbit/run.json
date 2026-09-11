@@ -83,7 +83,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -177,7 +177,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -271,7 +271,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -628,7 +628,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -722,7 +722,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -816,7 +816,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -910,7 +910,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -1004,7 +1004,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -1361,7 +1361,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -1455,7 +1455,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }

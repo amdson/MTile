@@ -18,5 +18,9 @@
     { "Name": "leg_r_upper", "Parent": "hip_r",         "Rotation": 1.5707964,  "Length": 9.5 },
     { "Name": "leg_r_lower", "Parent": "leg_r_upper", "Rotation": 0,          "Length": 9.5 },
     { "Name": "foot_r",      "Parent": "leg_r_lower", "Rotation": -1.3258177, "Length": 0.246211 }
+  ],
+  "Points": [
+    { "Id": "support_l", "Bone": "foot_l", "End": "End", "Role": "support", "Label": "left sole" },
+    { "Id": "support_r", "Bone": "foot_r", "End": "End", "Role": "support", "Label": "right sole" }
   ]
 }

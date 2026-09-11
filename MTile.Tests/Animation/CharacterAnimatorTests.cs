@@ -310,8 +310,8 @@ public class CharacterAnimatorTests
         return total;
     }
 
-    // Mirrors SkeletonStates/walk.json: legs scissor ±1.0; foot_r is the stance foot
-    // over [0, 0.5] (it sweeps backward there), foot_l over [0.5, 1].
+    // Mirrors SkeletonStates/walk.json: legs scissor ±1.0; the right leg's end is the stance
+    // foot over [0, 0.5] (it sweeps backward there), the left's over [0.5, 1].
     private static AnimationDocument BuildWalkClip(Skeleton skel) => BuildLocoClip(skel, "walk", "Walk");
     private static AnimationDocument BuildRunClip(Skeleton skel)  => BuildLocoClip(skel, "run",  "Run");
 
@@ -333,9 +333,9 @@ public class CharacterAnimatorTests
     private static AnimationDocument BuildLocoClip(Skeleton skel, string name, string type)
     {
         var clip = new AnimationDocument { Name = name, Type = type, Duration = 0.8f, Loop = true };
-        clip.Keyframes.Add(Kf(skel, 0f,   legL:  1.0f, legR: -1.0f, plant: "foot_r"));
-        clip.Keyframes.Add(Kf(skel, 0.5f, legL: -1.0f, legR:  1.0f, plant: "foot_l"));
-        clip.Keyframes.Add(Kf(skel, 1f,   legL:  1.0f, legR: -1.0f, plant: "foot_r"));
+        clip.Keyframes.Add(Kf(skel, 0f,   legL:  1.0f, legR: -1.0f, plant: "leg_r_lower"));
+        clip.Keyframes.Add(Kf(skel, 0.5f, legL: -1.0f, legR:  1.0f, plant: "leg_l_lower"));
+        clip.Keyframes.Add(Kf(skel, 1f,   legL:  1.0f, legR: -1.0f, plant: "leg_r_lower"));
         return clip;
     }
 

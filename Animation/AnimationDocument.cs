@@ -106,6 +106,10 @@ public sealed class AnimationDocument
     // including an empty one — replaces it. Reference data only; never a runtime collider.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ClipScene               Scene { get; set; }
+    // Clip-specific named points (EndpointResolver): locations on the rig this clip names
+    // (a marker on a hand, a custom support point). Shared anatomical points live on the rig.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<NamedPoint>        Points { get; set; }
     // Clip-local bones layered onto the base rig (named by Skeleton) for THIS clip
     // only — e.g. a "knife" held in the hand during a slash, which shouldn't bloat the
     // shared biped rig that walk/idle draw against. Each must Parent an existing base

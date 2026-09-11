@@ -137,13 +137,15 @@ public sealed class ClipStrideTrack
 
         // Opted-in nodes: any PlannedSupport label anywhere in the clip. A node mixing
         // PlannedSupport with SelfPlant/External is ambiguous ownership — refused.
+        // Nodes are contact identities (ContactLabel.Key: a named point id or the legacy bone
+        // name), resolved to a bone through the endpoint resolver below.
         var nodes = new List<string>();
         foreach (var k in ks)
         {
             if (k.Contacts == null) continue;
             foreach (var l in k.Contacts)
-                if ((anySource || l.Source == ContactSource.PlannedSupport) && !nodes.Contains(l.Node))
-                    nodes.Add(l.Node);
+                if ((anySource || l.Source == ContactSource.PlannedSupport) && l.Key != null && !nodes.Contains(l.Key))
+                    nodes.Add(l.Key);
         }
         if (nodes.Count == 0) { track = new ClipStrideTrack { Feet = Array.Empty<FootStrideTrack>() }; return true; }
         if (!anySource)
@@ -151,8 +153,8 @@ public sealed class ClipStrideTrack
             {
                 if (k.Contacts == null) continue;
                 foreach (var l in k.Contacts)
-                    if (l.Source != ContactSource.PlannedSupport && nodes.Contains(l.Node))
-                    { error = $"node '{l.Node}' mixes PlannedSupport with {l.Source} labels"; return false; }
+                    if (l.Source != ContactSource.PlannedSupport && nodes.Contains(l.Key))
+                    { error = $"node '{l.Key}' mixes PlannedSupport with {l.Source} labels"; return false; }
             }
 
         // FK scratch for offset sampling (compile-time only; allocation is fine here).
@@ -171,8 +173,9 @@ public sealed class ClipStrideTrack
         var feet = new List<FootStrideTrack>();
         foreach (var node in nodes)
         {
-            int bone = rig.IndexOf(node);
-            if (bone < 0) { error = $"PlannedSupport node '{node}' is not a bone of rig '{rig.Name}'"; return false; }
+            if (!EndpointResolver.TryResolvePoint(rig, doc, node, out var rp) || !rp.IsExactTip)
+            { error = $"contact '{node}' does not resolve to a bone tip of rig '{rig.Name}'"; return false; }
+            int bone = rp.Bone;
             // Max authored extension: sample the foot offset around the whole cycle.
             float maxReach = 0f;
             for (int i = 0; i < 16; i++)
@@ -185,7 +188,7 @@ public sealed class ClipStrideTrack
             {
                 var labels = ks[i].Contacts;
                 if (labels == null) continue;
-                foreach (var l in labels) if (l.Node == node) { on[i] = true; break; }
+                foreach (var l in labels) if (l.Key == node) { on[i] = true; break; }
             }
 
             // Maximal runs on the ring (wrapping when looping).

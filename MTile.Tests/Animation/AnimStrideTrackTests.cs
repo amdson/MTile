@@ -172,7 +172,7 @@ public class AnimStrideTrackTests
                 foreach (var l in k.Contacts) l.Source = ContactSource.PlannedSupport;
 
         Assert.True(ClipStrideTrack.TryCompile(walk, rig, out var track, out string err), err);
-        Assert.Equal(2, track.Feet.Length);   // foot_l + foot_r
+        Assert.Equal(2, track.Feet.Length);   // support_l + support_r
         foreach (var f in track.Feet)
         {
             var st = Assert.Single(f.Stances);

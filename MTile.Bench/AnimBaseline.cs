@@ -402,7 +402,7 @@ internal static class AnimBaseline
             if (d.Skeleton != rig.Name || d.Keyframes == null) continue;
             foreach (var k in d.Keyframes)
                 if (k.Contacts != null)
-                    foreach (var l in k.Contacts) { int b = rig.IndexOf(l.Node); if (b >= 0) set.Add(b); }
+                    foreach (var l in k.Contacts) { int b = EndpointResolver.BoneOf(rig, d, l); if (b >= 0) set.Add(b); }
         }
         return set.ToArray();
     }

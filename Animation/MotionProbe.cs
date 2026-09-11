@@ -67,10 +67,19 @@ public static class MotionProbe
     private static readonly string[] DefaultJoints =
     {
         "hip", "chest", "head",
-        "leg_l_upper", "leg_l_lower", "foot_l",
-        "leg_r_upper", "leg_r_lower", "foot_r",
+        "leg_l_upper", "leg_l_lower",
+        "leg_r_upper", "leg_r_lower",
         "arm_l_upper", "arm_l_lower", "arm_r_upper", "arm_r_lower",
     };
+
+    // The bone whose END is the rig's support point for side "l"/"r" (EndpointResolver, role
+    // "support") — the lower leg on the stick figure, the foot on a rig that has one.
+    public static string SupportBone(Skeleton rig, string side)
+    {
+        foreach (var p in EndpointResolver.WithRole(rig, "support"))
+            if (p.Id.EndsWith("_" + side, StringComparison.Ordinal)) return p.Bone;
+        return rig.IndexOf($"foot_{side}") >= 0 ? $"foot_{side}" : $"leg_{side}_lower";
+    }
 
     // A readable per-joint table swept across the clip's phase [0,1]. Pass specific
     // joint names to narrow it, or none for the full locomotion-relevant set.
@@ -178,7 +187,7 @@ public static class MotionProbe
         {
             float t = MathHelper.Clamp(kf.Time, 0f, 1f);
             string contacts = kf.Contacts != null && kf.Contacts.Count > 0
-                ? "  contacts=" + string.Join(",", kf.Contacts.ConvertAll(c => c.Node)) : "";
+                ? "  contacts=" + string.Join(",", kf.Contacts.ConvertAll(c => c.Key)) : "";
             sb.AppendLine();
             sb.AppendLine($"## t={t:0.00}{contacts}");
             DigestPose(sb, rig, World(clip, rig, t, root));
@@ -224,7 +233,7 @@ public static class MotionProbe
             // Anatomical landmarks are bone far ends: knee = leg_upper tip, ankle = leg_lower tip,
             // toe = foot tip.
             Vector2 socket = Socket($"leg_{s}_upper");
-            Vector2 knee = P($"leg_{s}_upper"), ankle = P($"leg_{s}_lower"), toe = P($"foot_{s}");
+            Vector2 knee = P($"leg_{s}_upper"), ankle = P($"leg_{s}_lower"), toe = P(SupportBone(rig, s));
             Vector2 dd = ankle - socket; float L = dd.Length();
             // signed cross (knee-socket)×(ankle-socket): + = knee on the front side (correct), - = recurvatum.
             float side = L > 1e-4f ? ((knee.X - socket.X) * dd.Y - (knee.Y - socket.Y) * dd.X) / L : 0f;
@@ -251,7 +260,7 @@ public static class MotionProbe
     private static void TrajectorySummary(StringBuilder sb, AnimationDocument clip, Skeleton rig,
                                           in Affine2 root, int samples)
     {
-        int fl = rig.IndexOf("foot_l"), fr = rig.IndexOf("foot_r");
+        int fl = rig.IndexOf(SupportBone(rig, "l")), fr = rig.IndexOf(SupportBone(rig, "r"));
         float lyMin = 1e9f, lyMax = -1e9f, lxMin = 1e9f, lxMax = -1e9f;
         float ryMin = 1e9f, ryMax = -1e9f, rxMin = 1e9f, rxMax = -1e9f;
         float groundMax = -1e9f, groundPhase = 0f;
@@ -287,7 +296,7 @@ public static class MotionProbe
         var sb = new StringBuilder();
         sb.AppendLine($"# diff: '{clip.Name}' minus '{reference.Name}'   (Δtip, +x = fwd / +y = down)");
         var root = Root(scale, facing);
-        string[] bones  = { "head", "chest", "arm_l_lower", "arm_r_lower", "foot_l", "foot_r" };
+        string[] bones  = { "head", "chest", "arm_l_lower", "arm_r_lower", SupportBone(rig, "l"), SupportBone(rig, "r") };
         string[] labels = { "headTop", "chestTop", "hand_l", "hand_r", "toe_l", "toe_r" };
 
         foreach (var kf in clip.Keyframes)

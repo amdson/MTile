@@ -45,20 +45,12 @@
           "Rotation": 1.2252358
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.6175493
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.3423
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.4150106
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.734889
         },
         {
           "Bone": "hip_l",
@@ -83,7 +75,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -139,20 +131,12 @@
           "Rotation": 1.2235334
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.6167599
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.5731052
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.5772271
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.6237631
         },
         {
           "Bone": "hip_l",
@@ -177,7 +161,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -233,20 +217,12 @@
           "Rotation": 1.4150106
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.734889
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.6803608
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.2252358
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.6175493
         },
         {
           "Bone": "hip_l",
@@ -271,7 +247,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -327,20 +303,12 @@
           "Rotation": 1.5772271
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.6237631
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.0686269
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.2235334
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.6167599
         },
         {
           "Bone": "hip_l",
@@ -365,7 +333,7 @@
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }

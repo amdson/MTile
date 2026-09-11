@@ -13,6 +13,30 @@
       "Length": 0
     }
   ],
+  "Attachments": [
+    {
+      "Bone": "knife",
+      "Effect": "knife",
+      "Start": 0.2188,
+      "End": 0.8281,
+      "Scale": 1,
+      "Rotation": 0,
+      "FrameTimes": [
+        0.2188,
+        0.2783,
+        0.3477,
+        0.4047,
+        0.5422,
+        0.6828,
+        0.7316,
+        0.7959
+      ],
+      "TrailStart": 0.4047,
+      "TrailEnd": 0.6828,
+      "TrailWidth": 1,
+      "TrailOpacity": 0.8
+    }
+  ],
   "Keyframes": [
     {
       "Time": 0,
@@ -54,20 +78,12 @@
           "Rotation": 0.62
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.62
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.2
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         },
         {
           "Bone": "knife",
@@ -125,20 +141,12 @@
           "Rotation": 0.62
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.62
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.2
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         },
         {
           "Bone": "knife",
@@ -196,20 +204,12 @@
           "Rotation": 0.62
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.62
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.2
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         },
         {
           "Bone": "knife",
@@ -267,20 +267,12 @@
           "Rotation": 0.62
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.62
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.2
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         },
         {
           "Bone": "knife",
@@ -338,20 +330,12 @@
           "Rotation": 0.62
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.62
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.2
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         },
         {
           "Bone": "knife",
@@ -368,28 +352,6 @@
           "Dy": 0
         }
       ]
-    }
-  ],
-  "Attachments": [
-    {
-      "Bone": "knife",
-      "Effect": "knife",
-      "Start": 0.2188,
-      "End": 0.8281,
-      "FrameTimes": [
-        0.2188,
-        0.2783,
-        0.3477,
-        0.4047,
-        0.5422,
-        0.6828,
-        0.7316,
-        0.7959
-      ],
-      "TrailStart": 0.4047,
-      "TrailEnd": 0.6828,
-      "TrailWidth": 1.0,
-      "TrailOpacity": 0.8
     }
   ]
 }

@@ -45,20 +45,12 @@
           "Rotation": 1.1938517
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.7327735
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.8274692
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.39034307
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.416196
         }
       ],
       "Contacts": [],
@@ -113,20 +105,12 @@
           "Rotation": 1.6305997
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.7439175
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 2.1043725
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.033823583
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -0.5517561
         }
       ],
       "Contacts": [],
@@ -181,20 +165,12 @@
           "Rotation": 1.0003136
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.7208425
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 1.3959079
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.8369779
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.4897758
         }
       ],
       "Contacts": [],

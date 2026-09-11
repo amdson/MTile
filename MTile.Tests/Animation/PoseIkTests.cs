@@ -14,8 +14,8 @@ public class PoseIkTests
     public void DefaultChain_FootIsItsOwnLimb()
     {
         var rig = SkeletonExamples.Biped();
-        var chain = PoseIk.DefaultChain(rig, rig.IndexOf("foot_l"));
-        Assert.Equal(new[] { "leg_l_upper", "leg_l_lower", "foot_l" },
+        var chain = PoseIk.DefaultChain(rig, rig.IndexOf("leg_l_lower"));
+        Assert.Equal(new[] { "leg_l_upper", "leg_l_lower" },
                      Array.ConvertAll(chain, i => rig.Bones[i].Name));
 
         var hand = PoseIk.DefaultChain(rig, rig.IndexOf("arm_r_lower"));
@@ -28,16 +28,16 @@ public class PoseIkTests
     {
         var rig = SkeletonExamples.Biped();
         var pose = rig.CreatePose(); pose.SetToDefault();
-        int tip = rig.IndexOf("foot_l");
+        int tip = rig.IndexOf("leg_l_lower");
         var before = pose.CloneLocal();
 
-        Vector2 target = Tip(rig, pose, "foot_l") + new Vector2(3f, -2f);   // forward + up a touch
+        Vector2 target = Tip(rig, pose, "leg_l_lower") + new Vector2(3f, -2f);   // forward + up a touch
         var r = PoseIk.Solve(rig, pose, tip, target, PoseIk.DefaultChain(rig, tip));
 
         Assert.True(r.Miss < 0.1f, $"miss {r.Miss}");
-        Assert.True((Tip(rig, pose, "foot_l") - target).Length() < 0.1f);
+        Assert.True((Tip(rig, pose, "leg_l_lower") - target).Length() < 0.1f);
         // Non-chain bones untouched (minimal-change property).
-        foreach (var name in new[] { "hip", "chest", "head", "arm_l_upper", "leg_r_upper", "foot_r" })
+        foreach (var name in new[] { "hip", "chest", "head", "arm_l_upper", "leg_r_upper", "leg_r_lower" })
         {
             int i = rig.IndexOf(name);
             Assert.Equal(before[i].Rotation, pose.Local[i].Rotation);

@@ -11,11 +11,42 @@
   "MaxHandles": 8,
   "Mask": "pumpkin_man_downsampled_mask.png",
   "Layers": [
-    { "Name": "arm_left",  "Color": "#FFFF00", "Bones": ["arm_l_*"] },
-    { "Name": "arm_right", "Color": "#FF0000", "Bones": ["arm_r_*"] },
-    { "Name": "body",                           "Bones": ["hip", "chest", "head"] },
-    { "Name": "leg_left",  "Color": "#00FF00", "Bones": ["leg_r_*", "foot_r"] },
-    { "Name": "leg_right", "Color": "#0000FF", "Bones": ["leg_l_*", "foot_l"] }
+    {
+      "Name": "arm_left",
+      "Color": "#FFFF00",
+      "Bones": [
+        "arm_l_*"
+      ]
+    },
+    {
+      "Name": "arm_right",
+      "Color": "#FF0000",
+      "Bones": [
+        "arm_r_*"
+      ]
+    },
+    {
+      "Name": "body",
+      "Bones": [
+        "hip",
+        "chest",
+        "head"
+      ]
+    },
+    {
+      "Name": "leg_left",
+      "Color": "#00FF00",
+      "Bones": [
+        "leg_r_*"
+      ]
+    },
+    {
+      "Name": "leg_right",
+      "Color": "#0000FF",
+      "Bones": [
+        "leg_l_*"
+      ]
+    }
   ],
   "BindPose": [
     {
@@ -64,11 +95,6 @@
       "Length": 9.5
     },
     {
-      "Bone": "foot_l",
-      "Rotation": -1.3258177,
-      "Length": 0.246211
-    },
-    {
       "Bone": "leg_r_upper",
       "Rotation": 1.9587963,
       "Length": 9.5
@@ -77,11 +103,6 @@
       "Bone": "leg_r_lower",
       "Rotation": 0,
       "Length": 9.5
-    },
-    {
-      "Bone": "foot_r",
-      "Rotation": -1.3258177,
-      "Length": 0.246211
     }
   ]
 }

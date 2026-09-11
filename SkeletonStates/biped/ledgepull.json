@@ -46,25 +46,17 @@
           "Rotation": 1.11
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.78
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.98
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         }
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -120,25 +112,17 @@
           "Rotation": 1.95
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.0258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.78
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.98
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.3258
         }
       ],
       "Contacts": [
         {
-          "Node": "foot_r",
+          "Point": "support_r",
           "Weight": 1,
           "Source": "SelfPlant"
         }
@@ -194,20 +178,12 @@
           "Rotation": 1.53
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.1258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": 0.71
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 1.9
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.5258
         }
       ],
       "Additions": [
@@ -261,25 +237,17 @@
           "Rotation": 0.48
         },
         {
-          "Bone": "foot_l",
-          "Rotation": -1.3258
-        },
-        {
           "Bone": "leg_r_upper",
           "Rotation": -0.04
         },
         {
           "Bone": "leg_r_lower",
           "Rotation": 2.1
-        },
-        {
-          "Bone": "foot_r",
-          "Rotation": -1.0258
         }
       ],
       "Contacts": [
         {
-          "Node": "foot_l",
+          "Point": "support_l",
           "Weight": 1,
           "Source": "SelfPlant"
         }
