@@ -232,3 +232,8 @@ harness, and chunk 2's edits are smaller to redo in the new style than vice vers
   contacts / scope) with contact bars, and the helper-feet removal on the biped
   (`probe feetreport` / `dropfeet`; 0.15 px support delta; `rabbit_derived` regenerated).
   The rabbit keeps its feet with support points at their tips.
+- Chunk 3.5 (2026-09-11): the editor's IK drag mode — `PoseIk.DragSession` (one LM per
+  frame over the limb chain; drag-start and previous-solution priors; `*_lower` fold
+  guard; a solver allocated once per drag) behind the header's "IK drag" box; Escape
+  restores the drag-start pose. Limb-only chains; the torso-extension modifier is the
+  documented follow-up.

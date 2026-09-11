@@ -66,6 +66,13 @@ public sealed class DemoGame : Game
     private bool    _contactWholeClip;          // edit scope: this key → next key (default) or the whole clip
     private Vector2 _pressPos;                  // where the left button went down (click vs drag)
     private string  _selectedPointId;           // a clip point selected from the menu (Delete removes it)
+    // IK DRAG MODE (workplan chunk 3.5): a header toggle; dragging a joint then runs an
+    // interactive solve (PoseIk.DragSession) pulling the clicked node toward the mouse,
+    // biased toward the drag-start pose and last frame's solution, instead of the direct
+    // rotate-one-bone edit. Escape mid-drag restores the drag-start pose.
+    private bool _ikMode;
+    private PoseIk.DragSession _ikDrag;
+    private Rectangle _ikToggle;                // header box; picking priority header-first
     // The clip's reference trajectory (Doc.ReferenceArc), loaded on clip select: the
     // authored maneuver arc (ReferenceClips/<name>.json, else the baked registry default)
     // that drives the body's scene placement while scrubbing. Null = no arc.
@@ -283,11 +290,19 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.Escape))
         {
             if (_menu.Open) _menu.Open = false;
+            else if (_ikDrag != null && _dragBone >= 0)
+            {
+                // Cancel the IK drag: back to the drag-start pose (the drag itself ends).
+                _ikDrag.Restore(_pose);
+                if (Doc != null && _activeKey >= 0) Doc.Keyframes[_activeKey].Bones = PoseData.Capture(_pose);
+                _ikDrag = null; _dragBone = -1;
+            }
             else if (!_guides.Cancel(Doc)) Exit();
         }
         UpdateRoot();   // tracks window size + the flip toggle
         var (guideFrame, groundY) = _placement.GuideFrame(Doc, _floorLocalY);
         _menu.Button = new Rectangle(W - 100, 6, 88, 22);
+        _ikToggle = new Rectangle(W - 190, 6, 84, 22);
         BuildSceneMenu();
 
         bool ctrl        = kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl);
@@ -424,7 +439,8 @@ public sealed class DemoGame : Game
             // Header UI first (deterministic picking priority), then the endpoint popup, then
             // the working area.
             _pressPos = mp;
-            if (_menu.HandlePress(mp)) { }
+            if (_ikToggle.Contains((int)mp.X, (int)mp.Y)) { _ikMode = !_ikMode; if (!_ikMode) _ikDrag = null; }
+            else if (_menu.HandlePress(mp)) { }
             else if (_endpointMenu.Button != Rectangle.Empty && _endpointMenu.HandlePress(mp)) { }
             else if (mp.X < SidebarW)
             {
@@ -469,7 +485,18 @@ public sealed class DemoGame : Game
                 {
                     int bone = _activeKey >= 0 ? PickJoint(world, mp) : -1;
                     if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
-                    else if (bone >= 0) _dragBone = bone;
+                    else if (bone >= 0)
+                    {
+                        _dragBone = bone;
+                        // IK mode: a limb chain (up to the torso) — the root/torso themselves keep
+                        // the direct edit (a chain of length 0 has nothing to solve).
+                        _ikDrag = null;
+                        if (_ikMode && !_skeleton.Bones[bone].IsRoot)
+                        {
+                            var session = new PoseIk.DragSession(_skeleton, _pose, bone);
+                            if (session.Chain.Length > 0) _ikDrag = session;
+                        }
+                    }
                     _selectedAdd = -1;
                 }
             }
@@ -519,6 +546,15 @@ public sealed class DemoGame : Game
         {
             DragAddition(world, mp);
         }
+        else if (leftDown && _dragBone >= 0 && _activeKey >= 0 && _ikDrag != null)
+        {
+            // IK drag: target in root-local rig units; solve in place; write the keyframe back
+            // exactly as the direct edit does (save / dirty / Escape semantics unchanged).
+            Vector2 local = _root.Inverse().TransformPoint(mp);
+            _ikDrag.Step(_pose, local);
+            Doc.Keyframes[_activeKey].Bones = PoseData.Capture(_pose);
+            _dirty = true;
+        }
         else if (leftDown && _dragBone >= 0 && _activeKey >= 0)
         {
             var touched = EditBone(world, _dragBone, mp);
@@ -541,6 +577,7 @@ public sealed class DemoGame : Game
         {
             // A click on a joint (press + release without moving) selects that endpoint.
             if (_dragBone >= 0 && Vector2.Distance(mp, _pressPos) < 3f) _selectedEndpoint = _dragBone;
+            _ikDrag = null;
             _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragSidebarThumb = false; _guides.Release(groundY);
         }
 
@@ -945,6 +982,18 @@ public sealed class DemoGame : Game
         }
 
         DrawAdditions(world);
+
+        // IK drag feedback: the target cross under the cursor and the miss distance (rig
+        // units) — an unreachable target shows the closest reachable pose plus how far off.
+        if (_ikDrag != null && _dragBone >= 0)
+        {
+            var ms = Mouse.GetState();
+            var mp = new Vector2(ms.X, ms.Y);
+            var c = new Color(255, 200, 120);
+            _draw.Line(mp - new Vector2(6f, 0f), mp + new Vector2(6f, 0f), c, 1.5f);
+            _draw.Line(mp - new Vector2(0f, 6f), mp + new Vector2(0f, 6f), c, 1.5f);
+            _spriteBatch.DrawString(_font, $"miss {_ikDrag.Last.Miss:0.00}", mp + new Vector2(10f, -6f), c);
+        }
     }
 
     // Draw the keyframe's labeled additions: points as a ringed dot, vectors as a labeled
@@ -1546,8 +1595,11 @@ public sealed class DemoGame : Game
         Color stateColor = _playing ? new Color(255, 200, 80)
                          : _activeKey >= 0 ? new Color(150, 230, 150) : new Color(150, 160, 175);
         _spriteBatch.DrawString(_font,
-            $"{state}    |    {_editMode.ToString().ToUpperInvariant()} (Tab)",
+            $"{state}    |    {_editMode.ToString().ToUpperInvariant()} (Tab)" + (_ikMode ? "    |    IK DRAG" : ""),
             new Vector2(SidebarW + 16, 28), stateColor);
+        // The IK-drag toggle box (header UI — picked before anything in the working area).
+        Fill(_ikToggle, _ikMode ? new Color(70, 130, 110) : new Color(45, 55, 75));
+        _spriteBatch.DrawString(_font, _ikMode ? "IK drag: on" : "IK drag: off", new Vector2(_ikToggle.Left + 6, _ikToggle.Top + 3), Color.White);
 
         if (doc != null)
         {
@@ -1589,7 +1641,7 @@ public sealed class DemoGame : Game
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
         ("Arc",      "A attach the next reference arc (Shift back, wraps through none)    arc file saves reload live"),
-        ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip"),
+        ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip    IK drag box (header): drag a joint = IK pull of its limb, Esc restores"),
         ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
         ("View",     "` block grid on/off (1 cell = 1 game tile, anchored to the floor line)    O physics hexagon at the com"),
         ("Scene",    "Scene menu (top right): add/select/duplicate/delete/hide/lock guides, snap, motion source, path/ghosts, frame/follow view"),

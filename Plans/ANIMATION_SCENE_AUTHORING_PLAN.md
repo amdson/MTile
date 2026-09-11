@@ -469,3 +469,24 @@ reversible and listed so they can be reviewed in one place.
   as the plan allows.
 - **Not done**: the sampling-error gate on `Bake arc` is a printed report; a Knife asset
   chooser (the only asset is `knife`); helper-foot removal on the rabbit rig.
+
+## Implementation decisions log (chunk 3.5, 2026-09-11)
+
+- **Solver**: `PoseIk.DragSession` (`Animation/PoseIk.cs`) — one `LeastSquaresSolver` and
+  its arrays per drag; rows = 2 tip rows + n prior-A rows (0.2 rig units/rad toward the
+  drag-start rotations) + n prior-B rows (0.05 toward the previous frame, which also warm
+  starts). 40 LM iterations per frame on n ≤ 4 variables. Only rotations move; a
+  keyframe's Stretch is preserved. Prior weights are public fields, left at values that
+  barely resist reach (lever arms are 10–20 units/rad) but keep the return-home drift
+  under 0.03 rad in the test.
+- **Fold guard**: a one-sided bound on `*_lower` bones whose drag-start angle exceeds
+  0.05 rad keeps the sign; a near-straight limb is free to fold either way. To be replaced
+  by the rig-level joint-limit vocabulary when runtime §8 defines it.
+- **Editor**: header box "IK drag: on/off" (`_ikToggle`, header-first picking); in mode a
+  joint press on a non-root bone opens a session over `PoseIk.DefaultChain`; the drag
+  branch steps the session in root-local rig units and captures the pose into the active
+  keyframe (same dirty/save path as a rotate edit); Escape restores; release drops the
+  session. RESIZE/STRETCH and com drags are untouched. Verified by compilation and the
+  headless `AnimDragIkTests` only (no display on the build VM).
+- **Not done**: the torso-extension modifier and graded up-chain weights (evaluate feel
+  first); a distinct hover color for chain nodes.

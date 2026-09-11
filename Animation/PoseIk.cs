@@ -78,4 +78,89 @@ public static class PoseIk
         return new Result(target + new Vector2(final[0], final[1]),
                           MathF.Sqrt(final[0] * final[0] + final[1] * final[1]));
     }
+
+    // INTERACTIVE DRAG SESSION (Plans/ANIMATION_WORKPLAN.md chunk 3.5 — the editor's prior-
+    // based kinematics drag mode). One LM solve per frame while a joint is held, pulling the
+    // clicked node toward the mouse with two priors:
+    //   A — the ORIGINAL pose: a weight toward the drag-start rotations. Elastic minimal
+    //       change; error cannot accumulate across the drag because the anchor never moves.
+    //   B — the PREVIOUS solution: warm start plus a small weight toward last frame's angles,
+    //       so the limb doesn't snap between LM basins mid-drag.
+    // A fold-sign guard on `*_lower` bones keeps the bend on the drag-start side of straight
+    // ("elbows don't bend backwards") — pragmatic until runtime §8 defines rig-level joint
+    // limits, which this should then consume. Solver and arrays are allocated once per
+    // session (PoseIk.Solve allocates per call — fine for the probe, not for a 60 Hz drag).
+    // Translations (a keyframe's Stretch) are left as they are; only rotations move.
+    public sealed class DragSession
+    {
+        public readonly int   Tip;
+        public readonly int[] Chain;
+        private readonly Skeleton _rig;
+        private readonly float[] _orig, _prev, _x, _lo, _hi;
+        private readonly LeastSquaresSolver _ls;
+        private readonly Affine2 _identity = Affine2.FromTRS(Vector2.Zero, 0f, Vector2.One);
+        private SkeletonPose _pose;
+        private Vector2 _target;
+        public float WeightOriginal = 0.2f;   // rig units per radian toward the drag-start pose
+        public float WeightPrevious = 0.05f;  // toward last frame's solution (continuity)
+        public float Range          = 2.5f;   // per-joint |Δ| bound from the drag-start angle
+        public Result Last { get; private set; }
+
+        public DragSession(Skeleton rig, SkeletonPose pose, int tip, int[] chain = null)
+        {
+            _rig = rig; Tip = tip;
+            Chain = chain ?? DefaultChain(rig, tip);
+            int n = Chain.Length;
+            _orig = new float[n]; _prev = new float[n]; _x = new float[n]; _lo = new float[n]; _hi = new float[n];
+            for (int i = 0; i < n; i++) _orig[i] = _prev[i] = pose.Local[Chain[i]].Rotation;
+            _ls = new LeastSquaresSolver(Math.Max(n, 1), 2 + 2 * n);
+        }
+
+        // Restore the drag-start rotations (Escape mid-drag).
+        public void Restore(SkeletonPose pose)
+        {
+            for (int i = 0; i < Chain.Length; i++) pose.Local[Chain[i]].Rotation = _orig[i];
+        }
+
+        // One frame: pull `Tip` toward `targetLocal` (root-local rig units). Solves in place.
+        public Result Step(SkeletonPose pose, Vector2 targetLocal)
+        {
+            int n = Chain.Length;
+            _pose = pose; _target = targetLocal;
+            for (int i = 0; i < n; i++)
+            {
+                _x[i] = _prev[i];   // warm start
+                float o = _orig[i];
+                float lo = o - Range, hi = o + Range;
+                // Fold guard: a `*_lower` bone's bend keeps the drag-start sign of its local angle.
+                if (_rig.Bones[Chain[i]].Name.EndsWith("_lower", StringComparison.Ordinal) && MathF.Abs(o) > 0.05f)
+                {
+                    if (o > 0f) lo = MathF.Max(lo, 0f); else hi = MathF.Min(hi, 0f);
+                }
+                _lo[i] = lo; _hi[i] = hi;
+            }
+            _ls.Minimize(Residuals, _x, _lo, _hi, iters: 40);
+            Span<float> final = stackalloc float[2 + 2 * n];
+            Residuals(_x, final);
+            for (int i = 0; i < n; i++) _prev[i] = _x[i];
+            Last = new Result(targetLocal + new Vector2(final[0], final[1]),
+                              MathF.Sqrt(final[0] * final[0] + final[1] * final[1]));
+            return Last;
+        }
+
+        private int Residuals(ReadOnlySpan<float> xs, Span<float> r)
+        {
+            int n = Chain.Length;
+            for (int i = 0; i < n; i++) _pose.Local[Chain[i]].Rotation = xs[i];
+            Vector2 tip = _pose.ComputeWorld(_identity)[Tip].Translation;
+            r[0] = tip.X - _target.X;
+            r[1] = tip.Y - _target.Y;
+            for (int i = 0; i < n; i++)
+            {
+                r[2 + i]     = WeightOriginal * (xs[i] - _orig[i]);
+                r[2 + n + i] = WeightPrevious * (xs[i] - _prev[i]);
+            }
+            return 2 + 2 * n;
+        }
+    }
 }
