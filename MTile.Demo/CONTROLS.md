@@ -143,6 +143,34 @@ The active mode is shown in the top header.
 
 ---
 
+## Scene (the header's **Scene ▾** menu)
+
+The scene is the fixed reference geometry a clip is authored against (`Scene` in the clip
+json: a ground line and axis-aligned blocks, in rig units, X right / Y down at canonical
+right-facing) plus the clip's declared **motion source** (`Motion`). Both are optional: a
+clip without a `Scene` shows the legacy preview (the floor line 2·Radius under the com, the
+one-tile obstacle block for the lip-maneuver clips); the first guide edit turns that preview
+into the clip's own scene. Guides are reference data only — the runtime never spawns them.
+
+| Menu item | Action |
+|---|---|
+| Add ground / Add block | Select the tool, then click to place (drag to size a block). Esc cancels |
+| Select guides | Guide mode: click a guide to select it, drag it to move, drag an edge or corner to resize; the ground line's handle drags its height. **Delete** removes the selected guide (only in guide mode — keyframe deletion is unchanged). Esc leaves guide mode, or restores a drag in progress |
+| Duplicate / Delete / Hide / Lock | On the selected guide. Hidden guides are not drawn or picked; locked guides are picked but not edited |
+| Snap to tile grid | Placement and drag ends snap to the tile grid anchored at the ground line |
+| Motion: auto / in place / authored path / reference arc | Which channel owns the body's scene path. **auto** is the legacy precedence (a named arc, else the `body_path` track, else stationary); **in place** declares a deliberately stationary clip (com-marker drags are refused); **authored path** is the `body_path` track (drag the com marker per keyframe); **reference arc** rides the arc picked with `A` (it must exist — a missing arc is reported in the header, never silently replaced) |
+| Bake arc to editable path | Writes the arc's position at every keyframe into `body_path`, declares the path the motion source and detaches the arc. The console reports the largest gap between the sparse track and the arc between keys |
+| Show path / pose ghosts / contact marks / physics body / tile grid | Preview layers. The path draws the body's scene path with a dot per keyframe; ghosts draw every other keyframe's pose at its own placement, with its planted nodes marked |
+| Frame scene/path | Pans so the path and every visible guide are centered |
+| Follow view | The camera tracks the body instead of the fixed scene (default: fixed, so displacement is visible) |
+| Continuous loop preview | During playback a looping clip accumulates its per-cycle displacement instead of resetting each cycle |
+
+A selected guide shows its coordinates and size in rig units with the tile size beside them.
+Header text shows the motion source in effect and whether the scene is explicit or legacy.
+Pan/zoom never edits scene data; moving the body never moves the guides.
+
+---
+
 ## Contacts (foot-plant labels)
 
 Contact labels mark which node is planted on a keyframe; the runtime cadence solver
@@ -180,10 +208,10 @@ default (deep-copied, so editing one keyframe's marks doesn't change the other's
 |---|---|
 | **`** | Toggle the block grid — one cell = one game tile (`Chunk.TileSize`), anchored to the floor line and the scene origin so cell edges sit where terrain would. On by default |
 | **O** | Toggle the player's **physics polygon** — the game's collision hexagon (`PlayerCharacter.CreateBodyPolygon`), drawn at true game scale around the com anchor. Its bottom vertex hovers one `Radius` above the floor line, exactly the in-game float height. Off by default |
-| **Ctrl-S** | Save **all** animations to their JSON files (`*unsaved*` clears) |
+| **Ctrl-S** | Save **all** animations to their JSON files (`*unsaved*` clears) — including each clip's `Scene` and `Motion` |
 | **N** | Create a new (empty) animation |
 | **C** | Clone the selected animation — deep-copies all keyframes/contacts into a new clip named `<name>_copy`, selected and ready to edit (saved as a separate file on Ctrl-S). Use it to fork a variant, e.g. derive a run from the walk |
-| **Escape** | Quit |
+| **Escape** | Close the Scene menu / cancel a guide placement or drag / leave guide mode — and, with nothing to cancel, quit |
 
 Edits are kept in memory until `Ctrl-S`; the header shows `*unsaved*` while dirty.
 

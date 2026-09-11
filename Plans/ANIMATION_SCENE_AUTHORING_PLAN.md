@@ -394,3 +394,37 @@ The first useful delivery ends with an editable, persistent moving step-up scene
 endpoint-based contact/element editing, a stick rig without helper feet, a matching
 derived rabbit preview, and a shared motion query. Automatic obstacle
 adaptation and broad gameplay changes can follow as a separate, reviewable step.
+
+## Implementation decisions log (chunk 3, 2026-09-11)
+
+Choices made while building the editor track without the owner in the loop; each is
+reversible and listed so they can be reviewed in one place.
+
+- **Document shape.** `AnimationDocument.Scene` (`ClipScene { Guides }`) and
+  `AnimationDocument.Motion` (`MotionSource?`: `InPlace | Track | ReferenceArc`), both
+  optional and omitted from JSON when absent. `Track` is the existing `body_path` channel;
+  no separate `Motion` object was added since the source is the only field it needed.
+- **Legacy precedence** when `Motion` is null: ReferenceArc → `body_path` → stationary, with
+  `ClipMotion.HasIntent` false only for the last case (missing intent ≠ declared in-place).
+  A declared arc that cannot be resolved reports `ArcMissing` and samples zero; it never
+  falls back to a stale track.
+- **Com-marker drag on a legacy clip** still seeds a `body_path` track and leaves `Motion`
+  null (the clip stays legacy-compatible); on a clip declared `InPlace` the drag is refused
+  with a console hint. Declaring a source is a menu action, never a side effect of a drag.
+- **Bake arc to path** clears `ReferenceArc` after writing the track and declares `Track`,
+  so the clip has exactly one owner afterwards. The sampling-error check is printed, not
+  gated: the author decides whether to add keys.
+- **Guide picking priority**: corners, then edges / the ground line, then a block body.
+  Locked guides are selectable but not editable; hidden guides are neither.
+- **Legacy materialization** copies exactly the preview the editor was showing (floor at
+  2·Radius/scale under the anchor; the one-tile block for Parkour/Mantle/ArcJump/LedgePull at
+  its persisted view offset). Non-com clips with an explicit scene use the scene-anchor frame.
+- **The playhead's body-radius ring** now draws for any moving source (arc or track), not
+  only for arcs.
+- **Escape** is layered: menu → guide cancel/tool exit → quit. **Delete** acts on the
+  selected guide only in guide mode.
+- **Verification**: this VM has no display or fonts, so the editor could not be run; the
+  extraction was verified by compiling the editor sources and by a parity test
+  (`AnimSceneTests.RootAt_MatchesTheLegacyEditorPlacement`) that checks the shared
+  `ClipMotion` query against the old placement formulas on the shipped clips. The
+  interaction itself needs the manual editor check the plan already calls for.

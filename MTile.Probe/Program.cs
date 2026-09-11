@@ -99,9 +99,10 @@ static class Probe
                 case "stretch": return StretchCmd(args);
                 case "bakeyaw": return BakeYaw(args);
                 case "refarc": return RefArc(args);
+                case "motion": return Motion(args);
                 default:
                     Console.Error.WriteLine($"unknown command '{cmd}'. try: list | digest | diff | report | anim | addcom | ik"
-                                          + " | new | addkey | contact | rot | retime | delkey | dur | retarget | stretch | bakeyaw");
+                                          + " | new | addkey | contact | rot | retime | delkey | dur | retarget | stretch | bakeyaw | motion");
                     return 2;
             }
         }
@@ -915,6 +916,35 @@ static class Probe
     }
 
     // --- helpers -------------------------------------------------------------
+
+    // motion <clip> [samples] — the shared motion query (ClipMotion): the source in effect,
+    // the per-cycle displacement, and p(t) / root(t) at uniform samples, in rig units. The
+    // same numbers the editor places the rig with, so the two can be compared directly.
+    static int Motion(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        int n = args.Length > 2 && int.TryParse(args[2], out int k) ? Math.Max(1, k) : 8;
+        HermiteClipDocument Arc(string name)
+        {
+            string path = Path.Combine(Path.GetDirectoryName(_statesRoot) ?? ".", "ReferenceClips", name + ".json");
+            return (File.Exists(path) ? HermiteClipDocument.Load(path) : null) ?? ReferenceClipRegistry.Get(name);
+        }
+        var m = ClipMotion.Resolve(clip, Arc);
+        Console.WriteLine($"{clip.Name}: motion source {m.Source}{(m.Explicit ? "" : " (legacy precedence)")}"
+                        + (m.HasIntent ? "" : "  — no motion intent")
+                        + (m.ArcMissing ? $"  — ReferenceArc '{clip.ReferenceArc}' NOT FOUND" : ""));
+        var d = m.CycleDisplacement;
+        Console.WriteLine($"  cycle displacement D = ({d.X:0.00}, {d.Y:0.00}) rig = ({d.X * Game1.SkeletonScale:0.0}, {d.Y * Game1.SkeletonScale:0.0}) px"
+                        + (clip.Loop ? "" : "  (one-shot: clamps)"));
+        Console.WriteLine($"  scene: {(clip.Scene == null ? "legacy preview" : clip.Scene.Guides.Count + " guides")}");
+        for (int i = 0; i <= n; i++)
+        {
+            float t = i / (float)n;
+            var p = m.BodyAt(t); var r = m.RootAt(t, out bool anchored);
+            Console.WriteLine($"  t={t:0.00}  p=({p.X,7:0.00},{p.Y,7:0.00})  root=({r.X,7:0.00},{r.Y,7:0.00}){(anchored ? "" : "  (no com)")}");
+        }
+        return 0;
+    }
 
     static AnimationDocument Find(string name)
     {

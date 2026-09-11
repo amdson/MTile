@@ -38,8 +38,7 @@ public sealed class DemoGame : Game
     private Skeleton     _skeleton;
     private SkeletonPose _pose;          // rendered / working pose
     private SkeletonPose _kfA, _kfB, _kfC, _kfD;   // scratch for the C1 keyframe quad (iL,i0,i1,iR)
-    private Affine2      _root;
-    private Vector2      _playerOffset;   // view pan (whole scene: rig + com + floor + refs). Arrows nudge, Home resets.
+    private Affine2      _root;           // the rig root, from _placement each frame
     // PER-KEYFRAME body path (Animation/BodyPath.cs — the com anchor's scene position,
     // formerly the editor-only "edref" track): authored by dragging the com marker — the
     // PLAYER ensemble (com marker + skeleton) offsets from the scene anchor by its
@@ -50,8 +49,14 @@ public sealed class DemoGame : Game
     // runtime-status note).
     private const string BodyPathName = BodyPath.ChannelName;
     private bool _warnedArcPlacement;   // one-shot hint when a com drag is refused (arc owns placement)
-    private bool _showGrid = true;      // block-sized grid under the scene (` toggles)
-    private bool _showBodyPoly;         // the game's physics hexagon at the com anchor (O toggles)
+    // The scene components (Plans/ANIMATION_SCENE_AUTHORING_PLAN.md "Refactor boundaries"):
+    // placement (view + the shared ClipMotion query), guide editing, preview drawing, and the
+    // header's Scene dropdown. DemoGame stays the MonoGame host wiring them together.
+    private readonly ScenePlacement _placement = new();
+    private readonly SceneGuideView _guides    = new();
+    private readonly ScenePreview   _preview   = new();
+    private readonly SceneMenu      _menu      = new();
+    private SkeletonPose _ghostPose;            // scratch for keyframe ghosts
     // The clip's reference trajectory (Doc.ReferenceArc), loaded on clip select: the
     // authored maneuver arc (ReferenceClips/<name>.json, else the baked registry default)
     // that drives the body's scene placement while scrubbing. Null = no arc.
@@ -62,18 +67,11 @@ public sealed class DemoGame : Game
 
     // COM-ANCHORED placement (clips that author a "com" track — all of them, post addcom):
     // the rig is drawn exactly the way the game places it — root = anchor − com·scale — so the
-    // com marker sits at a FIXED screen point (_anchor) and the ground line sits a fixed
-    // 2·Radius/SkeletonScale rig-units below it (the addcom stamp convention: com.Y = sole −
-    // 2R/scale ⇒ a planted sole rests on the line). Dragging the ROOT joint then edits the
-    // active keyframe's com INVERSELY: the skeleton follows the cursor while com marker and
-    // ground stay put — which is exactly "place the body against the ground", the intuitive
-    // control for authoring the com arc (airtime). Scrub/playback previews the body bobbing
-    // over the fixed ground, matching the in-game read. Clips with no com keep the old
-    // fixed-root placement (_comAnchored false).
-    private Vector2 _anchor;         // where the com point lands on screen (the "body position")
-    private Vector2 _sceneAnchor;    // scene-frame origin for ground refs — _anchor minus the com-drag offset
-    private bool    _comAnchored;
-    private const float GroundBelowComRig = 2f * PlayerCharacter.Radius / Game1.SkeletonScale;
+    // com marker sits at a FIXED screen point (ScenePlacement.Anchor) and the ground line sits
+    // 2·Radius/SkeletonScale rig-units below it. Dragging the ROOT joint edits the active
+    // keyframe's com INVERSELY: the skeleton follows the cursor while com marker and ground
+    // stay put — "place the body against the ground", the control for authoring the com arc.
+    // Clips with no com keep the old fixed-root placement (ScenePlacement.ComAnchored false).
 
     private string                   _dir;
     private List<AnimationDocument>  _docs = new();
@@ -88,9 +86,7 @@ public sealed class DemoGame : Game
     private int           _dragBone = -1, _hoverBone = -1;
     private int           _dragBar  = -1;     // keyframe bar being moved
     private bool          _dragPlayhead;
-    private bool          _dragRoot;          // dragging the root joint = moving the whole player (_playerOffset)
-    private Vector2       _obstacleBlockOffset;  // skeleton-local offset added to the obstacle reference block's base placement
-    private bool          _dragObstacleBlock;    // dragging the obstacle reference block
+    private bool          _dragRoot;          // dragging the root joint = placing the body (or panning)
     private enum EditMode { Rotate, Resize, Stretch }
     private EditMode      _editMode = EditMode.Rotate;   // Tab cycles
     private float         _sidebarScroll;                // clip-list scroll offset, px (0 = top)
@@ -121,7 +117,7 @@ public sealed class DemoGame : Game
     private const int   SidebarW = 250;
     private const int   PadTop   = 12;
     private const int   RowH     = 40;
-    private const float RigScale = 5f;
+    private const float RigScale = ScenePlacement.RigScale;
     private const float PickR    = 12f;
     private const float SnapEps  = 0.012f;
 
@@ -185,7 +181,7 @@ public sealed class DemoGame : Game
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_HELP") != null) _showHelp = true;
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_WIRE") != null) _skinWire = true;
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_NOSKEL") != null) _showRig = false;
-        if (Environment.GetEnvironmentVariable("MTILE_SHOT_BODY") != null) _showBodyPoly = true;
+        if (Environment.GetEnvironmentVariable("MTILE_SHOT_BODY") != null) _preview.ShowBody = true;
 
         // Authored-only content: the rig comes from Skeletons/<name>.json and throws
         // if missing (no procedural fallback), and the clip list is exactly what's
@@ -218,6 +214,7 @@ public sealed class DemoGame : Game
         _kfB  = _skeleton.CreatePose();
         _kfC  = _skeleton.CreatePose();
         _kfD  = _skeleton.CreatePose();
+        _ghostPose = _skeleton.CreatePose();
 
         // Floor line = the bind-pose sole (lowest joint/tip), so authored feet have a
         // ground reference to plant against. Matches CharacterAnimator's sole logic.
@@ -271,9 +268,18 @@ public sealed class DemoGame : Game
         }
 
         // Edge-triggered so an Escape still held from cancelling a label (which
-        // returned above last frame) doesn't immediately fall through and Exit.
-        if (Pressed(kb, Keys.Escape)) Exit();
+        // returned above last frame) doesn't immediately fall through and Exit. Escape
+        // first closes the Scene menu, then cancels a guide placement/drag or leaves the
+        // guide tool, and only quits when there is nothing to cancel.
+        if (Pressed(kb, Keys.Escape))
+        {
+            if (_menu.Open) _menu.Open = false;
+            else if (!_guides.Cancel(Doc)) Exit();
+        }
         UpdateRoot();   // tracks window size + the flip toggle
+        var (guideFrame, groundY) = _placement.GuideFrame(Doc, _floorLocalY);
+        _menu.Button = new Rectangle(W - 100, 6, 88, 22);
+        BuildSceneMenu();
 
         bool ctrl        = kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl);
         bool mDown       = kb.IsKeyDown(Keys.M);   // M + click toggles a node's contact mark
@@ -288,7 +294,13 @@ public sealed class DemoGame : Game
         if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 3);
         if (Pressed(kb, Keys.F)) FlipAnimation();
         if (Pressed(kb, Keys.Space)) TogglePlay();
-        if (Pressed(kb, Keys.Delete) || Pressed(kb, Keys.Back)) { if (_selectedAdd >= 0) RemoveSelectedAddition(); else DeleteActiveKeyframe(); }
+        // Delete acts on the selected GUIDE only in guide mode; keyframe/addition deletion is unchanged.
+        if (Pressed(kb, Keys.Delete) || Pressed(kb, Keys.Back))
+        {
+            if (_guides.Tool == GuideTool.Select && _guides.Selected(Doc) != null) _guides.DeleteSelected(Doc, ref _dirty);
+            else if (_selectedAdd >= 0) RemoveSelectedAddition();
+            else DeleteActiveKeyframe();
+        }
         // Add labeled constructs: P point, V vector (to the active keyframe), B child bone.
         // B adds the bone to the active clip (clip-local); Shift+B adds it to the base rig.
         if (Pressed(kb, Keys.P)) BeginAddAddition(AnimAdditionKind.Point, mp);
@@ -329,8 +341,8 @@ public sealed class DemoGame : Game
             { _selectedAttachment.End = _scrubT; _dirty = true; }
         }
         if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
-        if (Pressed(kb, Keys.OemTilde)) _showGrid = !_showGrid;
-        if (Pressed(kb, Keys.O)) _showBodyPoly = !_showBodyPoly;
+        if (Pressed(kb, Keys.OemTilde)) _preview.ShowGrid = !_preview.ShowGrid;
+        if (Pressed(kb, Keys.O)) _preview.ShowBody = !_preview.ShowBody;
         if (_skin != null && Pressed(kb, Keys.G)) _showSkin = !_showSkin;
         if (_skin != null && Pressed(kb, Keys.W)) _skinWire = !_skinWire;
         if (_skin != null && Pressed(kb, Keys.X)) _showRig  = !_showRig;
@@ -338,11 +350,11 @@ public sealed class DemoGame : Game
         // Pan the whole VIEW (rig + com + floor together): arrows nudge (Shift = faster), Home
         // recenters. Placing the BODY against the ground is the root-joint drag (edits com).
         float nudge = (kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift)) ? 6f : 1.5f;
-        if (kb.IsKeyDown(Keys.Left))  _playerOffset.X -= nudge;
-        if (kb.IsKeyDown(Keys.Right)) _playerOffset.X += nudge;
-        if (kb.IsKeyDown(Keys.Up))    _playerOffset.Y -= nudge;
-        if (kb.IsKeyDown(Keys.Down))  _playerOffset.Y += nudge;
-        if (Pressed(kb, Keys.Home))   _playerOffset = Vector2.Zero;
+        if (kb.IsKeyDown(Keys.Left))  _placement.Pan.X -= nudge;
+        if (kb.IsKeyDown(Keys.Right)) _placement.Pan.X += nudge;
+        if (kb.IsKeyDown(Keys.Up))    _placement.Pan.Y -= nudge;
+        if (kb.IsKeyDown(Keys.Down))  _placement.Pan.Y += nudge;
+        if (Pressed(kb, Keys.Home))   _placement.Pan = Vector2.Zero;
         if (Doc != null)
         {
             bool shift = kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift);
@@ -375,7 +387,9 @@ public sealed class DemoGame : Game
 
         if (leftPressed)
         {
-            if (mp.X < SidebarW)
+            // Header UI first (deterministic picking priority), then the working area.
+            if (_menu.HandlePress(mp)) { }
+            else if (mp.X < SidebarW)
             {
                 // The scrollbar strip owns the sidebar's right edge when the list overflows;
                 // clicking it jumps the thumb there and starts a drag.
@@ -398,8 +412,13 @@ public sealed class DemoGame : Game
             }
             else if (!_playing)
             {
-                // Addition handles take priority over joints (they sit on top of the rig).
-                if (_activeKey >= 0 && TryPickAddition(world, mp, out int ai, out bool tip))
+                // Guide tools / a legacy block grab come first; then addition handles (they
+                // sit on top of the rig), then joints.
+                if (_guides.HandlePress(mp, guideFrame, groundY, Doc, ref _dirty))
+                {
+                    _selectedAdd = -1;
+                }
+                else if (_activeKey >= 0 && TryPickAddition(world, mp, out int ai, out bool tip))
                 {
                     _selectedAdd = ai; _dragAdd = ai; _dragAddTip = tip;
                 }
@@ -414,17 +433,19 @@ public sealed class DemoGame : Game
                     int bone = _activeKey >= 0 ? PickJoint(world, mp) : -1;
                     if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
                     else if (bone >= 0) _dragBone = bone;
-                    // No joint under the cursor: grab the obstacle reference block if the click is on it.
-                    else if (TryGetObstacleBlockRect(out var vb) && vb.Contains((int)mp.X, (int)mp.Y)) _dragObstacleBlock = true;
                     _selectedAdd = -1;
                 }
             }
         }
 
-        if (leftDown && _dragRoot)
+        if (leftDown && _guides.Dragging)
+        {
+            _guides.HandleDrag(mp, mp - new Vector2(_prevMs.X, _prevMs.Y), guideFrame, groundY, ref _dirty);
+        }
+        else if (leftDown && _dragRoot)
         {
             var dm = mp - new Vector2(_prevMs.X, _prevMs.Y);
-            var comAdd = _comAnchored ? ActiveKeyCom() : null;
+            var comAdd = _placement.ComAnchored ? ActiveKeyCom() : null;
             if (comAdd != null)
             {
                 // COM-ANCHORED: dragging the root moves the BODY against the fixed ground/com —
@@ -439,13 +460,8 @@ public sealed class DemoGame : Game
             else
             {
                 // No com on the active keyframe (or a legacy no-com clip): plain view pan.
-                _playerOffset += dm;
+                _placement.Pan += dm;
             }
-        }
-        else if (leftDown && _dragObstacleBlock)
-        {
-            // Block offset is skeleton-local; _root is uniform-scaled (no rotation), so undo the scale.
-            _obstacleBlockOffset += (mp - new Vector2(_prevMs.X, _prevMs.Y)) / RigScale;
         }
         else if (leftDown && _dragBar >= 0)
         {
@@ -484,7 +500,7 @@ public sealed class DemoGame : Game
             }
         }
 
-        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragObstacleBlock = false; _dragSidebarThumb = false; }
+        if (leftUp) { _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragSidebarThumb = false; _guides.Release(groundY); }
 
         _prevMs = ms;
         _prevKb = kb;
@@ -593,34 +609,17 @@ public sealed class DemoGame : Game
             _floorLocalY = MathF.Max(_floorLocalY, bindWorld[i].Translation.Y);
     }
 
-    // Rig placement in the editor: centered in the working area, scaled, and — when the clip
-    // authors a com track — COM-ANCHORED like the game (root = anchor − com·scale), so the com
-    // marker and the ground line hold still while the BODY moves per keyframe. Recomputed each
-    // frame so it tracks window size and the com value at the playhead.
+    // Rig placement in the editor (ScenePlacement): centered in the working area, scaled, and —
+    // when the clip authors a com track — COM-ANCHORED like the game. Recomputed each frame so
+    // it tracks window size, the playhead, and (continuous-loop playback) the accumulated
+    // cycle displacement. Exactly ONE source owns the body's scene path (ClipMotion).
     private void UpdateRoot()
     {
-        float cx = SidebarW + (W - SidebarW) / 2f;
-        float cy = H * 0.48f;
-        _sceneAnchor = new Vector2(cx, cy) + _playerOffset;   // ground refs live here
-        // An arc is authored at true game scale, so a tall one (a 44px drop is nearly two
-        // body heights) would run off the working area from a centered anchor. Bias the
-        // scene by the arc's own midpoint so the whole path sits in view. Pure view
-        // placement — the arrow-key pan still composes on top, and nothing authored moves.
-        if (_refArc != null) _sceneAnchor -= ArcCenter() * RigScale;
-        // Player ensemble placement, per keyframe. EXACTLY ONE source owns it:
-        //   · an attached reference arc (Doc.ReferenceArc) — the maneuver's authored
-        //     trajectory, so the com rides the drawn curve;
-        //   · otherwise the edref track (dragging the com marker).
-        // They are NOT additive. edref predates arcs and was authored as absolute
-        // placement, so summing them pushed the body off its own arc by the edref amount
-        // — the com ring and the keyframe dots (which never included edref) disagreed.
-        Vector2 refOff = _refArc != null
-            ? ArcOffset(_scrubT) * RigScale
-            : TryPointAt(_scrubT, BodyPathName, out var r) ? r * RigScale : Vector2.Zero;
-        _anchor = _sceneAnchor + refOff;
-        _comAnchored = TryComAt(_scrubT, out var com);
-        Vector2 rootT = _comAnchored ? _anchor - com * RigScale : _anchor;
-        _root = Affine2.FromTRS(rootT, 0f, new Vector2(RigScale, RigScale));
+        var center = new Vector2(SidebarW + (W - SidebarW) / 2f, H * 0.48f);
+        bool unwrapped = _playing && _placement.ContinuousLoop && Doc != null;
+        float t = unwrapped ? _playTime / MathF.Max(Doc.Duration, 1e-4f) : _scrubT;
+        _placement.Update(Doc, _refArc, t, unwrapped, center);
+        _root = _placement.Root;
     }
 
     // Resolve a clip's ReferenceArc name: the editable file at ReferenceClips/<name>.json
@@ -691,62 +690,6 @@ public sealed class DemoGame : Game
         Console.WriteLine($"{Doc.Name} ReferenceArc = {Doc.ReferenceArc ?? "none"}");
     }
 
-    // Clip time → arc parameter. The two have INDEPENDENT durations, so a clip only
-    // rides its arc 1:1 when they match: a 0.4s clip on a 0.3s arc is at the gate by
-    // τ=0.75 and overshoots after. Capped at 2 so a mistuned pair can't fling the body
-    // off the far end of the linear extrapolation.
-    private float ArcProgress(float t)
-    {
-        float arcDur = _refArc.Duration <= 1e-4f ? 1f : _refArc.Duration;
-        float clipDur = Doc == null || Doc.Duration <= 1e-4f ? 1f : Doc.Duration;
-        return MathHelper.Clamp(MathHelper.Clamp(t, 0f, 1f) * (clipDur / arcDur), 0f, 2f);
-    }
-
-    private Vector2 ArcOffset(float t) => ArcOffsetAt(ArcProgress(t));
-
-    // Midpoint of the drawn arc's bounding box, in rig units — the view bias that keeps a
-    // full-scale path on screen.
-    //
-    // The box covers what the RIDING BODY sweeps, not just the curve: the arc's points are
-    // com positions, and the rig hangs GroundBelowComRig (40 units = 200px at RigScale 5)
-    // below its com with the head some way above. Centering the bare curve pushed a tall
-    // arc's body off the bottom of the window — the taller the arc, the further off, which
-    // is why it only showed up once parkour started drawing at its authored 40px rise.
-    private Vector2 ArcCenter()
-    {
-        float end = MathF.Max(ArcProgress(1f), 1f);
-        Vector2 min = new(float.MaxValue), max = new(float.MinValue);
-        for (int i = 0; i <= 16; i++)
-        {
-            Vector2 p = ArcOffsetAt(end * i / 16f);
-            min = Vector2.Min(min, p); max = Vector2.Max(max, p);
-        }
-        // Only the ASYMMETRY moves the midpoint, and the body is asymmetric about its com:
-        // soles a full GroundBelowComRig below, head roughly half that above.
-        max.Y += GroundBelowComRig;
-        min.Y -= GroundBelowComRig * 0.5f;
-        return (min + max) * 0.5f;
-    }
-
-    // Scene offset at a point along the ARC's own parameter (not clip time), in rig units.
-    //
-    // The arc is authored in game pixels against its own anchors, so its size and its
-    // direction both come straight from the file — the editor only converts px to rig units,
-    // for EVERY clip. Parkour used to be an exception (gate retargeted onto the reference
-    // block, so dragging the block rescaled the ride live), but that silently overrode the
-    // authored span: a 26×40px arc drew at the block's 18×14 *rig units* = 10.8×8.4px, five
-    // times shallower than authored and half the size of mantle's. The block is a piece of
-    // scenery to position the arc against, not a retarget target — the runtime does its own
-    // retargeting against the obstacle it actually measures.
-    private Vector2 ArcOffsetAt(float u)
-    {
-        Vector2 p = _refArc.Eval(u);
-        Vector2 gate = _refArc.Span / Game1.SkeletonScale;
-        return new ReferenceFrame(_refArc, Vector2.Zero, gate).Map(p);
-    }
-
-    private bool TryComAt(float t, out Vector2 com) => TryPointAt(t, "com", out com);
-
     // A named root-space Point track at normalized time t — the shared sparse-channel C1
     // sampler (same one the runtime uses, so the editor preview matches the game): only
     // keyframes that author the point are its keys, gaps bridge smoothly, and motion
@@ -766,12 +709,6 @@ public sealed class DemoGame : Game
             if (a.Kind == AnimAdditionKind.Point && a.Name == name && a.Parent == null) return a;
         return null;
     }
-
-    // The scene frame the GROUND-RELATIVE references (floor line, obstacle block) live in: fixed
-    // at the anchor when com-anchored (they must NOT follow the body), the rig root otherwise.
-    private (Affine2 frame, float floorLocalY) SceneFrame()
-        => _comAnchored ? (Affine2.FromTRS(_sceneAnchor, 0f, new Vector2(RigScale, RigScale)), GroundBelowComRig)
-                        : (_root, _floorLocalY);
 
     // === draw ================================================================
 
@@ -814,6 +751,7 @@ public sealed class DemoGame : Game
         DrawHeader();
         DrawHelpOverlay();
         DrawNamingOverlay();
+        _menu.Draw(_draw, _spriteBatch, _font);
         _spriteBatch.End();
 
         if (capturing)
@@ -904,27 +842,14 @@ public sealed class DemoGame : Game
 
     private void DrawEditor()
     {
-        // Floor reference: a dashed horizontal line. Com-anchored clips draw it FIXED below the
-        // com anchor (the in-game ground: 2·Radius under the body position) so the body can be
-        // authored moving against it; legacy clips keep the bind-pose sole height under _root.
-        var (scene, floorLocal) = SceneFrame();
-        float floorY = scene.TransformPoint(new Vector2(0f, floorLocal)).Y;
-        DrawTileGrid(scene, floorY);
-        DrawDashedH(floorY, SidebarW + 20, W - 20, new Color(90, 110, 95), 9f, 7f);
-        _spriteBatch.DrawString(_font, "floor", new Vector2(SidebarW + 20, floorY + 3), new Color(90, 110, 95));
-
-        // Obstacle reference block: sits on the floor a hair ahead of the rig in the +X
-        // (canonical facing) direction so the foot/hip arc can be authored against a
-        // concrete obstacle. Runtime mirrors clips by facing, so the block lives on the
-        // forward side here regardless of the player's in-game facing.
-        DrawObstacleBlock();
-
-        // The reference arc the body is riding, drawn as the path it sweeps through the
-        // scene, so a pose can be authored against WHERE ALONG THE ARC its keyframe lands.
-        DrawReferenceArc();
-
-        // The game's collision silhouette, under the rig so bones stay readable on top.
-        DrawBodyPolygon();
+        // Scene layers under the rig: the tile grid, the guides (or the legacy floor line +
+        // obstacle block), the body's scene path, keyframe ghosts, the physics silhouette.
+        var (frame, groundY) = _placement.GuideFrame(Doc, _floorLocalY);
+        _preview.DrawGrid(_draw, frame, groundY, SidebarW, W, 0f, TrackY - 28f);
+        _guides.Draw(_draw, _spriteBatch, _font, frame, groundY, Doc, SidebarW, W);
+        _preview.DrawPath(_draw, _placement, Doc);
+        _preview.DrawGhosts(_draw, _placement, Doc, _skeleton, _ghostPose, _kfA, _kfB, _kfC, _kfD, _activeKey);
+        _preview.DrawBody(_draw, _placement.Anchor);
 
         // The rig overlay (bones + joint markers + additions) hides when toggled off
         // (X, skin-view only) so the sprite can be judged unobstructed. Editing still
@@ -1010,138 +935,6 @@ public sealed class DemoGame : Game
             if (!string.IsNullOrEmpty(a.Name))
                 _spriteBatch.DrawString(_font, a.Name, o + new Vector2(8f, -6f), col);
         }
-    }
-
-    // One game tile in SKELETON-LOCAL units — the frame the scene (floor line, block, arcs)
-    // is drawn in, where 1 unit = 1 game px / SkeletonScale. Everything sized against the
-    // world must go through this: writing raw px here silently shrinks it by 0.6.
-    private const float TileRig = Chunk.TileSize / Game1.SkeletonScale;
-
-    // Reference obstacle for the guided lip maneuvers: exactly ONE TILE, one tile ahead of
-    // the rig, so it lands on the grid and "clears the block" in the editor means what the
-    // one-block band (MantleMinRise..MantleMaxRise, 8–20px) means in game. It used to be
-    // 18×14 *rig units* = 10.8×8.4 px, 4.8px ahead — a two-thirds-size curb starting inside
-    // the body (half-width ≈ 10.4px) — which is why poses authored to clear it didn't clear
-    // a real block. _obstacleBlockOffset (drag / arrows) shifts it. Nothing reads this.
-    private const float ObstacleBlockW = TileRig, ObstacleBlockH = TileRig, ObstacleBlockX = TileRig;
-
-    // The clips the block is scenery for. Keyed on the AnimClip ENUM, not the raw Type
-    // string, so renaming a member is a compile error here instead of the block silently
-    // never appearing again (which is exactly how it stayed Parkour-only after the climb
-    // family split — mantle and arcjump author against the same obstacle).
-    private static readonly AnimClip[] BlockClips =
-        { AnimClip.Parkour, AnimClip.Mantle, AnimClip.ArcJump, AnimClip.LedgePull };
-
-    // Screen-space rect of the obstacle block, false when no block is shown.
-    // Shared by the renderer and the drag hit-test so they never disagree.
-    private bool TryGetObstacleBlockRect(out Rectangle rect)
-    {
-        rect = default;
-        if (!Enum.TryParse<AnimClip>(Doc?.Type, ignoreCase: true, out var c)
-            || Array.IndexOf(BlockClips, c) < 0) return false;
-        // The block is a GROUND feature: it lives in the scene frame (fixed at the anchor when
-        // com-anchored) so it doesn't ride along as the body is placed against it.
-        var (scene, floorLocal) = SceneFrame();
-        Vector2 tl = scene.TransformPoint(new Vector2(ObstacleBlockX,               floorLocal - ObstacleBlockH) + _obstacleBlockOffset);
-        Vector2 br = scene.TransformPoint(new Vector2(ObstacleBlockX + ObstacleBlockW, floorLocal)               + _obstacleBlockOffset);
-        rect = new Rectangle((int)tl.X, (int)tl.Y, (int)(br.X - tl.X), (int)(br.Y - tl.Y));
-        return true;
-    }
-
-    // One grid cell = one game tile (Chunk.TileSize px) at the editor's zoom, so an authored
-    // rise can be read straight off in blocks: "the hip clears one cell" is exactly the
-    // one-block parkour band. Anchored to the FLOOR line and the scene X origin (the frame
-    // the obstacle block lives in), so cell edges coincide with where terrain would sit and
-    // the reference block fills exactly one cell.
-    private void DrawTileGrid(in Affine2 scene, float floorY)
-    {
-        if (!_showGrid) return;
-        float cell = TileRig * RigScale;   // one game tile in rig units → screen px
-        if (cell < 4f) return;                                          // degenerate zoom: skip
-
-        var minor = new Color(38, 42, 52);
-        var axis  = new Color(58, 64, 78);
-        float x0 = SidebarW, x1 = W, y0 = 0f, y1 = TrackY - 28f;   // stop above the timeline strip
-        float originX = scene.TransformPoint(Vector2.Zero).X;
-
-        // Verticals, walking both ways off the scene origin so the origin column is exact.
-        for (float x = originX; x <= x1; x += cell) if (x >= x0) _draw.Line(new Vector2(x, y0), new Vector2(x, y1), x == originX ? axis : minor, 1f);
-        for (float x = originX - cell; x >= x0; x -= cell)             _draw.Line(new Vector2(x, y0), new Vector2(x, y1), minor, 1f);
-        // Horizontals off the floor line (the floor itself is the axis row).
-        for (float y = floorY; y <= y1; y += cell) if (y >= y0) _draw.Line(new Vector2(x0, y), new Vector2(x1, y), y == floorY ? axis : minor, 1f);
-        for (float y = floorY - cell; y >= y0; y -= cell)              _draw.Line(new Vector2(x0, y), new Vector2(x1, y), minor, 1f);
-    }
-
-    private void DrawObstacleBlock()
-    {
-        if (!TryGetObstacleBlockRect(out var rect)) return;
-
-        Fill(rect, new Color(82, 64, 48));
-        _draw.Line(new Vector2(rect.Left,  rect.Top),    new Vector2(rect.Right, rect.Top),    new Color(150, 118, 88), 2f);
-        _draw.Line(new Vector2(rect.Left,  rect.Top),    new Vector2(rect.Left,  rect.Bottom), new Color(48, 36, 26), 1f);
-        _draw.Line(new Vector2(rect.Right, rect.Top),    new Vector2(rect.Right, rect.Bottom), new Color(48, 36, 26), 1f);
-    }
-
-    // The clip's reference arc as a scene path, with the body's progress along it marked.
-    //
-    // The bright stretch is the part the clip's own timeline actually covers — clip and
-    // arc carry INDEPENDENT durations, so a clip shorter than its arc stops early (dim
-    // tail) and a longer one runs past the gate (the arc extrapolates). Keyframes drop a
-    // dot where they land, and the ring is the player's body circle at the playhead:
-    // author each pose against the dot it sits on.
-    private void DrawReferenceArc()
-    {
-        if (_refArc == null) return;
-        const int Samples = 96;
-        float covered = ArcProgress(1f);
-        float end = MathF.Max(covered, 1f);
-
-        Vector2 prev = _sceneAnchor + ArcOffsetAt(0f) * RigScale;
-        for (int i = 1; i <= Samples; i++)
-        {
-            float u = end * i / Samples;
-            Vector2 p = _sceneAnchor + ArcOffsetAt(u) * RigScale;
-            bool live = u <= covered;
-            _draw.Line(prev, p, live ? new Color(90, 170, 210) : new Color(55, 80, 95), live ? 2f : 1f);
-            prev = p;
-        }
-
-        // Gate marker: where the maneuver's measured target sits on this path.
-        _draw.Ring(_sceneAnchor + ArcOffsetAt(1f) * RigScale, 5f, new Color(120, 220, 160), 12, 1.5f);
-
-        if (Doc?.Keyframes != null)
-            foreach (var kf in Doc.Keyframes)
-                _draw.Disc(_sceneAnchor + ArcOffset(kf.Time) * RigScale, 3.5f, new Color(150, 200, 235));
-
-        // Body circle at the playhead — the com the rig is hung from, at the game's radius.
-        _draw.Ring(_anchor, PlayerCharacter.Radius / Game1.SkeletonScale * RigScale,
-                   new Color(230, 190, 90), 24, 1.5f);
-    }
-
-    // The player's PHYSICS polygon (PlayerCharacter.CreateBodyPolygon — the width-squeezed
-    // hexagon), drawn at true game scale around the com anchor. The com convention puts the
-    // ground 2·Radius below the anchor — float height (R) plus the hexagon's half-height (R)
-    // — so this is exactly where the collision body sits relative to the authored ground
-    // line: the bottom vertex hovers one Radius above the floor, like in game. Use it to
-    // judge a pose against the real collision bounds (what clears a block is the hexagon,
-    // not the limbs). O toggles.
-    private void DrawBodyPolygon()
-    {
-        if (!_showBodyPoly) return;
-        float s = RigScale / Game1.SkeletonScale;   // game px → editor screen px
-        var verts = PlayerCharacter.CreateBodyPolygon().GetVertices(Vector2.Zero);
-        var col = new Color(230, 190, 90);
-        for (int i = 0; i < verts.Length; i++)
-            _draw.Line(_anchor + verts[i] * s,
-                       _anchor + verts[(i + 1) % verts.Length] * s, col, 1.5f);
-        // Tick the anchor itself so the polygon's center reads even with no com marker drawn.
-        _draw.Ring(_anchor, 2.5f, col, 8, 1f);
-    }
-
-    private void DrawDashedH(float y, float x0, float x1, Color c, float dash, float gap)
-    {
-        for (float x = x0; x < x1; x += dash + gap)
-            _draw.Line(new Vector2(x, y), new Vector2(MathF.Min(x + dash, x1), y), c, 1f);
     }
 
     private static bool HasContact(List<ContactLabel> contacts, string node)
@@ -1350,6 +1143,7 @@ public sealed class DemoGame : Game
         _kfB  = _skeleton.CreatePose();
         _kfC  = _skeleton.CreatePose();
         _kfD  = _skeleton.CreatePose();
+        _ghostPose = _skeleton.CreatePose();
         if (Doc != null && _activeKey >= 0) PoseData.Apply(Doc.Keyframes[_activeKey].Bones, _pose);
         else SamplePose(_scrubT);
         RecomputeFloorLine();
@@ -1406,19 +1200,21 @@ public sealed class DemoGame : Game
         // Editor-only visualization data (saved with the clip; runtime ignores it).
         // Moving the body WITHIN the com frame (the keyframe's com channel) is the
         // root-joint drag; panning everything together is the arrow keys.
-        if (_comAnchored && a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
+        if (_placement.ComAnchored && a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
         {
-            // With an arc attached, the ARC owns placement (UpdateRoot) — writing edref here
-            // would move the body off the curve it is supposed to be authored against. Edit
-            // the trajectory in the arc editor instead: MTile.Demo -- --ref <name>.
-            if (_refArc != null)
+            // Exactly one source owns placement (ClipMotion). With an arc attached, the ARC
+            // owns it — writing the track here would move the body off the curve it is
+            // authored against (edit it in `--ref <name>`, or bake the arc to a path from the
+            // Scene menu). A clip declared In place is stationary on purpose.
+            var src = _placement.Motion?.Source ?? MotionSource.InPlace;
+            if (src == MotionSource.ReferenceArc || (Doc.Motion == MotionSource.InPlace))
             {
                 if (!_warnedArcPlacement)
                 {
                     _warnedArcPlacement = true;
-                    Console.WriteLine($"'{Doc.ReferenceArc}' owns the body placement — drag it in "
-                                    + $"`dotnet run --project MTile.Demo -- --ref {Doc.ReferenceArc}` "
-                                    + "(or press A to detach the arc).");
+                    Console.WriteLine(src == MotionSource.ReferenceArc
+                        ? $"'{Doc.ReferenceArc}' owns the body placement — drag it in `dotnet run --project MTile.Demo -- --ref {Doc.ReferenceArc}`, or Scene > Bake arc to path."
+                        : "this clip is declared In place — Scene > Motion: Authored path to author a body path.");
                 }
                 return;
             }
@@ -1519,20 +1315,27 @@ public sealed class DemoGame : Game
             new Vector2(SidebarW + 16, 28), stateColor);
 
         if (doc != null)
+        {
+            var m = _placement.Motion;
+            string motion = m == null ? "" : m.Source switch
+            {
+                MotionSource.InPlace      => m.Explicit ? "in place" : "stationary (legacy)",
+                MotionSource.Track        => m.Explicit ? "authored path" : "authored path (legacy)",
+                MotionSource.ReferenceArc => $"arc {doc.ReferenceArc}"
+                    + (m.ArcMissing ? " (MISSING)"
+                       // Arc pace relative to the clip: ×1 means they share a duration,
+                       // >1 means the clip runs the arc faster than the arc's own seconds.
+                       : $" {m.Arc.Duration:0.00}s  x{(m.Arc.Duration > 1e-4f ? doc.Duration / m.Arc.Duration : 1f):0.00}  at {m.ArcProgress(_scrubT):0.00}"),
+                _ => "",
+            };
             _spriteBatch.DrawString(_font,
-                $"dur {doc.Duration:0.0}s  |  loop {(doc.Loop ? "on" : "off")}  |  region {doc.Region}"
-                + (doc.ReferenceArc != null
-                    ? $"  |  arc {doc.ReferenceArc}"
-                      + (_refArc == null ? " (missing)"
-                         // Arc pace relative to the clip: ×1 means they share a duration,
-                         // >1 means the clip runs the arc faster than the arc's own seconds.
-                         : $" {_refArc.Duration:0.00}s  x{(_refArc.Duration > 1e-4f ? doc.Duration / _refArc.Duration : 1f):0.00}"
-                           + $"  at {ArcProgress(_scrubT):0.00}")
-                    : ""),
+                $"dur {doc.Duration:0.0}s  |  loop {(doc.Loop ? "on" : "off")}  |  region {doc.Region}  |  motion: {motion}"
+                + (doc.Scene != null ? $"  |  scene: {doc.Scene.Guides.Count} guides" : "  |  scene: legacy"),
                 new Vector2(SidebarW + 16, 46), new Color(160, 170, 185));
+        }
 
-        _spriteBatch.DrawString(_font, "H controls   |   Ctrl-S save   |   K sample keyframe",
-            new Vector2(SidebarW + 16, 64), new Color(130, 140, 155));
+        _spriteBatch.DrawString(_font, _guides.Hint ?? "H controls   |   Ctrl-S save   |   K sample keyframe   |   Scene menu top right",
+            new Vector2(SidebarW + 16, 64), _guides.Hint != null ? new Color(220, 190, 140) : new Color(130, 140, 155));
 
         // Loop-seam guard: a looping locomotion clip whose first/last poses drifted apart
         // silently degrades to one-shot seam sampling in-game (pose pop + cadence stall
@@ -1554,7 +1357,8 @@ public sealed class DemoGame : Game
         ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip"),
         ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
         ("View",     "` block grid on/off (1 cell = 1 game tile, anchored to the floor line)    O physics hexagon at the com"),
-        ("Obstacle", "drag the brown block to reposition it (the four lip-maneuver clips)"),
+        ("Scene",    "Scene menu (top right): add/select/duplicate/delete/hide/lock guides, snap, motion source, path/ghosts, frame/follow view"),
+        ("Obstacle", "legacy clips: drag the brown block to reposition it; editing it in guide mode makes it this clip's own scene"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Effect",   "E over joint: attach/name effect (knife)    Shift+E remove    U/I set selected effect start/end at playhead"),
         ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
@@ -1767,6 +1571,8 @@ public sealed class DemoGame : Game
             SettleShare = src.SettleShare,
             OffRegionWeight = src.OffRegionWeight,
             ReferenceArc = src.ReferenceArc,
+            Motion   = src.Motion,
+            Scene    = src.Scene?.Clone(),
             ExtraBones = src.ExtraBones?.ConvertAll(b => new SkeletonBoneRecord
                 { Name = b.Name, Parent = b.Parent, Rotation = b.Rotation, Length = b.Length }),
             Attachments = src.Attachments?.ConvertAll(a => a.Clone()),
@@ -1849,7 +1655,7 @@ public sealed class DemoGame : Game
         {
             if (!File.Exists(ViewStatePath)) return;
             var v = System.Text.Json.JsonSerializer.Deserialize<ViewState>(File.ReadAllText(ViewStatePath));
-            if (v != null) _obstacleBlockOffset = new Vector2(v.BlockX, v.BlockY);
+            if (v != null) _guides.LegacyBlockOffset = new Vector2(v.BlockX, v.BlockY);
         }
         catch { /* view state is a convenience — never block startup on it */ }
     }
@@ -1858,7 +1664,7 @@ public sealed class DemoGame : Game
     {
         try
         {
-            var v = new ViewState { BlockX = _obstacleBlockOffset.X, BlockY = _obstacleBlockOffset.Y };
+            var v = new ViewState { BlockX = _guides.LegacyBlockOffset.X, BlockY = _guides.LegacyBlockOffset.Y };
             File.WriteAllText(ViewStatePath, System.Text.Json.JsonSerializer.Serialize(v));
         }
         catch { /* best-effort */ }
@@ -1919,6 +1725,76 @@ public sealed class DemoGame : Game
         list.AddRange(actions);
         list.Add("Misc");
         return list.ToArray();
+    }
+
+    // The Scene dropdown's items, rebuilt each frame from the current state.
+    private void BuildSceneMenu()
+    {
+        _menu.Clear();
+        var doc = Doc;
+        bool haveDoc = doc != null;
+        var sel = _guides.Selected(doc);
+        _menu.Add("Add ground", () => _guides.Tool = GuideTool.AddGround, _guides.Tool == GuideTool.AddGround, haveDoc);
+        _menu.Add("Add block (drag to size)", () => _guides.Tool = GuideTool.AddBlock, _guides.Tool == GuideTool.AddBlock, haveDoc);
+        _menu.Add("Select guides", () => _guides.Tool = _guides.Tool == GuideTool.Select ? GuideTool.None : GuideTool.Select, _guides.Tool == GuideTool.Select, haveDoc);
+        _menu.Add("Duplicate selected", () => _guides.DuplicateSelected(doc, ref _dirty), false, sel != null);
+        _menu.Add("Delete selected", () => _guides.DeleteSelected(doc, ref _dirty), false, sel != null);
+        _menu.Add(sel?.Hidden == true ? "Show selected" : "Hide selected", () => _guides.ToggleHidden(doc, ref _dirty), false, sel != null);
+        _menu.Add(sel?.Locked == true ? "Unlock selected" : "Lock selected", () => _guides.ToggleLocked(doc, ref _dirty), false, sel != null);
+        _menu.Add("Snap to tile grid", () => _guides.Snap = !_guides.Snap, _guides.Snap);
+        _menu.Separator();
+        var m = _placement.Motion;
+        _menu.Add("Motion: auto (legacy precedence)", () => { doc.Motion = null; _dirty = true; }, haveDoc && doc.Motion == null, haveDoc);
+        _menu.Add("Motion: in place", () => { doc.Motion = MotionSource.InPlace; _dirty = true; }, haveDoc && doc.Motion == MotionSource.InPlace, haveDoc);
+        _menu.Add("Motion: authored path", () => { doc.Motion = MotionSource.Track; _dirty = true; }, haveDoc && doc.Motion == MotionSource.Track, haveDoc);
+        _menu.Add("Motion: reference arc (A picks one)", () => { doc.Motion = MotionSource.ReferenceArc; _dirty = true; }, haveDoc && doc.Motion == MotionSource.ReferenceArc, haveDoc && doc.ReferenceArc != null);
+        _menu.Add("Bake arc to editable path", BakeArcToPath, false, m != null && m.Source == MotionSource.ReferenceArc && m.Arc != null);
+        _menu.Separator();
+        _menu.Add("Show path", () => _preview.ShowPath = !_preview.ShowPath, _preview.ShowPath);
+        _menu.Add("Show pose ghosts", () => _preview.ShowGhosts = !_preview.ShowGhosts, _preview.ShowGhosts);
+        _menu.Add("Show contact marks", () => _preview.ShowContacts = !_preview.ShowContacts, _preview.ShowContacts);
+        _menu.Add("Show physics body (O)", () => _preview.ShowBody = !_preview.ShowBody, _preview.ShowBody);
+        _menu.Add("Show tile grid (`)", () => _preview.ShowGrid = !_preview.ShowGrid, _preview.ShowGrid);
+        _menu.Separator();
+        _menu.Add("Frame scene/path", () =>
+        {
+            var (_, gy) = _placement.GuideFrame(doc, _floorLocalY);
+            _placement.FrameScene(doc, _guides.Effective(doc, gy).Guides, new Vector2(SidebarW + (W - SidebarW) / 2f, H * 0.48f));
+        }, false, haveDoc);
+        _menu.Add("Follow view (camera tracks the body)", () => _placement.FollowView = !_placement.FollowView, _placement.FollowView);
+        _menu.Add("Continuous loop preview (accumulate travel)", () => _placement.ContinuousLoop = !_placement.ContinuousLoop, _placement.ContinuousLoop);
+    }
+
+    // "Bake arc to editable path": write the arc's scene position at every keyframe into the
+    // body_path track, make the track the declared motion source, and detach the arc (one
+    // owner). Reports the largest gap between the sparse C1 track and the arc between keys —
+    // the sampling error the author is accepting (add keys where it is too large).
+    private void BakeArcToPath()
+    {
+        var doc = Doc; var m = _placement.Motion;
+        if (doc == null || m == null || m.Source != MotionSource.ReferenceArc || m.Arc == null) return;
+        foreach (var kf in doc.Keyframes)
+        {
+            Vector2 p = m.BodyAt(kf.Time);
+            kf.Additions ??= new List<AnimAddition>();
+            var add = kf.Additions.Find(x => x.Kind == AnimAdditionKind.Point && x.Name == BodyPathName && x.Parent == null);
+            if (add == null) kf.Additions.Add(add = new AnimAddition { Name = BodyPathName, Kind = AnimAdditionKind.Point });
+            add.Px = p.X; add.Py = p.Y;
+        }
+        float worst = 0f, worstT = 0f;
+        for (int i = 0; i <= 64; i++)
+        {
+            float t = i / 64f;
+            float e = BodyPath.TrySample(doc, t, out var q) ? Vector2.Distance(q, m.BodyAt(t)) : 0f;
+            if (e > worst) { worst = e; worstT = t; }
+        }
+        doc.Motion = MotionSource.Track;
+        doc.ReferenceArc = null;
+        _refArc = null;
+        _dirty = true;
+        Console.WriteLine($"{doc.Name}: baked arc to body_path over {doc.Keyframes.Count} keys; max sampling error "
+                        + $"{worst:0.00} rig units ({worst * Game1.SkeletonScale:0.0}px) at t={worstT:0.00}"
+                        + (worst > 1f ? " — add a key there if that matters" : ""));
     }
 
     // Cycle Doc.Type through the known options; a Type not in the list (hand-edited

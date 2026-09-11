@@ -139,6 +139,9 @@ Tune from `SolveScaleReport()` numbers, not first principles.
 | `Animation/SolveObjective.cs` | `SolveForward` (the forward pass: pose, root, Δφ velocities) + `SolveObjective` (residuals/Jacobian over the blocks, `PointJacobianColumns`/`Lever`) |
 | `Animation/SolveConstraints.cs` | The constraint blocks — stateless pure functions of `(SolveProblem, PoseEval, x)` |
 | `Animation/CharacterAnimator.Diagnostics.cs` | FD oracle (per-block attribution), SolveScaleReport, golden-trace capture, debug hooks |
+| `Animation/GaitTiming.cs` | The timing stage: phase advance from body travel over the authored stride, the stopping policy (chunk 5) |
+| `Animation/ClipMotion.cs` | The shared motion query: which channel owns the body's scene path, p(t), cycle displacement, loop extension (chunk 3) |
+| `Animation/ClipScene.cs` | Scene guides (ground/blocks in clip scene space), `MotionSource`, and the pure guide edit operations (chunk 3) |
 | `Animation/LeastSquaresSolver.cs` | Allocation-free box-bounded LM (portable MathF) |
 | `Animation/AnimationSampler.cs` | C1 sampling + angular velocity + IsCyclic + SeamMismatch guard |
 | `Animation/AnimSolverConfig.cs` + `configs/anim_solver_config.json` | All weights/limits, hot-reloaded |

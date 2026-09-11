@@ -95,6 +95,17 @@ public sealed class AnimationDocument
     // Null/omitted on ordinary clips.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string                  ReferenceArc { get; set; }
+    // EXPLICIT motion intent (ClipMotion): which channel owns the body's scene path. Null
+    // (legacy) keeps the precedence ReferenceArc → body_path track → stationary, which the
+    // editor previews but the runtime never opts into on its own. InPlace declares a
+    // deliberately stationary clip (distinct from "missing intent").
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public MotionSource?           Motion { get; set; }
+    // Fixed scene reference geometry (ClipScene): ground line + blocks in clip scene space.
+    // Null keeps the editor's legacy floor-line/obstacle-block preview; an explicit Scene —
+    // including an empty one — replaces it. Reference data only; never a runtime collider.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ClipScene               Scene { get; set; }
     // Clip-local bones layered onto the base rig (named by Skeleton) for THIS clip
     // only — e.g. a "knife" held in the hand during a slash, which shouldn't bloat the
     // shared biped rig that walk/idle draw against. Each must Parent an existing base
