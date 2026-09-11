@@ -51,7 +51,7 @@ internal static class AnimBaseline
         "rows_mean", "rows_max", "vars",
         "rate_mean", "rate_max", "rate_jump_max",
         "slip_mean", "slip_max", "tgt_err_mean", "tgt_err_max", "pen_max",
-        "dx_max", "dy_max", "dth_max", "foot_acc_p99", "foot_acc_max",
+        "dx_max", "dy_max", "dth_max", "foot_acc_p99", "foot_acc_max", "swing_acc_max",
     };
 
     public static int Run(string[] args)
@@ -182,6 +182,7 @@ internal static class AnimBaseline
         public float IdleSwitchSwingU; // on the frame a cadence clip switched to Idle: the max swing
                                        // progress of any foot at that phase (a "suspended foot"); else -1
         public (int Bone, Vector2 Target, float Weight)[] Contacts;
+        public (int Bone, Vector2 Target, bool Replanned)[] Swings;   // planner feet in flight (planned or clip fallback)
         public Vector2[] Tips;        // rendered world tip of every bone
         public float Pen;             // max vertical depth of any rendered tip under an upward face
     }
@@ -274,6 +275,24 @@ internal static class AnimBaseline
         m["foot_acc_p99"] = acc.Count == 0 ? 0 : Pct(acc.ToArray(), 0.99);
         m["foot_acc_max"] = acc.Count == 0 ? 0 : acc[^1];
 
+        // Planner swing-target acceleration (second difference, px/frame²) over three
+        // consecutive frames of the same foot in flight — the target-continuity measure of
+        // runtime §6 (a replan that jumps shows up here even before the solve smooths it).
+        var sacc = new List<double>(); int replans = 0;
+        for (int i = a; i < b; i++)
+        {
+            foreach (var sw in q[i].Swings)
+            {
+                if (sw.Replanned) replans++;
+                if (i < Math.Max(a, 2)) continue;
+                Vector2? p1 = null, p2 = null;
+                foreach (var x in q[i - 1].Swings) if (x.Bone == sw.Bone) p1 = x.Target;
+                foreach (var x in q[i - 2].Swings) if (x.Bone == sw.Bone) p2 = x.Target;
+                if (p1.HasValue && p2.HasValue) sacc.Add((sw.Target - 2f * p1.Value + p2.Value).Length());
+            }
+        }
+        m["swing_acc_max"] = sacc.Count == 0 ? 0 : sacc.Max();
+
         // Notes: what the scenario actually exercised (clip mix, overlay actions, low ceiling).
         var clipMix = win.GroupBy(i => q[i].Clip).OrderByDescending(g => g.Count())
                          .Select(g => $"{g.Key}:{100.0 * g.Count() / win.Length:0}%");
@@ -287,12 +306,21 @@ internal static class AnimBaseline
                      + (actions.Any() ? " actions=" + string.Join(",", actions) : "")
                      + (low > 0 ? $" lowceil={100.0 * low / win.Length:0}%" : "")
                      + (settle + idleHold > 0 ? $" timing=settle:{100.0 * settle / win.Length:0}%,hold:{100.0 * idleHold / win.Length:0}%" : "")
-                     + (switches.Length > 0 ? $" idle_switch_swing_u={switches.Max():0.00}" : "");
+                     + (switches.Length > 0 ? $" idle_switch_swing_u={switches.Max():0.00}" : "")
+                     + (replans > 0 ? $" replans={replans}" : "");
         return (m, notes);
     }
 
+    // MTILE_ANIM_TRACE=<scenario substring>: print a per-frame planner/contact trace of the
+    // matching scenarios' first rep to stdout (chunk 6 diagnostics — what replanned, why, and
+    // how far each engaged contact's rendered tip sits from its target).
+    private static readonly string TraceFilter = Environment.GetEnvironmentVariable("MTILE_ANIM_TRACE");
+    private static int _traceReps;
+
     private static Frame[] RunOnce(Scenario sc, Skeleton skel, List<AnimationDocument> clips)
     {
+        bool trace = TraceFilter is { Length: > 0 } && sc.Name.Contains(TraceFilter, StringComparison.OrdinalIgnoreCase)
+                     && (_traceReps++ % Reps) == 0;
         var chunks = sc.Terrain();
         var sim = new Simulation(chunks, sc.Spawn);
         var anim = new CharacterAnimator(skel, Scale, clips);
@@ -351,6 +379,17 @@ internal static class AnimBaseline
                 fr.Contacts[i] = (c.Bone, c.Target, c.Weight);
             }
 
+            int nSw = 0;
+            for (int i = 0; i < anim.Planner.FeetCount; i++)
+                if (anim.Planner.Plans[i].SwingU > 0f && anim.Planner.Plans[i].State != FootPlanState.Stance) nSw++;
+            fr.Swings = new (int, Vector2, bool)[nSw];
+            for (int i = 0, k = 0; i < anim.Planner.FeetCount; i++)
+            {
+                ref readonly var pl = ref anim.Planner.Plans[i];
+                if (pl.SwingU > 0f && pl.State != FootPlanState.Stance)
+                    fr.Swings[k++] = (pl.Bone, pl.Target, pl.Replan != StepReplan.None);
+            }
+
             // The rendered pose, placed exactly as Game1 draws it.
             int dir = p.Facing == 0 ? 1 : p.Facing;
             var root = AttackGlowSystem.RigRoot(p.Body.Position, p.Facing, anim, Scale);
@@ -363,6 +402,26 @@ internal static class AnimBaseline
                 pen = MathF.Max(pen, DepthBelowUpwardFace(sim.Chunks, fr.Tips[i]));
             }
             fr.Pen = pen;
+
+            if (trace)
+            {
+                var sb = new StringBuilder();
+                sb.Append($"[{sc.Name}] f={f,3} {fr.Clip,-8} phi={fr.Phase:0.000} {fr.Timing,-9} body=({p.Body.Position.X:0.0},{p.Body.Position.Y:0.0}) v=({p.Body.Velocity.X:0},{p.Body.Velocity.Y:0}) pen={fr.Pen:0.0}");
+                for (int i = 0; i < anim.Planner.FeetCount; i++)
+                {
+                    ref readonly var pl = ref anim.Planner.Plans[i];
+                    sb.Append($" | {skel.Bones[pl.Bone].Name}:{pl.State}");
+                    if (pl.State != FootPlanState.Stance) sb.Append($" u={pl.SwingU:0.00}");
+                    if (pl.Reject != StepReject.None) sb.Append($" rej={pl.Reject}");
+                    if (pl.Replan != StepReplan.None) sb.Append($" REPLAN={pl.Replan}#{pl.Replans}");
+                    sb.Append($" tgt=({pl.Target.X:0.0},{pl.Target.Y:0.0})");
+                    if (pl.HasSupport && pl.State == FootPlanState.Swing) sb.Append($" land=({pl.Landing.X:0.0},{pl.Landing.Y:0.0})");
+                    sb.Append($" tip=({fr.Tips[pl.Bone].X:0.0},{fr.Tips[pl.Bone].Y:0.0})");
+                }
+                foreach (var c in fr.Contacts)
+                    sb.Append($" | C {skel.Bones[c.Bone].Name} w={c.Weight:0.00} err={(fr.Tips[c.Bone] - c.Target).Length():0.0}");
+                Console.WriteLine(sb.ToString());
+            }
         }
         return frames;
     }
@@ -444,6 +503,7 @@ internal static class AnimBaseline
         }
         h.Add("# units: us = animator Update only (per-frame min over reps); solver counters = mean per LM-solve frame;");
         h.Add("#   seed_evals derived (11/cadence solve); rate cycles/s, rate_jump cycles/s^2; slip px/frame; tgt_err/pen/dx/dy px;");
+        h.Add("#   swing_acc_max: planner swing-target second difference px/frame^2 (chunk 6 continuity); notes replans= source changes.");
         h.Add("#   pen = vertical exit depth of any rendered bone tip inside solid terrain (min of up/down);");
         h.Add("#   dth rad; foot_acc px/frame^2 (second difference of rendered contact-node tips). Rendered pose placed via RigRoot.");
         return h;

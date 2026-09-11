@@ -148,3 +148,52 @@ owner and reason (`StepReject` already), active claims, and a pending handoff (t
 / released contacts at a clip switch). The bench's `--anim-baseline` notes column gains
 the timing state mix (traveling/settling/idle %) — that is how "deceleration settles into
 idle without a suspended foot" gets measured rather than eyeballed.
+
+## 7. Chunk 6 implementation (2026-09-11) — continuous replanning
+
+What landed in `Animation/StepPlanner.cs` (runtime plan §6's second half; the handoff rules
+of §4 were chunk 5's):
+
+- **Commitment.** A swing commits its landing on first selection (`FootState.CommitWish`
+  remembers the wish it committed at). Before the late lock it is reconsidered only when the
+  predicted wish has moved more than `PlannerReplanDistance` (4 px, the fourth planner knob),
+  when the committed path from the foot's current position is obstructed, or when the
+  support died / fell out of reach. A reselect that returns the same point is a quiet
+  re-commit. Reasons are reported per frame as `FootPlan.Replan`
+  (`Prediction | Obstruction | InvalidSupport | Fallback | Reacquired`) with a per-swing
+  count.
+- **Continuity.** The emitted target is `nominal(u) + offset · (1 − u)/(1 − u0)`, where the
+  offset is captured at every source change as the gap between the *carried* position (last
+  target plus its last per-frame step) and the new nominal path. Rebasing the chord and this
+  decaying offset are the same formula, so one mechanism covers replan, fallback to the
+  clip's motion and re-acquire from it, and the offset composes across successive changes.
+  Only rotations of the target path change; touchdown still lands exactly on the committed
+  point.
+- **Clearance of the replacement.** `SwingBlocked` samples the remaining path from the
+  carried position (same sample count, samples at or before u0 skipped) — for a fresh swing
+  that is the old takeoff→landing check. A first cut that let this permissive check pick any
+  clear tread committed three-steps-up landings on the 45° bench stairs (tgt_err_max 7.6 →
+  22 px); the fix is `MaxLandingMiss` = 1.5 tiles: a tread farther than that from the
+  authored wish is not a plan, for the touchdown selection too (the "do not pin a distant
+  point" intent, now enforced).
+- **Identity.** Feet are still keyed by bone; on one rig a support point resolves to one
+  bone, so `TransferContacts`' bone match is the endpoint identity of §3 (the point id is
+  the track's `Node`). A cross-rig transfer would key by point id — not needed yet.
+
+Numbers (`MTile.Bench/baselines/anim_chunk6.txt` vs `anim_chunk4.txt`, game config): flat
+scenarios are bit-identical (Run carries no planned support) or within noise; walk-speed and
+run-walk-run (planner-owned Walk) keep tgt_err/slip and show `swing_acc_max` 3.9 / 3.5
+px/frame² with 76 / 25 replans in 300 / 250 frames — the PWM input makes the velocity-based
+touchdown prediction swing ±10 px, each swing a blended replan. Stairs (StepUp) are mixed:
+stairs slow tgt_err_max 8.7 → 4.3, stairs run slip_max 3.6 → 4.6 and pen_max 7.3 → 10.6.
+The per-frame trace shows both effects are dominated by pre-existing step-up behaviour on
+these 45° stairs, not by the replanning: the toe-path clearance check rejects nearly every
+swing (`SwingBlocked` on most frames, so most stances come from the touchdown selection),
+and both feet get planned onto the same tread point. Both belong to chunk 7's step-up
+policy; the planner mechanics here are the substrate it will drive.
+
+Diagnostics landed (the §6 list): `AnimFrameDebug.Feet` (owner state, reject, replan, target,
+landing per planner foot); the bench's `swing_acc_max` column (second difference of the
+in-flight target) and `replans=` note; `MTILE_ANIM_TRACE=<scenario substring>` prints a
+per-frame planner/contact/penetration trace of the first rep. Not landed: active claims and
+the pending-handoff record (no claims implementation exists to report yet).

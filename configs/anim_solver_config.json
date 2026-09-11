@@ -20,5 +20,6 @@
   "ContactEngageTime": 0.08,
   "PlannerEnabled": true,
   "PlannerHysteresis": 4,
-  "PlannerLateSwingLock": 0.8
+  "PlannerLateSwingLock": 0.8,
+  "PlannerReplanDistance": 4
 }

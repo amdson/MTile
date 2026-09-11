@@ -43,6 +43,11 @@ namespace MTile.Tests;
 // surface), its planted contacts moved 0.15 px onto the lower legs' ends (support_l/r), and
 // the terrain tips are enumerated in a different order (support points appended), which
 // reorders the no-pen rows — the rabbit scenarios changed only by that ordering.
+// Re-recorded the two stairs scenarios for chunk 6 (StepPlanner continuous replanning): a
+// swing now commits its landing and blends replans instead of reselecting every frame, and
+// a tread farther than 1.5 tiles from the authored wish is no longer a plan, so the planner's
+// swing targets (SwingTargetConstraint rows) and which frames plant differ on the stairs. The
+// flat-floor scenarios (Run has no planned support) replay unchanged.
 public class AnimSolverGoldenTraceTests
 {
     private readonly ITestOutputHelper _o;

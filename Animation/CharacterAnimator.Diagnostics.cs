@@ -239,6 +239,9 @@ public sealed partial class CharacterAnimator
     {
         public struct ContactDbg { public string Bone; public Vector2 Target; public float Weight; }
         public struct PinDbg     { public string Bone; public Vector2 Target; }
+        // Planner-owned feet (Rule B's support owner + reason; chunk 6's replan events).
+        public struct FootDbg    { public string Bone; public FootPlanState State; public StepReject Reject;
+                                   public StepReplan Replan; public int Replans; public Vector2 Target, Landing; public bool HasSupport; }
 
         public bool         Solved;          // an LM solve ran this frame (offsets/Δθ valid)
         public string       Clip;            // locomotion clip of the solve (null when none)
@@ -248,6 +251,7 @@ public sealed partial class CharacterAnimator
         public string       MaxDThetaBone;
         public ContactDbg[] Contacts;        // planted contacts with their FROZEN solve weights
         public PinDbg[]     Pins;            // external fixed-point pins
+        public FootDbg[]    Feet;            // step-planner plans this frame (empty when not planning)
         public SolverSurface[] Surfaces;     // no-penetration half-planes
         public bool         AimActive;
         public Vector2      AimTarget;       // frozen û* of the aim row
@@ -379,8 +383,16 @@ public sealed partial class CharacterAnimator
             Phase    = _problem.Phi,
             Contacts = new AnimFrameDebug.ContactDbg[_contacts.Count],
             Pins     = new AnimFrameDebug.PinDbg[_pins.Count],
+            Feet     = new AnimFrameDebug.FootDbg[Planner.FeetCount],
             Surfaces = _surfaces.ToArray(),
         };
+        for (int i = 0; i < Planner.FeetCount; i++)
+        {
+            ref readonly var pl = ref Planner.Plans[i];
+            d.Feet[i] = new AnimFrameDebug.FootDbg
+            { Bone = BoneName(pl.Bone), State = pl.State, Reject = pl.Reject, Replan = pl.Replan, Replans = pl.Replans,
+              Target = pl.Target, Landing = pl.Landing, HasSupport = pl.HasSupport };
+        }
         for (int i = 0; i < _contacts.Count; i++)
             d.Contacts[i] = new AnimFrameDebug.ContactDbg
             { Bone = BoneName(_contacts[i].Bone), Target = _contacts[i].Target, Weight = _contacts[i].Weight };

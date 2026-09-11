@@ -217,4 +217,162 @@ public class AnimStepPlannerTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.True(late.HasSupport);
         Assert.Equal(mid.Support.Id, late.Support.Id);
     }
+
+    // ── Continuous replanning (runtime §6, workplan chunk 6) ─────────────────
+
+    private const float Rate = 1.25f, Dt = 1f / 60f;
+
+    private static FootPlan Frame(StepPlanner planner, ClipStrideTrack track, ChunkMap chunks,
+                                  ref Vector2 body, ref float phase, Vector2 vel)
+    {
+        planner.Update(Inputs(track, chunks, body, vel, phase, Rate));
+        phase = (phase + Rate * Dt) % 1f;
+        body += vel * Dt;
+        return planner.Plans[0];
+    }
+
+    private static void SetSolid(ChunkMap chunks, int gtx, int gty)
+    {
+        var pos = new Point((int)MathF.Floor(gtx / (float)Chunk.Size), (int)MathF.Floor(gty / (float)Chunk.Size));
+        if (!chunks.TryGet(pos, out var chunk)) { chunk = new Chunk { ChunkPos = pos }; chunks[pos] = chunk; }
+        chunk.Tiles[gtx - pos.X * Chunk.Size, gty - pos.Y * Chunk.Size].IsSolid = true;
+    }
+
+    // A steadily moving body keeps its committed landing (the wish barely moves); a material
+    // prediction change replans, and the emitted target bends onto the new path instead of
+    // jumping — then arrives at the new landing and plants exactly there.
+    [Fact]
+    public void Commitment_HoldsUnderSmallDrift_AndReplansContinuously()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        float floorTop = 2 * TS;
+        var track = Track(); var planner = new StepPlanner();
+        var vel = new Vector2(60f, 0f);
+        var body = new Vector2(60f, floorTop - 20f);
+        float phase = 0.62f;
+
+        var targets = new List<Vector2>();
+        FootPlan p = default; Vector2 landing = default;
+        for (int f = 0; f < 8; f++)
+        {
+            p = Frame(planner, track, chunks, ref body, ref phase, vel);
+            Assert.Equal(FootPlanState.Swing, p.State);
+            Assert.True(p.HasSupport, $"f={f} reject={p.Reject}");
+            if (f == 0) landing = p.Landing; else Assert.Equal(landing, p.Landing);   // committed
+            Assert.Equal(0, p.Replans);
+            targets.Add(p.Target);
+        }
+        Assert.True(p.SwingU < 0.5f, $"u={p.SwingU}");
+
+        // Material change: the body jumps a tread ahead → the wish moves > PlannerReplanDistance.
+        body.X += TS;
+        p = Frame(planner, track, chunks, ref body, ref phase, vel);
+        targets.Add(p.Target);
+        Assert.Equal(StepReplan.Prediction, p.Replan);
+        Assert.Equal(1, p.Replans);
+        Assert.True(p.HasSupport);
+        Assert.True((p.Landing - landing).Length() > AnimSolverConfig.Current.PlannerReplanDistance,
+            $"landing did not move: {landing} → {p.Landing}");
+        // Continuity: the target's per-frame step across the replan matches the step before it.
+        int k = targets.Count - 1;
+        Vector2 stepBefore = targets[k - 1] - targets[k - 2], stepAt = targets[k] - targets[k - 1];
+        Assert.True((stepAt - stepBefore).Length() < 0.5f,
+            $"target jumped at the replan: step {stepBefore} → {stepAt}");
+        Vector2 newLanding = p.Landing;
+
+        // The rest of the swing: no further replans, bounded acceleration, arrival at the landing.
+        float maxAcc = 0f;
+        while (true)
+        {
+            p = Frame(planner, track, chunks, ref body, ref phase, vel);
+            if (p.State != FootPlanState.Swing) break;
+            Assert.Equal(newLanding, p.Landing);
+            Assert.Equal(1, p.Replans);
+            targets.Add(p.Target);
+            int n = targets.Count - 1;
+            maxAcc = MathF.Max(maxAcc, (targets[n] - 2f * targets[n - 1] + targets[n - 2]).Length());
+        }
+        Assert.True(maxAcc < 1.5f, $"swing target acceleration {maxAcc} px/frame²");
+        Assert.True((targets[^1] - newLanding).Length() < 4f, $"last swing target {targets[^1]} vs landing {newLanding}");
+        Assert.Equal(FootPlanState.Stance, p.State);
+        Assert.Equal(newLanding, p.Target);
+    }
+
+    // Support lost mid-swing with nothing else to land on: the plan degrades to the clip's
+    // motion, but the emitted target blends into it rather than snapping.
+    [Fact]
+    public void SupportLoss_MidSwing_BlendsIntoTheFallback()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        float floorTop = 2 * TS;
+        var track = Track(); var planner = new StepPlanner();
+        var vel = new Vector2(60f, 0f);
+        var body = new Vector2(60f, floorTop - 20f);
+        float phase = 0.62f;
+        var targets = new List<Vector2>();
+        FootPlan p = default;
+        for (int f = 0; f < 8; f++) { p = Frame(planner, track, chunks, ref body, ref phase, vel); targets.Add(p.Target); }
+        Assert.True(p.HasSupport);
+
+        for (int gtx = 0; gtx < 20; gtx++) chunks.BreakCell(gtx, 2);   // the whole floor goes
+        p = Frame(planner, track, chunks, ref body, ref phase, vel);
+        targets.Add(p.Target);
+        Assert.Equal(FootPlanState.Unplanned, p.State);
+        Assert.False(p.HasSupport);
+        Assert.Equal(StepReplan.InvalidSupport, p.Replan);
+        Assert.Equal(StepReject.NoSupport, p.Reject);
+        int k = targets.Count - 1;
+        Vector2 stepBefore = targets[k - 1] - targets[k - 2], stepAt = targets[k] - targets[k - 1];
+        Assert.True((stepAt - stepBefore).Length() < 0.5f, $"target jumped into the fallback: {stepBefore} → {stepAt}");
+
+        // Quiet afterwards (no re-acquire without terrain), converging onto the authored path.
+        Vector2 authoredEnd = default;
+        while (track.Feet[0].SwingAt(phase, out _) >= 0)
+        {
+            authoredEnd = body + 2f * track.Feet[0].Stances[0].TdOffset;   // the clip's own landing at this body
+            p = Frame(planner, track, chunks, ref body, ref phase, vel);
+            Assert.Equal(StepReplan.None, p.Replan);
+            Assert.Equal(1, p.Replans);
+            Assert.False(p.HasSupport);
+            targets.Add(p.Target);
+        }
+        // At the swing's end the blend has faded: the target sits on the clip's own landing offset.
+        Assert.True((targets[^1] - authoredEnd).Length() < 4f, $"fallback did not converge: {targets[^1]} vs {authoredEnd}");
+    }
+
+    // A wall raised across the committed path forces an obstruction replan; the replacement
+    // landing is on the near side, judged by the clearance of the remaining path.
+    [Fact]
+    public void Obstruction_ReplansToAClearLanding()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        float floorTop = 3 * TS;
+        var track = Track(); var planner = new StepPlanner();
+        var vel = new Vector2(60f, 0f);
+        var body = new Vector2(60f, floorTop - 20f);
+        float phase = 0.62f;
+        FootPlan p = default;
+        for (int f = 0; f < 6; f++) p = Frame(planner, track, chunks, ref body, ref phase, vel);
+        Assert.True(p.HasSupport);
+        Vector2 landing = p.Landing;
+        int wallX = (int)MathF.Floor(landing.X / TS) - 1;
+        Assert.True(wallX * TS > p.Target.X, "the wall must stand between the foot and its landing");
+        SetSolid(chunks, wallX, 2); SetSolid(chunks, wallX, 1);
+
+        p = Frame(planner, track, chunks, ref body, ref phase, vel);
+        Assert.Equal(StepReplan.Obstruction, p.Replan);
+        Assert.True(p.HasSupport, $"no clear landing found: {p.Reject}");
+        Assert.True(p.Landing.X <= wallX * TS, $"replacement landing {p.Landing} is beyond the wall at x={wallX * TS}");
+        Assert.Equal(floorTop, p.Landing.Y, 3);
+    }
 }

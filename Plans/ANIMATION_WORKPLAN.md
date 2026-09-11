@@ -232,6 +232,15 @@ harness, and chunk 2's edits are smaller to redo in the new style than vice vers
   contacts / scope) with contact bars, and the helper-feet removal on the biped
   (`probe feetreport` / `dropfeet`; 0.15 px support delta; `rabbit_derived` regenerated).
   The rabbit keeps its feet with support points at their tips.
+- Chunk 6 implementation (2026-09-11): `StepPlanner` commits a swing's landing on first
+  selection and replans only for a material wish change (`PlannerReplanDistance`), an
+  obstructed committed path, or dead/unreachable support; every source change (replan,
+  clip fallback, re-acquire) keeps the emitted target continuous through a decaying
+  continuity offset; candidate landings are gated by the clearance of the remaining path
+  from the foot's carried position; a tread more than 1.5 tiles from the wish is no plan.
+  Diagnostics: `AnimFrameDebug.Feet`, the bench's `swing_acc_max` column and `replans=`
+  note, `MTILE_ANIM_TRACE=<scenario>` per-frame trace. Decisions and numbers in
+  Plans/ANIMATION_OWNERSHIP_CONTRACT.md §7. Goldens: the two stairs scenarios re-recorded.
 - Chunk 3.5 (2026-09-11): the editor's IK drag mode — `PoseIk.DragSession` (one LM per
   frame over the limb chain; drag-start and previous-solution priors; `*_lower` fold
   guard; a solver allocated once per drag) behind the header's "IK drag" box; Escape

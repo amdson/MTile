@@ -93,6 +93,9 @@ public class AnimSolverConfig
     public float PlannerHysteresis   { get; set; } = 4f;
     // Swing progress after which a still-valid landing target is frozen.
     public float PlannerLateSwingLock { get; set; } = 0.8f;
+    // A committed landing is reconsidered only when the predicted landing wish has moved
+    // more than this (px) from the wish it was committed at (StepPlanner, runtime §6).
+    public float PlannerReplanDistance { get; set; } = 4f;
     // Once a contact's feather RELEASE has begun, its weight also fades by time over at most
     // this many seconds (min of the two) — so a low-speed cadence stall can't hold the old
     // foot's grip forever (the foot-swap deadlock; see CharacterAnimator.RefreshContacts).
@@ -156,6 +159,7 @@ public class AnimSolverConfig
         PlannerEnabled          = src.PlannerEnabled;
         PlannerHysteresis       = src.PlannerHysteresis;
         PlannerLateSwingLock    = src.PlannerLateSwingLock;
+        PlannerReplanDistance   = src.PlannerReplanDistance;
         SettleSpeed             = src.SettleSpeed;
         SettleExitSpeed         = src.SettleExitSpeed;
         SettleTime              = src.SettleTime;

@@ -55,7 +55,9 @@ Demo-editor changes, and a knob budget of three.
    a valid target won't be swapped). All in `AnimSolverConfig` (hot-reloads, render-only
    — always safe). Engage/release ramps reuse the existing `ContactEngageTime` /
    `ContactReleaseTime`; selection preferences that would otherwise be knobs are fixed
-   unit weights until playtesting proves otherwise.
+   unit weights until playtesting proves otherwise. *Chunk 6 (2026-09-11) added a fourth,
+   `PlannerReplanDistance` — the wish movement that reopens a committed landing — and the
+   fixed `MaxLandingMiss` (1.5 tiles); see Plans/ANIMATION_OWNERSHIP_CONTRACT.md §7.*
 5. **Δφ cadence solve is untouched in the first live slice.** The planner takes over
    contact *lifecycle* (when/where feet plant and release); the solve keeps deriving Δφ
    from the no-slip rows of whatever contacts exist. The full cadence-ownership
