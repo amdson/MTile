@@ -48,6 +48,12 @@ namespace MTile.Tests;
 // a tread farther than 1.5 tiles from the authored wish is no longer a plan, so the planner's
 // swing targets (SwingTargetConstraint rows) and which frames plant differ on the stairs. The
 // flat-floor scenarios (Run has no planned support) replay unchanged.
+// Re-recorded for chunk 7 (the step-up slice): the stepup clips carry a baked scene path, so
+// the timing stage paces them by the body's motion projected onto the authored climb; their
+// swing keys were re-posed to lift first; and the planner commits climb-first swing shapes
+// where the plain chord runs into a riser — the stairs scenarios plant and swing differently.
+// Every other scenario replays bit-identical (the vector cycle displacement divides per
+// component so a flat cycle's run is the same float as before).
 public class AnimSolverGoldenTraceTests
 {
     private readonly ITestOutputHelper _o;

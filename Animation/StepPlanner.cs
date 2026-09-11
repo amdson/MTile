@@ -51,6 +51,7 @@ public struct FootPlan
     public Vector2       Landing;    // swing: the committed landing point (valid when HasSupport)
     public StepReplan    Replan;     // swing: the source change that happened this frame
     public int           Replans;    // swing: source changes since liftoff
+    public int           Shape;      // swing: index into StepPlanner.Shapes (0 = the authored path as is)
 }
 
 public struct PlannerInputs
@@ -92,7 +93,20 @@ public sealed class StepPlanner
         public Vector2 LastTarget, LastVel;   // last emitted swing target and its per-frame step
         public bool    HasLast, HasLastVel;
         public int     Replans;
+        public int     Shape;          // the committed landing's path shape (Shapes index)
     }
+
+    // SWING SHAPES (workplan chunk 7, runtime plan §7 — authored intent mapped to the real
+    // obstacle): the authored swing residual rides a chord from takeoff to landing. When that
+    // path is obstructed — a foot planted at the base of a riser cannot travel forward before
+    // it has risen — the chord is reshaped, in this order, until the toe path clears:
+    //   K     front-loads the chord's RISE (a rising landing only): r(u) = 1 − (1 − u)^K,
+    //         so most of the climb happens before most of the run (the knee lifts first);
+    //   Bump  adds an extra lift of Bump·TileSize·sin(πu) over the whole swing.
+    // Shape 0 is the plain reconstruction; nothing else changes for a flat step. The chosen
+    // shape is committed with the landing and reported in FootPlan.Shape.
+    public static readonly (float K, float BumpTiles)[] Shapes = { (1f, 0f), (6f, 0f), (6f, 0.5f), (6f, 1f) };
+
     private readonly FootState[] _feet = new FootState[MaxFeet];
 
     public void Reset()
@@ -175,7 +189,7 @@ public sealed class StepPlanner
                     st.HasSupport = false;   // reused below as "landing committed"
                     st.Blend = Vector2.Zero; st.BlendU0 = 0f;
                     st.HasLast = st.HasLastVel = false;
-                    st.Replans = 0;
+                    st.Replans = 0; st.Shape = 0;
                 }
                 st.State = FootPlanState.Swing;
                 st.Weight = MathF.Max(0f, st.Weight - release);
@@ -188,11 +202,14 @@ public sealed class StepPlanner
                 Vector2 bodyAtTd = inp.PredictAt?.Invoke(dtTd) ?? (inp.BodyPos + inp.BodyVel * dtTd);
                 plan.Preferred = bodyAtTd + Place(landStance.TdOffset, dir, inp.Scale);
 
-                // Where the foot is now (the carried position: last target plus its velocity) —
-                // the start of any replacement path, and the anchor of the continuity offset.
-                Vector2 carried = st.HasLast ? st.LastTarget + (st.HasLastVel ? st.LastVel : Vector2.Zero)
-                                             : st.Takeoff;
-                float   fromU   = st.HasLast ? u : 0f;   // no history yet: judge the whole reconstruction
+                // Where the foot is now (the carried position: last target plus its per-frame
+                // step) — the start of any replacement path, and the anchor of the continuity
+                // offset. It needs a velocity: one frame of history alone would place the foot
+                // one step behind the path (a fast-rising shape moves 3 px in that frame) and
+                // read as an obstruction. Until then the whole reconstruction is judged.
+                bool    haveCarried = st.HasLastVel;
+                Vector2 carried = haveCarried ? st.LastTarget + st.LastVel : st.Takeoff;
+                float   fromU   = haveCarried ? u : 0f;
                 bool wasCommitted = st.HasSupport;
                 var replan = StepReplan.None;
 
@@ -205,7 +222,7 @@ public sealed class StepPlanner
                     { st.HasSupport = false; reselect = true; replan = StepReplan.InvalidSupport; plan.Reject = StepReject.NoSupport; }
                     else if ((st.SupportPoint - bodyAtTd).Length() > maxReach)
                     { st.HasSupport = false; reselect = true; replan = StepReplan.InvalidSupport; plan.Reject = StepReject.Unreachable; }
-                    else if (SwingBlocked(swing, st.Takeoff, st.SupportPoint, dir, inp.Scale, inp.Chunks, fromU, carried))
+                    else if (SwingBlocked(swing, st.Takeoff, st.SupportPoint, dir, inp.Scale, inp.Chunks, fromU, carried, st.Shape))
                     { reselect = true; replan = StepReplan.Obstruction; }
                     else if (u <= cfg.PlannerLateSwingLock
                              && (plan.Preferred - st.CommitWish).Length() > cfg.PlannerReplanDistance)
@@ -219,14 +236,15 @@ public sealed class StepPlanner
                 {
                     bool found = TrySelect(inp, treads, plan.Preferred, bodyAtTd, maxReach,
                                            held: st.HasSupport ? st.SupportId : long.MinValue,
-                                           out var seg, out var pt, out var rej,
+                                           out var seg, out var pt, out var rej, out int shape,
                                            swing, st.Takeoff, dir, fromU, carried);
                     if (found)
                     {
-                        bool same = st.HasSupport && seg.Id == st.SupportId && (pt - st.SupportPoint).LengthSquared() < 1e-6f;
+                        bool same = st.HasSupport && seg.Id == st.SupportId && (pt - st.SupportPoint).LengthSquared() < 1e-6f
+                                    && shape == st.Shape;
                         if (!same && replan == StepReplan.None) replan = wasCommitted ? StepReplan.Prediction : StepReplan.Reacquired;
                         if (same) replan = StepReplan.None;
-                        st.SupportId = seg.Id; st.SupportPoint = pt; st.HasSupport = true;
+                        st.SupportId = seg.Id; st.SupportPoint = pt; st.HasSupport = true; st.Shape = shape;
                         st.CommitWish = plan.Preferred;
                         plan.Reject = StepReject.None;
                     }
@@ -246,17 +264,17 @@ public sealed class StepPlanner
                 //    source change re-captures it at the carried position; it fades to zero by
                 //    touchdown so the emitted target bends onto the new path.
                 Vector2 nominal = plan.HasSupport
-                    ? Vector2.Lerp(st.Takeoff, st.SupportPoint, u) + Place(Residual(swing, u), dir, inp.Scale)
+                    ? Chord(st.Takeoff, st.SupportPoint, u, st.Shape) + Place(Residual(swing, u), dir, inp.Scale)
                     : inp.BodyPos + Place(SampleAuthored(ft, swingIdx, u), dir, inp.Scale);
                 if (replan != StepReplan.None && st.HasLast)
                 {
-                    st.Blend = carried - nominal; st.BlendU0 = u;
+                    if (haveCarried) { st.Blend = carried - nominal; st.BlendU0 = u; }
                     st.Replans++;
                 }
                 plan.Target = nominal + st.Blend * Decay(u, st.BlendU0);
                 if (plan.HasSupport) { plan.Support = MakeSegment(st.SupportId, inp.Chunks); plan.Landing = st.SupportPoint; }
                 plan.State = plan.HasSupport ? FootPlanState.Swing : FootPlanState.Unplanned;
-                plan.Replan = replan; plan.Replans = st.Replans;
+                plan.Replan = replan; plan.Replans = st.Replans; plan.Shape = plan.HasSupport ? st.Shape : 0;
 
                 if (st.HasLast) { st.LastVel = plan.Target - st.LastTarget; st.HasLastVel = true; }
                 st.LastTarget = plan.Target; st.HasLast = true;
@@ -286,15 +304,27 @@ public sealed class StepPlanner
     private static float Decay(float u, float u0)
         => u0 >= 1f - 1e-4f ? 0f : MathHelper.Clamp((1f - u) / (1f - u0), 0f, 1f);
 
+    // The chord from takeoff to landing at progress u under a shape (see Shapes).
+    private static Vector2 Chord(Vector2 takeoff, Vector2 landing, float u, int shape)
+    {
+        var (k, bump) = Shapes[Math.Clamp(shape, 0, Shapes.Length - 1)];
+        Vector2 d = landing - takeoff;
+        float ry = u;
+        if (k > 1f && d.Y < -1f) ry = 1f - MathF.Pow(1f - u, k);   // rising landing: climb first
+        Vector2 p = new(takeoff.X + d.X * u, takeoff.Y + d.Y * ry);
+        if (bump > 0f) p.Y -= bump * Chunk.TileSize * MathF.Sin(MathF.PI * u);
+        return p;
+    }
+
     // The path a swing follows from progress u0 (where the foot is at `from`) to `landing`:
     // the chord+residual reconstruction, offset by the gap at u0 and its fade. At u0 = 0 with
     // `from` = takeoff this is the plain reconstruction.
     private static Vector2 PathAt(in StrideSwing swing, Vector2 takeoff, Vector2 landing, int dir, float scale,
-                                  float u, float u0, Vector2 from)
+                                  float u, float u0, Vector2 from, int shape)
     {
-        Vector2 nominal = Vector2.Lerp(takeoff, landing, u) + Place(Residual(swing, u), dir, scale);
+        Vector2 nominal = Chord(takeoff, landing, u, shape) + Place(Residual(swing, u), dir, scale);
         if (u0 <= 0f) return nominal;
-        Vector2 at0 = Vector2.Lerp(takeoff, landing, u0) + Place(Residual(swing, u0), dir, scale);
+        Vector2 at0 = Chord(takeoff, landing, u0, shape) + Place(Residual(swing, u0), dir, scale);
         return nominal + (from - at0) * Decay(u, u0);
     }
 
@@ -356,7 +386,8 @@ public sealed class StepPlanner
     // REMAINING path — the one the foot would actually follow — so a mid-swing replacement is
     // judged on its own clearance, not on the takeoff→landing chord it no longer travels.
     private static bool SwingBlocked(in StrideSwing swing, Vector2 takeoff, Vector2 landing,
-                                     int dir, float scale, ChunkMap chunks, float u0 = 0f, Vector2 from = default)
+                                     int dir, float scale, ChunkMap chunks, float u0 = 0f, Vector2 from = default,
+                                     int shape = 0)
     {
         // Sample the reconstructed path's interior; a sample inside a solid cell blocks it.
         // (Toe-point check only in this slice — shin/knee clearance arrives with the joint
@@ -367,14 +398,15 @@ public sealed class StepPlanner
         {
             float u = i / (float)(n - 1);
             if (u <= u0) continue;
-            Vector2 p = PathAt(swing, takeoff, landing, dir, scale, u, u0, from);
+            Vector2 p = PathAt(swing, takeoff, landing, dir, scale, u, u0, from, shape);
             // Probe above the toe path by a sub-tile tolerance: both endpoints SIT on
             // tread tops, so a low authored swing legitimately grazes — or dips a few
             // px into — the surface line, which is the solve's ground-hold/δ business,
             // not a blocked landing. Only tile-scale obstruction (a real block in the
             // way, ≥ TileSize) should reject the plan.
             if (chunks.GetCellState((int)MathF.Floor(p.X / ts), (int)MathF.Floor((p.Y - SwingProbeLift) / ts))
-                == TileState.Solid) return true;
+                == TileState.Solid)
+                return true;
         }
         return false;
     }
@@ -392,8 +424,15 @@ public sealed class StepPlanner
                            out SupportSegment best, out Vector2 point, out StepReject reject,
                            StrideSwing? swing = null, Vector2 takeoff = default, int dir = 1,
                            float u0 = 0f, Vector2 from = default)
+        => TrySelect(inp, treads, wish, bodyRef, maxReach, held, out best, out point, out reject, out _,
+                     swing, takeoff, dir, u0, from);
+
+    private bool TrySelect(in PlannerInputs inp, Span<SupportSegment> treads, Vector2 wish,
+                           Vector2 bodyRef, float maxReach, long held,
+                           out SupportSegment best, out Vector2 point, out StepReject reject, out int shape,
+                           StrideSwing? swing, Vector2 takeoff, int dir, float u0, Vector2 from)
     {
-        best = default; point = default;
+        best = default; point = default; shape = 0;
         int n = SupportQuery.QueryTreads(inp.Chunks, wish, QueryRadius, treads);
         if (n == 0) { reject = StepReject.NoSupport; return false; }
         float hysteresis = AnimSolverConfig.Current.PlannerHysteresis;
@@ -408,10 +447,15 @@ public sealed class StepPlanner
             anyInReach = true;
             float score = miss - (treads[i].Id == held ? hysteresis : 0f);
             if (score >= bestScore) continue;
-            if (swing.HasValue && SwingBlocked(swing.Value, takeoff, p, dir, inp.Scale, inp.Chunks, u0, from))
-                continue;
+            int sh = 0;
+            if (swing.HasValue)
+            {
+                // The first shape (plain, then progressively lifted) whose toe path clears.
+                while (sh < Shapes.Length && SwingBlocked(swing.Value, takeoff, p, dir, inp.Scale, inp.Chunks, u0, from, sh)) sh++;
+                if (sh == Shapes.Length) continue;
+            }
             anyClear = true;
-            bestScore = score; best = treads[i]; point = p;
+            bestScore = score; best = treads[i]; point = p; shape = sh;
         }
         reject = !anyInReach ? StepReject.Unreachable
                : !anyClear && swing.HasValue ? StepReject.SwingBlocked

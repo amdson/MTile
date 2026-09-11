@@ -48,7 +48,8 @@ public struct TimingResult
     public float  DeltaPhase;            // this frame's advance (unwrapped, ≥ 0)
     public float  Rate;                  // cycles/s this frame
     public float  Travel;                // body travel along the authored direction (px)
-    public float  CycleDistance;         // authored body travel per cycle (px, signed; 0 = none)
+    public float  CycleDistance;         // authored body travel per cycle (px, |D|; 0 = none)
+    public Vector2 Direction;            // unit authored direction in the facing frame (+x forward, +y down)
     public string Source;                // where the stride came from (diagnostics)
     public TimingState State;
     public float  SettleRemaining, SettleTimeLeft;
@@ -63,26 +64,34 @@ public static class GaitTiming
     private const float StationaryCycle = 1f;   // px per cycle
     private const float DefaultMaxStep  = 0.5f; // half a cycle per frame — a teleport guard, not a tuning
 
-    // Authored body travel per cycle, SIGNED in the facing frame (negative = the feet move
-    // forward under the body, i.e. a backpedal cycle). First available of:
-    //   1. the clip's scene path (BodyPath): D = p(1) − p(0), scaled;
-    //   2. the gait track's stance sweeps (ClipStrideTrack.CycleTravel), scaled;
-    //   3. nothing authored: NominalCycleDistance (the legacy constant), reported as such.
-    public static float CycleDistance(AnimationDocument clip, ClipStrideTrack gait, float scale, out string source)
+    // Authored body displacement per cycle, a VECTOR in the facing frame (+x forward at the
+    // canonical facing, +y down; a backpedal cycle points −x, a stair cycle rises). First
+    // available of:
+    //   1. the clip's scene path (BodyPath): D = p(1) − p(0), scaled — the only source that
+    //      carries a RISE: a scene path is authored intent (chunk 7's step-up pilot bakes one);
+    //   2. the gait track's stance sweeps (ClipStrideTrack.CycleDisplacement), the run only —
+    //      a flat cycle's stance Y sweep is the body's bob, not a direction to pace along;
+    //   3. nothing authored: NominalCycleDistance along +x (the legacy constant), reported as such.
+    public static Vector2 CycleDisplacement(AnimationDocument clip, ClipStrideTrack gait, float scale, out string source)
     {
         if (BodyPath.TryCycleDisplacement(clip, out var d))
         {
             source = "body_path";
-            return d.X * scale;
+            return d * scale;
         }
         if (gait != null && gait.HasTravel)
         {
             source = "gait_track";
-            return gait.CycleTravel * scale;
+            return new Vector2(gait.CycleDisplacement.X * scale, 0f);
         }
         source = "nominal";
-        return NominalCycleDistance;
+        return new Vector2(NominalCycleDistance, 0f);
     }
+
+    // The run component of CycleDisplacement (legacy scalar form; a stair cycle's rise is
+    // not in it — callers pacing a 2-D cycle use the vector).
+    public static float CycleDistance(AnimationDocument clip, ClipStrideTrack gait, float scale, out string source)
+        => CycleDisplacement(clip, gait, scale, out source).X;
 
     public static TimingResult Advance(in TimingInputs inp)
     {
@@ -90,18 +99,23 @@ public static class GaitTiming
         float dt = MathF.Max(inp.Dt, 1e-5f);
         float maxStep = inp.MaxStep > 0f ? inp.MaxStep : DefaultMaxStep;
         int dir = inp.Facing == 0 ? 1 : inp.Facing;
-        float dx = inp.Pos.X - inp.PrevPos.X;
-        r.CycleDistance = CycleDistance(inp.Clip, inp.Gait, inp.Scale, out r.Source);
+        // The body's motion in the facing frame (+x = forward for this facing, +y down).
+        Vector2 move = new(dir * (inp.Pos.X - inp.PrevPos.X), inp.Pos.Y - inp.PrevPos.Y);
+        Vector2 D = CycleDisplacement(inp.Clip, inp.Gait, inp.Scale, out r.Source);
+        r.CycleDistance = D.Length();
+        // Per-component division (Vector2/float multiplies by a reciprocal): a flat cycle's
+        // direction is exactly ±1 along x, so its pacing is the same float it always was.
+        r.Direction = r.CycleDistance > 1e-6f ? new Vector2(D.X / r.CycleDistance, D.Y / r.CycleDistance) : Vector2.UnitX;
 
         // ── Travel-based advance (§4) ──────────────────────────────────────────────────
         float dphi;
         if (r.Source == "nominal")
         {
             // No authored direction: direction-agnostic, like the legacy speed·PhasePerPixel.
-            r.Travel = MathF.Abs(dx);
+            r.Travel = MathF.Abs(move.X);
             dphi = r.Travel / NominalCycleDistance;
         }
-        else if (MathF.Abs(r.CycleDistance) < StationaryCycle)
+        else if (r.CycleDistance < StationaryCycle)
         {
             // A cycle that does not travel (a shuffle in place): play it at its authored rate.
             r.Travel = 0f;
@@ -110,10 +124,12 @@ public static class GaitTiming
         }
         else
         {
-            // Travel along the authored direction, at one constant rate per cycle. Backward
-            // travel against it never plays the cycle in reverse (clamped — the stopping
-            // policy owns what happens then).
-            r.Travel = dir * dx;
+            // Travel PROJECTED onto the authored direction, at one constant rate per cycle
+            // (chunk 7: a stair cycle advances on the climb as well as the run, so the sim's
+            // hop-then-run over a riser reads as one continuous step rather than a stall and a
+            // jump). Travel against the direction never plays the cycle in reverse (clamped —
+            // the stopping policy owns what happens then); motion across it is not travel.
+            r.Travel = Vector2.Dot(move, r.Direction);
             dphi = MathF.Max(0f, r.Travel / r.CycleDistance);
         }
         dphi = MathF.Min(dphi, maxStep);

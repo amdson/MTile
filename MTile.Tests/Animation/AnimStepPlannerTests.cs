@@ -375,4 +375,47 @@ public class AnimStepPlannerTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.True(p.Landing.X <= wallX * TS, $"replacement landing {p.Landing} is beyond the wall at x={wallX * TS}");
         Assert.Equal(floorTop, p.Landing.Y, 3);
     }
+
+    // ── Swing shapes (workplan chunk 7) ──────────────────────────────────────
+
+    // A foot planted at the base of a one-tile riser: the plain chord to the upper tread runs
+    // straight into the riser, so the planner commits a climb-first shape whose toe path clears.
+    [Fact]
+    public void RiserAtTheTakeoff_CommitsAClimbFirstShape()
+    {
+        var chunks = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOXXXXXXXXXXXX
+            XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        float lowerTop = 3 * TS, upperTop = 2 * TS, riserX = 8 * TS;
+        var track = Track(); var planner = new StepPlanner();
+        var vel = new Vector2(60f, 0f);
+        // Body placed so the stance wish (body + 8 px) clamps to the lower tread's edge at the riser.
+        var body = new Vector2(riserX - 6f, lowerTop - 20f);
+        float phase = 0.2f;
+        var p = Frame(planner, track, chunks, ref body, ref phase, vel);
+        Assert.Equal(FootPlanState.Stance, p.State);
+        Assert.Equal(riserX, p.Target.X, 2);
+        Assert.Equal(lowerTop, p.Target.Y, 2);
+        // Into the swing: the body keeps moving; the wish is on the upper tread.
+        phase = 0.61f;
+        FootPlan sw = default; int frames = 0;
+        var targets = new List<Vector2>();
+        while (track.Feet[0].SwingAt(phase, out _) >= 0 && frames++ < 60)
+        {
+            sw = Frame(planner, track, chunks, ref body, ref phase, vel);
+            output.WriteLine($"u={sw.SwingU:0.00} {sw.State} shape={sw.Shape} land=({sw.Landing.X:0.0},{sw.Landing.Y:0.0}) replan={sw.Replan} rej={sw.Reject} tgt=({sw.Target.X:0.0},{sw.Target.Y:0.0})");
+            if (sw.State == FootPlanState.Swing && sw.SwingU >= 0.125f) targets.Add(sw.Target);
+            if (sw.SwingU > 0.5f) break;
+        }
+        Assert.True(sw.HasSupport, $"no landing on the step (reject {sw.Reject})");
+        Assert.Equal(upperTop, sw.Landing.Y, 2);
+        Assert.True(sw.Shape > 0, "the plain chord runs into the riser; a lifted shape was expected");
+        // Past the takeoff, the emitted target clears the riser under the planner's own probe
+        // rule (a toe 3 px above the path is in open space).
+        foreach (var t in targets)
+            Assert.False(chunks.GetCellState((int)MathF.Floor(t.X / TS), (int)MathF.Floor((t.Y - 3f) / TS)) == TileState.Solid,
+                $"swing target {t} inside the riser");
+    }
 }

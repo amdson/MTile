@@ -31,6 +31,9 @@ using MTile;
 //   dotnet run --project MTile.Probe -- port <dstRig> <clip> [--dry] [bakeyaw knobs]   retarget one clip + bakeyaw + digest
 //   dotnet run --project MTile.Probe -- stretch <clip> <t> <bone> <s>   set one bone's length stretch on a keyframe
 //   dotnet run --project MTile.Probe -- refarc <clip> <arcName|none>    bind a ReferenceClips arc for editor placement
+//   dotnet run --project MTile.Probe -- bakepath <clip> [--flat] [--dry]   derive body_path + Motion=Track (+ scene guides) from the planted feet (--flat: run only)
+//   dotnet run --project MTile.Probe -- scenecheck <clip>         stance drift / swing clearance against the clip's scene guides
+//   dotnet run --project MTile.Probe -- liftswing <clip> [node] [--lift rig] [--dry]   re-pose swing keys on a climb-first toe path (needs bakepath)
 //   dotnet run --project MTile.Probe -- bakeyaw [clip] [--view deg] [--swap s] [--ref rad] [--shoulderamp f] [--dry]
 //       bake pelvis/shoulder yaw foreshortening: per keyframe, derive the leg (arm) scissor
 //       and write hip_l/hip_r (shoulder_l/shoulder_r) Stretch from the projected-yaw law.
@@ -101,6 +104,9 @@ static class Probe
                 case "bakeyaw": return BakeYaw(args);
                 case "refarc": return RefArc(args);
                 case "motion": return Motion(args);
+                case "bakepath": return BakePath(args);
+                case "scenecheck": return SceneCheck(args);
+                case "liftswing": return LiftSwing(args);
                 case "feetreport": return FeetReport(args);
                 case "dropfeet": return DropFeet(args);
                 default:
@@ -946,6 +952,46 @@ static class Probe
             var p = m.BodyAt(t); var r = m.RootAt(t, out bool anchored);
             Console.WriteLine($"  t={t:0.00}  p=({p.X,7:0.00},{p.Y,7:0.00})  root=({r.X,7:0.00},{r.Y,7:0.00}){(anchored ? "" : "  (no com)")}");
         }
+        return 0;
+    }
+
+    // bakepath <clip> [--dry] — the step-up pilot's path bake (ClipSceneBake): the scene path
+    // the planted feet imply, written as the body_path track with Motion = Track and, on a
+    // clip without a scene, guides showing the authored steps. Prints the scene check after.
+    static int BakePath(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        bool dry = HasFlag(args, "--dry");
+        if (!ClipSceneBake.TryBake(clip, _rig, out var r, out string err, flat: HasFlag(args, "--flat"))) { Console.Error.WriteLine(err); return 1; }
+        Console.WriteLine($"{clip.Name}: body_path baked at {r.Keys} keys, D = ({r.CycleDisplacement.X:0.0}, {r.CycleDisplacement.Y:0.0}) rig"
+                        + $" = ({r.CycleDisplacement.X * Game1.SkeletonScale:0.0}, {r.CycleDisplacement.Y * Game1.SkeletonScale:0.0}) px; Motion = Track"
+                        + (r.Guides > 0 ? $"; {r.Guides} scene guides" : "; scene kept")
+                        + (r.Warning != null ? $"\n  WARNING: {r.Warning}" : ""));
+        if (ClipSceneBake.TryCheck(clip, _rig, out var c, out _)) Console.Write(ClipSceneBake.Describe(c));
+        if (!dry) { AnimationStore.Save(clip, _statesDir); Console.WriteLine("  saved"); }
+        else Console.WriteLine("  (dry run — nothing written)");
+        return 0;
+    }
+
+    static int LiftSwing(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        string node = args.Length > 2 && !args[2].StartsWith("--", StringComparison.Ordinal) ? args[2] : null;
+        float lift = FlagValue(args, "--lift") is { } lv ? ParseF(lv) : 6f;
+        bool dry = HasFlag(args, "--dry");
+        if (!ClipSceneBake.TryLiftSwings(clip, _rig, node, lift, out string rep, out string err)) { Console.Error.WriteLine(err); return 1; }
+        Console.Write($"{clip.Name}: swing keys re-posed (lift {lift:0.0} rig)\n" + rep);
+        if (ClipSceneBake.TryCheck(clip, _rig, out var c, out _)) Console.Write(ClipSceneBake.Describe(c));
+        if (!dry) { AnimationStore.Save(clip, _statesDir); Console.WriteLine("  saved"); }
+        else Console.WriteLine("  (dry run — nothing written)");
+        return 0;
+    }
+
+    static int SceneCheck(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        if (!ClipSceneBake.TryCheck(clip, _rig, out var c, out string err)) { Console.Error.WriteLine(err); return 1; }
+        Console.Write($"{clip.Name}: " + ClipSceneBake.Describe(c));
         return 0;
     }
 

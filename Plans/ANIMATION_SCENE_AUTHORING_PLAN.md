@@ -490,3 +490,53 @@ reversible and listed so they can be reviewed in one place.
   headless `AnimDragIkTests` only (no display on the build VM).
 - **Not done**: the torso-extension modifier and graded up-chain weights (evaluate feel
   first); a distinct hover color for chain nodes.
+
+## Implementation decisions log (chunk 7, 2026-09-11) — the step-up pilot
+
+- **What the clip is.** The shipped `stepup` is a repeating stair gait (the sample tags
+  StepUp only on two consecutive one-tile risers; a single ledge is Parkour), so it keeps
+  its cadence and gets a scene path rather than a one-shot progress policy (runtime §7's
+  "decide which the current clip represents").
+- **Bake, not hand-place.** `ClipSceneBake.TryBake` (`probe bakepath`) derives p(t) from
+  the planted feet: while a foot is in stance its scene position is constant, so the body
+  moves by minus the foot's sweep; flight moves at the cycle's mean stance velocity, so the
+  baked D equals the stance-sweep displacement the timing stage already paced by (the
+  spline's tangents at liftoff do not enter). Writes `body_path` per keyframe, `Motion =
+  Track`, and — on a clip without a scene — a ground line at the lowest stance plus one
+  block per stance more than 4 rig units higher (smaller differences are bob). Source clips
+  stay the reproducible input; re-baking is idempotent to within the 128-sample grid.
+- **The lift.** The authored swings ran forward before rising: the scene check showed the
+  toe 8.8 rig (biped) / 4.4 rig (rabbit) inside the next step at u ≈ 0.25 — the same fact
+  the planner saw as `SwingBlocked` on nearly every stair swing. `ClipSceneBake.TryLiftSwings`
+  (`probe liftswing`, default lift 6 rig) re-poses every key inside a swing so the toe
+  follows x = F0.x + Δx·u^1.5, y = F0.y + Δy·(1 − (1 − u)³) − 6·sin(πu) between the takeoff
+  and landing feet, through `PoseIk` (limb chain only; stances and the path untouched).
+  Both clips now clear their blocks (min clearance 0.5–1.1 rig); stance drift is 1.8–2.2
+  rig (≈ 1.2 px at game scale) because the re-posed neighbours shift the stance tangents.
+  The digest's STEEP heuristic fires on the lifted keys by design; `StairAnimationTests`
+  now checks the seam only.
+- **Diagnostics first.** `probe scenecheck` / `ClipSceneBake.TryCheck`: per stance the
+  planted foot's drift in scene space, per swing the toe path's deepest dip into a block
+  guide or under the ground and its minimum clearance over the blocks. A toe-point check,
+  like the planner's — no limb or body-polygon proof (still not built).
+- **Runtime mapping.** The timing stage paces scene-path clips in 2-D (Plans/
+  ANIMATION_TIMING_STAGE.md). The planner keeps chord + authored residual but, when that
+  path is obstructed, commits the first of four shapes whose toe path clears
+  (`StepPlanner.Shapes`: front-loaded rise r(u) = 1 − (1 − u)^6 for a rising landing, then
+  +0.5 / +1 tile of sin(πu) lift) — the authored knee-lift intent mapped to the real
+  riser rather than a stairs conditional; it is inert on a flat step. The continuity
+  offset now needs one frame of velocity (a single frame of history placed the foot one
+  step behind a fast-rising shape and read as an obstruction).
+- **Numbers** (`MTile.Bench/baselines/anim_chunk7.txt` vs `anim_chunk6.txt`, game config).
+  Stairs run (biped): planned swing frames 127 → 172, unplanned-swinging 38 → 1,
+  `SwingBlocked` 46 → 1; the two feet land on consecutive treads (104.7 → 112.9 → 121 →
+  128.4 → 137.4 px) instead of stacking; slip_max 4.6 → 2.5 px (rabbit 5.8 → 4.1);
+  tgt_err_max unchanged (8.7 / 9.6); pen_max 10.6 → 11.1 (rabbit 11.9 → 11.4);
+  foot_acc_max 9.9 → 12.2; rate_jump_max 92 → 213 (the hop, see the timing doc).
+  Stairs slow: slip_max 7.0 → 3.0, pen 10.0 → 8.4, rate_jump 221 → 133, tgt_err_max
+  4.3 → 8.7 (back at the chunk 4 value). Walk-speed (planner-owned Walk, flat):
+  swing_acc_max 3.9 → 2.4, foot_acc_max 13.6 → 14.5, replans 76 → 94 — the carried-position
+  rule change. Everything else is identical.
+- **Not done**: the body-polygon / limb clearance report; guide-to-runtime surface binding
+  (the wish still comes from the authored offset, not from "the next block"); a Motion /
+  Scene review of the other looping clips (only stepup was baked — "do not bulk migrate").

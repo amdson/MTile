@@ -106,8 +106,12 @@ public sealed class ClipStrideTrack
     // cycle on purpose: a per-segment travel curve was measured (2026-09-10) and its within-
     // cycle variation came from the spline's easing between keys, not authored intent.
     // HasTravel is false when no foot has a non-persistent stance.
-    public float CycleTravel;
-    public bool  HasTravel;
+    //     Chunk 7: the displacement is a VECTOR — a stair cycle authors a rise as well as a
+    //     run (Td.Y − Lo.Y < 0: the body climbs over the planted foot), and the timing stage
+    //     projects the body's actual motion onto this direction (GaitTiming).
+    public Vector2 CycleDisplacement;
+    public float   CycleTravel => CycleDisplacement.X;   // the run component (legacy name)
+    public bool    HasTravel;
 
     public FootStrideTrack ForBone(int bone)
     {
@@ -269,15 +273,15 @@ public sealed class ClipStrideTrack
         }
 
         track = new ClipStrideTrack { Feet = feet.ToArray() };
-        float travel = 0f, span = 0f;
+        Vector2 travel = Vector2.Zero; float span = 0f;
         foreach (var f in track.Feet)
             foreach (var st in f.Stances)
             {
                 if (st.Persistent) continue;
-                travel += st.TdOffset.X - st.LoOffset.X;
+                travel += st.TdOffset - st.LoOffset;
                 span   += st.Liftoff - st.Touchdown;
             }
-        if (span > 1e-4f) { track.CycleTravel = travel / span; track.HasTravel = true; }
+        if (span > 1e-4f) { track.CycleDisplacement = new Vector2(travel.X / span, travel.Y / span); track.HasTravel = true; }   // per-component: Vector2/float multiplies by a reciprocal
         return true;
     }
 }

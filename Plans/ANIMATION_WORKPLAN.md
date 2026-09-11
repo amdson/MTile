@@ -169,7 +169,7 @@ a maneuver-aware progress policy instead of `CadencePhase`. Wants chunk 2
 workflow, per the authoring plan's rollout), chunk 5 (so it's a second timing
 *source*, not a second timing *architecture*), and chunk 6's contract.
 
-### 8. Solver diet — runtime §8, §9
+### 8. Solver diet — runtime §8, §9 — SKIPPED (owner's call, 2026-09-11)
 
 Strictly last by construction: §9 says so, and §8's "smaller problem" only
 makes sense after chunks 2 and 5 settle which variables the solve still owns.
@@ -241,6 +241,17 @@ harness, and chunk 2's edits are smaller to redo in the new style than vice vers
   Diagnostics: `AnimFrameDebug.Feet`, the bench's `swing_acc_max` column and `replans=`
   note, `MTILE_ANIM_TRACE=<scenario>` per-frame trace. Decisions and numbers in
   Plans/ANIMATION_OWNERSHIP_CONTRACT.md §7. Goldens: the two stairs scenarios re-recorded.
+- Chunk 7 (2026-09-11): the step-up slice. Authoring: `probe bakepath` derives a clip's
+  scene path from its planted feet (`Animation/ClipSceneBake.cs`; Motion = Track + step
+  guides), `probe liftswing` re-poses swing keys on a climb-first toe path, `probe
+  scenecheck` reports stance drift / swing clearance against the guides; both stepup clips
+  are baked and lifted (the derived rabbit pool carries the data through). Runtime: the
+  timing stage paces a scene-path clip by the body's motion projected onto the authored
+  2-D displacement (a stair cycle advances on the climb), and the planner commits
+  climb-first swing shapes (`StepPlanner.Shapes`) where the plain chord runs into a riser.
+  Decisions and numbers: Plans/ANIMATION_SCENE_AUTHORING_PLAN.md (chunk 7 log) and
+  Plans/ANIMATION_TIMING_STAGE.md (2-D pacing). Chunk 8 was skipped by the owner's call
+  (2026-09-11): runtime §8/§9 go further than the runtime needs.
 - Chunk 3.5 (2026-09-11): the editor's IK drag mode — `PoseIk.DragSession` (one LM per
   frame over the limb chain; drag-start and previous-solution priors; `*_lower` fold
   guard; a solver allocated once per drag) behind the header's "IK drag" box; Escape

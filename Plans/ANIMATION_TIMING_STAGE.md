@@ -54,8 +54,16 @@ timing state, and diagnostics (travel estimate, refinement delta, cycle distance
   advance at the clip's authored rate `1 / Duration` cycles/s (time-driven, like IdleBob).
 - Backward travel against the authored direction gives Δφ_travel < 0: clamp at 0 (the
   cycle never plays backward) and let the stopping policy take over.
-- Vertical/lateral maneuvers: StepUp keeps X travel for now (it is a cadence clip with a
-  planned track; its own progress policy is chunk 7).
+- Vertical/lateral maneuvers: *chunk 7 (2026-09-11)* — the cycle displacement is a vector.
+  A scene path (`body_path`, the only source that carries a rise) gives D = p(1) − p(0);
+  the gait-track fallback gives the run only (a flat cycle's stance Y sweep is bob, not a
+  direction). The phase advances by the body's frame motion projected onto D̂ (facing
+  applied to x only): a climb counts, motion across the direction does not, motion against
+  it clamps at 0. `TimingResult.CycleDistance` is |D| and `Direction` the unit vector. On
+  the bench's 45° stairs the sim hops each riser, so the projected rate saws 4.5 → 7.9
+  cycles/s per step where the run-only rate was a flat 5.6 (`rate_jump_max` 92 → 213 on
+  stairs run, 221 → 133 on stairs slow); the cadence now follows the real climb. Whether
+  to low-pass that is an open tuning question, not a structural one.
 
 Rate continuity, in cycles/s² and dt-aware (§4): the rate may change by at most
 `MaxRateAccel · dt` per frame from the previous rate, symmetric; this is the

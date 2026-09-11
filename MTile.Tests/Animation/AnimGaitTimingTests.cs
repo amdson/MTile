@@ -95,13 +95,54 @@ public class AnimGaitTimingTests
         Assert.Equal(10f / GaitTiming.NominalCycleDistance, r.DeltaPhase, 5);
     }
 
+    // Chunk 7: a stair cycle authors a rise as well as a run; the phase advances by the body's
+    // motion PROJECTED onto that direction — a climb counts, motion across it does not, and
+    // motion against it never plays the cycle backward.
+    [Fact]
+    public void Advance_ProjectsTravelOntoTheAuthoredDirection()
+    {
+        // A scene path is the source that carries a rise (a gait track's Y sweep is bob).
+        var (clip, _) = Load("biped", "walk");
+        foreach (var k in clip.Keyframes)
+            k.Additions = new System.Collections.Generic.List<AnimAddition>
+            { new() { Name = BodyPath.ChannelName, Kind = AnimAdditionKind.Point, Px = 30f * k.Time, Py = -20f * k.Time } };
+        var gait = new ClipStrideTrack { Feet = Array.Empty<FootStrideTrack>(), CycleDisplacement = new Vector2(30f, 5f), HasTravel = true };
+        Assert.Equal(new Vector2(30f, -20f), GaitTiming.CycleDisplacement(clip, gait, 1f, out string src));
+        Assert.Equal("body_path", src);
+        foreach (var k in clip.Keyframes) k.Additions = null;
+        Assert.Equal(new Vector2(30f, 0f), GaitTiming.CycleDisplacement(clip, gait, 1f, out _));   // the run only
+        foreach (var k in clip.Keyframes)
+            k.Additions = new System.Collections.Generic.List<AnimAddition>
+            { new() { Name = BodyPath.ChannelName, Kind = AnimAdditionKind.Point, Px = 30f * k.Time, Py = -20f * k.Time } };
+        float Step(Vector2 move) => GaitTiming.Advance(new TimingInputs
+        {
+            Clip = clip, Gait = gait, Phase = 0f, Dt = 1f / 60f, MaxStep = 2f,
+            PrevPos = Vector2.Zero, Pos = move, Facing = +1, Scale = 1f,
+        }).DeltaPhase;
+        float len = new Vector2(30f, -20f).Length();
+        Assert.Equal(1f, Step(new Vector2(30f, -20f)), 4);                    // one cycle along the stairs
+        Assert.Equal(0.1f, Step(new Vector2(3f, -2f)), 4);
+        Assert.Equal(2f * (30f / len) / len, Step(new Vector2(2f, 0f)), 4);   // a run-only move: its projection
+        Assert.Equal(0f, Step(new Vector2(0f, 5f)), 4);                        // dropping: against the climb
+        Assert.Equal(0f, Step(new Vector2(-30f, 20f)), 4);                     // back down: never in reverse
+        Assert.Equal(0f, Step(new Vector2(-20f, -30f)), 4);                    // across: not travel
+        // Facing left mirrors the run, not the rise.
+        var left = GaitTiming.Advance(new TimingInputs
+        {
+            Clip = clip, Gait = gait, Phase = 0f, Dt = 1f / 60f, MaxStep = 2f,
+            PrevPos = Vector2.Zero, Pos = new Vector2(-30f, -20f), Facing = -1, Scale = 1f,
+        });
+        Assert.Equal(1f, left.DeltaPhase, 4);
+        Assert.Equal(len, left.CycleDistance, 3);
+    }
+
     [Fact]
     public void Advance_StationaryCycle_PlaysAtAuthoredRate()
     {
         // A synthetic in-place shuffle: the travel curve is flat (no authored body travel).
         var (walk, skel) = Load("biped", "walk");
         foreach (var k in walk.Keyframes) k.Additions = null;   // drop any authored path
-        var gait = new ClipStrideTrack { Feet = Array.Empty<FootStrideTrack>(), CycleTravel = 0f, HasTravel = true };
+        var gait = new ClipStrideTrack { Feet = Array.Empty<FootStrideTrack>(), CycleDisplacement = Vector2.Zero, HasTravel = true };
         var r = GaitTiming.Advance(new TimingInputs
         {
             Clip = walk, Gait = gait, Phase = 0f, Dt = 1f / 60f,

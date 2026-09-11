@@ -4,6 +4,46 @@
   "Skeleton": "biped",
   "Duration": 0.65,
   "Loop": true,
+  "Motion": "Track",
+  "Scene": {
+    "Guides": [
+      {
+        "Id": "g1",
+        "Kind": "Ground",
+        "X": 0,
+        "Y": 29.823427,
+        "W": 0,
+        "H": 0
+      },
+      {
+        "Id": "g2",
+        "Kind": "Block",
+        "X": 14.110128,
+        "Y": 19.055134,
+        "W": 14.665759,
+        "H": 10.768293,
+        "Label": "step 1"
+      },
+      {
+        "Id": "g3",
+        "Kind": "Block",
+        "X": 28.77589,
+        "Y": 8.28684,
+        "W": 14.665764,
+        "H": 21.536587,
+        "Label": "step 2"
+      },
+      {
+        "Id": "g4",
+        "Kind": "Block",
+        "X": 43.44165,
+        "Y": -2.481453,
+        "W": 29.33152,
+        "H": 32.30488,
+        "Label": "step 3"
+      }
+    ]
+  },
   "Keyframes": [
     {
       "Time": 0,
@@ -46,11 +86,11 @@
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.5822936
+          "Rotation": 1.2665966
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.67672205
+          "Rotation": 1.9459668
         }
       ],
       "Contacts": [
@@ -66,6 +106,14 @@
           "Kind": "Point",
           "Px": 0,
           "Py": -22.94613,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": 0,
           "Dx": 0,
           "Dy": 0
         }
@@ -112,11 +160,11 @@
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": -0.45767245
+          "Rotation": -0.37509185
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 2.3226264
+          "Rotation": 3.5049753
         }
       ],
       "Contacts": [
@@ -132,6 +180,14 @@
           "Kind": "Point",
           "Px": 0,
           "Py": -22.94613,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 6.884667,
+          "Py": -4.898973,
           "Dx": 0,
           "Dy": 0
         }
@@ -178,11 +234,11 @@
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": -0.4132036
+          "Rotation": -0.5963664
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 2.2047021
+          "Rotation": 2.6324658
         }
       ],
       "Contacts": [],
@@ -192,6 +248,14 @@
           "Kind": "Point",
           "Px": 0,
           "Py": -22.94613,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 12.605015,
+          "Py": -9.275699,
           "Dx": 0,
           "Dy": 0
         }
@@ -230,11 +294,11 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 1.5822936
+          "Rotation": 1.2665967
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0.67672205
+          "Rotation": 1.9459667
         },
         {
           "Bone": "leg_r_upper",
@@ -258,6 +322,14 @@
           "Kind": "Point",
           "Px": 0,
           "Py": -22.94613,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 14.656992,
+          "Py": -10.785697,
           "Dx": 0,
           "Dy": 0
         }
@@ -296,11 +368,11 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -0.45767245
+          "Rotation": -0.37509558
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 2.3226264
+          "Rotation": 3.504977
         },
         {
           "Bone": "leg_r_upper",
@@ -324,6 +396,14 @@
           "Kind": "Point",
           "Px": 0,
           "Py": -22.94613,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 21.54166,
+          "Py": -15.6846695,
           "Dx": 0,
           "Dy": 0
         }
@@ -362,11 +442,11 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": -0.41320357
+          "Rotation": -0.59636647
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 2.2047024
+          "Rotation": 2.6324666
         },
         {
           "Bone": "leg_r_upper",
@@ -384,6 +464,14 @@
           "Kind": "Point",
           "Px": 0,
           "Py": -22.94613,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 27.262007,
+          "Py": -20.061394,
           "Dx": 0,
           "Dy": 0
         }
@@ -430,11 +518,11 @@
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.5822936
+          "Rotation": 1.2665966
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.67672205
+          "Rotation": 1.9459668
         }
       ],
       "Contacts": [
@@ -450,6 +538,14 @@
           "Kind": "Point",
           "Px": 0,
           "Py": -22.94613,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 29.313984,
+          "Py": -21.571384,
           "Dx": 0,
           "Dy": 0
         }
