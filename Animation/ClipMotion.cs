@@ -6,43 +6,33 @@ namespace MTile;
 // THE SHARED MOTION QUERY (Plans/ANIMATION_SCENE_AUTHORING_PLAN.md "Proposed document
 // additions"; workplan chunk 3): one resolver for "where is the body's anchor in the clip's
 // scene at phase t", used by the editor's placement, path dots, ghosts and the probe, so they
-// cannot disagree. Resolves the clip's motion SOURCE once (explicit AnimationDocument.Motion,
-// else the legacy precedence: a named ReferenceArc → the body_path track → stationary) and
-// samples it:
+// cannot disagree. Resolves the clip's motion SOURCE once — explicit AnimationDocument.Motion,
+// else the clip's own body_path track when it authors one, else stationary — and samples it:
 //
 //     p(t)   = BodyAt(t)               scene position of the com anchor, rig units
 //     D      = CycleDisplacement       p(1) − p(0), for loop extension (BodyPath)
 //     pExt(n + φ) = n·D + p(φ)         ExtendedBodyAt — a walking cycle repeating its pose
 //                                      while advancing (one-shots clamp instead)
 //
-// Missing intent stays distinguishable from an explicitly stationary clip (HasIntent), and a
-// requested arc that cannot be found is surfaced (ArcMissing) rather than silently replaced
-// by a stale track. Derivatives, when needed, are per normalized phase (Duration converts).
+// Missing intent stays distinguishable from an explicitly stationary clip (HasIntent). A
+// reference arc is never a source this picks between — ClipArcMap maps one ONTO the track.
+// Derivatives, when needed, are per normalized phase (Duration converts).
 public sealed class ClipMotion
 {
-    public MotionSource       Source     { get; private set; }
-    public bool               Explicit   { get; private set; }   // AnimationDocument.Motion was set
-    public bool               HasIntent  => Explicit || Source != MotionSource.InPlace;
-    public HermiteClipDocument Arc       { get; private set; }   // ReferenceArc source only
-    public bool               ArcMissing { get; private set; }   // source says arc, none resolvable
-    public AnimationDocument  Doc        { get; private set; }
+    public MotionSource      Source    { get; private set; }
+    public bool              Explicit  { get; private set; }   // AnimationDocument.Motion was set
+    public bool              HasIntent => Explicit || Source != MotionSource.InPlace;
+    public AnimationDocument Doc       { get; private set; }
 
-    // `arcProvider` maps a ReferenceArc name to its document (file or baked default); null
-    // when the caller has no arcs at all.
-    public static ClipMotion Resolve(AnimationDocument doc, Func<string, HermiteClipDocument> arcProvider)
+    // One channel: the clip's own body_path track when it authors one, else stationary. An
+    // explicit Motion says which the author MEANT (so "stationary on purpose" stays
+    // distinguishable from "nothing authored yet"); it cannot disagree about where to look.
+    public static ClipMotion Resolve(AnimationDocument doc)
     {
         var m = new ClipMotion { Doc = doc };
         if (doc == null) { m.Source = MotionSource.InPlace; return m; }
-        bool hasArcName = !string.IsNullOrWhiteSpace(doc.ReferenceArc);
         m.Explicit = doc.Motion.HasValue;
-        m.Source = doc.Motion ?? (hasArcName ? MotionSource.ReferenceArc
-                               : BodyPath.TrySample(doc, 0f, out _) ? MotionSource.Track
-                               : MotionSource.InPlace);
-        if (m.Source == MotionSource.ReferenceArc)
-        {
-            m.Arc = hasArcName ? arcProvider?.Invoke(doc.ReferenceArc) : null;
-            m.ArcMissing = m.Arc == null;
-        }
+        m.Source = doc.Motion ?? (BodyPath.TrySample(doc, 0f, out _) ? MotionSource.Track : MotionSource.InPlace);
         return m;
     }
 
@@ -51,18 +41,9 @@ public sealed class ClipMotion
     public Vector2 BodyAt(float t)
     {
         t = MathHelper.Clamp(t, 0f, 1f);
-        switch (Source)
-        {
-            case MotionSource.Track:
-                return BodyPath.TrySample(Doc, t, out var p) ? p : Vector2.Zero;
-            case MotionSource.ReferenceArc:
-                return Arc == null ? Vector2.Zero : ArcOffsetAt(ArcProgress(t));
-            default:
-                return Vector2.Zero;
-        }
+        return Source == MotionSource.Track && BodyPath.TrySample(Doc, t, out var p) ? p : Vector2.Zero;
     }
 
-    public Vector2 Delta(float from, float to) => BodyAt(to) - BodyAt(from);
 
     // Per-cycle displacement D = p(1) − p(0). Zero for a stationary or missing source.
     public Vector2 CycleDisplacement => BodyAt(1f) - BodyAt(0f);
@@ -86,26 +67,27 @@ public sealed class ClipMotion
         return comAnchored ? BodyAt(t) - c : BodyAt(t);
     }
 
-    // ── Reference-arc mapping (shared with the editor's former private helpers) ─────────
-    // Clip time → arc parameter. The two have INDEPENDENT durations, so a clip only rides
+    // ── Reference-arc mapping ───────────────────────────────────────────────────────────
+    // Clip time → arc parameter. The two have INDEPENDENT durations, so a clip only follows
     // its arc 1:1 when they match: a 0.4s clip on a 0.3s arc is at the gate by τ=0.75 and
     // overshoots after. Capped at 2 so a mistuned pair can't fling the body off the far end
-    // of the linear extrapolation.
-    public float ArcProgress(float t)
+    // of the linear extrapolation. Used by ClipArcMap when writing a path from an arc, and
+    // by the editor's arc overlays.
+    public static float ArcProgress(float t, float clipDuration, float arcDuration)
     {
-        if (Arc == null) return 0f;
-        float arcDur = Arc.Duration <= 1e-4f ? 1f : Arc.Duration;
-        float clipDur = Doc == null || Doc.Duration <= 1e-4f ? 1f : Doc.Duration;
+        float arcDur = arcDuration <= 1e-4f ? 1f : arcDuration;
+        float clipDur = clipDuration <= 1e-4f ? 1f : clipDuration;
         return MathHelper.Clamp(MathHelper.Clamp(t, 0f, 1f) * (clipDur / arcDur), 0f, 2f);
     }
 
-    // Scene offset at a point along the ARC's own parameter (not clip time), rig units. The
-    // arc is authored in game pixels against its own anchors, so its size and direction come
-    // straight from the file — only px → rig units is converted.
-    public Vector2 ArcOffsetAt(float u)
+    // Where a point along an arc's own parameter sits in scene space, rig units. The arc is
+    // authored in game pixels against its own anchors, so its size and direction come
+    // straight from the file — only px → rig units is converted. One implementation, shared
+    // by the display overlays and by ClipArcMap.
+    public static Vector2 ArcOffset(HermiteClipDocument arc, float u)
     {
-        if (Arc == null) return Vector2.Zero;
-        Vector2 gate = Arc.Span / Game1.SkeletonScale;
-        return new ReferenceFrame(Arc, Vector2.Zero, gate).Map(Arc.Eval(u));
+        if (arc == null) return Vector2.Zero;
+        Vector2 gate = arc.Span / Game1.SkeletonScale;
+        return new ReferenceFrame(arc, Vector2.Zero, gate).Map(arc.Eval(u));
     }
 }

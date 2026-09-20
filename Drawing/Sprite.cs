@@ -75,7 +75,6 @@ public class AnimatedSprite : Sprite
         if (anim != null) Pose = anim.SampleAt(0f);
     }
 
-    public bool IsFinished => Animation != null && !Animation.Loop && Time >= Animation.Duration;
 
     public override void Update(float dt)
     {

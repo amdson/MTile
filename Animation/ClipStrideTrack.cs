@@ -110,7 +110,6 @@ public sealed class ClipStrideTrack
     //     run (Td.Y − Lo.Y < 0: the body climbs over the planted foot), and the timing stage
     //     projects the body's actual motion onto this direction (GaitTiming).
     public Vector2 CycleDisplacement;
-    public float   CycleTravel => CycleDisplacement.X;   // the run component (legacy name)
     public bool    HasTravel;
 
     public FootStrideTrack ForBone(int bone)
@@ -139,27 +138,19 @@ public sealed class ClipStrideTrack
         if (loop && MathF.Abs((ks[^1].Time - ks[0].Time) - 1f) < 1e-3f) ringCount--;
         if (ringCount < 1) { error = "clip has no usable keyframes"; return false; }
 
-        // Opted-in nodes: any PlannedSupport label anywhere in the clip. A node mixing
-        // PlannedSupport with SelfPlant/External is ambiguous ownership — refused.
-        // Nodes are contact identities (ContactLabel.Key: a named point id or the legacy bone
-        // name), resolved to a bone through the endpoint resolver below.
+        // Opted-in points: any PlannedSupport span in the clip. A point mixing PlannedSupport
+        // with SelfPlant/External is ambiguous ownership — refused.
         var nodes = new List<string>();
-        foreach (var k in ks)
-        {
-            if (k.Contacts == null) continue;
-            foreach (var l in k.Contacts)
-                if ((anySource || l.Source == ContactSource.PlannedSupport) && l.Key != null && !nodes.Contains(l.Key))
-                    nodes.Add(l.Key);
-        }
+        var spans = doc.Contacts;
+        if (spans != null)
+            foreach (var c0 in spans)
+                if ((anySource || c0.Source == ContactSource.PlannedSupport)
+                    && c0.Point != null && !nodes.Contains(c0.Point)) nodes.Add(c0.Point);
         if (nodes.Count == 0) { track = new ClipStrideTrack { Feet = Array.Empty<FootStrideTrack>() }; return true; }
         if (!anySource)
-            foreach (var k in ks)
-            {
-                if (k.Contacts == null) continue;
-                foreach (var l in k.Contacts)
-                    if (l.Source != ContactSource.PlannedSupport && nodes.Contains(l.Key))
-                    { error = $"node '{l.Key}' mixes PlannedSupport with {l.Source} labels"; return false; }
-            }
+            foreach (var c0 in spans)
+                if (c0.Source != ContactSource.PlannedSupport && nodes.Contains(c0.Point))
+                { error = $"point '{c0.Point}' mixes PlannedSupport with {c0.Source} spans"; return false; }
 
         // FK scratch for offset sampling (compile-time only; allocation is fine here).
         var a = rig.CreatePose(); var b = rig.CreatePose(); var c = rig.CreatePose();
@@ -186,64 +177,39 @@ public sealed class ClipStrideTrack
                 maxReach = MathF.Max(maxReach, OffsetAt(bone, i / 16f).Length());
             maxReach *= 1.25f;
 
-            // Per-ring-key: does this key label the node?
-            Span<bool> on = ringCount <= 64 ? stackalloc bool[ringCount] : new bool[ringCount];
-            for (int i = 0; i < ringCount; i++)
-            {
-                var labels = ks[i].Contacts;
-                if (labels == null) continue;
-                foreach (var l in labels) if (l.Key == node) { on[i] = true; break; }
-            }
-
-            // Maximal runs on the ring (wrapping when looping).
+            // Stances ARE the authored spans. The ring walk this replaced existed only to
+            // reconstruct intervals from per-keyframe labels: run detection, "liftoff = the key
+            // AFTER the run", and the seam unwrap all reconstructed what a span now states.
+            // A span covering the whole cycle is Persistent (idle-like: maintain support, don't
+            // invent strides); OffsetAt wraps its own phase, so its two endpoints agree.
             var stances = new List<StrideStance>();
-            bool all = true;
-            for (int i = 0; i < ringCount; i++) if (!on[i]) { all = false; break; }
-            if (all)
+            foreach (var cs in spans)
             {
-                var off0 = OffsetAt(bone, ks[0].Time);
-                stances.Add(new StrideStance { Touchdown = ks[0].Time, Liftoff = ks[0].Time + 1f,
-                                               TdOffset = off0, LoOffset = off0, Persistent = true });
+                if (cs.Point != node) continue;
+                if (!anySource && cs.Source != ContactSource.PlannedSupport) continue;
+                if (cs.End - cs.Start <= 1e-4f)
+                { error = $"contact '{node}' has an empty span at {cs.Start:0.000}"; return false; }
+                stances.Add(new StrideStance
+                {
+                    Touchdown  = cs.Start,
+                    Liftoff    = cs.End,
+                    TdOffset   = OffsetAt(bone, cs.Start),
+                    LoOffset   = OffsetAt(bone, cs.End),
+                    Persistent = cs.End - cs.Start >= 1f - 1e-4f,
+                });
+            }
+            if (stances.Count == 0)
+            { error = $"point '{node}' is opted in but has no span"; return false; }
+            stances.Sort((x, y) => x.Touchdown.CompareTo(y.Touchdown));
+
+            // A persistent stance has no strides, so it has no swings either.
+            if (stances.Count == 1 && stances[0].Persistent)
+            {
                 feet.Add(new FootStrideTrack { Bone = bone, Node = node, MaxReachRig = maxReach,
                                                Stances = stances.ToArray(),
                                                Swings = Array.Empty<StrideSwing>() });
                 continue;
             }
-
-            float RingTime(int i) => ks[i % ringCount].Time + (i / ringCount) * 1f;
-            int NextIdx(int i) => loop ? (i + 1) % ringCount : i + 1;
-            for (int i = 0; i < ringCount; i++)
-            {
-                bool prevOn = loop ? on[(i - 1 + ringCount) % ringCount] : (i > 0 && on[i - 1]);
-                if (!on[i] || prevOn) continue;                    // not a run start
-                int j = i, len = 1;
-                while (true)
-                {
-                    int n = NextIdx(j);
-                    if (loop ? n == i : n >= ringCount) break;     // wrapped fully / hit clip end
-                    if (!on[n]) break;
-                    j = n; len++;
-                    if (len > ringCount) break;                    // safety, unreachable
-                }
-                float td = ks[i].Time;
-                // Liftoff = the key AFTER the run. Unwrap when the run crossed the seam
-                // or the liftoff key wrapped past it. Non-loop runs ending at the last
-                // key hold to the clip end (liftoff = 1).
-                float lo;
-                if (!loop && j == ringCount - 1) lo = 1f;
-                else
-                {
-                    int after = NextIdx(j);
-                    lo = ks[after].Time;
-                    while (lo <= td) lo += 1f;
-                }
-                stances.Add(new StrideStance { Touchdown = td, Liftoff = lo,
-                                               TdOffset = OffsetAt(bone, td),
-                                               LoOffset = OffsetAt(bone, lo) });
-            }
-            if (stances.Count == 0)
-            { error = $"node '{node}' has PlannedSupport labels but no stance run"; return false; }
-            stances.Sort((x, y) => x.Touchdown.CompareTo(y.Touchdown));
 
             // Swings: from each stance's liftoff to the next stance's touchdown
             // (cyclically for loops; a non-loop's last stance has a swing only if

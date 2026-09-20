@@ -17,33 +17,19 @@ public class AnimSceneTests
     // shipped clips: root = p(t) − com(t) with p from the arc (mapped px → rig units through
     // the arc's own anchors at ArcProgress) or the body_path track, else zero.
     [Theory]
-    [InlineData("biped", "parkour")]          // ReferenceArc + com
+    [InlineData("biped", "parkour")]          // body_path (mapped from its arc) + com
     [InlineData("biped_rabbit", "crouchwalk")] // body_path track + com
     [InlineData("biped", "walk")]             // com only (stationary, legacy)
     public void RootAt_MatchesTheLegacyEditorPlacement(string rig, string clipName)
     {
         var clip = AnimationStore.LoadAll(Path.Combine(FindDir("SkeletonStates"), rig)).Find(d => d.Name == clipName);
         Assert.True(clip != null, $"{rig}/{clipName}.json not found");
-        HermiteClipDocument arc = null;
-        if (clip.ReferenceArc != null)
-        {
-            string path = Path.Combine(Path.GetDirectoryName(FindDir("SkeletonStates"))!, "ReferenceClips", clip.ReferenceArc + ".json");
-            arc = (File.Exists(path) ? HermiteClipDocument.Load(path) : null) ?? ReferenceClipRegistry.Get(clip.ReferenceArc);
-            Assert.NotNull(arc);
-        }
-        var m = ClipMotion.Resolve(clip, _ => arc);
+        var m = ClipMotion.Resolve(clip);
         for (int i = 0; i <= 20; i++)
         {
             float t = i / 20f;
             // The legacy formulas, inline.
-            Vector2 refOff;
-            if (arc != null)
-            {
-                float arcDur = arc.Duration <= 1e-4f ? 1f : arc.Duration, clipDur = clip.Duration <= 1e-4f ? 1f : clip.Duration;
-                float u = MathHelper.Clamp(MathHelper.Clamp(t, 0f, 1f) * (clipDur / arcDur), 0f, 2f);
-                refOff = new ReferenceFrame(arc, Vector2.Zero, arc.Span / Game1.SkeletonScale).Map(arc.Eval(u));
-            }
-            else refOff = AnimAdditionSampler.SamplePoint(clip, t, BodyPath.ChannelName, out var r) ? r : Vector2.Zero;
+            Vector2 refOff = AnimAdditionSampler.SamplePoint(clip, t, BodyPath.ChannelName, out var r) ? r : Vector2.Zero;
             bool comAnchored = AnimAdditionSampler.SamplePoint(clip, t, "com", out var com);
             Vector2 legacyRoot = comAnchored ? refOff - com : refOff;
 
@@ -120,64 +106,54 @@ public class AnimSceneTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
+    // ONE placement channel: the clip's own body_path when it authors one, else stationary.
+    // (A reference arc is mapped ONTO that track by ClipArcMap — it is never a source the
+    // resolver picks between, which is what the old precedence did.)
     [Fact]
-    public void Motion_LegacyPrecedence_ArcThenTrackThenStationary()
+    public void Motion_ResolvesTheTrackWhenAuthored_ElseStationary()
     {
-        var plain = ClipMotion.Resolve(Doc(), _ => null);
+        var plain = ClipMotion.Resolve(Doc());
         Assert.Equal(MotionSource.InPlace, plain.Source);
         Assert.False(plain.HasIntent);
         Assert.Equal(Vector2.Zero, plain.BodyAt(0.5f));
 
         var tracked = Doc(); SetPath(tracked, 0, 0f, 0f); SetPath(tracked, 1, 30f, -4f);
-        var m = ClipMotion.Resolve(tracked, _ => null);
+        var m = ClipMotion.Resolve(tracked);
         Assert.Equal(MotionSource.Track, m.Source);
         Assert.True(m.HasIntent);
         Assert.Equal(new Vector2(30f, -4f), m.CycleDisplacement);
-
-        var arc = new HermiteClipDocument { Duration = 1f };
-        arc.Keys.Add(new HermiteClipKey { T = 0f, X = 0f, Y = 0f, TX = 10f, TY = 0f });
-        arc.Keys.Add(new HermiteClipKey { T = 1f, X = 10f, Y = -5f, TX = 10f, TY = 0f });
-        var arced = Doc(); arced.ReferenceArc = "test"; SetPath(arced, 1, 30f, -4f);   // arc wins over the track
-        var a = ClipMotion.Resolve(arced, n => n == "test" ? arc : null);
-        Assert.Equal(MotionSource.ReferenceArc, a.Source);
-        Assert.False(a.ArcMissing);
-        Assert.NotEqual(Vector2.Zero, a.BodyAt(1f));
-
-        // A named arc nobody can resolve is reported, not silently replaced by the track.
-        var missing = ClipMotion.Resolve(arced, _ => null);
-        Assert.True(missing.ArcMissing);
-        Assert.Equal(Vector2.Zero, missing.BodyAt(1f));
     }
 
     [Fact]
-    public void Motion_ExplicitDeclaration_OverridesTheLegacyPrecedence()
+    public void Motion_ExplicitDeclaration_OverridesWhatTheDataImplies()
     {
-        var d = Doc(); SetPath(d, 0, 0f, 0f); SetPath(d, 1, 30f, 0f); d.ReferenceArc = "x";
+        var d = Doc(); SetPath(d, 0, 0f, 0f); SetPath(d, 1, 30f, 0f);
         d.Motion = MotionSource.InPlace;
-        var m = ClipMotion.Resolve(d, _ => null);
+        var m = ClipMotion.Resolve(d);
         Assert.Equal(MotionSource.InPlace, m.Source);
         Assert.True(m.HasIntent);                       // stationary ON PURPOSE ≠ missing intent
         Assert.Equal(Vector2.Zero, m.CycleDisplacement);
         d.Motion = MotionSource.Track;
-        Assert.Equal(new Vector2(30f, 0f), ClipMotion.Resolve(d, _ => null).CycleDisplacement);
+        Assert.Equal(new Vector2(30f, 0f), ClipMotion.Resolve(d).CycleDisplacement);
     }
 
     [Fact]
     public void LoopExtension_AddsWholeCycles_OneShotClamps()
     {
         var d = Doc(); SetPath(d, 0, 0f, 0f); SetPath(d, 1, 20f, 0f);
-        var m = ClipMotion.Resolve(d, _ => null);
+        var m = ClipMotion.Resolve(d);
         Assert.Equal(m.BodyAt(0.25f) + new Vector2(40f, 0f), m.ExtendedBodyAt(2.25f));
         Assert.Equal(new Vector2(20f, 0f), m.BodyAt(1f));   // the endpoint is sampled, not wrapped to 0
         var one = Doc(loop: false); SetPath(one, 0, 0f, 0f); SetPath(one, 1, 20f, 0f);
-        Assert.Equal(new Vector2(20f, 0f), ClipMotion.Resolve(one, _ => null).ExtendedBodyAt(2.25f));
+        Assert.Equal(new Vector2(20f, 0f), ClipMotion.Resolve(one).ExtendedBodyAt(2.25f));
     }
 
     [Fact]
     public void Guides_HitTest_Drag_Snap_Duplicate()
     {
-        var s = SceneGuideOps.Legacy(groundY: 40f, withBlock: true, blockOffset: Vector2.Zero, tileRig: 18f);
-        var floor = s.Guides[0]; var block = s.Guides[1];
+        var s = new ClipScene();
+        var floor = SceneGuideOps.AddGround(s, 40f);
+        var block = SceneGuideOps.AddBlock(s, 18f, 22f, 18f, 18f);
         Assert.Equal(new Vector2(18f, 22f), new Vector2(block.X, block.Y));
 
         Assert.Equal((floor, GuidePart.GroundLine), SceneGuideOps.HitTest(s, new Vector2(-5f, 41f), 2f));

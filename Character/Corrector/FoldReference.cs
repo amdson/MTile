@@ -49,11 +49,6 @@ public static class FoldReference
     private const float DeformCap = 8f;
     private const float SlewCap   = 150f;
 
-    // TEMP EXPERIMENT: redirect audit counters (write-only debug stats).
-    public static int AuditSolves, AuditMaskFrames, AuditFireFrames;
-    public static float AuditMaxZr;
-    public static Vector2 AuditNetZr;
-
     // Generates the reference, deforms it around terrain, and servos the body
     // toward its tick-0 target. Returns false when the regime doesn't apply
     // (caller falls back to the ballistic-qp path).
@@ -252,20 +247,6 @@ public static class FoldReference
             // TEMP EXPERIMENT: redirect's tick-0 velocity update (z layout
             // is [c*H + k], so channel 1 tick 0 lives at index n).
             if (p.ChannelCount == 2) zr0 = s.Z[n];
-            AuditSolves++;
-            if (p.ChannelCount == 2)
-            {
-                bool any = false;
-                for (int k = 0; k < n; k++) if (s.ChannelMask[1][k]) { any = true; break; }
-                if (any) AuditMaskFrames++;
-                if (zr0 != Vector2.Zero)
-                {
-                    AuditFireFrames++;
-                    AuditNetZr += zr0;
-                    AuditMaxZr = MathF.Max(AuditMaxZr, zr0.Length());
-                }
-            }
-
             if (s.CaptureTrajectories)
             {
                 // Deformed path: pos′_T = pos_T + d_T (position-space offsets).

@@ -205,7 +205,7 @@ public static class BallisticPredictor
                     pos, vel, groundPos, groundNormal, Vector2.Zero, minDistance,
                     inputX: 0f, walkAccel: 0f, maxWalkSpeed: 0f,
                     preserveExternalVelocity: false,
-                    cfg.SpringK, cfg.SpringDamping, cfg.SpringMaxRiseSpeed, dt);
+                    cfg.SpringK, cfg.SpringDamping, dt);
                 force.Y += spring.Y;
             }
 

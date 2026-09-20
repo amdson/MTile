@@ -36,6 +36,20 @@ public sealed class DrawContext
     }
 
     // Axis-aligned filled rect from its top-left corner, snapped to whole pixels.
+    // Dashed segment a→b. Used by authoring overlays that draw a DERIVED reference (a hover
+    // height computed from the game's tuning) so it cannot be misread as authored geometry:
+    // solid lines are things the document owns, dashes are things it is only being shown.
+    public void Dashed(Vector2 a, Vector2 b, Color color, float thickness = 1f,
+                       float dash = 6f, float gap = 4f)
+    {
+        Vector2 d = b - a;
+        float len = d.Length();
+        if (len < 1e-3f || dash <= 0f || gap <= 0f) return;
+        Vector2 dir = d / len;
+        for (float t = 0f; t < len; t += dash + gap)
+            Line(a + dir * t, a + dir * MathF.Min(t + dash, len), color, thickness);
+    }
+
     public void Box(Vector2 topLeft, Vector2 size, Color color)
     {
         var r = new Rectangle((int)topLeft.X, (int)topLeft.Y, (int)size.X, (int)size.Y);

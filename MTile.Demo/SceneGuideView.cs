@@ -9,65 +9,76 @@ internal enum GuideTool { None, AddGround, AddBlock, Select }
 
 // SCENE GUIDE EDITING (Plans/ANIMATION_SCENE_AUTHORING_PLAN.md "Refactor boundaries" 2): the
 // input glue and drawing for a clip's scene guides — selection, hit tests, drag state, tool
-// placement — over the pure operations in SceneGuideOps. A clip with no explicit Scene shows
-// the LEGACY preview (the floor line 2·Radius under the anchor, the one-tile obstacle block
-// for the lip-maneuver clips, draggable, persisted in the editor view state); the first guide
-// edit materializes that preview into the clip's own Scene. Every drag is cancelable: Escape
-// restores the pre-drag values or drops a half-placed block.
+// placement — over the pure operations in SceneGuideOps. Every guide a clip shows is authored
+// data in its own Scene: there is no synthesized preview, so what you see is what the file
+// holds and what ClipSceneBake reads. Every drag is cancelable: Escape restores the pre-drag
+// values or drops a half-placed block.
 internal sealed class SceneGuideView
 {
     public GuideTool Tool;
     public bool      Snap;                 // snap edits to the tile grid (anchored at the ground line)
     public string    SelectedId;
-    public Vector2   LegacyBlockOffset;    // legacy obstacle block's scene offset (view state)
     public string    Hint;                 // one-line status for the header (what a click will do)
 
     private SceneGuide _dragGuide; private GuidePart _dragPart; private SceneGuide _preDrag;
     private SceneGuide _placing;   private Vector2   _placeStart;
-    private bool       _dragLegacyBlock;
-    public bool Dragging => _dragGuide != null || _placing != null || _dragLegacyBlock;
+    public bool Dragging => _dragGuide != null || _placing != null;
 
     public const float TileRig = Chunk.TileSize / Game1.SkeletonScale;   // one game tile in rig units
     private const float PickR = 12f;   // screen px
 
-    // The clips the legacy obstacle block is scenery for (keyed on the enum so a rename fails
-    // to compile instead of silently losing the block).
-    private static readonly AnimClip[] BlockClips = { AnimClip.Parkour, AnimClip.Mantle, AnimClip.ArcJump, AnimClip.LedgePull };
-    public static bool LegacyHasBlock(AnimationDocument doc)
-        => Enum.TryParse<AnimClip>(doc?.Type, ignoreCase: true, out var c) && Array.IndexOf(BlockClips, c) >= 0;
+    // Read-only stand-in for a clip that carries no Scene at all (a doc built in memory, or one
+    // authored before scenes existed). Never mutated — EnsureScene gives the clip its own.
+    private static readonly ClipScene Empty = new();
 
-    // The guides in effect: the clip's explicit Scene, else a transient legacy materialization
-    // (never stored until an edit happens).
-    public ClipScene Effective(AnimationDocument doc, float groundY)
-        => doc?.Scene ?? SceneGuideOps.Legacy(groundY, LegacyHasBlock(doc), LegacyBlockOffset, TileRig);
+    // The guides in effect: the clip's own Scene, or nothing to draw.
+    public ClipScene Effective(AnimationDocument doc) => doc?.Scene ?? Empty;
 
-    private ClipScene Materialize(AnimationDocument doc, float groundY, ref bool dirty)
+    // Give the clip a Scene to edit — what the Scene panel calls before adding a guide or an
+    // overlay. A clip that has none starts EMPTY rather than pre-populated: guides are the
+    // author's statement about the terrain, so the editor never invents one.
+    public ClipScene EnsureScene(AnimationDocument doc, ref bool dirty)
     {
-        if (doc.Scene == null) { doc.Scene = SceneGuideOps.Legacy(groundY, LegacyHasBlock(doc), LegacyBlockOffset, TileRig); dirty = true; }
+        if (doc == null) return null;
+        if (doc.Scene == null) { doc.Scene = new ClipScene(); dirty = true; }
         return doc.Scene;
     }
 
     public SceneGuide Selected(AnimationDocument doc)
         => SelectedId == null ? null : doc?.Scene?.Guides.Find(g => g.Id == SelectedId);
 
+    // What a press at `mp` WOULD hit in the guide layer, without consuming it. The editor uses
+    // this to resolve the one real overlap between the two layers: the rig is drawn on top of
+    // the scene, so its handles beat a guide's BODY, while a guide's edges and corners (which
+    // HitTest already prioritises) still beat the rig. Only meaningful in Select — the
+    // placement tools are an armed intent that always wins.
+    public GuidePart Peek(Vector2 mp, in Affine2 frame, float groundY, AnimationDocument doc)
+    {
+        if (doc == null || Tool != GuideTool.Select) return GuidePart.None;
+        Vector2 sp = frame.Inverse().TransformPoint(mp);
+        float handleR = PickR / frame.TransformVector(Vector2.UnitX).X;
+        var (hit, part) = SceneGuideOps.HitTest(Effective(doc), sp, handleR);
+        return hit == null ? GuidePart.None : part;
+    }
+
     // A left-press in the working area. Returns true when the guide layer consumed it.
     public bool HandlePress(Vector2 mp, in Affine2 frame, float groundY, AnimationDocument doc, ref bool dirty)
     {
         if (doc == null) return false;
         Vector2 sp = frame.Inverse().TransformPoint(mp);
-        float handleR = PickR / ScenePlacement.RigScale;
+        float handleR = PickR / frame.TransformVector(Vector2.UnitX).X;   // live view scale
         switch (Tool)
         {
             case GuideTool.AddGround:
             {
-                var scene = Materialize(doc, groundY, ref dirty);
+                var scene = EnsureScene(doc, ref dirty);
                 var g = SceneGuideOps.AddGround(scene, Snapped(sp, groundY).Y);
                 SelectedId = g.Id; dirty = true; Tool = GuideTool.Select;
                 return true;
             }
             case GuideTool.AddBlock:
             {
-                var scene = Materialize(doc, groundY, ref dirty);
+                var scene = EnsureScene(doc, ref dirty);
                 _placeStart = Snapped(sp, groundY);
                 _placing = SceneGuideOps.AddBlock(scene, _placeStart.X, _placeStart.Y, SceneGuideOps.MinBlockSize, SceneGuideOps.MinBlockSize);
                 SelectedId = _placing.Id; dirty = true;
@@ -75,35 +86,19 @@ internal sealed class SceneGuideView
             }
             case GuideTool.Select:
             {
-                var (hit, part) = SceneGuideOps.HitTest(Effective(doc, groundY), sp, handleR);
+                var (hit, part) = SceneGuideOps.HitTest(Effective(doc), sp, handleR);
                 if (hit == null) { SelectedId = null; return false; }
-                if (doc.Scene == null)
-                {
-                    // The hit was on the transient legacy preview: materialize it, then find the
-                    // same guide in the clip's own scene (same order, same ids).
-                    var scene = Materialize(doc, groundY, ref dirty);
-                    hit = scene.Guides.Find(g => g.Id == hit.Id) ?? hit;
-                }
                 SelectedId = hit.Id;
                 if (!hit.Locked) { _dragGuide = hit; _dragPart = part; _preDrag = hit.Clone(); }
                 return true;
             }
-            default:
-            {
-                // Legacy obstacle block drag (no explicit scene, not in a guide tool).
-                if (doc.Scene != null || !LegacyHasBlock(doc)) return false;
-                var block = Effective(doc, groundY).Guides.Find(g => g.Kind == SceneGuideKind.Block);
-                if (block == null) return false;
-                if (sp.X < block.X || sp.X > block.X + block.W || sp.Y < block.Y || sp.Y > block.Y + block.H) return false;
-                _dragLegacyBlock = true;
-                return true;
-            }
+            default: return false;
         }
     }
 
     public void HandleDrag(Vector2 mp, Vector2 dmScreen, in Affine2 frame, float groundY, ref bool dirty)
     {
-        Vector2 dm = dmScreen / ScenePlacement.RigScale;
+        Vector2 dm = dmScreen / frame.TransformVector(Vector2.UnitX).X;   // live view scale
         if (_placing != null)
         {
             Vector2 sp = Snapped(frame.Inverse().TransformPoint(mp), groundY);
@@ -119,13 +114,12 @@ internal sealed class SceneGuideView
             SceneGuideOps.Drag(_dragGuide, _dragPart, dm);
             dirty = true;
         }
-        else if (_dragLegacyBlock) LegacyBlockOffset += dm;
     }
 
     public void Release(float groundY)
     {
         if (_dragGuide != null && Snap) SceneGuideOps.SnapToGrid(_dragGuide, TileRig, groundY);
-        _dragGuide = null; _preDrag = null; _placing = null; _dragLegacyBlock = false;
+        _dragGuide = null; _preDrag = null; _placing = null;
     }
 
     // Escape: drop a half-placed block, restore a dragged guide, or leave the tool. True when
@@ -139,7 +133,6 @@ internal sealed class SceneGuideView
             _dragGuide = null; _preDrag = null;
             return true;
         }
-        if (_dragLegacyBlock) { _dragLegacyBlock = false; return true; }
         if (Tool != GuideTool.None) { Tool = GuideTool.None; return true; }
         return false;
     }
@@ -166,15 +159,13 @@ internal sealed class SceneGuideView
     }
 
     // ── drawing ─────────────────────────────────────────────────────────────────────
-    public void Draw(DrawContext draw, SpriteBatch sb, SpriteFont font, in Affine2 frame, float groundY,
+    public void Draw(DrawContext draw, SpriteBatch sb, SpriteFont font, in Affine2 frame,
                      AnimationDocument doc, int x0, int x1)
     {
-        var scene = Effective(doc, groundY);
-        bool explicitScene = doc?.Scene != null;
-        foreach (var g in scene.Guides)
+        foreach (var g in Effective(doc).Guides)
         {
             if (g.Hidden) continue;
-            bool selected = explicitScene && g.Id == SelectedId;
+            bool selected = g.Id == SelectedId;
             if (g.Kind == SceneGuideKind.Ground)
             {
                 float y = frame.TransformPoint(new Vector2(0f, g.Y)).Y;

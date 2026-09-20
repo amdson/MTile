@@ -321,27 +321,7 @@ public static class EnemyFactory
         // one line that makes it spawnable and snapshot-restorable.
         Register(TemplateEnemy.Blueprint);
 
-        // Older inline template — each new blueprint wants its own EntityKind
-        // in EntityKind.cs.
-        //
-        // Register(new EnemyBlueprint
-        // {
-        //     Kind   = EntityKind.Bombardier,
-        //     Health = 4f,
-        //     Color  = Color.DarkOliveGreen,
-        //     Movement = () => new()
-        //     {
-        //         new EnemyIdleState(),
-        //         new EnemyChaseState(),
-        //         new EnemyAttackHoldState(),
-        //         new EnemyJumpState(),
-        //         new EnemyStaggerState(),
-        //     },
-        //     Actions = () => new()
-        //     {
-        //         new EnemyShockwaveAction(),
-        //         new EnemyRangedAction(),
-        //     },
-        // });
+        // Each new blueprint wants its own EntityKind in EntityKind.cs; see
+        // TemplateEnemy.Blueprint above for the shape.
     }
 }

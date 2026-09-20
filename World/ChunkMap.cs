@@ -733,12 +733,6 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         if (Charge.IsCharged(gtx, gty)) _chargedBreaks.Add(CellCenter(gtx, gty));
     }
 
-    // World-coord shim — kept for existing call sites that work in world space.
-    public bool DestroyTile(float worldX, float worldY)
-    {
-        var (gtx, gty) = WorldToGlobalCell(worldX, worldY);
-        return BreakCell(gtx, gty);
-    }
 
     // ── Snapshot / restore (roadmap goal 6) ─────────────────────────────────────
     // Dense tile grid: a journal mark (rewound on restore). Sparse side-structures:

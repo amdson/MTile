@@ -9,11 +9,18 @@
     <RootNamespace>MTileDemo</RootNamespace>
     <Nullable>disable</Nullable>
     <MonoGamePlatform>DesktopGL</MonoGamePlatform>
+    <!-- ImGuiRenderer copies ImGui's draw lists with Buffer.MemoryCopy. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <!-- Reuse the game library (and its MonoGame.Framework.DesktopGL dependency,
          which flows through transitively). -->
     <ProjectReference Include="..\MTile.Core.csproj" />
+    <!-- Dear ImGui: the editor's window/panel manager (MTile.Demo/ImGuiRenderer.cs is the
+         MonoGame backend). Desktop-only tool — this dependency never reaches MTile.Core,
+         the Desktop game, the tests or the KNI/web build. Native cimgui ships per-RID:
+         win-x86/x64/arm64, linux-x64, and a universal (x86_64 + arm64) osx dylib. -->
+    <PackageReference Include="ImGui.NET" Version="1.91.6.1" />
   </ItemGroup>
   <ItemGroup>
     <!-- Shares the game's content project so the editor can load DebugFont for the

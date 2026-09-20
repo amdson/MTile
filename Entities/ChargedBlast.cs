@@ -79,9 +79,6 @@ public class ChargedBlast : Entity
 
     public override EntityKind Kind => EntityKind.ChargedBlast;
 
-    // World-space reach, for the render shell's telegraph/particle sizing and for tests.
-    public static float BlastRadius => Radius;
-    public static float Fuse        => FuseSeconds;
 
     // Ticks up to the fuse. Stored rather than derived from a spawn frame so it
     // snapshots as a plain value like every other entity fuse.

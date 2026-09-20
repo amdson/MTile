@@ -17,7 +17,6 @@ public sealed partial class CharacterAnimator
     // This frame's clip plays off the cadence phase (CadencePhase time mode).
     public bool BaselineCadenceMode => _timeMode == ClipTimeMode.CadencePhase;
 
-    public bool BaselineAimActive => _aimActive;
     public int  BaselineRejectedTrials => _ls.LastRejectedTrials;
     public int  BaselineVars => IdxTheta0 + _skeleton.Count;
 

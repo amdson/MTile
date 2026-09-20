@@ -83,7 +83,6 @@ public class AnimSolverConfig
     public float VertOffsetLimit { get; set; } = 24f;   // |δ| cap (world px)
     public float HorizOffsetLimit { get; set; } = 4f;   // |d.x| cap (world px) — small sway, and the hard backstop on travel absorption
     public float MaxPhaseStep    { get; set; } = 0.25f; // max Δφ advanced per frame (< one stance window)
-    public float FeatherWidth    { get; set; } = 0.12f; // phase span of the planted-foot crossover
 
     // ── Step planner (Plans/ANIMATION_STEP_PLANNER_IMPL.md — knob budget: these 3) ──
     // Master A/B for the whole planner path; off = every clip on the legacy SelfPlant
@@ -153,7 +152,6 @@ public class AnimSolverConfig
         VertOffsetLimit         = src.VertOffsetLimit;
         HorizOffsetLimit        = src.HorizOffsetLimit;
         MaxPhaseStep            = src.MaxPhaseStep;
-        FeatherWidth            = src.FeatherWidth;
         ContactReleaseTime      = src.ContactReleaseTime;
         ContactEngageTime       = src.ContactEngageTime;
         PlannerEnabled          = src.PlannerEnabled;

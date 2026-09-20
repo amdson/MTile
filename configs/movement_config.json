@@ -46,7 +46,6 @@
   "SpringK": 300,
   "WalkAccel": 3000,
   "MaxWalkSpeed": 100,
-  "BrakingForce": 3000,
   // Block peel (Shift+LMB grab) — see MovementConfig for each knob's role. Hot-reloads.
   // false restores the legacy one-frame drag-rip.
   "BlockPeelEnabled": true,

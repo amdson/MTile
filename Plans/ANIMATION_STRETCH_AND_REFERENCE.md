@@ -115,8 +115,8 @@ A clip can ride the maneuver's *authored* arc instead of hand-placed `edref` key
 ```
 
 ```bash
-dotnet $P --rig biped_rabbit refarc dropdown dropdown   # bind
-dotnet $P refarc dropdown none                          # clear
+dotnet $P --rig biped_rabbit mapcom dropdown dropdown   # write body_path from the arc
+dotnet $P --rig biped_rabbit mapcom dropdown dropdown --dry   # report only, write nothing
 ```
 
 - Or bind it **in the editor**: `A` / `Shift-A` cycles the clip through the baked arc

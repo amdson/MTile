@@ -170,10 +170,11 @@ public sealed class SpriteAttachmentRenderer : IDisposable
         {
             var a = sample.Attachment;
             var asset = Load(a.Effect);
-            int bone = pose.Skeleton.IndexOf(a.Bone);
-            if (asset == null || bone < 0 || !a.TryProgress(sample.Time, out float t)) continue;
+            // The anchor was resolved by AttachmentSampling.Append, which had the clip in hand
+            // — a clip-local point is not resolvable from here.
+            if (asset == null || !a.TryProgress(sample.Time, out float t)) continue;
             var spec = asset.Spec;
-            var transform = AttachmentSampling.Transform(world[bone], a);
+            var transform = AttachmentSampling.Transform(world, root, pose.Skeleton, sample.Point, a);
             if (history != null && spec.TrailSeconds > 0 && spec.TipPixels != null && a.EmitsTrail(sample.Time))
             {
                 if (!history.TryGetValue(a, out var h)) history[a] = h = new History();
@@ -196,11 +197,10 @@ public sealed class SpriteAttachmentRenderer : IDisposable
         {
             var a = sample.Attachment;
             var asset = Load(a.Effect);
-            int bone = pose.Skeleton.IndexOf(a.Bone);
-            if (asset == null || bone < 0 || !a.TryProgress(sample.Time, out float t)) continue;
+            if (asset == null || !a.TryProgress(sample.Time, out float t)) continue;
             var spec = asset.Spec;
             int frame = a.FrameAt(sample.Time, t, spec.FrameCount);
-            var transform = AttachmentSampling.Transform(world[bone], a);
+            var transform = AttachmentSampling.Transform(world, root, pose.Skeleton, sample.Point, a);
             float unit = spec.RigUnitsPerPixel;
             float left = -spec.PivotX * unit, top = -spec.PivotY * unit;
             float right = left + spec.FrameWidth * unit, bottom = top + spec.FrameHeight * unit;

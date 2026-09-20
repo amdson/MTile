@@ -30,10 +30,9 @@ public struct EnemyInput
     public bool Jump;
 
     // Directional leap velocity. Nonzero = "launch the body with this exact
-    // vector now." Triggers EnemyLeapState, which applies the vector once on
-    // entry and then lets gravity + collision shape a ballistic arc (no
-    // mid-air control). Use this to chain pillar-hops via EnemyClingMoveState:
-    // the cling state re-engages as soon as the leap lands near a tile.
+    // vector now." No movement state consumes it today — the state that did was
+    // never instantiated and has been removed; a brain that wants ballistic
+    // launches needs to bring its own state back with it.
     //
     // Separate from Jump because the two semantics differ — Jump is "lift +
     // drift" with continuous horizontal control, JumpVelocity is "one-shot

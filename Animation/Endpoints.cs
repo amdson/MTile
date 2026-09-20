@@ -11,8 +11,8 @@ namespace MTile;
 // such a location a stable identity and a role ("support_l"), optionally with a local offset
 // in the bone's frame (zero = the exact endpoint). Shared anatomical points live with the rig
 // (Skeleton.Points); clip-specific ones with the clip (AnimationDocument.Points). Contact
-// labels reference points by id (ContactLabel.Point); the legacy ContactLabel.Node keeps
-// resolving to its exact current location — a bone's End — through the same resolver.
+// labels reference points by id and ONLY by id (ContactLabel.Point) — a bare bone name still
+// resolves, as that bone's End, so a rig needs no point declared to be posed against.
 //
 // Under the R·T·S chain every bone's far tip is world[i].Translation (SkeletonPose.
 // ComputeWorld), and its Start is the parent's tip — so an endpoint never needs a "+Length"
@@ -51,26 +51,6 @@ public readonly struct ResolvedPoint
 
 public static class EndpointResolver
 {
-    // Resolve a contact label's target on `rig` for `clip`. Precedence: the clip's own
-    // points, then the rig's, by id (ContactLabel.Point); then the legacy node name as that
-    // bone's End with no offset. A label naming BOTH a point and a node that disagree is
-    // ambiguous and rejected (false) — the migration must not leave conflicting records.
-    public static bool TryResolve(Skeleton rig, AnimationDocument clip, ContactLabel label, out ResolvedPoint rp)
-    {
-        rp = default;
-        if (label == null) return false;
-        bool havePoint = !string.IsNullOrEmpty(label.Point) && TryResolvePoint(rig, clip, label.Point, out rp);
-        if (!string.IsNullOrEmpty(label.Node))
-        {
-            int b = rig.IndexOf(label.Node);
-            if (havePoint) return b < 0 || b == rp.Bone;          // both given: they must agree
-            if (b < 0) return false;
-            rp = new ResolvedPoint(label.Node, b, BoneEnd.End, Vector2.Zero);
-            return true;
-        }
-        return havePoint;
-    }
-
     // Resolve a point id (clip first, then rig), or a bare bone name as its End.
     public static bool TryResolvePoint(Skeleton rig, AnimationDocument clip, string id, out ResolvedPoint rp)
     {
@@ -97,16 +77,26 @@ public static class EndpointResolver
         return null;
     }
 
-    // The bone index a contact label pins (the solver's contact identity), or -1. Contact
-    // consumers pin bone TIPS: a point that is not an exact End is reported through
-    // `exactTip` so a caller can refuse it rather than silently pin the wrong place.
-    public static int BoneOf(Skeleton rig, AnimationDocument clip, ContactLabel label, out bool exactTip)
+    // The bone index a contact label pins (the solver's contact identity). THROWS on a label
+    // the clip's data cannot honor, rather than dropping it: an unresolvable id, or a point
+    // that is not an exact bone tip. Contact consumers pin TIPS — NamedPoint's offset and
+    // Start end are expressible but no contact consumer implements them, so a label using one
+    // used to vanish silently from the solve. Loud is the only honest option until they are
+    // implemented. Callers asking "does any label sit on bone i?" are asking about valid data;
+    // a clip that reaches them malformed is a bug upstream in authoring.
+    public static int BoneOf(Skeleton rig, AnimationDocument clip, string point)
     {
-        if (!TryResolve(rig, clip, label, out var rp)) { exactTip = false; return -1; }
-        exactTip = rp.IsExactTip;
+        if (!TryResolvePoint(rig, clip, point, out var rp))
+            throw new InvalidOperationException(
+                $"contact '{point ?? "(null)"}' in clip '{clip?.Name ?? "?"}' resolves to no point or bone " +
+                $"of rig '{rig.Name}' — name a point in Skeletons/{rig.Name}.json or the clip's Points.");
+        if (!rp.IsExactTip)
+            throw new InvalidOperationException(
+                $"contact '{rp.Id}' in clip '{clip?.Name ?? "?"}' is not an exact bone tip " +
+                $"({rig.Bones[rp.Bone].Name}.{rp.End}, offset {rp.Offset}). Contacts pin bone tips; " +
+                $"offset and Start-end points are not supported by the solver yet.");
         return rp.Bone;
     }
-    public static int BoneOf(Skeleton rig, AnimationDocument clip, ContactLabel label) => BoneOf(rig, clip, label, out _);
 
     // World position of a resolved point on a computed pose. `root` is the transform the
     // pose was computed under (a root bone's Start is its origin).

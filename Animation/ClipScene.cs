@@ -9,9 +9,10 @@ namespace MTile;
 // additions"; workplan chunk 3). A clip may carry an explicit Scene — fixed reference geometry
 // in CLIP SCENE SPACE (rig units, +X right, +Y down, canonical right-facing, origin = the
 // clip's scene anchor; see BodyPath) — and an explicit Motion source naming which channel
-// owns the body's scene path. Both are optional: a missing Scene keeps the editor's legacy
-// floor-line + obstacle-block preview, and a missing Motion keeps the legacy precedence
-// (ReferenceArc → body_path track → stationary) — see ClipMotion.Resolve.
+// owns the body's scene path. A clip's guides are exactly what it authors: nothing is
+// synthesized for a missing Scene, so the editor, ClipSceneBake and `probe scenecheck` all
+// read the same geometry. A missing Motion is inferred from the body_path track — see
+// ClipMotion.Resolve.
 //
 // Guides are REFERENCE DATA for authoring, never spawned runtime colliders: a rectangle's
 // top can describe candidate support and its interior clearance; contacts still say which
@@ -38,26 +39,80 @@ public sealed class SceneGuide
     { Id = Id, Kind = Kind, X = X, Y = Y, W = W, H = H, Label = Label, Hidden = Hidden, Locked = Locked };
 }
 
+// DISPLAY OVERLAYS — the other half of a clip's scene. Where a SceneGuide is geometry the
+// clip OWNS (coordinates authored and saved), an overlay carries NO coordinates: it names
+// something whose geometry is computed elsewhere, so it cannot go stale against the value it
+// draws. A "standing hover" line stored as a number would be a copy of FoldHoverOffset that
+// silently lies the next time hover is tuned; the derived kinds below are read back out of
+// the game's own constants at draw time (Animation/SceneReferences.cs).
+//
+// Overlays are an AUTHORING AID ONLY: ClipSceneBake and `probe scenecheck` never look at
+// them, so toggling a visual can never move a baked path or a check result. (If foot
+// planting ever becomes terrain-aware, that is the rule to revisit — deliberately not yet.)
+//
+// Two families, told apart by SceneReferences.IsHoverLine / IsTrajectory:
+//   DERIVED heights  — no Ref; geometry from the game's constants (hover lines).
+//   TRAJECTORIES     — Ref names another document (a ReferenceClips arc, or another clip
+//                      whose own motion source is resolved and drawn).
+//
+// A trajectory overlay is DISPLAY ONLY and never becomes the clip's placement: exactly one
+// source owns p(t) (AnimationDocument.Motion — see ClipMotion.Resolve), and that stays true
+// however many comparison curves are shown. Referencing the same arc the clip already rides
+// is allowed; it just draws over the owned path.
+public enum SceneOverlayKind
+{
+    HoverLine,    // where the body centre rides standing on a surface (fold hover)
+    CrouchLine,   // the same, crouched
+    Arc,          // Ref = a ReferenceClips arc name, drawn over its own parameter [0,1]
+    ClipPath,     // Ref = another clip's name, drawn through ITS resolved motion source
+}
+
+public sealed class SceneOverlay
+{
+    public string           Id    { get; set; }    // stable identity across edits/saves
+    public SceneOverlayKind Kind  { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string           Ref   { get; set; }    // arc / clip name for the reference kinds
+    // Arc kind only: resolve `Ref` against this clip's OWN arcs (AnimationDocument.Arcs)
+    // instead of the shared ReferenceClips/ pool. An explicit flag rather than shadowing by
+    // name, so a clip can show the shared arc and its own fork of it side by side.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool             Local { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool             Hidden { get; set; }
+
+    public SceneOverlay Clone() => new() { Id = Id, Kind = Kind, Ref = Ref, Local = Local, Hidden = Hidden };
+}
+
 public sealed class ClipScene
 {
-    // An explicitly EMPTY list means "no guides" (distinct from a missing Scene, which
-    // means "legacy preview").
     public List<SceneGuide> Guides { get; set; } = new();
+
+    // Null when the clip shows no overlays — the common case, and it keeps existing clip
+    // files byte-identical until one is added.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<SceneOverlay> Overlays { get; set; }
 
     public ClipScene Clone()
     {
         var c = new ClipScene();
         foreach (var g in Guides) c.Guides.Add(g.Clone());
+        if (Overlays != null)
+        {
+            c.Overlays = new List<SceneOverlay>(Overlays.Count);
+            foreach (var o in Overlays) c.Overlays.Add(o.Clone());
+        }
         return c;
     }
 }
 
-// Which channel owns the body's scene path p(t). Exactly one owner.
+// Where the body's scene path p(t) comes from. The clip's own `body_path` track is the only
+// channel — a reference arc is something you MAP onto that track (ClipArcMap), not something
+// the clip rides.
 public enum MotionSource
 {
-    InPlace,        // the clip is authored stationary — p(t) ≡ 0 (an explicit declaration)
-    Track,          // the reserved `body_path` point channel on the keyframes (BodyPath)
-    ReferenceArc,   // the clip's named ReferenceArc (HermiteClipDocument), mapped to scene units
+    InPlace,   // the clip is authored stationary — p(t) ≡ 0
+    Track,     // the reserved `body_path` point channel on the keyframes (BodyPath)
 }
 
 // The part of a guide a hit landed on — what a drag then edits.
@@ -109,18 +164,6 @@ public static class SceneGuideOps
     }
 
     public static bool Remove(ClipScene scene, SceneGuide g) => scene.Guides.Remove(g);
-
-    // The materialized LEGACY preview — the floor line 2·Radius/scale under the anchor and,
-    // for the lip-maneuver clips, the one-tile obstacle block one tile ahead — so a first
-    // scene edit on an old clip starts from exactly what the editor was showing.
-    public static ClipScene Legacy(float groundY, bool withBlock, Vector2 blockOffset, float tileRig)
-    {
-        var s = new ClipScene();
-        AddGround(s, groundY).Label = "floor";
-        if (withBlock)
-            AddBlock(s, tileRig + blockOffset.X, groundY - tileRig + blockOffset.Y, tileRig, tileRig).Label = "block";
-        return s;
-    }
 
     // Nearest hit among visible, unlocked-or-not guides (locking blocks EDITS, not
     // selection). Handles (edges/corners/ground line) win over bodies within `handleR`
@@ -191,6 +234,33 @@ public static class SceneGuideOps
     private static void Right(SceneGuide g, float dx)  { g.W = MathF.Max(MinBlockSize, g.W + dx); }
     private static void Top(SceneGuide g, float dy)    { float ny = MathF.Min(g.Y + dy, g.Y + g.H - MinBlockSize); g.H += g.Y - ny; g.Y = ny; }
     private static void Bottom(SceneGuide g, float dy) { g.H = MathF.Max(MinBlockSize, g.H + dy); }
+
+    // ── overlays ────────────────────────────────────────────────────────────────────────
+    // Add/remove only: an overlay has no geometry to edit, so there is no Drag/Snap/HitTest
+    // counterpart. Kinds are unique per clip — two identical hover lines would just draw on
+    // top of each other.
+    public static SceneOverlay AddOverlay(ClipScene scene, SceneOverlayKind kind, string reference = null,
+                                          bool local = false)
+    {
+        scene.Overlays ??= new List<SceneOverlay>();
+        var existing = scene.Overlays.Find(o => o.Kind == kind && o.Ref == reference && o.Local == local);
+        if (existing != null) { existing.Hidden = false; return existing; }
+        int n = scene.Overlays.Count + 1;
+        while (scene.Overlays.Exists(o => o.Id == $"o{n}")) n++;
+        var ov = new SceneOverlay { Id = $"o{n}", Kind = kind, Ref = reference, Local = local };
+        scene.Overlays.Add(ov);
+        return ov;
+    }
+
+    public static bool RemoveOverlay(ClipScene scene, SceneOverlay o)
+    {
+        if (scene.Overlays == null || !scene.Overlays.Remove(o)) return false;
+        if (scene.Overlays.Count == 0) scene.Overlays = null;   // absent, not an empty list
+        return true;
+    }
+
+    public static bool HasOverlay(ClipScene scene, SceneOverlayKind kind)
+        => scene?.Overlays != null && scene.Overlays.Exists(o => o.Kind == kind);
 
     // Snap a guide's edges to a grid anchored at the ground line (cell = one tile in rig units).
     public static void SnapToGrid(SceneGuide g, float cell, float groundY)

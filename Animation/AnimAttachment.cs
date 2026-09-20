@@ -4,9 +4,16 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
+// A rendered add-on hung off a NAMED POINT on the rig, over a window of the clip.
+//
+// Point, not a bone name: an attachment and a contact are the two things an endpoint can
+// carry, and they now anchor the same way. A raw bone name used to mean a bone rename
+// silently orphaned every effect on it — the same fragility ContactLabel.Node had. A bare
+// bone name still RESOLVES (as that bone's End) so nothing needs a point declared to be
+// posed against; declaring one is what makes the reference rename-safe.
 public sealed class AnimAttachment
 {
-    public string Bone { get; set; }
+    public string Point { get; set; }
     public string Effect { get; set; }
     public float Start { get; set; }
     public float End { get; set; } = 1f;
@@ -57,28 +64,45 @@ public sealed class AnimAttachment
 }
 
 public readonly record struct AttachmentSample(AnimationDocument Clip, AnimAttachment Attachment,
-    float Time, float Weight);
+    float Time, float Weight, ResolvedPoint Point);
 
 public static class AttachmentSampling
 {
     // Later layers replace the same bone/effect binding, including outside its active
     // window; otherwise a masked-out base effect could shine through an overlay.
+    // The resolve happens HERE, where the clip is in hand — a clip-local point cannot be
+    // resolved from the renderer, which only sees the sample. Unresolvable attachments are
+    // skipped rather than thrown on: unlike a contact, a missing effect anchor costs a
+    // cosmetic, and the renderer must not take the frame down over one.
     public static void Append(AnimationDocument clip, float time, float weight,
                               List<AttachmentSample> output, Skeleton rig, float[] boneWeights = null)
     {
         if (clip?.Attachments == null) return;
         foreach (var a in clip.Attachments)
         {
-            if (a == null || string.IsNullOrWhiteSpace(a.Bone) || string.IsNullOrWhiteSpace(a.Effect)) continue;
-            int b = rig.IndexOf(a.Bone);
-            if (b < 0) continue;
-            float w = boneWeights == null ? weight : boneWeights[b];
+            if (a == null || string.IsNullOrWhiteSpace(a.Point) || string.IsNullOrWhiteSpace(a.Effect)) continue;
+            if (!EndpointResolver.TryResolvePoint(rig, clip, a.Point, out var rp)) continue;
+            float w = boneWeights == null ? weight : boneWeights[rp.Bone];
             if (w <= 0) continue;
-            output.RemoveAll(s => s.Attachment.Bone == a.Bone && s.Attachment.Effect == a.Effect);
-            output.Add(new AttachmentSample(clip, a, time, w));
+            output.RemoveAll(s => s.Attachment.Point == a.Point && s.Attachment.Effect == a.Effect);
+            output.Add(new AttachmentSample(clip, a, time, w, rp));
         }
     }
 
-    public static Affine2 Transform(in Affine2 bone, AnimAttachment a)
-        => bone * Affine2.FromTRS(Vector2.Zero, a.Rotation, new Vector2(a.Scale));
+    // The frame an attachment hangs in: the point's world POSITION carrying its bone's
+    // orientation, facing and stretch, then the attachment's own rotation and scale. For an
+    // exact tip — every attachment authored so far — this is the bone's world transform
+    // unchanged, so offset and Start-end points are a strict addition here rather than a
+    // reinterpretation. (Contacts still refuse them; the solver pins tips only.)
+    public static Affine2 Transform(Affine2[] world, in Affine2 root, Skeleton rig,
+                                    in ResolvedPoint p, AnimAttachment a)
+    {
+        var bone = world[p.Bone];
+        if (!p.IsExactTip)
+        {
+            Vector2 at = EndpointResolver.World(world, root, rig, p);
+            bone = new Affine2(bone.M11, bone.M12, bone.M21, bone.M22, at.X, at.Y);
+        }
+        return bone * Affine2.FromTRS(Vector2.Zero, a.Rotation, new Vector2(a.Scale));
+    }
 }

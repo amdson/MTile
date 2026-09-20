@@ -27,7 +27,6 @@ namespace MTileDemo;
 //   • A                 — add a key at the nearest curve point (no shape pop).
 //   • X / Delete        — delete the hovered interior key.
 //   • [ / ]             — arc duration (seconds end to end; what animation clips pace against).
-//   • U                 — convert a legacy normalized clip to a pixel box.
 //   • Wheel / right-drag / Home — zoom at cursor / pan / fit.
 //   • R                 — revert to the file on disk.  Ctrl-S — save.  H — help.
 public sealed class HermiteClipGame : Game
@@ -57,12 +56,9 @@ public sealed class HermiteClipGame : Game
     private KeyboardState _prevKb;
 
     private const float PickR = 12f;
-    private const float HandleK = 0.25f;   // fraction of the tangent vector drawn as a handle
-    // Tangent magnitude bounds, as multiples of the anchor span length — the same
-    // shape limits the old normalized editor had, now scale-free.
-    private const float TanMinFrac = 0.05f, TanMaxFrac = 8f;
-    // Conversion box for a legacy normalized clip (U). Any size maps identically.
-    private const float LegacyW = 26f, LegacyH = 40f;
+    private const float HandleK = ArcEditOps.HandleK;   // drawn handle length (ArcEditOps owns the math)
+    // Tangent magnitude bounds, as multiples of the anchor span length — scale-free, so
+    // the same limits hold whatever pixel box the arc is authored in.
 
     private MouseState    _ms;
     private KeyboardState _kb;
@@ -73,7 +69,7 @@ public sealed class HermiteClipGame : Game
     private int W => GraphicsDevice.Viewport.Width;
     private int H => GraphicsDevice.Viewport.Height;
 
-    private float SpanLen => MathF.Max(_doc.Span.Length(), 1e-3f);
+    private float SpanLen => ArcEditOps.SpanLen(_doc);
 
     public HermiteClipGame(string clipName)
     {
@@ -103,8 +99,6 @@ public sealed class HermiteClipGame : Game
         if (_doc != null)
         {
             Console.WriteLine($"Hermite clip editor - loaded {_jsonPath}");
-            if (_doc.IsLegacyNormalized)
-                Console.WriteLine("  legacy normalized clip (entry (0,0), gate (1,-1)) - press U to convert to pixels");
         }
         else
         {
@@ -150,15 +144,12 @@ public sealed class HermiteClipGame : Game
         if (Pressed(Keys.Home)) FitView();
         if (ctrl && Pressed(Keys.S)) Save();
         if (Pressed(Keys.R)) Revert();
-        if (Pressed(Keys.U)) ConvertLegacy();
         // Duration in 0.05s steps, same convention as the animation editor's [ ].
         if (Pressed(Keys.OemOpenBrackets))  SetDuration(_doc.Duration - 0.05f);
         if (Pressed(Keys.OemCloseBrackets)) SetDuration(_doc.Duration + 0.05f);
         if (Pressed(Keys.A)) AddKeyNear(ToClip(mp));
-        if ((Pressed(Keys.X) || Pressed(Keys.Delete)) && _hoverKey > 0 && _hoverKey < _doc.Keys.Count - 1)
+        if ((Pressed(Keys.X) || Pressed(Keys.Delete)) && ArcEditOps.DeleteKey(_doc, _hoverKey))
         {
-            _doc.Keys.RemoveAt(_hoverKey);
-            _doc.RederiveT();
             _hoverKey = -1; _dirty = true;
         }
 
@@ -228,19 +219,13 @@ public sealed class HermiteClipGame : Game
         }
     }
 
-    private Vector2 HandleTip(int i, int side)
-    {
-        var tan = _doc.Keys[i].Tan;
-        if (tan.LengthSquared() < 1e-6f) tan = Vector2.UnitX * SpanLen;
-        return ToScreen(_doc.Keys[i].Pos + tan * (HandleK * side));
-    }
+    private Vector2 HandleTip(int i, int side) => ToScreen(ArcEditOps.HandleTip(_doc, i, side));
 
     // Every key moves freely now — the retarget anchors are separate points, so an arc
     // may start behind the entry or overshoot past the gate.
     private void DragKey(int i, Vector2 p)
     {
-        _doc.Keys[i].Pos = p;
-        _doc.RederiveT();
+        ArcEditOps.DragKey(_doc, i, p);
         _dirty = true;
     }
 
@@ -248,17 +233,13 @@ public sealed class HermiteClipGame : Game
     // (the retarget normalizes by the anchor span), not the drawn curve.
     private void DragAnchor(int which, Vector2 p)
     {
-        if (which == 0) _doc.Entry = p; else _doc.Gate = p;
+        ArcEditOps.DragAnchor(_doc, which, p);
         _dirty = true;
     }
 
     private void DragHandle(int i, Vector2 p)
     {
-        Vector2 tan = (p - _doc.Keys[i].Pos) * _handleSide / HandleK;
-        float len = tan.Length();
-        if (len < 1e-4f) return;
-        tan *= MathHelper.Clamp(len, TanMinFrac * SpanLen, TanMaxFrac * SpanLen) / len;
-        _doc.Keys[i].Tan = tan;
+        ArcEditOps.DragHandle(_doc, i, _handleSide, p);
         _dirty = true;
     }
 
@@ -266,44 +247,12 @@ public sealed class HermiteClipGame : Game
     // sampled), so adding never pops the shape.
     private void AddKeyNear(Vector2 p)
     {
-        const int Samples = 256;
-        float bestT = -1f, bestD = float.MaxValue;
-        for (int i = 0; i <= Samples; i++)
-        {
-            float t = i / (float)Samples;
-            float d = Vector2.DistanceSquared(_doc.Eval(t), p);
-            if (d < bestD) { bestD = d; bestT = t; }
-        }
-        // Refuse right on top of an existing key.
-        float eps = 1e-3f * SpanLen;
-        foreach (var k in _doc.Keys)
-            if (Vector2.DistanceSquared(_doc.Eval(bestT), k.Pos) < eps * eps) return;
-
-        int insert = 1;
-        while (insert < _doc.Keys.Count - 1 && _doc.Keys[insert].T < bestT) insert++;
-        _doc.Keys.Insert(insert, new HermiteClipKey
-        {
-            Pos = _doc.Eval(bestT),
-            Tan = _doc.EvalTangent(bestT),
-        });
-        _doc.RederiveT();
-        _dirty = true;
-    }
-
-    // Legacy normalized clip → pixel box. Pure rescale about the entry anchor, and the
-    // key T values stay put, so the retargeted world arc is untouched.
-    private void ConvertLegacy()
-    {
-        if (!_doc.IsLegacyNormalized) return;
-        _doc.RescaleClipSpace(new Vector2(LegacyW, LegacyH));
-        FitView();
-        _dirty = true;
-        Console.WriteLine($"converted to a {LegacyW}x{LegacyH}px box (arc unchanged) - Ctrl-S to keep");
+        if (ArcEditOps.AddKeyNear(_doc, p, out _)) _dirty = true;
     }
 
     private void SetDuration(float d)
     {
-        _doc.Duration = MathF.Round(MathHelper.Clamp(d, 0.05f, 5f), 2);
+        ArcEditOps.SetDuration(_doc, d);
         _dirty = true;
     }
 
@@ -486,10 +435,8 @@ public sealed class HermiteClipGame : Game
             $"{_doc.Keys.Count} keys   |   dur {_doc.Duration:0.00}s ({_doc.Duration * 60f:0} frames)   |   {keyInfo}",
             new Vector2(16, 28), new Color(160, 170, 185));
         _spriteBatch.DrawString(_font,
-            _doc.IsLegacyNormalized
-                ? "LEGACY normalized units - press U to convert to a pixel box (arc unchanged)"
-                : "A add key   X delete   Shift snap to px   [ ] duration   Ctrl-S save   R revert   H help",
-            new Vector2(16, 46), _doc.IsLegacyNormalized ? Color.Orange : new Color(130, 140, 155));
+            "A add key   X delete   Shift snap to px   [ ] duration   Ctrl-S save   R revert   H help",
+            new Vector2(16, 46), new Color(130, 140, 155));
     }
 
     private static readonly (string Group, string Keys)[] HelpRows =
@@ -499,7 +446,7 @@ public sealed class HermiteClipGame : Game
         ("Keys", "A = add key at nearest curve point    X / Del = delete hovered interior key"),
         ("Time", "[ / ] = arc duration in 0.05s steps - an animation riding this arc advances at (its duration / this one)"),
         ("View", "wheel = zoom at cursor    right/middle-drag = pan    Home = fit"),
-        ("File", "Ctrl-S save json    R revert to disk    U convert legacy normalized clip    Esc quit"),
+        ("File", "Ctrl-S save json    R revert to disk    Esc quit"),
     };
 
     private void DrawHelpOverlay()

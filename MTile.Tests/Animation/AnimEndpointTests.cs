@@ -25,27 +25,41 @@ public class AnimEndpointTests
     }
 
     [Fact]
-    public void LegacyNode_ResolvesToTheBoneTip_AndPointsTakePrecedenceFromTheClip()
+    public void ContactPoints_ResolveThroughTheClipThenTheRigThenTheBoneName()
     {
         var rig = TinyRig(new NamedPoint { Id = "support_l", Bone = "leg_l_lower", Role = "support" });
-        Assert.True(EndpointResolver.TryResolve(rig, null, new ContactLabel { Node = "foot_l" }, out var legacy));
-        Assert.Equal(rig.IndexOf("foot_l"), legacy.Bone); Assert.True(legacy.IsExactTip);
-
-        Assert.True(EndpointResolver.TryResolve(rig, null, new ContactLabel { Point = "support_l" }, out var rp));
+        Assert.True(EndpointResolver.TryResolvePoint(rig, null, "support_l", out var rp));
         Assert.Equal(rig.IndexOf("leg_l_lower"), rp.Bone); Assert.True(rp.IsExactTip);
 
-        // A clip point shadows the rig's by id; a bare bone name resolves as its End.
+        // A bare bone name resolves as that bone's End — the ONE remaining spelling of what
+        // ContactLabel.Node used to mean.
+        Assert.True(EndpointResolver.TryResolvePoint(rig, null, "foot_l", out var byBone));
+        Assert.Equal(rig.IndexOf("foot_l"), byBone.Bone); Assert.True(byBone.IsExactTip);
+
+        // A clip point shadows the rig's by id.
         var clip = new AnimationDocument { Points = new List<NamedPoint> { new() { Id = "support_l", Bone = "foot_l" } } };
         Assert.True(EndpointResolver.TryResolvePoint(rig, clip, "support_l", out var cp));
         Assert.Equal(rig.IndexOf("foot_l"), cp.Bone);
         Assert.True(EndpointResolver.TryResolvePoint(rig, null, "leg_l_lower", out var bare));
         Assert.Equal(BoneEnd.End, bare.End);
 
-        // Both fields, agreeing: fine. Disagreeing: rejected. Unknown: rejected.
-        Assert.True(EndpointResolver.TryResolve(rig, null, new ContactLabel { Node = "leg_l_lower", Point = "support_l" }, out _));
-        Assert.False(EndpointResolver.TryResolve(rig, null, new ContactLabel { Node = "foot_l", Point = "support_l" }, out _));
-        Assert.False(EndpointResolver.TryResolve(rig, null, new ContactLabel { Node = "flipper" }, out _));
-        Assert.Equal(-1, EndpointResolver.BoneOf(rig, null, new ContactLabel { Point = "nope" }));
+        Assert.False(EndpointResolver.TryResolvePoint(rig, null, "flipper", out _));
+    }
+
+    // A contact a consumer cannot honor is an ERROR, never a dropped one: the solver used to
+    // skip both cases silently, so a typo'd id or an offset point just stopped planting a foot.
+    [Fact]
+    public void BoneOf_Throws_OnAnUnresolvableId_AndOnANonTipPoint()
+    {
+        var rig = TinyRig(
+            new NamedPoint { Id = "support_l", Bone = "leg_l_lower", Role = "support" },
+            new NamedPoint { Id = "ball_l",    Bone = "foot_l", Ox = 0.1f },       // offset ≠ exact tip
+            new NamedPoint { Id = "ankle_l",   Bone = "foot_l", End = BoneEnd.Start });
+
+        Assert.Equal(rig.IndexOf("leg_l_lower"), EndpointResolver.BoneOf(rig, null, "support_l"));
+        Assert.Throws<InvalidOperationException>(() => EndpointResolver.BoneOf(rig, null, "nope"));
+        Assert.Throws<InvalidOperationException>(() => EndpointResolver.BoneOf(rig, null, "ball_l"));
+        Assert.Throws<InvalidOperationException>(() => EndpointResolver.BoneOf(rig, null, "ankle_l"));
     }
 
     [Fact]
@@ -93,10 +107,10 @@ public class AnimEndpointTests
         finally { try { Directory.Delete(dir, true); } catch { } }
     }
 
-    // The same run, once with its point labels (support_l/support_r) and once with the labels
-    // rewritten to legacy node names on the same bones: identical solver behavior.
+    // The same run, once with its point labels (support_l/support_r) and once with those ids
+    // replaced by the bare NAMES of the bones they resolve to: identical solver behavior.
     [Fact]
-    public void PointLabeledContacts_DriveTheSolverLikeNodeLabels()
+    public void PointLabeledContacts_DriveTheSolverLikeBoneNamedOnes()
     {
         var clips = AnimationStore.LoadAll(Path.Combine(FindDir("SkeletonStates"), "biped"));
         var baseRig = SkeletonExamples.Load("biped");
@@ -109,19 +123,22 @@ public class AnimEndpointTests
             Name = run.Name, Type = run.Type, Skeleton = run.Skeleton, Duration = run.Duration, Loop = run.Loop,
         };
         foreach (var kf in run.Keyframes)
+            relabeled.Keyframes.Add(new AnimationKeyframe { Time = kf.Time, Bones = kf.Bones, Additions = kf.Additions });
+
+        // Author the spans here rather than reading whatever the clip carries: the property
+        // under test is that a POINT ID and the bare BONE NAME it resolves to drive the solver
+        // identically, and that holds regardless of which contacts the file happens to have.
+        run.Contacts = new List<ContactSpan>
         {
-            var copy = new AnimationKeyframe { Time = kf.Time, Bones = kf.Bones, Additions = kf.Additions };
-            if (kf.Contacts != null)
-            {
-                copy.Contacts = new List<ContactLabel>();
-                foreach (var l in kf.Contacts)
-                {
-                    // The shipped clip carries point labels; the relabeled copy names the bones.
-                    Assert.True(EndpointResolver.TryResolve(rig, run, l, out var rp), $"unresolved label {l.Key}");
-                    copy.Contacts.Add(new ContactLabel { Node = rig.Bones[rp.Bone].Name, Weight = l.Weight, Source = l.Source });
-                }
-            }
-            relabeled.Keyframes.Add(copy);
+            new() { Point = "support_l", Start = 0.00f, End = 0.50f },
+            new() { Point = "support_r", Start = 0.50f, End = 1.00f },
+        };
+        relabeled.Contacts = new List<ContactSpan>();
+        foreach (var cs in run.Contacts)
+        {
+            Assert.True(EndpointResolver.TryResolvePoint(rig, run, cs.Point, out var rp), $"unresolved {cs.Point}");
+            relabeled.Contacts.Add(new ContactSpan
+            { Point = rig.Bones[rp.Bone].Name, Start = cs.Start, End = cs.End, Source = cs.Source });
         }
 
         float[] Trace(Skeleton r, AnimationDocument clip)

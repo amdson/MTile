@@ -72,20 +72,19 @@ public class AnimStepPlannerTests(Xunit.Abstractions.ITestOutputHelper output)
             Name = "gait", Type = "Misc", Skeleton = "tiny", Loop = true, Duration = 0.8f,
             Keyframes = new List<AnimationKeyframe>
             {
-                Key(0.1f, 0.00f, true), Key(0.3f, 0.10f, true),
-                Key(0.6f, 0.25f, false), Key(0.8f, 0.05f, false),
+                Key(0.1f, 0.00f), Key(0.3f, 0.10f), Key(0.6f, 0.25f), Key(0.8f, 0.05f),
             },
+            // The stance the four keys used to imply: planted at 0.1 and 0.3, free after.
+            Contacts = new List<ContactSpan>
+            { new() { Point = "foot", Start = 0.1f, End = 0.6f, Source = ContactSource.PlannedSupport } },
         };
         Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
         return track;
 
-        static AnimationKeyframe Key(float t, float hipRot, bool planted) => new()
+        static AnimationKeyframe Key(float t, float hipRot) => new()
         {
             Time = t,
             Bones = new List<PoseBoneEntry> { new() { Bone = "hip", Rotation = hipRot } },
-            Contacts = planted
-                ? new List<ContactLabel> { new() { Node = "foot", Source = ContactSource.PlannedSupport } }
-                : null,
         };
     }
 

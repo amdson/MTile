@@ -32,14 +32,14 @@ mode flag is given). Any bare argument is taken as a clip name for the editor.
 
 ```bash
 # Animation editor (default mode)
-dotnet run --project MTile.Demo                          # open on the first clip (rig: biped_rabbit)
+dotnet run --project MTile.Demo                          # open on the first clip (rig: biped)
 dotnet run --project MTile.Demo -- walk                  # open a clip by name
-dotnet run --project MTile.Demo -- --rig biped           # edit the legacy rig's clip pool
+dotnet run --project MTile.Demo -- --rig biped           # edit the biped clip pool (the default)
 dotnet run --project MTile.Demo -- walk --usebind rabbit
 
 # Sprite bind editor
 dotnet run --project MTile.Demo -- --bind rabbit                     # SpriteBindings/rabbit.json
-dotnet run --project MTile.Demo -- --bind hero.png                   # legacy: create/edit from a PNG
+dotnet run --project MTile.Demo -- --bind hero.png                   # create a NEW binding from a PNG
 dotnet run --project MTile.Demo -- --bind rabbit --rig biped_rabbit  # pick / re-target the rig
 
 # Art import (decomposed-limb intake, SPRITE_SKIN_PLAN.md §10.2)
@@ -64,12 +64,12 @@ dotnet run --project MTile.Demo -- --ref parkour
 | `<clip>` (bare arg) | editor | Clip name to open (sidebar jumps there). Ignored by other modes |
 | `--rig <name>` | editor, `--bind` | Rig from `Skeletons/<name>.json`, default `biped_rabbit`. **Editor**: also selects the clip pool `SkeletonStates/<name>/`; Ctrl-S rig edits write back to that rig's own file. **Bind editor**: default is the binding's `Skeleton` field (then `biped`); passing a *different* rig re-targets the binding — bones match by name, new bones start at rest, Ctrl-S persists the new rig name. Other modes ignore it (viewer/ref are biped-tied) |
 | `--usebind <binding>` | editor | Superimpose a sprite skin on the rig through scrub/playback. The skin bakes against the **binding's** own `Skeleton` rig; keys: `G` sprite, `W` wireframe, `X` skeleton |
-| `--bind <name\|png\|json>` | mode flag | Open the sprite bind editor. A bare name resolves `SpriteBindings/<name>.json` first (multi-image bindings have no single PNG); a `.png` argument is the legacy path and also creates brand-new bindings |
+| `--bind <name\|png\|json>` | mode flag | Open the sprite bind editor. A bare name resolves `SpriteBindings/<name>.json` first (multi-image bindings have no single PNG); a `.png` argument is how a brand-new binding is created |
 | `--import <dir>` | mode flag | One-time intake of decomposed part art: alpha-crop + downscale each PNG, write `SpriteBindings/<char>/<part>.png` + first-pass binding jsons |
 | `--out <dir>` | `--import` | Output root for imported art (default `SpriteBindings`) |
 | `--scale <f>` | `--import` | Downscale factor for imported art (default `0.25`) |
 | `--load <path>` | mode flag | Take viewer for a `.take.json` recorded in-game (Ctrl+R / Ctrl+S) |
-| `--ref <clip>` | mode flag | Hermite reference-arc editor; loads/saves `ReferenceClips/<name>.json`. Arcs are authored in **game pixels** against the clip's draggable **entry/gate anchors** (green rings) — the runtime rescales from that span onto the obstacle it measures, so keys are free to sit before the entry or past the gate. `U` converts a pre-anchor normalized clip to a pixel box; `[` / `]` set the arc's **Duration** (seconds end to end — what animation clips pace against) |
+| `--ref <clip>` | mode flag | Hermite reference-arc editor; loads/saves `ReferenceClips/<name>.json`. Arcs are authored in **game pixels** against the clip's draggable **entry/gate anchors** (green rings) — the runtime rescales from that span onto the obstacle it measures, so keys are free to sit before the entry or past the gate. `[` / `]` set the arc's **Duration** (seconds end to end — what animation clips pace against) |
 
 Screenshot env vars (dev captures; the window renders a few frames, saves a PNG, and
 exits): `MTILE_SHOT=<path>` works in **every** mode. Modifiers — editor:
@@ -81,14 +81,25 @@ take viewer: `MTILE_SHOT_HELP`, `MTILE_SHOT_FRAME=<n>`.
 
 ## Layout
 
-- **Left sidebar** — the animation list, grouped under a `Type` header, with each
-  entry's keyframe count. The selected clip is highlighted.
-- **Center** — the rig at the current timeline position. Bright = an editable
+The panels are Dear ImGui windows (`MTile.Demo/ImGuiRenderer.cs` is the MonoGame
+backend), so they clip and scroll their own contents; the canvas in the middle is
+unchanged MonoGame drawing, and every gesture on it works exactly as before.
+
+- **Menu bar** — File / Clip / Edit / Scene / View, plus the live status on the right
+  (clip, playhead state, unsaved markers). Every item has a keyboard equivalent.
+- **Clips** (left) — the animation list grouped by `Type`, with a filter box and each
+  entry's keyframe count. The selected clip is highlighted and scrolled into view.
+- **Canvas** (center) — the rig at the current timeline position. Bright = an editable
   keyframe is active; dimmed = an interpolated (non-editable) frame.
-- **Bottom** — the timeline: a track with keyframe **bars** and the orange
-  **playhead**.
-- **Top** — clip name/type, unsaved marker, current frame state, duration/loop, and
-  the active edit mode.
+- **Clip properties** (right) — type, duration, loop, region, reference arc, motion
+  source, the current edit mode and endpoint/effect selection, and the wrapped warnings
+  (guide hint, loop-seam mismatch).
+- **Timeline** (bottom) — play/sample/delete buttons, the track with keyframe **bars**,
+  the orange **playhead**, and the draggable annotation rows — one per contact span (with its
+  weight curve drawn inside) and one per attachment, each with its own label and numbers.
+
+Single-letter shortcuts are suppressed while a text field has focus (the name prompt,
+the clip filter), and a click that lands on a panel never reaches the canvas.
 
 ---
 
@@ -100,6 +111,22 @@ take viewer: `MTILE_SHOT_HELP`, `MTILE_SHOT_FRAME=<n>`.
 | Click/drag on the timeline track | Move the playhead (scrub / interpolate between keyframes) |
 | Click a keyframe **bar** | Select it as the active, editable keyframe |
 | Drag a keyframe **bar** | Move that keyframe in time |
+| Drag a **contact span** (the coloured rows under the track) | Either end retimes that end; the body slides the whole window. Dragging the end past the right edge is how a stance is made to wrap the loop seam |
+| Drag an attachment **span** (the rows below the contacts) | Same gesture. The rows all sit below the keyframe ticks, so a click down there never retimes a pose |
+| `,` / `.` (or the timeline's `< key` / `key >`) | Step to the previous/next keyframe and make it editable |
+
+### View navigation (canvas)
+
+| Input | Action |
+|---|---|
+| **Wheel** | Zoom about the cursor — the scene point under the pointer stays under it (25%–800%) |
+| **Middle-drag** | Pan the view |
+| Arrow keys / `Home` | Nudge the pan (Shift faster) / recenter |
+| `Ctrl+0` | Reset zoom to 100% |
+
+The whole view zooms as one — rig, guides, tile grid, path, ghosts — and every drag converts
+through the live scale, so editing at any zoom writes the same rig-unit values. The wheel over
+a panel scrolls that panel instead.
 
 When the playhead sits exactly on a keyframe, that frame becomes the editable one;
 otherwise you're on an interpolated frame (use `K` to turn it into a keyframe).
@@ -119,128 +146,87 @@ current **edit mode**, cycled with one key:
 | Drag joint (RESIZE) | Move the joint to the cursor — changing the limb's rest **Length on the rig** (persists to `Skeletons/<name>.json`, affects every clip) — rolling the bone's rotation so the subtree follows |
 | **IK drag** box (header) | Toggle the kinematics drag mode. While on, dragging a limb joint solves the limb's chain (up to the hip/chest) so the joint follows the cursor, biased toward the drag-start pose and last frame's solution, with the lower bone's bend kept on its starting side. A cross marks the target and the header row shows the miss in rig units when the target is out of reach. Esc mid-drag restores the drag-start pose. The root/torso, RESIZE, STRETCH and com-marker drags are unchanged |
 | Drag joint (STRETCH) | Slide the joint along the bone's axis — writes the ratio as this **keyframe's `Stretch`** (pseudo-3D foreshortening; rotation and rig untouched). Signed: dragging past the parent joint flips the bone slightly negative, e.g. a hip strut at full leg swap |
-| Drag **com marker** | Place the player against the fixed scenery **per keyframe**: com and skeleton travel with the cursor while the floor line and obstacle block stay put; the drag writes the active keyframe’s `edref` placement (refused while a reference arc is attached — the arc owns placement), and scrubbing interpolates it — so the body visibly arcs over the refs (e.g. parkour clearing its block). Editor-only visualization, saved with the clip (`edref` additions; the runtime ignores them). Arrow keys pan everything together |
+| Drag **com marker** | Place the player against the fixed scenery **per keyframe**: com and skeleton travel with the cursor while the clip's guides stay put; the drag writes the active keyframe’s `body_path` placement, and scrubbing interpolates it — so the body visibly arcs over the refs (e.g. parkour clearing its block). Editor-only visualization, saved with the clip (`edref` additions; the runtime ignores them). Arrow keys pan everything together |
 
-A clip can also ride the maneuver's **authored reference trajectory**: press **A** in the editor to
-cycle one on (or set `"ReferenceArc": "<name>"` in the clip json / run `MTile.Probe -- refarc <clip>
-<name>`). That drives the body's scene placement from `ReferenceClips/<name>.json` (falling back to
-the baked registry defaults) while scrubbing, and **reloads live** when that file is saved — so you
-can keep `--ref <name>` open in a second window and shape the arc while watching the body ride it —
-the header shows `arc <name> <arcDur>s x<ratio> at <progress>`. The arc is authored in game pixels
-against its own entry/gate anchors, so it maps to the scene at true scale — for every clip, including
-Parkour. The reference block is scenery to position the arc *against*, never a retarget target; the
-runtime does its own retargeting onto the obstacle it measures. **Clip and arc have independent durations** — the body
-advances along the arc at `τ · clipDuration/arcDuration`, so a 0.4s clip on a 0.3s arc hits the gate
-at τ≈0.75 and overshoots after. The arc draws into the scene: bright where the clip's timeline
-reaches, dim past it, a green ring at the gate, a dot per keyframe, and a body-radius ring at the
-playhead — author each pose against the dot it lands on: the ring rides the curve exactly, because
-**the arc OWNS placement while it is attached** — `edref` is the fallback for clips with no arc, not
-an additive nudge, so a com-marker drag is refused (with a console hint) rather than pushing the body
-off its own arc. Press **A** to detach the arc if you want to hand-place again. Editor visualization
-only; the runtime ignores it.
-| Drag **root joint** | Move the body **within** the com frame — the inverse edit of the active keyframe's `com` (the game's vertical anchor): the skeleton follows the cursor while the com marker and floor line hold still, exactly as the game will place it |
+A clip can be shaped against a maneuver's **authored reference trajectory**, but it never
+*rides* one: attach the arc as a Scene overlay to see it, then **Scene ▸ Map com to arc** to
+write the clip's own `body_path` from it (see "Reference arcs" below). The clip owns its path
+afterwards, so the com marker keeps editing it and nothing re-reads the arc behind your back.
 
-The active mode is shown in the top header.
+Arcs are authored in game pixels against their own entry/gate anchors, so they map to the scene
+at true scale. The reference block is scenery to position the arc *against*, never a retarget
+target; the runtime does its own retargeting onto the obstacle it measures. **Clip and arc have
+independent durations** — mapping advances along the arc at `τ · clipDuration/arcDuration`, so a
+0.4 s clip on a 0.3 s arc reaches the gate at τ≈0.75 and overshoots after, unless you map
+stretched.
 
 ---
 
-## Scene (the header's **Scene ▾** menu)
+## Scene (the menu bar's **Scene** menu)
 
 The scene is the fixed reference geometry a clip is authored against (`Scene` in the clip
 json: a ground line and axis-aligned blocks, in rig units, X right / Y down at canonical
-right-facing) plus the clip's declared **motion source** (`Motion`). Both are optional: a
-clip without a `Scene` shows the legacy preview (the floor line 2·Radius under the com, the
-one-tile obstacle block for the lip-maneuver clips); the first guide edit turns that preview
-into the clip's own scene. Guides are reference data only — the runtime never spawns them.
+right-facing) plus the clip's declared **motion source** (`Motion`). Every guide a clip shows
+is its own authored data — nothing is synthesized — so the editor, `ClipSceneBake` and
+`probe scenecheck` all read the same geometry. `probe new` starts a clip with the floor line
+it is posed against; add blocks from there. Guides are reference data only — the runtime
+never spawns them.
+
+The menu is organised around the two things an endpoint can carry, because they are the
+two shapes in the data — not around the order the features were written:
 
 | Menu item | Action |
 |---|---|
-| Add ground / Add block | Select the tool, then click to place (drag to size a block). Esc cancels |
-| Select guides | Guide mode: click a guide to select it, drag it to move, drag an edge or corner to resize; the ground line's handle drags its height. **Delete** removes the selected guide (only in guide mode — keyframe deletion is unchanged). Esc leaves guide mode, or restores a drag in progress |
-| Duplicate / Delete / Hide / Lock | On the selected guide. Hidden guides are not drawn or picked; locked guides are picked but not edited |
-| Snap to tile grid | Placement and drag ends snap to the tile grid anchored at the ground line |
-| Motion: auto / in place / authored path / reference arc | Which channel owns the body's scene path. **auto** is the legacy precedence (a named arc, else the `body_path` track, else stationary); **in place** declares a deliberately stationary clip (com-marker drags are refused); **authored path** is the `body_path` track (drag the com marker per keyframe); **reference arc** rides the arc picked with `A` (it must exist — a missing arc is reported in the header, never silently replaced) |
-| Bake arc to editable path | Writes the arc's position at every keyframe into `body_path`, declares the path the motion source and detaches the arc. The console reports the largest gap between the sparse track and the arc between keys |
-| Show path / pose ghosts / contact marks / physics body / tile grid | Preview layers. The path draws the body's scene path with a dot per keyframe; ghosts draw every other keyframe's pose at its own placement, with its planted nodes marked |
-| Frame scene/path | Pans so the path and every visible guide are centered |
-| Follow view | The camera tracks the body instead of the fixed scene (default: fixed, so displacement is visible) |
-| Continuous loop preview | During playback a looping clip accumulates its per-cycle displacement instead of resetting each cycle |
+| *(header)* `<bone> end [id]` | The endpoint's identity. `(unnamed)` means no `NamedPoint` names it yet |
+| Name / Rename this endpoint… | Give this location a stable id. Both kinds of addition hang off it, and contacts reference it rather than the bone — so a bone rename can't silently move a plant. You rarely need this by hand: adding a contact names the endpoint for you |
+| Target: cycle (…) | Only shown when another bone's endpoint is coincident here (a child's Start is its parent's End) — switches which one the menu is about |
+| **Add element** ▸ Knife / Custom… | An **add-on with its own frame**, hung off this endpoint's **named point** and drawn over a window of the clip. `Knife` is the one-step preset: a clip-local orientation bone, a point on its tip, and the `knife` attachment on that point. `Custom…` names any effect from `Assets/AnimationEffects/`. Because an element anchors on a point rather than a bone, it may sit at a point's **offset** — which contacts refuse, since the solver pins tips only |
+| **Add contact** ▸ No slip / Planned support / External pin | **Labeled spline data** on this endpoint: an interval plus a weight curve, read by the solver and never drawn. No slip = `SelfPlant` (capture and hold a world point); Planned support requests a terrain target from the step planner; External pin needs a target supplied by gameplay. All three act **at the playhead** — if a span already covers it the source changes in place, so retyping a contact never retimes it |
+| **Add contact** ▸ Clear the one at the playhead | Removes the span under the playhead, if any |
+| **Add contact** ▸ New span: playhead → next key / whole clip | Where a newly authored span starts and ends. Keyframes are a decent first guess at a plant's extent, but only a guess — the span is draggable afterwards and owes them nothing |
+| *(on this endpoint)* element / contact / point ▸ Select, Remove | Everything already here, each with its verbs. **Select** aims **U / I** and **Delete** at it, and selecting a contact opens its weight-curve editor. **Remove** on a point takes its contacts with it; on an element it takes the clip-local bone it was the last user of |
 
-A selected guide shows its coordinates and size in rig units with the tile size beside them.
-Header text shows the motion source in effect and whether the scene is explicit or legacy.
-Pan/zoom never edits scene data; moving the body never moves the guides.
+The two categories are the menu's whole structure: presets like *Knife* and *No slip* are the
+**submenu** of their category rather than siblings of it. A `NamedPoint` is neither — it is the
+anchor both hang off, which is why naming lives in the header.
 
----
+Contacts reference the rig's or clip's **named points** (`Point`) — the only spelling. A bare
+bone name in that field still resolves, as that bone's tip. A contact naming a point that does
+not exist, or one carrying an offset or sitting at a bone's Start, is an error at solve time
+rather than a quietly dropped contact.
 
-## Contacts (foot-plant labels)
+A contact is an **interval**, not a keyframe annotation: `[Start, End)` on the clip's phase,
+independent of where the keys fall. So a plant can start between keys, retiming a keyframe no
+longer drags every contact keyed on it, and a stance crossing the loop seam is one span with
+`End > 1`. Its bar under the timeline is coloured by source (green no slip, blue planned
+support, orange external pin) and carries its **weight curve** drawn as a profile inside the
+bar — an unauthored weight is an ease-in / hold / ease-out ramp over 15% of the span at each
+end, which is what makes a foot swap a crossover. Two spans overlapping IS the crossfade;
+there is no global feather width any more, so a short plant eases quickly and a long one
+slowly.
 
-Contact labels mark which node is planted on a keyframe; the runtime cadence solver
-pins them for no-slip locomotion. See
-[Plans/ANIMATION_LOCOMOTION_PLAN.md](../Plans/ANIMATION_LOCOMOTION_PLAN.md).
-
-| Input | Action |
-|---|---|
-| **M + click** a node | Toggle a No-slip (`SelfPlant`) contact on that endpoint (active keyframe) — a point label when the rig or clip names it, else the legacy node |
-
-Contact-labeled nodes are drawn with a **green halo** on the active keyframe. Sampling
-a new keyframe with **K** inherits the contact marks in effect at the playhead by
-default (deep-copied, so editing one keyframe's marks doesn't change the other's).
-
----
-
-## Keyframes, playback & clip settings
-
-| Input | Action |
-|---|---|
-| **K** | Sample the current (possibly interpolated) pose into a new keyframe at the playhead, and make it active |
-| **Delete** | Delete the active keyframe |
-| **Space** | Play / pause timeline playback (honors Duration & Loop) |
-| **[** / **]** | Decrease / increase the clip's Duration (seconds) by 0.1 |
-| **L** | Toggle Loop on/off |
-| **R** | Cycle the clip's Region: **FullBody → UpperBody → LowerBody**. Region is the bone mask an *action overlay* clip owns when layered over movement at runtime — a slash is `UpperBody` (chest/head/arms) so the legs keep walking. Movement clips stay `FullBody` (the default; not written to JSON) |
-| **A** / **Shift-A** | Attach the next / previous **reference arc** to this clip, wrapping through `none`. Offers the baked arc names plus every `ReferenceClips/*.json`. Same edit as `MTile.Probe -- refarc`, saved with Ctrl-S |
-| **T** / **Shift-T** | Cycle the clip's Type forward/back through the known categories: movement clips (`Idle`, `Walk`, …) plus every action state name (`GroundSlash1`, `StabAction`, …). The runtime binds action overlay clips by exact action name |
-
----
-
-## File operations
-
-| Input | Action |
-|---|---|
-| **`** | Toggle the block grid — one cell = one game tile (`Chunk.TileSize`), anchored to the floor line and the scene origin so cell edges sit where terrain would. On by default |
-| **O** | Toggle the player's **physics polygon** — the game's collision hexagon (`PlayerCharacter.CreateBodyPolygon`), drawn at true game scale around the com anchor. Its bottom vertex hovers one `Radius` above the floor line, exactly the in-game float height. Off by default |
-| **Ctrl-S** | Save **all** animations to their JSON files (`*unsaved*` clears) — including each clip's `Scene` and `Motion` |
-| **N** | Create a new (empty) animation |
-| **C** | Clone the selected animation — deep-copies all keyframes/contacts into a new clip named `<name>_copy`, selected and ready to edit (saved as a separate file on Ctrl-S). Use it to fork a variant, e.g. derive a run from the walk |
-| **Escape** | Close the Scene menu / cancel a guide placement or drag / leave guide mode — and, with nothing to cancel, quit |
-
-Edits are kept in memory until `Ctrl-S`; the header shows `*unsaved*` while dirty.
-
-## Endpoints (contacts, points, elements)
-
-Click a **joint** (a bone's far end) to select that endpoint; a small **v** appears beside
-it, and **right-click** on any joint opens the same menu directly. The selected bone's
-segment is highlighted, so at a shared joint you can see which bone's END is the target
-(the first item cycles among overlapping targets).
-
-| Menu item | Action |
-|---|---|
-| Add knife | One operation: a clip-local orientation bone at the endpoint plus the `knife` attachment on it, selected so **U / I** trim its window |
-| Add custom element… | Name an effect attached to this bone (the same as **E**) |
-| Add contact point / Contact point: `<id>` | Names this endpoint (a clip point) when neither the rig nor the clip already does; the rig's `support_l` / `support_r` are the feet |
-| Add named marker… | A named point here with no contact behavior |
-| Contact: No slip / Planned support / External pin / Clear | Set or clear the contact on this endpoint over the scope. No slip = `SelfPlant` (capture and hold a world point); Planned support requests a terrain target from the step planner; External pin needs a target supplied by gameplay |
-| Scope: this key → next key / whole clip | The keyframe contact convention (a label holds until the next key) or every keyframe. On an interpolated playhead a key is sampled there first |
-| Effect: … / Point: … | Select an attached item (then **U / I**, **Shift+E**, or **Delete** for a clip point — its contact annotations go with it) |
-
-Contact labels reference the rig's or clip's **named points** (`Point`); legacy labels by
-bone name (`Node`) keep working. Contact bars under the timeline show each label's interval
-colored by source: green no slip, blue planned support, orange external pin.
+**Selecting a contact bar opens its weight-curve editor.** The curve is authored on the span's
+own normalized domain, so the editor's x axis is a *fraction of the span*, not clip time —
+retiming the span stretches the shape rather than redrawing it. Drag a key to move it, drag its
+amber tangent handle to set the ease, or **Auto tangent** to hand it back to the sampler (amber
+keys are authored, blue are derived). **Add key** drops a handle at the playhead without moving
+the line; the two end keys are pinned in time because they *are* the span's ends, and move
+vertically only. **Reset to ramp** clears the curve back to unauthored; **Flat 1.0** pins it
+at full weight with no ease. The orange playhead line shows the weight at the current frame
+when the playhead is inside the span.
 
 ### Clip sprite attachments
 
 Hover a joint and press **E** to assign an effect name (`knife` is supplied).
-**Shift+E** removes it. After selecting with E, **U / I** set its start/end to
-this clip's playhead time. **Ctrl+S** saves. Space previews the moving trail;
+**Shift+E** removes one — it now deletes whatever is *selected*, falling back to the
+nearest attached joint only when nothing is; the endpoint menu's `remove` item is the
+discoverable form of the same thing.
+
+An attachment's lifetime is a **span on the timeline**, one row per attachment under the
+track: drag either end to retime it, drag the body to slide it, and read its numbers off the
+label. **U / I** still set start/end to the playhead. A knife's trail window
+(`TrailStart`/`TrailEnd`, a second lifetime nested inside the blade's) draws as a thin amber
+line inside the span; sliding the span carries it along, and dragging an end clamps it back
+inside, so it can never describe a trail outside the blade's own window. **Ctrl+S** saves. Space previews the moving trail;
 scrubbing previews a single blade frame. See [KNIFE_ATTACHMENTS.md](../Plans/KNIFE_ATTACHMENTS.md)
 for orientation, JSON fields, and shared PNG strip assets.

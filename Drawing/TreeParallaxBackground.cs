@@ -100,7 +100,6 @@ public sealed class TreeParallaxBackground : IBackdrop, IDisposable
         public TreeType Tree;    // which tree art this layer uses
         public float Z;          // depth in focal lengths; parallax + scale = Proj(Z)
         public float TreeHeight; // base tree height in WORLD px (play-plane scale)
-        // public float MaxTreeHeight; 
         public float Spacing;    // slot spacing in WORLD px; on screen it's Spacing*Proj(Z)
         public int SlotCount;    // slots per baked strip; period = Spacing*Proj(Z)*SlotCount
         public int SkipPct;      // % of slots left empty (sparseness)

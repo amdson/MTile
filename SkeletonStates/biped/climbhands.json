@@ -5,33 +5,66 @@
   "Duration": 0.45,
   "Loop": false,
   "Region": "UpperBody",
+  "Scene": {
+    "Guides": [
+      {
+        "Id": "g1",
+        "Kind": "Ground",
+        "X": 0,
+        "Y": 40,
+        "W": 0,
+        "H": 0,
+        "Label": "floor"
+      }
+    ]
+  },
   "Keyframes": [
     {
       "Time": 0,
       "Bones": [
         {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
           "Bone": "chest",
-          "Rotation": -1.1207963
+          "Rotation": -1.5707964
         },
         {
           "Bone": "head",
-          "Rotation": -0.14999998
+          "Rotation": 0
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": 0.74159265
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": -0.49999994
+          "Rotation": 0
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": -0.74159265
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": 0.5
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1.5707964
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.5707964
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -39,46 +72,7 @@
           "Name": "com",
           "Kind": "Point",
           "Px": 0,
-          "Py": -20.940285,
-          "Dx": 0,
-          "Dy": 0
-        }
-      ]
-    },
-    {
-      "Time": 1,
-      "Bones": [
-        {
-          "Bone": "chest",
-          "Rotation": -1.4707963
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0.14999998
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": -2.6415927
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -0.20000005
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": 2.6415925
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": 0.20000005
-        }
-      ],
-      "Additions": [
-        {
-          "Name": "com",
-          "Kind": "Point",
-          "Px": 0,
-          "Py": -20.940285,
+          "Py": -21,
           "Dx": 0,
           "Dy": 0
         }

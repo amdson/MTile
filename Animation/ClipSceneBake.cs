@@ -166,7 +166,7 @@ public static class ClipSceneBake
         result = null;
         if (!ClipStrideTrack.TryCompile(doc, rig, out var gait, out error, anySource: true)) return false;
         if (gait.Feet.Length == 0) { error = $"'{doc.Name}' has no contact labels"; return false; }
-        var motion = ClipMotion.Resolve(doc, null);
+        var motion = ClipMotion.Resolve(doc);
         var off = new Offsets(doc, rig);
         var r = new CheckResult { Source = motion.Source.ToString(), CycleDisplacement = motion.CycleDisplacement };
         Vector2 Scene(int bone, float t) => motion.ExtendedBodyAt(t) + off.At(bone, t);
@@ -227,7 +227,7 @@ public static class ClipSceneBake
     {
         report = null;
         if (!ClipStrideTrack.TryCompile(doc, rig, out var gait, out error, anySource: true)) return false;
-        var motion = ClipMotion.Resolve(doc, null);
+        var motion = ClipMotion.Resolve(doc);
         if (motion.Source != MotionSource.Track) { error = $"'{doc.Name}' has no baked body_path (run bakepath first)"; return false; }
         var off = new Offsets(doc, rig);
         var sb = new StringBuilder();

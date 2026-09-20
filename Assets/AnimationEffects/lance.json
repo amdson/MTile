@@ -1,0 +1,20 @@
+{
+  "Image": "lance.png",
+  "FrameWidth": 320,
+  "FrameHeight": 160,
+  "FrameCount": 8,
+  "PivotX": 16,
+  "PivotY": 80,
+  "RigUnitsPerPixel": 0.36,
+  "TipPixels": [
+    22,
+    107,
+    149,
+    200,
+    261,
+    203,
+    122,
+    20
+  ],
+  "TrailSeconds": 0
+}

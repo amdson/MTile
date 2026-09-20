@@ -6,15 +6,14 @@ namespace MTile;
 // The moving state of a skeleton: one local BoneTransform per bone plus a cached
 // array of resolved world transforms. Render-only — nothing here feeds the sim.
 //
-// Typical use each render frame:
-//     pose.BlendToward(targetPose, 1f - MathF.Exp(-stiffness * dt));  // procedural ease
-//     var world = pose.ComputeWorld(root);                            // root = world placement
+// Typical use each render frame — the pose arrives already solved (CharacterAnimator does
+// its easing INSIDE the solve; there is no procedural blend step here any more):
+//     var world = pose.ComputeWorld(root);   // root = world placement
 //     SkeletonRenderer.Draw(ctx, pose, root);
 public sealed class SkeletonPose
 {
     public readonly Skeleton        Skeleton;
     public readonly BoneTransform[] Local;    // editable per-bone local transforms
-    // public readonly Affine2 Root = Affine2.Identity; // world placement of the whole skeleton (root bone is local to this)
     private readonly Affine2[]      _world;    // resolved by ComputeWorld
     private bool _worldValid;
 
@@ -68,20 +67,6 @@ public sealed class SkeletonPose
         _worldValid = false;
     }
 
-    public void SetLocal(string bone, in BoneTransform t) => SetLocal(Skeleton.IndexOf(bone), t);
-
-    // Rotate / translate / scale a single bone's local transform in place.
-    public void Rotate(int bone, float deltaRadians)
-    {
-        Local[bone].Rotation += deltaRadians;
-        _worldValid = false;
-    }
-
-    public void Translate(int bone, Vector2 delta)
-    {
-        Local[bone].Translation += delta;
-        _worldValid = false;
-    }
 
     // ---- interpolation -------------------------------------------------------
 
@@ -96,28 +81,6 @@ public sealed class SkeletonPose
         dest._worldValid = false;
     }
 
-    // In-place blend toward a target — the building block for spring / critically-
-    // damped smoothing. Call each render frame with t = 1 - exp(-stiffness * dt)
-    // for framerate-independent easing of the current pose toward `target`.
-    public void BlendToward(SkeletonPose target, float t)
-    {
-        if (target.Count != Count) throw new ArgumentException("Pose bone count mismatch.");
-        for (int i = 0; i < Count; i++)
-            Local[i] = BoneTransform.Lerp(Local[i], target.Local[i], t);
-        _worldValid = false;
-    }
-
-    // Per-bone blend factor — same as above but each bone eases at its own rate
-    // (t[i] = 1 - exp(-stiffness_i * dt)). Lets a faster-moving region (e.g. an
-    // attacking upper body) snap to its target while the rest keeps a softer follow.
-    public void BlendToward(SkeletonPose target, ReadOnlySpan<float> t)
-    {
-        if (target.Count != Count) throw new ArgumentException("Pose bone count mismatch.");
-        if (t.Length != Count) throw new ArgumentException("Blend-factor count mismatch.");
-        for (int i = 0; i < Count; i++)
-            Local[i] = BoneTransform.Lerp(Local[i], target.Local[i], t[i]);
-        _worldValid = false;
-    }
 
     // ---- world resolution ----------------------------------------------------
 
@@ -145,5 +108,4 @@ public sealed class SkeletonPose
         return _world[bone];
     }
 
-    public Vector2 WorldPosition(int bone) => WorldOf(bone).Translation;
 }

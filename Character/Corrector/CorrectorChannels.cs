@@ -56,7 +56,7 @@ public static class CorrectorChannels
     // CornerAssist is lift-only for the same reason. The redirect disc may
     // still shed speed — passivity is its physical semantics (a deflection off
     // planted feet) — and exists only near the ground.
-    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir, float targetSpeed,
+    public static int BuildFold(CorrectorScratch s, int n, int rowCount, int dir,
                                 float supportVy = 0f)
     {
         var cfg = MovementConfig.Current;

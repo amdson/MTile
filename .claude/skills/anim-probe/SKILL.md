@@ -115,7 +115,9 @@ These are the lessons that cost the most time. They generalize beyond any one cl
    dotnet $P new <name> <Type> --dur 0.8 --from crouch      # create; pose copied from an existing clip (or rest)
    dotnet $P addkey <clip> 0.25 [--from clip@t]             # insert key; default = own C1 sample (shape-preserving)
    dotnet $P ik <clip> 0.25 foot_l --to 4.5,15 --write      # place limb tips (the main posing tool)
-   dotnet $P contact <clip> 0.25 foot_l                     # set the planted contact ('none' clears)
+   dotnet $P contact <clip> 0.1 0.6 support_l [planned]     # author a contact SPAN (phase start/end)
+   #   end may exceed 1 to wrap a loop seam (0.8 1.2 = one stance); 'none' as the first arg clears all;
+   #   --clear drops that point's existing spans first, so re-running retimes instead of stacking.
    dotnet $P rot <clip> 0 chest -1.25                       # raw-angle escape hatch (torso/head only; --deg)
    dotnet $P retime <clip> 0.5 0.6 | delkey <clip> 0.5 | dur <clip> 0.9
    dotnet $P addcom <clip>                                  # stamp the grounded com anchor LAST
@@ -123,7 +125,7 @@ These are the lessons that cost the most time. They generalize beyond any one cl
    dotnet $P bakeyaw [clip] [--view 18] [--swap -0.2] [--ref 1.0] [--shoulderamp 0.5] [--dry]
    #   bake pelvis/shoulder yaw foreshortening from the leg/arm scissor (strutted rigs
    #   only, e.g. --rig biped_rabbit); re-runnable. See Plans/ANIMATION_STRETCH_AND_REFERENCE.md
-   dotnet $P refarc <clip> <arcName|none>                   # bind a ReferenceClips arc (editor placement aid)
+   dotnet $P mapcom <clip> <arc> [--local] [--stretch]       # write body_path FROM an arc (--local: the clip's own)
    ```
    Command semantics that cost batch workers cycles (learn them here instead):
    - **Keyframe `Time` args are normalized [0,1]** fractions of the clip, NOT seconds —
@@ -158,7 +160,7 @@ These are the lessons that cost the most time. They generalize beyond any one cl
    The proven recipe (how crouchwalk was authored end-to-end without computing one leg angle):
    copy a base pose into each key (`new --from` / `addkey --from`), read the reference clip's
    digest for choreography numbers (stride, plant depth, contact pattern), then `ik --to` every
-   foot/hand target per key, `contact` per key, `addcom`, digest. Mirror-symmetric targets +
+   foot/hand target per key, one `contact` span per stance, `addcom`, digest. Mirror-symmetric targets +
    mirrored seeds give exactly mirrored solved halves for free.
 
 4. **Verify** by re-running the fast `MTile.Probe -- digest <clip>` (no rebuild) and checking the
@@ -325,24 +327,27 @@ Three solver gotchas (each cost a calibration worker real iterations):
 - **One planted Contact per keyframe.** Two simultaneous contacts moving opposite
   ways (lead sweeping back + trailing toe-off) cancel in the slip minimizer and
   **freeze** Δφ ≈ 0 (the walk won't advance). Use a single dominant foot.
-- **Contact timing = labels + `FeatherWidth` (0.12), NOT foot detection.** A
-  contact holds full weight from its keyframe until `nextKeyframe.Time − 0.12`,
-  then crossfades 1→0 to the next keyframe over that 0.12, and is removed at
-  weight ≤ 1e-3 ([WeightedContactsAtPhase](../../../Animation/CharacterAnimator.cs)).
-  The target is captured ONCE when the contact appears and held until it drops.
+- **Contact timing = AUTHORED SPANS, NOT foot detection and no longer keyframes.** A
+  contact is an interval `[Start, End)` on the clip (`ContactSpan`), independent of where
+  the keyframes fall, and its strength across that interval is an `AnimCurve` — unauthored
+  means an ease-in / hold / ease-out ramp over 15% of the span at each end. There is no
+  global `FeatherWidth` any more: a short plant eases quickly, a long one slowly. The target
+  is captured ONCE when the contact appears and held until it drops
+  ([WeightedContactsAtPhase](../../../Animation/CharacterAnimator.cs)).
 - **The freeze rule (run/short stance).** If a contact (even at tiny residual
   weight) is still alive when the planted foot **reverses** (toe-off → swings
   forward), its now-stale target can't be reached, the slip term pins Δφ→0, and
   the **phase freezes** at that value. Diagnose by printing per-frame phase — it
   sticks. So the contact must fully fade BEFORE the foot's rearmost point.
-- **Extending the pin across the whole stance (the right way).** To keep a foot
-  pinned through its full backward sweep (not just the strike instant): put the
-  Contact label on the strike AND mid-stance keyframes (consecutive contact
-  keyframes stay full weight — they crossfade foot→foot), then make the **toe-off
-  keyframe a NO-contact DROP point placed a feather-width before rearmost**. The
-  fade then completes over [toe-off−0.12, toe-off], entirely within the backward
-  sweep, releasing before the reversal. Find rearmost from the probe (min toe.X /
-  where toe vX flips sign) and put the drop keyframe ~0.04 phase before it.
+- **Extending the pin across the whole stance (now trivial).** Author ONE span covering the
+  whole stance. The old recipe — label the strike and mid-stance keys, then place a
+  no-contact drop key a feather-width before rearmost so the fade lands inside the backward
+  sweep — was entirely about steering an interval you could not state directly. State it:
+  set `End` so the ramp-out completes before the foot reverses. Find rearmost from the probe
+  (min toe.X / where toe vX flips sign) and end the span there; the ramp-out occupies the
+  last 15% of the span, so the effective release begins at `End − 0.15·(End − Start)`.
+- **A stance that crosses the loop seam is one span**, written with `End > 1`
+  (`contact walk 0.8 1.2 support_l`) — not two spans meeting at the seam.
 - Slip is **horizontal-only** by design (penalizing the foot's vertical arc froze
   the cadence below run speed).
 - Re-authoring a clip shifts its cadence objective, so the experimental

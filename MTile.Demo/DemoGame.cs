@@ -22,7 +22,11 @@ namespace MTileDemo;
 //
 // Animations are AnimationDocuments (Animation/*.cs) — the format a runtime player
 // can later consume. The editor never touches the sim.
-public sealed class DemoGame : Game
+//
+// This file is the CANVAS half: state, picking, drags, and the rig/scene rendering. The
+// chrome (menu bar, clip list, inspector, timeline, popups) lives in DemoGame.Ui.cs on
+// Dear ImGui, which owns panel layout, clipping and z-order.
+public sealed partial class DemoGame : Game
 {
     private readonly GraphicsDeviceManager _graphics;
     private SpriteBatch _spriteBatch;
@@ -48,20 +52,18 @@ public sealed class DemoGame : Game
     // retime follows); gameplay placement doesn't consume it yet (see BodyPath's
     // runtime-status note).
     private const string BodyPathName = BodyPath.ChannelName;
-    private bool _warnedArcPlacement;   // one-shot hint when a com drag is refused (arc owns placement)
     // The scene components (Plans/ANIMATION_SCENE_AUTHORING_PLAN.md "Refactor boundaries"):
     // placement (view + the shared ClipMotion query), guide editing, preview drawing, and the
     // header's Scene dropdown. DemoGame stays the MonoGame host wiring them together.
     private readonly ScenePlacement _placement = new();
     private readonly SceneGuideView _guides    = new();
     private readonly ScenePreview   _preview   = new();
-    private readonly SceneMenu      _menu      = new();
     private SkeletonPose _ghostPose;            // scratch for keyframe ghosts
     // ENDPOINT MENU (Plans/ANIMATION_SCENE_AUTHORING_PLAN.md "Endpoint menus"): click an
     // endpoint (a bone's far tip) to select it and show a small "v" affordance beside it;
     // right-click opens the same menu directly. Items add elements (knife), named points,
-    // and contact annotations for a scope, backed by EndpointResolver / NamedPoint.
-    private readonly SceneMenu _endpointMenu = new() { Label = "v" };
+    // and contact annotations for a scope, backed by EndpointResolver / NamedPoint. The menu
+    // itself is an ImGui popup now (DemoGame.Ui.cs EndpointPopup) — selection stays here.
     private int     _selectedEndpoint = -1;     // bone whose End is selected
     private bool    _contactWholeClip;          // edit scope: this key → next key (default) or the whole clip
     private Vector2 _pressPos;                  // where the left button went down (click vs drag)
@@ -70,24 +72,15 @@ public sealed class DemoGame : Game
     // interactive solve (PoseIk.DragSession) pulling the clicked node toward the mouse,
     // biased toward the drag-start pose and last frame's solution, instead of the direct
     // rotate-one-bone edit. Escape mid-drag restores the drag-start pose.
-    private bool _ikMode;
+    private bool _ikMode;                       // toggled from Edit ▸ IK drag / the inspector
     private PoseIk.DragSession _ikDrag;
-    private Rectangle _ikToggle;                // header box; picking priority header-first
-    // The clip's reference trajectory (Doc.ReferenceArc), loaded on clip select: the
-    // authored maneuver arc (ReferenceClips/<name>.json, else the baked registry default)
-    // that drives the body's scene placement while scrubbing. Null = no arc.
-    private HermiteClipDocument _refArc;
-    private string   _refArcPath;    // the file _refArc came from (null = baked default), watched for saves
-    private DateTime _refArcStamp;
-    private float        _floorLocalY;   // bind-pose sole height (skeleton-local), the legacy floor line
 
-    // COM-ANCHORED placement (clips that author a "com" track — all of them, post addcom):
-    // the rig is drawn exactly the way the game places it — root = anchor − com·scale — so the
-    // com marker sits at a FIXED screen point (ScenePlacement.Anchor) and the ground line sits
-    // 2·Radius/SkeletonScale rig-units below it. Dragging the ROOT joint edits the active
-    // keyframe's com INVERSELY: the skeleton follows the cursor while com marker and ground
-    // stay put — "place the body against the ground", the control for authoring the com arc.
-    // Clips with no com keep the old fixed-root placement (ScenePlacement.ComAnchored false).
+    // COM-ANCHORED placement: the rig is drawn exactly the way the game places it —
+    // root = anchor − com·scale — so the com marker sits at a FIXED screen point
+    // (ScenePlacement.Anchor) and the nominal ground line sits 2·Radius/SkeletonScale rig-units
+    // below it. Dragging the ROOT joint edits the active keyframe's com INVERSELY: the skeleton
+    // follows the cursor while com marker and ground stay put — "place the body against the
+    // ground", the control for authoring the com arc.
 
     private string                   _dir;
     private List<AnimationDocument>  _docs = new();
@@ -102,11 +95,16 @@ public sealed class DemoGame : Game
     private int           _dragBone = -1, _hoverBone = -1;
     private int           _dragBar  = -1;     // keyframe bar being moved
     private bool          _dragPlayhead;
+    // Timeline span drag (attachment windows today; contact spans next). The grabbed part
+    // and where inside the span the grab landed, so a body slide keeps its grip point.
+    private AnimAttachment _dragAttachSpan;
+    private ContactSpan    _dragContactSpan;
+    private SpanPart       _dragSpanPart;
+    private float          _dragSpanOffset;
+    private ContactSpan    _selectedContact;   // a contact span picked from its timeline bar
     private bool          _dragRoot;          // dragging the root joint = placing the body (or panning)
     private enum EditMode { Rotate, Resize, Stretch }
     private EditMode      _editMode = EditMode.Rotate;   // Tab cycles
-    private float         _sidebarScroll;                // clip-list scroll offset, px (0 = top)
-    private bool          _dragSidebarThumb;             // dragging the sidebar scrollbar thumb
     private bool          _playing;           // timeline playback
     private float         _playTime;          // seconds into playback
     private MouseState    _prevMs;
@@ -130,10 +128,8 @@ public sealed class DemoGame : Game
     private bool         _pendingBoneBase;     // Shift+B: add to the base rig vs the active clip
     private bool         _showHelp;           // H toggles the grouped controls panel
 
-    private const int   SidebarW = 250;
-    private const int   PadTop   = 12;
-    private const int   RowH     = 40;
-    private const float RigScale = ScenePlacement.RigScale;
+    private bool _panDrag;   // middle-button view pan in progress
+    private ArcEditSession _arcEdit;   // the open in-clip arc edit, or null
     private const float PickR    = 12f;
     private const float SnapEps  = 0.012f;
 
@@ -184,14 +180,9 @@ public sealed class DemoGame : Game
         _font = Content.Load<SpriteFont>("DebugFont");
         _draw = new DrawContext(_spriteBatch, _pixel);
 
-        // Printable characters for the naming mode. Control chars (Enter/Back/Esc) are
-        // handled by keyboard polling; this only fires once naming is active, so the key
-        // that *starts* naming (P/V/B) isn't captured (naming isn't on yet when it fires).
-        Window.TextInput += (s, e) =>
-        {
-            if (_naming != NameTarget.None && !char.IsControl(e.Character))
-                _nameBuffer += e.Character;
-        };
+        // The UI layer owns text entry now (the name modal's field), so it takes the
+        // window's TextInput; the editor no longer polls characters itself.
+        InitUi();
 
         _shotPath = Environment.GetEnvironmentVariable("MTILE_SHOT");
         if (Environment.GetEnvironmentVariable("MTILE_SHOT_HELP") != null) _showHelp = true;
@@ -203,13 +194,20 @@ public sealed class DemoGame : Game
         // if missing (no procedural fallback), and the clip list is exactly what's
         // on disk in SkeletonStates/<rigName>/ — one dir per base rig (no seed
         // autogeneration). N / C create clips there.
-        // Default rig is biped_rabbit — the one actually being authored. --rig biped
-        // still opens the legacy rig and its own SkeletonStates/biped/ clip dir.
-        _baseSkeleton = SkeletonExamples.Load(_rigArg ?? SkeletonExamples.RabbitName);
+        // Default rig is biped — the one actually being authored. --rig biped_rabbit
+        // opens the strutted rig and its own SkeletonStates/biped_rabbit/ clip dir.
+        _baseSkeleton = SkeletonExamples.Load(_rigArg ?? SkeletonExamples.BipedName);
         _dir = Path.Combine(FindStatesDir(), _baseSkeleton.Name);
+        // Derived overlays (SceneReferences: the hover lines) read the game's live tuning, so
+        // load the same movement config Game1 does — otherwise they would draw code defaults.
+        try
+        {
+            string cfg = Path.Combine(Path.GetDirectoryName(FindStatesDir()) ?? ".", "configs", "movement_config.json");
+            if (File.Exists(cfg)) MovementConfig.Load(cfg);
+        }
+        catch { /* the overlays fall back to code defaults; never block startup on tuning */ }
         _attachments = new SpriteAttachmentRenderer(GraphicsDevice,
             Path.GetFullPath(Path.Combine(_dir, "..", "..", "Assets", "AnimationEffects")));
-        LoadViewState();
         if (_bindingArg != null)
         {
             string path = ResolveBindingPath(_bindingArg);
@@ -231,11 +229,6 @@ public sealed class DemoGame : Game
         _kfC  = _skeleton.CreatePose();
         _kfD  = _skeleton.CreatePose();
         _ghostPose = _skeleton.CreatePose();
-
-        // Floor line = the bind-pose sole (lowest joint/tip), so authored feet have a
-        // ground reference to plant against. Matches CharacterAnimator's sole logic.
-        // Recomputed whenever the rig bind changes (see RecomputeFloorLine).
-        RecomputeFloorLine();
 
         UpdateRoot();
 
@@ -268,28 +261,23 @@ public sealed class DemoGame : Game
 
     protected override void Update(GameTime gameTime)
     {
+        // The chrome is built FIRST: its widget actions land on this update like any other
+        // edit, and it reports whether the cursor/keyboard belong to a panel this frame.
+        BuildUi(gameTime);
+        var io = ImGuiNET.ImGui.GetIO();
+        bool uiMouse = io.WantCaptureMouse;      // cursor is over a panel/popup
+        bool uiKeys  = io.WantCaptureKeyboard;   // a text field has focus
+
         var ms = Mouse.GetState();
         var kb = Keyboard.GetState();
         var mp = new Vector2(ms.X, ms.Y);
+        bool onCanvas = !uiMouse && _canvas.Contains((int)mp.X, (int)mp.Y);
 
-        // Naming mode swallows all other input: Enter commits, Esc cancels, Back edits.
-        if (_naming != NameTarget.None)
+        // Escape cancels an IK drag, then a guide placement/drag, and quits only when there
+        // is nothing left to cancel. The name modal owns Escape while it is open (uiKeys).
+        if (!uiKeys && Pressed(kb, Keys.Escape))
         {
-            if (Pressed(kb, Keys.Back) && _nameBuffer.Length > 0) _nameBuffer = _nameBuffer[..^1];
-            else if (Pressed(kb, Keys.Enter))  CommitName();
-            else if (Pressed(kb, Keys.Escape)) CancelName();
-            _prevMs = ms; _prevKb = kb;
-            base.Update(gameTime);
-            return;
-        }
-
-        // Edge-triggered so an Escape still held from cancelling a label (which
-        // returned above last frame) doesn't immediately fall through and Exit. Escape
-        // first closes the Scene menu, then cancels a guide placement/drag or leaves the
-        // guide tool, and only quits when there is nothing to cancel.
-        if (Pressed(kb, Keys.Escape))
-        {
-            if (_menu.Open) _menu.Open = false;
+            if (_arcEdit != null) CloseArcEditor(save: false);
             else if (_ikDrag != null && _dragBone >= 0)
             {
                 // Cancel the IK drag: back to the drag-start pose (the drag itself ends).
@@ -299,98 +287,25 @@ public sealed class DemoGame : Game
             }
             else if (!_guides.Cancel(Doc)) Exit();
         }
-        UpdateRoot();   // tracks window size + the flip toggle
-        var (guideFrame, groundY) = _placement.GuideFrame(Doc, _floorLocalY);
-        _menu.Button = new Rectangle(W - 100, 6, 88, 22);
-        _ikToggle = new Rectangle(W - 190, 6, 84, 22);
-        BuildSceneMenu();
+        UpdateRoot();   // tracks the canvas rect + the playhead
+        var (guideFrame, groundY) = _placement.GuideFrame();
 
-        bool ctrl        = kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl);
+        // VIEW NAVIGATION (canvas only — over a panel the wheel belongs to ImGui):
+        // wheel zooms about the cursor, middle-drag pans. Both are view-only; the root-joint
+        // drag still authors the com, and the arrow keys still nudge.
+        int wheel = ms.ScrollWheelValue - _prevMs.ScrollWheelValue;
+        if (wheel != 0 && onCanvas) _placement.ZoomBy(MathF.Pow(1.1f, wheel / 120f), mp);
+        bool midDown = ms.MiddleButton == ButtonState.Pressed;
+        if (midDown && _prevMs.MiddleButton == ButtonState.Released && onCanvas) _panDrag = true;
+        if (!midDown) _panDrag = false;
+        if (_panDrag) _placement.Pan += mp - new Vector2(_prevMs.X, _prevMs.Y);
+
         bool mDown       = kb.IsKeyDown(Keys.M);   // M + click toggles a node's contact mark
         bool leftDown    = ms.LeftButton == ButtonState.Pressed;
         bool leftPressed = leftDown && _prevMs.LeftButton == ButtonState.Released;
         bool leftUp      = !leftDown && _prevMs.LeftButton == ButtonState.Pressed;
 
-        if (ctrl && Pressed(kb, Keys.S)) SaveAll();
-        if (Pressed(kb, Keys.N)) NewAnimation();
-        if (Pressed(kb, Keys.C)) CloneAnimation();
-        if (Pressed(kb, Keys.K)) SampleKeyframe();
-        if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 3);
-        if (Pressed(kb, Keys.F)) FlipAnimation();
-        if (Pressed(kb, Keys.Space)) TogglePlay();
-        // Delete acts on the selected GUIDE only in guide mode; keyframe/addition deletion is unchanged.
-        if (Pressed(kb, Keys.Delete) || Pressed(kb, Keys.Back))
-        {
-            if (_guides.Tool == GuideTool.Select && _guides.Selected(Doc) != null) _guides.DeleteSelected(Doc, ref _dirty);
-            else if (_selectedPointId != null) RemoveSelectedPoint();
-            else if (_selectedAdd >= 0) RemoveSelectedAddition();
-            else DeleteActiveKeyframe();
-        }
-        // Add labeled constructs: P point, V vector (to the active keyframe), B child bone.
-        // B adds the bone to the active clip (clip-local); Shift+B adds it to the base rig.
-        if (Pressed(kb, Keys.P)) BeginAddAddition(AnimAdditionKind.Point, mp);
-        if (Pressed(kb, Keys.V)) BeginAddAddition(AnimAdditionKind.Vector, mp);
-        if (Pressed(kb, Keys.B)) BeginAddBone(mp, toBase: kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift));
-        if (Pressed(kb, Keys.E) && Doc != null)
-        {
-            var joints = _pose.ComputeWorld(_root);
-            int b = PickJoint(joints, mp);
-            // A zero-length socket shares its parent's location. Prefer an existing
-            // effect there so E edits it instead of adding a duplicate on the hand.
-            float nearest = PickR * PickR;
-            if (Doc.Attachments != null)
-                foreach (var a in Doc.Attachments)
-                {
-                    int ab = _skeleton.IndexOf(a.Bone);
-                    if (ab < 0) continue;
-                    float d = Vector2.DistanceSquared(joints[ab].Translation, mp);
-                    if (d < nearest) { nearest = d; b = ab; }
-                }
-            if (b >= 0)
-            {
-                _effectBone = _skeleton.Bones[b].Name;
-                _selectedAttachment = Doc.Attachments?.Find(a => a.Bone == _effectBone);
-                if (kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift))
-                {
-                    if (_selectedAttachment != null) { Doc.Attachments.Remove(_selectedAttachment); _dirty = true; }
-                    _selectedAttachment = null;
-                }
-                else { _naming = NameTarget.Effect; _nameBuffer = _selectedAttachment?.Effect ?? "knife"; }
-            }
-        }
-        if (_selectedAttachment != null && Doc?.Attachments?.Contains(_selectedAttachment) == true)
-        {
-            if (Pressed(kb, Keys.U) && _scrubT < _selectedAttachment.End)
-            { _selectedAttachment.Start = _scrubT; _dirty = true; }
-            if (Pressed(kb, Keys.I) && _scrubT > _selectedAttachment.Start)
-            { _selectedAttachment.End = _scrubT; _dirty = true; }
-        }
-        if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
-        if (Pressed(kb, Keys.OemTilde)) _preview.ShowGrid = !_preview.ShowGrid;
-        if (Pressed(kb, Keys.O)) _preview.ShowBody = !_preview.ShowBody;
-        if (_skin != null && Pressed(kb, Keys.G)) _showSkin = !_showSkin;
-        if (_skin != null && Pressed(kb, Keys.W)) _skinWire = !_skinWire;
-        if (_skin != null && Pressed(kb, Keys.X)) _showRig  = !_showRig;
-
-        // Pan the whole VIEW (rig + com + floor together): arrows nudge (Shift = faster), Home
-        // recenters. Placing the BODY against the ground is the root-joint drag (edits com).
-        float nudge = (kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift)) ? 6f : 1.5f;
-        if (kb.IsKeyDown(Keys.Left))  _placement.Pan.X -= nudge;
-        if (kb.IsKeyDown(Keys.Right)) _placement.Pan.X += nudge;
-        if (kb.IsKeyDown(Keys.Up))    _placement.Pan.Y -= nudge;
-        if (kb.IsKeyDown(Keys.Down))  _placement.Pan.Y += nudge;
-        if (Pressed(kb, Keys.Home))   _placement.Pan = Vector2.Zero;
-        if (Doc != null)
-        {
-            bool shift = kb.IsKeyDown(Keys.LeftShift) || kb.IsKeyDown(Keys.RightShift);
-            if (Pressed(kb, Keys.OemOpenBrackets))  { Doc.Duration = MathF.Max(0.1f, Doc.Duration - 0.1f); _dirty = true; }
-            if (Pressed(kb, Keys.OemCloseBrackets)) { Doc.Duration += 0.1f; _dirty = true; }
-            if (Pressed(kb, Keys.L))                { Doc.Loop = !Doc.Loop; _dirty = true; }
-            if (Pressed(kb, Keys.R))                { Doc.Region = (AnimRegion)(((int)Doc.Region + 1) % 3); _dirty = true; }
-            if (Pressed(kb, Keys.T))                CycleType(shift ? -1 : +1);
-            if (Pressed(kb, Keys.A))                CycleReferenceArc(shift ? -1 : +1);
-        }
-        RefreshRefArc();
+        if (!uiKeys) Hotkeys(kb, mp);
 
         // Playback: advance the playhead per the animation's Duration/Loop.
         if (_playing && Doc != null)
@@ -402,114 +317,89 @@ public sealed class DemoGame : Game
         }
 
         var world = _pose.ComputeWorld(_root);
-        _hoverBone = (!_playing && mp.X >= SidebarW && !InSlider(mp) && _dragBone < 0) ? PickJoint(world, mp) : _dragBone;
+        _hoverBone = (!_playing && onCanvas && _dragBone < 0) ? PickJoint(world, mp) : _dragBone;
 
-        // Endpoint menu affordance: a small button beside the selected endpoint; right-click on
-        // any endpoint selects it and opens the menu directly.
+        // Endpoint selection: right-click any endpoint selects it and opens its menu; the "v"
+        // affordance beside the selection opens the same menu. Both are ImGui popups now
+        // (DemoGame.Ui.cs) — this only tracks WHICH endpoint and WHERE it drew.
         if (_selectedEndpoint >= _skeleton.Count) _selectedEndpoint = -1;
-        if (_selectedEndpoint >= 0)
-        {
-            Vector2 ep = world[_selectedEndpoint].Translation;
-            _endpointMenu.Button = new Rectangle((int)ep.X + 8, (int)ep.Y - 20, 16, 16);
-        }
-        else { _endpointMenu.Button = Rectangle.Empty; _endpointMenu.Open = false; }
-        BuildEndpointMenu(world);
+        if (_selectedEndpoint >= 0) _endpointScreen = world[_selectedEndpoint].Translation;
         bool rightPressed = ms.RightButton == ButtonState.Pressed && _prevMs.RightButton == ButtonState.Released;
-        if (rightPressed && !_playing && mp.X >= SidebarW && !InSlider(mp) && Doc != null)
+        if (rightPressed && !_playing && onCanvas && Doc != null)
         {
             int b = PickJoint(world, mp);
-            if (b >= 0)
-            {
-                _selectedEndpoint = b;
-                Vector2 ep = world[b].Translation;
-                _endpointMenu.Button = new Rectangle((int)ep.X + 8, (int)ep.Y - 20, 16, 16);
-                BuildEndpointMenu(world);
-                _endpointMenu.Open = true;
-            }
+            if (b >= 0) { _selectedEndpoint = b; _endpointScreen = world[b].Translation; _openEndpointPopup = true; }
         }
 
-        // Clip-list scrolling: wheel over the sidebar (2 rows per notch), or drag the thumb.
-        int wheel = ms.ScrollWheelValue - _prevMs.ScrollWheelValue;
-        if (wheel != 0 && mp.X < SidebarW)
-            _sidebarScroll = ClampSidebarScroll(_sidebarScroll - wheel / 120f * RowH * 2f);
-        if (_dragSidebarThumb) _sidebarScroll = ScrollFromThumbY(mp.Y);
-
-        if (leftPressed)
+        if (leftPressed && onCanvas && !_playing)
         {
-            // Header UI first (deterministic picking priority), then the endpoint popup, then
-            // the working area.
             _pressPos = mp;
-            if (_ikToggle.Contains((int)mp.X, (int)mp.Y)) { _ikMode = !_ikMode; if (!_ikMode) _ikDrag = null; }
-            else if (_menu.HandlePress(mp)) { }
-            else if (_endpointMenu.Button != Rectangle.Empty && _endpointMenu.HandlePress(mp)) { }
-            else if (mp.X < SidebarW)
+            // PICK ORDER. The rig's handles — the com marker and any other addition, the root
+            // joint, the bone joints — sit ON TOP of the scene, so they win over a guide's
+            // BODY. That ordering used to be academic: the Select tool was only armed from the
+            // menu, so a block under the figure rarely consumed anything. The Scene panel
+            // leaves Select armed most of the time, and without this a block drawn under the
+            // player swallowed every com/joint drag on clips like stepup.
+            // A guide's EDGES and corners still win (they are what HandlePress hit-tests
+            // first), so resizing a block through the figure keeps working.
+            int ai = -1; bool tip = false;
+            bool onAddition = _activeKey >= 0 && TryPickAddition(world, mp, out ai, out tip);
+            int joint = PickJoint(world, mp);
+            bool onRig = onAddition || (joint >= 0 && (_skeleton.Bones[joint].IsRoot || _activeKey >= 0));
+            // An open arc edit owns the canvas: its keys and handles are the topmost thing
+            // drawn, so they pick before guides, additions and joints.
+            bool arcTook = _arcEdit != null && PickArcSession(mp);
+            var guidePart = _guides.Peek(mp, guideFrame, groundY, Doc);
+            bool guideWins = guidePart != GuidePart.None && guidePart != GuidePart.Body   // edge/corner/ground line
+                          || _guides.Tool is GuideTool.AddGround or GuideTool.AddBlock;    // armed placement
+
+            if (arcTook) { }
+            else if ((guideWins || !onRig) && _guides.HandlePress(mp, guideFrame, groundY, Doc, ref _dirty))
             {
-                // The scrollbar strip owns the sidebar's right edge when the list overflows;
-                // clicking it jumps the thumb there and starts a drag.
-                if (SidebarMaxScroll > 0f && mp.X >= SidebarW - ScrollbarW - 6)
-                {
-                    _dragSidebarThumb = true;
-                    _sidebarScroll = ScrollFromThumbY(mp.Y);
-                }
-                else
-                {
-                    int row = (int)MathF.Floor((mp.Y - PadTop + _sidebarScroll) / RowH);
-                    if (row >= 0 && row < _docs.Count) SelectAnimation(row);
-                }
+                _selectedAdd = -1;
             }
-            else if (!_playing && InSlider(mp))
+            else if (onAddition)
             {
-                int bar = PickKeyframeBar(mp);
-                if (bar >= 0) { _dragBar = bar; SelectKeyframe(bar); }
-                else          { _dragPlayhead = true; Scrub(XToTime(mp.X)); }
+                _selectedAdd = ai; _dragAdd = ai; _dragAddTip = tip;
             }
-            else if (!_playing)
+            // Grabbing the root joint moves the whole player (skeleton + com), independent of
+            // the active keyframe — root drag is otherwise a no-op (EditBone skips the root).
+            else if (joint >= 0 && _skeleton.Bones[joint].IsRoot)
             {
-                // Guide tools / a legacy block grab come first; then addition handles (they
-                // sit on top of the rig), then joints.
-                if (_guides.HandlePress(mp, guideFrame, groundY, Doc, ref _dirty))
+                _dragRoot = true; _selectedAdd = -1;
+            }
+            else
+            {
+                int bone = _activeKey >= 0 ? joint : -1;
+                if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
+                else if (bone >= 0)
                 {
-                    _selectedAdd = -1;
-                }
-                else if (_activeKey >= 0 && TryPickAddition(world, mp, out int ai, out bool tip))
-                {
-                    _selectedAdd = ai; _dragAdd = ai; _dragAddTip = tip;
-                }
-                // Grabbing the root joint moves the whole player (skeleton + com), independent of
-                // the active keyframe — root drag is otherwise a no-op (EditBone skips the root).
-                else if (PickJoint(world, mp) is int rb && rb >= 0 && _skeleton.Bones[rb].IsRoot)
-                {
-                    _dragRoot = true; _selectedAdd = -1;
-                }
-                else
-                {
-                    int bone = _activeKey >= 0 ? PickJoint(world, mp) : -1;
-                    if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
-                    else if (bone >= 0)
+                    _dragBone = bone;
+                    // IK mode: a limb chain (up to the torso) — the root/torso themselves keep
+                    // the direct edit (a chain of length 0 has nothing to solve).
+                    _ikDrag = null;
+                    if (_ikMode && !_skeleton.Bones[bone].IsRoot)
                     {
-                        _dragBone = bone;
-                        // IK mode: a limb chain (up to the torso) — the root/torso themselves keep
-                        // the direct edit (a chain of length 0 has nothing to solve).
-                        _ikDrag = null;
-                        if (_ikMode && !_skeleton.Bones[bone].IsRoot)
-                        {
-                            var session = new PoseIk.DragSession(_skeleton, _pose, bone);
-                            if (session.Chain.Length > 0) _ikDrag = session;
-                        }
+                        var session = new PoseIk.DragSession(_skeleton, _pose, bone);
+                        if (session.Chain.Length > 0) _ikDrag = session;
                     }
-                    _selectedAdd = -1;
                 }
+                _selectedAdd = -1;
             }
         }
 
-        if (leftDown && _guides.Dragging)
+        if (leftDown && _arcEdit != null && _arcEdit.Dragging)
+        {
+            DragArcSession(mp);
+        }
+        else if (leftDown && _guides.Dragging)
         {
             _guides.HandleDrag(mp, mp - new Vector2(_prevMs.X, _prevMs.Y), guideFrame, groundY, ref _dirty);
         }
         else if (leftDown && _dragRoot)
         {
             var dm = mp - new Vector2(_prevMs.X, _prevMs.Y);
-            var comAdd = _placement.ComAnchored ? ActiveKeyCom() : null;
+            var comAdd = ActiveKeyCom();
             if (comAdd != null)
             {
                 // COM-ANCHORED: dragging the root moves the BODY against the fixed ground/com —
@@ -517,30 +407,16 @@ public sealed class DemoGame : Game
                 // com·scale, so com -= Δ/scale draws the skeleton +Δ under the cursor while the
                 // com marker and floor hold still). This is the com-arc authoring control:
                 // scrub to a keyframe, drag the base node to where the body should be.
-                comAdd.Px -= dm.X / RigScale;
-                comAdd.Py -= dm.Y / RigScale;
+                comAdd.Px -= dm.X / _placement.Scale;
+                comAdd.Py -= dm.Y / _placement.Scale;
                 _dirty = true;
             }
             else
             {
-                // No com on the active keyframe (or a legacy no-com clip): plain view pan.
+                // The playhead is between keyframes, so there is no single com to author:
+                // plain view pan.
                 _placement.Pan += dm;
             }
-        }
-        else if (leftDown && _dragBar >= 0)
-        {
-            // Move the keyframe in time; re-sort and follow it (selection by identity).
-            var kf = Doc.Keyframes[_dragBar];
-            kf.Time = XToTime(mp.X);
-            Doc.SortKeyframes();
-            _dragBar = Doc.Keyframes.IndexOf(kf);
-            _activeKey = _dragBar;
-            _scrubT = kf.Time;
-            _dirty = true;
-        }
-        else if (leftDown && _dragPlayhead)
-        {
-            Scrub(XToTime(mp.X));
         }
         else if (leftDown && _dragAdd >= 0 && _activeKey >= 0)
         {
@@ -569,21 +445,130 @@ public sealed class DemoGame : Game
                 // dirties the active clip (its ExtraBones live in the animation file).
                 if (IsBaseBone(_skeleton.Bones[_dragBone].Name)) _skelDirty = true;
                 else _dirty = true;
-                RecomputeFloorLine();
             }
         }
 
         if (leftUp)
         {
             // A click on a joint (press + release without moving) selects that endpoint.
+            // (The timeline's own drags end with its widget — see TimelinePanel.)
             if (_dragBone >= 0 && Vector2.Distance(mp, _pressPos) < 3f) _selectedEndpoint = _dragBone;
             _ikDrag = null;
-            _dragBone = -1; _dragBar = -1; _dragPlayhead = false; _dragAdd = -1; _dragRoot = false; _dragSidebarThumb = false; _guides.Release(groundY);
+            _arcEdit?.EndDrag();
+            _dragBone = -1; _dragAdd = -1; _dragRoot = false; _guides.Release(groundY);
         }
 
         _prevMs = ms;
         _prevKb = kb;
         base.Update(gameTime);
+    }
+
+    // The editor's key bindings. Only runs when ImGui does not want the keyboard, so a
+    // single-letter shortcut can never fire while a name/filter field has focus.
+    private void Hotkeys(KeyboardState kb, Vector2 mp)
+    {
+        bool ctrl  = kb.IsKeyDown(Keys.LeftControl) || kb.IsKeyDown(Keys.RightControl);
+        bool shift = kb.IsKeyDown(Keys.LeftShift)   || kb.IsKeyDown(Keys.RightShift);
+
+        // An open arc edit takes A (add a key on the curve under the cursor) and Delete for
+        // its own keys, so the clip's keyframe bindings cannot fire into it by accident.
+        if (_arcEdit != null)
+        {
+            if (Pressed(kb, Keys.A)
+                && ArcEditOps.AddKeyNear(_arcEdit.Working, ScreenToArc(_arcEdit.Working, mp), out int addedKey))
+            { _arcEdit.Selected = addedKey; _arcEdit.Dirty = true; }
+            if ((Pressed(kb, Keys.Delete) || Pressed(kb, Keys.X))
+                && ArcEditOps.DeleteKey(_arcEdit.Working, _arcEdit.Selected))
+            { _arcEdit.Selected = -1; _arcEdit.Dirty = true; }
+        }
+
+        if (ctrl && Pressed(kb, Keys.S)) SaveAll();
+        if (Pressed(kb, Keys.N)) NewAnimation();
+        if (Pressed(kb, Keys.C)) CloneAnimation();
+        if (Pressed(kb, Keys.K)) SampleKeyframe();
+        if (Pressed(kb, Keys.Tab)) _editMode = (EditMode)(((int)_editMode + 1) % 3);
+        if (Pressed(kb, Keys.F)) FlipAnimation();
+        if (Pressed(kb, Keys.Space)) TogglePlay();
+        // Delete acts on the selected GUIDE only in guide mode; keyframe/addition deletion is unchanged.
+        if (_arcEdit == null && (Pressed(kb, Keys.Delete) || Pressed(kb, Keys.Back)))
+        {
+            if (_guides.Tool == GuideTool.Select && _guides.Selected(Doc) != null) _guides.DeleteSelected(Doc, ref _dirty);
+            else if (_selectedAttachment != null && Doc?.Attachments?.Contains(_selectedAttachment) == true)
+                RemoveAttachment(_selectedAttachment);
+            else if (_selectedPointId != null) RemoveSelectedPoint();
+            else if (_selectedAdd >= 0) RemoveSelectedAddition();
+            else DeleteActiveKeyframe();
+        }
+        // Add labeled constructs: P point, V vector (to the active keyframe), B child bone.
+        // B adds the bone to the active clip (clip-local); Shift+B adds it to the base rig.
+        if (Pressed(kb, Keys.P)) BeginAddAddition(AnimAdditionKind.Point, mp);
+        if (Pressed(kb, Keys.V)) BeginAddAddition(AnimAdditionKind.Vector, mp);
+        if (Pressed(kb, Keys.B)) BeginAddBone(mp, toBase: shift);
+        if (Pressed(kb, Keys.E) && Doc != null)
+        {
+            var joints = _pose.ComputeWorld(_root);
+            int b = PickJoint(joints, mp);
+            // A zero-length socket shares its parent's location. Prefer an existing
+            // effect there so E edits it instead of adding a duplicate on the hand.
+            float nearest = PickR * PickR;
+            if (Doc.Attachments != null)
+                foreach (var a in Doc.Attachments)
+                {
+                    int ab = EditorBoneOf(a.Point);
+                    if (ab < 0) continue;
+                    float d = Vector2.DistanceSquared(joints[ab].Translation, mp);
+                    if (d < nearest) { nearest = d; b = ab; }
+                }
+            // An attachment picked from the endpoint menu or a timeline bar is the target;
+            // only fall back to "nearest attached joint" when nothing is selected. The old
+            // order re-found by bone and threw the explicit selection away.
+            if (shift && _selectedAttachment != null && Doc.Attachments?.Contains(_selectedAttachment) == true)
+                RemoveAttachment(_selectedAttachment);
+            else if (b >= 0)
+            {
+                _effectBone = _skeleton.Bones[b].Name;
+                _selectedAttachment = Doc.Attachments?.Find(a => EditorBoneOf(a.Point) == b);
+                if (shift)
+                {
+                    if (_selectedAttachment != null) RemoveAttachment(_selectedAttachment);
+                    _selectedAttachment = null;
+                }
+                else { _naming = NameTarget.Effect; _nameBuffer = _selectedAttachment?.Effect ?? "knife"; }
+            }
+        }
+        if (_selectedAttachment != null && Doc?.Attachments?.Contains(_selectedAttachment) == true)
+        {
+            if (Pressed(kb, Keys.U) && _scrubT < _selectedAttachment.End)
+            { _selectedAttachment.Start = _scrubT; _dirty = true; }
+            if (Pressed(kb, Keys.I) && _scrubT > _selectedAttachment.Start)
+            { _selectedAttachment.End = _scrubT; _dirty = true; }
+        }
+        if (Pressed(kb, Keys.OemComma))   StepKeyframe(-1);
+        if (Pressed(kb, Keys.OemPeriod))  StepKeyframe(+1);
+        if (ctrl && Pressed(kb, Keys.D0)) _placement.ResetZoom();
+        if (Pressed(kb, Keys.H)) _showHelp = !_showHelp;
+        if (Pressed(kb, Keys.OemTilde)) _preview.ShowGrid = !_preview.ShowGrid;
+        if (Pressed(kb, Keys.O)) _preview.ShowBody = !_preview.ShowBody;
+        if (_skin != null && Pressed(kb, Keys.G)) _showSkin = !_showSkin;
+        if (_skin != null && Pressed(kb, Keys.W)) _skinWire = !_skinWire;
+        if (_skin != null && Pressed(kb, Keys.X)) _showRig  = !_showRig;
+
+        // Pan the whole VIEW (rig + com + floor together): arrows nudge (Shift = faster), Home
+        // recenters. Placing the BODY against the ground is the root-joint drag (edits com).
+        float nudge = shift ? 6f : 1.5f;
+        if (kb.IsKeyDown(Keys.Left))  _placement.Pan.X -= nudge;
+        if (kb.IsKeyDown(Keys.Right)) _placement.Pan.X += nudge;
+        if (kb.IsKeyDown(Keys.Up))    _placement.Pan.Y -= nudge;
+        if (kb.IsKeyDown(Keys.Down))  _placement.Pan.Y += nudge;
+        if (Pressed(kb, Keys.Home))   _placement.Pan = Vector2.Zero;
+        if (Doc != null)
+        {
+            if (Pressed(kb, Keys.OemOpenBrackets))  { Doc.Duration = MathF.Max(0.1f, Doc.Duration - 0.1f); _dirty = true; }
+            if (Pressed(kb, Keys.OemCloseBrackets)) { Doc.Duration += 0.1f; _dirty = true; }
+            if (Pressed(kb, Keys.L))                { Doc.Loop = !Doc.Loop; _dirty = true; }
+            if (Pressed(kb, Keys.R))                { Doc.Region = (AnimRegion)(((int)Doc.Region + 1) % 3); _dirty = true; }
+            if (Pressed(kb, Keys.T))                CycleType(shift ? -1 : +1);
+            }
     }
 
     // Which side(s) of the data model an edit mutates this frame. The drag handler
@@ -675,69 +660,131 @@ public sealed class DemoGame : Game
     // True when the named bone belongs to the base rig (vs the active clip's ExtraBones).
     private bool IsBaseBone(string name) => _baseSkeleton.IndexOf(name) >= 0;
 
-    // Floor line tracks the bind-pose sole; recompute after any rig edit so the
-    // ground reference stays consistent with the live silhouette.
-    private void RecomputeFloorLine()
-    {
-        var bindWorld = _skeleton.CreatePose().ComputeWorld(Affine2.Identity);
-        _floorLocalY = 0f;
-        // Each bone's far end (and every joint) is exactly world[i].Translation under the R·T·S
-        // chain, so the sole is the lowest of those — no separate +Length tip term (that would
-        // overshoot a whole bone past the real silhouette).
-        for (int i = 0; i < _skeleton.Count; i++)
-            _floorLocalY = MathF.Max(_floorLocalY, bindWorld[i].Translation.Y);
-    }
-
     // Rig placement in the editor (ScenePlacement): centered in the working area, scaled, and —
     // when the clip authors a com track — COM-ANCHORED like the game. Recomputed each frame so
     // it tracks window size, the playhead, and (continuous-loop playback) the accumulated
     // cycle displacement. Exactly ONE source owns the body's scene path (ClipMotion).
     private void UpdateRoot()
     {
-        var center = new Vector2(SidebarW + (W - SidebarW) / 2f, H * 0.48f);
+        var center = new Vector2(_canvas.Left + _canvas.Width / 2f, _canvas.Top + _canvas.Height * 0.46f);
         bool unwrapped = _playing && _placement.ContinuousLoop && Doc != null;
         float t = unwrapped ? _playTime / MathF.Max(Doc.Duration, 1e-4f) : _scrubT;
-        _placement.Update(Doc, _refArc, t, unwrapped, center);
+        _placement.Update(Doc, t, unwrapped, center);
         _root = _placement.Root;
     }
+    // Documents behind the TRAJECTORY overlays (SceneOverlayKind.Arc / ClipPath), resolved by
+    // name and cached. An arc is a REFERENCE now — it never places the clip, so nothing here
+    // can disturb placement. The cache means an arc edited in another window is picked up on
+    // the next editor run, not live.
+    private readonly Dictionary<string, HermiteClipDocument> _overlayArcs = new();
 
-    // Resolve a clip's ReferenceArc name: the editable file at ReferenceClips/<name>.json
-    // (repo root — the same file `--ref <name>` edits) wins; the baked registry default
-    // covers names with no file yet. Null name / nothing found → no arc.
-    private HermiteClipDocument LoadRefArc(string name)
+    // Clip-local first when the overlay says so (AnimationDocument.Arcs), else the shared pool.
+    private HermiteClipDocument ResolveArc(string name, bool local)
+        => local ? ClipArcs.FindLocal(Doc, name) : ResolveSharedArc(name);
+
+    // ── the open arc edit (ArcEditSession) ──────────────────────────────────────────────
+    // The arc is drawn and dragged through the SAME frame ClipMotion.ArcOffset uses, so a key
+    // sits exactly where mapping the arc would put the body: drag in the clip's scene, store
+    // in the pixels the arc is authored in.
+    //
+    // The anchors are NOT draggable here. That frame pins clip-space Entry to the scene origin
+    // and Gate to Span/scale, so both anchors are fixed points on screen whatever their values
+    // — dragging them would be a gesture that cannot move anything. They are a framing choice
+    // in this view (what the pixels MEAN), so the panel edits them as numbers; the standalone
+    // `--ref` editor, whose view IS arc space, keeps dragging them spatially.
+    private ReferenceFrame ArcFrame(HermiteClipDocument arc)
+        => new(arc, Vector2.Zero, arc.Span / Game1.SkeletonScale);
+
+    private Vector2 ArcToScreen(HermiteClipDocument arc, Vector2 p) => _placement.ToScreen(ArcFrame(arc).Map(p));
+    private Vector2 ScreenToArc(HermiteClipDocument arc, Vector2 s) => ArcFrame(arc).Unmap(_placement.ToScene(s));
+
+    private void DrawArcSession()
     {
-        _refArcPath = null;
-        _refArcStamp = default;
+        var s = _arcEdit;
+        if (s == null) return;
+        var arc = s.Working;
+        if (arc.Keys.Count == 0) return;
+        var curve = new Color(255, 200, 120);
+
+        const int Samples = 64;
+        Vector2 prev = ArcToScreen(arc, arc.Eval(0f));
+        for (int i = 1; i <= Samples; i++)
+        {
+            Vector2 p = ArcToScreen(arc, arc.Eval(i / (float)Samples));
+            _draw.Line(prev, p, curve, 2f);
+            prev = p;
+        }
+        // The anchors, as read-only marks: entry green, gate pink.
+        _draw.Ring(ArcToScreen(arc, arc.Entry), 6f, new Color(120, 220, 160), 12, 1.5f);
+        _draw.Ring(ArcToScreen(arc, arc.Gate),  6f, new Color(240, 140, 160), 12, 1.5f);
+
+        for (int i = 0; i < arc.Keys.Count; i++)
+        {
+            Vector2 k = ArcToScreen(arc, arc.Keys[i].Pos);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                Vector2 h = ArcToScreen(arc, ArcEditOps.HandleTip(arc, i, side));
+                _draw.Line(k, h, curve * 0.5f, 1f);
+                _draw.Ring(h, 3.5f, curve * 0.8f, 8, 1f);
+            }
+            if (i == s.Selected) { _draw.Disc(k, 6f, Color.White); _draw.Ring(k, 9f, curve, 12, 1.5f); }
+            else _draw.Disc(k, 4.5f, curve);
+        }
+    }
+
+    // Keys win over tangent handles — the standalone editor's order, minus the anchors.
+    private bool PickArcSession(Vector2 mp)
+    {
+        var s = _arcEdit;
+        if (s == null) return false;
+        var arc = s.Working;
+
+        float best = PickR * PickR; int key = -1;
+        for (int i = 0; i < arc.Keys.Count; i++)
+        {
+            float d = Vector2.DistanceSquared(ArcToScreen(arc, arc.Keys[i].Pos), mp);
+            if (d < best) { best = d; key = i; }
+        }
+        if (key >= 0) { s.DragKey = key; s.Selected = key; return true; }
+
+        best = PickR * PickR;
+        for (int i = 0; i < arc.Keys.Count; i++)
+            for (int side = -1; side <= 1; side += 2)
+            {
+                float d = Vector2.DistanceSquared(ArcToScreen(arc, ArcEditOps.HandleTip(arc, i, side)), mp);
+                if (d < best) { best = d; s.DragHandle = i; s.HandleSide = side; s.Selected = i; }
+            }
+        return s.DragHandle >= 0;
+    }
+
+    private void DragArcSession(Vector2 mp)
+    {
+        var s = _arcEdit;
+        var arc = s.Working;
+        Vector2 p = ScreenToArc(arc, mp);
+        if (s.DragKey >= 0)         ArcEditOps.DragKey(arc, s.DragKey, p);
+        else if (s.DragHandle >= 0) ArcEditOps.DragHandle(arc, s.DragHandle, s.HandleSide, p);
+        s.Dirty = true;
+    }
+
+    private HermiteClipDocument ResolveSharedArc(string name)
+    {
         if (string.IsNullOrWhiteSpace(name)) return null;
+        if (_overlayArcs.TryGetValue(name, out var cached)) return cached;
         string path = RefArcPath(name);
-        var doc = path != null ? HermiteClipDocument.Load(path) : null;
-        if (doc != null) { _refArcPath = path; _refArcStamp = File.GetLastWriteTimeUtc(path); }
-        else if (path != null) _refArcPath = path;   // watch for it appearing later
-        doc ??= ReferenceClipRegistry.Get(name);
-        if (doc == null) Console.WriteLine($"ReferenceArc '{name}': no file or baked default — ignoring.");
+        var doc = (path != null ? HermiteClipDocument.Load(path) : null) ?? ReferenceClipRegistry.Get(name);
+        _overlayArcs[name] = doc;
         return doc;
     }
+
+    private AnimationDocument ResolveClipOverlay(string name)
+        => string.IsNullOrWhiteSpace(name) ? null
+         : _docs.Find(d => string.Equals(d.Name, name, StringComparison.OrdinalIgnoreCase));
 
     private string RefArcPath(string name)
     {
         string root = Path.GetDirectoryName(FindStatesDir());
         return root == null ? null : Path.Combine(root, "ReferenceClips", name + ".json");
-    }
-
-    // Live reload: the `--ref` editor in another window writes the same file, so pick up
-    // its saves without re-selecting the clip. A stat per frame on a file of a few keys.
-    private void RefreshRefArc()
-    {
-        if (_refArcPath == null || Doc?.ReferenceArc == null) return;
-        DateTime stamp;
-        try { if (!File.Exists(_refArcPath)) return; stamp = File.GetLastWriteTimeUtc(_refArcPath); }
-        catch (IOException) { return; }
-        if (stamp == _refArcStamp) return;
-        var doc = HermiteClipDocument.Load(_refArcPath);
-        if (doc == null) return;      // mid-write; try again next frame (stamp unchanged)
-        _refArc = doc;
-        _refArcStamp = stamp;
-        Console.WriteLine($"ReferenceArc '{Doc.ReferenceArc}': reloaded");
     }
 
     // Every arc name the editor can offer: the baked registry's, plus any other file
@@ -751,22 +798,6 @@ public sealed class DemoGame : Game
             foreach (var f in Directory.GetFiles(dir, "*.json"))
                 names.Add(Path.GetFileNameWithoutExtension(f));
         return new List<string>(names);
-    }
-
-    // Attach the next arc to this clip (Shift = previous), wrapping through "none" — the
-    // in-editor equivalent of `MTile.Probe -- refarc <clip> <name|none>`, persisted on
-    // Ctrl-S like any other clip edit.
-    private void CycleReferenceArc(int dir)
-    {
-        if (Doc == null) return;
-        var names = ArcNames();
-        names.Insert(0, null);                       // "none" slot
-        int i = names.IndexOf(Doc.ReferenceArc);     // -1 (unknown name) → lands on none
-        i = ((i < 0 ? 0 : i) + dir + names.Count) % names.Count;
-        Doc.ReferenceArc = names[i];
-        _refArc = LoadRefArc(Doc.ReferenceArc);
-        _dirty = true;
-        Console.WriteLine($"{Doc.Name} ReferenceArc = {Doc.ReferenceArc ?? "none"}");
     }
 
     // A named root-space Point track at normalized time t — the shared sparse-channel C1
@@ -824,15 +855,12 @@ public sealed class DemoGame : Game
             _playing ? this : null, (float)gameTime.ElapsedGameTime.TotalSeconds);
 
         _spriteBatch.Begin();
-        DrawSidebar();
         DrawEditor();
-        DrawTimeline();
-        DrawHeader();
-        DrawHelpOverlay();
-        DrawNamingOverlay();
-        _menu.Draw(_draw, _spriteBatch, _font);
-        if (_endpointMenu.Button != Rectangle.Empty) _endpointMenu.Draw(_draw, _spriteBatch, _font);
         _spriteBatch.End();
+
+        // The chrome (built during Update) draws last, so panels and popups sit above the
+        // canvas and clip their own contents.
+        _ui.RenderDrawData();
 
         if (capturing)
         {
@@ -880,56 +908,20 @@ public sealed class DemoGame : Game
         return null;
     }
 
-    private void DrawSidebar()
-    {
-        Fill(new Rectangle(0, 0, SidebarW, H), new Color(30, 33, 42));
-        int scroll = (int)_sidebarScroll;
-        string lastType = null;
-        for (int i = 0; i < _docs.Count; i++)
-        {
-            var d = _docs[i];
-            int y = PadTop + i * RowH - scroll;
-            if (y < -RowH || y > H) { lastType = d.Type; continue; }   // culled; keep header grouping
-            if (i == _selected) Fill(new Rectangle(0, y - 2, SidebarW, RowH), new Color(60, 90, 140));
-
-            Color typeColor = d.Type != lastType ? new Color(150, 200, 255) : new Color(110, 120, 140);
-            _spriteBatch.DrawString(_font, $"{d.Type}", new Vector2(10, y), typeColor);
-            _spriteBatch.DrawString(_font, $"{d.Name}  ({d.Keyframes.Count}kf)", new Vector2(20, y + 16),
-                i == _selected ? Color.White : new Color(200, 205, 215));
-            lastType = d.Type;
-        }
-
-        // Scrollbar — only when the list overflows: thin track on the sidebar's right
-        // edge, proportional thumb. Wheel scrolls; click/drag on the strip jumps.
-        if (SidebarMaxScroll > 0f)
-        {
-            Fill(new Rectangle(SidebarW - ScrollbarW - 2, 0, ScrollbarW, H), new Color(22, 24, 30));
-            int thumbY = (int)((H - ThumbH) * (_sidebarScroll / SidebarMaxScroll));
-            Fill(new Rectangle(SidebarW - ScrollbarW - 2, thumbY, ScrollbarW, ThumbH),
-                 _dragSidebarThumb ? new Color(140, 155, 185) : new Color(90, 100, 120));
-        }
-    }
-
-    // --- sidebar scroll geometry ---------------------------------------------
-    private const int ScrollbarW = 6;
-    private float SidebarContentH => PadTop * 2 + _docs.Count * RowH;
-    private float SidebarMaxScroll => MathF.Max(0f, SidebarContentH - H);
-    private int   ThumbH => Math.Max(24, (int)(H * H / SidebarContentH));
-    private float ClampSidebarScroll(float s) => MathHelper.Clamp(s, 0f, SidebarMaxScroll);
-    // Map a cursor y to a scroll offset with the thumb centered under the cursor.
-    private float ScrollFromThumbY(float y)
-        => ClampSidebarScroll((y - ThumbH / 2f) / MathF.Max(1f, H - ThumbH) * SidebarMaxScroll);
-
     private void DrawEditor()
     {
-        // Scene layers under the rig: the tile grid, the guides (or the legacy floor line +
-        // obstacle block), the body's scene path, keyframe ghosts, the physics silhouette.
-        var (frame, groundY) = _placement.GuideFrame(Doc, _floorLocalY);
-        _preview.DrawGrid(_draw, frame, groundY, SidebarW, W, 0f, TrackY - 28f);
-        _guides.Draw(_draw, _spriteBatch, _font, frame, groundY, Doc, SidebarW, W);
+        // Scene layers under the rig: the tile grid, the clip's authored guides, the body's
+        // scene path, keyframe ghosts, the physics silhouette.
+        var (frame, groundY) = _placement.GuideFrame();
+        _preview.DrawGrid(_draw, frame, groundY, _canvas.Left, _canvas.Right, _canvas.Top, _canvas.Bottom);
+        _guides.Draw(_draw, _spriteBatch, _font, frame, Doc, _canvas.Left, _canvas.Right);
+        _preview.DrawOverlays(_draw, _spriteBatch, _font, frame, _placement, Doc,
+                              _guides.Effective(Doc), ResolveArc, ResolveClipOverlay,
+                              _canvas.Left, _canvas.Right);
         _preview.DrawPath(_draw, _placement, Doc);
+        DrawArcSession();
         _preview.DrawGhosts(_draw, _placement, Doc, _skeleton, _ghostPose, _kfA, _kfB, _kfC, _kfD, _activeKey);
-        _preview.DrawBody(_draw, _placement.Anchor);
+        _preview.DrawBody(_draw, _placement);
 
         // The rig overlay (bones + joint markers + additions) hides when toggled off
         // (X, skin-view only) so the sprite can be judged unobstructed. Editing still
@@ -958,7 +950,7 @@ public sealed class DemoGame : Game
             _draw.Line(from, world[_selectedEndpoint].Translation, new Color(150, 200, 255) * 0.6f, 6f);
             _draw.Ring(world[_selectedEndpoint].Translation, 8f, new Color(150, 200, 255), 16, 1.5f);
         }
-        var contacts = _activeKey >= 0 ? Doc.Keyframes[_activeKey].Contacts : null;
+        var contacts = Doc.Contacts;
         for (int i = 0; i < world.Length; i++)
         {
             Vector2 p = world[i].Translation;
@@ -1038,11 +1030,13 @@ public sealed class DemoGame : Game
         }
     }
 
-    // Does a label on this keyframe resolve to bone `i` (a legacy node or a named point)?
-    private bool HasContactOnBone(List<ContactLabel> contacts, int i)
+    // Does a contact span covering the PLAYHEAD resolve to bone `i`? The canvas halo follows
+    // the playhead now rather than the active keyframe — a span is live between keys too.
+    private bool HasContactOnBone(List<ContactSpan> spans, int i)
     {
-        if (contacts == null) return false;
-        foreach (var c in contacts) if (EndpointResolver.BoneOf(_skeleton, Doc, c) == i) return true;
+        if (spans == null) return false;
+        foreach (var c in spans)
+            if (c.Covers(_scrubT, out _) && EditorBoneOf(c.Point) == i) return true;
         return false;
     }
 
@@ -1080,16 +1074,15 @@ public sealed class DemoGame : Game
                     }
                 }
             }
-            if (kf.Contacts != null)
-                foreach (var c in kf.Contacts)
-                {
-                    // Mirror both the legacy node and a point id (support_l ↔ support_r).
-                    string m = MirrorBoneName(c.Node);
-                    if (m != null) c.Node = m;
-                    string mp = MirrorBoneName(c.Point);
-                    if (mp != null) c.Point = mp;
-                }
         }
+        if (doc.Contacts != null)
+            foreach (var c in doc.Contacts)
+            {
+                // Mirror the point id (support_l ↔ support_r). Spans keep their timing:
+                // a mirror swaps which foot plants, never when.
+                string mp = MirrorBoneName(c.Point);
+                if (mp != null) c.Point = mp;
+            }
         _dirty = true;
         if (_activeKey >= 0) PoseData.Apply(doc.Keyframes[_activeKey].Bones, _pose);
         else                 SamplePose(_scrubT);
@@ -1107,22 +1100,18 @@ public sealed class DemoGame : Game
         return null;
     }
 
-    // Toggle a No-slip (SelfPlant) contact on a bone's End for the active keyframe — the M+click
-    // quick path. Writes a point label when the rig/clip names that endpoint, else the legacy node.
-    private void ToggleContact(int bone)
-    {
-        if (Doc == null || _activeKey < 0 || bone < 0) return;
-        var kf = Doc.Keyframes[_activeKey];
-        int idx = IndexOfContactOnBone(kf.Contacts, bone);
-        if (idx >= 0) kf.Contacts.RemoveAt(idx);
-        else { kf.Contacts ??= new List<ContactLabel>(); kf.Contacts.Add(LabelFor(bone, ContactSource.SelfPlant)); }
-        _dirty = true;
-    }
+    // Toggle a No-slip (SelfPlant) contact on a bone's End at the playhead — the M+click quick
+    // path. Removes the span under the playhead if there is one, else starts a new one there.
+    private void ToggleContact(int bone) => ApplyContact(bone, SpanAtPlayhead(bone) >= 0 ? null : ContactSource.SelfPlant);
 
-    private int IndexOfContactOnBone(List<ContactLabel> contacts, int bone)
+    // Index of the span on `bone` that covers the playhead, or -1. Contacts are intervals, so
+    // "the contact on this bone" is only meaningful relative to a time.
+    private int SpanAtPlayhead(int bone)
     {
-        if (contacts == null) return -1;
-        for (int i = 0; i < contacts.Count; i++) if (EndpointResolver.BoneOf(_skeleton, Doc, contacts[i]) == bone) return i;
+        var spans = Doc?.Contacts;
+        if (spans == null) return -1;
+        for (int i = 0; i < spans.Count; i++)
+            if (spans[i].Covers(_scrubT, out _) && EditorBoneOf(spans[i].Point) == bone) return i;
         return -1;
     }
 
@@ -1136,12 +1125,16 @@ public sealed class DemoGame : Game
         return null;
     }
 
-    // A contact label for a bone's End: by point id when one exists, else the legacy node.
-    private ContactLabel LabelFor(int bone, ContactSource src)
+    // The interval a newly-authored contact gets: the playhead to the NEXT keyframe, or the
+    // whole clip under the whole-clip scope. Keyframes are a sensible first guess at where a
+    // plant ends — but only a guess now, because the span's ends are draggable afterwards.
+    private (float start, float end) NewSpanRange()
     {
-        var p = PointFor(bone);
-        return p != null ? new ContactLabel { Point = p.Id, Weight = 1f, Source = src }
-                         : new ContactLabel { Node = _skeleton.Bones[bone].Name, Weight = 1f, Source = src };
+        if (_contactWholeClip) return (0f, 1f);
+        float start = _scrubT, end = 1f;
+        foreach (var kf in Doc.Keyframes) if (kf.Time > start + 1e-4f) { end = kf.Time; break; }
+        if (end <= start + 1e-3f) end = MathF.Min(1f, start + 0.1f);
+        return (start, end);
     }
 
     // Make sure the bone's End has a named point (a "contact point"), creating a clip point
@@ -1159,22 +1152,30 @@ public sealed class DemoGame : Game
         return p;
     }
 
-    // Set (source) or clear (null) the contact on a bone's End over the edit scope: the active
-    // key's interval (this key → next key, the keyframe contact convention; an interpolated
-    // playhead first samples a key there) or every keyframe of the clip.
+    // Set (source) or clear (null) the contact on a bone's End AT THE PLAYHEAD. Setting a source
+    // on a span that already covers the playhead retypes it in place — the interval is the
+    // author's, so changing SelfPlant to PlannedSupport must not silently retime the plant.
+    // Otherwise a new span is authored over NewSpanRange, then dragged on the timeline.
+    // No keyframe is sampled: a contact no longer needs one to exist.
     private void ApplyContact(int bone, ContactSource? src)
     {
         if (Doc == null || bone < 0) return;
-        if (src != null) EnsureContactPoint(bone);
-        if (!_contactWholeClip && _activeKey < 0) SampleKeyframe();
-        var keys = _contactWholeClip ? Doc.Keyframes : new List<AnimationKeyframe> { Doc.Keyframes[_activeKey] };
-        foreach (var kf in keys)
+        int at = SpanAtPlayhead(bone);
+        if (src == null)
         {
-            int idx = IndexOfContactOnBone(kf.Contacts, bone);
-            if (idx >= 0) kf.Contacts.RemoveAt(idx);
-            if (src != null) { kf.Contacts ??= new List<ContactLabel>(); kf.Contacts.Add(LabelFor(bone, src.Value)); }
-            if (kf.Contacts != null && kf.Contacts.Count == 0) kf.Contacts = null;
+            if (at < 0) return;
+            Doc.Contacts.RemoveAt(at);
+            if (Doc.Contacts.Count == 0) Doc.Contacts = null;
+            _dirty = true;
+            return;
         }
+        if (at >= 0) { Doc.Contacts[at].Source = src.Value; _dirty = true; return; }
+
+        string point = EnsureContactPoint(bone).Id;
+        var (start, end) = NewSpanRange();
+        Doc.Contacts ??= new List<ContactSpan>();
+        Doc.Contacts.Add(new ContactSpan { Point = point, Start = start, End = end, Source = src.Value });
+        Doc.Contacts.Sort((x, y) => x.Start.CompareTo(y.Start));
         _dirty = true;
     }
 
@@ -1188,8 +1189,13 @@ public sealed class DemoGame : Game
         Doc.ExtraBones ??= new List<SkeletonBoneRecord>();
         Doc.ExtraBones.Add(new SkeletonBoneRecord { Name = name, Parent = _skeleton.Bones[bone].Name, Rotation = 0f, Length = 0f });
         RebuildWorkingRig();
+        // Name the knife bone's tip and hang the attachment off THAT, not off the bone name.
+        // The bare-name fallback would resolve identically today, but only a declared point
+        // survives a rename — which is the whole reason attachments moved onto points.
+        int kb = _skeleton.IndexOf(name);
+        string point = kb >= 0 ? EnsureContactPoint(kb).Id : name;
         Doc.Attachments ??= new List<AnimAttachment>();
-        _selectedAttachment = new AnimAttachment { Bone = name, Effect = "knife", Start = _scrubT,
+        _selectedAttachment = new AnimAttachment { Point = point, Effect = "knife", Start = _scrubT,
                                                    End = 1f - MathHelper.Clamp(Doc.SettleShare, 0f, 0.95f) };
         if (_selectedAttachment.End <= _selectedAttachment.Start) _selectedAttachment.Start = 0f;
         Doc.Attachments.Add(_selectedAttachment);
@@ -1197,72 +1203,90 @@ public sealed class DemoGame : Game
         _dirty = true;
     }
 
+    // Remove an attachment AND, when it was the last thing holding a clip-local bone up, that
+    // bone's ExtraBones record. AddKnife creates the pair together, so deleting only half left
+    // an orphan bone in the clip that nothing could ever remove — the file grew a dead bone per
+    // knife you changed your mind about. A base-rig bone is never touched; it isn't ours.
+    private void RemoveAttachment(AnimAttachment a)
+    {
+        if (Doc?.Attachments == null || a == null) return;
+        Doc.Attachments.Remove(a);
+        if (Doc.Attachments.Count == 0) Doc.Attachments = null;
+        if (_selectedAttachment == a) _selectedAttachment = null;
+
+        // Resolve the anchor before deciding what else goes with it.
+        int bi = EditorBoneOf(a.Point);
+        string bone = bi >= 0 ? _skeleton.Bones[bi].Name : null;
+
+        // The attachment's OWN point goes too when nothing else references it — otherwise the
+        // point AddKnife created would hold its own bone up forever and the knife could never
+        // be fully removed.
+        var own = Doc.Points?.Find(p => p.Id == a.Point);
+        if (own != null && !PointStillUsed(a.Point))
+        {
+            Doc.Points.Remove(own);
+            if (Doc.Points.Count == 0) Doc.Points = null;
+        }
+
+        string keep = bone == null || IsBaseBone(bone) || Doc.ExtraBones == null ? "base rig bone" : BoneHolder(bone, bi);
+        if (keep != null)
+        {
+            Console.WriteLine($"removed attachment '{a.Effect}' on '{a.Point}'; kept the bone ({keep})");
+            _dirty = true;
+            return;
+        }
+
+        // The bone's own animation data goes with it: its pose entries and anything hung off
+        // it exist only to orient the thing we just deleted.
+        int shed = 0;
+        foreach (var kf in Doc.Keyframes)
+        {
+            if (kf.Bones != null)     shed += kf.Bones.RemoveAll(e => e.Bone == bone);
+            if (kf.Additions != null) shed += kf.Additions.RemoveAll(ad => ad.Parent == bone);
+        }
+        Doc.ExtraBones.RemoveAll(r => r.Name == bone);
+        if (Doc.ExtraBones.Count == 0) Doc.ExtraBones = null;
+        Console.WriteLine($"removed attachment '{a.Effect}' and its clip-local bone '{bone}'"
+                        + (shed > 0 ? $" ({shed} pose/addition entr{(shed == 1 ? "y" : "ies")})" : ""));
+        RebuildWorkingRig();
+        _dirty = true;
+    }
+
+    // Does anything still reference this point id?
+    private bool PointStillUsed(string id)
+    {
+        if (Doc.Attachments != null) foreach (var a in Doc.Attachments) if (a.Point == id) return true;
+        if (Doc.Contacts    != null) foreach (var c in Doc.Contacts)    if (c.Point == id) return true;
+        return false;
+    }
+
+    // Why this clip-local bone must survive its attachment's removal, or null if nothing
+    // needs it. Pose entries and additions deliberately do NOT count — those are the bone's
+    // own data and are shed with it; a knife you posed must still be deletable.
+    private string BoneHolder(string bone, int boneIndex)
+    {
+        if (Doc.Attachments != null) foreach (var a in Doc.Attachments) if (EditorBoneOf(a.Point) == boneIndex) return "another attachment uses it";
+        if (Doc.Contacts    != null) foreach (var c in Doc.Contacts)    if (EditorBoneOf(c.Point) == boneIndex) return "a contact is on it";
+        if (Doc.ExtraBones  != null) foreach (var r in Doc.ExtraBones)  if (r.Parent == bone) return $"bone '{r.Name}' hangs off it";
+        if (Doc.Points      != null) foreach (var p in Doc.Points)      if (p.Bone == bone) return $"point '{p.Id}' is on it";
+        return null;
+    }
+
     private void RemoveSelectedPoint()
     {
         if (Doc?.Points == null || _selectedPointId == null) return;
         // A point's dependent annotations go with it (reported), never left dangling.
         int deps = 0;
-        foreach (var kf in Doc.Keyframes)
-            if (kf.Contacts != null) { deps += kf.Contacts.RemoveAll(c => c.Point == _selectedPointId); if (kf.Contacts.Count == 0) kf.Contacts = null; }
+        if (Doc.Contacts != null)
+        {
+            deps = Doc.Contacts.RemoveAll(c => c.Point == _selectedPointId);
+            if (Doc.Contacts.Count == 0) Doc.Contacts = null;
+        }
         Doc.Points.RemoveAll(p => p.Id == _selectedPointId);
         if (Doc.Points.Count == 0) Doc.Points = null;
         Console.WriteLine($"removed point '{_selectedPointId}'" + (deps > 0 ? $" and {deps} contact annotation(s) on it" : ""));
         _selectedPointId = null;
         _dirty = true;
-    }
-
-    // The endpoint popup's items for the selected endpoint, rebuilt each frame.
-    private void BuildEndpointMenu(Affine2[] world)
-    {
-        _endpointMenu.Clear();
-        int b = _selectedEndpoint;
-        if (Doc == null || b < 0 || b >= _skeleton.Count) { _endpointMenu.Title = null; return; }
-        string bone = _skeleton.Bones[b].Name;
-        var pt = PointFor(b);
-        _endpointMenu.Title = $"{bone} end" + (pt != null ? $"  [{pt.Id}]" : "");
-        // Shared joint: other bones whose End coincides with this one (a child bone's Start is
-        // its parent's End, so the alternative targets here are siblings / the parent).
-        var overlapping = new List<int>();
-        for (int i = 0; i < world.Length; i++)
-            if (i != b && Vector2.DistanceSquared(world[i].Translation, world[b].Translation) < PickR * PickR) overlapping.Add(i);
-        if (overlapping.Count > 0)
-            _endpointMenu.Add($"Target: cycle ({_skeleton.Bones[overlapping[0]].Name} ...)", () => _selectedEndpoint = overlapping[0]);
-        _endpointMenu.Add("Add knife", () => AddKnife(b));
-        _endpointMenu.Add("Add custom element...", () =>
-        {
-            _effectBone = bone; _selectedAttachment = Doc.Attachments?.Find(a => a.Bone == bone);
-            _naming = NameTarget.Effect; _nameBuffer = _selectedAttachment?.Effect ?? "";
-        });
-        _endpointMenu.Add(pt != null ? $"Contact point: {pt.Id}" : "Add contact point", () => { EnsureContactPoint(b); }, pt != null);
-        _endpointMenu.Add("Add named marker...", () => { _pendingBoneParent = b; _naming = NameTarget.Point; _nameBuffer = ""; });
-        _endpointMenu.Separator();
-        int here = _activeKey >= 0 ? IndexOfContactOnBone(Doc.Keyframes[_activeKey].Contacts, b) : -1;
-        ContactSource? cur = here >= 0 ? Doc.Keyframes[_activeKey].Contacts[here].Source : null;
-        _endpointMenu.Add("Contact: No slip",         () => ApplyContact(b, ContactSource.SelfPlant),      cur == ContactSource.SelfPlant);
-        _endpointMenu.Add("Contact: Planned support", () => ApplyContact(b, ContactSource.PlannedSupport), cur == ContactSource.PlannedSupport);
-        _endpointMenu.Add("Contact: External pin",    () => ApplyContact(b, ContactSource.External),       cur == ContactSource.External);
-        _endpointMenu.Add("Contact: Clear",           () => ApplyContact(b, null), false, cur != null || _contactWholeClip);
-        _endpointMenu.Add(_contactWholeClip ? "Scope: whole clip" : "Scope: this key -> next key", () => _contactWholeClip = !_contactWholeClip);
-        // Attached items at this endpoint: effects on the bone (or a knife bone hung from it) and
-        // the clip's own points here — selecting one makes U/I, Shift+E or Delete act on it.
-        bool any = false;
-        if (Doc.Attachments != null)
-            foreach (var a in Doc.Attachments)
-            {
-                int ab = _skeleton.IndexOf(a.Bone);
-                if (ab < 0 || (ab != b && _skeleton.Bones[ab].Parent != b)) continue;
-                if (!any) { _endpointMenu.Separator(); any = true; }
-                var att = a;
-                _endpointMenu.Add($"Effect: {a.Effect} on {a.Bone} [{a.Start:0.00}-{a.End:0.00}]", () => { _selectedAttachment = att; _selectedPointId = null; }, _selectedAttachment == a);
-            }
-        if (Doc.Points != null)
-            foreach (var p in Doc.Points)
-            {
-                if (p.Bone != bone) continue;
-                if (!any) { _endpointMenu.Separator(); any = true; }
-                var pp = p;
-                _endpointMenu.Add($"Point: {p.Id}{(p.Role != null ? " (" + p.Role + ")" : "")}  (Del removes)", () => { _selectedPointId = pp.Id; _selectedAttachment = null; }, _selectedPointId == p.Id);
-            }
     }
 
     // === labeled additions (points / vectors) + new bones ====================
@@ -1302,7 +1326,9 @@ public sealed class DemoGame : Game
             Doc.Attachments ??= new List<AnimAttachment>();
             if (_selectedAttachment == null)
             {
-                _selectedAttachment = new AnimAttachment { Bone = _effectBone,
+                int eb = _skeleton.IndexOf(_effectBone);
+                _selectedAttachment = new AnimAttachment {
+                    Point = eb >= 0 ? EnsureContactPoint(eb).Id : _effectBone,
                     End = 1 - MathHelper.Clamp(Doc.SettleShare, 0, .95f) };
                 Doc.Attachments.Add(_selectedAttachment);
             }
@@ -1404,7 +1430,6 @@ public sealed class DemoGame : Game
         _ghostPose = _skeleton.CreatePose();
         if (Doc != null && _activeKey >= 0) PoseData.Apply(Doc.Keyframes[_activeKey].Bones, _pose);
         else SamplePose(_scrubT);
-        RecomputeFloorLine();
     }
 
     private string UniqueBoneName(string baseName)
@@ -1458,24 +1483,13 @@ public sealed class DemoGame : Game
         // Editor-only visualization data (saved with the clip; runtime ignores it).
         // Moving the body WITHIN the com frame (the keyframe's com channel) is the
         // root-joint drag; panning everything together is the arrow keys.
-        if (_placement.ComAnchored && a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
+        if (a.Kind == AnimAdditionKind.Point && a.Name == "com" && a.Parent == null)
         {
-            // Exactly one source owns placement (ClipMotion). With an arc attached, the ARC
-            // owns it — writing the track here would move the body off the curve it is
-            // authored against (edit it in `--ref <name>`, or bake the arc to a path from the
-            // Scene menu). A clip declared In place is stationary on purpose.
-            var src = _placement.Motion?.Source ?? MotionSource.InPlace;
-            if (src == MotionSource.ReferenceArc || (Doc.Motion == MotionSource.InPlace))
-            {
-                if (!_warnedArcPlacement)
-                {
-                    _warnedArcPlacement = true;
-                    Console.WriteLine(src == MotionSource.ReferenceArc
-                        ? $"'{Doc.ReferenceArc}' owns the body placement — drag it in `dotnet run --project MTile.Demo -- --ref {Doc.ReferenceArc}`, or Scene > Bake arc to path."
-                        : "this clip is declared In place — Scene > Motion: Authored path to author a body path.");
-                }
-                return;
-            }
+            // The clip's own body_path is the ONLY placement channel, so a com drag always
+            // authors it — there is nothing else that could own the body's position, and no
+            // refusal to explain. Dragging a clip that was declared stationary simply makes
+            // it a travelling one, so the declaration follows the data.
+            if (Doc.Motion != MotionSource.Track) { Doc.Motion = MotionSource.Track; _dirty = true; }
             var refAdd = ActiveKeyPoint(BodyPathName);
             if (refAdd == null)
             {
@@ -1489,7 +1503,7 @@ public sealed class DemoGame : Game
                     Name = BodyPathName, Kind = AnimAdditionKind.Point, Px = seed.X, Py = seed.Y,
                 });
             }
-            var dm = (mp - new Vector2(_prevMs.X, _prevMs.Y)) / RigScale;
+            var dm = (mp - new Vector2(_prevMs.X, _prevMs.Y)) / _placement.Scale;
             refAdd.Px += dm.X;
             refAdd.Py += dm.Y;
             _dirty = true;
@@ -1520,196 +1534,24 @@ public sealed class DemoGame : Game
         return copy;
     }
 
-    private void DrawTimeline()
-    {
-        var doc = Doc;
-        if (doc == null) return;
-        float y = TrackY;
-        Fill(new Rectangle(SidebarW, (int)y - 28, W - SidebarW, 56), new Color(28, 30, 38));
-        _draw.Line(new Vector2(TrackX0, y), new Vector2(TrackX1, y), new Color(80, 85, 100), 2f);
-        if (doc.Attachments != null)
-            foreach (var a in doc.Attachments)
-            {
-                _draw.Line(new Vector2(TimeToX(a.Start), y + 14), new Vector2(TimeToX(a.End), y + 14), Color.LightCyan, 3);
-                _spriteBatch.DrawString(_font, $"{a.Bone}: {a.Effect}", new Vector2(TimeToX(a.Start), y + 24), Color.LightCyan);
-            }
-
-        // Contact bars: each keyframe's labels hold over [t_k, t_{k+1}) (the interval
-        // convention), colored by source — no slip green, planned support blue, external
-        // pin orange — one row per contact identity, under the track.
-        {
-            var rows = new List<string>();
-            for (int k = 0; k < doc.Keyframes.Count; k++)
-            {
-                var kf = doc.Keyframes[k];
-                if (kf.Contacts == null) continue;
-                float t1 = k + 1 < doc.Keyframes.Count ? doc.Keyframes[k + 1].Time : 1f;
-                foreach (var c in kf.Contacts)
-                {
-                    string key = c.Key ?? "?";
-                    int row = rows.IndexOf(key); if (row < 0) { rows.Add(key); row = rows.Count - 1; }
-                    if (row > 3) continue;
-                    var col = c.Source == ContactSource.PlannedSupport ? new Color(90, 150, 240)
-                            : c.Source == ContactSource.External       ? new Color(240, 160, 70)
-                                                                       : new Color(70, 220, 110);
-                    float by = y + 20 + row * 5;
-                    _draw.Line(new Vector2(TimeToX(kf.Time), by), new Vector2(TimeToX(t1), by), col * (0.4f + 0.6f * c.Weight), 3f);
-                }
-            }
-            for (int r = 0; r < rows.Count && r < 4; r++)
-                _spriteBatch.DrawString(_font, rows[r], new Vector2(TrackX1 + 4, y + 14 + r * 5), new Color(150, 160, 175));
-        }
-
-        // Keyframe bars.
-        for (int i = 0; i < doc.Keyframes.Count; i++)
-        {
-            float x = TimeToX(doc.Keyframes[i].Time);
-            Color c = i == _activeKey ? Color.White : new Color(120, 200, 255);
-            _draw.Line(new Vector2(x, y - 14), new Vector2(x, y + 14), c, i == _activeKey ? 3f : 2f);
-        }
-
-        // Playhead.
-        float px = TimeToX(_scrubT);
-        _draw.Line(new Vector2(px, y - 20), new Vector2(px, y + 20), new Color(255, 180, 60), 1.5f);
-    }
-
-    // Compact status header: what clip / where in time / current values. The full
-    // key cheatsheet lives in the H help panel so the top bar stays uncluttered.
-    private void DrawHeader()
-    {
-        var doc = Doc;
-        string title = doc != null ? $"[{doc.Type}] {doc.Name}" : "(none)";
-        // Two dirty flags: animation keyframes (orange) and the rig itself (cyan).
-        // Both clear on Ctrl-S; the rig flag means Skeletons/<rig>.json will be rewritten.
-        bool anyDirty = _dirty || _skelDirty;
-        string tag = (_dirty && _skelDirty) ? "  *unsaved (anim+rig)*"
-                   : _dirty                 ? "  *unsaved*"
-                   : _skelDirty             ? "  *unsaved rig*"
-                                            : "";
-        _spriteBatch.DrawString(_font, $"{title}{tag}",
-            new Vector2(SidebarW + 16, 10), anyDirty ? Color.Orange : Color.White);
-
-        string state = _playing      ? $"PLAYING @ t={_scrubT:0.00}"
-                     : _activeKey >= 0 ? $"keyframe {_activeKey} @ t={_scrubT:0.00}  (editable)"
-                                       : $"interpolated @ t={_scrubT:0.00}  (K to sample)";
-        Color stateColor = _playing ? new Color(255, 200, 80)
-                         : _activeKey >= 0 ? new Color(150, 230, 150) : new Color(150, 160, 175);
-        _spriteBatch.DrawString(_font,
-            $"{state}    |    {_editMode.ToString().ToUpperInvariant()} (Tab)" + (_ikMode ? "    |    IK DRAG" : ""),
-            new Vector2(SidebarW + 16, 28), stateColor);
-        // The IK-drag toggle box (header UI — picked before anything in the working area).
-        Fill(_ikToggle, _ikMode ? new Color(70, 130, 110) : new Color(45, 55, 75));
-        _spriteBatch.DrawString(_font, _ikMode ? "IK drag: on" : "IK drag: off", new Vector2(_ikToggle.Left + 6, _ikToggle.Top + 3), Color.White);
-
-        if (doc != null)
-        {
-            var m = _placement.Motion;
-            string motion = m == null ? "" : m.Source switch
-            {
-                MotionSource.InPlace      => m.Explicit ? "in place" : "stationary (legacy)",
-                MotionSource.Track        => m.Explicit ? "authored path" : "authored path (legacy)",
-                MotionSource.ReferenceArc => $"arc {doc.ReferenceArc}"
-                    + (m.ArcMissing ? " (MISSING)"
-                       // Arc pace relative to the clip: ×1 means they share a duration,
-                       // >1 means the clip runs the arc faster than the arc's own seconds.
-                       : $" {m.Arc.Duration:0.00}s  x{(m.Arc.Duration > 1e-4f ? doc.Duration / m.Arc.Duration : 1f):0.00}  at {m.ArcProgress(_scrubT):0.00}"),
-                _ => "",
-            };
-            _spriteBatch.DrawString(_font,
-                $"dur {doc.Duration:0.0}s  |  loop {(doc.Loop ? "on" : "off")}  |  region {doc.Region}  |  motion: {motion}"
-                + (doc.Scene != null ? $"  |  scene: {doc.Scene.Guides.Count} guides" : "  |  scene: legacy"),
-                new Vector2(SidebarW + 16, 46), new Color(160, 170, 185));
-        }
-
-        _spriteBatch.DrawString(_font, _guides.Hint ?? "H controls   |   Ctrl-S save   |   K sample keyframe   |   Scene menu top right",
-            new Vector2(SidebarW + 16, 64), _guides.Hint != null ? new Color(220, 190, 140) : new Color(130, 140, 155));
-
-        // Loop-seam guard: a looping locomotion clip whose first/last poses drifted apart
-        // silently degrades to one-shot seam sampling in-game (pose pop + cadence stall
-        // every stride — the run.json incident). Warn LIVE while editing; fix by making
-        // the last keyframe an exact copy of the first.
-        if (doc != null && AnimationSampler.SeamMismatch(doc, out string seamBone, out float seamDelta))
-            _spriteBatch.DrawString(_font,
-                $"!! LOOP SEAM MISMATCH: {seamBone} differs {seamDelta:0.000} rad between first & last keyframe " +
-                "- copy the first pose onto the last (loop pops + stalls until fixed)",
-                new Vector2(SidebarW + 16, 82), new Color(255, 90, 70));
-    }
-
     // Grouped key cheatsheet, toggled by H. Sections so related controls cluster instead
     // of one dense line — scales as the editor grows (additions, bones, …).
     private static readonly (string Group, string Keys)[] HelpRows =
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
-        ("Arc",      "A attach the next reference arc (Shift back, wraps through none)    arc file saves reload live"),
         ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip    IK drag box (header): drag a joint = IK pull of its limb, Esc restores"),
         ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
-        ("View",     "` block grid on/off (1 cell = 1 game tile, anchored to the floor line)    O physics hexagon at the com"),
+        ("View",     "wheel zoom (about the cursor)    middle-drag pan    Ctrl+0 reset zoom    View > Frame scene/path fits    ` block grid on/off (1 cell = 1 game tile, anchored to the floor line)    O physics hexagon at the com"),
         ("Scene",    "Scene menu (top right): add/select/duplicate/delete/hide/lock guides, snap, motion source, path/ghosts, frame/follow view"),
-        ("Obstacle", "legacy clips: drag the brown block to reposition it; editing it in guide mode makes it this clip's own scene"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Endpoint", "click a joint = select its endpoint, then the small v (or right-click) opens: add knife / element / contact point / marker, contact no-slip / planned / external / clear, scope"),
         ("Effect",   "E over joint: attach/name effect (knife)    Shift+E remove    U/I set selected effect start/end at playhead"),
-        ("Keyframe", "K sample    Del delete    click / drag a timeline bar    Space play"),
+        ("Keyframe", "K sample    Del delete    , . previous/next keyframe    click / drag a timeline bar    Space play"),
         ("Skin",     "G sprite skin on/off    W mesh wireframe    X skeleton on/off    (launch with --usebind <binding>)"),
         ("File",     "Ctrl-S save  (writes clips + rig)"),
     };
 
-    private void DrawHelpOverlay()
-    {
-        if (!_showHelp) return;
-        int x = SidebarW + 30, y = 130;
-        var panel = new Rectangle(x - 16, y - 34, W - SidebarW - 60, HelpRows.Length * 30 + 60);
-        Fill(panel, new Color(16, 18, 26, 240));
-        _draw.Line(new Vector2(panel.Left, panel.Top),    new Vector2(panel.Right, panel.Top),    new Color(90, 130, 120), 1f);
-        _draw.Line(new Vector2(panel.Left, panel.Bottom), new Vector2(panel.Right, panel.Bottom), new Color(90, 130, 120), 1f);
-
-        _spriteBatch.DrawString(_font, "CONTROLS", new Vector2(x, y - 26), new Color(150, 200, 255));
-        _spriteBatch.DrawString(_font, "H to close", new Vector2(panel.Right - 100, y - 26), new Color(120, 130, 145));
-        for (int i = 0; i < HelpRows.Length; i++)
-        {
-            int ry = y + 10 + i * 30;
-            _spriteBatch.DrawString(_font, HelpRows[i].Group, new Vector2(x, ry), new Color(255, 200, 120));
-            _spriteBatch.DrawString(_font, HelpRows[i].Keys,  new Vector2(x + 96, ry), new Color(205, 210, 220));
-        }
-    }
-
     // Modal name prompt while adding a point/vector/bone.
-    private void DrawNamingOverlay()
-    {
-        if (_naming == NameTarget.None) return;
-        string what = _naming == NameTarget.Effect ? $"effect on {_effectBone}"
-                    : _naming == NameTarget.Point ? "named marker"
-                    : _naming == NameTarget.Bone ? "bone"
-                    : _pendingAddition?.Kind == AnimAdditionKind.Vector ? "vector" : "point";
-        var box = new Rectangle(SidebarW + 40, H / 2 - 26, 420, 52);
-        Fill(box, new Color(18, 20, 28));
-        _draw.Line(new Vector2(box.Left,  box.Top),    new Vector2(box.Right, box.Top),    new Color(120, 230, 200), 1f);
-        _draw.Line(new Vector2(box.Left,  box.Bottom), new Vector2(box.Right, box.Bottom), new Color(120, 230, 200), 1f);
-        _spriteBatch.DrawString(_font, $"name {what}:  {_nameBuffer}_", new Vector2(box.Left + 12, box.Top + 9), Color.White);
-        _spriteBatch.DrawString(_font, "Enter = accept    Esc = cancel", new Vector2(box.Left + 12, box.Top + 28), new Color(150, 160, 175));
-    }
-
-    // === timeline geometry ===================================================
-
-    private float TrackX0 => SidebarW + 40;
-    private float TrackX1 => W - 40;
-    private float TrackY  => H - 60;
-    private float TimeToX(float t) => TrackX0 + t * (TrackX1 - TrackX0);
-    private float XToTime(float x) => MathHelper.Clamp((x - TrackX0) / (TrackX1 - TrackX0), 0f, 1f);
-    private bool  InSlider(Vector2 p) => p.X >= SidebarW && p.Y >= TrackY - 28 && p.Y <= TrackY + 28;
-
-    private int PickKeyframeBar(Vector2 mp)
-    {
-        var doc = Doc; if (doc == null) return -1;
-        int best = -1; float bestD = 8f;
-        for (int i = 0; i < doc.Keyframes.Count; i++)
-        {
-            float d = MathF.Abs(TimeToX(doc.Keyframes[i].Time) - mp.X);
-            if (d < bestD) { bestD = d; best = i; }
-        }
-        return best;
-    }
-
     private int PickJoint(Affine2[] world, Vector2 mp)
     {
         int best = -1; float bestD = PickR * PickR; 
@@ -1731,19 +1573,38 @@ public sealed class DemoGame : Game
         _attachments?.ClearHistory();
         _playing = false;
         _selected = i;
-        // Keep the selected row on screen (positions the initial open-by-name jump and
-        // N/C appends at the list's end; a plain click is already visible → no-op).
-        float rowTop = PadTop + i * RowH;
-        if (rowTop - _sidebarScroll < 0f)            _sidebarScroll = ClampSidebarScroll(rowTop);
-        else if (rowTop + RowH - _sidebarScroll > H) _sidebarScroll = ClampSidebarScroll(rowTop + RowH - H);
+        // Ask the clip list to reveal the row (the open-by-name jump and N/C appends land
+        // off screen; a plain click is already visible, and scrolling to it is harmless).
+        _scrollToSelected = true;
         _activeKey = -1;            // stale index from the previous clip; SelectKeyframe resets it
         var doc = _docs[i];
-        _refArc = LoadRefArc(doc.ReferenceArc);
         RebuildWorkingRig();        // compose base + THIS clip's ExtraBones
         if (doc.Keyframes.Count == 0)
             doc.Keyframes.Add(new AnimationKeyframe { Time = 0f, Bones = PoseData.Capture(_skeleton.CreatePose()) });
         doc.SortKeyframes();
         SelectKeyframe(0);          // render the first frame
+    }
+
+    // , / . — step to the previous/next keyframe and make it the editable one. From an
+    // interpolated playhead it jumps to the neighbouring key in that direction.
+    private void StepKeyframe(int dir)
+    {
+        var doc = Doc;
+        if (doc == null || doc.Keyframes.Count == 0) return;
+        int k;
+        if (_activeKey >= 0) k = MathHelper.Clamp(_activeKey + dir, 0, doc.Keyframes.Count - 1);
+        else if (dir > 0)
+        {
+            k = doc.Keyframes.FindIndex(x => x.Time > _scrubT + SnapEps);
+            if (k < 0) k = doc.Keyframes.Count - 1;
+        }
+        else
+        {
+            k = doc.Keyframes.FindLastIndex(x => x.Time < _scrubT - SnapEps);
+            if (k < 0) k = 0;
+        }
+        _playing = false;
+        SelectKeyframe(k);
     }
 
     private void SelectKeyframe(int k)
@@ -1792,7 +1653,6 @@ public sealed class DemoGame : Game
         {
             Time = _scrubT,
             Bones = PoseData.Capture(_pose),
-            Contacts = CloneContactsAt(_scrubT),
             Additions = AnimAdditionSampler.CloneEffectiveAt(doc, _scrubT),
         };
         doc.Keyframes.Add(kf);
@@ -1803,21 +1663,6 @@ public sealed class DemoGame : Game
 
     // Deep-copy the contact marks from the keyframe at or before `t` (the marks "in
     // effect" there), so a sampled keyframe carries them over rather than starting bare.
-    private List<ContactLabel> CloneContactsAt(float t)
-    {
-        var doc = Doc;
-        List<ContactLabel> src = null;
-        for (int i = 0; i < doc.Keyframes.Count; i++)
-        {
-            if (doc.Keyframes[i].Time > t) break;
-            if (doc.Keyframes[i].Contacts is { Count: > 0 }) src = doc.Keyframes[i].Contacts;
-        }
-        if (src == null) return null;
-        var copy = new List<ContactLabel>(src.Count);
-        foreach (var c in src) copy.Add(c.Clone());
-        return copy;
-    }
-
     private void TogglePlay()
     {
         _playing = !_playing;
@@ -1859,20 +1704,19 @@ public sealed class DemoGame : Game
             Region   = src.Region,
             SettleShare = src.SettleShare,
             OffRegionWeight = src.OffRegionWeight,
-            ReferenceArc = src.ReferenceArc,
             Motion   = src.Motion,
             Scene    = src.Scene?.Clone(),
             Points   = src.Points?.ConvertAll(p => p.Clone()),
             ExtraBones = src.ExtraBones?.ConvertAll(b => new SkeletonBoneRecord
                 { Name = b.Name, Parent = b.Parent, Rotation = b.Rotation, Length = b.Length }),
             Attachments = src.Attachments?.ConvertAll(a => a.Clone()),
+            Contacts    = src.Contacts?.ConvertAll(c => c.Clone()),
         };
         foreach (var kf in src.Keyframes)
             copy.Keyframes.Add(new AnimationKeyframe
             {
                 Time      = kf.Time,
                 Bones     = CloneBones(kf.Bones),
-                Contacts  = CloneContacts(kf.Contacts),
                 Additions = CloneAdditions(kf.Additions),
             });
         _docs.Add(copy);
@@ -1898,18 +1742,10 @@ public sealed class DemoGame : Game
         return copy;
     }
 
-    private static List<ContactLabel> CloneContacts(List<ContactLabel> src)
-    {
-        if (src == null) return null;
-        var copy = new List<ContactLabel>(src.Count);
-        foreach (var c in src) copy.Add(c.Clone());
-        return copy;
-    }
 
     private void SaveAll()
     {
         foreach (var d in _docs) AnimationStore.Save(d, _dir);
-        SaveViewState();
         _dirty = false;
         Console.WriteLine($"Saved {_docs.Count} animations to {_dir}");
 
@@ -1925,44 +1761,8 @@ public sealed class DemoGame : Game
         }
     }
 
-    // Editor view-state sidecar: the obstacle block's scene placement persists across sessions
-    // so the obstacle reference stays where you left it. (The per-keyframe player placement
-    // — the "edref" track — saves with each clip itself, not here.) Convenience view state,
-    // not clip data — lives beside the rig dirs at SkeletonStates/.editor_view.json
-    // (AnimationStore only reads inside SkeletonStates/<rig>/, so it can never be mistaken
-    // for a clip). Loaded on startup; written on Ctrl-S and on exit; never blocks on failure.
-    private string ViewStatePath => Path.Combine(FindStatesDir(), ".editor_view.json");
-
-    private sealed class ViewState
-    {
-        public float BlockX { get; set; }
-        public float BlockY { get; set; }
-    }
-
-    private void LoadViewState()
-    {
-        try
-        {
-            if (!File.Exists(ViewStatePath)) return;
-            var v = System.Text.Json.JsonSerializer.Deserialize<ViewState>(File.ReadAllText(ViewStatePath));
-            if (v != null) _guides.LegacyBlockOffset = new Vector2(v.BlockX, v.BlockY);
-        }
-        catch { /* view state is a convenience — never block startup on it */ }
-    }
-
-    private void SaveViewState()
-    {
-        try
-        {
-            var v = new ViewState { BlockX = _guides.LegacyBlockOffset.X, BlockY = _guides.LegacyBlockOffset.Y };
-            File.WriteAllText(ViewStatePath, System.Text.Json.JsonSerializer.Serialize(v));
-        }
-        catch { /* best-effort */ }
-    }
-
     protected override void OnExiting(object sender, ExitingEventArgs args)
     {
-        SaveViewState();
         base.OnExiting(sender, args);
     }
 
@@ -2016,77 +1816,6 @@ public sealed class DemoGame : Game
         list.Add("Misc");
         return list.ToArray();
     }
-
-    // The Scene dropdown's items, rebuilt each frame from the current state.
-    private void BuildSceneMenu()
-    {
-        _menu.Clear();
-        var doc = Doc;
-        bool haveDoc = doc != null;
-        var sel = _guides.Selected(doc);
-        _menu.Add("Add ground", () => _guides.Tool = GuideTool.AddGround, _guides.Tool == GuideTool.AddGround, haveDoc);
-        _menu.Add("Add block (drag to size)", () => _guides.Tool = GuideTool.AddBlock, _guides.Tool == GuideTool.AddBlock, haveDoc);
-        _menu.Add("Select guides", () => _guides.Tool = _guides.Tool == GuideTool.Select ? GuideTool.None : GuideTool.Select, _guides.Tool == GuideTool.Select, haveDoc);
-        _menu.Add("Duplicate selected", () => _guides.DuplicateSelected(doc, ref _dirty), false, sel != null);
-        _menu.Add("Delete selected", () => _guides.DeleteSelected(doc, ref _dirty), false, sel != null);
-        _menu.Add(sel?.Hidden == true ? "Show selected" : "Hide selected", () => _guides.ToggleHidden(doc, ref _dirty), false, sel != null);
-        _menu.Add(sel?.Locked == true ? "Unlock selected" : "Lock selected", () => _guides.ToggleLocked(doc, ref _dirty), false, sel != null);
-        _menu.Add("Snap to tile grid", () => _guides.Snap = !_guides.Snap, _guides.Snap);
-        _menu.Separator();
-        var m = _placement.Motion;
-        _menu.Add("Motion: auto (legacy precedence)", () => { doc.Motion = null; _dirty = true; }, haveDoc && doc.Motion == null, haveDoc);
-        _menu.Add("Motion: in place", () => { doc.Motion = MotionSource.InPlace; _dirty = true; }, haveDoc && doc.Motion == MotionSource.InPlace, haveDoc);
-        _menu.Add("Motion: authored path", () => { doc.Motion = MotionSource.Track; _dirty = true; }, haveDoc && doc.Motion == MotionSource.Track, haveDoc);
-        _menu.Add("Motion: reference arc (A picks one)", () => { doc.Motion = MotionSource.ReferenceArc; _dirty = true; }, haveDoc && doc.Motion == MotionSource.ReferenceArc, haveDoc && doc.ReferenceArc != null);
-        _menu.Add("Bake arc to editable path", BakeArcToPath, false, m != null && m.Source == MotionSource.ReferenceArc && m.Arc != null);
-        _menu.Separator();
-        _menu.Add("Show path", () => _preview.ShowPath = !_preview.ShowPath, _preview.ShowPath);
-        _menu.Add("Show pose ghosts", () => _preview.ShowGhosts = !_preview.ShowGhosts, _preview.ShowGhosts);
-        _menu.Add("Show contact marks", () => _preview.ShowContacts = !_preview.ShowContacts, _preview.ShowContacts);
-        _menu.Add("Show physics body (O)", () => _preview.ShowBody = !_preview.ShowBody, _preview.ShowBody);
-        _menu.Add("Show tile grid (`)", () => _preview.ShowGrid = !_preview.ShowGrid, _preview.ShowGrid);
-        _menu.Separator();
-        _menu.Add("Frame scene/path", () =>
-        {
-            var (_, gy) = _placement.GuideFrame(doc, _floorLocalY);
-            _placement.FrameScene(doc, _guides.Effective(doc, gy).Guides, new Vector2(SidebarW + (W - SidebarW) / 2f, H * 0.48f));
-        }, false, haveDoc);
-        _menu.Add("Follow view (camera tracks the body)", () => _placement.FollowView = !_placement.FollowView, _placement.FollowView);
-        _menu.Add("Continuous loop preview (accumulate travel)", () => _placement.ContinuousLoop = !_placement.ContinuousLoop, _placement.ContinuousLoop);
-    }
-
-    // "Bake arc to editable path": write the arc's scene position at every keyframe into the
-    // body_path track, make the track the declared motion source, and detach the arc (one
-    // owner). Reports the largest gap between the sparse C1 track and the arc between keys —
-    // the sampling error the author is accepting (add keys where it is too large).
-    private void BakeArcToPath()
-    {
-        var doc = Doc; var m = _placement.Motion;
-        if (doc == null || m == null || m.Source != MotionSource.ReferenceArc || m.Arc == null) return;
-        foreach (var kf in doc.Keyframes)
-        {
-            Vector2 p = m.BodyAt(kf.Time);
-            kf.Additions ??= new List<AnimAddition>();
-            var add = kf.Additions.Find(x => x.Kind == AnimAdditionKind.Point && x.Name == BodyPathName && x.Parent == null);
-            if (add == null) kf.Additions.Add(add = new AnimAddition { Name = BodyPathName, Kind = AnimAdditionKind.Point });
-            add.Px = p.X; add.Py = p.Y;
-        }
-        float worst = 0f, worstT = 0f;
-        for (int i = 0; i <= 64; i++)
-        {
-            float t = i / 64f;
-            float e = BodyPath.TrySample(doc, t, out var q) ? Vector2.Distance(q, m.BodyAt(t)) : 0f;
-            if (e > worst) { worst = e; worstT = t; }
-        }
-        doc.Motion = MotionSource.Track;
-        doc.ReferenceArc = null;
-        _refArc = null;
-        _dirty = true;
-        Console.WriteLine($"{doc.Name}: baked arc to body_path over {doc.Keyframes.Count} keys; max sampling error "
-                        + $"{worst:0.00} rig units ({worst * Game1.SkeletonScale:0.0}px) at t={worstT:0.00}"
-                        + (worst > 1f ? " — add a key there if that matters" : ""));
-    }
-
     // Cycle Doc.Type through the known options; a Type not in the list (hand-edited
     // JSON) restarts the cycle from the first option.
     private void CycleType(int dir)
@@ -2103,6 +1832,7 @@ public sealed class DemoGame : Game
     {
         _attachments?.Dispose();
         _skin?.Dispose();
+        _ui?.Dispose();
         base.UnloadContent();
     }
 

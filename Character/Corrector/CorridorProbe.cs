@@ -98,8 +98,6 @@ public sealed class Corridor
         return min;
     }
 
-    // Total floor height change over the recorded prefix (+ = net climb).
-    public float TotalRise() => ColumnCount == 0 ? 0f : StandingBaseY - FloorY[ColumnCount - 1];
 
     // Landing gate for a climb onto this column's floor: standing float height (2·Radius
     // above the floor top). The single definition of the gate — the reflex crest cap and

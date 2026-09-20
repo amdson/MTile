@@ -4,6 +4,19 @@
   "Skeleton": "biped",
   "Duration": 0.25,
   "Loop": false,
+  "Scene": {
+    "Guides": [
+      {
+        "Id": "g1",
+        "Kind": "Ground",
+        "X": 0,
+        "Y": 40,
+        "W": 0,
+        "H": 0,
+        "Label": "floor"
+      }
+    ]
+  },
   "Keyframes": [
     {
       "Time": 0,
@@ -14,172 +27,51 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.45
+          "Rotation": -1.5707964
         },
         {
           "Bone": "head",
-          "Rotation": 0.120000005
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": -2.0494974
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -1.7887198
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": 3.0243804
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -0.9477099
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 0.6662154
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 1.1938517
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 1.8274692
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.39034307
-        }
-      ],
-      "Contacts": [],
-      "Additions": [
-        {
-          "Name": "com",
-          "Kind": "Point",
-          "Px": 0,
-          "Py": -17.9,
-          "Dx": 0,
-          "Dy": 0
-        }
-      ]
-    },
-    {
-      "Time": 0.12,
-      "Bones": [
-        {
-          "Bone": "hip",
           "Rotation": 0
         },
         {
-          "Bone": "chest",
-          "Rotation": -1.25
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0.120000005
-        },
-        {
           "Bone": "arm_l_upper",
-          "Rotation": -1.9077137
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": -1.481214
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": 2.7631693
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -0.03146038
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 0.6178986
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 1.6305997
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 2.1043725
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.033823583
-        }
-      ],
-      "Contacts": [],
-      "Additions": [
-        {
-          "Name": "com",
-          "Kind": "Point",
-          "Px": 0,
-          "Py": -17.9,
-          "Dx": 0,
-          "Dy": 0
-        }
-      ]
-    },
-    {
-      "Time": 0.25,
-      "Bones": [
-        {
-          "Bone": "hip",
           "Rotation": 0
         },
         {
-          "Bone": "chest",
-          "Rotation": -1.58
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0.120000005
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": -2.2180967
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -1.854096
-        },
-        {
           "Bone": "arm_r_upper",
-          "Rotation": 2.8757536
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -0.17090154
+          "Rotation": 0
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 0.7813997
+          "Rotation": 1.5707964
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 1.0003136
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.3959079
+          "Rotation": 1.5707964
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.8369779
+          "Rotation": 0
         }
       ],
-      "Contacts": [],
       "Additions": [
         {
           "Name": "com",
           "Kind": "Point",
           "Px": 0,
-          "Py": -17.9,
+          "Py": -21,
           "Dx": 0,
           "Dy": 0
         }

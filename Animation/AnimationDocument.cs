@@ -35,12 +35,8 @@ public sealed class AnimationKeyframe
 {
     public float                Time      { get; set; }
     public List<PoseBoneEntry>  Bones     { get; set; } = new();
-    // Contact annotations active at this keyframe (planted feet / external pins).
-    // Null on legacy files → no contacts (airborne); the locomotion solver then
-    // falls back to the velocity-driven phase advance. See ContactLabel.
-    public List<ContactLabel>   Contacts  { get; set; }
-    // Labeled points/vectors authored on this keyframe (see AnimAddition). Null on
-    // legacy files. Carried forward when a new keyframe is sampled, like Contacts.
+    // Labeled points/vectors authored on this keyframe (see AnimAddition). Carried
+    // forward when a new keyframe is sampled.
     public List<AnimAddition>   Additions { get; set; }
 }
 
@@ -86,21 +82,24 @@ public sealed class AnimationDocument
     // behavior. See CharacterAnimator's action-overlay resolve.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public float                   SettleShare { get; set; } = 0f;
-    // Name of a reference trajectory (ReferenceClips/<name>.json, falling back to the
-    // baked ReferenceClipRegistry defaults) this clip rides for EDITOR visualization:
-    // while scrubbing, the Demo editor drives the body's placement against the fixed
-    // scenery (floor line, vault block) from the arc, so poses are authored in the
-    // context of the maneuver's real path. Authoring aid only — the runtime ignores it
-    // (the sim follows the arc through ReferencePath, never through the animation).
-    // Null/omitted on ordinary clips.
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string                  ReferenceArc { get; set; }
-    // EXPLICIT motion intent (ClipMotion): which channel owns the body's scene path. Null
-    // (legacy) keeps the precedence ReferenceArc → body_path track → stationary, which the
-    // editor previews but the runtime never opts into on its own. InPlace declares a
-    // deliberately stationary clip (distinct from "missing intent").
+    // EXPLICIT motion intent (ClipMotion): Track when the clip authors its own body_path,
+    // InPlace for a deliberately stationary clip. Null (legacy) resolves to whichever the
+    // clip's data implies — a track if one is authored, else stationary.
+    //
+    // A clip used to be able to name a ReferenceArc and have its placement RESOLVED from
+    // that file, which put a clip's path in another document and gave placement three
+    // competing sources. Arcs are now references you map onto the clip's own path on demand
+    // (ClipArcMap / `probe mapcom`, Scene ▸ Map com to arc) and display overlays you can
+    // keep alongside it (ClipScene.Overlays) — one placement channel, owned by the clip.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public MotionSource?           Motion { get; set; }
+    // CLIP-LOCAL reference arcs (ClipArcs). An arc edited from inside the clip editor is
+    // forked to here and belongs to this clip alone: it travels with a clone or a retarget,
+    // cannot orphan when a clip is renamed, and never writes back to the shared
+    // ReferenceClips/ file it came from. A Scene overlay with Local = true names one of
+    // these; without the flag the name resolves to the shared arc instead.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<HermiteClipDocument> Arcs { get; set; }
     // Fixed scene reference geometry (ClipScene): ground line + blocks in clip scene space.
     // Null keeps the editor's legacy floor-line/obstacle-block preview; an explicit Scene —
     // including an empty one — replaces it. Reference data only; never a runtime collider.
@@ -122,6 +121,13 @@ public sealed class AnimationDocument
     // existing joint (or a clip-local orientation bone); Effect names a shared asset.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<AnimAttachment> Attachments { get; set; }
+    // Contacts as explicit phase intervals (planted feet / external pins / planner
+    // requests). CLIP-LEVEL, not per-keyframe: a contact's lifetime is its own property, so
+    // it can start between keys and a keyframe retime no longer drags it along. Null = no
+    // contacts (airborne), and the locomotion solver falls back to velocity-driven phase
+    // advance. See ContactSpan.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<ContactSpan>    Contacts { get; set; }
     public List<AnimationKeyframe> Keyframes { get; set; } = new();
 
     [JsonIgnore] public string FilePath { get; set; }

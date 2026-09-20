@@ -11,15 +11,14 @@
   "DrawBackground":             true,
   "BackgroundStyle":            "trees", //trees / mountain
   "DrawPlayerSprites":          false, 
-  "DrawPlayerSpriteSkin":       true, 
-  "AnimationRig":               "biped", // "biped_rabbit" for the strutted rig + rabbit/badger skins
+  "DrawPlayerSpriteSkin":       false, 
+  "AnimationRig":               "biped", // "biped" for the plain stick rig (pumpkin_man_downsampled skin); "biped_rabbit" for the strutted rig + rabbit/badger skins
   // "PlayerSpriteBinding":        "pumpkin_man_downsampled",
-  "PlayerSpriteBindings":       ["pumpkin_man_downsampled"], // rabbit/badger bindings need AnimationRig biped_rabbit
-  "DebugDrawSkeleton":          false,
+  "PlayerSpriteBindings":       ["rabbit"], // rabbit/badger bindings need AnimationRig biped_rabbit; ["pumpkin_man_downsampled"] with AnimationRig biped
+  "DebugDrawSkeleton":          true,
   "RunAnimationSolver":         true,
   "CameraZoom":                 5.0,
   "DebugDrawConstraints":       false, 
-  "DebugDrawSteeringRamps":     false,
   "DebugDrawGuidedPath":        false,
   "DebugDrawCorrectorReference": false,
   "DebugDrawCorrectorBallistic": false,

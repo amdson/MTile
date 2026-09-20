@@ -456,7 +456,6 @@ public abstract class SlashLikeAction : ActionState
     // Internal (not private) so RecoveryAction can publish the hold-field
     // continuation at the same geometry.
     internal const float BaseArcRadius        = PlayerCharacter.Radius * 1.5f * 1.75f;
-    internal const float HoldFieldBaseRadius  = BaseArcRadius;
 
     // Hold-field tuning (COMBAT_FEEL_PLAN Phase 2). Variants with HoldVictims=true
     // broadcast a ForceField each frame of the slash that servo-pulls enemies

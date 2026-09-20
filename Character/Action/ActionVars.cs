@@ -47,7 +47,6 @@ public struct ActionVars
                                       // hitbox lengths (sim) AND the glow tip (render)
 
     public Vector2 OriginCell;        // BlockPlace (last placed cell), BlockBurst (target cell)
-    public Vector2 CursorPosition;     // BlockReady
 
     public float   FiringTime;        // Beam
     public bool    Firing;            // Beam

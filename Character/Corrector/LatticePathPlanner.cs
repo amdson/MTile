@@ -168,7 +168,6 @@ public sealed class LatticePathPlanner
     public int   DebugHeight => _h;
     public Vector2 DebugCellCenter(int cx, int cy) => CellCenter(_x0 + cx, _y0 + cy);
     public bool  DebugBlocked(int cx, int cy)   => _blocked[cy * _w + cx];
-    public bool  DebugReachable(int cx, int cy) => _reachable[cy * _w + cx];
     // Last solve's stats; the string is built on demand (nothing allocates
     // per solve on the sim path).
     public int   LastReach { get; private set; }

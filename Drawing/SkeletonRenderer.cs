@@ -8,20 +8,16 @@ public struct SkeletonDrawStyle
     public Color BoneColor;
     public Color JointColor;
     public Color RootColor;
-    public Color AxisColor;     // local +X tick of length Bone.Length; skipped if Length <= 0
     public float BoneThickness;
     public float JointRadius;
-    public bool  DrawAxes;
 
     public static SkeletonDrawStyle Default => new()
     {
         BoneColor     = Color.White,
         JointColor    = Color.OrangeRed,
         RootColor     = Color.Yellow,
-        AxisColor     = new Color(120, 200, 255),
-        BoneThickness = 2f,
+        BoneThickness = 1f,
         JointRadius   = 2.5f,
-        DrawAxes      = false,
     };
 }
 

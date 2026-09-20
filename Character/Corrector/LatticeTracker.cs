@@ -275,7 +275,7 @@ public static class LatticeTracker
             pr.H = H; pr.Dt = dt;
             pr.CoastVel = s.CoastVel;
             pr.Rows = s.Rows; pr.RowCount = rowCount;
-            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, speed, supportVy);
+            pr.ChannelCount = CorrectorChannels.BuildFold(s, H, rowCount, dir, supportVy);
             for (int k = 0; k < H; k++)
             {
                 s.ChannelMask[2][k] = false;   // CornerAssist: not carried over

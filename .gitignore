@@ -30,6 +30,9 @@ _shot_*.png
 # Motion-probe inspection output (dev tool)
 .probe/
 
+# Dear ImGui window layout — MTile.Demo rewrites it on every run, per machine.
+imgui.ini
+
 # Recorded gameplay takes (Ctrl+S in the recorder; opened via MTile.Demo -- --load)
 Takes/
 

@@ -458,10 +458,8 @@ internal static class AnimBaseline
         var set = new SortedSet<int>();
         foreach (var d in clips)
         {
-            if (d.Skeleton != rig.Name || d.Keyframes == null) continue;
-            foreach (var k in d.Keyframes)
-                if (k.Contacts != null)
-                    foreach (var l in k.Contacts) { int b = EndpointResolver.BoneOf(rig, d, l); if (b >= 0) set.Add(b); }
+            if (d.Skeleton != rig.Name || d.Contacts == null) continue;
+            foreach (var c in d.Contacts) set.Add(EndpointResolver.BoneOf(rig, d, c.Point));
         }
         return set.ToArray();
     }

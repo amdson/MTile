@@ -186,8 +186,6 @@ public sealed class SpriteBindingDocument
     public Vector2 ImageToRig(Vector2 imagePx)
         => imagePx * ImageToRigScale + new Vector2(ImageToRigTx, ImageToRigTy);
 
-    public Vector2 RigToImage(Vector2 rig)
-        => (rig - new Vector2(ImageToRigTx, ImageToRigTy)) / ImageToRigScale;
 
     // Build the bind pose on `skel`: rig defaults, overridden per entry by name. Unknown
     // bone names are skipped (a binding survives rig growth; new bones sit at bind).

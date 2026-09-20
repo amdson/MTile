@@ -448,9 +448,6 @@ public sealed class LeastSquaresSolver
         return cost;
     }
 
-    // Sum of squares of r(x) — for picking a seed (e.g. a coarse global search) before
-    // a local Minimize. Uses the residual scratch, so don't call mid-Minimize.
-    public float Cost(ResidualFn fn, ReadOnlySpan<float> x) => SumSq(_r, fn(x, _r));
 
     private static float SumSq(float[] v, int n)
     {

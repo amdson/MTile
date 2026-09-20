@@ -54,7 +54,7 @@ public sealed class HermiteClipDocument
     // DropdownRefDuration), so keep the two in step when retuning.
     public float Duration { get; set; } = 1f;
 
-    // Retarget anchors in clip space. Defaults are the legacy normalized convention.
+    // Retarget anchors in clip space, in the pixels the arc is authored in.
     public float EntryX { get; set; } = 0f;
     public float EntryY { get; set; } = 0f;
     public float GateX  { get; set; } = 1f;
@@ -80,10 +80,27 @@ public sealed class HermiteClipDocument
         }
     }
 
-    [JsonIgnore] public bool IsLegacyNormalized
-        => Entry == Vector2.Zero && Gate == new Vector2(1f, -1f);
+    // Provenance for a CLIP-LOCAL copy (AnimationDocument.Arcs): the shared arc this was
+    // forked from, so the editor can say where it came from. Null on shared arcs and on
+    // locals authored from scratch — it is a note, never a link the resolver follows.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string FromShared { get; set; }
 
     [JsonIgnore] public string FilePath;
+
+    // Deep copy — what forking a shared arc into a clip produces (no aliasing of Keys, and
+    // FilePath deliberately dropped: a clip-local arc has no file of its own).
+    public HermiteClipDocument Clone()
+    {
+        var c = new HermiteClipDocument
+        {
+            Name = Name, Duration = Duration,
+            EntryX = EntryX, EntryY = EntryY, GateX = GateX, GateY = GateY,
+            FromShared = FromShared,
+        };
+        foreach (var k in Keys) c.Keys.Add(new HermiteClipKey { T = k.T, X = k.X, Y = k.Y, TX = k.TX, TY = k.TY });
+        return c;
+    }
 
     private static readonly JsonSerializerOptions Opts = new()
     {
@@ -208,7 +225,7 @@ public sealed class HermiteClipDocument
     // Rescale clip space in place about the Entry anchor (positions and tangents alike,
     // key T values untouched). The retarget map normalizes by the anchor span, so this
     // leaves the mapped world arc bit-identical — it only changes the units the editor
-    // shows. Used to convert legacy normalized clips to a pixel authoring box.
+    // shows — how ReferenceClipRegistry's baked defaults are authored, then boxed.
     public void RescaleClipSpace(Vector2 factor)
     {
         Vector2 e = Entry;

@@ -76,9 +76,7 @@ public class MovementConfig
     public float MaxWalkSpeed { get; set; } = 100f;
     // Legacy: used to be StandingState/CrouchedState's brake force when no input.
     // Now the equivalent role is played by SurfaceContact.Friction (set on floor
-    // contacts at collision time, value below). Kept for movement_config.json
-    // backward compatibility but unused by code.
-    public float BrakingForce { get; set; } = 3000f;
+    // contacts at collision time, value below).
     // Floor-contact friction coefficient (px/s²), applied by the physics solver as
     // a cap on relative tangential velocity change per frame. Matches the old
     // BrakingForce in magnitude so braking from a walk still stops the body in
@@ -88,7 +86,6 @@ public class MovementConfig
     
     // Crouching
     public float CrouchMaxWalkSpeed { get; set; } = 50f;
-    public float CrouchWalkAccel { get; set; } = 1500f;
     
     // Fast Falling / Sliding
     public float FastFallForce { get; set; } = 1000f;
@@ -105,11 +102,6 @@ public class MovementConfig
     public float RunJumpHoldForce { get; set; } = -1200f;
     public float RunJumpMinSpeed { get; set; } = 80f;
 
-    // Duck Under
-    public float DuckAutoFireSpeed { get; set; } = 40f;
-    public float DuckForce         { get; set; } = 4000f;
-    public float DuckPushForce     { get; set; } = 500f;
-    public float MaxDuckTime       { get; set; } = 0.5f;
 
     // Ledge Grab / Pull
     public float GrabGravityCancel { get; set; } = 600f;
@@ -126,8 +118,6 @@ public class MovementConfig
     public float LedgeJumpServoAccel    { get; set; } = 3000f;
     public float LedgeJumpGravityCancel { get; set; } = 600f;
 
-    // Duck Under (stable height)
-    public float DuckDamping       { get; set; } = 80f;
 
     // Guided lip maneuvers (ledge pull, parkour, mantle, arc jump)
     public float LipLiftForce  { get; set; } = 2000f;
@@ -161,11 +151,6 @@ public class MovementConfig
     public float GuidedMaxDuration    { get; set; } = 0.6f;
     public float GuidedRefSpeed       { get; set; } = 80f;    // fallback for duration estimate
 
-    // Parkour kick — instantaneous velocity bump applied at ParkourState entry.
-    // Forward component is scaled by wallDir; upward is negative Y.
-    public float ParkourKickForward     { get; set; } = 0f;
-    public float ParkourKickUp          { get; set; } = -40f;
-
     // Corridor probe (shared local-geometry sensing for the maneuver layer —
     // see Plans/CORRIDOR_MANEUVER_PLAN.md and Character/CorridorProbe.cs).
     // Columns of tiles scanned ahead of the body's leading face (capped at
@@ -192,9 +177,6 @@ public class MovementConfig
     // Body-relative px, deliberately independent of Chunk.TileSize.
     public float MantleMinRise { get; set; } = 8f;
     public float MantleMaxRise { get; set; } = 20f;
-    // Body face must be within this many px of the step lip — the mantle is the flush/slow
-    // fallback for the case the ramps' steep-angle taper refuses, not a running maneuver.
-    public float MantleFlushDistance { get; set; } = 6f;
     // |vx| gate: above this the body is mid-run and the reflex ramps own the vault; the
     // mantle only claims stalled/deliberate entries. Below MaxWalkSpeed by a wide margin.
     public float MantleMaxEntrySpeed { get; set; } = 60f;
@@ -205,10 +187,6 @@ public class MovementConfig
     // tile) — above it the body pops an honest hop and arcs over, reproducing the old
     // ramp-vault feel with real ballistics; at or below it the flush/slow approach belongs
     // to MantleState.
-    // Body face may be up to this many px from the lip when the hop fires — unlike the
-    // mantle's flush gate, the arc wants a little run-up room so entry speed carries over.
-    // Body-relative px, deliberately independent of Chunk.TileSize.
-    public float ArcJumpTriggerDistance { get; set; } = 20f;
     // Extra apex height (px) above the landing gate the entry hop budgets for, so the
     // ballistic rollout crosses the lip with a small clearance instead of grazing it.
     public float ArcJumpApexMargin { get; set; } = 4f;
@@ -221,8 +199,8 @@ public class MovementConfig
     public int   CorrectorHorizon               { get; set; } = 18;
     public float CorrectorMargin                { get; set; } = 2f;
     public float CorrectorDeltaWeight           { get; set; } = 5f;
-    // Body face within this many px of the rise lip before the vault fires — larger
-    // than ArcJumpTriggerDistance because the corrector plans the whole arc.
+    // Body face within this many px of the rise lip before the vault fires — generous,
+    // because the corrector plans the whole arc rather than reacting at the lip.
     // Body-relative px, deliberately independent of Chunk.TileSize.
     public float CorrectorClimbTriggerDistance  { get; set; } = 32f;
     // Ambient corrector mode (plan step 7 — replaces the ambient reflex ramps).

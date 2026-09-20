@@ -146,6 +146,8 @@ public class GroundFrictionTests(ITestOutputHelper output)
 
     // The on-disk movement_config.json predates GroundFriction and doesn't list it.
     // Verify System.Text.Json keeps the class initializer (3000) for missing properties.
+    // "BrakingForce" is deliberately a knob the class NO LONGER HAS — the json a player
+    // has on disk outlives the code, so unknown keys must be ignored, not fatal.
     [Fact]
     public void MovementConfig_LoadFromStaleJson_KeepsGroundFrictionDefault()
     {

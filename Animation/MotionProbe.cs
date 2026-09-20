@@ -186,8 +186,13 @@ public static class MotionProbe
         foreach (var kf in clip.Keyframes)
         {
             float t = MathHelper.Clamp(kf.Time, 0f, 1f);
-            string contacts = kf.Contacts != null && kf.Contacts.Count > 0
-                ? "  contacts=" + string.Join(",", kf.Contacts.ConvertAll(c => c.Key)) : "";
+            // Contacts are clip-level spans now, so the digest reports the ones COVERING this
+            // key's phase rather than ones "on" it — a plant that starts between keys still shows.
+            var live = new List<string>();
+            if (clip.Contacts != null)
+                foreach (var cs in clip.Contacts)
+                    if (cs.Covers(t, out _)) live.Add($"{cs.Point}@{cs.WeightAt(t):0.00}");
+            string contacts = live.Count > 0 ? "  contacts=" + string.Join(",", live) : "";
             sb.AppendLine();
             sb.AppendLine($"## t={t:0.00}{contacts}");
             DigestPose(sb, rig, World(clip, rig, t, root));

@@ -68,8 +68,6 @@ public sealed class TileMassField
     private readonly Dictionary<(int gtx, int gty), MassBucket> _mass = new();
     private readonly List<(int gtx, int gty)> _scratchPrune = new();
 
-    public float MassAt(int gtx, int gty)
-        => _mass.TryGetValue((gtx, gty), out var m) ? m.Amount : 0f;
 
     // Drop `amount` of mass at (gtx, gty). Returns the number of tiles committed by
     // this deposit and everything it cascaded into. `wave` tags the mass with its

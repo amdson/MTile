@@ -54,6 +54,18 @@ public readonly struct ReferenceFrame
     }
 
     public Vector2 MapTangent(Vector2 t) => new(t.X * Scale.X, t.Y * Scale.Y);
+
+    // Inverse of Map. The mapping is diagonal, so it inverts componentwise; a degenerate axis
+    // (scale 0) reports the clip-space origin on that axis rather than dividing by zero. The
+    // editors use this to turn a dragged world point back into the pixels the arc is authored
+    // in — drag in the frame you see, store in the frame the file keeps.
+    public Vector2 Unmap(Vector2 world)
+    {
+        Vector2 d = world - Entry;
+        return ClipEntry + new Vector2(
+            MathF.Abs(Scale.X) < 1e-6f ? 0f : d.X / Scale.X,
+            MathF.Abs(Scale.Y) < 1e-6f ? 0f : d.Y / Scale.Y);
+    }
 }
 
 public static class ReferencePath

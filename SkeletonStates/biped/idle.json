@@ -4,6 +4,19 @@
   "Skeleton": "biped",
   "Duration": 1.5,
   "Loop": true,
+  "Scene": {
+    "Guides": [
+      {
+        "Id": "g1",
+        "Kind": "Ground",
+        "X": 0,
+        "Y": 40,
+        "W": 0,
+        "H": 0,
+        "Label": "floor"
+      }
+    ]
+  },
   "Keyframes": [
     {
       "Time": 0,
@@ -14,7 +27,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.5708
+          "Rotation": -1.5707964
         },
         {
           "Bone": "head",
@@ -22,35 +35,35 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": 3.7570467
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": -0.73048395
+          "Rotation": 0
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 2.5270872
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": 0.53083247
+          "Rotation": 0
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 1.0636978
+          "Rotation": 1.5707964
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0.4529341
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.8126074
+          "Rotation": 1.5707964
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.3180468
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -58,7 +71,7 @@
           "Name": "com",
           "Kind": "Point",
           "Px": 0,
-          "Py": -22.27178,
+          "Py": -21,
           "Dx": 0,
           "Dy": 0
         }

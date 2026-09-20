@@ -7,10 +7,14 @@ using Xunit;
 
 namespace MTile.Tests;
 
-// ClipStrideTrack compiler (step planner P1 — Plans/ANIMATION_STEP_PLANNER_IMPL.md):
-// stance runs from PlannedSupport labels, loop-seam unwrapping, persistent stance,
-// structural validation, and the placement convention's agreement with the live
-// solve-root (com frame, rig units, facing/scale applied at runtime).
+// ClipStrideTrack compiler (step planner P1 — Plans/ANIMATION_STEP_PLANNER_IMPL.md).
+//
+// Contacts are AUTHORED SPANS now, so the stance boundaries are no longer derived: what used
+// to be tested here (run detection across a keyframe ring, "liftoff = the key after the run",
+// seam unwrapping, dropping a duplicate closing key) has no subject — a span states its own
+// interval. What still has to hold is everything DOWNSTREAM of that: swings between stances,
+// chord-relative residuals, the persistent case, structural refusals, and the placement
+// convention's agreement with the live solve-root.
 public class AnimStrideTrackTests
 {
     // Tiny rig: hip (root, rotates) -> foot (length 10). Rotating the hip swings the
@@ -23,31 +27,27 @@ public class AnimStrideTrackTests
         return b.Build();
     }
 
-    private static AnimationKeyframe Key(float t, float hipRot, params ContactLabel[] contacts) => new()
+    private static AnimationKeyframe Key(float t, float hipRot) => new()
     {
         Time = t,
         Bones = new List<PoseBoneEntry> { new() { Bone = "hip", Rotation = hipRot } },
-        Contacts = contacts.Length == 0 ? null : new List<ContactLabel>(contacts),
     };
 
-    private static ContactLabel Planned(string node) =>
-        new() { Node = node, Weight = 1f, Source = ContactSource.PlannedSupport };
+    private static ContactSpan Planned(string point, float start, float end) => new()
+    { Point = point, Start = start, End = end, Source = ContactSource.PlannedSupport };
 
-    private static AnimationDocument Doc(bool loop, params AnimationKeyframe[] keys) => new()
+    private static AnimationDocument Doc(bool loop, ContactSpan[] contacts, params AnimationKeyframe[] keys) => new()
     {
         Name = "test", Type = "Misc", Skeleton = "tiny", Loop = loop, Duration = 1f,
         Keyframes = new List<AnimationKeyframe>(keys),
+        Contacts = contacts == null ? null : new List<ContactSpan>(contacts),
     };
 
     [Fact]
-    public void SingleStance_TouchdownAndLiftoff_FromRunBoundaries()
+    public void Stance_IsTheAuthoredSpan_AndTheSwingFollowsIt()
     {
-        // foot planned over keys 0.1 and 0.3; free at 0.6 and 0.8. Stance [0.1, 0.6).
-        var doc = Doc(loop: true,
-            Key(0.1f, 0.0f, Planned("foot")),
-            Key(0.3f, 0.2f, Planned("foot")),
-            Key(0.6f, 0.5f),
-            Key(0.8f, 0.1f));
+        var doc = Doc(loop: true, new[] { Planned("foot", 0.1f, 0.6f) },
+            Key(0.1f, 0.0f), Key(0.3f, 0.2f), Key(0.6f, 0.5f), Key(0.8f, 0.1f));
         Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
         var f = Assert.Single(track.Feet);
         var st = Assert.Single(f.Stances);
@@ -64,60 +64,52 @@ public class AnimStrideTrackTests
     }
 
     [Fact]
-    public void LoopSeam_RunWrapsAndUnwraps()
+    public void SpanCrossingTheSeam_StaysOneStance()
     {
-        // Planned on the LAST ring key (0.75) and the first (0.0): one stance wrapping
-        // the seam, touchdown 0.75, liftoff unwrapped to 1.25 (= key 0.25 + 1).
-        var doc = Doc(loop: true,
-            Key(0.00f, 0.0f, Planned("foot")),
-            Key(0.25f, 0.3f),
-            Key(0.50f, 0.5f),
-            Key(0.75f, 0.2f, Planned("foot")));
+        // The span says 0.75 → 1.25 outright; there is no ring to walk and nothing to unwrap.
+        var doc = Doc(loop: true, new[] { Planned("foot", 0.75f, 1.25f) },
+            Key(0.00f, 0.0f), Key(0.25f, 0.3f), Key(0.50f, 0.5f), Key(0.75f, 0.2f));
         Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
         var f = Assert.Single(track.Feet);
         var st = Assert.Single(f.Stances);
         Assert.Equal(0.75f, st.Touchdown, 3);
         Assert.Equal(1.25f, st.Liftoff, 3);
+        // Its two endpoints are the same phase modulo 1, so the offsets agree.
+        var doc2 = Doc(loop: true, new[] { Planned("foot", 0.75f, 1.75f) }, Key(0f, 0f), Key(0.5f, 0.4f));
+        Assert.True(ClipStrideTrack.TryCompile(doc2, TinyRig(), out var t2, out err), err);
+        Assert.True(t2.Feet[0].Stances[0].Persistent, "a span covering a whole cycle is persistent");
     }
 
     [Fact]
-    public void ClosingDuplicateKey_IsDroppedFromTheRing()
+    public void TwoStancesOnOneFoot_GiveTwoSwings()
     {
-        // Walk-shaped: closing key at t=1 duplicates key 0's label. Must not create a
-        // second stance — one stance [0, 0.5).
-        var doc = Doc(loop: true,
-            Key(0.00f, 0.0f, Planned("foot")),
-            Key(0.25f, 0.2f, Planned("foot")),
-            Key(0.50f, 0.4f),
-            Key(0.75f, 0.2f),
-            Key(1.00f, 0.0f, Planned("foot")));
+        var doc = Doc(loop: true, new[] { Planned("foot", 0.0f, 0.3f), Planned("foot", 0.5f, 0.8f) },
+            Key(0.0f, 0.0f), Key(0.3f, 0.3f), Key(0.5f, 0.1f), Key(0.8f, 0.4f));
         Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
         var f = Assert.Single(track.Feet);
-        var st = Assert.Single(f.Stances);
-        Assert.Equal(0.0f, st.Touchdown, 3);
-        Assert.Equal(0.5f, st.Liftoff, 3);
+        Assert.Equal(2, f.Stances.Length);
+        Assert.Equal(2, f.Swings.Length);
+        Assert.Equal(0.3f, f.Swings[0].Start, 3);
+        Assert.Equal(0.5f, f.Swings[0].End, 3);
+        // The cyclic swing wraps: 0.8 → 1.0 (the next stance's touchdown, unwrapped).
+        Assert.Equal(0.8f, f.Swings[1].Start, 3);
+        Assert.Equal(1.0f, f.Swings[1].End, 3);
     }
 
     [Fact]
     public void PersistentStance_WholeCycle_NoSwings()
     {
-        var doc = Doc(loop: true,
-            Key(0.0f, 0.0f, Planned("foot")),
-            Key(0.5f, 0.1f, Planned("foot")));
+        var doc = Doc(loop: true, new[] { Planned("foot", 0f, 1f) }, Key(0.0f, 0.0f), Key(0.5f, 0.1f));
         Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
         var f = Assert.Single(track.Feet);
-        var st = Assert.Single(f.Stances);
-        Assert.True(st.Persistent);
+        Assert.True(Assert.Single(f.Stances).Persistent);
         Assert.Empty(f.Swings);
     }
 
     [Fact]
-    public void NonLoop_TailStance_HoldsToClipEnd()
+    public void NonLoop_TailStance_HasNoSwing()
     {
-        var doc = Doc(loop: false,
-            Key(0.0f, 0.0f),
-            Key(0.4f, 0.2f, Planned("foot")),
-            Key(0.8f, 0.3f, Planned("foot")));
+        var doc = Doc(loop: false, new[] { Planned("foot", 0.4f, 1.0f) }, Key(0.0f, 0.0f), Key(0.8f, 0.3f));
         Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
         var f = Assert.Single(track.Feet);
         var st = Assert.Single(f.Stances);
@@ -127,38 +119,54 @@ public class AnimStrideTrackTests
     }
 
     [Fact]
-    public void MixedSources_OnOneNode_IsRefused()
+    public void MixedSources_OnOnePoint_IsRefused()
     {
         var doc = Doc(loop: true,
-            Key(0.0f, 0f, Planned("foot")),
-            Key(0.5f, 0f, new ContactLabel { Node = "foot", Source = ContactSource.SelfPlant }));
+            new[] { Planned("foot", 0f, 0.4f),
+                    new ContactSpan { Point = "foot", Start = 0.5f, End = 0.9f, Source = ContactSource.SelfPlant } },
+            Key(0.0f, 0f), Key(0.5f, 0f));
         Assert.False(ClipStrideTrack.TryCompile(doc, TinyRig(), out _, out string err));
         Assert.Contains("mixes", err);
     }
 
     [Fact]
-    public void UnknownBone_IsRefused()
+    public void UnknownPoint_IsRefused()
     {
-        var doc = Doc(loop: true, Key(0.0f, 0f, Planned("flipper")), Key(0.5f, 0f));
+        var doc = Doc(loop: true, new[] { Planned("flipper", 0f, 0.5f) }, Key(0.0f, 0f), Key(0.5f, 0f));
         Assert.False(ClipStrideTrack.TryCompile(doc, TinyRig(), out _, out string err));
         Assert.Contains("flipper", err);
+    }
+
+    [Fact]
+    public void EmptySpan_IsRefused()
+    {
+        var doc = Doc(loop: true, new[] { Planned("foot", 0.4f, 0.4f) }, Key(0.0f, 0f), Key(0.5f, 0f));
+        Assert.False(ClipStrideTrack.TryCompile(doc, TinyRig(), out _, out string err));
+        Assert.Contains("empty span", err);
     }
 
     [Fact]
     public void NoOptIn_CompilesEmpty_NotAnError()
     {
         var doc = Doc(loop: true,
-            Key(0.0f, 0f, new ContactLabel { Node = "foot", Source = ContactSource.SelfPlant }),
-            Key(0.5f, 0f));
+            new[] { new ContactSpan { Point = "foot", Start = 0f, End = 0.5f, Source = ContactSource.SelfPlant } },
+            Key(0.0f, 0f), Key(0.5f, 0f));
         Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
         Assert.Empty(track.Feet);
+
+        // A clip with no contact list at all is likewise legal and empty.
+        Assert.True(ClipStrideTrack.TryCompile(Doc(true, null, Key(0f, 0f), Key(0.5f, 0f)),
+                                               TinyRig(), out var t2, out err), err);
+        Assert.Empty(t2.Feet);
     }
 
     // The placement convention: offsets are rig-unit, facing +1, com-shifted (both axes), so
     //     world = bodyPos + (dir·scale·off.X, scale·off.Y)
     // must equal FK under the live solve-root T(body + BodyPath.RootOffset(c))·S(dir·scale, scale)
-    // (CharacterAnimator.SolveRootAt). Verified on the REAL walk clip + biped rig,
-    // labels flipped to PlannedSupport in memory (no file writes).
+    // (CharacterAnimator.SolveRootAt). Verified against the REAL biped rig and walk clip, with
+    // the spans authored HERE rather than read from the file — the convention is a property of
+    // the compiler, and pinning it to whatever contacts a clip happens to carry made this test
+    // hostage to clip content.
     [Theory]
     [InlineData(1, 2.0f)]
     [InlineData(-1, 1.5f)]
@@ -167,9 +175,11 @@ public class AnimStrideTrackTests
         var rig = SkeletonStore.Load(FindDir("Skeletons"), "biped");
         var walk = AnimationStore.LoadAll(Path.Combine(FindDir("SkeletonStates"), "biped"))
                                  .First(a => a.Type == "Walk");
-        foreach (var k in walk.Keyframes)
-            if (k.Contacts != null)
-                foreach (var l in k.Contacts) l.Source = ContactSource.PlannedSupport;
+        walk.Contacts = new List<ContactSpan>
+        {
+            Planned("support_l", 0.00f, 0.50f),
+            Planned("support_r", 0.50f, 1.00f),
+        };
 
         Assert.True(ClipStrideTrack.TryCompile(walk, rig, out var track, out string err), err);
         Assert.Equal(2, track.Feet.Length);   // support_l + support_r

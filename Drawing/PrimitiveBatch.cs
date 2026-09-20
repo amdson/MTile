@@ -84,16 +84,6 @@ public sealed class PrimitiveBatch
         Triangle(a, c, d, ca, cc, cd);
     }
 
-    // A ribbon between two equal-length polylines (left[i] <-> right[i]), each vertex
-    // carrying its own color. The building block for stroked curves and surface rows.
-    public void Strip(ReadOnlySpan<Vector2> left, ReadOnlySpan<Vector2> right,
-                      ReadOnlySpan<Color> leftColor, ReadOnlySpan<Color> rightColor)
-    {
-        int n = Math.Min(left.Length, right.Length);
-        for (int i = 0; i + 1 < n; i++)
-            Quad(left[i], right[i], right[i + 1], left[i + 1],
-                 leftColor[i], rightColor[i], rightColor[i + 1], leftColor[i + 1]);
-    }
 
     private void Flush()
     {

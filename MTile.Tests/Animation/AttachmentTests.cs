@@ -47,7 +47,7 @@ public class AttachmentTests
             Assert.Equal((1 - clip.SettleShare) * .5f, s.Time, 5);
             Assert.True(s.Attachment.TryProgress(s.Time, out float t));
             Assert.InRange(t, 0f, 1f); // authored windows need not span the whole swing
-            Assert.Equal("knife", s.Attachment.Bone);
+            Assert.Equal("knife", s.Attachment.Point);
             Assert.InRange(s.Weight, .001f, 1);
 
             animator.Update(new CharacterAnimSample(Vector2.Zero, Vector2.Zero, 1, true,
@@ -64,19 +64,39 @@ public class AttachmentTests
     }
 
     [Fact]
+    public void ActualRabbitStabs_GenerateTheLanceAcrossTheAuthoredPhases()
+    {
+        var clips = AnimationStore.LoadAll(Path.Combine(Root(), "SkeletonStates", "biped_rabbit"));
+        var stabs = clips.Where(c => c.Type is "StabAction" or "AirSpinStab").ToArray();
+        Assert.Equal(2, stabs.Length);
+        foreach (var clip in stabs)
+        {
+            var attachment = Assert.Single(clip.Attachments);
+            Assert.Equal("knife", attachment.Point);
+            Assert.Equal("lance", attachment.Effect);
+            Assert.Equal(MathF.PI / 2, attachment.Rotation, 5);
+            Assert.Equal(new[] { 0f, .1f, .18f, .28f, .42f, .67f, .82f, .94f }, attachment.FrameTimes);
+            Assert.Equal(4, attachment.FrameAt(.5f, .5f, 8));
+            Assert.Equal(6, attachment.FrameAt(.9f, .9f, 8));
+        }
+    }
+
+    [Fact]
     public void AttachmentUsesFullBoneTransform_IncludingMirrorAndStretch()
     {
         var b = new SkeletonBuilder("test");
         int arm = b.AddRoot("arm", MathF.PI / 4, 5);
         b.Add("knife", arm, -MathF.PI / 2);
-        var pose = b.Build().CreatePose();
-        var a = new AnimAttachment { Scale = 2, Rotation = .2f };
+        var rig = b.Build();
+        var pose = rig.CreatePose();
+        var a = new AnimAttachment { Point = "knife", Scale = 2, Rotation = .2f };
+        var tip = new ResolvedPoint("knife", 1, BoneEnd.End, Vector2.Zero);
         Affine2 At(int facing)
         {
             var root = Affine2.FromTRS(new Vector2(20, 30), 0, new Vector2(facing * .6f, .6f));
             var world = pose.ComputeWorld(root);
             Assert.Equal(world[arm].Translation, world[1].Translation); // zero-length socket sits at hand
-            return AttachmentSampling.Transform(world[1], a);
+            return AttachmentSampling.Transform(world, root, rig, tip, a);
         }
         var right = At(1); var left = At(-1);
         foreach (var p in new[] { Vector2.Zero, new Vector2(7, 2), new Vector2(7, -2) })
@@ -109,13 +129,57 @@ public class AttachmentTests
         trail.Age(.1f, .065f); Assert.Empty(trail.Points);
     }
 
+    // Attachments anchor on a NAMED POINT now, the same as contacts. Two consequences worth
+    // pinning: a declared point survives a bone rename (the reason for the change), and an
+    // OFFSET point is honoured here even though contacts refuse one — the solver pins tips,
+    // but there is nothing stopping an effect hanging a few units off a joint.
+    [Fact]
+    public void Attachment_ResolvesThroughAPoint_AndHonoursItsOffset()
+    {
+        var b = new SkeletonBuilder("test");
+        int arm = b.AddRoot("arm", 0f, 5f);
+        b.AddPoint(new NamedPoint { Id = "grip", Bone = "arm", End = BoneEnd.End });
+        b.AddPoint(new NamedPoint { Id = "offgrip", Bone = "arm", End = BoneEnd.End, Ox = 2f });
+        var rig = b.Build();
+        var pose = rig.CreatePose();
+        var root = Affine2.FromTRS(new Vector2(10f, 4f), 0f, Vector2.One);
+        var world = pose.ComputeWorld(root);
+
+        var samples = new List<AttachmentSample>();
+        var doc = new AnimationDocument
+        {
+            Attachments = new() { new() { Point = "grip", Effect = "knife" } },
+        };
+        AttachmentSampling.Append(doc, 0.5f, 1f, samples, rig);
+        var exact = AttachmentSampling.Transform(world, root, rig, Assert.Single(samples).Point,
+                                                 doc.Attachments[0]);
+        Assert.Equal(world[arm].Translation, exact.Translation);   // an exact tip is the bone frame
+
+        samples.Clear();
+        doc.Attachments[0].Point = "offgrip";
+        AttachmentSampling.Append(doc, 0.5f, 1f, samples, rig);
+        var offset = AttachmentSampling.Transform(world, root, rig, Assert.Single(samples).Point,
+                                                  doc.Attachments[0]);
+        Assert.Equal(2f, Vector2.Distance(offset.Translation, world[arm].Translation), 3);
+        // ...and it keeps the BONE's orientation, only the position moves.
+        Assert.Equal(exact.M11, offset.M11, 5);
+        Assert.Equal(exact.M21, offset.M21, 5);
+
+        // An unresolvable anchor is skipped, not thrown on: a missing effect anchor costs a
+        // cosmetic, and the renderer must not take the frame down over one.
+        samples.Clear();
+        doc.Attachments[0].Point = "nope";
+        AttachmentSampling.Append(doc, 0.5f, 1f, samples, rig);
+        Assert.Empty(samples);
+    }
+
     [Fact]
     public void OverlayBindingWinsWithoutDuplicate_AndRespectsBoneMask()
     {
         var b = new SkeletonBuilder("test"); b.AddRoot("hand", 0);
         var rig = b.Build();
-        var first = new AnimationDocument { Attachments = new() { new() { Bone = "hand", Effect = "knife" } } };
-        var second = new AnimationDocument { Attachments = new() { new() { Bone = "hand", Effect = "knife", Start = .8f } } };
+        var first = new AnimationDocument { Attachments = new() { new() { Point = "hand", Effect = "knife" } } };
+        var second = new AnimationDocument { Attachments = new() { new() { Point = "hand", Effect = "knife", Start = .8f } } };
         var samples = new List<AttachmentSample>();
         AttachmentSampling.Append(first, .5f, 1, samples, rig);
         AttachmentSampling.Append(second, .3f, 1, samples, rig, new[] { 0f });
@@ -179,5 +243,18 @@ public class AttachmentTests
         }
         Assert.All(maxAlpha, a => Assert.True(a > 0));
         Assert.True(maxAlpha[7] < maxAlpha[6] && maxAlpha[6] < maxAlpha[5] && maxAlpha[5] < maxAlpha[4]);
+    }
+
+    [Fact]
+    public void LanceStripMatchesTheRuntimeSpriteSheetContract()
+    {
+        string dir = Path.Combine(Root(), "Assets", "AnimationEffects");
+        var spec = JsonSerializer.Deserialize<SpriteAttachmentAsset>(File.ReadAllText(Path.Combine(dir, "lance.json")))!;
+        byte[] png = File.ReadAllBytes(Path.Combine(dir, spec.Image));
+        int width = BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(16));
+        int height = BinaryPrimitives.ReadInt32BigEndian(png.AsSpan(20));
+        Assert.Equal(6, png[25]);
+        Assert.True(spec.IsValid(width, height));
+        Assert.Equal(new[] { 22f, 107f, 149f, 200f, 261f, 203f, 122f, 20f }, spec.TipPixels);
     }
 }

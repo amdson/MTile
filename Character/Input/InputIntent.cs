@@ -6,11 +6,8 @@ public struct InputIntent
 {
     public int  HeldHorizontal;     // -1, 0, 1 — sustained over HeldFrames consecutive frames
     public int  CurrentHorizontal;  // -1, 0, 1 — current frame only
-    public bool JumpHeld;
     public bool JumpJustPressed;
-    public bool DownHeld;
     public bool DownJustPressed;
-    public bool UpHeld;
     public bool UpJustPressed;
 
     public const int HeldFrames = 3;
@@ -36,11 +33,8 @@ public struct InputIntent
         {
             HeldHorizontal    = heldH,
             CurrentHorizontal = curH,
-            JumpHeld          = cur.Space,
             JumpJustPressed   = cur.Space && !prev.Space,
-            DownHeld          = cur.Down,
             DownJustPressed   = cur.Down && !prev.Down,
-            UpHeld            = cur.Up,
             UpJustPressed     = cur.Up && !prev.Up,
         };
     }

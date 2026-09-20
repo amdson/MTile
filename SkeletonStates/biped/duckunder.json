@@ -4,6 +4,19 @@
   "Skeleton": "biped",
   "Duration": 1,
   "Loop": true,
+  "Scene": {
+    "Guides": [
+      {
+        "Id": "g1",
+        "Kind": "Ground",
+        "X": 0,
+        "Y": 40,
+        "W": 0,
+        "H": 0,
+        "Label": "floor"
+      }
+    ]
+  },
   "Keyframes": [
     {
       "Time": 0,
@@ -14,161 +27,43 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.22
+          "Rotation": -1.5707964
         },
         {
           "Bone": "head",
-          "Rotation": 0.9
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 6.6030893
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -2.4254687
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": -1.8151178
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -1.18836
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 0.5436026
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 2.1103716
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 1.5951812
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.17897403
-        }
-      ],
-      "Additions": [
-        {
-          "Name": "com",
-          "Kind": "Point",
-          "Px": 0,
-          "Py": -13.037685,
-          "Dx": 0,
-          "Dy": 0
-        }
-      ]
-    },
-    {
-      "Time": 0.5,
-      "Bones": [
-        {
-          "Bone": "hip",
           "Rotation": 0
         },
         {
-          "Bone": "chest",
-          "Rotation": -1.22
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0.98
-        },
-        {
           "Bone": "arm_l_upper",
-          "Rotation": 6.6374335
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_l_lower",
-          "Rotation": -2.34024
-        },
-        {
-          "Bone": "arm_r_upper",
-          "Rotation": -1.8151178
-        },
-        {
-          "Bone": "arm_r_lower",
-          "Rotation": -1.18836
-        },
-        {
-          "Bone": "leg_l_upper",
-          "Rotation": 0.5436026
-        },
-        {
-          "Bone": "leg_l_lower",
-          "Rotation": 2.1103716
-        },
-        {
-          "Bone": "leg_r_upper",
-          "Rotation": 1.5951812
-        },
-        {
-          "Bone": "leg_r_lower",
-          "Rotation": 0.17897403
-        }
-      ],
-      "Additions": [
-        {
-          "Name": "com",
-          "Kind": "Point",
-          "Px": 0,
-          "Py": -13.037685,
-          "Dx": 0,
-          "Dy": 0
-        }
-      ]
-    },
-    {
-      "Time": 1,
-      "Bones": [
-        {
-          "Bone": "hip",
           "Rotation": 0
         },
         {
-          "Bone": "chest",
-          "Rotation": -1.22
-        },
-        {
-          "Bone": "head",
-          "Rotation": 0.9
-        },
-        {
-          "Bone": "arm_l_upper",
-          "Rotation": 6.6030893
-        },
-        {
-          "Bone": "arm_l_lower",
-          "Rotation": -2.4254687
-        },
-        {
           "Bone": "arm_r_upper",
-          "Rotation": -1.8151178
+          "Rotation": 3.1415927
         },
         {
           "Bone": "arm_r_lower",
-          "Rotation": -1.18836
+          "Rotation": 0
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 0.5436026
+          "Rotation": 1.5707964
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 2.1103716
+          "Rotation": 0
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.5951812
+          "Rotation": 1.5707964
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.17897403
+          "Rotation": 0
         }
       ],
       "Additions": [
@@ -176,7 +71,7 @@
           "Name": "com",
           "Kind": "Point",
           "Px": 0,
-          "Py": -13.037685,
+          "Py": -21,
           "Dx": 0,
           "Dy": 0
         }

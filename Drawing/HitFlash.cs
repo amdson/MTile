@@ -88,7 +88,6 @@ public sealed class HitFlashSystem
 {
     private readonly HitFlashTracker _tracker = new();
 
-    public HitFlashTracker Tuning => _tracker;
 
     // Once per rendered frame, before drawing.
     public void Collect(Simulation sim, float dt)

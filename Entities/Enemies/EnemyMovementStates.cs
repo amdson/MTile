@@ -325,74 +325,6 @@ public class EnemyClingMoveState : EnemyMovementState
         => SurfaceProbe.IsAnchored(pos, ctx.Spawner.Chunks, AnchorDist, NumSamples);
 }
 
-// Directional ballistic leap. The brain commits a launch velocity via
-// Input.JumpVelocity; this state applies the vector once on Enter and then
-// lets gravity + collision draw the arc. No mid-air control — that's the
-// point. Pair with EnemyClingMoveState to hop between pillars: cling holds
-// the body, brain emits JumpVelocity aimed at the next surface, leap runs the
-// arc, cling re-engages when the body lands within AnchorDist of a tile.
-//
-// Distinct from EnemyJumpState, which exists for the "lift + horizontal
-// drift" pattern (continuous Vx control mid-air). Leap is pure ballistic,
-// trusting the brain to have already chosen a trajectory that lands somewhere
-// useful.
-public class EnemyLeapState : EnemyMovementState
-{
-    // Grace window after takeoff during which the state ignores anchored-ness.
-    // Without this, the first frame after Enter has the body still ~moveLen
-    // from the launch surface — within AnchorDist — so re-anchor would fire
-    // immediately and we'd never actually leave. 0.15s clears AnchorDist for
-    // typical jump magnitudes (≥ 100 px/s).
-    protected virtual float MinAirTime  => 0.15f;
-    // Hard cutoff so a leap that never lands (e.g. flung off the map) doesn't
-    // pin the FSM here forever. Idle takes over after that.
-    protected virtual float MaxAirTime  => 1.5f;
-    protected virtual float AnchorDist  => 14f;
-    protected virtual int   NumSamples  => 16;
-
-    // Above Cling (32/26) so an anchored clinger can launch via leap. Below
-    // AttackHold (40) and Stagger (50) so attacks and hitstun still preempt.
-    public override int ActivePriority  => 36;
-    public override int PassivePriority => 30;
-
-    public override bool CheckPreConditions(in EnemyContext ctx)
-    {
-        if (ctx.Self.IsActionCommitted) return false;
-        if (ctx.Input.JumpVelocity.LengthSquared() < 1e-4f) return false;
-        // Must be touching SOME surface to push off. Same anchor probe Cling
-        // uses, so a clinger on a wall qualifies just as well as a grounded
-        // brute.
-        return SurfaceProbe.IsAnchored(ctx.Self.Body.Position, ctx.Spawner.Chunks, AnchorDist, NumSamples);
-    }
-
-    public override bool CheckConditions(in EnemyContext ctx, ref EnemyMovementVars v)
-    {
-        if (ctx.Self.IsActionCommitted) return false;
-        if (v.TimeInState < MinAirTime) return true;
-        if (v.TimeInState >= MaxAirTime) return false;
-        // After the grace window, exit as soon as the body is near a surface
-        // again — Cling (if in the movement list) or Idle/Chase picks up the
-        // landing on the next frame.
-        return !SurfaceProbe.IsAnchored(ctx.Self.Body.Position, ctx.Spawner.Chunks, AnchorDist, NumSamples);
-    }
-
-    public override void Enter(in EnemyContext ctx, ref EnemyMovementVars v)
-    {
-        // Replace, not add — the brain has full info and committed to this
-        // trajectory. Adding would coupling with whatever velocity the prior
-        // state happened to be writing (Cling crawling, Chase walking, …).
-        ctx.Self.Body.Velocity = ctx.Input.JumpVelocity;
-    }
-
-    public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
-    {
-        v.TimeInState += ctx.Dt;
-        // Deliberately no velocity writes — pure ballistic. If you want mid-air
-        // steering, use EnemyJumpState; if you want a different trajectory,
-        // emit a different JumpVelocity next leap.
-    }
-}
-
 // Self-propelled hover. The brain emits a 2D MoveDir (zero = hold position);
 // the state applies a velocity correction each frame that aims for the
 // implied target velocity AFTER the physics-step gravity addition. The
@@ -491,10 +423,9 @@ public class EnemyFlyState : EnemyMovementState
 // keeping them together means the launch impulse and the tell that precedes it
 // can never desynchronise.
 //
-// Distinct from EnemyLeapState, which executes a trajectory the *brain* chose
-// (Input.JumpVelocity) and therefore needs a brain that can do ballistics. Hop
-// solves its own arc from Input.AimWorld, so it pairs with any aim-at-the-player
-// controller — including the stock ones.
+// Hop solves its own arc from Input.AimWorld, so it pairs with any aim-at-the-player
+// controller — including the stock ones. (Contrast a brain-chosen trajectory, which
+// would need a controller that can do ballistics; nothing ships one.)
 //
 // Phase timeline (t = TimeInState):
 //   [0, CrouchTime)                  compress + telegraph, horizontal brake
@@ -525,9 +456,8 @@ public class EnemyHopState : EnemyMovementState
     // still visibly leaves the ground rather than sliding along it.
     protected virtual float MinRise         => 200f;
     protected virtual float MaxLaunchSpeed  => 520f;
-    // Grace window after takeoff during which the anchor probe is ignored —
-    // same rationale as EnemyLeapState.MinAirTime: the body is still within
-    // AnchorDist of the surface it just pushed off.
+    // Grace window after takeoff during which the anchor probe is ignored: the
+    // body is still within AnchorDist of the surface it just pushed off.
     protected virtual float MinAirTime      => 0.14f;
     // Hard cutoff for a hop that never lands (flung off the map, launched into
     // open sky). Idle takes over and the body just falls.

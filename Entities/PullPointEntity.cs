@@ -93,7 +93,6 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
     // Not a target: no hurtbox, so neither hits nor force fields ever find it.
     public override void PublishHurtboxes(HurtboxWorld world) { }
 
-    public void Kill() => Health = 0f;
 
     // Hand-off: the action lets go. The point flies on at the cursor's velocity; any
     // ball in hand is already an entity chasing it, and any unresolved contest keeps

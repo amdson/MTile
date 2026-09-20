@@ -24,8 +24,6 @@ public class FoamDecay
     public void Clear(int gtx, int gty)
         => _remaining.Remove((gtx, gty));
 
-    public float? GetRemaining(int gtx, int gty)
-        => _remaining.TryGetValue((gtx, gty), out var r) ? r : null;
 
     // Snapshot/restore (roadmap goal 6). Dict copy = deep copy (value-typed entries).
     // Live entries, without Capture()'s copy — Simulation.Checksum() folds these into

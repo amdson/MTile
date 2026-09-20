@@ -432,8 +432,7 @@ public static class AmbientCorrector
             // contributes perturbations to one plan. Δ anchors live in
             // MovementVars (snapshot-covered), not scratch: rollback restore
             // must reproduce the smoothness chain exactly.
-            p.ChannelCount = CorrectorChannels.BuildFold(s, n, rowCount, dir,
-                fold.MaxSpeed * ctx.Modifiers.MaxWalkSpeed, supportVy);
+            p.ChannelCount = CorrectorChannels.BuildFold(s, n, rowCount, dir, supportVy);
             // LEAKY Δ anchors: continuity across frames without DC memory. A
             // full-strength anchor lets a force channel sustain thrust with no
             // remaining demand (the smoothness chain becomes momentum and the

@@ -15,7 +15,6 @@
   "VertOffsetLimit": 24,
   "HorizOffsetLimit": 4,
   "MaxPhaseStep": 0.25,
-  "FeatherWidth": 0.12,
   "ContactReleaseTime": 0.1,
   "ContactEngageTime": 0.08,
   "PlannerEnabled": true,

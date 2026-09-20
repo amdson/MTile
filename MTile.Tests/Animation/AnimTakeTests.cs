@@ -170,6 +170,7 @@ public class AnimTakeTests
         clip.Keyframes.Add(Kf(skel, 0f,   legL:  1.0f, legR: -1.0f, plant: "leg_r_lower"));
         clip.Keyframes.Add(Kf(skel, 0.5f, legL: -1.0f, legR:  1.0f, plant: "leg_l_lower"));
         clip.Keyframes.Add(Kf(skel, 1f,   legL:  1.0f, legR: -1.0f, plant: "leg_r_lower"));
+        ContactFixture.ApplyPlants(clip, new[] { "leg_r_lower", "leg_l_lower", "leg_r_lower" });
         return clip;
     }
 
@@ -193,7 +194,6 @@ public class AnimTakeTests
         {
             Time = t,
             Bones = PoseData.Capture(p),
-            Contacts = new List<ContactLabel> { new() { Node = plant, Weight = 1f } },
         };
     }
 

@@ -58,8 +58,6 @@ public sealed class BruteEnemy : EnemyEntity
         new EnemyMeleeAction(),       // 0
         // new EnemyLungeAction(),       // 1
         // new EnemyRangedAction(),      // 2
-        // new EnemyShockwaveAction(),   // 3 — appended
         new EnemySlamAction(),        // 4 — appended
-        // new EnemySpinAction(),        // 5 — appended
     };
 }

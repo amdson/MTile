@@ -28,6 +28,17 @@ public sealed class MaterialStrength
 
 public static class MaterialStrengths
 {
+    // The load-time shape of one json entry. Every field is nullable so "absent" is
+    // distinguishable from "authored to the class default" — deserializing straight into
+    // MaterialStrength cannot tell those apart, which is what made a partial entry
+    // silently clobber the fields it never mentioned.
+    private sealed class MaterialPatch
+    {
+        public float? MaxHP       { get; set; }
+        public float? Restitution { get; set; }
+        public float? BuildCost   { get; set; }
+    }
+
     private static Dictionary<TileType, MaterialStrength> _current = Defaults();
 
     // Defaults match the legacy MaxHPFor switch in TileDamage. Behavior on
@@ -82,16 +93,29 @@ public static class MaterialStrengths
             // JSON keys are TileType enum names ("Stone", "Dirt", …). Parse
             // them into the enum and skip any unknown ones so a stale config
             // (referencing a removed tile type) doesn't crash.
-            var raw = JsonSerializer.Deserialize<Dictionary<string, MaterialStrength>>(stream, opts);
+            var raw = JsonSerializer.Deserialize<Dictionary<string, MaterialPatch>>(stream, opts);
             if (raw == null) return;
             var merged = Defaults();
-            foreach (var (name, mat) in raw)
+            foreach (var (name, patch) in raw)
             {
-                if (mat == null) continue;
-                if (Enum.TryParse<TileType>(name, ignoreCase: true, out var type))
-                    merged[type] = mat;
-                else
+                if (patch == null) continue;
+                if (!Enum.TryParse<TileType>(name, ignoreCase: true, out var type))
+                {
                     Console.WriteLine($"[MaterialStrengths] Unknown TileType '{name}' in JSON, ignored.");
+                    continue;
+                }
+                // PER-FIELD merge: an entry overrides exactly the fields it names and
+                // inherits the rest from Defaults(). Replacing the whole entry instead
+                // meant the json — which supplies only MaxHP and BuildCost — silently
+                // reset every material's Restitution to the 0.5 class default, so the
+                // authored 0.70/0.35/0.05/0.15/0.90 spread never reached the game.
+                var b = merged.TryGetValue(type, out var d) ? d : new MaterialStrength();
+                merged[type] = new MaterialStrength
+                {
+                    MaxHP       = patch.MaxHP       ?? b.MaxHP,
+                    Restitution = patch.Restitution ?? b.Restitution,
+                    BuildCost   = patch.BuildCost   ?? b.BuildCost,
+                };
             }
             _current = merged;
         }

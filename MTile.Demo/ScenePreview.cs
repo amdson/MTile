@@ -20,7 +20,8 @@ internal sealed class ScenePreview
     public void DrawGrid(DrawContext draw, in Affine2 frame, float groundY, float x0, float x1, float y0, float y1)
     {
         if (!ShowGrid) return;
-        float cell = SceneGuideView.TileRig * ScenePlacement.RigScale;
+        // The frame carries the live view scale (ScenePlacement.Scale), so the grid zooms with it.
+        float cell = SceneGuideView.TileRig * frame.TransformVector(Vector2.UnitX).X;
         if (cell < 4f) return;
         var minor = new Color(38, 42, 52);
         var axis  = new Color(58, 64, 78);
@@ -32,31 +33,14 @@ internal sealed class ScenePreview
         for (float y = floorY - cell; y >= y0; y -= cell)       draw.Line(new Vector2(x0, y), new Vector2(x1, y), minor, 1f);
     }
 
-    // The body's scene path. For a reference arc the bright stretch is what the clip's own
-    // timeline covers (clip and arc carry independent durations — a shorter clip stops early,
-    // a longer one runs past the gate along the extrapolation); a green ring marks the gate.
-    // A body_path track draws over [0,1]. Keyframes drop a dot where they land; the ring at
-    // the playhead is the player's body circle at the game's radius.
+    // The body's scene path: the clip's own body_path track over [0,1]. Keyframes drop a dot
+    // where they land; the ring at the playhead is the player's body circle at the game's
+    // radius. (A reference arc is an OVERLAY now — DrawOverlays — never the path itself.)
     public void DrawPath(DrawContext draw, ScenePlacement pl, AnimationDocument doc)
     {
         var m = pl.Motion;
         if (m == null || doc == null) return;
-        if (ShowPath && m.Source == MotionSource.ReferenceArc && m.Arc != null)
-        {
-            const int Samples = 96;
-            float covered = m.ArcProgress(1f), end = MathF.Max(covered, 1f);
-            Vector2 prev = pl.ToScreen(m.ArcOffsetAt(0f));
-            for (int i = 1; i <= Samples; i++)
-            {
-                float u = end * i / Samples;
-                Vector2 p = pl.ToScreen(m.ArcOffsetAt(u));
-                bool live = u <= covered;
-                draw.Line(prev, p, live ? new Color(90, 170, 210) : new Color(55, 80, 95), live ? 2f : 1f);
-                prev = p;
-            }
-            draw.Ring(pl.ToScreen(m.ArcOffsetAt(1f)), 5f, new Color(120, 220, 160), 12, 1.5f);
-        }
-        else if (ShowPath && m.Source == MotionSource.Track)
+        if (ShowPath && m.Source == MotionSource.Track)
         {
             const int Samples = 64;
             Vector2 prev = pl.ToScreen(m.BodyAt(0f));
@@ -73,7 +57,7 @@ internal sealed class ScenePreview
             foreach (var kf in doc.Keyframes)
                 draw.Disc(pl.ToScreen(m.BodyAt(kf.Time)), 3.5f, new Color(150, 200, 235));
         if (ShowPath && m.Source != MotionSource.InPlace)
-            draw.Ring(pl.Anchor, PlayerCharacter.Radius / Game1.SkeletonScale * ScenePlacement.RigScale,
+            draw.Ring(pl.Anchor, PlayerCharacter.Radius / Game1.SkeletonScale * pl.Scale,
                       new Color(230, 190, 90), 24, 1.5f);
     }
 
@@ -94,24 +78,125 @@ internal sealed class ScenePreview
             AnimationSampler.SampleSmooth(doc, kf.Time, a, b, c, d, ghost);
             var root = pl.RootAt(kf.Time);
             if (ShowGhosts) SkeletonRenderer.Draw(draw, ghost, root, style);
-            if (ShowContacts && kf.Contacts != null)
+            // Contact marks on a ghost show the spans LIVE at that keyframe's phase, faded by
+            // the span's own weight there — so a ghost mid-crossfade reads as mid-crossfade.
+            if (ShowContacts && doc.Contacts != null)
             {
                 var world = ghost.ComputeWorld(root);
-                foreach (var cl in kf.Contacts)
+                foreach (var cs in doc.Contacts)
                 {
-                    int bi = EndpointResolver.BoneOf(rig, doc, cl);
-                    if (bi >= 0) draw.Disc(world[bi].Translation, 4f, new Color(70, 220, 110) * 0.7f);
+                    if (!cs.Covers(kf.Time, out _)) continue;
+                    float w = cs.WeightAt(kf.Time);
+                    if (w <= 0.01f) continue;
+                    // Tolerant here, unlike the solver: a preview that throws on a contact the
+                    // clip cannot honor hides every OTHER mark and takes the editor with it.
+                    if (!EndpointResolver.TryResolvePoint(rig, doc, cs.Point, out var rp) || !rp.IsExactTip) continue;
+                    draw.Disc(world[rp.Bone].Translation, 4f, new Color(70, 220, 110) * (0.25f + 0.55f * w));
                 }
             }
         }
     }
 
+    // PER-CLIP DISPLAY OVERLAYS (ClipScene.Overlays) — derived reference geometry, drawn
+    // DASHED so it never reads as authored guide geometry. A hover line is drawn over every
+    // surface the scene describes: across the view for a ground line, across its own span for
+    // a block top, at the height the body centre rides when standing there
+    // (Animation/SceneReferences.cs computes it from the live movement config).
+    //
+    // Overlays live on doc.Scene; the guides they hang off are passed in separately so a clip
+    // whose scene was just created still marks the guides drawn this frame.
+    public void DrawOverlays(DrawContext draw, SpriteBatch sb, SpriteFont font, in Affine2 frame,
+                             ScenePlacement pl, AnimationDocument doc, ClipScene effective,
+                             Func<string, bool, HermiteClipDocument> arcs, Func<string, AnimationDocument> clips,
+                             float x0, float x1)
+    {
+        var overlays = doc?.Scene?.Overlays;
+        if (overlays == null || effective == null) return;
+        foreach (var o in overlays)
+        {
+            if (o.Hidden) continue;
+            if (SceneReferences.IsTrajectory(o.Kind)) DrawTrajectoryOverlay(draw, sb, font, pl, o, arcs, clips);
+            else DrawHoverOverlay(draw, sb, font, frame, effective, o, x0, x1);
+        }
+    }
+
+    private void DrawHoverOverlay(DrawContext draw, SpriteBatch sb, SpriteFont font, in Affine2 frame,
+                                  ClipScene effective, SceneOverlay o, float x0, float x1)
+    {
+        float rig = SceneReferences.ComRig(o.Kind);
+        var col = o.Kind == SceneOverlayKind.CrouchLine ? new Color(200, 150, 240) : new Color(120, 220, 200);
+        bool labelled = false;
+        foreach (var g in effective.Guides)
+        {
+            if (g.Hidden) continue;
+            if (g.Kind == SceneGuideKind.Ground)
+            {
+                float y = frame.TransformPoint(new Vector2(0f, g.Y - rig)).Y;
+                draw.Dashed(new Vector2(x0, y), new Vector2(x1, y), col, 1f);
+                if (!labelled)
+                {
+                    sb.DrawString(font, SceneReferences.Name(o.Kind), new Vector2(x0 + 8f, y - 16f), col);
+                    labelled = true;
+                }
+            }
+            else
+            {
+                Vector2 l = frame.TransformPoint(new Vector2(g.X, g.Y - rig));
+                Vector2 r = frame.TransformPoint(new Vector2(g.X + g.W, g.Y - rig));
+                draw.Dashed(l, r, col, 1f);
+            }
+        }
+    }
+
+    // A REFERENCE TRAJECTORY: an arc over its own parameter, or another clip's path through
+    // that clip's own resolved motion source. Both are sampled in scene units and drawn in
+    // THIS clip's scene frame (both are com positions measured from their scene anchor, so
+    // the shared origin is the comparison that matters), dashed and dimmer than the owned
+    // path — a ring marks the far end. Unresolvable refs draw nothing; the Scene panel is
+    // where that is reported.
+    private void DrawTrajectoryOverlay(DrawContext draw, SpriteBatch sb, SpriteFont font, ScenePlacement pl,
+                                       SceneOverlay o, Func<string, bool, HermiteClipDocument> arcs,
+                                       Func<string, AnimationDocument> clips)
+    {
+        const int Samples = 48;
+        Func<float, Vector2> at = null;
+        Color col;
+        if (o.Kind == SceneOverlayKind.Arc)
+        {
+            var arc = arcs?.Invoke(o.Ref, o.Local);
+            if (arc == null) return;
+            at = u => ClipMotion.ArcOffset(arc, u);
+            col = new Color(150, 140, 230);
+        }
+        else
+        {
+            var other = clips?.Invoke(o.Ref);
+            if (other == null) return;
+            var m = ClipMotion.Resolve(other);
+            if (m.Source == MotionSource.InPlace) return;   // a stationary clip has no path to show
+            at = m.BodyAt;
+            col = new Color(230, 180, 110);
+        }
+
+        Vector2 prev = pl.ToScreen(at(0f));
+        for (int i = 1; i <= Samples; i++)
+        {
+            Vector2 p = pl.ToScreen(at(i / (float)Samples));
+            draw.Dashed(prev, p, col, 1.5f, 5f, 3f);
+            prev = p;
+        }
+        draw.Ring(prev, 4f, col, 12, 1.5f);
+        string tag = o.Kind == SceneOverlayKind.Arc && o.Local ? $"{o.Ref} (local)" : o.Ref;
+        sb.DrawString(font, $"{SceneReferences.Name(o.Kind)}: {tag}", pl.ToScreen(at(0f)) + new Vector2(8f, -14f), col);
+    }
+
     // The player's PHYSICS polygon (the width-squeezed hexagon) at true game scale around the
     // com anchor: its bottom vertex hovers one Radius above the ground line, like in game.
-    public void DrawBody(DrawContext draw, Vector2 anchor)
+    public void DrawBody(DrawContext draw, ScenePlacement pl)
     {
         if (!ShowBody) return;
-        float s = ScenePlacement.RigScale / Game1.SkeletonScale;
+        Vector2 anchor = pl.Anchor;
+        float s = pl.Scale / Game1.SkeletonScale;
         var verts = PlayerCharacter.CreateBodyPolygon().GetVertices(Vector2.Zero);
         var col = new Color(230, 190, 90);
         for (int i = 0; i < verts.Length; i++)

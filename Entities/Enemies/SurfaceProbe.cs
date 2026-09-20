@@ -4,7 +4,7 @@ using Microsoft.Xna.Framework;
 namespace MTile;
 
 // Read-only terrain probe shared by every surface-aware movement state
-// (EnemyClingMoveState, EnemyLeapState, EnemyHopState). They all key off one
+// (EnemyClingMoveState, EnemyHopState). They all key off one
 // question — "is a solid tile within AnchorDist of `pos`?" — and if their
 // answers ever diverge the states hand off at the wrong moment, so a body
 // either falls through the world or sticks to thin air. Keeping the predicate

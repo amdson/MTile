@@ -65,12 +65,4 @@ public sealed class TerrainJournal
         if (mark < _entries.Count) _entries.RemoveRange(mark, _entries.Count - mark);
     }
 
-    // Drop confirmed history before `mark` (netcode hook — once a frame can no longer
-    // be rolled back to, its deltas are dead weight). Shifts the effective origin;
-    // outstanding marks must be rebased by the caller. Unused by the first pass.
-    public void TrimBefore(int mark)
-    {
-        if (mark <= 0) return;
-        _entries.RemoveRange(0, Math.Min(mark, _entries.Count));
-    }
 }

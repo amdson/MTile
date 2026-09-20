@@ -26,8 +26,6 @@ public readonly struct TileRef
     // explicit branch rather than `& 15` which would round toward zero.
     public int ChunkX => Gtx >= 0 ? Gtx / Chunk.Size : (Gtx - Chunk.Size + 1) / Chunk.Size;
     public int ChunkY => Gty >= 0 ? Gty / Chunk.Size : (Gty - Chunk.Size + 1) / Chunk.Size;
-    public int LocalX => Gtx - ChunkX * Chunk.Size;
-    public int LocalY => Gty - ChunkY * Chunk.Size;
 
     public float WorldLeft    => Gtx * Chunk.TileSize;
     public float WorldTop     => Gty * Chunk.TileSize;
@@ -86,97 +84,6 @@ public static class TileTypes
     // as an outward edge to its neighbors, which is what makes it feel set in place.
     public static bool IsGrabbable(TileType t) => t != TileType.Hardened;
 }
-
-public enum EdgeType : byte
-{
-    None,
-    Left,
-    Right,
-    Top,
-    Bottom
-}
-
-public enum CornerType : byte
-{
-    None,
-    TopLeft,
-    TopRight,
-    BottomLeft,
-    BottomRight
-}
-
-public readonly struct EdgeRef
-{
-    public readonly TileRef Tile;
-    public readonly EdgeType Type;
-
-    public EdgeRef(TileRef tile, EdgeType type) { Tile = tile; Type = type; }
-    // Public get segment function returns the edge as a line segment in world coordinates, for convenience of probe code that needs to treat edges as segments. The tile's world position is the top-left corner, so we add the appropriate offsets for the other corners.
-    public (Vector2 Start, Vector2 End) WorldSegment => Type switch
-    {
-        EdgeType.Left   => (new Vector2(Tile.WorldLeft, Tile.WorldTop), new Vector2(Tile.WorldLeft, Tile.WorldBottom)),
-        EdgeType.Right  => (new Vector2(Tile.WorldRight, Tile.WorldTop), new Vector2(Tile.WorldRight, Tile.WorldBottom)),
-        EdgeType.Top    => (new Vector2(Tile.WorldLeft, Tile.WorldTop), new Vector2(Tile.WorldRight, Tile.WorldTop)),
-        EdgeType.Bottom => (new Vector2(Tile.WorldLeft, Tile.WorldBottom), new Vector2(Tile.WorldRight, Tile.WorldBottom)),
-        _ => throw new InvalidOperationException($"Invalid edge type {Type}")
-    };
-}
-
-public readonly struct CornerRef
-{
-    public readonly TileRef Tile;
-    public readonly CornerType Type;
-
-    public CornerRef(TileRef tile, CornerType type) { Tile = tile; Type = type; }
-    // Public get pos function returns position of corner in world as a Vector2, for convenience of probe code that needs to treat corners as points. The tile's world position is the top-left corner, so we add the appropriate offsets for the other corners.
-    public Vector2 WorldPos => Type switch
-    {
-        CornerType.TopLeft     => new Vector2(Tile.WorldLeft, Tile.WorldTop),
-        CornerType.TopRight    => new Vector2(Tile.WorldRight, Tile.WorldTop),
-        CornerType.BottomLeft  => new Vector2(Tile.WorldLeft, Tile.WorldBottom),
-        CornerType.BottomRight => new Vector2(Tile.WorldRight, Tile.WorldBottom),
-        _ => throw new InvalidOperationException($"Invalid corner type {Type}")
-    };
-}
-
-public static class TileUtils
-    {
-        public static EdgeType FlipVertical(EdgeType edge) => edge switch
-        {
-            EdgeType.Left   => EdgeType.Left,
-            EdgeType.Right  => EdgeType.Right,
-            EdgeType.Top    => EdgeType.Bottom,
-            EdgeType.Bottom => EdgeType.Top,
-            _ => EdgeType.None
-        };
-
-        public static EdgeType FlipHorizontal(EdgeType edge) => edge switch
-        {
-            EdgeType.Left   => EdgeType.Right,
-            EdgeType.Right  => EdgeType.Left,
-            EdgeType.Top    => EdgeType.Top,
-            EdgeType.Bottom => EdgeType.Bottom,
-            _ => EdgeType.None
-        };
-
-        public static CornerType FlipVertical(CornerType corner) => corner switch
-        {
-            CornerType.TopLeft     => CornerType.BottomLeft,
-            CornerType.TopRight    => CornerType.BottomRight,
-            CornerType.BottomLeft  => CornerType.TopLeft,
-            CornerType.BottomRight => CornerType.TopRight,
-            _ => CornerType.None
-        };
-
-        public static CornerType FlipHorizontal(CornerType corner) => corner switch
-        {
-            CornerType.TopLeft     => CornerType.TopRight,
-            CornerType.TopRight    => CornerType.TopLeft,
-            CornerType.BottomLeft  => CornerType.BottomRight,
-            CornerType.BottomRight => CornerType.BottomLeft,
-            _ => CornerType.None
-        };
-    }
 
 public struct Tile
 {

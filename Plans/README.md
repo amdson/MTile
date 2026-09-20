@@ -30,19 +30,26 @@ actually does today.
 (items 7+8 landed as prototype — see `Character/Corrector/ReferencePath.cs`) · `SPRITE_SKIN_PLAN.md` ·
 `STAB_AIM_PLAN.md` · `VAULT_HAND_PIN_PLAN.md` · `ANIMATION_LOCOMOTION_PLAN.md` ·
 `RENDERING_UPGRADE_PLAN.md` · `ENEMY_CAPABILITY_FRAMEWORK.md` · `TILE_SPROUT_GRAPH_PLAN.md` ·
-`ANIM_TAKE_VIEWER_PLAN.md` · `ANIMATION_STRETCH_AND_REFERENCE.md` · `CLIP_BACKLOG.md` (17/17) ·
-`ANIMATION_BATCH.md` / `ANIMATION_RETRO.md` (status table inside is a stale snapshot — run
-`MTile.Probe -- list` for live clip status).
+`ANIM_TAKE_VIEWER_PLAN.md` · `ANIMATION_STRETCH_AND_REFERENCE.md` · `ANIMATION_RETRO.md`
+(the lessons hold; its clip status table does not — run `MTile.Probe -- list` for live status).
+
+`CLIP_BACKLOG.md`, `ANIMATION_CLIP_GAPS.md` and `ANIMATION_BATCH.md` moved to `Archive/` on
+2026-09-18: all three inventory a clip pool that no longer exists (the 139 authored clips were
+backed up and replaced with rest-pose stubs for a full re-author). `ANIMATION_RETRO.md`'s
+process lessons and `ANIMATION_BATCH.md`'s batch mechanics are the parts worth re-reading.
 
 `ROLLBACK_ROADMAP.md` is **stale**: several unchecked goals are done, and the ECS migration
 plus `Net/RollbackSession.cs` supersede parts of it.
 
 ## Reference / surveys (not commitments)
 
+`ANIMATION_ANNOTATIONS.md` (**start here for clip annotations** — points, elements, contacts,
+curves; the model, the path from `ContactSource` to a solver row, the invariants that bite, and
+why the suite is ~96 red while the clips are stubs) ·
 `ANIMATION_CODE_STATE.md` · `ANIMATION_SOLVER_OVERVIEW.md` · `COMBAT_AND_CONTENT_ROADMAP.md` ·
 `DYNAMIC_PHYSICS_ROADMAP.md` · `MAP_STATE_BRAINSTORM.md` · `LEDGE_PULL_INPUT_MATRIX.md` ·
 `BLOCK_ERUPTION_NOTES.md` · `ledge_vault_design.md` (superseded in practice by the corrector
-climb family) · `ANIMATION_CLIP_GAPS.md` (mostly closed by `CLIP_BACKLOG.md`).
+climb family).
 
 ## Partial / undecided
 

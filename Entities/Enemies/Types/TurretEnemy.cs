@@ -114,7 +114,6 @@ public class TurretEnemy : Entity
         ? MathHelper.Clamp(_stateTime / ChargeDuration, 0f, 1f)
         : 0f;
     public Vector2 Aim => _aim;
-    public bool IsCharging => _state == AIState.Charging;
 
     private void Transition(AIState s) { _state = s; _stateTime = 0f; }
 

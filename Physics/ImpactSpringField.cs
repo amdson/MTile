@@ -146,16 +146,14 @@ public static class ImpactSpringField
         // Tile HP actually consumed — the energy the terrain took out of the body,
         // expressed in HP units. Convert back with EnergyForHp.
         public readonly float HpConsumed;
-        public readonly int CellsBroken;
         // Whether every cell the body was about to move into gave way. The body only
         // carries on through the gap if this is true; cells that broke off to the side
         // widen the crater but do not open a path.
         public readonly bool PathCleared;
 
-        public Result(float hpConsumed, int cellsBroken, bool pathCleared)
+        public Result(float hpConsumed, bool pathCleared)
         {
             HpConsumed = hpConsumed;
-            CellsBroken = cellsBroken;
             PathCleared = pathCleared;
         }
     }
@@ -171,7 +169,7 @@ public static class ImpactSpringField
         ChunkMap chunks, int gtx0, int gty0, Vector2 direction, float energyHp,
         System.Collections.Generic.List<(int gtx, int gty)> pathCells)
     {
-        if (energyHp <= 0f) return new Result(0f, 0, false);
+        if (energyHp <= 0f) return new Result(0f, false);
 
         var phi = _phi ??= new Vector2[Cells];
         var next = _next ??= new Vector2[Cells];
@@ -218,7 +216,7 @@ public static class ImpactSpringField
                 yield[i] = YieldFraction * maxHp;
             }
         }
-        if (!anySolid || !solid[Centre]) return new Result(0f, 0, false);
+        if (!anySolid || !solid[Centre]) return new Result(0f, false);
 
         // ---- relax at unit amplitude --------------------------------------------------
         // The struck cell is a Dirichlet boundary pinned along the impact direction; every
@@ -280,7 +278,7 @@ public static class ImpactSpringField
         // Read the relaxed field as a distribution: cell i takes a share |phi_i|^2 of the
         // impact, and the shares sum to exactly the energy delivered.
         float e1 = groundE;
-        if (e1 <= 1e-9f) return new Result(0f, 0, false);
+        if (e1 <= 1e-9f) return new Result(0f, false);
 
         // Exact rescale: energy is quadratic in the field, so s² = E / E1.
         float s2 = energyHp / e1;
@@ -369,6 +367,6 @@ public static class ImpactSpringField
             }
         }
 
-        return new Result(consumed, broken, pathCleared);
+        return new Result(consumed, pathCleared);
     }
 }

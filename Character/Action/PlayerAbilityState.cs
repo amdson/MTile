@@ -22,9 +22,6 @@ public class PlayerAbilityState
     // so a standstill slash still has a side to swing toward. Refreshed by
     // PlayerCharacter.Update each frame before the action FSM runs.
     public int  Facing = 1;
-    // Reserved for future use; currently unset by any state.
-    public bool SlashInterrupted;
-
     // Combat condition flags — combo readiness, recovery, guard window. Lives here
     // so action states read/write through the same well-known struct, the same way
     // movement states use PlayerAbilityState for HasDoubleJumped etc.
@@ -63,7 +60,6 @@ public class PlayerAbilityState
         GrabbedCorner   = o.GrabbedCorner;
         DropChainDir    = o.DropChainDir;
         Facing          = o.Facing;
-        SlashInterrupted = o.SlashInterrupted;
         Condition.CopyFrom(o.Condition);
         Combat.CopyFrom(o.Combat);
         Meters.CopyFrom(o.Meters);

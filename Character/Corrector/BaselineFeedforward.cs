@@ -60,7 +60,7 @@ public static class BaselineFeedforward
         Vector2 groundPos, Vector2 groundNormal, Vector2 groundSurfaceVel, float minDistance,
         float inputX, float walkAccel, float maxWalkSpeed,
         bool preserveExternalVelocity,
-        float springK, float springDamping, float springMaxRiseSpeed,
+        float springK, float springDamping,
         float dt)
     {
         var force = Vector2.Zero;

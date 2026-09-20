@@ -57,8 +57,6 @@ public sealed partial class CharacterAnimator
     // welded to it — tracks the real attack. Gated by ActionWeight so locomotion's
     // softer arm follow is untouched; only attacks snap.
     private const float UpperBodyStiffness  = 90f;
-    // private const float WalkLean            = 0.25f;  // torso lean at full walk speed
-    // private const float WalkLeanRefSpeed    = 160f;   // px/s at which lean reaches max
 
     // --- cadence / IK solver ---
     // All solver weights + box limits live in AnimSolverConfig (hot-reloadable; the solve is
@@ -172,7 +170,6 @@ public sealed partial class CharacterAnimator
     private readonly float[]      _easeB;
     //   (the per-solve smoothness targets t_i live in _problem.SmoothTarget — FillSmoothTargets)
     private bool                  _haveEmitted;   // false until the first frame has been drawn
-    // private float                 _leanEase;      // eased locomotion lean (post-solve additive)
 
     // Overlay motion layers composed onto the base pose (Phase 4): the compositor lives in
     // OverlayStack (an ordered stack of crossfading slots — slot 0 is the privileged Action-FSM
@@ -776,16 +773,7 @@ public sealed partial class CharacterAnimator
         if (_haveCorr) { _dyEmitted = _solveVars[IdxDy]; _dxEmitted = _solveVars[IdxDx]; }
         else           { _dyEmitted *= 1f - _easeBase;   _dxEmitted *= 1f - _easeBase; }
 
-        // 3b. Directional lean for locomotion — an eased scalar layered OUTSIDE the smoothing
-        //     loop (see the capture note above). The ease covers both the speed ramp and the
-        //     clip-switch drop (walk→jump used to be smoothed by the global pose ease).
-        // float leanTarget = 0f;
-        // if (clip == AnimClip.Walk || clip == AnimClip.WalkBack || clip == AnimClip.Run
-        //     || clip == AnimClip.CrouchWalk)
-        //     leanTarget = (clip == AnimClip.WalkBack ? -1f : 1f)
-        //                * WalkLean * MathHelper.Clamp(speed / WalkLeanRefSpeed, 0f, 1f);
-        // _leanEase += (leanTarget - _leanEase) * (1f - MathF.Exp(-Stiffness * dt));
-        // if (MathF.Abs(_leanEase) > 1e-4f) Rot(_chest, _leanEase);
+        // (3b retired: the procedural locomotion lean is authored into the walk/run clips.)
 
         // (3c retired: the procedural landing squash is replaced by the authored Land
         //  one-shot selected in step 1 — pose-driven, no post-solve scale/translate hack.)
@@ -944,64 +932,33 @@ public sealed partial class CharacterAnimator
 
     // --- cadence solver ------------------------------------------------------
 
-    private static bool HasContacts(AnimationDocument clip)
-    {
-        var ks = clip?.Keyframes;
-        if (ks == null) return false;
-        foreach (var k in ks)
-            if (k.Contacts != null && k.Contacts.Count > 0) return true;
-        return false;
-    }
+    private static bool HasContacts(AnimationDocument clip) => clip?.Contacts is { Count: > 0 };
 
-    // Feathered contact weights at `phase`, written into _weightBuf as (bone, weight, dweight)
-    // merged by bone (§5.2), where dweight = dw/dφ. The keyframe interval's contacts hold full
-    // weight, then crossfade to the next interval's over FeatherWidth before the change — so a
-    // foot swap is a smooth crossover instead of a hard switch. The derivative's SIGN tells
-    // RefreshContacts which side of a crossover a contact is on (dw/dφ < 0 = release has begun
-    // → the time-fade floor engages; see RefreshContacts / the foot-swap deadlock).
+    // Contact weights at `phase`, written into _weightBuf as (bone, weight, dweight) merged by
+    // bone (§5.2), where dweight = dw/dφ. Each span evaluates its own curve; a foot swap is a
+    // smooth crossover because the two spans OVERLAP with eased ends, not because a fixed-width
+    // feather is applied on top. The derivative's SIGN tells RefreshContacts which side of a
+    // crossover a contact is on (dw/dφ < 0 = release has begun → the time-fade floor engages;
+    // see RefreshContacts / the foot-swap deadlock).
+    //
+    // The keyframe ring is gone from this: spans carry their own interval and their own wrap
+    // (ContactSpan.Covers retries at φ+1), so there is no open-tail special case to keep in
+    // step with AnimationSampler, and dw/dφ is analytic inside a span rather than a step
+    // function with corners at the feather clamps.
     private void WeightedContactsAtPhase(AnimationDocument clip, float phase)
     {
         _weightBuf.Clear();
-        var ks = clip.Keyframes;
-
-        int i = 0;
-        for (int k = 0; k < ks.Count; k++) { if (ks[k].Time > phase) break; i = k; }
-        int j = Math.Min(i + 1, ks.Count - 1);
-        float jTime = ks[j].Time;
-        // Open-tail loop, phase in the wrap gap: the interval is [last, first+1], so the
-        // last keyframe's contacts hold and crossfade into the FIRST keyframe's before the
-        // seam — same feathered crossover as any interior keyframe change.
-        if (AnimationSampler.IsCyclic(clip) && AnimationSampler.HasOpenTail(clip)
-            && (phase >= ks[ks.Count - 1].Time || phase < ks[0].Time))
+        var spans = clip.Contacts;
+        if (spans == null) return;
+        foreach (var c in spans)
         {
-            i = ks.Count - 1; j = 0;
-            jTime = ks[0].Time + 1f;
-            if (phase < ks[0].Time) phase += 1f;
-        }
-
-        float feather = _frame.Solver.FeatherWidth;
-        float featherStart = jTime - feather;
-        bool inWindow = j != i && phase > featherStart;
-        float u  = inWindow ? MathHelper.Clamp((phase - featherStart) / feather, 0f, 1f) : 0f;
-        // du/dφ: 1/feather strictly inside the ramp, 0 outside / at the clamps (a kink the
-        // FD-vs-analytic oracle must skip, like the keyframe boundary — see FeatherRegionAt).
-        float du = inWindow && u > 0f && u < 1f ? 1f / feather : 0f;
-
-        AddWeighted(clip, ks[i].Contacts, 1f - u, -du);
-        if (u > 0f) AddWeighted(clip, ks[j].Contacts, u, du);
-    }
-
-    private void AddWeighted(AnimationDocument clip, List<ContactLabel> labels, float scale, float dscale)
-    {
-        if (labels == null || scale <= 0f) return;
-        foreach (var l in labels)
-        {
-            // Labels resolve through the endpoint resolver (a named point or the legacy node);
-            // the solver pins bone TIPS, so a point that is not an exact End is ignored here.
-            int b = EndpointResolver.BoneOf(_skeleton, clip, l, out bool exactTip);
-            if (b < 0 || !exactTip) continue;
-            float w  = l.Weight * scale;
-            float dw = l.Weight * dscale;
+            if (!c.Covers(phase, out _)) continue;
+            float w = c.WeightAt(phase);
+            if (w <= 0f) continue;
+            // Spans resolve through the endpoint resolver, which THROWS on one this solve
+            // cannot honor (unresolvable, or not an exact bone tip) rather than dropping it.
+            int b = EndpointResolver.BoneOf(_skeleton, clip, c.Point);
+            float dw = c.SlopeAt(phase);
             int at = -1;
             for (int k = 0; k < _weightBuf.Count; k++) if (_weightBuf[k].bone == b) { at = k; break; }
             if (at >= 0) _weightBuf[at] = (b, _weightBuf[at].weight + w, _weightBuf[at].dweight + dw);
@@ -1030,7 +987,7 @@ public sealed partial class CharacterAnimator
         float timeFade = dt / MathF.Max(1e-3f, _frame.Solver.ContactReleaseTime);
         // ENGAGE mirror of the release floor: a contact's weight may RISE by at most this much
         // per frame, from a capture at (at most) this much. The phase feather alone is too
-        // short in TIME at run cadence — FeatherWidth 0.12 phase at Δφ ≈ 0.07/frame is under
+        // short in TIME at run cadence — a 0.12-phase crossover at Δφ ≈ 0.07/frame is under
         // two frames, so a re-contact went 0 → 0.76 → 1.0 and the ground-hold row yanked the
         // root to the new foot in one frame (the landing jerk). Ramping over ContactEngageTime
         // lets δ and the leg share the landing across several frames at any cadence; at a slow
@@ -1051,7 +1008,7 @@ public sealed partial class CharacterAnimator
             w = MathF.Min(w, c.Weight + timeRamp);
             if (DWeightOf(c.Bone) < 0f) w = MathF.Min(w, c.Weight - timeFade);
             // Deliberately NO slew floor on release (tried 2026-08-26): a fast cadence steps
-            // clean over the release feather (Δφ 0.078 vs FeatherWidth 0.12) and a full-weight
+            // clean over the release ramp (Δφ 0.078 vs a ~0.12-phase crossover) and a full-weight
             // contact drops in one frame — but holding it for a time ramp instead dragged the
             // old foot's ground-hold through toe-off (δ → +6px) and stalled the cadence on
             // its no-slip row (Δφ → 0.01), the foot-swap deadlock all over again. Toe-off
