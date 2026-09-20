@@ -20,7 +20,7 @@ code, scattered; the contract names them and stops them drifting.
 |---|---|---|
 | Descriptive tags | `AnimTag` (movement) / action class name (action) | Search labels only; acquire nothing. |
 | Exclusive slot | `OverlayStack` slot 0 (action) vs. the base clip chosen by the active `IMoveDriver` (locomotion); slots 1–2 for driver overlays | The base clip IS the locomotion slot's owner. |
-| Resource claims | Hands: a driver's `FrameInputs.Pins` (the vault grip); feet: `ContactSource.PlannedSupport` labels (planner-owned) vs. `SelfPlant` (animator-owned) | Implicit today — nothing reserves; see §3. |
+| Resource claims | Hands: a driver's `FrameInputs.Pins` (the vault grip); feet: the planner owns every contact span of the running clip while it runs (`CharacterAnimator.PlannerActive`), the animator's own capture otherwise | Implicit today — nothing reserves; see §3. |
 | Pose contribution | `AnimationDocument.Region` + `OffRegionWeight` (regional override with an off-mask weight); the base clip is full-body | Additive layers do not exist yet (recoil would be the first). |
 | Timing source | `ClipTimeMode` — `CadencePhase`, `IdleBob`, `Hold` (locomotion phase), `Progress` (maneuver progress), `Clock` (local clock); the action overlay's τ is `ActionProgress` (action progress) | Exactly the plan's four sources plus Hold. |
 | Transition policy | The driver registry ORDER (first `Matches` wins), `ClipChoice.StartT` / `MatchPose` (entry), the overlay ease-in/out rates, the settle tail | No commitment window or interruption reasons yet. |
@@ -62,12 +62,13 @@ A foot's contact target comes from exactly one of:
 
 | Owner | Declared by | Lifecycle |
 |---|---|---|
-| Step planner | `PlannedSupport` labels on the clip (the clip *claims* `foot_support_plan` for that node) | `StepPlanner` — touchdown/liftoff from the stride track, targets from terrain treads |
-| Animator (legacy) | `SelfPlant` labels | `RefreshContacts` — feathered capture/release at the entry phase |
+| Step planner | The clip's contact spans, when the planner runs (locomotion clip, terrain in the sample, `PlannerEnabled`) | `StepPlanner` — touchdown/liftoff from the stride track, targets from terrain treads |
+| Animator | The same spans, when it does not | `RefreshContacts` — feathered capture/release at the entry phase |
 | A driver | `FrameInputs.Pins` (`External`) | Frozen per frame by the driver |
 | Nobody | No label / `Unplanned` | The foot follows the clip; no-pen only |
 
-Mixed sources on one node are already refused at compile (`ClipStrideTrack.TryCompile`).
+The two are never mixed within a frame: a clip is planner-owned or animator-owned whole
+(2026-09-20 — the per-point `PlannedSupport` opt-in and its mixed-source compile error are gone).
 The rule adds: **the stopping policy does not become a fifth owner.** Settling (runtime §5)
 expresses "finish or shorten the active swing toward a reachable landing" through the
 existing owner — a planner-owned foot gets a shortened swing schedule from the planner
@@ -90,7 +91,7 @@ The contract (the plan's §10 table) for the *first* implementation slice:
 
 - A **claim set** per candidate layer: `{LeftHand, RightHand, FootSupportPlan}` plus, per
   planned foot, the foot's identity. Locomotion base clips claim `FootSupportPlan` iff they
-  carry `PlannedSupport` labels. The vault's grip pin claims `LeftHand`. Action overlays
+  carry contact spans. The vault's grip pin claims `LeftHand`. Action overlays
   claim the hand(s) their clip drives — **[owner's call]** whether a one-handed slash claims
   `RightHand` only (so run + slash composes, ledge-pull + slash conflicts on the support
   hand) or both hands; the plan's expected combinations imply per-hand.

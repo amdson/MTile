@@ -4,11 +4,13 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-// STRIDE TRACKS — derived, cached data compiled from a clip's PlannedSupport contact
-// labels (Plans/ANIMATION_STEP_PLANNER_PLAN.md / _IMPL.md, phase P1). Pure function of
-// (AnimationDocument, Skeleton): when each opted-in foot should be planted (touchdown/
-// liftoff phases), where the clip prefers it relative to the body, and the authored
-// swing shape between stances. Consumed by StepPlanner; never hand-edited.
+// STRIDE TRACKS — derived, cached data compiled from a clip's contact spans
+// (Plans/ANIMATION_STEP_PLANNER_PLAN.md / _IMPL.md, phase P1). Pure function of
+// (AnimationDocument, Skeleton): when each foot should be planted (touchdown/liftoff
+// phases), where the clip prefers it relative to the body, and the authored swing shape
+// between stances. One track serves both the timing stage (GaitTiming reads the cycle
+// displacement) and the step planner (which owns every foot in it while it runs).
+// Never hand-edited.
 //
 // PLACEMENT CONVENTION (BodyPath's one contract — the live solve-root and the draw root:
 // root = T(body + RootOffset(c)) · S(dir·scale, scale)): offsets here are stored in RIG
@@ -27,7 +29,7 @@ namespace MTile;
 // (idle-like: maintain support, don't invent strides) and has no swing.
 //
 // Structural validation only — no terrain or gait special cases. Any violation fails the
-// whole compile with a message and the clip stays on the legacy SelfPlant path.
+// whole compile with a message and the animator runs the clip on its own SelfPlant capture.
 
 public struct StrideStance
 {
@@ -94,7 +96,7 @@ public sealed class ClipStrideTrack
 {
     public const int SwingSampleCount = 9;
 
-    public FootStrideTrack[] Feet;   // one per opted-in node; empty compile = no opt-in (legal, legacy path)
+    public FootStrideTrack[] Feet;   // one per named point; empty = the clip has no contact spans (legal)
 
     // AUTHORED BODY TRAVEL PER CYCLE (the timing stage, Plans/ANIMATION_TIMING_STAGE.md), rig
     // units at facing +1, signed (negative = the feet move forward under the body, a
@@ -119,13 +121,9 @@ public sealed class ClipStrideTrack
     }
 
     // Compile the clip's stride tracks. Returns false with `error` on any structural
-    // violation; returns true with Feet.Length == 0 when the clip simply doesn't opt in.
-    // `anySource` compiles every labeled node regardless of ContactSource — the TIMING
-    // stage's gait track (GaitTiming: authored stride length from stance offsets), which
-    // owns no foot and so needs no ownership discipline. The planner's track (default)
-    // stays PlannedSupport-only.
+    // violation; returns true with Feet.Length == 0 when the clip has no contact spans.
     public static bool TryCompile(AnimationDocument doc, Skeleton rig,
-                                  out ClipStrideTrack track, out string error, bool anySource = false)
+                                  out ClipStrideTrack track, out string error)
     {
         track = null; error = null;
         var ks = doc?.Keyframes;
@@ -138,19 +136,13 @@ public sealed class ClipStrideTrack
         if (loop && MathF.Abs((ks[^1].Time - ks[0].Time) - 1f) < 1e-3f) ringCount--;
         if (ringCount < 1) { error = "clip has no usable keyframes"; return false; }
 
-        // Opted-in points: any PlannedSupport span in the clip. A point mixing PlannedSupport
-        // with SelfPlant/External is ambiguous ownership — refused.
+        // Every point the clip's spans name, whatever their source.
         var nodes = new List<string>();
         var spans = doc.Contacts;
         if (spans != null)
             foreach (var c0 in spans)
-                if ((anySource || c0.Source == ContactSource.PlannedSupport)
-                    && c0.Point != null && !nodes.Contains(c0.Point)) nodes.Add(c0.Point);
+                if (c0.Point != null && !nodes.Contains(c0.Point)) nodes.Add(c0.Point);
         if (nodes.Count == 0) { track = new ClipStrideTrack { Feet = Array.Empty<FootStrideTrack>() }; return true; }
-        if (!anySource)
-            foreach (var c0 in spans)
-                if (c0.Source != ContactSource.PlannedSupport && nodes.Contains(c0.Point))
-                { error = $"point '{c0.Point}' mixes PlannedSupport with {c0.Source} spans"; return false; }
 
         // FK scratch for offset sampling (compile-time only; allocation is fine here).
         var a = rig.CreatePose(); var b = rig.CreatePose(); var c = rig.CreatePose();
@@ -186,7 +178,6 @@ public sealed class ClipStrideTrack
             foreach (var cs in spans)
             {
                 if (cs.Point != node) continue;
-                if (!anySource && cs.Source != ContactSource.PlannedSupport) continue;
                 if (cs.End - cs.Start <= 1e-4f)
                 { error = $"contact '{node}' has an empty span at {cs.Start:0.000}"; return false; }
                 stances.Add(new StrideStance
@@ -199,7 +190,7 @@ public sealed class ClipStrideTrack
                 });
             }
             if (stances.Count == 0)
-            { error = $"point '{node}' is opted in but has no span"; return false; }
+            { error = $"point '{node}' names no span"; return false; }
             stances.Sort((x, y) => x.Touchdown.CompareTo(y.Touchdown));
 
             // A persistent stance has no strides, so it has no swings either.

@@ -18,7 +18,7 @@ using MTile;
 //   dotnet run --project MTile.Probe -- addcom [clip] [--dry]    stamp grounded COM anchors (all clips, or one)
 //   dotnet run --project MTile.Probe -- new <name> <type> [--dur s] [--from clip[@t]] [--noloop]
 //   dotnet run --project MTile.Probe -- addkey <clip> <t> [--from clip[@t]]   pose = own-clip sample at t (shape-preserving) or a copy
-//   dotnet run --project MTile.Probe -- contact <clip> <start> <end> <point|none> [planned|external] [--clear]
+//   dotnet run --project MTile.Probe -- contact <clip> <start> <end> <point|none> [external] [--clear]
 //       author a contact SPAN in normalized phase; end may exceed 1 to wrap a loop seam; --clear retimes instead of stacking
 //   dotnet run --project MTile.Probe -- rot <clip> <t> <bone> <value> [--deg] escape hatch: set one bone's rotation
 //   dotnet run --project MTile.Probe -- retime <clip> <t> <newT> | delkey <clip> <t> | dur <clip> <seconds>
@@ -452,7 +452,7 @@ static class Probe
         return 0;
     }
 
-    // contact <clip> <start> <end> <point|none> [planned|external] [--clear]
+    // contact <clip> <start> <end> <point|none> [external] [--clear]
     //   Author a contact SPAN — the interval the point is pinned over, in normalized phase.
     //   `end` may exceed 1 on a looping clip to wrap the seam (0.8 1.2 is one stance, not two).
     //   `none` as the point clears every span; --clear drops only the ones on that point first,
@@ -472,9 +472,7 @@ static class Probe
 
         float start = ParseF(first), end = ParseF(Arg(args, 3));
         string node = Arg(args, 4);
-        var source = HasFlag(args, "planned")  ? ContactSource.PlannedSupport
-                   : HasFlag(args, "external") ? ContactSource.External
-                                               : ContactSource.SelfPlant;
+        var source = HasFlag(args, "external") ? ContactSource.External : ContactSource.SelfPlant;
         if (end <= start)
             throw new ArgumentException($"end ({end}) must exceed start ({start}); a span wrapping the loop seam is written as e.g. 0.8 1.2");
         if (start < 0f || start >= 1f) throw new ArgumentException($"start ({start}) must lie in [0,1)");
@@ -522,15 +520,15 @@ static class Probe
         var clip = Find(Arg(args, 1));
         if (!ClipStrideTrack.TryCompile(clip, _rig, out var track, out string err))
         {
-            Console.WriteLine($"{clip.Name}: COMPILE ERROR — {err} (clip stays on the legacy path)");
+            Console.WriteLine($"{clip.Name}: COMPILE ERROR — {err} (the animator self-plants this clip)");
             return 1;
         }
         if (track.Feet.Length == 0)
         {
-            Console.WriteLine($"{clip.Name}: no PlannedSupport labels — not opted in.");
+            Console.WriteLine($"{clip.Name}: no contact spans — nothing to plan.");
             return 0;
         }
-        Console.WriteLine($"{clip.Name}: {track.Feet.Length} planned feet");
+        Console.WriteLine($"{clip.Name}: {track.Feet.Length} feet");
         foreach (var f in track.Feet)
         {
             Console.WriteLine($"  {f.Node}:");

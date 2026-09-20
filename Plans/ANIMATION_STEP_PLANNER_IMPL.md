@@ -99,7 +99,9 @@ struct FootTrack { int Bone; Stance[] Stances;
                                                // normalized to its own chord (never a parabola)
 ```
 
-Opt-in = any `ContactLabel` on that foot with `Source: PlannedSupport`. Body-relative
+~~Opt-in = any `ContactLabel` on that foot with `Source: PlannedSupport`.~~ *(Retired
+2026-09-20: every contact span compiles; the planner owns the whole clip when it runs.)*
+Body-relative
 extraction uses the SAME root construction as the live solve (`com` anchor via
 `SampleNamedPoint`, scale, facing — `CharacterAnimator.cs:620-624`); factor that root
 math into a small shared helper rather than duplicating it.
@@ -175,16 +177,16 @@ written unconditionally by `LatticeTracker` after its solve (today the count is 
 kept under `CaptureTrajectories`). Two write-only diagnostic ints; no sim behavior
 change, nothing snapshot-relevant.
 
-### 5. Solver integration — one enum value, one ownership check, one block
+### 5. Solver integration — one ownership check, one block
 
-- `ContactSource.PlannedSupport` (schema already serializes `Source`; legacy JSON
-  defaults to `SelfPlant`, untouched).
-- **Ownership check** in `RefreshContacts` (`CharacterAnimator.cs:956`): a foot whose
-  active clip compiled a `FootTrack` is *planner-owned* — skip capture/release for it
-  entirely. The animator instead mirrors that foot's `FootPlan` into `_contacts`
-  (stance ⇒ ensure a `PlannedSupport` contact at `Target` with the plan's weight;
-  otherwise ⇒ none). Non-owned bones and legacy clips run the existing path,
-  bit-for-bit. This is the entire lifecycle handover — the capture-side patches
+*(As shipped, then simplified 2026-09-20: the `PlannedSupport` enum value and the per-bone
+ownership predicate are gone. `CharacterAnimator._plannerActive` decides per frame for the
+whole clip; `MirrorPlans` is the contact list on planner frames.)*
+
+- **Ownership check** in `RefreshContacts`: on a frame the planner ran, skip
+  capture/release entirely and mirror each foot's `FootPlan` into `_contacts`
+  (stance ⇒ ensure a contact at `Target` with the plan's weight; otherwise ⇒ none).
+  Every other frame runs the self-plant path, bit-for-bit. This is the entire lifecycle handover — the capture-side patches
   (engage ramp) become planner weight policy using the same config constants; the
   release-side patches simply never see planner-owned bones.
 - **`SwingTargetConstraint : ISolveConstraint`**, appended to `_coreGeom`: 2 rows per
@@ -199,8 +201,8 @@ change, nothing snapshot-relevant.
 
 Each phase ships green and observable before the next starts.
 
-**P0 — schema + probe (half a day).** `PlannedSupport` enum value; probe
-`contact <clip> <t> <node|none> [planned]`. No runtime change (no clip is opted in).
+**P0 — schema + probe (half a day).** ~~`PlannedSupport` enum value; probe
+`contact <clip> <t> <node|none> [planned]`.~~ *(Retired 2026-09-20.)*
 
 **P1 — stride tracks, no consumption.** `ClipStrideTrack` + probe op
 `stride <clip>` dumping events/offsets/swing shapes/compile errors. Tests:

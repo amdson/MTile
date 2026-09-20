@@ -76,7 +76,7 @@ public class AnimStepPlannerTests(Xunit.Abstractions.ITestOutputHelper output)
             },
             // The stance the four keys used to imply: planted at 0.1 and 0.3, free after.
             Contacts = new List<ContactSpan>
-            { new() { Point = "foot", Start = 0.1f, End = 0.6f, Source = ContactSource.PlannedSupport } },
+            { new() { Point = "foot", Start = 0.1f, End = 0.6f } },
         };
         Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
         return track;

@@ -34,7 +34,7 @@ public class AnimStrideTrackTests
     };
 
     private static ContactSpan Planned(string point, float start, float end) => new()
-    { Point = point, Start = start, End = end, Source = ContactSource.PlannedSupport };
+    { Point = point, Start = start, End = end };
 
     private static AnimationDocument Doc(bool loop, ContactSpan[] contacts, params AnimationKeyframe[] keys) => new()
     {
@@ -118,15 +118,18 @@ public class AnimStrideTrackTests
         Assert.Empty(f.Swings);   // nothing follows a non-loop tail stance
     }
 
+    // A span's Source is not an ownership label: every span on a point is a stance of that
+    // point's track, whatever it says.
     [Fact]
-    public void MixedSources_OnOnePoint_IsRefused()
+    public void AnySource_OnOnePoint_CompilesAsOneTrack()
     {
         var doc = Doc(loop: true,
             new[] { Planned("foot", 0f, 0.4f),
-                    new ContactSpan { Point = "foot", Start = 0.5f, End = 0.9f, Source = ContactSource.SelfPlant } },
+                    new ContactSpan { Point = "foot", Start = 0.5f, End = 0.9f, Source = ContactSource.External } },
             Key(0.0f, 0f), Key(0.5f, 0f));
-        Assert.False(ClipStrideTrack.TryCompile(doc, TinyRig(), out _, out string err));
-        Assert.Contains("mixes", err);
+        Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
+        var f = Assert.Single(track.Feet);
+        Assert.Equal(2, f.Stances.Length);
     }
 
     [Fact]
@@ -146,16 +149,12 @@ public class AnimStrideTrackTests
     }
 
     [Fact]
-    public void NoOptIn_CompilesEmpty_NotAnError()
+    public void NoSpans_CompilesEmpty_NotAnError()
     {
-        var doc = Doc(loop: true,
-            new[] { new ContactSpan { Point = "foot", Start = 0f, End = 0.5f, Source = ContactSource.SelfPlant } },
-            Key(0.0f, 0f), Key(0.5f, 0f));
-        Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
-        Assert.Empty(track.Feet);
-
-        // A clip with no contact list at all is likewise legal and empty.
         Assert.True(ClipStrideTrack.TryCompile(Doc(true, null, Key(0f, 0f), Key(0.5f, 0f)),
+                                               TinyRig(), out var track, out string err), err);
+        Assert.Empty(track.Feet);
+        Assert.True(ClipStrideTrack.TryCompile(Doc(true, System.Array.Empty<ContactSpan>(), Key(0f, 0f), Key(0.5f, 0f)),
                                                TinyRig(), out var t2, out err), err);
         Assert.Empty(t2.Feet);
     }

@@ -8,16 +8,17 @@ namespace MTile;
 //                    and held (a planted foot that must not slip).
 //   External       — a fixed world point supplied by the sim/level over a time window
 //                    (e.g. the corner a ParkourState vault must keep a hand on).
-//   PlannedSupport — opt-in for the step planner (Plans/ANIMATION_STEP_PLANNER_PLAN.md):
-//                    the interval REQUESTS terrain support for this point and the runtime
-//                    (StepPlanner) chooses the support point. Feet in a clip carrying any
-//                    PlannedSupport span are planner-owned: RefreshContacts' SelfPlant
-//                    capture/release lifecycle skips them.
+//
+// A span never opts a foot in or out of the step planner. Whether the planner or the
+// animator's own capture supplies a contact's target is decided per FRAME by the animator
+// (planner enabled, terrain in the sample, the clip's spans compile — CharacterAnimator.
+// RefreshContacts), and when the planner runs it owns every span in the clip. The former
+// PlannedSupport value was the per-point opt-in of that rollout; a legacy clip that still
+// serializes it loads as SelfPlant (AnimationDocument's converter).
 public enum ContactSource
 {
     SelfPlant,
     External,
-    PlannedSupport,
 }
 
 // ONE CONTACT, AS AN EXPLICIT INTERVAL. A named point pinned over [Start, End) of the clip's

@@ -615,9 +615,7 @@ public sealed partial class DemoGame
             float sx = TimeToX(cs.Start), ex = TimeToX(MathF.Min(cs.End, 1f));
             float by = ContactRowY(y, ContactRow(contacts, i));
             bool sel = _selectedContact == cs;
-            uint col = cs.Source == ContactSource.PlannedSupport ? Col(90, 150, 240)
-                     : cs.Source == ContactSource.External       ? Col(240, 160, 70)
-                                                                 : Col(70, 220, 110);
+            uint col = cs.Source == ContactSource.External ? Col(240, 160, 70) : Col(70, 220, 110);
             DrawSpan(dl, sx, ex, by, col, sel);
             const int Profile = 24;
             for (int k = 0; k < Profile; k++)
@@ -1053,7 +1051,6 @@ public sealed partial class DemoGame
         if (ImGui.BeginMenu("Add contact"))
         {
             if (ImGui.MenuItem("No slip", null, cur == ContactSource.SelfPlant)) ApplyContact(b, ContactSource.SelfPlant);
-            if (ImGui.MenuItem("Planned support", null, cur == ContactSource.PlannedSupport)) ApplyContact(b, ContactSource.PlannedSupport);
             if (ImGui.MenuItem("External pin", null, cur == ContactSource.External)) ApplyContact(b, ContactSource.External);
             ImGui.Separator();
             if (ImGui.MenuItem("Clear the one at the playhead", null, false, cur != null)) ApplyContact(b, null);

@@ -148,9 +148,25 @@ public static class AnimationStore
         WriteIndented = true,
         PropertyNameCaseInsensitive = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        // ContactSource reads/writes as "SelfPlant"/"External" rather than 0/1.
-        Converters = { new JsonStringEnumConverter() },
+        // ContactSource reads/writes as "SelfPlant"/"External" rather than 0/1; its own
+        // converter goes first so the generic enum converter never sees it.
+        Converters = { new ContactSourceConverter(), new JsonStringEnumConverter() },
     };
+
+    // ContactSource by name, accepting the retired "PlannedSupport" as SelfPlant: the
+    // 2026-09-18 clip backup (Backups/clips-*.tar.gz, the only copy of the pre-stub
+    // library) serializes it, and the planner no longer needs a per-point opt-in.
+    private sealed class ContactSourceConverter : JsonConverter<ContactSource>
+    {
+        public override ContactSource Read(ref Utf8JsonReader r, Type t, JsonSerializerOptions o)
+        {
+            if (r.TokenType == JsonTokenType.Number) return (ContactSource)r.GetInt32();
+            string s = r.GetString();
+            return Enum.TryParse<ContactSource>(s, ignoreCase: true, out var v) ? v : ContactSource.SelfPlant;
+        }
+        public override void Write(Utf8JsonWriter w, ContactSource v, JsonSerializerOptions o)
+            => w.WriteStringValue(v.ToString());
+    }
 
     public static List<AnimationDocument> LoadAll(string dir)
     {

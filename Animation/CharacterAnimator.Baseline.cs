@@ -21,8 +21,8 @@ public sealed partial class CharacterAnimator
     public int  BaselineVars => IdxTheta0 + _skeleton.Count;
 
     public int BaselineContactCount => _contacts.Count;
-    public (int Bone, Vector2 Target, float Weight, ContactSource Source) BaselineContact(int i)
-        => (_contacts[i].Bone, _contacts[i].Target, _contacts[i].Weight, _contacts[i].Source);
+    public (int Bone, Vector2 Target, float Weight) BaselineContact(int i)
+        => (_contacts[i].Bone, _contacts[i].Target, _contacts[i].Weight);
 
     // Largest |Δθ| the solver applied this frame (0 on a fast-path frame).
     public float BaselineMaxAbsDTheta

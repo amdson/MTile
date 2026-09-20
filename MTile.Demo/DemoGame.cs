@@ -1154,7 +1154,7 @@ public sealed partial class DemoGame : Game
 
     // Set (source) or clear (null) the contact on a bone's End AT THE PLAYHEAD. Setting a source
     // on a span that already covers the playhead retypes it in place — the interval is the
-    // author's, so changing SelfPlant to PlannedSupport must not silently retime the plant.
+    // author's, so changing SelfPlant to External must not silently retime the plant.
     // Otherwise a new span is authored over NewSpanRange, then dragged on the timeline.
     // No keyframe is sampled: a contact no longer needs one to exist.
     private void ApplyContact(int bone, ContactSource? src)
