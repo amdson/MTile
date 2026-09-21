@@ -41,6 +41,13 @@ public sealed class TransitionOptions
     public float  ContactMismatch    = 1f;     // per support point whose stance state differs
     public float  MaxCost            = float.PositiveInfinity;   // keep local minima at or below this
     public string FootRole           = "support";
+    // Clamp the comparison windows at both clips' ends even if the documents say Loop —
+    // for a search that does not trust the authored seam (ClipLoopCut).
+    public bool   TreatAsNonLooping  = false;
+    // Sample phases i/(Samples−1) over [0, 1] INCLUSIVE instead of i/Samples over [0, 1):
+    // the last sample is the clip's end pose, so a jump from the very end (the authored
+    // seam) is a scored pair like any other. Only meaningful with TreatAsNonLooping.
+    public bool   IncludeEndPhase    = false;
 }
 
 public readonly struct ClipTransition
@@ -57,16 +64,18 @@ public sealed class ClipTransitionGraph
 {
     public readonly AnimationDocument From, To;
     public readonly int Samples;
+    public readonly bool IncludesEnd;                // sample phases are i/(Samples−1)
     public readonly float[,] Cost;                  // [fromIndex, toIndex]
     public readonly ClipTransition[] Transitions;   // local minima ≤ MaxCost, cheapest first
 
-    private ClipTransitionGraph(AnimationDocument from, AnimationDocument to, int samples,
+    private ClipTransitionGraph(AnimationDocument from, AnimationDocument to, int samples, bool includesEnd,
                                 float[,] cost, ClipTransition[] transitions)
-    { From = from; To = to; Samples = samples; Cost = cost; Transitions = transitions; }
+    { From = from; To = to; Samples = samples; IncludesEnd = includesEnd; Cost = cost; Transitions = transitions; }
 
-    public float PhaseOf(int index) => index / (float)Samples;
+    public float PhaseOf(int index) => IncludesEnd ? index / (float)(Samples - 1) : index / (float)Samples;
     public int   IndexOf(float phase)
     {
+        if (IncludesEnd) return Math.Clamp((int)MathF.Round(phase * (Samples - 1)), 0, Samples - 1);
         float p = phase - MathF.Floor(phase);
         return (int)MathF.Round(p * Samples) % Samples;
     }
@@ -98,8 +107,8 @@ public sealed class ClipTransitionGraph
         int n = o.Samples, w = Math.Max(0, o.Window);
 
         var feet = SupportBones(rig, o.FootRole);
-        var a = ClipSamples.Take(from, rig, feet, n);
-        var b = ClipSamples.Take(to, rig, feet, n);
+        var a = ClipSamples.Take(from, rig, feet, n, o.TreatAsNonLooping, o.IncludeEndPhase);
+        var b = ClipSamples.Take(to, rig, feet, n, o.TreatAsNonLooping, o.IncludeEndPhase);
 
         // One reach normaliser for both clips so a foot-position gap means the same thing
         // whichever side it is measured on.
@@ -140,10 +149,10 @@ public sealed class ClipTransitionGraph
                         if (ii == i && jj == j) continue;             // clamped onto itself
                         if (cost[ii, jj] < c) { min = false; break; }
                     }
-                if (min) found.Add(new ClipTransition(i / (float)n, j / (float)n, c));
+                if (min) found.Add(new ClipTransition(a.PhaseOf(i), b.PhaseOf(j), c));
             }
         found.Sort((x, y) => x.Cost.CompareTo(y.Cost));
-        return new ClipTransitionGraph(from, to, n, cost, found.ToArray());
+        return new ClipTransitionGraph(from, to, n, o.IncludeEndPhase, cost, found.ToArray());
     }
 
     // ---- the metric ----------------------------------------------------------
@@ -201,6 +210,8 @@ public sealed class ClipTransitionGraph
     {
         public bool       Loop;
         public int        N;
+        public bool       IncludesEnd;
+        public float PhaseOf(int i) => IncludesEnd ? i / (float)(N - 1) : i / (float)N;
         public float[][]  Angles;    // [sample][bone]
         public Vector2[][] FootPos;  // [sample][foot], root-relative rig units, com-subtracted
         public Vector2[][] FootVel;  // [sample][foot], per-sample finite difference
@@ -216,13 +227,14 @@ public sealed class ClipTransitionGraph
             return Math.Clamp(j, 0, N - 1);
         }
 
-        public static ClipSamples Take(AnimationDocument doc, Skeleton rig, int[] feet, int n)
+        public static ClipSamples Take(AnimationDocument doc, Skeleton rig, int[] feet, int n,
+                                       bool forceNonLooping = false, bool includeEnd = false)
         {
             var ks = doc.Keyframes;
             if (ks == null || ks.Count == 0) throw new ArgumentException($"clip '{doc.Name}' has no keyframes");
             var s = new ClipSamples
             {
-                Loop = doc.Loop, N = n,
+                Loop = doc.Loop && !forceNonLooping && !includeEnd, N = n, IncludesEnd = includeEnd,
                 Angles = new float[n][], FootPos = new Vector2[n][], FootVel = new Vector2[n][],
                 Planted = new bool[n][], HasContacts = doc.Contacts is { Count: > 0 },
             };
@@ -241,7 +253,7 @@ public sealed class ClipTransitionGraph
             var d = rig.CreatePose(); var dst = rig.CreatePose();
             for (int i = 0; i < n; i++)
             {
-                float phase = i / (float)n;
+                float phase = s.PhaseOf(i);
                 AnimationSampler.SampleSmooth(doc, phase, a, b, c2, d, dst);
                 var ang = new float[rig.Count];
                 for (int k = 0; k < rig.Count; k++) ang[k] = dst.Local[k].Rotation;

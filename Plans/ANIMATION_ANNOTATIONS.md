@@ -169,7 +169,25 @@ freezes them first. Pinned by `AnimCurveTests.InsertPreservingShape_DoesNotMoveT
 boundary. `Covers()` retries at φ+1. The editor's `SpanDrag` takes an `allowWrap` flag;
 contacts allow it, attachment windows do not.
 
-### 4.8 Deleting an element cascades
+### 4.8 A cadence clip's seam is not necessarily at phase 1
+
+Every cadence clip is checked once (`ClipLoopBack.Plan`, cached per document) for a better
+place to loop than its authored seam: the cheapest jump from an exit in the clip's tail
+(`LoopBackRegion`, last 25%) to an entry before the tail, at least `LoopBackMinLoop` of the
+clip apart, scored by `ClipTransitionGraph` (the clip against itself, phase 1 included).
+If that jump costs less than the seam itself (last key → first key), the animator takes it: on the
+first frame at or past the exit the phase is set to the entry plus the overshoot, before
+the timing stage, so the smoothness prior crossfades the gap and `TransferContacts`
+carries the stance support, exactly as a `MatchPose` clip entry. A perfectly looping clip
+scores its seam at ~0, nothing beats it, and it wraps as before. Nothing is authored.
+
+- Phases the runtime reports can jump backwards mid-clip; `CharacterAnimator.LoopBackJumps`
+  counts them. `LoopBackEnabled = false` restores plain wrapping.
+- `probe loopback <clip>` prints the seam cost, the best tail jump and the decision;
+  `--write` saves the loop the runtime effectively plays as a Misc clip (`ClipLoopCut.Cut`).
+  A cost under ~0.1 is a clean seam; over ~1 will pop.
+
+### 4.9 Deleting an element cascades
 
 `RemoveAttachment` drops the attachment, then its own point if nothing else references it,
 then the clip-local bone if nothing holds it (`BoneHolder`). The bone's pose entries and

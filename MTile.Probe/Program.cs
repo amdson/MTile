@@ -34,6 +34,10 @@ using MTile;
 //   dotnet run --project MTile.Probe -- mapcom <clip> <arc> [--stretch]   write body_path from a ReferenceClips arc
 //   dotnet run --project MTile.Probe -- bakepath <clip> [--flat] [--dry]   derive body_path + Motion=Track (+ scene guides) from the planted feet (--flat: run only)
 //   dotnet run --project MTile.Probe -- scenecheck <clip>         stance drift / swing clearance against the clip's scene guides
+//   dotnet run --project MTile.Probe -- loopback <clip> [--region f] [--minloop f] [--write [name]]
+//       the loop-back the runtime takes for a cadence clip (Animation/ClipLoopBack.cs): the best
+//       tail exit -> earlier entry, its cost against the authored seam's, and whether it jumps.
+//       --write saves the loop the runtime effectively plays as a Misc clip (default <clip>_loop).
 //   dotnet run --project MTile.Probe -- liftswing <clip> [node] [--lift rig] [--dry]   re-pose swing keys on a climb-first toe path (needs bakepath)
 //   dotnet run --project MTile.Probe -- bakeyaw [clip] [--view deg] [--swap s] [--ref rad] [--shoulderamp f] [--dry]
 //       bake pelvis/shoulder yaw foreshortening: per keyframe, derive the leg (arm) scissor
@@ -93,6 +97,7 @@ static class Probe
                 case "addkey": return AddKey(args);
                 case "contact": return Contact(args);
                 case "stride": return Stride(args);
+                case "loopback": return LoopBack(args);
                 case "rot":    return Rot(args);
                 case "retime": return Retime(args);
                 case "delkey": return DelKey(args);
@@ -509,6 +514,35 @@ static class Probe
         throw new ArgumentException(
             $"bone '{name}' has no named point at its End. Contacts reference points, not bones — " +
             $"add one to Skeletons/{_rig.Name}.json (or the clip's Points) and use its id.");
+    }
+
+    // loopback <clip> [--region f] [--minloop f] [--write [name]]
+    static int LoopBack(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        var cfg = AnimSolverConfig.Current;
+        float region  = FlagValue(args, "--region")  is string r ? ParseF(r) : cfg.LoopBackRegion;
+        float minLoop = FlagValue(args, "--minloop") is string m ? ParseF(m) : cfg.LoopBackMinLoop;
+        var plan = ClipLoopBack.Plan(clip, _rig, region, minLoop);
+        Console.WriteLine($"{clip.Name}: seam cost {plan.SeamCost:0.0000} (last key -> first key)");
+        if (!plan.HasCandidate)
+        {
+            Console.WriteLine($"  no tail exit with a loop of at least {minLoop:0.00} of the clip — wraps at the seam");
+            return 0;
+        }
+        Console.WriteLine($"  best tail jump: {plan.Exit:0.000} -> {plan.Entry:0.000}  cost {plan.Cost:0.0000}  loop length {plan.Exit - plan.Entry:0.000}");
+        Console.WriteLine(plan.Jumps ? "  JUMPS there (beats the seam)" : "  wraps at the seam (the jump is no better)");
+        if (HasFlag(args, "--write"))
+        {
+            float entry = plan.Jumps ? plan.Entry : 0f, exit = plan.Jumps ? plan.Exit : 1f;
+            var loop = ClipLoopCut.Cut(clip, _rig, entry, exit);
+            string name = FlagValue(args, "--write");
+            if (name == null || name.StartsWith("--")) name = clip.Name + "_loop";
+            loop.Name = name; loop.Type = "Misc"; loop.FilePath = null;
+            AnimationStore.Save(loop, _statesDir);
+            Console.WriteLine($"  wrote {loop.FilePath} (Type Misc — a viewer copy, never bound)");
+        }
+        return 0;
     }
 
     // stride <clip> — read-only: compile and dump the clip's stride tracks

@@ -271,6 +271,23 @@ public sealed partial class CharacterAnimator
         return t;
     }
 
+    // Loop-back plans per DOCUMENT REFERENCE (ClipLoopBack), tagged with the knobs they were
+    // computed under so a hot-reloaded region/min-loop recomputes.
+    private readonly Dictionary<AnimationDocument, (float region, float minLoop, LoopBackPlan plan)> _loopBackCache = new();
+    private LoopBackPlan LoopBackFor(AnimationDocument doc)
+    {
+        var cfg = AnimSolverConfig.Current;
+        if (_loopBackCache.TryGetValue(doc, out var e) && e.region == cfg.LoopBackRegion && e.minLoop == cfg.LoopBackMinLoop)
+            return e.plan;
+        var plan = ClipLoopBack.Plan(doc, _skeleton, cfg.LoopBackRegion, cfg.LoopBackMinLoop);
+        _loopBackCache[doc] = (cfg.LoopBackRegion, cfg.LoopBackMinLoop, plan);
+        return plan;
+    }
+    // Diagnostics / tests: how many loop-back jumps this animator has taken, and the plan
+    // for a bound clip (null when the clip is not bound).
+    public int LoopBackJumps { get; private set; }
+    public LoopBackPlan? LoopBackPlanFor(AnimClip clip) => _clips.TryGetValue(clip, out var d) ? LoopBackFor(d) : null;
+
     // True on frames the planner ran for the active clip: every contact is then PLANNER-
     // OWNED — RefreshContacts skips its SelfPlant capture/release lifecycle and mirrors the
     // planner's stance plans into _contacts instead. False (planner off / no spans / no
@@ -493,7 +510,8 @@ public sealed partial class CharacterAnimator
         float speed   = MathF.Abs(s.Velocity.X);
         bool hasClip  = _clips.TryGetValue(clip, out var anim);
 
-        if (clip != _state.Clip)
+        bool entered = clip != _state.Clip;
+        if (entered)
         {
             _state.Clip = clip;
             _state.ClipTime = 0f;
@@ -525,6 +543,25 @@ public sealed partial class CharacterAnimator
         _timeMode = mode;
         _problem.WrapPhase = mode is ClipTimeMode.CadencePhase or ClipTimeMode.IdleBob or ClipTimeMode.Hold;
         bool locomotion = mode == ClipTimeMode.CadencePhase;   // the cadence-solvable clip family
+
+        // LOOP-BACK (Animation/ClipLoopBack.cs): a cadence clip whose tail matches an earlier
+        // point better than its authored seam does jumps there instead of wrapping at 1. Done
+        // HERE, before the timing stage, for the same reason a MatchPose entry is: the
+        // smoothness rows then measure this frame's final pose against the pose already on
+        // screen, and Δθ crossfades the (small, by construction) gap in-solve; the stance
+        // support the landing phase can carry transfers exactly as at a clip switch. The jump
+        // fires on the first frame at or past the planned exit (overshoot carried into the
+        // entry), or one predicted step before the seam if the exit would be stepped over.
+        if (locomotion && hasClip && !entered && AnimSolverConfig.Current.LoopBackEnabled)
+        {
+            var plan = LoopBackFor(anim);
+            if (plan.Jumps && (_state.Phase >= plan.Exit || _state.Phase + MathF.Max(0f, _prevPhaseStep) >= 1f))
+            {
+                _state.Phase = Math.Clamp(plan.Entry + (_state.Phase - plan.Exit), 0f, 1f - 1e-4f);
+                TransferContacts(anim, _state.Phase, in s);
+                LoopBackJumps++;
+            }
+        }
 
         // 1.4 The driver's contributions to this frame's solve inputs — overlay requests,
         //     fixed-point pins, and (future) whole constraint blocks. FROZEN here, like every
