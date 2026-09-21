@@ -453,7 +453,7 @@ internal static class AnimBaseline
         if (_gaits.TryGetValue(key, out var t)) return t;
         var rig = SkeletonComposition.WithClipBones(skel, clips);
         var doc = clips.Find(d => d.Skeleton == rig.Name && string.Equals(d.Type, clip.ToString(), StringComparison.OrdinalIgnoreCase));
-        t = doc != null && ClipStrideTrack.TryCompile(doc, rig, out var track, out _, anySource: true) && track.Feet.Length > 0 ? track : null;
+        t = doc != null && ClipStrideTrack.TryCompile(doc, rig, out var track, out _) && track.Feet.Length > 0 ? track : null;
         _gaits[key] = t;
         return t;
     }

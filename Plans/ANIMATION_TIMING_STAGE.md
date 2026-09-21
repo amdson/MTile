@@ -38,9 +38,9 @@ timing state, and diagnostics (travel estimate, refinement delta, cycle distance
 - `cycleDistance` (signed, world px per cycle), first available of:
   1. `BodyPath.TryCycleDisplacement` (an authored scene path; today 1 locomotion cycle,
      the rabbit crouchwalk) → `D.X · scale`.
-  2. The **gait track**: `ClipStrideTrack` compiled over *all* contact sources (a new
-     `anySource` compile — `PlannedSupport` and `SelfPlant` alike; ownership is
-     untouched because only the timing stage reads this track). During a stance the foot's
+  2. The **gait track**: `ClipStrideTrack` compiled over the clip's contact spans (the
+     same track the planner reads; since 2026-09-20 there is no separate `anySource`
+     compile). During a stance the foot's
      body-relative offset runs `TdOffset → LoOffset`, so the body travels
      `(TdOffset.X − LoOffset.X) · scale` over `Liftoff − Touchdown` cycles. Cycle distance =
      `Σ travel_i / Σ span_i` over every stance of every foot (a mean rate per cycle, which

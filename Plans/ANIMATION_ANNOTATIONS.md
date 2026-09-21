@@ -71,22 +71,27 @@ through a `1/width` chain-rule factor, zero outside the span.
 
 ## 3. `ContactSpan` → the solver
 
-This is the part people get fuzzy on. **`ContactSource` never becomes a constraint. It is a
-routing decision about where `Target` comes from.**
+This is the part people get fuzzy on. **A span never becomes a constraint, and its `Source`
+never decides who supplies `Target`.** Who does is decided per frame by the animator, for the
+whole clip at once:
 
 ```
-ContactSpan.Source = PlannedSupport
+clip.Contacts (every span, any Source)
         │
-        ├─► ClipStrideTrack.TryCompile collects the opted-in points → stances + swings
-        │      (refuses a point that MIXES PlannedSupport with another source)
+        ├─► ClipStrideTrack.TryCompile → one track: stances + swings per named point
+        │      (the timing stage reads its CycleDisplacement; the planner reads the rest)
         │
-        ├─► CharacterAnimator.PlannerOwned(bone) := _curPlanTrack?.ForBone(bone) != null
-        │
-        └─► RefreshContacts routes on that predicate:
-              SelfPlant       → capture the rig's CURRENT world tip, hold it   (clip decides)
-              PlannedSupport  → skip capture; the PLAN MIRROR writes
-                                Target = FootPlan.Target                       (terrain decides)
+        └─► CharacterAnimator._plannerActive := locomotion clip ∧ terrain in the sample
+                                               ∧ PlannerEnabled ∧ the track has feet
+              false → RefreshContacts captures the rig's CURRENT world tip and holds it
+                      (SelfPlant: the clip decides)
+              true  → MirrorPlans writes Target = FootPlan.Target for every stance
+                      (the terrain decides); nothing self-plants that frame
 ```
+
+(2026-09-20: this replaced a per-point `PlannedSupport` opt-in with a per-bone ownership
+predicate and a mixed-source compile error. The opt-in was rollout scaffolding; the clip
+backup still serializes the name and `AnimationStore` reads it as `SelfPlant`.)
 
 By the time `PlantedContactsConstraint` runs, both look identical — it never reads `Source`:
 
@@ -104,10 +109,10 @@ Other things worth knowing:
   contact; `SwingTargetConstraint` pulls it toward its landing **without** the `d.x`/`δ`
   columns, so a swinging foot never drags the root. That is why the plan mirror *removes* the
   contact rather than fading it.
-- **Ownership can flip mid-stance** at a clip switch. `TransferContacts` re-decides per
-  contact and hands the already-captured target to `Planner.Rebind` as an *adopted* support,
-  so a foot that was self-planted in a run and becomes planner-owned in a walk keeps standing
-  on the same spot instead of re-selecting and popping.
+- **A stance survives a clip switch.** `TransferContacts` keeps a contact whose bone is in
+  a stance of the incoming clip and hands the already-captured target to `Planner.Rebind` as
+  an *adopted* support, so a foot keeps standing on the same spot instead of re-selecting
+  and popping.
 - **`dw/dφ`'s SIGN is read by the SelfPlant lifecycle** to detect a release. Planner-owned feet
   do not use it — their release is `p.State != Stance`.
 
@@ -164,7 +169,25 @@ freezes them first. Pinned by `AnimCurveTests.InsertPreservingShape_DoesNotMoveT
 boundary. `Covers()` retries at φ+1. The editor's `SpanDrag` takes an `allowWrap` flag;
 contacts allow it, attachment windows do not.
 
-### 4.8 Deleting an element cascades
+### 4.8 A cadence clip's seam is not necessarily at phase 1
+
+Every cadence clip is checked once (`ClipLoopBack.Plan`, cached per document) for a better
+place to loop than its authored seam: the cheapest jump from an exit in the clip's tail
+(`LoopBackRegion`, last 25%) to an entry before the tail, at least `LoopBackMinLoop` of the
+clip apart, scored by `ClipTransitionGraph` (the clip against itself, phase 1 included).
+If that jump costs less than the seam itself (last key → first key), the animator takes it: on the
+first frame at or past the exit the phase is set to the entry plus the overshoot, before
+the timing stage, so the smoothness prior crossfades the gap and `TransferContacts`
+carries the stance support, exactly as a `MatchPose` clip entry. A perfectly looping clip
+scores its seam at ~0, nothing beats it, and it wraps as before. Nothing is authored.
+
+- Phases the runtime reports can jump backwards mid-clip; `CharacterAnimator.LoopBackJumps`
+  counts them. `LoopBackEnabled = false` restores plain wrapping.
+- `probe loopback <clip>` prints the seam cost, the best tail jump and the decision;
+  `--write` saves the loop the runtime effectively plays as a Misc clip (`ClipLoopCut.Cut`).
+  A cost under ~0.1 is a clean seam; over ~1 will pop.
+
+### 4.9 Deleting an element cascades
 
 `RemoveAttachment` drops the attachment, then its own point if nothing else references it,
 then the clip-local bone if nothing holds it (`BoneHolder`). The bone's pose entries and

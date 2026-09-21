@@ -60,6 +60,10 @@ Proposed opt-in annotation, retaining existing defaults:
 { "Node": "foot_l", "Source": "PlannedSupport" }
 ```
 
+*(Shipped as proposed, then removed 2026-09-20 once the library was being re-authored: the
+runtime plans every contact span of a locomotion clip when terrain is present, so no
+per-point opt-in exists. The rest of this section describes intent that still holds.)*
+
 The exact name is provisional. Its meaning is: this interval requests terrain support
 for this node; the runtime chooses the support point. It is not a promise that support
 exists, nor a command to capture wherever the foot currently happens to be.

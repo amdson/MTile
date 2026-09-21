@@ -1198,7 +1198,7 @@ public class Game1 : Game
             _debugOverlay.DrawCObstacles(_sim.Chunks, player.Body.Polygon, player.Body.Position, 160f);
 
         // Step-planner plans: treads, foot targets, landing wishes, rejections.
-        // Draws nothing until a clip opts in via PlannedSupport labels.
+        // Draws nothing unless a locomotion clip with contact spans is running over terrain.
         if (_config.DebugDrawStepPlanner && _animator != null)
             _debugOverlay.DrawStepPlan(_animator.Planner);
 

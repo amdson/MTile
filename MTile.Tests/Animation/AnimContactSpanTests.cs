@@ -207,7 +207,7 @@ public class AnimContactSpanTests
             Contacts = new List<ContactSpan>
             {
                 new() { Point = "support_l", Start = 0f,    End = 0.5f },
-                new() { Point = "support_r", Start = 0.5f,  End = 1.0f, Source = ContactSource.PlannedSupport },
+                new() { Point = "support_r", Start = 0.5f,  End = 1.0f, Source = ContactSource.External },
             },
         };
         string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "mtile_span_" + Guid.NewGuid().ToString("N"));
@@ -217,7 +217,7 @@ public class AnimContactSpanTests
             var back = AnimationStore.LoadAll(dir)[0];
             Assert.Equal(2, back.Contacts.Count);
             Assert.Equal("support_r", back.Contacts[1].Point);
-            Assert.Equal(ContactSource.PlannedSupport, back.Contacts[1].Source);
+            Assert.Equal(ContactSource.External, back.Contacts[1].Source);
             Assert.Equal(0.5f, back.Contacts[1].Start, 5);
 
             // A clip with no contacts writes no key at all.
@@ -229,6 +229,14 @@ public class AnimContactSpanTests
             AnimationStore.Save(bare, dir);
             Assert.DoesNotContain("Contacts", System.IO.File.ReadAllText(bare.FilePath));
             Assert.Null(AnimationStore.LoadAll(dir).Find(x => x.Name == "bare").Contacts);
+
+            // The retired per-point planner opt-in still appears in the pre-stub clip backup
+            // (Backups/clips-20260918-*.tar.gz); it loads as SelfPlant rather than throwing.
+            string legacy = System.IO.File.ReadAllText(doc.FilePath).Replace("\"External\"", "\"PlannedSupport\"");
+            Assert.Contains("PlannedSupport", legacy);
+            System.IO.File.WriteAllText(doc.FilePath, legacy);
+            var migrated = AnimationStore.LoadAll(dir).Find(x => x.Name == "t");
+            Assert.Equal(ContactSource.SelfPlant, migrated.Contacts[1].Source);
         }
         finally { try { System.IO.Directory.Delete(dir, true); } catch { } }
     }

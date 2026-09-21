@@ -30,7 +30,7 @@ public class AnimStepUpSceneTests(ITestOutputHelper output)
         Assert.True(c.MaxDrift < 2.5f, $"a planted foot drifts {c.MaxDrift:0.00} rig in scene space");
         Assert.True(c.MaxPenetration < 0.5f, $"a swing toe dips {c.MaxPenetration:0.00} rig into a step guide");
         // The timing stage reads the same displacement from the path.
-        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var gait, out _, anySource: true));
+        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var gait, out _));
         var d = GaitTiming.CycleDisplacement(clip, gait, 1f, out string source);
         Assert.Equal("body_path", source);
         Assert.Equal(c.CycleDisplacement.X, d.X, 2);
@@ -47,7 +47,7 @@ public class AnimStepUpSceneTests(ITestOutputHelper output)
         foreach (var k in clip.Keyframes)
             k.Additions?.RemoveAll(a => a.Name == BodyPath.ChannelName);
         clip.Motion = null; clip.Scene = null;
-        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var gait, out _, anySource: true));
+        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var gait, out _));
         Assert.True(ClipSceneBake.TryBake(clip, skel, out var r, out string err, flat: true), err);
         output.WriteLine($"walk: D = {r.CycleDisplacement}, sweeps {gait.CycleDisplacement}, {r.Guides} guides");
         Assert.InRange(r.CycleDisplacement.X, gait.CycleDisplacement.X * 0.95f, gait.CycleDisplacement.X * 1.05f);   // grid resolution

@@ -7,7 +7,7 @@ using Xunit;
 namespace MTile.Tests;
 
 // The live planner path end-to-end (step planner P3 — Plans/ANIMATION_STEP_PLANNER_IMPL.md):
-// the real biped walk clip (opted in via PlannedSupport labels), a real CharacterAnimator,
+// the real biped walk clip (its contact spans compile to a stride track), a real CharacterAnimator,
 // and ascii terrain in the sample. Pins that the ownership handover happens (planner
 // contacts drive the cadence), that stance targets sit on real treads, that the legacy
 // path survives both the A/B toggle and a chunk-less sample, and that a step up changes
@@ -56,8 +56,8 @@ public class AnimPlannedGaitTests
             anim.Update(new CharacterAnimSample(
                 new Vector2(x, floorTop - BodyRideHeight), new Vector2(vx, 0f), 1, true,
                 "StandingState", "", dt, chunks: chunks));
-            if (anim.PlannedContactCount > 0) plannedContactFrames++;
-            if (anim.ContactCount > anim.PlannedContactCount) selfPlantFrames++;
+            if (anim.PlannerActive && anim.ContactCount > 0) plannedContactFrames++;
+            if (!anim.PlannerActive && anim.ContactCount > 0) selfPlantFrames++;
             for (int f = 0; f < anim.Planner.FeetCount; f++)
             {
                 var p = anim.Planner.Plans[f];
@@ -71,14 +71,14 @@ public class AnimPlannedGaitTests
         Assert.True(totalPhase > 0.2f, $"cadence didn't advance ({totalPhase:0.000})");
         Assert.True(plannedContactFrames > 45,
             $"planner contacts held on only {plannedContactFrames}/90 frames");
-        Assert.Equal(0, selfPlantFrames);   // ownership handover: no SelfPlant on planned feet
+        Assert.Equal(0, selfPlantFrames);   // the planner owns every contact while it runs
         Assert.True(stanceOnFloor > 30, $"stance targets sat on the floor tread on {stanceOnFloor} foot-frames");
     }
 
-    // The A/B knob: with PlannerEnabled=false the exact same opted-in clip runs the
-    // legacy SelfPlant lifecycle — contacts still exist, none of them PlannedSupport.
+    // The A/B knob: with PlannerEnabled=false the exact same clip runs the animator's own
+    // SelfPlant lifecycle — contacts still exist, the planner never runs.
     [Fact]
-    public void PlannerDisabled_OptedInClip_FallsBackToSelfPlant()
+    public void PlannerDisabled_FallsBackToSelfPlant()
     {
         var chunks = SimTerrain.FromAscii(@"
             OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
@@ -99,7 +99,7 @@ public class AnimPlannedGaitTests
                     new Vector2(x, floorTop - BodyRideHeight), new Vector2(vx, 0f), 1, true,
                     "StandingState", "", dt, chunks: chunks));
                 if (anim.ContactCount > 0) contactFrames++;
-                Assert.Equal(0, anim.PlannedContactCount);
+                Assert.False(anim.PlannerActive);
                 Assert.Equal(0, anim.Planner.FeetCount);
             }
             Assert.True(contactFrames > 30, $"legacy contacts on only {contactFrames}/60 frames");
@@ -108,9 +108,9 @@ public class AnimPlannedGaitTests
     }
 
     // No chunks in the sample (recorder, hand-built tests, hosts that don't wire
-    // terrain): the opted-in clip must run the legacy path untouched.
+    // terrain): the clip must self-plant, untouched by the planner.
     [Fact]
-    public void NoChunks_OptedInClip_RunsLegacyPath()
+    public void NoChunks_RunsSelfPlantPath()
     {
         var anim = Animator();
         float dt = 1f / 30f, vx = 25f, x = 0f;
@@ -120,7 +120,7 @@ public class AnimPlannedGaitTests
             x += vx * dt;
             anim.Update(new CharacterAnimSample(
                 new Vector2(x, 0f), new Vector2(vx, 0f), 1, true, "StandingState", "", dt));
-            Assert.Equal(0, anim.PlannedContactCount);
+            Assert.False(anim.PlannerActive);
             float ph = anim.State.Phase, d = ph - prev; if (d < -0.5f) d += 1f;
             totalPhase += d; prev = ph;
         }

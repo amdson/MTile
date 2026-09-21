@@ -18,7 +18,7 @@ using MTile;
 //   dotnet run --project MTile.Probe -- addcom [clip] [--dry]    stamp grounded COM anchors (all clips, or one)
 //   dotnet run --project MTile.Probe -- new <name> <type> [--dur s] [--from clip[@t]] [--noloop]
 //   dotnet run --project MTile.Probe -- addkey <clip> <t> [--from clip[@t]]   pose = own-clip sample at t (shape-preserving) or a copy
-//   dotnet run --project MTile.Probe -- contact <clip> <start> <end> <point|none> [planned|external] [--clear]
+//   dotnet run --project MTile.Probe -- contact <clip> <start> <end> <point|none> [external] [--clear]
 //       author a contact SPAN in normalized phase; end may exceed 1 to wrap a loop seam; --clear retimes instead of stacking
 //   dotnet run --project MTile.Probe -- rot <clip> <t> <bone> <value> [--deg] escape hatch: set one bone's rotation
 //   dotnet run --project MTile.Probe -- retime <clip> <t> <newT> | delkey <clip> <t> | dur <clip> <seconds>
@@ -34,6 +34,10 @@ using MTile;
 //   dotnet run --project MTile.Probe -- mapcom <clip> <arc> [--stretch]   write body_path from a ReferenceClips arc
 //   dotnet run --project MTile.Probe -- bakepath <clip> [--flat] [--dry]   derive body_path + Motion=Track (+ scene guides) from the planted feet (--flat: run only)
 //   dotnet run --project MTile.Probe -- scenecheck <clip>         stance drift / swing clearance against the clip's scene guides
+//   dotnet run --project MTile.Probe -- loopback <clip> [--region f] [--minloop f] [--write [name]]
+//       the loop-back the runtime takes for a cadence clip (Animation/ClipLoopBack.cs): the best
+//       tail exit -> earlier entry, its cost against the authored seam's, and whether it jumps.
+//       --write saves the loop the runtime effectively plays as a Misc clip (default <clip>_loop).
 //   dotnet run --project MTile.Probe -- liftswing <clip> [node] [--lift rig] [--dry]   re-pose swing keys on a climb-first toe path (needs bakepath)
 //   dotnet run --project MTile.Probe -- bakeyaw [clip] [--view deg] [--swap s] [--ref rad] [--shoulderamp f] [--dry]
 //       bake pelvis/shoulder yaw foreshortening: per keyframe, derive the leg (arm) scissor
@@ -93,6 +97,7 @@ static class Probe
                 case "addkey": return AddKey(args);
                 case "contact": return Contact(args);
                 case "stride": return Stride(args);
+                case "loopback": return LoopBack(args);
                 case "rot":    return Rot(args);
                 case "retime": return Retime(args);
                 case "delkey": return DelKey(args);
@@ -452,7 +457,7 @@ static class Probe
         return 0;
     }
 
-    // contact <clip> <start> <end> <point|none> [planned|external] [--clear]
+    // contact <clip> <start> <end> <point|none> [external] [--clear]
     //   Author a contact SPAN — the interval the point is pinned over, in normalized phase.
     //   `end` may exceed 1 on a looping clip to wrap the seam (0.8 1.2 is one stance, not two).
     //   `none` as the point clears every span; --clear drops only the ones on that point first,
@@ -472,9 +477,7 @@ static class Probe
 
         float start = ParseF(first), end = ParseF(Arg(args, 3));
         string node = Arg(args, 4);
-        var source = HasFlag(args, "planned")  ? ContactSource.PlannedSupport
-                   : HasFlag(args, "external") ? ContactSource.External
-                                               : ContactSource.SelfPlant;
+        var source = HasFlag(args, "external") ? ContactSource.External : ContactSource.SelfPlant;
         if (end <= start)
             throw new ArgumentException($"end ({end}) must exceed start ({start}); a span wrapping the loop seam is written as e.g. 0.8 1.2");
         if (start < 0f || start >= 1f) throw new ArgumentException($"start ({start}) must lie in [0,1)");
@@ -513,6 +516,35 @@ static class Probe
             $"add one to Skeletons/{_rig.Name}.json (or the clip's Points) and use its id.");
     }
 
+    // loopback <clip> [--region f] [--minloop f] [--write [name]]
+    static int LoopBack(string[] args)
+    {
+        var clip = Find(Arg(args, 1));
+        var cfg = AnimSolverConfig.Current;
+        float region  = FlagValue(args, "--region")  is string r ? ParseF(r) : cfg.LoopBackRegion;
+        float minLoop = FlagValue(args, "--minloop") is string m ? ParseF(m) : cfg.LoopBackMinLoop;
+        var plan = ClipLoopBack.Plan(clip, _rig, region, minLoop);
+        Console.WriteLine($"{clip.Name}: seam cost {plan.SeamCost:0.0000} (last key -> first key)");
+        if (!plan.HasCandidate)
+        {
+            Console.WriteLine($"  no tail exit with a loop of at least {minLoop:0.00} of the clip — wraps at the seam");
+            return 0;
+        }
+        Console.WriteLine($"  best tail jump: {plan.Exit:0.000} -> {plan.Entry:0.000}  cost {plan.Cost:0.0000}  loop length {plan.Exit - plan.Entry:0.000}");
+        Console.WriteLine(plan.Jumps ? "  JUMPS there (beats the seam)" : "  wraps at the seam (the jump is no better)");
+        if (HasFlag(args, "--write"))
+        {
+            float entry = plan.Jumps ? plan.Entry : 0f, exit = plan.Jumps ? plan.Exit : 1f;
+            var loop = ClipLoopCut.Cut(clip, _rig, entry, exit);
+            string name = FlagValue(args, "--write");
+            if (name == null || name.StartsWith("--")) name = clip.Name + "_loop";
+            loop.Name = name; loop.Type = "Misc"; loop.FilePath = null;
+            AnimationStore.Save(loop, _statesDir);
+            Console.WriteLine($"  wrote {loop.FilePath} (Type Misc — a viewer copy, never bound)");
+        }
+        return 0;
+    }
+
     // stride <clip> — read-only: compile and dump the clip's stride tracks
     // (Animation/ClipStrideTrack.cs). The step-planner's phase-P1 observability: stance
     // events, body-relative preferred placements (rig units, com-frame), swing residual
@@ -522,15 +554,15 @@ static class Probe
         var clip = Find(Arg(args, 1));
         if (!ClipStrideTrack.TryCompile(clip, _rig, out var track, out string err))
         {
-            Console.WriteLine($"{clip.Name}: COMPILE ERROR — {err} (clip stays on the legacy path)");
+            Console.WriteLine($"{clip.Name}: COMPILE ERROR — {err} (the animator self-plants this clip)");
             return 1;
         }
         if (track.Feet.Length == 0)
         {
-            Console.WriteLine($"{clip.Name}: no PlannedSupport labels — not opted in.");
+            Console.WriteLine($"{clip.Name}: no contact spans — nothing to plan.");
             return 0;
         }
-        Console.WriteLine($"{clip.Name}: {track.Feet.Length} planned feet");
+        Console.WriteLine($"{clip.Name}: {track.Feet.Length} feet");
         foreach (var f in track.Feet)
         {
             Console.WriteLine($"  {f.Node}:");

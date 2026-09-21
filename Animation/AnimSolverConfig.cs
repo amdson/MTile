@@ -95,6 +95,16 @@ public class AnimSolverConfig
     // A committed landing is reconsidered only when the predicted landing wish has moved
     // more than this (px) from the wish it was committed at (StepPlanner, runtime §6).
     public float PlannerReplanDistance { get; set; } = 4f;
+
+    // ── Loop-back (Animation/ClipLoopBack.cs) ──
+    // A cadence clip may leave its authored seam alone and instead jump from a point in its
+    // TAIL back to an earlier point, when that pair matches better than the seam does. Off =
+    // every clip wraps at phase 1 exactly as authored. Render-only; safe to toggle live.
+    public bool  LoopBackEnabled     { get; set; } = true;
+    // The tail: exits are considered over the last this-fraction of the clip.
+    public float LoopBackRegion      { get; set; } = 0.25f;
+    // The shortest loop a jump may leave, as a fraction of the clip (keeps runs long).
+    public float LoopBackMinLoop     { get; set; } = 0.5f;
     // Once a contact's feather RELEASE has begun, its weight also fades by time over at most
     // this many seconds (min of the two) — so a low-speed cadence stall can't hold the old
     // foot's grip forever (the foot-swap deadlock; see CharacterAnimator.RefreshContacts).
@@ -173,6 +183,9 @@ public class AnimSolverConfig
         PlannerHysteresis       = src.PlannerHysteresis;
         PlannerLateSwingLock    = src.PlannerLateSwingLock;
         PlannerReplanDistance   = src.PlannerReplanDistance;
+        LoopBackEnabled         = src.LoopBackEnabled;
+        LoopBackRegion          = src.LoopBackRegion;
+        LoopBackMinLoop         = src.LoopBackMinLoop;
         SettleSpeed             = src.SettleSpeed;
         SettleExitSpeed         = src.SettleExitSpeed;
         SettleTime              = src.SettleTime;

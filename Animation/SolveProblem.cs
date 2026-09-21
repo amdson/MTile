@@ -9,10 +9,9 @@ namespace MTile;
 // RefreshContacts owns the lifecycle; the solve sees a frozen copy in SolveProblem.Contacts).
 public struct ActiveContact
 {
-    public int           Bone;
-    public Vector2       Target;
-    public float         Weight;
-    public ContactSource Source;
+    public int     Bone;
+    public Vector2 Target;
+    public float   Weight;
 }
 
 // A residual block of the composite solve objective (workplan chunk 1.5 — the functional solve

@@ -135,18 +135,6 @@ public sealed partial class CharacterAnimator
     // The cadence clip family the stopping policy may hold through a settle (step 1).
     private static bool IsCadenceClip(AnimClip c)
         => c is AnimClip.Walk or AnimClip.WalkBack or AnimClip.Run or AnimClip.CrouchWalk or AnimClip.StepUp or AnimClip.Stairs;
-    // Any-source stride tracks for the timing stage, cached per document like _strideCache.
-    private readonly Dictionary<AnimationDocument, ClipStrideTrack> _gaitCache = new();
-    private ClipStrideTrack GaitTrackFor(AnimationDocument doc)
-    {
-        if (doc == null) return null;
-        if (!_gaitCache.TryGetValue(doc, out var t))
-        {
-            if (!ClipStrideTrack.TryCompile(doc, _skeleton, out t, out _, anySource: true)) t = null;
-            _gaitCache[doc] = t;
-        }
-        return t;
-    }
 
     // Authored clips keyed by category, matched from the loaded animations' Type.
     // When a clip has an authored animation it plays that; otherwise the procedural
@@ -267,12 +255,14 @@ public sealed partial class CharacterAnimator
     public SkeletonPose       Pose     => _pose;
     public CharacterAnimState State    => _state;
 
-    // The step planner (Plans/ANIMATION_STEP_PLANNER_IMPL.md). Runs for CadencePhase
-    // clips that opted in via PlannedSupport labels; P2 scope — its plans feed the
-    // debug overlay and diagnostics only, the solve does not consume them yet.
+    // The step planner (Plans/ANIMATION_STEP_PLANNER_IMPL.md). Runs for CadencePhase clips
+    // whose contact spans compile, when the sample carries terrain. Its stance plans become
+    // the solve's planted contacts (RefreshContacts' plan mirror) and its swing plans the
+    // SwingTargetConstraint's targets (FreezeProblem).
     public readonly StepPlanner Planner = new();
     // Stride tracks cached per DOCUMENT REFERENCE — an editor-reloaded doc is a new
-    // reference and recompiles; a failed compile caches null (legacy path, no respam).
+    // reference and recompiles; a failed compile caches null (self-plant path, no respam).
+    // One track per clip serves both the timing stage and the planner.
     private readonly Dictionary<AnimationDocument, ClipStrideTrack> _strideCache = new();
 
     private ClipStrideTrack StrideTrackFor(AnimationDocument doc)
@@ -286,26 +276,35 @@ public sealed partial class CharacterAnimator
         return t;
     }
 
-    // Non-null only on frames the planner ran for the active clip: those feet are
-    // PLANNER-OWNED — RefreshContacts skips its SelfPlant capture/release lifecycle for
-    // them and mirrors the planner's stance plans into _contacts instead (P3 handover).
-    // Null (planner off / clip not opted in / no terrain) = the legacy path, bit-for-bit.
-    private ClipStrideTrack _curPlanTrack;
-    private bool PlannerOwned(int bone) => _curPlanTrack?.ForBone(bone) != null;
+    // Loop-back plans per DOCUMENT REFERENCE (ClipLoopBack), tagged with the knobs they were
+    // computed under so a hot-reloaded region/min-loop recomputes.
+    private readonly Dictionary<AnimationDocument, (float region, float minLoop, LoopBackPlan plan)> _loopBackCache = new();
+    private LoopBackPlan LoopBackFor(AnimationDocument doc)
+    {
+        var cfg = AnimSolverConfig.Current;
+        if (_loopBackCache.TryGetValue(doc, out var e) && e.region == cfg.LoopBackRegion && e.minLoop == cfg.LoopBackMinLoop)
+            return e.plan;
+        var plan = ClipLoopBack.Plan(doc, _skeleton, cfg.LoopBackRegion, cfg.LoopBackMinLoop);
+        _loopBackCache[doc] = (cfg.LoopBackRegion, cfg.LoopBackMinLoop, plan);
+        return plan;
+    }
+    // Diagnostics / tests: how many loop-back jumps this animator has taken, and the plan
+    // for a bound clip (null when the clip is not bound).
+    public int LoopBackJumps { get; private set; }
+    public LoopBackPlan? LoopBackPlanFor(AnimClip clip) => _clips.TryGetValue(clip, out var d) ? LoopBackFor(d) : null;
+
+    // True on frames the planner ran for the active clip: every contact is then PLANNER-
+    // OWNED — RefreshContacts skips its SelfPlant capture/release lifecycle and mirrors the
+    // planner's stance plans into _contacts instead. False (planner off / no spans / no
+    // terrain) = the animator's own capture, bit-for-bit as before the planner existed.
+    private bool _plannerActive;
+    public  bool PlannerActive => _plannerActive;
     // The solver config the LAST Update actually solved with — Current plus whatever the
     // move driver overrode that frame (FrameInputs.Solver). Diagnostics / tests.
     public AnimSolverConfig   SolverConfig => _frame.Solver;
     // The cadence's current per-frame phase rate Δφ (last solved / coasted step; the
     // legacy velocity-derived rate right after a clip change). Diagnostics / tests.
     public float              PhaseStep    => _prevPhaseStep;
-
-    // Planner-owned contact count — diagnostics / tests only (proves the P3 handover
-    // actually mirrors stance plans into the solve's contact list; the total count is
-    // the Diagnostics partial's ContactCount).
-    public int PlannedContactCount
-    {
-        get { int n = 0; foreach (var c in _contacts) if (c.Source == ContactSource.PlannedSupport) n++; return n; }
-    }
 
     // Per-bone angle correction Δθ (radians) the solver applied this frame, by bone
     // index — the IK channel on top of the authored blend. Zero on frames with no
@@ -513,9 +512,9 @@ public sealed partial class CharacterAnimator
 
         float speed   = MathF.Abs(s.Velocity.X);
         bool hasClip  = _clips.TryGetValue(clip, out var anim);
-        bool clipSwitched = clip != _state.Clip;
 
-        if (clipSwitched)
+        bool entered = clip != _state.Clip;
+        if (entered)
         {
             _state.Clip = clip;
             _state.ClipTime = 0f;
@@ -547,6 +546,27 @@ public sealed partial class CharacterAnimator
         _timeMode = mode;
         _problem.WrapPhase = mode is ClipTimeMode.CadencePhase or ClipTimeMode.IdleBob or ClipTimeMode.Hold;
         bool locomotion = mode == ClipTimeMode.CadencePhase;   // the cadence-solvable clip family
+
+        // LOOP-BACK (Animation/ClipLoopBack.cs): a cadence clip whose tail matches an earlier
+        // point better than its authored seam does jumps there instead of wrapping at 1. Done
+        // HERE, before the timing stage, for the same reason a MatchPose entry is: the
+        // smoothness rows then measure this frame's final pose against the pose already on
+        // screen, and Δθ crossfades the (small, by construction) gap in-solve; the stance
+        // support the landing phase can carry transfers exactly as at a clip switch. The jump
+        // fires on the first frame at or past the planned exit (overshoot carried into the
+        // entry), or one predicted step before the seam if the exit would be stepped over.
+        bool loopedBack = false;   // this frame re-seated the phase; last frame's stance plans predate it
+        if (locomotion && hasClip && !entered && AnimSolverConfig.Current.LoopBackEnabled)
+        {
+            var plan = LoopBackFor(anim);
+            if (plan.Jumps && (_state.Phase >= plan.Exit || _state.Phase + MathF.Max(0f, _prevPhaseStep) >= 1f))
+            {
+                _state.Phase = Math.Clamp(plan.Entry + (_state.Phase - plan.Exit), 0f, 1f - 1e-4f);
+                TransferContacts(anim, _state.Phase, in s);
+                LoopBackJumps++;
+                loopedBack = true;
+            }
+        }
 
         // 1.4 The driver's contributions to this frame's solve inputs — overlay requests,
         //     fixed-point pins, and (future) whole constraint blocks. FROZEN here, like every
@@ -653,16 +673,17 @@ public sealed partial class CharacterAnimator
             var cfgT = _frame.Solver;
             // (T6) What the planted feet say the phase is, read from LAST frame's stance plans
             // (their support points are fixed in the world) against THIS frame's body. Not
-            // across a clip switch: the plans belong to the old clip's track.
+            // across a clip switch or a loop-back jump: the plans predate the re-seated phase.
+            // _plannerActive is last frame's decision here (it is made below, after timing).
             bool observed = false; float observedPhase = 0f;
             _lastObservedResidual = 0f;
-            if (cfgT.PhaseServoEnabled && !clipSwitched && _curPlanTrack != null)
-                observed = GaitTiming.Observe(_curPlanTrack, Planner.Plans, Planner.FeetCount,
+            if (cfgT.PhaseServoEnabled && !entered && !loopedBack && _plannerActive)
+                observed = GaitTiming.Observe(StrideTrackFor(anim), Planner.Plans, Planner.FeetCount,
                                               s.Position, s.Facing, _scale, _state.Phase,
                                               out observedPhase, out _lastObservedResidual);
             _lastTiming = GaitTiming.Advance(new TimingInputs
             {
-                Clip = anim, Gait = GaitTrackFor(anim),
+                Clip = anim, Gait = StrideTrackFor(anim),
                 Phase = _state.Phase, PrevRate = _rate, Dt = dt,
                 HasObserved = observed, ObservedPhase = observedPhase,
                 ServoGain = cfgT.PhaseServoGain, ServoMaxRate = cfgT.PhaseServoMaxRate,
@@ -686,14 +707,14 @@ public sealed partial class CharacterAnimator
             _lastTiming.State = TimingState.Traveling;   // off the cadence family the policy is idle
         }
 
-        // Step planner: runs for opted-in CadencePhase clips with terrain in the sample, at
-        // the phase the timing stage produced, paced by its rate. Its stance plans are
-        // mirrored into the contact list by RefreshContacts (P3 ownership handover).
+        // Step planner: runs for CadencePhase clips with contact spans and terrain in the
+        // sample, at the phase the timing stage produced, paced by its rate. Its stance
+        // plans are mirrored into the contact list by RefreshContacts.
         var planTrack = locomotion && hasClip && s.Chunks != null
                         && AnimSolverConfig.Current.PlannerEnabled
             ? StrideTrackFor(anim) : null;
-        if (planTrack != null && planTrack.Feet.Length > 0)
-        {
+        _plannerActive = planTrack != null && planTrack.Feet.Length > 0;
+        if (_plannerActive)
             Planner.Update(new PlannerInputs
             {
                 BodyPos = s.Position, BodyVel = s.Velocity,
@@ -702,13 +723,7 @@ public sealed partial class CharacterAnimator
                 NominalRate = _rate, Dt = dt,
                 Track = planTrack, Chunks = s.Chunks, PredictAt = s.PredictAt,
             });
-            _curPlanTrack = planTrack;   // RefreshContacts' ownership predicate this frame
-        }
-        else
-        {
-            if (Planner.FeetCount > 0) Planner.Reset();
-            _curPlanTrack = null;        // opted-in clips degrade to SelfPlant semantics
-        }
+        else if (Planner.FeetCount > 0) Planner.Reset();   // the clip self-plants this frame
 
         // 2.2 Contacts at the resulting phase, then the POSE solve (root offset + limbs; Δφ
         //     locked). Solve-root: the draw's placement (BodyPath.RootOffset — body minus the
@@ -982,12 +997,13 @@ public sealed partial class CharacterAnimator
         }
     }
 
-    // Refresh active contacts from the feathered weights: drop those that faded to ~0,
-    // update held ones' weights, and lazily capture newly-appearing ones (world tip at
-    // the current phase, while their weight is still small — §5.2). SelfPlant only for
-    // now (External = Phase 5).
+    // Refresh active contacts. With the planner running this frame, the contact list IS the
+    // planner's stance plans (MirrorPlans). Otherwise, from the feathered weights: drop those
+    // that faded to ~0, update held ones' weights, and lazily capture newly-appearing ones
+    // (world tip at the current phase, while their weight is still small — §5.2).
     private void RefreshContacts(AnimationDocument clip, float phase, float dt, in Affine2 root)
     {
+        if (_plannerActive) { MirrorPlans(); return; }
         WeightedContactsAtPhase(clip, phase);
 
         // Held contacts: weight = the phase-feathered value — except once RELEASE has begun
@@ -1012,14 +1028,6 @@ public sealed partial class CharacterAnimator
         for (int i = _contacts.Count - 1; i >= 0; i--)
         {
             var c = _contacts[i];
-            // Planner-owned bones: the SelfPlant lifecycle below never touches them.
-            // Their contacts are maintained by the plan mirror at the end (stance =
-            // upsert, anything else = prompt removal — the documented toe-off rule).
-            if (PlannerOwned(c.Bone))
-            {
-                if (c.Source != ContactSource.PlannedSupport) _contacts.RemoveAt(i);   // handover
-                continue;
-            }
             float w = WeightOf(c.Bone);
             w = MathF.Min(w, c.Weight + timeRamp);
             if (DWeightOf(c.Bone) < 0f) w = MathF.Min(w, c.Weight - timeFade);
@@ -1037,7 +1045,7 @@ public sealed partial class CharacterAnimator
 
         bool needWorld = false;
         foreach (var (bone, w, _) in _weightBuf)
-            if (w > 1e-3f && ActiveIndex(bone) < 0 && !PlannerOwned(bone)) { needWorld = true; break; }
+            if (w > 1e-3f && ActiveIndex(bone) < 0) { needWorld = true; break; }
         if (needWorld)
         {
             AnimationSampler.SampleSmooth(clip, phase, _kfA, _kfB, _kfC, _kfD, _scratch);
@@ -1047,51 +1055,57 @@ public sealed partial class CharacterAnimator
 
         foreach (var (bone, w, _) in _weightBuf)
         {
-            if (w <= 1e-3f || ActiveIndex(bone) >= 0 || PlannerOwned(bone)) continue;   // held ones updated above
+            if (w <= 1e-3f || ActiveIndex(bone) >= 0) continue;   // held ones updated above
             Vector2 tip = _scratch.WorldOf(bone).Translation;     // bone's far end = contact tip
             _contacts.Add(new ActiveContact { Bone = bone, Target = SnapToSupport(bone, tip),
-                                              Weight = MathF.Min(w, timeRamp),   // capture SMALL, ramp in
-                                              Source = ContactSource.SelfPlant });
+                                              Weight = MathF.Min(w, timeRamp) });   // capture SMALL, ramp in
         }
+    }
 
-        // ── Plan mirror (planner-owned feet only) ────────────────────────────────
-        // Stance with support ⇒ one PlannedSupport contact at the plan's fixed point,
-        // weight = the planner's engage ramp (same config constants as the legacy path).
-        // Everything else ⇒ no contact: toe-off lets go promptly, per the release-slew
-        // decision above — the swing is the SwingTargetConstraint's job, never a plant.
-        if (_curPlanTrack != null)
-            for (int i = 0; i < Planner.FeetCount; i++)
+    // The planner-active contact list: a stance with support ⇒ one contact at the plan's
+    // fixed point, weight = the planner's engage ramp (the same config constants as the
+    // self-plant ramps). Everything else ⇒ no contact: toe-off lets go promptly, per the
+    // release-slew decision in RefreshContacts — the swing is the SwingTargetConstraint's
+    // job, never a plant. A contact left by a previous clip on a bone the planner does not
+    // plan is dropped the same way.
+    private void MirrorPlans()
+    {
+        for (int i = _contacts.Count - 1; i >= 0; i--)
+            if (PlanIndex(_contacts[i].Bone) < 0) _contacts.RemoveAt(i);
+        for (int i = 0; i < Planner.FeetCount; i++)
+        {
+            ref readonly var p = ref Planner.Plans[i];
+            int at = ActiveIndex(p.Bone);
+            bool want = p.State == FootPlanState.Stance && p.HasSupport && p.Weight > 1e-3f;
+            if (!want)
             {
-                ref readonly var p = ref Planner.Plans[i];
-                int at = ActiveIndex(p.Bone);
-                bool want = p.State == FootPlanState.Stance && p.HasSupport && p.Weight > 1e-3f;
-                if (!want)
-                {
-                    if (at >= 0) _contacts.RemoveAt(at);
-                    continue;
-                }
-                var mirrored = new ActiveContact { Bone = p.Bone, Target = p.Target,
-                                                   Weight = p.Weight,
-                                                   Source = ContactSource.PlannedSupport };
-                if (at >= 0) _contacts[at] = mirrored;
-                else _contacts.Add(mirrored);
+                if (at >= 0) _contacts.RemoveAt(at);
+                continue;
             }
+            var mirrored = new ActiveContact { Bone = p.Bone, Target = p.Target, Weight = p.Weight };
+            if (at >= 0) _contacts[at] = mirrored;
+            else _contacts.Add(mirrored);
+        }
+    }
+
+    private int PlanIndex(int bone)
+    {
+        for (int i = 0; i < Planner.FeetCount; i++) if (Planner.Plans[i].Bone == bone) return i;
+        return -1;
     }
 
     // A CLIP SWITCH's contact handoff (ANIMATION_OWNERSHIP_CONTRACT.md §4; timing-stage T4).
-    // A stance contact TRANSFERS to `incoming` iff the same bone is a support owner there (a
-    // label of any source), the entry phase falls inside that bone's stance in the incoming
-    // clip (never into an incoming swing just because the name matches), and the target is
-    // within the incoming gait's reach of the body. Ownership follows the incoming clip's
-    // label source (a self-plant foot becomes planner-owned across run → walk, and back), and
-    // the planner adopts the transferred support point so it does not re-select and pop.
-    // Everything else releases promptly — the emitted-offset ease and the Δθ smoothness prior
-    // carry the visual continuity, as at any toe-off. `incoming` null = no cadence clip.
+    // A stance contact TRANSFERS to `incoming` iff the same bone has a span there, the entry
+    // phase falls inside that bone's stance in the incoming clip (never into an incoming
+    // swing just because the name matches), and the target is within the incoming gait's
+    // reach of the body. When the planner will run the incoming clip it adopts the
+    // transferred support point so it does not re-select and pop. Everything else releases
+    // promptly — the emitted-offset ease and the Δθ smoothness prior carry the visual
+    // continuity, as at any toe-off. `incoming` null = no cadence clip.
     private void TransferContacts(AnimationDocument incoming, float phase, in CharacterAnimSample s)
     {
-        var gait = incoming != null ? GaitTrackFor(incoming) : null;
-        var planTrack = incoming != null && s.Chunks != null && AnimSolverConfig.Current.PlannerEnabled
-            ? StrideTrackFor(incoming) : null;
+        var gait = StrideTrackFor(incoming);
+        var planTrack = s.Chunks != null && AnimSolverConfig.Current.PlannerEnabled ? gait : null;
         Span<(int Bone, Vector2 Target, float Weight)> adopted = stackalloc (int, Vector2, float)[StepPlanner.MaxFeet];
         int nAdopted = 0;
         for (int i = _contacts.Count - 1; i >= 0; i--)
@@ -1101,15 +1115,12 @@ public sealed partial class CharacterAnimator
             bool keep = ft != null && ft.StanceAt(phase, out _) >= 0
                         && (c.Target - s.Position).Length() <= ft.MaxReachRig * _scale;
             if (!keep) { _contacts.RemoveAt(i); continue; }
-            bool planned = planTrack?.ForBone(c.Bone) != null;
-            c.Source = planned ? ContactSource.PlannedSupport : ContactSource.SelfPlant;
-            _contacts[i] = c;
-            if (planned && nAdopted < adopted.Length) adopted[nAdopted++] = (c.Bone, c.Target, c.Weight);
+            if (planTrack != null && nAdopted < adopted.Length) adopted[nAdopted++] = (c.Bone, c.Target, c.Weight);
         }
         Planner.Rebind(planTrack, adopted.Slice(0, nAdopted), s.Chunks);
-        // A transferred planner-owned foot whose point found no tread under it is dropped by
-        // the mirror on this frame's RefreshContacts (Rebind left it Unplanned) — the
-        // documented toe-off rule, not a special case.
+        // A transferred foot whose point found no tread under it is dropped by the plan
+        // mirror on this frame's RefreshContacts (Rebind left it Unplanned) — the documented
+        // toe-off rule, not a special case.
     }
 
     // Snap a freshly captured plant onto the terrain face that supports it.

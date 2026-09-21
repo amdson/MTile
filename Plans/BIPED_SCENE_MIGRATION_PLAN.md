@@ -10,8 +10,8 @@ and validation pass, with a few tooling gaps to close first.
 Of 47 clips in `SkeletonStates/biped`, only `stepup` has explicit `Motion`,
 `Scene`, and `body_path`. Five already follow reference arcs: `parkour`, `mantle`,
 `arcjump`, `ledgepull`, and `dropdown`. All 47 have a `com` anchor. Missing explicit
-motion does not mean missing runtime support: `walk` already uses `PlannedSupport`;
-`run` and `crouchwalk` still use `SelfPlant`.
+motion does not mean missing runtime support: any clip with contact spans is planned
+over terrain (the per-clip `PlannedSupport` opt-in is gone as of 2026-09-20).
 
 1. **Classify each clip and declare its intent.** Record one motion owner:
    `Track` for authored travel, `ReferenceArc` for guided maneuvers, or `InPlace`
@@ -40,8 +40,8 @@ motion does not mean missing runtime support: `walk` already uses `PlannedSuppor
    poses, `com`, and swing clearance with IK/`liftswing`; check between keys and
    across the loop seam. Baking derives a candidate from existing foot sweeps;
    it does not repair inconsistent double support or produce ballistic flight.
-   Review planner opt-in separately from scene migration; changing `Motion`
-   does not convert `SelfPlant` contacts to `PlannedSupport`.
+   Scene migration does not touch contact spans; the planner reads whatever spans
+   the clip has.
 
 4. **Author obstacle and airborne scenes.** Make the five existing arc choices
    explicit, add floor/ledge/block guides, and pose against them. Check clip/arc

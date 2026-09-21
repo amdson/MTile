@@ -20,7 +20,7 @@ public class AnimPhaseServoTests(ITestOutputHelper output)
         while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "SkeletonStates"))) dir = dir.Parent;
         var clip = AnimationStore.LoadAll(Path.Combine(dir!.FullName, "SkeletonStates", "biped")).Single(c => c.Name == "run");
         var skel = SkeletonExamples.Load("biped");
-        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var gait, out string err, anySource: true), err);
+        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var gait, out string err), err);
         return (clip, skel, gait);
     }
 
@@ -121,7 +121,7 @@ public class AnimPhaseServoTests(ITestOutputHelper output)
     public void Observe_ReadsTheStancePhase_FromThePlantedFootOffset(int facing, float u)
     {
         var (clip, skel, _) = LoadRun();
-        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var track, out string err, anySource: true), err);
+        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var track, out string err), err);
         var ft = track.Feet[0];
         var st = ft.Stances[0];
         float expected = st.Touchdown + u * (st.Liftoff - st.Touchdown); expected -= MathF.Floor(expected);

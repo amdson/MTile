@@ -19,9 +19,9 @@ public class AnimContactTransferTests
     public AnimContactTransferTests(ITestOutputHelper o) => _o = o;
     private const float Scale = 0.6f, Dt = 1f / 60f;
 
-    // biped: run (SelfPlant labels) → walk (PlannedSupport labels) on flat terrain. Drop the
-    // speed on a frame where a foot is planted in BOTH clips; the planted contact survives
-    // the switch with its target unchanged and is now planner-owned.
+    // biped: run → walk on flat terrain. Drop the speed on a frame where a foot is planted in
+    // BOTH clips; the planted contact survives the switch with its target unchanged and the
+    // walk's planner adopts it.
     [Fact]
     public void RunToWalk_KeepsThePlantedFoot_AndThePlannerAdoptsIt()
     {
@@ -82,7 +82,7 @@ public class AnimContactTransferTests
             Assert.True(w > 0.4f, $"transferred weight dropped to {w:0.00}");
         }
         Assert.True(found, "the planted foot was released at the clip switch");
-        Assert.True(anim.PlannedContactCount >= 1, "the walk's planner did not adopt the transferred contact");
+        Assert.True(anim.PlannerActive && anim.ContactCount >= 1, "the walk's planner did not adopt the transferred contact");
     }
 
     // A clip with no labels (Idle) carries nothing: every contact releases.

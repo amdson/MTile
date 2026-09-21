@@ -106,7 +106,7 @@ public static class ClipSceneBake
     public static bool TryBake(AnimationDocument doc, Skeleton rig, out BakeResult result, out string error, bool flat = false)
     {
         result = null;
-        if (!ClipStrideTrack.TryCompile(doc, rig, out var gait, out error, anySource: true)) return false;
+        if (!ClipStrideTrack.TryCompile(doc, rig, out var gait, out error)) return false;
         if (gait.Feet.Length == 0) { error = $"'{doc.Name}' has no contact labels to bake a path from"; return false; }
         var off = new Offsets(doc, rig);
         var p = Walk(doc, gait, off);
@@ -164,7 +164,7 @@ public static class ClipSceneBake
     public static bool TryCheck(AnimationDocument doc, Skeleton rig, out CheckResult result, out string error)
     {
         result = null;
-        if (!ClipStrideTrack.TryCompile(doc, rig, out var gait, out error, anySource: true)) return false;
+        if (!ClipStrideTrack.TryCompile(doc, rig, out var gait, out error)) return false;
         if (gait.Feet.Length == 0) { error = $"'{doc.Name}' has no contact labels"; return false; }
         var motion = ClipMotion.Resolve(doc);
         var off = new Offsets(doc, rig);
@@ -226,7 +226,7 @@ public static class ClipSceneBake
                                      out string report, out string error)
     {
         report = null;
-        if (!ClipStrideTrack.TryCompile(doc, rig, out var gait, out error, anySource: true)) return false;
+        if (!ClipStrideTrack.TryCompile(doc, rig, out var gait, out error)) return false;
         var motion = ClipMotion.Resolve(doc);
         if (motion.Source != MotionSource.Track) { error = $"'{doc.Name}' has no baked body_path (run bakepath first)"; return false; }
         var off = new Offsets(doc, rig);

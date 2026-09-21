@@ -27,7 +27,7 @@ public class AnimGaitTimingTests
     public void CycleDistance_FromContactLabels_IsPlausible(string rig, string clipName)
     {
         var (clip, skel) = Load(rig, clipName);
-        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var gait, out string err, anySource: true), err);
+        Assert.True(ClipStrideTrack.TryCompile(clip, skel, out var gait, out string err), err);
         Assert.True(gait.Feet.Length >= 2, "both feet labeled");
         float d = GaitTiming.CycleDistance(clip, gait, Scale, out string source);
         _o.WriteLine($"{rig}/{clipName}: cycle distance {d:0.0} px ({source}); duration {clip.Duration}s");
@@ -49,7 +49,7 @@ public class AnimGaitTimingTests
     public void Advance_TravelOverCycleDistance_AndClampsBackwardTravel()
     {
         var (clip, skel) = Load("biped", "run");
-        ClipStrideTrack.TryCompile(clip, skel, out var gait, out _, anySource: true);
+        ClipStrideTrack.TryCompile(clip, skel, out var gait, out _);
         float cycle = GaitTiming.CycleDistance(clip, gait, Scale, out _);
 
         // One full cycle of travel is exactly one cycle of phase, from any entry phase.
@@ -89,7 +89,7 @@ public class AnimGaitTimingTests
     public void Advance_NoAuthoredStride_FallsBackToTheNominal_DirectionAgnostic()
     {
         var (clip, skel) = Load("biped", "walkback");   // no contact labels, no body path
-        var gait = ClipStrideTrack.TryCompile(clip, skel, out var g, out _, anySource: true) ? g : null;
+        var gait = ClipStrideTrack.TryCompile(clip, skel, out var g, out _) ? g : null;
         var r = GaitTiming.Advance(new TimingInputs
         {
             Clip = clip, Gait = gait, Phase = 0f, Dt = 1f / 60f,
@@ -187,7 +187,7 @@ public class AnimGaitTimingTests
     public void Stop_SettlesToTheNearestLanding_ThenHolds_ThenRestarts()
     {
         var (clip, skel) = Load("biped", "run");
-        ClipStrideTrack.TryCompile(clip, skel, out var gait, out _, anySource: true);
+        ClipStrideTrack.TryCompile(clip, skel, out var gait, out _);
         var cfg = new AnimSolverConfig();
         TimingInputs In(TimingResult prev, float phase, float dx, float speed, float prevSpeed) => new()
         {
