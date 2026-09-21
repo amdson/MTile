@@ -103,7 +103,11 @@ A clip is a JSON file = one `AnimationDocument`:
 
 Pull model. Each render frame `Update(in CharacterAnimSample s)` runs, in order:
 
-0. **Land squash** — touchdown (was airborne, now grounded) arms a decaying squash.
+0. **Fold the frame into `AnimHistory`** — the core's move-agnostic memory of earlier
+   frames (seconds continuously grounded, last frame's sample), handed to every driver
+   below. Measurement only: windows over it are driver policy. (This step was a landing
+   squash, then a landing-clip countdown the core armed and consumed; both are gone —
+   the touchdown one-shot is `LandingDriver`.)
 1. **Select clip** from the sample only (`SelectClip`): movement-state strings
    (`Parkour→Vault`, `Crouch`, ledge holds) win, else airborne→`Jump`/`Fall`, else
    speed bands → `Idle`/`Walk`/`Run`/`WalkBack`. Clip change resets `ClipTime`/contacts.

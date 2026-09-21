@@ -12,7 +12,10 @@ namespace MTile;
 // and Fall. Parkour/Mantle/ArcJump/LedgePull are the four guided lip maneuvers — one clip each
 // (they were a single shared "Vault" clip until 2026-08-04; see Plans/ANIMATION_BINDING_MAP.md).
 // EVERY value here must have a clip file whose Type matches, or binding throws at construction.
-public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, DuckUnder, Jump, Fall, Parkour, Run, WallSlide, Hang, Hitstun, Tumble, WallJumpKick, DoubleJumpFlip, RunTurn, Land, LedgeJump, Dropdown, Mantle, ArcJump, LedgePull, StepUp }
+public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, 
+DuckUnder, Jump, Fall, Parkour, Run, WallSlide, Hang, Hitstun, 
+Tumble, WallJumpKick, DoubleJumpFlip, RunTurn, Land, LedgeJump, 
+Dropdown, Mantle, ArcJump, LedgePull, StepUp, Stairs }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
@@ -22,10 +25,8 @@ public struct CharacterAnimState
     public AnimClip Clip;         // currently-selected clip
     public float    ClipTime;     // seconds spent in the current clip
     public float    Phase;        // locomotion cycle phase, wrapped to [0,1)
-    public float    LandTime;     // counts down from LandClipTime after a touchdown — while
-                                  // positive, a near-idle landing plays the authored Land
-                                  // one-shot (replaced the old procedural hip squash)
     public float    ActionWeight; // eased 0..1 blend of the action overlay layer
+
 }
 
 // Drives a skeleton from a character's observed motion. Pure pull model and
@@ -40,8 +41,6 @@ public sealed partial class CharacterAnimator
     // --- tuning (first-draft constants; no real velocity matching yet) ---
     // (The Walk/Run speed thresholds live in GroundLocomotionDriver — clip selection policy
     //  moved into the move drivers; see Animation/MoveDriver.cs.)
-    private const float LandClipTime       = 0.25f;  // s the Land one-shot owns Idle after touchdown
-                                                     // (keep == land.json Duration)
     private const float PhasePerPixel       = 0.010f; // legacy fallback: cycles/sec per px/s
     private const float IdleBobHz           = 0.30f;  // breathing cycles/sec
     // Pose-follow rate (1/sec). No longer a BlendToward ease — the smoothing lives INSIDE the
@@ -129,9 +128,13 @@ public sealed partial class CharacterAnimator
     private float        _rate;
     private TimingResult _lastTiming;   // carries the stopping policy's state frame to frame
     public  TimingResult LastTiming => _lastTiming;
+    // Worst perpendicular miss of the observed foot offset from its authored stance sweep
+    // (rig units) on the last frame an observation was taken — diagnostics.
+    private float _lastObservedResidual;
+    public  float LastObservedResidual => _lastObservedResidual;
     // The cadence clip family the stopping policy may hold through a settle (step 1).
     private static bool IsCadenceClip(AnimClip c)
-        => c is AnimClip.Walk or AnimClip.WalkBack or AnimClip.Run or AnimClip.CrouchWalk or AnimClip.StepUp;
+        => c is AnimClip.Walk or AnimClip.WalkBack or AnimClip.Run or AnimClip.CrouchWalk or AnimClip.StepUp or AnimClip.Stairs;
     // Any-source stride tracks for the timing stage, cached per document like _strideCache.
     private readonly Dictionary<AnimationDocument, ClipStrideTrack> _gaitCache = new();
     private ClipStrideTrack GaitTrackFor(AnimationDocument doc)
@@ -200,8 +203,10 @@ public sealed partial class CharacterAnimator
     private ClipTimeMode           _timeMode;       // how the current clip's sample time is produced
 
     private CharacterAnimState  _state;
-    private CharacterAnimSample _prev;      // previous frame's sample
-    private bool _hasPrev;
+    // What the core remembers about earlier frames, handed to every driver (Animation/
+    // MoveDriver.cs). Refreshed at the top of Update; the retained sample is replaced at
+    // the very bottom, so `_history.Prev` is last frame's throughout the body.
+    private AnimHistory _history;
 
     // The clip doc sampled this frame and the normalized time it was sampled at —
     // remembered so the host can pull labeled additions (e.g. the "com" reference
@@ -470,10 +475,9 @@ public sealed partial class CharacterAnimator
         // config read below and in the constraint rows goes through _frame.Solver.
         _frame.Solver.CopyFrom(AnimSolverConfig.Current);
 
-        // 0. Use the previous frame's state: detect a touchdown (was airborne, now
-        //    grounded) and arm the authored Land one-shot window.
-        if (_hasPrev && !_prev.Grounded && s.Grounded) _state.LandTime = LandClipTime;
-        _state.LandTime = MathF.Max(0f, _state.LandTime - dt);
+        // 0. Fold this frame into the observed history the drivers select on (how long the
+        //    body has been down, last frame's sample). Measurement only — no policy.
+        _history.BeginFrame(in s, dt);
 
         // 1. Select the active MOVE DRIVER — the first registry entry whose situation matches —
         //    and ask it which clip to play, how its time is produced, and (optionally) where to
@@ -482,26 +486,25 @@ public sealed partial class CharacterAnimator
         //    unconditionally, so `driver` is never null.
         IMoveDriver driver = null;
         for (int di = 0; di < _drivers.Length; di++)
-            if (_drivers[di].Matches(in s, in _state)) { driver = _drivers[di]; break; }
-        ClipChoice choice = driver.Select(in s, in _state);
+            if (_drivers[di].Matches(in s, in _state, in _history)) { driver = _drivers[di]; break; }
+        ClipChoice choice = driver.Select(in s, in _state, in _history);
         AnimClip clip = choice.Clip;
         ClipTimeMode mode = choice.Time;
-        // Landing one-shot (cross-move memory of the airborne→grounded edge, so it stays
-        // core-side): a touchdown that settles into the Idle band plays the authored
-        // crouch-touch instead. Only Idle is overridden — landing into a run/walk keeps the
-        // locomotion cycle, and any tagged state wins outright. Re-evaluated per frame, so
-        // speeding up or leaving the ground cancels it naturally.
-        if (_state.LandTime > 0f && clip == AnimClip.Idle) { clip = AnimClip.Land; mode = ClipTimeMode.Clock; }
-        // SETTLING (timing stage T3, core-side like the Land override): while the stopping
-        // policy is finishing the last step, a cadence clip is held through the driver's Idle
-        // choice so the landing completes on the locomotion clip; Idle takes over once the
-        // phase holds (SupportedIdle) and the contacts release through the ordinary handoff.
+        // (The landing one-shot used to be overridden onto the driver's Idle choice here. It
+        //  is LandingDriver now — the airborne→grounded edge it needs is in AnimHistory, so it
+        //  is ordinary registry policy rather than a core special case.)
+        // SETTLING (timing stage T3) — the one override left on the driver's choice: while the
+        // stopping policy is finishing the last step, a cadence clip is held through the
+        // driver's Idle choice so the landing completes on the locomotion clip; Idle takes
+        // over once the phase holds (SupportedIdle) and the contacts release through the
+        // ordinary handoff.
         //     The entry test is evaluated HERE on this frame's speed (GaitTiming.WantsSettle,
         //     the same predicate the stage applies): an abrupt stop drops below the idle band
         //     in the frame the driver first picks Idle, before any Settling state exists.
         if (clip == AnimClip.Idle && IsCadenceClip(_state.Clip) && _clips.ContainsKey(_state.Clip))
         {
-            float spd = MathF.Abs(s.Velocity.X), prevSpeed = _hasPrev ? MathF.Abs(_prev.Velocity.X) : spd;
+            float spd = MathF.Abs(s.Velocity.X);
+            float prevSpeed = _history.HasPrev ? MathF.Abs(_history.Prev.Velocity.X) : spd;
             bool settling = _lastTiming.State == TimingState.Settling
                 || (_lastTiming.State == TimingState.Traveling
                     && GaitTiming.WantsSettle(s.Grounded, spd, prevSpeed, _frame.Solver.SettleSpeed));
@@ -510,8 +513,9 @@ public sealed partial class CharacterAnimator
 
         float speed   = MathF.Abs(s.Velocity.X);
         bool hasClip  = _clips.TryGetValue(clip, out var anim);
+        bool clipSwitched = clip != _state.Clip;
 
-        if (clip != _state.Clip)
+        if (clipSwitched)
         {
             _state.Clip = clip;
             _state.ClipTime = 0f;
@@ -647,15 +651,28 @@ public sealed partial class CharacterAnimator
         if (locomotion && hasClip)
         {
             var cfgT = _frame.Solver;
+            // (T6) What the planted feet say the phase is, read from LAST frame's stance plans
+            // (their support points are fixed in the world) against THIS frame's body. Not
+            // across a clip switch: the plans belong to the old clip's track.
+            bool observed = false; float observedPhase = 0f;
+            _lastObservedResidual = 0f;
+            if (cfgT.PhaseServoEnabled && !clipSwitched && _curPlanTrack != null)
+                observed = GaitTiming.Observe(_curPlanTrack, Planner.Plans, Planner.FeetCount,
+                                              s.Position, s.Facing, _scale, _state.Phase,
+                                              out observedPhase, out _lastObservedResidual);
             _lastTiming = GaitTiming.Advance(new TimingInputs
             {
                 Clip = anim, Gait = GaitTrackFor(anim),
                 Phase = _state.Phase, PrevRate = _rate, Dt = dt,
-                Pos = s.Position, PrevPos = _hasPrev ? _prev.Position : s.Position,
+                HasObserved = observed, ObservedPhase = observedPhase,
+                ServoGain = cfgT.PhaseServoGain, ServoMaxRate = cfgT.PhaseServoMaxRate,
+                RateSlew = cfgT.PhaseRateSlew, ReentryError = cfgT.PhaseReentryError,
+                Pos = s.Position, PrevPos = _history.HasPrev ? _history.Prev.Position : s.Position,
                 Facing = s.Facing, Scale = _scale, MaxStep = cfgT.MaxPhaseStep,
                 State = _lastTiming.State, SettleRemaining = _lastTiming.SettleRemaining,
                 SettleTimeLeft = _lastTiming.SettleTimeLeft,
-                Speed = speed, PrevSpeed = _hasPrev ? MathF.Abs(_prev.Velocity.X) : speed, Grounded = s.Grounded,
+                Speed = speed, Grounded = s.Grounded,
+                PrevSpeed = _history.HasPrev ? MathF.Abs(_history.Prev.Velocity.X) : speed,
                 SettleSpeed = cfgT.SettleSpeed, SettleExitSpeed = cfgT.SettleExitSpeed,
                 IdleSpeed = GroundLocomotionDriver.WalkSpeedThreshold, SettleTime = cfgT.SettleTime,
             });
@@ -783,8 +800,7 @@ public sealed partial class CharacterAnimator
         //    constrained tip (pin, planted foot) is satisfied on the RENDERED skeleton.
         _pose.CopyFrom(_target);
 
-        _prev = s;
-        _hasPrev = true;
+        _history.EndFrame(in s);
     }
 
     // Render the eased pose at the character's world position. The rig→world scale is

@@ -41,6 +41,13 @@ public struct TimingInputs
     public float   Speed, PrevSpeed;     // |vx| now / last frame (px/s)
     public bool    Grounded;
     public float   SettleSpeed, SettleExitSpeed, IdleSpeed, SettleTime;   // AnimSolverConfig + the driver's idle band
+    // Foot-synchronized servo (T6). ObservedPhase is what the planted feet say the phase is
+    // (Observe); the servo tracks it as a bounded RATE change, never a phase jump, unless
+    // |error| > ReentryError. ServoMaxRate is a fraction of max(feedforward, authored) rate;
+    // RateSlew (cycles/s²) bounds the whole rate's change per frame, 0 = off.
+    public bool    HasObserved;
+    public float   ObservedPhase;
+    public float   ServoGain, ServoMaxRate, RateSlew, ReentryError;
 }
 
 public struct TimingResult
@@ -53,6 +60,10 @@ public struct TimingResult
     public string Source;                // where the stride came from (diagnostics)
     public TimingState State;
     public float  SettleRemaining, SettleTimeLeft;
+    // Servo diagnostics: the wrapped observed-minus-phase error this frame (0 without an
+    // observation), the rate correction applied (cycles/s), and whether the phase re-entered.
+    public float  PhaseError, ServoRate;
+    public bool   Reentered;
 }
 
 public static class GaitTiming
@@ -134,6 +145,42 @@ public static class GaitTiming
         }
         dphi = MathF.Min(dphi, maxStep);
 
+        // ── Foot-synchronized servo (T6) ───────────────────────────────────────────────
+        // The advance above integrates travel and drifts against what the feet actually do
+        // (the sim's hop rhythm on stairs is not the com path). A planted foot is a fixed
+        // world point, so the body's offset from it reads the phase directly (Observe); the
+        // servo removes the drift as a bounded change of RATE — the phase never jumps — so
+        // the clip merely plays a little faster or slower for a few frames. Past ReentryError
+        // the clip and the feet disagree outright: the phase re-enters AT the observation and
+        // the smoothness prior bridges the pose, exactly as on a clip switch. Traveling only —
+        // the stopping policy owns the phase while settling. The slew bounds the whole rate's
+        // change per frame (feedforward included): that is the anti-jerk term.
+        float ffRate = dphi / dt;
+        float rate   = ffRate;
+        if (inp.HasObserved && inp.State == TimingState.Traveling && r.CycleDistance >= StationaryCycle)
+        {
+            float err = WrapHalf(inp.ObservedPhase - inp.Phase);
+            r.PhaseError = err;
+            if (inp.ReentryError > 0f && MathF.Abs(err) > inp.ReentryError)
+            {
+                r.Reentered  = true;
+                r.DeltaPhase = err;        // signed: the phase lands ON the observation
+                r.Rate       = ffRate;     // the next frame's slew starts from the feedforward
+                r.State = inp.State; r.SettleRemaining = inp.SettleRemaining; r.SettleTimeLeft = inp.SettleTimeLeft;
+                return r;
+            }
+            float dur   = inp.Clip.Duration <= 1e-4f ? 1f : inp.Clip.Duration;
+            float bound = inp.ServoMaxRate * MathF.Max(ffRate, 1f / dur);
+            r.ServoRate = MathHelper.Clamp(inp.ServoGain * err, -bound, bound);
+            rate = MathF.Max(0f, ffRate + r.ServoRate);
+        }
+        if (inp.RateSlew > 0f)
+        {
+            float lim = inp.RateSlew * dt;
+            rate = MathF.Max(0f, MathHelper.Clamp(rate, inp.PrevRate - lim, inp.PrevRate + lim));
+        }
+        dphi = MathF.Min(rate * dt, maxStep);
+
         // ── Stopping policy (§5) ───────────────────────────────────────────────────────
         var state = inp.State;
         float remaining = inp.SettleRemaining, timeLeft = inp.SettleTimeLeft;
@@ -167,6 +214,67 @@ public static class GaitTiming
         r.DeltaPhase = dphi;
         r.Rate = dphi / dt;
         return r;
+    }
+
+    // Wrap a phase difference to [-0.5, 0.5).
+    public static float WrapHalf(float d) => d - MathF.Floor(d + 0.5f);
+    private static float Wrap01(float x) => x - MathF.Floor(x);
+
+    // Below this authored sweep (rig units) a stance offers no phase reading.
+    private const float MinObservableSweep = 2f;
+
+    // (T6) THE PHASE THE PLANTED FEET IMPLY. During a stance the foot's body-relative offset
+    // sweeps TdOffset → LoOffset (ClipStrideTrack), so with the support point S fixed in the
+    // world the observed offset o = (S − body) in the facing frame projects onto that sweep
+    // at a progress u, and the foot says the phase is Touchdown + u·(Liftoff − Touchdown).
+    // Each planner-held stance (FootPlan.State == Stance with a support) votes, weighted by
+    // its engage/release ramp, and the votes combine as wrapped differences from the current
+    // phase so a foot swap hands over softly. The stance a foot is read against is the one
+    // nearest the current phase (a foot may plant twice per cycle — the stairs — and the two
+    // sweeps look alike; anything further off than that is a re-entry's job, not a reading).
+    // `residual` reports the worst perpendicular miss from the sweep (rig units, diagnostic:
+    // the sim hovers the body, so a vertical miss is expected and not gated on).
+    public static bool Observe(ClipStrideTrack track, FootPlan[] plans, int feetCount,
+                               Vector2 body, int facing, float scale, float phase,
+                               out float observed, out float residual)
+    {
+        observed = phase; residual = 0f;
+        if (track == null || plans == null || feetCount <= 0 || scale <= 1e-6f) return false;
+        int dir = facing == 0 ? 1 : facing;
+        float sumW = 0f, sumErr = 0f, worst = 0f;
+        int n = Math.Min(feetCount, Math.Min(plans.Length, track.Feet.Length));
+        for (int i = 0; i < n; i++)
+        {
+            var plan = plans[i];
+            if (plan.State != FootPlanState.Stance || !plan.HasSupport || plan.Weight <= 1e-3f) continue;
+            var ft = track.Feet[i];
+            Vector2 o = new((plan.Target.X - body.X) / (dir * scale), (plan.Target.Y - body.Y) / scale);
+
+            int best = -1; float bestDist = float.MaxValue;
+            for (int k = 0; k < ft.Stances.Length; k++)
+            {
+                var st = ft.Stances[k];
+                if (st.Persistent) continue;
+                if ((st.LoOffset - st.TdOffset).LengthSquared() < MinObservableSweep * MinObservableSweep) continue;
+                // Distance from the current phase to the stance's interval, on the circle.
+                float span = st.Liftoff - st.Touchdown;
+                float du = Wrap01(phase - st.Touchdown);
+                float dist = du < span ? 0f : MathF.Min(du - span, 1f - du);
+                if (dist < bestDist) { bestDist = dist; best = k; }
+            }
+            if (best < 0) continue;
+            var s = ft.Stances[best];
+            Vector2 chord = s.LoOffset - s.TdOffset;
+            float u   = MathHelper.Clamp(Vector2.Dot(o - s.TdOffset, chord) / chord.LengthSquared(), 0f, 1f);
+            float res = (o - s.TdOffset - u * chord).Length();
+            float phi = s.Touchdown + u * (s.Liftoff - s.Touchdown);
+            sumW += plan.Weight; sumErr += plan.Weight * WrapHalf(phi - phase);
+            worst = MathF.Max(worst, res);
+        }
+        if (sumW <= 0f) return false;
+        observed = Wrap01(phase + sumErr / sumW);
+        residual = worst;
+        return true;
     }
 
     // Settle entry: grounded, under the settle speed and not accelerating. Shared with the

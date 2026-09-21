@@ -20,5 +20,10 @@
   "PlannerEnabled": true,
   "PlannerHysteresis": 4,
   "PlannerLateSwingLock": 0.8,
-  "PlannerReplanDistance": 4
+  "PlannerReplanDistance": 4,
+  "PhaseServoEnabled": true,
+  "PhaseServoGain": 25,
+  "PhaseServoMaxRate": 0.5,
+  "PhaseRateSlew": 40,
+  "PhaseReentryError": 0.2
 }

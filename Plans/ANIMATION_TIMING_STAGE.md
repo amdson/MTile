@@ -189,6 +189,38 @@ json keys), the clip-switch rate seed, and the bench sweeps over `PhaseFloorMode
 Δφ's column and box remain (chunk 8). The golden traces were re-recorded for the two-row
 layout change; the bench numbers are unchanged (the rows were identically zero).
 
+### T6 — foot-synchronized servo (2026-09-21)
+
+T1 integrates travel and drifts against what the feet actually do: on stairs the sim climbs
+in two-tread hops while the clip's com path is a smooth diagonal, so the projected rate
+surges and lags inside every hop and the planner is asked for treads the legs cannot reach
+(the stairs trace: Unreachable/SwingBlocked rejects, stance targets sliding with the body).
+
+The fix closes the loop on the planted feet. A stance is a fixed world point, so the body's
+offset from it reads the phase directly: `GaitTiming.Observe` projects the observed offset
+`(S − body)` onto the stance's authored sweep `TdOffset → LoOffset` and reads
+`Touchdown + u·(Liftoff − Touchdown)`; every planner-held stance votes, weighted by its
+engage/release ramp, as a wrapped difference from the current phase. The stance a foot is
+read against is the one nearest the current phase (a foot may plant twice per cycle).
+
+`Advance` then servos the RATE, never the phase: `rate = feedforward + clamp(gain·err,
+±maxRate·max(feedforward, 1/Duration))`, followed by a slew limit on the whole rate's change
+per frame (feedforward included — the anti-jerk term). Past `PhaseReentryError` the clip and
+the feet disagree outright and the phase re-enters AT the observation (signed jump); the
+smoothness prior bridges the pose as it does on a clip switch. Traveling only — the stopping
+policy owns the phase while settling. Knobs: `PhaseServo*` / `PhaseRateSlew` in
+`AnimSolverConfig` (hot-reloaded). Diagnostics: `TimingResult.PhaseError/ServoRate/Reentered`,
+`CharacterAnimator.LastObservedResidual`. Tests: `AnimPhaseServoTests`.
+
+Rule A (ANIMATION_OWNERSHIP_CONTRACT.md) holds: the timing stage is still the phase's only
+writer; the planner's plans are an INPUT to it (last frame's stances against this frame's
+body), and the planner still owns where feet land.
+
+Not yet: rescaling a stance's sweep to the ACTUAL step (the planned next landing) so a
+short or long tread reads correctly, and scheduling swing/flight toward the next planned
+touchdown with a gate there. Self-plant clips supply no independent observation (their
+capture is phase-driven) and stay on T1.
+
 ## Order of work and acceptance
 
 1. T1 + Δφ locked + T4 (the transfer is needed before settling can be judged). Golden

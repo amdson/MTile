@@ -44,7 +44,7 @@ public readonly struct SolverSurface
 // Parkour/Mantle/ArcJump are the three CLIMB states (ClimbStates.cs), split by entry speed and
 // rise band; they share the hands overlay and grip machinery but each gets its own clip so the
 // speed vault, the flush climb and the two-block arc can be authored apart.
-public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump, LedgeJump, Dropdown, Mantle, ArcJump, StepUp }
+public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump, LedgeJump, Dropdown, Mantle, ArcJump, StepUp, Stairs }
 
 // A read-only snapshot of everything the animation layer is allowed to look at,
 // gathered once per render frame. This is the *one-way* boundary between the sim
@@ -194,10 +194,16 @@ public readonly struct CharacterAnimSample
         // The sim already chains climbs across stairs. Give that whole traversal one
         // cadence instead of restarting Parkour/Jump at every riser. Explicit jumps,
         // crouches, reactions and taller ledge maneuvers retain their own animation.
+        // Stairs vs StepUp: the same probe counts the risers still AHEAD of the body. Two or
+        // more is a staircase (the Stairs clip, authored over several treads); fewer is the
+        // last riser or a lone step (StepUp). Both need the three-tile diagonal to fire at all.
         if (chunks != null
-            && p.CurrentState is StandingState or FallingState or ParkourState or MantleState
-            && IsAscendingStairs(pos, p.Body.Velocity, facing, chunks))
-            tag = AnimTag.StepUp;
+            && p.CurrentState is StandingState or FallingState or ParkourState or MantleState)
+        {
+            int ahead = AscendingStairRisersAhead(pos, p.Body.Velocity, facing, chunks);
+            if (ahead >= StairsMinRisersAhead) tag = AnimTag.Stairs;
+            else if (ahead >= 0)               tag = AnimTag.StepUp;
+        }
 
         // Is there a solid ceiling right overhead? Reuse CeilingChecker.TryFind — the exact
         // query CrouchedState.CheckConditions uses to stay crouched with Down released (a 20px
@@ -277,32 +283,47 @@ public readonly struct CharacterAnimSample
                chunks: chunks, predictAt: predictAt);
     }
 
-    private static bool IsAscendingStairs(Vector2 position, Vector2 velocity, int facing, ChunkMap chunks)
+    // Risers still ahead of the body for the Stairs clip (vs StepUp for the last riser).
+    public const int StairsMinRisersAhead = 2;
+    // The longest diagonal the probe follows: a base tile plus enough risers to see two
+    // ahead from a base two columns behind.
+    private const int StairProbeMaxRun = 5;
+
+    // Stair probe. Returns -1 when the body is not ascending stairs; otherwise how many
+    // one-high/one-wide risers lie strictly AHEAD of the body's column along the best
+    // diagonal found (0 = the staircase is behind or under the feet, the last riser taken).
+    //
+    // A staircase is a diagonal run of solid tiles with air above each — at least three,
+    // which distinguishes stairs from a single vault or a wall — starting from a base tile
+    // beneath/alongside the feet up to two columns behind (the sim chains its climbs, so the
+    // body's column trails the riser it is stepping onto). Nothing distant is searched.
+    private static int AscendingStairRisersAhead(Vector2 position, Vector2 velocity, int facing, ChunkMap chunks)
     {
         if (facing is not (1 or -1)
             || velocity.X * facing <= GroundLocomotionDriver.WalkSpeedThreshold
-            || velocity.Y > GroundLocomotionDriver.WalkSpeedThreshold) return false;
+            || velocity.Y > GroundLocomotionDriver.WalkSpeedThreshold) return -1;
 
         const int ts = Chunk.TileSize;
         int col = (int)MathF.Floor(position.X / ts);
         int row = (int)MathF.Floor(position.Y / ts);
-        // Two consecutive one-high/one-wide risers distinguish stairs from a single
-        // vault or a wall. Search only beneath/alongside the feet, not distant terrain.
+        int best = -1;
         for (int back = 0; back <= 2; back++)
         for (int y = row; y <= row + (int)MathF.Ceiling(2 * PlayerCharacter.Radius / ts) + 1; y++)
         {
             int x = col - facing * back;
-            bool stair = true;
-            for (int step = 0; step < 3; step++)
+            int run = 0;
+            for (int step = 0; step < StairProbeMaxRun; step++)
             {
                 float cx = (x + facing * step + 0.5f) * ts;
                 float cy = (y - step + 0.5f) * ts;
                 if (!TileQuery.IsSolidAt(chunks, cx, cy)
-                    || TileQuery.IsSolidAt(chunks, cx, cy - ts))
-                { stair = false; break; }
+                    || TileQuery.IsSolidAt(chunks, cx, cy - ts)) break;
+                run++;
             }
-            if (stair) return true;
+            if (run < 3) continue;
+            // Tiles of the run past the body's column are the risers still ahead.
+            best = Math.Max(best, Math.Max(0, run - 1 - back));
         }
-        return false;
+        return best;
     }
 }

@@ -52,14 +52,16 @@ public class StairAnimationTests(ITestOutputHelper output)
             var s = CharacterAnimSample.From(sim.Player, Dt, surfaces, count, near, terrain);
             animator.Update(s);
             float forward = direction == 1 ? s.Position.X / Chunk.TileSize : 50 - s.Position.X / Chunk.TileSize;
+            bool onStairs = s.Tag is AnimTag.Stairs or AnimTag.StepUp;
             if (forward > 10 && forward < 16)
             {
                 middleFrames++;
-                if (s.Tag != AnimTag.StepUp) missed++;
+                // Mid-staircase there are always two risers ahead: the Stairs clip, never StepUp.
+                if (s.Tag != AnimTag.Stairs) missed++;
             }
-            if (s.Tag == AnimTag.StepUp)
+            if (onStairs)
             {
-                Assert.Equal(AnimClip.StepUp, animator.State.Clip);
+                Assert.Equal(s.Tag == AnimTag.Stairs ? AnimClip.Stairs : AnimClip.StepUp, animator.State.Clip);
                 if (stairFrames++ > 0)
                 {
                     float delta = animator.State.Phase - phase;
@@ -69,7 +71,7 @@ public class StairAnimationTests(ITestOutputHelper output)
             }
             if (forward > 21)
             {
-                Assert.NotEqual(AnimTag.StepUp, s.Tag);
+                Assert.False(onStairs, $"still tagged {s.Tag} past the staircase");
                 leftStairs = true;
                 break;
             }
@@ -91,18 +93,18 @@ public class StairAnimationTests(ITestOutputHelper output)
         for (int f = 0; f < 100; f++)
         {
             sim.Step(new PlayerInput { Right = true });
-            if (CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag == AnimTag.StepUp)
+            if (CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag is AnimTag.Stairs or AnimTag.StepUp)
             { entered = true; break; }
         }
         Assert.True(entered);
         foreach (var velocity in new[] { Vector2.Zero, new Vector2(-50, -30), new Vector2(50, 50) })
         {
             sim.Player.Body.Velocity = velocity;
-            Assert.NotEqual(AnimTag.StepUp, CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag);
+            AssertNotStairs(CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag);
         }
         sim.Player.Body.Velocity = new Vector2(50, -50);
         sim.Player.Body.Position -= new Vector2(0, 100);
-        Assert.NotEqual(AnimTag.StepUp, CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag);
+        AssertNotStairs(CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag);
     }
 
     [Theory]
@@ -115,8 +117,56 @@ public class StairAnimationTests(ITestOutputHelper output)
         for (int f = 0; f < 100; f++)
         {
             sim.Step(new PlayerInput { Right = true });
-            Assert.NotEqual(AnimTag.StepUp, CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag);
+            AssertNotStairs(CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag);
         }
+    }
+
+    private static void AssertNotStairs(AnimTag tag)
+        => Assert.False(tag is AnimTag.Stairs or AnimTag.StepUp, $"tagged {tag}");
+
+    // The Stairs/StepUp split: Stairs needs two risers still AHEAD of the body, StepUp is the
+    // last riser (or a short flight). A 10-step staircase reads Stairs from the bottom until
+    // the second-to-last riser is under the feet, then StepUp for the final one; a 2-step
+    // flight reads Stairs at its foot and StepUp for its last riser; a lone step never
+    // reads Stairs.
+    [Theory]
+    [InlineData(10)]
+    [InlineData(2)]
+    public void StairsTag_NeedsTwoRisersAhead_ThenHandsTheLastRiserToStepUp(int steps)
+    {
+        var terrain = Terrain(1, steps);
+        var sim = new Simulation(terrain, new Vector2(16, 15 * Chunk.TileSize - PlayerCharacter.Radius));
+        int stairsFrames = 0, stepUpFrames = 0; bool stepUpAfterStairs = false, stairsAfterStepUp = false;
+        for (int f = 0; f < 250; f++)
+        {
+            sim.Step(new PlayerInput { Right = true });
+            var tag = CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag;
+            if (tag == AnimTag.Stairs) { stairsFrames++; if (stepUpFrames > 0) stairsAfterStepUp = true; }
+            if (tag == AnimTag.StepUp) { stepUpFrames++; if (stairsFrames > 0) stepUpAfterStairs = true; }
+        }
+        Assert.True(stairsFrames > 5, $"Stairs never tagged on a {steps}-step flight ({stairsFrames} frames)");
+        Assert.True(stepUpAfterStairs, "the last riser should hand off to StepUp");
+        Assert.False(stairsAfterStepUp, "Stairs re-tagged after the hand-off to StepUp");
+    }
+
+    [Fact]
+    public void StairsTag_SelectsTheStairsClip_AboveStepUp()
+    {
+        var terrain = Terrain(1);
+        var sim = new Simulation(terrain, new Vector2(1.5f * Chunk.TileSize, 15 * Chunk.TileSize - PlayerCharacter.Radius));
+        var animator = Animator("biped");
+        var surfaces = new SolverSurface[32];
+        bool sawStairs = false;
+        for (int f = 0; f < 200; f++)
+        {
+            sim.Step(new PlayerInput { Right = true });
+            int count = TerrainSurfaces.Extract(terrain, animator, sim.Player.Body.Position,
+                sim.Player.Facing, Game1.SkeletonScale, surfaces, out bool near);
+            var s = CharacterAnimSample.From(sim.Player, Dt, surfaces, count, near, terrain);
+            animator.Update(s);
+            if (s.Tag == AnimTag.Stairs) { sawStairs = true; Assert.Equal(AnimClip.Stairs, animator.State.Clip); }
+        }
+        Assert.True(sawStairs);
     }
 
     [Theory]

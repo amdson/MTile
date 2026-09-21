@@ -11,7 +11,10 @@ namespace MTile;
 // owns all the per-move animation policy that used to be scattered across SelectClip /
 // IsPhaseDriven / ResolveMovementOverlays / ResolveMovementPins:
 //
-//   Matches     — is this the active situation? First match in registry order wins.
+//   Matches     — is this the active situation? First match in registry order wins. Judged on
+//                 the sample plus AnimHistory, the core's move-agnostic memory of earlier
+//                 frames (how long the body has been down, last frame's sample) — so a
+//                 situation defined by an EDGE, like a touchdown, is a driver like any other.
 //   Select      — which clip to play, how its sample time is produced (TimeMode), and
 //                 optionally where to start it on entry (StartT; -1 = default). Re-run
 //                 every frame, so intra-move switches (Walk→Run, Crouch→DuckUnder) stay
@@ -77,11 +80,48 @@ public sealed class FrameInputs
     public void Clear() { Overlays.Clear(); Pins.Clear(); Constraints.Clear(); }
 }
 
+// What the animator core remembers about the frames BEFORE this one, handed to every driver
+// alongside the current sample. Some clip policy keys on an EDGE or a duration rather than on
+// a single frame — a touchdown, a stop — and the sample, which is a pure snapshot of now,
+// cannot express one. That memory used to be kept per-move in the core (CharacterAnimState
+// .LandTime, a landing countdown the core armed and consumed); it lives here instead so the
+// driver that cares owns its own policy.
+//
+// The core only MEASURES here. Every window, threshold and band over these measurements is a
+// driver's business (LandingDriver's 0.25s), which is what keeps this struct move-agnostic:
+// add a field when a driver needs a fact about the past it cannot read off one sample, never
+// a timer for one move.
+public struct AnimHistory
+{
+    public bool                 HasPrev;       // false only on the very first Update
+    public CharacterAnimSample  Prev;          // last frame's sample
+    // Seconds the body has been continuously grounded — 0 on the touchdown frame itself and
+    // throughout flight, so `GroundedTime < w` IS "touched down within the last w seconds".
+    public float                GroundedTime;
+
+    // A character first observed already standing has been there forever as far as the
+    // animator knows: seeding large is what keeps a grounded spawn from playing a landing.
+    private const float Settled = 1e9f;
+
+    // Called at the top of Update, BEFORE any driver runs, so a driver reads this frame's
+    // measurements against last frame's retained sample.
+    public void BeginFrame(in CharacterAnimSample s, float dt)
+    {
+        if (!HasPrev)         GroundedTime = s.Grounded ? Settled : 0f;
+        else if (!s.Grounded) GroundedTime = 0f;
+        else                  GroundedTime = Prev.Grounded ? GroundedTime + dt : 0f;
+    }
+
+    // Called at the very bottom of Update — Prev stays last frame's for the whole body.
+    public void EndFrame(in CharacterAnimSample s) { Prev = s; HasPrev = true; }
+}
+
 public interface IMoveDriver
 {
-    bool       Matches(in CharacterAnimSample s, in CharacterAnimState st);
-    ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st);
+    bool       Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h);
+    ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h);
     // `t` is the clip's current normalized sample time (pre-advance) for drivers that need it.
+    // No history here yet — nothing contributes off the past; widen it the day something does.
     void       Contribute(in CharacterAnimSample s, float t, FrameInputs dst);
 }
 
@@ -93,12 +133,17 @@ public static class MoveDrivers
     // tag-matched situations first — they're mutually exclusive (one tag per sample), but all
     // must precede the generic drivers because several tagged states are also airborne
     // (Tumble/WallJump/DoubleJump are strict subsets of !Grounded) or carry walk-band speed
-    // (Stunned slides while grounded). Airborne precedes ground locomotion; ground locomotion
-    // is the terminal catch-all.
+    // (Stunned slides while grounded). LandingDriver sits below the tagged situations AND below
+    // CrouchDriver — a tagged or crouched touchdown keeps its own clip, exactly as the old
+    // core-side override did by only ever replacing an Idle choice. Airborne precedes ground
+    // locomotion; ground locomotion is the terminal catch-all.
     public static IMoveDriver[] CreateDefault(Skeleton rig,
                                               IReadOnlyDictionary<string, AnimationDocument> actionClips)
         => new IMoveDriver[]
         {
+            // Stairs (two or more risers ahead) outranks the single StepUp — the sample builder
+            // tags at most one of them, so the order here only documents the intent.
+            new TagClipDriver(AnimTag.Stairs, AnimClip.Stairs, ClipTimeMode.CadencePhase),
             new TagClipDriver(AnimTag.StepUp, AnimClip.StepUp, ClipTimeMode.CadencePhase),
             new ParkourDriver(rig, actionClips),
             new CrouchDriver(),
@@ -111,6 +156,7 @@ public static class MoveDrivers
             new TagClipDriver(AnimTag.Tumble,     AnimClip.Tumble),
             new TagClipDriver(AnimTag.WallJump,   AnimClip.WallJumpKick),
             new TagClipDriver(AnimTag.DoubleJump, AnimClip.DoubleJumpFlip),
+            new LandingDriver(),
             new AirborneDriver(),
             new GroundLocomotionDriver(),
         };
@@ -122,14 +168,16 @@ public sealed class TagClipDriver : IMoveDriver
     private readonly AnimTag _tag; private readonly AnimClip _clip; private readonly ClipTimeMode _time;
     public TagClipDriver(AnimTag tag, AnimClip clip, ClipTimeMode time = ClipTimeMode.Clock)
     { _tag = tag; _clip = clip; _time = time; }
-    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st) => s.Tag == _tag;
-    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st) => new(_clip, _time);
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => s.Tag == _tag;
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => new(_clip, _time);
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }
 
 // Grounded locomotion — the terminal catch-all. Owns the speed/facing fan-out over the
-// Idle/Walk/WalkBack/Run/RunTurn clip family (the Land override on a near-idle touchdown
-// stays core-side: it's cross-move memory of the airborne→grounded edge).
+// Idle/Walk/WalkBack/Run/RunTurn clip family. The first fraction of a second after a
+// touchdown is LandingDriver's, which sits above this one and matches the same idle band.
 public sealed class GroundLocomotionDriver : IMoveDriver
 {
     public const float WalkSpeedThreshold = 12f;   // px/s before Idle -> Walk
@@ -142,9 +190,9 @@ public sealed class GroundLocomotionDriver : IMoveDriver
     // around rest) never triggers it.
     public const float PreContactGap = 2f;
 
-    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st) => true;
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h) => true;
 
-    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st)
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
     {
         float speed = MathF.Abs(s.Velocity.X);
         if (speed > WalkSpeedThreshold)
@@ -194,11 +242,38 @@ public sealed class GroundLocomotionDriver : IMoveDriver
     }
 }
 
+// The touchdown one-shot: a landing that settles into the IDLE BAND plays the authored Land
+// clip for a moment instead of dropping straight onto Idle. Touching down into a walk or a run
+// is deliberately excluded — the feet are already cycling and a one-shot would stutter them —
+// which is the same band GroundLocomotionDriver picks Idle for, tested here against the same
+// threshold so the two cannot drift apart.
+//
+// This is the driver that needed AnimHistory: "just landed" is an edge, invisible in any single
+// sample. It was CharacterAnimState.LandTime — a countdown the core armed on the airborne→
+// grounded edge and consumed by overriding the chosen clip — until 2026-09-20.
+public sealed class LandingDriver : IMoveDriver
+{
+    // Seconds the one-shot owns the idle band after touchdown. Keep == land.json Duration:
+    // the clip is Clock-timed and holds its last pose, so a longer window freezes on the
+    // final frame rather than playing more animation.
+    public const float LandWindow = 0.25f;
+
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => s.Grounded && h.GroundedTime < LandWindow
+           && MathF.Abs(s.Velocity.X) <= GroundLocomotionDriver.WalkSpeedThreshold;
+
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => new(AnimClip.Land, ClipTimeMode.Clock);
+
+    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+}
+
 // Generic airborne (no tag): rising plays Jump, falling plays Fall.
 public sealed class AirborneDriver : IMoveDriver
 {
-    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st) => !s.Grounded;
-    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st)
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => !s.Grounded;
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => new(s.Velocity.Y < 0f ? AnimClip.Jump : AnimClip.Fall, ClipTimeMode.Clock);
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }
@@ -209,8 +284,9 @@ public sealed class AirborneDriver : IMoveDriver
 // read-only); otherwise the generic static Crouch.
 public sealed class CrouchDriver : IMoveDriver
 {
-    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st) => s.Tag == AnimTag.Crouch;
-    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st)
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => s.Tag == AnimTag.Crouch;
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
     {
         if (MathF.Abs(s.Velocity.X) > GroundLocomotionDriver.WalkSpeedThreshold)
             return new ClipChoice(AnimClip.CrouchWalk, ClipTimeMode.CadencePhase);
@@ -247,10 +323,10 @@ public sealed class ParkourDriver : IMoveDriver
     // step (speed vault or flush mantle) should stay a legs-only stride, no arm
     // gesture. Ledge pulls keep their own hand treatment via the ledge_pull reference
     // clip (LedgeStates), untouched by this driver.
-    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st)
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => s.Tag is AnimTag.Parkour or AnimTag.Mantle or AnimTag.ArcJump;
 
-    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st)
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => new(s.Tag switch
         {
             AnimTag.Mantle  => AnimClip.Mantle,

@@ -35,10 +35,14 @@ public class AnimGaitTimingTests
             foreach (var st in f.Stances)
                 _o.WriteLine($"  {f.Node,-8} td {st.Touchdown:0.00} lo {st.Liftoff:0.00} span {st.Liftoff - st.Touchdown:0.00}  " +
                              $"off {st.TdOffset.X:0.0}→{st.LoOffset.X:0.0} rig  travel {(st.TdOffset.X - st.LoOffset.X) * Scale:0.0} px");
-        Assert.Equal("gait_track", source);
+        // A clip with a baked scene path paces by it (GaitTiming prefers body_path); the bake
+        // derives that path FROM the stance sweeps, so the two strides must agree.
+        Assert.True(source is "gait_track" or "body_path", source);
+        float dLabels = gait.CycleDisplacement.X * Scale;
+        if (source == "body_path") Assert.Equal(dLabels, d, 0);
         // Forward cycles travel forward. (The stride is whatever the labels say — biped walk
         // is ~20 px/cycle at scale 0.6, run ~43 px.)
-        Assert.InRange(d, 5f, 300f);
+        Assert.InRange(dLabels, 5f, 300f);
     }
 
     [Fact]
@@ -158,19 +162,23 @@ public class AnimGaitTimingTests
         var clips = AnimationStore.LoadAll(Path.Combine(FindDir("SkeletonStates"), "biped"));
         var anim = new CharacterAnimator(SkeletonExamples.Load("biped"), Scale, clips);
         const float dt = 1f / 60f, vx = 90f;
+        // The rate slews up from rest over the first frames (T6's anti-jerk limit), so the
+        // distance-vs-phase comparison starts once it has settled.
+        const int warmup = 10;
         float x = 0f, cycles = 0f, prevPhase = 0f;
         for (int i = 0; i < 120; i++)
         {
             x += vx * dt;
             anim.Update(new CharacterAnimSample(new Vector2(x, 0f), new Vector2(vx, 0f), +1, true, "WalkState", "", dt));
-            if (i == 0) { prevPhase = anim.State.Phase; continue; }
+            if (i < warmup) { prevPhase = anim.State.Phase; continue; }
             float d = anim.State.Phase - prevPhase; if (d < 0f) d += 1f;
             cycles += d; prevPhase = anim.State.Phase;
         }
         float cycleDist = anim.LastTiming.CycleDistance;
-        _o.WriteLine($"cycle distance {cycleDist:0.0} px ({anim.LastTiming.Source}); {cycles:0.00} cycles over {vx * dt * 119:0.0} px");
-        Assert.Equal("gait_track", anim.LastTiming.Source);
-        Assert.Equal(vx * dt * 119 / cycleDist, cycles, 2);
+        float travelled = vx * dt * (120 - warmup);
+        _o.WriteLine($"cycle distance {cycleDist:0.0} px ({anim.LastTiming.Source}); {cycles:0.00} cycles over {travelled:0.0} px");
+        Assert.True(anim.LastTiming.Source is "gait_track" or "body_path", anim.LastTiming.Source);
+        Assert.Equal(travelled / cycleDist, cycles, 2);
     }
 
     // The stopping policy (T3): a run that stops dead settles — the nearest landing is

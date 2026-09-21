@@ -53,10 +53,13 @@ so nothing changed visually — the point is that they can now be authored apart
 tags still route through `ParkourDriver`, so they keep the shared `ClimbHands` overlay and the
 hand-grip pin; only the base clip differs. `ClipBindingTests` pins that they stay distinct.
 
-Speed fan-out ([MoveDriver.cs:125-165](../Animation/MoveDriver.cs#L125-L165)): `|vx| ≤ 12`
+Speed fan-out ([MoveDriver.cs:178-240](../Animation/MoveDriver.cs#L178-L240)): `|vx| ≤ 12`
 → Idle; `12 < |vx| ≤ 40` → Walk (WalkBack if against facing); `|vx| > 40` → Run (RunTurn if
-against facing). `GroundGap > 2px` holds the cycle frozen. The Land override on a near-idle
-touchdown is core-side ([CharacterAnimator.cs:409](../Animation/CharacterAnimator.cs#L409)).
+against facing). `GroundGap > 2px` holds the cycle frozen. The first 0.25s after a touchdown
+in that `≤ 12` band belongs to `LandingDriver`
+([MoveDriver.cs:251](../Animation/MoveDriver.cs#L251)), which sits directly above this driver
+and reads the edge off `AnimHistory` — it was a core-side override on the Idle choice, armed
+by a `CharacterAnimState.LandTime` countdown, until 2026-09-20.
 
 `CharacterAnimSample.From` recognizes two consecutive exposed one-tile risers while moving
 upstairs and overrides Standing/Falling/Parkour/Mantle with `StepUp`. The cadence-driven

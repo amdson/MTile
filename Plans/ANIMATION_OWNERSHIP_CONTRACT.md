@@ -56,6 +56,11 @@ disposition list in [ANIMATION_TIMING_STAGE.md](ANIMATION_TIMING_STAGE.md). Noth
 may write `Phase` mid-frame. The step planner receives the timing stage's rate as
 `NominalRate` (today it receives last frame's jointly solved rate).
 
+**Foot feedback (T6, 2026-09-21).** The timing stage now also takes the planner's held
+stances as an input and servos the phase rate toward what they imply
+(`GaitTiming.Observe` / `Advance`, Plans/ANIMATION_TIMING_STAGE.md T6). Rule A is unchanged:
+one writer of the phase, the timing stage; the planner reports, it never sets.
+
 ### Rule B — each foot has one support owner per frame
 
 A foot's contact target comes from exactly one of:

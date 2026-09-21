@@ -317,7 +317,16 @@ public sealed partial class DemoGame : Game
         }
 
         var world = _pose.ComputeWorld(_root);
-        _hoverBone = (!_playing && onCanvas && _dragBone < 0) ? PickJoint(world, mp) : _dragBone;
+        // ONE pick for the hover highlight and the press (PickCanvas): the highlighted joint is
+        // exactly what a left-click will grab, never a guide or arc handle under it.
+        bool anyDrag = _dragBone >= 0 || _dragAdd >= 0 || _dragRoot || _guides.Dragging
+                    || (_arcEdit != null && _arcEdit.Dragging);
+        int pickJoint = -1, pickAdd = -1; bool pickTip = false;
+        var target = (!_playing && onCanvas && !anyDrag)
+            ? PickCanvas(world, mp, guideFrame, groundY, out pickJoint, out pickAdd, out pickTip)
+            : CanvasTarget.None;
+        _hoverBone = _dragBone >= 0 ? _dragBone
+                   : target is CanvasTarget.Joint or CanvasTarget.Root ? pickJoint : -1;
 
         // Endpoint selection: right-click any endpoint selects it and opens its menu; the "v"
         // affordance beside the selection opens the same menu. Both are ImGui popups now
@@ -334,57 +343,43 @@ public sealed partial class DemoGame : Game
         if (leftPressed && onCanvas && !_playing)
         {
             _pressPos = mp;
-            // PICK ORDER. The rig's handles — the com marker and any other addition, the root
-            // joint, the bone joints — sit ON TOP of the scene, so they win over a guide's
-            // BODY. That ordering used to be academic: the Select tool was only armed from the
-            // menu, so a block under the figure rarely consumed anything. The Scene panel
-            // leaves Select armed most of the time, and without this a block drawn under the
-            // player swallowed every com/joint drag on clips like stepup.
-            // A guide's EDGES and corners still win (they are what HandlePress hit-tests
-            // first), so resizing a block through the figure keeps working.
-            int ai = -1; bool tip = false;
-            bool onAddition = _activeKey >= 0 && TryPickAddition(world, mp, out ai, out tip);
-            int joint = PickJoint(world, mp);
-            bool onRig = onAddition || (joint >= 0 && (_skeleton.Bones[joint].IsRoot || _activeKey >= 0));
-            // An open arc edit owns the canvas: its keys and handles are the topmost thing
-            // drawn, so they pick before guides, additions and joints.
-            bool arcTook = _arcEdit != null && PickArcSession(mp);
-            var guidePart = _guides.Peek(mp, guideFrame, groundY, Doc);
-            bool guideWins = guidePart != GuidePart.None && guidePart != GuidePart.Body   // edge/corner/ground line
-                          || _guides.Tool is GuideTool.AddGround or GuideTool.AddBlock;    // armed placement
-
-            if (arcTook) { }
-            else if ((guideWins || !onRig) && _guides.HandlePress(mp, guideFrame, groundY, Doc, ref _dirty))
+            switch (target)
             {
-                _selectedAdd = -1;
-            }
-            else if (onAddition)
-            {
-                _selectedAdd = ai; _dragAdd = ai; _dragAddTip = tip;
-            }
-            // Grabbing the root joint moves the whole player (skeleton + com), independent of
-            // the active keyframe — root drag is otherwise a no-op (EditBone skips the root).
-            else if (joint >= 0 && _skeleton.Bones[joint].IsRoot)
-            {
-                _dragRoot = true; _selectedAdd = -1;
-            }
-            else
-            {
-                int bone = _activeKey >= 0 ? joint : -1;
-                if (mDown && bone >= 0) ToggleContact(bone);   // M + click marks/unmarks the node
-                else if (bone >= 0)
-                {
-                    _dragBone = bone;
-                    // IK mode: a limb chain (up to the torso) — the root/torso themselves keep
-                    // the direct edit (a chain of length 0 has nothing to solve).
-                    _ikDrag = null;
-                    if (_ikMode && !_skeleton.Bones[bone].IsRoot)
+                case CanvasTarget.Arc:
+                    PickArcSession(mp);   // arms the session's DragKey/DragHandle
+                    break;
+                case CanvasTarget.Placement:
+                case CanvasTarget.Guide:
+                    _guides.HandlePress(mp, guideFrame, groundY, Doc, ref _dirty);
+                    _selectedAdd = -1;
+                    break;
+                case CanvasTarget.Addition:
+                    _selectedAdd = pickAdd; _dragAdd = pickAdd; _dragAddTip = pickTip;
+                    break;
+                // Grabbing the root joint moves the whole player (skeleton + com), independent of
+                // the active keyframe — root drag is otherwise a no-op (EditBone skips the root).
+                case CanvasTarget.Root:
+                    _dragRoot = true; _selectedAdd = -1;
+                    break;
+                case CanvasTarget.Joint:
+                    if (mDown) ToggleContact(pickJoint);   // M + click marks/unmarks the node
+                    else
                     {
-                        var session = new PoseIk.DragSession(_skeleton, _pose, bone);
-                        if (session.Chain.Length > 0) _ikDrag = session;
+                        _dragBone = pickJoint;
+                        // IK mode: a limb chain (up to the torso) — the root/torso themselves keep
+                        // the direct edit (a chain of length 0 has nothing to solve).
+                        _ikDrag = null;
+                        if (_ikMode)
+                        {
+                            var session = new PoseIk.DragSession(_skeleton, _pose, pickJoint);
+                            if (session.Chain.Length > 0) _ikDrag = session;
+                        }
                     }
-                }
-                _selectedAdd = -1;
+                    _selectedAdd = -1;
+                    break;
+                default:
+                    _selectedAdd = -1;
+                    break;
             }
         }
 
@@ -733,28 +728,66 @@ public sealed partial class DemoGame : Game
     }
 
     // Keys win over tangent handles — the standalone editor's order, minus the anchors.
-    private bool PickArcSession(Vector2 mp)
+    // Pure hit-test of the open arc session's keys and handles (keys first). No side effects,
+    // so the hover pick can consult it every frame; PickArcSession arms the drag from it.
+    private bool PeekArcSession(Vector2 mp, out int key, out int handle, out int side)
     {
+        key = -1; handle = -1; side = 0;
         var s = _arcEdit;
         if (s == null) return false;
         var arc = s.Working;
 
-        float best = PickR * PickR; int key = -1;
+        float best = PickR * PickR;
         for (int i = 0; i < arc.Keys.Count; i++)
         {
             float d = Vector2.DistanceSquared(ArcToScreen(arc, arc.Keys[i].Pos), mp);
             if (d < best) { best = d; key = i; }
         }
-        if (key >= 0) { s.DragKey = key; s.Selected = key; return true; }
+        if (key >= 0) return true;
 
         best = PickR * PickR;
         for (int i = 0; i < arc.Keys.Count; i++)
-            for (int side = -1; side <= 1; side += 2)
+            for (int sd = -1; sd <= 1; sd += 2)
             {
-                float d = Vector2.DistanceSquared(ArcToScreen(arc, ArcEditOps.HandleTip(arc, i, side)), mp);
-                if (d < best) { best = d; s.DragHandle = i; s.HandleSide = side; s.Selected = i; }
+                float d = Vector2.DistanceSquared(ArcToScreen(arc, ArcEditOps.HandleTip(arc, i, sd)), mp);
+                if (d < best) { best = d; handle = i; side = sd; }
             }
-        return s.DragHandle >= 0;
+        return handle >= 0;
+    }
+
+    private bool PickArcSession(Vector2 mp)
+    {
+        if (!PeekArcSession(mp, out int key, out int handle, out int side)) return false;
+        var s = _arcEdit;
+        if (key >= 0) { s.DragKey = key; s.Selected = key; }
+        else          { s.DragHandle = handle; s.HandleSide = side; s.Selected = handle; }
+        return true;
+    }
+
+    // What a left press on the canvas grabs — the ONE pick order, consulted by both the
+    // hover highlight and the press so the highlight never lies about what a click will do.
+    //
+    //   arc session > armed placement > rig handles (addition, root, joint) > guide
+    //
+    // The rig's handles sit ON TOP of the scene, so a highlighted joint always beats a guide
+    // under it — including a guide's EDGE, corner or ground line. (Those used to win over the
+    // joint, which is how a highlighted node could turn into a block resize or a ground-line
+    // drag.) To resize a block through the figure, grab the edge away from a joint.
+    private enum CanvasTarget { None, Arc, Placement, Addition, Root, Joint, Guide }
+
+    private CanvasTarget PickCanvas(Affine2[] world, Vector2 mp, in Affine2 guideFrame, float groundY,
+                                    out int joint, out int addition, out bool additionTip)
+    {
+        joint = -1; addition = -1; additionTip = false;
+        if (_arcEdit != null && PeekArcSession(mp, out _, out _, out _)) return CanvasTarget.Arc;
+        if (_guides.Tool is GuideTool.AddGround or GuideTool.AddBlock) return CanvasTarget.Placement;
+        if (_activeKey >= 0 && TryPickAddition(world, mp, out addition, out additionTip)) return CanvasTarget.Addition;
+        joint = PickJoint(world, mp);
+        if (joint >= 0 && _skeleton.Bones[joint].IsRoot) return CanvasTarget.Root;
+        if (joint >= 0 && _activeKey >= 0) return CanvasTarget.Joint;
+        joint = -1;   // no keyframe to edit: the joint is not a handle, so it neither highlights nor blocks the guide
+        if (_guides.Peek(mp, guideFrame, groundY, Doc) != GuidePart.None) return CanvasTarget.Guide;
+        return CanvasTarget.None;
     }
 
     private void DragArcSession(Vector2 mp)

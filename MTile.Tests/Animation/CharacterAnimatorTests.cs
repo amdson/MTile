@@ -98,6 +98,71 @@ public class CharacterAnimatorTests
         }
     }
 
+    // ─── the landing window (LandingDriver) ─────────────────────────────────────────────
+    // These pin CLIP SELECTION, not clip content, so they stand up while the library is
+    // stub poses: the driver only needs Land to be BOUND. There was no coverage here at all
+    // while the window lived in the core as CharacterAnimState.LandTime.
+
+    // A touchdown that settles into the idle band plays the authored Land one-shot, then
+    // hands back to Idle once the window closes. The exact boundary frame is a tuning knob
+    // (LandingDriver.LandWindow vs the accumulated dt), so this asserts well inside and well
+    // outside it, never the frame it flips.
+    [Fact]
+    public void Touchdown_IntoTheIdleBand_PlaysLand_ThenReturnsToIdle()
+    {
+        var anim = RealAnimator();
+        Fall(anim, 5);
+
+        for (int i = 0; i < 13; i++)   // ≈0.217s, inside the 0.25s window
+        {
+            Ground(anim, 0f);
+            Assert.Equal(AnimClip.Land, anim.State.Clip);
+        }
+        for (int i = 0; i < 4; i++) Ground(anim, 0f);   // carry past the window
+        Assert.Equal(AnimClip.Idle, anim.State.Clip);
+    }
+
+    // Landing into a walk keeps the locomotion cycle — the feet are already cycling and a
+    // one-shot would stutter them. Same band GroundLocomotionDriver picks Idle for, which is
+    // why LandingDriver tests against its threshold rather than a second copy.
+    [Fact]
+    public void Touchdown_AboveTheIdleBand_KeepsLocomotion()
+    {
+        var anim = RealAnimator();
+        Fall(anim, 5);
+        for (int i = 0; i < 5; i++)
+        {
+            Ground(anim, GroundLocomotionDriver.WalkSpeedThreshold * 2f);
+            Assert.Equal(AnimClip.Walk, anim.State.Clip);
+        }
+    }
+
+    // A character first observed already standing has not "just landed": the animator has no
+    // airborne frame behind it, and seeding AnimHistory.GroundedTime large is what keeps a
+    // spawn from opening on a landing. (The old LandTime got this by only arming on an
+    // observed edge — worth a test now that it is a measurement instead.)
+    [Fact]
+    public void GroundedSpawn_DoesNotPlayLand()
+    {
+        var anim = RealAnimator();
+        for (int i = 0; i < 4; i++)
+        {
+            Ground(anim, 0f);
+            Assert.Equal(AnimClip.Idle, anim.State.Clip);
+        }
+    }
+
+    private static void Fall(CharacterAnimator anim, int frames)
+    {
+        for (int i = 0; i < frames; i++)
+            anim.Update(new CharacterAnimSample(
+                Vector2.Zero, new Vector2(0f, 120f), 1, false, "FallingState", "", 1f / 60f));
+    }
+
+    private static void Ground(CharacterAnimator anim, float vx)
+        => anim.Update(new CharacterAnimSample(
+            Vector2.Zero, new Vector2(vx, 0f), 1, true, "StandingState", "", 1f / 60f));
+
     // An animator bound to every authored clip, as the game builds it.
     private static CharacterAnimator RealAnimator()
     {

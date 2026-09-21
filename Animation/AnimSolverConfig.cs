@@ -117,6 +117,21 @@ public class AnimSolverConfig
     public float SettleExitSpeed { get; set; } = 30f;
     public float SettleTime      { get; set; } = 0.15f;
 
+    // ── Timing stage — the foot-synchronized servo (GaitTiming T6) ──
+    // The phase is servoed toward what the planner's planted feet imply (GaitTiming.Observe)
+    // as a bounded RATE change: Gain (1/s) sets how fast the error dies (a 25/s gain is a
+    // 40 ms time constant, inside any stance at run cadence); MaxRate caps the correction at
+    // this fraction of the larger of the feedforward and the authored rate, so playback never
+    // deviates more than that; RateSlew (cycles/s²) caps how fast the whole rate may change
+    // per frame — the anti-jerk term (0 = off); ReentryError (cycles): past this the clip and
+    // the feet disagree outright and the phase re-enters at the observation instead of
+    // chasing it (the smoothness prior bridges the pose, as on a clip switch).
+    public bool  PhaseServoEnabled { get; set; } = true;
+    public float PhaseServoGain    { get; set; } = 25f;
+    public float PhaseServoMaxRate { get; set; } = 0.5f;
+    public float PhaseRateSlew     { get; set; } = 40f;
+    public float PhaseReentryError { get; set; } = 0.2f;
+
     private static AnimSolverConfig _current = new AnimSolverConfig();
 
     [JsonIgnore]
@@ -161,6 +176,11 @@ public class AnimSolverConfig
         SettleSpeed             = src.SettleSpeed;
         SettleExitSpeed         = src.SettleExitSpeed;
         SettleTime              = src.SettleTime;
+        PhaseServoEnabled       = src.PhaseServoEnabled;
+        PhaseServoGain          = src.PhaseServoGain;
+        PhaseServoMaxRate       = src.PhaseServoMaxRate;
+        PhaseRateSlew           = src.PhaseRateSlew;
+        PhaseReentryError       = src.PhaseReentryError;
     }
 
     public static void Load(string path)
