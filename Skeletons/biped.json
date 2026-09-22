@@ -9,9 +9,9 @@
     { "Name": "arm_r_upper", "Parent": "chest",       "Rotation": 3.1415927,  "Length": 10 },
     { "Name": "arm_r_lower", "Parent": "arm_r_upper", "Rotation": 0,          "Length": 10 },
     { "Name": "leg_l_upper", "Parent": "hip",         "Rotation": 1.5707964,  "Length": 9.5 },
-    { "Name": "leg_l_lower", "Parent": "leg_l_upper", "Rotation": 0,          "Length": 9.5 },
+    { "Name": "leg_l_lower", "Parent": "leg_l_upper", "Rotation": 0,          "Length": 9.5, "MinRotation": 0, "MaxRotation": 3.05 },
     { "Name": "leg_r_upper", "Parent": "hip",         "Rotation": 1.5707964,  "Length": 9.5 },
-    { "Name": "leg_r_lower", "Parent": "leg_r_upper", "Rotation": 0,          "Length": 9.5 }
+    { "Name": "leg_r_lower", "Parent": "leg_r_upper", "Rotation": 0,          "Length": 9.5, "MinRotation": 0, "MaxRotation": 3.05 }
   ],
   "Points": [
     { "Id": "support_l", "Bone": "leg_l_lower", "End": "End", "Role": "support", "Label": "left sole" },

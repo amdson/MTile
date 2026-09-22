@@ -15,8 +15,9 @@ public sealed class SpriteStripGame : Game
 {
     private readonly string _output, _clipName, _takePath, _bindingPath, _rigName, _scenario;
     private readonly int _frames = 12, _columns = 4, _size = 240, _facing = 1;
+    private readonly int _stairs = 10;
     private readonly float _start = 0, _end = -1;
-    private readonly bool _world, _overlay, _trails;
+    private readonly bool _world, _overlay, _trails, _contacts;
     private readonly List<Frame> _panels = new();
     private SpriteBatch _batch;
     private Texture2D _pixel;
@@ -33,7 +34,9 @@ public sealed class SpriteStripGame : Game
     private sealed record Frame(BoneTransform[] Pose, Vector2 Root, Vector2 Camera,
         float Scale, int Facing, string Label, int Terrain = -1,
         AnimationDocument Clip = null, float Tau = 0,
-        AttachmentSample[] Effects = null, float Seconds = 0);
+        AttachmentSample[] Effects = null, float Seconds = 0, FootDebug[] Feet = null);
+
+    private sealed record FootDebug(string Name, FootPlan Plan, Vector2 Actual);
 
     public SpriteStripGame(string[] args)
     {
@@ -52,6 +55,7 @@ public sealed class SpriteStripGame : Game
                 case "--rig": rig = Value(); break;
                 case "--usebind": binding = Value(); break;
                 case "--frames": _frames = Number(); break;
+                case "--stairs": _stairs = Number(); break;
                 case "--columns": _columns = Number(); columnsSpecified = true; break;
                 case "--size": _size = Number(); break;
                 case "--facing": _facing = Number(); break;
@@ -60,6 +64,7 @@ public sealed class SpriteStripGame : Game
                 case "--world": _world = true; break;
                 case "--overlay": _overlay = true; break;
                 case "--trails": _trails = true; break;
+                case "--contacts": _contacts = true; break;
                 default:
                     if (args[i].StartsWith("--") || _clipName != null)
                         throw new ArgumentException("Unknown argument: " + args[i]);
@@ -79,6 +84,8 @@ public sealed class SpriteStripGame : Game
         if (_facing is not (-1 or 1) || !float.IsFinite(_start) || !float.IsFinite(_end)
             || _start < 0 || (_end != -1 && _end <= _start))
             throw new ArgumentException("Use facing -1 or 1 and a finite increasing start/end range.");
+        if (_stairs < 1 || _stairs > 300)
+            throw new ArgumentException("Use 1–300 stairs.");
         if (binding != null)
         {
             _bindingPath = File.Exists(binding) ? Path.GetFullPath(binding)
@@ -134,6 +141,18 @@ public sealed class SpriteStripGame : Game
                 _min = Vector2.Min(_min, bone.Translation);
                 _max = Vector2.Max(_max, bone.Translation);
             }
+            if (frame.Feet != null)
+                foreach (var foot in frame.Feet)
+                    if (foot.Plan.HasSupport || foot.Plan.Reject == StepReject.Unreachable)
+                    {
+                        var target = foot.Plan.Target - frame.Camera;
+                        _min = Vector2.Min(_min, target); _max = Vector2.Max(_max, target);
+                        if (foot.Plan.HasSupport && foot.Plan.State == FootPlanState.Swing)
+                        {
+                            var landing = foot.Plan.Landing - frame.Camera;
+                            _min = Vector2.Min(_min, landing); _max = Vector2.Max(_max, landing);
+                        }
+                    }
             if (_skin != null)
             {
                 SyncSkin();
@@ -246,22 +265,24 @@ public sealed class SpriteStripGame : Game
         MovementConfig.Load(Path.Combine(RepoRoot(), "configs", "movement_config.json"));
         AnimSolverConfig.Load(Path.Combine(RepoRoot(), "configs", "anim_solver_config.json"));
         var terrain = new ChunkMap();
-        // Flat approach, ten one-high/one-wide risers, then a long flat landing.
+        // Flat approach, configurable one-high/one-wide risers, then a long flat landing.
         // Build directly as level loading does; all subsequent motion uses Simulation.Step.
-        for (int x = 0; x < 80; x++)
-        for (int y = 15 - Math.Clamp(x - 7, 0, 10); y < 20; y++)
+        int ground = _stairs + 5, width = _stairs + 70;
+        for (int x = 0; x < width; x++)
+        for (int y = ground - Math.Clamp(x - 7, 0, _stairs); y < ground + 5; y++)
         {
-            int tx = _facing == 1 ? x : 79 - x;
+            int tx = _facing == 1 ? x : width - 1 - x;
             var cp = new Point(tx / Chunk.Size, y / Chunk.Size);
             if (!terrain.TryGet(cp, out var chunk)) terrain[cp] = chunk = new Chunk { ChunkPos = cp };
             chunk.Tiles[tx % Chunk.Size, y % Chunk.Size].IsSolid = true;
         }
-        float startX = (_facing == 1 ? 1.5f : 78.5f) * Chunk.TileSize;
-        var sim = new Simulation(terrain, new Vector2(startX, 15 * Chunk.TileSize - PlayerCharacter.Radius));
+        float startX = (_facing == 1 ? 1.5f : width - 1.5f) * Chunk.TileSize;
+        var sim = new Simulation(terrain, new Vector2(startX, ground * Chunk.TileSize - PlayerCharacter.Radius));
         var animator = new CharacterAnimator(rig, Game1.SkeletonScale, clips);
         _pose = animator.Skeleton.CreatePose();
         _take = new AnimTake { SkeletonScale = Game1.SkeletonScale, PlayerRadius = PlayerCharacter.Radius };
-        var surfaces = new SolverSurface[32];
+        var surfaces = new SolverSurface[8];
+        var predictor = new LatticePathSampler();
         var indices = Enumerable.Range(0, _frames)
             .Select(i => first + (int)Math.Round(i * (last - first) / (double)(_frames - 1))).ToArray();
         int panel = 0;
@@ -272,16 +293,34 @@ public sealed class SpriteStripGame : Game
             // live character sample, full solver, then the game's CoM-anchored rig root.
             int count = TerrainSurfaces.Extract(terrain, animator, sim.Player.Body.Position,
                 sim.Player.Facing, Game1.SkeletonScale, surfaces, out bool near);
-            var sample = CharacterAnimSample.From(sim.Player, Simulation.FixedDt, surfaces, count, near, terrain);
+            predictor.Bind(sim.Player);
+            var sample = CharacterAnimSample.From(sim.Player, Simulation.FixedDt, surfaces, count, near, terrain, predictor.PredictAt);
             animator.Update(sample);
             while (panel < indices.Length && indices[panel] == f)
             {
                 _take.AddFrame(sample, terrain.CaptureDense());
+                var rigRoot = AttackGlowSystem.RigRoot(sample.Position, sample.Facing, animator, Game1.SkeletonScale);
+                FootDebug[] feet = null;
+                if (_contacts)
+                {
+                    var world = animator.Pose.ComputeWorld(Affine2.FromTRS(rigRoot, 0,
+                        new Vector2(sample.Facing * Game1.SkeletonScale, Game1.SkeletonScale)));
+                    feet = animator.Planner.Plans.Take(animator.Planner.FeetCount)
+                        .Select(p => new FootDebug(animator.Skeleton.Bones[p.Bone].Name, p, world[p.Bone].Translation)).ToArray();
+                }
                 _panels.Add(new Frame(animator.Pose.CloneLocal(),
-                    AttackGlowSystem.RigRoot(sample.Position, sample.Facing, animator, Game1.SkeletonScale),
+                    rigRoot,
                     _world ? Vector2.Zero : sample.Position, Game1.SkeletonScale, sample.Facing,
-                    $"f{f} {(f + 1) * Simulation.FixedDt:0.00}s {animator.State.Clip}", _take.Frames[^1].Terrain));
-                Console.WriteLine($"frame {f}: {sample.MovementState} / {animator.State.Clip}, position {sample.Position}, phase {animator.State.Phase:0.000}");
+                    $"f{f} p{animator.State.Phase:0.000} loop{animator.LoopBackJumps}", _take.Frames[^1].Terrain, Feet: feet));
+                string plants = string.Join(",", animator.Planner.Plans.Take(animator.Planner.FeetCount)
+                    .Where(p => p.State == FootPlanState.Stance && p.HasSupport)
+                    .Select(p => animator.Skeleton.Bones[p.Bone].Name));
+                Console.WriteLine($"frame {f}: {sample.MovementState} / {animator.State.Clip}, position {sample.Position}, phase {animator.State.Phase:0.000}, loop {animator.LoopBackJumps}, plants [{plants}]");
+                for (int fi = 0; fi < animator.Planner.FeetCount; fi++)
+                {
+                    var plan = animator.Planner.Plans[fi];
+                    Console.WriteLine($"  {animator.Skeleton.Bones[plan.Bone].Name}: {plan.State}, reject={plan.Reject}, weight={plan.Weight:0.000}, target={plan.Target}, bodyDistance={Vector2.Distance(plan.Target, sample.Position):0.000}");
+                }
                 panel++;
             }
         }
@@ -298,14 +337,15 @@ public sealed class SpriteStripGame : Game
         var pixels = new Color[strip.Width * strip.Height];
         Array.Fill(pixels, new Color(22, 26, 34));
         var panelPixels = new Color[_size * _size];
-        float zoom = MathF.Min((_size - 24) / (_max.X - _min.X), (_size - 52) / (_max.Y - _min.Y));
+        int footer = _contacts ? 58 : 0;
+        float zoom = MathF.Min((_size - 24) / (_max.X - _min.X), (_size - 52 - footer) / (_max.Y - _min.Y));
         var center = (_min + _max) / 2;
         for (int i = 0; i < _panels.Count; i++)
         {
             var frame = _panels[i];
             GraphicsDevice.SetRenderTarget(panel);
             GraphicsDevice.Clear(new Color(22, 26, 34));
-            var offset = new Vector2(_size / 2f, (_size + 28) / 2f) - center * zoom;
+            var offset = new Vector2(_size / 2f, (_size + 28 - footer) / 2f) - center * zoom;
             Vector2 Screen(Vector2 p) => (p - frame.Camera) * zoom + offset;
             _batch.Begin(samplerState: SamplerState.PointClamp);
             if (_take != null && frame.Terrain >= 0 && frame.Terrain < _take.TerrainStates.Count)
@@ -335,6 +375,36 @@ public sealed class SpriteStripGame : Game
                 _trails ? this : null, effectDt);
             _batch.Begin();
             if (_skin == null || _overlay) SkeletonRenderer.Draw(_draw, _pose, root);
+            if (frame.Feet != null)
+            {
+                _draw.Box(new Vector2(0, _size - footer), new Vector2(_size, footer), new Color(22, 26, 34));
+                for (int fi = 0; fi < frame.Feet.Length; fi++)
+                {
+                    var foot = frame.Feet[fi]; var p = foot.Plan;
+                    bool left = foot.Name.Contains("_l_");
+                    var color = left ? Color.Cyan : Color.Magenta;
+                    var actual = Screen(foot.Actual);
+                    _draw.Ring(actual, 3, color);
+                    bool hasTarget = p.HasSupport || p.Reject == StepReject.Unreachable;
+                    if (hasTarget)
+                    {
+                        var target = Screen(p.Target);
+                        _draw.Line(target - new Vector2(4, 4), target + new Vector2(4, 4), color);
+                        _draw.Line(target + new Vector2(-4, 4), target + new Vector2(4, -4), color);
+                        if (p.State == FootPlanState.Stance && p.HasSupport) _draw.Line(actual, target, color);
+                        else _draw.Dashed(actual, target, color);
+                        if (p.State == FootPlanState.Swing && p.HasSupport)
+                            _draw.Ring(Screen(p.Landing), 6, color, segments: 4);
+                    }
+                    string error = hasTarget ? Vector2.Distance(foot.Actual, p.Target).ToString("0.0", CultureInfo.InvariantCulture) : "-";
+                    string text = $"{(left ? "L" : "R")} {p.State} w{p.Weight:0.00} e{error} {p.Reject}";
+                    float scale = MathF.Min(.75f, (_size - 8) / _font.MeasureString(text).X);
+                    _batch.DrawString(_font, text, new Vector2(4, _size - footer + fi * 18), color, 0, Vector2.Zero, scale, SpriteEffects.None, 0);
+                }
+                const string legend = "O foot  X target  diamond landing";
+                _batch.DrawString(_font, legend, new Vector2(4, _size - 18), Color.White, 0, Vector2.Zero,
+                    MathF.Min(.65f, (_size - 8) / _font.MeasureString(legend).X), SpriteEffects.None, 0);
+            }
             _draw.Box(Vector2.Zero, new Vector2(_size, 28), new Color(34, 42, 54));
             float textScale = MathF.Min(1, (_size - 12) / _font.MeasureString(frame.Label).X);
             _batch.DrawString(_font, frame.Label, new Vector2(6, 5), Color.White, 0, Vector2.Zero, textScale, SpriteEffects.None, 0);

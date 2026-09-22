@@ -111,7 +111,7 @@ the clip filter), and a click that lands on a panel never reaches the canvas.
 | Click/drag on the timeline track | Move the playhead (scrub / interpolate between keyframes) |
 | Click a keyframe **bar** | Select it as the active, editable keyframe |
 | Drag a keyframe **bar** | Move that keyframe in time |
-| Drag a **contact span** (the coloured rows under the track) | Either end retimes that end; the body slides the whole window. Dragging the end past the right edge is how a stance is made to wrap the loop seam |
+| Drag a **contact span** (the coloured rows under the track) | Either end retimes that end; the body slides the whole window. Dragging the end past the right edge is how a stance is made to wrap the loop seam; a wrapped span's tail at the clip's head is grabbable too, and its end handle lives there (drag it back to the head's left edge to un-wrap). Where lanes overlap, the lane nearest the pointer is the one grabbed |
 | Drag an attachment **span** (the rows below the contacts) | Same gesture. The rows all sit below the keyframe ticks, so a click down there never retimes a pose |
 | `,` / `.` (or the timeline's `< key` / `key >`) | Step to the previous/next keyframe and make it editable |
 

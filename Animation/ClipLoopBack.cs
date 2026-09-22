@@ -49,6 +49,7 @@ public static class ClipLoopBack
         m.MaxCost = float.PositiveInfinity;
 
         var g = ClipTransitionGraph.Build(doc, doc, rig, m);
+        ClipStrideTrack.TryCompile(doc, rig, out var gait, out _);
         // Only the KEYED range is motion: outside [first key, last key] a non-cyclic clip
         // holds a pose, and two held samples would match perfectly for no reason.
         var ks = doc.Keyframes;
@@ -68,6 +69,8 @@ public static class ClipLoopBack
         for (int i = tailStart; i < last; i++)
             for (int j = first; j < tailStart && i - j >= minLen; j++)
             {
+                if (!ClipTransitionGraph.ContactsCompatible(gait, g.PhaseOf(i), gait, g.PhaseOf(j),
+                                                           1f / (g.Samples - 1))) continue;
                 float c = g.Cost[i, j];
                 // Cheapest wins; a tie goes to the longer loop.
                 if (c < best || (c == best && i - j > bestI - bestJ)) { best = c; bestI = i; bestJ = j; any = true; }

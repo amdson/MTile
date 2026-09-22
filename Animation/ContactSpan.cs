@@ -47,6 +47,15 @@ public sealed class ContactSpan
     public float         Start  { get; set; }                    // phase, [0,1)
     public float         End    { get; set; } = 1f;              // unwrapped: > Start, may exceed 1
     public ContactSource Source { get; set; } = ContactSource.SelfPlant;
+    // A CORNER PLANT (2026-09-21): the sole is meant to sit on a block's lip — the ball of the
+    // foot on the edge, as every stair and step-up stance is authored. The planner then lands
+    // this span on the nearest exposed corner of a tread instead of the clamped nearest point,
+    // so the tie between "this tread's edge" and "the next tread's interior" never flips it.
+    // The scene check classifies it (a touchdown sole on a guide's corner) and
+    // `probe scenecheck --tag-corners` writes it.
+    [System.Text.Json.Serialization.JsonIgnore(
+        Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public bool          Corner { get; set; }
 
     // Strength across the span, on the curve's normalized domain. Null = DefaultWeight.
     [System.Text.Json.Serialization.JsonIgnore(
@@ -97,6 +106,6 @@ public sealed class ContactSpan
 
     public ContactSpan Clone() => new()
     {
-        Point = Point, Start = Start, End = End, Source = Source, Weight = Weight?.Clone(),
+        Point = Point, Start = Start, End = End, Source = Source, Corner = Corner, Weight = Weight?.Clone(),
     };
 }

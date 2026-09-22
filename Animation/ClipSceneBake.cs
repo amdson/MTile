@@ -30,7 +30,14 @@ public static class ClipSceneBake
         public string  Warning;             // e.g. a loop without a t = 1 key
     }
 
-    public sealed class StanceCheck { public string Node; public float Touchdown, Liftoff; public Vector2 Foot; public float Drift; }
+    public sealed class StanceCheck
+    {
+        public string Node; public float Touchdown, Liftoff; public Vector2 Foot; public float Drift;
+        public bool    OnCorner;   // the touchdown sole sits on a scene guide's exposed top corner
+        public bool    Tagged;     // the span is already tagged Corner
+    }
+    // How close (rig units) a touchdown sole must be to a guide's corner to count as on it.
+    public const float CornerEps = 3f;
     public sealed class SwingCheck  { public string Node; public float Start, End; public float MaxPenetration; public float MinClearance; public float AtU; }
     public sealed class CheckResult
     {
@@ -177,7 +184,8 @@ public static class ClipSceneBake
             foreach (var st in f.Stances)
             {
                 if (st.Persistent) continue;
-                var c = new StanceCheck { Node = f.Node, Touchdown = st.Touchdown, Liftoff = st.Liftoff, Foot = Scene(f.Bone, st.Touchdown) };
+                var c = new StanceCheck { Node = f.Node, Touchdown = st.Touchdown, Liftoff = st.Liftoff, Foot = Scene(f.Bone, st.Touchdown),
+                                          Tagged = st.Corner, OnCorner = NearGuideCorner(doc, Scene(f.Bone, st.Touchdown)) };
                 for (int i = 0; i <= N; i++)
                 {
                     float t = st.Touchdown + (st.Liftoff - st.Touchdown) * i / N;
@@ -268,12 +276,51 @@ public static class ClipSceneBake
         return true;
     }
 
+    // Is `p` (scene, rig units) on an exposed top corner of a block guide — a corner not
+    // covered by another block's top at the same height?
+    public static bool NearGuideCorner(AnimationDocument doc, Vector2 p)
+    {
+        var guides = doc?.Scene?.Guides;
+        if (guides == null) return false;
+        foreach (var g in guides)
+        {
+            if (g.Kind != SceneGuideKind.Block) continue;
+            foreach (float cx in new[] { g.X, g.X + g.W })
+            {
+                if (MathF.Abs(p.X - cx) > CornerEps || MathF.Abs(p.Y - g.Y) > CornerEps) continue;
+                // Exposed: no other block's top runs through this corner at the same height.
+                bool covered = false;
+                foreach (var o in guides)
+                    if (!ReferenceEquals(o, g) && o.Kind == SceneGuideKind.Block && MathF.Abs(o.Y - g.Y) < 1e-3f
+                        && cx > o.X + 1e-3f && cx < o.X + o.W - 1e-3f) { covered = true; break; }
+                if (!covered) return true;
+            }
+        }
+        return false;
+    }
+
+    // Write Corner on every span whose touchdown sole the check found on a guide corner.
+    // Returns the number of spans newly tagged.
+    public static int TagCorners(AnimationDocument doc, CheckResult check)
+    {
+        int n = 0;
+        if (doc?.Contacts == null) return 0;
+        foreach (var s in check.Stances)
+        {
+            if (!s.OnCorner) continue;
+            foreach (var cs in doc.Contacts)
+                if (cs.Point == s.Node && MathF.Abs(cs.Start - s.Touchdown) < 1e-4f && !cs.Corner) { cs.Corner = true; n++; }
+        }
+        return n;
+    }
+
     public static string Describe(CheckResult r)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"motion {r.Source}: cycle displacement D = ({r.CycleDisplacement.X:0.0}, {r.CycleDisplacement.Y:0.0}) rig");
         foreach (var s in r.Stances)
-            sb.AppendLine($"  stance {s.Node,-9} [{s.Touchdown:0.00}, {s.Liftoff:0.00})  foot=({s.Foot.X:0.0},{s.Foot.Y:0.0})  drift {s.Drift:0.00} rig");
+            sb.AppendLine($"  stance {s.Node,-9} [{s.Touchdown:0.00}, {s.Liftoff:0.00})  foot=({s.Foot.X:0.0},{s.Foot.Y:0.0})  drift {s.Drift:0.00} rig"
+                          + (s.Tagged ? "  corner" : s.OnCorner ? "  on a corner (untagged)" : ""));
         foreach (var s in r.Swings)
             sb.AppendLine($"  swing  {s.Node,-9} [{s.Start:0.00}, {s.End:0.00})  block penetration {s.MaxPenetration:0.00} rig"
                           + (s.MaxPenetration > 0f ? $" at u={s.AtU:0.00}" : "")

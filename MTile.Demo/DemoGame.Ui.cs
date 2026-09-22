@@ -527,7 +527,13 @@ public sealed partial class DemoGame
         ImGui.TextDisabled($"{doc.Duration:0.00}s   t={_scrubT:0.000}");
 
         var avail = ImGui.GetContentRegionAvail();
-        float trackH = MathF.Max(40f, avail.Y - 4f);
+        // The track is the click target for every row below the keyframe ticks, so it must
+        // be at least as tall as the rows it draws (six contact lanes plus the attachment
+        // rows overran a 40 px track and were unclickable).
+        int rowsForHeight = ContactRowCount(doc);
+        int attachForHeight = doc.Attachments?.Count ?? 0;
+        float neededH = 18f + 8f + Math.Max(rowsForHeight, 1) * ContactPitch + 8f + attachForHeight * AttachPitch + 12f;
+        float trackH = MathF.Max(MathF.Max(40f, neededH), avail.Y - 4f);
         ImGui.InvisibleButton("##track", new NVec2(MathF.Max(32f, avail.X), trackH));
         var min = ImGui.GetItemRectMin();
         var max = ImGui.GetItemRectMax();
@@ -549,15 +555,29 @@ public sealed partial class DemoGame
         {
             // Span grabs win over keyframe bars: the rows sit below the keyframe ticks, so a
             // click down there is aimed at an annotation, never at retiming the whole pose.
-            _dragAttachSpan = null; _dragContactSpan = null; _dragSpanPart = SpanPart.None;
-            for (int i = 0; i < contacts.Count && _dragContactSpan == null; i++)
+            _dragAttachSpan = null; _dragContactSpan = null; _dragSpanPart = SpanPart.None; _dragSpanTail = false;
+            // NEAREST lane wins. Contact lanes are ContactPitch (6 px) apart and SpanHit accepts
+            // ±7 px, so a first-hit scan let the lane above swallow a click aimed at the one
+            // below wherever the two bars overlap in time. A span that crosses the loop seam
+            // is also hittable on its tail at the clip's head, where its END handle lives.
+            float bestDy = float.MaxValue;
+            for (int i = 0; i < contacts.Count; i++)
             {
                 var cs = contacts[i];
-                var part = SpanHit(TimeToX(cs.Start), TimeToX(MathF.Min(cs.End, 1f)), mouseX, mouseY,
-                                   ContactRowY(y, ContactRow(contacts, i)));
+                float by = ContactRowY(y, ContactRow(contacts, i));
+                float dy = MathF.Abs(mouseY - by);
+                if (dy >= bestDy) continue;
+                bool tail = false;
+                var part = SpanHit(TimeToX(cs.Start), TimeToX(MathF.Min(cs.End, 1f)), mouseX, mouseY, by, capEnd: cs.End <= 1f);
+                if (part == SpanPart.None && cs.End > 1f)
+                {
+                    part = SpanHit(TimeToX(0f), TimeToX(cs.End - 1f), mouseX, mouseY, by, capStart: false);
+                    tail = part != SpanPart.None;
+                }
                 if (part == SpanPart.None) continue;
-                _dragContactSpan = cs; _dragSpanPart = part;
-                _dragSpanOffset = XToTime(mouseX) - cs.Start;
+                bestDy = dy;
+                _dragContactSpan = cs; _dragSpanPart = part; _dragSpanTail = tail;
+                _dragSpanOffset = XToTime(mouseX) + (tail ? 1f : 0f) - cs.Start;
                 _selectedContact = cs; _selectedAttachment = null; _selectedPointId = null;
             }
             for (int i = 0; i < attachments.Count && _dragContactSpan == null && _dragAttachSpan == null; i++)
@@ -584,7 +604,7 @@ public sealed partial class DemoGame
         }
         if (ImGui.IsItemActive() && !_playing)
         {
-            if (_dragContactSpan != null) DragContactSpan(_dragContactSpan, _dragSpanPart, XToTime(mouseX), _dragSpanOffset);
+            if (_dragContactSpan != null) DragContactSpan(_dragContactSpan, _dragSpanPart, XToTime(mouseX) + (_dragSpanTail ? 1f : 0f), _dragSpanOffset);
             else if (_dragAttachSpan != null) DragAttachSpan(_dragAttachSpan, _dragSpanPart, XToTime(mouseX), _dragSpanOffset);
             else if (_dragBar >= 0)
             {
@@ -599,7 +619,7 @@ public sealed partial class DemoGame
             else if (_dragPlayhead) Scrub(XToTime(mouseX));
         }
         if (ImGui.IsItemDeactivated())
-        { _dragBar = -1; _dragPlayhead = false; _dragAttachSpan = null; _dragContactSpan = null; _dragSpanPart = SpanPart.None; }
+        { _dragBar = -1; _dragPlayhead = false; _dragAttachSpan = null; _dragContactSpan = null; _dragSpanPart = SpanPart.None; _dragSpanTail = false; }
 
         var dl = ImGui.GetWindowDrawList();
         dl.AddLine(new NVec2(x0, y), new NVec2(x1, y), Col(80, 85, 100), 2f);
@@ -616,19 +636,23 @@ public sealed partial class DemoGame
             float by = ContactRowY(y, ContactRow(contacts, i));
             bool sel = _selectedContact == cs;
             uint col = cs.Source == ContactSource.External ? Col(240, 160, 70) : Col(70, 220, 110);
-            DrawSpan(dl, sx, ex, by, col, sel);
+            bool wraps = cs.End > 1f;
+            // A span wrapping the loop seam continues at the clip's head; its END handle is
+            // there, not at the seam (and it is grabbable there — see the press above).
+            DrawSpan(dl, sx, ex, by, col, sel, capEnd: !wraps);
+            if (wraps) DrawSpan(dl, TimeToX(0f), TimeToX(cs.End - 1f), by, col, sel, capStart: false);
+            // The weight profile, over the UNWRAPPED span (a segment straddling the seam is skipped).
             const int Profile = 24;
+            float XOf(float t) => TimeToX(t > 1f ? t - 1f : t);
             for (int k = 0; k < Profile; k++)
             {
                 float u0 = k / (float)Profile, u1 = (k + 1) / (float)Profile;
+                float t0 = cs.Start + (cs.End - cs.Start) * u0, t1 = cs.Start + (cs.End - cs.Start) * u1;
+                if ((t0 > 1f) != (t1 > 1f)) continue;
                 float w0 = AnimCurve.ValueAt(cs.EffectiveWeight, u0);
                 float w1 = AnimCurve.ValueAt(cs.EffectiveWeight, u1);
-                dl.AddLine(new NVec2(sx + (ex - sx) * u0, by - 6f * w0),
-                           new NVec2(sx + (ex - sx) * u1, by - 6f * w1), col, 1f);
+                dl.AddLine(new NVec2(XOf(t0), by - 6f * w0), new NVec2(XOf(t1), by - 6f * w1), col, 1f);
             }
-            // A span wrapping the loop seam continues at the clip's head.
-            if (cs.End > 1f)
-                dl.AddLine(new NVec2(TimeToX(0f), by), new NVec2(TimeToX(cs.End - 1f), by), col, 3f);
             if (sel) dl.AddText(new NVec2(sx + 4f, by - 20f), Col(255, 255, 255),
                                 $"{cs.Point} [{cs.Start:0.00}-{cs.End:0.00}] {cs.Source}");
         }
@@ -713,11 +737,14 @@ public sealed partial class DemoGame
 
     // Which part of the bar at `by` spanning [sx,ex] the pointer is on. Endpoint handles win
     // over the body so a span squeezed to a few pixels stays resizable instead of only movable.
-    private static SpanPart SpanHit(float sx, float ex, float mx, float my, float by)
+    // `capStart`/`capEnd` say which ends carry a handle: a seam-crossing span's pre-seam
+    // segment has no end handle (the seam is not its end) and its tail has no start handle.
+    private static SpanPart SpanHit(float sx, float ex, float mx, float my, float by,
+                                    bool capStart = true, bool capEnd = true)
     {
         if (MathF.Abs(my - by) > 7f) return SpanPart.None;
-        if (MathF.Abs(mx - sx) <= 5f) return SpanPart.Start;
-        if (MathF.Abs(mx - ex) <= 5f) return SpanPart.End;
+        if (capStart && MathF.Abs(mx - sx) <= 5f) return SpanPart.Start;
+        if (capEnd   && MathF.Abs(mx - ex) <= 5f) return SpanPart.End;
         return mx > sx && mx < ex ? SpanPart.Body : SpanPart.None;
     }
 
@@ -781,13 +808,14 @@ public sealed partial class DemoGame
         _dirty = true;
     }
 
-    private static void DrawSpan(ImDrawListPtr dl, float sx, float ex, float by, uint col, bool selected)
+    private static void DrawSpan(ImDrawListPtr dl, float sx, float ex, float by, uint col, bool selected,
+                                 bool capStart = true, bool capEnd = true)
     {
         dl.AddLine(new NVec2(sx, by), new NVec2(ex, by), col, selected ? 5f : 3f);
         // Endpoint caps — the affordance that says "this end is draggable".
         float h = selected ? 6f : 4f;
-        dl.AddRectFilled(new NVec2(sx - 2f, by - h), new NVec2(sx + 2f, by + h), col);
-        dl.AddRectFilled(new NVec2(ex - 2f, by - h), new NVec2(ex + 2f, by + h), col);
+        if (capStart) dl.AddRectFilled(new NVec2(sx - 2f, by - h), new NVec2(sx + 2f, by + h), col);
+        if (capEnd)   dl.AddRectFilled(new NVec2(ex - 2f, by - h), new NVec2(ex + 2f, by + h), col);
     }
 
 

@@ -9,6 +9,7 @@ namespace MTile;
 //   WallStates.cs       — WallSliding, WallJumping
 //   LedgeStates.cs      — LedgeGrab, LedgePull, LedgeJump
 //   ClimbStates.cs      — Parkour (vault), Mantle, ArcJump (ClimbManeuverBase)
+//   StairClimbState.cs  — StairClimb (a fold state: Standing's drive, free-climb profile)
 //   ReactionStates.cs   — Stunned, Tumble
 //
 // The corrector solve is SHARED INFRASTRUCTURE, not a class of state — any

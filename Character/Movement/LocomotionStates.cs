@@ -71,7 +71,7 @@ public class StandingState : MovementState
     // descent will cross the engagement gate and flicker the state) — it becomes
     // Standing when support can actually bind it. Continuation (CheckConditions) stays
     // the plain probe: states are sticky.
-    private static bool IsStandingGround(EnvironmentContext ctx)
+    internal static bool IsStandingGround(EnvironmentContext ctx)
     {
         if (!ctx.TryGetGround(out var ground)) return false;
         float riseSpeed = Vector2.Dot(ctx.Body.Velocity - ground.SurfaceVelocity, ground.Normal);

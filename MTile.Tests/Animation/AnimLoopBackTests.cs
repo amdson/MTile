@@ -59,6 +59,57 @@ public class AnimLoopBackTests
         Assert.False(plan.Jumps);
     }
 
+    [Fact]
+    public void AnnotatedSeam_UsesWrappedContactsAtTheEndPose()
+    {
+        var clip = Swing("Walk", 1f);
+        clip.Contacts = new()
+        {
+            new() { Point = "support_l", Start = 0f, End = 0.5f },
+            new() { Point = "support_r", Start = 0.5f, End = 1f },
+        };
+        var graph = ClipTransitionGraph.Build(clip, clip, Rig(), new TransitionOptions
+        {
+            Window = 0, IncludeEndPhase = true, TreatAsNonLooping = true,
+            AngleWeight = 0, FootPositionWeight = 0, FootVelocityWeight = 0,
+        });
+        Assert.Equal(0f, graph.CostAt(1f, 0f));
+        Assert.False(ClipLoopBack.Plan(clip, Rig(), 0.25f, 0.3f).Jumps);
+    }
+
+    [Fact]
+    public void ContactTransfer_RejectsBothFootSwapAndWrongPartOfStance()
+    {
+        var clip = Swing("Walk", 1f);
+        clip.Contacts = new()
+        {
+            new() { Point = "support_l", Start = 0f, End = 0.5f },
+            new() { Point = "support_r", Start = 0.5f, End = 1f },
+        };
+        Assert.True(ClipStrideTrack.TryCompile(clip, Rig(), out var gait, out _));
+        Assert.True(ClipTransitionGraph.ContactsCompatible(gait, 0.12f, gait, 0.13f, 0.02f));
+        Assert.False(ClipTransitionGraph.ContactsCompatible(gait, 0.12f, gait, 0.62f, 0.02f));
+        Assert.False(ClipTransitionGraph.ContactsCompatible(gait, 0.12f, gait, 0.42f, 0.02f));
+    }
+
+    [Fact]
+    public void AnnotatedRepeat_StillAllowsContactCompatibleLoopBack()
+    {
+        var clip = Swing("Walk", 2.5f);
+        clip.Contacts = new()
+        {
+            new() { Point = "support_l", Start = 0f, End = .2f },
+            new() { Point = "support_r", Start = .2f, End = .4f },
+            new() { Point = "support_l", Start = .4f, End = .6f },
+            new() { Point = "support_r", Start = .6f, End = .8f },
+            new() { Point = "support_l", Start = .8f, End = 1f },
+        };
+        var plan = ClipLoopBack.Plan(clip, Rig(), 0.3f, 0.3f, new TransitionOptions { Samples = 101 });
+        Assert.True(plan.Jumps, $"{plan.Cost} vs seam {plan.SeamCost}");
+        Assert.True(ClipStrideTrack.TryCompile(clip, Rig(), out var gait, out _));
+        Assert.True(ClipTransitionGraph.ContactsCompatible(gait, plan.Exit, gait, plan.Entry, .01f));
+    }
+
     // Drive the animator: with loop-back on, the phase never crosses the bad seam by wrapping;
     // every backwards step is a counted jump onto the plan's entry. With it off, it wraps.
     [Theory]

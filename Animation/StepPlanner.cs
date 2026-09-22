@@ -65,6 +65,7 @@ public struct PlannerInputs
     public ClipStrideTrack Track;
     public ChunkMap Chunks;
     public Func<float, Vector2> PredictAt;   // dt-ahead body prediction; null → velocity fallback
+    public LoopBackPlan? LoopBack;          // optional same-clip continuation for stance lookahead
 }
 
 public sealed class StepPlanner
@@ -124,7 +125,6 @@ public sealed class StepPlanner
 
         var cfg = AnimSolverConfig.Current;
         int dir = inp.Facing == 0 ? 1 : inp.Facing;
-        float engage  = inp.Dt / MathF.Max(1e-3f, cfg.ContactEngageTime);
         float release = inp.Dt / MathF.Max(1e-3f, cfg.ContactReleaseTime);
 
         Span<SupportSegment> treads = stackalloc SupportSegment[MaxTreads];
@@ -143,16 +143,23 @@ public sealed class StepPlanner
             if (stanceIdx >= 0)
             {
                 var stance = ft.Stances[stanceIdx];
+                float remaining = StanceTime(inp, ft, stanceIdx, inp.Phase);
+                var reach = PredictReach(inp, 0, remaining);
+                // Establish the plant during the first half of even a short stance.
+                float engage = inp.Dt / MathF.Max(inp.Dt,
+                    MathF.Min(cfg.ContactEngageTime, remaining * .5f));
                 if (st.State != FootPlanState.Stance)
                 {
                     // Touchdown: land on the support selected during swing; if none (or it
                     // died), try an immediate selection around the authored offset — do not
                     // pin a distant point just because phase crossed the event.
-                    if (!st.HasSupport || !SupportQuery.Revalidate(inp.Chunks, MakeSegment(st.SupportId, inp.Chunks)))
+                    if (!st.HasSupport || !SupportQuery.Revalidate(inp.Chunks, MakeSegment(st.SupportId, inp.Chunks))
+                        || !reach.Contains(st.SupportPoint, maxReach))
                     {
                         Vector2 wish = inp.BodyPos + Place(stance.TdOffset, dir, inp.Scale);
-                        st.HasSupport = TrySelect(inp, treads, wish, inp.BodyPos, maxReach,
-                                                  held: -1, out var seg, out var pt, out plan.Reject);
+                        st.HasSupport = TrySelect(inp, treads, wish, reach, maxReach,
+                                                  held: -1, out var seg, out var pt, out plan.Reject,
+                                                  corner: stance.Corner);
                         if (st.HasSupport) { st.SupportId = seg.Id; st.SupportPoint = pt; }
                     }
                     st.State = st.HasSupport ? FootPlanState.Stance : FootPlanState.Unplanned;
@@ -200,6 +207,8 @@ public sealed class StepPlanner
                 float dtTd = MathHelper.Clamp((1f - u) * (swing.End - swing.Start) / rate,
                                               0f, MaxLookahead);
                 Vector2 bodyAtTd = inp.PredictAt?.Invoke(dtTd) ?? (inp.BodyPos + inp.BodyVel * dtTd);
+                var reach = PredictReach(inp, dtTd,
+                    StanceTime(inp, ft, (swingIdx + 1) % ft.Stances.Length, landStance.Touchdown));
                 plan.Preferred = bodyAtTd + Place(landStance.TdOffset, dir, inp.Scale);
 
                 // Where the foot is now (the carried position: last target plus its per-frame
@@ -220,7 +229,7 @@ public sealed class StepPlanner
                 {
                     if (!SupportQuery.Revalidate(inp.Chunks, MakeSegment(st.SupportId, inp.Chunks)))
                     { st.HasSupport = false; reselect = true; replan = StepReplan.InvalidSupport; plan.Reject = StepReject.NoSupport; }
-                    else if ((st.SupportPoint - bodyAtTd).Length() > maxReach)
+                    else if (!reach.Contains(st.SupportPoint, maxReach))
                     { st.HasSupport = false; reselect = true; replan = StepReplan.InvalidSupport; plan.Reject = StepReject.Unreachable; }
                     else if (SwingBlocked(swing, st.Takeoff, st.SupportPoint, dir, inp.Scale, inp.Chunks, fromU, carried, st.Shape))
                     { reselect = true; replan = StepReplan.Obstruction; }
@@ -234,10 +243,10 @@ public sealed class StepPlanner
                 //    the same point is a quiet re-commit, not a replan.
                 if (reselect)
                 {
-                    bool found = TrySelect(inp, treads, plan.Preferred, bodyAtTd, maxReach,
+                    bool found = TrySelect(inp, treads, plan.Preferred, reach, maxReach,
                                            held: st.HasSupport ? st.SupportId : long.MinValue,
                                            out var seg, out var pt, out var rej, out int shape,
-                                           swing, st.Takeoff, dir, fromU, carried);
+                                           swing, st.Takeoff, dir, fromU, carried, landStance.Corner);
                     if (found)
                     {
                         bool same = st.HasSupport && seg.Id == st.SupportId && (pt - st.SupportPoint).LengthSquared() < 1e-6f
@@ -326,6 +335,50 @@ public sealed class StepPlanner
         if (u0 <= 0f) return nominal;
         Vector2 at0 = Chord(takeoff, landing, u0, shape) + Place(Residual(swing, u0), dir, scale);
         return nominal + (from - at0) * Decay(u, u0);
+    }
+
+    private readonly record struct StanceReach(Vector2 Start, Vector2 Middle, Vector2 End)
+    {
+        public bool Contains(Vector2 point, float radius) =>
+            Vector2.DistanceSquared(point, Start) <= radius * radius &&
+            Vector2.DistanceSquared(point, Middle) <= radius * radius &&
+            Vector2.DistanceSquared(point, End) <= radius * radius;
+    }
+
+    private static StanceReach PredictReach(in PlannerInputs inp, float touchdown, float duration)
+    {
+        // Without a terrain-aware trajectory, velocity extrapolation is only the existing
+        // touchdown estimate. Extending it through stance can predict motion through walls
+        // or off ledges and reject otherwise valid plants in lightweight callers.
+        if (inp.PredictAt == null)
+        {
+            var atTouchdown = inp.BodyPos + inp.BodyVel * touchdown;
+            return new StanceReach(atTouchdown, atTouchdown, atTouchdown);
+        }
+        float mid = MathF.Min(MaxLookahead, touchdown + duration * .5f);
+        float end = MathF.Min(MaxLookahead, touchdown + duration);
+        return new StanceReach(
+            inp.PredictAt?.Invoke(touchdown) ?? inp.BodyPos + inp.BodyVel * touchdown,
+            inp.PredictAt?.Invoke(mid) ?? inp.BodyPos + inp.BodyVel * mid,
+            inp.PredictAt?.Invoke(end) ?? inp.BodyPos + inp.BodyVel * end);
+    }
+
+    private static float StanceTime(in PlannerInputs inp, FootStrideTrack foot, int index, float phase)
+    {
+        var stance = foot.Stances[index];
+        if (stance.Persistent) return AnimSolverConfig.Current.ContactEngageTime * 2;
+        float unwrapped = phase < stance.Touchdown ? phase + 1 : phase;
+        float remaining = MathF.Max(0, stance.Liftoff - unwrapped);
+        // A compatible loop-back may extend this plant into an earlier stance interval.
+        if (inp.LoopBack is { Jumps: true } loop && loop.Exit >= phase &&
+            foot.StanceAt(loop.Exit, out _) == index)
+        {
+            int entry = foot.StanceAt(loop.Entry, out _);
+            if (entry >= 0)
+                remaining = MathF.Max(remaining,
+                    loop.Exit - phase + foot.Stances[entry].Liftoff - loop.Entry);
+        }
+        return remaining / MathF.Max(inp.NominalRate, .25f);
     }
 
     private static int FindStance(FootStrideTrack ft, float phase, out float u) => ft.StanceAt(phase, out u);
@@ -420,17 +473,24 @@ public sealed class StepPlanner
     // stairs the only clearable tread can be several steps up — the clip's own motion
     // plus touchdown selection is the honest answer there).
     private bool TrySelect(in PlannerInputs inp, Span<SupportSegment> treads, Vector2 wish,
-                           Vector2 bodyRef, float maxReach, long held,
+                           StanceReach reach, float maxReach, long held,
                            out SupportSegment best, out Vector2 point, out StepReject reject,
                            StrideSwing? swing = null, Vector2 takeoff = default, int dir = 1,
-                           float u0 = 0f, Vector2 from = default)
-        => TrySelect(inp, treads, wish, bodyRef, maxReach, held, out best, out point, out reject, out _,
-                     swing, takeoff, dir, u0, from);
+                           float u0 = 0f, Vector2 from = default, bool corner = false)
+        => TrySelect(inp, treads, wish, reach, maxReach, held, out best, out point, out reject, out _,
+                     swing, takeoff, dir, u0, from, corner);
 
+    // CORNER PLANTS (2026-09-21). A landing whose clamp lands on a tread's lip is a corner
+    // plant — the ball of the foot on the edge, which is how every stair stance is authored.
+    // It gets the hysteresis-sized bonus so the tie between "this tread's lip" and "the next
+    // tread's interior" resolves the same way every frame instead of flipping with the wish.
+    // A span tagged Corner (ContactSpan.Corner) goes further: its candidates ARE the treads'
+    // exposed corners — the nearest lip wins outright and a tread with no lip is not a plan.
     private bool TrySelect(in PlannerInputs inp, Span<SupportSegment> treads, Vector2 wish,
-                           Vector2 bodyRef, float maxReach, long held,
+                           StanceReach reach, float maxReach, long held,
                            out SupportSegment best, out Vector2 point, out StepReject reject, out int shape,
-                           StrideSwing? swing, Vector2 takeoff, int dir, float u0, Vector2 from)
+                           StrideSwing? swing, Vector2 takeoff, int dir, float u0, Vector2 from,
+                           bool corner = false)
     {
         best = default; point = default; shape = 0;
         int n = SupportQuery.QueryTreads(inp.Chunks, wish, QueryRadius, treads);
@@ -440,12 +500,15 @@ public sealed class StepPlanner
         bool anyInReach = false, anyClear = false;
         for (int i = 0; i < n; i++)
         {
-            Vector2 p = treads[i].Clamp(wish.X);
-            if ((p - bodyRef).Length() > maxReach) continue;
+            Vector2 p;
+            if (corner) { if (!treads[i].TryNearestCorner(wish.X, out p)) continue; }
+            else p = treads[i].Clamp(wish.X);
+            if (!reach.Contains(p, maxReach)) continue;
             float miss = (p - wish).Length();
             if (miss > MaxLandingMiss) continue;
             anyInReach = true;
-            float score = miss - (treads[i].Id == held ? hysteresis : 0f);
+            float score = miss - (treads[i].Id == held ? hysteresis : 0f)
+                               - (treads[i].IsCorner(p) ? hysteresis : 0f);
             if (score >= bestScore) continue;
             int sh = 0;
             if (swing.HasValue)

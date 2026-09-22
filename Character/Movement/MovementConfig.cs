@@ -196,6 +196,9 @@ public class MovementConfig
     // the ramp stack; the rest tune the predict → rows → solve loop. Iteration counts
     // and the hinge/ε weights are deliberately NOT here — fixed constants, not knobs.
     public bool  CorrectorClimbEnabled          { get; set; } = true;
+    // StairClimbState A/B (hot-reload): off = a regular flight is climbed by the vault
+    // chain again (one Parkour re-entry per riser).
+    public bool  StairClimbEnabled              { get; set; } = true;
     public int   CorrectorHorizon               { get; set; } = 18;
     public float CorrectorMargin                { get; set; } = 2f;
     public float CorrectorDeltaWeight           { get; set; } = 5f;

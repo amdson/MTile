@@ -89,6 +89,15 @@ public static class MovementPriorities
     public const int ClimbActive  = 29;
     public const int ClimbPassive = 29;
 
+    // StairClimb (Character/Movement/StairClimbState.cs): a regular flight of one-riser
+    // steps is one fold climb, not a chain of vaults. Same band as the climb family —
+    // every deliberate launch (30+) still overrides it, stun (25) still can't — and the
+    // SAME numbers as Parkour on purpose: when both bid at the first riser the tie goes to
+    // registration order, and StairClimb is registered before the vaults. Once active its
+    // 29 keeps the vaults (Passive 29, not > 29) from stealing the flight riser by riser.
+    public const int StairClimbActive  = 29;
+    public const int StairClimbPassive = 29;
+
     // Holds.
     public const int LedgeGrabActive  = 42;
     public const int LedgeGrabPassive = 42;

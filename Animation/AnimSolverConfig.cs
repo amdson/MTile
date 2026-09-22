@@ -30,7 +30,11 @@ public class AnimSolverConfig
 {
     // --- constraint weight tiers (dimensionless rows — see the units note above) ---
     public float TierHard      { get; set; } = 4700f; // FixedPoint external pins (both axes)
-    public float TierNoPen     { get; set; } = 4700f; // active no-penetration half-plane push-out (hard tier, like a pin)
+    // No-penetration half-plane push-out. SOFT since 2026-09-21 (was the hard tier): a sole
+    // planted on a block's lip lies on two half-planes at once, and a hard riser face pushed
+    // it off the corner every frame. A few px of penetration is acceptable; the contact pin
+    // (TierContact) must win over the faces that meet at its corner.
+    public float TierNoPen     { get; set; } = 60f;
     public float TierAim       { get; set; } = 60f;   // action aim: rotate the overlay's L→R-hand vector onto the input dir
     public float TierContact   { get; set; } = 470f;  // planted-foot no-slip (Δφ) + ground hold (δ), × feathered label weight
     public float CorePosePrior { get; set; } = 60f;   // λ_θ on hip/chest/head — stiff torso
@@ -59,7 +63,7 @@ public class AnimSolverConfig
     // |Δθ| cap per bone (rad). Widened from 0.6 when smoothing moved in-solve: Δθ now also
     // BRIDGES clip switches (spanning the pose gap, then decaying), and Idle↔Walk gaps can
     // exceed 1 rad — a tight box would clamp the bridge and pop. Sanity backstop only; the
-    // priors do the real bounding. Proper per-joint bounds = JointLimits (future phase).
+    // priors limit distortion; optional rig MinRotation/MaxRotation bound joint anatomy.
     public float AngleCorrLimit  { get; set; } = 3.2f;
     // Relative-cost-reduction stopping test for the STATIC solve (MINPACK ftol, Ceres
     // function_tolerance). The static path had none, so it spent its whole 12-iteration
@@ -88,6 +92,8 @@ public class AnimSolverConfig
     // Master A/B for the whole planner path; off = every clip on the legacy SelfPlant
     // lifecycle even when opted in. Render-only, so live-toggling is always safe.
     public bool  PlannerEnabled      { get; set; } = true;
+    // A/B switch: retain landing selection and plants, but omit airborne foot targets.
+    public bool SwingTargetsEnabled { get; set; } = true;
     // Landing selection: score bonus (px) for keeping the previously selected tread.
     public float PlannerHysteresis   { get; set; } = 4f;
     // Swing progress after which a still-valid landing target is frozen.
@@ -104,7 +110,7 @@ public class AnimSolverConfig
     // The tail: exits are considered over the last this-fraction of the clip.
     public float LoopBackRegion      { get; set; } = 0.25f;
     // The shortest loop a jump may leave, as a fraction of the clip (keeps runs long).
-    public float LoopBackMinLoop     { get; set; } = 0.5f;
+    public float LoopBackMinLoop     { get; set; } = 0.3f;   // a run-in plays once; a two-stride loop can be well under half the clip
     // Once a contact's feather RELEASE has begun, its weight also fades by time over at most
     // this many seconds (min of the two) — so a low-speed cadence stall can't hold the old
     // foot's grip forever (the foot-swap deadlock; see CharacterAnimator.RefreshContacts).
@@ -180,6 +186,7 @@ public class AnimSolverConfig
         ContactReleaseTime      = src.ContactReleaseTime;
         ContactEngageTime       = src.ContactEngageTime;
         PlannerEnabled          = src.PlannerEnabled;
+        SwingTargetsEnabled     = src.SwingTargetsEnabled;
         PlannerHysteresis       = src.PlannerHysteresis;
         PlannerLateSwingLock    = src.PlannerLateSwingLock;
         PlannerReplanDistance   = src.PlannerReplanDistance;

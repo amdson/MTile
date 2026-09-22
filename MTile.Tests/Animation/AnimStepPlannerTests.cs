@@ -97,6 +97,155 @@ public class AnimStepPlannerTests(Xunit.Abstractions.ITestOutputHelper output)
             Track = track, Chunks = chunks, PredictAt = null,
         };
 
+    // ── Corner plants (2026-09-21) ────────────────────────────────────────────
+
+    [Fact]
+    public void ShortStance_EstablishesContactBeforeLiftoff()
+    {
+        var track = Track();
+        track.Feet[0].Stances[0].Liftoff = .15f;
+        var chunks = TwoTreads();
+        var body = BodyFor(track, new Vector2(3.6f * TS, 2 * TS));
+        var planner = new StepPlanner();
+        planner.Update(Inputs(track, chunks, body, Vector2.Zero, .1f, rate: 1));
+        Assert.Equal(FootPlanState.Stance, planner.Plans[0].State);
+        Assert.True(planner.Plans[0].Weight >= .5f);
+        planner.Update(Inputs(track, chunks, body, Vector2.Zero, .1f + 1f / 60f, rate: 1));
+        Assert.Equal(1f, planner.Plans[0].Weight);
+    }
+
+    [Fact]
+    public void LandingSelection_AccountsForBodyTravelDuringStance()
+    {
+        var chunks = SimTerrain.FromAscii("OOOOOOOOOOOOOOOOOOOO\nOOOOOOOOOOOOOOOOOOOO\nXXXXXXXXXXXXXXXXXXXX");
+        var track = Track();
+        var body = new Vector2(60, 2 * TS - 20);
+        var velocity = new Vector2(90, 0);
+        var input = Inputs(track, chunks, body, velocity, .15f);
+        var baseline = new StepPlanner(); baseline.Update(input);
+        input.PredictAt = t => body + velocity * t;
+        var planner = new StepPlanner(); planner.Update(input);
+        var plan = planner.Plans[0];
+        Assert.Equal(FootPlanState.Stance, plan.State);
+        Assert.True(plan.Target.X > baseline.Plans[0].Target.X);
+        var end = input.PredictAt((.6f - .15f) / input.NominalRate);
+        Assert.True(Vector2.Distance(plan.Target, end) <= track.Feet[0].MaxReachRig * input.Scale);
+    }
+
+    [Fact]
+    public void StanceLookahead_IncludesLoopBackContinuation()
+    {
+        var track = Track();
+        track.Feet[0].Stances = new[]
+        {
+            new StrideStance { Touchdown = .1f, Liftoff = .3f, TdOffset = new Vector2(4, 10) },
+            new StrideStance { Touchdown = .6f, Liftoff = .7f, TdOffset = new Vector2(4, 10) },
+        };
+        var body = new Vector2(35, 2 * TS - 20);
+        var input = Inputs(track, TwoTreads(), body, Vector2.Zero, .62f, rate: 1);
+        input.LoopBack = new LoopBackPlan(true, true, .65f, .15f, 0, 1);
+        float furthest = 0;
+        input.PredictAt = t => { furthest = MathF.Max(furthest, t); return body; };
+        new StepPlanner().Update(input);
+        Assert.InRange(furthest, .179f, .181f);
+    }
+
+    // Two-tread staircase: the row-2 tread (cols 3-4, top y=2·TS) has its lip at x=3·TS,
+    // above the row-3 floor (cols 0-2, top y=3·TS).
+    private static ChunkMap TwoTreads() => SimTerrain.FromAscii(@"
+            OOOOOOOO
+            OOOOOXXX
+            OOOXXXXX
+            XXXXXXXX", originTileX: 0, originTileY: 0);
+
+    // The body position whose authored touchdown wish lands at `wish` (tiny rig: the foot
+    // tip is TdOffset·Scale ahead/below the body).
+    private static Vector2 BodyFor(ClipStrideTrack track, Vector2 wish, float scale = 2f)
+    {
+        var td = track.Feet[0].Stances[0].TdOffset;
+        return wish - new Vector2(td.X * scale, td.Y * scale);
+    }
+
+    private static ClipStrideTrack CornerTrack()
+    {
+        var doc = new AnimationDocument
+        {
+            Name = "gait", Type = "Misc", Skeleton = "tiny", Loop = true, Duration = 0.8f,
+            Keyframes = new List<AnimationKeyframe>
+            {
+                K(0.1f, 0.00f), K(0.3f, 0.10f), K(0.6f, 0.25f), K(0.8f, 0.05f),
+            },
+            Contacts = new List<ContactSpan> { new() { Point = "foot", Start = 0.1f, End = 0.6f, Corner = true } },
+        };
+        Assert.True(ClipStrideTrack.TryCompile(doc, TinyRig(), out var track, out string err), err);
+        Assert.True(track.Feet[0].Stances[0].Corner);
+        return track;
+
+        static AnimationKeyframe K(float t, float hipRot) => new()
+        { Time = t, Bones = new List<PoseBoneEntry> { new() { Bone = "hip", Rotation = hipRot } } };
+    }
+
+    // A wish that is a near tie between the lower floor's interior and the upper tread's
+    // lip goes to the LIP: a corner plant gets the hysteresis-sized bonus, so the choice does
+    // not flip with the wish from frame to frame.
+    [Fact]
+    public void Landing_NearATie_PrefersTheLip()
+    {
+        var chunks = TwoTreads();
+        var track = Track();
+        var planner = new StepPlanner();
+        // 5.5 px left of and below the lip: 5.5 px to the floor straight down, 7.8 px to the lip.
+        var wish = new Vector2(3 * TS - 5.5f, 2 * TS + 5.5f);
+        planner.Update(Inputs(track, chunks, BodyFor(track, wish), new Vector2(60f, 0f), 0.15f));
+        var p = planner.Plans[0];
+        Assert.Equal(FootPlanState.Stance, p.State);
+        Assert.True(p.HasSupport, $"no support ({p.Reject})");
+        Assert.Equal(3 * TS, p.Target.X, 3);
+        Assert.Equal(2 * TS, p.Target.Y, 3);
+    }
+
+    // A span tagged Corner lands on the tread's exposed corner even when the wish sits in the
+    // middle of the tread; untagged, the same wish plants where it points.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TaggedCornerPlant_LandsOnTheLip_UntaggedPlantsAtTheWish(bool tagged)
+    {
+        var chunks = TwoTreads();
+        var track = tagged ? CornerTrack() : Track();
+        var planner = new StepPlanner();
+        var wish = new Vector2(3.6f * TS, 2 * TS);           // mid-tread, 6.6 px in from the lip
+        planner.Update(Inputs(track, chunks, BodyFor(track, wish), new Vector2(60f, 0f), 0.15f));
+        var p = planner.Plans[0];
+        Assert.Equal(FootPlanState.Stance, p.State);
+        Assert.True(p.HasSupport, $"no support ({p.Reject})");
+        Assert.Equal(tagged ? 3 * TS : 3.6f * TS, p.Target.X, 3);
+        Assert.Equal(2 * TS, p.Target.Y, 3);
+    }
+
+    [Fact]
+    public void QueryTreads_FlagsExposedLips()
+    {
+        var chunks = TwoTreads();
+        Span<SupportSegment> dst = stackalloc SupportSegment[32];
+        int n = SupportQuery.QueryTreads(chunks, new Vector2(3.5f * TS, 2 * TS), 1.2f * TS, dst);
+        bool sawLip = false;
+        for (int i = 0; i < n; i++)
+            if (MathF.Abs(dst[i].Y - 2 * TS) < 1e-3f && MathF.Abs(dst[i].X0 - 3 * TS) < 1e-3f)
+            { sawLip = true; Assert.True(dst[i].CornerL); Assert.False(dst[i].CornerR); }
+        Assert.True(sawLip, "the row-2 tread at col 3 was not queried");
+    }
+
+    [Fact]
+    public void ContactSpan_Corner_RoundTripsOnlyWhenSet()
+    {
+        var on  = System.Text.Json.JsonSerializer.Serialize(new ContactSpan { Point = "support_l", Start = 0.1f, End = 0.4f, Corner = true });
+        var off = System.Text.Json.JsonSerializer.Serialize(new ContactSpan { Point = "support_l", Start = 0.1f, End = 0.4f });
+        Assert.Contains("Corner", on);
+        Assert.DoesNotContain("Corner", off);
+        Assert.True(System.Text.Json.JsonSerializer.Deserialize<ContactSpan>(on)!.Corner);
+    }
+
     // Walk the phase through a full cycle over a flat floor: stance frames must plant
     // on the floor top with one stable tread; swing frames must select a landing.
     [Fact]

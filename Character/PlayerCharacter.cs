@@ -442,6 +442,10 @@ public class PlayerCharacter : IHittable
         // ArcJump = 2-block band, Mantle = slow/flush 1-block. Gated per frame by
         // MovementConfig.CorrectorClimbEnabled (hot-reloadable A/B), so
         // registration is unconditional.
+        // Before the vaults: same band, and the tie at a flight's first riser is
+        // decided by registration order (MovementPriorities.StairClimb*).
+        _stateRegistry.Add(new StairClimbState(1));
+        _stateRegistry.Add(new StairClimbState(-1));
         _stateRegistry.Add(new ParkourState(1));
         _stateRegistry.Add(new ParkourState(-1));
         _stateRegistry.Add(new ArcJumpState(1));

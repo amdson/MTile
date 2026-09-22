@@ -86,6 +86,16 @@ public struct FoldProfile
         Hover        = true,
     };
 
+    // StairClimbState: Standing's profile with the climb priced FREE. On a regular flight
+    // the rise IS the objective, so the planner routes straight up the corner line at the
+    // hover offset instead of weighing each riser against progress (measured 2026-09-21 on
+    // the 10-step 45° fixture, fold alone: RiseCost 16 rides 12 px above the corner line
+    // with 190 px/s vertical spikes; RiseCost 0 rides 18 px, a steady 70 px/s glide).
+    public static FoldProfile Stairs
+    {
+        get { var p = Stand; p.RiseCost = 0f; return p; }
+    }
+
     // Crouched: same fold, lower reference — the crouch IS reference shaping,
     // not a new mechanism. Hover 0 = center resting on the C-obstacle surface
     // (≈ the old crouch spring equilibrium at float height 0); climb reach

@@ -38,6 +38,7 @@ public struct StrideStance
     public Vector2 TdOffset;    // preferred body-relative foot tip at touchdown (rig units)
     public Vector2 LoOffset;    // …at liftoff
     public bool    Persistent;  // stance spans the whole cycle — no stride events
+    public bool    Corner;      // a corner plant (ContactSpan.Corner): land on a tread's lip
 }
 
 public struct StrideSwing
@@ -187,6 +188,7 @@ public sealed class ClipStrideTrack
                     TdOffset   = OffsetAt(bone, cs.Start),
                     LoOffset   = OffsetAt(bone, cs.End),
                     Persistent = cs.End - cs.Start >= 1f - 1e-4f,
+                    Corner     = cs.Corner,
                 });
             }
             if (stances.Count == 0)

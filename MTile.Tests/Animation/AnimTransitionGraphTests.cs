@@ -93,6 +93,24 @@ public class AnimTransitionGraphTests
         Assert.True(noSpans < 1e-6f, $"an unannotated clip must not be penalised ({noSpans})");
     }
 
+    // The alignment term: two planted samples of the same gait are the same moment only at the
+    // same fraction through the stance. Measured as the difference between the metric with and
+    // without the term, since the fixture's pose also changes with phase.
+    [Fact]
+    public void StanceProgressDisagreement_CostsByItsSquare_OnlyWhenStatesAgree()
+    {
+        var planted = new[] { new ContactSpan { Point = "support", Start = 0f, End = 0.5f } };
+        var a = Swing("a", 0f, contacts: planted);
+        var b = Swing("b", 0f, contacts: planted);
+        var with    = ClipTransitionGraph.Build(a, b, Rig(), new TransitionOptions { ContactMismatch = 3f, ContactAlignment = 2f, Window = 0, Samples = 40 });
+        var without = ClipTransitionGraph.Build(a, b, Rig(), new TransitionOptions { ContactMismatch = 3f, ContactAlignment = 0f, Window = 0, Samples = 40 });
+        float Term(float x, float y) => with.CostAt(x, y) - without.CostAt(x, y);
+        Assert.Equal(0f, Term(0.1f, 0.1f), 4);            // same progress (0.2): free
+        Assert.Equal(2f * 0.36f, Term(0.1f, 0.4f), 3);    // stance progress 0.2 vs 0.8
+        Assert.Equal(2f * 0.36f, Term(0.6f, 0.9f), 3);    // swing progress 0.2 vs 0.8 through [0.5, 1.0)
+        Assert.Equal(0f, Term(0.1f, 0.6f), 4);            // a state mismatch pays the flat penalty only
+    }
+
     [Fact]
     public void NonLoopingClips_ClampTheirWindows()
     {

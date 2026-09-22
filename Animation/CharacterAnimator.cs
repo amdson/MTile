@@ -552,7 +552,7 @@ public sealed partial class CharacterAnimator
         // HERE, before the timing stage, for the same reason a MatchPose entry is: the
         // smoothness rows then measure this frame's final pose against the pose already on
         // screen, and Δθ crossfades the (small, by construction) gap in-solve; the stance
-        // support the landing phase can carry transfers exactly as at a clip switch. The jump
+        // compatible stance and swing commitments survive the jump. The jump
         // fires on the first frame at or past the planned exit (overshoot carried into the
         // entry), or one predicted step before the seam if the exit would be stepped over.
         bool loopedBack = false;   // this frame re-seated the phase; last frame's stance plans predate it
@@ -561,10 +561,17 @@ public sealed partial class CharacterAnimator
             var plan = LoopBackFor(anim);
             if (plan.Jumps && (_state.Phase >= plan.Exit || _state.Phase + MathF.Max(0f, _prevPhaseStep) >= 1f))
             {
-                _state.Phase = Math.Clamp(plan.Entry + (_state.Phase - plan.Exit), 0f, 1f - 1e-4f);
-                TransferContacts(anim, _state.Phase, in s);
-                LoopBackJumps++;
-                loopedBack = true;
+                float entry = Math.Clamp(plan.Entry + (_state.Phase - plan.Exit), 0f, 1f - 1e-4f);
+                var gait = StrideTrackFor(anim);
+                // Recheck at the actual overshoot, not just the search's grid points.
+                // A compatible same-clip jump retains BOTH stance and swing commitments:
+                // re-binding only the plants would restart the other foot in mid-air.
+                if (ClipTransitionGraph.ContactsCompatible(gait, _state.Phase, gait, entry, 1f / 31f))
+                {
+                    _state.Phase = entry;
+                    LoopBackJumps++;
+                    loopedBack = true;
+                }
             }
         }
 
@@ -722,6 +729,7 @@ public sealed partial class CharacterAnimator
                 Phase = _state.Phase,
                 NominalRate = _rate, Dt = dt,
                 Track = planTrack, Chunks = s.Chunks, PredictAt = s.PredictAt,
+                LoopBack = AnimSolverConfig.Current.LoopBackEnabled ? LoopBackFor(anim) : null,
             });
         else if (Planner.FeetCount > 0) Planner.Reset();   // the clip self-plants this frame
 
@@ -734,8 +742,10 @@ public sealed partial class CharacterAnimator
             _problem.Clip = anim; _problem.Body = s.Position; _problem.Dir = s.Facing == 0 ? 1 : s.Facing;
             var root = SolveForward.RootAt(_problem, _state.Phase);
             RefreshContacts(anim, _state.Phase, dt, root);
-            if (_contacts.Count > 0) SolvePoseLm(anim, _state.Phase, phiEntry);
-            // Flight (no planted contact): nothing to fit; the phase already advanced by travel.
+            bool hasSwing = false;
+            for (int i = 0; i < Planner.FeetCount; i++)
+                hasSwing |= _frame.Solver.SwingTargetsEnabled && Planner.Plans[i].State == FootPlanState.Swing && Planner.Plans[i].HasSupport;
+            if (_contacts.Count > 0 || hasSwing) SolvePoseLm(anim, _state.Phase, phiEntry);
         }
         else _contacts.Clear();
 
@@ -791,6 +801,13 @@ public sealed partial class CharacterAnimator
                 float g = MathHelper.WrapAngle(_target.Local[i].Rotation - _thetaEmitted[i]);
                 _target.Local[i].Rotation = _thetaEmitted[i] + _easeB[i] * g;
             }
+
+        // Apply the same anatomical interval on the unconstrained blend path. The solve
+        // already fitted targets inside these bounds; this only changes fast-path blends.
+        if (!_haveCorr)
+            for (int i = 0; i < _skeleton.Count; i++)
+                if (_skeleton.Bones[i].RotationBounds(_target.Local[i].Rotation, out float min, out float max))
+                    _target.Local[i].Rotation = Math.Clamp(_target.Local[i].Rotation, min, max);
 
         // Capture the EMITTED angles — the smoothness target for next frame's solve/fast path.
         // Captured BEFORE lean/squash: those are post-solve additive layers, and folding them
@@ -1173,8 +1190,9 @@ public sealed partial class CharacterAnimator
         for (int i = IdxTheta0; i < n; i++) { _solveLo[i] = -cfg.AngleCorrLimit; _solveHi[i] = cfg.AngleCorrLimit; }
         Array.Clear(_solveVars, 0, n);        // d, Δθ start at 0 (baseline pose)
         FreezeProblem(clip, phi, phiEntry, n);   // every input the rows read, incl. t_i (entry base) and û*
+        ApplyJointBounds();
 
-        // Δθ starts at 0 (not warm-started): the θ-smoothness prior supplies the temporal
+        // Δθ starts at 0 (or the nearest legal joint angle): the smoothness prior supplies temporal
         // continuity from the COST side (its target is last frame's EMITTED pose), and a
         // box-clamped warm seed would stick the solution at the wall.
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
@@ -1232,6 +1250,9 @@ public sealed partial class CharacterAnimator
                     float g = MathHelper.WrapAngle(_scratch.Local[i].Rotation - _thetaEmitted[i]);
                     _scratch.Local[i].Rotation = _thetaEmitted[i] + _easeB[i] * g;
                 }
+            for (int i = 0; i < _skeleton.Count; i++)
+                if (_skeleton.Bones[i].RotationBounds(_scratch.Local[i].Rotation, out float min, out float max))
+                    _scratch.Local[i].Rotation = Math.Clamp(_scratch.Local[i].Rotation, min, max);
             _scratch.ComputeWorld(root);
             float worst = float.MinValue;
             foreach (var srf in _surfaces)
@@ -1246,12 +1267,34 @@ public sealed partial class CharacterAnimator
             if (worst <= StaticSolveSlack) return;   // all rows dormant — nothing to solve
         }
         FreezeProblem(anim, phi, phi, n);
+        ApplyJointBounds();
 
         _ls.Minimize(_cadenceResiduals, _cadenceJacobian,
                      _solveVars.AsSpan(0, n), _solveLo.AsSpan(0, n), _solveHi.AsSpan(0, n),
                      ftol: cfg.StaticFtol, vectorize: cfg.StaticVectorize);
         CaptureBreakdown(n);
         _haveCorr = true;
+    }
+
+    // Reuse the LM box bounds for anatomical limits on the FINAL composed angle. This is
+    // independent of clip, terrain and facing. If an authored pose itself lies outside the
+    // interval, bring the seed to the nearest legal angle even beyond the correction cap.
+    private void ApplyJointBounds()
+    {
+        bool any = false;
+        foreach (var b in _skeleton.Bones) any |= b.MinRotation.HasValue;
+        if (!any) return;
+        SolveForward.Run(_problem, _solveVars, _eval);
+        for (int i = 0; i < _skeleton.Count; i++)
+        {
+            float angle = _eval.Pose.Local[i].Rotation;
+            if (!_skeleton.Bones[i].RotationBounds(angle, out float min, out float max)) continue;
+            int v = IdxTheta0 + i;
+            float nearest = Math.Clamp(angle, min, max) - angle;
+            _solveLo[v] = MathF.Max(min - angle, MathF.Min(_solveLo[v], nearest));
+            _solveHi[v] = MathF.Min(max - angle, MathF.Max(_solveHi[v], nearest));
+            _solveVars[v] = Math.Clamp(0f, _solveLo[v], _solveHi[v]);
+        }
     }
 
     // FREEZE this solve's problem (SolveProblem.cs): copy every input a residual or Jacobian may
@@ -1276,7 +1319,8 @@ public sealed partial class CharacterAnimator
         for (int i = 0; i < Planner.FeetCount; i++)
         {
             ref readonly var pl = ref Planner.Plans[i];
-            if (pl.State == FootPlanState.Swing && pl.HasSupport) p.Swings.Add((pl.Bone, pl.Target));
+            if (_frame.Solver.SwingTargetsEnabled && pl.State == FootPlanState.Swing && pl.HasSupport)
+                p.Swings.Add((pl.Bone, pl.Target));
         }
         p.AimActive      = _aimActive;
         p.Cfg            = _frame.Solver;

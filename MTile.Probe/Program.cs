@@ -478,6 +478,7 @@ static class Probe
         float start = ParseF(first), end = ParseF(Arg(args, 3));
         string node = Arg(args, 4);
         var source = HasFlag(args, "external") ? ContactSource.External : ContactSource.SelfPlant;
+        bool corner = HasFlag(args, "corner");   // a corner plant: land on a tread's lip (ContactSpan.Corner)
         if (end <= start)
             throw new ArgumentException($"end ({end}) must exceed start ({start}); a span wrapping the loop seam is written as e.g. 0.8 1.2");
         if (start < 0f || start >= 1f) throw new ArgumentException($"start ({start}) must lie in [0,1)");
@@ -488,7 +489,7 @@ static class Probe
         string point = ResolveContactPoint(clip, node);
         clip.Contacts ??= new List<ContactSpan>();
         if (HasFlag(args, "--clear")) clip.Contacts.RemoveAll(c => c.Point == point);
-        clip.Contacts.Add(new ContactSpan { Point = point, Start = start, End = end, Source = source });
+        clip.Contacts.Add(new ContactSpan { Point = point, Start = start, End = end, Source = source, Corner = corner });
         clip.Contacts.Sort((x, y) => x.Start.CompareTo(y.Start));
 
         AnimationStore.Save(clip, _statesDir);
@@ -1081,6 +1082,12 @@ static class Probe
         var clip = Find(Arg(args, 1));
         if (!ClipSceneBake.TryCheck(clip, _rig, out var c, out string err)) { Console.Error.WriteLine(err); return 1; }
         Console.Write($"{clip.Name}: " + ClipSceneBake.Describe(c));
+        if (HasFlag(args, "--tag-corners"))
+        {
+            int n = ClipSceneBake.TagCorners(clip, c);
+            if (n > 0) { AnimationStore.Save(clip, _statesDir); Console.WriteLine($"  tagged {n} corner plant(s), saved"); }
+            else Console.WriteLine("  no untagged corner plants");
+        }
         return 0;
     }
 

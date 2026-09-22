@@ -101,6 +101,7 @@ public sealed partial class DemoGame : Game
     private ContactSpan    _dragContactSpan;
     private SpanPart       _dragSpanPart;
     private float          _dragSpanOffset;
+    private bool           _dragSpanTail;      // grabbed on a seam-crossing span's tail (drawn at the head): times read +1
     private ContactSpan    _selectedContact;   // a contact span picked from its timeline bar
     private bool          _dragRoot;          // dragging the root joint = placing the body (or panning)
     private enum EditMode { Rotate, Resize, Stretch }

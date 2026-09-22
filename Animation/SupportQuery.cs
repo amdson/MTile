@@ -23,8 +23,22 @@ public struct SupportSegment
     public float X0, X1;   // tread endpoints (world px, X0 < X1)
     public float Y;        // tread height (world px, the tile's top edge)
     public long  Id;       // packed cell coords — stable identity for hysteresis/revalidation
+    public bool  CornerL, CornerR;   // the end is a LIP: air beside the tread at its own level
 
     public Vector2 Clamp(float x) => new(MathHelper.Clamp(x, X0, X1), Y);
+
+    // The point `p` (a Clamp result) sits on one of this tread's lips.
+    public bool IsCorner(Vector2 p) => (CornerL && p.X == X0) || (CornerR && p.X == X1);
+
+    // The tread's exposed corner nearest x, if it has one.
+    public bool TryNearestCorner(float x, out Vector2 corner)
+    {
+        corner = default;
+        if (!CornerL && !CornerR) return false;
+        float cx = !CornerR ? X0 : !CornerL ? X1 : (MathF.Abs(x - X0) <= MathF.Abs(x - X1) ? X0 : X1);
+        corner = new Vector2(cx, Y);
+        return true;
+    }
 
     public static long PackId(int gtx, int gty) => ((long)gty << 32) | (uint)gtx;
     public static (int gtx, int gty) UnpackId(long id) => ((int)(uint)id, (int)(id >> 32));
@@ -52,6 +66,8 @@ public static class SupportQuery
                 {
                     X0 = gx * ts, X1 = (gx + 1) * ts, Y = gy * ts,
                     Id = SupportSegment.PackId(gx, gy),
+                    CornerL = chunks.GetCellState(gx - 1, gy) != TileState.Solid,
+                    CornerR = chunks.GetCellState(gx + 1, gy) != TileState.Solid,
                 };
                 if (count == dst.Length) return count;
             }

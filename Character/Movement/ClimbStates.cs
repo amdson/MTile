@@ -105,18 +105,17 @@ public abstract class ClimbManeuverBase : MovementState
         var s = ctx.Corrector;
         if (s == null) return true;   // hand-built test contexts: cheap gates only
 
-        float targetY = corridor.ClimbTargetY(rise.Column);
+        PlanHop(ctx, corridor, rise, out var target, out float targetY, out float vy0);
         var probe = s.ProbeBody;
         probe.Polygon  = ctx.Body.Polygon;
         probe.Position = ctx.Body.Position;
-        float vy0 = HopVy(ctx, rise, targetY);
         probe.Velocity = new Vector2(ctx.Body.Velocity.X,
                                      MathF.Min(ctx.Body.Velocity.Y, -vy0));
         float entrySpeed = MathF.Max(_dir * ctx.Body.Velocity.X, cfg.MaxWalkSpeed);
 
         ManeuverCorrector.Run(ctx, probe, _dir, entrySpeed, default, out int rowCount,
                               FeasibilityIterations);
-        if (Delivers(ctx, rowCount > 0 ? s.TickDv : null, entrySpeed, rise, targetY)) return true;
+        if (Delivers(ctx, rowCount > 0 ? s.TickDv : null, entrySpeed, target, targetY)) return true;
 
         // Second look, uncorrected — the case where the SOLVE is what refuses.
         // A body standing flush against the step it wants to climb is already
@@ -136,7 +135,39 @@ public abstract class ClimbManeuverBase : MovementState
         probe.Position = ctx.Body.Position;
         probe.Velocity = new Vector2(ctx.Body.Velocity.X,
                                      MathF.Min(ctx.Body.Velocity.Y, -vy0));
-        return Delivers(ctx, null, entrySpeed, rise, targetY);
+        return Delivers(ctx, null, entrySpeed, target, targetY);
+    }
+
+    // TIME-CONSISTENT TARGET (2026-09-21). A hop aimed at the first rise takes long enough
+    // to reach its gate that a running body is over a LATER tread by then — on a 45° stair
+    // at run speed, one tread further per hop — so it arrived at the right height for the
+    // wrong tread, 11 px too low for the one under it. Project the body forward by the
+    // hop's time to apex and aim at the gate of the tread under THAT x when it is higher:
+    // the corner is the last rise up to that column, so the delivery's "past the lip" test
+    // stays consistent. A lone step (nothing higher there) is untouched.
+    protected void PlanHop(EnvironmentContext ctx, Corridor corridor, in CorridorCorner rise,
+                           out CorridorCorner target, out float targetY, out float vy0)
+    {
+        target  = rise;
+        targetY = corridor.ClimbTargetY(rise.Column);
+        vy0     = HopVy(ctx, rise, targetY);
+        float vx = _dir * ctx.Body.Velocity.X;
+        if (vx <= 0f || ctx.Gravity.Y <= 0f) return;
+        float tApex = vy0 / ctx.Gravity.Y;
+        float xApex = ctx.Body.Position.X + _dir * vx * tApex;
+        int col = corridor.ColumnIndexOf((int)MathF.Floor(xApex / Chunk.TileSize));
+        if (col <= rise.Column || col >= corridor.ColumnCount) return;
+        if (corridor.FloorY[col] >= corridor.FloorY[rise.Column]) return;   // nothing higher there
+        var best = rise;
+        for (int i = 0; i < corridor.FloorCornerCount; i++)
+        {
+            var c = corridor.FloorCorners[i];
+            if (c.Delta > 0f && c.Column > rise.Column && c.Column <= col) best = c;
+        }
+        if (best.Column == rise.Column) return;
+        target  = best;
+        targetY = corridor.ClimbTargetY(col);
+        vy0     = HopVy(ctx, best, targetY);
     }
 
     // Rolls the arc out from ctx.Corrector.ProbeBody under an optional per-tick
@@ -185,8 +216,9 @@ public abstract class ClimbManeuverBase : MovementState
         vars.TimeInState = 0f;
         var corridor = ctx.GetCorridor(_dir);
         corridor.TryFirstRise(out var rise);   // precondition just verified it exists
-        vars.MantleCorner    = rise.Pos;
-        vars.MantleTargetY   = corridor.ClimbTargetY(rise.Column);
+        PlanHop(ctx, corridor, rise, out var target, out float targetY, out float vy0);
+        vars.MantleCorner    = target.Pos;
+        vars.MantleTargetY   = targetY;
         vars.MantleEntryY    = ctx.Body.Position.Y;
         vars.EntrySpeed      = MathF.Max(_dir * ctx.Body.Velocity.X, cfg.MaxWalkSpeed);
         vars.ManeuverChannelPrev = default;
@@ -194,8 +226,7 @@ public abstract class ClimbManeuverBase : MovementState
         abilities.HasDoubleJumped = false;
 
         // One-shot entry hop — all the maneuver's injected energy (same sizing the
-        // feasibility probe planned with).
-        float vy0 = HopVy(ctx, rise, vars.MantleTargetY);
+        // feasibility probe planned with, PlanHop above).
         ctx.Body.Velocity.Y = MathF.Min(ctx.Body.Velocity.Y, -vy0);
 
         // Reference capture (render-only): the authored arc as planned from the

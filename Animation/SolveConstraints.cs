@@ -68,8 +68,9 @@ public sealed class PlantedContactsConstraint : ISolveConstraint
 
 // Two rows per SWINGING planner-owned foot (step planner P3): √(TierContact·SwingShare)
 // · (tip − swingTarget), both axes. A soft "follow the authored swing toward the planned
-// landing" pull — deliberately NOT a planted contact: no d.x/δ columns (the root must not
-// chase a swinging foot), no SkipPair collision exemption, no no-slip cadence semantics.
+// landing" pull, evaluated at the rendered point including the root correction. The lower
+// weight and root priors limit its influence; omitting the root here fits the wrong point.
+// No SkipPair collision exemption and no no-slip cadence semantics.
 // Δθ bends the leg along the path; the Δφ column (via the point primitive) gives the
 // bounded timing correction the plan allows, boxed by the momentum prior as usual.
 // Targets are frozen per solve (p.Swings — StepPlanner runs once, before the solve).
@@ -85,8 +86,8 @@ public sealed class SwingTargetConstraint : ISolveConstraint
         {
             Vector2 tip = e.Pose.WorldOf(bone).Translation;
             float sw = MathF.Sqrt(p.Cfg.TierContact * SwingShare) * p.InvCharLen;
-            r[n++] = sw * (tip.X - target.X);
-            r[n++] = sw * (tip.Y - target.Y);
+            r[n++] = sw * (tip.X + x[IdxDx] - target.X);
+            r[n++] = sw * (tip.Y + x[IdxDy] - target.Y);
         }
         return n;
     }
@@ -107,6 +108,8 @@ public sealed class SwingTargetConstraint : ISolveConstraint
                 jac[row * stride + v]       = sw * colX[v];
                 jac[(row + 1) * stride + v] = sw * colY[v];
             }
+            jac[row * stride + IdxDx] += sw;
+            jac[(row + 1) * stride + IdxDy] += sw;
             row += 2;
         }
         return row - row0;

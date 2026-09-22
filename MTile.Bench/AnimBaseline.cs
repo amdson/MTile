@@ -179,7 +179,8 @@ internal static class AnimBaseline
         public string Action;
         public bool LowCeiling;
         public TimingState Timing;
-        public bool Reentered;   // the timing stage re-entered the phase this frame (T6)    // the stopping policy's state this frame
+        public bool Reentered;   // the timing stage re-entered the phase this frame (T6)
+        public bool LoopedBack;  // the cadence clip looped back (ClipLoopBack) this frame    // the stopping policy's state this frame
         public float IdleSwitchSwingU; // on the frame a cadence clip switched to Idle: the max swing
                                        // progress of any foot at that phase (a "suspended foot"); else -1
         public (int Bone, Vector2 Target, float Weight)[] Contacts;
@@ -226,11 +227,12 @@ internal static class AnimBaseline
         // jump (cycles/s²) across three such frames.
         // A re-entry (T6: the phase jumped onto the feet's reading) is a deliberate
         // discontinuity, counted in the notes and excluded here like a clip change.
-        var rates = new List<double>(); double jump = 0; int reentries = 0;
+        var rates = new List<double>(); double jump = 0; int reentries = 0, loopbacks = 0;
         double? prevRate = null;
         for (int i = Math.Max(a, 1); i < b; i++)
         {
             if (q[i].Reentered) { reentries++; prevRate = null; continue; }
+            if (q[i].LoopedBack) { loopbacks++; prevRate = null; continue; }   // a planned jump, like a clip change
             bool ok = q[i].CadenceMode && q[i - 1].CadenceMode && q[i].Clip == q[i - 1].Clip;
             if (!ok) { prevRate = null; continue; }
             double d = q[i].Phase - q[i - 1].Phase; if (d < 0) d += 1;
@@ -312,7 +314,8 @@ internal static class AnimBaseline
                      + (settle + idleHold > 0 ? $" timing=settle:{100.0 * settle / win.Length:0}%,hold:{100.0 * idleHold / win.Length:0}%" : "")
                      + (switches.Length > 0 ? $" idle_switch_swing_u={switches.Max():0.00}" : "")
                      + (replans > 0 ? $" replans={replans}" : "")
-                     + (reentries > 0 ? $" reentries={reentries}" : "");
+                     + (reentries > 0 ? $" reentries={reentries}" : "")
+                     + (loopbacks > 0 ? $" loopbacks={loopbacks}" : "");
         return (m, notes);
     }
 
@@ -333,6 +336,7 @@ internal static class AnimBaseline
         var surfaces = new SolverSurface[8];   // == CosmeticUpdateSystem's scratch
         var frames = new Frame[sc.Frames];
 
+        int loopBacksSeen = 0;
         for (int f = 0; f < sc.Frames; f++)
         {
             var p = sim.Player;
@@ -365,6 +369,7 @@ internal static class AnimBaseline
             fr.Clip = anim.State.Clip;
             fr.Timing = anim.LastTiming.State;
             fr.Reentered = anim.LastTiming.Reentered;
+            fr.LoopedBack = anim.LoopBackJumps != loopBacksSeen; loopBacksSeen = anim.LoopBackJumps;
             fr.IdleSwitchSwingU = -1f;
             if (f > 0 && fr.Clip == AnimClip.Idle && frames[f - 1].Clip != AnimClip.Idle
                 && GaitFor(frames[f - 1].Clip, skel, clips) is { } gait)
@@ -507,7 +512,7 @@ internal static class AnimBaseline
         }
         h.Add("# units: us = animator Update only (per-frame min over reps); solver counters = mean per LM-solve frame;");
         h.Add("#   seed_evals derived (11/cadence solve); rate cycles/s, rate_jump cycles/s^2; slip px/frame; tgt_err/pen/dx/dy px;");
-        h.Add("#   swing_acc_max: planner swing-target second difference px/frame^2 (chunk 6 continuity); notes replans= source changes, reentries= phase re-entries (excluded from rate_jump).");
+        h.Add("#   swing_acc_max: planner swing-target second difference px/frame^2 (chunk 6 continuity); notes replans= source changes, reentries= phase re-entries, loopbacks= loop-back jumps (both excluded from rate_jump).");
         h.Add("#   pen = vertical exit depth of any rendered bone tip inside solid terrain (min of up/down);");
         h.Add("#   dth rad; foot_acc px/frame^2 (second difference of rendered contact-node tips). Rendered pose placed via RigRoot.");
         return h;

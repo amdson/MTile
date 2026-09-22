@@ -22,6 +22,12 @@ namespace MTile;
 //   contacts — a flat penalty per support point whose stance state (inside a contact span or
 //              not) differs; applied only when BOTH clips carry spans, so an unannotated clip
 //              is not penalised for its silence.
+//   alignment — (2026-09-21) per support point whose stance state AGREES, the squared
+//              difference of its progress through that stance (or through the swing between
+//              stances). Two samples of a gait are the same moment of the stride only when
+//              every foot is the same fraction into its stance, so a loop-back between such
+//              samples contains whole plant pairs and its displacement is a whole number of
+//              strides; without this term a pose-similar entry on the run-in could beat it.
 // Support points are the rig's NamedPoints with Role == Options.FootRole ("support").
 //
 // Transitions are the LOCAL MINIMA of the cost surface (8-neighbourhood, wrapping per clip)
@@ -39,6 +45,7 @@ public sealed class TransitionOptions
     public float  FootPositionWeight = 4f;
     public float  FootVelocityWeight = 2f;
     public float  ContactMismatch    = 1f;     // per support point whose stance state differs
+    public float  ContactAlignment   = 2f;     // × Δprogress² per support point whose stance state agrees
     public float  MaxCost            = float.PositiveInfinity;   // keep local minima at or below this
     public string FootRole           = "support";
     // Clamp the comparison windows at both clips' ends even if the documents say Loop —
@@ -62,6 +69,43 @@ public readonly struct ClipTransition
 
 public sealed class ClipTransitionGraph
 {
+    // Pose similarity alone cannot transfer a gait: each annotated limb must be in
+    // the same part of its contact lifecycle. Tolerance is in clip phase (the search
+    // grid spacing), not a new animation tuning weight. Also usable by clip switches.
+    public static bool ContactsCompatible(ClipStrideTrack from, float fromPhase,
+                                          ClipStrideTrack to, float toPhase, float tolerance)
+    {
+        if (from == null || to == null || from.Feet.Length == 0 || to.Feet.Length == 0) return true;
+        if (from.Feet.Length != to.Feet.Length) return false;
+        foreach (var a in from.Feet)
+        {
+            var b = to.ForBone(a.Bone);
+            if (b == null) return false;
+            int sa = a.StanceAt(fromPhase, out float ua), sb = b.StanceAt(toPhase, out float ub);
+            if ((sa >= 0) != (sb >= 0)) return false;
+            float da, db;
+            if (sa >= 0)
+            {
+                if (a.Stances[sa].Persistent || b.Stances[sb].Persistent)
+                {
+                    if (a.Stances[sa].Persistent != b.Stances[sb].Persistent) return false;
+                    continue;
+                }
+                da = a.Stances[sa].Liftoff - a.Stances[sa].Touchdown;
+                db = b.Stances[sb].Liftoff - b.Stances[sb].Touchdown;
+            }
+            else
+            {
+                int wa = a.SwingAt(fromPhase, out ua), wb = b.SwingAt(toPhase, out ub);
+                if (wa < 0 || wb < 0) return false;
+                da = a.Swings[wa].End - a.Swings[wa].Start;
+                db = b.Swings[wb].End - b.Swings[wb].Start;
+            }
+            if (MathF.Abs(ua - ub) * MathF.Min(da, db) > tolerance) return false;
+        }
+        return true;
+    }
+
     public readonly AnimationDocument From, To;
     public readonly int Samples;
     public readonly bool IncludesEnd;                // sample phases are i/(Samples−1)
@@ -185,9 +229,17 @@ public sealed class ClipTransitionGraph
             }
             d += o.FootPositionWeight * sp + o.FootVelocityWeight * sv;
         }
-        if (contacts && o.ContactMismatch > 0f)
+        if (contacts)
             for (int f = 0; f < feet; f++)
-                if (a.Planted[i][f] != b.Planted[j][f]) d += o.ContactMismatch;
+            {
+                if (a.Planted[i][f] != b.Planted[j][f]) { d += o.ContactMismatch; continue; }
+                float ua = a.Progress[i][f], ub = b.Progress[j][f];
+                if (o.ContactAlignment > 0f && ua >= 0f && ub >= 0f)
+                {
+                    float du = ua - ub;
+                    d += o.ContactAlignment * du * du;
+                }
+            }
         return d;
     }
 
@@ -216,8 +268,26 @@ public sealed class ClipTransitionGraph
         public Vector2[][] FootPos;  // [sample][foot], root-relative rig units, com-subtracted
         public Vector2[][] FootVel;  // [sample][foot], per-sample finite difference
         public bool[][]   Planted;   // [sample][foot], inside any contact span
+        public float[][]  Progress;  // [sample][foot], fraction through the stance (planted) or the swing
+                                     // between stances (not planted); -1 when the foot has no spans
         public bool       HasContacts;
         public float      MaxReach;
+
+        // Fraction of the way from the previous liftoff to the next touchdown at `phase`
+        // (not inside any span), with spans taken cyclically; -1 when nothing brackets it.
+        private static float SwingProgress(List<ContactSpan> spans, float phase)
+        {
+            float prevEnd = float.NegativeInfinity, nextStart = float.PositiveInfinity;
+            foreach (var c in spans)
+                for (int lap = -1; lap <= 1; lap++)
+                {
+                    float e = c.End + lap, st = c.Start + lap;
+                    if (e <= phase && e > prevEnd) prevEnd = e;
+                    if (st >= phase && st < nextStart) nextStart = st;
+                }
+            if (float.IsInfinity(prevEnd) || float.IsInfinity(nextStart) || nextStart - prevEnd <= 1e-6f) return -1f;
+            return (phase - prevEnd) / (nextStart - prevEnd);
+        }
 
         // Sample index k steps from i: wrapped on a loop, clamped otherwise.
         public int Neighbour(int i, int k)
@@ -236,7 +306,7 @@ public sealed class ClipTransitionGraph
             {
                 Loop = doc.Loop && !forceNonLooping && !includeEnd, N = n, IncludesEnd = includeEnd,
                 Angles = new float[n][], FootPos = new Vector2[n][], FootVel = new Vector2[n][],
-                Planted = new bool[n][], HasContacts = doc.Contacts is { Count: > 0 },
+                Planted = new bool[n][], Progress = new float[n][], HasContacts = doc.Contacts is { Count: > 0 },
             };
 
             // Which spans pin which support bone — resolved once.
@@ -263,15 +333,22 @@ public sealed class ClipTransitionGraph
                 bool haveCom = BodyPath.TrySampleAnchor(doc, phase, out var com, out _);
                 var pos = new Vector2[feet.Length];
                 var pl = new bool[feet.Length];
+                var pr = new float[feet.Length];
                 for (int f = 0; f < feet.Length; f++)
                 {
                     Vector2 tip = world[feet[f]].Translation;
                     if (haveCom) tip -= com;
                     pos[f] = tip;
                     s.MaxReach = MathF.Max(s.MaxReach, tip.Length());
-                    foreach (var span in spansOf[f]) if (span.Covers(phase, out _)) { pl[f] = true; break; }
+                    pr[f] = -1f;
+                    // The end pose is sampled at 1, but a looping clip's contact events
+                    // at that instant are phase 0. Otherwise its valid seam scores as a
+                    // support swap and an interior jump can spuriously beat it.
+                    float contactPhase = doc.Loop ? phase - MathF.Floor(phase) : phase;
+                    foreach (var span in spansOf[f]) if (span.Covers(contactPhase, out float u)) { pl[f] = true; pr[f] = u; break; }
+                    if (!pl[f] && spansOf[f].Count > 0) pr[f] = SwingProgress(spansOf[f], contactPhase);
                 }
-                s.FootPos[i] = pos; s.Planted[i] = pl;
+                s.FootPos[i] = pos; s.Planted[i] = pl; s.Progress[i] = pr;
             }
 
             // Central-difference velocity per sample (one-sided at a non-loop's ends).
