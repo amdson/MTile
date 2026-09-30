@@ -8,33 +8,34 @@ namespace MTile;
 // off TimeInState / WindupDuration in EnemyActionVars — the sim never declares
 // a separate telegraph descriptor. See Plans/ENEMY_CAPABILITY_FRAMEWORK.md §3.
 
-// Forward melee swing. Subclasses tune Windup / Active / Recovery / Range /
-// Damage / Knockback via virtual properties.
+// Forward melee swing. Every tunable comes from the ActionSpec handed to the
+// ctor; ActionSpec.Default(ActionKind.Melee) is the stock swing. The stock
+// numbers' rationale, preserved from when they were constants here:
+//   Damage 1.0 — a full HP off the player's pool of 5, five clean swings down you.
+//   Knockback (250, -110) — OnHit divides by target mass, so a player at Mass 2.5
+//   gains ~100 px/s of shove and ~44 up: enough that a hit reads as contact and
+//   interrupts you without taking the fight away. Was (460, -180), a body-check
+//   off every routine swing. Launching is the player's job (Stab); |impulse| ≈ 120
+//   stays under the 280 stun threshold, so no creature swing stuns on its own.
 public class EnemyMeleeAction : EnemyActionState
 {
-    protected virtual float   Windup            => 0.45f;
-    protected virtual float   Active            => 0.12f;
-    protected virtual float   Recovery          => 0.40f;
-    protected virtual float   Range             => 32f;
-    protected virtual float   VerticalSlack     => 24f;
-    protected virtual float   HitboxReach       => 22f;
-    protected virtual float   HitboxHalfHeight  => 12f;
-    // A full HP off the player's pool of 5 — five clean swings down you.
-    protected virtual float   Damage            => 1.0f;
-    // Knockback impulse — OnHit divides by target mass, so a player at Mass 2.5
-    // gains (X/2.5, Y/2.5) px/s. Creature hits deliberately DON'T launch: this is
-    // ~100 px/s of shove and ~44 up, half a run's worth, enough that a hit reads as
-    // contact and interrupts what you were doing without taking the fight away from
-    // you. Was (460, -180) — a body-check off every routine swing, which combined
-    // with the escalation multiplier to make basic enemies feel like cannons. The
-    // launching is the player's job (Stab), and the resulting |impulse| ≈ 120 stays
-    // under the 280 stun threshold, so no creature swing stuns on its own.
-    protected virtual Vector2 Knockback         => new(250f, -110f);
+    public EnemyMeleeAction() : this(ActionSpec.Default(ActionKind.Melee)) {}
+    public EnemyMeleeAction(ActionSpec spec) { Spec = spec; }
+
+    protected float   Windup            => Spec.Windup;
+    protected float   Active            => Spec.Active;
+    protected float   Recovery          => Spec.Recovery;
+    protected float   Range             => Spec.MaxRange;
+    protected float   VerticalSlack     => Spec.VerticalSlack;
+    protected float   HitboxReach       => Spec.Reach;
+    protected float   HitboxHalfHeight  => Spec.HalfHeight;
+    protected float   Damage            => Spec.Damage;
+    protected Vector2 Knockback         => Spec.Knockback;
     protected virtual Color   TelegraphColor    => Color.Red;
     protected virtual Color   StrikeColor       => Color.OrangeRed;
 
-    public override int ActivePriority  => 30;
-    public override int PassivePriority => 25;
+    public override int ActivePriority  => Spec.ActivePriority;
+    public override int PassivePriority => Spec.PassivePriority;
 
     public override bool CheckPreConditions(in EnemyContext ctx)
         => ctx.Dist < Range && MathF.Abs(ctx.ToPlayer.Y) < VerticalSlack;
@@ -126,33 +127,36 @@ public class EnemyMeleeAction : EnemyActionState
 //   * The hitbox is centred on the body and sized to it, so the damage region is
 //     the creature. The precondition below is only a cheap broad gate — actual
 //     overlap against the player's hurtbox is CombatSystem's call.
+//
+// Spec mapping (ActionSpec.Default(ActionKind.Contact) is the stock hazard):
+//   HalfWidth  — half-extent of the damage box; slightly over the body radius so
+//                contact registers on touch rather than on overlap.
+//   MaxRange   — trigger range. Generous: it only has to be wide enough that the
+//                box gets published on the frame contact happens.
+//   Damage 0.4 — well under the 1.0 a committed melee swing deals; brushing a
+//                hazard that repeats on a cooldown should sting, not trade evenly
+//                with an attack the player could read.
+//   Knockback  — signed away from the creature at Enter, with lift so a hit reads
+//                as being knocked off rather than shoved into the floor. Light
+//                (was (340, -240)): walking into a creature should push you off it.
+//   Active     — the short damage window; Recovery is the re-hit cooldown.
 public class EnemyContactAction : EnemyActionState
 {
-    // Half-extent of the damage box, as a multiple of the body radius the
-    // blueprint gave the entity. Slightly over 1 so contact registers on touch
-    // rather than on overlap.
-    protected virtual float BodyHalfExtent => 11f;
-    // Distance at which the action is allowed to start. Generous — it only has
-    // to be wide enough that the box gets published on the frame contact happens.
-    protected virtual float TriggerRange   => 34f;
-    // HP straight off the target, like every other hitbox. Deliberately well under
-    // the 1.0 a committed melee swing deals — brushing a hazard that repeats on a
-    // cooldown should sting, not trade evenly with an attack the player could read.
-    protected virtual float Damage         => 0.4f;
-    // Knockback is signed away from the creature at Enter, with a lift component
-    // so a hit reads as being knocked off rather than shoved into the floor. Light
-    // (was (340, -240)) — walking into a creature should push you off it, not punt
-    // you across the room.
-    protected virtual Vector2 Knockback    => new(190f, -140f);
-    // Active window is short; the gap to the next hit is Recovery.
-    protected virtual float ActiveWindow   => 0.10f;
-    protected virtual float Cooldown       => 0.85f;
+    public EnemyContactAction() : this(ActionSpec.Default(ActionKind.Contact)) {}
+    public EnemyContactAction(ActionSpec spec) { Spec = spec; }
+
+    protected float   BodyHalfExtent => Spec.HalfWidth;
+    protected float   TriggerRange   => Spec.MaxRange;
+    protected float   Damage         => Spec.Damage;
+    protected Vector2 Knockback      => Spec.Knockback;
+    protected float   ActiveWindow   => Spec.Active;
+    protected float   Cooldown       => Spec.Recovery;
     protected virtual Color StrikeColor    => new(215, 120, 90);
 
-    // Low priority: this is what the creature does when it has nothing better to
-    // do, and any real attack a future blueprint pairs it with should win.
-    public override int ActivePriority  => 12;
-    public override int PassivePriority => 10;
+    // Low priority by default: this is what the creature does when it has nothing
+    // better to do, and any real attack a blueprint pairs it with should win.
+    public override int ActivePriority  => Spec.ActivePriority;
+    public override int PassivePriority => Spec.PassivePriority;
 
     public override bool CheckPreConditions(in EnemyContext ctx) => ctx.Dist < TriggerRange;
 
@@ -207,26 +211,31 @@ public class EnemyContactAction : EnemyActionState
 // into the player; the hitbox is published on the body itself so contact during
 // the dash damages on touch (à la StalkerEnemy.Lunge). Mid-range trigger
 // disjoint from EnemyMeleeAction so the two don't fight for the same situation.
+//
+// Stock spec (ActionSpec.Default(ActionKind.Lunge)): MinRange 36 is disjoint with
+// the melee swing's 32. Knockback (300, -140) is heavier than the swing — a lunge
+// is a committed dash, so it shoves noticeably harder (~120 px/s horizontal + ~56
+// up against player Mass 2.5) — but still short of a launch and under the stun
+// threshold: the creature kit trades in interruption and chip, not in juggles.
 public class EnemyLungeAction : EnemyActionState
 {
-    protected virtual float Windup       => 0.35f;
-    protected virtual float Active       => 0.25f;
-    protected virtual float Recovery     => 0.45f;
-    protected virtual float MinRange     => 36f;     // disjoint with EnemyMeleeAction.Range (32)
-    protected virtual float MaxRange     => 90f;
-    protected virtual float VertSlack    => 24f;
-    protected virtual float LungeSpeed   => 260f;
-    protected virtual float HitHalfWidth => 12f;
-    protected virtual float HitHalfHeight=> 12f;
-    protected virtual float Damage       => 0.9f;
-    // Heavier than the melee swing — a lunge is a committed dash, so it shoves
-    // noticeably harder (~120 px/s horizontal + ~56 up against player Mass 2.5).
-    // Still short of a launch, and still under the stun threshold: the creature
-    // kit trades in interruption and chip, not in juggles.
-    protected virtual Vector2 Knockback  => new(300f, -140f);
+    public EnemyLungeAction() : this(ActionSpec.Default(ActionKind.Lunge)) {}
+    public EnemyLungeAction(ActionSpec spec) { Spec = spec; }
 
-    public override int ActivePriority  => 30;
-    public override int PassivePriority => 24;
+    protected float   Windup       => Spec.Windup;
+    protected float   Active       => Spec.Active;
+    protected float   Recovery     => Spec.Recovery;
+    protected float   MinRange     => Spec.MinRange;
+    protected float   MaxRange     => Spec.MaxRange;
+    protected float   VertSlack    => Spec.VerticalSlack;
+    protected float   LungeSpeed   => Spec.Speed;
+    protected float   HitHalfWidth => Spec.HalfWidth;
+    protected float   HitHalfHeight=> Spec.HalfHeight;
+    protected float   Damage       => Spec.Damage;
+    protected Vector2 Knockback    => Spec.Knockback;
+
+    public override int ActivePriority  => Spec.ActivePriority;
+    public override int PassivePriority => Spec.PassivePriority;
 
     public override bool CheckPreConditions(in EnemyContext ctx)
         => ctx.Dist >= MinRange && ctx.Dist <= MaxRange
@@ -356,25 +365,31 @@ public class EnemyLungeAction : EnemyActionState
 // The "I'm airborne and aimed at you" precondition is what makes this feel
 // distinct from melee. It pairs with EnemyJumpState to give the brute a
 // vertical engagement pattern.
+//
+// Stock spec (ActionSpec.Default(ActionKind.Slam)): Damage 1.6 is the kit's
+// heaviest single blow — a third of the player's pool per connect — and Knockback
+// (360, -110) its hardest shove (~145 px/s + 45 up), but a shove: a diving
+// body-slam, not a launcher. |impulse| ≈ 380 does clear the 280 stun threshold,
+// which is the one creature attack that should. Passive 30 wins vs melee/lunge
+// when airborne.
 public class EnemySlamAction : EnemyActionState
 {
-    protected virtual float Windup        => 0.20f;
-    protected virtual float Active        => 0.16f;
-    protected virtual float Recovery      => 0.40f;
-    protected virtual float MinFallSpeed  => 80f;
-    protected virtual float MaxHorizDist  => 50f;
-    protected virtual float HitHalfWidth  => 18f;
-    protected virtual float HitHalfHeight => 16f;
-    protected virtual float HitOffsetY    => 16f;       // hitbox sits below the body
-    // The kit's heaviest single blow — a third of the player's pool per connect.
-    protected virtual float Damage        => 1.6f;
-    // ...and correspondingly its hardest shove (~145 px/s + 45 up), but a shove:
-    // this is a diving body-slam, not a launcher. |impulse| ≈ 380 does clear the
-    // 280 stun threshold, which is the one creature attack that should.
-    protected virtual Vector2 Knockback   => new(360f, -110f);
+    public EnemySlamAction() : this(ActionSpec.Default(ActionKind.Slam)) {}
+    public EnemySlamAction(ActionSpec spec) { Spec = spec; }
 
-    public override int ActivePriority  => 34;
-    public override int PassivePriority => 30;          // wins vs melee/lunge when airborne
+    protected float   Windup        => Spec.Windup;
+    protected float   Active        => Spec.Active;
+    protected float   Recovery      => Spec.Recovery;
+    protected float   MinFallSpeed  => Spec.FallSpeedMin;
+    protected float   MaxHorizDist  => Spec.MaxRange;
+    protected float   HitHalfWidth  => Spec.HalfWidth;
+    protected float   HitHalfHeight => Spec.HalfHeight;
+    protected float   HitOffsetY    => Spec.Reach;       // hitbox sits below the body
+    protected float   Damage        => Spec.Damage;
+    protected Vector2 Knockback     => Spec.Knockback;
+
+    public override int ActivePriority  => Spec.ActivePriority;
+    public override int PassivePriority => Spec.PassivePriority;
 
     public override bool CheckPreConditions(in EnemyContext ctx)
         => ctx.Self.Body.Velocity.Y > MinFallSpeed
@@ -470,18 +485,26 @@ public class EnemySlamAction : EnemyActionState
 // The spawn fires exactly once on the windup→active transition; no extra
 // snapshot field is needed because the transition is computable from
 // TimeInState + Dt at a fixed timestep.
+//
+// Stock spec (ActionSpec.Default(ActionKind.Ranged)): MinRange 90 is disjoint
+// with the lunge's MaxRange. Speed and Damage are handed to the projectile at
+// spawn, so a spec that changes them changes the shot — they are not decorative.
 public class EnemyRangedAction : EnemyActionState
 {
-    protected virtual float Windup        => 0.60f;
-    protected virtual float Active        => 0.08f;
-    protected virtual float Recovery      => 0.50f;
-    protected virtual float MinRange      => 90f;    // disjoint with EnemyLungeAction.MaxRange
-    protected virtual float MaxRange      => 360f;
-    protected virtual float ProjectileSpeed => 500f;
-    protected virtual float MuzzleOffset  => 14f;
+    public EnemyRangedAction() : this(ActionSpec.Default(ActionKind.Ranged)) {}
+    public EnemyRangedAction(ActionSpec spec) { Spec = spec; }
 
-    public override int ActivePriority  => 28;
-    public override int PassivePriority => 22;
+    protected float Windup          => Spec.Windup;
+    protected float Active          => Spec.Active;
+    protected float Recovery        => Spec.Recovery;
+    protected float MinRange        => Spec.MinRange;
+    protected float MaxRange        => Spec.MaxRange;
+    protected float ProjectileSpeed => Spec.Speed;
+    protected float Damage          => Spec.Damage;
+    protected float MuzzleOffset    => Spec.Reach;
+
+    public override int ActivePriority  => Spec.ActivePriority;
+    public override int PassivePriority => Spec.PassivePriority;
 
     public override bool CheckPreConditions(in EnemyContext ctx)
         => ctx.Dist >= MinRange && ctx.Dist <= MaxRange;
@@ -524,7 +547,7 @@ public class EnemyRangedAction : EnemyActionState
                 : new Vector2(v.LockedFacing, 0f);
             var muzzle = origin + dir * MuzzleOffset;
             ctx.Spawner?.SpawnEntity(new EnergyBallProjectile(
-                muzzle, dir, v.HitId, Faction.Enemy));
+                muzzle, dir, v.HitId, Faction.Enemy, ProjectileSpeed, Damage));
         }
     }
 

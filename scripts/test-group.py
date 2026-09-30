@@ -27,7 +27,7 @@ GROUPS = {
  "combat": ["Combat","Guard","Grab","DirectDamage","AttackRecoil","Commitment","HitResolver",
             "HitboxOcclusion","HitEviction","HitFlash","ActionOverlay","ActionAimSolver",
             "ClipBinding","DownAirSlash","InputParserGesture","RecoveryTransition","Laser",
-            "Bird","Shrike","Aspid","TemplateEnemy","WardenEnemy","WizardEnemy","GauntletEnemy","Zeus","TelegraphList",
+            "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","WizardEnemy","GauntletEnemy","Zeus","TelegraphList",
             "PresentationEventLog","SandImpactDamage","PlayerImpactByVelocity","ImpactCrater",
             "RunningOverUnderImpact","ChargedBlast","SlashCombo"],
  "movement": ["Dropdown","Jump","Ledge","Mantle","ArcJump","WallJump","Tumble","StandingJitter",

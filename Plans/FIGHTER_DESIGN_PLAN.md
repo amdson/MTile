@@ -522,3 +522,37 @@ Phases 1–2 are the risky ones (they touch every enemy). Phases 3–6 are addit
   roll back.
 - No data-file spec format yet. Specs are C# object initializers, like blueprints. A JSON
   spec loader is trivial once the shape stops moving, and the brain is code anyway.
+
+---
+
+## 12. Campaign status (branch `fighter-plan`, started 2026-09-30)
+
+Phase markers: `[ ]` todo · `[~]` in progress · `[x] done @commit` · `[!]` blocked · `[?]` needs user decision.
+
+- [x] Phase 1 — action tuning into data (`ActionSpec`, `ActionKind`, `EnemyActionState.Spec`) @b5a0d61
+- [~] Phase 2 — meter, scratch block, `RequestedAction`, blueprint attributes, power-based movement
+- [ ] Phase 3 — `FighterSpec`, cost model, compiler, six archetypes, `fighters` stage
+- [ ] Phase 4 — targets and teams
+- [ ] Phase 5 — arena harness and coefficient loop
+- [ ] Phase 6 — AI designer (`MTile.Bench --forge`)
+
+### Decisions taken at kickoff (user, 2026-09-30)
+
+- **Power model is legacy-when-unset.** A blueprint that leaves `GroundPower` / `JumpImpulse` at 0 keeps today's velocity-set / fixed-impulse behaviour exactly. Only specs that buy power run the accel ÷ mass path. No back-solving of existing enemies.
+- **Arena player is a rooted dummy** parked far out of range with idle input; no "no-player" Simulation mode.
+- **AI designer lives in `MTile.Bench` behind `--forge`.** No new project.
+- **`k_*` coefficients are the campaign's guess**, derived from existing enemy numbers and logged below; the phase 5 balance test is what corrects them.
+
+### Plan-vs-code divergences found at kickoff
+
+- **No subclasses of the pool actions exist.** Zeus / Shrike / Wizard / Warden / Aspid / Template actions are their own `EnemyActionState` classes with private knobs, not subclasses of Melee/Lunge/etc. Phase 1's `ActionSpec` therefore covers the eight pool actions (5 in `EnemyActions.cs`, 3 in `GauntletActions.cs`) only; the specials keep their knobs. §4's "every subclass body compiles unchanged" is moot.
+- **Custom walk states are not `EnemyChaseState`.** `TemplateMoveState`, `WardenWalkState`, `WizardWalkState` are separate classes; `WardenHopState` subclasses `EnemyJumpState` with an overridden impulse. §7 touches only the stock Chase/Jump/Fly states; the custom ones stay constant-based.
+- **More enemies than the plan lists**: Sparring, Warden, Wizard, Aspid exist beyond the eight named. All must behave identically after phases 1–2; their tests (`MTile.Tests/Sim/*EnemyTests.cs`) are part of the gate.
+- **`ctx.Player` has ~34 call sites across 10 files**, including the specials. Phase 4's target abstraction is a broader edit than §5.3 implies but mechanical.
+- **Enemy tests live in `MTile.Tests/Sim/`**, not the test root. Headless `SimRunner` defaults to `Dt = 1/30`; the enemy tests drive a real `Simulation` at 1/60 — the arena will do the same.
+
+### Campaign log
+
+(one line per milestone: what, commit, test status)
+
+- 2026-09-30 · Phase 1 · b5a0d61 · `ActionSpec` + `Default(kind)`; eight pool actions read `Spec`; ranged Speed/Damage threaded into the projectiles (`EntityData.ProjDamage`). `FighterActionSpecTests` 12/12 green; `combat` group 283 pass / 10 red, the same 10 player-side reds as before the change (ActionAimSolver ×3, CombatHitstun crush, SlashComboPresentation ×6). `simcore` group: 3 red — `TrainingStageTests` (BACKLOG §5) and both `GauntletStageTests`, whose message is "player only reached x 60 of ~1397", a traversal failure from spawn that predates this work and cannot come from enemy knob plumbing.

@@ -68,7 +68,8 @@ public static class EntityFactory
             EntityKind.Stalker       => new StalkerEnemy(body.Position),
             EntityKind.Turret        => new TurretEnemy(body.Position),
             EntityKind.Bullet        => new BulletProjectile(body.Position, body.Velocity, hitIds),
-            EntityKind.EnergyBall    => new EnergyBallProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
+            // Speed rides in body.Velocity; damage comes back through ProjDamage.
+            EntityKind.EnergyBall    => new EnergyBallProjectile(body.Position, body.Velocity, d.HitId, d.Faction, damage: d.ProjDamage),
             EntityKind.StickyGrenade => new StickyGrenadeProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.LobbedArea    => new LobbedAreaProjectile(body.Position, body.Velocity, d.Budget, d.TileType, d.HitId, d.Faction),
             EntityKind.MassBall      => new MassBall(body.Position, body.Velocity, d.BuildMass, d.TileType, d.Faction),
@@ -77,7 +78,7 @@ public static class EntityFactory
             EntityKind.PullPoint     => new PullPointEntity(body.Position, d.Faction, d.TileType),
             // Budget is the penetration counter, restored through the same
             // EntityData slot LobbedArea uses (disjoint kinds, one slot).
-            EntityKind.RailBolt      => new RailBoltProjectile(body.Position, body.Velocity, d.HitId, d.Faction, d.Budget),
+            EntityKind.RailBolt      => new RailBoltProjectile(body.Position, body.Velocity, d.HitId, d.Faction, d.Budget, bodyDamage: d.ProjDamage),
             EntityKind.AspidFireball => new AspidFireballProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.Brute         => new BruteEnemy(body.Position),
             EntityKind.Warden        => new WardenEnemy(body.Position),

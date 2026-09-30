@@ -25,28 +25,35 @@ namespace MTile;
 // The long recovery is load-bearing. It is the window in which the player is
 // meant to cross the gallery, and it is why the Bastion reads as a puzzle
 // ("when do I move?") rather than as a damage tax.
+//
+// Stock spec (ActionSpec.Default(ActionKind.RailShot)): MinRange 70 keeps the
+// Bastion from charging a shot at a player already inside its guard — at that
+// point it's just a stationary target, which is the intended reward for closing
+// the distance. Priority 34/30 sits above the MVP melee (30/25); nothing else
+// competes on a Bastion, but the ordering matters in a fuller kit. Speed, Damage
+// and Penetration are handed to the bolt at spawn.
 public class EnemyRailShotAction : EnemyActionState
 {
-    protected virtual float Windup       => 1.35f;
-    protected virtual float Active       => 0.06f;
-    protected virtual float Recovery     => 1.15f;
-    // Min range keeps the Bastion from charging a shot at a player who is
-    // already inside its guard — at that point it's just a stationary target,
-    // which is the intended reward for closing the distance.
-    protected virtual float MinRange     => 70f;
-    protected virtual float MaxRange     => 520f;
-    protected virtual float MuzzleOffset => 16f;
+    public EnemyRailShotAction() : this(ActionSpec.Default(ActionKind.RailShot)) {}
+    public EnemyRailShotAction(ActionSpec spec) { Spec = spec; }
+
+    protected float Windup       => Spec.Windup;
+    protected float Active       => Spec.Active;
+    protected float Recovery     => Spec.Recovery;
+    protected float MinRange     => Spec.MinRange;
+    protected float MaxRange     => Spec.MaxRange;
+    protected float MuzzleOffset => Spec.Reach;
+    protected float BoltSpeed    => Spec.Speed;
+    protected float BoltDamage   => Spec.Damage;
+    protected int   BoltBudget   => Spec.Penetration;
     // Length of the drawn sight line. Only cosmetic — the bolt's actual reach is
     // its speed × lifetime — but it should overshoot the engagement range so the
     // line always reads as "this goes through you", never as "this stops short".
     protected virtual float SightLength  => 620f;
-    protected virtual int   BoltBudget   => 3;
     protected virtual Color BeamColor    => new(255, 90, 40);
 
-    // Above the MVP melee (30/25) — nothing else is competing on a Bastion, but
-    // the ordering matters if this is ever mixed into a fuller kit.
-    public override int ActivePriority  => 34;
-    public override int PassivePriority => 30;
+    public override int ActivePriority  => Spec.ActivePriority;
+    public override int PassivePriority => Spec.PassivePriority;
 
     // Range band AND line of sight. Without the sight check a Bastion charges at
     // a player it cannot see — through the wall of the room it is standing in —
@@ -98,7 +105,8 @@ public class EnemyRailShotAction : EnemyActionState
         {
             var dir    = v.LockedAim.LengthSquared() > 1e-4f ? v.LockedAim : new Vector2(v.LockedFacing, 0f);
             var muzzle = ctx.Self.Body.Position + dir * MuzzleOffset;
-            ctx.Spawner?.SpawnEntity(new RailBoltProjectile(muzzle, dir, v.HitId, Faction.Enemy, BoltBudget));
+            ctx.Spawner?.SpawnEntity(new RailBoltProjectile(muzzle, dir, v.HitId, Faction.Enemy, BoltBudget,
+                                                            BoltSpeed, BoltDamage));
         }
     }
 
@@ -173,30 +181,35 @@ public class EnemyRailShotAction : EnemyActionState
 // state brakes the body while an action is committed, which would bleed off the
 // exact momentum this action is measuring. EnemyHopState is written to hold its
 // latch through a committed action for the same reason.
+//
+// Stock spec (ActionSpec.Default(ActionKind.PounceSlam)): Windup 0 because the
+// fall IS the windup. Active 0.95 covers a full descent from the top of a hop
+// arc; the hitbox self-gates on fall speed, so an early landing just stops it
+// publishing. FallSpeedMin 170: below it the enemy is rising, hovering or
+// drifting — no attack, and it is the precondition too, so the action can't be
+// selected on the way up. FallSpeedRef 560 is where damage and knockback
+// saturate — above the terminal-ish speed of a normal hop, so a pounce from a
+// high ledge genuinely hits harder than one from the floor.
 public class EnemyPounceSlamAction : EnemyActionState
 {
-    protected virtual float Windup          => 0f;      // the fall IS the windup
-    // Long enough to cover a full descent from the top of a hop arc; the hitbox
-    // self-gates on fall speed, so an early landing just stops it publishing.
-    protected virtual float Active          => 0.95f;
-    protected virtual float Recovery        => 0.40f;
-    // Below this the enemy is rising, hovering, or drifting — no attack. Also
-    // the precondition, so the action can't even be selected on the way up.
-    protected virtual float MinFallSpeed    => 170f;
-    // Fall speed at which damage and knockback saturate. Above the terminal-ish
-    // speed of a normal hop, so a pounce launched from a high ledge genuinely
-    // hits harder than one from the floor.
-    protected virtual float RefFallSpeed    => 560f;
-    protected virtual float MinDamage       => 0.8f;
-    protected virtual float MaxDamage       => 2.4f;
-    protected virtual float MinKnockback    => 200f;
-    protected virtual float MaxKnockback    => 380f;
-    protected virtual float HitboxHalfWidth => 15f;
-    protected virtual float HitboxReachDown => 16f;
+    public EnemyPounceSlamAction() : this(ActionSpec.Default(ActionKind.PounceSlam)) {}
+    public EnemyPounceSlamAction(ActionSpec spec) { Spec = spec; }
+
+    protected float Windup          => Spec.Windup;
+    protected float Active          => Spec.Active;
+    protected float Recovery        => Spec.Recovery;
+    protected float MinFallSpeed    => Spec.FallSpeedMin;
+    protected float RefFallSpeed    => Spec.FallSpeedRef;
+    protected float MinDamage       => Spec.Damage;
+    protected float MaxDamage       => Spec.DamageMax;
+    protected float MinKnockback    => Spec.Knockback.X;
+    protected float MaxKnockback    => Spec.KnockbackMax;
+    protected float HitboxHalfWidth => Spec.HalfWidth;
+    protected float HitboxReachDown => Spec.Reach;
     protected virtual Color SlamColor       => new(255, 200, 90);
 
-    public override int ActivePriority  => 34;
-    public override int PassivePriority => 30;
+    public override int ActivePriority  => Spec.ActivePriority;
+    public override int PassivePriority => Spec.PassivePriority;
 
     public override bool CheckPreConditions(in EnemyContext ctx)
         => ctx.Self.Body.Velocity.Y > MinFallSpeed;
@@ -298,26 +311,31 @@ public class EnemyPounceSlamAction : EnemyActionState
 //
 // Reach is roughly three body-lengths — long enough that "back off" is a real
 // answer, short enough that it can't contest the room the way the Bastion can.
+//
+// Stock spec (ActionSpec.Default(ActionKind.Lash)): MinRange 18 keeps the lash
+// from firing at point-blank, where the strike polygon starts behind the target
+// and reads as a phantom hit. Knockback.X is the impulse along the frozen axis;
+// -Knockback.Y is an extra upward bias so a lash from a ceiling still launches
+// the player sideways-and-clear rather than straight into the floor.
 public class EnemyLashAction : EnemyActionState
 {
-    protected virtual float Windup      => 0.55f;
-    protected virtual float Active      => 0.14f;
-    protected virtual float Recovery    => 0.45f;
-    // Min range keeps the lash from firing at point-blank, where the strike
-    // polygon starts behind the target and reads as a phantom hit.
-    protected virtual float MinRange    => 18f;
-    protected virtual float MaxRange    => 62f;
-    protected virtual float Reach       => 58f;
-    protected virtual float HalfWidth   => 7f;
-    protected virtual float Damage      => 1.3f;
-    protected virtual float Knockback   => 260f;
-    // Extra upward bias so a lash from a ceiling still launches the player
-    // sideways-and-clear rather than straight into the floor.
-    protected virtual float UpBias      => 150f;
+    public EnemyLashAction() : this(ActionSpec.Default(ActionKind.Lash)) {}
+    public EnemyLashAction(ActionSpec spec) { Spec = spec; }
+
+    protected float Windup      => Spec.Windup;
+    protected float Active      => Spec.Active;
+    protected float Recovery    => Spec.Recovery;
+    protected float MinRange    => Spec.MinRange;
+    protected float MaxRange    => Spec.MaxRange;
+    protected float Reach       => Spec.Reach;
+    protected float HalfWidth   => Spec.HalfWidth;
+    protected float Damage      => Spec.Damage;
+    protected float Knockback   => Spec.Knockback.X;
+    protected float UpBias      => -Spec.Knockback.Y;
     protected virtual Color LashColor   => new(120, 230, 190);
 
-    public override int ActivePriority  => 32;
-    public override int PassivePriority => 27;
+    public override int ActivePriority  => Spec.ActivePriority;
+    public override int PassivePriority => Spec.PassivePriority;
 
     public override bool CheckPreConditions(in EnemyContext ctx)
         => ctx.Dist >= MinRange && ctx.Dist <= MaxRange;

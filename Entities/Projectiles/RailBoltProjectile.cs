@@ -30,14 +30,15 @@ public class RailBoltProjectile : Projectile
     // Fast enough that dodging is a matter of not being on the line when it
     // fires, rather than of reacting to the bolt itself. That's deliberate: the
     // windup is the counterplay, the flight is the consequence.
-    private const float Speed              = 1500f;
+    // Public so ActionSpec.Default(ActionKind.RailShot) can quote it.
+    public  const float DefaultSpeed       = 1500f;
     private const float LifeSeconds        = 0.85f;
     // Above Stone's MaxHP (2.0) so one pass clears a cell — a terrain requirement,
     // which is why the body number below is authored separately rather than sharing it.
     private const float DamagePerFrame     = 2.6f;
     // Heavy on a body too — 30% of a player's pool for the one attack in the set with
     // a full wind-up to read — but three of them, not two.
-    private const float BodyDamage         = 1.5f;
+    public  const float DefaultBodyDamage  = 1.5f;
     private const float HitboxHalfSize     = 6f;
     private const float CollisionStopSpeed = 200f;   // high: the bolt is fast, "slowed" means "blocked"
     private const float ArmDelay           = 0.03f;
@@ -47,21 +48,27 @@ public class RailBoltProjectile : Projectile
     // no longer has to fling you into a wall to matter.
     private const float KnockbackImpulse   = 350f;
     // How many terrain halts the bolt survives. 3 ≈ a pillar's worth.
-    private const int   DefaultBudget      = 3;
+    public  const int   DefaultBudget      = 3;
 
-    private readonly int _hitId;
+    private readonly int   _hitId;
+    private readonly float _bodyDamage;
     private int _budget;
 
     public override EntityKind Kind => EntityKind.RailBolt;
 
-    public RailBoltProjectile(Vector2 pos, Vector2 dir, int hitId, Faction owner, int budget = DefaultBudget)
+    // `speed` / `bodyDamage` default to the stock bolt; an EnemyRailShotAction
+    // passes its ActionSpec's values. Tile damage (DamagePerFrame) is NOT a spec
+    // knob — it is a terrain requirement, not a fighter's choice.
+    public RailBoltProjectile(Vector2 pos, Vector2 dir, int hitId, Faction owner, int budget = DefaultBudget,
+                              float speed = DefaultSpeed, float bodyDamage = DefaultBodyDamage)
         : base(new PhysicsBody(Polygon.CreateRegular(4f, 4), pos), health: 0.1f, lifetime: LifeSeconds, owner: owner)
     {
-        _hitId  = hitId;
-        _budget = budget;
+        _hitId      = hitId;
+        _budget     = budget;
+        _bodyDamage = bodyDamage > 0f ? bodyDamage : DefaultBodyDamage;
         if (dir.LengthSquared() < 1e-4f) dir = Vector2.UnitX;
         dir.Normalize();
-        Body.Velocity = dir * Speed;
+        Body.Velocity = dir * (speed > 0f ? speed : DefaultSpeed);
         // Reuse the energy-ball impact tuning: its low BreakThreshold is exactly
         // the "keep going once a cell gives way" behaviour the penetration
         // budget is metering. Without an Impact config the solver would pin the
@@ -80,8 +87,9 @@ public class RailBoltProjectile : Projectile
     protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
-        s.HitId  = _hitId;
-        s.Budget = _budget;
+        s.HitId      = _hitId;
+        s.Budget     = _budget;
+        s.ProjDamage = _bodyDamage;
     }
 
     protected override void ReadState(in EntityData s)
@@ -126,7 +134,7 @@ public class RailBoltProjectile : Projectile
             dir * KnockbackImpulse,
             Faction, Id, Color,
             // All, not EntitiesOnly — this is the whole point of the bolt.
-            targets: HitTargets.All, bodyDamage: BodyDamage,
+            targets: HitTargets.All, bodyDamage: _bodyDamage,
             origin: p));
     }
 }

@@ -100,6 +100,11 @@ public abstract class EnemyMovementState : EnemyState<EnemyMovementVars> {}
 
 public abstract class EnemyActionState : EnemyState<EnemyActionVars>
 {
+    // The knobs this action reads (Plans/FIGHTER_DESIGN_PLAN.md §4). Pool actions
+    // take one in their ctor and read every tunable through it; the bespoke
+    // actions under Types/ leave it at default (Kind == Special) and keep their
+    // own constants. Construction input only — never snapshotted.
+    public ActionSpec Spec { get; init; }
     // Stamp Windup/Active/RecoveryDuration into vars from this flyweight's knobs.
     // Called by EnemyEntity.ReadState after restoring TimeInState so Draw and
     // phase math see the same numbers a live Enter would have written. Default

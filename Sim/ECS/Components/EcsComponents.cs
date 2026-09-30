@@ -100,6 +100,7 @@ public struct EntityData
 
     // Projectile subtype state
     public int                 HitId;
+    public float               ProjDamage;  // EnergyBall / RailBolt: per-hit body damage handed in by the spawning ActionSpec
     public bool                Stuck;       // StickyGrenade
     public float               StuckSince;  // StickyGrenade
     public bool                Exploded;    // StickyGrenade

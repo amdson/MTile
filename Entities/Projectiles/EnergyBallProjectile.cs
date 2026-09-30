@@ -18,9 +18,11 @@ namespace MTile;
 // the contact, then dies on the next collision (or lifetime).
 public class EnergyBallProjectile : Projectile
 {
-    private const float Speed              = 500f;
+    // Public so ActionSpec.Default(ActionKind.Ranged) can quote them: an enemy
+    // ranged spec that leaves Speed / Damage at these fires exactly this ball.
+    public  const float DefaultSpeed       = 500f;
+    public  const float DefaultDamage      = 1.0f;
     private const float LifeSeconds        = 1.2f;
-    private const float DamagePerFrame     = 1.0f;
     private const float HitboxHalfSize     = 5f;
     private const float CollisionStopSpeed = 30f;
     private const float ArmDelay           = 0.03f;
@@ -29,26 +31,34 @@ public class EnergyBallProjectile : Projectile
     // vs Brute Mass 1.2 → 275 px/s; vs Stalker Mass 1.0 → 330 px/s.
     private const float KnockbackImpulse   = 330f;
 
-    private readonly int _hitId;
+    private readonly int   _hitId;
+    private readonly float _damage;
 
     public override EntityKind Kind => EntityKind.EnergyBall;
 
-    // _hitId is immutable (set once at construction); WriteState records it so
-    // Rehydrate can pass it back through the ctor. No ReadState override needed —
-    // the base body/stat restore is sufficient for a live-entity restore.
+    // _hitId and _damage are immutable (set once at construction); WriteState
+    // records them so Rehydrate can pass them back through the ctor. Speed needs
+    // no slot — it lives in Body.Velocity, which BodyStateComp already carries. No
+    // ReadState override needed: the base body/stat restore covers a live entity.
     protected override void WriteState(ref EntityData s)
     {
         base.WriteState(ref s);
-        s.HitId = _hitId;
+        s.HitId      = _hitId;
+        s.ProjDamage = _damage;
     }
 
-    public EnergyBallProjectile(Vector2 pos, Vector2 dir, int hitId, Faction owner)
+    // `speed` / `damage` default to the stock ball. An enemy ranged action passes
+    // its ActionSpec's values; the player's EnergyBallAction and Rehydrate pass
+    // what they have (Rehydrate: the snapshotted damage, or 0 ⇒ stock).
+    public EnergyBallProjectile(Vector2 pos, Vector2 dir, int hitId, Faction owner,
+                                float speed = DefaultSpeed, float damage = DefaultDamage)
         : base(new PhysicsBody(Polygon.CreateRegular(4f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: owner)
     {
-        _hitId = hitId;
+        _hitId  = hitId;
+        _damage = damage > 0f ? damage : DefaultDamage;
         if (dir.LengthSquared() < 1e-4f) dir = Vector2.UnitX;
         dir.Normalize();
-        Body.Velocity = dir * Speed;
+        Body.Velocity = dir * (speed > 0f ? speed : DefaultSpeed);
         // Impact config so the ball can pierce 1-2 cells before dying — the
         // chunk solver's break-through path keeps it moving once a tile breaks
         // under the impulse threshold. Tuning lives in impact_profiles.json
@@ -77,7 +87,7 @@ public class EnergyBallProjectile : Projectile
         Vector2 vel = Body.Velocity;
         Vector2 dir = vel.LengthSquared() > 0.01f ? Vector2.Normalize(vel) : Vector2.UnitX;
         hitboxes?.Publish(new Hitbox(
-            region, _hitId, DamagePerFrame,
+            region, _hitId, _damage,
             dir * KnockbackImpulse,
             Faction, Id, Color,
             targets: HitTargets.EntitiesOnly,
