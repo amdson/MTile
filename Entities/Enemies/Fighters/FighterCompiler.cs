@@ -57,17 +57,10 @@ public static class FighterCompiler
     // (the player's is ~6 px; TemplateEnemy documents the same number).
     public const float TargetHalfWidth = 6f;
 
-    // Floor friction scale for every compiled fighter. Much lower than the stock
-    // enemies' 0.10–0.14 on purpose: EnemyChaseState's powered walk pre-compensates the
-    // floor's Coulomb brake by min(brake, |vCmd|), which only survives the solver when
-    // the frame's commanded velocity is at least half the brake. From rest that means
-    // GroundPower / Mass must exceed GroundFriction · FrictionScale / 2 — 180 px/s² at
-    // 0.12, which no heavy archetype clears (the Brick measured 0.1 px in 4 s). At 0.02
-    // the threshold is 30 px/s², under a_min (40), so every fighter that passes
-    // validation can actually start walking. Idle / AttackHold brake the body themselves,
-    // so stopping does not need the floor. Revisit if the chase state compensates the
-    // full brake — then this can go back to a stock-feeling 0.10.
-    public const float FighterFrictionScale = 0.02f;
+    // Floor friction scale for every compiled fighter — the stock enemies' band.
+    // EnemyChaseState's powered walk pre-compensates the floor's full Coulomb brake, so
+    // friction never gates whether a fighter can start walking; a_min is the only floor.
+    public const float FighterFrictionScale = 0.10f;
 
     public static CompileResult Compile(FighterSpec spec, ICostModel model)
     {
@@ -200,6 +193,7 @@ public static class FighterCompiler
             FrictionScale = rooted ? 0.9f : FighterFrictionScale,
             TargetMemory = spec.TargetMemory,
             Rooted       = rooted,
+            Team         = spec.Team,
             Strength     = spec.Strength,
             Armor        = spec.Armor,
             EnergyMax    = spec.EnergyReserve,
@@ -243,6 +237,8 @@ public static class FighterCompiler
         ActionKind.RailShot   => new EnemyRailShotAction(a),
         ActionKind.PounceSlam => new EnemyPounceSlamAction(a),
         ActionKind.Lash       => new EnemyLashAction(a),
+        ActionKind.PlaceBlock      => new EnemyPlaceBlockAction(a),
+        ActionKind.SpawnBlockInAir => new EnemySpawnBlockInAirAction(a),
         _ => throw new NotSupportedException(
                  $"ActionKind.{a.Kind} has no pool action a fighter can buy."),
     };

@@ -77,11 +77,14 @@ public class EnemyChaseState : EnemyMovementState
         // per step) is what a walker pushes AGAINST, not something its motor has to
         // out-muscle — the legacy velocity-set walk never felt it because it rewrote
         // the velocity every frame. Pre-compensate exactly the amount the solver
-        // will strip so the commanded velocity is what survives the step. Airborne
-        // (no floor contact) there is nothing to compensate and nothing is added.
+        // will strip so the commanded velocity is what survives the step: the solver
+        // removes min(brake, |v_set|), so setting vCmd + brake — the FULL brake,
+        // whatever vCmd is — lands on vCmd. (Capping the add at |vCmd| was a bug that
+        // pinned a walker starting from rest at zero forever.) Airborne (no floor
+        // contact) there is nothing to compensate and nothing is added.
         float brake = FloorBrake(body) * ctx.Dt;
         if (brake > 0f && vCmd != 0f)
-            vCmd += MathF.Sign(vCmd) * MathF.Min(brake, MathF.Abs(vCmd));
+            vCmd += MathF.Sign(vCmd) * brake;
         body.Velocity.X = vCmd;
     }
 

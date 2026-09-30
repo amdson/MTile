@@ -531,9 +531,9 @@ Phase markers: `[ ]` todo · `[~]` in progress · `[x] done @commit` · `[!]` bl
 
 - [x] Phase 1 — action tuning into data (`ActionSpec`, `ActionKind`, `EnemyActionState.Spec`) @39dbb8d
 - [x] Phase 2 — meter, scratch block, `RequestedAction`, blueprint attributes, power-based movement @7e27b0a
-- [~] Phase 3 — `FighterSpec`, cost model, compiler, six archetypes, `fighters` stage
+- [x] Phase 3 — `FighterSpec`, cost model, compiler, six archetypes, `fighters` stage @(merge 305c196 + follow-up, see log)
 - [x] Phase 4 — targets and teams @(merge of f658f9d, see log)
-- [ ] Phase 5 — arena harness and coefficient loop
+- [~] Phase 5 — arena harness and coefficient loop
 - [ ] Phase 6 — AI designer (`MTile.Bench --forge`)
 
 ### Decisions taken at kickoff (user, 2026-09-30)
@@ -592,3 +592,4 @@ Phase markers: `[ ]` todo · `[~]` in progress · `[x] done @commit` · `[!]` bl
 | default budget | Mass 2.5 · Slots 4 · Points 2 | |
 
 Roster under it: Brick 2.437 (walk 45 px/s², at the mass cap) · Sprinter 1.866 (139 px/s², jump 214 px/s) · Gunner 1.140 · Flyer 1.269 (T/M 709 > 600) · Builder 1.569 · Turret 2.155 (points 1 after the rooted refund).
+- 2026-09-30 · Phase 3 close-out (supervisor) · merged `fighter-3a-cost` (7cf107e) and finished what the worker could not after its stash was blocked: block kinds priced in `PhysicsCostModel.ActionCost` (PlaceBlock = BuildCost(material); SpawnBlockInAir = × AirPremium + 1 point) and wired in `FighterCompiler.CreateAction`; Builder gets Ranged + PlaceBlock + SpawnBlockInAir; `FighterSpec.Team` copied onto the blueprint. **Fixed the phase-2 walk bug the worker found:** `EnemyChaseState` capped its brake pre-compensation at |vCmd|, so a walker from rest never moved under stock friction; it now adds the full brake, and compiled fighters go back to FrictionScale 0.10 (the 0.02 workaround is gone). Fighter classes 70/70 + ConfigLayout 4/4 (after a Desktop build), snapshot/rollback 33/33, `combat` 338 pass / same 10 reds.

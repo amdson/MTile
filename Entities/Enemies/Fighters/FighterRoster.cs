@@ -117,11 +117,10 @@ public static class FighterRoster
         Brain           = s => new FighterHoverDiveBrain(s),
     };
 
-    // Builder — an energy bank, legs, a jump and a light shot. Proves terrain actions are
-    // worth their energy — once it has them.
-    // TODO(fighter phase 3b): add ActionKind.PlaceBlock and ActionKind.SpawnBlockInAir to
-    // this kit when those kinds land (another parcel is implementing them). The slot
-    // budget already has room: ranged + jump + the two block actions = 4 = MaxSlots.
+    // Builder — an energy bank, legs, a jump, a light shot and the two terrain actions.
+    // Proves terrain actions are worth their energy: a wall between it and the target,
+    // or a block dropped on the target's head, each cost the same meter the shot does.
+    // Slots: ranged + jump + two block actions = 4 = MaxSlots.
     public static FighterSpec Builder() => new()
     {
         Name          = "Builder",
@@ -137,6 +136,8 @@ public static class FighterRoster
         Actions       =
         {
             Ranged(damage: 0.6f, speed: 400f),                  // 0 — 0.48 energy a shot
+            ActionSpec.Default(ActionKind.PlaceBlock),          // 1 — a wall, one tile at a time
+            ActionSpec.Default(ActionKind.SpawnBlockInAir),     // 2 — a block over the target's head
         },
         EngageRange     = 180f,
         StandoffRange   = 100f,

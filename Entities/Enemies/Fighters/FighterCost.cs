@@ -90,6 +90,11 @@ public sealed class PhysicsCostModel : ICostModel
                                               _k.KShot * a.Speed * a.Damage + _k.KTile * a.Penetration,
                                               1, _k.RailPoints),
             ActionKind.Lash       => new Cost(kA * a.Damage * a.Reach, 0f, 1, _k.LashPoints),
+            // Terrain actions (§3.3): weightless, paid per tile in the same units as the
+            // player's build meter; conjuring a block in mid-air carries a premium and a point.
+            ActionKind.PlaceBlock      => new Cost(0f, MaterialStrengths.BuildCostFor(a.Material), 1, 0),
+            ActionKind.SpawnBlockInAir => new Cost(0f, MaterialStrengths.BuildCostFor(a.Material) * _k.AirPremium,
+                                                   1, _k.SpawnInAirPoints),
             // Special actions carry private knobs the model cannot read. Validate
             // reports them; price them as one slot so the report still adds up.
             _                     => new Cost(0f, 0f, 1, 0),
