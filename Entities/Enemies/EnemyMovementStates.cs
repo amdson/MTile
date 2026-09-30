@@ -53,7 +53,46 @@ public class EnemyChaseState : EnemyMovementState
     public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
     {
         v.TimeInState += ctx.Dt;
-        ctx.Self.Body.Velocity.X = MathF.Sign(ctx.Input.MoveDir.X) * Speed;
+        float power = ctx.Self.GroundPower;
+        if (power <= 0f)
+        {
+            // Legacy walk: every enemy that predates the fighter attributes.
+            ctx.Self.Body.Velocity.X = MathF.Sign(ctx.Input.MoveDir.X) * Speed;
+            return;
+        }
+
+        // Power ÷ mass (FIGHTER_DESIGN_PLAN §7): accelerate toward the drag-limited
+        // top speed. Heavier is slower to get going; more power buys both a faster
+        // start and a higher ceiling. The cap is what keeps a huge power from
+        // being a teleport — the body still has to cover the distance.
+        var   body  = ctx.Self.Body;
+        float mass  = MathF.Max(ctx.Self.Mass, 0.01f);
+        float accel = power / mass;
+        float vTop  = MathF.Sqrt(power / MathF.Max(ctx.Self.GroundDrag, 1e-4f));
+        float want  = MathF.Sign(ctx.Input.MoveDir.X) * vTop;
+        float step  = accel * ctx.Dt;
+        float vCmd  = body.Velocity.X + MathHelper.Clamp(want - body.Velocity.X, -step, step);
+
+        // The floor's Coulomb brake (PhysicsContact.Friction, capped at Friction·dt
+        // per step) is what a walker pushes AGAINST, not something its motor has to
+        // out-muscle — the legacy velocity-set walk never felt it because it rewrote
+        // the velocity every frame. Pre-compensate exactly the amount the solver
+        // will strip so the commanded velocity is what survives the step. Airborne
+        // (no floor contact) there is nothing to compensate and nothing is added.
+        float brake = FloorBrake(body) * ctx.Dt;
+        if (brake > 0f && vCmd != 0f)
+            vCmd += MathF.Sign(vCmd) * MathF.Min(brake, MathF.Abs(vCmd));
+        body.Velocity.X = vCmd;
+    }
+
+    // Friction coefficient of the body's maintained floor contact, or 0 when it has
+    // none. Read-only walk over the constraint list the solver already stamped.
+    private static float FloorBrake(PhysicsBody body)
+    {
+        float best = 0f;
+        foreach (var c in body.Constraints)
+            if (c is SurfaceContact sc && sc.Normal.Y < -0.7f && sc.Friction > best) best = sc.Friction;
+        return best;
     }
 }
 
@@ -160,7 +199,13 @@ public class EnemyJumpState : EnemyMovementState
         // through MovementConfig.JumpVelocity. Adding rather than assigning so
         // a body that's already drifting upward (e.g. on a moving platform)
         // doesn't get its lift truncated.
-        ctx.Self.Body.Velocity.Y += JumpImpulse;
+        //
+        // A fighter that bought a jump launches at JumpImpulse / Mass (§7); a
+        // blueprint that didn't keeps this state's fixed lift.
+        float bought = ctx.Self.JumpImpulse;
+        ctx.Self.Body.Velocity.Y += bought > 0f
+            ? -bought / MathF.Max(ctx.Self.Mass, 0.01f)
+            : JumpImpulse;
     }
 
     public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
@@ -363,8 +408,15 @@ public class EnemyFlyState : EnemyMovementState
     public override int ActivePriority  => 30;
     public override int PassivePriority => 26;
 
-    public override bool CheckPreConditions(in EnemyContext ctx) => !ctx.Self.IsActionCommitted;
-    public override bool CheckConditions  (in EnemyContext ctx, ref EnemyMovementVars v) => !ctx.Self.IsActionCommitted;
+    // A flyer that pays for flight (FlightDrain > 0) can only fly while the meter
+    // has something in it; when it hits zero the state drops and the body falls
+    // (§6). Free flyers — every stock bird — are unaffected.
+    public override bool CheckPreConditions(in EnemyContext ctx)
+        => !ctx.Self.IsActionCommitted && HasFuel(ctx.Self);
+    public override bool CheckConditions  (in EnemyContext ctx, ref EnemyMovementVars v)
+        => !ctx.Self.IsActionCommitted && HasFuel(ctx.Self);
+
+    protected static bool HasFuel(EnemyEntity self) => self.FlightDrain <= 0f || self.Energy > 0f;
 
     public override void Update(in EnemyContext ctx, ref EnemyMovementVars v)
     {
@@ -377,10 +429,18 @@ public class EnemyFlyState : EnemyMovementState
         // when computing the delta-cap.
         float mass = MathF.Max(ctx.Self.Mass, 0.01f);
 
+        // Per-second hover cost, paid up front so the frame that empties the meter
+        // still gets its thrust and the NEXT frame's CheckConditions is what drops
+        // the state — no half-powered frame.
+        if (ctx.Self.FlightDrain > 0f)
+            ctx.Self.Energy = MathF.Max(0f, ctx.Self.Energy - ctx.Self.FlightDrain * dt);
+
         // Per-frame velocity-change envelope. The (1/Mass) factor is the only
         // place Entity.Mass enters this state — match the player-knockback
-        // semantics (heavier = harder to push around).
-        float budget = MaxAcceleration / mass * dt;
+        // semantics (heavier = harder to push around). A fighter's bought Thrust
+        // replaces the state's MaxAcceleration; the division is the same.
+        float thrust = ctx.Self.Thrust > 0f ? ctx.Self.Thrust : MaxAcceleration;
+        float budget = thrust / mass * dt;
 
         // Desired post-step velocity. Virtual so a subclass can vary it per frame
         // (a dive that hovers during its wind-up and then commits at a different

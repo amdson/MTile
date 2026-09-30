@@ -530,8 +530,8 @@ Phases 1–2 are the risky ones (they touch every enemy). Phases 3–6 are addit
 Phase markers: `[ ]` todo · `[~]` in progress · `[x] done @commit` · `[!]` blocked · `[?]` needs user decision.
 
 - [x] Phase 1 — action tuning into data (`ActionSpec`, `ActionKind`, `EnemyActionState.Spec`) @b5a0d61
-- [~] Phase 2 — meter, scratch block, `RequestedAction`, blueprint attributes, power-based movement
-- [ ] Phase 3 — `FighterSpec`, cost model, compiler, six archetypes, `fighters` stage
+- [x] Phase 2 — meter, scratch block, `RequestedAction`, blueprint attributes, power-based movement @3653266
+- [~] Phase 3 — `FighterSpec`, cost model, compiler, six archetypes, `fighters` stage
 - [ ] Phase 4 — targets and teams
 - [ ] Phase 5 — arena harness and coefficient loop
 - [ ] Phase 6 — AI designer (`MTile.Bench --forge`)
@@ -556,3 +556,4 @@ Phase markers: `[ ]` todo · `[~]` in progress · `[x] done @commit` · `[!]` bl
 (one line per milestone: what, commit, test status)
 
 - 2026-09-30 · Phase 1 · b5a0d61 · `ActionSpec` + `Default(kind)`; eight pool actions read `Spec`; ranged Speed/Damage threaded into the projectiles (`EntityData.ProjDamage`). `FighterActionSpecTests` 12/12 green; `combat` group 283 pass / 10 red, the same 10 player-side reds as before the change (ActionAimSolver ×3, CombatHitstun crush, SlashComboPresentation ×6). `simcore` group: 3 red — `TrainingStageTests` (BACKLOG §5) and both `GauntletStageTests`, whose message is "player only reached x 60 of ~1397", a traversal failure from spawn that predates this work and cannot come from enemy knob plumbing.
+- 2026-09-30 · Phase 2 · 3653266 · `EnemyInput.RequestedAction` (`int?`, null = anything) narrows `SelectAction` to one candidate; `BrainScratch` on `EnemyEntity` + `EntityData`; `Energy`/`EnergyMax`/`EnergyRegen` meter ticked before `Decide`, gated + spent in `SelectAction`, drained per second by `EnemyFlyState` (`FlightDrain`); blueprint attributes `Strength`, `Armor`, `EnergyMax`, `EnergyRegen`, `GroundPower`, `GroundDrag`, `JumpImpulse`, `Thrust`, `FlightDrain` (all default off = legacy behaviour); `Strength` applied at every pool-action hitbox publish; `Armor` widens the knockback divisor via `Entity.KnockbackMass`. **Found while testing:** a powered walk has to pre-compensate the floor's Coulomb brake (3000 × FrictionScale px/s², capped per step) or an acceleration under it never moves — `EnemyChaseState` now adds back exactly what the solver will strip, read off the body's maintained floor contact. `FighterDeterminismTests` 7/7 (bit-identical round trip with a stateful brain + draining meter; requested action; energy gate + regen; power ÷ mass; flight drain; strength + armor). `combat` 290 pass / same 10 reds; snapshot + rollback suites 33/33.

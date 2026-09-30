@@ -33,6 +33,17 @@ public struct PlayerRef { public PlayerCharacter Obj; }
 // body's contacts into the snapshot.
 public struct BodyStateComp { public BodyState State; }
 
+// A bundled fighter brain's memory (Plans/FIGHTER_DESIGN_PLAN.md §5.2). Controllers
+// are shared flyweights with no per-entity fields, so the only place a brain may
+// keep a timer or a mode is here, on the entity, where it snapshots as a flat
+// value copy. Fixed-size on purpose: four floats and two ints is a timer, a mode,
+// a remembered position and a counter, and anything richer wants a real component.
+public struct BrainScratch
+{
+    public float F0, F1, F2, F3;
+    public int   I0, I1;
+}
+
 // Everything an Entity needs snapshotted EXCEPT its body pose (BodyStateComp) and its
 // EntityId (the World owns identity). Fields are unioned across entity types exactly
 // like the old EntitySnapshot — an AIState int reused by Stalker/Turret, a HitId reused
@@ -97,6 +108,13 @@ public struct EntityData
     // with a different target.
     public Vector2 LastSeenPos;
     public float   LastSeenAge;
+
+    // Fighter runtime state (Plans/FIGHTER_DESIGN_PLAN.md §5.2, §6). Scratch is the
+    // bundled brain's memory; Energy / EnergyMax the per-entity meter. Regen is a
+    // blueprint constant, rebuilt on rehydrate, so it has no slot.
+    public BrainScratch Scratch;
+    public float        Energy;
+    public float        EnergyMax;
 
     // Projectile subtype state
     public int                 HitId;

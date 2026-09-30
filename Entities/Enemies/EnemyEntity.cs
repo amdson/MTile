@@ -51,6 +51,34 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     public float   LastSeenAge   => MathF.Max(_lastSeenAge, 0f);
     public bool    PlayerVisible => _playerVisible;
 
+    // ── Fighter attributes (Plans/FIGHTER_DESIGN_PLAN.md §3.2, §5.2, §6, §7) ─
+    // Construction-time constants copied off the blueprint (not snapshotted —
+    // rehydrate rebuilds them through the registered blueprint, like TracksTarget).
+    public float Strength    { get; set; } = 1f;
+    public float Armor       { get; set; }
+    public float EnergyRegen { get; set; }
+    public float GroundPower { get; set; }
+    public float GroundDrag  { get; set; } = EnemyBlueprint.DefaultGroundDrag;
+    public float JumpImpulse { get; set; }
+    public float Thrust      { get; set; }
+    public float FlightDrain { get; set; }
+
+    // Runtime state (snapshotted). Energy is ticked toward EnergyMax at EnergyRegen
+    // per second before the brain runs each frame; actions spend it at Enter
+    // (SelectAction) and EnemyFlyState drains it per second. No debt: an action
+    // whose Spec.EnergyCost exceeds Energy is simply never selected.
+    public float EnergyMax   { get; set; }
+    public float Energy      { get; set; }
+
+    // The bundled brain's memory. A controller may read and write this through
+    // ctx.Self.Scratch (ref-able, since Self is a class) and NOTHING else on the
+    // controller instance — see EnemyController. Snapshotted as a flat value.
+    public BrainScratch Scratch;
+
+    // Armor is "mass that only counts for shoves" — it widens the knockback
+    // divisor without touching the physics mass.
+    protected override float KnockbackMass => Mass + Armor;
+
     // Read by EnemyMovementState.CheckPreConditions to detect "an attack is mid-flight"
     // — the only cross-FSM channel, mirroring MovementModifiers from player code.
     public bool IsActionCommitted => _currentAction >= 0 && _actionVars.Committed;
@@ -142,6 +170,10 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         // Pre-input context — Facing/Input intentionally unset; the controller
         // doesn't read them (it produces them).
         UpdateTargetMemory(dt, player, spawner);
+        // Meter regen runs before the brain so what it reads is what it can spend
+        // this frame. Clamped — no overfill from a regen tick landing on a full bar.
+        if (EnergyRegen > 0f && Energy < EnergyMax)
+            Energy = MathF.Min(EnergyMax, Energy + EnergyRegen * dt);
 
         var ctx = new EnemyContext {
             Dt            = dt,
@@ -267,11 +299,24 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         // runs, so an in-flight action finishes its recovery and exits cleanly.
         if (!ctx.Input.WantAttack) return;
 
+        // Explicit choice narrows the scan to one candidate; every other rule
+        // (precondition, energy, priority vs the incumbent) still applies to it.
+        // An out-of-range request is treated as "nothing", not as "anything".
+        int lo = 0, hi = _actions.Count;
+        if (ctx.Input.RequestedAction is int req)
+        {
+            if (req < 0 || req >= _actions.Count) return;
+            lo = req; hi = req + 1;
+        }
+
         int bestIdx = -1;
         int bestPri = int.MinValue;
-        for (int i = 0; i < _actions.Count; i++)
+        for (int i = lo; i < hi; i++)
         {
             if (i == _currentAction) continue;
+            // Energy gate: an unaffordable action never triggers (§6). Stock actions
+            // cost 0, so an enemy without a meter is unaffected.
+            if (_actions[i].Spec.EnergyCost > Energy) continue;
             if (!_actions[i].CheckPreConditions(in ctx)) continue;
             if (_actions[i].PassivePriority > bestPri)
             {
@@ -287,6 +332,8 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
             _currentAction = bestIdx;
             _actionVars    = default;
             _actions[_currentAction].Enter(ctx, ref _actionVars);
+            // Spend at Enter. The gate above guarantees this never goes negative.
+            Energy -= _actions[_currentAction].Spec.EnergyCost;
         }
     }
 
@@ -360,6 +407,9 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         s.Aim          = _actionVars.LockedAim;
         s.LastSeenPos  = _lastSeenPos;
         s.LastSeenAge  = _lastSeenAge;
+        s.Scratch      = Scratch;
+        s.Energy       = Energy;
+        s.EnergyMax    = EnergyMax;
     }
 
     protected override void ReadState(in EntityData s)
@@ -378,6 +428,9 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         _actionVars.Committed    = _currentAction >= 0;
         _lastSeenPos             = s.LastSeenPos;
         _lastSeenAge             = s.LastSeenAge;
+        Scratch                  = s.Scratch;
+        Energy                   = s.Energy;
+        EnergyMax                = s.EnergyMax;
 
         // Re-derive durations from the flyweight so Draw / phase math reads the
         // same Windup/Active/Recovery values the live action would have stamped

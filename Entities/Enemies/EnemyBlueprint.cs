@@ -43,6 +43,37 @@ public sealed class EnemyBlueprint
     // pixel. For emplacements and statues whose position is level geometry.
     public bool  Rooted        { get; init; }
 
+    // ── Fighter attributes (Plans/FIGHTER_DESIGN_PLAN.md §3.2, §6, §7) ──────
+    // Every one of these defaults to "off", and off means the stock movement
+    // states and actions behave exactly as they did before the fields existed:
+    // a zero power keeps EnemyChaseState's velocity-set walk, a zero jump impulse
+    // keeps EnemyJumpState's fixed lift, a zero thrust keeps EnemyFlyState's
+    // MaxAcceleration. Only a blueprint that buys the attribute runs the
+    // power ÷ mass path. The fighter compiler fills these from a FighterSpec;
+    // hand-written blueprints may set them too.
+    //
+    // Damage scale on every hitbox this enemy publishes (applied at publish time,
+    // so the same ActionSpec on two fighters reads the same in the cost table).
+    public float Strength      { get; init; } = 1f;
+    // Extra knockback divisor on top of Mass — "mass that only counts for shoves".
+    public float Armor         { get; init; }
+    // Per-entity meter (§6). Max 0 ⇒ no meter: every EnergyCost is unaffordable
+    // except a cost of 0, which is what every stock action has.
+    public float EnergyMax     { get; init; }
+    public float EnergyRegen   { get; init; }         // units per second
+    // Walk acceleration = GroundPower / Mass; top speed = √(GroundPower / GroundDrag).
+    public float GroundPower   { get; init; }
+    public float GroundDrag    { get; init; } = DefaultGroundDrag;
+    // Launch velocity = JumpImpulse / Mass (a positive magnitude; the state signs it).
+    public float JumpImpulse   { get; init; }
+    // Flight acceleration budget = Thrust / Mass (replaces EnemyFlyState.MaxAcceleration).
+    public float Thrust        { get; init; }
+    // Meter units per second spent while EnemyFlyState is active. 0 ⇒ flight is free.
+    public float FlightDrain   { get; init; }
+
+    // Chosen so a stock-feeling walk (70 px/s) is GroundPower ≈ 100 (70² × 0.02 = 98).
+    public const float DefaultGroundDrag = 0.02f;
+
     // ── Rendering ───────────────────────────────────────────────────────────
     public Color Color { get; init; } = new(150, 30, 30);
     // Sprite factory; receives Radius so the implementation can scale. Default
@@ -91,6 +122,16 @@ public sealed class BlueprintEnemy : EnemyEntity
         Body.FrictionScale = blueprint.FrictionScale;
         Rooted             = blueprint.Rooted;
         TracksTarget       = blueprint.TargetMemory;
+        Strength           = blueprint.Strength;
+        Armor              = blueprint.Armor;
+        EnergyMax          = blueprint.EnergyMax;
+        Energy             = blueprint.EnergyMax;     // spawn full
+        EnergyRegen        = blueprint.EnergyRegen;
+        GroundPower        = blueprint.GroundPower;
+        GroundDrag         = blueprint.GroundDrag;
+        JumpImpulse        = blueprint.JumpImpulse;
+        Thrust             = blueprint.Thrust;
+        FlightDrain        = blueprint.FlightDrain;
         Color              = blueprint.Color;
         Sprite             = blueprint.Sprite(blueprint.Radius);
     }

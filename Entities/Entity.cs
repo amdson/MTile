@@ -99,10 +99,14 @@ public class Entity : IHittable
     public virtual void PublishHurtboxes(HurtboxWorld world)
         => world.Publish(new Hurtbox(Body.Bounds, Faction, Id));
 
+    // What a hit divides its impulse by. Mass for everything except an enemy that
+    // bought Armor — "mass that only counts for shoves" (FIGHTER_DESIGN_PLAN §3.2).
+    protected virtual float KnockbackMass => Mass;
+
     public virtual Vector2 OnHit(in Hitbox hit, in Hurtbox _)
     {
         Health -= hit.BodyDamage;
-        var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
+        var res = HitResolver.Resolve(in hit, KnockbackMass, Body.Velocity);
         if (_holdingBody) _heldVelocity += res.TargetDeltaV;
         else              Body.Velocity += res.TargetDeltaV;
 

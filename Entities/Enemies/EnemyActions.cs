@@ -75,7 +75,7 @@ public class EnemyMeleeAction : EnemyActionState
             center.X - halfReach, center.Y - HitboxHalfHeight,
             center.X + halfReach, center.Y + HitboxHalfHeight);
         ctx.Hitboxes?.Publish(new Hitbox(
-            region, v.HitId, Damage,
+            region, v.HitId, Damage * ctx.Self.Strength,
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, StrikeColor,
             targets: HitTargets.EntitiesOnly,
@@ -190,7 +190,7 @@ public class EnemyContactAction : EnemyActionState
             c.X - BodyHalfExtent, c.Y - BodyHalfExtent,
             c.X + BodyHalfExtent, c.Y + BodyHalfExtent);
         ctx.Hitboxes?.Publish(new Hitbox(
-            region, v.HitId, Damage,
+            region, v.HitId, Damage * ctx.Self.Strength,
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, StrikeColor,
             targets: HitTargets.EntitiesOnly,
@@ -279,7 +279,7 @@ public class EnemyLungeAction : EnemyActionState
             p.X - HitHalfWidth, p.Y - HitHalfHeight,
             p.X + HitHalfWidth, p.Y + HitHalfHeight);
         ctx.Hitboxes?.Publish(new Hitbox(
-            region, v.HitId, Damage,
+            region, v.HitId, Damage * ctx.Self.Strength,
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, Color.MediumPurple,
             targets: HitTargets.EntitiesOnly,
@@ -428,7 +428,7 @@ public class EnemySlamAction : EnemyActionState
             c.X - HitHalfWidth, c.Y - HitHalfHeight,
             c.X + HitHalfWidth, c.Y + HitHalfHeight);
         ctx.Hitboxes?.Publish(new Hitbox(
-            region, v.HitId, Damage,
+            region, v.HitId, Damage * ctx.Self.Strength,
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, Color.Crimson,
             targets: HitTargets.EntitiesOnly,
@@ -547,7 +547,7 @@ public class EnemyRangedAction : EnemyActionState
                 : new Vector2(v.LockedFacing, 0f);
             var muzzle = origin + dir * MuzzleOffset;
             ctx.Spawner?.SpawnEntity(new EnergyBallProjectile(
-                muzzle, dir, v.HitId, Faction.Enemy, ProjectileSpeed, Damage));
+                muzzle, dir, v.HitId, Faction.Enemy, ProjectileSpeed, Damage * ctx.Self.Strength));
         }
     }
 

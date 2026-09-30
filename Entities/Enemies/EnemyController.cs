@@ -54,6 +54,14 @@ public struct EnemyInput
     // NOTE: this is a plain bool on a struct, so it defaults to FALSE, not true.
     // Every brain must set it explicitly or its enemy will never attack.
     public bool WantAttack;
+
+    // Explicit action choice (Plans/FIGHTER_DESIGN_PLAN.md §5.1): an index into
+    // the entity's own action list. When set, SelectAction considers ONLY that
+    // candidate — its precondition, priority and the incumbency rule still apply,
+    // so a brain can ask for a swing but the sim still decides whether the swing
+    // is physically available. Null (the default) is "anything that passes",
+    // which is exactly what every brain written before this field saw.
+    public int? RequestedAction;
 }
 
 // Swappable brain. One Decide call per Update produces the per-frame

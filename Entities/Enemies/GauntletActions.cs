@@ -106,7 +106,7 @@ public class EnemyRailShotAction : EnemyActionState
             var dir    = v.LockedAim.LengthSquared() > 1e-4f ? v.LockedAim : new Vector2(v.LockedFacing, 0f);
             var muzzle = ctx.Self.Body.Position + dir * MuzzleOffset;
             ctx.Spawner?.SpawnEntity(new RailBoltProjectile(muzzle, dir, v.HitId, Faction.Enemy, BoltBudget,
-                                                            BoltSpeed, BoltDamage));
+                                                            BoltSpeed, BoltDamage * ctx.Self.Strength));
         }
     }
 
@@ -267,7 +267,7 @@ public class EnemyPounceSlamAction : EnemyActionState
         var impulse = new Vector2(side * knockback * 0.75f, -knockback * 0.55f);
 
         ctx.Hitboxes?.Publish(new Hitbox(
-            region, v.HitId, damage, impulse,
+            region, v.HitId, damage * ctx.Self.Strength, impulse,
             Faction.Enemy, ctx.Self.Id, SlamColor,
             targets: HitTargets.EntitiesOnly,
             origin: ctx.Self.Body.Position));
@@ -379,7 +379,7 @@ public class EnemyLashAction : EnemyActionState
         var aabb   = poly.GetBoundingBox(center, rotation);
 
         ctx.Hitboxes?.Publish(new Hitbox(
-            aabb, v.HitId, Damage,
+            aabb, v.HitId, Damage * ctx.Self.Strength,
             dir * Knockback + new Vector2(0f, -UpBias),
             Faction.Enemy, ctx.Self.Id, LashColor,
             targets: HitTargets.EntitiesOnly,
