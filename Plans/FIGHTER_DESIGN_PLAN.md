@@ -1,9 +1,12 @@
 # Fighter Design Plan — parametrized NPC fighters with costed features
 
-**Status:** proposed, 2026-09-30. Nothing implemented. Written against the code as of
-commit `1ef80d7` (branch `worktree-remove-planned-support-optin`). §§1–9 are the fighter
-model and its phases; §§10–13 (added the same day) are the arena, the rating system, the
-submission pipeline, and the benchmark protocol built on top of it.
+**Status:** phases 1–4 implemented on branch `fighter-plan` (2026-09-30), plus an interim
+in-library arena (`FighterArena`, the §8.1 shape) and the AI designer as `MTile.Bench
+--forge`. §§10–13 — the fightbox, the ledger and ratings, `MTile.Forge` intake, the
+benchmark protocol — are not started; see §16 for what exists and what the reconciliation
+with those sections needs. Originally written against commit `1ef80d7`. §§1–9 are the
+fighter model and its phases; §§10–13 (added the same day) are the arena, the rating
+system, the submission pipeline, and the benchmark protocol built on top of it.
 
 **One-liner:** make a game out of *designing* fighters. A fighter is a data spec —
 attributes, an action list, and its own brain — priced by a cost model and compiled to the
@@ -865,16 +868,20 @@ network access and a CPU cap, and is out of scope until the pool is public.
 
 ---
 
-## 12. Campaign status (branch `fighter-plan`, started 2026-09-30)
+## 16. Campaign status (branch `fighter-plan`, started 2026-09-30)
 
 Phase markers: `[ ]` todo · `[~]` in progress · `[x] done @commit` · `[!]` blocked · `[?]` needs user decision.
+Numbering follows §9 as of 04e567e (the fightbox/ledger/Forge/benchmark revision).
 
 - [x] Phase 1 — action tuning into data (`ActionSpec`, `ActionKind`, `EnemyActionState.Spec`) @39dbb8d
 - [x] Phase 2 — meter, scratch block, `RequestedAction`, blueprint attributes, power-based movement @7e27b0a
-- [x] Phase 3 — `FighterSpec`, cost model, compiler, six archetypes, `fighters` stage @(merge 305c196 + follow-up, see log)
-- [x] Phase 4 — targets and teams @(merge of f658f9d, see log)
-- [x] Phase 5 — arena harness and coefficient loop @(see log)
-- [~] Phase 6 — AI designer (`MTile.Bench --forge`)
+- [x] Phase 3 — `FighterSpec`, cost model, compiler, six archetypes, `fighters` stage @305c196 + 44a9a9e
+- [x] Phase 4 — targets and teams @5ef97e8
+- [~] Phase 5 — arena box and harness. **Interim:** `FighterArena` (library, `Entities/Enemies/Fighters/FighterArena.cs`) implements the §8.1 harness on three ascii terrains with the player parked far away and resolves a timeout on health @1a8e76c. **Not done:** the §10 fightbox (`TerrainRule.Type`, hardened immunity, player excluded from targeting), and §11.2's rule that a timeout is always a draw scored 0.5−d. Those change the harness's contract, so they are a deliberate rework, not a gap.
+- [ ] Phase 6 — ledger and ratings (§11). Not started.
+- [ ] Phase 7 — `MTile.Forge` and intake (§12). Not started.
+- [ ] Phase 8 — benchmark protocol (§13). Not started.
+- [~] Phase 9 — AI designer. **Done as `MTile.Bench --forge`** (`Entities/Enemies/Fighters/FighterForge.cs` + `MTile.Bench/Forge.cs`) @140ac35, per the kickoff decision to house it in Bench; §12.2 now wants it as a `forge` subcommand of `MTile.Forge`, which is a move once that project exists. Its objective is the interim arena's win rate, not the §11 rating.
 
 ### Decisions taken at kickoff (user, 2026-09-30)
 
