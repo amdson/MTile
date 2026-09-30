@@ -245,15 +245,23 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
 
     public Simulation(GameConfig config, Stage stage)
     {
-        _chunks = new ChunkMap();
-        // Title-relative ("Levels/<file>"); chunk files referenced by the config resolve
-        // next to it. Stages captured in-game (StageSaver) carry an ABSOLUTE path instead
-        // — TitleContent reads those via direct file I/O, so a stage saved this session
-        // loads without a rebuild.
-        string cfgPath = System.IO.Path.IsPathRooted(stage.TerrainConfig)
-            ? stage.TerrainConfig
-            : $"Levels/{stage.TerrainConfig}";
-        TerrainLoader.Load(cfgPath, _chunks);
+        if (stage.Terrain != null)
+        {
+            // Code-built terrain (a saved fight's arena) — no level file involved.
+            _chunks = stage.Terrain();
+        }
+        else
+        {
+            _chunks = new ChunkMap();
+            // Title-relative ("Levels/<file>"); chunk files referenced by the config resolve
+            // next to it. Stages captured in-game (StageSaver) carry an ABSOLUTE path instead
+            // — TitleContent reads those via direct file I/O, so a stage saved this session
+            // loads without a rebuild.
+            string cfgPath = System.IO.Path.IsPathRooted(stage.TerrainConfig)
+                ? stage.TerrainConfig
+                : $"Levels/{stage.TerrainConfig}";
+            TerrainLoader.Load(cfgPath, _chunks);
+        }
 
         _playerSpawn = stage.PlayerSpawn;
         // Endless levels have no authored ground to aim a spawn at — the surface under

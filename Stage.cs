@@ -15,6 +15,9 @@ public sealed class Stage
 {
     public string             Name;
     public string             TerrainConfig;   // filename inside Levels/ — TerrainLoader handles the rest
+    // Alternative to TerrainConfig: build the terrain in code (a saved fight carries its
+    // arena as ascii). When set, TerrainConfig is ignored.
+    public Func<ChunkMap>     Terrain;
     public Vector2            PlayerSpawn;
     public Action<Simulation> Populate;
 }

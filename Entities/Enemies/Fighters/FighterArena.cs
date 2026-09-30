@@ -37,28 +37,11 @@ public static class FighterArena
     // Spawn order is entry order, which fixes ECS iteration order and therefore target
     // tie-breaks; the same inputs always produce the same result.
     public static ArenaResult Run(ChunkMap terrain, IReadOnlyList<ArenaEntry> fighters, Vector2 playerSpawn,
-                                  int maxFrames = DefaultMaxFrames, ICostModel model = null)
+                                  int maxFrames = DefaultMaxFrames, ICostModel model = null,
+                                  List<ulong> checksums = null)
     {
-        if (fighters.Count > EntityKinds.FighterSlotCount)
-            throw new ArgumentException($"At most {EntityKinds.FighterSlotCount} fighters per match.");
-        model ??= new PhysicsCostModel();
-
         var bots = new EnemyEntity[fighters.Count];
-        var sim = new Simulation(terrain, playerSpawn, g =>
-        {
-            for (int i = 0; i < fighters.Count; i++)
-            {
-                var spec  = fighters[i].Spec;
-                spec.Kind = EntityKinds.FighterSlot(i);
-                spec.Team = fighters[i].Team;
-                var r = FighterCompiler.Register(spec, model);
-                if (!r.IsValid)
-                    throw new InvalidOperationException($"Fighter '{spec.Name}' is invalid:\n{r.Report()}");
-                var e = EnemyFactory.Create(spec.Kind, fighters[i].Pos);
-                bots[i] = (EnemyEntity)e;
-                g.SpawnEntity(e);
-            }
-        });
+        var sim  = new Simulation(terrain, playerSpawn, g => Populate(g, fighters, model, bots));
 
         var health = new float[bots.Length];
         var dealt  = new float[bots.Length];
@@ -68,6 +51,9 @@ public static class FighterArena
         for (; frame < maxFrames; frame++)
         {
             sim.Step(default);
+            // Optional per-frame fingerprint — what a FightRecord stores so a replay can
+            // prove it is the same fight (or name the first frame where it is not).
+            checksums?.Add(sim.Checksum());
 
             // Attribute this frame's losses to live opponents.
             for (int i = 0; i < bots.Length; i++)
@@ -88,6 +74,28 @@ public static class FighterArena
         }
 
         return new ArenaResult(Winner(bots, health, fighters), frame, health, dealt);
+    }
+
+    // Compile each entry under its slot kind and spawn it, in entry order. Shared by
+    // Run and by the in-game fight stage (FightRecord.ToStage), so what you watch is
+    // spawned exactly as what was scored.
+    public static void Populate(Simulation g, IReadOnlyList<ArenaEntry> fighters, ICostModel model, EnemyEntity[] bots = null)
+    {
+        if (fighters.Count > EntityKinds.FighterSlotCount)
+            throw new ArgumentException($"At most {EntityKinds.FighterSlotCount} fighters per match.");
+        model ??= new PhysicsCostModel();
+        for (int i = 0; i < fighters.Count; i++)
+        {
+            var spec  = fighters[i].Spec;
+            spec.Kind = EntityKinds.FighterSlot(i);
+            spec.Team = fighters[i].Team;
+            var r = FighterCompiler.Register(spec, model);
+            if (!r.IsValid)
+                throw new InvalidOperationException($"Fighter '{spec.Name}' is invalid:\n{r.Report()}");
+            var e = EnemyFactory.Create(spec.Kind, fighters[i].Pos);
+            if (bots != null) bots[i] = (EnemyEntity)e;
+            g.SpawnEntity(e);
+        }
     }
 
     private static int TeamsAlive(EnemyEntity[] bots)
@@ -135,9 +143,19 @@ public static class FighterArena
     public static readonly Vector2 LeftSpawn  = new(84 * Chunk.TileSize, FloorTopY - 14f);   // 1344
     public static readonly Vector2 RightSpawn = new(95 * Chunk.TileSize + 4f, FloorTopY - 14f); // 1524
 
-    public static ChunkMap Flat()     => AsciiTerrain.FromAscii(Ascii(roof: false, hills: false));
-    public static ChunkMap Corridor() => AsciiTerrain.FromAscii(Ascii(roof: true,  hills: false));
-    public static ChunkMap Hills()    => AsciiTerrain.FromAscii(Ascii(roof: false, hills: true));
+    public static ChunkMap Flat()     => AsciiTerrain.FromAscii(TerrainAscii("flat"));
+    public static ChunkMap Corridor() => AsciiTerrain.FromAscii(TerrainAscii("corridor"));
+    public static ChunkMap Hills()    => AsciiTerrain.FromAscii(TerrainAscii("hills"));
+
+    // The ascii behind a named terrain — what a FightRecord stores, so a saved fight is
+    // self-contained even if these generators change later.
+    public static string TerrainAscii(string name) => name switch
+    {
+        "flat"     => Ascii(roof: false, hills: false),
+        "corridor" => Ascii(roof: true,  hills: false),
+        "hills"    => Ascii(roof: false, hills: true),
+        _ => throw new ArgumentException($"Unknown arena terrain '{name}' (flat / corridor / hills).", nameof(name)),
+    };
 
     public static IReadOnlyList<(string name, Func<ChunkMap> make)> Terrains { get; } = new (string, Func<ChunkMap>)[]
     {

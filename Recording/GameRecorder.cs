@@ -68,6 +68,15 @@ public sealed class GameRecorder
     public bool IsRecording => State == Mode.Recording;
     public bool IsPlayback  => State == Mode.Playback;
 
+    // Programmatic Ctrl+R: the fight viewer starts a take at frame 0 so Ctrl+P can scrub
+    // the whole bout without the viewer having to remember to press it.
+    public void StartRecording()
+    {
+        if (State == Mode.Playback) return;
+        _frames.Clear();
+        State = Mode.Recording;
+    }
+
     private int  _cursor;        // current frame shown in playback
     private int  _applied = -1;  // last frame actually applied to the sim (avoid redundant restores)
     private int  _playDir;       // 0 paused, +1 forward, -1 reverse

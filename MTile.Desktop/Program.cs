@@ -3,16 +3,26 @@ using System.Threading.Tasks;
 using MTile;
 using MTile.Rtc;
 
-// Entry point. Three modes:
+// Entry point. Four modes:
 //   (no args)        solo / offline play (the original behaviour)
 //   host  [stun...]  create the offer, take the peer's answer, then play as player 1
 //   join  [stun...]  take the host's offer, emit an answer, then play as player 2
+//   --fight <file>   re-simulate a saved fighter bout on screen (Fights/*.fight.json;
+//                    record one with `MTile.Bench -- --record-fight`)
 //
 // Signaling is manual copy/paste of base64 SDP blobs (offer ⇄ answer). Pass STUN
 // server URLs as extra args for internet NAT traversal; the default Google STUN works
 // for most setups, and LAN/loopback connects even without it.
 
 string mode = args.Length > 0 ? args[0].ToLowerInvariant() : "solo";
+
+if (mode == "--fight")
+{
+    if (args.Length < 2) { Console.Error.WriteLine("usage: --fight <Fights/name.fight.json>"); return; }
+    using var viewer = new Game1(configPath: null, fightPath: args[1]);
+    viewer.Run();
+    return;
+}
 
 // Any non-mode arg is an alternate game config path (scenario configs, e.g.
 // Testing/freeze.json — see GameConfig.FreezeFrame):

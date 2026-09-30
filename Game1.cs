@@ -148,6 +148,12 @@ public class Game1 : Game
     // rebuilds the sim from _activeStage for a pristine re-entry of the scenario.
     // _activeStage starts as the config stage and switches to each new save.
     private string _activeStage;
+
+    // Fight viewer (`MTile.Desktop -- --fight Fights/<name>.fight.json`): the saved
+    // bout being re-simulated on screen, and the fighters its stage spawned (entry
+    // order) for the HUD and the camera. Null in ordinary play.
+    private readonly FightRecord _fight;
+    private readonly EnemyEntity[] _fightBots;
     private string _configPath;
     private KeyboardState _prevKeys;
     private string _toast;
@@ -172,7 +178,7 @@ public class Game1 : Game
     private bool _probeSlow, _shownSlow;
     private int  _probeFrames;
 
-    public Game1(string configPath = null)
+    public Game1(string configPath = null, string fightPath = null)
     {
         // Load game config before the GraphicsDeviceManager finalizes so window
         // prefs take effect on the first frame. The path may be a CLI-selected
@@ -183,6 +189,17 @@ public class Game1 : Game
         _configPath = configPath ?? "configs/game_config.json";
         _config = GameConfig.Load(File.Exists(_configPath)
             ? Path.GetFullPath(_configPath) : _configPath);
+
+        // Fight viewer: the saved bout becomes a stage (same terrain, spawn and populate
+        // the arena scored it with), registered so F5 reloads it like any other.
+        if (fightPath != null)
+        {
+            _fight     = FightRecord.Load(fightPath);
+            _fightBots = new EnemyEntity[_fight.Entries.Count];
+            Stages.Register(_fight.ToStage(_fightBots));
+            _config.Stage = "fight";
+            Console.WriteLine("[fight] " + _fight.Summary());
+        }
         _camera.Zoom = _config.CameraZoom;
         _hitFeel = new HitFeelSystem(_particles, _camera);
 
@@ -393,6 +410,22 @@ public class Game1 : Game
     }
 
     // Transient HUD line for the stage save/reload hotkeys (drawn in Draw, gold).
+    // Fight viewer camera: the centroid of the live fighters (so a chase keeps both in
+    // frame), the survivor once it is over, or the record's spawn box before anyone
+    // exists.
+    private Vector2 FightCameraTarget()
+    {
+        var sum = Vector2.Zero; int n = 0;
+        foreach (var b in _fightBots)
+        {
+            if (b == null || b.IsDead) continue;
+            sum += b.Body.Position; n++;
+        }
+        if (n > 0) return sum / n;
+        foreach (var e in _fight.Entries) { sum += new Vector2(e.X, e.Y); n++; }
+        return n > 0 ? sum / n : _sim.Player.Body.Position;
+    }
+
     private void Toast(string msg)
     {
         _toast = msg;
@@ -408,6 +441,8 @@ public class Game1 : Game
         _sim = new Simulation(_config, stage);
         _activeStage = stage.Name;
         _simAccum = 0f;
+        // Fight viewer: record from frame 0 so the whole bout is scrubbable (Ctrl+P).
+        if (_fight != null) _recorder.StartRecording();
 
         // Offline only: if the stage spawned a second player, spoof its input with a bot.
         _botInput = _net == null && _sim.SecondaryPlayers.Count > 0
@@ -701,6 +736,7 @@ public class Game1 : Game
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
                                               _camera, _particles, _cursorTrail, _attackGlow)
         {
+            CameraTarget = _fight != null ? FightCameraTarget : null,
             Profiler = _prof, AnimSlot = _sAnim,
         };
 
@@ -1318,6 +1354,12 @@ public class Game1 : Game
 
         long tHud = _prof.Begin();
         _hud.Draw(_sim, _animator);
+        if (_fight != null)
+        {
+            FightHud.DrawWorld(_spriteBatch, _pixel, camTransform, _fightBots);
+            FightHud.Draw(_spriteBatch, _debugFont, _pixel, GraphicsDevice.Viewport, _fight, _fightBots, _sim,
+                          _recorder.IsRecording);
+        }
         _recorder.DrawHud(_spriteBatch, _debugFont);
         string stepLine = _stepper.HudLine(_sim.Frame);
         if (stepLine != null)

@@ -7,12 +7,15 @@ namespace MTile;
 
 // Screenshot capture (desktop dev tool). F12 grabs a timestamped PNG next to the
 // binary. If the MTILE_SCREENSHOT env var is set, auto-capture to that path after
-// AutoShotFrame frames have rendered, then signal exit — lets a headless run produce
+// _autoShotFrame frames have rendered, then signal exit — lets a headless run produce
 // a frame for review. Captures through a RenderTarget so it's immune to window focus.
 // Render-only; threaded through Game1's Initialize/Update/Draw lifecycle.
 public sealed class ScreenshotSystem
 {
-    private const int AutoShotFrame = 20;
+    // Frame the auto-capture fires on. 20 by default (enough for the world to settle);
+    // MTILE_SCREENSHOT_FRAME=N overrides it, so a fight can be shot mid-bout.
+    private readonly int _autoShotFrame =
+        int.TryParse(Environment.GetEnvironmentVariable("MTILE_SCREENSHOT_FRAME"), out var f) && f > 0 ? f : 20;
 
     private string _autoShotPath;
     private int    _frameCount;
@@ -50,7 +53,7 @@ public sealed class ScreenshotSystem
     {
         _frameCount++;
         bool capturing = _shotPending && !OperatingSystem.IsBrowser()
-                         && (!_exitAfterShot || _frameCount >= AutoShotFrame);
+                         && (!_exitAfterShot || _frameCount >= _autoShotFrame);
         if (!capturing) return null;
 
         var pp = graphicsDevice.PresentationParameters;

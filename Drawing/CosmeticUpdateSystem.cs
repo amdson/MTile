@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 
@@ -153,6 +154,10 @@ public sealed class CosmeticUpdateSystem
 
         _particles.Update(dt);
 
-        _camera.TrackTarget(localPlayer.Body.Position, screenCenter, dt);
+        _camera.TrackTarget(CameraTarget?.Invoke() ?? localPlayer.Body.Position, screenCenter, dt);
     }
+
+    // Optional camera subject. Null (the default) follows the local player; the fight
+    // viewer points it at the fighters instead, since the player is parked off-screen.
+    public Func<Vector2> CameraTarget { get; set; }
 }
