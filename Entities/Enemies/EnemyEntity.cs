@@ -51,6 +51,13 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     public float   LastSeenAge   => MathF.Max(_lastSeenAge, 0f);
     public bool    PlayerVisible => _playerVisible;
 
+    // ── Target (Plans/FIGHTER_DESIGN_PLAN.md §5.3) ──────────────────────────
+    // The id of the candidate this enemy chose on its last Update (a player's or an
+    // entity's World id; None before the first). Fed back to the target source as the
+    // sticky id and snapshotted, so a rollback replay keeps the same opponent.
+    private EntityId _targetId;
+    public  EntityId CurrentTargetId => _targetId;
+
     // ── Fighter attributes (Plans/FIGHTER_DESIGN_PLAN.md §3.2, §5.2, §6, §7) ─
     // Construction-time constants copied off the blueprint (not snapshotted —
     // rehydrate rebuilds them through the registered blueprint, like TracksTarget).
@@ -167,9 +174,21 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         if (IsDead) return;
         _frame++;
 
+        // Resolve the target once per frame, before memory and the brain. With no
+        // source (a headless spawner) or nothing on another team, fall back to the
+        // player handed in — which is what every enemy fought before teams existed.
+        var targets = spawner?.Targets;
+        if (targets == null || !targets.TryFindTarget(this, _targetId, out var target, out var targetPlayer))
+        {
+            target       = EnemyTarget.Of(player);
+            targetPlayer = player;
+        }
+        var prevTarget = _targetId;
+        _targetId      = target.Id;
+
         // Pre-input context — Facing/Input intentionally unset; the controller
         // doesn't read them (it produces them).
-        UpdateTargetMemory(dt, player, spawner);
+        UpdateTargetMemory(dt, target.Position, prevTarget, spawner);
         // Meter regen runs before the brain so what it reads is what it can spend
         // this frame. Clamped — no overfill from a regen tick landing on a full bar.
         if (EnergyRegen > 0f && Energy < EnergyMax)
@@ -179,7 +198,8 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
             Dt            = dt,
             Frame         = _frame,
             Self          = this,
-            Player        = player,
+            Target        = target,
+            Player        = targetPlayer,
             Hitboxes      = hitboxes,
             Spawner       = spawner,
             PlayerVisible = _playerVisible,
@@ -221,34 +241,36 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     }
 
     // One terrain raycast per frame, and the only piece of an enemy's own history it
-    // is allowed to keep. Seeded on the first frame from wherever the player actually
+    // is allowed to keep. Seeded on the first frame from wherever the target actually
     // is, at full age — so a statue that has never had a clear look starts out firing
-    // vaguely rather than either perfectly or at the world origin.
+    // vaguely rather than either perfectly or at the world origin. A switch to a
+    // different target re-seeds the same way: a sighting of the old one says nothing
+    // about where the new one is.
     //
-    // Enemies without TracksTarget report the player as permanently visible and their
+    // Enemies without TracksTarget report the target as permanently visible and their
     // memory as exact, which is what every controller written before this saw.
-    private void UpdateTargetMemory(float dt, PlayerCharacter player, IEntitySpawner spawner)
+    private void UpdateTargetMemory(float dt, Vector2 targetPos, EntityId prevTarget, IEntitySpawner spawner)
     {
         if (!TracksTarget)
         {
             _playerVisible = true;
-            _lastSeenPos   = player.Body.Position;
+            _lastSeenPos   = targetPos;
             _lastSeenAge   = 0f;
             return;
         }
 
-        if (_lastSeenAge < 0f)
+        if (_lastSeenAge < 0f || (!prevTarget.IsNone && prevTarget != _targetId))
         {
-            _lastSeenPos = player.Body.Position;
+            _lastSeenPos = targetPos;
             _lastSeenAge = SeedAgeSeconds;
         }
 
         _playerVisible = EnemyAim.HasLineOfSight(
-            Body.Position, player.Body.Position, spawner?.Chunks, SightSkipPx);
+            Body.Position, targetPos, spawner?.Chunks, SightSkipPx);
 
         if (_playerVisible)
         {
-            _lastSeenPos = player.Body.Position;
+            _lastSeenPos = targetPos;
             _lastSeenAge = 0f;
         }
         else
@@ -407,6 +429,7 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         s.Aim          = _actionVars.LockedAim;
         s.LastSeenPos  = _lastSeenPos;
         s.LastSeenAge  = _lastSeenAge;
+        s.TargetId     = _targetId;
         s.Scratch      = Scratch;
         s.Energy       = Energy;
         s.EnergyMax    = EnergyMax;
@@ -428,6 +451,7 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         _actionVars.Committed    = _currentAction >= 0;
         _lastSeenPos             = s.LastSeenPos;
         _lastSeenAge             = s.LastSeenAge;
+        _targetId                = s.TargetId;
         Scratch                  = s.Scratch;
         Energy                   = s.Energy;
         EnergyMax                = s.EnergyMax;

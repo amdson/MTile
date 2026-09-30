@@ -42,6 +42,10 @@ public sealed class EnemyBlueprint
     // shove — a rooted enemy is not shoved at all, and stays where it was spawned to the
     // pixel. For emplacements and statues whose position is level geometry.
     public bool  Rooted        { get; init; }
+    // Which side it fights for (Plans/FIGHTER_DESIGN_PLAN.md §5.3). The stock roster
+    // stays on Teams.Enemies so none of it targets or hits the rest; a fighter spawned
+    // onto its own team targets anything not on it, including other enemies.
+    public int   Team          { get; init; } = Teams.Enemies;
 
     // ── Fighter attributes (Plans/FIGHTER_DESIGN_PLAN.md §3.2, §6, §7) ──────
     // Every one of these defaults to "off", and off means the stock movement
@@ -122,6 +126,7 @@ public sealed class BlueprintEnemy : EnemyEntity
         Body.FrictionScale = blueprint.FrictionScale;
         Rooted             = blueprint.Rooted;
         TracksTarget       = blueprint.TargetMemory;
+        Team               = blueprint.Team;
         Strength           = blueprint.Strength;
         Armor              = blueprint.Armor;
         EnergyMax          = blueprint.EnergyMax;

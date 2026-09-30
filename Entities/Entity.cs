@@ -50,6 +50,13 @@ public class Entity : IHittable
     private bool _rooted;
     public Color Color        = Color.White;
     public Faction Faction { get; set; } = Faction.Neutral;
+    // Who this entity fights for (Plans/FIGHTER_DESIGN_PLAN.md §5.3). Enemies target
+    // the nearest live candidate whose Team differs from theirs; Enemy-faction
+    // hitboxes land on Enemy-faction hurtboxes only across a team line (CombatSystem).
+    // Every entity defaults to Teams.Enemies, so the stock roster shares one team and
+    // never turns on itself; a fighter's spawn assigns its own. Projectiles inherit
+    // their spawner's. Snapshotted via EntityData.
+    public int Team { get; set; } = Teams.Enemies;
     // Optional visual. When null, Game1 falls back to drawing the body polygon outline.
     public Sprite Sprite;
 
@@ -201,6 +208,7 @@ public class Entity : IHittable
         d.GravityScale = GravityScale;
         d.Color        = Color;
         d.Faction      = Faction;
+        d.Team         = Team;
         d.Polygon      = Body.Polygon;   // immutable shape
         d.Impact       = Body.Impact;    // immutable config
         d.HitGeneration  = HitGeneration;
@@ -223,6 +231,7 @@ public class Entity : IHittable
         GravityScale = d.GravityScale;
         Color        = d.Color;
         Faction      = d.Faction;
+        Team         = d.Team;
         HitGeneration  = d.HitGeneration;
         LastHitImpulse = d.LastHitImpulse;
         LastHitDir     = d.LastHitDir;
@@ -272,6 +281,10 @@ public interface IEntitySpawner
     // the blast's world-space radius so the render shell doesn't have to know the
     // entity's constants. Default no-op — only Simulation forwards it, as OnChargedBlast.
     void NotifyChargedBlast(EntityId id, Vector2 pos, float radius) { }
+    // "Who should I be fighting?" for EnemyEntity (Plans/FIGHTER_DESIGN_PLAN.md §5.3).
+    // Default null: an enemy handed a spawner without one targets the player it was
+    // given, which is what every enemy did before teams existed.
+    ITargetSource Targets => null;
 }
 
 // Entities that show something beyond their Sprite in the world-space overlay pass

@@ -2327,7 +2327,7 @@ public class BlockPaintAction : ActionState
                                                    recruited * BuildMeters.EruptMax);
         if (mass <= 0f || ctx.Spawner == null) return;
         ctx.Spawner.SpawnEntity(new MassBall(
-            vars.BallPos, vars.BallVel, mass, ctx.ActiveBlockType, ctx.Faction));
+            vars.BallPos, vars.BallVel, mass, ctx.ActiveBlockType, ctx.Faction) { Team = ctx.Team });
     }
 
     private static void Paint(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 ballPos, float ballSpeed)
@@ -3086,7 +3086,7 @@ public class LobbedAreaAction : ActionState
 
         // Pick up the player's active block type for the eruption shape — same
         // material the BlockReady charge would have used.
-        ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(spawnPos, launchVel, budget, ctx.ActiveBlockType, ctx.HitIds.Next(), ctx.Faction));
+        ctx.Spawner.SpawnEntity(new LobbedAreaProjectile(spawnPos, launchVel, budget, ctx.ActiveBlockType, ctx.HitIds.Next(), ctx.Faction) { Team = ctx.Team });
     }
 
     // Ballistic solve: given gravity g (from MovementConfig.Current.Gravity),
@@ -3276,6 +3276,7 @@ public class BlockGrabAction : ActionState
         var point = new PullPointEntity(ctx.Input.MouseWorldPosition, ctx.Faction, ctx.ActiveBlockType)
         {
             OwnerPos = ctx.Body.Position,
+            Team     = ctx.Team,
         };
         ctx.Spawner.SpawnEntity(point);      // assigns the id
         vars.PullPointId = point.Id;

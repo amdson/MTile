@@ -93,7 +93,7 @@ public class TurretEnemy : Entity
                 {
                     // Fire. Spawn a bullet at the muzzle, headed along _aim at BulletSpeed.
                     var muzzle = Body.Position + _aim * MuzzleOffset;
-                    spawner?.SpawnEntity(new BulletProjectile(muzzle, _aim * BulletSpeed, spawner.HitIds));
+                    spawner?.SpawnEntity(new BulletProjectile(muzzle, _aim * BulletSpeed, spawner.HitIds) { Team = Team });
                     Transition(AIState.Cooldown);
                 }
                 break;

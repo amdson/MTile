@@ -17,6 +17,9 @@ public class EnvironmentContext
     // so attacks from different players resolve against each other (and stay self-
     // immune). Set by PlayerCharacter.Update from its own Faction each frame.
     public Faction Faction;
+    // Owning player's team (PlayerCharacter.Team) — stamped on spawned entities so a
+    // player's projectile is on the player's team.
+    public int Team;
     // Owning entity's id. Stamped on every hitbox an action publishes (Hitbox.Source)
     // so a hit can be attributed back to its attacker. Set by PlayerCharacter.Update.
     public EntityId SelfId;
