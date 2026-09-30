@@ -38,8 +38,11 @@ public readonly struct EnemyTarget
     // True for a PlayerCharacter (primary or secondary). EnemyContext.Player is that
     // PlayerCharacter when this is set, null otherwise.
     public readonly bool     IsPlayer;
+    // The target's body AABB this frame, for actions that must not build into it.
+    public readonly BoundingBox Bounds;
 
-    public EnemyTarget(EntityId id, Vector2 position, Vector2 velocity, float health, int team, bool isPlayer)
+    public EnemyTarget(EntityId id, Vector2 position, Vector2 velocity, float health, int team, bool isPlayer,
+                       BoundingBox bounds = default)
     {
         Id       = id;
         Position = position;
@@ -47,13 +50,14 @@ public readonly struct EnemyTarget
         Health   = health;
         Team     = team;
         IsPlayer = isPlayer;
+        Bounds   = bounds;
     }
 
     public static EnemyTarget Of(PlayerCharacter p) =>
-        new(p.Id, p.Body.Position, p.Body.Velocity, p.Health, p.Team, isPlayer: true);
+        new(p.Id, p.Body.Position, p.Body.Velocity, p.Health, p.Team, isPlayer: true, p.Body.Bounds);
 
     public static EnemyTarget Of(Entity e) =>
-        new(e.Id, e.Body.Position, e.Body.Velocity, e.Health, e.Team, isPlayer: false);
+        new(e.Id, e.Body.Position, e.Body.Velocity, e.Health, e.Team, isPlayer: false, e.Body.Bounds);
 }
 
 // "Who should `self` be fighting?" Implemented by Simulation. Must be a pure function

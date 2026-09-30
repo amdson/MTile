@@ -107,9 +107,11 @@ public static class EntityKinds
     // unconditionally so an unregistered one fails loudly.
     public static bool IsFighter(EntityKind k) => k >= EntityKind.Brick && k <= EntityKind.FighterSlot7;
 
+    public const int FighterSlotCount = 8;
+
     public static EntityKind FighterSlot(int i)
     {
-        if (i < 0 || i > 7) throw new ArgumentOutOfRangeException(nameof(i), "Fighter slots are 0..7.");
+        if (i < 0 || i >= FighterSlotCount) throw new ArgumentOutOfRangeException(nameof(i), "Fighter slots are 0..7.");
         return EntityKind.FighterSlot0 + i;
     }
 }

@@ -33,9 +33,11 @@ internal static class EnemyBlockCells
     // Strict AABB overlap between the cell and a body. A tile grown into a body would
     // crush it (and one grown into the caster would bury it), so either is refused.
     public static bool Overlaps(PhysicsBody body, int gtx, int gty)
+        => body != null && Overlaps(body.Bounds, gtx, gty);
+
+    public static bool Overlaps(in BoundingBox b, int gtx, int gty)
     {
-        if (body == null) return false;
-        var b = body.Bounds;
+        if (b.Right <= b.Left || b.Bottom <= b.Top) return false;   // no target body this frame
         float l = gtx * Chunk.TileSize, t = gty * Chunk.TileSize;
         float r = l + Chunk.TileSize,   btm = t + Chunk.TileSize;
         return b.Left < r && b.Right > l && b.Top < btm && b.Bottom > t;
@@ -147,7 +149,7 @@ public class EnemyPlaceBlockAction : EnemyActionState
         if (chunks == null) return;
         var (gtx, gty) = EnemyBlockCells.CellOf(v.LockedAim);
         if (EnemyBlockCells.Overlaps(ctx.Self.Body, gtx, gty)) return;
-        if (EnemyBlockCells.Overlaps(ctx.Player?.Body, gtx, gty)) return;
+        if (EnemyBlockCells.Overlaps(ctx.Target.Bounds, gtx, gty)) return;
         chunks.TryRequestTile(gtx, gty, Material);   // null ⇒ filled / unsupported meanwhile: skip
     }
 
@@ -189,7 +191,7 @@ public class EnemySpawnBlockInAirAction : EnemyActionState
     public override int ActivePriority  => Spec.ActivePriority;
     public override int PassivePriority => Spec.PassivePriority;
 
-    private Vector2 PointAbove(in EnemyContext ctx) => ctx.Player.Body.Position - new Vector2(0f, Height);
+    private Vector2 PointAbove(in EnemyContext ctx) => ctx.Target.Position - new Vector2(0f, Height);
 
     public override bool CheckPreConditions(in EnemyContext ctx)
     {
@@ -230,7 +232,7 @@ public class EnemySpawnBlockInAirAction : EnemyActionState
         if (chunks == null) return;
         var (gtx, gty) = EnemyBlockCells.CellOf(v.LockedAim);
         if (EnemyBlockCells.Overlaps(ctx.Self.Body, gtx, gty)) return;
-        if (EnemyBlockCells.Overlaps(ctx.Player?.Body, gtx, gty)) return;
+        if (EnemyBlockCells.Overlaps(ctx.Target.Bounds, gtx, gty)) return;
         chunks.ForceSprout(gtx, gty, Material);      // null ⇒ filled meanwhile: skip
     }
 
