@@ -1,7 +1,9 @@
 # Fighter Design Plan — parametrized NPC fighters with costed features
 
 **Status:** proposed, 2026-09-30. Nothing implemented. Written against the code as of
-commit `1ef80d7` (branch `worktree-remove-planned-support-optin`).
+commit `1ef80d7` (branch `worktree-remove-planned-support-optin`). §§1–9 are the fighter
+model and its phases; §§10–13 (added the same day) are the arena, the rating system, the
+submission pipeline, and the benchmark protocol built on top of it.
 
 **One-liner:** make a game out of *designing* fighters. A fighter is a data spec —
 attributes, an action list, and its own brain — priced by a cost model and compiled to the
@@ -405,7 +407,7 @@ entity; states read them off `ctx.Self`.
 
 ---
 
-## 8. The arena: fighters as an optimization problem
+## 8. Fighters as an optimization problem
 
 The sim is deterministic and headless, and a match is a few thousand `Step` calls. That is
 the whole reason "design the best fighter" can be a *game* rather than a spreadsheet.
@@ -415,16 +417,19 @@ the whole reason "design the best fighter" can be a *game* rather than a spreads
 `MTile.Tests/Sim/FighterArena.cs` (test-side, like `SimRunner`):
 
 ```csharp
+// WinnerTeam == -1 ⇒ draw (timeout). HealthLeft/DamageDealt are for the optimizer's
+// shaped objective and for reports only — the rating never reads them (§11.2).
 public sealed record ArenaResult(int WinnerTeam, int Frames, float[] HealthLeft, float[] DamageDealt);
 
 public static ArenaResult Run(ChunkMap terrain, IReadOnlyList<(FighterSpec spec, Vector2 pos, int team)> fighters,
-                              int maxFrames = 60 * 60, PlayerInput? player = null);
+                              int maxFrames = 60 * 60);
 ```
 
-Fighters are spawned through `EnemyFactory.Create` after compile; the player is parked out
-of reach (or absent — `Simulation` needs a "no player" mode, or a rooted dummy at a far
-position; the dummy is simpler and is what the gauntlet tests effectively do). A match ends
-when one team has no live fighters or `maxFrames` elapses (draw, scored on health).
+Fighters are spawned through `EnemyFactory.Create` after compile. `Simulation` always
+constructs a player, so the harness parks it in a sealed pocket in the rock outside the box
+and the target source ignores it (§10.3). A fight ends when one team has no live fighters
+(kill) or `maxFrames` elapses (**draw** — never resolved on health, §11.1). The terrain is
+`SimTerrain.FightBox(...)` (§10); a *bout* is the 12-condition bundle of §10.2.
 
 The arena is **also the balance tool for the `k_*` coefficients**: run a fixed roster of
 hand-made fighters across a fixed set of terrains; if one archetype wins everything, its
@@ -434,9 +439,9 @@ coefficient is too low. That loop replaces hand-balancing the cost table.
 
 Fitness is not "beats one opponent". It is win rate across a **roster** of opponents on a
 **set** of terrains, because the whole point of the terrain-is-the-weapon game is that a
-fighter tuned for a flat floor loses in a corridor. Start with three terrains (flat floor,
-roofed corridor, stepped hills — all exist as ascii in the gauntlet and stage tests) and a
-roster of ~6 hand-authored archetypes that span the tradeoff space:
+fighter tuned for a flat floor loses among pillars. The terrains are the `fightbox`
+variants of §10.2 (flat and pillars, three spawn separations, both sides — 12 conditions
+per bout) and the roster is ~6 hand-authored archetypes that span the tradeoff space:
 
 | Archetype | Buys | Point |
 |---|---|---|
@@ -488,17 +493,340 @@ list in phase 1 so every class below runs in the group.
 4. **Targets and teams.** §5.3. *Gate:* `FighterCombatTests` — two fighters on opposite
    teams with no player in reach close and damage each other; two on the same team ignore
    each other; the gauntlet trio's tests are unchanged.
-5. **Arena harness and the coefficient loop.** §8.1. *Gate:* `FighterArenaTests` — round
-   robin of the six archetypes on three terrains is deterministic (same result table twice)
-   and no archetype wins every match (the balance smoke test — allowed to be red while
-   `k_*` is being tuned, noted in BACKLOG §5 if so).
-6. **AI designer.** §8.3, in a CLI. No sim gate; its output is checked by phase 3's tests.
+5. **Arena box and harness.** §10 (`TerrainRule.Type`, hardened immunity in the tile pass,
+   `Levels/fightbox.json`, the `fightbox` stage, `SimTerrain.FightBox`) and §8.1. *Gate:*
+   `FighterArenaTests` — the box has no reachable non-hardened tile outside the interior;
+   a round robin of the six archetypes over the 12 conditions is deterministic (same result
+   table twice); and no archetype wins every bout (the balance smoke test — allowed to be
+   red while `k_*` is being tuned, noted in BACKLOG §5 if so).
+6. **Ledger and ratings.** §11: content-hashed fight cache, `ledger.jsonl`, Glicko-2 with
+   the draw penalty, anchor pinning, `recompute`. *Gate:* `FighterRatingTests` — replaying a
+   fixed ledger twice gives identical ratings; a draw lowers both sides when equal-rated and
+   still raises the weaker side in an upset; anchors never move.
+7. **`MTile.Forge` and intake.** §12: `validate` / `submit` / `bout` / `league` / `ladder` /
+   `report` / `replay`, Roslyn compile in an isolated load context, the determinism gate.
+   *Gate:* a brain with a hidden mutable field is rejected by `submit`; the six archetypes
+   submitted into an empty pool reproduce their pinned ratings within one deviation.
+8. **Benchmark protocol.** §13: held-out conditions, the fixed-pool track, the scoring
+   script, a first run with one agent. No sim gate; its output is a ledger.
+9. **AI designer.** §8.3, as a `forge` subcommand. No sim gate; its output is checked by
+   phase 3's tests and scored by phase 8's script.
 
-Phases 1–2 are the risky ones (they touch every enemy). Phases 3–6 are additive.
+Phases 1–2 are the risky ones (they touch every enemy). Phases 3–9 are additive; 5–7 can
+run in parallel with 3–4 once phase 2 is in (they need the meter and the scratch block but
+not the compiler).
 
 ---
 
-## 10. Open questions
+## 10. The arena: `fightbox`
+
+A large closed box with unbreakable walls, built for 1v1. Two facts about the level loader
+shape it:
+
+- **Rules only set solid/open.** `TerrainLoader.ApplyRules` writes `IsSolid` and nothing
+  else; material falls through to the enum default, `Stone`. Hardened rock (`H`, the
+  bedrock-grade material) is only authorable in hand-written ascii chunks. Add a `Type`
+  string to `TerrainRule` (null = today's behaviour) so a rule-based box can be hardened.
+  Five lines in `World/TerrainLoader.cs`.
+- **Hardened is tough, not immune.** `MaxHP` 120 in `material_strengths.json` and nothing in
+  the tile-damage path checks for it, so a rail bolt or a few hundred slashes eventually
+  chew through. Two fixes, both cheap: fill *everything* outside the box with hardened (the
+  gauntlet's bedrock-seal trick — digging out gains nothing), and skip `TileType.Hardened`
+  in `CombatSystem`'s tile pass so the walls are fixed geometry. Hardened already has no
+  in-game source and `TileTypes.IsPlaceable/IsGrabbable` already refuse it.
+
+### 10.1 Layout
+
+Interior **64 tiles wide × 32 tall** (704 × 352 px at `Chunk.TileSize` 11), aligned to
+chunk boundaries so it is exactly 4 × 2 chunks: tiles `x ∈ [0, 64)`, `y ∈ [−32, 0)`. Floor
+surface at tile `y = 0`: three tiles of dirt over hardened bedrock. Walls and ceiling bare
+hardened. Mirror-symmetric about `x = 32`.
+
+```
+HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH   y = -33
+H                                                                H
+H                       32 tiles of air                          H
+H                                                                H
+H          A                                      B              H   spawns x = 12, 52
+HDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDH   y = 0..2  dirt
+HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH   y >= 3   bedrock
+ x = -1                                                    x = 64
+```
+
+`Levels/fightbox.json`, `Extents` 6 (chunks −6..6, so ≥ 32 tiles of rock on every side of
+the box), five rules in last-match-wins order:
+
+| Condition | Type | Purpose |
+|---|---|---|
+| `y >= 0` | Dirt | floor slab |
+| `y >= 3` | Hardened | bedrock under the slab |
+| `y < -32` | Hardened | ceiling and everything above |
+| `x < 0` | Hardened | left wall (overrides the dirt rows) |
+| `x >= 64` | Hardened | right wall |
+
+Why those sizes, in tiles:
+
+| Reference | Size | Consequence in a 64 × 32 box |
+|---|---|---|
+| Rail shot max range (520 px) | 47 | Cannot cover the width from one wall; retreat exists |
+| Ranged action max range (360 px) | 33 | A gunner closes about half the box before firing |
+| Enemy jump (impulse 260 → ~56 px) | ~5 | Ceiling is six jumps up: flight is a dimension, not a hop |
+| Walk speed (100 px/s) | 9 / s | Crossing takes ~7 s: positioning matters |
+| Spawn separation | 40 | Inside rail range, outside ranged range — deliberate; the harness varies it |
+
+The dirt slab is the terrain-is-the-weapon concession: builders and diggers have material to
+work with; bedrock three tiles down stops anyone tunnelling out.
+
+### 10.2 Variants and conditions
+
+- `fightbox` — flat, as above. The v1 arena.
+- `fightbox_pillars` — same box plus symmetric cover: two 3 × 6 stone pillars at
+  `x = 20..22` and `41..43`, a 8 × 1 stone ledge centred at `x = 32`, four tiles up. The
+  roster's terrain-sensitivity test.
+- A **condition** is (terrain, spawn separation, side assignment). Three separations
+  (24, 40, 56 tiles) × two sides × two terrains = **12 conditions per bout** (§11.1).
+  Sides are swapped so residual asymmetry cancels. Later terrains join the pool; a bout
+  draws a seeded subset (§11.5).
+
+### 10.3 Plumbing
+
+- `Stages` gets a `fightbox` entry (`PlayerSpawn` inside the box) for human play against
+  a fighter, and `SimTerrain.FightBox(pillars: bool)` builds the same geometry
+  programmatically for tests and the harness, so the level path is not on the test path.
+- **The player must be excludable from targeting.** `Simulation` always constructs a
+  `PlayerCharacter`. For bot-vs-bot the harness parks it in a sealed 3 × 3 pocket in the
+  rock far from the box, and the `ITargetSource` of §5.3 must support "teams only, ignore
+  the player" or the nearest-enemy rule pulls a fighter toward the pocket. This is a
+  requirement on phase 4.
+- **Spectating.** `Camera.TrackTarget` follows the player. Watching a bot fight in-game
+  needs a render-only camera mode that frames both fighters. Not on the critical path.
+
+---
+
+## 11. Bouts, ratings, and the ledger
+
+### 11.1 A bout is a bundle of conditions
+
+The sim is deterministic: A vs B under one condition has exactly one outcome, forever.
+Replaying it teaches nothing. So:
+
+- A **bout** between two fighters is all 12 conditions of §10.2. Each condition yields a
+  **fight result**: a kill for one side inside the clock, or a **draw** on timeout.
+  Health, damage dealt, and margin do **not** enter the result — resolving timeouts on
+  margin makes "land one hit and run" optimal, so it is a draw, always.
+- Every fight result is **cached by content hash** `(hash(specA), hash(specB), conditionId,
+  simVersion)`. A fighter is immutable once submitted (a change is a new fighter). Any sim
+  change bumps `simVersion` and invalidates the cache: determinism does not hold across
+  builds (CLAUDE.md, the never-cross-play rule), so a stale result is a wrong result.
+- The **clock** is a condition parameter; 60 s (3600 frames) is the placeholder. Shorter
+  clocks produce more draws and reward closers; longer reward attrition. The pillar box
+  probably wants longer.
+
+Cost: a Release frame is ~30–180 µs on the current bench (`MTile.Bench/baseline.txt`), so
+a 60 s fight is ~0.1–0.5 s and a bout is a few seconds per core. All-play-all over a pool
+of 100 is hours; over 1000, weeks. Ratings are therefore computed from **sampled** bouts,
+which is what the rating system is for.
+
+### 11.2 Draws are possible and penalised
+
+A win scores 1, a loss 0, and a **draw scores `0.5 − d` for each side**, with `d = 0.1` to
+start. The two sides' scores no longer sum to one: draws drain rating from the pool. Bout
+score for a side is `(wins + (0.5 − d) · draws) / 12`, a fraction the rating update
+consumes directly.
+
+What this buys, with no special cases:
+
+- Both sides always prefer a win to a draw, so the fighter ahead chases and finishes, and
+  the locomotion costs decide whether it can.
+- The fighter behind prefers a draw to a loss, so running when losing is rational — real
+  fighting-game behaviour, and the closed box means there is nowhere to run forever. A
+  fighter built only to run draws everyone at `0.5 − d`, converges below average, and by
+  then matchmaking (§12.4) pairs it only with its peers. Self-limiting.
+- Drawing against a much stronger fighter still *gains* rating: the zero-sum term of the
+  upset outweighs `d`. Forcing a draw on the number one stays an achievement, and the
+  strong side loses more than the weak side gains — top fighters must be able to close.
+- Mutual passivity is just a draw. No pseudo-opponent, no activity metric.
+
+Health margin is used in exactly one place: the AI designer's search (§8.3) may use it as a
+*shaped* objective, because a win-or-draw result is a step function. The rating never sees
+it. Keeping those apart is what stops the search from rediscovering hit-and-run: a fighter
+that games the shaped objective still draws in the ledger and sinks.
+
+### 11.3 Glicko-2
+
+Each fighter carries a rating `μ`, a deviation `σ`, and a volatility. Glicko-2 rather than
+plain Elo because the deviation is what buys **fast mixing**: a new entrant starts wide, so
+its first dozen bouts move it hundreds of points, while an established fighter with a
+narrow deviation barely moves when a newcomer beats it. The deviation also drives
+matchmaking (§12.4) and the leaderboard's confidence display. Plain Elo with a K that
+decays with bouts played is an acceptable stand-in and is ten lines; go to Glicko-2 as
+soon as the pool has more than a handful of fighters.
+
+**Anchors pin the scale.** The six archetypes of §8.2 get fixed ratings that never update
+(Brick 1300, Sprinter 1400, Gunner 1500, Flyer 1500, Builder 1400, Turret 1300 as a first
+guess — they are re-pinned once by an all-play-all among themselves, then frozen). They
+stop the scale drifting as draws drain it and as the pool grows, and they give designers a
+legible goal ("beat the Brick").
+
+### 11.4 The ledger
+
+Every fight result is appended to `Arena/<pool>/ledger.jsonl`:
+
+```json
+{"a":"sha256:…","b":"sha256:…","cond":"fightbox/sep40/aLeft/60s","sim":"v12","result":"A","frames":2210,"t":"2026-10-01T…"}
+```
+
+Ratings are a **derived view**: `forge recompute` replays the ledger from zero. That makes
+the leaderboard reproducible, lets `d`, the anchor ratings, or the whole formula change
+later with full history intact, and means a pool is fully described by its directory
+(§12.2). Fighter hashes are content hashes of `spec.json` + `brain.cs`, so a ledger line
+never refers to something that can drift.
+
+### 11.5 Overfitting to the arena
+
+A fighter tuned to exactly two terrains and three spawn separations looks better than it
+is. Keep a terrain **pool** larger than any bout uses, and let each bout draw its
+conditions from a seed derived from the two fighter hashes, so the rating is over the
+distribution. For benchmark runs (§13) the scoring conditions are a held-out subset the
+designer never iterates on.
+
+---
+
+## 12. Submission and evaluation (the eval suite)
+
+Think of this as an eval suite for pools of submitted fighters. A **pool** is a directory:
+fighters, anchors, condition set, sim version, ledger. Humans and agents submit into a
+pool through one CLI; everything downstream is mechanical and replayable.
+
+### 12.1 The fighter package on disk
+
+```
+Fighters/<name>/
+  manifest.json      name, author, agent id (optional), created, notes
+  spec.json          FighterSpec fields (§2) — attributes and ActionSpec list
+  brain.cs           one class : EnemyController, plus an optional BrainConfig record
+  README.md          designer's notes (optional; not read by anything)
+```
+
+The hash of `spec.json` + `brain.cs` is the fighter's identity. Nothing else is hashed, so
+notes can be edited without minting a new fighter.
+
+### 12.2 `MTile.Forge`
+
+A CLI project (sibling of `MTile.Bench`), never linked into the game. JSON in and out on
+every command so any agent can drive it without parsing prose.
+
+| Command | Does |
+|---|---|
+| `forge validate <dir>` | Compile the brain (Roslyn, isolated `AssemblyLoadContext`), run the cost model, print the cost vector and any violations. Exit 0 iff submittable. |
+| `forge submit <dir> --pool <p>` | Validate, determinism gate, placement, calibration (§12.3). Writes the fighter into the pool and its fights into the ledger. Prints the fighter's hash, rating, deviation. |
+| `forge bout <hashA> <hashB> --pool <p> [--cond …]` | Run (or fetch from cache) one bout. Prints per-condition results. |
+| `forge league --pool <p> --rounds n` | Swiss rounds across the pool (§12.4). |
+| `forge ladder --pool <p>` | Leaderboard: rating, deviation, record, anchors marked. |
+| `forge report <hash> --pool <p>` | Per-fighter report: cost vector, matchup matrix vs anchors, win/draw/loss by condition, median fight length. |
+| `forge recompute --pool <p>` | Replay the ledger into ratings from zero. |
+| `forge replay <ledger-line>` | Re-run one fight and dump a trace (`TraceExport`) for inspection. |
+
+### 12.3 Intake
+
+1. **Compile + cost.** As `validate`. Over budget or infeasible is rejected with the
+   validator's messages; that text is the designer's (or agent's) feedback.
+2. **Determinism gate.** One fight run twice, plus snapshot → restore → re-run from
+   mid-fight. Checksum mismatch rejects the fighter. This catches a brain keeping state
+   outside the scratch block (§5.2), `System.Random`, statics, and anything else
+   `FighterDeterminismTests` would catch — but against the *submitted* code.
+3. **Placement.** Bouts against the anchors, six bouts. Initialises `μ` and narrows `σ`
+   enough to be placed.
+4. **Calibration.** Four bouts against the nearest-rated live fighters — the most
+   informative pairings.
+5. **Done.** The fighter is on the ladder. Steps 1–4 are under a minute at current fight
+   cost.
+
+### 12.4 League rounds
+
+`forge league` pairs the pool Swiss-style: sort by rating, pair neighbours, prefer pairs
+that have never met and fighters whose `σ` has grown since their last bout. Incumbents
+only ever fight new pairs or new conditions, because everything else is cached. Run it as
+a background job after a batch of submissions, or on a timer.
+
+### 12.5 Outputs
+
+`forge ladder` and `forge report` print JSON and a Markdown table. The pool directory is
+the artefact: commit it (ledger and fighters are small text) and the whole history is
+reviewable in git.
+
+---
+
+## 13. As an AI benchmark
+
+The pipeline is a benchmark with one more layer: a fixed protocol and a frozen
+environment. What it measures is worth stating, because it is unusual:
+
+- **Reasoning about trade-offs under a cost model** — the spec half. Nothing about the
+  optimum is stated; it must be inferred from the physics and from opponents.
+- **Writing deterministic control code** against a real, documented API — the brain half.
+  The determinism gate is a hard correctness check most benchmarks lack.
+- **Iterating from structured feedback** — validator messages, per-condition results,
+  reports, replays — under a budget.
+
+### 13.1 Protocol
+
+An agent is given: this document, `configs/fighter_costs.json`, the `EnemyController` /
+`EnemyInput` / `EnemyContext` / `ActionSpec` surface (a generated API file), the archetype
+fighters *including their brains* (it is a design benchmark, not a guessing game), and
+`forge`. Then a **budget**: `N` submissions and `M` bouts of self-run evaluation. The
+agent may run `forge bout` against anything in the pool within `M`.
+
+Score, from the ledger:
+
+| Metric | What it rewards |
+|---|---|
+| **Peak rating** reached within the budget, on the held-out conditions (§11.5) | Design quality |
+| **Rating at k submissions** for k = 1, 3, 10 (the sample-efficiency curve) | Reasoning before iterating |
+| **Validity rate** — submissions passing intake | Reading the cost model correctly; writing deterministic code |
+| **Improvement over a given fighter** (the improvement track) | Reading and reasoning about existing code |
+
+### 13.2 Tracks
+
+- **Fixed-pool track.** Anchors only; no other submissions in the pool. Fully
+  reproducible: same sim version, same anchors, same seeded conditions ⇒ same score
+  for the same submissions. This is the number to report.
+- **Open-pool track.** Rating against every submission from every agent and human. A
+  living leaderboard; moves over time by construction, so it is reported with a date and
+  the pool's ledger hash.
+- **Improvement track.** Start from a mid-table fighter; the score is the rating delta in
+  `k` submissions.
+
+Humans run the same protocol on the same ladder. That is the point of the game half.
+
+### 13.3 Reproducibility and contamination
+
+- The whole run is the ledger. Publish it with the pool directory and the sim version
+  tag; anyone can `forge recompute` it.
+- Scoring conditions are held out; the public condition set is what the agent iterates on.
+  The gap between public and held-out rating is itself a reported number (overfitting).
+- The sim is frozen per benchmark version. A sim change is a new benchmark version with a
+  new anchor re-pin; old ledgers stay valid under their own tag.
+- Anchor brains are public. Hiding them would measure guessing, not design.
+
+### 13.4 Exploits are findings
+
+A search over fighter space is also a search over sim bugs: a physics glitch that lets a
+fighter clip through the floor is the optimum until it is fixed. Treat every "how did it
+win that" as both a benchmark result and a bug report: `forge replay` the fight, fix the
+sim, bump the version, re-pin the anchors, recompute. A benchmark that pressures the sim
+this way is a feature, but it means the sim version will move, which is why every ledger
+line carries it.
+
+### 13.5 Untrusted code
+
+A submitted brain is arbitrary C# running in-process. Fine for the owner and their agents
+on their own machine. Not fine for strangers: that needs a process sandbox with no file or
+network access and a CPU cap, and is out of scope until the pool is public.
+
+---
+
+## 14. Open questions
 
 - **Q1 — Windup pricing.** Unpriced by design (§3.3). Revisit if search finds 0-frame tells.
 - **Q2 — Friendly fire.** On by default (§5.3). Revisit if teammates dominate the arena.
@@ -512,12 +840,24 @@ Phases 1–2 are the risky ones (they touch every enemy). Phases 3–6 are addit
   been through the coefficient loop.
 - **Q6 — Radius.** Priced as mass here; it also changes reach and hurtbox size, which the
   physics prices implicitly. Watch for "smallest possible body" dominating and add a floor.
+- **Q7 — The clock.** 60 s placeholder (§11.1). Decide by feel once fights exist; the pillar
+  box likely wants longer. It is a condition parameter, so two clocks can coexist.
+- **Q8 — Draw penalty `d`.** 0.1 to start (§11.2). Too small and running-when-behind is
+  free; too large and a forced draw against a top fighter stops being an achievement.
+  Ledger replay makes it free to retune.
+- **Q9 — Anchor ratings.** First guesses in §11.3, re-pinned once by an anchor-only
+  all-play-all. Whether to re-pin on every sim version bump, or only when an anchor's
+  behaviour actually changed, is open.
+- **Q10 — Brain memory size.** Four floats and two ints (§5.2) is a guess. A benchmark
+  agent will tell us quickly whether it is enough; growing it is a snapshot-slot change.
 
-## 11. Non-goals
+## 15. Non-goals
 
 - No player-side changes. No new `ActionState`, no corrector or lattice for bots, no
   `PlayerInput` piloting of fighters.
-- No render work beyond what `TelegraphList` already gives an action for free.
+- No render work beyond what `TelegraphList` already gives an action for free, except the
+  spectator camera mode of §10.3, which is render-only and off the critical path.
+- No sandboxing of submitted brains (§13.5) until a pool is public.
 - No networking implications beyond determinism: fighters are entities, and entities already
   roll back.
 - No data-file spec format yet. Specs are C# object initializers, like blueprints. A JSON
