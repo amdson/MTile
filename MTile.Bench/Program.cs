@@ -41,6 +41,7 @@ internal static class Program
         SimTrace.Enabled = false;
 
         if (Array.IndexOf(args, "--anim-baseline") >= 0) return AnimBaseline.Run(args);
+        if (Array.IndexOf(args, "--forge") >= 0) return Forge.Run(args);
         if (Array.IndexOf(args, "--corrector") >= 0) { CorrectorDiag.Run(); return 0; }
         if (Array.IndexOf(args, "--ftol") >= 0) { JtJDiff.Run(); AnimDiag.Run(); return 0; }
         if (Array.IndexOf(args, "--simd") >= 0) { FtolStudy.SimdCheck(); return 0; }
@@ -88,7 +89,7 @@ internal static class Program
     }
 
     // Walks up from the bin directory to the repo root (the folder holding MTile.sln).
-    private static string RepoRoot()
+    internal static string RepoRoot()
     {
         var d = new System.IO.DirectoryInfo(AppContext.BaseDirectory);
         while (d != null && !System.IO.File.Exists(System.IO.Path.Combine(d.FullName, "MTile.sln"))) d = d.Parent;
