@@ -1,0 +1,35 @@
+{
+  "KBody": 0.0025,
+  "KHp": 0.10,
+  "KStr": 0.40,
+  "KArm": 0.50,
+  "KE": 0.03,
+  "KR": 0.15,
+  "KGp": 0.002,
+  "KJ": 0.00075,
+  "KT": 0.0005,
+  "KCling": 0.25,
+  "KA": 0.005,
+  "ReachRef": 22,
+
+  "KDash": 0.002,
+  "KShot": 0.002,
+  "KTile": 0.5,
+  "CHover": 0.001,
+  "AirPremium": 1.5,
+
+  "AMin": 40,
+  "VMin": 150,
+  "MinStrength": 0.25,
+
+  "RootedDiscount": 2,
+  "TargetMemoryPoints": 1,
+  "SlamPoints": 1,
+  "RailPoints": 2,
+  "LashPoints": 1,
+  "SpawnInAirPoints": 1,
+
+  "MaxMass": 2.5,
+  "MaxSlots": 4,
+  "MaxPoints": 2
+}

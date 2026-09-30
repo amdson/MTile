@@ -557,3 +557,28 @@ Phase markers: `[ ]` todo · `[~]` in progress · `[x] done @commit` · `[!]` bl
 
 - 2026-09-30 · Phase 1 · b5a0d61 · `ActionSpec` + `Default(kind)`; eight pool actions read `Spec`; ranged Speed/Damage threaded into the projectiles (`EntityData.ProjDamage`). `FighterActionSpecTests` 12/12 green; `combat` group 283 pass / 10 red, the same 10 player-side reds as before the change (ActionAimSolver ×3, CombatHitstun crush, SlashComboPresentation ×6). `simcore` group: 3 red — `TrainingStageTests` (BACKLOG §5) and both `GauntletStageTests`, whose message is "player only reached x 60 of ~1397", a traversal failure from spawn that predates this work and cannot come from enemy knob plumbing.
 - 2026-09-30 · Phase 2 · 3653266 · `EnemyInput.RequestedAction` (`int?`, null = anything) narrows `SelectAction` to one candidate; `BrainScratch` on `EnemyEntity` + `EntityData`; `Energy`/`EnergyMax`/`EnergyRegen` meter ticked before `Decide`, gated + spent in `SelectAction`, drained per second by `EnemyFlyState` (`FlightDrain`); blueprint attributes `Strength`, `Armor`, `EnergyMax`, `EnergyRegen`, `GroundPower`, `GroundDrag`, `JumpImpulse`, `Thrust`, `FlightDrain` (all default off = legacy behaviour); `Strength` applied at every pool-action hitbox publish; `Armor` widens the knockback divisor via `Entity.KnockbackMass`. **Found while testing:** a powered walk has to pre-compensate the floor's Coulomb brake (3000 × FrictionScale px/s², capped per step) or an acceleration under it never moves — `EnemyChaseState` now adds back exactly what the solver will strip, read off the body's maintained floor contact. `FighterDeterminismTests` 7/7 (bit-identical round trip with a stateful brain + draining meter; requested action; energy gate + regen; power ÷ mass; flight drain; strength + armor). `combat` 290 pass / same 10 reds; snapshot + rollback suites 33/33.
+- 2026-09-30 · Phase 3a · (branch `fighter-3a-cost`) · `FighterSpec` (+ BrainConfig fields `EngageRange`/`StandoffRange`/`HoverHeight`/`AlertRange`/`RetreatBelowHealth`/`PreferredAction`, `Team`), `Cost`/`FighterBudget`/`ICostModel`/`PhysicsCostModel`, `FighterCosts` (+ `configs/fighter_costs.json`, loaded once in Game1, copied by Desktop + Web, in `ConfigLayoutTests`), `FighterCompiler` (cost report, violations, §4 ordering rule, movement list from what was bought, compiler OVERWRITES each action's `EnergyCost` with the priced energy), three Scratch-only brains (closer / kiter / hover-dive), six archetypes registered from `RegisterBuiltIns`, `EntityKind` Brick…FighterTurret + `FighterSlot0..7` (unregistered fighter kinds throw on rehydrate), `fighters` stage on flat.json. `FighterCostTests` 35/35; `ConfigLayoutTests` 4/4; `combat` 325 pass / the same 10 player-side reds; snapshot + rollback + `FighterDeterminism` 40/40. **Found:** `EnemyChaseState`'s brake pre-compensation (`min(brake, |vCmd|)`) only survives the solver when a frame's command is ≥ half the floor brake, so from rest a walker needs `GroundPower/Mass > 1500·FrictionScale` — 180 px/s² at the stock 0.12; the Brick moved 0.1 px in 4 s. Compiled fighters use `FrictionScale 0.02` (threshold 30 < a_min 40) until the chase state compensates the full brake. The turret archetype's kind is `FighterTurret` (`Turret` is TurretEnemy's). Builder still ships ranged-only: the block kinds and `Team → EnemyBlueprint.Team` wait on merging `fighter-plan` into this branch.
+
+#### Starting `k_*` coefficients (phase 3a guess — phase 5's arena corrects them)
+
+| Coefficient | Value | Anchor / reasoning |
+|---|---|---|
+| `k_body` | 0.0025 / px² | Brute R12 → 0.360 |
+| `k_hp` | 0.10 / HP | Brute 3 HP → 0.300 |
+| `k_a` | 0.005 / (dmg·px) | stock melee 1.0 × 22 → 0.110; reach-less kinds priced at `ReachRef` 22 px |
+| `k_gp` | 0.002 | GroundPower 100 (≈70 px/s top at drag 0.02) → 0.200 |
+| `k_j` | 0.00075 | JumpImpulse 312 (≈260 px/s at M 1.2) → 0.234 · **Brute total 1.204 ≈ 1.2** |
+| `k_t` | 0.0005 | must be ≪ 1/600; flight needs `T > 857·m0`. Bird body 0.42 + T 700 → M 0.77 (Bird's 0.8), T/M 905 ≈ stock 900 |
+| `k_str` / `k_arm` | 0.40 per +1 Strength / 0.50 per Armor | armor is shove-only mass, so cheaper than mass |
+| `k_e` / `k_r` | 0.03 per unit / 0.15 per unit/s | the mass budget is what bounds energy |
+| `k_cling` | 0.25 | fixed |
+| `k_dash` | 0.002 energy per px/s | stock lunge 0.52 / use |
+| `k_shot` | 0.002 energy per (px/s·dmg) | stock energy ball 1.0 / shot |
+| `k_tile` | 0.5 per penetration | stock rail 4.5 + 1.5 = 6.0 / shot |
+| `c_hover` | 0.001 per Thrust per s | Thrust 900 → 0.9 /s |
+| `AirPremium` | 1.5 | reserved for `SpawnBlockInAir` |
+| `a_min` / `v_min` | 40 px/s² / 150 px/s | design floor (chase pre-compensates Coulomb) / clears a one-tile step with margin |
+| points | Rooted −2, memory 1, slam 1, rail 2, lash 1, spawn-in-air 1 | |
+| default budget | Mass 2.5 · Slots 4 · Points 2 | |
+
+Roster under it: Brick 2.437 (walk 45 px/s², at the mass cap) · Sprinter 1.866 (139 px/s², jump 214 px/s) · Gunner 1.140 · Flyer 1.269 (T/M 709 > 600) · Builder 1.569 · Turret 2.155 (points 1 after the rooted refund).

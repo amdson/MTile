@@ -42,6 +42,7 @@ public class ConfigLayoutTests(ITestOutputHelper output)
         "anim_solver_config.json",
         "impact_profiles.json",
         "material_strengths.json",
+        "fighter_costs.json",
     };
 
     private static string RepoRoot()

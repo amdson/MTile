@@ -44,6 +44,9 @@
     <None Include="..\configs\material_strengths.json" Link="configs\material_strengths.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <None Include="..\configs\fighter_costs.json" Link="configs\fighter_costs.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="..\ReferenceClips\**\*" Link="ReferenceClips\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
