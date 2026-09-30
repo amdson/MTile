@@ -902,8 +902,21 @@ Numbering follows §9 as of 04e567e (the fightbox/ledger/Forge/benchmark revisio
 
 - **[?] Friendly fire between teammates — currently OFF.** §5.3 said "leave it on", but the premise behind that was wrong: the combat pass gates on `Faction`, not on entities, so two `Faction.Enemy` bodies could never hit each other at all. Phase 4 made an Enemy-vs-Enemy pair resolve only across different `Team`s. Turning friendly fire on would need a separate self-immunity check and would make the stock roster (all team 2) start hitting each other in the gauntlet. Left OFF; rule on it when the arena shows whether stacking teammates dominates.
 - **[?] Multiplayer targeting.** Enemies now target the nearest opposing player, so in a two-player match they chase P2 when P2 is closer. Before phase 4 they only ever chased P1. This is what §5.3 asks for, but it is a visible change to co-op/PvP feel.
-- **Noted, not decided (arena finding):** cross-team projectiles hit each other. Two ranged kiters (Gunner vs Builder) fire in lockstep along the same line and their energy balls annihilate every time, so that pairing never exchanges damage on any terrain. Consistent with how player projectiles already meet enemy ones (different factions), so left alone; if it should not happen for fighters, projectiles need a "don't publish a hurtbox to other projectiles" rule.
+- **Decided (user, 2026-09-30): cross-team projectiles DO hit each other — keep it.** Two ranged kiters (Gunner vs Builder) fire in lockstep along the same line and their energy balls annihilate every time; that is a feature of the space, and reaction-time latency (below) is what will desynchronise identical brains, not a combat rule.
 - **Noted, not decided:** with nothing opposing, an enemy falls back to the primary player even on the same team (only reachable by putting a fighter on team 0); Stalker/Turret (pre-framework) still read the player directly and are not target candidates; Aspid fireball / Wizard orb burst only on player hurtboxes and fly through other fighters after hurting them.
+
+### Design additions agreed after the first fights (user + supervisor, 2026-09-30)
+
+Ordered as they should land, since the first three change what the arena measures and the coefficient loop should not start before them.
+
+1. **Readable telegraphs + a priced reaction time.** `EnemyTarget` gains the opponent's tell: current `ActionKind`, windup progress, locked aim, facing. A fighter buys `ReactionFrames` (points; fewer frames costs more) and its brain sees the target as it was that many frames ago (a fixed-size ring of past `EnemyTarget`s on the entity, snapshotted). Windups stay unpriced: once bots can read them, the arena prices them. Identical brains desynchronise through this latency plus a `hash(frame, id)` phase, never through randomness.
+2. **Mandatory line of sight for fighters.** Every fighter does the LOS raycast; `TargetMemory` becomes what you buy to keep aiming at where the target WAS. No fighter sees through a Builder's wall.
+3. **Density → radius, not radius → mass.** Mass is derived from purchases as today; `Radius = f(Mass, Density)` with density a costed attribute, and the pool actions' reach / hitbox extents become body-relative. Non-circular shapes are a later step, only if the arena asks.
+4. **Terrain perception for brains.** A few `SurfaceProbe`-style queries (ground ahead / drop ahead / wall ahead / headroom) so walkers handle the hills and flyers the corridor.
+
+Explicitly NOT doing: a data-driven decision-table brain. Brains stay code, authored by humans or AI agents (§12–13). **Watch brain compute:** a brain is arbitrary C# per fighter per frame, so the intake gate (§12.3) needs a µs-per-`Decide` budget measured in `MTile.Bench`, and the arena should report it per fighter.
+
+Prices (`fighter_costs.json`) are frozen until more fights have been watched — the Brick and rooted-refund readings above are recorded, not acted on.
 
 ### Campaign log
 
