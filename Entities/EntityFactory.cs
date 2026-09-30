@@ -90,6 +90,10 @@ public static class EntityFactory
             // Fuse position (Age) and the fired flag come back through RestoreState.
             EntityKind.ChargedBlast  => new ChargedBlast(body.Position, d.HitId),
             _ when EnemyFactory.IsRegistered(d.Kind) => EnemyFactory.Create(d.Kind, body.Position),
+            // A fighter kind that is NOT registered (an arena slot the caller never
+            // filled) must not fall through to a generic entity — Create throws with
+            // the kind's name, which is the loud failure a missing blueprint deserves.
+            _ when EntityKinds.IsFighter(d.Kind)     => EnemyFactory.Create(d.Kind, body.Position),
             _                        => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
         };
 }

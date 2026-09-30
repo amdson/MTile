@@ -337,6 +337,7 @@ public class Game1 : Game
         BootMark("configs loaded");
         ImpactProfiles.Load("configs/impact_profiles.json");
         MaterialStrengths.Load("configs/material_strengths.json");
+        FighterCosts.Load("configs/fighter_costs.json");
         BootMark("impact/material configs loaded");
 
         // A networked match always has two real players (local + remote), so force the

@@ -1,3 +1,5 @@
+using System;
+
 namespace MTile;
 
 // Tag identifying an entity's concrete type for snapshot rehydration. The sim is
@@ -70,4 +72,44 @@ public enum EntityKind
     // pillars. See Entities/Enemies/Types/WizardEnemy.cs.
     Wizard,
     WizardOrb,      // Wizard ordnance (WizardOrbProjectile)
+
+    // ── Fighters (Plans/FIGHTER_DESIGN_PLAN.md) ─────────────────────────────
+    // Compiled from FighterSpecs by FighterCompiler and registered with EnemyFactory.
+    // KEEP THIS BLOCK CONTIGUOUS AND LAST: EntityKinds.IsFighter is a range check.
+    //
+    // The six stock archetypes (Entities/Enemies/Fighters/FighterRoster.cs), registered
+    // at startup. The turret archetype is FighterTurret because `Turret` is the older
+    // TurretEnemy's kind.
+    Brick,
+    Sprinter,
+    Gunner,
+    Flyer,
+    Builder,
+    FighterTurret,
+
+    // Scratch slots for the arena / forge / tests: re-registrable at will, because
+    // EnemyFactory.Register overwrites and both spawn and rehydrate go through the
+    // registry. Nothing is registered here at startup — rehydrating an unregistered
+    // slot throws rather than quietly making a generic entity.
+    FighterSlot0,
+    FighterSlot1,
+    FighterSlot2,
+    FighterSlot3,
+    FighterSlot4,
+    FighterSlot5,
+    FighterSlot6,
+    FighterSlot7,
+}
+
+public static class EntityKinds
+{
+    // Every kind a FighterSpec can compile to. Rehydrate routes these to EnemyFactory
+    // unconditionally so an unregistered one fails loudly.
+    public static bool IsFighter(EntityKind k) => k >= EntityKind.Brick && k <= EntityKind.FighterSlot7;
+
+    public static EntityKind FighterSlot(int i)
+    {
+        if (i < 0 || i > 7) throw new ArgumentOutOfRangeException(nameof(i), "Fighter slots are 0..7.");
+        return EntityKind.FighterSlot0 + i;
+    }
 }

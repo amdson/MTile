@@ -399,6 +399,10 @@ public static class EnemyFactory
         // "aspid" stage. Everything lives in Entities/Enemies/Types/AspidEnemy.cs.
         Register(AspidEnemy.Blueprint);
 
+        // Fighters — the six archetypes of Plans/FIGHTER_DESIGN_PLAN.md §8.2, compiled
+        // from FighterSpecs under the default cost model. Throws if one is over budget.
+        FighterRoster.RegisterAll();
+
         // Each new blueprint wants its own EntityKind in EntityKind.cs; see
         // TemplateEnemy.Blueprint above for the shape.
     }

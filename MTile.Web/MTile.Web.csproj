@@ -75,6 +75,7 @@
     <Copy SourceFiles="..\configs\anim_solver_config.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
     <Copy SourceFiles="..\configs\impact_profiles.json"   DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
     <Copy SourceFiles="..\configs\material_strengths.json" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="..\configs\fighter_costs.json"    DestinationFolder="$(MSBuildThisFileDirectory)wwwroot\configs" SkipUnchangedFiles="true" />
     <ItemGroup>
       <_LevelAsset Include="..\Levels\**\*" />
       <_RefClipAsset Include="..\ReferenceClips\**\*" />
