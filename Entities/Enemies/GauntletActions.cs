@@ -106,7 +106,8 @@ public class EnemyRailShotAction : EnemyActionState
             var dir    = v.LockedAim.LengthSquared() > 1e-4f ? v.LockedAim : new Vector2(v.LockedFacing, 0f);
             var muzzle = ctx.Self.Body.Position + dir * MuzzleOffset;
             ctx.Spawner?.SpawnEntity(new RailBoltProjectile(muzzle, dir, v.HitId, Faction.Enemy, BoltBudget,
-                                                            BoltSpeed, BoltDamage * ctx.Self.Strength));
+                                                            BoltSpeed, BoltDamage * ctx.Self.Strength)
+                                     { Team = ctx.Self.Team });
         }
     }
 

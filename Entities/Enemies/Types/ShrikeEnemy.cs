@@ -81,7 +81,7 @@ public sealed class ShrikeController : EnemyController
             {
                 MoveDir    = dir,
                 Jump       = false,
-                AimWorld   = ctx.Player.Body.Position,
+                AimWorld   = ctx.Target.Position,
                 WantAttack = true,
             };
         }

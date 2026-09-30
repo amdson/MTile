@@ -76,6 +76,11 @@ public class PlayerCharacter : IHittable
     // re-tagged Enemy/Neutral and become a valid target through CombatSystem's
     // self-damage filter. Real solo play never touches this — the default stands.
     public Faction Faction { get; set; } = MTile.Faction.Player1;
+    // Team for enemy targeting (Plans/FIGHTER_DESIGN_PLAN.md §5.3). Fixed at
+    // construction like Faction (Simulation.AddSecondaryPlayer sets it from
+    // Teams.ForPlayerIndex), so it carries no snapshot slot. Stamped on the entities
+    // this player's actions spawn.
+    public int Team { get; set; } = Teams.Player;
 
     // Combat stats. Mass divides incoming knockback impulses (heavier = less yeet).
     //
@@ -623,6 +628,7 @@ public class PlayerCharacter : IHittable
             ForceFields    = forceFields,
             Spawner        = spawner,
             Faction        = Faction,
+            Team           = Team,
             SelfId         = Id,
             HitIds         = HitIds,
             CombatSystem   = CombatSystem,

@@ -541,13 +541,14 @@ public class EnemyRangedAction : EnemyActionState
         if (prevT < v.WindupDuration && v.TimeInState >= v.WindupDuration)
         {
             var origin = ctx.Self.Body.Position;
-            var toPlayer = ctx.Player.Body.Position - origin;
+            var toPlayer = ctx.Target.Position - origin;
             Vector2 dir = toPlayer.LengthSquared() > 1e-4f
                 ? Vector2.Normalize(toPlayer)
                 : new Vector2(v.LockedFacing, 0f);
             var muzzle = origin + dir * MuzzleOffset;
             ctx.Spawner?.SpawnEntity(new EnergyBallProjectile(
-                muzzle, dir, v.HitId, Faction.Enemy, ProjectileSpeed, Damage * ctx.Self.Strength));
+                muzzle, dir, v.HitId, Faction.Enemy, ProjectileSpeed, Damage * ctx.Self.Strength)
+                { Team = ctx.Self.Team });
         }
     }
 

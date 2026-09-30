@@ -37,7 +37,7 @@ public sealed class WizardController : EnemyController
         int   side = to.X >= 0f ? 1 : -1;
         var input = new EnemyInput
         {
-            AimWorld   = ctx.Player.Body.Position,
+            AimWorld   = ctx.Target.Position,
             WantAttack = ctx.Dist <= AlertRange,
         };
         if (ctx.Dist > AlertRange) return input;
@@ -129,7 +129,8 @@ public class WizardWavesAction : EnemyActionState
         {
             var   pos   = origin + new Vector2(0f, (i - mid) * OrbSpacing);
             float phase = i * MathHelper.TwoPi / OrbsPerWave;
-            ctx.Spawner.SpawnEntity(new WizardOrbProjectile(pos, facing * DriftSpeed, phase, hitId, ctx.Self.Faction));
+            ctx.Spawner.SpawnEntity(new WizardOrbProjectile(pos, facing * DriftSpeed, phase, hitId, ctx.Self.Faction)
+                { Team = ctx.Self.Team });
         }
     }
 

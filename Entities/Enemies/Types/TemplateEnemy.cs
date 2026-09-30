@@ -152,7 +152,7 @@ public sealed class TemplateController : EnemyController
             // Drives facing (EnemyEntity derives it from this whenever no action
             // is committed) and is what actions read to aim. Kept separate from
             // MoveDir on purpose: a retreating bot still faces its target.
-            AimWorld   = ctx.Player.Body.Position,
+            AimWorld   = ctx.Target.Position,
             WantAttack = dist <= AlertRange,        // see rule 6 above
         };
     }
@@ -161,7 +161,7 @@ public sealed class TemplateController : EnemyController
 
 // ── 2. THE LEGS ─────────────────────────────────────────────────────────────
 // Deliberately dumb: it reads ctx.Input.MoveDir and writes velocity. Resist the
-// urge to look at ctx.Player here — the moment a movement state makes tactical
+// urge to look at ctx.Target here — the moment a movement state makes tactical
 // decisions, swapping the brain stops working and the two start fighting.
 public class TemplateMoveState : EnemyMovementState
 {

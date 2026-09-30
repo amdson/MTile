@@ -6,7 +6,7 @@ namespace MTile;
 // MVP movement-FSM states. Tactical decisions (when to chase, when to jump,
 // where to face) live in EnemyController. These states only execute the
 // controller's intent — read ctx.Input.MoveX / .Jump / .AimWorld rather than
-// poking at ctx.Player or ctx.Dist. The only world-state they touch is their
+// poking at ctx.Target or ctx.Dist. The only world-state they touch is their
 // own body (Velocity, position) and cross-FSM signals (IsActionCommitted) —
 // nothing that would change if a different brain were attached.
 //

@@ -64,7 +64,7 @@ public sealed class AspidController : EnemyController
     public override EnemyInput Decide(in EnemyContext ctx)
     {
         var   self   = ctx.Self.Body.Position;
-        var   target = ctx.Player.Body.Position;
+        var   target = ctx.Target.Position;
         var   chunks = ctx.Spawner?.Chunks;
         float dist   = ctx.Dist;
         bool  alert  = dist <= AlertRange;
@@ -287,7 +287,8 @@ public class AspidVolleyAction : EnemyActionState
         {
             var dir = Rotate(aim, (i - mid) * step);
             ctx.Spawner?.SpawnEntity(new AspidFireballProjectile(
-                body.Position + dir * MuzzleOffset, dir * ShotSpeed, v.HitId, ctx.Self.Faction));
+                body.Position + dir * MuzzleOffset, dir * ShotSpeed, v.HitId, ctx.Self.Faction)
+                { Team = ctx.Self.Team });
         }
 
         body.Velocity -= aim * RecoilSpeed;

@@ -188,7 +188,7 @@ public sealed class CombatSystem
             {
                 foreach (var hb in hurtboxes.All)
                 {
-                    if (hit.Owner == hb.Owner) continue;
+                    if (hit.Owner == hb.Owner && !AcrossTeams(in hit, in hb, resolve)) continue;
                     if (alreadyHit.Contains(hb.Target)) continue;
                     if (!HitboxWorld.Overlaps(hit.Region, hb.Region)) continue;
                     if (hit.Shape != null && !OverlapsPolyAABB(hitVerts, hitAxes, hb.Region)) continue;
@@ -225,6 +225,23 @@ public sealed class CombatSystem
         foreach (var k in _hitDedupe.Keys)
             if (!_liveHitIds.Contains(k)) _scratchPrune.Add(k);
         foreach (var k in _scratchPrune) _hitDedupe.Remove(k);
+    }
+
+    // The faction gate above skips any pair whose Owner factions match — self-immunity,
+    // and why the stock enemies (all Faction.Enemy) never hit each other. Fighters
+    // (Plans/FIGHTER_DESIGN_PLAN.md §5.3) are Faction.Enemy too, so between two
+    // Enemy-faction parties the TEAM decides instead: the pair resolves when the
+    // attacker (hit.Source — the enemy, or the projectile carrying its spawner's team)
+    // and the target are both live entities on different teams. Every stock enemy and
+    // its projectiles share Teams.Enemies, so nothing that resolved before resolves
+    // differently now. Scoped to Faction.Enemy so player/neutral pairs keep the plain
+    // faction rule. Consequence: same-team fighters are immune to each other's hits.
+    private static bool AcrossTeams(in Hitbox hit, in Hurtbox hb, Func<EntityId, IHittable> resolve)
+    {
+        if (hit.Owner != Faction.Enemy) return false;
+        return resolve(hit.Source) is Entity attacker
+            && resolve(hb.Target)  is Entity target
+            && attacker.Team != target.Team;
     }
 
     // ── Snapshot/restore (roadmap goal 4 §H) ────────────────────────────────────

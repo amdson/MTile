@@ -13,7 +13,7 @@ namespace MTile;
 // This is the rollback-netcode core. SimRunner is the headless test analogue and
 // mirrors the same phase ordering. Goal 4 will make Step's state snapshot/restorable;
 // for now the job is just to isolate it from the render shell and run it on a fixed dt.
-public sealed class Simulation : IEntitySpawner, IChunkProvider
+public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
 {
     // Fixed simulation timestep. Every Step advances the world by exactly this much,
     // regardless of wall-clock frame time — a hard requirement for deterministic
@@ -128,6 +128,60 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
     // rollback never resolves to a stranger.
     public Entity Resolve(EntityId id)
         => _world.IsAlive(id) && _world.Has<EntityRef>(id) ? _world.Get<EntityRef>(id).Obj : null;
+    // IEntitySpawner — enemy target selection (Plans/FIGHTER_DESIGN_PLAN.md §5.3).
+    public ITargetSource Targets => this;
+
+    // A sticky target is kept unless a challenger is closer than this fraction of its
+    // distance (i.e. at least 25% closer). Compared squared: 0.75² = 0.5625.
+    private const float StickyKeepDistSq = 0.75f * 0.75f;
+
+    // ITargetSource. Candidates, in this fixed order: the primary player (always — it
+    // respawns inside the Step, so it is never "gone"), each secondary player that is
+    // alive (list order), then every live EnemyEntity other than `self` (ECS query
+    // order, the order Step updates them in). Projectiles, balls, balloons and helper
+    // entities are never candidates. Only candidates whose Team differs from
+    // self.Team count.
+    //
+    // Rule: take the nearest opposing candidate; on an exact distance tie the earlier
+    // one in the order above wins (strict <). Then, if `sticky` names a candidate that
+    // is still alive and opposing, keep it instead UNLESS the nearest is closer than
+    // 75% of the sticky one's distance. Pure function of positions, health, teams and
+    // `sticky` — no hidden state — so a replay from a snapshot (which restores the
+    // enemy's TargetId) makes the same choice.
+    public bool TryFindTarget(EnemyEntity self, EntityId sticky, out EnemyTarget target, out PlayerCharacter player)
+    {
+        var   me       = self.Body.Position;
+        int   team     = self.Team;
+        bool  found    = false, stickyFound = false;
+        float bestD2   = float.MaxValue, stickyD2 = 0f;
+        EnemyTarget best = default, stuck = default;
+        PlayerCharacter bestP = null, stuckP = null;
+
+        void Consider(in EnemyTarget c, PlayerCharacter pc)
+        {
+            if (c.Team == team) return;
+            float d2 = Vector2.DistanceSquared(c.Position, me);
+            if (d2 < bestD2) { bestD2 = d2; best = c; bestP = pc; found = true; }
+            if (!sticky.IsNone && c.Id == sticky) { stickyD2 = d2; stuck = c; stuckP = pc; stickyFound = true; }
+        }
+
+        Consider(EnemyTarget.Of(_player), _player);
+        foreach (var (p, _) in _secondaryPlayers)
+            if (p.IsAlive) Consider(EnemyTarget.Of(p), p);
+        foreach (var r in _world.Query<EntityRef>())
+        {
+            if (r.Component1.Obj is not EnemyEntity e || e == self || e.IsDead) continue;
+            Consider(EnemyTarget.Of(e), null);
+        }
+
+        if (stickyFound && !(bestD2 < stickyD2 * StickyKeepDistSq))
+        {
+            target = stuck; player = stuckP; return true;
+        }
+        target = best; player = bestP;
+        return found;
+    }
+
     // IEntitySpawner — cosmetic: a thrown/lobbed mass ball landed and erupted. Fired from
     // inside Step; subscribers must key on (Frame, id) like the tile events do.
     public event Action<EntityId, Vector2, TileType, int> OnMassLanded;
@@ -284,6 +338,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         {
             HitIds  = _hitIds,
             Faction = Factions.ForPlayerIndex(_secondaryPlayers.Count + 1),
+            Team    = Teams.ForPlayerIndex(_secondaryPlayers.Count + 1),
             CombatSystem = _combat,
         };
         RegisterPlayer(player);

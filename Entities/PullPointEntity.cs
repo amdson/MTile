@@ -163,6 +163,7 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         HarvestBlocks = blocks;
         ChargedBlocks = charged;
         var ball = LobbedAreaProjectile.MakeTracking(at, blocks, type, spawner.HitIds.Next(), Faction, Id, charged);
+        ball.Team = Team;      // the ball fights for whoever pulled it
         spawner.SpawnEntity(ball);
         BallId = ball.Id;
     }

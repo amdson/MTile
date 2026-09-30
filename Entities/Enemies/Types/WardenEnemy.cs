@@ -49,7 +49,7 @@ public sealed class WardenController : EnemyController
         int side  = to.X >= 0f ? 1 : -1;
         var input = new EnemyInput
         {
-            AimWorld   = ctx.Player.Body.Position,
+            AimWorld   = ctx.Target.Position,
             WantAttack = ctx.Dist <= AlertRange,
         };
         if (ctx.Dist > AlertRange) return input;

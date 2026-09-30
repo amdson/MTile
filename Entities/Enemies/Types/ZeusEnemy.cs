@@ -230,7 +230,7 @@ public sealed class ZeusController : EnemyController
     {
         MoveDir    = Vector2.Zero,
         Jump       = false,
-        AimWorld   = ctx.PlayerVisible ? ctx.Player.Body.Position : SearchPoint(in ctx),
+        AimWorld   = ctx.PlayerVisible ? ctx.Target.Position : SearchPoint(in ctx),
         // Neither proximity nor visibility any more — the per-action range bands are the
         // real gate, and the statue never stands down. It keeps swinging at a player who
         // is hidden, and now also at one who has walked away: the thunder column follows

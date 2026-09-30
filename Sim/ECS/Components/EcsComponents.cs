@@ -64,6 +64,7 @@ public struct EntityData
     public float   GravityScale;
     public Color   Color;
     public Faction Faction;
+    public int     Team;      // Entity.Team (FIGHTER_DESIGN_PLAN §5.3)
 
     // Render-only hit-feel stamp (Plans/HIT_FEEL_PLAN.md) — mirrors CombatState's
     // LastHit* fields on PlayerCharacter. HitGeneration advances once per landed
@@ -108,6 +109,12 @@ public struct EntityData
     // with a different target.
     public Vector2 LastSeenPos;
     public float   LastSeenAge;
+
+    // The target EnemyEntity chose last frame (a player's or an entity's World id;
+    // None before the first choice). Snapshotted so target stickiness survives a
+    // rollback: the choice is a function of this plus the current positions, and
+    // restoring positions without it would let a replay pick a different opponent.
+    public EntityId TargetId;
 
     // Fighter runtime state (Plans/FIGHTER_DESIGN_PLAN.md §5.2, §6). Scratch is the
     // bundled brain's memory; Energy / EnergyMax the per-entity meter. Regen is a

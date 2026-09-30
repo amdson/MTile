@@ -120,7 +120,7 @@ public sealed class ChasePlayerController : EnemyController
         {
             MoveDir    = move,
             Jump       = jump,
-            AimWorld   = ctx.Player.Body.Position,
+            AimWorld   = ctx.Target.Position,
             WantAttack = true,
         };
     }
@@ -139,7 +139,7 @@ public sealed class ProximityChaseController : EnemyController
     public override EnemyInput Decide(in EnemyContext ctx)
     {
         var toPlayer = ctx.ToPlayer;
-        var input = new EnemyInput { AimWorld = ctx.Player.Body.Position };
+        var input = new EnemyInput { AimWorld = ctx.Target.Position };
         if (toPlayer.LengthSquared() > AlertRange * AlertRange) return input;
 
         if (toPlayer.LengthSquared() > EngageRange * EngageRange)
@@ -177,7 +177,7 @@ public sealed class MoveTowardPlayerController : EnemyController
             // Jump is meaningless for a clinger — the cling state ignores it
             // and gravity is off — but harmless to leave false.
             Jump       = false,
-            AimWorld   = ctx.Player.Body.Position,
+            AimWorld   = ctx.Target.Position,
             WantAttack = true,
         };
     }
@@ -251,7 +251,7 @@ public sealed class StationaryAimController : EnemyController
     {
         MoveDir    = Vector2.Zero,
         Jump       = false,
-        AimWorld   = ctx.Player.Body.Position,
+        AimWorld   = ctx.Target.Position,
         WantAttack = ctx.Dist <= AlertRange,
     };
 }

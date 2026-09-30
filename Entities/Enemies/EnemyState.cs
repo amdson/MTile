@@ -15,6 +15,11 @@ public struct EnemyContext
     public float            Dt;
     public int              Frame;
     public EnemyEntity      Self;
+    // Who this enemy is fighting this frame (Plans/FIGHTER_DESIGN_PLAN.md §5.3): the
+    // nearest live candidate not on Self's team, resolved once per Update. Read this.
+    public EnemyTarget      Target;
+    // The PlayerCharacter behind Target when Target.IsPlayer, else NULL. Only for code
+    // that needs something a player has and an entity does not; guard it.
     public PlayerCharacter  Player;
     public HitboxWorld      Hitboxes;
     public IEntitySpawner   Spawner;     // .HitIds, .SpawnEntity (for future ranged variants)
@@ -23,7 +28,7 @@ public struct EnemyContext
     // controller's Decide, before any state scan. Movement states should
     // prefer this over re-reading the world: MoveX over recomputing chase
     // direction, Jump over re-checking player altitude, AimWorld over
-    // ctx.Player.Body.Position.
+    // ctx.Target.Position.
     public EnemyInput       Input;
 
     // Sight and memory, filled by EnemyEntity.Update before Decide. Only meaningful
@@ -34,7 +39,10 @@ public struct EnemyContext
     public Vector2  LastSeenPos;
     public float    LastSeenAge;      // seconds since the last clear sighting
 
-    public Vector2 ToPlayer => Player.Body.Position - Self.Body.Position;
+    // Named for the player; measured to Target — which IS the player whenever the
+    // player is the nearest thing on another team (always, for the stock roster).
+    // PlayerVisible / LastSeen* above track Target the same way.
+    public Vector2 ToPlayer => Target.Position - Self.Body.Position;
     public float   Dist     => ToPlayer.Length();
 }
 
