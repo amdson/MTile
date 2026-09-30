@@ -48,24 +48,21 @@ public sealed partial class CharacterAnimator
         var rp2 = new float[m];   // ±h/2 evaluations for the Δφ column's Richardson step
         var rm2 = new float[m];
 
-        // The no-penetration rows carry a one-sided max(0, margin − gap): smooth where active,
-        // but with a KNEE at gap == margin. A central difference that straddles that knee (the
-        // tip sits within ~one FD step of the boundary) sees only half the slope and is NOT a
+        // The no-penetration rows are smooth where active but have KINKS — activation, the
+        // allowance knee, a face's line and span ends (NoPenetrationConstraint.NearKink). A
+        // central difference that straddles one (the tip within ~one FD step of it) is NOT a
         // valid oracle there — exactly the keyframe-boundary situation for Δφ. So mark every
-        // no-pen row whose penetration is within a band of 0 and skip it below; the analytic
-        // value is still exact, we just can't judge it by FD at the corner. Rows comfortably
-        // active or inactive (|pen| ≥ band) stay valid (a single-column ±h step can't flip them).
+        // no-pen row whose tip sits within a band of a kink and skip it below; the analytic
+        // value is still exact, we just can't judge it by FD at the corner.
         var skipRow = new bool[m];
         int b0 = _skeleton.Count;
         const float kneeBand = 0.5f;   // > any single-column FD tip displacement (lever × h)
-        int npRow = npStart;
-        foreach (var s in p.Surfaces)
-            for (int b = 0; b < b0; b++, npRow++)
+        if (npCount > 0)
+            for (int b = 0; b < b0; b++)
             {
                 Vector2 tip = _eval.Pose.WorldOf(b).Translation;   // _scratch left at x by CadenceJacobian
-                float gap = s.Normal.X * (tip.X + x[IdxDx] - s.Point.X)
-                          + s.Normal.Y * (tip.Y + x[IdxDy] - s.Point.Y);
-                if (MathF.Abs(s.Margin - gap) < kneeBand) skipRow[npRow] = true;
+                var q = new Vector2(tip.X + x[IdxDx], tip.Y + x[IdxDy]);
+                if (NoPenetrationConstraint.NearKink(p, b, q, kneeBand)) skipRow[npStart + b] = true;
             }
 
         float worst = 0f;
@@ -189,7 +186,7 @@ public sealed partial class CharacterAnimator
         }
         if (_surfaces.Count > 0)
         {
-            // Largest residual remaining over the no-penetration rows (= worst √w·penetration
+            // Largest residual remaining over the no-penetration rows (= worst √w·shaped potential
             // the solve couldn't push out). The rows sit right after contacts+pins in `r`.
             float maxPen = 0f;
             for (int i = npStart; i < npStart + npCount && i < m; i++) maxPen = MathF.Max(maxPen, MathF.Abs(r[i]));
@@ -252,7 +249,7 @@ public sealed partial class CharacterAnimator
         public ContactDbg[] Contacts;        // planted contacts with their FROZEN solve weights
         public PinDbg[]     Pins;            // external fixed-point pins
         public FootDbg[]    Feet;            // step-planner plans this frame (empty when not planning)
-        public SolverSurface[] Surfaces;     // no-penetration half-planes
+        public SolverSurface[] Surfaces;     // no-penetration faces
         public bool         AimActive;
         public Vector2      AimTarget;       // frozen û* of the aim row
         public float        AimErrDeg;       // solved aim error, degrees (0 when inactive)
@@ -500,34 +497,5 @@ public sealed partial class CharacterAnimator
                 w = ks[0].Time + 1f - ks[ks.Count - 1].Time;   // the wrap segment
         }
         return MathHelper.Clamp(0.02f * w, 1e-4f, 1e-3f);
-    }
-
-    // TEST HOOK (golden traces — AnimSolverGoldenTraceTests): the composite objective's residual
-    // vector and dense Jacobian at the last solve's accepted x, and again at a fixed off-optimum
-    // perturbation of it (so inactive-set knees and off-solution branches are exercised too).
-    // Allocates. Null when no solve ran this frame.
-    internal sealed class SolveTrace
-    {
-        public int N, M; public float[] X, R, J, R2, J2;
-        public (string Name, int Start, int Count)[] Layout;   // block row ranges (diagnostic labels, not stored)
-        public string BlockOf(int row) => BlockNameAt(Layout, row);
-    }
-    internal SolveTrace CaptureSolveTrace()
-    {
-        if (!_haveCorr || _ls == null) return null;
-        int n = IdxTheta0 + _skeleton.Count;
-        var x = new float[n];
-        Array.Copy(_solveVars, x, n);
-        int m = CompositeRowLayout(x, n, out _, out _, out _);
-        var t = new SolveTrace { N = n, M = m, X = x, R = new float[m], J = new float[m * n], R2 = new float[m], J2 = new float[m * n],
-                                 Layout = BlockRows(x, n) };
-        SolveObjective.Jacobian(_problem, _eval,x, t.J, n);
-        SolveObjective.Residuals(_problem, _eval,x, t.R);
-        var x2 = new float[n];
-        for (int i = 0; i < n; i++) x2[i] = x[i] + ((i & 1) == 0 ? 0.02f : -0.02f);
-        SolveObjective.Jacobian(_problem, _eval,x2, t.J2, n);
-        SolveObjective.Residuals(_problem, _eval,x2, t.R2);
-        SolveForward.Run(_problem, x, _eval);   // leave the scratch at the accepted x, like the other hooks
-        return t;
     }
 }

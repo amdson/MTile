@@ -1,0 +1,15 @@
+{
+  "//": "Aspid test room (Stage 'aspid'). A wide walled hall so the fliers have air to hold range in: floor top at tile y 8 (world y 88), walls at tile x -30 / 45, ceiling at tile y -26 — 74 x 33 tiles of open space. The three middle floor chunks are hand-authored for a couple of jump-up platforms and a stone pillar that breaks line of sight (the aspid holds fire and re-picks its hover point when it can't see you). Enemy placement + the respawn wave live in Stage.cs.",
+  "Extents": 2,
+  "ChunkFiles": {
+    "-1,0": "aspid_left.txt",
+    "0,0":  "aspid_mid.txt",
+    "1,0":  "aspid_right.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 8",   "IsSolid": true },
+    { "Condition": "x <= -30", "IsSolid": true },
+    { "Condition": "x >= 45",  "IsSolid": true },
+    { "Condition": "y <= -26", "IsSolid": true }
+  ]
+}

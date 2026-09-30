@@ -10,8 +10,8 @@ namespace MTile;
 // (FoldLattice) in front of FoldReference's rows → deform → servo tail.
 //
 // The solve, per the plan:
-//   - a world-aligned cell grid (TileSize / LatticeCellsPerTile) over the
-//     cone's footprint from the seed (§2.1): L along u, ±L·tanθ across;
+//   - a world-aligned cell grid (TileSize / LatticeCellsPerTile) over a
+//     radial horizon: nodes within L of the seed (revised 2026-09-30, below);
 //   - nodes are candidate BODY-CENTER positions; a node is admissible iff the
 //     center lies outside every stamped C-obstacle (§3.1);
 //   - edges are primitive lattice offsets filtered by the cone
@@ -23,7 +23,18 @@ namespace MTile;
 //     hover toward the surface below per px of path (state-supplied on/off),
 //     seed-edge velocity bias (§3.4–3.5);
 //   - goal: the reachable node maximizing progress·w_prog − cost; a bonk is
-//     a route that is not worth its cost (§3.4, revised).
+//     a route that is not worth its cost (§3.4, revised): the goal stops
+//     short of the horizon's rim.
+//
+// Radial horizon (2026-09-30). The window was the cone's footprint — L along
+// u, the reach of every admitted offset across — and under a near-90° cone
+// that box overflowed MaxCells and was trimmed. With the costs near zero (a
+// jump: rise free, hover off) the argmax ran to the trimmed box's far
+// corner: 4.4·L out, at an angle the trim chose (62° against a 76° u), and
+// the extra sideways travel it demanded landed wherever the DP's ties put
+// it — at the start, so a directional jump planned a flat run-up the
+// tracker followed forever. On a disk the most progress along u is the one
+// point seed + L·u: the goal lies along intent, at the lookahead distance.
 //
 // Output samples carry the plan's §3.6 support fields: FloorY = the C-space
 // surface below the node (Pos.Y + floorBelow), Grounded = floorBelow within
@@ -143,6 +154,9 @@ public sealed class LatticePathPlanner
 
     // Window in cell coords (world-anchored: cell i covers [i·cell, (i+1)·cell)).
     private float _cell;
+    // Radial horizon: nodes whose centers lie within √_horizon2 of _seed.
+    private Vector2 _seed;
+    private float _horizon2;
     private int _x0, _y0, _w, _h;
 
     // Seed run (§3.5): nodes seed + j·o for j < _runLen may leave only along
@@ -208,7 +222,8 @@ public sealed class LatticePathPlanner
                 _admitted[_admittedCount++] = o;
         if (_admittedCount == 0) return 0;
 
-        BuildWindow(seed, u, L);
+        _seed = seed; _horizon2 = L * L;
+        BuildWindow(seed, L);
         if (_w <= 0 || _h <= 0) return 0;
 
         // Obstacles inflated by Clearance (see the const): the path is
@@ -349,8 +364,16 @@ public sealed class LatticePathPlanner
         // crouch's u tilts down, and a 1-high block stops being worth it),
         // and nothing needs a give-up. Length cost is gone: every edge
         // advances p, so progress reward and length cost were one term.
+        //
+        // Progress pays only up to pCap, two cells inside the rim. The rim is
+        // curved and the grid is not: a line offset from the seed's axis (a
+        // hover line above a sagged seed) loses its last node to the rim a
+        // cell before the axis does, so an uncapped reward bent every such
+        // path's final node back toward the seed's height for one more cell
+        // of progress. Two cells is the band every line within ~√(2·L·cell)
+        // of the axis still has inside the disk.
         float pSeed = Vector2.Dot(CellCenter(seedX, seedY), u);
-        float pFar  = pSeed + L - _cell;
+        float pCap  = pSeed + L - 2f * _cell;
         float wProg = cfg.LatticeProgressWeight;
         int best = -1; float bestVal = float.NegativeInfinity, bestP = float.NegativeInfinity;
         for (int i = 0; i < reachCount; i++)
@@ -358,11 +381,20 @@ public sealed class LatticePathPlanner
             int idx = _order[i];
             if (float.IsPositiveInfinity(_dp[idx])) continue;
             float pI = _orderKey[i];
-            float val = wProg * (pI - pSeed) - _dp[idx];
+            float val = wProg * (MathF.Min(pI, pCap) - pSeed) - _dp[idx];
             if (val > bestVal || (val == bestVal && pI > bestP)) { best = idx; bestVal = val; bestP = pI; }
         }
         if (best < 0) { bonk = true; LastBonk = true; return 0; }
-        bonk = bestP < pFar;                                     // did not find the far band worth reaching
+        // Did not find the horizon worth reaching: the goal stopped short of the
+        // capped progress AND inside the rim. The rim half is what keeps a
+        // detour honest — a route over a wall reaches the rim well off the
+        // axis, short of pCap. A cell's grace on each: the last cell before
+        // the cap pays only the part of it left (a corridor's sag can
+        // outprice that), and the rim's nearest node center can sit up to
+        // half a diagonal inside the rim. A route whose edges are worth their
+        // cost always gets within a cell of both.
+        bonk = bestP < pCap - _cell
+            && (CellCenter(_x0 + best % _w, _y0 + best / _w) - seed).Length() < L - _cell;
         cost = _dp[best];
         LastReach = reachCount; LastBonk = bonk; LastCost = cost;
 
@@ -407,21 +439,13 @@ public sealed class LatticePathPlanner
         return best;
     }
 
-    // Window = bbox of everything a monotone path can reach before the far
-    // band: for each admitted offset ô, the point where a straight run along
-    // it crosses p = pSeed + L (seed + ô·L/dot(ô,u)). A path mixing offsets
-    // never leaves the hull of those extremes, so this is exact for the
-    // offset table — and it is what keeps a near-90° cone affordable: the
-    // lateral extent is L·(steepest admitted slope), not L·tanθ.
-    private void BuildWindow(Vector2 seed, Vector2 u, float L)
+    // Window = the horizon disk's bounding box (nodes outside the disk are
+    // rejected by EdgeFree). Only the half ahead along u is ever reachable —
+    // every edge increases p — but the full box is small (≈ 2L/cell square)
+    // and keeps the window independent of u.
+    private void BuildWindow(Vector2 seed, float L)
     {
-        Vector2 min = seed, max = seed;
-        for (int a = 0; a < _admittedCount; a++)
-        {
-            var o = _admitted[a];
-            var p = seed + o.Unit * (L / Vector2.Dot(o.Unit, u));
-            min = Vector2.Min(min, p); max = Vector2.Max(max, p);
-        }
+        Vector2 min = seed - new Vector2(L), max = seed + new Vector2(L);
         // Two cells of slack on every side: one for the bbox floor, one so the
         // seed snap has room when the body sits at the window's edge.
         _x0 = (int)MathF.Floor(min.X / _cell) - 2;
@@ -569,12 +593,14 @@ public sealed class LatticePathPlanner
         return count;
     }
 
-    // Edge (nx,ny) → (nx,ny)+o is in the window, lands on a free cell and
-    // crosses only free cells (the supercover tunneling check, §3.3).
+    // Edge (nx,ny) → (nx,ny)+o is in the window, lands on a free cell inside
+    // the horizon disk and crosses only free cells (the supercover tunneling
+    // check, §3.3).
     private bool EdgeFree(int nx, int ny, ref Offset o)
     {
         int mx = nx + o.Dx, my = ny + o.Dy;
         if ((uint)mx >= (uint)_w || (uint)my >= (uint)_h) return false;
+        if ((CellCenter(_x0 + mx, _y0 + my) - _seed).LengthSquared() > _horizon2) return false;
         if (_blocked[my * _w + mx]) return false;
         var cross = o.Cross;
         for (int c = 0; c < o.CrossCount; c++)

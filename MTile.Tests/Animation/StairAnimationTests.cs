@@ -82,8 +82,9 @@ public class StairAnimationTests(ITestOutputHelper output)
         Assert.True(leftStairs);
     }
 
-    // The sample builder's terrain probe (the vault-chain path — StairClimbState declares
-    // its own tag, so it is switched off here to exercise the probe).
+    // The sample builder's terrain probe supplies StepUp only (Stairs is StairClimbState's
+    // own tag). It is exercised on the vault-chain path — the state switched off — where the
+    // last riser of the flight reads StepUp; the probe's velocity gates then hold.
     [Fact]
     public void StairSample_DoesNotOverrideStoppingBackpedalingDescendingOrDistantFlight()
     {
@@ -94,13 +95,14 @@ public class StairAnimationTests(ITestOutputHelper output)
             var terrain = Terrain(1);
             var sim = new Simulation(terrain, new Vector2(16, 15 * Chunk.TileSize - PlayerCharacter.Radius));
             bool entered = false;
-            for (int f = 0; f < 100; f++)
+            for (int f = 0; f < 300; f++)
             {
                 sim.Step(new PlayerInput { Right = true });
-                if (CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag is AnimTag.Stairs or AnimTag.StepUp)
-                { entered = true; break; }
+                var tag = CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag;
+                Assert.NotEqual(AnimTag.Stairs, tag);   // the probe never says Stairs
+                if (tag == AnimTag.StepUp) { entered = true; break; }
             }
-            Assert.True(entered);
+            Assert.True(entered, "the last riser never read StepUp on the vault-chain path");
             foreach (var velocity in new[] { Vector2.Zero, new Vector2(-50, -30), new Vector2(50, 50) })
             {
                 sim.Player.Body.Velocity = velocity;
@@ -247,37 +249,6 @@ public class StairAnimationTests(ITestOutputHelper output)
             Assert.Equal(0, reentries);
         }
         finally { AnimSolverConfig.Current.CopyFrom(saved); }
-    }
-
-    // The Stairs/StepUp split on the sample builder's PROBE path (StairClimbState off):
-    // Stairs needs two risers still AHEAD of the body, StepUp is the last riser. A 10-step
-    // staircase reads Stairs from the bottom until the second-to-last riser is under the
-    // feet, then StepUp for the final one; a 2-step flight reads Stairs at its foot and
-    // StepUp for its last riser; a lone step never reads Stairs.
-    [Theory]
-    [InlineData(10)]
-    [InlineData(2)]
-    public void ProbePath_StairsTag_NeedsTwoRisersAhead_ThenHandsTheLastRiserToStepUp(int steps)
-    {
-        bool prev = MovementConfig.Current.StairClimbEnabled;
-        MovementConfig.Current.StairClimbEnabled = false;
-        try
-        {
-            var terrain = Terrain(1, steps);
-            var sim = new Simulation(terrain, new Vector2(16, 15 * Chunk.TileSize - PlayerCharacter.Radius));
-            int stairsFrames = 0, stepUpFrames = 0; bool stepUpAfterStairs = false, stairsAfterStepUp = false;
-            for (int f = 0; f < 250; f++)
-            {
-                sim.Step(new PlayerInput { Right = true });
-                var tag = CharacterAnimSample.From(sim.Player, Dt, chunks: terrain).Tag;
-                if (tag == AnimTag.Stairs) { stairsFrames++; if (stepUpFrames > 0) stairsAfterStepUp = true; }
-                if (tag == AnimTag.StepUp) { stepUpFrames++; if (stairsFrames > 0) stepUpAfterStairs = true; }
-            }
-            Assert.True(stairsFrames > 5, $"Stairs never tagged on a {steps}-step flight ({stairsFrames} frames)");
-            Assert.True(stepUpAfterStairs, "the last riser should hand off to StepUp");
-            Assert.False(stairsAfterStepUp, "Stairs re-tagged after the hand-off to StepUp");
-        }
-        finally { MovementConfig.Current.StairClimbEnabled = prev; }
     }
 
     // With StairClimbState (the default): the state declares the tag and owns the whole

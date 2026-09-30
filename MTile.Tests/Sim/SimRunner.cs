@@ -245,6 +245,7 @@ public static class SimRunner
             // Entity gravity-scale opt-out, then every body (players + live entities,
             // spawn order) through the solver.
             foreach (var e in world.Entities) e.PreStep(cfg.Gravity);
+            foreach (var p in players) p.PreStep(cfg.Gravity);
             bodyScratch.Clear();
             bodyScratch.AddRange(bodies);
             foreach (var e in world.Entities) bodyScratch.Add(e.Body);

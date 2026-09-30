@@ -385,6 +385,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider
         // Entity gravity-scale opt-out, applied right before uniform gravity integrates.
         // Fresh query so entities spawned this frame are included (as before).
         foreach (var r in _world.Query<EntityRef>()) r.Component1.Obj.PreStep(Gravity);
+        // Hitstop body hold for players (the entity half lives in Entity.PreStep above).
+        _player.PreStep(Gravity);
+        foreach (var (p, _) in _secondaryPlayers) p.PreStep(Gravity);
 
         // Project the World's bodies into the scratch list (spawn order) for the solver.
         _bodyScratch.Clear();

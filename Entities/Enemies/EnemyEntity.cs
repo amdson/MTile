@@ -68,12 +68,18 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     public string CurrentActionName =>
         _currentAction >= 0 ? _actions[_currentAction].GetType().Name : "";
 
+    // Quadratic air resistance every enemy gets (PhysicsBody.QuadraticDrag). Stronger
+    // than the player's: enemies are lighter and low-friction, so knockback is what
+    // carries them off-screen. Terminal fall ≈ √(600 / k) ≈ 550 px/s.
+    public const float DefaultQuadraticDrag = 0.002f;
+
     protected EnemyEntity(PhysicsBody body, float health,
                           List<EnemyMovementState> movement,
                           List<EnemyActionState>   actions,
                           EnemyController          controller = null)
         : base(body, health)
     {
+        Body.QuadraticDrag = DefaultQuadraticDrag;
         if (movement == null || movement.Count == 0)
             throw new ArgumentException("EnemyEntity requires at least one movement state (the fallback).", nameof(movement));
         _movement   = movement;
@@ -322,7 +328,9 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     // Overlay telegraphs — the FSM-side analogue of player.CurrentAction.Telegraph
     // in Game1. Movement first, action on top (telegraphs are read most easily when
     // they sit above the body+ground state).
-    public void Telegraph(TelegraphList t)
+    // Virtual so a subtype can add an entity-level overlay on top of the FSMs'
+    // (WardenEnemy's armor ring).
+    public virtual void Telegraph(TelegraphList t)
     {
         _movement[_currentMovement].Telegraph(t, Body, in _moveVars);
         if (_currentAction >= 0)

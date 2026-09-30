@@ -1,0 +1,16 @@
+{
+  "//": "WardenEnemy demo (stage 'warden'). Floor surface at tile row 12 (world y 132). Player spawns on the flat at x ~6. Right of spawn the ground rises 3 blocks at x 16 (a ledge the right-hand Warden drops off), steps down to +1 at x 40 and to the floor at x 50 — so a Warden walking left from x 58 hops a 1-block then a 2-block step. Left of spawn, a 3-block wall at x -20..-19 the left-hand Warden cannot hop. Walls at x -40 / 70, ceiling at row -12. Placement + respawn in Stage.cs (PopulateWarden).",
+  "Extents": 5,
+  "ChunkFiles": {
+    "-2,0": "warden_wall.txt",
+    "1,0": "warden_high.txt",
+    "2,0": "warden_steps.txt",
+    "3,0": "warden_base.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 12",  "IsSolid": true },
+    { "Condition": "x <= -40", "IsSolid": true },
+    { "Condition": "x >= 70",  "IsSolid": true },
+    { "Condition": "y <= -12", "IsSolid": true }
+  ]
+}

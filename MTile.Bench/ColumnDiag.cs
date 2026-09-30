@@ -56,7 +56,7 @@ internal static class ColumnDiag
         CharacterAnimator.CaptureResidualBreakdown = true;
         var anim = new CharacterAnimator(skel, Scale, clips);
         var sim  = new Simulation(FtolStudy.FlatFloor(), spawn);
-        var surfaces = new SolverSurface[8];
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];
 
         // Warm past the spawn drop and landing transient before sampling — the character
         // starts above the floor, and without this the "worst" frame was routinely a landing

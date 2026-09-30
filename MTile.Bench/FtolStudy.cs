@@ -349,7 +349,7 @@ internal static class FtolStudy
         const int Warm = 180, N = 600;
         var anim = new CharacterAnimator(skel, Scale, clips);
         var sim  = new Simulation(FlatFloor(), spawn);
-        var surfaces = new SolverSurface[8];
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];
         var poses = new float[N][];
 
         LastBlockCost.Clear(); LastBlockRows.Clear();

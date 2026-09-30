@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using static MTile.SolveProblem;
 
@@ -164,56 +165,141 @@ public sealed class FixedPointConstraint : ISolveConstraint
     }
 }
 
-// One row per (surface × sampled bone tip): the one-sided HALF-PLANE no-penetration residual
-// √w·max(0, margin − n·(q − p0)), pushing a limb point q out of a solid surface the movement
-// layer already resolved (wall-slide wall, ground line — §11.5/§4.5 v1). q = each bone's far
-// tip; every joint of the chain is some bone's tip, so sampling all tips covers the limbs.
-// INACTIVE rows (the point is already clear) emit 0 residual AND 0 Jacobian, so the row COUNT
-// is stable across one Minimize (the LM fixed-row contract) without a separate active-set
-// pass — only WHICH rows are nonzero changes. The active residual is smooth (affine in q), so
-// its analytic Jacobian −√w·n·PointJacobian(b, q) matches finite differences everywhere except
-// the activation knee (the max()'s corner, like the keyframe kink, is where the FD oracle is
-// mute). The Y component rides the body bob δ (q.Y + δ), same as a contact/pin's vertical row.
+// One row per rig bone: a UNIFIED no-penetration potential over every face masked to that
+// bone, pushing its far tip q back out of the solid toward the body.
+//
+// The face list is pre-filtered by the host to faces that FACE THE BODY (TerrainSurfaces:
+// the physics body's centre lies on the face's free side), so every face here is a way
+// back to where the body is. Per face s (segment, span [−H, H] along the tangent):
+//   d_s    = depth of q BEHIND the face's line (margin-shifted); only d_s > 0 faces take part
+//   dist_s = distance from q to the face SEGMENT — d_s inside the span, the distance to the
+//            nearer end past it (so a tip under a convex corner exits diagonally, at the corner)
+// q is INVALID when it is behind some face within its span (extended past concave ends). That
+// covers a tip inside a block AND a tip poked clean through a thin wall (the far face faces
+// away and was dropped, so the tip is still behind the near one: it is pulled back through
+// the side it went in, never shoved out the far side).
+//   P = −τ·ln Σ w_s·exp(−dist_s/τ)   a soft MIN over the exits: the shallowest body-facing
+// exit dominates, near-tied exits (a corner) blend instead of flipping. w_s = 1 in span; past
+// a span end it ramps in with d_s (smoothstep over MemberEps) so a face joining the set never
+// jumps P. The residual is √w·shape(P): P up to NoPenAllowance, then NoPenSteepGain× steeper.
+// P → 0 as q reaches a face, so the invalid→valid switch is continuous.
+// INACTIVE rows emit 0 residual AND 0 Jacobian, so the row COUNT is fixed at one per bone
+// (the LM fixed-row contract). The Jacobian holds each face's normal/end fixed — exact away
+// from the kinks (activation, the allowance knee, span ends), where the FD oracle is mute.
+// The Y component rides the body bob δ and X the sway d.x, same as a contact/pin row.
 public sealed class NoPenetrationConstraint : ISolveConstraint
 {
     public string Name => "NoPenetrationConstraint";
 
-    // A (surface, bone) pair that never emits a live row — its row slot stays a
-    // permanent zero (residual AND Jacobian), so the fixed surfaces×bones layout is
-    // preserved. Two reasons:
-    //  - BoneMask: terrain planes constrain only the tips they were extracted for
+    public const float Tau       = 1f;   // soft-min temperature (px): corner exits blend over ~τ
+    public const float MemberEps = 1f;   // off-span faces ramp into the soft-min over this depth (px)
+
+    // A (surface, bone) pair that never takes part. Two reasons:
+    //  - BoneMask: terrain faces constrain only the tips they were extracted for
     //    (-1 = all bones, the wall-slide plane).
     //  - Planted-foot exemption: the cadence solve sweeps a PLANTED foot along its
-    //    support plane at gap ≈ 0, exactly on the one-sided knee — the contact's
-    //    V-row already owns "foot sits on ground", so its own upward support plane
-    //    must not flicker against it.
-    private static bool SkipPair(SolveProblem p, in SolverSurface s, int b)
+    //    support face at gap ≈ 0 — the contact's V-row already owns "foot sits on
+    //    ground", so its own upward support face must not flicker against it.
+    private static bool SkipPair(List<ActiveContact> contacts, in SolverSurface s, int b)
     {
         if (((s.BoneMask >> b) & 1) == 0) return true;
-        if (s.Normal.Y < -0.7f)                        // upward-facing plane (y-down)
-            foreach (var c in p.Contacts)
+        if (contacts != null && s.Normal.Y < -0.7f)   // upward-facing (y-down)
+            foreach (var c in contacts)
                 if (c.Bone == b &&
                     MathF.Abs(s.Normal.X * (c.Target.X - s.Point.X)
                             + s.Normal.Y * (c.Target.Y - s.Point.Y)) < ContactSupportBand)
-                    return true;                       // this plane supports the plant
+                    return true;                      // this face supports the plant
         return false;
+    }
+
+    // The unified potential P at world point q for `bone`, and ∂P/∂q. Returns false (P = 0,
+    // grad = 0) when q is valid. Shared with the animator's dormancy pre-check and the FD
+    // oracle's kink guard so all three read one definition. `contacts` null = no exemption.
+    public static bool Potential(List<SolverSurface> surfaces, List<ActiveContact> contacts,
+                                 int bone, Vector2 q, out float pen, out Vector2 grad)
+    {
+        pen = 0f; grad = Vector2.Zero;
+        bool invalid = false;
+        float minDist = float.MaxValue;
+        foreach (var s in surfaces)
+        {
+            if (SkipPair(contacts, in s, bone)) continue;
+            if (!Measure(in s, q, out float d, out float lat, out float dist, out _)) continue;
+            if (InSpan(in s, lat)) invalid = true;
+            minDist = MathF.Min(minDist, dist);
+        }
+        if (!invalid) return false;
+
+        // Soft-min, shifted by the hard min so exp never underflows.
+        float sum = 0f; Vector2 dSum = Vector2.Zero;
+        foreach (var s in surfaces)
+        {
+            if (SkipPair(contacts, in s, bone)) continue;
+            if (!Measure(in s, q, out float d, out float lat, out float dist, out Vector2 dDist)) continue;
+            float w = 1f, dw = 0f;                     // dw = ∂w/∂d
+            if (!InSpan(in s, lat))
+            {
+                float u = MathF.Min(d / MemberEps, 1f);
+                w  = u * u * (3f - 2f * u);
+                dw = d < MemberEps ? 6f * u * (1f - u) / MemberEps : 0f;
+            }
+            if (w <= 0f) continue;
+            float e = MathF.Exp(-(dist - minDist) / Tau);
+            sum  += w * e;
+            // ∂(w·e)/∂q = e·dw·∂d/∂q + w·e·(−1/τ)·∂dist/∂q, with ∂d/∂q = −n.
+            dSum += e * dw * -s.Normal - (w * e / Tau) * dDist;
+        }
+        if (sum <= 0f) return false;
+        pen  = minDist - Tau * MathF.Log(sum);
+        grad = -Tau * dSum / sum;
+        return true;
+    }
+
+    // Depth d behind face s's margin-shifted line (false when q is on the free side), the
+    // tangent coordinate lat, and the distance to the segment with its gradient.
+    private static bool Measure(in SolverSurface s, Vector2 q, out float d, out float lat,
+                                out float dist, out Vector2 dDist)
+    {
+        Vector2 n = s.Normal, t = s.Tangent;
+        Vector2 u = q - (s.Point + n * s.Margin);
+        d   = -(n.X * u.X + n.Y * u.Y);
+        lat = t.X * u.X + t.Y * u.Y;
+        dist = 0f; dDist = Vector2.Zero;
+        if (d <= 0f) return false;
+        float tc = Math.Clamp(lat, -s.HalfLength, s.HalfLength);
+        Vector2 v = u - t * tc;                        // closest segment point → q
+        dist  = v.Length();
+        dDist = dist > 1e-6f ? v / dist : -n;
+        return true;
+    }
+
+    private static bool InSpan(in SolverSurface s, float lat)
+        => lat >= -s.HalfLength - s.ExtLo && lat <= s.HalfLength + s.ExtHi;
+
+    // The residual shape over P and its slope.
+    private static float Shape(AnimSolverConfig c, float pen, out float slope)
+    {
+        if (pen <= 0f) { slope = 0f; return 0f; }
+        float over = pen - c.NoPenAllowance;
+        if (over <= 0f) { slope = 1f; return pen; }
+        slope = c.NoPenSteepGain;
+        return pen + (c.NoPenSteepGain - 1f) * over;
     }
 
     public int Residuals(SolveProblem p, PoseEval e, ReadOnlySpan<float> x, Span<float> r)
     {
         float dy = x[IdxDy], dx = x[IdxDx];
         float sw = MathF.Sqrt(p.Cfg.TierNoPen) * p.InvCharLen;
-        int bones = p.Skeleton.Count, n = 0;
-        foreach (var s in p.Surfaces)
-            for (int b = 0; b < bones; b++)
-            {
-                if (SkipPair(p, in s, b)) { r[n++] = 0f; continue; }
-                Vector2 tip = e.Pose.WorldOf(b).Translation;
-                float gap = s.Normal.X * (tip.X + dx - s.Point.X) + s.Normal.Y * (tip.Y + dy - s.Point.Y);
-                float pen = s.Margin - gap;                  // >0 ⇒ inside the margin (penetrating)
-                r[n++] = pen > 0f ? sw * pen : 0f;
-            }
-        return n;
+        int bones = p.Skeleton.Count;
+        for (int b = 0; b < bones; b++)
+        {
+            r[b] = 0f;
+            if (p.Surfaces.Count == 0) continue;
+            Vector2 tip = e.Pose.WorldOf(b).Translation;
+            if (Potential(p.Surfaces, p.Contacts, b, new Vector2(tip.X + dx, tip.Y + dy), out float pen, out _))
+                r[b] = sw * Shape(p.Cfg, pen, out _);
+        }
+        return bones;
     }
 
     public int Jacobian(SolveProblem p, PoseEval e, ReadOnlySpan<float> x, Span<float> jac, int stride, int row0)
@@ -223,22 +309,44 @@ public sealed class NoPenetrationConstraint : ISolveConstraint
         int nv = p.Vars, bones = p.Skeleton.Count;
         var colX = e.ColX.AsSpan(0, nv);
         var colY = e.ColY.AsSpan(0, nv);
-        int row = row0;
+        for (int b = 0; b < bones; b++)
+        {
+            if (p.Surfaces.Count == 0) continue;
+            Vector2 tip = e.Pose.WorldOf(b).Translation;
+            if (!Potential(p.Surfaces, p.Contacts, b, new Vector2(tip.X + dx, tip.Y + dy), out float pen, out Vector2 g))
+                continue;                                     // inactive → zero row (solver pre-zeroes)
+            Shape(p.Cfg, pen, out float slope);
+            if (slope == 0f) continue;
+            float kx = sw * slope * g.X, ky = sw * slope * g.Y;
+            SolveObjective.PointJacobianColumns(p, e, b, tip, colX, colY);   // ∂(world tip)/∂x (d added below)
+            int row = row0 + b;
+            for (int v = 0; v < nv; v++)
+                jac[row * stride + v] = kx * colX[v] + ky * colY[v];
+            jac[row * stride + IdxDx] += kx;                  // q.X rides d.x
+            jac[row * stride + IdxDy] += ky;                  // q.Y rides δ
+        }
+        return bones;
+    }
+
+    // FD-oracle guard: is q within `band` px of a kink of the potential (activation, the
+    // allowance knee, a face's line or span end)? A central difference straddling one is not
+    // a valid oracle there.
+    public static bool NearKink(SolveProblem p, int bone, Vector2 q, float band)
+    {
+        Potential(p.Surfaces, p.Contacts, bone, q, out float pen, out _);
+        if (MathF.Abs(pen) < band || MathF.Abs(pen - p.Cfg.NoPenAllowance) < band) return true;
         foreach (var s in p.Surfaces)
-            for (int b = 0; b < bones; b++, row++)
-            {
-                if (SkipPair(p, in s, b)) continue;          // permanent zero row
-                Vector2 tip = e.Pose.WorldOf(b).Translation;
-                float gap = s.Normal.X * (tip.X + dx - s.Point.X) + s.Normal.Y * (tip.Y + dy - s.Point.Y);
-                if (s.Margin - gap <= 0f) continue;          // inactive → zero row (solver pre-zeroes)
-                SolveObjective.PointJacobianColumns(p, e, b, tip, colX, colY);   // ∂(world tip)/∂x (d added below)
-                // r = √w·(margin − n·q) ⇒ ∂r/∂x = −√w · n·(∂q/∂x)
-                for (int v = 0; v < nv; v++)
-                    jac[row * stride + v] = -sw * (s.Normal.X * colX[v] + s.Normal.Y * colY[v]);
-                jac[row * stride + IdxDx] += -sw * s.Normal.X;   // q.X rides d.x ⇒ ∂(n·q)/∂d.x = n.X
-                jac[row * stride + IdxDy] += -sw * s.Normal.Y;   // q.Y rides δ ⇒ ∂(n·q)/∂δ = n.Y
-            }
-        return row - row0;
+        {
+            if (SkipPair(p.Contacts, in s, bone)) continue;
+            Vector2 u = q - (s.Point + s.Normal * s.Margin);
+            float d = -(s.Normal.X * u.X + s.Normal.Y * u.Y);
+            float lat = s.Tangent.X * u.X + s.Tangent.Y * u.Y;
+            if (MathF.Abs(d) < band || MathF.Abs(d - MemberEps) < band) return true;
+            float lo = -s.HalfLength, hi = s.HalfLength;
+            if (MathF.Abs(lat - lo) < band || MathF.Abs(lat - hi) < band
+                || MathF.Abs(lat - (lo - s.ExtLo)) < band || MathF.Abs(lat - (hi + s.ExtHi)) < band) return true;
+        }
+        return false;
     }
 }
 

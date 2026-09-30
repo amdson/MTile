@@ -57,7 +57,7 @@ internal static class AnimDiag
         const float Scale = 0.6f;
         var anim = new CharacterAnimator(skel, Scale, clips);
         var sim  = new Simulation(FlatFloor(), spawn);
-        var surfaces = new SolverSurface[8];
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];
         int bones = skel.Count;
 
         for (int f = 0; f < 180; f++)   // warmup
@@ -209,7 +209,7 @@ internal static class AnimDiag
         const float Scale = 0.6f;
         var anim = new CharacterAnimator(skel, Scale, clips);
         var sim  = new Simulation(FlatFloor(), spawn);
-        var surfaces = new SolverSurface[8];
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];
         LeastSquaresSolver.ProfileCallbacks = true;
 
         var sum = new double[16];

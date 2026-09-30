@@ -4,22 +4,103 @@
   "Skeleton": "biped",
   "Duration": 0.8,
   "Loop": true,
+  "Motion": "Track",
   "Scene": {
     "Guides": [
       {
         "Id": "g1",
         "Kind": "Ground",
         "X": 0,
-        "Y": 40,
+        "Y": 39.916737,
         "W": 0,
-        "H": 0,
-        "Label": "floor"
+        "H": 0
       }
     ]
   },
+  "Contacts": [
+    {
+      "Point": "support_l",
+      "Start": 0,
+      "End": 0.5,
+      "Source": "SelfPlant"
+    },
+    {
+      "Point": "support_r",
+      "Start": 0.5,
+      "End": 1,
+      "Source": "SelfPlant"
+    }
+  ],
   "Keyframes": [
     {
       "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.5707964
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -2.741593
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 2.7415926
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1.0707964
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0.5999999
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 2.0707963
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.5
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -22.127161,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": 0,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    },
+    {
+      "Time": 0.25,
       "Bones": [
         {
           "Bone": "hip",
@@ -55,15 +136,15 @@
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0
+          "Rotation": 0.19999993
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 1.5707964
+          "Rotation": 1.0707964
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0
+          "Rotation": 0.14999998
         }
       ],
       "Additions": [
@@ -71,7 +152,216 @@
           "Name": "com",
           "Kind": "Point",
           "Px": 0,
-          "Py": -21,
+          "Py": -22.127161,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 5.493484,
+          "Py": 0,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    },
+    {
+      "Time": 0.5,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.5707964
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 2.741593
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": -2.7415926
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 2.0707963
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0.5
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.0707964
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.5999999
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -22.127161,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 16.497074,
+          "Py": 0,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    },
+    {
+      "Time": 0.75,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.5707964
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": 3.1415927
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 3.1415927
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1.0707964
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0.14999998
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.5707964
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.19999993
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -22.127161,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 21.990559,
+          "Py": 0,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    },
+    {
+      "Time": 1,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.5707964
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -2.741593
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 2.7415926
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": 1.0707964
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 0.5999999
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 2.0707963
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.5
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -22.127161,
+          "Dx": 0,
+          "Dy": 0
+        },
+        {
+          "Name": "body_path",
+          "Kind": "Point",
+          "Px": 32.994152,
+          "Py": 0,
           "Dx": 0,
           "Dy": 0
         }

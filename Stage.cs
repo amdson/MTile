@@ -96,6 +96,41 @@ public static class Stages
             Populate      = _ => { },
         });
 
+        // ─── weights ──────────────────────────────────────────────────────────
+        // Knockback-by-mass testbed: a flat walled hall with a row of passive balls
+        // (left) and a row of proximity-triggered melee enemies (right), one per
+        // mass in WeightMasses, lightest nearest the spawn. Anything killed respawns
+        // at its slot. See PopulateWeights.
+        Register(new Stage {
+            Name          = "weights",
+            TerrainConfig = "weights.json",
+            PlayerSpawn   = new Vector2(0f, 30f),
+            Populate      = PopulateWeights,
+        });
+
+        // ─── warden ───────────────────────────────────────────────────────────
+        // WardenEnemy demo (Levels/warden.json). You spawn on the left floor. To the
+        // right, a Warden has to hop a 1-block and then a 2-block step and drop off a
+        // ledge to reach you; to the left, a second one sits behind a 3-block wall it
+        // cannot hop — walk over it to fight that one. Dead Wardens come back.
+        Register(new Stage {
+            Name          = "warden",
+            TerrainConfig = "warden.json",
+            PlayerSpawn   = WardenPlayerSpawn,
+            Populate      = PopulateWarden,
+        });
+
+        // ─── wizard ───────────────────────────────────────────────────────────
+        // WizardEnemy demo (Levels/wizard.json): a flat walled hall — the only cover
+        // is the pillars the Wizard raises. One Wizard to your right; it respawns
+        // 3 s after dying.
+        Register(new Stage {
+            Name          = "wizard",
+            TerrainConfig = "wizard.json",
+            PlayerSpawn   = new Vector2(0f, 12 * Chunk.TileSize - 30f),
+            Populate      = PopulateWizard,
+        });
+
         // ─── gym ──────────────────────────────────────────────────────────────
         // Channel-scenario proving ground: flat floor (tile y = 8) with a
         // repeating 1-high ledge (up at col 6, down at col 12, every 16 tiles).
@@ -149,6 +184,19 @@ public static class Stages
             TerrainConfig = "flat.json",
             PlayerSpawn   = new Vector2(-80f, 40f),
             Populate      = PopulateSandbox,
+        });
+
+        // ─── aspid ────────────────────────────────────────────────────────────
+        // Aspid fight room (Levels/aspid.json): a wide walled hall, two jump-up
+        // platforms and a line-of-sight-breaking pillar, three Aspids overhead.
+        // Kill them all and a fresh wave of three arrives on the next 4-second
+        // beat. See Entities/Enemies/Types/AspidEnemy.cs.
+        Register(new Stage {
+            Name          = "aspid",
+            TerrainConfig = "aspid.json",
+            // Floor top at tile y 8 → world y 88; drops a few px onto it.
+            PlayerSpawn   = new Vector2(0f, 50f),
+            Populate      = PopulateAspid,
         });
 
         // ─── hill ─────────────────────────────────────────────────────────────
@@ -416,6 +464,44 @@ public static class Stages
                                           new Vector2(120f, floorTopY - 11f)));
     }
 
+    // Where each Aspid wave appears: high, spread across the hall, and never
+    // right on top of the spawn point. Three is enough to watch the separation
+    // steering spread them out and to layer fans from different angles.
+    private static readonly Vector2[] AspidSpawns =
+    {
+        new(-190f, -90f), new(150f, -120f), new(330f, -60f),
+    };
+    private const float AspidWaveSeconds = 4f;
+
+    private static void PopulateAspid(Simulation g)
+    {
+        SpawnAspidWave(g);
+
+        // Respawn: on each 4 s beat, if every Aspid is dead, send the next wave.
+        // A pure function of sim time + live entities — no closure counter — so
+        // it replays identically under rollback.
+        int waveFrames = SimFrames.FromSeconds(AspidWaveSeconds, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % waveFrames != 0) return;
+            foreach (var e in g.Entities)
+                if (e.Kind == EntityKind.Aspid && !e.IsDead) return;
+            SpawnAspidWave(g);
+        });
+
+        // Ammo: weightless balls to slash up into an Aspid.
+        const float floorTopY = 8 * Chunk.TileSize;
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2(-60f, floorTopY - 40f)));
+        g.SpawnEntity(EntityFactory.FloatingBall(new Vector2( 90f, floorTopY - 40f)));
+    }
+
+    private static void SpawnAspidWave(Simulation g)
+    {
+        foreach (var p in AspidSpawns)
+            g.SpawnEntity(EnemyFactory.Create(EntityKind.Aspid, p));
+    }
+
     // Gauntlet encounter layout. Positions are given in world pixels and derived
     // from the chunk grid: chunk cx spans world x [256·cx, 256·cx+255], and every
     // gauntlet chunk shares a floor whose top surface is tile y 12 → world y 192.
@@ -587,6 +673,129 @@ public static class Stages
         for (int i = 0; i < 2; i++)
             g.SpawnEntity(EnemyFactory.Create(EntityKind.Shrike,
                 new Vector2(laneStart + i * 26f, y + (i % 2 == 0 ? 0f : -20f))));
+    }
+
+    // Masses for both "weights" rows, lightest first. Spans the roster (Aspid-light
+    // 0.3 → player 2.5 → Bastion 40) so a knockback change can be read across it.
+    private static readonly float[] WeightMasses = { 0.3f, 0.6f, 1f, 1.5f, 2.5f, 4f, 8f, 40f };
+    private const float WeightSlotSpacing = 50f;
+    private const float WeightRowInset    = 60f;   // first slot's distance from spawn
+
+    // Slot i's spawn point on the given side (−1 passive row, +1 active row), resting
+    // a body of `radius` just above the floor.
+    private static Vector2 WeightSlot(int i, int side, float radius)
+    {
+        const float floorTopY = 6 * Chunk.TileSize;
+        return new Vector2(side * (WeightRowInset + i * WeightSlotSpacing), floorTopY - radius - 1f);
+    }
+
+    private static void PopulateWeights(Simulation g)
+    {
+        for (int i = 0; i < WeightMasses.Length; i++)
+        {
+            g.SpawnEntity(WeightBall(i));
+            g.SpawnEntity(WeightSparrer(i));
+        }
+
+        // Respawn anything killed, at its slot. Slots are identified by (kind, mass) —
+        // each mass appears once per row — so this is a pure function of sim state and
+        // replays identically under rollback. Checked every 2 s, not every frame, so a
+        // kill reads as a kill before the replacement drops in.
+        int period = SimFrames.FromSeconds(2f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            for (int i = 0; i < WeightMasses.Length; i++)
+            {
+                bool ball = false, sparrer = false;
+                foreach (var e in g.Entities)
+                {
+                    if (e.IsDead || e.Mass != WeightMasses[i]) continue;
+                    if (e.Kind == EntityKind.Generic)  ball    = true;
+                    if (e.Kind == EntityKind.Sparring) sparrer = true;
+                }
+                if (!ball)    g.SpawnEntity(WeightBall(i));
+                if (!sparrer) g.SpawnEntity(WeightSparrer(i));
+            }
+        });
+    }
+
+    // Passive: a plain ball, radius growing with the cube root of mass (so the row
+    // reads light → heavy at a glance), shaded pale → dark the same way. No drag and
+    // no impact profile — a passive prop, and it shouldn't dig through the walls.
+    private static Entity WeightBall(int i)
+    {
+        float m = WeightMasses[i];
+        float r = 3f + 3f * MathF.Cbrt(m / WeightMasses[0]);   // 6 px … ~18 px
+        float shade = (float)i / (WeightMasses.Length - 1);
+        return new Entity(new PhysicsBody(Polygon.CreateRegular(r, 8), WeightSlot(i, -1, r)), health: 5f)
+        {
+            Mass    = m,
+            Color   = Color.Lerp(new Color(170, 210, 255), new Color(20, 40, 110), shade),
+            Faction = Faction.Neutral,
+            Sprite  = Sprites.Ball(r),
+        };
+    }
+
+    // Active: the Sparring blueprint with this slot's mass.
+    private static Entity WeightSparrer(int i)
+    {
+        var e = EnemyFactory.Create(EntityKind.Sparring, WeightSlot(i, +1, 10f));   // blueprint Radius
+        e.Mass = WeightMasses[i];
+        return e;
+    }
+
+    // Warden stage geometry (Levels/warden.json): floor surface at tile row 12.
+    private const float WardenFloorTopY = 12 * Chunk.TileSize;
+    private static readonly Vector2 WardenPlayerSpawn = new(6 * Chunk.TileSize, WardenFloorTopY - 30f);
+    private static readonly Vector2[] WardenSpawns =
+    {
+        new(58 * Chunk.TileSize, WardenFloorTopY - 16f),    // right: must climb the 1- and 2-block steps
+        new(-28 * Chunk.TileSize, WardenFloorTopY - 16f),   // left: stuck behind the 3-block wall
+    };
+
+    private static void PopulateWarden(Simulation g)
+    {
+        foreach (var p in WardenSpawns) g.SpawnEntity(new WardenEnemy(p));
+
+        // Respawn a slot's Warden (on the 3 s beat) once it is dead. A slot is "empty"
+        // when no live Warden is on its side of the 3-block wall — which neither of
+        // them can cross, so the split holds however far they chase. A pure function
+        // of sim state, so it replays identically under rollback.
+        const float wallX = -19.5f * Chunk.TileSize;
+        int period = SimFrames.FromSeconds(3f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            foreach (var spawn in WardenSpawns)
+            {
+                bool left = spawn.X < wallX, alive = false;
+                foreach (var e in g.Entities)
+                    if (e.Kind == EntityKind.Warden && !e.IsDead
+                        && (e.Body.Position.X < wallX) == left) alive = true;
+                if (!alive) g.SpawnEntity(new WardenEnemy(spawn));
+            }
+        });
+    }
+
+    private static readonly Vector2 WizardSpawn = new(220f, 12 * Chunk.TileSize - 12f);
+
+    private static void PopulateWizard(Simulation g)
+    {
+        g.SpawnEntity(new WizardEnemy(WizardSpawn));
+
+        // Respawn on the 3 s beat once no Wizard is alive. Pure function of sim state.
+        int period = SimFrames.FromSeconds(3f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            foreach (var e in g.Entities)
+                if (e.Kind == EntityKind.Wizard && !e.IsDead) return;
+            g.SpawnEntity(new WizardEnemy(WizardSpawn));
+        });
     }
 
     private static void PopulatePlain(Simulation g)

@@ -1,11 +1,12 @@
 ﻿{
-  // options: "spires" (endless procedural world - spiky hills + rare thousand-tile spires, Levels/spires.json) | "start" | "hill" | "arena" | "plain" | "gauntlet" (left-to-right combat run) | "sandbox" (one Template enemy — see Entities/Enemies/Types/TemplateEnemy.cs) | "training" | "flat" | "corridor" (bumpy tunnel) | "gym" (1-high ledges, CorrectorScenario applies)
-  "Stage": "corridor",
+  // options: "spires" (endless procedural world - spiky hills + rare thousand-tile spires, Levels/spires.json) | "start" | "hill" | "arena" | "plain" | "gauntlet" (left-to-right combat run) | "sandbox" (one Template enemy — see Entities/Enemies/Types/TemplateEnemy.cs) | "aspid" (Primal-Aspid fight room, respawning waves of 3) | "training" | "warden" (armored walker demo) | "wizard" (caster: orb waves + pillars) | "weights" (knockback-by-mass rows: passive balls left, melee sparrers right, 0.3 → 40) | "flat" | "corridor" (bumpy tunnel) | "gym" (1-high ledges, CorrectorScenario applies)
+  // entity options: aspid, wizard
+  "Stage": "aspid",
   "WindowWidth": 1000,
   "WindowHeight": 900,
   "Fullscreen": true,
   "DebugDrawHitboxes":          true,
-  "DebugDrawHurtboxes":         false,
+  "DebugDrawHurtboxes":         true,
   "DebugDrawPlayerOrientation": false,
   "DebugDrawBodies":            false,
   "DrawBackground":             true,

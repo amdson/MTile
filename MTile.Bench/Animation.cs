@@ -67,7 +67,7 @@ internal static class AnimationBench
 
         const float Scale = 0.6f;
         const int Frames = 1800, Bucket = 60;
-        var surfaces = new SolverSurface[8];
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];
 
         // Min over reps, for the reason spelled out in Program.Measure: noise only adds.
         double bestUs = double.MaxValue, worstBucketUs = 0;

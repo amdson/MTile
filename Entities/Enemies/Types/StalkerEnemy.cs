@@ -85,6 +85,7 @@ public class StalkerEnemy : Entity
         // lengths of travel.
         Mass         = 1.0f;
         Body.FrictionScale = 0.12f;
+        Body.QuadraticDrag = EnemyEntity.DefaultQuadraticDrag;
         GravityScale = 1f;
         Color        = Color.DarkOrange;
         Faction      = Faction.Enemy;

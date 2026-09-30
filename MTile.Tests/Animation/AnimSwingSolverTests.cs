@@ -50,17 +50,25 @@ public class AnimSwingSolverTests
         var terrain = SimTerrain.FromAscii(new string('X', 100), originTileX: -20, originTileY: 3);
         var anim = new CharacterAnimator(rig, .6f, new[] { clip });
         int swings = 0;
-        for (int i = 0; i < 100; i++)
+        // Airborne foot targets are OFF by default (the shipped anim_solver_config.json); this
+        // test is the A/B's ON side, so it opts in explicitly and restores the shipped value.
+        bool prevSwing = AnimSolverConfig.Current.SwingTargetsEnabled;
+        AnimSolverConfig.Current.SwingTargetsEnabled = true;
+        try
         {
-            anim.Update(new CharacterAnimSample(new Vector2(i * .5f, 3 * Chunk.TileSize - 18),
-                new Vector2(30, 0), 1, true, "StairClimbState", "", 1f / 60,
-                tag: AnimTag.Stairs, chunks: terrain, surfacesNear: false));
-            if (!anim.Planner.Plans.Take(anim.Planner.FeetCount).Any(p => p.State == FootPlanState.Swing && p.HasSupport)) continue;
-            swings++;
-            Assert.True(anim.SolvedThisFrame);
-            Assert.Equal(0, anim.BaselineContactCount);
-            Assert.True(anim.MaxJacobianError() < .01f);
+            for (int i = 0; i < 100; i++)
+            {
+                anim.Update(new CharacterAnimSample(new Vector2(i * .5f, 3 * Chunk.TileSize - 18),
+                    new Vector2(30, 0), 1, true, "StairClimbState", "", 1f / 60,
+                    tag: AnimTag.Stairs, chunks: terrain, surfacesNear: false));
+                if (!anim.Planner.Plans.Take(anim.Planner.FeetCount).Any(p => p.State == FootPlanState.Swing && p.HasSupport)) continue;
+                swings++;
+                Assert.True(anim.SolvedThisFrame);
+                Assert.Equal(0, anim.BaselineContactCount);
+                Assert.True(anim.MaxJacobianError() < .01f);
+            }
         }
+        finally { AnimSolverConfig.Current.SwingTargetsEnabled = prevSwing; }
         Assert.True(swings > 10, $"only {swings} planned swing frames");
 
         static AnimationKeyframe Key(float t) => new()

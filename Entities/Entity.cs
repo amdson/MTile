@@ -69,6 +69,17 @@ public class Entity : IHittable
     public int     HitGeneration;
     public float   LastHitImpulse;
     public Vector2 LastHitDir;
+    // Hitstop this hit earned (0 = light); HitFeelSystem shakes off it.
+    public float   LastHitStopSeconds;
+
+    // Hitstop (same curve and body hold as CombatState's): a landed hit parks the body
+    // for a few frames — velocity stashed, zeroed, gravity cancelled in PreStep — then
+    // hands the knockback back, so the freeze reads as a freeze instead of the target
+    // already sliding away during it. Counted in frames because an Entity has no frame
+    // clock. Snapshotted via EntityData.
+    private int     _hitstopFrames;
+    private bool    _holdingBody;
+    private Vector2 _heldVelocity;
 
     public bool IsDead => Health <= 0f;
 
@@ -92,7 +103,19 @@ public class Entity : IHittable
     {
         Health -= hit.BodyDamage;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
-        Body.Velocity += res.TargetDeltaV;
+        if (_holdingBody) _heldVelocity += res.TargetDeltaV;
+        else              Body.Velocity += res.TargetDeltaV;
+
+        // Keyed on the hitbox's nominal strength, as the attacker's inbox is
+        // (CombatSystem), so both sides of the hit freeze for the same window — or,
+        // below CombatState.BigHitStrength, neither does. Immovable and rooted bodies
+        // have nothing to hold; grab erosion is exempt, as it is for the attacker.
+        LastHitStopSeconds = CombatState.HitstopSecondsFor(HitResolver.NominalStrength(in hit));
+        if (LastHitStopSeconds > 0f && Mass > 0f && !_rooted && hit.GrabStrengthDamage <= 0f)
+        {
+            int frames = SimFrames.FromSeconds(LastHitStopSeconds, Simulation.FixedDt);
+            if (frames > _hitstopFrames) _hitstopFrames = frames;
+        }
 
         LastHitDir = res.TargetDeltaV.LengthSquared() > 1e-4f
             ? Vector2.Normalize(res.TargetDeltaV)
@@ -118,6 +141,20 @@ public class Entity : IHittable
             Body.Velocity     = Vector2.Zero;
             Body.AppliedForce = -globalGravity;
             return;
+        }
+        if (_hitstopFrames > 0)
+        {
+            if (!_holdingBody) { _heldVelocity = Body.Velocity; _holdingBody = true; }
+            _hitstopFrames--;
+            Body.Velocity     = Vector2.Zero;
+            Body.AppliedForce = -globalGravity;
+            return;
+        }
+        if (_holdingBody)
+        {
+            Body.Velocity += _heldVelocity;
+            _heldVelocity  = Vector2.Zero;
+            _holdingBody   = false;
         }
         if (GravityScale == 1f) return;
         Body.AppliedForce += globalGravity * (GravityScale - 1f);
@@ -165,6 +202,10 @@ public class Entity : IHittable
         d.HitGeneration  = HitGeneration;
         d.LastHitImpulse = LastHitImpulse;
         d.LastHitDir     = LastHitDir;
+        d.LastHitStopSeconds = LastHitStopSeconds;
+        d.HitstopFrames  = _hitstopFrames;
+        d.HoldingBody    = _holdingBody;
+        d.HeldVelocity   = _heldVelocity;
         WriteState(ref d);
         world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
@@ -181,6 +222,10 @@ public class Entity : IHittable
         HitGeneration  = d.HitGeneration;
         LastHitImpulse = d.LastHitImpulse;
         LastHitDir     = d.LastHitDir;
+        LastHitStopSeconds = d.LastHitStopSeconds;
+        _hitstopFrames = d.HitstopFrames;
+        _holdingBody   = d.HoldingBody;
+        _heldVelocity  = d.HeldVelocity;
         ReadState(in d);
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
     }

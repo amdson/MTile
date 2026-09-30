@@ -105,8 +105,8 @@ public sealed partial class CharacterAnimator
     // Held at the HARD tier by FixedPointConstraint; frozen for the duration of one solve.
     private readonly List<(int bone, Vector2 target)> _pins = new();
     private const int MaxPins = SolveProblem.MaxPins;
-    // No-penetration half-planes resolved from this frame's sample. Frozen for one solve; each
-    // emits one row per rig bone (NoPenetrationConstraint) — the limbs the solver pushes out.
+    // No-penetration faces resolved from this frame's sample. Frozen for one solve; they fold
+    // into ONE potential row per rig bone (NoPenetrationConstraint) — the limbs pushed out.
     private readonly List<SolverSurface> _surfaces = new();
     private const int MaxSurfaces = SolveProblem.MaxSurfaces;
     // Support band shared with NoPenetrationConstraint.SkipPair — documented on SolveProblem.
@@ -380,12 +380,12 @@ public sealed partial class CharacterAnimator
         // little headroom. Residuals: two rows per contact (H no-slip + V ground) + two per
         // external pin + continuity + com + one prior per bone. Sized to the rig once.
         int nv = IdxTheta0 + rig.Count + 2;
-        // 2/contact + 2/pin + (MaxSurfaces × bones) no-penetration + 1 aim + continuity
+        // 2/contact + 2/pin + bones no-penetration + 1 aim + continuity
         // + phase-rate floor + com(δ, d.x: absolute tie + temporal smoothness = 4)
         // + bones Tikhonov + bones Δθ-smoothness
         // + headroom for driver-contributed constraint blocks (FrameInputs.Constraints).
         const int MaxContributedRows = 16;
-        int nr = 2 * 4 + 2 * MaxPins + MaxSurfaces * rig.Count + 1 + 4 + 2 * rig.Count + 4
+        int nr = 2 * 4 + 2 * MaxPins + rig.Count + 1 + 4 + 2 * rig.Count + 4
                + MaxContributedRows;
         _maxResiduals = nr;
         _ls = new LeastSquaresSolver(maxVars: nv, maxRes: nr);
@@ -432,7 +432,7 @@ public sealed partial class CharacterAnimator
             new PlantedContactsConstraint(),   // 2 rows/contact: H no-slip (Δφ) + V ground hold (δ)
             new SwingTargetConstraint(),       // 2 rows/planned swing foot: soft follow toward the landing
             new FixedPointConstraint(),        // 2 rows/pin: both-axis hard external pin (Δθ IK)
-            new NoPenetrationConstraint(),     // 1 row/(surface×bone): half-plane limb push-out (Δθ/δ)
+            new NoPenetrationConstraint(),     // 1 row/bone: unified face-potential limb push-out (Δθ/δ)
             new ActionAimConstraint(),         // 1 row: re-aim the action overlay along the input dir (Δθ)
         };
         _corePriors = new ISolveConstraint[]
@@ -1155,6 +1155,7 @@ public sealed partial class CharacterAnimator
     // exactly where the rig put it — that row drives the cadence and must not be perturbed by
     // the ground. Falls through unchanged when no face supports the toe (no terrain extracted,
     // or the plant is genuinely mid-air), so the com anchor remains the fallback.
+    private const float SupportLateralSlop = 2f;   // a toe this far past a tread's end still stands on it
     private Vector2 SnapToSupport(int bone, Vector2 tip)
     {
         float best = ContactSupportBand, drop = 0f;
@@ -1162,6 +1163,8 @@ public sealed partial class CharacterAnimator
         {
             if (((s.BoneMask >> bone) & 1) == 0) continue;
             if (s.Normal.Y > -0.7f) continue;                     // upward-facing only (y-down)
+            float lat = s.Tangent.X * (tip.X - s.Point.X) + s.Tangent.Y * (tip.Y - s.Point.Y);
+            if (MathF.Abs(lat) > s.HalfLength + SupportLateralSlop) continue;   // off the face's span
             float gap = s.Normal.X * (tip.X - s.Point.X) + s.Normal.Y * (tip.Y - s.Point.Y);
             float d = MathF.Abs(gap);
             if (d >= best) continue;                              // outside the band, or a nearer face won
@@ -1255,15 +1258,10 @@ public sealed partial class CharacterAnimator
                     _scratch.Local[i].Rotation = Math.Clamp(_scratch.Local[i].Rotation, min, max);
             _scratch.ComputeWorld(root);
             float worst = float.MinValue;
-            foreach (var srf in _surfaces)
-                for (int b = 0; b < _skeleton.Count; b++)
-                {
-                    if (((srf.BoneMask >> b) & 1) == 0) continue;
-                    Vector2 tip = _scratch.WorldOf(b).Translation;
-                    float gap = srf.Normal.X * (tip.X - srf.Point.X)
-                              + srf.Normal.Y * (tip.Y - srf.Point.Y);
-                    worst = MathF.Max(worst, srf.Margin - gap);
-                }
+            for (int b = 0; b < _skeleton.Count; b++)
+                if (NoPenetrationConstraint.Potential(_surfaces, null, b,
+                        _scratch.WorldOf(b).Translation, out float pen, out _))
+                    worst = MathF.Max(worst, pen);
             if (worst <= StaticSolveSlack) return;   // all rows dormant — nothing to solve
         }
         FreezeProblem(anim, phi, phi, n);

@@ -124,9 +124,14 @@ public static class MovementPriorities
     public const int CoveredJumpPassive = 48;
     // WallJump: Passive 45 strictly above DoubleJump's 40 — when both could fire (near a
     // wall, jump tapped, double-jump still available), WallJump wins outright; DoubleJump
-    // fires only when no wall is detected.
+    // fires only when no wall is detected. Its 45 is for bailing out of holds (LedgeGrab 42,
+    // LedgePull 43) and vaults (29); it never outbids a ground jump, because it does not bid
+    // while the body stands on ground or a stair tread (JumpingState.HasGroundSource).
     public const int WallJumpActive   = 50;
     public const int WallJumpPassive  = 45;
+    // DoubleJump never outbids a ground jump despite 40 > 30: it is not a rival bid at
+    // all, because its precondition is the exact complement of JumpingState's launch
+    // source (ground, stair tread, or gripped corner — JumpingState.HasLaunchSource).
     public const int DoubleJumpActive  = 60;
     public const int DoubleJumpPassive = 40;
 }

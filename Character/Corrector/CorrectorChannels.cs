@@ -362,8 +362,15 @@ public static class CorrectorChannels
     // underside, one side, and that diagonal are all open (the lip's
     // lower-left/right corner; never a flat wall face, never a slab run) —
     // as plantable: BuildFold/BuildManeuver expose the Redirect disc there.
+    //
+    // risingLips (the lattice tracker, 2026-09-30): a RISING tick may plant
+    // too, but only on a corner above the body's center — a ceiling lip. A
+    // body that meets a corridor mouth too high meets it rising (that is why
+    // it is high), and the lip is the one thing it can push down against;
+    // the descending-only rule below is about corners underfoot (bump-hops,
+    // ledges), which a lip above the head is not.
     public static void MarkCornerPlants(ChunkMap chunks, CoastSample[] samples, int n,
-                                        bool[] outMask)
+                                        bool[] outMask, bool risingLips = false)
     {
         const float R = CornerPlantReach;
         float plunge = MovementConfig.Current.MaxGroundEngageVnRel;
@@ -375,7 +382,8 @@ public static class CorrectorChannels
             // into micro-plants), and plunging ticks can't plant at all
             // (impact honesty — the sand-break spec is tuned against raw
             // plunges; a plant would silently soften terrain damage).
-            if (samples[k].Grounded || samples[k].Vel.Y <= 0f || samples[k].Vel.Y > plunge)
+            bool rising = samples[k].Vel.Y <= 0f;
+            if (samples[k].Grounded || (rising && !risingLips) || samples[k].Vel.Y > plunge)
                 continue;
             var pos = samples[k].Pos;
             const float ts = Chunk.TileSize, half = ts * 0.5f;
@@ -391,9 +399,11 @@ public static class CorrectorChannels
                                 && !TileQuery.IsSolidAt(chunks, cx - ts, below);
                 bool rightOpen = !TileQuery.IsSolidAt(chunks, cx + ts, cy)
                                  && !TileQuery.IsSolidAt(chunks, cx + ts, below);
-                if (leftOpen && Vector2.DistanceSquared(pos, new Vector2(gx * ts, gy * ts + ts)) <= R * R)
+                float cornerY = gy * ts + ts;
+                if (rising && cornerY >= pos.Y) continue;           // rising: lips above the center only
+                if (leftOpen && Vector2.DistanceSquared(pos, new Vector2(gx * ts, cornerY)) <= R * R)
                     outMask[k] = true;
-                else if (rightOpen && Vector2.DistanceSquared(pos, new Vector2(gx * ts + ts, gy * ts + ts)) <= R * R)
+                else if (rightOpen && Vector2.DistanceSquared(pos, new Vector2(gx * ts + ts, cornerY)) <= R * R)
                     outMask[k] = true;
             }
         }

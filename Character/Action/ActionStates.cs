@@ -586,6 +586,40 @@ public abstract class SlashLikeAction : ActionState
 
     protected float ArcRadius => BaseArcRadius * ArcRadiusScale;
 
+    // The slash's damage volume in local space (+X = swing direction, origin =
+    // body centre): a band HalfWidth = ArcRadius/2 either side of the swing
+    // axis — roughly head-to-feet on a horizontal swing — running from just
+    // inside the body's side edge out to 1.5 × ArcRadius, with a rounded tip
+    // centred on the old apex (1 × ArcRadius). Same far reach and band height
+    // as the old apex-centred square, but it starts AT the body instead of half
+    // a radius out, so there's no gap a point-blank target can stand in.
+    //
+    // One convex polygon rather than a spray of small boxes on purpose: tile
+    // damage isn't deduped per HitId, so overlapping boxes would multiply the
+    // carve on every cell they share. Pure function of per-variant constants,
+    // so it's built once and cached.
+    private Polygon _hitShape;
+    protected Polygon HitShape => _hitShape ??= BuildHitShape(ArcRadius);
+
+    private static Polygon BuildHitShape(float arcRadius)
+    {
+        const int CapSegments = 6;
+        float h     = arcRadius * 0.5f;
+        float outer = arcRadius * 1.5f;
+        // 1 px of overlap into the body so the seam never opens up.
+        float inner = MathF.Min(PlayerCharacter.Radius * PlayerCharacter.BodyWidthScale - 1f, outer - h);
+
+        var verts = new Vector2[CapSegments + 3];
+        verts[0] = new Vector2(inner, -h);
+        for (int i = 0; i <= CapSegments; i++)
+        {
+            float a = -MathHelper.PiOver2 + MathF.PI * i / CapSegments;
+            verts[i + 1] = new Vector2(outer - h + h * MathF.Cos(a), h * MathF.Sin(a));
+        }
+        verts[CapSegments + 2] = new Vector2(inner, h);
+        return new Polygon(verts);
+    }
+
     private readonly Trail _trail = new(TrailCapacity, TrailLifetime);
 
     // Render-only accessors so a glow pass (Game1) can render the slash apex as a glowing
@@ -665,10 +699,14 @@ public abstract class SlashLikeAction : ActionState
         float windowEnd   = windowStart + HurtboxActiveSeconds;
         if (vars.TimeInState >= windowStart && vars.TimeInState <= windowEnd && ctx.Hitboxes != null)
         {
-            var apex = ctx.Body.Position + vars.AttackDir * ArcRadius;
-            var region = new BoundingBox(
-                apex.X - ArcRadius * 0.5f, apex.Y - ArcRadius * 0.5f,
-                apex.X + ArcRadius * 0.5f, apex.Y + ArcRadius * 0.5f);
+            // Oriented capsule from the body's edge out to the reach (see
+            // HitShape), rotated onto the swing direction — so the damage volume
+            // hugs the attacker with no dead band, and a diagonal swing no longer
+            // inflates into the AABB of a rotated square.
+            var shape    = HitShape;
+            var pos      = ctx.Body.Position;
+            float rot    = MathF.Atan2(vars.AttackDir.Y, vars.AttackDir.X);
+            var region   = shape.GetBoundingBox(pos, rot);
             // Launcher variants (StrikeSpeed > 0) publish Collision mode; the
             // strike fields are ignored under Impulse, so one call covers both.
             // KnockbackImpulse stays authored either way — parry cone, bullet
@@ -689,6 +727,7 @@ public abstract class SlashLikeAction : ActionState
                 strikeMass: SlashStrikeMass,
                 restitution: SlashRestitution,
                 minLaunch: MinLaunch,
+                shape: shape, shapePos: pos, shapeRotation: rot,
                 origin: ctx.Body.Position));
         }
 
@@ -1060,7 +1099,9 @@ public class DownAirSlash : SlashLikeAction
     protected override float SweepAngleDeg        => 70f;     // narrow — a chop, not a fan
     protected override float SweepDirection       => +1f;
     protected override float KnockbackMagnitude   => 210f;
-    protected override float StrikeSpeed          => 300f;
+    // 250, under CombatState.BigHitStrength (280): a pogo chop shouldn't freeze or
+    // shake. A fast dive's body-velocity share can still push a connect over the line.
+    protected override float StrikeSpeed          => 250f;
     // The one slash that swings along gravity, so the only one for which the
     // attacker's velocity is fully collinear with AttackDir — see the base class.
     // Undamped, a terminal-velocity connect closed at ~1300 px/s against the 511 of a

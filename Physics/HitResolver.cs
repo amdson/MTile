@@ -104,6 +104,16 @@ public static class HitResolver
         return new HitResult(dvTarget, n * j, u);
     }
 
+    // How hard the attack was swung, from the hitbox alone: the authored impulse
+    // magnitude (Impulse mode) or the striker's speed along the strike (Collision mode).
+    // Unlike HitResult.Strength it ignores the target's velocity, so the attacker's
+    // side (CombatSystem) and the victim's side compute the SAME number — which is what
+    // lets both agree on whether a hit was big enough to earn hitstop.
+    public static float NominalStrength(in Hitbox hit)
+        => hit.Mode == KnockbackMode.Impulse
+            ? hit.KnockbackImpulse.Length()
+            : MathF.Max(0f, Vector2.Dot(hit.StrikeVelocity, hit.StrikeDir));
+
     // Collision-mode recoil off a TILE surface — the m_t → ∞ limit of the collision,
     // expressed directly in attacker Δv (the recoil inbox is applied as a raw
     // velocity add by the attacker's ApplyActionForces). Tiles are stationary, so

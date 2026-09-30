@@ -62,6 +62,12 @@ public struct EntityData
     public int     HitGeneration;
     public float   LastHitImpulse;
     public Vector2 LastHitDir;
+    public float   LastHitStopSeconds;
+
+    // Entity hitstop body hold (see Entity._hitstopFrames).
+    public int     HitstopFrames;
+    public bool    HoldingBody;
+    public Vector2 HeldVelocity;
 
     // Immutable construction inputs (rebuild a Generic entity's body on rehydrate).
     public Polygon      Polygon;

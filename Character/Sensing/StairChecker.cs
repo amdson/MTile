@@ -31,6 +31,12 @@ public readonly struct StairSupport
 
 public static class StairChecker
 {
+    // Widest tread (columns) that still counts as a step of the flight. ONE number for both
+    // gates: StairClimbState's entry (TryFindFlight's corner spacing) and this probe's
+    // continuation reach must accept the same treads, or a flight the state claims is one
+    // it cannot stay on.
+    public const int MaxTreadColumns = 2;
+
     // How far below the body's bottom edge a tread still counts as carrying the climb.
     // Riding the corner line at hover height, the bounds' bottom sits 5–21 px above the
     // tread under the centre (measured on the 45° fixture: highest at the tread's far
@@ -55,14 +61,14 @@ public static class StairChecker
             bool next = false, on = false;
             // Walk across the current tread, stopping at its first height change or gap.
             // Entry accepts one- and two-column treads; continuation must use that same reach.
-            for (int d = 1; d <= StairClimbState.MaxTreadColumns; d++)
+            for (int d = 1; d <= MaxTreadColumns; d++)
             {
                 int x = col + dir * d;
                 if (Solid(chunks, x, row - 1))
                 { next = !Solid(chunks, x, row - 2); break; }
                 if (!Solid(chunks, x, row)) break;
             }
-            for (int d = 1; d <= StairClimbState.MaxTreadColumns; d++)
+            for (int d = 1; d <= MaxTreadColumns; d++)
             {
                 int x = col - dir * d;
                 if (!Solid(chunks, x, row))

@@ -1,0 +1,10 @@
+{
+  "//": "WizardEnemy demo (stage 'wizard'). A flat walled hall: floor surface at tile row 12 (world y 132), walls at tile x -36 / 36, ceiling at row -12. No authored cover — the only terrain features are the pillars the Wizard raises. Placement + respawn in Stage.cs (PopulateWizard).",
+  "Extents": 3,
+  "Rules": [
+    { "Condition": "y >= 12",  "IsSolid": true },
+    { "Condition": "x <= -36", "IsSolid": true },
+    { "Condition": "x >= 36",  "IsSolid": true },
+    { "Condition": "y <= -12", "IsSolid": true }
+  ]
+}

@@ -125,10 +125,6 @@ Tune from `SolveScaleReport()` numbers, not first principles.
 - Headline tests: `AnimSolverTests` (Jacobian parity, well-posedness, vertical offset),
   `FixedPointSolverTests`, `NoPenetrationSolverTests`, `VaultGripSolverTests`,
   `ActionAimSolverTests`, `SmoothingTests`, `SeamGuardTests`.
-- `AnimSolverGoldenTraceTests` — bit-identical replay of the objective (x, residuals, Jacobian
-  at the accepted x and at a perturbation) over six scripted scenarios against
-  `MTile.Tests/Animation/Golden/*.bin.gz`. The guard for behavior-preserving refactors of the
-  solve core; regenerate with `MTILE_GOLDEN_RECORD=1` only when the objective is MEANT to change.
 
 ## Key files
 
@@ -138,7 +134,7 @@ Tune from `SolveScaleReport()` numbers, not first principles.
 | `Animation/SolveProblem.cs` | `SolveProblem` (the frozen inputs of one solve, incl. the block list) + `PoseEval` (the forward pass's output) + `ISolveConstraint` |
 | `Animation/SolveObjective.cs` | `SolveForward` (the forward pass: pose, root, Δφ velocities) + `SolveObjective` (residuals/Jacobian over the blocks, `PointJacobianColumns`/`Lever`) |
 | `Animation/SolveConstraints.cs` | The constraint blocks — stateless pure functions of `(SolveProblem, PoseEval, x)` |
-| `Animation/CharacterAnimator.Diagnostics.cs` | FD oracle (per-block attribution), SolveScaleReport, golden-trace capture, debug hooks |
+| `Animation/CharacterAnimator.Diagnostics.cs` | FD oracle (per-block attribution), SolveScaleReport, debug hooks |
 | `Animation/GaitTiming.cs` | The timing stage: phase advance from body travel over the authored stride, the stopping policy (chunk 5) |
 | `Animation/ClipMotion.cs` | The shared motion query: which channel owns the body's scene path, p(t), cycle displacement, loop extension (chunk 3) |
 | `Animation/ClipScene.cs` | Scene guides (ground/blocks in clip scene space), `MotionSource`, and the pure guide edit operations (chunk 3) |

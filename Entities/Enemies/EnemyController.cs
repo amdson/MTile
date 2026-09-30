@@ -118,6 +118,29 @@ public sealed class ChasePlayerController : EnemyController
     }
 }
 
+// Chase-and-attack only while the player is within AlertRange; otherwise stand still,
+// facing them. A stateless stand-in for a home leash: the "weights" stage uses it so a
+// row of enemies waits in its slots until you walk up to one, instead of all of them
+// converging on you at once.
+public sealed class ProximityChaseController : EnemyController
+{
+    public float AlertRange  { get; init; } = 80f;
+    // Stop walking inside this distance — sized under EnemyMeleeAction's 32 px Range.
+    public float EngageRange { get; init; } = 26f;
+
+    public override EnemyInput Decide(in EnemyContext ctx)
+    {
+        var toPlayer = ctx.ToPlayer;
+        var input = new EnemyInput { AimWorld = ctx.Player.Body.Position };
+        if (toPlayer.LengthSquared() > AlertRange * AlertRange) return input;
+
+        if (toPlayer.LengthSquared() > EngageRange * EngageRange)
+            input.MoveDir.X = toPlayer.X >= 0f ? 1f : -1f;
+        input.WantAttack = true;
+        return input;
+    }
+}
+
 // 2D approach brain — emits a unit vector pointing straight at the player,
 // regardless of terrain. Suitable for surface-anchored enemies (paired with
 // EnemyClingMoveState): the brain says "go toward the player," the state

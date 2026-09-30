@@ -32,7 +32,7 @@ public sealed class CosmeticUpdateSystem
     // Reused scratch for terrain no-penetration half-planes (TerrainSurfaces.Extract).
     // Safe to share across characters: each sample is built and consumed by its
     // animator's Update before the next extraction overwrites it.
-    private readonly SolverSurface[] _terrainScratch = new SolverSurface[8];
+    private readonly SolverSurface[] _terrainScratch = new SolverSurface[SolveProblem.MaxSurfaces];
 
     // Step-planner prediction adapters (Drawing/LatticePathSampler.cs) — one per
     // animator so each delegate is allocated once and rebound per frame.

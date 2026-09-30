@@ -1,0 +1,10 @@
+{
+  "//": "Knockback-by-mass testbed (stage 'weights'). One flat walled hall: floor top at tile y 6 (world y 66), walls at tile x -40 / 40 (8 tiles thick), ceiling at tile y -14. Passive masses line the floor left of spawn, active (proximity-triggered) masses to the right, lightest nearest the middle. Entity placement + the respawn ticker live in Stage.cs (PopulateWeights).",
+  "Extents": 3,
+  "Rules": [
+    { "Condition": "y >= 6",   "IsSolid": true },
+    { "Condition": "x <= -40", "IsSolid": true },
+    { "Condition": "x >= 40",  "IsSolid": true },
+    { "Condition": "y <= -14", "IsSolid": true }
+  ]
+}

@@ -152,7 +152,8 @@ public static class GaitTiming
         // servo removes the drift as a bounded change of RATE — the phase never jumps — so
         // the clip merely plays a little faster or slower for a few frames. Past ReentryError
         // the clip and the feet disagree outright: the phase re-enters AT the observation and
-        // the smoothness prior bridges the pose, exactly as on a clip switch. Traveling only —
+        // the smoothness prior bridges the pose, exactly as on a clip switch — ReentryError 0
+        // disables re-entry, which is the shipped default. Traveling only —
         // the stopping policy owns the phase while settling. The slew bounds the whole rate's
         // change per frame (feedforward included): that is the anti-jerk term.
         float ffRate = dphi / dt;

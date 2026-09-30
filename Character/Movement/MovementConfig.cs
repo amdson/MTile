@@ -11,6 +11,9 @@ public class MovementConfig
     public float AirAccel { get; set; } = 1500f;
     public float MaxAirSpeed { get; set; } = 150f;
     public float AirDrag { get; set; } = 500f;
+    // Quadratic air resistance on the player body (PhysicsBody.QuadraticDrag, 1/px):
+    // decel = k·|v|², always on, both axes. Terminal fall speed = √(600 / k).
+    public float QuadraticAirDrag { get; set; } = 0.0005f;
 
     // Jumping
     public float JumpVelocity { get; set; } = -100f;
@@ -34,6 +37,20 @@ public class MovementConfig
             float run = -RunJumpVelocity
                 + MathF.Max(0f, (-RunJumpHoldForce - g) * MaxJumpHoldTime);
             return MathF.Max(jump, MathF.Max(run, -DoubleJumpVelocity));
+        }
+    }
+    // Height a full-hold running jump rises above its launch point: the hold
+    // window under RunJumpHoldForce, then the ballistic coast to the apex
+    // (≈49 px at default tuning). Derived like MaxAssistRiseSpeed. The height
+    // RunningJumpState needs clear overhead — see its precondition.
+    public float RunJumpApexRise
+    {
+        get
+        {
+            float g = Simulation.WorldGravityY, t = MaxJumpHoldTime;
+            float v0 = -RunJumpVelocity;
+            float v1 = MathF.Max(0f, v0 + (-RunJumpHoldForce - g) * t);
+            return 0.5f * (v0 + v1) * t + v1 * v1 / (2f * g);
         }
     }
     public float JumpHoldForce { get; set; } = -1500f;
@@ -314,14 +331,17 @@ public class MovementConfig
     public float FoldLmMaxForce                 { get; set; } = 8000f;
     // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — the FoldEngine
     // "lattice" reference generator, also the freeze-frame oracle. Window =
-    // the cone's footprint from the seed: LookaheadPx along u, ±L·tanθ
-    // across (§2.1). ConeCos > 0 is structural (the DAG condition, §3.3) and
+    // the disk of radius LookaheadPx around the seed (radial horizon). ConeCos > 0 is structural (the DAG condition, §3.3) and
     // is set to "90° − ε" so every forward offset is an edge — climbing is
     // priced by RiseWeight, never filtered (with the ±3 offset table any
     // value ≤ 0.316 admits the same edges). Sim-affecting under "lattice" —
     // hot-reload is gated like every movement knob.
-    // Planning lookahead along u — a physical distance, so body-relative px
-    // and deliberately independent of Chunk.TileSize.
+    // Planning horizon: the radius of the disk around the seed the DP searches
+    // (2026-09-30; was a distance along u with a cone-footprint window). It is
+    // also the most progress any route can earn, so it sits in the
+    // "mount 1-high, refuse 2-high" trade with ProgressWeight and the rise
+    // cost. A physical distance, so body-relative px and deliberately
+    // independent of Chunk.TileSize.
     public float LatticeLookaheadPx             { get; set; } = 56f;
     // DP grid cell = Chunk.TileSize / this ⇒ ~3.7 px per cell. Tuned for the
     // physical cell size, not the tile count: raising it past the intended

@@ -23,6 +23,7 @@ public static class PhysicsWorld
             body.Velocity += body.AppliedForce * dt;
             body.AppliedForce = Vector2.Zero;
             body.Velocity += gravity * dt;
+            ApplyQuadraticDrag(body, dt);
 
             foreach (var c in body.Constraints)
             {
@@ -193,6 +194,19 @@ public static class PhysicsWorld
         }
     }
 
+    // dv/dt = −k|v|v, integrated semi-implicitly (v ← v / (1 + k|v|dt)): exact in
+    // direction, never overshoots zero or reverses however large k·|v|·dt gets.
+    // Public form is for predictors that mirror the step (BallisticPredictor).
+    private static void ApplyQuadraticDrag(PhysicsBody body, float dt)
+        => body.Velocity = QuadraticDrag(body.Velocity, body.QuadraticDrag, dt);
+
+    public static Vector2 QuadraticDrag(Vector2 v, float k, float dt)
+    {
+        if (k <= 0f) return v;
+        float speed = v.Length();
+        return speed > 0f ? v / (1f + k * speed * dt) : v;
+    }
+
     public static void StepSwept(
         IReadOnlyList<PhysicsBody> bodies,
         ChunkMap chunks,
@@ -205,6 +219,7 @@ public static class PhysicsWorld
             body.Velocity += body.AppliedForce * dt;
             body.AppliedForce = Vector2.Zero;
             body.Velocity += gravity * dt;
+            ApplyQuadraticDrag(body, dt);
             // Reset per-step impulse accumulator. Resolve* paths max this against
             // each collision's |vnRel|; the largest one is what callers (e.g.
             // PlayerCharacter.Update) read post-step for crush-damage dispatch.

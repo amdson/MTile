@@ -159,6 +159,10 @@ public class WallJumpingState : MovementState
         bool pressingHorizontal = ctx.Input.Left || ctx.Input.Right;
         if (!pressingHorizontal) return false;
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
+        // A body standing on something ground-jumps, even flush against a wall (a stair
+        // riser is one). Ground and stair tread only, not JumpingState.HasLaunchSource's
+        // gripped corner: jump + away out of a hang or a vault is this state's bail-out.
+        if (JumpingState.HasGroundSource(ctx)) return false;
         return ctx.TryGetWall(_wallDir, out _);
     }
 

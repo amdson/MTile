@@ -49,7 +49,7 @@ internal static class HoverDiag
 
         var anim = new CharacterAnimator(skel, Scale, clips);
         var sim  = new Simulation(FtolStudy.FlatFloor(), new Vector2(24f, 72f));
-        var surfaces = new SolverSurface[8];
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];
         int fl = skel.IndexOf("foot_l"), fr = skel.IndexOf("foot_r");
         if (fl < 0 || fr < 0) return;
 

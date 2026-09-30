@@ -145,6 +145,7 @@ public static class BallisticPredictor
             vel += force * dt;
             vel += gravity * dt;
             if (tickDv != null) vel += tickDv[k];
+            vel = PhysicsWorld.QuadraticDrag(vel, cfg.QuadraticAirDrag, dt);   // StepSwept's air drag
             pos += (pos + vel * dt) - pos;   // StepSwept's displacement rounding
 
             samples[k].Pos      = pos;
@@ -212,6 +213,7 @@ public static class BallisticPredictor
             vel += force * dt;
             vel += gravity * dt;
             if (tickDv != null) vel += tickDv[k];
+            vel = PhysicsWorld.QuadraticDrag(vel, cfg.QuadraticAirDrag, dt);   // StepSwept's air drag
 
             if (grounded)
             {

@@ -281,7 +281,7 @@ public sealed class SpriteStripGame : Game
         var animator = new CharacterAnimator(rig, Game1.SkeletonScale, clips);
         _pose = animator.Skeleton.CreatePose();
         _take = new AnimTake { SkeletonScale = Game1.SkeletonScale, PlayerRadius = PlayerCharacter.Radius };
-        var surfaces = new SolverSurface[8];
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];
         var predictor = new LatticePathSampler();
         var indices = Enumerable.Range(0, _frames)
             .Select(i => first + (int)Math.Round(i * (last - first) / (double)(_frames - 1))).ToArray();

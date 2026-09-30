@@ -146,6 +146,53 @@ public static class Sprites
         return sprite;
     }
 
+    // Aspid: a bulbous orange sac with two dark eyes, a pair of fast-beating
+    // translucent wings on top, and three short spikes hanging underneath (the
+    // spitting end). Symmetric, since enemy sprites aren't mirrored by facing.
+    public static AnimatedSprite Aspid(float radius)
+    {
+        var bodyColor  = new Color(215, 110, 40);
+        var bellyColor = new Color(255, 170, 70);
+        var wingColor  = new Color(235, 225, 200, 170);
+        var eyeColor   = new Color(30, 20, 20);
+
+        Pose Frame(float wing) => new Pose()
+            .Line(new Vector2(-radius * 0.3f, -radius * 0.6f), new Vector2(-radius * 1.5f, -radius * 0.9f + wing), wingColor, 2f)
+            .Line(new Vector2( radius * 0.3f, -radius * 0.6f), new Vector2( radius * 1.5f, -radius * 0.9f + wing), wingColor, 2f)
+            .Disc(Vector2.Zero, radius * 0.85f, bodyColor)
+            .Disc(new Vector2(0f, radius * 0.25f), radius * 0.45f, bellyColor)
+            .Line(new Vector2(-radius * 0.4f, radius * 0.6f), new Vector2(-radius * 0.55f, radius * 1.2f), bodyColor, 1.5f)
+            .Line(new Vector2( 0f,            radius * 0.8f), new Vector2( 0f,            radius * 1.35f), bodyColor, 1.5f)
+            .Line(new Vector2( radius * 0.4f, radius * 0.6f), new Vector2( radius * 0.55f, radius * 1.2f), bodyColor, 1.5f)
+            .Disc(new Vector2(-radius * 0.32f, -radius * 0.2f), radius * 0.16f, eyeColor)
+            .Disc(new Vector2( radius * 0.32f, -radius * 0.2f), radius * 0.16f, eyeColor);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(-radius * 0.6f), Frame(radius * 0.5f) },
+            frameDuration: 0.07f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
+    // Aspid fireball: hot core inside an orange disc. The flicker halo is drawn
+    // by AspidFireballProjectile.Telegraph.
+    public static Sprite Fireball(float radius) => new Sprite
+    {
+        Pose = new Pose()
+            .Disc(Vector2.Zero, radius, new Color(255, 120, 30))
+            .Disc(Vector2.Zero, radius * 0.5f, new Color(255, 235, 150))
+    };
+
+    // Wizard orb: the fireball's shape in violet — a magic bolt, not a flame.
+    public static Sprite WizardOrb(float radius) => new Sprite
+    {
+        Pose = new Pose()
+            .Disc(Vector2.Zero, radius, new Color(150, 70, 230))
+            .Disc(Vector2.Zero, radius * 0.5f, new Color(230, 200, 255))
+    };
+
     // Bullet: tiny solid disc with a thin trailing line — a one-frame pose, no
     // animation needed. Rotation is unused (the disc reads identically at any
     // angle), so BulletProjectile doesn't bother syncing it.

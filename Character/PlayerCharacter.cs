@@ -226,14 +226,14 @@ public class PlayerCharacter : IHittable
         float armor = _currentAction?.ArmorProfile(in _actionVars) ?? 0f;
         if (armor > 0f && res.Strength < armor)
         {
-            Body.Velocity += res.TargetDeltaV * ArmorKnockbackScale * guard.KnockbackScale;
+            AddKnockback(res.TargetDeltaV * ArmorKnockbackScale * guard.KnockbackScale);
             return res.Impulse;
         }
 
         // Scaled here rather than through HitResolver's `scale` because that also feeds
         // Collision mode's MinLaunch floor, which would hand back most of the knockback
         // a leaky guard just ate.
-        Body.Velocity += res.TargetDeltaV * guard.KnockbackScale;
+        AddKnockback(res.TargetDeltaV * guard.KnockbackScale);
 
         // For render-only cosmetics (directional knockback cue, weapon flash) that
         // want more than LastHitImpulse's magnitude. Falls back to the hit's launch
@@ -251,7 +251,8 @@ public class PlayerCharacter : IHittable
         // (pre-mass), so leaving it whole while halving the actual velocity change
         // would stun the victim as if nothing had been blocked.
         _abilities.Combat.OnHitRegistered(_frame, res.Strength * guard.KnockbackScale, _dt,
-                                          hit.HitstunSecondsOverride);
+                                          hit.HitstunSecondsOverride,
+                                          hitstopStrength: HitResolver.NominalStrength(in hit));
         return res.Impulse;
     }
 
@@ -269,6 +270,30 @@ public class PlayerCharacter : IHittable
         // by the hit that killed the last one.
         _abilities.Combat.DamageTaken = 0f;
         _lastDamageFrame = int.MinValue / 2;
+        _abilities.Combat.HoldingBody  = false;
+        _abilities.Combat.HeldVelocity = Vector2.Zero;
+    }
+
+    // Hitstop body hold, run by the sim right before the physics step (after
+    // CombatSystem.Apply and the force fields, so this frame's knockback is already in
+    // Body.Velocity). The first held frame stashes the velocity; every held frame
+    // parks the body — zero velocity, gravity cancelled — discarding whatever movement
+    // or fields wrote this frame. Update releases the stash (see the Tick call there).
+    public void PreStep(Vector2 globalGravity)
+    {
+        var c = _abilities.Combat;
+        if (!c.HitstopActive) return;
+        if (!c.HoldingBody) { c.HeldVelocity = Body.Velocity; c.HoldingBody = true; }
+        Body.Velocity     = Vector2.Zero;
+        Body.AppliedForce = -globalGravity;
+    }
+
+    // Knockback lands in the hitstop stash while the body is held, so a second hit
+    // during the freeze isn't wiped by the next PreStep.
+    private void AddKnockback(Vector2 dv)
+    {
+        if (_abilities.Combat.HoldingBody) _abilities.Combat.HeldVelocity += dv;
+        else                               Body.Velocity += dv;
     }
     
     private readonly PlayerAbilityState _abilities = new();
@@ -549,6 +574,16 @@ public class PlayerCharacter : IHittable
         _abilities.Condition.Tick(_frame);
         // Expire hitstun / stun whose window closed.
         _abilities.Combat.Tick(_frame, guardHeld: input.Shift);
+        // Re-read every frame so movement_config hot-reload retunes it live.
+        Body.QuadraticDrag = MovementConfig.Current.QuadraticAirDrag;
+        // Hitstop just ended: hand back the velocity PreStep parked, before movement
+        // runs, so this frame's states see the knockback they're about to carry.
+        if (_abilities.Combat.HoldingBody && !_abilities.Combat.HitstopActive)
+        {
+            Body.Velocity += _abilities.Combat.HeldVelocity;
+            _abilities.Combat.HeldVelocity = Vector2.Zero;
+            _abilities.Combat.HoldingBody  = false;
+        }
 
         // Hitstop (Plans/HIT_FEEL_PLAN.md phase 1): freeze the CURRENT ACTION's
         // progression for a few frames after a landed combat hit — no new hitboxes,
@@ -563,7 +598,7 @@ public class PlayerCharacter : IHittable
         //     mid-swing attack, HitEvictionTests) must also keep running every frame,
         //     hitstop or not, or a fresh hit could never interrupt what it just hit —
         //     only the chosen action's Update/ApplyActionForces freeze, not selection.
-        // Physics integration (gravity/terrain collision) is untouched either way.
+        // The BODY is frozen separately, by PreStep just before the physics step.
         bool hitstopFrozen = _abilities.Combat.HitstopActive;
 
         // Edge-detect input gestures and enqueue intents. Done BEFORE the FSMs so

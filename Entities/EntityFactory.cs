@@ -78,7 +78,11 @@ public static class EntityFactory
             // Budget is the penetration counter, restored through the same
             // EntityData slot LobbedArea uses (disjoint kinds, one slot).
             EntityKind.RailBolt      => new RailBoltProjectile(body.Position, body.Velocity, d.HitId, d.Faction, d.Budget),
+            EntityKind.AspidFireball => new AspidFireballProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.Brute         => new BruteEnemy(body.Position),
+            EntityKind.Warden        => new WardenEnemy(body.Position),
+            EntityKind.Wizard        => new WizardEnemy(body.Position),
+            EntityKind.WizardOrb     => new WizardOrbProjectile(body.Position, d.Aim.X, d.Aim.Y, d.HitId, d.Faction),
             // Spawn-point placeholder — RestoreState's ReadState overwrites it from
             // the snapshotted Aim slot right after construction.
             EntityKind.PracticeBall  => new PracticeBall(body.Position),

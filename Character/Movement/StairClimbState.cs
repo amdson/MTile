@@ -19,13 +19,14 @@ namespace MTile;
 // the 45° line at walk speed along it, no backslides.
 //
 // Scope: a flight is at least two consecutive floor rises, each one riser (the mantle
-// band), at the same column spacing (the tread width, up to MaxTreadColumns). Anything
+// band), at the same column spacing (the tread width, up to StairChecker.MaxTreadColumns). Anything
 // irregular — a lone step, a two-high riser, a landing mid-flight — is not a flight and
 // stays with the climb family. Descending is not this state's (a run of drops falls).
 public class StairClimbState : MovementState
 {
     private readonly int _dir;
     public StairClimbState(int dir) => _dir = dir;
+    public int Dir => _dir;
 
     public override int ActivePriority  => MovementPriorities.StairClimbActive;
     public override int PassivePriority => MovementPriorities.StairClimbPassive;
@@ -33,9 +34,6 @@ public class StairClimbState : MovementState
     // not start climbing it (Stunned's Active 25 would otherwise lose to this 29).
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
     public override AnimTag AnimationTag => AnimTag.Stairs;
-
-    // Widest tread (columns) the flight detector still calls regular.
-    public const int MaxTreadColumns = 2;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -78,6 +76,9 @@ public class StairClimbState : MovementState
     {
         vars.TimeInState = 0f;
         abilities.Facing = _dir;
+        // Supported like Standing, so the air jump re-arms here too (the grounded reset in
+        // PlayerCharacter only covers Standing/Crouched) — same as the climb family's Enter.
+        abilities.HasDoubleJumped = false;
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -104,7 +105,7 @@ public class StairClimbState : MovementState
         bool OneRiser(float d) => d >= cfg.MantleMinRise && d <= cfg.MantleMaxRise;
         if (!OneRiser(a.Delta) || !OneRiser(b.Delta)) return false;
         spacing = b.Column - a.Column;
-        if (spacing < 1 || spacing > MaxTreadColumns) return false;
+        if (spacing < 1 || spacing > StairChecker.MaxTreadColumns) return false;
         first = a;
         return true;
     }

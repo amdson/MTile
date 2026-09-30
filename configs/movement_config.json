@@ -30,6 +30,7 @@
   "AirAccel": 1500,
   "MaxAirSpeed": 150,
   "AirDrag": 500,
+  "QuadraticAirDrag": 0.0005,
   "JumpVelocity": -100,
   "JumpHoldForce": -1500,
   "JumpInitForce": 0,

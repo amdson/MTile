@@ -333,7 +333,7 @@ internal static class AnimBaseline
         var sim = new Simulation(chunks, sc.Spawn);
         var anim = new CharacterAnimator(skel, Scale, clips);
         var predictor = new LatticePathSampler();
-        var surfaces = new SolverSurface[8];   // == CosmeticUpdateSystem's scratch
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];   // == CosmeticUpdateSystem's scratch
         var frames = new Frame[sc.Frames];
 
         int loopBacksSeen = 0;

@@ -60,6 +60,13 @@ public class CombatState
     // also freeze you mid-fall.
     public bool    HitstopActive;     public int HitstopExpireFrame;
 
+    // Body hold for the hitstop window: PlayerCharacter.PreStep parks the body (velocity
+    // stashed here, zeroed, gravity cancelled) for every hitstopped frame, and Update
+    // hands the stash back the frame the freeze ends — so the knockback plays out AFTER
+    // the freeze instead of the victim sliding away during it. A hit landing while
+    // held adds its knockback to the stash (PlayerCharacter.AddKnockback).
+    public bool    HoldingBody;       public Vector2 HeldVelocity;
+
     public float   LastHitImpulse;    public int LastHitFrame;
     // Direction the last hit's knockback pushed this player, for render-only cosmetics
     // (directional knockback cue, weapon flash) that need more than the magnitude
@@ -67,6 +74,9 @@ public class CombatState
     // knockback, not OnHitRegistered — the caller already has it there and this avoids
     // growing OnHitRegistered's parameter list for a value it doesn't otherwise need.
     public Vector2 LastHitDir;
+    // Hitstop the last hit earned, in seconds (0 = below BigHitStrength). Stamped by
+    // OnHitRegistered alongside LastHitFrame; HitFeelSystem shakes off it.
+    public float   LastHitStopSeconds;
 
     // Cumulative HP this player has lost within the current life — every source
     // (a landed hit, a crush impact) adds to it, and only a KO/respawn resets it.
@@ -128,8 +138,11 @@ public class CombatState
     // a stun-threshold impulse so the victim exits the throw into Tumble (airborne):
     // committed, control-muted, able to tech, and bouncing hard off terrain — instead
     // of keeping full control out of the throw. Called by the throw field's onThrown.
+    // No hitstop: the field fires every frame it acts, so a freeze would re-arm each
+    // frame and the body hold would eat the fling the field is delivering.
     private const float ThrowStunImpulse = 450f;   // > StunImpulseThreshold ⇒ stun + Tumble
-    public void RegisterThrown(int frame, float dt) => OnHitRegistered(frame, ThrowStunImpulse, dt);
+    public void RegisterThrown(int frame, float dt)
+        => OnHitRegistered(frame, ThrowStunImpulse, dt, hitstop: false);
 
     // Hoisted gates so callers can write `ctx.Combat?.BlocksAttack == true` instead
     // of repeating raw flag checks at every action/movement precondition site.
@@ -280,13 +293,24 @@ public class CombatState
     // on every connect, and at the old floor a slash's 2-frame victim-only pause read
     // as nothing. A jab-tier hit now holds 4 frames; the launchers ~10.
     private const float HitstopSecondsPerImpulse = 0.0005f;
-    private const float MinHitstopSeconds        = 0.067f;
-    private const float MaxHitstopSeconds        = 0.167f;
+    public  const float MinHitstopSeconds        = 0.067f;
+    public  const float MaxHitstopSeconds        = 0.167f;
 
-    // THE hitstop curve — shared by the victim path (OnHitRegistered) and by
-    // CombatSystem's attacker-side inbox, so both parties freeze for the same window.
-    public static float HitstopSecondsFor(float impulse)
-        => Math.Clamp(impulse * HitstopSecondsPerImpulse, MinHitstopSeconds, MaxHitstopSeconds);
+    // "Big hit" line (2026-09-29): below it a hit gets NO hitstop — and, because
+    // HitFeelSystem keys screen shake off the same answer, no shake either. Compared
+    // against HitResolver.NominalStrength, which both the attacker and the victim can
+    // compute from the hitbox, so the two always agree. Set at the stun line (280), so
+    // "freezes + shakes" and "stuns" are the same set of moves: Slash3, GuardRetaliate,
+    // Stab, Pulse, a fast dive — the light slashes and creature attacks stay unfrozen.
+    public const float BigHitStrength = 280f;
+
+    // THE hitstop curve — shared by the victim paths (OnHitRegistered, Entity.OnHit)
+    // and CombatSystem's attacker-side inbox, so both parties freeze for the same
+    // window. 0 below BigHitStrength.
+    public static float HitstopSecondsFor(float strength)
+        => strength < BigHitStrength
+            ? 0f
+            : Math.Clamp(strength * HitstopSecondsPerImpulse, MinHitstopSeconds, MaxHitstopSeconds);
 
     // While hitstunned, the victim's self-control is muted so knockback actually
     // displaces (COMBAT_FEEL_PLAN Phase 1). Applied by PlayerCharacter.Update as
@@ -304,10 +328,15 @@ public class CombatState
     // `muteControl` = false for self-inflicted registration (crush landings):
     // jump still gates, but movement modifiers are left alone.
     public void OnHitRegistered(int currentFrame, float impulse, float dt,
-                                float hitstunSecondsOverride = -1f, bool muteControl = true)
+                                float hitstunSecondsOverride = -1f, bool muteControl = true,
+                                bool hitstop = true, float hitstopStrength = -1f)
     {
         LastHitImpulse   = impulse;
         LastHitFrame     = currentFrame;
+        // How big this hit was on the hitstop scale (0 = light), stamped whether or not
+        // the freeze is actually applied — a crush landing or a throw never freezes the
+        // player but can still be big enough to shake the screen.
+        LastHitStopSeconds = HitstopSecondsFor(hitstopStrength >= 0f ? hitstopStrength : impulse);
 
         float seconds = hitstunSecondsOverride >= 0f
             ? hitstunSecondsOverride
@@ -330,7 +359,7 @@ public class CombatState
 
         // Real combat hits only — a self-inflicted crush/landing (muteControl=false)
         // shouldn't also freeze the player mid-fall.
-        if (muteControl) ApplyHitstop(currentFrame, HitstopSecondsFor(impulse), dt);
+        if (muteControl && hitstop) ApplyHitstop(currentFrame, LastHitStopSeconds, dt);
     }
 
     // Max-merge a hitstop window ending `seconds` from now. Two callers: the victim
@@ -338,6 +367,7 @@ public class CombatState
     // — the symmetric half, so a landed attack freezes the one who swung it too.
     public void ApplyHitstop(int currentFrame, float seconds, float dt)
     {
+        if (seconds <= 0f) return;   // a light hit: no freeze at all
         int expire = currentFrame + SimFrames.FromSeconds(seconds, dt);
         if (expire > HitstopExpireFrame) HitstopExpireFrame = expire;
         HitstopActive = true;
@@ -484,8 +514,9 @@ public class CombatState
         HitstunMutesControl = o.HitstunMutesControl;
         StunActive = o.StunActive; StunExpireFrame = o.StunExpireFrame;
         HitstopActive = o.HitstopActive; HitstopExpireFrame = o.HitstopExpireFrame;
+        HoldingBody = o.HoldingBody; HeldVelocity = o.HeldVelocity;
         LastHitImpulse = o.LastHitImpulse; LastHitFrame = o.LastHitFrame;
-        LastHitDir = o.LastHitDir;
+        LastHitDir = o.LastHitDir; LastHitStopSeconds = o.LastHitStopSeconds;
         DamageTaken = o.DamageTaken;
         InvulnExpireFrame = o.InvulnExpireFrame;
         GrabbedActive = o.GrabbedActive; GrabbedExpireFrame = o.GrabbedExpireFrame;

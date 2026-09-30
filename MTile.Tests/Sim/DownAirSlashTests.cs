@@ -243,7 +243,9 @@ public class DownAirSlashTests(ITestOutputHelper output)
         var prev = Vector2.Zero;
         SimRunner.RunMulti(cfg, onFrame: (f, ps) =>
         {
-            var v = ps[1].Body.Velocity;
+            // On the connect frame the knockback sits in the hitstop hold, not the body.
+            var c = ps[1].Combat;
+            var v = c.HoldingBody ? c.HeldVelocity : ps[1].Body.Velocity;
             if (!hit && !first && ps[1].Combat.HitstunActive) { hit = true; dv = (v - prev).Length(); }
             prev = v; first = false;
         });

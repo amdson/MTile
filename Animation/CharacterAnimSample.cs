@@ -15,23 +15,35 @@ public readonly struct ExternalPin
     public ExternalPin(string bone, Vector2 target) { Bone = bone; Target = target; }
 }
 
-// A one-sided no-penetration HALF-PLANE the solver keeps the rig's limbs out of: the solid
-// fills the side BEHIND `Point` (against `Normal`); the free space is where `Normal·(q − Point)`
-// is positive. The solve pushes any limb sample point that crosses it back out to `Margin` along
-// `Normal` (residual √w·max(0, Margin − Normal·(q − Point))). Supplied by the host from a surface
-// the movement layer already resolved (the wall-slide wall) or extracted from nearby exposed
-// tile faces (TerrainSurfaces). Render-only, `Normal` is unit.
+// A no-penetration FACE the solver keeps the rig's limb tips behind-free of: the solid lies
+// BEHIND the face (against `Normal`); free space is where `Normal·(q − Point)` is positive.
+// A face is a finite SEGMENT centred on `Point`, running ±HalfLength along the tangent
+// t = (−Normal.Y, Normal.X); HalfLength = ∞ makes it a whole half-plane (the wall-slide wall,
+// hand-built test planes). ExtLo/ExtHi extend the span in which "behind this face" still
+// means "inside solid" past the segment's −t / +t end — set at a CONCAVE end, where the
+// solid carries on past the face (a floor meeting a wall's foot); 0 at a convex corner.
+// NoPenetrationConstraint folds every face masked to a bone into ONE potential (see there).
+// Supplied by the host from a surface the movement layer already resolved (the wall-slide
+// wall) or extracted from nearby exposed tile faces (TerrainSurfaces). Render-only; `Normal`
+// is unit.
 public readonly struct SolverSurface
 {
-    public readonly Vector2 Point;   // a point on the surface (world)
-    public readonly Vector2 Normal;  // unit outward normal — points into the free half-space
+    public readonly Vector2 Point;   // the face's centre (world)
+    public readonly Vector2 Normal;  // unit outward normal — points into free space
     public readonly float   Margin;  // keep limb points at least this far out along Normal (world px)
     // Which rig bones this surface constrains, as a bitmask over skeleton bone indices
     // (bit b = bone b). -1 = all bones (the wall-slide wall). Terrain surfaces carry only
-    // the tip bones they were extracted FOR, so a plane near a hand never pushes a foot.
+    // the tip bones they were extracted FOR, so a face near a hand never pushes a foot.
     public readonly int     BoneMask;
-    public SolverSurface(Vector2 point, Vector2 normal, float margin, int boneMask = -1)
-    { Point = point; Normal = normal; Margin = margin; BoneMask = boneMask; }
+    public readonly float   HalfLength;   // segment half-extent along the tangent (∞ = half-plane)
+    public readonly float   ExtLo, ExtHi; // "still inside" span extension past the −t / +t end
+    public SolverSurface(Vector2 point, Vector2 normal, float margin, int boneMask = -1,
+                         float halfLength = float.PositiveInfinity, float extLo = 0f, float extHi = 0f)
+    {
+        Point = point; Normal = normal; Margin = margin; BoneMask = boneMask;
+        HalfLength = halfLength; ExtLo = extLo; ExtHi = extHi;
+    }
+    public Vector2 Tangent => new(-Normal.Y, Normal.X);
 }
 
 // The movement-state categories the animation layer keys behavior on — clip selection,
@@ -191,18 +203,16 @@ public readonly struct CharacterAnimSample
         var pos = p.Body.Position;
         int facing = p.Facing;
         AnimTag tag = p.CurrentState?.AnimationTag ?? AnimTag.None;
-        // The sim already chains climbs across stairs. Give that whole traversal one
-        // cadence instead of restarting Parkour/Jump at every riser. Explicit jumps,
-        // crouches, reactions and taller ledge maneuvers retain their own animation.
-        // Stairs vs StepUp: the same probe counts the risers still AHEAD of the body. Two or
-        // more is a staircase (the Stairs clip, authored over several treads); fewer is the
-        // last riser or a lone step (StepUp). Both need the three-tile diagonal to fire at all.
+        // The Stairs clip is keyed on the sim: StairClimbState declares AnimTag.Stairs and
+        // owns a regular flight from a tile before its first riser to the landing. The
+        // terrain probe below only supplies StepUp — the last riser of a flight (a vault
+        // taking it after a release, the exit stride onto the landing); with two or more
+        // risers still ahead the state's own tag stands, and the probe never says Stairs.
         if (chunks != null
             && p.CurrentState is StandingState or FallingState or ParkourState or MantleState)
         {
             int ahead = AscendingStairRisersAhead(pos, p.Body.Velocity, facing, chunks);
-            if (ahead >= StairsMinRisersAhead) tag = AnimTag.Stairs;
-            else if (ahead >= 0)               tag = AnimTag.StepUp;
+            if (ahead >= 0 && ahead <= StepUpMaxRisersAhead) tag = AnimTag.StepUp;
         }
 
         // Is there a solid ceiling right overhead? Reuse CeilingChecker.TryFind — the exact
@@ -225,7 +235,7 @@ public readonly struct CharacterAnimSample
 
         // While wall-sliding the rig faces the wall (+X = the wall direction). The wall the
         // slide resolved sits at the body's leading edge; its outward normal points back into
-        // open space. Hand it to the solver as a no-penetration half-plane (Position/Radius are
+        // open space. Hand it to the solver as a no-penetration half-plane (infinite face) (Position/Radius are
         // public, so this is a render-only read — §11.5) so the trailing limbs don't clip into
         // the wall. The braced grip hand/foot rest ON the surface (gap ≈ 0, just inside Margin).
         // Applies to ALL bones (BoneMask -1), unlike per-tip terrain planes.
@@ -236,6 +246,7 @@ public readonly struct CharacterAnimSample
             var wall = new SolverSurface(wallPoint, wallNormal, 1.5f);
             if (surfaces == null) { _wallSurfaceScratch[0] = wall; surfaces = _wallSurfaceScratch; count = 1; }
             else if (count < surfaces.Length) surfaces[count++] = wall;
+            else surfaces[count - 1] = wall;   // buffer full: the resolved wall outranks a terrain face
             near = true;   // the braced limbs rest on the wall — always engageable
         }
 
@@ -283,15 +294,17 @@ public readonly struct CharacterAnimSample
                chunks: chunks, predictAt: predictAt);
     }
 
-    // Risers still ahead of the body for the Stairs clip (vs StepUp for the last riser).
-    public const int StairsMinRisersAhead = 2;
+    // The most risers still ahead of the body for which the probe tags StepUp (the last
+    // riser, or the landing stride just past it). More is a flight: StairClimbState's tag.
+    public const int StepUpMaxRisersAhead = 1;
     // The longest diagonal the probe follows: a base tile plus enough risers to see two
     // ahead from a base two columns behind.
     private const int StairProbeMaxRun = 5;
 
-    // Stair probe. Returns -1 when the body is not ascending stairs; otherwise how many
-    // one-high/one-wide risers lie strictly AHEAD of the body's column along the best
-    // diagonal found (0 = the staircase is behind or under the feet, the last riser taken).
+    // Stair probe (StepUp only — see From). Returns -1 when the body is not ascending
+    // stairs; otherwise how many one-high/one-wide risers lie strictly AHEAD of the body's
+    // column along the best diagonal found (0 = the staircase is behind or under the feet,
+    // the last riser taken).
     //
     // A staircase is a diagonal run of solid tiles with air above each — at least three,
     // which distinguishes stairs from a single vault or a wall — starting from a base tile

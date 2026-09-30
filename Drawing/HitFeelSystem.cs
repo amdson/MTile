@@ -59,7 +59,7 @@ public sealed class HitFeelSystem
         float t   = MathHelper.Min(c.LastHitImpulse / 900f, 1f);
         var   pos = p.Body.Position;
 
-        React(pos, c.LastHitDir, t);
+        React(pos, c.LastHitDir, t, c.LastHitStopSeconds);
     }
 
     // Guard parry (Character/Action/CombatState.cs TryParry): the hit was absorbed
@@ -95,12 +95,21 @@ public sealed class HitFeelSystem
         _lastHandledGeneration[e.Id] = e.HitGeneration;
 
         float t = MathHelper.Min(e.LastHitImpulse / 900f, 1f);
-        React(e.Body.Position, e.LastHitDir, t);
+        React(e.Body.Position, e.LastHitDir, t, e.LastHitStopSeconds);
     }
 
-    private void React(Vector2 pos, Vector2 dir, float t)
+    // Shake only for big hits — the ones that earned hitstop (CombatState.BigHitStrength),
+    // so the freeze and the shake are one event. Trauma rides the hitstop length: the
+    // shortest freeze shakes 0.45 (~2 world px peak), the longest 0.8 (~6.4).
+    private void React(Vector2 pos, Vector2 dir, float t, float hitstopSeconds)
     {
-        _camera.Shake(0.12f + 0.5f * t);
+        if (hitstopSeconds > 0f)
+        {
+            float s = MathHelper.Clamp(
+                (hitstopSeconds - CombatState.MinHitstopSeconds)
+                / (CombatState.MaxHitstopSeconds - CombatState.MinHitstopSeconds), 0f, 1f);
+            _camera.Shake(0.45f + 0.35f * s);
+        }
 
         if (dir.LengthSquared() > 1e-4f)
         {

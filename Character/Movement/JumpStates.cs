@@ -41,7 +41,10 @@ public class JumpingState : MovementState
             // the steal would otherwise fizzle. Corners are static terrain:
             // Enter's sourceVy is 0 and the hold window rides
             // vars.JumpFromCorner instead of a source FSD.
-            if (!TryCornerLaunch(ctx, abilities, out _)) return false;
+            // Stair push-off: a body riding a flight's corner line drifts out
+            // of the ground probe's window for a few frames of every riser;
+            // the stair probe still has the tread under it (see OnStairTread).
+            if (!OnStairTread(ctx) && !TryCornerLaunch(ctx, abilities, out _)) return false;
             return OnLattice || !(ctx.TryGetCeiling(out var c)
                      && ctx.Body.Position.Y - c.Position.Y <= JumpClearance.Headroom);
         }
@@ -56,6 +59,25 @@ public class JumpingState : MovementState
             && ground.Position.Y - ceiling.Position.Y <= JumpClearance.Headroom) return false;
         return true;
     }
+
+    // Is there anything a ground jump could push off — ground, a stair tread, or a
+    // gripped corner? DoubleJumpingState bids only when there is not, so an air jump can
+    // never outbid (or be spent in place of) a ground jump the body is entitled to.
+    // Deliberately not the full precondition: a low ceiling defers the ground jump to
+    // CoveredJumpState, which is still no reason to spend the double jump.
+    internal static bool HasLaunchSource(EnvironmentContext ctx, PlayerAbilityState abilities)
+        => HasGroundSource(ctx) || TryCornerLaunch(ctx, abilities, out _);
+
+    // Standing on something: ground, or a stair tread. WallJumpingState yields to it.
+    internal static bool HasGroundSource(EnvironmentContext ctx)
+        => ctx.TryGetGround(out _) || OnStairTread(ctx);
+
+    // Climbing a flight, the stair probe (StairClimbState's own continuation) is the
+    // authority on support — not the generic ground probe, whose rest-band window the
+    // corner-line ride leaves for a few frames per riser.
+    private static bool OnStairTread(EnvironmentContext ctx)
+        => ctx.PreviousState(0) is StairClimbState stair
+           && StairChecker.TryFind(ctx.Body, ctx.Chunks, stair.Dir, out _);
 
     // A corner the body just gripped (hang, or a climb's animation grip) within
     // arm's reach counts as a push-off point.
@@ -232,10 +254,19 @@ public class RunningJumpState : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
-        if (!ctx.TryGetGround(out var ground)) return false;
+        if (!ctx.TryGetGround(out _)) return false;
+        // A running start is a run along a surface. Climbing a flight, speed along the
+        // stairs straddles RunJumpMinSpeed riser by riser, so it would pick between two
+        // launches at random — stairs always take JumpingState.
+        if (ctx.PreviousState(0) is StairClimbState) return false;
         if (Math.Abs(ctx.Body.Velocity.X) < MovementConfig.Current.RunJumpMinSpeed) return false;
-        if (ctx.TryGetCeiling(out var ceiling)
-            && ground.Position.Y - ceiling.Position.Y <= JumpClearance.Headroom) return false;
+        // Open sky only. The running jump is a blind impulse: anything overhead
+        // within its own rise cuts it short — under a 3-high slab (33 px, one
+        // over the old Headroom gate) it rose 2 px into the underside and died.
+        // Under any ceiling it can reach, JumpingState owns the press (on the
+        // lattice, it plans the walk-out-then-rise escape).
+        if (CeilingChecker.TryFind(ctx.Body, ctx.Chunks, out _, MovementConfig.Current.RunJumpApexRise))
+            return false;
         return true;
     }
 
@@ -328,8 +359,9 @@ public class DoubleJumpingState : MovementState
         // No wall check: when the player IS pressing into a wall, WallJumpingState wins outright
         // (its Passive 45 beats DoubleJump's 40). When they're NOT pressing into a wall — e.g.
         // dropping off a platform while holding the away direction — DoubleJump is the right fire.
+        // Only with nothing to launch a ground jump from — see JumpingState.HasLaunchSource.
         return ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)
-            && !abilities.HasDoubleJumped && !ctx.TryGetGround(out _);
+            && !abilities.HasDoubleJumped && !JumpingState.HasLaunchSource(ctx, abilities);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)

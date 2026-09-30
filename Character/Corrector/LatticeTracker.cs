@@ -143,8 +143,13 @@ public static class LatticeTracker
             s.Samples[k].Vel      = body.Velocity;
             s.Samples[k].FloorY   = floorFound ? floorY : float.PositiveInfinity;
             s.Samples[k].Grounded = anchored;
-            s.CornerPlant[k] = false;
         }
+        // Plantable corners in hand reach (the cave-mouth lip; rising, a lip
+        // above the head) — the one place the engine acts in free air. See
+        // the Redirect mask below.
+        // Every tick's sample is the same held state, so one scan serves all.
+        CorrectorChannels.MarkCornerPlants(ctx.Chunks, s.Samples, 1, s.CornerPlant, risingLips: true);
+        for (int k = 1; k < H; k++) s.CornerPlant[k] = s.CornerPlant[0];
 
         // ── Reference polyline: body → first node ≥ one cell away → nodes ──
         int nv = 0;
@@ -307,7 +312,20 @@ public static class LatticeTracker
                 // the body floating off the launch. The threshold is the one
                 // StandingState already uses to decide a body is ballistic
                 // rather than supported (a rise no support could author).
-                s.ChannelMask[3][k] = cfg.FoldRedirectEnabled && near && !ballistic;
+                //
+                // ...and at a plantable corner: the one anchor free air has.
+                // MarkCornerPlants' own gates apply there — descending onto a
+                // corner, or rising into a lip above the center — so the lift
+                // on a flat-ground launch above (no corner in reach) cannot
+                // come back through it. Limits (measured 2026-09-30): the
+                // plant exists only within CornerPlantReach of the lip, ~3
+                // frames before contact for a running jump's arc, and inside
+                // this 5-tick solve the lip's face row is cheaper to meet by
+                // braking x than by dropping under it — so a body arriving
+                // at a corridor mouth still rising hard brakes and wall-slides
+                // anyway. It helps the slow, late contacts.
+                s.ChannelMask[3][k] = cfg.FoldRedirectEnabled
+                    && ((near && !ballistic) || s.CornerPlant[k]);
                 // No legs for a profile that neither hovers nor rises (Fall):
                 // its plan is a level line at the body's height, and legs in
                 // reach would hold it there — a re-planned level line, a hard

@@ -35,6 +35,12 @@ public class AnimSolverConfig
     // it off the corner every frame. A few px of penetration is acceptable; the contact pin
     // (TierContact) must win over the faces that meet at its corner.
     public float TierNoPen     { get; set; } = 60f;
+    // Depth shaping of the no-pen potential P (px, NoPenetrationConstraint): the residual is
+    // P up to NoPenAllowance, then rises NoPenSteepGain× faster — a shallow graze (a sole
+    // on a lip) stays cheap, a limb buried past the allowance costs NoPenSteepGain² as much
+    // per px² and outbids the contact tier.
+    public float NoPenAllowance  { get; set; } = 2f;
+    public float NoPenSteepGain  { get; set; } = 4f;
     public float TierAim       { get; set; } = 60f;   // action aim: rotate the overlay's L→R-hand vector onto the input dir
     public float TierContact   { get; set; } = 470f;  // planted-foot no-slip (Δφ) + ground hold (δ), × feathered label weight
     public float CorePosePrior { get; set; } = 60f;   // λ_θ on hip/chest/head — stiff torso
@@ -93,7 +99,9 @@ public class AnimSolverConfig
     // lifecycle even when opted in. Render-only, so live-toggling is always safe.
     public bool  PlannerEnabled      { get; set; } = true;
     // A/B switch: retain landing selection and plants, but omit airborne foot targets.
-    public bool SwingTargetsEnabled { get; set; } = true;
+    // OFF by default (matching configs/anim_solver_config.json) — the airborne foot targets
+    // are kept only as an A/B; landing selection and plants run either way.
+    public bool SwingTargetsEnabled { get; set; } = false;
     // Landing selection: score bonus (px) for keeping the previously selected tread.
     public float PlannerHysteresis   { get; set; } = 4f;
     // Swing progress after which a still-valid landing target is frozen.
@@ -141,12 +149,13 @@ public class AnimSolverConfig
     // deviates more than that; RateSlew (cycles/s²) caps how fast the whole rate may change
     // per frame — the anti-jerk term (0 = off); ReentryError (cycles): past this the clip and
     // the feet disagree outright and the phase re-enters at the observation instead of
-    // chasing it (the smoothness prior bridges the pose, as on a clip switch).
+    // chasing it (the smoothness prior bridges the pose, as on a clip switch) — 0 disables
+    // re-entry entirely, which is the default (the servo alone carries the correction).
     public bool  PhaseServoEnabled { get; set; } = true;
     public float PhaseServoGain    { get; set; } = 25f;
     public float PhaseServoMaxRate { get; set; } = 0.5f;
     public float PhaseRateSlew     { get; set; } = 40f;
-    public float PhaseReentryError { get; set; } = 0.2f;
+    public float PhaseReentryError { get; set; } = 0f;
 
     private static AnimSolverConfig _current = new AnimSolverConfig();
 
@@ -169,6 +178,8 @@ public class AnimSolverConfig
     {
         TierHard                = src.TierHard;
         TierNoPen               = src.TierNoPen;
+        NoPenAllowance          = src.NoPenAllowance;
+        NoPenSteepGain          = src.NoPenSteepGain;
         TierAim                 = src.TierAim;
         TierContact             = src.TierContact;
         CorePosePrior           = src.CorePosePrior;

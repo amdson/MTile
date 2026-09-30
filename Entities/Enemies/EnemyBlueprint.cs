@@ -156,6 +156,34 @@ public static class EnemyFactory
             },
         });
 
+        // Sparring — the "weights" stage's active target. Plain ground melee with a
+        // proximity brain, so a row of them stands still until approached. The stage
+        // overrides Mass per slot; this blueprint's Mass is just the default.
+        Register(new EnemyBlueprint
+        {
+            Kind          = EntityKind.Sparring,
+            Radius        = 10f,
+            Health        = 4f,
+            Mass          = 1f,
+            FrictionScale = 0.10f,
+            Color         = new Color(200, 120, 60),
+            Sprite        = Sprites.Stalker,
+            Movement = () => new()
+            {
+                new EnemyIdleState(),          // 0 — fallback
+                new EnemyChaseState(),
+                new EnemyAttackHoldState(),
+                new EnemyStaggerState(),
+            },
+            Actions = () => new()
+            {
+                new EnemyMeleeAction(),
+            },
+            // Alert under the stage's 50 px slot spacing, so walking up to one enemy
+            // doesn't wake its neighbours.
+            Controller = new ProximityChaseController { AlertRange = 45f },
+        });
+
         // ── Gauntlet trio ───────────────────────────────────────────────────
         // Three enemies that between them cover the three axes a traversal
         // encounter has: hold a line (Bastion), close from above (Pouncer), and
@@ -320,6 +348,10 @@ public static class EnemyFactory
         // and both state lists live in Entities/Enemies/Types/TemplateEnemy.cs; this is the
         // one line that makes it spawnable and snapshot-restorable.
         Register(TemplateEnemy.Blueprint);
+
+        // Aspid — hovering ranged pest (Primal Aspid homage); spawn it on the
+        // "aspid" stage. Everything lives in Entities/Enemies/Types/AspidEnemy.cs.
+        Register(AspidEnemy.Blueprint);
 
         // Each new blueprint wants its own EntityKind in EntityKind.cs; see
         // TemplateEnemy.Blueprint above for the shape.

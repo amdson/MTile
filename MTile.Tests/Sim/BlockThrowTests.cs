@@ -414,7 +414,9 @@ public class BlockThrowTests(ITestOutputHelper output)
                 {
                     hurtFrame = f;
                     hurtAt    = ps[1].Combat.DamageTaken;
-                    shove     = ps[1].Body.Velocity.X;
+                    // On the connect frame the knockback sits in the hitstop hold, not the body.
+                    var c     = ps[1].Combat;
+                    shove     = (c.HoldingBody ? c.HeldVelocity : ps[1].Body.Velocity).X;
                 }
                 bool ball = false;
                 foreach (var e in es) if (e is LobbedAreaProjectile) ball = true;

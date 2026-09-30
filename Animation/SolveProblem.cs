@@ -54,7 +54,7 @@ public sealed class SolveProblem
     public const int IdxPhi = 0, IdxDy = 1, IdxDx = 2, IdxTheta0 = 3;
 
     public const int MaxPins     = 4;   // sizes the residual scratch; excess pins are dropped
-    public const int MaxSurfaces = 8;   // sizes the residual scratch; excess surfaces are dropped
+    public const int MaxSurfaces = 16;  // caps the frozen face list; excess faces are dropped
                                         // (terrain extraction emits a handful + the wall plane)
     // How near an upward-facing face must be to a toe to count as SUPPORTING its plant. One
     // meaning, two users that must agree: CharacterAnimator.SnapToSupport captures the target
@@ -82,7 +82,7 @@ public sealed class SolveProblem
     public readonly List<ActiveContact>             Contacts = new();   // planted feet (H no-slip + V hold)
     public readonly List<(int Bone, Vector2 Target)> Swings  = new();   // planner-owned swinging feet
     public readonly List<(int Bone, Vector2 Target)> Pins    = new();   // external hard pins
-    public readonly List<SolverSurface>             Surfaces = new();   // no-penetration half-planes
+    public readonly List<SolverSurface>             Surfaces = new();   // no-penetration faces
     public bool    AimActive;
     public Vector2 AimTarget;             // û*: frozen target unit vector of the action aim row
     public int     AimBoneL, AimBoneR;    // the L→R hand pair whose vector encodes the aim

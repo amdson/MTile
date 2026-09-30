@@ -1,6 +1,8 @@
 {
   "TierHard": 4700,
   "TierNoPen": 60,
+  "NoPenAllowance": 2,
+  "NoPenSteepGain": 4,
   "TierAim": 60,
   "TierContact": 470,
   "CorePosePrior": 60,

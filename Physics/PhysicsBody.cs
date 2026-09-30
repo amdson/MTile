@@ -21,6 +21,14 @@ public class PhysicsBody
     // in 1-2 frames. Applied wherever PhysicsWorld assigns or computes friction.
     public float FrictionScale = 1f;
 
+    // Quadratic air resistance, in 1/px: StepSwept applies a deceleration of
+    // QuadraticDrag·|v|² opposing v, in every state (airborne or not). Negligible at
+    // walking speed, strong at launch speed; terminal velocity under gravity alone is
+    // √(g / QuadraticDrag). 0 (default) = none — projectiles and passive props keep
+    // their authored flight. Players set it each frame from MovementConfig; enemies at
+    // construction (EnemyEntity.DefaultQuadraticDrag).
+    public float QuadraticDrag;
+
     // Opt out of terrain collision entirely: StepSwept integrates position and skips
     // constraints + chunk resolution. Set by MassBall, which deposits terrain as it
     // flies — give it collision and it walls itself in a few frames after release.

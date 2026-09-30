@@ -52,4 +52,22 @@ public enum EntityKind
     // Copy-and-edit starting point for a new enemy — Entities/Enemies/Types/TemplateEnemy.cs.
     // Spawn it on the "sandbox" stage.
     Template,
+
+    // Aspid — Primal Aspid homage: slow flier that holds range above the player
+    // and fires fans of three slow fireballs. See Entities/Enemies/Types/AspidEnemy.cs.
+    Aspid,
+    AspidFireball,  // Aspid ordnance (AspidFireballProjectile)
+
+    // Sparring — plain melee enemy for the "weights" stage: waits in place until the
+    // player comes near (ProximityChaseController). The stage overrides Mass per slot.
+    Sparring,
+
+    // Warden — armored player-sized walker, open only while it swings its one heavy
+    // smash. Subclass (custom body + armor); see Entities/Enemies/Types/WardenEnemy.cs.
+    Warden,
+
+    // Wizard — fragile caster: waves of slow terrain-passing orbs + raised dirt
+    // pillars. See Entities/Enemies/Types/WizardEnemy.cs.
+    Wizard,
+    WizardOrb,      // Wizard ordnance (WizardOrbProjectile)
 }
