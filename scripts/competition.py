@@ -6,6 +6,7 @@
     scripts/competition.py worktree --wave N --name <agent>
         give a competitor a worktree .claude/worktrees/<agent> on competition-wave<N>-<agent>
     scripts/competition.py collect  --wave N [--dry-run]
+    scripts/competition.py brief    --wave N --name <agent> [--author <tag>]
         copy each competitor's single new package file into this checkout (or just report)
 
 Works from any directory: the repo root comes from `git rev-parse --show-toplevel`.
@@ -174,22 +175,43 @@ def cmd_collect(a):
     return 1 if rejected else 0
 
 
+def cmd_brief(a):
+    root = repo_root()
+    path = os.path.join(root, "Plans", "FIGHTER_COMPETITOR_BRIEF.md")
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    # Drop the HTML comment header: the brief is what follows it.
+    if text.startswith("<!--"):
+        end = text.find("-->")
+        if end >= 0:
+            text = text[end + 3:].lstrip("\n")
+    author = a.author or (a.name.split("-")[0] + "-w" + str(a.wave))
+    out = (text.replace("{WAVE}", str(a.wave)).replace("{SLOT}", a.name)
+               .replace("{WORKTREE}", os.path.join(root, ".claude", "worktrees", a.name))
+               .replace("{AUTHOR}", author))
+    sys.stdout.write(out)
+
+
 def main():
     p = argparse.ArgumentParser(
         prog="competition.py",
         description="Branch plumbing for the fighter-package competition (Plans/FIGHTER_COMPETITION.md).")
-    sub = p.add_subparsers(dest="cmd", required=True, metavar="{base,worktree,collect}")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="{base,worktree,collect,brief}")
     b = sub.add_parser("base", help="cut competition-wave<N>-base from <from> with the Holdout packages git rm'd")
     b.add_argument("--wave", type=int, required=True)
     b.add_argument("--from", dest="from_", default="fighter-plan", help="committed ref to cut from (default fighter-plan)")
     w = sub.add_parser("worktree", help="create .claude/worktrees/<agent> on branch competition-wave<N>-<agent>")
     w.add_argument("--wave", type=int, required=True)
     w.add_argument("--name", required=True)
+    r = sub.add_parser("brief", help="print the competitor brief (Plans/FIGHTER_COMPETITOR_BRIEF.md) rendered for one slot")
+    r.add_argument("--wave", type=int, required=True)
+    r.add_argument("--name", required=True, help="slot / worktree name, e.g. opus-1")
+    r.add_argument("--author", help="Author tag for the package (default: <model>-w<N> from the slot name)")
     c = sub.add_parser("collect", help="copy each submission branch's one new package file into this checkout")
     c.add_argument("--wave", type=int, required=True)
     c.add_argument("--dry-run", action="store_true", help="only print what would be accepted/rejected")
     a = p.parse_args()
-    return {"base": cmd_base, "worktree": cmd_worktree, "collect": cmd_collect}[a.cmd](a) or 0
+    return {"base": cmd_base, "worktree": cmd_worktree, "collect": cmd_collect, "brief": cmd_brief}[a.cmd](a) or 0
 
 
 if __name__ == "__main__":

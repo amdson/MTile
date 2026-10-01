@@ -77,14 +77,13 @@ does not reach competitors. If the pool file is committed first, competitors can
 holdout names in it; that is no leak, since the names are the published ladder minus the
 packages in their tree (§4).
 
-**One worktree per competitor.**
+**One worktree per competitor, one brief.**
 
 ```bash
 scripts/competition.py worktree --wave 3 --name <agent>
 #   git worktree add .claude/worktrees/<agent> -b competition-wave3-<agent> competition-wave3-base
+scripts/competition.py brief --wave 3 --name <agent>        # the prompt to give that session (§5)
 ```
-
-Each agent gets its worktree path and the guide (the whole page, including §12).
 
 **Collect.** When the agents are done:
 
@@ -203,6 +202,19 @@ commits are never part of `fighter-plan`'s history.
 **Gets:** a worktree at `.claude/worktrees/<name>` on branch `competition-wave<N>-<name>`, cut
 from `competition-wave<N>-base`. That tree is `fighter-plan` minus the holdout package files:
 the Dev packages, the roster, every tool, the guide, the published ladders and lessons.
+
+**And one brief, the same for everyone.** `Plans/FIGHTER_COMPETITOR_BRIEF.md` is the prompt an
+authoring session receives, rendered for its slot by
+
+```bash
+scripts/competition.py brief --wave 3 --name opus-1          # Author defaults to opus-w3
+```
+
+Edit the template, never the rendered text: within a wave every class gets the same words, so a
+difference in results is the author, not the prompt. Wave 3 slipped here once (the Opus and
+Fable sessions got one extra sentence about mirror draws; the Haiku and Sonnet ones did not),
+which is why the brief now lives in a file. A later wave may change the brief, for the whole
+wave.
 
 **Delivers:** one new file, `Entities/Enemies/Fighters/Packages/<Name>.cs`, committed on its
 branch. The acceptance rule is mechanical:
