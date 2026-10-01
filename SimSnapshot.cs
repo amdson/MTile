@@ -15,6 +15,8 @@ public sealed class SimSnapshot
     public int   HitIdValue;            // HitIdAllocator.Value
     public float Elapsed;               // absolute sim clock (drives platform tickers)
     public int   Frame;                 // step counter; rewinds with rollback (presentation dedup key)
+    public int   PlayerDeaths;          // Simulation.PlayerDeaths
+    public int[] StageVars;             // Simulation.StageVars (a copy)
 
     // The ECS world snapshot: slot generations + free list (EntityId bookkeeping) PLUS
     // every snapshotted value-component store — PlayerData, EntityData, and BodyStateComp.

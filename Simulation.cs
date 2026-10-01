@@ -128,6 +128,15 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     // slot kinds). Fixed for the match, so not snapshotted; Restore rehydrates from it first.
     // Per sim so concurrent matches (league --threads) never see each other's fighters.
     public Dictionary<EntityKind, EnemyBlueprint> Blueprints { get; } = new();
+    // Stage scratch: ints a stage's tickers keep between frames (a gauntlet's progress, a
+    // countdown). Snapshotted, so a ticker that reads and writes only these and sim state
+    // replays identically under rollback — closure fields would not.
+    public int[] StageVars { get; } = new int[8];
+    // Times the primary player has died and respawned. Snapshotted. The respawn happens
+    // late in Step, after the tickers, so a ticker never sees the player dead; it sees
+    // this count change on the next frame instead.
+    public int PlayerDeaths => _playerDeaths;
+    private int _playerDeaths;
     // IEntitySpawner — id → live entity. Generation-checked, so an id recycled after a
     // rollback never resolves to a stranger.
     public Entity Resolve(EntityId id)
@@ -446,6 +455,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         if (!_player.IsAlive)
         {
             _player.Respawn(_playerSpawn);
+            _playerDeaths++;
             OnPlayerRespawn?.Invoke(_player.Body.Position);
         }
 
@@ -597,6 +607,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             World                = _world.Capture(),
             Elapsed              = _elapsed,
             Frame                = _frame,
+            PlayerDeaths         = _playerDeaths,
+            StageVars            = (int[])StageVars.Clone(),
             PrimaryController    = _controller.Capture(),
             SecondaryControllers = secCtrls,
             Dedupe               = _combat.CaptureDedupe(),
@@ -613,6 +625,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         _hitIds.Value = snap.HitIdValue;
         _elapsed      = snap.Elapsed;
         _frame        = snap.Frame;
+        _playerDeaths = snap.PlayerDeaths;
+        if (snap.StageVars != null) Array.Copy(snap.StageVars, StageVars, StageVars.Length);
 
         // Snapshot the live entity set (by id) BEFORE the World restore clears the
         // registry stores — used to restore-in-place where an id still matches.
