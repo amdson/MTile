@@ -33,5 +33,6 @@
   "MaxSlots": 4,
   "MaxPoints": 2,
 
-  "DecideBudgetMicros": 20
+  "DecideBudgetMicros": 20,
+  "DrawPenalty": 0.1
 }

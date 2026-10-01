@@ -105,8 +105,10 @@ public class EnemyRailShotAction : EnemyActionState
         {
             var dir    = v.LockedAim.LengthSquared() > 1e-4f ? v.LockedAim : new Vector2(v.LockedFacing, 0f);
             var muzzle = ctx.Self.Body.Position + dir * MuzzleOffset;
+            // Strength does not scale shots (see EnemyRangedAction): the bolt lands for
+            // the spec's Damage, which is also what its energy price is built on.
             ctx.Spawner?.SpawnEntity(new RailBoltProjectile(muzzle, dir, v.HitId, Faction.Enemy, BoltBudget,
-                                                            BoltSpeed, BoltDamage * ctx.Self.Strength)
+                                                            BoltSpeed, BoltDamage)
                                      { Team = ctx.Self.Team });
         }
     }

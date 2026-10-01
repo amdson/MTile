@@ -18,6 +18,10 @@ public sealed class CompileResult
     public IReadOnlyList<CostPart> ActionCosts { get; init; }
     public Cost                   Brain      { get; init; }
     public IReadOnlyList<string>  Violations { get; init; }
+    // Things the compiler changed about the spec without refusing it — a spec field it
+    // overrides (an action's Windup/Recovery are fixed per kind). Shown in the report so
+    // an author learns the field is not theirs to tune.
+    public IReadOnlyList<string>  Notes      { get; init; } = Array.Empty<string>();
     public FighterBudget          Budget     { get; init; }
 
     public bool IsValid => Violations.Count == 0;
@@ -42,6 +46,7 @@ public sealed class CompileResult
         sb.AppendLine($"  {"TOTAL",-18} mass {Total.Mass,6:0.000}  energy {Total.Energy,6:0.00}  " +
                       $"slots {Total.Slots,2}  points {Total.Points,2}   " +
                       $"(budget {Budget.MaxMass:0.##} / {Budget.MaxSlots} / {Budget.MaxPoints})");
+        foreach (var n in Notes)      sb.AppendLine("  · " + n);
         foreach (var v in Violations) sb.AppendLine("  ✗ " + v);
         return sb.ToString();
     }
@@ -79,6 +84,22 @@ public static class FighterCompiler
             total += c;
         }
 
+        // Timing is not a buy. Windup and Recovery are fixed per kind (the defaults in
+        // ActionSpec.Default); a spec that sets them differently compiles to the fixed
+        // values and is told so. Active stays the author's — it is geometry for a lunge
+        // and priced as such.
+        var notes = new List<string>();
+        for (int i = 0; i < spec.Actions.Count; i++)
+        {
+            var a = spec.Actions[i];
+            if (a.Kind == ActionKind.Special) continue;
+            var d = ActionSpec.Default(a.Kind);
+            if (a.Windup != d.Windup)
+                notes.Add($"{i}:{a.Kind} Windup is fixed at {d.Windup:0.##} s (spec said {a.Windup:0.##}).");
+            if (a.Recovery != d.Recovery)
+                notes.Add($"{i}:{a.Kind} Recovery is fixed at {d.Recovery:0.##} s (spec said {a.Recovery:0.##}).");
+        }
+
         var violations = new List<string>();
         var budget = model.Budget;
         if (total.Mass > budget.MaxMass)
@@ -104,6 +125,7 @@ public static class FighterCompiler
             ActionCosts = actionCosts,
             Brain       = brain,
             Violations  = violations,
+            Notes       = notes,
             Budget      = budget,
             Blueprint   = violations.Count == 0 ? Build(spec, model, total, actionCosts) : null,
         };
@@ -168,6 +190,14 @@ public static class FighterCompiler
             // compiler overwrites whatever EnergyCost the spec carried, so the number
             // the cost report shows and the number the sim spends can never disagree.
             a.EnergyCost = actionCosts[i].Cost.Energy;
+            // Timing is fixed per kind (see Compile's notes): the sim runs the default
+            // Windup and Recovery whatever the spec said.
+            if (a.Kind != ActionKind.Special)
+            {
+                var d = ActionSpec.Default(a.Kind);
+                a.Windup   = d.Windup;
+                a.Recovery = d.Recovery;
+            }
             actions[i] = a;
         }
 

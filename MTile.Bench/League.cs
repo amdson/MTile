@@ -7,12 +7,15 @@ namespace MTile.Bench;
 // The fighter league CLI (Plans/FIGHTER_PACKAGE_GUIDE.md §6):
 //
 //   dotnet run --project MTile.Bench -c Release -- --league [--only <Name>]... [--frames N]
+//                                                         [--seeds N] [--first-seed N]
 //                                                         [--out <dir>] [--no-record] [--quiet]
 //
 // Every discovered package plus the six roster archetypes, every ordered pair on every
-// arena terrain. Prints the ladder and one matrix per terrain, writes the same to
-// <out>/league.md, and saves each bout as <out>/<A>_vs_<B>_<terrain>.fight.json unless
-// --no-record. `--only X` plays X against everyone (may repeat).
+// arena terrain, under every bout seed (--seeds N plays seeds first..first+N-1; the
+// default is the single canonical seed 0). Prints the ladder and one matrix per
+// terrain, writes the same to <out>/league.md, and saves each bout as
+// <out>/<A>_vs_<B>_<terrain>[_s<seed>].fight.json unless --no-record. `--only X` plays
+// X against everyone (may repeat).
 //
 // All of the league is FighterLeague (library side, tested by FighterLeagueTests); this
 // file is argument parsing and printing only.
@@ -32,6 +35,8 @@ internal static class League
         var settings = new LeagueSettings
         {
             Frames     = int.Parse(Value(args, "--frames") ?? "720"),
+            Seeds      = int.Parse(Value(args, "--seeds") ?? "1"),
+            FirstSeed  = ulong.Parse(Value(args, "--first-seed") ?? "0"),
             OutDir     = noRecord ? null : outDir,
             SimVersion = FightRecorderCli.GitHash(root),
         };
@@ -42,12 +47,12 @@ internal static class League
             {
                 var r = b.Result;
                 string res = r.WinnerTeam == 1 ? "left wins" : r.WinnerTeam == 2 ? "right wins" : "draw";
-                Console.WriteLine($"  [{k + 1,3}/{n}] {b.Terrain,-8} {b.LeftName} vs {b.RightName}: " +
+                Console.WriteLine($"  [{k + 1,3}/{n}] {b.Terrain,-8} s{b.Seed} {b.LeftName} vs {b.RightName}: " +
                                   $"{res} after {r.Frames}f, margin {b.Margin:+0.00;-0.00;0.00}");
             };
 
         Console.WriteLine();
-        Console.WriteLine($"league: {settings.Frames}-frame bouts" +
+        Console.WriteLine($"league: {settings.Frames}-frame bouts, seeds {settings.FirstSeed}..{settings.FirstSeed + (ulong)settings.Seeds - 1}" +
                           (settings.Only.Count > 0 ? $", only {string.Join(", ", settings.Only)}" : "") +
                           (noRecord ? ", not recording" : $", recording to {outDir}"));
 

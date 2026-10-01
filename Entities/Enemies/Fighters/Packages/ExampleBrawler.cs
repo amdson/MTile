@@ -47,7 +47,9 @@ public sealed class ExampleBrawler : IFighterPackage
         return a;
     }
 
-    // Scratch: I0 = mode (0 hunt, 1 dodge), F0 = seconds in mode.
+    // Scratch: I0 = mode (0 hunt, 1 dodge), F0 = seconds in mode, I1 = 1 when the current
+    // dodge is a hop rather than a step (drawn from s.Random: the seeded stream is the
+    // only randomness a brain may use — it rewinds with a rollback and replays exactly).
     private sealed class BrawlerBrain : FighterController
     {
         private readonly float _engage, _alert, _lungeCost, _lungeMax;
@@ -77,10 +79,12 @@ public sealed class ExampleBrawler : IFighterPackage
             bool incoming = t.Known && t.TellProgress is >= 0.35f and < 1f
                             && t.Tell is ActionKind.Melee or ActionKind.Lunge or ActionKind.Lash
                             && dist < 70f && !self.ActionCommitted;
-            if (m.I0 == 0 && incoming) { m.I0 = 1; m.F0 = 0f; }
+            // Half the dodges hop, half just step: a brawler that always hops is read
+            // and punished the same way every time.
+            if (m.I0 == 0 && incoming) { m.I0 = 1; m.F0 = 0f; m.I1 = s.Chance(0.5f) ? 1 : 0; }
             if (m.I0 == 1)
             {
-                if (m.F0 < 0.3f) { input.MoveDir.X = to.X >= 0f ? -1f : 1f; input.Jump = true; return input; }
+                if (m.F0 < 0.3f) { input.MoveDir.X = to.X >= 0f ? -1f : 1f; input.Jump = m.I1 == 1; return input; }
                 m.I0 = 0; m.F0 = 0f;
             }
 

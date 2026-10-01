@@ -43,14 +43,18 @@ internal static class FightRecorderCli
         int at = Array.IndexOf(args, "--record-fight");
         if (at < 0 || args.Length < at + 5)
         {
-            Console.Error.WriteLine("usage: --record-fight <left> <right> <flat|corridor|hills> <out.fight.json> [--frames N]\n" +
-                                    "  left/right: a roster name, a package name, or a .fight.json (its first entry)");
+            Console.Error.WriteLine("usage: --record-fight <left> <right> <flat|corridor|hills> <out.fight.json> [--frames N] [--seed N]\n" +
+                                    "  left/right: a roster name, a package name, or a .fight.json (its first entry)\n" +
+                                    "  --seed N: the bout condition (0 = the canonical 180 px start; otherwise seeded spawns + brain streams)");
             return 2;
         }
         string left = args[at + 1], right = args[at + 2], terrain = args[at + 3], outPath = args[at + 4];
         int frames = FighterArena.DefaultMaxFrames;
         int fi = Array.IndexOf(args, "--frames");
         if (fi >= 0 && fi + 1 < args.Length) frames = int.Parse(args[fi + 1]);
+        ulong seed = 0;
+        int si = Array.IndexOf(args, "--seed");
+        if (si >= 0 && si + 1 < args.Length) seed = ulong.Parse(args[si + 1]);
 
         // Same three configs Game1 loads at boot, so the recorded bout is the one the
         // game would show.
@@ -59,14 +63,9 @@ internal static class FightRecorderCli
         MaterialStrengths.Load(Path.Combine(root, "configs", "material_strengths.json"));
         FighterCosts.Load(Path.Combine(root, "configs", "fighter_costs.json"));
 
-        var entries = new List<ArenaEntry>
-        {
-            new(Resolve(left),  FighterArena.LeftSpawn,              1),
-            new(Resolve(right), FighterArena.RightSpawnFor(terrain), 2),
-        };
-        var rec = FightRecord.Describe(terrain, entries, FighterArena.PlayerPark, frames);
+        var rec = FightRecord.Describe(terrain, Resolve(left), Resolve(right), seed, frames);
         rec.SimVersion = GitHash(root);
-        rec.Notes      = $"recorded by MTile.Bench --record-fight {left} {right} {terrain}";
+        rec.Notes      = $"recorded by MTile.Bench --record-fight {left} {right} {terrain} --seed {seed}: {rec.Notes}";
 
         var sw  = System.Diagnostics.Stopwatch.StartNew();
         var res = rec.Record();

@@ -546,8 +546,11 @@ public class EnemyRangedAction : EnemyActionState
                 ? Vector2.Normalize(toPlayer)
                 : new Vector2(v.LockedFacing, 0f);
             var muzzle = origin + dir * MuzzleOffset;
+            // Strength is muscle: it scales swings, not shots. A projectile's damage is
+            // the spec's Damage alone — the same number its energy price is built on
+            // (FighterCost), so the two can never disagree.
             ctx.Spawner?.SpawnEntity(new EnergyBallProjectile(
-                muzzle, dir, v.HitId, Faction.Enemy, ProjectileSpeed, Damage * ctx.Self.Strength)
+                muzzle, dir, v.HitId, Faction.Enemy, ProjectileSpeed, Damage)
                 { Team = ctx.Self.Team });
         }
     }

@@ -124,6 +124,12 @@ public sealed class FighterCostConfig
     // FighterPackageTests measure it (TimedController). A TOOL-SIDE limit: it is never
     // read by the sim, so it cannot desync anything — it only flags a package.
     public float DecideBudgetMicros { get; set; } = 20f;
+    // Scoring (plan §11.2): a win is 1, a loss 0, a draw 0.5 − DrawPenalty for BOTH sides,
+    // so draws drain points from the pool — the fighter ahead prefers to finish, the one
+    // behind prefers a draw to a loss, and a fighter built only to run converges below
+    // average. Q8: 0.1 to start. Read by the league ladder and the forge's fitness.
+    public float DrawPenalty        { get; set; } = 0.1f;
+    public float DrawScore          => 0.5f - DrawPenalty;
 
     // ── Default budget (§3.4) ───────────────────────────────────────────────
     public float MaxMass      { get; set; } = 2.5f;

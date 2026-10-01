@@ -45,13 +45,13 @@ public sealed class FighterGenome
 // One opponent's line in a score: results across every terrain × order it was played on.
 public sealed record ForgeMatchup(string Opponent, int Wins, int Losses, int Draws);
 
-// Win rate across the roster × terrains × orders, draw = ½, tie-broken on the mean
+// Win rate across the roster × terrains × orders, draw = 0.5 − DrawPenalty (plan §11.2), tie-broken on the mean
 // health-fraction margin (candidate's fraction left − opponent's). Ordered by
 // (Fitness, Margin); exact float comparison, which is honest because the arena is
 // deterministic.
 public sealed class ForgeScore : IComparable<ForgeScore>
 {
-    public float Points    { get; init; }   // wins + ½ draws
+    public float Points    { get; init; }   // wins + (0.5 − DrawPenalty) · draws
     public int   Matches   { get; init; }
     public float MarginSum { get; init; }
     public IReadOnlyList<ForgeMatchup> PerOpponent { get; init; } = Array.Empty<ForgeMatchup>();
@@ -212,7 +212,7 @@ public static class FighterForge
         if (rng.NextDouble() < 0.5) a.Damage   = Q(d.Damage   * Uniform(rng, 0.5f, 1.5f));
         if (rng.NextDouble() < 0.5) a.Reach    = Q(d.Reach    * Uniform(rng, 0.5f, 1.5f));
         if (rng.NextDouble() < 0.5) a.MaxRange = Q(d.MaxRange * Uniform(rng, 0.5f, 1.5f));
-        if (rng.NextDouble() < 0.5) a.Windup   = Q(d.Windup   * Uniform(rng, 0.5f, 1.5f));
+        // No Windup gene: the compiler fixes Windup and Recovery per kind.
         return a;
     }
 
@@ -304,12 +304,11 @@ public static class FighterForge
         var d = ActionSpec.Default(a.Kind);
         static float Nudge(Random r, float v, float def)
             => def == 0f ? v : Q(Math.Clamp(v + Gaussian(r) * 0.15f * def, 0.5f * def, 1.5f * def));
-        switch (rng.Next(4))
+        switch (rng.Next(3))
         {
             case 0:  a.Damage   = Nudge(rng, a.Damage,   d.Damage);   break;
             case 1:  a.Reach    = Nudge(rng, a.Reach,    d.Reach);    break;
-            case 2:  a.MaxRange = Nudge(rng, a.MaxRange, d.MaxRange); break;
-            default: a.Windup   = Nudge(rng, a.Windup,   d.Windup);   break;
+            default: a.MaxRange = Nudge(rng, a.MaxRange, d.MaxRange); break;
         }
         return a;
     }
@@ -346,7 +345,7 @@ public static class FighterForge
                     };
                     var r = FighterArena.Run(make(), entries, FighterArena.PlayerPark, settings.Frames, model);
                     int meIdx = meLeft ? 0 : 1, meTeam = meLeft ? 1 : 2;
-                    if      (r.Draw)                 { points += 0.5f; dr++; }
+                    if      (r.Draw)                 { points += FighterCosts.Current.DrawScore; dr++; }
                     else if (r.WinnerTeam == meTeam) { points += 1f;   w++;  }
                     else                             {                 l++;  }
                     margin += r.HealthLeft[meIdx] / MathF.Max(meMax, 1e-3f)

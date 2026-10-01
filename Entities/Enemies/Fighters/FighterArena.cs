@@ -35,19 +35,22 @@ public static class FighterArena
     // its default budget) and registered under the scratch kinds FighterSlot0.. so any
     // spec — hand-written or searched — can fight without an EntityKind of its own.
     // Spawn order is entry order, which fixes ECS iteration order and therefore target
-    // tie-breaks; the same inputs always produce the same result.
+    // tie-breaks; the same inputs always produce the same result. `seed` is the bout
+    // seed each brain's random stream is derived from (ArenaCondition explains it);
+    // the positions in `fighters` are the caller's — a seeded condition's or not.
     public static ArenaResult Run(ChunkMap terrain, IReadOnlyList<ArenaEntry> fighters, Vector2 playerSpawn,
                                   int maxFrames = DefaultMaxFrames, ICostModel model = null,
-                                  List<ulong> checksums = null)
+                                  List<ulong> checksums = null, ulong seed = 0)
     {
         var bots = new EnemyEntity[fighters.Count];
-        var sim  = new Simulation(terrain, playerSpawn, g => Populate(g, fighters, model, bots));
+        var sim  = new Simulation(terrain, playerSpawn, g => Populate(g, fighters, model, bots, seed));
 
         var health = new float[bots.Length];
         var dealt  = new float[bots.Length];
         for (int i = 0; i < bots.Length; i++) health[i] = bots[i].Health;
 
-        int frame = 0;
+        int  frame   = 0;
+        bool decided = false;
         for (; frame < maxFrames; frame++)
         {
             sim.Step(default);
@@ -70,16 +73,23 @@ public static class FighterArena
                     if (bots[j].Team != bots[i].Team && !bots[j].IsDead) dealt[j] += lost / opponents;
             }
 
-            if (TeamsAlive(bots) <= 1) { frame++; break; }
+            if (TeamsAlive(bots) <= 1) { frame++; decided = true; break; }
         }
 
-        return new ArenaResult(Winner(bots, health, fighters), frame, health, dealt);
+        // Only an elimination decides a bout. A timeout is a draw whatever the health
+        // left (plan §11.1): resolving it on margin made "land one hit and hide" the
+        // optimal strategy, and two waves of packages proved it. HealthLeft/DamageDealt
+        // are still reported for the forge's shaped objective and for reading a fight.
+        return new ArenaResult(decided ? Winner(bots, health, fighters) : -1, frame, health, dealt);
     }
 
     // Compile each entry under its slot kind and spawn it, in entry order. Shared by
     // Run and by the in-game fight stage (FightRecord.ToStage), so what you watch is
-    // spawned exactly as what was scored.
-    public static void Populate(Simulation g, IReadOnlyList<ArenaEntry> fighters, ICostModel model, EnemyEntity[] bots = null)
+    // spawned exactly as what was scored. Each brain's random stream is seeded from
+    // the bout seed and its entry index — so a seed names the whole bout, and the two
+    // sides never share a stream.
+    public static void Populate(Simulation g, IReadOnlyList<ArenaEntry> fighters, ICostModel model, EnemyEntity[] bots = null,
+                                ulong seed = 0)
     {
         if (fighters.Count > EntityKinds.FighterSlotCount)
             throw new ArgumentException($"At most {EntityKinds.FighterSlotCount} fighters per match.");
@@ -92,8 +102,9 @@ public static class FighterArena
             var r = FighterCompiler.Register(spec, model);
             if (!r.IsValid)
                 throw new InvalidOperationException($"Fighter '{spec.Name}' is invalid:\n{r.Report()}");
-            var e = EnemyFactory.Create(spec.Kind, fighters[i].Pos);
-            if (bots != null) bots[i] = (EnemyEntity)e;
+            var e = (EnemyEntity)EnemyFactory.Create(spec.Kind, fighters[i].Pos);
+            e.SeedBrain(BrainRandom.Mix(seed, (ulong)i + 1));
+            if (bots != null) bots[i] = e;
             g.SpawnEntity(e);
         }
     }
@@ -111,8 +122,9 @@ public static class FighterArena
         return count;
     }
 
-    // The team with the most health fraction left. A knockout is the degenerate case
-    // (the dead side has 0). Exact tie ⇒ draw (-1).
+    // After an elimination: the team with the most health fraction left (the dead side
+    // has 0, so in a 1v1 this is simply the survivor). Everyone dead on the same frame ⇒
+    // draw (-1). Never called on a timeout.
     private static int Winner(EnemyEntity[] bots, float[] health, IReadOnlyList<ArenaEntry> entries)
     {
         var frac = new Dictionary<int, float>();
@@ -192,4 +204,68 @@ public static class FighterArena
     // Right spawn sits on the hills' two-tile step; the flat/corridor value otherwise.
     public static Vector2 RightSpawnFor(string terrain)
         => terrain == "hills" ? RightSpawn - new Vector2(0f, 2 * Chunk.TileSize) : RightSpawn;
+
+    // A body standing on the ground at column x: 14 px above the top of the first
+    // solid cell at or above the floor row (walked upward from the floor so a roof
+    // never counts). Reproduces LeftSpawn / RightSpawnFor exactly at their columns.
+    public static Vector2 GroundSpawn(ChunkMap map, float x)
+    {
+        int gtx = (int)MathF.Floor(x / Chunk.TileSize);
+        int row = FloorRow;
+        while (row > 0 && map.GetCellState(gtx, row - 1) == TileState.Solid) row--;
+        return new Vector2(x, row * Chunk.TileSize - 14f);
+    }
+
+    // The two sides' entries for a condition, left on team 1, right on team 2 — the
+    // league's and the recorder's convention.
+    public static List<ArenaEntry> Entries(in ArenaCondition c, FighterSpec left, FighterSpec right, ChunkMap map = null)
+    {
+        map ??= AsciiTerrain.FromAscii(TerrainAscii(c.Terrain));
+        return new List<ArenaEntry>
+        {
+            new(left,  c.LeftSpawn(map),  1),
+            new(right, c.RightSpawn(map), 2),
+        };
+    }
+}
+
+// A seeded start (Plans/FIGHTER_DESIGN_PLAN.md §10.2, §11.5): where the two fighters
+// stand, and the seed each brain's random stream is derived from. Seed 0 is the
+// CANONICAL start — the legacy spawns, 180 px apart — so everything that ran before
+// seeds existed still runs the same; any other seed draws the separation
+// (MinSeparation..MaxSeparation) and slides the pair along the fighting ground
+// (±CentreShift). Spawn heights follow the terrain, so on the hills a draw may put
+// either side on a step. The same seed means the same geometry on every terrain and
+// for every pair, which is what makes one seed a "round" of a league.
+//
+// Separation stays under the stock brains' AlertRange (260) so no condition starts
+// with a roster fighter asleep; the ceiling is the arena's, not a brain's.
+public readonly record struct ArenaCondition(string Terrain, ulong Seed, float Separation, float CentreX)
+{
+    public const float MinSeparation = 120f;
+    public const float MaxSeparation = 250f;
+    public const float CentreShift   = 60f;
+
+    public static float CanonicalSeparation => FighterArena.RightSpawn.X - FighterArena.LeftSpawn.X;   // 180
+    public static float CanonicalCentre     => (FighterArena.LeftSpawn.X + FighterArena.RightSpawn.X) * 0.5f;
+
+    public static ArenaCondition Derive(string terrain, ulong seed)
+    {
+        if (seed == 0) return new ArenaCondition(terrain, 0, CanonicalSeparation, CanonicalCentre);
+        ulong s = BrainRandom.Seed(seed);
+        float sep   = MathF.Round(MinSeparation + (MaxSeparation - MinSeparation) * BrainRandom.Unit(ref s));
+        float shift = MathF.Round(-CentreShift + 2f * CentreShift * BrainRandom.Unit(ref s));
+        return new ArenaCondition(terrain, seed, sep, MathF.Round(CanonicalCentre) + shift);
+    }
+
+    public bool IsCanonical => Seed == 0;
+
+    public Vector2 LeftSpawn(ChunkMap map)
+        => IsCanonical ? FighterArena.LeftSpawn : FighterArena.GroundSpawn(map, CentreX - Separation * 0.5f);
+    public Vector2 RightSpawn(ChunkMap map)
+        => IsCanonical ? FighterArena.RightSpawnFor(Terrain) : FighterArena.GroundSpawn(map, CentreX + Separation * 0.5f);
+
+    public override string ToString()
+        => IsCanonical ? $"{Terrain} seed 0 (canonical, {Separation:0} px apart)"
+                       : $"{Terrain} seed {Seed} ({Separation:0} px apart, centre {CentreX:0})";
 }

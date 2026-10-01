@@ -12,8 +12,9 @@ namespace MTile;
 //     terrain probes and cell reads cost energy. An unpaid read is stale.
 //   * Config only on the instance — `init` fields copied from the spec at construction.
 //     Nothing on `this` is ever written in Decide.
-//   * All memory in the BrainScratch handed in by ref (snapshotted). No System.Random,
-//     no statics, no wall clock. Time is s.Dt accumulated in Scratch.
+//   * All memory in the BrainScratch handed in by ref (snapshotted). No System.Random
+//     (noise comes from s.Random(), the bout-seeded snapshotted stream), no statics,
+//     no wall clock. Time is s.Dt accumulated in Scratch.
 //
 // These are the reference brains for the three archetype shapes. A competitive brain
 // is expected to beat them — see Plans/FIGHTER_PACKAGE_GUIDE.md.

@@ -52,6 +52,26 @@ public class FighterArenaTests(ITestOutputHelper output)
                          $"health {a.HealthLeft[0]:F2} / {a.HealthLeft[1]:F2}, dealt {a.DamageDealt[0]:F2} / {a.DamageDealt[1]:F2}");
     }
 
+    // Plan §11.1: only an elimination decides a bout. Cut the same fight one frame
+    // short of its kill and it is a draw, however lopsided the health — the rule that
+    // rotted once (phase 5 shipped "timeout on health" as an interim and two waves of
+    // packages were tuned to it), so it is pinned here.
+    [Fact]
+    public void Timeout_IsADraw_WhateverTheHealthLeft()
+    {
+        var full = Match("flat", FighterRoster.Brick, FighterRoster.Sprinter, FighterArena.DefaultMaxFrames);
+        Assert.False(full.Draw, "Brick vs Sprinter should end in a kill; pick another pair for this test");
+        Assert.True(full.Frames < FighterArena.DefaultMaxFrames);
+
+        var cut = Match("flat", FighterRoster.Brick, FighterRoster.Sprinter, full.Frames - 1);
+        Assert.True(cut.Draw, $"a timeout went to team {cut.WinnerTeam}");
+        Assert.Equal(full.Frames - 1, cut.Frames);
+        Assert.NotEqual(cut.HealthLeft[0], cut.HealthLeft[1]);
+        Assert.True(cut.DamageDealt.Sum() > 0f, "no damage before the cut, so the draw proves nothing");
+        output.WriteLine($"kill at frame {full.Frames} (team {full.WinnerTeam}); cut at {cut.Frames}: draw with " +
+                         $"health {cut.HealthLeft[0]:F2} / {cut.HealthLeft[1]:F2}");
+    }
+
     [Fact]
     public void SwappedSides_IsADifferentMatchButStillDeterministic()
     {

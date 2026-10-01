@@ -30,6 +30,10 @@ namespace MTile;
 //            position coarsened and without a tell. Visible says whether the newest
 //            view is a real sighting.
 //
+//   RANDOM — Random() / Random(lo, hi) / RandomInt(n) / Chance(p): a seeded stream whose
+//            state is snapshotted with the sense memory. Free. The only randomness a
+//            brain may use; the bout seeds it (FighterArena).
+//
 // Determinism: pure functions of sim state plus the entity's snapshotted history and
 // memory. No allocation per frame; one instance per entity, re-armed each Update.
 public struct TerrainProbe
@@ -176,6 +180,32 @@ public sealed class FighterSenses
         return _ctx.Spawner?.Chunks?.GetCellState(gtx, gty) ?? TileState.Empty;
     }
 
+    // ── Random (free) ───────────────────────────────────────────────────────
+    // The one source of randomness a brain may use. A seeded xorshift stream whose
+    // state lives in the snapshotted sense memory, so a rollback rewinds it with
+    // everything else, a replay draws the same numbers, and two identical brains with
+    // different seeds desynchronise. Seeded by the bout (FighterArena.Populate: bout
+    // seed × entry index) or, for a fighter spawned outside the arena, lazily from its
+    // entity id. Never System.Random: that is unsnapshotted state (guide §5).
+
+    // Uniform in [0, 1).
+    public float Random()
+    {
+        ref var mem = ref _self.SenseMem;
+        if (mem.Rng == 0)
+            mem.Rng = BrainRandom.Seed(BrainRandom.Mix((ulong)(uint)_self.Id.Index, (ulong)(uint)_self.Id.Generation));
+        return BrainRandom.Unit(ref mem.Rng);
+    }
+
+    // Uniform in [lo, hi).
+    public float Random(float lo, float hi) => lo + (hi - lo) * Random();
+
+    // Uniform in 0..n-1 (0 when n <= 1).
+    public int RandomInt(int n) => n <= 1 ? 0 : (int)(Random() * n);
+
+    // True with probability p.
+    public bool Chance(float p) => Random() < p;
+
     // ── Internals ───────────────────────────────────────────────────────────
 
     private bool Pay(float cost)
@@ -221,6 +251,40 @@ public sealed class FighterSenses
         p.Headroom = head;
         return p;
     }
+}
+
+// The brain random stream behind FighterSenses.Random: pure functions on a 64-bit
+// state, so the state can sit in a snapshotted struct. splitmix64 to turn a seed (or
+// two) into a well-mixed non-zero state, xorshift64* to step it. Identical on every
+// runtime — integer only, no floating-point until the final scale.
+public static class BrainRandom
+{
+    // A seed's stream state: splitmix64 of the seed, forced non-zero (xorshift's
+    // only fixed point is 0, and 0 doubles as "not seeded yet" in SenseMemory).
+    public static ulong Seed(ulong seed)
+    {
+        ulong z = seed + 0x9E3779B97F4A7C15UL;
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
+        z ^= z >> 31;
+        return z == 0 ? 0x2545F4914F6CDD1DUL : z;
+    }
+
+    // Combine two values into one seed (a bout seed and an entry index, say).
+    public static ulong Mix(ulong a, ulong b) => Seed(a) ^ (Seed(b ^ 0xD1B54A32D192ED03UL) * 0x9E3779B97F4A7C15UL);
+
+    // Advance the state (xorshift64*) and return the next 64 bits.
+    public static ulong Next(ref ulong state)
+    {
+        ulong x = state;
+        x ^= x >> 12; x ^= x << 25; x ^= x >> 27;
+        state = x;
+        return x * 0x2545F4914F6CDD1DUL;
+    }
+
+    // Uniform float in [0, 1): the top 24 bits over 2^24, so every value is exactly
+    // representable and 1.0 is never returned.
+    public static float Unit(ref ulong state) => (Next(ref state) >> 40) * (1f / 16777216f);
 }
 
 // Base class for every fighter brain. The EnemyContext entry is sealed: a fighter

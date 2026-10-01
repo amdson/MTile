@@ -31,6 +31,11 @@ public sealed class FightRecord
     public float             PlayerX     { get; set; }
     public float             PlayerY     { get; set; }
     public int               MaxFrames   { get; set; } = FighterArena.DefaultMaxFrames;
+    // The bout seed (ArenaCondition): what the brains' random streams derive from, and —
+    // when the entries were placed by a condition — what drew the spawn positions
+    // stored above. 0 is the canonical start, so files written before seeds existed
+    // read unchanged.
+    public ulong             Seed        { get; set; }
 
     // What the run produced. Null until recorded.
     public ResultDto         Result      { get; set; }
@@ -64,7 +69,7 @@ public sealed class FightRecord
     // ── Build / run ──────────────────────────────────────────────────────────
 
     public static FightRecord Describe(string terrainName, IReadOnlyList<ArenaEntry> entries, Vector2 playerSpawn,
-                                       int maxFrames = FighterArena.DefaultMaxFrames)
+                                       int maxFrames = FighterArena.DefaultMaxFrames, ulong seed = 0)
     {
         var r = new FightRecord
         {
@@ -72,9 +77,23 @@ public sealed class FightRecord
             PlayerX   = playerSpawn.X,
             PlayerY   = playerSpawn.Y,
             MaxFrames = maxFrames,
+            Seed      = seed,
         };
         foreach (var e in entries)
             r.Entries.Add(new EntryDto { Spec = FighterSpecDto.From(e.Spec), X = e.Pos.X, Y = e.Pos.Y, Team = e.Team });
+        return r;
+    }
+
+    // A seeded 1v1 on a named terrain: the condition the seed draws places the two
+    // fighters (left team 1, right team 2) and the player is parked at the arena's
+    // spot. What the league and --record-fight build.
+    public static FightRecord Describe(string terrainName, FighterSpec left, FighterSpec right, ulong seed,
+                                       int maxFrames = FighterArena.DefaultMaxFrames)
+    {
+        var cond = ArenaCondition.Derive(terrainName, seed);
+        var map  = AsciiTerrain.FromAscii(FighterArena.TerrainAscii(terrainName));
+        var r = Describe(terrainName, FighterArena.Entries(in cond, left, right, map), FighterArena.PlayerPark, maxFrames, seed);
+        r.Notes = cond.ToString();
         return r;
     }
 
@@ -86,7 +105,7 @@ public sealed class FightRecord
         var sums    = new List<ulong>();
         var entries = BuildEntries();
         instrument?.Invoke(entries);
-        var res  = FighterArena.Run(BuildTerrain(), entries, PlayerSpawn, MaxFrames, model, sums);
+        var res  = FighterArena.Run(BuildTerrain(), entries, PlayerSpawn, MaxFrames, model, sums, Seed);
         Result    = new ResultDto { WinnerTeam = res.WinnerTeam, Frames = res.Frames,
                                     HealthLeft = res.HealthLeft, DamageDealt = res.DamageDealt };
         Checksums = sums;
@@ -98,7 +117,7 @@ public sealed class FightRecord
     public ReplayReport Replay(ICostModel model = null)
     {
         var sums = new List<ulong>();
-        var res  = FighterArena.Run(BuildTerrain(), BuildEntries(), PlayerSpawn, MaxFrames, model, sums);
+        var res  = FighterArena.Run(BuildTerrain(), BuildEntries(), PlayerSpawn, MaxFrames, model, sums, Seed);
         int first = -1;
         int n = Math.Min(sums.Count, Checksums.Count);
         for (int i = 0; i < n; i++)
@@ -133,7 +152,7 @@ public sealed class FightRecord
             Name        = "fight",
             Terrain     = BuildTerrain,
             PlayerSpawn = PlayerSpawn,
-            Populate    = g => FighterArena.Populate(g, BuildEntries(), model, bots),
+            Populate    = g => FighterArena.Populate(g, BuildEntries(), model, bots, Seed),
         };
 
     // ── Disk ─────────────────────────────────────────────────────────────────
@@ -162,7 +181,8 @@ public sealed class FightRecord
         string res = Result == null ? "unrecorded"
             : Result.WinnerTeam < 0 ? $"draw after {Result.Frames} frames"
             : $"team {Result.WinnerTeam} wins after {Result.Frames} frames";
-        return $"{string.Join(" vs ", names)} on {Terrain.Name}: {res}";
+        string seed = Seed == 0 ? "" : $" (seed {Seed})";
+        return $"{string.Join(" vs ", names)} on {Terrain.Name}{seed}: {res}";
     }
 }
 

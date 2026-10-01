@@ -14,7 +14,8 @@ namespace MTile;
 //   * Spec() returns a FRESH FighterSpec each call (the arena mutates Kind/Team on it).
 //     Its Brain must build a FighterController subclass defined in the same file: the
 //     only view of the world a brain gets is FighterSenses, and all its memory lives in
-//     the BrainScratch passed by ref. No statics, no System.Random, no wall clock.
+//     the BrainScratch passed by ref. No statics, no System.Random (randomness is
+//     FighterSenses.Random, seeded by the bout and snapshotted), no wall clock.
 //   * The spec must compile under FighterCosts.DefaultBudget (FighterCompiler.Compile
 //     with zero violations) — FighterPackageTests enforces it for every package found.
 public interface IFighterPackage

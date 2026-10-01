@@ -18,7 +18,7 @@ public sealed class FighterSpec
 
     // ── Attributes (§3.2) — each is a buy with a physical consequence ──────────
     public float Health        = 3f;
-    public float Strength      = 1f;   // damage scale on every action's hitbox
+    public float Strength      = 1f;   // damage scale on melee hitboxes (not projectiles)
     public float Armor         = 0f;   // knockback divisor beyond mass
     public float EnergyReserve = 0f;   // EnemyEntity.EnergyMax
     public float EnergyRegen   = 0f;   // units per second
@@ -51,7 +51,8 @@ public sealed class FighterSpec
     // ── Brain (§5) ────────────────────────────────────────────────────────────
     // A factory so the brain can copy the spec's config below into itself. The result
     // must be a stateless flyweight: every piece of per-entity memory in
-    // ctx.Self.Scratch, no System.Random, no statics, no wall clock.
+    // ctx.Self.Scratch, no System.Random (FighterSenses.Random is the seeded,
+    // snapshotted stream), no statics, no wall clock.
     public required Func<FighterSpec, EnemyController> Brain;
 
     // BrainConfig (§8.3): the floats a bundled brain reads, so a designer — human or

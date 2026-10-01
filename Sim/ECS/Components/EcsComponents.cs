@@ -96,6 +96,10 @@ public struct SenseMemory
     public TerrainProbe Probe;         // last paid probe
     public int          ProbeFrame;
     public int          ProbeDir;      // the direction it was asked for (+1 / -1)
+    // The brain's seeded random stream (FighterSenses.Random): one 64-bit xorshift
+    // state, seeded by the bout (FighterArena) or lazily from the entity id. Lives here
+    // so a rollback rewinds the stream with everything else; 0 = not seeded yet.
+    public ulong        Rng;
 }
 
 // Everything an Entity needs snapshotted EXCEPT its body pose (BodyStateComp) and its

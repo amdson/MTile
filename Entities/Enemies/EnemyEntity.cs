@@ -92,6 +92,10 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     // the senses last paid for.
     public TargetHistory Targets;
     public SenseMemory   SenseMem;
+    // Seed the brain's random stream (FighterSenses.Random). The arena calls this at
+    // spawn with a seed derived from the bout; left unseeded, the stream seeds itself
+    // from the entity id on first use. Snapshotted with the sense memory.
+    public void SeedBrain(ulong seed) => SenseMem.Rng = BrainRandom.Seed(seed);
     // The sensing boundary a FighterController brain reads through. One per entity.
     public FighterSenses Senses => _senses ??= new FighterSenses(this);
     private FighterSenses _senses;
