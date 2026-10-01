@@ -67,6 +67,21 @@ Windup / active / recovery are **free**: shorter windups are harder to read, but
 opponents can read them (below), so it is a bet, not a freebie. Projectiles from
 different teams **destroy each other** on contact.
 
+**The ordering rule, worked.** For every melee-band action the compiler checks
+`effective reach > MaxRange > EngageRange`, with the reach measured on YOUR body
+(geometry × Radius / 12). `FighterCompiler.EffectiveReach`:
+
+| Kind | Effective reach (centre to centre) |
+|---|---|
+| Melee | `8 + Reach·k + 6` |
+| Lunge | `Speed·Active + HalfWidth·k + 6` |
+| Lash | `Reach·k + 6` |
+
+where `k = Radius / 12` and 6 is the assumed target half-width. A stock lunge (speed 260,
+active 0.25, half-width 12) on a 10 px body reaches `65 + 10 + 6 = 81`, so its
+`MaxRange` must be under 81 — the default 90 is refused. Compute your radius first
+(`CompileResult.Blueprint.Radius`, or `11·√(Mass/Density)`), then set the bands.
+
 ## 3. What your brain can know (`FighterSenses`)
 
 Your brain's only input is a `FighterSenses` and a `ref BrainScratch` (4 floats, 2 ints —
