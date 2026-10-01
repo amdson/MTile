@@ -51,6 +51,9 @@ public sealed class GameConfig
     public bool DebugDrawCObstacles         { get; set; } = false;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
+    // Small name labels floating above named enemies (compiled fighters); the stock
+    // roster has no name and is never labelled.
+    public bool DrawFighterNames           { get; set; } = true;
     // Frame-time probe: worst CPU ms per section over the last 60 frames (sim step
     // loop / cosmetics+animator / draw submit), particle + entity counts, and a
     // CATCH-UP marker whenever MonoGame reports IsRunningSlowly (fixed-timestep

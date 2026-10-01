@@ -119,6 +119,8 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     // Read by EnemyMovementState.CheckPreConditions to detect "an attack is mid-flight"
     // — the only cross-FSM channel, mirroring MovementModifiers from player code.
     public bool IsActionCommitted => _currentAction >= 0 && _actionVars.Committed;
+    // Overlay label (a compiled fighter's name); null = unlabelled. Render-only.
+    public virtual string DisplayName => null;
 
     // True while the currently-selected movement state is a stagger interrupt.
     // Action FSM checks this so a recovering brute can't immediately swing or

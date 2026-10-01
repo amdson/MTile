@@ -231,6 +231,7 @@ public static class FighterCompiler
         return new EnemyBlueprint
         {
             Kind         = spec.Kind,
+            Name         = spec.Name,
             Radius       = DerivedRadius(total.Mass, spec),
             Sides        = spec.Sides,
             Health       = spec.Health,

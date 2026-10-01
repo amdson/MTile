@@ -1354,6 +1354,8 @@ public class Game1 : Game
 
         long tHud = _prof.Begin();
         _hud.Draw(_sim, _animator);
+        if (_config.DrawFighterNames)
+            FightHud.DrawNameLabels(_spriteBatch, _debugFont, camTransform, _sim.Entities);
         if (_fight != null)
         {
             FightHud.DrawWorld(_spriteBatch, _pixel, camTransform, _fightBots);

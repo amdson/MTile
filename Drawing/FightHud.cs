@@ -1,3 +1,4 @@
+using System;
 using System.Text;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
@@ -89,6 +90,25 @@ public static class FightHud
             sb.Draw(pixel, new Rectangle((int)p.X, (int)p.Y, (int)(w * frac), (int)h), TeamColor(b.Team));
         }
         sb.End();
+    }
+
+    // Small name labels above every live named enemy (EnemyEntity.DisplayName: compiled
+    // fighters). Drawn in screen space at the font's own size, so they stay small at any
+    // camera zoom; anchored a few world px above the body (clear of the health bar).
+    public static void DrawNameLabels(SpriteBatch sb, SpriteFont font, Matrix camTransform,
+                                      System.Collections.Generic.IEnumerable<Entity> entities)
+    {
+        bool begun = false;
+        foreach (var e in entities)
+        {
+            if (e.IsDead || e is not EnemyEntity en || en.DisplayName is not { Length: > 0 } name) continue;
+            if (!begun) { sb.Begin(); begun = true; }
+            var anchor = Vector2.Transform(e.Body.Position - new Vector2(0f, e.Body.Bounds.Height / 2f + 8f), camTransform);
+            var size   = font.MeasureString(name);
+            var pos    = new Vector2(MathF.Round(anchor.X - size.X / 2f), MathF.Round(anchor.Y - size.Y));
+            Shadowed(sb, font, name, pos, Color.White * 0.9f);
+        }
+        if (begun) sb.End();
     }
 
     private static string TargetName(EnemyEntity b, EnemyEntity[] bots, FightRecord fight, Simulation sim)

@@ -25,6 +25,9 @@ public sealed class EnemyBlueprint
     // dispatches on it — two blueprints sharing a Kind would clobber each
     // other in the registry.
     public required EntityKind Kind { get; init; }
+    // Display name for overlays (a fighter's spec name). Null for the stock roster,
+    // which is not labelled. Render-only: nothing in the sim reads it.
+    public string Name { get; init; }
 
     // ── Body / physics ──────────────────────────────────────────────────────
     public float Radius        { get; init; } = 12f;
@@ -116,6 +119,7 @@ public sealed class BlueprintEnemy : EnemyEntity
     private readonly EnemyBlueprint _bp;
 
     public override EntityKind Kind => _bp.Kind;
+    public override string DisplayName => _bp.Name;
 
     public BlueprintEnemy(EnemyBlueprint blueprint, Vector2 pos)
         : base(new PhysicsBody(Polygon.CreateRegular(blueprint.Radius, blueprint.Sides), pos),
