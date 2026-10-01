@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -41,23 +42,59 @@ public readonly struct EnemyTarget
     // The target's body AABB this frame, for actions that must not build into it.
     public readonly BoundingBox Bounds;
 
+    // ── The tell (FIGHTER_DESIGN_PLAN §16, "readable telegraphs") ───────────
+    // What the target is visibly doing: the pool-action kind it is winding up or
+    // swinging (Special for a bespoke action or a player), how far through the windup
+    // it is (0..1; 1 ⇒ active; <0 ⇒ no action), the aim it locked, and its facing. A
+    // brain that reads this can dodge; one that reads it late (reaction frames) cannot.
+    public readonly ActionKind Tell;
+    public readonly float      TellProgress;
+    public readonly Vector2    TellAim;
+    public readonly int        Facing;
+    // False for the empty value — a history slot nothing has been written to yet.
+    public readonly bool       Known;
+
     public EnemyTarget(EntityId id, Vector2 position, Vector2 velocity, float health, int team, bool isPlayer,
-                       BoundingBox bounds = default)
+                       BoundingBox bounds = default,
+                       ActionKind tell = ActionKind.Special, float tellProgress = -1f, Vector2 tellAim = default,
+                       int facing = 1)
     {
-        Id       = id;
-        Position = position;
-        Velocity = velocity;
-        Health   = health;
-        Team     = team;
-        IsPlayer = isPlayer;
-        Bounds   = bounds;
+        Id           = id;
+        Position     = position;
+        Velocity     = velocity;
+        Health       = health;
+        Team         = team;
+        IsPlayer     = isPlayer;
+        Bounds       = bounds;
+        Tell         = tell;
+        TellProgress = tellProgress;
+        TellAim      = tellAim;
+        Facing       = facing;
+        Known        = true;
     }
 
     public static EnemyTarget Of(PlayerCharacter p) =>
-        new(p.Id, p.Body.Position, p.Body.Velocity, p.Health, p.Team, isPlayer: true, p.Body.Bounds);
+        new(p.Id, p.Body.Position, p.Body.Velocity, p.Health, p.Team, isPlayer: true, p.Body.Bounds,
+            facing: p.Facing == 0 ? 1 : p.Facing);
 
-    public static EnemyTarget Of(Entity e) =>
-        new(e.Id, e.Body.Position, e.Body.Velocity, e.Health, e.Team, isPlayer: false, e.Body.Bounds);
+    public static EnemyTarget Of(Entity e) => e is EnemyEntity en
+        ? new(e.Id, e.Body.Position, e.Body.Velocity, e.Health, e.Team, isPlayer: false, e.Body.Bounds,
+              en.TellKind, en.TellProgress, en.TellAim, en.Facing)
+        : new(e.Id, e.Body.Position, e.Body.Velocity, e.Health, e.Team, isPlayer: false, e.Body.Bounds);
+
+    // The coarse view a fighter gets for free: position snapped to a grid, no velocity,
+    // no tell. Health and team survive — a brain can always tell whether it is winning.
+    public EnemyTarget Coarse(float quantPx)
+    {
+        float q = MathF.Max(quantPx, 1f);
+        var p = new Vector2(MathF.Floor(Position.X / q) * q + q * 0.5f, MathF.Floor(Position.Y / q) * q + q * 0.5f);
+        return new EnemyTarget(Id, p, Vector2.Zero, Health, Team, IsPlayer, default);
+    }
+
+    // The same target as last seen at `pos`, with nothing current about it — what a
+    // hidden target looks like to a fighter that did not buy memory.
+    public EnemyTarget Frozen(Vector2 pos)
+        => new(Id, pos, Vector2.Zero, Health, Team, IsPlayer, default);
 }
 
 // "Who should `self` be fighting?" Implemented by Simulation. Must be a pure function

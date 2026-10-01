@@ -48,19 +48,22 @@ public class FighterCostTests(ITestOutputHelper output)
     [Fact]
     public void BruteShapedBody_CompilesToTheBrutesMass()
     {
-        // The coefficient anchor from FighterCosts.cs: Radius 12, 3 HP, a stock melee,
-        // a 70 px/s walk and a ~260 px/s jump should weigh what BruteEnemy weighs.
+        // The coefficient anchor from FighterCosts.cs: 3 HP, a stock melee, a 70 px/s
+        // walk and a ~260 px/s jump at the default reaction time. Since §16 the body term
+        // is gone (radius is derived from mass), so the anchor is the Brute's 1.2 minus
+        // its 0.36 body term; the derived radius at Density 1 is then ≈ 11·√0.84 ≈ 10 px.
         var brute = new FighterSpec
         {
             Name = "BruteAnchor", Kind = EntityKind.FighterSlot0,
-            Radius = 12f, Health = 3f, GroundPower = 100f, JumpImpulse = 312f,
+            Health = 3f, GroundPower = 100f, JumpImpulse = 312f,
             Actions = { ActionSpec.Default(ActionKind.Melee) },
             Brain = s => new FighterCloserBrain(s),
         };
         var r = Compile(brute);
         output.WriteLine(r.Report());
         Assert.Empty(r.Violations);
-        Assert.InRange(r.Total.Mass, 1.15f, 1.25f);
+        Assert.InRange(r.Total.Mass, 0.80f, 0.90f);
+        Assert.InRange(r.Blueprint.Radius, 9.5f, 10.5f);
     }
 
     // ── Hard constraints (§3.2) ──────────────────────────────────────────────
@@ -266,8 +269,8 @@ public class FighterCostTests(ITestOutputHelper output)
         Assert.True(brick.Total.Mass > sprint.Total.Mass,
             $"Brick {brick.Total.Mass:F3} should outweigh Sprinter {sprint.Total.Mass:F3}");
 
-        float dBrick  = Walk(EntityKind.Brick,    13f, 30);
-        float dSprint = Walk(EntityKind.Sprinter,  9f, 30);
+        float dBrick  = Walk(EntityKind.Brick,    brick.Blueprint.Radius,  30);
+        float dSprint = Walk(EntityKind.Sprinter, sprint.Blueprint.Radius, 30);
         output.WriteLine($"30 frames: Brick {dBrick:F1} px, Sprinter {dSprint:F1} px");
         Assert.True(dBrick > 0f, "the Brick never walked toward the player");
         Assert.True(dSprint > dBrick * 1.5f,

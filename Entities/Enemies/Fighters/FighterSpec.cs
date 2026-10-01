@@ -28,7 +28,12 @@ public sealed class FighterSpec
     public bool  Cling         = false;
     public bool  TargetMemory  = false;
     public bool  Rooted        = false;
-    public float Radius        = 12f;
+    // Body size is DERIVED (§16): Radius = RadiusPerSqrtMass · √(Mass / Density). Dense is
+    // small and hard to hit and costs mass above 1; below 1 is free.
+    public float Density       = 1f;
+    // Frames of latency on the exact sensing read (§16). Fewer than the config default
+    // costs mass; the floor is 0, the ceiling TargetHistory.Capacity - 1.
+    public int   ReactionFrames = 6;
     public int   Sides         = 6;
     // Which side it fights for (plan §5.3). Every stock enemy is team 2; the arena
     // assigns others. Copied onto EnemyBlueprint.Team once the phase-4 targeting work

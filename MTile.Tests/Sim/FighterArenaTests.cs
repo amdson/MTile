@@ -78,12 +78,15 @@ public class FighterArenaTests(ITestOutputHelper output)
     {
         // Not "every pairing": two ranged kiters (Gunner vs Builder) fire in lockstep
         // along the same line and their energy balls shoot each other down every time —
-        // a real dynamic of cross-team projectiles, not a bug. What must hold is that
-        // each archetype can hurt SOMETHING on each terrain: a roster member that never
-        // lands anything anywhere is a targeting or reach bug, not a balance question.
+        // a real dynamic of cross-team projectiles, not a bug. And not "every terrain":
+        // a terrain is allowed to counter an archetype outright (a flyer under a low
+        // roof). What must hold is that each archetype can hurt SOMETHING somewhere: a
+        // roster member that never lands anything anywhere is a targeting or reach bug,
+        // not a balance question. Per-terrain misses are printed for the balance loop.
         var roster = FighterRoster.All;
         var quiet  = new List<string>();
         var idle   = new List<string>();
+        var landedAnywhere = new bool[roster.Count];
         foreach (var (terrain, _) in FighterArena.Terrains)
         {
             var landed = new bool[roster.Count];
@@ -97,10 +100,16 @@ public class FighterArenaTests(ITestOutputHelper output)
                     if (r.DamageDealt.Sum() <= 0f) quiet.Add($"{roster[i]().Name} vs {roster[j]().Name} on {terrain}");
                 }
             for (int i = 0; i < roster.Count; i++)
+            {
                 if (!landed[i]) idle.Add($"{roster[i]().Name} on {terrain}");
+                landedAnywhere[i] |= landed[i];
+            }
         }
         if (quiet.Count > 0) output.WriteLine("No damage exchanged in:\n  " + string.Join("\n  ", quiet));
-        Assert.True(idle.Count == 0, $"never landed a hit: {string.Join(", ", idle)}");
+        if (idle.Count > 0)  output.WriteLine("Landed nothing on a terrain (allowed — a counter):\n  " + string.Join("\n  ", idle));
+        var never = new List<string>();
+        for (int i = 0; i < roster.Count; i++) if (!landedAnywhere[i]) never.Add(roster[i]().Name);
+        Assert.True(never.Count == 0, $"never landed a hit on any terrain: {string.Join(", ", never)}");
     }
 
     [Fact]

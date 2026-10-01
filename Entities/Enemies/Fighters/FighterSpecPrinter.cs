@@ -25,7 +25,8 @@ public static class FighterSpecPrinter
         sb.AppendLine("    {");
         Line(sb, "Name",          $"\"{name}\"");
         sb.AppendLine($"        {"Kind".PadRight(18)} = EntityKind.{s.Kind},   // TODO: give it its own EntityKind");
-        Line(sb, "Radius",        F(s.Radius));
+        Line(sb, "Density",       F(s.Density));
+        Line(sb, "ReactionFrames", s.ReactionFrames.ToString());
         Line(sb, "Sides",         I(s.Sides));
         Line(sb, "Health",        F(s.Health));
         Line(sb, "Strength",      F(s.Strength));

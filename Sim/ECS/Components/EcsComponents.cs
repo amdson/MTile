@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -42,6 +43,59 @@ public struct BrainScratch
 {
     public float F0, F1, F2, F3;
     public int   I0, I1;
+}
+
+// A fighter's recent views of its target, newest first, for reaction latency
+// (FIGHTER_DESIGN_PLAN §16): FighterSenses serves the entry ReactionFrames back. Fixed
+// eight slots as plain fields so the snapshot stays a flat value copy; Count is how many
+// are filled, Head the index of the newest.
+public struct TargetHistory
+{
+    public const int Capacity = 8;
+    public EnemyTarget T0, T1, T2, T3, T4, T5, T6, T7;
+    public int Head, Count;
+
+    public void Push(in EnemyTarget t)
+    {
+        Head = (Head + 1) % Capacity;
+        Set(Head, t);
+        if (Count < Capacity) Count++;
+    }
+
+    // The view `back` frames ago (0 = newest). Clamped to what has been recorded, so a
+    // fresh fighter with a long reaction time sees its oldest frame rather than nothing.
+    public readonly EnemyTarget Back(int back)
+    {
+        if (Count == 0) return default;
+        back = Math.Clamp(back, 0, Count - 1);
+        return Get(((Head - back) % Capacity + Capacity) % Capacity);
+    }
+
+    private void Set(int i, in EnemyTarget t)
+    {
+        switch (i)
+        {
+            case 0: T0 = t; break; case 1: T1 = t; break; case 2: T2 = t; break; case 3: T3 = t; break;
+            case 4: T4 = t; break; case 5: T5 = t; break; case 6: T6 = t; break; default: T7 = t; break;
+        }
+    }
+
+    private readonly EnemyTarget Get(int i) => i switch
+    {
+        0 => T0, 1 => T1, 2 => T2, 3 => T3, 4 => T4, 5 => T5, 6 => T6, _ => T7,
+    };
+}
+
+// What a fighter's senses last BOUGHT (FIGHTER_DESIGN_PLAN §16): an unpaid query
+// returns these with their age instead of nothing, so an empty meter degrades a
+// fighter's picture of the fight rather than blinding it.
+public struct SenseMemory
+{
+    public EnemyTarget  Target;        // last paid exact read
+    public int          TargetFrame;   // entity frame it was bought on (-1 ⇒ never)
+    public TerrainProbe Probe;         // last paid probe
+    public int          ProbeFrame;
+    public int          ProbeDir;      // the direction it was asked for (+1 / -1)
 }
 
 // Everything an Entity needs snapshotted EXCEPT its body pose (BodyStateComp) and its
@@ -122,6 +176,15 @@ public struct EntityData
     public BrainScratch Scratch;
     public float        Energy;
     public float        EnergyMax;
+    // Fighter perception (FIGHTER_DESIGN_PLAN §16): the target views the senses serve
+    // from, and what was last paid for.
+    public TargetHistory Targets;
+    public SenseMemory   Senses;
+    // EnemyEntity's own Update counter. Brains derive time from it (PatrolController's
+    // square wave) and the sense memory stamps reads with it, so it has to rewind with
+    // everything else — it did not before §16, which was a latent rollback divergence
+    // for every patrolling bird.
+    public int           EnemyFrame;
 
     // Projectile subtype state
     public int                 HitId;

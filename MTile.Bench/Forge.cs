@@ -61,7 +61,7 @@ internal static class Forge
                               $"[{r.Accepted}/{r.Evaluations - 1} steps kept]  " +
                               $"{FighterSpecPrinter.BrainClass(r.End.Brain)}, {sp.Actions.Count} actions " +
                               $"({string.Join(", ", sp.Actions.ConvertAll(a => a.Kind.ToString()))}), " +
-                              $"R {sp.Radius:0.#} HP {sp.Health:0.#}   ({sw.Elapsed.TotalSeconds:F0}s)");
+                              $"D {sp.Density:0.#} HP {sp.Health:0.#}   ({sw.Elapsed.TotalSeconds:F0}s)");
         });
         sw.Stop();
 

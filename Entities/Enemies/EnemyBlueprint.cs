@@ -74,6 +74,10 @@ public sealed class EnemyBlueprint
     public float Thrust        { get; init; }
     // Meter units per second spent while EnemyFlyState is active. 0 ⇒ flight is free.
     public float FlightDrain   { get; init; }
+    // Perception (§16): frames of reaction latency on a fighter's exact reads, and
+    // whether a hidden target is tracked coarsely (bought memory) or frozen.
+    public int   ReactionFrames  { get; init; }
+    public bool  RemembersTarget { get; init; }
 
     // Chosen so a stock-feeling walk (70 px/s) is GroundPower ≈ 100 (70² × 0.02 = 98).
     public const float DefaultGroundDrag = 0.02f;
@@ -137,6 +141,8 @@ public sealed class BlueprintEnemy : EnemyEntity
         JumpImpulse        = blueprint.JumpImpulse;
         Thrust             = blueprint.Thrust;
         FlightDrain        = blueprint.FlightDrain;
+        ReactionFrames     = blueprint.ReactionFrames;
+        RemembersTarget    = blueprint.RemembersTarget;
         Color              = blueprint.Color;
         Sprite             = blueprint.Sprite(blueprint.Radius);
     }

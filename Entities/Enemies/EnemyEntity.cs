@@ -82,6 +82,32 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     // controller instance — see EnemyController. Snapshotted as a flat value.
     public BrainScratch Scratch;
 
+    // ── Perception (Plans/FIGHTER_DESIGN_PLAN.md §16) ───────────────────────
+    // Construction-time: how many frames late a fighter's exact reads are, and whether
+    // a hidden target is tracked coarsely through terrain (bought TargetMemory) or
+    // frozen where it was last seen.
+    public int  ReactionFrames  { get; set; }
+    public bool RemembersTarget { get; set; }
+    // Snapshotted: the ring of recent target views the senses serve from, and what
+    // the senses last paid for.
+    public TargetHistory Targets;
+    public SenseMemory   SenseMem;
+    // The sensing boundary a FighterController brain reads through. One per entity.
+    public FighterSenses Senses => _senses ??= new FighterSenses(this);
+    private FighterSenses _senses;
+
+    // Half-extent of the body polygon — what the senses report as Radius.
+    public float BodyRadius => Body.Bounds.Width * 0.5f;
+
+    // The tell: what this enemy is visibly doing, for an opponent's EnemyTarget.
+    // Kind of the running pool action (Special for a bespoke one or none), windup
+    // progress 0..1 (1 once active, -1 while idle), and the aim it locked at Enter.
+    public ActionKind TellKind     => _currentAction >= 0 ? _actions[_currentAction].Spec.Kind : ActionKind.Special;
+    public float      TellProgress => _currentAction < 0 ? -1f
+        : _actionVars.WindupDuration <= 0f ? 1f
+        : MathF.Min(1f, _actionVars.TimeInState / _actionVars.WindupDuration);
+    public Vector2    TellAim      => _actionVars.LockedAim;
+
     // Armor is "mass that only counts for shoves" — it widens the knockback
     // divisor without touching the physics mass.
     protected override float KnockbackMass => Mass + Armor;
@@ -189,6 +215,13 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         // Pre-input context — Facing/Input intentionally unset; the controller
         // doesn't read them (it produces them).
         UpdateTargetMemory(dt, target.Position, prevTarget, spawner);
+        // What this frame's view of the target looks like to the senses: the real
+        // thing while in sight; otherwise the last-seen point frozen (no velocity, no
+        // tell), or — with TargetMemory bought — the live position coarsened. Pushed
+        // every frame so reaction latency has a continuous ring to read back through.
+        Targets.Push(_playerVisible ? target
+                   : RemembersTarget ? target.Coarse(FighterCosts.Current.CoarseQuantPx)
+                   : target.Frozen(_lastSeenPos));
         // Meter regen runs before the brain so what it reads is what it can spend
         // this frame. Clamped — no overfill from a regen tick landing on a full bar.
         if (EnergyRegen > 0f && Energy < EnergyMax)
@@ -433,6 +466,9 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         s.Scratch      = Scratch;
         s.Energy       = Energy;
         s.EnergyMax    = EnergyMax;
+        s.Targets      = Targets;
+        s.Senses       = SenseMem;
+        s.EnemyFrame   = _frame;
     }
 
     protected override void ReadState(in EntityData s)
@@ -455,6 +491,9 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         Scratch                  = s.Scratch;
         Energy                   = s.Energy;
         EnergyMax                = s.EnergyMax;
+        Targets                  = s.Targets;
+        SenseMem                 = s.Senses;
+        _frame                   = s.EnemyFrame;
 
         // Re-derive durations from the flyweight so Draw / phase math reads the
         // same Windup/Active/Recovery values the live action would have stamped

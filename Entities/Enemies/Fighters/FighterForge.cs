@@ -127,7 +127,8 @@ public static class FighterForge
         new("GroundPower",        0f,    400f, s => s.GroundPower,        (s, v) => s.GroundPower = v),
         new("JumpImpulse",        0f,    600f, s => s.JumpImpulse,        (s, v) => s.JumpImpulse = v),
         new("Thrust",             0f,    1500f,s => s.Thrust,             (s, v) => s.Thrust = v),
-        new("Radius",             7f,    15f,  s => s.Radius,             (s, v) => s.Radius = v),
+        new("Density",            0.5f,  3f,   s => s.Density,            (s, v) => s.Density = v),
+        new("ReactionFrames",     0f,    7f,   s => s.ReactionFrames,     (s, v) => s.ReactionFrames = (int)MathF.Round(v)),
         new("EngageRange",        0f,    300f, s => s.EngageRange,        (s, v) => s.EngageRange = v),
         new("StandoffRange",      0f,    200f, s => s.StandoffRange,      (s, v) => s.StandoffRange = v),
         new("HoverHeight",        20f,   140f, s => s.HoverHeight,        (s, v) => s.HoverHeight = v),
@@ -164,7 +165,8 @@ public static class FighterForge
         s.Health        = Q(Uniform(rng, 1f, 8f));
         s.Strength      = rng.NextDouble() < 0.5 ? 1f : Q(Uniform(rng, 0.5f, 1.8f));
         s.Armor         = rng.NextDouble() < 0.6 ? 0f : Q(Uniform(rng, 0f, 1.5f));
-        s.Radius        = Q(Uniform(rng, 8f, 14f));
+        s.Density       = Q(Uniform(rng, 0.6f, 2.5f));
+        s.ReactionFrames = rng.Next(0, TargetHistory.Capacity);
         s.EnergyReserve = rng.NextDouble() < 0.2 ? 0f : Q(Uniform(rng, 1f, 20f));
         s.EnergyRegen   = s.EnergyReserve <= 0f ? 0f : Q(Uniform(rng, 0f, 2.5f));
 
@@ -437,7 +439,7 @@ public static class FighterForge
         EnergyReserve = s.EnergyReserve, EnergyRegen = s.EnergyRegen,
         GroundPower = s.GroundPower, JumpImpulse = s.JumpImpulse, Thrust = s.Thrust,
         Cling = s.Cling, TargetMemory = s.TargetMemory, Rooted = s.Rooted,
-        Radius = s.Radius, Sides = s.Sides, Team = s.Team,
+        Density = s.Density, ReactionFrames = s.ReactionFrames, Sides = s.Sides, Team = s.Team,
         Color = s.Color, Sprite = s.Sprite,
         Actions = new List<ActionSpec>(s.Actions),
         Brain = BrainFactory(brain),

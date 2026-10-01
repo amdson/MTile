@@ -179,7 +179,8 @@ public sealed class FighterSpecDto
     public bool   Cling         { get; set; }
     public bool   TargetMemory  { get; set; }
     public bool   Rooted        { get; set; }
-    public float  Radius        { get; set; }
+    public float  Density       { get; set; } = 1f;
+    public int    ReactionFrames { get; set; } = 6;
     public int    Sides         { get; set; }
     public int    Team          { get; set; }
     public byte[] Color         { get; set; } = new byte[3];
@@ -199,7 +200,7 @@ public sealed class FighterSpecDto
         EnergyReserve = s.EnergyReserve, EnergyRegen = s.EnergyRegen,
         GroundPower = s.GroundPower, JumpImpulse = s.JumpImpulse, Thrust = s.Thrust,
         Cling = s.Cling, TargetMemory = s.TargetMemory, Rooted = s.Rooted,
-        Radius = s.Radius, Sides = s.Sides, Team = s.Team,
+        Density = s.Density, ReactionFrames = s.ReactionFrames, Sides = s.Sides, Team = s.Team,
         Color = new[] { s.Color.R, s.Color.G, s.Color.B },
         Brain = BrainOf(s).ToString(),
         EngageRange = s.EngageRange, StandoffRange = s.StandoffRange, HoverHeight = s.HoverHeight,
@@ -217,7 +218,7 @@ public sealed class FighterSpecDto
             EnergyReserve = EnergyReserve, EnergyRegen = EnergyRegen,
             GroundPower = GroundPower, JumpImpulse = JumpImpulse, Thrust = Thrust,
             Cling = Cling, TargetMemory = TargetMemory, Rooted = Rooted,
-            Radius = Radius, Sides = Sides, Team = Team,
+            Density = Density, ReactionFrames = ReactionFrames, Sides = Sides, Team = Team,
             Color = Color != null && Color.Length >= 3 ? new Color(Color[0], Color[1], Color[2]) : new Color(150, 30, 30),
             Brain = FighterForge.BrainFactory(brain),
             EngageRange = EngageRange, StandoffRange = StandoffRange, HoverHeight = HoverHeight,

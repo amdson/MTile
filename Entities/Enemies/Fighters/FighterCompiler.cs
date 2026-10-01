@@ -93,7 +93,9 @@ public static class FighterCompiler
             violations.Add($"PreferredAction {spec.PreferredAction} is out of range " +
                            $"(the kit has {spec.Actions.Count} actions).");
         violations.AddRange(model.Validate(spec, total));
-        violations.AddRange(ValidateOrdering(spec));
+        // The ordering rule is checked against the reach the compiled body will actually
+        // have (hitbox geometry scales with the derived radius; trigger bands do not).
+        violations.AddRange(ValidateOrdering(spec, DerivedRadius(total.Mass, spec) / FighterCosts.Current.ReferenceRadius));
 
         var result = new CompileResult
         {
@@ -123,11 +125,11 @@ public static class FighterCompiler
     // swinging at air (TemplateEnemy measured it: frozen at 54.7 px, 0 hits in 420
     // frames). Contact is excluded — its trigger range is a deliberately generous
     // broad-phase gate, the body IS the hitbox.
-    public static IEnumerable<string> ValidateOrdering(FighterSpec s)
+    public static IEnumerable<string> ValidateOrdering(FighterSpec s, float geometryScale = 1f)
     {
         for (int i = 0; i < s.Actions.Count; i++)
         {
-            var a = s.Actions[i];
+            var a = ScaleGeometry(s.Actions[i], geometryScale);
             if (EffectiveReach(a) is not float reach) continue;
             if (reach <= a.MaxRange)
                 yield return $"Action {i} ({a.Kind}) ordering: effective reach {reach:0.#} must exceed " +
@@ -186,12 +188,16 @@ public static class FighterCompiler
         return new EnemyBlueprint
         {
             Kind         = spec.Kind,
-            Radius       = spec.Radius,
+            Radius       = DerivedRadius(total.Mass, spec),
             Sides        = spec.Sides,
             Health       = spec.Health,
             Mass         = total.Mass,
             FrictionScale = rooted ? 0.9f : FighterFrictionScale,
-            TargetMemory = spec.TargetMemory,
+            // Every fighter raycasts (§16, mandatory line of sight); bought memory
+            // decides what a hidden target looks like, not whether sight is checked.
+            TargetMemory    = true,
+            RemembersTarget = spec.TargetMemory,
+            ReactionFrames  = spec.ReactionFrames,
             Rooted       = rooted,
             Team         = spec.Team,
             Strength     = spec.Strength,
@@ -203,7 +209,7 @@ public static class FighterCompiler
             Thrust       = thrust,
             FlightDrain  = model.AttributeCost(spec).Energy,
             Color        = spec.Color,
-            Sprite       = spec.Sprite ?? PickSprite(spec),
+            Sprite       = spec.Sprite ?? PickSprite(spec, DerivedRadius(total.Mass, spec)),
             Controller   = controller,
             Movement = () =>
             {
@@ -219,10 +225,33 @@ public static class FighterCompiler
             Actions = () =>
             {
                 var list = new List<EnemyActionState>(actions.Length);
-                foreach (var a in actions) list.Add(CreateAction(a));
+                float geom = DerivedRadius(total.Mass, spec) / FighterCosts.Current.ReferenceRadius;
+                foreach (var a in actions) list.Add(CreateAction(ScaleGeometry(a, geom)));
                 return list;
             },
         };
+    }
+
+    // Body radius from the compiled mass (§16): R = RadiusPerSqrtMass · √(Mass / Density).
+    public static float DerivedRadius(float mass, FighterSpec spec)
+    {
+        var k = FighterCosts.Current;
+        float d = MathHelper.Clamp(spec.Density, k.DensityMin, k.DensityMax);
+        return k.RadiusPerSqrtMass * MathF.Sqrt(MathF.Max(mass, 0.05f) / d);
+    }
+
+    // Pool-action HITBOX geometry (reach and extents) is authored for ReferenceRadius and
+    // scales with the compiled body: a bigger fighter swings a bigger arc. Trigger bands
+    // (Min/MaxRange, VerticalSlack) are the designer's numbers and stay as written — the
+    // brain's ranges are paired with them. The COST uses the nominal (unscaled) spec, so
+    // pricing never depends on the mass it is helping to compute.
+    public static ActionSpec ScaleGeometry(ActionSpec a, float scale)
+    {
+        if (MathF.Abs(scale - 1f) < 1e-4f) return a;
+        a.Reach      *= scale;
+        a.HalfWidth  *= scale;
+        a.HalfHeight *= scale;
+        return a;
     }
 
     // ActionSpec → pool action flyweight. Kinds without a pool behaviour throw: the
@@ -244,13 +273,13 @@ public static class FighterCompiler
     };
 
     // A stock sprite chosen by what the body is, so a compiled fighter reads at a glance.
-    private static Func<float, Sprite> PickSprite(FighterSpec s)
+    private static Func<float, Sprite> PickSprite(FighterSpec s, float radius)
     {
         if (s.Thrust > 0f)  return Sprites.Bird;
         if (s.Rooted)       return Sprites.Bastion;
         if (s.Cling)        return Sprites.Latcher;
         if (s.Sides == 3)   return Sprites.Pouncer;
-        if (s.Radius <= 10f) return Sprites.Stalker;
+        if (radius <= 10f) return Sprites.Stalker;
         return Sprites.Brute;
     }
 }

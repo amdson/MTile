@@ -171,10 +171,10 @@ public static class FighterArena
             for (int col = 0; col < Width; col++)
             {
                 bool solid = row >= FloorRow;
-                // Roofed corridor: four tiles (64 px) of headroom — enough for any body in
-                // the roster, low enough that a Flyer cannot climb out of reach and an air
-                // block has somewhere to hang.
-                if (roof && row < FloorRow - 4) solid = true;
+                // Roofed corridor: six tiles (66 px at the 11 px tile) of headroom — enough
+                // that a flyer can still get over a walker, low enough that it cannot climb
+                // out of reach and an air block has somewhere to hang.
+                if (roof && row < FloorRow - 6) solid = true;
                 if (hills)
                 {
                     // Two steps up between the spawns and a mound behind the right one:

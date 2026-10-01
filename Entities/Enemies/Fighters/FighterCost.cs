@@ -52,8 +52,7 @@ public sealed class PhysicsCostModel : ICostModel
 
     public Cost AttributeCost(FighterSpec s)
     {
-        float mass = _k.KBody * s.Radius * s.Radius
-                   + _k.KHp   * s.Health
+        float mass = _k.KHp   * s.Health
                    + _k.KStr  * MathF.Max(0f, s.Strength - 1f)
                    + _k.KArm  * s.Armor
                    + _k.KE    * s.EnergyReserve
@@ -61,7 +60,9 @@ public sealed class PhysicsCostModel : ICostModel
                    + _k.KGp   * s.GroundPower
                    + _k.KJ    * s.JumpImpulse
                    + _k.KT    * s.Thrust
-                   + (s.Cling ? _k.KCling : 0f);
+                   + (s.Cling ? _k.KCling : 0f)
+                   + _k.KDensity * MathF.Max(0f, s.Density - 1f)
+                   + _k.KReact   * MathF.Max(0, _k.ReactionFramesDefault - s.ReactionFrames);
 
         // Movement modes take slots; walking is the baseline and does not.
         int slots = (s.JumpImpulse > 0f ? 1 : 0) + (s.Thrust > 0f ? 1 : 0) + (s.Cling ? 1 : 0);
@@ -113,8 +114,12 @@ public sealed class PhysicsCostModel : ICostModel
             yield return $"Strength {s.Strength:0.##} is below the floor {_k.MinStrength:0.##}.";
         if (s.Health <= 0f)
             yield return "Health must be positive.";
-        if (s.Radius <= 0f || s.Sides < 3)
-            yield return "Body needs a positive Radius and at least 3 Sides.";
+        if (s.Sides < 3)
+            yield return "Body needs at least 3 Sides.";
+        if (s.Density < _k.DensityMin || s.Density > _k.DensityMax)
+            yield return $"Density {s.Density:0.##} is outside [{_k.DensityMin:0.##}, {_k.DensityMax:0.##}].";
+        if (s.ReactionFrames < 0 || s.ReactionFrames >= TargetHistory.Capacity)
+            yield return $"ReactionFrames {s.ReactionFrames} is outside [0, {TargetHistory.Capacity - 1}].";
 
         if (s.Rooted)
         {

@@ -91,6 +91,34 @@ public sealed class FighterCostConfig
     public int   LashPoints         { get; set; } = 1;    // needs cling
     public int   SpawnInAirPoints   { get; set; } = 1;
 
+    // ── Perception (§16 "readable telegraphs", "mandatory LOS", sensing) ─────
+    // Sensing is paid from the ENERGY meter per query (user decision, 2026-09-30): a
+    // fighter that looks hard shoots less. An unpaid query returns the last bought value.
+    public float SenseTargetCost  { get; set; } = 0.02f;   // one exact target read (with its tell)
+    public float SenseProbeCost   { get; set; } = 0.05f;   // one terrain probe (ground / drop / wall / headroom)
+    public float SenseCellCost    { get; set; } = 0.01f;   // one tile-state read
+    // The free coarse read: position snapped to this grid, served this many frames late
+    // (or ReactionFrames late, whichever is more).
+    public float CoarseQuantPx    { get; set; } = Chunk.TileSize;
+    public int   CoarseLagFrames  { get; set; } = 6;
+    // Reaction time: a fighter's exact reads are ReactionFrames old. Cheaper to be slow;
+    // each frame faster than the default costs KReact of mass. 0 is the floor, the
+    // history's capacity the ceiling.
+    public int   ReactionFramesDefault { get; set; } = 6;
+    public float KReact           { get; set; } = 0.04f;   // mass per frame faster than the default
+
+    // ── Body (§16 "density → radius") ────────────────────────────────────────
+    // Radius is DERIVED: R = RadiusPerSqrtMass · √(Mass / Density). 11 puts a Mass 1.2
+    // body at the Brute's 12 px. Density above 1 (dense, small, hard to hit) costs mass;
+    // below 1 is free (big and easy to hit is its own price).
+    public float RadiusPerSqrtMass { get; set; } = 11f;
+    public float KDensity          { get; set; } = 0.30f;   // mass per unit of Density above 1
+    public float DensityMin        { get; set; } = 0.5f;
+    public float DensityMax        { get; set; } = 3f;
+    // Pool-action geometry (reach, hitbox extents, trigger bands) is authored for this
+    // body radius and scales with Radius / ReferenceRadius on a compiled fighter.
+    public float ReferenceRadius   { get; set; } = 12f;
+
     // ── Default budget (§3.4) ───────────────────────────────────────────────
     public float MaxMass      { get; set; } = 2.5f;
     public int   MaxSlots     { get; set; } = 4;
