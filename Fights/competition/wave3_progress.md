@@ -98,6 +98,41 @@ before rounding. Opus leads the original four-class comparison by about 10 ratin
 no uncertainty interval for that difference is fitted. Codex is a separate one-bot entry
 with the information advantage described under provenance below.
 
+## Rescored under the close-out rules (2026-10-01, commit 5078cde)
+
+[`wave3_rescored.md`](wave3_rescored.md): the same nine bots, same pool, seeds and frames,
+after the three post-wave fixes — fixed per-kind priorities with uncuttable recoveries, a
+Contact box that is the body (radius + 3 px), and the rollback fix (a touch's recovery no
+longer locks the body after a restore). The original `wave3.md` stands as the official result;
+this is the field as wave 4 will inherit it.
+
+| Rank | Bot | Holdout ±se | Dev ±se | Gap | H2H | Rating | was (rank, holdout) |
+|---|---|---|---|---|---|---|---|
+| 1 | Thornrush | 0.983 ±0.005 | 0.979 | −0.003 | 0.686 | 2179 | 4, 0.977 |
+| 2 | Thornbull | 0.980 ±0.006 | 0.986 | +0.007 | 0.907 | 2367 | 3, 0.985 |
+| 3 | Ironmaw | 0.850 ±0.017 | 0.975 | +0.126 | 0.476 | 2011 | 5, 0.849 |
+| 4 | Twinbarrel | 0.842 ±0.015 | 0.941 | +0.099 | 0.376 | 1969 | 2, 0.992 |
+| 5 | Thornback | 0.704 ±0.005 | 0.934 | +0.229 | 0.463 | 1971 | 6, 0.704 |
+| 6 | Stonecreep | 0.699 ±0.001 | 0.925 | +0.227 | 0.424 | 1950 | 7, 0.699 |
+| 7 | Ironshot | 0.693 ±0.004 | 0.881 | +0.188 | 0.307 | 1872 | 8, 0.693 |
+| 8 | Arrowhawk | 0.651 ±0.015 | 0.862 | +0.211 | 0.452 | 1904 | 9, 0.651 |
+| 9 | Gravemantle | 0.214 ±0.013 | 0.345 | +0.131 | 0.115 | 1423 | 1, 1.000 |
+
+| class | mean rating | mean holdout | was (rating) |
+|---|---|---|---|
+| Opus 5.5 | 2273 | 0.981 | 2265 |
+| Fable 5.1 | 1990 | 0.846 | 2255 |
+| Sonnet 5.5 | 1961 | 0.702 | 1977 |
+| Haiku 4.5 | 1888 | 0.672 | 1904 |
+| Codex (one bot) | 1423 | 0.214 | 3108 |
+
+Gravemantle falls from first to last: its arena-wide contact field is now a 0.35-damage touch
+(308 holdout draws, 268 losses). Twinbarrel loses its barrel swap and drops from 0.992 to
+0.842 (138 holdout draws); it still beats the Haiku and Sonnet bots on the holdout but not
+head-to-head. The two Opus rammers are untouched by the rules and now lead outright; the
+Haiku and Sonnet shooters are unchanged to three decimals. Opus leads Fable by 283 rating
+points instead of 10.
+
 ## Machine
 
 8 cores, 16 GB. Load average at start 7.5 (before any session). Each session builds its own

@@ -363,8 +363,11 @@ submission provenance, class results and caveats: [wave-3 progress](../Fights/co
   Twinbarrel alternates ranged actions after firing to skip recovery. Gravemantle
   alternates its two contact actions every frame with PassivePriority 13 > ActivePriority
   12. The compiler accepted both at scoring time. **Closed after the wave** (§2): priorities
-  are fixed per kind, and a Contact box is the body (radius + `ContactMargin`), so neither
-  lever exists from wave 4 on; wave 3's results stand as scored.
+  are fixed per kind with uncuttable recoveries, and a Contact box is the body (radius +
+  `ContactMargin`), so neither lever exists from wave 4 on; wave 3's results stand as scored.
+  Rescored under the new rules (`Fights/competition/wave3_rescored.md`): Thornrush 0.983 and
+  Thornbull 0.980 lead, Twinbarrel 0.842, Gravemantle 0.214 (last); the shooters are
+  unchanged. A one-touch kill at Contact's price is now the thing to watch.
 - **Knockback can prevent a finish.** Gravemantle's development experiments produced
   draws when repeated hits launched targets beyond reach; zero knockback retained them
   in the damage field. Its rejected single-contact design also lost to synthetic rammers
