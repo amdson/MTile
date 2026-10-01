@@ -157,6 +157,11 @@ public struct EntityData
     public int   ActionIdx;
     public float ActionTime;
     public int   LockedFacing;
+    // The action's Committed flag (movement lock). Snapshotted, not derived: a Contact
+    // touch runs uncommitted so flight survives the hit, and a restore that re-derived
+    // "committed = has an action" froze a body that was moving in the live run — the
+    // wave-3 rollback divergence (FighterRollbackKillTests).
+    public bool  ActionCommitted;
 
     // Target memory, for enemies whose blueprint sets TargetMemory (see
     // EnemyEntity). LastSeenPos is the last player position the enemy actually had

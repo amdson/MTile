@@ -66,8 +66,11 @@ reach, or the compiler refuses (the fighter would swing at air).
 **Windup, recovery and FSM priorities are fixed per kind** (the values in
 `ActionSpec.Default`: melee 0.45 / 0.40 s, lunge 0.35 / 0.45, ranged 0.60 / 0.50, rail
 1.35 / 1.15, …). The compiler overrides whatever you set and says so in the `--spec`
-report. With the default priorities no action can preempt its own kind, so a second copy
-of an action cannot skip the first one's recovery (wave 3's lever, closed since). Timing is the one thing
+report. A compiled fighter's action is **never preempted**: the compiler puts every
+passive priority below every active one (the stock order among idle choices is kept), so
+an action always runs to the end of its recovery, whatever else the brain asks for
+(wave 3's lever, closed since; the plain defaults would still have let a block placement
+cut a touch's cooldown). Timing is the one thing
 every opponent can read (below), so it is the arena's, not yours. `Active` is still
 yours: for a lunge it is the dash length and it is priced. Projectiles from different
 teams **destroy each other** on contact.

@@ -98,12 +98,14 @@ public static class FighterCompiler
                 notes.Add($"{i}:{a.Kind} Windup is fixed at {d.Windup:0.##} s (spec said {a.Windup:0.##}).");
             if (a.Recovery != d.Recovery)
                 notes.Add($"{i}:{a.Kind} Recovery is fixed at {d.Recovery:0.##} s (spec said {a.Recovery:0.##}).");
-            // Priorities are the arena's too: with the per-kind defaults no action can preempt
-            // its own kind, so a second copy of an action cannot skip the first one's recovery
-            // (wave 3's Twinbarrel and Gravemantle did exactly that).
+            // Priorities are the arena's too, and a fighter's action is never preempted: the
+            // compiled Passive is the default minus PassiveOffset, below every Active, so an
+            // action always runs to the end of its recovery (wave 3's Twinbarrel and Gravemantle
+            // skipped recoveries with authored priorities; a Contact + PlaceBlock kit could still
+            // have cut a touch's cooldown with the plain defaults).
             if (a.ActivePriority != d.ActivePriority || a.PassivePriority != d.PassivePriority)
-                notes.Add($"{i}:{a.Kind} priorities are fixed at {d.ActivePriority}/{d.PassivePriority} " +
-                          $"(spec said {a.ActivePriority}/{a.PassivePriority}).");
+                notes.Add($"{i}:{a.Kind} priorities are fixed at {d.ActivePriority}/{d.PassivePriority - PassiveOffset} " +
+                          $"(spec said {a.ActivePriority}/{a.PassivePriority}); a fighter's action is never preempted.");
             if (a.Kind == ActionKind.Contact && (a.HalfWidth != d.HalfWidth || a.HalfHeight != d.HalfHeight))
                 notes.Add($"{i}:Contact box is the body (radius + {FighterCosts.Current.ContactMargin:0.#} px); " +
                           $"spec HalfWidth {a.HalfWidth:0.#} / HalfHeight {a.HalfHeight:0.#} ignored.");
@@ -207,7 +209,7 @@ public static class FighterCompiler
                 a.Windup          = d.Windup;
                 a.Recovery        = d.Recovery;
                 a.ActivePriority  = d.ActivePriority;
-                a.PassivePriority = d.PassivePriority;
+                a.PassivePriority = d.PassivePriority - PassiveOffset;
             }
             actions[i] = a;
         }
@@ -295,6 +297,12 @@ public static class FighterCompiler
         a.HalfHeight *= scale;
         return a;
     }
+
+    // Subtracted from every compiled action's PassivePriority. The passive only competes with
+    // other candidates' passives (order preserved) and with the incumbent's Active (never won),
+    // so a fighter's action cannot be cut short by another of its own actions. Stock enemies
+    // keep their cross-kind cancels (a dash interrupting a block placement).
+    public const int PassiveOffset = 100;
 
     // A Contact action's box is the body: half-extent = radius + ContactMargin, whatever the
     // spec (or the geometry scale) made of HalfWidth/HalfHeight. Other kinds pass through.

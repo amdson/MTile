@@ -460,6 +460,7 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         s.ActionIdx    = _currentAction;
         s.ActionTime   = _actionVars.TimeInState;
         s.LockedFacing = _actionVars.LockedFacing;
+        s.ActionCommitted = _actionVars.Committed;
         // EntityData.Aim is a Vector2 slot the Stalker/Turret subtypes use for
         // their own aim; no EnemyEntity path wrote it before, so it's free real
         // estate for the action FSM's locked 2D aim. Keeps the snapshot flat.
@@ -488,7 +489,7 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         _actionVars.TimeInState  = s.ActionTime;
         _actionVars.LockedFacing = s.LockedFacing;
         _actionVars.LockedAim    = s.Aim;
-        _actionVars.Committed    = _currentAction >= 0;
+        _actionVars.Committed    = _currentAction >= 0 && s.ActionCommitted;
         _lastSeenPos             = s.LastSeenPos;
         _lastSeenAge             = s.LastSeenAge;
         _targetId                = s.TargetId;
