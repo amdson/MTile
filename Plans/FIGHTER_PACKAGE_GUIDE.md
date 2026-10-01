@@ -137,6 +137,7 @@ fall speed, line of sight for rail shots) and you can pay its energy.
 
 ```bash
 dotnet build MTile.Core.csproj                                   # does it compile
+dotnet run --project MTile.Bench -- --spec <YourName>            # cost report: mass/slots/points per part, violations, radius, speeds
 dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName~FighterPackage"   # compiles under budget, deterministic, compute
 dotnet run --project MTile.Bench -- --record-fight <YourName> Brick flat Fights/mine.fight.json --frames 720   # one bout, as the league plays it
 dotnet run --project MTile.Bench -c Release -- --league --only <YourName>  # you vs everyone, all terrains, both sides
