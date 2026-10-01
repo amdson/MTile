@@ -338,3 +338,32 @@ zero violations under the default budget, it is deterministic, and it stays unde
 compute budget. A spec that does not compile is disqualified, not ranked.
 
 Supervisor's side of all this: `Plans/FIGHTER_COMPETITION.md`.
+
+## 13. Wave three: holdout scoring and contact coverage
+
+Full results: [`Fights/competition/wave3.md`](../Fights/competition/wave3.md);
+submission provenance, class results and caveats: [wave-3 progress](../Fights/competition/wave3_progress.md).
+
+- **A saturated dev field does not settle the competition.** Official scores use fresh
+  seeds 100–115. Thornback and Stonecreep score 0.934 and 0.925 against Dev but only
+  0.704 and 0.699 against Holdout. Twinbarrel reaches 0.992 holdout; the contact rammers
+  Thornbull and Thornrush reach 0.985 and 0.977. Preserve the fixed pool and report the gap.
+- **Contact reach is a powerful purchase under this cost model.** Gravemantle spends
+  0.98 total mass on two Contact actions, each Damage 0.35 / HalfWidth 280. Density 0.5
+  gives radius 24.5 and scales each box to roughly 572 px half-extent. This buys coverage
+  across typical spawn separations without projectile travel or windup. It scores
+  1.000 against both the hidden and visible pools. This is a pricing finding, not
+  evidence that contact geometry is balanced.
+- **Fixed timing does not fix action throughput when priorities are author-controlled.**
+  Twinbarrel alternates ranged actions after firing to skip recovery. Gravemantle
+  alternates its two contact actions every frame with PassivePriority 13 > ActivePriority
+  12. The compiler accepts both. Close this loophole in a later version and preserve
+  this wave's results against the version actually scored.
+- **Knockback can prevent a finish.** Gravemantle's development experiments produced
+  draws when repeated hits launched targets beyond reach; zero knockback retained them
+  in the damage field. Its rejected single-contact design also lost to synthetic rammers
+  despite a perfect dev score. Test plausible stronger opponents as well as the public pool.
+- **Keep protocol caveats visible.** Codex read the wave progress and exploit findings
+  with the user's permission before submitting one bot. The four Claude classes each
+  submitted two, with the earlier brief discrepancy documented in the progress file.
+  These are competition results, not a controlled model comparison.
