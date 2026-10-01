@@ -14,9 +14,9 @@ Haiku → Sonnet → Opus → Fable. Pool: `wave3.pool.json` (Dev visible, Holdo
 | sonnet-1 | Sonnet 5.5 | submitted | Thornback | 11:40 | 11:44 | 0.943 (1130-118-0, 16 seeds) | Lancer derivative (cling crawler, 1.6-dmg shot, Health 9, TargetMemory); draws Lancer 0-8-0; commit 3e95e28; 4 league runs |
 | sonnet-2 | Sonnet 5.5 | submitted | Stonecreep | 11:46 | 12:08 | 0.937 ±0.004 (1117-131-0, 16 seeds) | Lancer refinement: cling crawler at Density 1.7 (radius 13.3 so it actually anchors; found Lancer at 14.3 never anchors and is a stationary turret), 500 px/s shot, Health 9.5; tried shot phasing vs enemy windup (+0.003, noise); draws Lancer 0-96-0; commit 5f378db |
 | opus-1 | Opus 5.5 | running | | 11:53 | | | |
-| opus-2 | Opus 5.5 | running | | 11:54 | | | |
+| opus-2 | Opus 5.5 | submitted | Thornbull | 11:54 | 12:14 | 0.998 ±0.001 (1245-0-3, 16 seeds) | rammer: Contact action Damage 7 / HalfWidth 16 (no windup, no tell, staggers), 150 px/s legs, Density 0.6; loses only to Lancer on hills from the left spawn; commit de2c641 |
 | fable-1 | Fable 5.1 | running | | 12:09 | | | |
-| fable-2 | Fable 5.1 | queued | | | | | |
+| fable-2 | Fable 5.1 | running | | 12:15 | | | |
 
 Status: queued → running → submitted (branch has its one file) → collected → scored.
 
@@ -61,4 +61,6 @@ expected peak. Bottleneck notes go here.
 - 11:54 worktrees `opus-1`, `opus-2` cut; sessions launched (3 active: sonnet-2, opus-1, opus-2).
 - 12:08 sonnet-2 submitted Stonecreep (dev 0.937). Finding worth keeping: a Cling body with radius > 14 px never anchors (Lancer, Thornback), so those "crawlers" are stationary shooters.
 - 12:09 worktree `fable-1` cut; session launched (3 active: opus-1, opus-2, fable-1).
+- 12:14 opus-2 submitted Thornbull (dev 0.998). **Pricing finding:** Contact damage costs 0.005 × Damage × HalfWidth, so a 7-damage, 16-wide hide is 0.56 mass — a one-hit kill with no windup and no tell. Plan §13.4: exploits are findings; price it after the wave. **Possible sim gap** reported by the author: a kill before the frame-60 rollback snapshot made the replay diverge from the restore frame ("the snapshot appears not to carry the post-kill retarget"); the brain avoids attacking before frame 65 to pass the gate. To reproduce after the wave.
+- 12:15 worktree `fable-2` cut; session launched (3 active: opus-1, fable-1, fable-2). All eight sessions have now started.
 - Fairness note: the Opus and Fable briefs carry one extra sentence (mirror draws are worth less than a finish) that the Haiku and Sonnet briefs did not. Recorded for the wave report. User: slight advantages are acceptable; the brief is now standardised as `Plans/FIGHTER_COMPETITOR_BRIEF.md` (`competition.py brief`), the Opus/Fable wording.
