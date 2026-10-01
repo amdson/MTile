@@ -113,6 +113,9 @@ fall speed, line of sight for rail shots) and you can pay its energy.
   replay must be bit-identical) is out.
 - A brain over the compute budget: the league reports microseconds per `Decide`; stay
   under **20 µs** on average.
+- The compute budget is `DecideBudgetMicros` in `configs/fighter_costs.json`
+  (`FighterCostConfig.DecideBudgetMicros`, default 20); FighterPackageTests and the league
+  measure it by wrapping your brain in `TimedController` (mean wall-clock µs per `Decide`).
 - Editing any file other than your own.
 
 ## 6. How to test it
@@ -120,12 +123,18 @@ fall speed, line of sight for rail shots) and you can pay its energy.
 ```bash
 dotnet build MTile.Core.csproj                                   # does it compile
 dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName~FighterPackage"   # compiles under budget, deterministic, compute
-dotnet run --project MTile.Bench -- --record-fight <YourName> Brick flat Fights/mine.fight.json   # one bout, 720 frames
-dotnet run --project MTile.Bench -- --league --only <YourName>  # you vs everyone, all terrains, both sides
+dotnet run --project MTile.Bench -- --record-fight <YourName> Brick flat Fights/mine.fight.json --frames 720   # one bout, as the league plays it
+dotnet run --project MTile.Bench -c Release -- --league --only <YourName>  # you vs everyone, all terrains, both sides
 dotnet run --project MTile.Desktop -- --fight Fights/mine.fight.json   # watch it (F6 pause, F7 step, Ctrl+P scrub)
 ```
 
-The arena: three terrains (flat, roofed corridor with four tiles of headroom, stepped
+League options: `--only <Name>` (repeatable), `--frames N` (default 720), `--out <dir>`
+(default `Fights/league`: one `<A>_vs_<B>_<terrain>.fight.json` per bout plus `league.md`),
+`--no-record`, `--quiet`. Use `-c Release` — a Debug build inflates the µs/Decide column.
+`--record-fight` takes a roster name, a package name, or a `.fight.json` for either side;
+without `--frames` it runs the arena default of 1800 frames.
+
+The arena: three terrains (flat, roofed corridor with six tiles of headroom, stepped
 hills), opponents start 180 px apart, 720 frames per bout, a timeout is scored on
 health left. `FighterArena.Run` is the exact scorer. The stock roster (Brick, Sprinter,
 Gunner, Flyer, Builder, Turret in `FighterRoster.cs`) and `ExampleBrawler` are the

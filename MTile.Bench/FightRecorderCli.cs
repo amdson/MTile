@@ -9,8 +9,9 @@ namespace MTile.Bench;
 //
 //   dotnet run --project MTile.Bench -- --record-fight Brick Sprinter flat Fights/brick_v_sprinter.fight.json [--frames 720]
 //
-// Left and right are roster archetype names (FighterRoster.All) — or a path to a
-// .fight.json whose first entry's spec should be reused — and the terrain is one of the
+// Left and right are roster archetype names (FighterRoster.All), fighter package names
+// (FighterPackages.Discover(), e.g. ExampleBrawler), or a path to a .fight.json whose
+// first entry's spec should be reused — and the terrain is one of the
 // arena's (flat / corridor / hills). The bout runs headless, its result and per-frame
 // checksums go into the file, and `MTile.Desktop -- --fight <file>` shows it.
 internal static class FightRecorderCli
@@ -20,7 +21,8 @@ internal static class FightRecorderCli
         int at = Array.IndexOf(args, "--record-fight");
         if (at < 0 || args.Length < at + 5)
         {
-            Console.Error.WriteLine("usage: --record-fight <left> <right> <flat|corridor|hills> <out.fight.json> [--frames N]");
+            Console.Error.WriteLine("usage: --record-fight <left> <right> <flat|corridor|hills> <out.fight.json> [--frames N]\n" +
+                                    "  left/right: a roster name, a package name, or a .fight.json (its first entry)");
             return 2;
         }
         string left = args[at + 1], right = args[at + 2], terrain = args[at + 3], outPath = args[at + 4];
@@ -66,14 +68,19 @@ internal static class FightRecorderCli
             var s = make();
             if (string.Equals(s.Name, nameOrPath, StringComparison.OrdinalIgnoreCase)) return s;
         }
+        var pkg = FighterPackages.Find(nameOrPath);
+        if (pkg != null) return pkg.Spec();
         var names = new List<string>();
         foreach (var make in FighterRoster.All) names.Add(make().Name);
-        throw new ArgumentException($"'{nameOrPath}' is not a roster fighter ({string.Join(", ", names)}) or a .fight.json");
+        var pkgs = new List<string>();
+        foreach (var p in FighterPackages.Discover()) pkgs.Add(p.Name);
+        throw new ArgumentException($"'{nameOrPath}' is not a roster fighter ({string.Join(", ", names)}), " +
+                                    $"a package ({string.Join(", ", pkgs)}) or a .fight.json");
     }
 
     // Best effort: the checked-out commit, read straight from .git, so the file says
     // which sim produced it. Empty when that fails (not a git checkout).
-    private static string GitHash(string root)
+    internal static string GitHash(string root)
     {
         try
         {

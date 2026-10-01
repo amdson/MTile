@@ -119,6 +119,12 @@ public sealed class FighterCostConfig
     // body radius and scales with Radius / ReferenceRadius on a compiled fighter.
     public float ReferenceRadius   { get; set; } = 12f;
 
+    // ── Compute budget (Plans/FIGHTER_PACKAGE_GUIDE.md §5) ────────────────────
+    // Mean wall-clock microseconds a brain may spend per Decide, as the league and
+    // FighterPackageTests measure it (TimedController). A TOOL-SIDE limit: it is never
+    // read by the sim, so it cannot desync anything — it only flags a package.
+    public float DecideBudgetMicros { get; set; } = 20f;
+
     // ── Default budget (§3.4) ───────────────────────────────────────────────
     public float MaxMass      { get; set; } = 2.5f;
     public int   MaxSlots     { get; set; } = 4;

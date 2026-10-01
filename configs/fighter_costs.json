@@ -31,5 +31,7 @@
 
   "MaxMass": 2.5,
   "MaxSlots": 4,
-  "MaxPoints": 2
+  "MaxPoints": 2,
+
+  "DecideBudgetMicros": 20
 }

@@ -78,11 +78,15 @@ public sealed class FightRecord
         return r;
     }
 
-    // Run the fight, filling Result and Checksums. Returns the result.
-    public ArenaResult Record(ICostModel model = null)
+    // Run the fight, filling Result and Checksums. Returns the result. `instrument` sees
+    // the entries just before the run — the league uses it to wrap each brain in a
+    // TimedController (tool-side measurement that does not change the fight).
+    public ArenaResult Record(ICostModel model = null, Action<IReadOnlyList<ArenaEntry>> instrument = null)
     {
-        var sums = new List<ulong>();
-        var res  = FighterArena.Run(BuildTerrain(), BuildEntries(), PlayerSpawn, MaxFrames, model, sums);
+        var sums    = new List<ulong>();
+        var entries = BuildEntries();
+        instrument?.Invoke(entries);
+        var res  = FighterArena.Run(BuildTerrain(), entries, PlayerSpawn, MaxFrames, model, sums);
         Result    = new ResultDto { WinnerTeam = res.WinnerTeam, Frames = res.Frames,
                                     HealthLeft = res.HealthLeft, DamageDealt = res.DamageDealt };
         Checksums = sums;
@@ -164,7 +168,10 @@ public sealed class FightRecord
 
 // The data form of a FighterSpec: every field, with the brain named by its ForgeBrain
 // enum (a spec holds its brain as a delegate, which cannot be serialized) and the colour
-// as bytes. Sprite is not stored — the compiler picks a stock one from the body.
+// as bytes. Sprite is not stored — the compiler picks a stock one from the body. A
+// package brain (Plans/FIGHTER_PACKAGE_GUIDE.md) is named by its package instead:
+// `Package` holds IFighterPackage.Name and ToSpec rebuilds the brain from that package.
+// Null for the stock brains, so older files read unchanged.
 public sealed class FighterSpecDto
 {
     public string Name          { get; set; } = "";
@@ -185,6 +192,7 @@ public sealed class FighterSpecDto
     public int    Team          { get; set; }
     public byte[] Color         { get; set; } = new byte[3];
     public string Brain         { get; set; } = nameof(ForgeBrain.Closer);
+    public string Package       { get; set; }
     public float  EngageRange        { get; set; }
     public float  StandoffRange      { get; set; }
     public float  HoverHeight        { get; set; }
@@ -203,6 +211,7 @@ public sealed class FighterSpecDto
         Density = s.Density, ReactionFrames = s.ReactionFrames, Sides = s.Sides, Team = s.Team,
         Color = new[] { s.Color.R, s.Color.G, s.Color.B },
         Brain = BrainOf(s).ToString(),
+        Package = FighterPackages.BrainOwner(s),
         EngageRange = s.EngageRange, StandoffRange = s.StandoffRange, HoverHeight = s.HoverHeight,
         AlertRange = s.AlertRange, RetreatBelowHealth = s.RetreatBelowHealth, PreferredAction = s.PreferredAction,
         Actions = s.Actions.ConvertAll(ActionSpecDto.From),
@@ -225,12 +234,18 @@ public sealed class FighterSpecDto
             AlertRange = AlertRange, RetreatBelowHealth = RetreatBelowHealth, PreferredAction = PreferredAction,
         };
         foreach (var a in Actions) s.Actions.Add(a.ToSpec());
+        if (!string.IsNullOrEmpty(Package))
+        {
+            var p = FighterPackages.Find(Package)
+                    ?? throw new InvalidOperationException($"Fight file names package '{Package}', which this build does not contain.");
+            s.Brain = p.Spec().Brain;
+        }
         return s;
     }
 
     // Which bundled brain a spec's factory makes — instantiate it once and look. Unknown
     // controllers map to Closer, which is also what the forge does for its default.
-    public static ForgeBrain BrainOf(FighterSpec s) => s.Brain?.Invoke(s) switch
+    public static ForgeBrain BrainOf(FighterSpec s) => TimedController.Unwrap(s.Brain?.Invoke(s)) switch
     {
         FighterKiterBrain     => ForgeBrain.Kiter,
         FighterHoverDiveBrain => ForgeBrain.HoverDive,
