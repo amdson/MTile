@@ -113,7 +113,7 @@ public class FighterBlockActionTests(ITestOutputHelper output)
     {
         var spec = ActionSpec.Default(ActionKind.PlaceBlock);
         float cost = spec.EnergyCost;
-        Assert.Equal(MaterialStrengths.BuildCostFor(spec.Material), cost);   // honest default row
+        Assert.Equal(MaterialStrengths.BuildCostFor(spec.Material) * FighterCosts.Current.PlaceDiscount, cost);   // honest default row
         Assert.True(cost > 0f);
 
         float max = cost * 2.5f;   // two uses, then 0.5 × cost left over forever

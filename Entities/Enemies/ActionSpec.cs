@@ -165,7 +165,7 @@ public struct ActionSpec
         // Block kinds (Entities/Enemies/EnemyBlockActions.cs). Reach is how far along
         // the locked aim the tile goes; HalfHeight is how far ABOVE the target the air
         // block is conjured. EnergyCost is the material's per-tile build price — the
-        // same number the fighter compiler writes (× airPremium for the air block), so
+        // same number the fighter compiler writes (× PlaceDiscount next to you, × AirPremium for the air block), so
         // an action built straight from its default row is honestly priced. Material
         // matches the player's starting block (PlayerCharacter._activeBlockType).
         ActionKind.PlaceBlock => new ActionSpec
@@ -175,13 +175,13 @@ public struct ActionSpec
             MinRange = 40f, MaxRange = 160f,
             Reach = 22f,
             Material = TileType.Dirt,
-            EnergyCost = MaterialStrengths.BuildCostFor(TileType.Dirt),
+            EnergyCost = MaterialStrengths.BuildCostFor(TileType.Dirt) * FighterCosts.Current.PlaceDiscount,
             ActivePriority = 26, PassivePriority = 18,
         },
         ActionKind.SpawnBlockInAir => new ActionSpec
         {
             Kind = kind,
-            Windup = 0.70f, Active = 0.05f, Recovery = 0.45f,
+            Windup = 0.35f, Active = 0.05f, Recovery = 0.30f,
             MinRange = 30f, MaxRange = 260f,
             HalfHeight = 36f,
             Material = TileType.Dirt,

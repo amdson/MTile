@@ -17,6 +17,7 @@
   "KTile": 0.5,
   "CHover": 0.001,
   "AirPremium": 1.5,
+  "PlaceDiscount": 0.3,
 
   "AMin": 40,
   "VMin": 150,

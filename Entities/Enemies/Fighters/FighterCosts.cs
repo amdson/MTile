@@ -77,6 +77,10 @@ public sealed class FighterCostConfig
     // priced): a placed tile costs its material's BuildCost; one conjured in mid-air
     // costs that times this premium.
     public float AirPremium   { get; set; } = 1.5f;
+    // A tile laid next to yourself costs this fraction of its BuildCost (fighters only:
+    // the player's build meter keeps the full price). Cheap on purpose — walls, steps and
+    // cover should be an everyday tool, not a once-a-fight purchase.
+    public float PlaceDiscount { get; set; } = 0.3f;
 
     // ── Floors (§3.2 hard constraints) ──────────────────────────────────────
     public float AMin         { get; set; } = 40f;        // px/s² — min GroundPower / Mass
