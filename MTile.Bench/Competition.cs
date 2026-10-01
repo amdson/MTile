@@ -11,7 +11,7 @@ namespace MTile.Bench;
 //                                                               [--out Fights/competition/wave<N>.pool.json]
 //   dotnet run --project MTile.Bench -c Release -- --competition files --pool <pool.json>
 //   dotnet run --project MTile.Bench -c Release -- --competition score --pool <pool.json>
-//                                                               [--submission Name]... [--out Fights/competition/wave<N>.md] [--quiet]
+//                                                               [--submission Name]... [--out Fights/competition/wave<N>.md] [--quiet] [--no-rating]
 //   dotnet run --project MTile.Bench -c Release -- --competition roll --pool <pool.json> --ladder <league.md> --wave N+1
 //                                                               [--out Fights/competition/wave<N+1>.pool.json]
 //
@@ -94,6 +94,7 @@ internal static class Competition
     {
         var pool   = CompetitionPool.Load(Input(Required(args, "--pool"), root));
         bool quiet = Array.IndexOf(args, "--quiet") >= 0;
+        bool rating = Array.IndexOf(args, "--no-rating") < 0;   // the pool's own all-to-all league is the slow part
         string out_ = Value(args, "--out")
                       ?? Path.Combine(root, "Fights", "competition", $"wave{pool.Wave}.md");
         List<string> subs = null;
@@ -137,7 +138,7 @@ internal static class Competition
                 Console.WriteLine($"    {label}  {k + 1}/{n}  {b.Terrain,-8} s{b.Seed} {b.LeftName} vs {b.RightName}: {res} after {r.Frames}f");
             };
 
-        var report = FighterCompetition.Run(pool, subs, Log, onBout);
+        var report = FighterCompetition.Run(pool, subs, Log, onBout, rating);
         string md = report.Markdown();
 
         string dir = Path.GetDirectoryName(Path.GetFullPath(out_));

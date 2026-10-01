@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -213,6 +214,8 @@ public sealed class CompetitionScore
     public double DevScore     => Dev.Score;
     public double OverfitGap   => DevScore - HoldoutScore;
     public LeagueStanding HeadToHead;      // null when < 2 submissions
+    public double Rating = double.NaN;     // FighterRating (Elo scale, pool mean 1500); NaN when not fitted
+    public IReadOnlyList<LeagueBout> Bouts; // every bout of the two scoring leagues (rating input)
     public int Rank;                       // 1-based, after sorting
 }
 
@@ -222,6 +225,11 @@ public sealed class CompetitionReport
     public IReadOnlyList<CompetitionScore> Scores;   // holdout score desc, then head-to-head score desc, then ordinal name
     public LeagueResult HeadToHead;                  // null when < 2 submissions
     public IReadOnlyList<string> Disqualified;       // submissions whose spec does not compile, with reason
+    // Bradley–Terry ratings (FighterRating) over every bout played — the submissions' scoring
+    // leagues, the head-to-head, and a league among the pool itself (PoolLeague) so the pool
+    // is rated on the same seeds — anchored so the pool's mean is 1500. Null when not fitted.
+    public IReadOnlyDictionary<string, double> Ratings;
+    public LeagueResult PoolLeague;
     public TimeSpan Elapsed;                         // wall clock — never printed in Markdown()
 
     private static string F(double v, string fmt) => v.ToString(fmt, CultureInfo.InvariantCulture);
@@ -246,12 +254,15 @@ public sealed class CompetitionReport
                   (string.IsNullOrEmpty(p.Created) ? "" : $", cut {p.Created}") + ".\n\n");
         sb.Append($"Score: win 1, loss 0, draw {F(FighterCosts.Current.DrawScore, "0.##")}, over bouts played (both spawn orders). " +
                   "Ranked on the holdout score, then the head-to-head score, then name. " +
-                  "`gap` = dev − holdout (overfit to the visible field). `±se` is the standard error over seeds.\n\n");
+                  "`gap` = dev − holdout (overfit to the visible field). `±se` is the standard error over seeds." +
+                  (Ratings != null ? " `rating` is a Bradley–Terry fit on the Elo scale over every bout played (the scoring " +
+                                     "leagues, the head-to-head and a league among the pool), with the pool's mean at 1500." : "") + "\n\n");
 
         int nw = 4, aw = 6;
         foreach (var s in Scores) { nw = Math.Max(nw, s.Name.Length); aw = Math.Max(aw, (s.Author ?? "").Length); }
         sb.Append("## Ranking\n\n```\n");
-        sb.Append($"{"rank",4}  {"name".PadRight(nw)}  {"author".PadRight(aw)}  {"holdout",7}  {"±se",5}  {"dev",6}  {"±se",5}  {"gap",6}  {"h2h",6}  {"W-D-L hold",11}  {"W-D-L dev",11}\n");
+        sb.Append($"{"rank",4}  {"name".PadRight(nw)}  {"author".PadRight(aw)}  {"holdout",7}  {"±se",5}  {"dev",6}  {"±se",5}  {"gap",6}  {"h2h",6}" +
+                  (Ratings != null ? $"  {"rating",6}" : "") + $"  {"W-D-L hold",11}  {"W-D-L dev",11}\n");
         foreach (var s in Scores)
         {
             sb.Append(s.Rank.ToString(CultureInfo.InvariantCulture).PadLeft(4)).Append("  ")
@@ -262,8 +273,9 @@ public sealed class CompetitionReport
               .Append(F(s.DevScore, "0.000").PadLeft(6)).Append("  ")
               .Append(F(s.Dev.ScoreSe, "0.000").PadLeft(5)).Append("  ")
               .Append(F(s.OverfitGap, "+0.000;-0.000;0.000").PadLeft(6)).Append("  ")
-              .Append((s.HeadToHead == null ? "-" : F(s.HeadToHead.Score, "0.000")).PadLeft(6)).Append("  ")
-              .Append(Wdl(s.Holdout).PadLeft(11)).Append("  ")
+              .Append((s.HeadToHead == null ? "-" : F(s.HeadToHead.Score, "0.000")).PadLeft(6)).Append("  ");
+            if (Ratings != null) sb.Append(F(s.Rating, "0").PadLeft(6)).Append("  ");
+            sb.Append(Wdl(s.Holdout).PadLeft(11)).Append("  ")
               .Append(Wdl(s.Dev).PadLeft(11)).Append('\n');
         }
         sb.Append("```\n\n");
@@ -281,6 +293,46 @@ public sealed class CompetitionReport
               .Append(HeadToHead.LadderText(timing: false)).Append("```\n\n");
             sb.Append("## Head-to-head matrices\n\n");
             foreach (var t in HeadToHead.Terrains) sb.Append("```\n").Append(HeadToHead.MatrixText(t)).Append("```\n\n");
+        }
+
+        if (Ratings != null)
+        {
+            // By author: a class's score is the mean over its bots.
+            var byAuthor = new SortedDictionary<string, List<CompetitionScore>>(StringComparer.Ordinal);
+            foreach (var s in Scores)
+            {
+                string a = s.Author ?? "";
+                if (!byAuthor.TryGetValue(a, out var l)) byAuthor[a] = l = new List<CompetitionScore>();
+                l.Add(s);
+            }
+            var rows = new List<(string Author, List<CompetitionScore> Bots, double Rating, double Holdout)>();
+            foreach (var kv in byAuthor)
+            {
+                double r = 0, h = 0;
+                foreach (var s in kv.Value) { r += s.Rating; h += s.HoldoutScore; }
+                rows.Add((kv.Key, kv.Value, r / kv.Value.Count, h / kv.Value.Count));
+            }
+            rows.Sort((x, y) => { int c = y.Rating.CompareTo(x.Rating); return c != 0 ? c : string.CompareOrdinal(x.Author, y.Author); });
+            sb.Append("## By author\n\nMean over the author's bots.\n\n```\n");
+            sb.Append($"{"author".PadRight(aw)}  {"bots",4}  {"rating",6}  {"holdout",7}  names\n");
+            foreach (var (a, bots, r, h) in rows)
+            {
+                var names = bots.ConvertAll(b => b.Name);
+                sb.Append(a.PadRight(aw)).Append("  ").Append(bots.Count.ToString(CultureInfo.InvariantCulture).PadLeft(4)).Append("  ")
+                  .Append(F(r, "0").PadLeft(6)).Append("  ").Append(F(h, "0.000").PadLeft(7)).Append("  ").Append(string.Join(", ", names)).Append('\n');
+            }
+            sb.Append("```\n\n");
+
+            sb.Append("## Ratings\n\nEvery participant, pool and submissions, Elo scale, pool mean 1500.\n\n```\n");
+            var all = new List<KeyValuePair<string, double>>(Ratings);
+            all.Sort((x, y) => { int c = y.Value.CompareTo(x.Value); return c != 0 ? c : string.CompareOrdinal(x.Key, y.Key); });
+            int rw = 4;
+            foreach (var kv in all) rw = Math.Max(rw, kv.Key.Length);
+            var subNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var x in Scores) subNames.Add(x.Name);
+            foreach (var kv in all)
+                sb.Append(kv.Key.PadRight(rw)).Append("  ").Append(F(kv.Value, "0").PadLeft(6)).Append(subNames.Contains(kv.Key) ? "  submission" : "").Append('\n');
+            sb.Append("```\n\n");
         }
 
         sb.Append("## Pool\n\n");
@@ -312,19 +364,20 @@ public static class FighterCompetition
         foreach (var n in pool.All)
             if (string.Equals(n, p.Name, StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException($"'{p.Name}' is in the wave-{pool.Wave} pool — a submission must be new.");
-        return new CompetitionScore
-        {
-            Name    = p.Name,
-            Author  = p.Author,
-            Holdout = VsSide(pool, pool.Holdout, p.Name, onBout),
-            Dev     = VsSide(pool, pool.Dev,     p.Name, onBout),
-        };
+        var (holdout, hb) = VsSide(pool, pool.Holdout, p.Name, onBout);
+        var (dev,     db) = VsSide(pool, pool.Dev,     p.Name, onBout);
+        var bouts = new List<LeagueBout>(hb);
+        bouts.AddRange(db);
+        return new CompetitionScore { Name = p.Name, Author = p.Author, Holdout = holdout, Dev = dev, Bouts = bouts };
     }
 
     // submissions null ⇒ pool.Submissions(). Scores each (refusing any whose spec does not
     // compile), runs the head-to-head league when ≥ 2 remain, sorts and ranks.
+    // `rating` also plays a league among the pool itself (the pool's own bouts on the scoring
+    // seeds) and fits FighterRating over everything; it is the slow part (the pool is all-to-all).
     public static CompetitionReport Run(CompetitionPool pool, IReadOnlyList<string> submissions = null,
-                                        Action<string> log = null, Action<LeagueBout, int, int> onBout = null)
+                                        Action<string> log = null, Action<LeagueBout, int, int> onBout = null,
+                                        bool rating = true)
     {
         var sw = Stopwatch.StartNew();
         var subs = submissions != null ? new List<string>(submissions) : pool.Submissions();
@@ -335,6 +388,7 @@ public static class FighterCompetition
         var model  = new PhysicsCostModel();
         var scores = new List<CompetitionScore>();
         var dq     = new List<string>();
+        var games  = new List<(string A, string B, double ScoreA)>();
         foreach (var n in subs)
         {
             var part = Participant(n);
@@ -347,6 +401,7 @@ public static class FighterCompetition
             }
             log?.Invoke($"{part.Name}: scoring vs holdout ({pool.Holdout.Count}) and dev ({pool.Dev.Count})");
             var s = Score(pool, part.Name, onBout);
+            games.AddRange(FighterRating.Games(s.Bouts));
             log?.Invoke(string.Format(CultureInfo.InvariantCulture, "{0}: holdout {1:0.000}  dev {2:0.000}  gap {3:+0.000;-0.000;0.000}",
                                       s.Name, s.HoldoutScore, s.DevScore, s.OverfitGap));
             scores.Add(s);
@@ -362,6 +417,22 @@ public static class FighterCompetition
             h2h = FighterLeague.Run(st);
             foreach (var s in scores)
                 s.HeadToHead = StandingOf(h2h, s.Name);
+            games.AddRange(FighterRating.Games(h2h.Bouts));
+        }
+
+        LeagueResult poolLeague = null;
+        Dictionary<string, double> ratings = null;
+        if (rating)
+        {
+            log?.Invoke($"pool league: {pool.Dev.Count + pool.Holdout.Count} pool participants, all-to-all");
+            var st = Settings(pool);
+            st.OnBout = onBout;
+            st.Include.AddRange(pool.All);
+            poolLeague = FighterLeague.Run(st);
+            games.AddRange(FighterRating.Games(poolLeague.Bouts));
+            ratings = FighterRating.Fit(games, pool.All);
+            foreach (var s in scores)
+                if (ratings.TryGetValue(s.Name, out double r)) s.Rating = r;
         }
 
         scores.Sort((x, y) =>
@@ -374,7 +445,8 @@ public static class FighterCompetition
         for (int i = 0; i < scores.Count; i++) scores[i].Rank = i + 1;
 
         sw.Stop();
-        return new CompetitionReport { Pool = pool, Scores = scores, HeadToHead = h2h, Disqualified = dq, Elapsed = sw.Elapsed };
+        return new CompetitionReport { Pool = pool, Scores = scores, HeadToHead = h2h, Disqualified = dq,
+                                       Ratings = ratings, PoolLeague = poolLeague, Elapsed = sw.Elapsed };
     }
 
     // Next wave's pool: prev.All ∪ prev.Submissions(), re-split from `ranked` (a fresh full
@@ -404,7 +476,7 @@ public static class FighterCompetition
         return next;
     }
 
-    private static LeagueStanding VsSide(CompetitionPool pool, List<string> side, string sub, Action<LeagueBout, int, int> onBout)
+    private static (LeagueStanding, IReadOnlyList<LeagueBout>) VsSide(CompetitionPool pool, List<string> side, string sub, Action<LeagueBout, int, int> onBout)
     {
         var st = Settings(pool);
         st.OnBout = onBout;
@@ -412,8 +484,9 @@ public static class FighterCompetition
         st.Include.Add(sub);
         st.Only.Add(sub);
         var r = FighterLeague.Run(st);
-        return StandingOf(r, sub)
+        var standing = StandingOf(r, sub)
                ?? throw new InvalidOperationException($"'{sub}' was not scored: {string.Join("; ", r.Disqualified)}");
+        return (standing, r.Bouts);
     }
 
     private static LeagueStanding StandingOf(LeagueResult r, string name)
