@@ -1,0 +1,32 @@
+{
+  "Wave": 3,
+  "Created": "2026-10-01",
+  "Source": "Fights/wave2_long_league.md",
+  "Dev": [
+    "Lancer",
+    "Kestrel",
+    "Vanguard",
+    "Breacher",
+    "Wraith",
+    "Brick",
+    "Bulwark",
+    "Turret",
+    "Builder",
+    "Gunner",
+    "Flyer",
+    "ExampleBrawler",
+    "Sprinter"
+  ],
+  "Holdout": [
+    "Phalanx",
+    "Harrier",
+    "Sentinel",
+    "Mason",
+    "Sapper",
+    "Skirmish"
+  ],
+  "Terrains": [],
+  "Frames": 1800,
+  "Seeds": 16,
+  "FirstSeed": 100
+}

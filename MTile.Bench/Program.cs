@@ -45,6 +45,7 @@ internal static class Program
         if (Array.IndexOf(args, "--record-fight") >= 0) return FightRecorderCli.Run(args);
         if (Array.IndexOf(args, "--spec") >= 0) return FightRecorderCli.Report(args);
         if (Array.IndexOf(args, "--league") >= 0) return League.Run(args);
+        if (Array.IndexOf(args, "--competition") >= 0) return Competition.Run(args);
         if (Array.IndexOf(args, "--corrector") >= 0) { CorrectorDiag.Run(); return 0; }
         if (Array.IndexOf(args, "--ftol") >= 0) { JtJDiff.Run(); AnimDiag.Run(); return 0; }
         if (Array.IndexOf(args, "--simd") >= 0) { FtolStudy.SimdCheck(); return 0; }
