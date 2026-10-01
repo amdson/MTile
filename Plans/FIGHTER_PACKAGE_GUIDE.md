@@ -167,3 +167,42 @@ opponents you must beat; their brains (`FighterBrains.cs`) are deliberately simp
 - Knockback divides by mass + armor; a heavy fighter is hard to launch.
 - The brain of the stock `FighterCloserBrain` shows the pattern: a mode in `I0`, a timer
   in `F0`, a dodge triggered by `TellProgress`.
+
+## 8. Lessons from wave one (six agents, 2026-09-30)
+
+Everything here was learned the hard way by the first six packages. Read it as the
+current meta, which the next wave exists to break.
+
+- **Windup, active and recovery are the biggest lever and they are free.** A 0.1 s melee
+  windup lands before a ReactionFrames-old read can trigger the stock dodge; a 0.3 s rail
+  windup fires three times as often and gives nothing to dodge. Expect prices on these
+  later; for now, use them and know everyone else will.
+- **The rooted refund is big.** Rooted (−2 points) pays for a RailShot and target memory
+  with a point to spare, and the rail's 6 energy per shot is covered by a reserve of ~14
+  and 2/s regen within mass. That is the wave-one champion (Sentinel, 0.93). It cannot
+  move: closing on it is the counter, if you survive the line.
+- **Speed is `√(GroundPower / 0.02)`**: 120 power is 77 px/s, 220 is 105 px/s. Kiters
+  hold ~100 px, so a melee body under ~100 px/s never catches them. Jump floors divide by
+  TOTAL mass (`JumpImpulse / Mass ≥ 150`), so a heavy spec needs 370+ impulse.
+- **Flight cruises at 80 px/s** (`EnemyFlyState.CruiseSpeed`) whatever the thrust; thrust
+  only buys climb and turn. A flyer cannot chase a kiter.
+- **A Lunge costs ~0.35 mass** at stock damage and speed (reach price plus the energy
+  reserve and regen it needs), not the 0 the action table suggests.
+- **Mixed kits:** the brain's `EngageRange` must sit under every melee action's `MaxRange`
+  (ordering rule), so a kiter with a jab keeps `EngageRange` small and does its standoff
+  logic itself.
+- **Projectiles are 1D.** A shot is aimed at where you were at windup start, so closing
+  along its line does not dodge it; a timed jump does (fire when the estimated arrival is
+  0.2–0.5 s out). Backing off along the line just loses ground.
+- **Tells vanish with line of sight.** On the hills a ledge hides the target for stretches;
+  a brain that waits for a tell on a ledge stands still. Walk toward the last view, jump
+  when stalled.
+- **Timeouts are scored on health fraction**, so a passive pair ends 0-0. Early damage
+  plus a blinding wall is a win; a wall with no damage is a draw. Shooting outranks
+  walling.
+- **`RequestedAction` is a restriction.** Requesting a PlaceBlock out of its 40–160 band
+  attacks nothing, and requesting it in a loop walls forever. Pick explicitly.
+- **Energy rationing wins.** Exact reads every 3rd frame when close, every 6th when far,
+  stale reads in between; every brain that read every frame starved its own meter.
+- **`SpawnBlockInAir` does no damage.** The block hangs. It blocks sight lines and dives,
+  nothing more.

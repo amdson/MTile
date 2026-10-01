@@ -50,3 +50,6 @@ SkeletonStates/.editor_view.json
 
 # League output (MTile.Bench --league): regenerated on every run
 Fights/league/
+
+# League output: hundreds of recorded bouts per run; keep the tables, not the files
+Fights/wave*/
