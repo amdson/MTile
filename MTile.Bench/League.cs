@@ -37,6 +37,7 @@ internal static class League
             Frames     = int.Parse(Value(args, "--frames") ?? "720"),
             Seeds      = int.Parse(Value(args, "--seeds") ?? "1"),
             FirstSeed  = ulong.Parse(Value(args, "--first-seed") ?? "0"),
+            Threads    = int.Parse(Value(args, "--threads") ?? Environment.ProcessorCount.ToString()),
             OutDir     = noRecord ? null : outDir,
             SimVersion = FightRecorderCli.GitHash(root),
         };

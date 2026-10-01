@@ -99,10 +99,14 @@ public static class FighterArena
             var spec  = fighters[i].Spec;
             spec.Kind = EntityKinds.FighterSlot(i);
             spec.Team = fighters[i].Team;
-            var r = FighterCompiler.Register(spec, model);
+            // Kept in the sim's own blueprint table, never the process-wide EnemyFactory
+            // registry: concurrent bouts (league --threads) share the slot kinds, and a
+            // shared table would let one bout spawn (or rehydrate) another's fighter.
+            var r = FighterCompiler.Compile(spec, model);
             if (!r.IsValid)
                 throw new InvalidOperationException($"Fighter '{spec.Name}' is invalid:\n{r.Report()}");
-            var e = (EnemyEntity)EnemyFactory.Create(spec.Kind, fighters[i].Pos);
+            g.Blueprints[spec.Kind] = r.Blueprint;
+            var e = new BlueprintEnemy(r.Blueprint, fighters[i].Pos);
             e.SeedBrain(BrainRandom.Mix(seed, (ulong)i + 1));
             if (bots != null) bots[i] = e;
             g.SpawnEntity(e);

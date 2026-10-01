@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace MTile;
@@ -47,6 +48,8 @@ public sealed class LeagueSettings
     // every (pair, terrain) is played under. 1 seed from 0 = the canonical league.
     public int    Seeds     { get; set; } = 1;
     public ulong  FirstSeed { get; set; } = 0;
+    // Bouts played at once. Results do not depend on it; µs/Decide gets noisier above 1.
+    public int    Threads   { get; set; } = Environment.ProcessorCount;
     // Directory for <A>_vs_<B>_<terrain>[_s<seed>].fight.json files; null ⇒ do not save.
     public string OutDir    { get; set; }
     public string SimVersion { get; set; } = "";
@@ -120,6 +123,31 @@ public sealed class LeagueResult
             if (timing && s.OverBudget) sb.Append($"  OVER BUDGET (> {BudgetMicros:0.#} µs)");
             sb.Append('\n');
         }
+        return sb.ToString();
+    }
+
+    // Elo per participant (best first), then the mean per author.
+    public string RatingsText()
+    {
+        var names = new List<string>();
+        foreach (var s in Standings) names.Add(s.Participant.Name);
+        var r = FighterRating.Fit(FighterRating.Games(Bouts), names);
+        var rows = new List<LeagueStanding>(Standings);
+        rows.Sort((a, b) => r[b.Participant.Name].CompareTo(r[a.Participant.Name]));
+        int nw = 4, aw = 6;
+        foreach (var s in rows) { nw = Math.Max(nw, s.Participant.Name.Length); aw = Math.Max(aw, s.Participant.Author.Length); }
+        var sb = new StringBuilder();
+        sb.Append($"{"rank",4}  {"name".PadRight(nw)}  {"author".PadRight(aw)}  {"rating",6}  {"score",6}\n");
+        for (int i = 0; i < rows.Count; i++)
+            sb.Append($"{i + 1,4}  {rows[i].Participant.Name.PadRight(nw)}  {rows[i].Participant.Author.PadRight(aw)}  " +
+                      $"{r[rows[i].Participant.Name],6:0}  {rows[i].Score,6:0.000}\n");
+        var byAuthor = new Dictionary<string, List<double>>();
+        foreach (var s in rows)
+            (byAuthor.TryGetValue(s.Participant.Author, out var l) ? l : byAuthor[s.Participant.Author] = new()).Add(r[s.Participant.Name]);
+        var authors = new List<KeyValuePair<string, List<double>>>(byAuthor);
+        authors.Sort((a, b) => b.Value.Average().CompareTo(a.Value.Average()));
+        sb.Append($"\n{"author".PadRight(aw)}  {"bots",4}  {"mean",6}\n");
+        foreach (var a in authors) sb.Append($"{a.Key.PadRight(aw)}  {a.Value.Count,4}  {a.Value.Average(),6:0}\n");
         return sb.ToString();
     }
 
@@ -212,6 +240,8 @@ public sealed class LeagueResult
                       $"({100.0 * Unanimous / Math.Max(Matchups, 1):0}%).");
         sb.Append("\n\n");
         sb.Append("## Ladder\n\n```\n").Append(LadderText()).Append("```\n\n");
+        sb.Append("## Ratings\n\nBradley–Terry fit on the Elo scale over every bout (a draw is half a win), " +
+                  "field mean 1500. By author: the mean over the author's bots.\n\n```\n").Append(RatingsText()).Append("```\n\n");
         if (Disqualified.Count > 0)
         {
             sb.Append("## Disqualified\n\n");
@@ -293,8 +323,13 @@ public static class FighterLeague
         // ── Play ────────────────────────────────────────────────────────────────
         var maxHp = new float[field.Count];
         for (int i = 0; i < field.Count; i++) maxHp[i] = Math.Max(field[i].Make().Health, 1e-3f);
-        var bouts = new List<LeagueBout>(schedule.Count);
-        for (int n = 0; n < schedule.Count; n++)
+        // Bouts are independent sims, so they run in parallel; each lands in its schedule slot,
+        // so the result (and everything scored from it) is the same as a serial run.
+        var slots = new LeagueBout[schedule.Count];
+        int done = 0;
+        var gate = new object();
+        var options = new System.Threading.Tasks.ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, settings.Threads) };
+        System.Threading.Tasks.Parallel.For(0, schedule.Count, options, n =>
         {
             var (i, j, t, k) = schedule[n];
             ulong seed = seeds[k];
@@ -319,9 +354,10 @@ public static class FighterLeague
             }
             double margin = res.HealthLeft[0] / maxHp[i] - res.HealthLeft[1] / maxHp[j];
             var bout = new LeagueBout(i, j, field[i].Name, field[j].Name, t, seed, res, margin, timers[0], timers[1], saved);
-            bouts.Add(bout);
-            settings.OnBout?.Invoke(bout, n, schedule.Count);
-        }
+            slots[n] = bout;
+            if (settings.OnBout != null) lock (gate) settings.OnBout(bout, done++, schedule.Count);
+        });
+        var bouts = new List<LeagueBout>(slots);
 
         // ── Score ───────────────────────────────────────────────────────────────
         var budget    = FighterCosts.Current.DecideBudgetMicros;

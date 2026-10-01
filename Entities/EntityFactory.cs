@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -61,8 +62,10 @@ public static class EntityFactory
     // is only consulted by Bullet (re-deflect allocator); its counter is restored
     // separately by SimSnapshot. Falls through to a Generic entity for any kind not
     // registered with EnemyFactory — the same path the old EntitySnapshot.Rehydrate took.
-    public static Entity Rehydrate(in EntityData d, in BodyState body, HitIdAllocator hitIds)
-        => d.Kind switch
+    // `local` is the sim's own blueprint table (Simulation.Blueprints), consulted before the registry.
+    public static Entity Rehydrate(in EntityData d, in BodyState body, HitIdAllocator hitIds,
+                                   IReadOnlyDictionary<EntityKind, EnemyBlueprint> local = null)
+        => local != null && local.TryGetValue(d.Kind, out var bp) ? new BlueprintEnemy(bp, body.Position) : d.Kind switch
         {
             EntityKind.Generic       => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
             EntityKind.Stalker       => new StalkerEnemy(body.Position),

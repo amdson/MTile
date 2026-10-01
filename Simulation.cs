@@ -124,6 +124,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     public ChunkMap Chunks => _chunks;
     // IEntitySpawner — shared HitId source for AI / projectile-spawned hitboxes.
     public HitIdAllocator HitIds => _hitIds;
+    // Blueprints this sim spawned outside the process-wide EnemyFactory (the fighter arena's
+    // slot kinds). Fixed for the match, so not snapshotted; Restore rehydrates from it first.
+    // Per sim so concurrent matches (league --threads) never see each other's fighters.
+    public Dictionary<EntityKind, EnemyBlueprint> Blueprints { get; } = new();
     // IEntitySpawner — id → live entity. Generation-checked, so an id recycled after a
     // rollback never resolves to a stranger.
     public Entity Resolve(EntityId id)
@@ -655,7 +659,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             else
             {
                 var body = _world.Get<BodyStateComp>(id).State;
-                e = EntityFactory.Rehydrate(in _world.Get<EntityData>(id), in body, _hitIds);
+                e = EntityFactory.Rehydrate(in _world.Get<EntityData>(id), in body, _hitIds, Blueprints);
                 e.Id = id;
             }
             _world.Add<EntityRef>(id).Obj = e;
