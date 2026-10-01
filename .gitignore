@@ -47,3 +47,6 @@ Assets/Sounds/*.zip
 Audio/candidates/
 Audio/raw/
 SkeletonStates/.editor_view.json
+
+# League output (MTile.Bench --league): regenerated on every run
+Fights/league/

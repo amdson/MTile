@@ -40,15 +40,22 @@ public sealed class ExampleBrawler : IFighterPackage
     private static ActionSpec Lunge()
     {
         var a = ActionSpec.Default(ActionKind.Lunge);
-        a.MinRange = 40f; a.MaxRange = 110f;
+        // MaxRange must sit under the lunge's effective reach (speed × active + hitbox
+        // half-width + target half-width, scaled with the body): ≈ 84 px at this body,
+        // so 80 — FighterCompiler refuses a band the dash cannot cover.
+        a.MinRange = 40f; a.MaxRange = 80f;
         return a;
     }
 
     // Scratch: I0 = mode (0 hunt, 1 dodge), F0 = seconds in mode.
     private sealed class BrawlerBrain : FighterController
     {
-        private readonly float _engage, _alert, _lungeCost;
-        public BrawlerBrain(FighterSpec s) { _engage = s.EngageRange; _alert = s.AlertRange; _lungeCost = s.Actions[1].EnergyCost; }
+        private readonly float _engage, _alert, _lungeCost, _lungeMax;
+        public BrawlerBrain(FighterSpec s)
+        {
+            _engage = s.EngageRange; _alert = s.AlertRange;
+            _lungeCost = s.Actions[1].EnergyCost; _lungeMax = s.Actions[1].MaxRange;
+        }
 
         protected override EnemyInput Decide(FighterSenses s, ref BrainScratch m)
         {
@@ -81,7 +88,7 @@ public sealed class ExampleBrawler : IFighterPackage
             input.Jump       = to.Y < -20f;
             input.WantAttack = true;
             // Lunge from mid range, swing up close; null lets the sim pick what passes.
-            input.RequestedAction = dist >= 40f && dist <= 110f ? 1 : dist <= 34f ? 0 : null;
+            input.RequestedAction = dist >= 40f && dist <= _lungeMax ? 1 : dist <= 34f ? 0 : null;
             return input;
         }
     }

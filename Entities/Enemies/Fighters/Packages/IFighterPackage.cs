@@ -41,4 +41,29 @@ public static class FighterPackages
         list.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
         return list;
     }
+
+    // The package called `name` (case-insensitive), or null. Tool-time lookup (league,
+    // --record-fight, loading a fight file) — reflection, so never per frame.
+    public static IFighterPackage Find(string name)
+    {
+        foreach (var p in Discover())
+            if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) return p;
+        return null;
+    }
+
+    // Which package's brain a spec carries, by the controller type its factory builds
+    // (timing wrappers looked through), or null for a stock brain. This is how a fight
+    // file names a package brain — a delegate cannot be serialized, a package name can.
+    public static string BrainOwner(FighterSpec spec)
+    {
+        var ctrl = TimedController.Unwrap(spec?.Brain?.Invoke(spec));
+        if (ctrl == null || ctrl is FighterCloserBrain or FighterKiterBrain or FighterHoverDiveBrain) return null;
+        var t = ctrl.GetType();
+        foreach (var p in Discover())
+        {
+            var ps = p.Spec();
+            if (TimedController.Unwrap(ps.Brain?.Invoke(ps))?.GetType() == t) return p.Name;
+        }
+        return null;
+    }
 }
