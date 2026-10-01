@@ -78,8 +78,9 @@ public sealed class PhysicsCostModel : ICostModel
         return a.Kind switch
         {
             ActionKind.Melee      => new Cost(kA * a.Damage * a.Reach, 0f, 1, 0),
-            // Touch damage: priced by the size of the damage box.
-            ActionKind.Contact    => new Cost(kA * a.Damage * a.HalfWidth, 0f, 1, 0),
+            // Touch damage. The box is the body (compiler: Radius + ContactMargin), not a
+            // knob, so it is priced on the stock box, never on the spec's HalfWidth.
+            ActionKind.Contact    => new Cost(kA * a.Damage * ActionSpec.Default(ActionKind.Contact).HalfWidth, 0f, 1, 0),
             // A lunge's reach is the distance its hitbox sweeps.
             ActionKind.Lunge      => new Cost(kA * a.Damage * (a.Speed * a.Active + a.HalfWidth),
                                               _k.KDash * a.Speed, 1, 0),

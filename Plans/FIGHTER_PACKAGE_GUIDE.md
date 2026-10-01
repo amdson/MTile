@@ -59,13 +59,15 @@ reach, or the compiler refuses (the fighter would swing at air).
 | `RailShot` | fast tile-breaking bolt | + 0.5 × penetration | 2 |
 | `Slam` / `PounceSlam` | fall-triggered | 0 | 1 (needs jump or fly) |
 | `Lash` | frozen-axis reach | 0 | 1 (needs cling) |
-| `Contact` | touch damage | 0 | 0 |
+| `Contact` | touch damage; the box IS your body (radius + 3 px), `HalfWidth` is ignored and unpriced | 0 | 0 |
 | `PlaceBlock` | a tile at `Reach` along your aim | material build cost | 0 |
 | `SpawnBlockInAir` | a tile over the target's head | 1.5 × build cost | 1 |
 
-**Windup and recovery are fixed per kind** (the values in `ActionSpec.Default`: melee
-0.45 / 0.40 s, lunge 0.35 / 0.45, ranged 0.60 / 0.50, rail 1.35 / 1.15, …). The compiler
-overrides whatever you set and says so in the `--spec` report. Timing is the one thing
+**Windup, recovery and FSM priorities are fixed per kind** (the values in
+`ActionSpec.Default`: melee 0.45 / 0.40 s, lunge 0.35 / 0.45, ranged 0.60 / 0.50, rail
+1.35 / 1.15, …). The compiler overrides whatever you set and says so in the `--spec`
+report. With the default priorities no action can preempt its own kind, so a second copy
+of an action cannot skip the first one's recovery (wave 3's lever, closed since). Timing is the one thing
 every opponent can read (below), so it is the arena's, not yours. `Active` is still
 yours: for a lunge it is the dash length and it is priced. Projectiles from different
 teams **destroy each other** on contact.
@@ -357,8 +359,9 @@ submission provenance, class results and caveats: [wave-3 progress](../Fights/co
 - **Fixed timing does not fix action throughput when priorities are author-controlled.**
   Twinbarrel alternates ranged actions after firing to skip recovery. Gravemantle
   alternates its two contact actions every frame with PassivePriority 13 > ActivePriority
-  12. The compiler accepts both. Close this loophole in a later version and preserve
-  this wave's results against the version actually scored.
+  12. The compiler accepted both at scoring time. **Closed after the wave** (§2): priorities
+  are fixed per kind, and a Contact box is the body (radius + `ContactMargin`), so neither
+  lever exists from wave 4 on; wave 3's results stand as scored.
 - **Knockback can prevent a finish.** Gravemantle's development experiments produced
   draws when repeated hits launched targets beyond reach; zero knockback retained them
   in the damage field. Its rejected single-contact design also lost to synthetic rammers

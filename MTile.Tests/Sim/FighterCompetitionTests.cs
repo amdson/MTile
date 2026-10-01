@@ -268,13 +268,19 @@ public class FighterCompetitionTests(ITestOutputHelper output)
     [Fact]
     public void Roll_PoolGrowsBySubmissions_AndReSplits()
     {
+        // The wave-2 ladder plus any participant present in this build that the ladder does
+        // not know (later waves' packages), appended at score 0 so `full` ranks the whole field.
         var full = Wave2Ladder();
-        // Two dealt (non-fixed) names play the wave's submissions: the top one and the last one.
+        var known = new HashSet<string>(full.Select(x => x.Name), StringComparer.OrdinalIgnoreCase);
+        foreach (var p in FighterLeague.AllParticipants())
+            if (!known.Contains(p.Name)) full.Add((p.Name, 0.0));
+        // The wave's submissions: the top and last dealt wave-2 names, plus every later package.
         var fixedDev = new HashSet<string>(CompetitionPool.DefaultAlwaysDev(), StringComparer.OrdinalIgnoreCase);
-        var dealt = full.Select(x => x.Name).Where(n => !fixedDev.Contains(n)).ToList();
+        var dealt = Wave2Ladder().Select(x => x.Name).Where(n => !fixedDev.Contains(n)).ToList();
         string top = dealt[0], last = dealt[^1];
-        var subs = new[] { top, last }.OrderBy(x => x, StringComparer.Ordinal).ToArray();
-        var prev = CompetitionPool.Split(3, full.Where(x => x.Name != top && x.Name != last).ToList());
+        var poolNames = full.Select(x => x.Name).Where(n => n != top && n != last && known.Contains(n)).ToList();
+        var subs = full.Select(x => x.Name).Where(n => !poolNames.Contains(n)).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+        var prev = CompetitionPool.Split(3, full.Where(x => poolNames.Contains(x.Name)).ToList());
         prev.Frames = 600; prev.Seeds = 4;
         Assert.Equal(subs, prev.Submissions().OrderBy(x => x, StringComparer.Ordinal));
 

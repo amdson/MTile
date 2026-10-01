@@ -118,6 +118,11 @@ public sealed class FighterCostConfig
     // Pool-action geometry (reach, hitbox extents, trigger bands) is authored for this
     // body radius and scales with Radius / ReferenceRadius on a compiled fighter.
     public float ReferenceRadius   { get; set; } = 12f;
+    // A Contact action's damage box is the BODY: half-extent = Radius + ContactMargin, set by
+    // the compiler whatever the spec's HalfWidth says (wave 3's Gravemantle bought a 280 px
+    // box for 0.98 mass and covered the arena from spawn). The margin is the touch slack —
+    // bodies do not collide, so a hit registers at near-contact, not on overlap.
+    public float ContactMargin     { get; set; } = 3f;
 
     // ── Compute budget (Plans/FIGHTER_PACKAGE_GUIDE.md §5) ────────────────────
     // Mean wall-clock microseconds a brain may spend per Decide, as the league and

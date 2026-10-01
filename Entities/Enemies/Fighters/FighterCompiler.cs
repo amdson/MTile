@@ -98,6 +98,15 @@ public static class FighterCompiler
                 notes.Add($"{i}:{a.Kind} Windup is fixed at {d.Windup:0.##} s (spec said {a.Windup:0.##}).");
             if (a.Recovery != d.Recovery)
                 notes.Add($"{i}:{a.Kind} Recovery is fixed at {d.Recovery:0.##} s (spec said {a.Recovery:0.##}).");
+            // Priorities are the arena's too: with the per-kind defaults no action can preempt
+            // its own kind, so a second copy of an action cannot skip the first one's recovery
+            // (wave 3's Twinbarrel and Gravemantle did exactly that).
+            if (a.ActivePriority != d.ActivePriority || a.PassivePriority != d.PassivePriority)
+                notes.Add($"{i}:{a.Kind} priorities are fixed at {d.ActivePriority}/{d.PassivePriority} " +
+                          $"(spec said {a.ActivePriority}/{a.PassivePriority}).");
+            if (a.Kind == ActionKind.Contact && (a.HalfWidth != d.HalfWidth || a.HalfHeight != d.HalfHeight))
+                notes.Add($"{i}:Contact box is the body (radius + {FighterCosts.Current.ContactMargin:0.#} px); " +
+                          $"spec HalfWidth {a.HalfWidth:0.#} / HalfHeight {a.HalfHeight:0.#} ignored.");
         }
 
         var violations = new List<string>();
@@ -190,13 +199,15 @@ public static class FighterCompiler
             // compiler overwrites whatever EnergyCost the spec carried, so the number
             // the cost report shows and the number the sim spends can never disagree.
             a.EnergyCost = actionCosts[i].Cost.Energy;
-            // Timing is fixed per kind (see Compile's notes): the sim runs the default
-            // Windup and Recovery whatever the spec said.
+            // Timing and priorities are fixed per kind (see Compile's notes): the sim runs
+            // the default Windup, Recovery and FSM priorities whatever the spec said.
             if (a.Kind != ActionKind.Special)
             {
                 var d = ActionSpec.Default(a.Kind);
-                a.Windup   = d.Windup;
-                a.Recovery = d.Recovery;
+                a.Windup          = d.Windup;
+                a.Recovery        = d.Recovery;
+                a.ActivePriority  = d.ActivePriority;
+                a.PassivePriority = d.PassivePriority;
             }
             actions[i] = a;
         }
@@ -255,8 +266,9 @@ public static class FighterCompiler
             Actions = () =>
             {
                 var list = new List<EnemyActionState>(actions.Length);
-                float geom = DerivedRadius(total.Mass, spec) / FighterCosts.Current.ReferenceRadius;
-                foreach (var a in actions) list.Add(CreateAction(ScaleGeometry(a, geom)));
+                float radius = DerivedRadius(total.Mass, spec);
+                float geom   = radius / FighterCosts.Current.ReferenceRadius;
+                foreach (var a in actions) list.Add(CreateAction(ContactBox(ScaleGeometry(a, geom), radius)));
                 return list;
             },
         };
@@ -281,6 +293,15 @@ public static class FighterCompiler
         a.Reach      *= scale;
         a.HalfWidth  *= scale;
         a.HalfHeight *= scale;
+        return a;
+    }
+
+    // A Contact action's box is the body: half-extent = radius + ContactMargin, whatever the
+    // spec (or the geometry scale) made of HalfWidth/HalfHeight. Other kinds pass through.
+    public static ActionSpec ContactBox(ActionSpec a, float radius)
+    {
+        if (a.Kind != ActionKind.Contact) return a;
+        a.HalfWidth = a.HalfHeight = radius + FighterCosts.Current.ContactMargin;
         return a;
     }
 

@@ -33,6 +33,7 @@
   "MaxSlots": 4,
   "MaxPoints": 2,
 
+  "ContactMargin": 3,
   "DecideBudgetMicros": 20,
   "DrawPenalty": 0.1
 }
