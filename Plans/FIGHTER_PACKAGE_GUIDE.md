@@ -206,3 +206,22 @@ current meta, which the next wave exists to break.
   stale reads in between; every brain that read every frame starved its own meter.
 - **`SpawnBlockInAir` does no damage.** The block hangs. It blocks sight lines and dives,
   nothing more.
+
+## 9. Lessons from wave two (six more agents, 2026-10-01)
+
+- **Strength is the cheapest damage in the game.** It multiplies every hitbox at publish
+  time, including a rail bolt, and costs 0.40 mass per unit above 1 with NO energy price —
+  energy scales with the spec's Damage, not Strength. Bulwark (0.96, 104-0-4): a rooted
+  rail with spec Damage 1.0 (4.5 energy a shot) and Strength 3.6, so the bolt lands for
+  3.6 and most of the field dies at frame 12, the first possible shot.
+- **Walls still beat one-shot turrets.** Bulwark's only losses are to Sapper, which
+  advances behind placed blocks and wins the timeout on health. Line of sight is the one
+  thing a rail cannot buy around.
+- **A shooter on a crawler works.** Lancer (0.95) is a Cling body — fixed 60 px/s crawl,
+  no jump, no walk speed — with a 0.25 s shot, a lash and a jab; its balls shoot down
+  incoming balls and it never stops advancing. It loses only to Bulwark.
+- **A Ranged action costs ~0.11 mass**, regardless of speed or damage; the table's "0"
+  is wrong. Its energy cost is 0.002 × speed × damage per shot.
+- **Health and strength are a cheaper counter to shooters than dodge logic.** Phalanx
+  (0.88) took Harrier's chassis, swapped in an 800 px/s 0.25 s shot, and spent the rest on
+  Health 6 and Strength 1.3; that beat the wave-one champion without a smarter dodge.
