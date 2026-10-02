@@ -535,13 +535,15 @@ public static class Stages
     {
         var all   = FighterLeague.AllParticipants();
         var model = new PhysicsCostModel();
-        var kinds = new EntityKind[GauntletOrder.Length];
-        for (int i = 0; i < GauntletOrder.Length; i++)
+        var kinds = new List<EntityKind>(GauntletOrder.Length);
+        foreach (var name in GauntletOrder)
         {
-            var p = all.Find(x => string.Equals(x.Name, GauntletOrder[i], StringComparison.OrdinalIgnoreCase))
-                    ?? throw new InvalidOperationException($"fighter_gauntlet: no fighter named '{GauntletOrder[i]}'.");
+            // A fighter that is not in this checkout is skipped: competition base branches
+            // hide the holdout packages, and the run should still play without them.
+            var p = all.Find(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (p == null) continue;
             var spec = p.Make();
-            spec.Kind = EntityKinds.FighterSlot(i);
+            spec.Kind = EntityKinds.FighterSlot(kinds.Count);
             spec.Team = Teams.Enemies;
             // The room is the whole world: every fighter knows where the player is.
             spec.AlertRange = MathF.Max(spec.AlertRange, GauntletRoomTiles * Chunk.TileSize);
@@ -549,7 +551,7 @@ public static class Stages
             if (!r.IsValid)
                 throw new InvalidOperationException($"fighter_gauntlet: '{spec.Name}' is invalid:\n{r.Report()}");
             g.Blueprints[spec.Kind] = r.Blueprint;
-            kinds[i] = spec.Kind;
+            kinds.Add(spec.Kind);
         }
 
         var v      = g.StageVars;
@@ -576,7 +578,7 @@ public static class Stages
             if (current != null) return;
             // The fighter in the room just died: queue the next one.
             if (v[3] == 1) { v[0]++; v[3] = 0; v[2] = frame + delay; }
-            if (v[0] >= kinds.Length || frame < v[2]) return;
+            if (v[0] >= kinds.Count || frame < v[2]) return;
 
             var f = new BlueprintEnemy(g.Blueprints[kinds[v[0]]], enter);
             f.SeedBrain(BrainRandom.Mix((ulong)v[1], (ulong)v[0] + 1));
