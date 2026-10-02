@@ -24,9 +24,9 @@ Slots are `sonnet-3`..`sonnet-6`: `sonnet-1` and `sonnet-2` are wave 3's worktre
 | slot | model | status | bot | started | finished | dev score (self-reported) | notes |
 |---|---|---|---|---|---|---|---|
 | sonnet-3 | Sonnet 5.5 | running (resumed 22:15) | Bullrush (draft) | 19:10 | | | |
-| sonnet-4 | Sonnet 5.5 | running (resumed 22:15) | Ironhide (9879f31) | 19:10 | | | |
-| sonnet-5 | Sonnet 5.5 | running (resumed 22:15) | Ironwing (draft) | 19:10 | | | |
-| sonnet-6 | Sonnet 5.5 | queued | | | | | |
+| sonnet-4 | Sonnet 5.5 | submitted | Ironhide | 19:10 | 22:14 | 0.992 ±0.002 (1712-6-10, 16 seeds) | contact rammer on a Thornbull-style brain: Health 9, Contact Damage 8, GroundPower 330 (128 px/s), Density 0.5 (radius 24); survives Thornbull's 7-damage touch and kills with its own; worst on hills vs Phalanx (9-6-1), Thornbull (12-0-4), Arrowhawk (13-0-3); no Dash or Mine; commit 9879f31 |
+| sonnet-5 | Sonnet 5.5 | submitted | Ironwing | 19:10 | 22:15 | 0.993 ±0.002 (1713-7-8, 16 seeds) | Thornbull's brain copied, spec re-split: Contact Damage 7, Health 9.4, GroundPower 330, jump 370, Density 0.6 (radius 22); survives a 7–9 damage touch so rammer mirrors become wins; worst vs Arrowhawk, Mason, Twinbarrel; considered Dash and Mine on paper, used neither; commit d3d4fd0 |
+| sonnet-6 | Sonnet 5.5 | running | | 22:14 | | | |
 
 Status: queued → running → submitted (branch has its one file) → collected → scored.
 
@@ -51,3 +51,5 @@ Status: queued → running → submitted (branch has its one file) → collected
   (Ironwing) had uncommitted drafts. All three resumed with their context and told to pass
   `--threads 2` and keep commands under ~5 min; the brief template now says the same, so
   sonnet-6 gets identical instructions.
+- 22:14 — sonnet-4 submitted Ironhide (9879f31, one file, clean tree). sonnet-6 launched into the free slot.
+- 22:15 — sonnet-5 submitted Ironwing (d3d4fd0, one file, clean tree). Second Thornbull-derived high-health rammer; no new tools used so far.
