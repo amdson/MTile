@@ -231,6 +231,20 @@ public class FighterGuardShoveTests
     }
 
     [Fact]
+    public void KnockbackAboveStock_IsPricedOnEveryKind_BelowStockIsFree()
+    {
+        // A swing must not buy a free shove: push above the kind's stock costs mass.
+        var model = new PhysicsCostModel();
+        var s = Tool(_ => new EnemyInput());
+        var stock = ActionSpec.Default(ActionKind.Melee);
+        var hard = stock; hard.Knockback = new Vector2(1000f, -150f);
+        var soft = stock; soft.Knockback = new Vector2(50f, 0f);
+        float m0 = model.ActionCost(stock, s).Mass;
+        Assert.True(model.ActionCost(hard, s).Mass > m0 + 0.1f);
+        Assert.Equal(m0, model.ActionCost(soft, s).Mass, 5);
+    }
+
+    [Fact]
     public void StockGuardAndShove_Compile_AndOutOfBoundsKnobsAreRefused()
     {
         var model = new PhysicsCostModel();

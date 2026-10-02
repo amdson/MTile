@@ -435,4 +435,8 @@ submission provenance, class results and caveats: [wave-3 progress](../Fights/co
   energy-paid guard that stops frontal touches and shots but slows you and leaves your back
   open, and a light shove that breaks it and turns positioning into damage. Guard is
   request-only; no existing brain uses either.
+- **Knockback is priced.** Any action's knockback above its kind's stock push now costs mass
+  at the shove's rate (0.0002 per unit), so a swing can't buy a free shove. Pushing less
+  than stock stays free. No existing bot was affected: every one sets its push at or below
+  stock.
 

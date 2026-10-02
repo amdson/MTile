@@ -74,6 +74,19 @@ public sealed class PhysicsCostModel : ICostModel
 
     public Cost ActionCost(in ActionSpec a, FighterSpec s)
     {
+        var c = BaseActionCost(in a, s);
+        // Knockback above the kind's stock push is control, and is paid for at the shove's
+        // rate (a shove already pays for all of its push). Below stock is free.
+        if (a.Kind is not (ActionKind.Shove or ActionKind.Special))
+        {
+            float extra = a.Knockback.Length() - ActionSpec.Default(a.Kind).Knockback.Length();
+            if (extra > 0f) c = c with { Mass = c.Mass + _k.KShove * extra };
+        }
+        return c;
+    }
+
+    private Cost BaseActionCost(in ActionSpec a, FighterSpec s)
+    {
         float kA = _k.KA, refReach = _k.ReachRef;
         return a.Kind switch
         {
