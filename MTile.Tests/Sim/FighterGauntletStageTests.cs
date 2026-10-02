@@ -82,10 +82,7 @@ public class FighterGauntletStageTests
         // Every listed fighter present in this checkout (a competition base hides some).
         var g = NewSim();
         var names = FighterLeague.AllParticipants().Select(p => p.Name).ToHashSet();
-        int present = new[] { "Sprinter", "ExampleBrawler", "Flyer", "Kestrel", "Builder", "Turret", "Gravemantle",
-            "Bulwark", "Skirmish", "Gunner", "Sapper", "Brick", "Breacher", "Wraith", "Vanguard", "Sentinel", "Mason",
-            "Harrier", "Ironshot", "Lancer", "Arrowhawk", "Stonecreep", "Phalanx", "Twinbarrel", "Thornback",
-            "Ironmaw", "Hollowstep", "Thornrush", "Thornbull" }.Count(names.Contains);
+        int present = Stages_GauntletOrder().Count(names.Contains);
         Assert.True(present >= 18);
         Assert.Equal(present, g.Blueprints.Count);
         for (int i = 0; i < present; i++) Assert.True(g.Blueprints.ContainsKey(EntityKinds.FighterSlot(i)));
@@ -120,4 +117,8 @@ public class FighterGauntletStageTests
         Assert.Equal(deaths, g.PlayerDeaths);
         Assert.Equal(kinds, Fighters(g).Select(e => e.Kind).ToList());
     }
+
+    // The stage's own list, read by reflection so the test follows it.
+    private static string[] Stages_GauntletOrder()
+        => (string[])typeof(Stages).GetField("GauntletOrder", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!;
 }

@@ -99,12 +99,15 @@ public enum EntityKind
     FighterSlot5,
     FighterSlot6,
     FighterSlot7,
-    // 8..31: the fighter gauntlet gives each of its fighters its own kind, so a restore
+    // 8..47: the fighter gauntlet gives each of its fighters its own kind, so a restore
     // rehydrates the right one from Simulation.Blueprints.
     FighterSlot8,  FighterSlot9,  FighterSlot10, FighterSlot11, FighterSlot12, FighterSlot13,
     FighterSlot14, FighterSlot15, FighterSlot16, FighterSlot17, FighterSlot18, FighterSlot19,
     FighterSlot20, FighterSlot21, FighterSlot22, FighterSlot23, FighterSlot24, FighterSlot25,
     FighterSlot26, FighterSlot27, FighterSlot28, FighterSlot29, FighterSlot30, FighterSlot31,
+    FighterSlot32, FighterSlot33, FighterSlot34, FighterSlot35, FighterSlot36, FighterSlot37,
+    FighterSlot38, FighterSlot39, FighterSlot40, FighterSlot41, FighterSlot42, FighterSlot43,
+    FighterSlot44, FighterSlot45, FighterSlot46, FighterSlot47,
 
     // A fighter's mine (ActionKind.Mine, Entities/Projectiles/FighterMine.cs).
     FighterMine,
@@ -114,13 +117,13 @@ public static class EntityKinds
 {
     // Every kind a FighterSpec can compile to. Rehydrate routes these to EnemyFactory
     // unconditionally so an unregistered one fails loudly.
-    public static bool IsFighter(EntityKind k) => k >= EntityKind.Brick && k <= EntityKind.FighterSlot31;
+    public static bool IsFighter(EntityKind k) => k >= EntityKind.Brick && k <= EntityKind.FighterSlot47;
 
-    public const int FighterSlotCount = 32;
+    public const int FighterSlotCount = 48;
 
     public static EntityKind FighterSlot(int i)
     {
-        if (i < 0 || i >= FighterSlotCount) throw new ArgumentOutOfRangeException(nameof(i), "Fighter slots are 0..31.");
+        if (i < 0 || i >= FighterSlotCount) throw new ArgumentOutOfRangeException(nameof(i), "Fighter slots are 0..47.");
         return EntityKind.FighterSlot0 + i;
     }
 }
