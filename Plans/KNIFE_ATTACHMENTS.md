@@ -60,6 +60,15 @@ The ground combo also authors optional JSON controls:
 
 These settings are currently authored in JSON; the editor previews them.
 
+**Progress curve.** `Progress` is an optional `AnimCurve` (the same spline type as a contact's
+weight) from window fraction u to strip progress. Null = linear. When set it **supersedes
+`FrameTimes`**; the window gate and trail fade stay linear in u. In the editor: endpoint menu →
+the element's entry → **Progress curve**. The first time, the curve is seeded from `FrameTimes`
+(monotone tangents, so nothing changes on screen) or the identity, and the curve window opens
+whenever that element is selected. Edit keys and tangents there, the same way as the weight curve; the curve's
+shape is drawn under the element's timeline bar. **Remove curve** falls back to `FrameTimes`.
+Like contact curves, it lives on the window's own domain, so retiming the window stretches the ease.
+
 ## Shared asset
 
 [`knife.png`](../Assets/AnimationEffects/knife.png) is a transparent RGBA strip:

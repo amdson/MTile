@@ -207,6 +207,68 @@ public class AttachmentTests
         finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
     }
 
+    // The biped groundslash1 schedule: holds the full blade across the hit window.
+    private static AnimAttachment ScheduledKnife() => new()
+    {
+        Start = .2188f, End = .8281f,
+        FrameTimes = new[] { .2188f, .2783f, .3477f, .4047f, .5422f, .6828f, .7316f, .7959f },
+    };
+
+    [Fact]
+    public void SeededProgressCurve_ReproducesTheFrameTimesSchedule()
+    {
+        var a = ScheduledKnife();
+        var seeded = ScheduledKnife();
+        seeded.Progress = seeded.SeedProgress();
+        int mismatches = 0, samples = 0;
+        for (float time = a.Start; time < a.End - 1e-6f; time += .0005f, samples++)
+        {
+            Assert.True(a.TryProgress(time, out float u));
+            bool nearBoundary = a.FrameTimes.Any(f => MathF.Abs(time - f) < .001f);
+            if (a.FrameAt(time, u, 8) != seeded.FrameAt(time, u, 8) && !nearBoundary) mismatches++;
+        }
+        Assert.Equal(0, mismatches);
+        Assert.True(samples > 1000);
+    }
+
+    [Fact]
+    public void ProgressCurve_SupersedesFrameTimes_AndNullMeansLinear()
+    {
+        var a = ScheduledKnife();
+        Assert.Equal(.3f, a.StripProgress(.3f), 5);               // no curve: identity
+        a.Progress = AnimCurve.Constant(.99f);                     // hold the last frame
+        Assert.Equal(7, a.FrameAt(a.Start, 0f, 8));
+        a.Progress = AnimAttachment.LinearProgress();
+        Assert.Equal(4, a.FrameAt(a.FrameTimes[1], .5f, 8));       // u = .5, not the FrameTimes frame 1
+        Assert.True(a.TryProgress(.5f, out float u));              // the window gate stays linear
+        Assert.Equal((.5f - a.Start) / (a.End - a.Start), u, 5);
+    }
+
+    [Fact]
+    public void ProgressCurve_RoundTripsAndClonesDeep()
+    {
+        var clip = new AnimationDocument { Name = "curvecheck", Type = "CurveCheck",
+            Keyframes = { new AnimationKeyframe { Time = 0 } } };
+        var a = ScheduledKnife(); a.Point = "knife"; a.Effect = "knife";
+        a.Progress = a.SeedProgress();
+        clip.Attachments = new() { a, new AnimAttachment { Point = "x", Effect = "knife" } };
+        string dir = Path.Combine(Path.GetTempPath(), "mtile-attachment-" + Guid.NewGuid());
+        try
+        {
+            AnimationStore.Save(clip, dir);
+            Assert.DoesNotContain("\"Progress\": null", File.ReadAllText(Directory.GetFiles(dir).Single()));
+            var loaded = Assert.Single(AnimationStore.LoadAll(dir)).Attachments;
+            Assert.Null(loaded[1].Progress);
+            Assert.Equal(a.Progress.Keys.Count, loaded[0].Progress.Keys.Count);
+            for (float u = 0; u <= 1; u += .05f) Assert.Equal(a.StripProgress(u), loaded[0].StripProgress(u), 5);
+        }
+        finally { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
+
+        var copy = a.Clone();
+        copy.Progress.Keys[1].V = 0f;
+        Assert.NotEqual(0f, a.Progress.Keys[1].V);
+    }
+
     [Fact]
     public void KnifeStripHasRealAlpha_EmptyCellBorders_AndFadingTail()
     {

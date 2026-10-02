@@ -58,6 +58,7 @@ public sealed partial class DemoGame
         EndpointPopup();
         ArcEditorWindow();
         ContactCurveWindow();
+        AttachmentCurveWindow();
         NameModal();
         HelpWindow(menuH);
 
@@ -670,8 +671,23 @@ public sealed partial class DemoGame
             if (a.TrailStart.HasValue || a.TrailEnd.HasValue)
                 dl.AddLine(new NVec2(TimeToX(a.TrailStart ?? a.Start), by + 4f),
                            new NVec2(TimeToX(a.TrailEnd ?? a.End), by + 4f), Col(255, 210, 120), 1.5f);
+            // The progress curve, as a profile in the strip under the bar (baseline = strip
+            // start, top = strip end) — the attachment's analogue of a contact's weight profile.
+            if (a.Progress != null)
+            {
+                const int Profile = 24;
+                float baseY = by + 15f;
+                for (int k = 0; k < Profile; k++)
+                {
+                    float u0 = k / (float)Profile, u1 = (k + 1) / (float)Profile;
+                    dl.AddLine(new NVec2(sx + (ex - sx) * u0, baseY - 8f * a.StripProgress(u0)),
+                               new NVec2(sx + (ex - sx) * u1, baseY - 8f * a.StripProgress(u1)),
+                               Col(180, 230, 240), 1f);
+                }
+            }
             dl.AddText(new NVec2(sx + 4f, by - 13f), sel ? Col(255, 255, 255) : Col(180, 230, 240),
-                       $"{a.Effect} on {a.Point}  [{a.Start:0.00}-{a.End:0.00}]");
+                       $"{a.Effect} on {a.Point}  [{a.Start:0.00}-{a.End:0.00}]"
+                       + (a.Progress != null ? "  ~curve" : ""));
         }
 
         // Keyframe bars + playhead.
@@ -707,7 +723,7 @@ public sealed partial class DemoGame
     private static readonly List<ContactSpan> EmptyContacts = new();
 
     private const float ContactPitch = 6f;
-    private const float AttachPitch  = 18f;   // bar + its label above it
+    private const float AttachPitch  = 28f;   // label above the bar, progress-curve strip below it
     private static readonly List<AnimAttachment> EmptyAttachments = new();
 
     // Distinct contact identities in the clip, capped at the 6 rows the read-out draws —
@@ -836,7 +852,10 @@ public sealed partial class DemoGame
     {
         var c = _selectedContact;
         if (c == null || Doc?.Contacts == null || !Doc.Contacts.Contains(c))
-        { _curveKey = -1; _dragCurveKey = _dragCurveTan = false; return; }
+        {
+            if (!AttachmentCurveOpen()) { _curveKey = -1; _dragCurveKey = _dragCurveTan = false; }
+            return;
+        }
 
         ImGui.SetNextWindowPos(new NVec2(LeftW + 24f, 90f), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new NVec2(360f, 0f), ImGuiCond.FirstUseEver);
@@ -848,6 +867,77 @@ public sealed partial class DemoGame
         ImGui.TextDisabled($"span [{c.Start:0.000} – {c.End:0.000}]   {c.Source}"
                          + (c.Weight == null ? "   (default ramp — editing makes a copy)" : ""));
 
+        bool inSpan = c.Covers(_scrubT, out float pu);
+        CurveCanvas(c.EffectiveWeight, c.Weight != null, c.EnsureWeight,
+                    inSpan ? pu : null, inSpan ? $"{c.WeightAt(_scrubT):0.00}" : null);
+        ImGui.TextDisabled("ends are pinned in time — they are the span's ends. amber = authored tangent");
+
+        if (ImGui.Button("Reset to ramp")) { c.Weight = null; _curveKey = -1; _dirty = true; }
+        ImGui.SameLine();
+        if (ImGui.Button("Flat 1.0")) { c.Weight = AnimCurve.Constant(1f); _curveKey = -1; _dirty = true; }
+        CurveKeyReadout(c.EffectiveWeight);
+
+        ImGui.End();
+        if (!open) _selectedContact = null;
+    }
+
+    // ── attachment progress curve editor ────────────────────────────────────────────
+    // The same span-local curve, on an element: x = fraction of the attachment's window,
+    // y = how far through its sprite strip it is. Opens while the selected attachment HAS a
+    // Progress curve (the endpoint menu's "Progress curve" verb adds one); closing it keeps the
+    // curve and just deselects, matching the weight window. Shares the canvas state with the
+    // weight window — contact and attachment selection are mutually exclusive.
+    private bool AttachmentCurveOpen()
+        => _selectedAttachment?.Progress != null && Doc?.Attachments?.Contains(_selectedAttachment) == true;
+
+    private void AttachmentCurveWindow()
+    {
+        if (!AttachmentCurveOpen()) return;
+        var a = _selectedAttachment;
+
+        ImGui.SetNextWindowPos(new NVec2(LeftW + 24f, 90f), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new NVec2(360f, 0f), ImGuiCond.FirstUseEver);
+        bool open = true;
+        if (!ImGui.Begin($"Progress curve — {a.Effect} on {a.Point}", ref open,
+                         ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings))
+        { ImGui.End(); if (!open) _selectedAttachment = null; return; }
+
+        ImGui.TextDisabled($"window [{a.Start:0.000} – {a.End:0.000}]   x = window fraction, y = strip progress");
+
+        bool inWindow = a.TryProgress(_scrubT, out float pu);
+        CurveCanvas(a.Progress, true, () => a.Progress ??= AnimAttachment.LinearProgress(),
+                    inWindow ? pu : null, inWindow ? $"{a.StripProgress(pu):0.00}" : null);
+        ImGui.TextDisabled("ends are pinned in time — they are the window's ends. amber = authored tangent");
+
+        if (ImGui.Button("Linear")) { a.Progress = AnimAttachment.LinearProgress(); _curveKey = -1; _dirty = true; }
+        if (a.FrameTimes != null)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("From FrameTimes")) { a.Progress = a.SeedProgress(); _curveKey = -1; _dirty = true; }
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Remove curve"))
+        {
+            a.Progress = null; _curveKey = -1; _dirty = true;
+            ImGui.End(); return;
+        }
+        if (a.FrameTimes != null)
+            ImGui.TextDisabled("this curve supersedes FrameTimes (kept in the file; Remove curve falls back to it)");
+        CurveKeyReadout(a.Progress);
+
+        ImGui.End();
+        if (!open) _selectedAttachment = null;
+    }
+
+    // ── shared span-curve canvas ────────────────────────────────────────────────────
+    // One AnimCurve on its normalized u ∈ [0,1] domain, value range [0,1]. `shown` is what is
+    // drawn (possibly a shared default); `ensure` hands back the clip-owned curve to mutate, so
+    // the first edit of a default forks it. `playheadU` marks the scrub position when it lies
+    // inside the span. Drag a key or the selected key's tangent handle; the end keys move
+    // vertically only, interior keys stay strictly between their neighbours.
+    private void CurveCanvas(AnimCurve shown, bool authored, Func<AnimCurve> ensure,
+                             float? playheadU, string playheadText)
+    {
         var dl = ImGui.GetWindowDrawList();
         ImGui.InvisibleButton("##curve", new NVec2(330f, 130f));
         var lo = ImGui.GetItemRectMin();
@@ -865,25 +955,24 @@ public sealed partial class DemoGame
         dl.AddText(new NVec2(x0 - 8f, yOne - 7f),  Col(110, 116, 130), "1");
         dl.AddText(new NVec2(x0 - 8f, yZero - 7f), Col(110, 116, 130), "0");
 
-        var curve = c.EffectiveWeight;
-        uint line = c.Weight == null ? Col(120, 130, 150) : Col(120, 210, 255);
+        uint line = authored ? Col(120, 210, 255) : Col(120, 130, 150);
         const int N = 80;
         for (int i = 0; i < N; i++)
         {
             float u0 = i / (float)N, u1 = (i + 1) / (float)N;
-            dl.AddLine(new NVec2(X(u0), Y(AnimCurve.ValueAt(curve, u0))),
-                       new NVec2(X(u1), Y(AnimCurve.ValueAt(curve, u1))), line, 2f);
+            dl.AddLine(new NVec2(X(u0), Y(AnimCurve.ValueAt(shown, u0))),
+                       new NVec2(X(u1), Y(AnimCurve.ValueAt(shown, u1))), line, 2f);
         }
 
         // The playhead, when it is inside this span — the reason to look at the curve at all.
-        if (c.Covers(_scrubT, out float pu))
+        if (playheadU is float pu)
         {
             dl.AddLine(new NVec2(X(pu), yOne - 6f), new NVec2(X(pu), yZero + 6f), Col(255, 180, 60), 1.5f);
-            dl.AddText(new NVec2(X(pu) + 4f, yOne - 6f), Col(255, 180, 60), $"{c.WeightAt(_scrubT):0.00}");
+            if (playheadText != null) dl.AddText(new NVec2(X(pu) + 4f, yOne - 6f), Col(255, 180, 60), playheadText);
         }
 
         // Keys + tangent handles.
-        var ks = curve.Keys;
+        var ks = shown.Keys;
         for (int i = 0; i < ks.Count; i++)
         {
             float kx = X(ks[i].T), ky = Y(ks[i].V);
@@ -929,8 +1018,7 @@ public sealed partial class DemoGame
         if (ImGui.IsItemActive() && (_dragCurveKey || _dragCurveTan) && _curveKey >= 0)
         {
             var mp = ImGui.GetIO().MousePos;
-            var w = c.EnsureWeight();          // first edit forks the shared default
-            ks = w.Keys;
+            ks = ensure().Keys;                // first edit forks a shared default
             if (_curveKey < ks.Count)
             {
                 var k = ks[_curveKey];
@@ -953,37 +1041,28 @@ public sealed partial class DemoGame
         }
         if (ImGui.IsItemDeactivated()) { _dragCurveKey = _dragCurveTan = false; }
 
-        // Buttons.
+        // Key buttons.
         if (ImGui.Button("Add key"))
         {
-            var w = c.EnsureWeight();
-            float u = c.Covers(_scrubT, out float at) ? at : 0.5f;
-            int idx = w.InsertPreservingShape(u);
+            int idx = ensure().InsertPreservingShape(playheadU ?? 0.5f);
             _curveKey = idx; _dirty = true;
         }
         ImGui.SameLine();
-        bool canDelete = _curveKey > 0 && c.Weight != null && _curveKey < c.Weight.Keys.Count - 1;
+        bool canDelete = authored && _curveKey > 0 && _curveKey < shown.Keys.Count - 1;
         if (!canDelete) ImGui.BeginDisabled();
-        if (ImGui.Button("Delete key")) { c.Weight.Keys.RemoveAt(_curveKey); _curveKey = -1; _dirty = true; }
+        if (ImGui.Button("Delete key")) { shown.Keys.RemoveAt(_curveKey); _curveKey = -1; _dirty = true; }
         if (!canDelete) ImGui.EndDisabled();
         ImGui.SameLine();
-        if (ImGui.Button("Auto tangent") && _curveKey >= 0 && c.Weight != null && _curveKey < c.Weight.Keys.Count)
-        { c.Weight.Keys[_curveKey].Tan = null; _dirty = true; }
-        ImGui.TextDisabled("ends are pinned in time — they are the span's ends. amber = authored tangent");
+        if (ImGui.Button("Auto tangent") && authored && _curveKey >= 0 && _curveKey < shown.Keys.Count)
+        { shown.Keys[_curveKey].Tan = null; _dirty = true; }
+    }
 
-        if (ImGui.Button("Reset to ramp")) { c.Weight = null; _curveKey = -1; _dirty = true; }
-        ImGui.SameLine();
-        if (ImGui.Button("Flat 1.0")) { c.Weight = AnimCurve.Constant(1f); _curveKey = -1; _dirty = true; }
-
-        if (_curveKey >= 0 && _curveKey < curve.Keys.Count)
-        {
-            var k = curve.Keys[_curveKey];
-            ImGui.TextDisabled($"key {_curveKey}:  u={k.T:0.000}  v={k.V:0.000}  "
-                             + (k.Tan.HasValue ? $"tan={k.Tan.Value:0.00}" : "tan=auto"));
-        }
-
-        ImGui.End();
-        if (!open) _selectedContact = null;
+    private void CurveKeyReadout(AnimCurve curve)
+    {
+        if (curve == null || _curveKey < 0 || _curveKey >= curve.Keys.Count) return;
+        var k = curve.Keys[_curveKey];
+        ImGui.TextDisabled($"key {_curveKey}:  u={k.T:0.000}  v={k.V:0.000}  "
+                         + (k.Tan.HasValue ? $"tan={k.Tan.Value:0.00}" : "tan=auto"));
     }
 
     // The tangent the curve will actually use at key i — authored, else the Catmull-Rom secant
@@ -1092,7 +1171,7 @@ public sealed partial class DemoGame
         // ── what is already here ────────────────────────────────────────────────────
         // Each existing item gets its own submenu with the verbs spelled out. Selecting aims
         // U/I and Delete at it; a contact's row also opens its weight-curve editor.
-        var items = new List<(string label, Action select, Action remove)>();
+        var items = new List<(string label, Action select, Action remove, Action curve)>();
         if (doc.Attachments != null)
             foreach (var a in doc.Attachments)
             {
@@ -1101,7 +1180,11 @@ public sealed partial class DemoGame
                 var att = a;
                 items.Add(($"element: {a.Effect} [{a.Start:0.00}-{a.End:0.00}]",
                            () => { _selectedAttachment = att; _selectedContact = null; _selectedPointId = null; },
-                           () => { _pendingAttachmentRemoval = att; }));
+                           () => { _pendingAttachmentRemoval = att; },
+                           // The progress curve opens its editor by selecting the element; a
+                           // first use seeds it from FrameTimes so nothing jumps on screen.
+                           () => { att.Progress ??= att.SeedProgress(); _dirty = true;
+                                   _selectedAttachment = att; _selectedContact = null; _selectedPointId = null; }));
             }
         if (doc.Contacts != null)
             foreach (var cs in doc.Contacts)
@@ -1113,7 +1196,7 @@ public sealed partial class DemoGame
                            () => { doc.Contacts.Remove(span);
                                    if (doc.Contacts.Count == 0) doc.Contacts = null;
                                    if (_selectedContact == span) _selectedContact = null;
-                                   _dirty = true; }));
+                                   _dirty = true; }, null));
             }
         if (doc.Points != null)
             foreach (var p in doc.Points)
@@ -1122,16 +1205,17 @@ public sealed partial class DemoGame
                 var pp = p;
                 items.Add(($"point: {p.Id}",
                            () => { _selectedPointId = pp.Id; _selectedAttachment = null; _selectedContact = null; },
-                           () => { _selectedPointId = pp.Id; RemoveSelectedPoint(); }));
+                           () => { _selectedPointId = pp.Id; RemoveSelectedPoint(); }, null));
             }
 
         if (items.Count == 0) return;
         ImGui.Separator();
         ImGui.TextDisabled("on this endpoint");
-        foreach (var (label, select, remove) in items)
+        foreach (var (label, select, remove, curve) in items)
             if (ImGui.BeginMenu(label))
             {
                 if (ImGui.MenuItem("Select")) select();
+                if (curve != null && ImGui.MenuItem("Progress curve")) curve();
                 if (ImGui.MenuItem("Remove")) { remove(); ImGui.CloseCurrentPopup(); }
                 ImGui.EndMenu();
             }
