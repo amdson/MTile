@@ -63,7 +63,7 @@ reach, or the compiler refuses (the fighter would swing at air).
 | `PlaceBlock` | a tile at `Reach` along your aim | 0.3 × material build cost (dirt 0.23) | 0 |
 | `SpawnBlockInAir` | a tile over the target's head, windup 0.35 s | 1.5 × build cost | 1 |
 | `Dash` | a burst along the ground: `Speed × Active` px (stock 72 px in 9 frames, cap 120), **no hurtbox** for the first `Intangible` s (stock 5 frames). **Request-only.** | 0.004 × distance + 3.6 × `Intangible` (stock ≈ 0.6) | 0 |
-| `Mine` | lays a mine on the floor under you. **Request-only**, at most `MaxLive` (stock 2, cap 3) out at once | 0.015 × damage × `BlastRadius`, × `0.3 / ArmDelay` (clamped 0.5–2), × `(0.5 + 0.5 × Fuse / 3)` (stock ≈ 1.2) | 0 |
+| `Mine` | **summons** a mine at the point you aim (`AimWorld`, pulled in to `MaxRange`: stock 220, cap 260) after a long, public 1.0 s windup; mid-air is fine, it never falls. **Request-only**, at most `MaxLive` (stock 2, cap 3) out or on the way | 0.015 × damage × `BlastRadius`, × `0.3 / ArmDelay` (clamped 0.5–2), × `(0.5 + 0.5 × Fuse / 3)` (stock ≈ 1.2) | 0 |
 
 **Dash and Mine are request-only**: they fire only when `RequestedAction` names them,
 never from the open "whatever passes" scan. A dash goes in `MoveDir.X`'s direction (or
@@ -71,6 +71,12 @@ straight away from the target if you give none) and needs you on the ground. Bod
 never collide in this sim, so a dash can cross straight through the opponent; while it
 is intangible, nothing hits you and no mine feels you. Its recovery (0.25 s) is
 hittable.
+
+**The summon is public.** For the whole 1.0 s windup the destination shows a filling
+blast ring, and every opponent's free `s.Mines(span)` lists it with `Pending = true` and
+`AppearsIn` seconds — so a mine never appears under anyone who was paying attention.
+Aimed into solid terrain it fizzles (still paid). To lay one at your feet, aim at your
+feet.
 
 **A mine** goes off on the first of: an **opposing** body touching it once armed
 (`ArmDelay`, stock 0.3 s); **any hit** at all (a shot, a swing, another blast — armed or
@@ -119,8 +125,9 @@ your entire memory). Every call is deterministic.
   frames old**, plus health and team. No velocity, no tell.
 - `s.Visible` / `s.HiddenSeconds` — whether line of sight holds right now.
 - `s.TargetStale(out age)` — the last exact read you bought, and how old it is.
-- `s.Mines(span)` — every live mine (yours and theirs): exact position, blast radius,
-  `Armed`, `FuseLeft`, `Owner`, `Team`. Pass a `stackalloc MineView[8]` buffer; returns the
+- `s.Mines(span)` — every live mine and every summon in progress (yours and theirs):
+  exact position, blast radius, `Pending` / `AppearsIn`, `Armed`, `FuseLeft`, `Owner`,
+  `Team`. Pass a `stackalloc MineView[8]` buffer; returns the
   count. A mine is a still object lying in the open, so this read is exact and free.
 - `s.TargetCost`, `s.ProbeCost`, `s.CellCost` — prices, so you can ration.
 - `s.Random()` (uniform in [0, 1)), `s.Random(lo, hi)`, `s.RandomInt(n)`, `s.Chance(p)` —
@@ -398,7 +405,8 @@ submission provenance, class results and caveats: [wave-3 progress](../Fights/co
 
 ## 14. New tools for wave 4 (2026-10-01)
 
-- **`Dash`** and **`Mine`** (table in §2). Both are request-only, so no existing brain
+- **`Dash`** and **`Mine`** (table in §2). A mine is summoned anywhere within 220 px after
+  a 1.0 s warning everyone can see. Both are request-only, so no existing brain
   changed behaviour. A dash is the answer to the two things wave 3 had none for: a fast
   ball from inside ~150 px (a hop lifts too little, too late) and a touch charge. A mine
   rewards predicting where the opponent will be; `s.Mines(span)` shows every live one

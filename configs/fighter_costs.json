@@ -28,6 +28,7 @@
   "MineMinArm": 0.1,
   "MineMaxFuse": 6,
   "MineMaxLive": 3,
+  "MineMaxRange": 260,
 
   "AMin": 40,
   "VMin": 150,

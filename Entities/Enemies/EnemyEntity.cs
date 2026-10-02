@@ -111,6 +111,8 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         : _actionVars.WindupDuration <= 0f ? 1f
         : MathF.Min(1f, _actionVars.TimeInState / _actionVars.WindupDuration);
     public Vector2    TellAim      => _actionVars.LockedAim;
+    // The running pool action's knobs (default when idle). Read-only, for views of it.
+    public ActionSpec CurrentActionSpec => _currentAction >= 0 ? _actions[_currentAction].Spec : default;
 
     // Armor is "mass that only counts for shoves" — it widens the knockback
     // divisor without touching the physics mass.

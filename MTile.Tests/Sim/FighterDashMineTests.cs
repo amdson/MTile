@@ -106,32 +106,63 @@ public class FighterDashMineTests
 
     // ── Mine ────────────────────────────────────────────────────────────────
 
+    // Summon at a point; `feet` = the floor just under the body.
+    private static EnemyInput Summon(Vector2 at, float moveX = 0f)
+        => new() { WantAttack = true, RequestedAction = 0, AimWorld = at, MoveDir = new Vector2(moveX, 0f) };
+    private static Vector2 Feet(FighterSenses s) => s.Self.Position + new Vector2(0f, s.Self.Radius);
+    private const int Summoned = 75;   // frames after a request by which the 1.0 s summon has landed
+
     [Fact]
-    public void Mine_LiesOnTheFloor_IsVisibleToBothSides_AndArms()
+    public void Mine_IsSummonedAtTheAimedPoint_AfterAPublicWarning_AndArms()
     {
         var m = ActionSpec.Default(ActionKind.Mine);
-        var (sim, bots) = Arena(Tool(s => s.Frame == 10 ? Ask(0) : new EnemyInput(), m), Post());
-        for (int f = 0; f < 30; f++) sim.Step(default);
+        var spot = FighterArena.LeftSpawn + new Vector2(90f, -40f);   // mid-air, between the two
+        var (sim, bots) = Arena(Tool(s => s.Frame == 10 ? Summon(spot) : new EnemyInput(), m), Post());
+        Span<MineView> views = stackalloc MineView[4];
+
+        // During the summon: nothing in the world yet, but the opponent sees it coming.
+        for (int f = 0; f < 40; f++) sim.Step(default);
+        Assert.Empty(Mines(sim));
+        Assert.Equal(1, bots[1].Senses.Mines(views));
+        Assert.True(views[0].Pending);
+        Assert.InRange(views[0].AppearsIn, 0.1f, m.Windup);
+        Assert.True(Vector2.Distance(views[0].Position, spot) < 0.01f);
+
+        for (int f = 0; f < Summoned - 40; f++) sim.Step(default);
         var mine = Assert.Single(Mines(sim));
         Assert.Equal(bots[0].Id, mine.Owner);
-        Assert.True(mine.Body.Position.Y < FighterArena.FloorTopY && mine.Body.Position.Y > FighterArena.FloorTopY - 10f,
-                    $"mine at y {mine.Body.Position.Y}, floor top {FighterArena.FloorTopY}");
-        Span<MineView> views = stackalloc MineView[4];
+        Assert.True(Vector2.Distance(mine.Body.Position, spot) < 0.01f, $"mine at {mine.Body.Position}, aimed {spot}");
         Assert.Equal(1, bots[1].Senses.Mines(views));
-        Assert.False(views[0].Armed);          // 20 frames old: not armed yet
+        Assert.False(views[0].Pending);
         for (int f = 0; f < 30; f++) sim.Step(default);
         Assert.Equal(1, bots[1].Senses.Mines(views));
         Assert.True(views[0].Armed);
-        Assert.Equal(1, views[0].Team);
+        Assert.True(Vector2.Distance(Assert.Single(Mines(sim)).Body.Position, spot) < 0.01f);   // rooted: never falls
+    }
+
+    [Fact]
+    public void Mine_AimedTooFar_IsPulledInToMaxRange_AndInsideRockFizzles()
+    {
+        var m = ActionSpec.Default(ActionKind.Mine);
+        var far = FighterArena.LeftSpawn + new Vector2(1000f, 0f);
+        var (sim, bots) = Arena(Tool(s => s.Frame == 10 ? Summon(far) : new EnemyInput(), m), Post());
+        for (int f = 0; f < Summoned; f++) sim.Step(default);
+        var mine = Assert.Single(Mines(sim));
+        Assert.Equal(m.MaxRange, Vector2.Distance(mine.Body.Position, bots[0].Body.Position), 1);
+
+        var rock = new Vector2(FighterArena.LeftSpawn.X, FighterArena.FloorTopY + 8f);
+        var (sim2, _) = Arena(Tool(s => s.Frame == 10 ? Summon(rock) : new EnemyInput(), m), Post());
+        for (int f = 0; f < Summoned + 10; f++) sim2.Step(default);
+        Assert.Empty(Mines(sim2));
     }
 
     [Fact]
     public void Mine_GoesOffOnItsFuse_AndHurtsItsOwner()
     {
         var m = ActionSpec.Default(ActionKind.Mine);
-        var (sim, bots) = Arena(Tool(s => s.Frame == 10 ? Ask(0) : new EnemyInput(), m), Post());
+        var (sim, bots) = Arena(Tool(s => s.Frame == 10 ? Summon(Feet(s)) : new EnemyInput(), m), Post());
         float hp = bots[0].Health;
-        for (int f = 0; f < 30; f++) sim.Step(default);
+        for (int f = 0; f < Summoned; f++) sim.Step(default);
         Assert.Single(Mines(sim));
         for (int f = 0; f < (int)(m.Fuse * 60) + 10; f++) sim.Step(default);
         Assert.Empty(Mines(sim));
@@ -142,21 +173,22 @@ public class FighterDashMineTests
     [Fact]
     public void Mine_OpposingContactSetsItOff_OwnerContactDoesNot()
     {
-        // The owner lays a mine and walks off left; a Brick on the other team walks in
-        // from close by, steps on it, and takes the blast long before the fuse.
+        // The owner summons a mine 50 px ahead of itself, in the path of a Brick on the
+        // other team that walks in to fight it; the Brick steps on it long before the fuse.
+        // The owner stands next to it the whole time and never sets it off.
         var m = ActionSpec.Default(ActionKind.Mine);
         m.Fuse = 6f;
-        var owner = Tool(s => s.Frame == 5 ? Ask(0) : s.Frame > 30 ? new EnemyInput { MoveDir = new Vector2(-1f, 0f) } : new EnemyInput(), m);
+        var owner = Tool(s => s.Frame == 5 ? Summon(Feet(s) + new Vector2(50f, 0f)) : new EnemyInput(), m);
         var brick = FighterRoster.Brick();
-        var (sim, bots) = Arena(owner, brick, FighterArena.LeftSpawn + new Vector2(70f, 0f));
+        var (sim, bots) = Arena(owner, brick, FighterArena.LeftSpawn + new Vector2(150f, 0f));
         float hp = bots[1].Health;
         int gone = -1;
-        for (int f = 0; f < 300 && gone < 0; f++)
+        for (int f = 0; f < 400 && gone < 0; f++)
         {
             sim.Step(default);
-            if (f > 20 && Mines(sim).Count == 0) gone = f;
+            if (f > Summoned && Mines(sim).Count == 0) gone = f;
         }
-        Assert.True(gone > 0 && gone < 300, "the mine never went off under the walker");
+        Assert.True(gone > 0, "the mine never went off under the walker");
         Assert.True(bots[1].Health < hp, "the walker stepped on the mine and took nothing");
         Assert.True(gone < m.Fuse * 60, "went off on the fuse, not on contact");
     }
@@ -165,8 +197,8 @@ public class FighterDashMineTests
     public void Mine_AnyHitSetsItOff_EvenUnarmed()
     {
         var m = ActionSpec.Default(ActionKind.Mine);
-        var (sim, _) = Arena(Tool(s => s.Frame == 10 ? Ask(0) : new EnemyInput(), m), Post());
-        for (int f = 0; f < 26; f++) sim.Step(default);   // laid ~frame 22, arms ~18 frames later
+        var (sim, _) = Arena(Tool(s => s.Frame == 10 ? Summon(Feet(s)) : new EnemyInput(), m), Post());
+        while (Mines(sim).Count == 0) sim.Step(default);
         var mine = Assert.Single(Mines(sim));
         Assert.False(mine.Armed);
         mine.Health -= 0.1f;                 // a hit
@@ -175,12 +207,18 @@ public class FighterDashMineTests
     }
 
     [Fact]
-    public void Mine_AtMostMaxLivePerFighter()
+    public void Mine_AtMostMaxLivePerFighter_SummonsIncluded()
     {
         var m = ActionSpec.Default(ActionKind.Mine);
-        var (sim, _) = Arena(Tool(_ => Ask(0, -1f), m), Post());
+        var (sim, bots) = Arena(Tool(s => Summon(Feet(s), -1f), m), Post());
+        Span<MineView> views = stackalloc MineView[8];
         int most = 0;
-        for (int f = 0; f < 240; f++) { sim.Step(default); most = Math.Max(most, Mines(sim).Count); }
+        for (int f = 0; f < 480; f++)
+        {
+            sim.Step(default);
+            int n = bots[1].Senses.Mines(views);
+            most = Math.Max(most, n);
+        }
         Assert.Equal(m.MaxLive, most);
     }
 
@@ -189,28 +227,31 @@ public class FighterDashMineTests
     [Fact]
     public void SnapshotWithALiveMineAndADash_ReplaysBitIdentically()
     {
-        // Snapshot while a mine is armed; inside the window: a dash, the fuse firing (the
-        // mine is destroyed, so the restore must rehydrate it), and a second mine.
+        // Snapshot at 100 (a mine armed; inside the window a dash, the fuse firing — the
+        // mine is destroyed, so the restore must rehydrate it — and a second summon) and at
+        // 220 (mid-way through that second summon: the locked destination must survive).
         var m = ActionSpec.Default(ActionKind.Mine);
         var d = ActionSpec.Default(ActionKind.Dash);
         EnemyInput Brain(FighterSenses s) => s.Frame switch
         {
-            10 => Ask(0),
-            60 => Ask(1, -1f),
-            220 => Ask(0),
-            _ => new EnemyInput(),
+            10  => Summon(Feet(s)),
+            120 => Ask(1, -1f),
+            200 => Summon(Feet(s) + new Vector2(60f, -20f)),
+            _   => new EnemyInput(),
         };
-        var (sim, _) = Arena(Tool(Brain, m, d), Post());
-        for (int f = 0; f < 40; f++) sim.Step(default);
-        Assert.Single(Mines(sim));
-        var snap = sim.Snapshot();
-        var live = new List<ulong>();
-        for (int f = 0; f < 300; f++) { sim.Step(default); live.Add(sim.Checksum()); }
-        sim.Restore(snap);
-        for (int f = 0; f < 300; f++)
+        foreach (int at in new[] { 100, 220 })
         {
-            sim.Step(default);
-            Assert.True(sim.Checksum() == live[f], $"replay diverged {f + 1} steps after the restore");
+            var (sim, _) = Arena(Tool(Brain, m, d), Post());
+            for (int f = 0; f < at; f++) sim.Step(default);
+            var snap = sim.Snapshot();
+            var live = new List<ulong>();
+            for (int f = 0; f < 300; f++) { sim.Step(default); live.Add(sim.Checksum()); }
+            sim.Restore(snap);
+            for (int f = 0; f < 300; f++)
+            {
+                sim.Step(default);
+                Assert.True(sim.Checksum() == live[f], $"snapshot at {at}: replay diverged {f + 1} steps after the restore");
+            }
         }
     }
 
@@ -239,6 +280,7 @@ public class FighterDashMineTests
     [InlineData("maxlive")]
     [InlineData("radius")]
     [InlineData("fuse")]
+    [InlineData("range")]
     public void OutOfBoundsTools_AreRefused(string what)
     {
         var d = ActionSpec.Default(ActionKind.Dash);
@@ -250,6 +292,7 @@ public class FighterDashMineTests
             case "maxlive":    m.MaxLive = 9; break;
             case "radius":     m.BlastRadius = 300f; break;
             case "fuse":       m.Fuse = m.ArmDelay; break;
+            case "range":      m.MaxRange = 900f; break;
         }
         var r = FighterCompiler.Compile(Tool(_ => new EnemyInput(), d, m), new PhysicsCostModel());
         Assert.False(r.IsValid);

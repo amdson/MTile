@@ -192,6 +192,8 @@ public sealed class PhysicsCostModel : ICostModel
                         yield return $"Action {i} (Mine) ArmDelay {a.ArmDelay:0.##} s is below {_k.MineMinArm:0.##} s.";
                     if (a.Fuse <= a.ArmDelay || a.Fuse > _k.MineMaxFuse)
                         yield return $"Action {i} (Mine) Fuse {a.Fuse:0.##} s must exceed ArmDelay and be at most {_k.MineMaxFuse:0.##} s.";
+                    if (a.MaxRange < 0f || a.MaxRange > _k.MineMaxRange)
+                        yield return $"Action {i} (Mine) MaxRange {a.MaxRange:0} must be within [0, {_k.MineMaxRange:0}].";
                     if (a.MaxLive < 1 || a.MaxLive > _k.MineMaxLive)
                         yield return $"Action {i} (Mine) MaxLive {a.MaxLive} must be within [1, {_k.MineMaxLive}].";
                     break;

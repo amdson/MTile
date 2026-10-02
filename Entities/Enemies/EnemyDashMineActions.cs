@@ -85,17 +85,20 @@ public class EnemyDashAction : EnemyActionState
     }
 }
 
-// Lay a FighterMine on the floor under the body. The windup is the tell; the mine appears
-// on the windup→active transition (one frame per use at a fixed timestep, like the
-// ranged shot, so nothing beyond the vars needs snapshotting). Refused while this fighter
-// already has MaxLive mines out.
+// Summon a FighterMine at a point of the brain's choosing: AimWorld at Enter, pulled in to
+// MaxRange from the body and frozen there as an ABSOLUTE point in v.LockedAim (which
+// round-trips through EntityData.Aim, so a snapshot mid-summon restores the same spot).
+// The windup is long (1.0 s, fixed per kind) and public: the destination draws a marker
+// that fills in, and every opponent's free FighterSenses.Mines lists it as Pending with
+// the seconds until it appears. The mine appears on the windup→active transition (one
+// frame per use at a fixed timestep, so nothing beyond the vars needs snapshotting),
+// exactly where it was aimed — mid-air included; mines are rooted and never fall. A
+// destination inside solid terrain fizzles (still paid: the fighter committed to it).
+// Refused while this fighter already has MaxLive mines out or on the way.
 public class EnemyMineAction : EnemyActionState
 {
     public EnemyMineAction() : this(ActionSpec.Default(ActionKind.Mine)) {}
     public EnemyMineAction(ActionSpec spec) { Spec = spec; }
-
-    // How far below the feet to look for a floor to rest the mine on.
-    private const int FloorSearchTiles = 6;
 
     public override int  ActivePriority  => Spec.ActivePriority;
     public override int  PassivePriority => Spec.PassivePriority;
@@ -112,7 +115,16 @@ public class EnemyMineAction : EnemyActionState
         v.LockedFacing = ctx.Facing == 0 ? 1 : ctx.Facing;
         v.HitId        = ctx.Spawner.HitIds.Next();
         v.Committed    = true;
+        v.LockedAim    = Destination(ctx.Self.Body.Position, ctx.Input.AimWorld, Spec.MaxRange);
         PopulateDurations(ref v);
+    }
+
+    // The aimed point, pulled in along the aim line to at most `range` from the body.
+    public static Vector2 Destination(Vector2 body, Vector2 aim, float range)
+    {
+        var d = aim - body;
+        float len = d.Length();
+        return len <= range || len < 1e-4f ? aim : body + d * (range / len);
     }
 
     public override void Exit(in EnemyContext ctx, ref EnemyActionVars v) => v.Committed = false;
@@ -129,26 +141,19 @@ public class EnemyMineAction : EnemyActionState
         float prevT = v.TimeInState;
         v.TimeInState += ctx.Dt;
         if (!(prevT < v.WindupDuration && v.TimeInState >= v.WindupDuration)) return;
+        var at = v.LockedAim;
+        var chunks = ctx.Spawner?.Chunks;
+        if (chunks != null)
+        {
+            int gtx = (int)MathF.Floor(at.X / Chunk.TileSize), gty = (int)MathF.Floor(at.Y / Chunk.TileSize);
+            if (chunks.GetCellState(gtx, gty) == TileState.Solid) return;   // fizzles inside rock
+        }
         var self = ctx.Self;
-        var pos  = Floor(ctx.Spawner?.Chunks, self.Body.Position, self.Body.Bounds.Bottom);
-        ctx.Spawner?.SpawnEntity(new FighterMine(pos, self.Id, self.Team, v.HitId,
+        ctx.Spawner?.SpawnEntity(new FighterMine(at, self.Id, self.Team, v.HitId,
             Spec.Damage, Spec.BlastRadius, Spec.ArmDelay, Spec.Fuse, Spec.Knockback.X));
     }
 
-    // The mine rests on the first solid cell at or below the feet (within a few tiles);
-    // over a drop it hangs at the feet.
-    private static Vector2 Floor(ChunkMap chunks, Vector2 body, float feetY)
-    {
-        var at = new Vector2(body.X, feetY - FighterMine.BodyRadius);
-        if (chunks == null) return at;
-        int gtx = (int)MathF.Floor(body.X / Chunk.TileSize);
-        int gty = (int)MathF.Floor((feetY - 1f) / Chunk.TileSize);
-        for (int k = 0; k <= FloorSearchTiles; k++)
-            if (chunks.GetCellState(gtx, gty + k) == TileState.Solid)
-                return new Vector2(body.X, (gty + k) * Chunk.TileSize - FighterMine.BodyRadius);
-        return at;
-    }
-
+    // Live mines plus summons on the way, both counted against MaxLive.
     private static int LiveMines(in EnemyContext ctx)
     {
         Span<MineView> views = stackalloc MineView[16];
@@ -157,23 +162,31 @@ public class EnemyMineAction : EnemyActionState
         return mine;
     }
 
-    // The windup: a small disc growing at the feet.
+    // The summon, drawn at the destination: the blast ring fills in across the windup,
+    // with a pulsing core in the last third.
     public override void Telegraph(TelegraphList t, PhysicsBody body, in EnemyActionVars v)
     {
         if (v.WindupDuration <= 0f || v.TimeInState >= v.WindupDuration) return;
         float p = v.TimeInState / v.WindupDuration;
-        t.Rect(new Vector2(body.Position.X, body.Bounds.Bottom - 2f), 2f + p * 4f, new Color(230, 70, 40) * (0.3f + 0.6f * p));
+        var at = v.LockedAim;
+        var hot = new Color(230, 70, 40);
+        t.Ring(at, Spec.BlastRadius, hot * 0.15f, 20);
+        t.Ring(at, Spec.BlastRadius * p, hot * (0.25f + 0.5f * p), 20);
+        float pulse = p > 0.66f ? 0.5f + 0.5f * MathF.Abs(MathF.Sin(v.TimeInState * 20f)) : 0.5f;
+        t.Rect(at, 2f + 3f * p, hot * pulse);
     }
 }
 
-// What a brain (and the mine action's own cap) sees of a mine: free, exact — a mine is
-// a still object lying in the open. Owner is its layer's id; Hostile is "not my team".
+// What a brain (and the mine action's own cap) sees of a mine: free, exact — a mine is a
+// still object in the open, and a summon is a public marker. Owner is its summoner's id.
 public struct MineView
 {
     public Vector2  Position;
     public float    Radius;      // blast reach, px
+    public bool     Pending;     // still being summoned: not there yet, cannot go off
+    public float    AppearsIn;   // Pending: seconds until it appears (0 once it has)
     public bool     Armed;       // contact sets it off now
-    public float    FuseLeft;    // seconds until it goes off on its own
+    public float    FuseLeft;    // seconds until it goes off on its own (from now, pending included)
     public EntityId Owner;
     public int      Team;
 }

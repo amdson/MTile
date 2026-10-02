@@ -97,6 +97,7 @@ public sealed class FighterCostConfig
     public float MineMinArm     { get; set; } = 0.1f;
     public float MineMaxFuse    { get; set; } = 6f;
     public int   MineMaxLive    { get; set; } = 3;
+    public float MineMaxRange   { get; set; } = 260f;   // summon distance cap, = the air block's reach
 
     // ── Floors (§3.2 hard constraints) ──────────────────────────────────────
     public float AMin         { get; set; } = 40f;        // px/s² — min GroundPower / Mass

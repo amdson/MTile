@@ -195,8 +195,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         return found;
     }
 
-    // ITargetSource: live mines in World (spawn) order — what EnemyMineAction counts and
-    // FighterSenses.Mines serves.
+    // ITargetSource: live mines, then summons in progress (a fighter mid-windup on a Mine
+    // action: Pending, at its locked destination), both in World (spawn) order — what
+    // EnemyMineAction counts against MaxLive and FighterSenses.Mines serves.
     public int Mines(Span<MineView> into)
     {
         int n = 0;
@@ -206,6 +207,18 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             if (r.Component1.Obj is not FighterMine m || m.IsDead) continue;
             into[n++] = new MineView { Position = m.Body.Position, Radius = m.Radius, Armed = m.Armed,
                                        FuseLeft = m.FuseLeft, Owner = m.Owner, Team = m.Team };
+        }
+        foreach (var r in _world.Query<EntityRef>())
+        {
+            if (n >= into.Length) break;
+            if (r.Component1.Obj is not EnemyEntity e || e.IsDead || e.TellKind != ActionKind.Mine) continue;
+            float p = e.TellProgress;
+            if (p < 0f || p >= 1f) continue;
+            var spec = e.CurrentActionSpec;
+            float appears = (1f - p) * spec.Windup;
+            into[n++] = new MineView { Position = e.TellAim, Radius = spec.BlastRadius, Pending = true,
+                                       AppearsIn = appears, FuseLeft = appears + spec.Fuse,
+                                       Owner = e.Id, Team = e.Team };
         }
         return n;
     }

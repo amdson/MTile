@@ -78,8 +78,9 @@ public struct ActionSpec
     public float Intangible;
 
     // Mine: the blast's reach (px, centre to edge; not scaled with the body), seconds
-    // before contact can set it off, seconds until it goes off on its own, and how many
-    // of this fighter's mines may be live at once.
+    // after it appears before contact can set it off, seconds after it appears until it
+    // goes off on its own, and how many of this fighter's mines may be live (or on the
+    // way) at once. MaxRange is how far from the body it may be summoned.
     public float BlastRadius, ArmDelay, Fuse;
     public int   MaxLive;
 
@@ -209,11 +210,13 @@ public struct ActionSpec
             Speed = 480f, Intangible = 0.083f,
             ActivePriority = 34, PassivePriority = 27,
         },
-        // Mine: dropped at the feet, armed after 0.3 s, gone off by 3 s. Request-only.
+        // Mine: summoned at an aimed point up to MaxRange away after a long, public 1.0 s
+        // windup; armed 0.3 s after it appears, gone off by 3 s. Request-only.
         ActionKind.Mine => new ActionSpec
         {
             Kind = kind,
-            Windup = 0.20f, Active = 0.05f, Recovery = 0.25f,
+            Windup = 1.00f, Active = 0.05f, Recovery = 0.25f,
+            MaxRange = 220f,
             Damage = 2.0f, Knockback = new Vector2(380f, 0f),
             BlastRadius = 40f, ArmDelay = 0.30f, Fuse = 3.0f, MaxLive = 2,
             ActivePriority = 25, PassivePriority = 17,
