@@ -30,7 +30,7 @@ Slots are `sonnet-3`..`sonnet-6`: `sonnet-1` and `sonnet-2` are wave 3's worktre
 
 | opus-3 | Opus 5.5 | submitted | Bramblehorn | 11:19 | 11:37 | 0.997 ±0.001 (1719-8-1, 16 seeds) | one-touch rammer (Contact Damage 10, Active 0.6, Health 7.5, 134 px/s) **plus a long untouchable dash** (790 px/s × 0.15 s): dashes through shots on the predicted release frame, through an opposing rammer's unfired hide, and into a cooling hide; randomised crossings so mirrors decide; worst vs Thornbull (6 draws, 1 loss), Bulwark, Gravemantle; weak spot per author: a one-touch-kill rammer on hills; commit 5f5826b |
 | opus-4 | Opus 5.5 | running | | 11:19 | | | |
-| opus-5 | Opus 5.5 | running | | 11:19 | | | |
+| opus-5 | Opus 5.5 | submitted | Cinderhoof | 11:19 | 11:39 | 0.991 ±0.002 (1706-15-7, 16 seeds) | rammer for the rammer duel: Contact Damage 12.1 (one-touch kills up to 12 health), Health 8.1 (wins exact-equality trades), hide fired only when the boxes will meet, no opening-frame gate; learns the opponent's hide window from the tell and dashes clear of a live hide, then back in during its recovery; walks through shots with feet down; worst vs Mason 86-9-1, Gravemantle 90-6-0, Arrowhawk 93-0-3; commit b5943c8 |
 Status: queued → running → submitted (branch has its one file) → collected → scored.
 
 ## Close-out
@@ -106,3 +106,10 @@ Gritmaul lost least to the hidden field. Only Bullrush used a new tool (a gap-cl
   bots are not visible to the Opus sessions (they are submissions, not pool). Same brief
   template; Opus sessions get the tools working, the Sonnet sessions had the bug.
 - 11:37 — opus-3 submitted Bramblehorn (5f5826b, one file, clean tree): rammer + long untouchable dash, the first submission built around the dash.
+- 11:39 — opus-5 submitted Cinderhoof (b5943c8, one file, clean tree). **Isolation leak reported by
+  opus-5:** subagent sessions share one scratchpad directory, so concurrent competitors could
+  see each other's scratch files (it saw Bramblehorn fight files, which carry the spec's
+  numbers but not its brain, and another session's script overwrote its own). It moved to a
+  private subfolder and says it read nothing of anyone else's. Within the agreed loose
+  security; closed for later waves: the brief now says to keep scratch files under the
+  worktree's (git-ignored) `Fights/league/`.

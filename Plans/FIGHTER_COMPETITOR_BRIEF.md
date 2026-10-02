@@ -22,6 +22,7 @@ READ FIRST, in full: `{WORKTREE}/CLAUDE.md`, then `{WORKTREE}/Plans/FIGHTER_PACK
 
 DELIVERABLE:
 - Exactly one NEW file: `{WORKTREE}/Entities/Enemies/Fighters/Packages/<Name>.cs`, where the class's `Name` property equals the file name, and `Author` is `"{AUTHOR}"`. `<Name>` must be unique: not any name in the pool file, not any existing file in `Packages/`, and preferably distinctive (two words fused, e.g. "Ironwing", not "Viper"). Do not modify any other file. A submission that changes or adds anything else is rejected automatically.
+- Keep every scratch file (scripts, fight files, logs, proxy notes) inside your worktree under `Fights/league/` (git ignores it). Never use a shared temp or scratchpad directory: other competitors run at the same time and could read or overwrite it.
 - Commit on your branch as you go (`git add Entities/Enemies/Fighters/Packages/<Name>.cs && git commit -m "..."`); only that path may ever be staged. Commit your final version before you finish. Never commit build output, fight files or notes.
 - The spec must compile under the default budget with zero violations, and pass the `FighterPackage` test filter.
 
