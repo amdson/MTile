@@ -55,6 +55,11 @@ public struct EnemyInput
     // Every brain must set it explicitly or its enemy will never attack.
     public bool WantAttack;
 
+    // Keep a raised guard up (ActionKind.Guard). Raising one is a request like any other
+    // action (RequestedAction = its index); it then stays up only while this is true,
+    // and lowers (into its recovery) the first frame it is false.
+    public bool Guard;
+
     // Explicit action choice (Plans/FIGHTER_DESIGN_PLAN.md §5.1): an index into
     // the entity's own action list. When set, SelectAction considers ONLY that
     // candidate — its precondition, priority and the incumbency rule still apply,

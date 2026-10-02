@@ -57,7 +57,7 @@ public class EnemyChaseState : EnemyMovementState
         if (power <= 0f)
         {
             // Legacy walk: every enemy that predates the fighter attributes.
-            ctx.Self.Body.Velocity.X = MathF.Sign(ctx.Input.MoveDir.X) * Speed;
+            ctx.Self.Body.Velocity.X = MathF.Sign(ctx.Input.MoveDir.X) * Speed * ctx.Self.MoveScale;
             return;
         }
 
@@ -69,7 +69,7 @@ public class EnemyChaseState : EnemyMovementState
         float mass  = MathF.Max(ctx.Self.Mass, 0.01f);
         float accel = power / mass;
         float vTop  = MathF.Sqrt(power / MathF.Max(ctx.Self.GroundDrag, 1e-4f));
-        float want  = MathF.Sign(ctx.Input.MoveDir.X) * vTop;
+        float want  = MathF.Sign(ctx.Input.MoveDir.X) * vTop * ctx.Self.MoveScale;
         float step  = accel * ctx.Dt;
         float vCmd  = body.Velocity.X + MathHelper.Clamp(want - body.Velocity.X, -step, step);
 

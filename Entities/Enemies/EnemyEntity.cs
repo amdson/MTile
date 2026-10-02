@@ -128,6 +128,11 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     // frames). Hurtboxes are published before entities update, so this reads the action
     // as last frame left it — a pure function of snapshotted vars.
     public bool IsIntangible => _currentAction >= 0 && _actions[_currentAction].IsIntangible(in _actionVars);
+    // A raised guard, and which way it faces (the facing locked when it went up).
+    public bool IsGuarding   => _currentAction >= 0 && _actions[_currentAction].IsGuarding(in _actionVars);
+    public int  GuardFacing  => _actionVars.LockedFacing;
+    // Walk-speed scale the movement states apply: slowed behind a raised guard.
+    public float MoveScale   => IsGuarding ? FighterCosts.Current.GuardMoveScale : 1f;
     public override void PublishHurtboxes(HurtboxWorld world)
     {
         if (IsIntangible) return;
@@ -175,9 +180,36 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     // StalkerEnemy.OnHit kicks itself into AIState.Stagger.
     public override Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
     {
+        if (IsGuarding && TryBlock(in hit, out var chip)) return chip;
         var delivered = base.OnHit(hit, myHurtbox);
         if (!IsDead) TriggerStagger();
         return delivered;
+    }
+
+    // A raised guard against one hit (ActionKind.Guard). From the front — the hit's origin
+    // (attacker, projectile, blast centre; else its box's centre) on the guarded side — and
+    // not a shove, and the meter can pay GuardCostPerHit + GuardCostPerDamage · damage: no
+    // damage, no stagger, GuardChip of the knockback. Otherwise the guard breaks (lowers)
+    // and the hit lands normally. Called from CombatSystem.Apply, outside Update; it only
+    // touches snapshotted state (Energy, the action vars, the body's velocity).
+    private bool TryBlock(in Hitbox hit, out Vector2 delivered)
+    {
+        delivered = Vector2.Zero;
+        float fromX = hit.Occluded ? hit.Origin.X : hit.Region.CenterX;
+        int side = fromX >= Body.Position.X ? 1 : -1;
+        bool front = side == GuardFacing;
+        var k = FighterCosts.Current;
+        float cost = k.GuardCostPerHit + k.GuardCostPerDamage * hit.BodyDamage;
+        if (!front || hit.GuardBreak || Energy < cost)
+        {
+            EnemyGuardAction.Lower(ref _actionVars);
+            return false;
+        }
+        Energy -= cost;
+        var res = HitResolver.Resolve(in hit, KnockbackMass, Body.Velocity);
+        Body.Velocity += res.TargetDeltaV * k.GuardChip;
+        delivered = res.Impulse * k.GuardChip;
+        return true;
     }
 
     // Force-transition the movement FSM into a stagger state (if registered).

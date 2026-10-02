@@ -128,6 +128,9 @@ public readonly struct Hitbox
     // occlusion model).
     public readonly bool        Occluded;
     public readonly Vector2     Origin;
+    // A shove (ActionKind.Shove): against a raised guard it is not blocked — it breaks
+    // the guard and lands in full (EnemyEntity.OnHit).
+    public readonly bool        GuardBreak;
 
     // Input cheat-sheet (details on the fields above):
     //   Identity   region (broad AABB) · hitId (dedupe key) · owner/source · targets
@@ -154,10 +157,12 @@ public readonly struct Hitbox
                   Vector2 strikeDir = default, Vector2 strikeVelocity = default,
                   float strikeMass = 0f, float restitution = 0.5f, float minLaunch = 0f,
                   float minRecoilSpeed = 0f,
-                  Vector2? origin = null)
+                  Vector2? origin = null,
+                  bool guardBreak = false)
     {
         Occluded             = origin.HasValue;
         Origin               = origin ?? default;
+        GuardBreak           = guardBreak;
         Region               = region;
         HitId                = hitId;
         Damage               = damage;

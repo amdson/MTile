@@ -105,6 +105,12 @@ public sealed class PhysicsCostModel : ICostModel
                                         _k.KMine * a.Damage * a.BlastRadius
                                         * Math.Clamp(_k.MineArmRef / MathF.Max(a.ArmDelay, 1e-3f), 0.5f, 2f)
                                         * (0.5f + 0.5f * a.Fuse / _k.MineFuseRef), 1, 0),
+            // Guard: weightless; raising it costs GuardRaiseCost (holding and blocking drain
+            // the meter at run time); a point, like the other defensive specials.
+            ActionKind.Guard => new Cost(0f, _k.GuardRaiseCost, 1, _k.GuardPoints),
+            // Shove: a swing's mass for its reach and damage, plus mass for the push.
+            ActionKind.Shove => new Cost(kA * a.Damage * a.Reach + _k.KShove * a.Knockback.Length(),
+                                         _k.ShoveEnergy, 1, 0),
             // Special actions carry private knobs the model cannot read. Validate
             // reports them; price them as one slot so the report still adds up.
             _                     => new Cost(0f, 0f, 1, 0),
@@ -182,6 +188,16 @@ public sealed class PhysicsCostModel : ICostModel
                         yield return $"Action {i} (Dash) covers {a.Speed * a.Active:0} px; the cap is {_k.DashMaxDistance:0}.";
                     if (a.Intangible < 0f || a.Intangible > a.Active)
                         yield return $"Action {i} (Dash) Intangible {a.Intangible:0.###} s must be within [0, Active {a.Active:0.###}].";
+                    break;
+                case ActionKind.Guard:
+                    if (a.Active <= 0f || a.Active > _k.GuardMaxHold)
+                        yield return $"Action {i} (Guard) Active {a.Active:0.##} s (the longest hold) must be within (0, {_k.GuardMaxHold:0.##}].";
+                    break;
+                case ActionKind.Shove:
+                    if (a.Knockback.Length() > _k.ShoveMaxImpulse)
+                        yield return $"Action {i} (Shove) knockback {a.Knockback.Length():0} exceeds the cap {_k.ShoveMaxImpulse:0}.";
+                    if (a.Damage < 0f)
+                        yield return $"Action {i} (Shove) Damage must not be negative.";
                     break;
                 case ActionKind.Mine:
                     if (a.Damage <= 0f)

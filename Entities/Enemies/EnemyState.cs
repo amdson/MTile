@@ -125,4 +125,7 @@ public abstract class EnemyActionState : EnemyState<EnemyActionVars>
     // True on frames this action makes the body untouchable: EnemyEntity then
     // publishes no hurtbox (Dash).
     public virtual bool IsIntangible(in EnemyActionVars v) => false;
+    // True while this action holds a raised guard (EnemyGuardAction): EnemyEntity.OnHit
+    // blocks frontal hits for energy, and the walk is slowed.
+    public virtual bool IsGuarding(in EnemyActionVars v) => false;
 }

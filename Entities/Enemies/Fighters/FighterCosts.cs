@@ -98,6 +98,23 @@ public sealed class FighterCostConfig
     public float MineMaxFuse    { get; set; } = 6f;
     public int   MineMaxLive    { get; set; } = 3;
     public float MineMaxRange   { get; set; } = 260f;   // summon distance cap, = the air block's reach
+    // Guard: energy to raise it, per second held, and per blocked hit (flat + per point of
+    // the hit's damage). A blocked hit does no damage and no stagger and keeps this
+    // fraction of its knockback; walking is scaled by GuardMoveScale while it is up. A hit
+    // the meter cannot pay for, or any shove, breaks the guard and lands in full.
+    public float GuardRaiseCost     { get; set; } = 0.2f;
+    public float GuardDrain         { get; set; } = 0.4f;
+    public float GuardCostPerHit    { get; set; } = 0.3f;
+    public float GuardCostPerDamage { get; set; } = 0.1f;
+    public float GuardChip          { get; set; } = 0.25f;
+    public float GuardMoveScale     { get; set; } = 0.35f;
+    public float GuardMaxHold       { get; set; } = 3f;
+    public int   GuardPoints        { get; set; } = 1;
+    // Shove: mass per unit of knockback (on top of the swing's KA · damage · reach), a flat
+    // energy per use, and a cap on the knockback's magnitude.
+    public float KShove         { get; set; } = 0.0002f;
+    public float ShoveEnergy    { get; set; } = 0.3f;
+    public float ShoveMaxImpulse { get; set; } = 1200f;
 
     // ── Floors (§3.2 hard constraints) ──────────────────────────────────────
     public float AMin         { get; set; } = 40f;        // px/s² — min GroundPower / Mass

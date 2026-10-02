@@ -21,6 +21,8 @@ public enum ActionKind
     SpawnBlockInAir,
     Dash,
     Mine,
+    Guard,
+    Shove,
 }
 
 // Every tunable an enemy pool action reads, as a value struct the blueprint
@@ -219,6 +221,26 @@ public struct ActionSpec
             Damage = 2.0f, Knockback = new Vector2(380f, 0f),
             BlastRadius = 40f, ArmDelay = 0.30f, Fuse = 3.0f, MaxLive = 2,
             ActivePriority = 25, PassivePriority = 17,
+        },
+        // Guard (Entities/Enemies/EnemyGuardShoveActions.cs): raised in 0.1 s, held up to
+        // Active seconds while the brain keeps EnemyInput.Guard, lowered in 0.25 s. Blocks
+        // frontal hits for energy; slows the walk. Request-only.
+        ActionKind.Guard => new ActionSpec
+        {
+            Kind = kind,
+            Windup = 0.10f, Active = 1.5f, Recovery = 0.25f,
+            ActivePriority = 35, PassivePriority = 26,
+        },
+        // Shove: a short, light push with a big knockback that breaks a guard. Punishable:
+        // a long recovery. MaxRange sits under its effective reach (8 + Reach + 6).
+        ActionKind.Shove => new ActionSpec
+        {
+            Kind = kind,
+            Windup = 0.20f, Active = 0.08f, Recovery = 0.50f,
+            MaxRange = 26f, VerticalSlack = 24f,
+            Reach = 16f, HalfHeight = 14f,
+            Damage = 0.3f, Knockback = new Vector2(700f, -150f),
+            ActivePriority = 31, PassivePriority = 26,
         },
         _ => new ActionSpec { Kind = ActionKind.Special },
     };

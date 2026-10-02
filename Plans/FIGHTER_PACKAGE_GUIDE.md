@@ -64,6 +64,8 @@ reach, or the compiler refuses (the fighter would swing at air).
 | `SpawnBlockInAir` | a tile **wherever you aim** (`AimWorld`, pulled in to `MaxRange` 260), no support needed — a wall between you and a charger, a ceiling, a step; windup 0.35 s, public marker; refused if the cell overlaps a body | 1.5 × build cost | 1 |
 | `Dash` | a burst along the ground: `Speed × Active` px (stock 72 px in 9 frames, cap 120), **no hurtbox** for the first `Intangible` s (stock 5 frames). **Request-only.** | 0.004 × distance + 3.6 × `Intangible` (stock ≈ 0.6) | 0 |
 | `Mine` | **summons** a mine at the point you aim (`AimWorld`, pulled in to `MaxRange`: stock 220, cap 260) after a long, public 1.0 s windup; mid-air is fine, it never falls. **Request-only**, at most `MaxLive` (stock 2, cap 3) out or on the way | 0.015 × damage × `BlastRadius`, × `0.3 / ArmDelay` (clamped 0.5–2), × `(0.5 + 0.5 × Fuse / 3)` (stock ≈ 1.2) | 0 |
+| `Guard` | raise a guard toward `AimWorld` (0.1 s), hold it while `EnemyInput.Guard` stays true (up to `Active`, stock 1.5 s, cap 3), lower it (0.25 s, open). Blocks **frontal** hits: no damage, no stagger, a quarter of the knockback. Walk slowed to 35%. **Request-only** | 0.2 to raise; 0.4/s held; per blocked hit 0.3 + 0.1 × damage | 1 |
+| `Shove` | short swing (reach 16), 0.3 damage, **big knockback** (stock 700), recovery 0.5 s. **Breaks a raised guard** (it lands in full and staggers) | 0.3 per use; mass for damage × reach plus 0.0002 × knockback | 0 |
 
 **Dash and Mine are request-only**: they fire only when `RequestedAction` names them,
 never from the open "whatever passes" scan. A dash goes in `MoveDir.X`'s direction (or
@@ -77,6 +79,15 @@ blast ring, and every opponent's free `s.Mines(span)` lists it with `Pending = t
 `AppearsIn` seconds — so a mine never appears under anyone who was paying attention.
 Aimed into solid terrain it fizzles (still paid). To lay one at your feet, aim at your
 feet.
+
+**A guard** stops a touch, a swing, a shot or a blast **from the front** (the side you
+faced when you raised it; facing does not turn while it is up). Anything from behind, any
+shove, or a hit your meter cannot pay for breaks it and lands normally. So a rammer beats a
+guard by crossing behind it (a dash), out-waiting the meter, or shoving it. To raise one:
+`RequestedAction` = its index and `Guard = true`; keep `Guard = true` to hold it.
+
+**A shove** is the control move: little damage, a big push, and it breaks guards. Near a
+mine, a ledge or a wall, the push is the damage. A miss costs half a second open.
 
 **A mine** goes off on the first of: an **opposing** body touching it once armed
 (`ArmDelay`, stock 0.3 s); **any hit** at all (a shot, a swing, another blast — armed or
@@ -420,3 +431,8 @@ submission provenance, class results and caveats: [wave-3 progress](../Fights/co
 - The `fighter_gauntlet` stage (`dotnet run --project MTile.Desktop --
   Testing/fighter_gauntlet.json`) runs every league fighter against the player, weakest
   first, if you want to feel your bot from the other side.
+- **`Guard`** and **`Shove`** (table in §2), suggested by Astra after wave 4: a directional,
+  energy-paid guard that stops frontal touches and shots but slows you and leaves your back
+  open, and a light shove that breaks it and turns positioning into damage. Guard is
+  request-only; no existing brain uses either.
+

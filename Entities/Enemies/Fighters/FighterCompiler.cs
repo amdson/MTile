@@ -179,6 +179,8 @@ public static class FighterCompiler
     {
         // Box spans 8..(8 + Reach) in front of the body (EnemyMeleeAction.Update).
         ActionKind.Melee => 8f + a.Reach + TargetHalfWidth,
+        // The shove's box is the swing's (EnemyShoveAction : EnemyMeleeAction).
+        ActionKind.Shove => 8f + a.Reach + TargetHalfWidth,
         // Body-anchored box carried Speed · Active px by the dash.
         ActionKind.Lunge => a.Speed * a.Active + a.HalfWidth + TargetHalfWidth,
         // Rotated box from the body centre out to Reach (EnemyLashAction.Update).
@@ -330,6 +332,8 @@ public static class FighterCompiler
         ActionKind.SpawnBlockInAir => new EnemySpawnBlockInAirAction(a),
         ActionKind.Dash            => new EnemyDashAction(a),
         ActionKind.Mine            => new EnemyMineAction(a),
+        ActionKind.Guard           => new EnemyGuardAction(a),
+        ActionKind.Shove           => new EnemyShoveAction(a),
         _ => throw new NotSupportedException(
                  $"ActionKind.{a.Kind} has no pool action a fighter can buy."),
     };

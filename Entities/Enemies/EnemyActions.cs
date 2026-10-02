@@ -33,6 +33,8 @@ public class EnemyMeleeAction : EnemyActionState
     protected Vector2 Knockback         => Spec.Knockback;
     protected virtual Color   TelegraphColor    => Color.Red;
     protected virtual Color   StrikeColor       => Color.OrangeRed;
+    // A shove's swing is not stopped by a raised guard (EnemyShoveAction).
+    protected virtual bool    BreaksGuard       => false;
 
     public override int ActivePriority  => Spec.ActivePriority;
     public override int PassivePriority => Spec.PassivePriority;
@@ -79,7 +81,8 @@ public class EnemyMeleeAction : EnemyActionState
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, StrikeColor,
             targets: HitTargets.EntitiesOnly,
-            origin: ctx.Self.Body.Position));
+            origin: ctx.Self.Body.Position,
+            guardBreak: BreaksGuard));
     }
 
     // Telegraph reads everything off vars, just like the player's
