@@ -200,7 +200,10 @@ public struct EntityData
     public float               ProjDamage;  // EnergyBall / RailBolt: per-hit body damage handed in by the spawning ActionSpec
     public bool                Stuck;       // StickyGrenade
     public float               StuckSince;  // StickyGrenade
-    public bool                Exploded;    // StickyGrenade
+    public bool                Exploded;    // StickyGrenade, FighterMine
+    public float               MineRadius;  // FighterMine: blast reach (px)
+    public float               MineArm;     // FighterMine: arming delay (s)
+    public float               MineFuse;    // FighterMine: fuse (s)
     public bool                Detonated;   // LobbedArea
     public int                 Budget;      // LobbedArea
     public TileType            TileType;    // LobbedArea + MassBall + PullPoint (orb material)

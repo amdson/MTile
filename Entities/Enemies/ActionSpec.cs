@@ -19,6 +19,8 @@ public enum ActionKind
     Lash,
     PlaceBlock,
     SpawnBlockInAir,
+    Dash,
+    Mine,
 }
 
 // Every tunable an enemy pool action reads, as a value struct the blueprint
@@ -70,6 +72,16 @@ public struct ActionSpec
 
     // Block-placing kinds (PlaceBlock, SpawnBlockInAir): the tile type laid down.
     public TileType Material;
+
+    // Dash: seconds of the Active window, from its start, with no hurtbox (nothing can
+    // hit the body). Never more than Active. Speed × Active is the dash distance.
+    public float Intangible;
+
+    // Mine: the blast's reach (px, centre to edge; not scaled with the body), seconds
+    // before contact can set it off, seconds until it goes off on its own, and how many
+    // of this fighter's mines may be live at once.
+    public float BlastRadius, ArmDelay, Fuse;
+    public int   MaxLive;
 
     // Meter units spent at Enter (phase 2 of the fighter plan). 0 = free.
     public float EnergyCost;
@@ -187,6 +199,24 @@ public struct ActionSpec
             Material = TileType.Dirt,
             EnergyCost = MaterialStrengths.BuildCostFor(TileType.Dirt),
             ActivePriority = 28, PassivePriority = 21,
+        },
+        // Dash (Entities/Enemies/EnemyDashMineActions.cs): a burst along the ground,
+        // ~70 px in 9 frames, untouchable for the first 5. Request-only.
+        ActionKind.Dash => new ActionSpec
+        {
+            Kind = kind,
+            Windup = 0.05f, Active = 0.15f, Recovery = 0.25f,
+            Speed = 480f, Intangible = 0.083f,
+            ActivePriority = 34, PassivePriority = 27,
+        },
+        // Mine: dropped at the feet, armed after 0.3 s, gone off by 3 s. Request-only.
+        ActionKind.Mine => new ActionSpec
+        {
+            Kind = kind,
+            Windup = 0.20f, Active = 0.05f, Recovery = 0.25f,
+            Damage = 2.0f, Knockback = new Vector2(380f, 0f),
+            BlastRadius = 40f, ArmDelay = 0.30f, Fuse = 3.0f, MaxLive = 2,
+            ActivePriority = 25, PassivePriority = 17,
         },
         _ => new ActionSpec { Kind = ActionKind.Special },
     };

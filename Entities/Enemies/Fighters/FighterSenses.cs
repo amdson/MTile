@@ -30,6 +30,8 @@ namespace MTile;
 //            position coarsened and without a tell. Visible says whether the newest
 //            view is a real sighting.
 //
+//   MINES  — Mines(span): every live mine, exact and free (a still object in the open).
+//
 //   RANDOM — Random() / Random(lo, hi) / RandomInt(n) / Chance(p): a seeded stream whose
 //            state is snapshotted with the sense memory. Free. The only randomness a
 //            brain may use; the bout seeds it (FighterArena).
@@ -115,6 +117,16 @@ public sealed class FighterSenses
         QueriesThisFrame++;
         int lag = Math.Max(_k.CoarseLagFrames, _self.ReactionFrames);
         return _self.Targets.Back(lag).Coarse(_k.CoarseQuantPx);
+    }
+
+    // Every live mine, yours and theirs: exact and current, because a mine is a still
+    // object lying in the open. Fills `into` (pass a stackalloc'd span; no allocation)
+    // and returns how many it wrote. A mine with Team != Self.Team is hostile — but
+    // every blast hurts everyone in reach, your own included.
+    public int Mines(Span<MineView> into)
+    {
+        QueriesThisFrame++;
+        return _ctx.Spawner?.Targets?.Mines(into) ?? 0;
     }
 
     // How much a query would cost — so a brain can decide before asking.

@@ -73,6 +73,7 @@ public static class EntityFactory
             EntityKind.Bullet        => new BulletProjectile(body.Position, body.Velocity, hitIds),
             // Speed rides in body.Velocity; damage comes back through ProjDamage.
             EntityKind.EnergyBall    => new EnergyBallProjectile(body.Position, body.Velocity, d.HitId, d.Faction, damage: d.ProjDamage),
+            EntityKind.FighterMine   => FighterMine.FromState(in d, body.Position),
             EntityKind.StickyGrenade => new StickyGrenadeProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
             EntityKind.LobbedArea    => new LobbedAreaProjectile(body.Position, body.Velocity, d.Budget, d.TileType, d.HitId, d.Faction),
             EntityKind.MassBall      => new MassBall(body.Position, body.Velocity, d.BuildMass, d.TileType, d.Faction),

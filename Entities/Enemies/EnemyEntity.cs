@@ -122,6 +122,16 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     // Overlay label (a compiled fighter's name); null = unlabelled. Render-only.
     public virtual string DisplayName => null;
 
+    // No hurtbox while the running action makes the body untouchable (a dash's first
+    // frames). Hurtboxes are published before entities update, so this reads the action
+    // as last frame left it — a pure function of snapshotted vars.
+    public bool IsIntangible => _currentAction >= 0 && _actions[_currentAction].IsIntangible(in _actionVars);
+    public override void PublishHurtboxes(HurtboxWorld world)
+    {
+        if (IsIntangible) return;
+        base.PublishHurtboxes(world);
+    }
+
     // True while the currently-selected movement state is a stagger interrupt.
     // Action FSM checks this so a recovering brute can't immediately swing or
     // lunge through its own hitstun.
@@ -375,6 +385,7 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
         for (int i = lo; i < hi; i++)
         {
             if (i == _currentAction) continue;
+            if (_actions[i].RequestOnly && ctx.Input.RequestedAction is null) continue;
             // Energy gate: an unaffordable action never triggers (§6). Stock actions
             // cost 0, so an enemy without a meter is unaffected.
             if (_actions[i].Spec.EnergyCost > Energy) continue;

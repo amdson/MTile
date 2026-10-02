@@ -195,6 +195,21 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         return found;
     }
 
+    // ITargetSource: live mines in World (spawn) order — what EnemyMineAction counts and
+    // FighterSenses.Mines serves.
+    public int Mines(Span<MineView> into)
+    {
+        int n = 0;
+        foreach (var r in _world.Query<EntityRef>())
+        {
+            if (n >= into.Length) break;
+            if (r.Component1.Obj is not FighterMine m || m.IsDead) continue;
+            into[n++] = new MineView { Position = m.Body.Position, Radius = m.Radius, Armed = m.Armed,
+                                       FuseLeft = m.FuseLeft, Owner = m.Owner, Team = m.Team };
+        }
+        return n;
+    }
+
     // IEntitySpawner — cosmetic: a thrown/lobbed mass ball landed and erupted. Fired from
     // inside Step; subscribers must key on (Frame, id) like the tile events do.
     public event Action<EntityId, Vector2, TileType, int> OnMassLanded;

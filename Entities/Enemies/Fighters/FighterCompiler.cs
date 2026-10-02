@@ -328,6 +328,8 @@ public static class FighterCompiler
         ActionKind.Lash       => new EnemyLashAction(a),
         ActionKind.PlaceBlock      => new EnemyPlaceBlockAction(a),
         ActionKind.SpawnBlockInAir => new EnemySpawnBlockInAirAction(a),
+        ActionKind.Dash            => new EnemyDashAction(a),
+        ActionKind.Mine            => new EnemyMineAction(a),
         _ => throw new NotSupportedException(
                  $"ActionKind.{a.Kind} has no pool action a fighter can buy."),
     };

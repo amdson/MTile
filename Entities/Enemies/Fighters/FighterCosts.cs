@@ -81,6 +81,22 @@ public sealed class FighterCostConfig
     // the player's build meter keeps the full price). Cheap on purpose — walls, steps and
     // cover should be an everyday tool, not a once-a-fight purchase.
     public float PlaceDiscount { get; set; } = 0.3f;
+    // Dash: per px of dash distance (Speed × Active) and per second untouchable, per use.
+    // The stock dash (72 px, 5 frames) costs ~0.6.
+    public float KDashDistance   { get; set; } = 0.004f;
+    public float KIntangible     { get; set; } = 3.6f;
+    public float DashMaxDistance { get; set; } = 120f;
+    // Mine: per damage·px of blast radius, per use, scaled cheaper by a longer arming
+    // delay (× ArmRef / ArmDelay, clamped to [0.5, 2]) and a shorter fuse
+    // (× 0.5 + 0.5 · Fuse / FuseRef). Mass: half the KA a swing of that reach pays.
+    // The stock mine (2 damage, 40 px, 0.3 s, 3 s) costs ~1.2 per use.
+    public float KMine          { get; set; } = 0.015f;
+    public float MineArmRef     { get; set; } = 0.3f;
+    public float MineFuseRef    { get; set; } = 3f;
+    public float MineMaxRadius  { get; set; } = 80f;
+    public float MineMinArm     { get; set; } = 0.1f;
+    public float MineMaxFuse    { get; set; } = 6f;
+    public int   MineMaxLive    { get; set; } = 3;
 
     // ── Floors (§3.2 hard constraints) ──────────────────────────────────────
     public float AMin         { get; set; } = 40f;        // px/s² — min GroundPower / Mass

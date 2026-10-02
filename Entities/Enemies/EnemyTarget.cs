@@ -106,4 +106,7 @@ public readonly struct EnemyTarget
 public interface ITargetSource
 {
     bool TryFindTarget(EnemyEntity self, EntityId sticky, out EnemyTarget target, out PlayerCharacter player);
+    // Live fighter mines, in a fixed (spawn) order, up to into.Length; returns the count
+    // written. Default none, for sources that never hold mines.
+    int Mines(System.Span<MineView> into) => 0;
 }

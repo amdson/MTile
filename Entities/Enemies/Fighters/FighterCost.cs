@@ -97,6 +97,14 @@ public sealed class PhysicsCostModel : ICostModel
             ActionKind.PlaceBlock      => new Cost(0f, MaterialStrengths.BuildCostFor(a.Material) * _k.PlaceDiscount, 1, 0),
             ActionKind.SpawnBlockInAir => new Cost(0f, MaterialStrengths.BuildCostFor(a.Material) * _k.AirPremium,
                                                    1, _k.SpawnInAirPoints),
+            // Dash: weightless; paid per use for distance and for untouchable time.
+            ActionKind.Dash => new Cost(0f, _k.KDashDistance * a.Speed * a.Active + _k.KIntangible * a.Intangible, 1, 0),
+            // Mine: a swing's mass for half its blast reach; per use for damage × reach,
+            // cheaper for a slow arm or a short fuse.
+            ActionKind.Mine => new Cost(0.5f * kA * a.Damage * a.BlastRadius,
+                                        _k.KMine * a.Damage * a.BlastRadius
+                                        * Math.Clamp(_k.MineArmRef / MathF.Max(a.ArmDelay, 1e-3f), 0.5f, 2f)
+                                        * (0.5f + 0.5f * a.Fuse / _k.MineFuseRef), 1, 0),
             // Special actions carry private knobs the model cannot read. Validate
             // reports them; price them as one slot so the report still adds up.
             _                     => new Cost(0f, 0f, 1, 0),
@@ -166,6 +174,26 @@ public sealed class PhysicsCostModel : ICostModel
                 case ActionKind.Lash:
                     if (!s.Cling)
                         yield return $"Action {i} (Lash) needs Cling.";
+                    break;
+                case ActionKind.Dash:
+                    if (a.Speed <= 0f || a.Active <= 0f)
+                        yield return $"Action {i} (Dash) needs a positive Speed and Active.";
+                    if (a.Speed * a.Active > _k.DashMaxDistance)
+                        yield return $"Action {i} (Dash) covers {a.Speed * a.Active:0} px; the cap is {_k.DashMaxDistance:0}.";
+                    if (a.Intangible < 0f || a.Intangible > a.Active)
+                        yield return $"Action {i} (Dash) Intangible {a.Intangible:0.###} s must be within [0, Active {a.Active:0.###}].";
+                    break;
+                case ActionKind.Mine:
+                    if (a.Damage <= 0f)
+                        yield return $"Action {i} (Mine) needs positive Damage.";
+                    if (a.BlastRadius <= 0f || a.BlastRadius > _k.MineMaxRadius)
+                        yield return $"Action {i} (Mine) BlastRadius {a.BlastRadius:0} must be within (0, {_k.MineMaxRadius:0}].";
+                    if (a.ArmDelay < _k.MineMinArm)
+                        yield return $"Action {i} (Mine) ArmDelay {a.ArmDelay:0.##} s is below {_k.MineMinArm:0.##} s.";
+                    if (a.Fuse <= a.ArmDelay || a.Fuse > _k.MineMaxFuse)
+                        yield return $"Action {i} (Mine) Fuse {a.Fuse:0.##} s must exceed ArmDelay and be at most {_k.MineMaxFuse:0.##} s.";
+                    if (a.MaxLive < 1 || a.MaxLive > _k.MineMaxLive)
+                        yield return $"Action {i} (Mine) MaxLive {a.MaxLive} must be within [1, {_k.MineMaxLive}].";
                     break;
             }
             float use = ActionCost(a, s).Energy;

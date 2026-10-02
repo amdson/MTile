@@ -119,4 +119,10 @@ public abstract class EnemyActionState : EnemyState<EnemyActionVars>
     // is no-op for actions that don't telegraph (none currently, but the hook
     // costs nothing).
     public virtual void PopulateDurations(ref EnemyActionVars v) {}
+    // Selected only when a brain names it (EnemyInput.RequestedAction); the open scan
+    // skips it. For tools that are not attacks (Dash, Mine).
+    public virtual bool RequestOnly => false;
+    // True on frames this action makes the body untouchable: EnemyEntity then
+    // publishes no hurtbox (Dash).
+    public virtual bool IsIntangible(in EnemyActionVars v) => false;
 }

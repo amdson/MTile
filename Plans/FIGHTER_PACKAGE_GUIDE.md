@@ -60,8 +60,24 @@ reach, or the compiler refuses (the fighter would swing at air).
 | `Slam` / `PounceSlam` | fall-triggered | 0 | 1 (needs jump or fly) |
 | `Lash` | frozen-axis reach | 0 | 1 (needs cling) |
 | `Contact` | touch damage; the box IS your body (radius + 3 px), `HalfWidth` is ignored and unpriced | 0 | 0 |
-| `PlaceBlock` | a tile at `Reach` along your aim | material build cost | 0 |
-| `SpawnBlockInAir` | a tile over the target's head | 1.5 × build cost | 1 |
+| `PlaceBlock` | a tile at `Reach` along your aim | 0.3 × material build cost (dirt 0.23) | 0 |
+| `SpawnBlockInAir` | a tile over the target's head, windup 0.35 s | 1.5 × build cost | 1 |
+| `Dash` | a burst along the ground: `Speed × Active` px (stock 72 px in 9 frames, cap 120), **no hurtbox** for the first `Intangible` s (stock 5 frames). **Request-only.** | 0.004 × distance + 3.6 × `Intangible` (stock ≈ 0.6) | 0 |
+| `Mine` | lays a mine on the floor under you. **Request-only**, at most `MaxLive` (stock 2, cap 3) out at once | 0.015 × damage × `BlastRadius`, × `0.3 / ArmDelay` (clamped 0.5–2), × `(0.5 + 0.5 × Fuse / 3)` (stock ≈ 1.2) | 0 |
+
+**Dash and Mine are request-only**: they fire only when `RequestedAction` names them,
+never from the open "whatever passes" scan. A dash goes in `MoveDir.X`'s direction (or
+straight away from the target if you give none) and needs you on the ground. Bodies
+never collide in this sim, so a dash can cross straight through the opponent; while it
+is intangible, nothing hits you and no mine feels you. Its recovery (0.25 s) is
+hittable.
+
+**A mine** goes off on the first of: an **opposing** body touching it once armed
+(`ArmDelay`, stock 0.3 s); **any hit** at all (a shot, a swing, another blast — armed or
+not, so you can set one off from range next to whoever stands on it); its **fuse**
+(stock 3 s). The blast (stock 2 damage, 40 px) hits **everyone** in reach — you, and your
+own other mines, which chain — but never digs terrain. Your own body never sets your
+mine off by touch. See every live mine for free with `s.Mines(span)`.
 
 **Windup, recovery and FSM priorities are fixed per kind** (the values in
 `ActionSpec.Default`: melee 0.45 / 0.40 s, lunge 0.35 / 0.45, ranged 0.60 / 0.50, rail
@@ -103,6 +119,9 @@ your entire memory). Every call is deterministic.
   frames old**, plus health and team. No velocity, no tell.
 - `s.Visible` / `s.HiddenSeconds` — whether line of sight holds right now.
 - `s.TargetStale(out age)` — the last exact read you bought, and how old it is.
+- `s.Mines(span)` — every live mine (yours and theirs): exact position, blast radius,
+  `Armed`, `FuseLeft`, `Owner`, `Team`. Pass a `stackalloc MineView[8]` buffer; returns the
+  count. A mine is a still object lying in the open, so this read is exact and free.
 - `s.TargetCost`, `s.ProbeCost`, `s.CellCost` — prices, so you can ration.
 - `s.Random()` (uniform in [0, 1)), `s.Random(lo, hi)`, `s.RandomInt(n)`, `s.Chance(p)` —
   **the only randomness you may use.** It is a seeded stream whose state is snapshotted
@@ -376,3 +395,18 @@ submission provenance, class results and caveats: [wave-3 progress](../Fights/co
   with the user's permission before submitting one bot. The four Claude classes each
   submitted two, with the earlier brief discrepancy documented in the progress file.
   These are competition results, not a controlled model comparison.
+
+## 14. New tools for wave 4 (2026-10-01)
+
+- **`Dash`** and **`Mine`** (table in §2). Both are request-only, so no existing brain
+  changed behaviour. A dash is the answer to the two things wave 3 had none for: a fast
+  ball from inside ~150 px (a hop lifts too little, too late) and a touch charge. A mine
+  rewards predicting where the opponent will be; `s.Mines(span)` shows every live one
+  for free, so walking into one is a choice.
+- **Blocks:** a `PlaceBlock` tile now costs 0.3 × its build cost (dirt 0.23, stone 0.58),
+  and `SpawnBlockInAir` winds up in 0.35 s (was 0.70) with a 0.30 s recovery (was 0.45).
+  Rescored against the field, Builder, Mason and Sapper did not move: their brains were
+  written for the old prices. Cheap cover is open ground for a brain written for it.
+- The `fighter_gauntlet` stage (`dotnet run --project MTile.Desktop --
+  Testing/fighter_gauntlet.json`) runs every league fighter against the player, weakest
+  first, if you want to feel your bot from the other side.

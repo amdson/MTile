@@ -105,6 +105,9 @@ public enum EntityKind
     FighterSlot14, FighterSlot15, FighterSlot16, FighterSlot17, FighterSlot18, FighterSlot19,
     FighterSlot20, FighterSlot21, FighterSlot22, FighterSlot23, FighterSlot24, FighterSlot25,
     FighterSlot26, FighterSlot27, FighterSlot28, FighterSlot29, FighterSlot30, FighterSlot31,
+
+    // A fighter's mine (ActionKind.Mine, Entities/Projectiles/FighterMine.cs).
+    FighterMine,
 }
 
 public static class EntityKinds
