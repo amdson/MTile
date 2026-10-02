@@ -19,6 +19,44 @@
       }
     ]
   },
+  "Points": [
+    {
+      "Id": "knife_tip",
+      "Bone": "knife",
+      "End": "End",
+      "Role": "contact"
+    }
+  ],
+  "ExtraBones": [
+    {
+      "Name": "knife",
+      "Parent": "arm_r_lower",
+      "Rotation": 0,
+      "Length": 0
+    }
+  ],
+  "Attachments": [
+    {
+      "Point": "knife_tip",
+      "Effect": "knife",
+      "Start": 0.2188,
+      "End": 0.8281,
+      "FrameTimes": [
+        0.2188,
+        0.2783,
+        0.3477,
+        0.4047,
+        0.5422,
+        0.6828,
+        0.7316,
+        0.7959
+      ],
+      "TrailStart": 0.4047,
+      "TrailEnd": 0.6828,
+      "TrailWidth": 1.0,
+      "TrailOpacity": 0.8
+    }
+  ],
   "Keyframes": [
     {
       "Time": 0,
@@ -66,6 +104,10 @@
         {
           "Bone": "leg_r_lower",
           "Rotation": 0.5920037
+        },
+        {
+          "Bone": "knife",
+          "Rotation": 0
         }
       ],
       "Additions": [
