@@ -120,13 +120,16 @@ and 2.
 **Roll** (§6) once wave 3 is closed:
 
 ```bash
-dotnet run --project MTile.Bench -c Release -- --league --seeds 16 --frames 1800 --no-record --out Fights/wave3_full
+dotnet run --project MTile.Bench -c Release -- --league --seeds 16 --frames 1800 --per-pair 16 --no-record --out Fights/wave3_full
 dotnet run --project MTile.Bench -c Release -- --competition roll --pool Fights/competition/wave3.pool.json --ladder Fights/wave3_full/league.md --wave 4
 #   -> Fights/competition/wave4.pool.json  (default --out)
 ```
 
 The full league covers pool 3 plus the wave-3 submissions, which is what `roll` requires of its
-ladder. `Fights/wave3_full/` is ignored; copy its `league.md` to a tracked
+ladder. `--per-pair 16` samples it (an even 16 bouts a pair on random terrain/seed/side instead of
+all 96): validated against a full 39-bot league, it reproduced the ratings to ~11 Elo mean (max
+46), top 8 in exact order, in 17% of the bouts. Drop the flag for the full schedule. Competition
+scoring samples its rating-anchor pool league the same way; holdout, dev and head-to-head stay exact. `Fights/wave3_full/` is ignored; copy its `league.md` to a tracked
 `Fights/*_league.md` if the ladder is to be published (the roll's pool file names its source).
 
 ## 3. Scoring rules

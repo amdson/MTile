@@ -375,6 +375,9 @@ public static class FighterCompetition
     // compile), runs the head-to-head league when ≥ 2 remain, sorts and ranks.
     // `rating` also plays a league among the pool itself (the pool's own bouts on the scoring
     // seeds) and fits FighterRating over everything; it is the slow part (the pool is all-to-all).
+    // Bouts per pool pair in the rating-anchor league (sampled; see Run).
+    public const int PoolLeagueBoutsPerPair = 16;
+
     public static CompetitionReport Run(CompetitionPool pool, IReadOnlyList<string> submissions = null,
                                         Action<string> log = null, Action<LeagueBout, int, int> onBout = null,
                                         bool rating = true)
@@ -424,8 +427,13 @@ public static class FighterCompetition
         Dictionary<string, double> ratings = null;
         if (rating)
         {
-            log?.Invoke($"pool league: {pool.Dev.Count + pool.Holdout.Count} pool participants, all-to-all");
+            // The pool league only anchors the rating scale, so it is sampled: an even 16
+            // bouts a pair (FighterLeague's uniform sampler converges to the full league's
+            // ratings at that budget). The holdout, dev and head-to-head scores stay exact.
+            int n = pool.Dev.Count + pool.Holdout.Count;
             var st = Settings(pool);
+            st.Sample = PoolLeagueBoutsPerPair * n * (n - 1) / 2;
+            log?.Invoke($"pool league: {n} pool participants, sampled ({st.Sample} bouts)");
             st.OnBout = onBout;
             st.Include.AddRange(pool.All);
             poolLeague = FighterLeague.Run(st);
