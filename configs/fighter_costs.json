@@ -40,6 +40,7 @@
   "KShove": 0.0002,
   "ShoveEnergy": 0.3,
   "ShoveMaxImpulse": 1200,
+  "ShoveMaxDamage": 1,
 
   "AMin": 40,
   "VMin": 150,

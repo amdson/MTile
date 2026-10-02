@@ -35,6 +35,8 @@ public class EnemyMeleeAction : EnemyActionState
     protected virtual Color   StrikeColor       => Color.OrangeRed;
     // A shove's swing is not stopped by a raised guard (EnemyShoveAction).
     protected virtual bool    BreaksGuard       => false;
+    // Strength scales a swing's damage; a shove's is its spec's alone (it is capped).
+    protected virtual bool    UsesStrength      => true;
 
     public override int ActivePriority  => Spec.ActivePriority;
     public override int PassivePriority => Spec.PassivePriority;
@@ -77,7 +79,7 @@ public class EnemyMeleeAction : EnemyActionState
             center.X - halfReach, center.Y - HitboxHalfHeight,
             center.X + halfReach, center.Y + HitboxHalfHeight);
         ctx.Hitboxes?.Publish(new Hitbox(
-            region, v.HitId, Damage * ctx.Self.Strength,
+            region, v.HitId, Damage * (UsesStrength ? ctx.Self.Strength : 1f),
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, StrikeColor,
             targets: HitTargets.EntitiesOnly,

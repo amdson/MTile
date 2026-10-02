@@ -65,7 +65,7 @@ reach, or the compiler refuses (the fighter would swing at air).
 | `Dash` | a burst along the ground: `Speed × Active` px (stock 72 px in 9 frames, cap 120), **no hurtbox** for the first `Intangible` s (stock 5 frames). **Request-only.** | 0.004 × distance + 3.6 × `Intangible` (stock ≈ 0.6) | 0 |
 | `Mine` | **summons** a mine at the point you aim (`AimWorld`, pulled in to `MaxRange`: stock 220, cap 260) after a long, public 1.0 s windup; mid-air is fine, it never falls. **Request-only**, at most `MaxLive` (stock 2, cap 3) out or on the way | 0.015 × damage × `BlastRadius`, × `0.3 / ArmDelay` (clamped 0.5–2), × `(0.5 + 0.5 × Fuse / 3)` (stock ≈ 1.2) | 0 |
 | `Guard` | raise a guard toward `AimWorld` (0.1 s), hold it while `EnemyInput.Guard` stays true (up to `Active`, stock 1.5 s, cap 3), lower it (0.25 s, open). Blocks **frontal** hits: no damage, no stagger, a quarter of the knockback. Walk slowed to 35%. **Request-only** | 0.2 to raise; 0.4/s held; per blocked hit 0.3 + 0.1 × damage | 1 |
-| `Shove` | short swing (reach 16), 0.3 damage, **big knockback** (stock 700), recovery 0.5 s. **Breaks a raised guard** (it lands in full and staggers) | 0.3 per use; mass for damage × reach plus 0.0002 × knockback | 0 |
+| `Shove` | short swing (reach 16), 0.3 damage (**capped at 1**, not scaled by Strength — use `Melee` for damage), **big knockback** (stock 700), recovery 0.5 s. **Breaks a raised guard** (it lands in full and staggers) | 0.3 per use; mass for damage × reach plus 0.0002 × knockback | 0 |
 
 **Dash and Mine are request-only**: they fire only when `RequestedAction` names them,
 never from the open "whatever passes" scan. A dash goes in `MoveDir.X`'s direction (or
@@ -439,4 +439,7 @@ submission provenance, class results and caveats: [wave-3 progress](../Fights/co
   at the shove's rate (0.0002 per unit), so a swing can't buy a free shove. Pushing less
   than stock stays free. No existing bot was affected: every one sets its push at or below
   stock.
+- **Shove damage is capped at 1** and not scaled by Strength (Astra's Gatecrash showed a
+  9-damage shove was a faster, guard-breaking swing at a swing's price). Gatecrash was
+  patched to strike with a Melee swing instead.
 

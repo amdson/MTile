@@ -209,8 +209,8 @@ public sealed class PhysicsCostModel : ICostModel
                 case ActionKind.Shove:
                     if (a.Knockback.Length() > _k.ShoveMaxImpulse)
                         yield return $"Action {i} (Shove) knockback {a.Knockback.Length():0} exceeds the cap {_k.ShoveMaxImpulse:0}.";
-                    if (a.Damage < 0f)
-                        yield return $"Action {i} (Shove) Damage must not be negative.";
+                    if (a.Damage < 0f || a.Damage > _k.ShoveMaxDamage)
+                        yield return $"Action {i} (Shove) Damage {a.Damage:0.##} must be within [0, {_k.ShoveMaxDamage:0.##}]: a shove is a push (use Melee for damage).";
                     break;
                 case ActionKind.Mine:
                     if (a.Damage <= 0f)

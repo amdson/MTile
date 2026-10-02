@@ -93,4 +93,5 @@ public class EnemyShoveAction : EnemyMeleeAction
     protected override Color TelegraphColor => Color.Gold;
     protected override Color StrikeColor    => Color.Goldenrod;
     protected override bool  BreaksGuard    => true;
+    protected override bool  UsesStrength   => false;
 }

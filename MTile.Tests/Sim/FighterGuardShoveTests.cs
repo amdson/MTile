@@ -210,6 +210,22 @@ public class FighterGuardShoveTests
     }
 
     [Fact]
+    public void AShovesDamage_IsNotScaledByStrength()
+    {
+        EnemyInput Shover(FighterSenses s) => new()
+        {
+            MoveDir = new Vector2(-1f, 0f), AimWorld = s.Self.Position - new Vector2(100f, 0f),
+            WantAttack = true, RequestedAction = 0,
+        };
+        var strong = Tool(Shover, ActionSpec.Default(ActionKind.Shove));
+        strong.Strength = 2.5f; strong.Health = 4f;
+        var (sim, bots) = Arena(Post(), strong, gap: 60f);
+        float hp = bots[0].Health;
+        for (int f = 0; f < 60 && bots[0].Health == hp; f++) sim.Step(default);
+        Assert.Equal(hp - ActionSpec.Default(ActionKind.Shove).Damage, bots[0].Health, 4);
+    }
+
+    [Fact]
     public void ARammersTouch_OnARaisedGuard_DoesNothing()
     {
         // Thornbull's 7-damage touch from the front: blocked for 0.3 + 0.7 energy.
@@ -258,6 +274,8 @@ public class FighterGuardShoveTests
         Assert.False(FighterCompiler.Compile(Tool(_ => new EnemyInput(), longHold), model).IsValid);
         var hugePush = ActionSpec.Default(ActionKind.Shove); hugePush.Knockback = new Vector2(3000f, 0f);
         Assert.False(FighterCompiler.Compile(Tool(_ => new EnemyInput(), hugePush), model).IsValid);
+        var heavy = ActionSpec.Default(ActionKind.Shove); heavy.Damage = 1.5f;              // over the cap
+        Assert.False(FighterCompiler.Compile(Tool(_ => new EnemyInput(), heavy), model).IsValid);
         var farTrigger = ActionSpec.Default(ActionKind.Shove); farTrigger.MaxRange = 60f;   // beyond its reach
         Assert.False(FighterCompiler.Compile(Tool(_ => new EnemyInput(), farTrigger), model).IsValid);
     }

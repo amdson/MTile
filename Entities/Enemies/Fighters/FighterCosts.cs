@@ -115,6 +115,8 @@ public sealed class FighterCostConfig
     public float KShove         { get; set; } = 0.0002f;
     public float ShoveEnergy    { get; set; } = 0.3f;
     public float ShoveMaxImpulse { get; set; } = 1200f;
+    // A shove is a push, not a weapon: its damage is capped (and Strength does not scale it).
+    public float ShoveMaxDamage  { get; set; } = 1f;
 
     // ── Floors (§3.2 hard constraints) ──────────────────────────────────────
     public float AMin         { get; set; } = 40f;        // px/s² — min GroundPower / Mass

@@ -4,7 +4,10 @@ using Microsoft.Xna.Framework;
 namespace MTile;
 
 // Raise a guard for the first collision, then punish the opponent's recovery with
-// a damaging shove. The shove also gives this fighter an answer to other guards.
+// a heavy swing.
+// Patched by the coordinator (2026-10-02) when Shove damage was capped at 1: the 9-damage
+// strike was a Shove (faster windup, guard-breaking, priced like a swing); it is now a
+// Melee swing with the same damage and geometry, and the aim leads by the swing's windup.
 // New-mechanics dev (engine 31f1217, wave-4 visible pool, seeds 0..15):
 // 0.937 +/- 0.006, 1593 wins / 66 draws / 69 losses. Thornbull is the hardest matchup.
 public sealed class Gatecrash : IFighterPackage
@@ -22,7 +25,7 @@ public sealed class Gatecrash : IFighterPackage
 
     private static ActionSpec Strike()
     {
-        var a = ActionSpec.Default(ActionKind.Shove);
+        var a = ActionSpec.Default(ActionKind.Melee);
         a.Damage = 9f; a.Reach = 19f; a.MaxRange = 51f;
         a.VerticalSlack = 48f; a.HalfHeight = 20f;
         a.Knockback = new Vector2(80f, 0f);
@@ -43,6 +46,7 @@ public sealed class Gatecrash : IFighterPackage
 
     private sealed class Brain : FighterController
     {
+        private static readonly float SwingWindup = ActionSpec.Default(ActionKind.Melee).Windup;
         // F0: previous energy; F1: stalled seconds; F2: last jump frame.
         // I0: counterattack deadline; I1: guard start frame.
         protected override EnemyInput Decide(FighterSenses s, ref BrainScratch m)
@@ -82,7 +86,7 @@ public sealed class Gatecrash : IFighterPackage
                 else if (delta.Length() < 51f && dy < 48f && s.Frame > 64)
                 {
                     input.RequestedAction = 0; input.WantAttack = true;
-                    input.AimWorld = t.Position + t.Velocity * (0.2f + Math.Min(age, 12) * s.Dt);
+                    input.AimWorld = t.Position + t.Velocity * (SwingWindup + Math.Min(age, 12) * s.Dt);
                 }
                 else if (dx > 155f && dy < 35f && t.Velocity.X * dir > -20f
                     && self.Energy > 2f && MathF.Abs(self.Velocity.Y) < 5f)

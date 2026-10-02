@@ -215,7 +215,7 @@ public static class Stages
 
         // ─── fighter_gauntlet ─────────────────────────────────────────────────
         // Every league fighter, one at a time, weakest first and the league champion
-        // last (GauntletOrder: the 39-bot league of 2026-10-02, by Elo). A walled, roofed
+        // last (GauntletOrder: the 40-bot league of 2026-10-02, by Elo). A walled, roofed
         // room; the next fighter walks in 1.5 s after the last one dies. Die and the run
         // starts over from the first fighter. See PopulateFighterGauntlet.
         Register(new Stage {
@@ -501,16 +501,16 @@ public static class Stages
         EntityKind.Flyer, EntityKind.Builder,  EntityKind.FighterTurret,
     };
 
-    // The fighter gauntlet's order: Fights/wave4_full_league.md's ratings (39 fighters,
-    // 2026-10-02), lowest first. Names are league participant names (roster or package).
+    // The fighter gauntlet's order: Fights/wave4_gatecrash_league.md's ratings (40 fighters,
+    // 2026-10-02, sampled 16 a pair), lowest first. Names are league participant names (roster or package).
     private static readonly string[] GauntletOrder =
     {
-        "Sprinter", "ExampleBrawler", "Flyer", "Kestrel", "Builder", "Bulwark", "Turret", "Gunner",
-        "Gravemantle", "Skirmish", "Sapper", "Brick", "Wraith", "Breacher", "Vanguard", "Sentinel",
-        "Mason", "Harrier", "Ironshot", "Lancer", "Stonecreep", "Phalanx", "Arrowhawk",
-        "Twinbarrel", "Ironmaw", "Thornback", "Hollowstep", "Tripwire", "Thornrush", "Thornbull",
-        "Bullrush", "Ironwing", "Gritmaul", "Wardstep", "Ironhide", "Brambleram", "Cinderhoof",
-        "Bramblehorn", "Gravemarch",
+        "Sprinter", "ExampleBrawler", "Flyer", "Kestrel", "Builder", "Turret", "Bulwark", "Gunner",
+        "Skirmish", "Gravemantle", "Sapper", "Wraith", "Brick", "Breacher", "Vanguard", "Sentinel",
+        "Mason", "Harrier", "Ironshot", "Lancer", "Phalanx", "Arrowhawk", "Twinbarrel",
+        "Stonecreep", "Ironmaw", "Thornback", "Hollowstep", "Thornrush", "Tripwire", "Thornbull",
+        "Bullrush", "Gritmaul", "Ironwing", "Gatecrash", "Wardstep", "Ironhide", "Cinderhoof",
+        "Bramblehorn", "Brambleram", "Gravemarch",
     };
     private const int GauntletRoomTiles = 64, GauntletFloorRow = 14;
 
