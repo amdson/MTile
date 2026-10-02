@@ -103,6 +103,19 @@ public class FighterGuardShoveTests
     }
 
     [Fact]
+    public void AnAttackerOnTopOfTheGuard_CountsAsFront()
+    {
+        // A dash that ends on the body: the origin sits a hair behind centre. Blocked.
+        var (sim, bots) = Arena(Tool(HoldGuard, ActionSpec.Default(ActionKind.Guard)), Post());
+        var g = bots[0];
+        RaiseGuard(sim, g);
+        float hp = g.Health;
+        g.OnHit(HitFrom(g, bots[1], -2f, 3f), Hurt(g));
+        Assert.Equal(hp, g.Health);
+        Assert.True(g.IsGuarding);
+    }
+
+    [Fact]
     public void Shove_BreaksTheGuard_EvenFromTheFront()
     {
         var (sim, bots) = Arena(Tool(HoldGuard, ActionSpec.Default(ActionKind.Guard)), Post());

@@ -187,7 +187,9 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     }
 
     // A raised guard against one hit (ActionKind.Guard). From the front — the hit's origin
-    // (attacker, projectile, blast centre; else its box's centre) on the guarded side — and
+    // (attacker, projectile, blast centre; else its box's centre) on the guarded side, or
+    // within half a body radius of the centre: bodies pass through each other, so an
+    // attacker standing ON you (a dash that ends on top) is in front, not behind — and
     // not a shove, and the meter can pay GuardCostPerHit + GuardCostPerDamage · damage: no
     // damage, no stagger, GuardChip of the knockback. Otherwise the guard breaks (lowers)
     // and the hit lands normally. Called from CombatSystem.Apply, outside Update; it only
@@ -196,8 +198,7 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     {
         delivered = Vector2.Zero;
         float fromX = hit.Occluded ? hit.Origin.X : hit.Region.CenterX;
-        int side = fromX >= Body.Position.X ? 1 : -1;
-        bool front = side == GuardFacing;
+        bool front = (fromX - Body.Position.X) * GuardFacing >= -0.5f * BodyRadius;
         var k = FighterCosts.Current;
         float cost = k.GuardCostPerHit + k.GuardCostPerDamage * hit.BodyDamage;
         if (!front || hit.GuardBreak || Energy < cost)
