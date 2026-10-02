@@ -28,7 +28,7 @@ Slots are `sonnet-3`..`sonnet-6`: `sonnet-1` and `sonnet-2` are wave 3's worktre
 | sonnet-5 | Sonnet 5.5 | scored | Ironwing | 19:10 | 22:15 | 0.993 ±0.002 (1713-7-8, 16 seeds) | Thornbull's brain copied, spec re-split: Contact Damage 7, Health 9.4, GroundPower 330, jump 370, Density 0.6 (radius 22); survives a 7–9 damage touch so rammer mirrors become wins; worst vs Arrowhawk, Mason, Twinbarrel; considered Dash and Mine on paper, used neither; commit d3d4fd0 |
 | sonnet-6 | Sonnet 5.5 | scored | Gritmaul | 22:14 | 23:00 | 0.996 ±0.001 (1720-4-4, 16 seeds) | Thornbull-derived rammer: Health 8, Contact Damage 5.5, 150 px/s, energy trimmed to 1 / 0.5 to pay for health; first named Bullrush (clash with sonnet-3), renamed; no Dash or Mine; commit d79da43 |
 
-| opus-3 | Opus 5.5 | running | | 11:19 | | | |
+| opus-3 | Opus 5.5 | submitted | Bramblehorn | 11:19 | 11:37 | 0.997 ±0.001 (1719-8-1, 16 seeds) | one-touch rammer (Contact Damage 10, Active 0.6, Health 7.5, 134 px/s) **plus a long untouchable dash** (790 px/s × 0.15 s): dashes through shots on the predicted release frame, through an opposing rammer's unfired hide, and into a cooling hide; randomised crossings so mirrors decide; worst vs Thornbull (6 draws, 1 loss), Bulwark, Gravemantle; weak spot per author: a one-touch-kill rammer on hills; commit 5f5826b |
 | opus-4 | Opus 5.5 | running | | 11:19 | | | |
 | opus-5 | Opus 5.5 | running | | 11:19 | | | |
 Status: queued → running → submitted (branch has its one file) → collected → scored.
@@ -105,3 +105,4 @@ Gritmaul lost least to the hidden field. Only Bullrush used a new tool (a gap-cl
   merge-base with the base, so the Sonnet branches still read as one added file each. Sonnet
   bots are not visible to the Opus sessions (they are submissions, not pool). Same brief
   template; Opus sessions get the tools working, the Sonnet sessions had the bug.
+- 11:37 — opus-3 submitted Bramblehorn (5f5826b, one file, clean tree): rammer + long untouchable dash, the first submission built around the dash.
