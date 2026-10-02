@@ -31,6 +31,7 @@ Slots are `sonnet-3`..`sonnet-6`: `sonnet-1` and `sonnet-2` are wave 3's worktre
 | opus-3 | Opus 5.5 | scored | Bramblehorn | 11:19 | 11:37 | 0.997 ±0.001 (1719-8-1, 16 seeds) | one-touch rammer (Contact Damage 10, Active 0.6, Health 7.5, 134 px/s) **plus a long untouchable dash** (790 px/s × 0.15 s): dashes through shots on the predicted release frame, through an opposing rammer's unfired hide, and into a cooling hide; randomised crossings so mirrors decide; worst vs Thornbull (6 draws, 1 loss), Bulwark, Gravemantle; weak spot per author: a one-touch-kill rammer on hills; commit 5f5826b |
 | opus-4 | Opus 5.5 | scored | Brambleram | 11:19 | 11:48 | 0.998 ±0.001 (1723-5-0, 16 seeds) | one-touch rammer (Contact Damage 11.5, live 0.6 s, Health 7.3, Density 0.5, TargetMemory) with a full-length untouchable 120 px dash; learns the opponent's ball speed and hide window from the first exchange and times dashes frame by frame through shots and through rammers; worst: single-seed draws vs Gravemantle, Phalanx (hills), Mason; commit 486bc52 |
 | opus-5 | Opus 5.5 | scored | Cinderhoof | 11:19 | 11:39 | 0.991 ±0.002 (1706-15-7, 16 seeds) | rammer for the rammer duel: Contact Damage 12.1 (one-touch kills up to 12 health), Health 8.1 (wins exact-equality trades), hide fired only when the boxes will meet, no opening-frame gate; learns the opponent's hide window from the tell and dashes clear of a live hide, then back in during its recovery; walks through shots with feet down; worst vs Mason 86-9-1, Gravemantle 90-6-0, Arrowhawk 93-0-3; commit b5943c8 |
+| codex-2 | Codex (Astra) | scored | Gravemarch | — | 12:44 (collected) | 0.996 dev (1717-9-2) | dash rammer: Health 12.2, Contact Damage 9.5 (live 0.6 s, no knockback), 1180 px/s × 0.1 s fully untouchable dash, legs 165, energy 1.1 / 0.7, TargetMemory; branch cut from the current base by its own session; commit 3764225 |
 Status: queued → running → submitted (branch has its one file) → collected → scored.
 
 ## Close-out
@@ -103,3 +104,10 @@ coordinator's exhibition bot Tripwire found (branch exhibition-coordinator-2).
   security; closed for later waves: the brief now says to keep scratch files under the
   worktree's (git-ignored) `Fights/league/`.
 - 11:48 — opus-4 submitted Brambleram (486bc52). Collected the three Opus bots; gate 181/181; all seven scored (247 s). Brambleram wins on holdout 1.000.
+- 12:44 — Astra (Codex) added Gravemarch on `competition-wave4-codex-2` (one file, cut from the
+  current base). Collected; gate 187/187; all eight rescored. Gravemarch: holdout 0.994 (3rd),
+  head-to-head **0.960** (638-18-16), rating **3120** (top). Note: its Health 12.2 sits one notch
+  over the wave's top touch damage (Cinderhoof's 12.1), a number this tracker published on
+  `fighter-plan` before the branch was committed; the holdout score is unaffected, the
+  head-to-head should be read with that in mind. Class means: Codex 3120 (1 bot), Opus 2760,
+  Sonnet 2386.
