@@ -1,7 +1,7 @@
 # Wave 4 competition — progress
 
 Coordinator: Claude (Opus 5.5), started 2026-10-02. Rules: `Plans/FIGHTER_COMPETITION.md`.
-Four Sonnet 5.5 sessions, one bot each, author tag `sonnet-w4`. At most three authoring
+Four Sonnet 5.5 sessions, one bot each, author tag `sonnet-w4`; then (2026-10-02) three Opus 5.5 sessions, author tag `opus-w4`, against the same pool and base. At most three authoring
 sessions run at a time. Brief: `Plans/FIGHTER_COMPETITOR_BRIEF.md` (rendered per slot by
 `scripts/competition.py brief --wave 4 --name <slot>`); new since wave 3: Dash, Mine
 (summoned, 1.0 s public warning), cheap nearby blocks, faster air blocks (guide §2, §14).
@@ -28,6 +28,9 @@ Slots are `sonnet-3`..`sonnet-6`: `sonnet-1` and `sonnet-2` are wave 3's worktre
 | sonnet-5 | Sonnet 5.5 | scored | Ironwing | 19:10 | 22:15 | 0.993 ±0.002 (1713-7-8, 16 seeds) | Thornbull's brain copied, spec re-split: Contact Damage 7, Health 9.4, GroundPower 330, jump 370, Density 0.6 (radius 22); survives a 7–9 damage touch so rammer mirrors become wins; worst vs Arrowhawk, Mason, Twinbarrel; considered Dash and Mine on paper, used neither; commit d3d4fd0 |
 | sonnet-6 | Sonnet 5.5 | scored | Gritmaul | 22:14 | 23:00 | 0.996 ±0.001 (1720-4-4, 16 seeds) | Thornbull-derived rammer: Health 8, Contact Damage 5.5, 150 px/s, energy trimmed to 1 / 0.5 to pay for health; first named Bullrush (clash with sonnet-3), renamed; no Dash or Mine; commit d79da43 |
 
+| opus-3 | Opus 5.5 | running | | 11:19 | | | |
+| opus-4 | Opus 5.5 | running | | 11:19 | | | |
+| opus-5 | Opus 5.5 | running | | 11:19 | | | |
 Status: queued → running → submitted (branch has its one file) → collected → scored.
 
 ## Close-out
@@ -95,3 +98,10 @@ Gritmaul lost least to the hidden field. Only Bullrush used a new tool (a gap-cl
   bouts in 940 s wall clock: the machine was asleep or starved overnight (load ~36), not a
   code path. Next morning the same check took 0.78 s.
 - 09:55 — scored (188 s). Gritmaul wins the wave on holdout 0.989.
+- 11:19 — three Opus sessions (opus-3/4/5; opus-1/2 are wave 3's worktrees) launched on the same
+  pool. Before launching, the spec-copy fix (21726b0: the fight record dropped every Dash and
+  Mine knob, so a mine crashed any league run and a dash lost its i-frames) was cherry-picked
+  onto `competition-wave4-base` (ee37253), and `collect` now diffs each branch from its
+  merge-base with the base, so the Sonnet branches still read as one added file each. Sonnet
+  bots are not visible to the Opus sessions (they are submissions, not pool). Same brief
+  template; Opus sessions get the tools working, the Sonnet sessions had the bug.
