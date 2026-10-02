@@ -140,7 +140,9 @@ def cmd_collect(a):
         print(f"no submission branches competition-wave{a.wave}-*")
         return 0
 
-    diffs = {b: git("diff", "--no-renames", "--name-status", f"{base}..{b}", cwd=root).stdout.strip().splitlines()
+    # Three dots: what each branch changed since it left the base (merge-base), so a fix
+    # landed on the base mid-wave does not read as a revert on branches cut before it.
+    diffs = {b: git("diff", "--no-renames", "--name-status", f"{base}...{b}", cwd=root).stdout.strip().splitlines()
              for b in branches}
     # Two branches adding the same path (two bots with one name) would overwrite each other,
     # and neither is "first" in any way the branch list knows: reject both and say why.
