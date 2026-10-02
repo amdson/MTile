@@ -23,9 +23,9 @@ Slots are `sonnet-3`..`sonnet-6`: `sonnet-1` and `sonnet-2` are wave 3's worktre
 
 | slot | model | status | bot | started | finished | dev score (self-reported) | notes |
 |---|---|---|---|---|---|---|---|
-| sonnet-3 | Sonnet 5.5 | running | | 19:10 | | | |
-| sonnet-4 | Sonnet 5.5 | running | | 19:10 | | | |
-| sonnet-5 | Sonnet 5.5 | running | | 19:10 | | | |
+| sonnet-3 | Sonnet 5.5 | running (resumed 22:15) | Bullrush (draft) | 19:10 | | | |
+| sonnet-4 | Sonnet 5.5 | running (resumed 22:15) | Ironhide (9879f31) | 19:10 | | | |
+| sonnet-5 | Sonnet 5.5 | running (resumed 22:15) | Ironwing (draft) | 19:10 | | | |
 | sonnet-6 | Sonnet 5.5 | queued | | | | | |
 
 Status: queued → running → submitted (branch has its one file) → collected → scored.
@@ -44,3 +44,10 @@ Status: queued → running → submitted (branch has its one file) → collected
   file and ladder committed; `fighter_gauntlet` made tolerant of hidden packages; base cut
   and gate-checked (12 Dev packages, build green, 105 fighter tests green).
 - 19:10 — sonnet-3, sonnet-4, sonnet-5 launched (three at a time); sonnet-6 queued for the first free slot.
+- 22:15 — all three sessions stalled (watchdog: a command with no output for 600 s). Cause: a
+  computational bottleneck — the league now uses every core by default, so three concurrent
+  league runs (~24 sim threads + builds, Steam also busy) on 8 cores pushed the load average to
+  ~61. Work survived: sonnet-4 committed Ironhide (9879f31); sonnet-3 (Bullrush) and sonnet-5
+  (Ironwing) had uncommitted drafts. All three resumed with their context and told to pass
+  `--threads 2` and keep commands under ~5 min; the brief template now says the same, so
+  sonnet-6 gets identical instructions.

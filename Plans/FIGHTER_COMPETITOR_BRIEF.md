@@ -14,7 +14,7 @@ WORKSPACE — this is a hard rule:
   - `dotnet build MTile.Bench/MTile.Bench.csproj -c Release` once, then use `--no-build` on the bench commands below to save time.
   - `dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName~FighterPackage"` — the gate every package must pass (compiles under budget, deterministic, within the 20 µs Decide budget).
   - `dotnet run --project MTile.Bench -c Release --no-build -- --spec <Name>` — cost report for your spec.
-  - `dotnet run --project MTile.Bench -c Release --no-build -- --league --only <Name> --seeds 4 --frames 1800 --no-record --quiet` — your bot against the whole visible field (dev seeds 0..15 are yours to use; `--seeds 16` for a final check).
+  - `dotnet run --project MTile.Bench -c Release --no-build -- --league --only <Name> --seeds 4 --frames 1800 --no-record --quiet --threads 2` — your bot against the whole visible field (dev seeds 0..15 are yours to use; `--seeds 16` for a final check). Always pass `--threads 2`: several competitors share one machine, and the league otherwise takes every core. Keep each command under ~5 minutes.
   - `dotnet run --project MTile.Bench -c Release --no-build -- --record-fight <Name> <Opponent> <flat|corridor|hills> out.fight.json --seed N` then read the JSON summary, to see how a bout went.
   - `--forge` exists (see the guide) if you want an optimiser pass on your spec's numbers.
 
