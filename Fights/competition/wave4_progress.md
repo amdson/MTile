@@ -28,9 +28,9 @@ Slots are `sonnet-3`..`sonnet-6`: `sonnet-1` and `sonnet-2` are wave 3's worktre
 | sonnet-5 | Sonnet 5.5 | scored | Ironwing | 19:10 | 22:15 | 0.993 ±0.002 (1713-7-8, 16 seeds) | Thornbull's brain copied, spec re-split: Contact Damage 7, Health 9.4, GroundPower 330, jump 370, Density 0.6 (radius 22); survives a 7–9 damage touch so rammer mirrors become wins; worst vs Arrowhawk, Mason, Twinbarrel; considered Dash and Mine on paper, used neither; commit d3d4fd0 |
 | sonnet-6 | Sonnet 5.5 | scored | Gritmaul | 22:14 | 23:00 | 0.996 ±0.001 (1720-4-4, 16 seeds) | Thornbull-derived rammer: Health 8, Contact Damage 5.5, 150 px/s, energy trimmed to 1 / 0.5 to pay for health; first named Bullrush (clash with sonnet-3), renamed; no Dash or Mine; commit d79da43 |
 
-| opus-3 | Opus 5.5 | submitted | Bramblehorn | 11:19 | 11:37 | 0.997 ±0.001 (1719-8-1, 16 seeds) | one-touch rammer (Contact Damage 10, Active 0.6, Health 7.5, 134 px/s) **plus a long untouchable dash** (790 px/s × 0.15 s): dashes through shots on the predicted release frame, through an opposing rammer's unfired hide, and into a cooling hide; randomised crossings so mirrors decide; worst vs Thornbull (6 draws, 1 loss), Bulwark, Gravemantle; weak spot per author: a one-touch-kill rammer on hills; commit 5f5826b |
-| opus-4 | Opus 5.5 | running | | 11:19 | | | |
-| opus-5 | Opus 5.5 | submitted | Cinderhoof | 11:19 | 11:39 | 0.991 ±0.002 (1706-15-7, 16 seeds) | rammer for the rammer duel: Contact Damage 12.1 (one-touch kills up to 12 health), Health 8.1 (wins exact-equality trades), hide fired only when the boxes will meet, no opening-frame gate; learns the opponent's hide window from the tell and dashes clear of a live hide, then back in during its recovery; walks through shots with feet down; worst vs Mason 86-9-1, Gravemantle 90-6-0, Arrowhawk 93-0-3; commit b5943c8 |
+| opus-3 | Opus 5.5 | scored | Bramblehorn | 11:19 | 11:37 | 0.997 ±0.001 (1719-8-1, 16 seeds) | one-touch rammer (Contact Damage 10, Active 0.6, Health 7.5, 134 px/s) **plus a long untouchable dash** (790 px/s × 0.15 s): dashes through shots on the predicted release frame, through an opposing rammer's unfired hide, and into a cooling hide; randomised crossings so mirrors decide; worst vs Thornbull (6 draws, 1 loss), Bulwark, Gravemantle; weak spot per author: a one-touch-kill rammer on hills; commit 5f5826b |
+| opus-4 | Opus 5.5 | scored | Brambleram | 11:19 | 11:48 | 0.998 ±0.001 (1723-5-0, 16 seeds) | one-touch rammer (Contact Damage 11.5, live 0.6 s, Health 7.3, Density 0.5, TargetMemory) with a full-length untouchable 120 px dash; learns the opponent's ball speed and hide window from the first exchange and times dashes frame by frame through shots and through rammers; worst: single-seed draws vs Gravemantle, Phalanx (hills), Mason; commit 486bc52 |
+| opus-5 | Opus 5.5 | scored | Cinderhoof | 11:19 | 11:39 | 0.991 ±0.002 (1706-15-7, 16 seeds) | rammer for the rammer duel: Contact Damage 12.1 (one-touch kills up to 12 health), Health 8.1 (wins exact-equality trades), hide fired only when the boxes will meet, no opening-frame gate; learns the opponent's hide window from the tell and dashes clear of a live hide, then back in during its recovery; walks through shots with feet down; worst vs Mason 86-9-1, Gravemantle 90-6-0, Arrowhawk 93-0-3; commit b5943c8 |
 Status: queued → running → submitted (branch has its one file) → collected → scored.
 
 ## Close-out
@@ -38,44 +38,33 @@ Status: queued → running → submitted (branch has its one file) → collected
 - [x] all four submitted
 - [x] `collect --wave 4` accepted every file (after Gritmaul's rename; collect now rejects name clashes)
 - [x] `FighterPackage` tests green on the collected field (163/163)
-- [x] `--competition score` → [`wave4.md`](wave4.md) (188 s)
+- [x] `--competition score` → [`wave4.md`](wave4.md) (all seven, 247 s)
 - [ ] plan log + guide lessons
 
-## Results — scored 2026-10-02
+## Results — all seven, scored 2026-10-02 (supersedes the Sonnet-only scoring of b899c6c)
 
-| rank | bot | holdout | dev | gap | h2h | rating | W-D-L hold |
-|---|---|---|---|---|---|---|---|
-| 1 | Gritmaul | **0.989** | 0.992 | +0.003 | 0.342 | 2402 | 1044-1-11 |
-| 2 | Bullrush | 0.969 | 0.995 | +0.026 | 0.217 | 2339 | 1022-2-32 |
-| 3 | Ironhide | 0.963 | 0.990 | +0.027 | 0.821 | **2546** | 1017-1-38 |
-| 4 | Ironwing | 0.932 | 0.987 | +0.055 | 0.424 | 2358 | 984-0-72 |
+Scored on the fixed build (the spec-copy fix, so dashes keep their i-frames): the Sonnet
+holdout numbers are unchanged from the Sonnet-only scoring.
 
-Sonnet class mean rating **2411** (wave 3 Sonnet: 1961 rescored). All four rate above every
-pool bot (Thornbull 2085 next).
+| rank | bot | class | holdout | dev | gap | h2h | rating | W-D-L hold |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Brambleram | Opus | **1.000** | 0.998 | -0.002 | 0.686 | 2747 | 1056-0-0 |
+| 2 | Bramblehorn | Opus | 0.999 | 0.999 | -0.001 | 0.766 | **2811** | 1055-1-0 |
+| 3 | Gritmaul | Sonnet | 0.989 | 0.992 | +0.003 | 0.175 | 2366 | 1044-1-11 |
+| 4 | Cinderhoof | Opus | 0.988 | 0.987 | 0.000 | **0.820** | 2805 | 1043-0-13 |
+| 5 | Bullrush | Sonnet | 0.969 | 0.995 | +0.026 | 0.115 | 2313 | 1022-2-32 |
+| 6 | Ironhide | Sonnet | 0.963 | 0.990 | +0.027 | 0.564 | 2584 | 1017-1-38 |
+| 7 | Ironwing | Sonnet | 0.932 | 0.987 | +0.055 | 0.219 | 2329 | 984-0-72 |
 
-Holdout by opponent (W-D-L of 96, 16 seeds × 3 terrains × both sides):
+Class means: **Opus 2788** (holdout 0.996), Sonnet 2398 (holdout 0.963).
 
-| hidden bot | Gritmaul | Bullrush | Ironhide | Ironwing |
-|---|---|---|---|---|
-| Thornrush | 96-0-0 | 96-0-0 | 96-0-0 | 96-0-0 |
-| Hollowstep | 94-0-2 | 95-0-1 | 96-0-0 | 93-0-3 |
-| Thornback | 91-1-4 | 63-2-31 | 68-0-28 | 66-0-30 |
-| Stonecreep | 95-0-1 | 96-0-0 | 91-1-4 | 82-0-14 |
-| Lancer | 94-0-2 | 96-0-0 | 94-0-2 | 75-0-21 |
-| Ironshot | 94-0-2 | 96-0-0 | 92-0-4 | 92-0-4 |
-| the other five | 480-0-0 | 480-0-0 | 480-0-0 | 480-0-0 |
-
-Head to head (row vs column): Ironhide beats all three others 96-0-0 (its 8-damage touch
-kills every other submission's health in one hit, and its 9 health survives theirs); the
-other pairings are mostly draws (mutual kills).
-
-**Reading.** All four are Thornbull-derived contact rammers that moved budget into health,
-so a simultaneous touch kills only the other side. That beat every hidden bot built for
-wave 3, including both counters to rammers: Thornrush (a rammer itself, 5 health) and
-Hollowstep (a counter-puncher whose two 1.5-damage balls cannot kill 7.5–9.4 health before
-the touch lands). Only Thornback, a clinging 9-health turret, took real points. Among the
-submissions it is a health/damage threshold race, which Ironhide won (h2h 0.821) and
-Gritmaul lost least to the hidden field. Only Bullrush used a new tool (a gap-closing Dash).
+**Reading.** All seven are contact rammers; the three Opus bots are the ones built around a
+long, fully untouchable dash (through shots on the predicted release frame, through a
+rammer's live touch into its cooldown) and a one-touch kill (10–12.1 damage). That beat the
+holdout's one remaining resistance (Thornback, the clinging turret, which took 28–31 wins off
+three Sonnets) and dominates the Sonnet rammers head to head (Cinderhoof 0.820, Bramblehorn
+0.766, Brambleram 0.686 vs Ironhide 0.564 and the rest under 0.22). The same counter the
+coordinator's exhibition bot Tripwire found (branch exhibition-coordinator-2).
 
 ## Log
 
@@ -113,3 +102,4 @@ Gritmaul lost least to the hidden field. Only Bullrush used a new tool (a gap-cl
   private subfolder and says it read nothing of anyone else's. Within the agreed loose
   security; closed for later waves: the brief now says to keep scratch files under the
   worktree's (git-ignored) `Fights/league/`.
+- 11:48 — opus-4 submitted Brambleram (486bc52). Collected the three Opus bots; gate 181/181; all seven scored (247 s). Brambleram wins on holdout 1.000.
