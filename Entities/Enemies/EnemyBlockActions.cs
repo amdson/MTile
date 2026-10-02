@@ -161,14 +161,17 @@ public class EnemyPlaceBlockAction : EnemyActionState
     }
 }
 
-// Conjure one tile `HalfHeight` px directly above where the target stood at Enter.
-// Needs no line of sight and no support (ChunkMap.ForceSprout, the unsupported-sprout
-// path BlockBurstAction uses) — that is the point premium over PlaceBlock. The target
-// can step out from under it during the windup, and must: it reads the marker.
+// Conjure one tile at the point the brain aims at (AimWorld at Enter, pulled in to
+// MaxRange from the body — the same rule as a summoned mine). Needs no line of sight and
+// no support (ChunkMap.ForceSprout, the unsupported-sprout path BlockBurstAction uses) —
+// that is the point premium over PlaceBlock. Anywhere: a wall between you and a charger,
+// a ceiling over a jumper, a step up a ledge. The windup's marker is public, and the
+// destination rides in the tell (TellAim). A destination that overlaps a body — the
+// caster's, or the target's at Enter — is refused by the precondition, so aiming at the
+// target's body simply never fires.
 //
 // Terrain has no gravity in this sim (TileMassField only settles fractional build
-// mass; a whole tile never falls), so the block hangs where it was conjured — a
-// ceiling that caps a jump, or a stepping stone for whoever gets there first.
+// mass; a whole tile never falls), so the block hangs where it was conjured.
 //
 // The destination is frozen at Enter as an ABSOLUTE world point in v.LockedAim (it is
 // not a unit vector for this action). LockedAim round-trips through EntityData.Aim, so
@@ -182,24 +185,24 @@ public class EnemySpawnBlockInAirAction : EnemyActionState
     protected float    Windup   => Spec.Windup;
     protected float    Active   => Spec.Active;
     protected float    Recovery => Spec.Recovery;
-    protected float    MinRange => Spec.MinRange;
     protected float    MaxRange => Spec.MaxRange;
-    protected float    Height   => Spec.HalfHeight;
     protected TileType Material => Spec.Material;
     protected virtual Color MarkerColor => new(230, 120, 220);
 
     public override int ActivePriority  => Spec.ActivePriority;
     public override int PassivePriority => Spec.PassivePriority;
 
-    private Vector2 PointAbove(in EnemyContext ctx) => ctx.Target.Position - new Vector2(0f, Height);
+    private Vector2 Destination(in EnemyContext ctx)
+        => EnemyMineAction.Destination(ctx.Self.Body.Position, ctx.Input.AimWorld, MaxRange);
 
     public override bool CheckPreConditions(in EnemyContext ctx)
     {
-        if (ctx.Dist < MinRange || ctx.Dist > MaxRange) return false;
         var chunks = ctx.Spawner?.Chunks;
         if (chunks == null) return false;
-        var (gtx, gty) = EnemyBlockCells.CellOf(PointAbove(ctx));
-        return EnemyBlockCells.IsFree(chunks, gtx, gty);
+        var (gtx, gty) = EnemyBlockCells.CellOf(Destination(ctx));
+        return EnemyBlockCells.IsFree(chunks, gtx, gty)
+            && !EnemyBlockCells.Overlaps(ctx.Self.Body, gtx, gty)
+            && !EnemyBlockCells.Overlaps(ctx.Target.Bounds, gtx, gty);
     }
 
     public override bool CheckConditions(in EnemyContext ctx, ref EnemyActionVars v)
@@ -208,7 +211,7 @@ public class EnemySpawnBlockInAirAction : EnemyActionState
     public override void Enter(in EnemyContext ctx, ref EnemyActionVars v)
     {
         v.LockedFacing = ctx.Facing == 0 ? 1 : ctx.Facing;
-        v.LockedAim    = PointAbove(ctx);   // absolute destination — see the header
+        v.LockedAim    = Destination(ctx);   // absolute destination — see the header
         v.Committed    = true;
         PopulateDurations(ref v);
     }

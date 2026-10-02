@@ -14,8 +14,9 @@ namespace MTile.Tests.Sim;
 //     aim, on the windup→active transition frame and not before.
 //   * Energy drops by exactly Spec.EnergyCost at Enter, and a meter that can no longer
 //     afford the cost never fires again (regen 0).
-//   * SpawnBlockInAir conjures the tile above where the target WAS at Enter — a target
-//     that walks during the windup leaves the block hanging over empty floor.
+//   * SpawnBlockInAir conjures the tile where the brain aimed at Enter (within MaxRange)
+//     — a target that walks during the windup leaves the block hanging over empty floor;
+//     aiming at a body is refused.
 //   * A snapshot mid-windup replays bit-identically, including the terrain: the tile
 //     appears on the same replay frame (the destination rides in EntityData.Aim).
 public class FighterBlockActionTests(ITestOutputHelper output)
@@ -37,7 +38,11 @@ public class FighterBlockActionTests(ITestOutputHelper output)
     private static readonly PlayerInput WalkLeft = new() { Left = true };
 
     // A planted turret with one action. Regen 0 so every unit spent stays spent.
-    private static EnemyBlueprint Builder(EnemyActionState action, float energyMax, int holdFrames = 0) => new()
+    // The air block's tests aim this far over the player's head (the old fixed placement).
+    private static readonly Vector2 OverHead = new(0f, -36f);
+
+    private static EnemyBlueprint Builder(EnemyActionState action, float energyMax, int holdFrames = 0,
+                                          Vector2 aimOffset = default) => new()
     {
         Kind          = EntityKind.Sparring,
         Radius        = 10f,
@@ -48,7 +53,7 @@ public class FighterBlockActionTests(ITestOutputHelper output)
         EnergyRegen   = 0f,
         Movement   = () => new() { new EnemyIdleState() },
         Actions    = () => new() { action },
-        Controller = new HoldThenAim { HoldFrames = holdFrames },
+        Controller = new HoldThenAim { HoldFrames = holdFrames, AimOffset = aimOffset },
     };
 
     private static Simulation Build(EnemyBlueprint bp, float enemyX, float playerX) =>
@@ -149,13 +154,13 @@ public class FighterBlockActionTests(ITestOutputHelper output)
         output.WriteLine($"enters at {string.Join(", ", enters)}; energy left {bot.Energy:F3} (cost {cost:F3})");
     }
 
-    // ── (c) SpawnBlockInAir aims where the target WAS ───────────────────────
+    // ── (c) SpawnBlockInAir goes where the brain aimed at Enter ─────────────
 
     [Fact]
-    public void SpawnBlockInAir_UsesTheTargetPositionAtEnter()
+    public void SpawnBlockInAir_LandsAtTheAimLockedAtEnter()
     {
         var spec = ActionSpec.Default(ActionKind.SpawnBlockInAir);
-        var sim = Build(Builder(new EnemySpawnBlockInAirAction(spec), energyMax: 100f, holdFrames: 30),
+        var sim = Build(Builder(new EnemySpawnBlockInAirAction(spec), energyMax: 100f, holdFrames: 30, aimOffset: OverHead),
                         enemyX: 380f, playerX: 200f);
         var bot = (EnemyEntity)sim.Entities[0];
 
@@ -172,7 +177,7 @@ public class FighterBlockActionTests(ITestOutputHelper output)
         }
         Assert.True(enter > 0, "the air block never started");
         var atEnter = after[enter - 1];
-        var (gtx, gty) = Cell(atEnter - new Vector2(0f, spec.HalfHeight));
+        var (gtx, gty) = Cell(atEnter + OverHead);
 
         int windupFrames = (int)MathF.Ceiling(spec.Windup / Simulation.FixedDt);
         for (int f = 0; f < windupFrames + 2; f++) sim.Step(WalkLeft);
@@ -197,17 +202,48 @@ public class FighterBlockActionTests(ITestOutputHelper output)
     public void SpawnBlockInAir_RefusesAnOccupiedDestination()
     {
         var spec = ActionSpec.Default(ActionKind.SpawnBlockInAir);
-        var sim = Build(Builder(new EnemySpawnBlockInAirAction(spec), energyMax: 100f, holdFrames: 30),
+        var sim = Build(Builder(new EnemySpawnBlockInAirAction(spec), energyMax: 100f, holdFrames: 30, aimOffset: OverHead),
                         enemyX: 380f, playerX: 200f);
         var bot = (EnemyEntity)sim.Entities[0];
         for (int f = 0; f < 20; f++) sim.Step(Idle);   // brain holding fire while the player settles
         // Fill the cell over the parked player; the precondition must now fail.
-        var (gtx, gty) = Cell(sim.Player.Body.Position - new Vector2(0f, spec.HalfHeight));
+        var (gtx, gty) = Cell(sim.Player.Body.Position + OverHead);
         Assert.NotNull(sim.Chunks.ForceSprout(gtx, gty, TileType.Stone));
         float energy = bot.Energy;
         for (int f = 0; f < 60; f++) sim.Step(Idle);
         Assert.Equal("", bot.CurrentActionName);
         Assert.Equal(energy, bot.Energy);
+    }
+
+    [Fact]
+    public void SpawnBlockInAir_AimedAtABody_NeverFires()
+    {
+        var spec = ActionSpec.Default(ActionKind.SpawnBlockInAir);
+        var sim = Build(Builder(new EnemySpawnBlockInAirAction(spec), energyMax: 100f, holdFrames: 10),
+                        enemyX: 380f, playerX: 200f);   // aims at the player's centre
+        var bot = (EnemyEntity)sim.Entities[0];
+        float energy = bot.Energy;
+        for (int f = 0; f < 120; f++) sim.Step(Idle);
+        Assert.Equal("", bot.CurrentActionName);
+        Assert.Equal(energy, bot.Energy);
+        Assert.Empty(AirTiles(sim.Chunks));
+    }
+
+    [Fact]
+    public void SpawnBlockInAir_AimedPastMaxRange_IsPulledIn()
+    {
+        // Aim 400 px past the player, far beyond MaxRange: the tile lands on the aim line
+        // at MaxRange from the caster, in mid-air (no support needed).
+        var spec = ActionSpec.Default(ActionKind.SpawnBlockInAir);
+        var sim = Build(Builder(new EnemySpawnBlockInAirAction(spec), energyMax: 100f, holdFrames: 10,
+                                aimOffset: new Vector2(-400f, -30f)), enemyX: 380f, playerX: 200f);
+        var bot = (EnemyEntity)sim.Entities[0];
+        StepUntilAction(sim, nameof(EnemySpawnBlockInAirAction));
+        var body = bot.Body.Position;
+        for (int f = 0; f < 40; f++) sim.Step(Idle);
+        var tile = Assert.Single(AirTiles(sim.Chunks));
+        var centre = new Vector2((tile.gtx + 0.5f) * Chunk.TileSize, (tile.gty + 0.5f) * Chunk.TileSize);
+        Assert.InRange(Vector2.Distance(centre, body), spec.MaxRange - Chunk.TileSize, spec.MaxRange + Chunk.TileSize);
     }
 
     // ── (d) Snapshot mid-windup round-trips, terrain included ───────────────
@@ -228,7 +264,7 @@ public class FighterBlockActionTests(ITestOutputHelper output)
         var input = kind == ActionKind.PlaceBlock ? Idle : WalkLeft;
         var live = kind == ActionKind.PlaceBlock
             ? Build(Builder(action, 100f), enemyX: 160f, playerX: 60f)
-            : Build(Builder(action, 100f, holdFrames: 20), enemyX: 380f, playerX: 200f);
+            : Build(Builder(action, 100f, holdFrames: 20, aimOffset: OverHead), enemyX: 380f, playerX: 200f);
         var bot = (EnemyEntity)live.Entities[0];
 
         int f = 0;
@@ -272,9 +308,11 @@ public class FighterBlockActionTests(ITestOutputHelper output)
     private sealed class HoldThenAim : EnemyController
     {
         public int HoldFrames { get; init; }
+        // Added to the player's position: where the brain aims (the air block goes there).
+        public Vector2 AimOffset { get; init; }
         public override EnemyInput Decide(in EnemyContext ctx) => new()
         {
-            AimWorld   = ctx.Player.Body.Position,
+            AimWorld   = ctx.Player.Body.Position + AimOffset,
             WantAttack = ctx.Frame > HoldFrames,
         };
     }

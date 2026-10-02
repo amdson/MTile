@@ -61,7 +61,7 @@ reach, or the compiler refuses (the fighter would swing at air).
 | `Lash` | frozen-axis reach | 0 | 1 (needs cling) |
 | `Contact` | touch damage; the box IS your body (radius + 3 px), `HalfWidth` is ignored and unpriced | 0 | 0 |
 | `PlaceBlock` | a tile at `Reach` along your aim | 0.3 × material build cost (dirt 0.23) | 0 |
-| `SpawnBlockInAir` | a tile over the target's head, windup 0.35 s | 1.5 × build cost | 1 |
+| `SpawnBlockInAir` | a tile **wherever you aim** (`AimWorld`, pulled in to `MaxRange` 260), no support needed — a wall between you and a charger, a ceiling, a step; windup 0.35 s, public marker; refused if the cell overlaps a body | 1.5 × build cost | 1 |
 | `Dash` | a burst along the ground: `Speed × Active` px (stock 72 px in 9 frames, cap 120), **no hurtbox** for the first `Intangible` s (stock 5 frames). **Request-only.** | 0.004 × distance + 3.6 × `Intangible` (stock ≈ 0.6) | 0 |
 | `Mine` | **summons** a mine at the point you aim (`AimWorld`, pulled in to `MaxRange`: stock 220, cap 260) after a long, public 1.0 s windup; mid-air is fine, it never falls. **Request-only**, at most `MaxLive` (stock 2, cap 3) out or on the way | 0.015 × damage × `BlastRadius`, × `0.3 / ArmDelay` (clamped 0.5–2), × `(0.5 + 0.5 × Fuse / 3)` (stock ≈ 1.2) | 0 |
 
@@ -412,7 +412,9 @@ submission provenance, class results and caveats: [wave-3 progress](../Fights/co
   rewards predicting where the opponent will be; `s.Mines(span)` shows every live one
   for free, so walking into one is a choice.
 - **Blocks:** a `PlaceBlock` tile now costs 0.3 × its build cost (dirt 0.23, stone 0.58),
-  and `SpawnBlockInAir` winds up in 0.35 s (was 0.70) with a 0.30 s recovery (was 0.45).
+  and `SpawnBlockInAir` winds up in 0.35 s (was 0.70) with a 0.30 s recovery (was 0.45), and
+  is now **aimed**: the tile goes where `AimWorld` points (within 260 px), not over the
+  target's head.
   Rescored against the field, Builder, Mason and Sapper did not move: their brains were
   written for the old prices. Cheap cover is open ground for a brain written for it.
 - The `fighter_gauntlet` stage (`dotnet run --project MTile.Desktop --

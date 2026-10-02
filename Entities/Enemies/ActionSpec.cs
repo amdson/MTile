@@ -176,8 +176,8 @@ public struct ActionSpec
             ActivePriority = 32, PassivePriority = 27,
         },
         // Block kinds (Entities/Enemies/EnemyBlockActions.cs). Reach is how far along
-        // the locked aim the tile goes; HalfHeight is how far ABOVE the target the air
-        // block is conjured. EnergyCost is the material's per-tile build price — the
+        // the locked aim the tile goes; the air block goes where the brain aims, within
+        // MaxRange. EnergyCost is the material's per-tile build price — the
         // same number the fighter compiler writes (× PlaceDiscount next to you, × AirPremium for the air block), so
         // an action built straight from its default row is honestly priced. Material
         // matches the player's starting block (PlayerCharacter._activeBlockType).
@@ -195,8 +195,7 @@ public struct ActionSpec
         {
             Kind = kind,
             Windup = 0.35f, Active = 0.05f, Recovery = 0.30f,
-            MinRange = 30f, MaxRange = 260f,
-            HalfHeight = 36f,
+            MaxRange = 260f,                    // how far from the body it may be conjured
             Material = TileType.Dirt,
             EnergyCost = MaterialStrengths.BuildCostFor(TileType.Dirt),
             ActivePriority = 28, PassivePriority = 21,
