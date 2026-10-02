@@ -140,9 +140,20 @@ def cmd_collect(a):
         print(f"no submission branches competition-wave{a.wave}-*")
         return 0
 
+    diffs = {b: git("diff", "--no-renames", "--name-status", f"{base}..{b}", cwd=root).stdout.strip().splitlines()
+             for b in branches}
+    # Two branches adding the same path (two bots with one name) would overwrite each other,
+    # and neither is "first" in any way the branch list knows: reject both and say why.
+    by_path = {}
+    for b, diff in diffs.items():
+        for l in diff:
+            parts = l.split("\t")
+            if parts[0] == "A":
+                by_path.setdefault(parts[-1], []).append(b)
+
     rows, rejected = [], 0
     for b in branches:
-        diff = git("diff", "--no-renames", "--name-status", f"{base}..{b}", cwd=root).stdout.strip().splitlines()
+        diff = diffs[b]
         entries = [l.split("\t") for l in diff]
         reason = None
         if len(entries) != 1:
@@ -153,6 +164,9 @@ def cmd_collect(a):
                 reason = f"{status} {path} (expected one ADDED file)"
             elif not (path.startswith(PACKAGES) and path.endswith(".cs")):
                 reason = f"A {path} (not under {PACKAGES}, or not .cs)"
+            elif len(by_path.get(path, [])) > 1:
+                others = ", ".join(o for o in by_path[path] if o != b)
+                reason = f"{path} is also added by {others} (name clash: one of them must rename)"
             elif os.path.exists(os.path.join(root, path)):
                 reason = f"{path} already present, delete it first"
         if reason:
