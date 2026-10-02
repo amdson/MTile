@@ -255,6 +255,34 @@ public class FighterDashMineTests
         }
     }
 
+    // ── The fight record ────────────────────────────────────────────────────
+
+    [Fact]
+    public void EveryActionSpecField_SurvivesTheFightRecord()
+    {
+        // Every league bout and every saved fight goes through ActionSpecDto; a field it
+        // drops silently reverts to zero in the bout (it did, for every Dash and Mine
+        // knob, through wave 4's scoring). Set every field to a distinct value and require
+        // all of them back.
+        object boxed = new ActionSpec();
+        int k = 1;
+        foreach (var f in typeof(ActionSpec).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+        {
+            object v = f.FieldType == typeof(float) ? 0.5f + k
+                     : f.FieldType == typeof(int) ? 1 + k
+                     : f.FieldType == typeof(Vector2) ? new Vector2(k, -k)
+                     : f.FieldType == typeof(ActionKind) ? ActionKind.Mine
+                     : f.FieldType == typeof(TileType) ? TileType.Stone
+                     : throw new InvalidOperationException($"new field type {f.FieldType} on ActionSpec.{f.Name}: extend this test");
+            f.SetValue(boxed, v);
+            k++;
+        }
+        var a = (ActionSpec)boxed;
+        var back = ActionSpecDto.From(a).ToSpec();
+        foreach (var f in typeof(ActionSpec).GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            Assert.True(Equals(f.GetValue(a), f.GetValue(back)), $"ActionSpec.{f.Name} is lost by the fight record");
+    }
+
     // ── Pricing and limits ──────────────────────────────────────────────────
 
     [Fact]

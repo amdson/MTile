@@ -107,6 +107,11 @@ public static class FighterSpecPrinter
         Fl("FallSpeedRef", a.FallSpeedRef, d.FallSpeedRef);
         In("Penetration", a.Penetration, d.Penetration);
         if (a.Material != d.Material) o.Add($"Material = TileType.{a.Material}");
+        Fl("Intangible", a.Intangible, d.Intangible);
+        Fl("BlastRadius", a.BlastRadius, d.BlastRadius);
+        Fl("ArmDelay", a.ArmDelay, d.ArmDelay);
+        Fl("Fuse", a.Fuse, d.Fuse);
+        In("MaxLive", a.MaxLive, d.MaxLive);
         Fl("EnergyCost", a.EnergyCost, d.EnergyCost);
         In("ActivePriority", a.ActivePriority, d.ActivePriority);
         In("PassivePriority", a.PassivePriority, d.PassivePriority);

@@ -295,6 +295,11 @@ public sealed class ActionSpecDto
     public float   FallSpeedRef  { get; set; }
     public int     Penetration   { get; set; }
     public string  Material      { get; set; } = "";
+    public float   Intangible    { get; set; }
+    public float   BlastRadius   { get; set; }
+    public float   ArmDelay      { get; set; }
+    public float   Fuse          { get; set; }
+    public int     MaxLive       { get; set; }
     public float   EnergyCost    { get; set; }
     public int     ActivePriority  { get; set; }
     public int     PassivePriority { get; set; }
@@ -309,6 +314,7 @@ public sealed class ActionSpecDto
         Reach = a.Reach, HalfWidth = a.HalfWidth, HalfHeight = a.HalfHeight,
         Speed = a.Speed, FallSpeedMin = a.FallSpeedMin, FallSpeedRef = a.FallSpeedRef,
         Penetration = a.Penetration, Material = a.Material.ToString(), EnergyCost = a.EnergyCost,
+        Intangible = a.Intangible, BlastRadius = a.BlastRadius, ArmDelay = a.ArmDelay, Fuse = a.Fuse, MaxLive = a.MaxLive,
         ActivePriority = a.ActivePriority, PassivePriority = a.PassivePriority,
     };
 
@@ -324,6 +330,7 @@ public sealed class ActionSpecDto
         Penetration = Penetration,
         Material = Enum.TryParse<TileType>(Material, ignoreCase: true, out var m) ? m : default,
         EnergyCost = EnergyCost,
+        Intangible = Intangible, BlastRadius = BlastRadius, ArmDelay = ArmDelay, Fuse = Fuse, MaxLive = MaxLive,
         ActivePriority = ActivePriority, PassivePriority = PassivePriority,
     };
 }
