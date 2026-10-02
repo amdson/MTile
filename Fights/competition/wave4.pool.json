@@ -1,0 +1,42 @@
+{
+  "Wave": 4,
+  "Created": "2026-10-02",
+  "Source": "Fights/wave3_full_league.md",
+  "Dev": [
+    "Thornbull",
+    "Ironmaw",
+    "Twinbarrel",
+    "Phalanx",
+    "Arrowhawk",
+    "Harrier",
+    "Mason",
+    "Breacher",
+    "Wraith",
+    "Brick",
+    "Bulwark",
+    "Turret",
+    "Gunner",
+    "Gravemantle",
+    "Builder",
+    "Flyer",
+    "ExampleBrawler",
+    "Sprinter"
+  ],
+  "Holdout": [
+    "Thornrush",
+    "Hollowstep",
+    "Thornback",
+    "Stonecreep",
+    "Lancer",
+    "Ironshot",
+    "Sentinel",
+    "Vanguard",
+    "Sapper",
+    "Skirmish",
+    "Kestrel"
+  ],
+  "Terrains": [],
+  "Frames": 1800,
+  "Seeds": 16,
+  "FirstSeed": 100
+}
