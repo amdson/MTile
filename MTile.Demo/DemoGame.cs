@@ -1579,7 +1579,7 @@ public sealed partial class DemoGame : Game
         ("Scene",    "Scene menu (top right): add/select/duplicate/delete/hide/lock guides, snap, motion source, path/ghosts, frame/follow view"),
         ("Add",      "P point    V vector    B clip bone  (Shift+B base rig)    (then name, Enter)"),
         ("Endpoint", "click a joint = select its endpoint, then the small v (or right-click) opens: add knife / element / contact point / marker, contact no-slip / planned / external / clear, scope"),
-        ("Effect",   "E over joint: attach/name effect (knife)    Shift+E remove    U/I set selected effect start/end at playhead"),
+        ("Effect",   "E over joint: attach/name effect (knife)    Shift+E remove    U/I set selected effect start/end at playhead    endpoint menu > element > Progress curve: ease the strip"),
         ("Keyframe", "K sample    Del delete    , . previous/next keyframe    click / drag a timeline bar    Space play"),
         ("Skin",     "G sprite skin on/off    W mesh wireframe    X skeleton on/off    (launch with --usebind <binding>)"),
         ("File",     "Ctrl-S save  (writes clips + rig)"),

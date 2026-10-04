@@ -24,29 +24,86 @@ public sealed class AnimAttachment
     public float? TrailEnd { get; set; }
     public float TrailWidth { get; set; } = 1f; // outer fraction of the blade swept by the ribbon
     public float TrailOpacity { get; set; } = 1f;
+    // Optional ease of the STRIP over the window: u (fraction of [Start, End)) → strip progress
+    // in [0,1]. Null = linear. Same AnimCurve as a contact's weight, on the same span-local
+    // domain, so retiming the window stretches the ease rather than distorting it. When set it
+    // supersedes FrameTimes — one continuous schedule instead of a per-frame list that has to
+    // be re-typed whenever the window moves. The window gate and trail fade stay linear in u.
+    public AnimCurve Progress { get; set; }
     public AnimAttachment Clone()
     {
         var copy = (AnimAttachment)MemberwiseClone();
         copy.FrameTimes = FrameTimes == null ? null : (float[])FrameTimes.Clone();
+        copy.Progress = Progress?.Clone();
         return copy;
     }
 
+    // The fresh progress curve: the identity, so adding one changes nothing until it is bent.
+    public static AnimCurve LinearProgress()
+    {
+        var c = new AnimCurve();
+        c.Keys.Add(new AnimCurveKey { T = 0f, V = 0f, Tan = 1f });
+        c.Keys.Add(new AnimCurveKey { T = 1f, V = 1f, Tan = 1f });
+        return c;
+    }
+
+    // Strip progress at window fraction u: the Progress curve if authored, else u itself.
+    public float StripProgress(float u)
+        => Progress == null ? u : Math.Clamp(AnimCurve.ValueAt(Progress, u, u), 0f, 1f);
+
     public int FrameAt(float time, float progress, int count)
     {
-        if (FrameTimes?.Length == count)
+        if (Progress != null)
+            return Math.Clamp((int)(StripProgress(progress) * count), 0, count - 1);
+        if (FrameTimes?.Length == count && FrameTimesValid())
         {
-            bool valid = true;
-            for (int i = 0; i < count; i++)
-                valid &= float.IsFinite(FrameTimes[i]) && FrameTimes[i] >= Start && FrameTimes[i] < End
-                    && (i == 0 || FrameTimes[i] >= FrameTimes[i - 1]);
-            if (valid)
-            {
-                int frame = 0;
-                while (frame + 1 < count && time >= FrameTimes[frame + 1]) frame++;
-                return frame;
-            }
+            int frame = 0;
+            while (frame + 1 < count && time >= FrameTimes[frame + 1]) frame++;
+            return frame;
         }
         return Math.Clamp((int)(progress * count), 0, count - 1);
+    }
+
+    private bool FrameTimesValid()
+    {
+        for (int i = 0; i < FrameTimes.Length; i++)
+            if (!float.IsFinite(FrameTimes[i]) || FrameTimes[i] < Start || FrameTimes[i] >= End
+                || (i > 0 && FrameTimes[i] < FrameTimes[i - 1])) return false;
+        return true;
+    }
+
+    // The curve that reproduces this attachment's CURRENT schedule, so switching to a Progress
+    // curve changes nothing on screen until it is edited: frame i of n begins at strip progress
+    // i/n, so each FrameTimes entry becomes the key (its window fraction, i/n). Tangents are
+    // Fritsch–Butland (harmonic mean of the adjacent secants), which keeps the Hermite segments
+    // monotone — an overshoot would flash the next frame early and then step back. No usable
+    // FrameTimes → the identity.
+    public AnimCurve SeedProgress()
+    {
+        int n = FrameTimes?.Length ?? 0;
+        float w = End - Start;
+        if (n < 2 || !(w > 0) || !FrameTimesValid()) return LinearProgress();
+
+        var c = new AnimCurve();
+        void Key(float u, float v)
+        {
+            if (c.Keys.Count > 0 && u <= c.Keys[^1].T + 1e-4f) c.Keys[^1].V = v;   // zero-length frame
+            else c.Keys.Add(new AnimCurveKey { T = u, V = v });
+        }
+        Key(0f, 0f);
+        for (int i = 0; i < n; i++) Key((FrameTimes[i] - Start) / w, i / (float)n);
+        Key(1f, 1f);
+
+        var ks = c.Keys;
+        float Secant(int i) => (ks[i + 1].V - ks[i].V) / (ks[i + 1].T - ks[i].T);
+        for (int i = 0; i < ks.Count; i++)
+        {
+            if (i == 0) { ks[i].Tan = Secant(0); continue; }
+            if (i == ks.Count - 1) { ks[i].Tan = Secant(i - 1); continue; }
+            float d0 = Secant(i - 1), d1 = Secant(i);
+            ks[i].Tan = d0 > 0 && d1 > 0 ? 2f * d0 * d1 / (d0 + d1) : 0f;
+        }
+        return c;
     }
 
     public bool EmitsTrail(float time) => time >= (TrailStart ?? Start) && time < (TrailEnd ?? End);
