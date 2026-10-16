@@ -181,7 +181,7 @@ public static class ReferenceClipRegistry
         var doc = new HermiteClipDocument
         {
             Name = LedgePull,
-            Duration = 0.60f,   // authoring/playback length; LedgePull paces by MovementConfig.LedgePullRefDuration
+            Duration = 0.45f,   // the pull's pace: arc length / Duration (LedgePullState)
             Keys =
             {
                 new HermiteClipKey { X = 0.00f, Y =  0.00f, TX = 0.05f, TY = -1.60f },
@@ -207,7 +207,7 @@ public static class ReferenceClipRegistry
         var doc = new HermiteClipDocument
         {
             Name = Dropdown,
-            Duration = 0.30f,   // == MovementConfig.DropdownRefDuration
+            Duration = 0.45f,   // the slide's pace: arc length / Duration (DropdownState)
             Keys =
             {
                 new HermiteClipKey { X = 0.00f, Y =  0.00f, TX = 1.60f, TY = -0.10f },

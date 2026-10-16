@@ -46,12 +46,12 @@ public sealed class HermiteClipDocument
 {
     public string Name { get; set; } = "";
 
-    // Seconds the arc is meant to take end to end. It is what makes arc time comparable
-    // to ANIMATION clip time: an animation riding this arc advances along it at
-    // τ · (animDuration / Duration), so a 0.4s clip on a 0.3s arc reaches the gate a
-    // third of the way before its last keyframe. Tooling reads this; the sim takes its
-    // pace from the state's own MovementConfig knob (LedgePullRefDuration /
-    // DropdownRefDuration), so keep the two in step when retuning.
+    // Seconds the arc is meant to take end to end — the ONE duration a move has.
+    // Animation rides it (an animation on this arc advances at τ · (animDuration /
+    // Duration)), and the path-following sim moves pace by it: LedgePull and
+    // Dropdown's channels fade at arc length / Duration (no clock — a faster body
+    // keeps its speed). The climb family paces at running speed instead (the
+    // speed-cap principle), so for parkour / mantle / arcjump it is tooling-only.
     public float Duration { get; set; } = 1f;
 
     // Retarget anchors in clip space, in the pixels the arc is authored in.

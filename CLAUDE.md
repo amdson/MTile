@@ -144,7 +144,7 @@ Note that `Plans/ROLLBACK_ROADMAP.md`'s checklist is **stale** — several unche
 - **Clip annotations** (points / elements / contacts / curves, and the `MTile.Demo` editor that authors them) — **read [Plans/ANIMATION_ANNOTATIONS.md](Plans/ANIMATION_ANNOTATIONS.md) first.** It covers the data model, how `ContactSource` becomes a solver row, the invariants that bite (a shared-static default curve, a resolver that throws in the solve path but must not in draw paths, loop-seam spans), and **why the suite is ~96 red right now** — the clip library is blank stubs pending a re-author, so tests that read clip content fail by design (BACKLOG §5.0).
 - **Browser PvP** — works end to end (WebRTC + Firestore room codes, deployed to GitHub Pages). What's left before strangers can play: TURN (STUN-only today, so symmetric NAT/CGNAT fails), desync/disconnect handling, and a Firestore-path smoke test. `Plans/INTERNET_READY_PLAN.md`.
 - **Terrain building** — the paint/place/burst/peel + mass-economy rework replaced the old eruption planners. Actively evolving.
-- Known gaps worth not rediscovering: `PlayerCharacter.cs:485-554` prints `[move]`/`[action]` transitions to the console on the sim hot path (fires during rollback re-sim too — almost certainly leftover tracing); 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
+- Known gaps worth not rediscovering: 7 tests are deliberately `Skip`ped with reasons; `Game1.cs` render/HUD extraction is half-done.
 
 `MTile.Tests/Sim/` (`SimRunner`, `SimTerrain`, `InputScript`, `SimReport`) is the headless analogue of the sim — scenario tests with ascii terrain + scripted input, mirroring the same phase ordering as `Simulation.Step`. Use it for deterministic gameplay tests.
 

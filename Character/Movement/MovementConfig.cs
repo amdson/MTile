@@ -151,18 +151,13 @@ public class MovementConfig
 
     // Reference clips (ReferenceClips/<name>.json, baked defaults in
     // ReferenceClipRegistry): LedgePull and Dropdown FOLLOW their clips as paths
-    // (PathTracker), so these durations are not clocks — each move's pace is its
-    // arc's length over its duration, the speed its channels fade out at, and a
-    // body arriving faster keeps its speed. Both are 0.45 because a constant-pace
-    // follower must be re-derived against the state's own timing:
-    //   LedgePull — at 0.60 it crossed the corner right at the 0.5 s
-    //     MaxLipManeuverTime and re-grabbed (the pull "gave up" and sagged back);
-    //     0.45 completes from a dead hang in ~0.4 s.
-    //   Dropdown — only the clip's on-platform stretch plays, which the old clock
-    //     entered slowly; at 0.30 the average-speed pace slipped off at twice the
-    //     old exit speed. 0.45 matches the old slip-off (exit vy ≈ 120–195 px/s).
-    public float LedgePullRefDuration { get; set; } = 0.45f;
-    public float DropdownRefDuration  { get; set; } = 0.45f;
+    // (PathTracker); each move's pace is its arc's length over the CLIP's own
+    // Duration (HermiteClipDocument.Duration — one duration per move, shared with
+    // animation). Both clips are 0.45 s because a constant-pace follower must be
+    // re-derived against the state's own timing: the pull at 0.60 crossed the
+    // corner right at the 0.5 s MaxLipManeuverTime and re-grabbed; the dropdown at
+    // 0.30 slipped off at twice the old exit speed (only its on-platform stretch
+    // plays).
 
     // Corridor probe (shared local-geometry sensing for the maneuver layer —
     // see Plans/CORRIDOR_MANEUVER_PLAN.md and Character/CorridorProbe.cs).

@@ -326,11 +326,11 @@ public class DropdownState : MovementState
         var s = ctx.Corrector;
         if (clip != null && s != null && ctx.Dt > 0f)
         {
-            // The clip as a path from the body onward; its pace — the authored duration over
-            // the arc's length — is the speed the drive pushes to, not a clock.
+            // The clip as a path from the body onward; its pace — the clip's authored
+            // Duration over the arc's length — is the speed the drive pushes to, not a clock.
             int nv = PathTracker.BuildClipPolyline(s, body.Position, clip,
                 new ReferenceFrame(clip, vars.RefEntry, vars.RefGate), out float arcLength);
-            float pace = arcLength / MathF.Max(cfg.DropdownRefDuration, 1e-4f);
+            float pace = arcLength / MathF.Max(clip.Duration, 1e-4f);
             float floorY = AmbientCorrector.FloorEnvelope(ctx.Chunks, CObstacleTemplate.For(body.Polygon),
                 body.Position.X, body.Position.Y - 2f, body.Position.Y + CorrectorChannels.LegReach, out bool floorFound);
             var slide = new SlidePathPolicy(vars.DropDir, pace);

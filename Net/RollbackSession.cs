@@ -150,12 +150,21 @@ public sealed class RollbackSession
             if (depth > WorstRollbackDepth) WorstRollbackDepth = depth;
             rolledBack = true;
             _sim.Restore(snap);
-            for (int f = rollbackTo; f < _frame; f++)
+            // The replayed frames' FSM transitions were already traced when the frames
+            // first ran; re-printing them per replay is noise that reads as real
+            // transitions (SimTrace's own header). Output-only — no sim state.
+            bool trace = SimTrace.Enabled;
+            SimTrace.Enabled = false;
+            try
             {
-                _snaps.Set(f, _sim.Snapshot());
-                _sim.Step(InputFor(0, f), InputFor(1, f));
-                RecordChecksum(f);
+                for (int f = rollbackTo; f < _frame; f++)
+                {
+                    _snaps.Set(f, _sim.Snapshot());
+                    _sim.Step(InputFor(0, f), InputFor(1, f));
+                    RecordChecksum(f);
+                }
             }
+            finally { SimTrace.Enabled = trace; }
             // sim is now back at _frame with the corrected timeline.
         }
         // Our checksums for confirmed frames are now current → safe to compare.

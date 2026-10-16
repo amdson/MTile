@@ -12,8 +12,8 @@ namespace MTile.Tests;
 // the 30 Hz suites missed the ledge pull timing out): every hanging-over start,
 // still or running in, slips off within MaxDropdownTime, lands just past the edge,
 // and leaves the platform no faster than the old clock-servo did (≈ 210 px/s at
-// worst) — the pace fades per axis AND along the path, and DropdownRefDuration is
-// re-derived for the constant-pace follower.
+// worst) — the pace fades per axis AND along the path, and the dropdown clip's
+// Duration is re-derived for the constant-pace follower.
 public class DropdownPathTests(ITestOutputHelper output)
 {
     private const float TS = Chunk.TileSize;

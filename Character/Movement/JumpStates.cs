@@ -84,7 +84,9 @@ public class JumpingState : MovementState
     // abilities.GrabbedCorner (snapshotted); nothing here reads animation data.
     // (From the hang LedgeJumpState outbids this launch; the case still matters to
     // HasLaunchSource, which keeps DoubleJump from bidding while a corner is held.)
-    private const float CornerLaunchReach = 24f;
+    // Arm's reach: the grip channels' own (CorrectorChannels.GripReach) — one
+    // physical quantity, not a second number for jumping (this was 24 px).
+    private const float CornerLaunchReach = CorrectorChannels.GripReach;
     internal static bool TryCornerLaunch(EnvironmentContext ctx, PlayerAbilityState abilities,
                                          out Vector2 corner)
     {

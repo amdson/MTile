@@ -20,6 +20,9 @@ public class LedgeGrabState : MovementState
 
     public override void ResetTransient() { _wall = null; _floor = null; }
 
+    // How long a fresh hang holds against away/Down exits (CheckConditions).
+    private const float HangSettleSeconds = 0.1f;
+
     public LedgeGrabState(int wallDir) => _wallDir = wallDir;
 
     // Read by LedgeJumpState's preconditions to match the side it launches off.
@@ -74,14 +77,14 @@ public class LedgeGrabState : MovementState
 
     // Same geometry as LedgePullState's completion test: standing height AND past the
     // corner horizontally. A completed pull must exit onto the platform, not re-grab.
-    // The height test keeps a 0.7R buffer (a body that high clears the lip and drops
-    // onto it); the horizontal one does not: the body's bottom is a point, so a
-    // center short of the corner edge slides back off the lip instead of landing.
+    // The height test keeps a slack (a body that high clears the lip and drops onto
+    // it); the horizontal one does not: the body's bottom is a point, so a center
+    // short of the corner edge slides back off the lip instead of landing.
+    private const float ClearsLipSlack = 0.7f * PlayerCharacter.Radius;
     private bool PullCompleted(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         var corner = abilities.GrabbedCorner;
-        var buffer = 0.7f * PlayerCharacter.Radius;
-        bool atStandingHeight = ctx.Body.Position.Y - buffer < corner.Y - 2f * PlayerCharacter.Radius;
+        bool atStandingHeight = ctx.Body.Position.Y - ClearsLipSlack < corner.Y - 2f * PlayerCharacter.Radius;
         bool pastCorner       = _wallDir == 1
             ? ctx.Body.Position.X > corner.X
             : ctx.Body.Position.X < corner.X;
@@ -90,10 +93,10 @@ public class LedgeGrabState : MovementState
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        // Entry grace (~3 frames): drop-in enters with Down still held, and a re-grab
-        // from an abandoned pull needs the damper a few frames to absorb the pull's
-        // velocity before an away/Down exit may carry it out of the state.
-        if (vars.TimeInState < 0.1f) return true;
+        // Entry grace: drop-in enters with Down still held, and a re-grab from an
+        // abandoned pull needs the damper a few frames to absorb the pull's velocity
+        // before an away/Down exit may carry it out of the state.
+        if (vars.TimeInState < HangSettleSeconds) return true;
         bool pressingAway = (_wallDir == 1 && ctx.Input.Left) || (_wallDir == -1 && ctx.Input.Right);
         if (pressingAway) return false;
         // movement_todo #4: an inward/neutral jump press launches OFF the
@@ -374,11 +377,11 @@ public class LedgePullState : MovementState
         if (clip != null && s != null && ctx.Dt > 0f)
         {
             // The arc retargeted at Enter, as a path from the body onward.
-            // Its pace: the authored duration over the arc's length — the
+            // Its pace: the clip's authored Duration over the arc's length — the
             // speed the arms pull to, not a clock the body is held to.
             int nv = PathTracker.BuildClipPolyline(s, ctx.Body.Position, clip,
                 new ReferenceFrame(clip, vars.RefEntry, vars.RefGate), out float arcLength);
-            float pace = arcLength / MathF.Max(MovementConfig.Current.LedgePullRefDuration, 1e-4f);
+            float pace = arcLength / MathF.Max(clip.Duration, 1e-4f);
             var grip = new GripPathPolicy(abilities.GrabbedCorner, _wallDir, pace);
             PathTracker.FollowPolyline(ctx, s, nv, ref grip);
         }
