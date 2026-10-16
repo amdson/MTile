@@ -501,11 +501,13 @@ public static class CorrectorChannels
     //         answer it, choked the lift until the pull timed out.
     // Each is capped (LipLiftForce for the two arm-strength channels,
     // LipPushForce for the over-the-lip push) and FADES to zero as the body's
-    // speed along that channel's own axis approaches `pace` — the LegServo /
-    // BuildManeuver idiom: the arms cannot push faster than the pace, but
-    // never brake speed the body arrived with along their axis. Per axis, not
-    // along the path: at a crest the path runs flat, and a path-speed fade
-    // left the lift at full authority on a body already rising past the lip.
+    // speed approaches `pace` along that channel's own axis OR along the path
+    // (PaceFade, whichever binds first) — the LegServo / BuildManeuver idiom:
+    // the arms cannot push faster than the pace, but never brake speed the
+    // body arrived with. The axis term: at a crest the path runs flat, and a
+    // path-speed fade alone left the lift at full authority on a body already
+    // rising past the lip. The path term: the channels' diagonals (HOLD) add
+    // to the axis pushes, and a climb's arc ran at ~1.5× the pace without it.
     // Active while the corner is within arm's reach. Returns the channel count.
     public const float GripReach     = 3f * PlayerCharacter.Radius;
     public const float SpeedFadeBand = 25f;   // px/s — pace-fade window (BuildManeuver's VxFadeBand)
@@ -520,7 +522,8 @@ public static class CorrectorChannels
         return d.LengthSquared() > 1e-6f ? Vector2.Normalize(d) : Vector2.Zero;
     }
 
-    public static int BuildGrip(CorrectorScratch s, int n, Vector2 corner, int overDir, float pace)
+    public static int BuildGrip(CorrectorScratch s, int n, Vector2 corner, int overDir,
+                                Vector2 pathDir, float pace)
     {
         var cfg = MovementConfig.Current;
         // Held state (every tick's sample is the body's current state), so
@@ -534,10 +537,10 @@ public static class CorrectorChannels
             s.ChannelMask[1][k] = reach;
             s.ChannelMask[2][k] = reach && hold != Vector2.Zero;
             s.ChannelMask[3][k] = reach && s.Samples[k].Pos.Y > corner.Y;
-            s.ChannelCap[0][k] = cfg.LipLiftForce * Fade(pace, -v.Y);
-            s.ChannelCap[1][k] = cfg.LipPushForce * Fade(pace, overDir * v.X);
-            s.ChannelCap[2][k] = cfg.LipLiftForce * Fade(pace, Vector2.Dot(v, hold));
-            s.ChannelCap[3][k] = cfg.LipPushForce * Fade(pace, -overDir * v.X);
+            s.ChannelCap[0][k] = cfg.LipLiftForce * PaceFade(pace, v, new Vector2(0f, -1f), pathDir);
+            s.ChannelCap[1][k] = cfg.LipPushForce * PaceFade(pace, v, new Vector2(overDir, 0f), pathDir);
+            s.ChannelCap[2][k] = cfg.LipLiftForce * PaceFade(pace, v, hold, pathDir);
+            s.ChannelCap[3][k] = cfg.LipPushForce * PaceFade(pace, v, new Vector2(-overDir, 0f), pathDir);
         }
         var ch = s.Problem.Channels;
         ch[0] = new ChannelDef {
@@ -608,12 +611,26 @@ public static class CorrectorChannels
     private static float Fade(float pace, float speedAlong)
         => Math.Clamp((pace - speedAlong) / SpeedFadeBand, 0f, 1f);
 
-    // A path actuator's pace fade: the tighter of its own axis's speed and the
-    // speed along the path. Per-axis alone lets a diagonal path run at √2 ×
-    // pace; path-speed alone leaves an axis at full authority where the path
-    // turns across it (a flat crest — see BuildGrip).
+    // A path actuator's pace fade: no channel pushes the body past the pace in
+    // any direction it pushes. It fades (the tightest of):
+    //   - on its own axis;
+    //   - on each WORLD axis its push has a component along — a diagonal (the
+    //     grip's HOLD) must not add x or y speed past the pace the axis-aligned
+    //     channels respect (it ran a fast vault to 200 px/s of x past a 150 entry);
+    //   - on the PATH, if it pushes along it (axis · pathDir > 0) — per-axis alone
+    //     lets a diagonal path run at √2 × pace.
+    // A channel pointing across or against the path only answers the band, which
+    // adds no path speed: fading it on path speed switched off the climb's HOLD
+    // exactly when a vault, moving at pace over the top, needed it to come down
+    // onto the step. The axis terms keep a flat crest's lift honest (BuildGrip).
     private static float PaceFade(float pace, Vector2 v, Vector2 axis, Vector2 pathDir)
-        => MathF.Min(Fade(pace, Vector2.Dot(v, axis)), Fade(pace, Vector2.Dot(v, pathDir)));
+    {
+        float fade = Fade(pace, Vector2.Dot(v, axis));
+        if (MathF.Abs(axis.X) > 1e-3f) fade = MathF.Min(fade, Fade(pace, MathF.Sign(axis.X) * v.X));
+        if (MathF.Abs(axis.Y) > 1e-3f) fade = MathF.Min(fade, Fade(pace, MathF.Sign(axis.Y) * v.Y));
+        if (Vector2.Dot(axis, pathDir) > 0f) fade = MathF.Min(fade, Fade(pace, Vector2.Dot(v, pathDir)));
+        return fade;
+    }
 
     // Cross-frame Δ-anchor leak shared by every corrector loop: continuity
     // without DC memory (a full-strength anchor lets a force channel sustain

@@ -325,8 +325,20 @@ public static class PathTracker
         int nv = BeginPolyline(s, origin);
         for (int i = 1; i <= ClipPathSamples; i++)
             if (arc[i] > a0 + 0.5f) AppendVertex(s, ref nv, pts[i]);
-        // Past the clip's end: continue along its final direction.
-        if (nv < 2) AppendVertex(s, ref nv, origin + (pts[ClipPathSamples] - pts[ClipPathSamples - 1]));
+        if (nv < 2)
+        {
+            // Past the clip's end: the path continues along its final direction
+            // FROM ITS END POINT — a point on that ray just ahead of the body's own
+            // projection — so a body that overshot the arc (a vault cresting high
+            // past its gate) is drawn back onto the authored line. A ray from the
+            // body itself would hold the body at whatever height it overshot to.
+            var end = pts[ClipPathSamples];
+            var dir = end - pts[ClipPathSamples - 1];
+            float len = dir.Length();
+            dir = len > 1e-6f ? dir / len : new Vector2(1f, 0f);
+            float ahead = MathF.Max(0f, a0 - totalArc) + 2f * (totalArc / ClipPathSamples);
+            AppendVertex(s, ref nv, end + dir * ahead);
+        }
         return nv;
     }
 }

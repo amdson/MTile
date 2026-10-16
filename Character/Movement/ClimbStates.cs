@@ -37,6 +37,9 @@ public abstract class ClimbManeuverBase : MovementState
     protected abstract float RiseBandMin { get; }
     protected abstract float RiseBandMax { get; }
     protected abstract bool  RequiresRunningEntry { get; }
+    // The authored arc this climb follows (ReferenceClips/<name>.json, baked in
+    // ReferenceClipRegistry) — the same arc the animation's body path maps from.
+    protected abstract string ClipName { get; }
 
     // Each subclass names its own clip family. They shared AnimTag.Parkour (and so one clip)
     // until 2026-08-04 — a speed vault, a flush climb and a two-block arc all reading as the
@@ -170,13 +173,20 @@ public abstract class ClimbManeuverBase : MovementState
     {
         if (ctx.Intent.CurrentHorizontal != _dir) return false;                    // release cancels
         if (vars.TimeInState >= MovementConfig.Current.MaxLipManeuverTime) return false; // stuck → bail
-        // Delivered: at gate height and past the lip — then normal arbitration
-        // (Standing on the step) claims the next frame.
-        bool atHeight = ctx.Body.Position.Y <= vars.MantleTargetY + 1f;
+        // Delivered: past the lip and in StandingState's hands — the ground probe
+        // sees the step and the body is not rising faster than a support could
+        // push (StandingState's own entry rule) — so normal arbitration claims it
+        // the next frame. Past the lip with the step under the probe already means
+        // "on top"; a height test on top of that kept a body that had settled onto
+        // the step (below the hover line — nothing holds hover in a climb) stuck
+        // to the timeout. A climb that crests high stays in the climb until it is
+        // standable: completing in mid-air left Falling hovering it there.
         bool past = _dir == 1
             ? ctx.Body.Position.X > vars.MantleCorner.X + PlayerCharacter.Radius * 0.5f
             : ctx.Body.Position.X < vars.MantleCorner.X - PlayerCharacter.Radius * 0.5f;
-        return !(atHeight && past);
+        bool standable = ctx.TryGetGround(out _)
+                         && -ctx.Body.Velocity.Y <= MovementConfig.Current.SpringMaxRiseSpeed;
+        return !(past && standable);
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -190,12 +200,27 @@ public abstract class ClimbManeuverBase : MovementState
         vars.MantleEntryY    = ctx.Body.Position.Y;
         vars.EntrySpeed      = MathF.Max(_dir * ctx.Body.Velocity.X, cfg.MaxWalkSpeed);
         vars.ManeuverChannelPrev = default;
+        // The climb's clip, retargeted: Entry = where the climb starts; Gate = just
+        // past the completion line (half a radius past the lip) and a couple of px
+        // BELOW the standing line, so the arc ends inside StandingState's ground-
+        // probe window — the completion test hands the body to Standing there, and
+        // Standing's legs lift it the last px to hover. An arc ending above the
+        // window held the body hovering just out of the hand-off's reach.
+        vars.RefEntry = ctx.Body.Position;
+        vars.RefGate  = new Vector2(rise.Pos.X + _dir * (0.5f * PlayerCharacter.Radius + 2f),
+                                    vars.MantleTargetY + 2f);
         abilities.Facing = _dir;
         abilities.HasDoubleJumped = false;
 
-        // One-shot entry hop — all the maneuver's injected energy (same sizing the
-        // feasibility probe planned with).
-        float vy0 = HopVy(ctx, rise, vars.MantleTargetY);
+        // One-shot entry hop — the launch, a velocity write (jumps are hybrid):
+        // the honest ballistic hop to the gate height + ArcJumpApexMargin, no more.
+        // Nothing brakes a rise below the lip (the grip only lifts and pulls
+        // there), so HopVy's lip-timing term — which over-launched and relied on
+        // the old feedforward's uncapped envelope brake — is not used; the grip
+        // channels carry the arc over the lip. Capped by the deliberate-jump
+        // ceiling and by head clearance under any ceiling over the arc.
+        float vy0 = MathF.Min(ApexHopVy(ctx, vars.MantleTargetY), CeilingCapVy(ctx, rise));
+        vy0 = MathF.Min(vy0, cfg.MaxAssistRiseSpeed);
         ctx.Body.Velocity.Y = MathF.Min(ctx.Body.Velocity.Y, -vy0);
 
         // Reference capture (render-only): the authored arc as planned from the
@@ -213,6 +238,27 @@ public abstract class ClimbManeuverBase : MovementState
         // Drop captured trajectories with the maneuver — the overlay must not keep
         // drawing a stale plan after the state hands the body off.
         if (ctx.Corrector is { } s) { s.ReferenceCount = 0; s.BeginFrame(); }
+    }
+
+    // The ballistic hop that just reaches the gate height + ArcJumpApexMargin.
+    private static float ApexHopVy(EnvironmentContext ctx, float targetY)
+        => BallisticPredictor.BallisticVy(MathF.Max(0f, ctx.Body.Position.Y - targetY)
+                                          + MovementConfig.Current.ArcJumpApexMargin);
+
+    // Head-clearance cap on a hop: the apex keeps the head under the LOWEST
+    // ceiling across the arc's columns (see HopVy).
+    private float CeilingCapVy(EnvironmentContext ctx, in CorridorCorner rise)
+    {
+        var corridor = ctx.GetCorridor(_dir);
+        float ceil = float.NegativeInfinity;   // y-down: larger = lower = more restrictive
+        int lastCol = Math.Min(rise.Column + 2, corridor.ColumnCount - 1);
+        for (int i = 0; i <= lastCol; i++)
+            if (!float.IsNegativeInfinity(corridor.CeilY[i]) && corridor.CeilY[i] > ceil)
+                ceil = corridor.CeilY[i];
+        if (float.IsNegativeInfinity(ceil)) return float.PositiveInfinity;
+        float halfHeight = (PlayerCharacter.StandingHeight - PlayerCharacter.Radius) * 0.5f;
+        float apexCenterMin = ceil + halfHeight + CeilingClearMargin;
+        return BallisticPredictor.BallisticVy(MathF.Max(0f, ctx.Body.Position.Y - apexCenterMin));
     }
 
     // Hop sizing: vy so the arc clears the gate + margin BOTH at apex (the
@@ -253,20 +299,7 @@ public abstract class ClimbManeuverBase : MovementState
             vy0 = MathF.Min(vy0, cfg.MaxAssistRiseSpeed);
         }
 
-        var corridor = ctx.GetCorridor(_dir);
-        float ceil = float.NegativeInfinity;   // y-down: larger = lower = more restrictive
-        int lastCol = Math.Min(rise.Column + 2, corridor.ColumnCount - 1);
-        for (int i = 0; i <= lastCol; i++)
-            if (!float.IsNegativeInfinity(corridor.CeilY[i]) && corridor.CeilY[i] > ceil)
-                ceil = corridor.CeilY[i];
-        if (!float.IsNegativeInfinity(ceil))
-        {
-            float halfHeight = (PlayerCharacter.StandingHeight - PlayerCharacter.Radius) * 0.5f;
-            float apexCenterMin = ceil + halfHeight + CeilingClearMargin;
-            float vyCap = BallisticPredictor.BallisticVy(MathF.Max(0f, ctx.Body.Position.Y - apexCenterMin));
-            vy0 = MathF.Min(vy0, vyCap);
-        }
-        return vy0;
+        return MathF.Min(vy0, CeilingCapVy(ctx, rise));
     }
 
     private const float CeilingClearMargin = 2f;   // px of head clearance the hop must keep
@@ -283,42 +316,27 @@ public abstract class ClimbManeuverBase : MovementState
             ? Math.Clamp((vars.MantleEntryY - ctx.Body.Position.Y) / span, 0f, 1f)
             : 0f;
 
-        // ── Authored feedforward: entry-speed drive + ballistic envelope ──
-        var force = Vector2.Zero;
-        force.X = AirControl.SoftClampVelocity(ctx.Body.Velocity.X, _dir * vars.EntrySpeed,
-                                               cfg.WalkAccel, ctx.Dt);
-        float remaining = ctx.Body.Position.Y - vars.MantleTargetY;
-        if (remaining > 1f)
+        // ── The climb FOLLOWS its authored arc as a path (PathTracker) ──
+        // The entry hop (Enter) is the launch — a jump, so a velocity write. From
+        // there the only actuator is the hands on the lip (the grip channels on
+        // MantleCorner: lift, pull over, hold toward it, brace off the face), as
+        // for the ledge pull; nothing is a clock. Pace: running speed — the climb
+        // family's speed-cap principle (BACKLOG 1.21, SpeedInvariantTests): the
+        // arms may carry the body at a run but never add speed past it; a faster
+        // entry keeps its own momentum (the fades never brake).
+        ctx.Body.AppliedForce = Vector2.Zero;
+        var clip = ReferenceClipRegistry.Get(ClipName);
+        var s = ctx.Corrector;
+        if (clip != null && s != null && ctx.Dt > 0f)
         {
-            // Ballistic honesty: gravity owns the ascent; brake only past the
-            // free-fall envelope, lift only if the rollout went under-budget.
-            float vyAllow = BallisticPredictor.BallisticVy(remaining);
-            if (ctx.Body.Velocity.Y < -vyAllow && ctx.Dt > 0f)
-                force.Y = (-vyAllow - ctx.Body.Velocity.Y) / ctx.Dt;
-            else if (ctx.Body.Velocity.Y > -0.25f * vyAllow)
-                force.Y = -cfg.LipLiftForce;
+            int nv = PathTracker.BuildClipPolyline(s, ctx.Body.Position, clip,
+                new ReferenceFrame(clip, vars.RefEntry, vars.RefGate), out float arcLength);
+            float pace = MovementConfig.Current.MaxWalkSpeed;
+            var grip = new GripPathPolicy(vars.MantleCorner, _dir, pace);
+            PathTracker.FollowPolyline(ctx, s, nv, ref grip);
         }
-        else
-        {
-            // Crest: kill residual rise, push over the lip. The push is a
-            // CLAMP toward entry speed, not an open throttle (movement_todo
-            // #5): a stalled crest gets the full shove up to EntrySpeed, a
-            // fast one gets nothing — the vault keeps the speed it arrived
-            // with, it doesn't mint more (this line was +500 unconditional
-            // and pushed a 150 px/s entry to 175 over the lip).
-            if (ctx.Body.Velocity.Y < 0f && ctx.Dt > 0f)
-                force.Y = MathF.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.LipLiftForce);
-            force.X = AirControl.SoftClampVelocity(ctx.Body.Velocity.X, _dir * vars.EntrySpeed,
-                                                   cfg.LipPushForce, ctx.Dt);
-        }
-        ctx.Body.AppliedForce = force;
 
-        // ── Corrector: two outer passes of predict → rows → solve, apply z₀
-        // (ManeuverCorrector.Apply: correction into AppliedForce, Δ anchors,
-        // ledger record). ──
-        ManeuverCorrector.Apply(ctx, _dir, vars.EntrySpeed, ref vars.ManeuverChannelPrev);
-
-        // Ambient stays Off: the maneuver solve owns correction, and an ambient
+        // Ambient stays Off: the path solve owns correction, and an ambient
         // assist would fight the owned arc. The call still runs every frame so
         // Apply's early-out clears the cross-frame anchor state.
         ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
@@ -330,6 +348,7 @@ public abstract class ClimbManeuverBase : MovementState
 public class ParkourState : ClimbManeuverBase
 {
     public ParkourState(int dir) : base(dir) { }
+    protected override string ClipName => ReferenceClipRegistry.Parkour;
     public override AnimTag AnimationTag => AnimTag.Parkour;
     protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
     protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
@@ -343,6 +362,7 @@ public class ParkourState : ClimbManeuverBase
 public class MantleState : ClimbManeuverBase
 {
     public MantleState(int dir) : base(dir) { }
+    protected override string ClipName => ReferenceClipRegistry.Mantle;
     public override AnimTag AnimationTag => AnimTag.Mantle;
     protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
     protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
@@ -360,6 +380,7 @@ public class MantleState : ClimbManeuverBase
 public class ArcJumpState : ClimbManeuverBase
 {
     public ArcJumpState(int dir) : base(dir) { }
+    protected override string ClipName => ReferenceClipRegistry.ArcJump;
     public override AnimTag AnimationTag => AnimTag.ArcJump;
     protected override float RiseBandMin => MovementConfig.Current.MantleMaxRise;
     protected override float RiseBandMax => MovementConfig.Current.CorridorMaxRise;

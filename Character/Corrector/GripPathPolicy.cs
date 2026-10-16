@@ -35,6 +35,8 @@ public struct GripPathPolicy : IPathTrackPolicy
         return true;
     }
 
+    // The path's direction at the body: its first segment (vertex 0 is the body).
     public int BuildChannels(CorrectorScratch s, int H, int rowCount)
-        => CorrectorChannels.BuildGrip(s, H, Corner, OverDir, Pace);
+        => CorrectorChannels.BuildGrip(s, H, Corner, OverDir,
+            Vector2.Normalize(s.BeadVerts[1] - s.BeadVerts[0]), Pace);
 }

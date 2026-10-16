@@ -79,7 +79,10 @@ public static class ReferenceClipRegistry
 {
     public const string LedgePull = "ledge_pull";
     public const string Dropdown  = "dropdown";
-    private static readonly string[] Names = { LedgePull, Dropdown };
+    public const string Parkour   = "parkour";
+    public const string Mantle    = "mantle";
+    public const string ArcJump   = "arcjump";
+    private static readonly string[] Names = { LedgePull, Dropdown, Parkour, Mantle, ArcJump };
 
     // Authoring-box sizes (px) for the baked clips. Readability only — the retarget
     // normalizes by the clip's own anchor span, so changing these changes nothing
@@ -91,6 +94,9 @@ public static class ReferenceClipRegistry
     {
         [LedgePull] = MakeLedgePull(),
         [Dropdown]  = MakeDropdown(),
+        [Parkour]   = MakeClimb(Parkour),
+        [Mantle]    = MakeClimb(Mantle),
+        [ArcJump]   = MakeClimb(ArcJump),
     };
 
     // The arcs that always exist (a baked default covers each, file or no file). Tooling
@@ -117,6 +123,51 @@ public static class ReferenceClipRegistry
             }
         }
     }
+
+    // The climb family's arcs (ParkourState / MantleState / ArcJumpState), baked
+    // verbatim from ReferenceClips/<name>.json so the headless sim and a build
+    // without the files follow the same arc the editor authored (and the
+    // animation's body path is mapped from — MTile.Probe mapcom).
+    private static HermiteClipDocument MakeClimb(string name) => name switch
+    {
+        "parkour" => new HermiteClipDocument
+        {
+            Name = "parkour", Duration = 0.45f,
+            EntryX = 0.0f, EntryY = 0.0f,
+            GateX = 25.109129f, GateY = -16.339863f,
+            Keys =
+            {
+                new HermiteClipKey { T = 0.0f, X = -2.4572186f, Y = 0.23007262f, TX = 13.754844f, TY = -81.96129f },
+                new HermiteClipKey { T = 0.4914804f, X = 2.9656694f, Y = -20.858936f, TX = 22.294094f, TY = -22.896637f },
+                new HermiteClipKey { T = 1.0f, X = 25.4104f, Y = -18.900671f, TX = 77.961296f, TY = -0.49032593f },
+            },
+        },
+        "mantle" => new HermiteClipDocument
+        {
+            Name = "mantle", Duration = 0.45f,
+            EntryX = 0.0f, EntryY = 0.0f,
+            GateX = 18.0f, GateY = -16.0f,
+            Keys =
+            {
+                new HermiteClipKey { T = 0.0f, X = 0.0f, Y = 0.0f, TX = 2.0f, TY = -40.0f },
+                new HermiteClipKey { T = 0.5467f, X = 3.0f, Y = -18.0f, TX = 20.0f, TY = -6.0f },
+                new HermiteClipKey { T = 1.0f, X = 18.0f, Y = -16.0f, TX = 24.0f, TY = 2.0f },
+            },
+        },
+        "arcjump" => new HermiteClipDocument
+        {
+            Name = "arcjump", Duration = 0.5f,
+            EntryX = 0.0f, EntryY = 0.0f,
+            GateX = 34.0f, GateY = -32.0f,
+            Keys =
+            {
+                new HermiteClipKey { T = 0.0f, X = 0.0f, Y = 0.0f, TX = 60.0f, TY = -70.0f },
+                new HermiteClipKey { T = 0.6862f, X = 16.0f, Y = -40.0f, TX = 50.0f, TY = -6.0f },
+                new HermiteClipKey { T = 1.0f, X = 34.0f, Y = -32.0f, TX = 45.0f, TY = 8.0f },
+            },
+        },
+        _ => throw new ArgumentException(name),
+    };
 
     // Best-guess pull-up: rise nearly straight up hugging the wall, then a late,
     // quick crest over the corner onto the top. The wall-hugging x-profile is
