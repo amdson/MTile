@@ -149,7 +149,7 @@ public sealed class CorrectionProblem
 public static class CorrectionSolver
 {
     public const int DefaultInnerIterations = 4;
-    public const int MaxChannels = 8;
+    public const int MaxChannels = 10;
 
     // Write-only profiling counters, off by default. Same contract as
     // PlayerCharacter.CorrectorDebug's trajectory capture: nothing in the sim ever READS

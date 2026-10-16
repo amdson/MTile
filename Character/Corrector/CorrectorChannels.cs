@@ -237,7 +237,83 @@ public static class CorrectorChannels
             Lever = LeverKind.Force, Weight = 0.2f, AxisOnly = true,
             Axis = new Vector2(0f, 1f), Cap = cfg.FoldAirVerticalForce, ActiveMask = s.ChannelMask[6],
             SkipSoftHorizontal = true };
-        return AddCornerPlant(s, n, 7);
+        return AddContactPush(s, n, dir, AddCornerPlant(s, n, 7));
+    }
+
+    // Contact push: an airborne hand shove off an exposed wall face or lower
+    // corner within hand reach (MarkContactPush). Two unilateral lateral
+    // channels — each surface can only push the body AWAY from itself, so
+    // between two (a 1-wide hole's corners) the solve can only center. The
+    // anti-autopilot rule holds: the side that would push AGAINST a held
+    // direction is masked, so a body pressed into a wall stays on it (the
+    // wall rows otherwise shoved a held wall slide off its face, and it fell
+    // at 121 px/s instead of the slide's 80). Neutral, both sides. Lateral only:
+    // it never adds rise or brakes a fall. The solve decides when — the
+    // wall rows and the path band — never a centering rule. Cap 0 → omitted.
+    private const float ContactPushWeight = 0.05f;   // AirLateral's price
+    private static int AddContactPush(CorrectorScratch s, int n, int dir, int slot)
+    {
+        float cap = MovementConfig.Current.FoldContactPushForce;
+        if (cap <= 0f) return slot;
+        var ch = s.Problem.Channels;
+        ch[slot] = new ChannelDef {
+            Id = CorrectionChannel.ContactPushLeft,
+            Lever = LeverKind.Force, Weight = ContactPushWeight, AxisOnly = true, Unilateral = true,
+            SkipSoftHorizontal = true,
+            Axis = new Vector2(-1f, 0f), Cap = cap, ActiveMask = s.ChannelMask[slot] };
+        ch[slot + 1] = new ChannelDef {
+            Id = CorrectionChannel.ContactPushRight,
+            Lever = LeverKind.Force, Weight = ContactPushWeight, AxisOnly = true, Unilateral = true,
+            SkipSoftHorizontal = true,
+            Axis = new Vector2(1f, 0f), Cap = cap, ActiveMask = s.ChannelMask[slot + 1] };
+        // Airborne, or LEAVING the floor (rising faster than support could
+        // push — the launch ticks, StandingState's ballistic rule): a jump's
+        // hands are free from its first tick, and a lip the rise will meet
+        // 5 ticks out is only correctable if the shove can start then.
+        float launch = MovementConfig.Current.SpringMaxRiseSpeed;
+        for (int k = 0; k < n; k++)
+        {
+            if (s.Samples[k].Grounded && -s.Samples[k].Vel.Y <= launch)
+            { s.ChannelMask[slot][k] = s.ChannelMask[slot + 1][k] = false; continue; }
+            s.ChannelMask[slot][k]     = s.ContactPushLeft[k]  && dir <= 0;
+            s.ChannelMask[slot + 1][k] = s.ContactPushRight[k] && dir >= 0;
+        }
+        return slot + 2;
+    }
+
+    // Contact-push surface scan: per sample, is an EXPOSED vertical tile face
+    // (open on the body's side) within hand reach of the body center? A face
+    // on the right lets the body push left, and vice versa. A ceiling tile's
+    // side face ends at its lower corner, so a hole's lip counts from below.
+    public static void MarkContactPush(ChunkMap chunks, CoastSample[] samples, int n,
+                                       bool[] outLeft, bool[] outRight)
+    {
+        const float R = CornerPlantReach;
+        const float ts = Chunk.TileSize, half = ts * 0.5f;
+        for (int k = 0; k < n; k++)
+        {
+            outLeft[k] = outRight[k] = false;
+            var pos = samples[k].Pos;
+            int gx0 = (int)MathF.Floor((pos.X - R) / ts), gx1 = (int)MathF.Floor((pos.X + R) / ts);
+            int gy0 = (int)MathF.Floor((pos.Y - R) / ts), gy1 = (int)MathF.Floor((pos.Y + R) / ts);
+            for (int gy = gy0; gy <= gy1; gy++)
+            for (int gx = gx0; gx <= gx1; gx++)
+            {
+                float cx = gx * ts + half, cy = gy * ts + half;
+                if (!TileQuery.IsSolidAt(chunks, cx, cy)) continue;
+                float y0 = gy * ts, y1 = y0 + ts;
+                float dy = pos.Y < y0 ? y0 - pos.Y : pos.Y > y1 ? pos.Y - y1 : 0f;
+                float faceR = gx * ts + ts, faceL = gx * ts;
+                // Right face, body to its right → shove right.
+                if (!outRight[k] && faceR < pos.X && !TileQuery.IsSolidAt(chunks, cx + ts, cy)
+                    && (pos.X - faceR) * (pos.X - faceR) + dy * dy <= R * R)
+                    outRight[k] = true;
+                // Left face, body to its left → shove left.
+                if (!outLeft[k] && faceL > pos.X && !TileQuery.IsSolidAt(chunks, cx - ts, cy)
+                    && (faceL - pos.X) * (faceL - pos.X) + dy * dy <= R * R)
+                    outLeft[k] = true;
+            }
+        }
     }
 
     // TEMP EXPERIMENT: an UNRESTRICTED 2D force channel at convex-corner plant

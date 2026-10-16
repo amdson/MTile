@@ -311,6 +311,11 @@ public class MovementConfig
     // CorrectorChannels' CornerPlant channel). 0 (default) disables the
     // channel; opt in via movement_config.json while playtesting.
     public float FoldCornerPlantForce           { get; set; } = 0f;
+    // Contact push (px/s²): an airborne body may shove itself sideways off an
+    // exposed wall face or lower corner within hand reach — lateral only,
+    // always AWAY from the surface. Deliberately mild (below AirAccel): a
+    // nudge that lets a jump thread a 1-wide hole, not a wall-run. 0 disables.
+    public float FoldContactPushForce           { get; set; } = 1000f;
     // Stand-fold engine: "qp" = the linearized channel solve (the default —
     // what the test suite pins); "ref" = the reference-rollout engine
     // (FoldReference: terrain-generated carry reference + PathDeform + servo;

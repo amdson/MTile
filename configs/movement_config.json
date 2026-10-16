@@ -27,6 +27,7 @@
   "FoldLegPushFadeSpeed": 400,
   "FoldAirLateralForce": 1500,
   "FoldAirVerticalForce": 300,
+  "FoldContactPushForce": 1000,
   "AirAccel": 1500,
   "MaxAirSpeed": 150,
   "AirDrag": 500,

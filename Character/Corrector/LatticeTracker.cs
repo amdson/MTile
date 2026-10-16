@@ -150,6 +150,9 @@ public static class LatticeTracker
         // Every tick's sample is the same held state, so one scan serves all.
         CorrectorChannels.MarkCornerPlants(ctx.Chunks, s.Samples, 1, s.CornerPlant, risingLips: true);
         for (int k = 1; k < H; k++) s.CornerPlant[k] = s.CornerPlant[0];
+        // Contact-push surfaces (walls, a hole's lips) — same held state.
+        CorrectorChannels.MarkContactPush(ctx.Chunks, s.Samples, 1, s.ContactPushLeft, s.ContactPushRight);
+        for (int k = 1; k < H; k++) { s.ContactPushLeft[k] = s.ContactPushLeft[0]; s.ContactPushRight[k] = s.ContactPushRight[0]; }
 
         // ── Reference polyline: body → first node ≥ one cell away → nodes ──
         int nv = 0;
@@ -210,7 +213,7 @@ public static class LatticeTracker
         for (int pass = 0; pass < BeadPasses; pass++)
         {
             rowCount = wallRows;
-            Vector2 tLast = u;
+            Vector2 tLast = u, qLast = p0;
             float sPrev = 0f;
             for (int T = 0; T < H; T++)
             {
@@ -220,7 +223,7 @@ public static class LatticeTracker
                     float sT = MathF.Max(sPrev, ProjectArc(s, nv, pT));
                     sPrev = sT;
                     PointAt(s, nv, sT, out var q, out var t);
-                    tLast = t;
+                    tLast = t; qLast = q;
                     var n = new Vector2(-t.Y, t.X);
                     float e = Vector2.Dot(pT - q, n) - Vector2.Dot(pass == 0 ? Vector2.Zero : s.TrackDelta[T], n);
                     // e is the FREE rollout's offset from the bead along n
@@ -265,6 +268,18 @@ public static class LatticeTracker
                 // Progress: what the channels could add along t̂ by the last
                 // tick at their caps — Σ_k (T−k+1)·dt² = dt²·(T+1)(T+2)/2.
                 // (zero in free air: no actuators there — see the masks below)
+                // t̂ is the CHORD body → last bead, the direction the plan
+                // takes over the horizon — not the last bead's segment
+                // tangent. The path is cell-quantized: on a 45° flight it
+                // zigzags a cell around the corner line, so the segment under
+                // the last bead was as often flat or descending as climbing,
+                // and a descending t̂ priced the TUCK as progress (the stronger
+                // the row, the lower and slower the climb rode).
+                if (havePath)
+                {
+                    var chord = qLast - p0;
+                    if (chord.LengthSquared() > 1e-6f) tLast = Vector2.Normalize(chord);
+                }
                 float capX = near ? cfg.FoldDriveForce : 0f;
                 float capY = !near ? 0f : tLast.Y < 0f ? cfg.FoldLegForce : cfg.FoldTuckForce;
                 float capAlong = MathF.Abs(tLast.X) * capX + MathF.Abs(tLast.Y) * capY;

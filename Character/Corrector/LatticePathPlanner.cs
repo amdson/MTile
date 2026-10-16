@@ -65,9 +65,15 @@ public sealed class LatticePathPlanner
     // free for any inflation ≤ 0.83 px (the grid is world-aligned and divides
     // the tile, so this is arithmetic, not luck). The tracker's floor and
     // ceiling rows need 2·Clearance < 2.8. LatticePathPlannerTests'
-    // TwoHighCorridor_* tests guard both. Body-relative px, deliberately
-    // independent of Chunk.TileSize.
-    public const float Clearance = 0.5f;
+    // TwoHighCorridor_* tests guard both. The binding case is HORIZONTAL: a
+    // 1-wide hole (11 px) leaves the 10.08 px-wide body 0.92 px of room, so
+    // the tracker's wall rows need 2·Clearance < 0.92; the DP's middle cell
+    // (odd cells-per-tile) sits exactly on the tile center and stays free for
+    // any Clearance < 0.46. At 0.5 every node in a 1-wide hole was blocked:
+    // a jump under one planned a Refused dead end and braked into its notch.
+    // LatticePathPlannerTests' OneWideHole_* test guards it. Body-relative
+    // px, deliberately independent of Chunk.TileSize.
+    public const float Clearance = 0.25f;
     private const float LateralTieBreak = 0.05f;   // per px perpendicular to u — an ε, not a knob
 
     // ── Primitive offset table (§3.3): |dx|,|dy| ≤ Radius, gcd = 1 ───────────

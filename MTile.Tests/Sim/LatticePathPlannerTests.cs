@@ -335,6 +335,38 @@ public class LatticePathPlannerTests(ITestOutputHelper output)
             $"route ends outside the corridor band: y={last.Y:F2} ({CorridorTop:F1}, {CorridorBottom:F1})");
     }
 
+    // ── The tightest passable HOLE: a 1-wide gap (11 px) in a 1-thick ceiling
+    // leaves the 10.08 px-wide body 0.92 px of horizontal room. PINS
+    // LatticePathPlanner.Clearance < 0.46: at 0.5 every node in the hole was
+    // stamped blocked and a rising plan was Refused at the hole's mouth.
+    private const int HoleCol = 10, CeilRow = 1;
+    [Fact]
+    public void OneWideHole_RisingPlan_RoutesThrough()
+    {
+        var sb = new StringBuilder();
+        for (int r = 0; r <= FloorRow; r++)
+        {
+            for (int x = 0; x < 21; x++)
+                sb.Append(r == FloorRow || (r == CeilRow && x != HoleCol) ? 'X' : 'O');
+            if (r < FloorRow) sb.Append('\n');
+        }
+        var chunks = SimTerrain.FromAscii(sb.ToString(), originTileX: 0, originTileY: 0);
+        float ts = Chunk.TileSize, holeMid = (HoleCol + 0.5f) * ts;
+        float slack = ts * 0.5f - CObstacleTemplate.For(PlayerCharacter.CreateBodyPolygon()).XExtent + ts * 0.5f;
+        Assert.True(slack > 0f, "fixture must physically fit the body");
+        var seed = new Vector2(holeMid + 2.5f, HoverY(FloorRow * ts));
+        var (planner, body, path) = Setup(seed);
+        int n = planner.Solve(chunks, body.Polygon, seed, Vector2.Zero, -Vector2.UnitY,
+            false, MovementConfig.Current.FoldHoverOffset, 0f, path, out _, out bool bonk);
+        Assert.True(n >= 2 && !bonk, $"refused a passable 1-wide hole: {planner.LastDebug}");
+        float ceilTop = CeilRow * ts;
+        Assert.True(path[n - 1].Pos.Y < ceilTop, $"route ends below the ceiling top: y={path[n - 1].Pos.Y:F2}");
+        for (int i = 0; i < n; i++)
+            if (path[i].Pos.Y < ceilTop + ts + PlayerCharacter.Radius && path[i].Pos.Y > ceilTop - ts)
+                Assert.True(MathF.Abs(path[i].Pos.X - holeMid) <= slack,
+                    $"node {i} at x={path[i].Pos.X:F2} is outside the hole's ±{slack:F2} band");
+    }
+
     // PINS the LOWER end of LatticeHoverWeight: a body two cells below hover
     // on flat ground must find the rise back worth paying inside the window.
     // Below ~0.29 per px (rise 16 / window 56) it never does, and the body

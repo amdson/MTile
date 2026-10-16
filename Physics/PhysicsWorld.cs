@@ -66,7 +66,16 @@ public static class PhysicsWorld
                 // step and the movement layer never saw a push.
                 float allow = 2f * Epsilon
                     + MathF.Max(0f, Vector2.Dot(sd.SurfaceVelocity, sd.Normal)) * dt;
-                if (Vector2.Dot(body.Position - sd.Position, sd.Normal) > allow) return true;
+                float sep = Vector2.Dot(body.Position - sd.Position, sd.Normal);
+                if (sep > allow) return true;
+                // ...and past the plane by as much: the contact is a half-plane
+                // stamped at the hit, but the surface that made it is finite. A
+                // corner hit's bevel plane outlives the corner — once the body
+                // slides past it (deflected up into a 1-wide hole) the stale
+                // plane sits ~1 px INSIDE the body and zeroed its rise every
+                // step, stalling the body mid-hole. A real surface can't be
+                // penetrated that deep: the sweep ejects from tiles.
+                if (sep < -allow) return true;
                 // Query-driven refresh: re-probe each frame so a moving source surface's
                 // current velocity overwrites the snapshot stamped at collision time.
                 if (!TryFindContactSurface(chunks, bodyBounds, sd.Normal, out var surfaceVel)) return true;
@@ -297,7 +306,16 @@ public static class PhysicsWorld
                 // step and the movement layer never saw a push.
                 float allow = 2f * Epsilon
                     + MathF.Max(0f, Vector2.Dot(sd.SurfaceVelocity, sd.Normal)) * dt;
-                if (Vector2.Dot(body.Position - sd.Position, sd.Normal) > allow) return true;
+                float sep = Vector2.Dot(body.Position - sd.Position, sd.Normal);
+                if (sep > allow) return true;
+                // ...and past the plane by as much: the contact is a half-plane
+                // stamped at the hit, but the surface that made it is finite. A
+                // corner hit's bevel plane outlives the corner — once the body
+                // slides past it (deflected up into a 1-wide hole) the stale
+                // plane sits ~1 px INSIDE the body and zeroed its rise every
+                // step, stalling the body mid-hole. A real surface can't be
+                // penetrated that deep: the sweep ejects from tiles.
+                if (sep < -allow) return true;
                 // Query-driven refresh: re-probe each frame so a moving source surface's
                 // current velocity overwrites the snapshot stamped at collision time.
                 if (!TryFindContactSurface(chunks, bodyBounds, sd.Normal, out var surfaceVel)) return true;

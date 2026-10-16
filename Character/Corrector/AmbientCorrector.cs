@@ -281,6 +281,7 @@ public static class AmbientCorrector
             CorrectorChannels.MarkCornerPlants(ctx.Chunks, s.Samples, n, s.CornerPlant);
         else
             Array.Clear(s.CornerPlant, 0, n);
+        CorrectorChannels.MarkContactPush(ctx.Chunks, s.Samples, n, s.ContactPushLeft, s.ContactPushRight);
         int rowCount = ClearanceConstraintBuilder.Build(
             ctx.Chunks, ctx.Body.Polygon, s.Samples, n,
             cfg.CorrectorMargin, ClearanceConstraintBuilder.DefaultDeepViolation,

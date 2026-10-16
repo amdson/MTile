@@ -20,6 +20,8 @@ public enum CorrectionChannel : byte
     AirVertical,    // tiny two-sided vertical nudge in flight
     PathDeform,     // ReferenceCorrector: deforms an authored arc, not a body force
     CornerPlant,    // TEMP EXPERIMENT: unrestricted 2D force at corner-plant ticks
+    ContactPushLeft,  // hand shove off a surface on the body's right (pushes −x), airborne
+    ContactPushRight, // hand shove off a surface on the body's left (pushes +x), airborne
 }
 
 // Per-step bookkeeping of what the corrector solve actually exerted — the

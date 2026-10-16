@@ -31,6 +31,10 @@ public sealed class CorrectorScratch
     // from the coast by the integration layers (AmbientCorrector.Apply /
     // ManeuverCorrector.Run) before the channel build; pure derived data.
     public readonly bool[] CornerPlant = new bool[BallisticPredictor.MaxHorizon];
+    // Contact-push surfaces per tick (CorrectorChannels.MarkContactPush): a
+    // face on the right (push left) / on the left (push right).
+    public readonly bool[] ContactPushLeft  = new bool[BallisticPredictor.MaxHorizon];
+    public readonly bool[] ContactPushRight = new bool[BallisticPredictor.MaxHorizon];
     private static bool[][] MakeMasks()
     {
         var m = new bool[CorrectionSolver.MaxChannels][];

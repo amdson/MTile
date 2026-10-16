@@ -11,13 +11,13 @@ namespace MTile;
 // Sized to CorrectionSolver.MaxChannels.
 public struct ChannelAnchors
 {
-    public Vector2 C0, C1, C2, C3, C4, C5, C6, C7;
+    public Vector2 C0, C1, C2, C3, C4, C5, C6, C7, C8, C9;
 
     public Vector2 this[int i]
     {
         readonly get => i switch
         {
-            0 => C0, 1 => C1, 2 => C2, 3 => C3, 4 => C4, 5 => C5, 6 => C6, 7 => C7,
+            0 => C0, 1 => C1, 2 => C2, 3 => C3, 4 => C4, 5 => C5, 6 => C6, 7 => C7, 8 => C8, 9 => C9,
             _ => throw new IndexOutOfRangeException(),
         };
         set
@@ -32,6 +32,8 @@ public struct ChannelAnchors
                 case 5: C5 = value; break;
                 case 6: C6 = value; break;
                 case 7: C7 = value; break;
+                case 8: C8 = value; break;
+                case 9: C9 = value; break;
                 default: throw new IndexOutOfRangeException();
             }
         }
