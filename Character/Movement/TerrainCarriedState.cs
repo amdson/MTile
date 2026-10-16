@@ -38,8 +38,8 @@ namespace MTile;
 // cells are one front); and a cliff-shaped proximity fade feeding a soft
 // X-servo plus a hard Y-clamp plus fold hover was five controllers whose
 // composition read as jitter. The servo field replaces all of it; while
-// carried, the ambient corrector runs clearance-only (FoldProfile.None) so
-// there is exactly one opinion about the trajectory.
+// carried, the ambient corrector is off so there is exactly one opinion about
+// the trajectory.
 //
 // The same query is the state's CONTINUITY evidence: any approaching mover
 // within the wide probe keeps the classification alive, so a whole ride is
@@ -334,6 +334,12 @@ public class TerrainCarriedState : MovementState
         // Clearance protection only — hard rows against terrain ahead, no
         // fold hover: the ride servo is the single opinion about where the
         // body goes while carried.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
+        // Corrector off: the ride servo is the one opinion about the trajectory.
+        // Measured 2026-10-16 (PATH_TRACKER_UNIFICATION_PLAN phase 4): the old
+        // clearance-only ambient assist acted on 3% of carried frames (mean 11
+        // vs the servo's ~790); switching it off changed no test — the one
+        // visible effect is the drop after a ride ends (lands at ~100 px/s, was ~70).
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+
     }
 }

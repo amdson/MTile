@@ -277,6 +277,9 @@ today.
 > trigger-only); the dynamic check (tracker rollout on the probe — original
 > D3 (a)); or the geometric sweep plus an explicit closed-form timing refusal
 > (hop reaches lip height before the face arrives).
+> **Decided 2026-10-16: keep the old probe solve as the trigger for now.**
+> `ManeuverCorrector` stays (trigger-only); step 3's deletions wait on a
+> revisit of the trigger.
 
 ### 5.4 Order inside the phase
 
