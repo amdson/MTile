@@ -17,7 +17,9 @@ public static class JumpServo
     public static float Force(float vy, float sourceVy, float targetVy, float maxAccel, float gravityCancel, float dt)
     {
         if (dt <= 0f) return 0f;
+        // Y-down: a push toward an upward target is NEGATIVE, so the clamp must be
+        // two-sided (a [0, maxAccel] clamp only ever braked — the push never fired).
         float needed = (sourceVy + targetVy - vy) / dt;
-        return Math.Clamp(needed, 0f, maxAccel) - gravityCancel;
+        return Math.Clamp(needed, -maxAccel, maxAccel) - gravityCancel;
     }
 }

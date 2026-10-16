@@ -98,7 +98,8 @@ public class LedgeRegrabDriftTests(ITestOutputHelper output)
     {
         var script = new InputScript()
             .For(30, new PlayerInput { })
-            .Forever(new PlayerInput { Up = true });
+            .For(3,  new PlayerInput { Up = true })   // tap: a held Up now climbs (hold-to-climb)
+            .Forever(new PlayerInput { });
         var cfg = new SimConfig
         {
             Terrain       = BuildLedgeTerrain(),

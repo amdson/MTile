@@ -1,3 +1,4 @@
+using System.Linq;
 using Microsoft.Xna.Framework;
 using MTile.Tests.Sim;
 using Xunit;
@@ -135,7 +136,8 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         float halfW = 10.392f;   // R·sin60° at R=12
         var script = new InputScript()
             .For(30, new PlayerInput { })
-            .Forever(new PlayerInput { Up = true });
+            .For(3,  new PlayerInput { Up = true })   // tap: a held Up now climbs (hold-to-climb)
+            .Forever(new PlayerInput { });
         var cfg = new SimConfig
         {
             Terrain       = terrain,
@@ -184,7 +186,10 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
 
         // Body just left of the pillar's left face, two tiles above the lip,
         // falling straight down with Up held the whole run — the natural "drop
-        // alongside the wall, try to catch the lip" gesture.
+        // alongside the wall, try to catch the lip" gesture. Since the pull can
+        // start from above the hang (LedgePullState.FromAbove), the press catches
+        // the lip on the way down and climbs onto the pillar: Falling → LedgePull
+        // → Falling → Standing is one clean climb, not flicker.
         var cfg = new SimConfig
         {
             Terrain        = terrain,
@@ -196,6 +201,14 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
             Gravity        = new Vector2(0f, Gravity),
         };
         var frames = SimRunner.Run(cfg);
+        var seq = frames.Where(f => f.Transition).Select(f => f.State).ToArray();
+        if (seq.SequenceEqual(new[] { "FallingState", "LedgePullState", "FallingState", "StandingState" }))
+        {
+            var last = frames[^1];
+            Assert.True(last.X > pillarLeft && last.Y < pillarTop - 18f,
+                $"climbed but ended at ({last.X:F1}, {last.Y:F1}), not on the pillar top");
+            return;
+        }
         AssertStableAfterSettle(frames, settleFrame: 0, label: "drop next to pillar Up held");
     }
 
@@ -240,7 +253,11 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
             Terrain        = terrain,
             StartPosition  = new Vector2(pillarLeft - halfW, pillarTop - 16f),
             StartVelocity  = new Vector2(0f, 400f),
-            Script         = InputScript.Always(new PlayerInput { Up = true }),
+            // A tapped Up: held, the grab now rolls into a pull (hold-to-climb), which is
+            // a clean climb rather than the flicker this test guards against.
+            Script         = new InputScript()
+                .For(3, new PlayerInput { Up = true })
+                .Forever(new PlayerInput { }),
             Frames         = 90,
             Dt             = Dt,
             Gravity        = new Vector2(0f, Gravity),

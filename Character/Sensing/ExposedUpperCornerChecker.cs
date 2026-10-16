@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -83,6 +84,46 @@ public static class ExposedUpperCornerChecker
             .Where(TileFilters.UpperDiagonalClear(wallDir))
             .Where(TileFilters.NothingBetween(bounds, wallDir))
             .MaxBy(t => t.WorldTop);
+
+        if (best is not { } b) return false;
+        float bestX = wallDir == 1 ? b.WorldLeft : b.WorldRight;
+        corner = new ExposedCorner(new Vector2(bestX, b.WorldTop));
+        return true;
+    }
+
+    // LedgePull-from-above probe: a graspable lip the pull could still carry the
+    // body over from where it already is — ABOVE the hang (TryFindAboveHead's
+    // territory, which LedgeGrab owns) up to the pull's crest, with the body's
+    // center not yet past the corner. A hand-set band, deliberately not derived
+    // from the pull's clip:
+    //   corner top ∈ (center − R, center + 2R + 4]   — just above the hang line
+    //                                                   down to the pull's gate height
+    //   corner edge ahead of the center by ≤ half-width + ProbeSlack.
+    // Same edge/notch filters as the other corner probes; nearest corner wins.
+    public static bool TryFindPullable(PhysicsBody body, ChunkMap chunks, int wallDir, out ExposedCorner corner)
+    {
+        corner = default;
+        var bounds = body.Bounds;
+        var pos = body.Position;
+        float R = PlayerCharacter.Radius;
+        float bandTop    = pos.Y - R;
+        float bandBottom = pos.Y + 2f * R + 4f;
+        float reach = 0.5f * bounds.Width + ProbeSlack;
+        float far = pos.X + wallDir * reach;
+        var probe = new BoundingBox(MathF.Min(pos.X, far), bandTop, MathF.Max(pos.X, far), bandBottom);
+
+        var best = TileQuery.Tiles(chunks, probe)
+            .Where((_, t) => t.WorldTop > bandTop && t.WorldTop <= bandBottom)
+            .Where((_, t) =>
+            {
+                float ahead = wallDir * ((wallDir == 1 ? t.WorldLeft : t.WorldRight) - pos.X);
+                return ahead > 0f && ahead <= reach;
+            })
+            .Where(TileFilters.TopExposed)
+            .Where(TileFilters.BodyFacingNeighborEmpty(wallDir))
+            .Where(TileFilters.UpperDiagonalClear(wallDir))
+            .Where(TileFilters.NothingBetween(bounds, wallDir))
+            .MinBy(t => MathF.Abs((wallDir == 1 ? t.WorldLeft : t.WorldRight) - pos.X));
 
         if (best is not { } b) return false;
         float bestX = wallDir == 1 ? b.WorldLeft : b.WorldRight;

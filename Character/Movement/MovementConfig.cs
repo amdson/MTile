@@ -125,7 +125,8 @@ public class MovementConfig
     public float GrabSpringK       { get; set; } = 300f;
     public float GrabDamping       { get; set; } = 100f;
 
-    // Ledge Jump (launch at the top of a ledge pull — see LedgeJumpState).
+    // Ledge Jump (launch off a gripped corner, from the hang or any point of a pull —
+    // see LedgeJumpState; powered until the legs clear the corner).
     // The launch is a saturated velocity servo toward TargetVy relative to the
     // ledge: it pushes a slow body toward the target and brakes the pull's surplus
     // vy down to it, so the jump can never exit faster than the target. ServoAccel
@@ -140,6 +141,10 @@ public class MovementConfig
     public float LipLiftForce  { get; set; } = 2000f;
     public float LipPushForce  { get; set; } = 500f;
     public float MaxLipManeuverTime    { get; set; } = 0.5f;
+    // Hold-to-climb: holding the Up press that caught a ledge for this long rolls the
+    // grab straight into LedgePull; a shorter tap just hangs. 0 disables (tap-only).
+    // Keep it above a deliberate tap (~0.1 s) or taps start pulling.
+    public float LedgeAutoPullHoldTime { get; set; } = 0.15f;
 
     // Guided States (reference-clip tracking — ReferencePath.TrackForce PD servo,
     // consumed by LedgePull/Dropdown when UseReferenceClips is on)
@@ -158,11 +163,13 @@ public class MovementConfig
     // (must stay under MaxLipManeuverTime / MaxDropdownTime respectively — the state
     // timeouts still govern).
     public bool  UseReferenceClips    { get; set; } = true;
-    // 0.60 matches the bespoke pull's measured pace: the corner crossing (which
-    // is both the completion trigger and the end of the mid-pull re-grab window)
-    // sits at clip progress ≈ 0.72 → ~13 of the 15 frames MaxLipManeuverTime allows at
-    // 1/30 — the same last-2-frames crest the legacy pull had.
-    public float LedgePullRefDuration { get; set; } = 0.60f;
+    // LedgePull follows its clip as a PATH (PathTracker), so this is not a clock:
+    // the pull's pace is the arc's length over this duration — the speed the grip
+    // channels fade out at. A body arriving faster keeps its speed. 0.45: a pull
+    // from a dead hang completes in ~0.4 s, inside MaxLipManeuverTime (at 0.60 the
+    // constant-pace follower crossed the corner right at the 0.5 s timeout and
+    // re-grabbed — the pull "gave up" and sagged back).
+    public float LedgePullRefDuration { get; set; } = 0.45f;
     public float DropdownRefDuration  { get; set; } = 0.30f;
     public float GuidedMinDuration    { get; set; } = 0.15f;
     public float GuidedMaxDuration    { get; set; } = 0.6f;

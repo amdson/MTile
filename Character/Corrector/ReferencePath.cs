@@ -162,7 +162,7 @@ public static class ReferenceClipRegistry
         var doc = new HermiteClipDocument
         {
             Name = LedgePull,
-            Duration = 0.60f,   // == MovementConfig.LedgePullRefDuration
+            Duration = 0.60f,   // authoring/playback length; LedgePull paces by MovementConfig.LedgePullRefDuration
             Keys =
             {
                 new HermiteClipKey { X = 0.00f, Y =  0.00f, TX = 0.05f, TY = -1.60f },

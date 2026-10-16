@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Microsoft.Xna.Framework;
 using MTile.Tests.Sim;
@@ -45,12 +46,34 @@ public class LedgePullExitTests(ITestOutputHelper output)
             .For(pullFramesHeld, new PlayerInput { Up = true })
             .Forever(then);
 
+    // Same lip (corner top at CornerTopY, wall face at WallLeft) on a 5-tall wall,
+    // so a body can be BELOW the lip beside the wall — the rising-grab start.
+    private static ChunkMap BuildTallLedgeTerrain() => SimTerrain.FromAscii(@"
+            ..........
+            ..........
+            .........X
+            .........X
+            .........X
+            .........X
+            .........X
+            XXXXXXXXXX", originTileX: 0, originTileY: 0);
+
     private SimFrame[] Run(InputScript script, int frames = 150)
+        => Run(script, BuildLedgeTerrain(),
+               new Vector2(WallLeft - HalfW, GroundTop - 2f * PlayerCharacter.Radius), Vector2.Zero, frames);
+
+    // Beside the tall wall, two radii below the lip, launched upward.
+    private SimFrame[] RunRising(InputScript script, float vy, int frames)
+        => Run(script, BuildTallLedgeTerrain(),
+               new Vector2(WallLeft - HalfW, CornerTopY + 2f * PlayerCharacter.Radius), new Vector2(0f, vy), frames);
+
+    private SimFrame[] Run(InputScript script, ChunkMap terrain, Vector2 start, Vector2 startVel, int frames)
     {
         var cfg = new SimConfig
         {
-            Terrain       = BuildLedgeTerrain(),
-            StartPosition = new Vector2(WallLeft - HalfW, GroundTop - 2f * PlayerCharacter.Radius),
+            Terrain       = terrain,
+            StartPosition = start,
+            StartVelocity = startVel,
             Script        = script,
             Frames        = frames,
             Dt            = Dt,
@@ -73,6 +96,152 @@ public class LedgePullExitTests(ITestOutputHelper output)
         for (int i = trace.Length - 1; i >= 0; i--)
             if (trace[i].State == state) return i;
         return -1;
+    }
+
+    // ── Hold-to-climb: the press that grabs, held, rolls into the pull ─────────
+
+    [Fact]
+    public void HoldUpFromGround_GrabsThenPullsOverWithoutRepress()
+    {
+        var trace = Run(new InputScript()
+            .For(30, new PlayerInput { })
+            .Forever(new PlayerInput { Up = true }));
+
+        int grab = FirstFrame(trace, "LedgeGrabState");
+        int pull = FirstFrame(trace, "LedgePullState");
+        Assert.True(grab > 0, "never grabbed");
+        Assert.True(pull > grab, "held Up never rolled the grab into a pull");
+        // Pull waits out the tap window, then starts — no long hang in between.
+        float wait = (pull - grab) * Dt;
+        Assert.True(wait >= MovementConfig.Current.LedgeAutoPullHoldTime - Dt && wait < 0.4f,
+            $"pull started {wait:F3}s after the grab");
+        // Carried up and over: ends standing on top of the ledge, not hanging.
+        var last = trace[^1];
+        Assert.Equal("StandingState", last.State);
+        Assert.True(last.X > WallLeft && last.Y < CornerTopY - 18f,
+            $"ended at ({last.X:F1}, {last.Y:F1}), not on top of the lip at ({WallLeft}, {CornerTopY})");
+    }
+
+    [Fact]
+    public void TapUpFromGround_JustHangs()
+    {
+        var trace = Run(new InputScript()
+            .For(30, new PlayerInput { })
+            .For(3,  new PlayerInput { Up = true })   // 0.1 s tap
+            .Forever(new PlayerInput { }), frames: 90);
+
+        Assert.True(FirstFrame(trace, "LedgeGrabState") > 0, "never grabbed");
+        Assert.Equal(-1, FirstFrame(trace, "LedgePullState"));
+        Assert.Equal("LedgeGrabState", trace[^1].State);
+    }
+
+    // ── Hold-to-climb keeps momentum: a grab made while rising ───────────────
+    // Rising past the lip at 250 px/s with Up held: the grab must not catch the
+    // rise, and the pull (a path, not a clock) must not brake it to its pace —
+    // the body keeps rising until it is over the lip.
+
+    [Fact]
+    public void RisingGrab_HoldUp_CarriesMomentumOverTheLip()
+    {
+        var trace = RunRising(InputScript.Always(new PlayerInput { Up = true }), -250f, frames: 40);
+
+        int grab = FirstFrame(trace, "LedgeGrabState");
+        int pull = FirstFrame(trace, "LedgePullState");
+        Assert.True(grab >= 0 && pull > grab, $"grab f{grab}, pull f{pull}");
+        // Rising every frame from launch until above the standing line: no catch.
+        int top = Array.FindIndex(trace, f => f.Y < StandingLineY);
+        Assert.True(top > 0, "never rose above the standing line");
+        Assert.All(trace.Take(top + 1), f => Assert.True(f.Vy < 0f, $"f{f.Frame}: stopped rising (vy={f.Vy:F1}) below the lip"));
+        // Gravity is the only brake while coasting: vy at the pull's start is what
+        // the launch leaves after (pull − 0) frames of g, not a caught hang.
+        float coastVy = -250f + Gravity * Dt * (pull + 1);
+        Assert.True(trace[pull - 1].Vy < coastVy + 15f,
+            $"vy entering the pull {trace[pull - 1].Vy:F1}, gravity-only coast ≈ {coastVy:F1}");
+        var last = trace[^1];
+        Assert.Equal("StandingState", last.State);
+        Assert.True(last.X > WallLeft && last.Y < CornerTopY - 18f,
+            $"ended at ({last.X:F1}, {last.Y:F1}), not on top of the lip");
+    }
+
+    [Fact]
+    public void RisingGrab_TapUp_CatchesIntoTheHang()
+    {
+        var trace = RunRising(new InputScript()
+            .For(3, new PlayerInput { Up = true })
+            .Forever(new PlayerInput { }), -250f, frames: 60);
+
+        Assert.Equal(-1, FirstFrame(trace, "LedgePullState"));
+        // Caught impulsively when the tap resolves (Up up on frame 3): no coasting
+        // on upward past the release point.
+        float releaseY = trace[3].Y;
+        Assert.True(trace.Skip(3).Min(f => f.Y) > releaseY - 1f,
+            $"kept rising after the tap released at y={releaseY:F1} (min {trace.Skip(3).Min(f => f.Y):F1})");
+        var last = trace[^1];
+        Assert.Equal("LedgeGrabState", last.State);
+        float hangY = CornerTopY + PlayerCharacter.Radius;
+        Assert.True(MathF.Abs(last.Y - hangY) < 4f && MathF.Abs(last.Vy) < 10f,
+            $"ended at Y={last.Y:F1} vy={last.Vy:F1}, expected settled at hang ≈ {hangY}");
+    }
+
+    // ── Pull from above the hang: Up pressed where the pull would carry the body ──
+    // Rising past the lip beside the wall (no Up yet), then a press: the pull
+    // starts directly — no hang first — and carries the body onto the top.
+
+    [Theory]
+    [InlineData(2)]    // just above the hang line
+    [InlineData(5)]    // beside the lip
+    [InlineData(8)]    // near the crest
+    public void UpPressedAboveTheHang_PullsDirectly(int pressFrame)
+    {
+        var trace = RunRising(new InputScript()
+            .For(pressFrame, new PlayerInput { })
+            .Forever(new PlayerInput { Up = true }), -280f, frames: 50);
+
+        int pull = FirstFrame(trace, "LedgePullState");
+        Assert.True(pull >= pressFrame && pull <= pressFrame + 1, $"pull started f{pull}, Up pressed f{pressFrame}");
+        Assert.True(trace[pull].Y < CornerTopY + PlayerCharacter.Radius,
+            $"pull started at y={trace[pull].Y:F1}, at or below the hang line");
+        Assert.Equal(-1, FirstFrame(trace, "LedgeGrabState"));
+        var last = trace[^1];
+        Assert.Equal("StandingState", last.State);
+        Assert.True(last.X > WallLeft && last.Y < CornerTopY - 18f,
+            $"ended at ({last.X:F1}, {last.Y:F1}), not on top of the lip");
+    }
+
+    // ── The pull completes inside its timeout at the game's own rate ─────────
+    // Every other test here runs at 1/30; the game steps at 1/60. A pull that
+    // ground up the corner (no actuator pushing off the wall) or paced too slowly
+    // ran out MaxLipManeuverTime and re-grabbed — "moves up, gives up, falls back".
+
+    [Fact]
+    public void PullFromHang_At60Hz_CompletesInsideTheTimeout()
+    {
+        const float dt60 = 1f / 60f;
+        var trace = SimRunner.Run(new SimConfig
+        {
+            Terrain       = BuildLedgeTerrain(),
+            StartPosition = new Vector2(WallLeft - HalfW, GroundTop - 2f * PlayerCharacter.Radius),
+            Script        = new InputScript()
+                .For(60, new PlayerInput { })
+                .For(5,  new PlayerInput { Up = true })   // tap → grab
+                .For(30, new PlayerInput { })             // hang
+                .Forever(new PlayerInput { Up = true }),  // hold → pull
+            Frames        = 200,
+            Dt            = dt60,
+            Gravity       = new Vector2(0f, Gravity),
+        });
+
+        int pullStart = FirstFrame(trace, "LedgePullState");
+        int pullEnd   = LastFrame(trace, "LedgePullState");
+        Assert.True(pullStart > 0, "pull never started");
+        float pullTime = (pullEnd - pullStart + 1) * dt60;
+        Assert.True(pullTime < MovementConfig.Current.MaxLipManeuverTime - 0.05f,
+            $"pull took {pullTime:F3}s — at the {MovementConfig.Current.MaxLipManeuverTime}s timeout");
+        Assert.Equal(1, trace.Count(f => f.State == "LedgePullState" && trace[f.Frame - 1].State != "LedgePullState"));
+        var last = trace[^1];
+        Assert.Equal("StandingState", last.State);
+        Assert.True(last.X > WallLeft && last.Y < CornerTopY - 18f,
+            $"ended at ({last.X:F1}, {last.Y:F1}), not on top of the lip");
     }
 
     // ── Row D: release Up midway up — re-grab, settle back to the hang ─────────
@@ -193,10 +362,10 @@ public class LedgePullExitTests(ITestOutputHelper output)
         Assert.True(minY > StandingLineY + 2f, $"rose to {minY} — looks like a jump");
     }
 
-    // ── Row I: jump queued mid-pull fires LedgeJump at the top, no ground hop ──
+    // ── Row I: a jump mid-pull launches off the corner at once, no ground hop ──
 
     [Fact]
-    public void JumpQueuedMidPull_FiresLedgeJumpAtTop()
+    public void JumpMidPull_LaunchesOffTheCornerImmediately()
     {
         // Press-and-hold Space two frames into the pull, Up stays held.
         var script = new InputScript()
@@ -210,15 +379,18 @@ public class LedgePullExitTests(ITestOutputHelper output)
         int pullStart = FirstFrame(trace, "LedgePullState");
         int ledgeJump = FirstFrame(trace, "LedgeJumpState");
         Assert.True(pullStart > 0, "pull never started");
-        Assert.True(ledgeJump > pullStart, "queued jump never fired LedgeJumpState");
+        Assert.True(ledgeJump > pullStart, "jump mid-pull never fired LedgeJumpState");
 
-        // Queued, not instant: the press happened ~2 frames into the pull but the
-        // jump waited for the body to reach standing height beside the lip.
-        Assert.True(ledgeJump >= pullStart + 3, "LedgeJump fired before the top of the pull");
-        Assert.True(trace[ledgeJump - 1].State == "LedgePullState",
-            "something other than the pull preceded the ledge jump");
-        Assert.True(trace[ledgeJump].Y <= StandingLineY + 3f,
-            $"LedgeJump fired at Y={trace[ledgeJump].Y}, below the lip's standing line {StandingLineY}");
+        // From any point of the pull: the press lands ~2 frames in, and the corner
+        // launch takes over that frame — below the lip, not waiting for the top.
+        Assert.True(ledgeJump <= pullStart + 3, $"LedgeJump waited {ledgeJump - pullStart} frames into the pull");
+        Assert.Equal("LedgePullState", trace[ledgeJump - 1].State);
+        Assert.True(trace[ledgeJump].Y > StandingLineY,
+            $"LedgeJump fired at Y={trace[ledgeJump].Y}, already at the standing line");
+        // Powered past the lip: the legs clear the corner.
+        float legReach = PlayerCharacter.StandingHeight - PlayerCharacter.Radius;
+        Assert.True(trace.Skip(ledgeJump).Min(f => f.Y) + legReach < CornerTopY,
+            "the corner launch never lifted the feet above the lip");
 
         // The servo brakes the pull's surplus vy: from launch onward the body never
         // exceeds the target (-210) by more than per-frame slack.
@@ -231,7 +403,55 @@ public class LedgePullExitTests(ITestOutputHelper output)
         Assert.DoesNotContain(trace, f => f.State is "WallJumpingState" or "DoubleJumpingState");
     }
 
-    // ── Row K: Space + inward queues for the top instead of wall-jumping away ──
+    // ── Jump from the hang: powered off the corner until the legs clear it ──────
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void JumpFromHang_PowersOffTheCorner(bool inward)
+    {
+        // Wide platform on top so an inward jump has somewhere to land.
+        var terrain = SimTerrain.FromAscii(@"
+            .........................
+            .........................
+            .........XXXXXXXXXXXXXXXX
+            .........XXXXXXXXXXXXXXXX
+            .........XXXXXXXXXXXXXXXX
+            XXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        var trace = Run(new InputScript()
+                .For(30, new PlayerInput { })
+                .For(3,  new PlayerInput { Up = true })                          // tap → grab
+                .For(10, new PlayerInput { })                                    // hang
+                .For(3,  new PlayerInput { Space = true, Right = inward })       // tap jump
+                .Forever(new PlayerInput { Right = inward }),
+            terrain, new Vector2(WallLeft - HalfW, GroundTop - 2f * PlayerCharacter.Radius), Vector2.Zero, 90);
+
+        int grab = FirstFrame(trace, "LedgeGrabState");
+        int jump = FirstFrame(trace, "LedgeJumpState");
+        Assert.True(grab > 0 && jump > grab, $"grab f{grab}, ledge jump f{jump}");
+        Assert.DoesNotContain(trace, f => f.State == "WallJumpingState");
+        // Committed past a tap: still powered after Space came up, until the legs
+        // are above the corner — and well above it at the apex.
+        float legReach = PlayerCharacter.StandingHeight - PlayerCharacter.Radius;
+        int end = FirstFrame(trace, "FallingState", jump);
+        if (end < 0) end = FirstFrame(trace, "StandingState", jump);
+        Assert.True(end > jump + 3, $"ledge jump ended {end - jump} frames in — a tap cut it short");
+        Assert.True(trace[end - 1].Y + legReach <= CornerTopY + 2f,
+            $"launch ended at y={trace[end - 1].Y:F1}, feet below the lip");
+        if (inward)
+        {
+            int landed = FirstFrame(trace, "StandingState", jump);
+            Assert.True(landed > 0 && trace[landed].X > WallLeft && trace[landed].Y < CornerTopY,
+                "inward jump from the hang did not land on top");
+        }
+        else
+        {
+            float apexAboveLip = CornerTopY - trace.Skip(jump).Min(f => f.Y);
+            Assert.True(apexAboveLip > 40f, $"apex only {apexAboveLip:F1}px above the lip — not a powerful jump");
+        }
+    }
+
+    // ── Row K: Space + inward launches up onto the ledge instead of wall-jumping away ──
 
     [Fact]
     public void JumpPlusInwardMidPull_QueuesAndLandsOnTop()

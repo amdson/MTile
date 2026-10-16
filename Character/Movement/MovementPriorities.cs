@@ -103,8 +103,8 @@ public static class MovementPriorities
     public const int LedgeGrabPassive = 42;
     public const int LedgePullActive  = 43;
     public const int LedgePullPassive = 43;
-    // LedgeJump: launches off the top of a ledge pull. Passive 44 preempts the pull
-    // (Active 43) the moment its height gate opens, but stays below WallJump's Passive
+    // LedgeJump: launches off a gripped corner. Passive 44 preempts the hang (Active 42)
+    // and the pull (Active 43) on a jump press, but stays below WallJump's Passive
     // (45) so a same-frame Space+away still wins the bail-out. Active 55 is in the
     // launch band — Falling/Stunned/DoubleJump can't steal it mid-launch.
     public const int LedgeJumpActive  = 55;

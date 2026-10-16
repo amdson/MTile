@@ -22,6 +22,10 @@ public enum CorrectionChannel : byte
     CornerPlant,    // TEMP EXPERIMENT: unrestricted 2D force at corner-plant ticks
     ContactPushLeft,  // hand shove off a surface on the body's right (pushes −x), airborne
     ContactPushRight, // hand shove off a surface on the body's left (pushes +x), airborne
+    GripLift,       // hands on a gripped corner: lift (up-only, pace-faded)
+    GripPull,       // hands on a gripped corner: pull over the lip (inward-only, pace-faded)
+    GripHold,       // hands on a gripped corner: tension toward it (down onto the lip at the crest)
+    GripBrace,      // feet off the wall face below the lip: away from the wall
 }
 
 // Per-step bookkeeping of what the corrector solve actually exerted — the

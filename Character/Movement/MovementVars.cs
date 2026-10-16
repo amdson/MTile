@@ -99,7 +99,7 @@ public struct MovementVars
     public bool    RefActive;       // LedgePull, Dropdown: tracking a reference clip this
                                     // activation (latched at Enter so a mid-state
                                     // UseReferenceClips hot-reload can't read stale frames)
-    public float   RefProgress;     // LedgePull, Dropdown: clip parameter t (advances dt/duration)
+    public float   RefProgress;     // Dropdown: clip parameter t (advances dt/duration); LedgePull follows its clip as a path
     public Vector2 RefEntry;        // LedgePull, Dropdown: body position at Enter — clip (0,0)
     public Vector2 RefGate;         // LedgePull, Dropdown: measured gate point — clip (1,-1)
     public sbyte AmbientElectiveLatch; // Elective-refusal hysteresis (AmbientCorrector):

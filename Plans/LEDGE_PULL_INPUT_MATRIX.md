@@ -39,10 +39,12 @@ The hang becomes the hub once "release → re-grab" lands, so its own input tabl
 |---|---|---|---|
 | neutral / inward held | hang (spring holds at hang point) | unchanged | |
 | Up press | → LedgePull | unchanged | |
+| Up held from the grabbing press (≥ `LedgeAutoPullHoldTime`, 0.15 s) | → LedgePull (hold-to-climb) | — | one-shot per press: a pull inside the same hold disarms it; a tap (< 0.15 s) just hangs |
 | Down hold (after 0.1 s grace) | drop → Falling, ~0 velocity | unchanged | grace exists for drop-in entries (`MovementStates.cs` ~804) |
 | outward hold | drop → Falling | unchanged *except* a short grace after re-grab (see row F below) | |
-| Space alone | nothing (DoubleJump 40 < grab 42) | nothing (intent expires unconsumed) | open question: should jump-at-hang do something? |
-| Space + horizontal | WallJump away (45 > 42) | unchanged | |
+| Space alone | nothing (DoubleJump 40 < grab 42) | nothing (intent expires unconsumed) | **superseded 2026-10-16:** LedgeJump (44 > 42) — corner servo to `LedgeJumpTargetVy`, committed until the legs clear the corner, then a normal jump hold |
+| Space + inward | WallJump away (45 > 42) | — | **2026-10-16:** WallJump suppressed (`LedgeGrabState.Suppresses`, as mid-pull) → LedgeJump up onto the ledge |
+| Space + away | WallJump away (45 > 42) | unchanged | |
 
 ## Pull input matrix
 
@@ -59,7 +61,7 @@ Unless a phase is named, the row applies to both P1 and P2.
 | F | release Up + outward | both | Falling with upward vy **plus** outward air control — worst exploit | re-grab; extend the existing 0.1 s entry grace to also cover `pressingAway` on re-grab entries, so the damper eats most vy before the away-drop fires. Exit then reads as a small wall-kick | 🐞 + decision: grace length |
 | G | release Up + Down | both | Falling with upward vy, then fast-fall force (up-then-slam, reads wrong) | re-grab → 0.1 s grace → Down still held → clean drop from hang at ~0 velocity = climb-down | 🐞 fixed for free |
 | H | release Up + inward | both | Falling, drifts back into wall (may wall-slide) | re-grab → settles at hang (inward is the natural "keep holding" input) | 🐞 fixed for free |
-| I | Space, no horizontal (Up held) | both | **input lost** — DoubleJump blocked (40 < 43), edge expires before pull ends | `IntentType.Jump` queued; pull keep-alives it; on Done, buffered intent fires a normal ground jump off the ledge top (source-relative vy per `JumpingState.Enter`, so no super-jump) | ✨ new |
+| I | Space, no horizontal (Up held) | both | **input lost** — DoubleJump blocked (40 < 43), edge expires before pull ends | `IntentType.Jump` queued; pull keep-alives it; on Done, buffered intent fires a normal ground jump off the ledge top (source-relative vy per `JumpingState.Enter`, so no super-jump) | ✨ new — **superseded 2026-10-16:** LedgeJump fires at once from any point of the pull (no wait for the top) |
 | J | Space + outward (Up held) | P1 | WallJump fires immediately (passive 45 > 43, wall detected) → kicks away, cancels climb | unchanged — deliberate bail-out; WallJump consumes the Jump intent | decision: keep |
 | J′ | Space + outward (Up held) | P2 | nothing (body above lip, wall no longer detected) | intent queues → jump on top at Done | ✨ new |
 | K | Space + inward (Up held) | P1 | WallJump **away** fires (precondition accepts either horizontal) — counterintuitive: pressing toward the ledge ejects you from it | gate WallJump so that during pull only *outward* + Space bails; inward + Space queues → jump on top | decision: change |

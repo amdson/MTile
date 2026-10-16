@@ -485,6 +485,83 @@ public static class CorrectorChannels
         }
     }
 
+    // The grip channel set — hands on a gripped corner, the ledge family's
+    // actuator as the legs are the fold's. Four unilateral channels:
+    //   LIFT  up (the pull-up below the lip, the press above it);
+    //   PULL  over the lip, along overDir;
+    //   HOLD  tension toward the corner — the hands keep hold of it. Below
+    //         the lip that is up and in; once the body is above the corner it
+    //         is DOWN and in, which is what stops a pull that arrives at the
+    //         crest still rising (nothing else can push down there, and the
+    //         band would have no actuator to answer it);
+    //   BRACE away from the wall — the feet pushing off its face, so only
+    //         while the body is still below the lip. Without it nothing could
+    //         undo drift INTO the wall (HOLD pulls that way from below): the
+    //         body ground up the corner, and the band, with no actuator to
+    //         answer it, choked the lift until the pull timed out.
+    // Each is capped (LipLiftForce for the two arm-strength channels,
+    // LipPushForce for the over-the-lip push) and FADES to zero as the body's
+    // speed along that channel's own axis approaches `pace` — the LegServo /
+    // BuildManeuver idiom: the arms cannot push faster than the pace, but
+    // never brake speed the body arrived with along their axis. Per axis, not
+    // along the path: at a crest the path runs flat, and a path-speed fade
+    // left the lift at full authority on a body already rising past the lip.
+    // Active while the corner is within arm's reach. Returns the channel count.
+    public const float GripReach     = 3f * PlayerCharacter.Radius;
+    public const float SpeedFadeBand = 25f;   // px/s — pace-fade window (BuildManeuver's VxFadeBand)
+
+    public static bool InGripReach(Vector2 pos, Vector2 corner)
+        => Vector2.DistanceSquared(pos, corner) <= GripReach * GripReach;
+
+    // HOLD's axis from a held position: toward the corner (zero at the corner).
+    public static Vector2 GripHoldAxis(Vector2 pos, Vector2 corner)
+    {
+        var d = corner - pos;
+        return d.LengthSquared() > 1e-6f ? Vector2.Normalize(d) : Vector2.Zero;
+    }
+
+    public static int BuildGrip(CorrectorScratch s, int n, Vector2 corner, int overDir, float pace)
+    {
+        var cfg = MovementConfig.Current;
+        // Held state (every tick's sample is the body's current state), so
+        // one axis serves the horizon, as the masks and caps do.
+        var hold = GripHoldAxis(s.Samples[0].Pos, corner);
+        for (int k = 0; k < n; k++)
+        {
+            bool reach = InGripReach(s.Samples[k].Pos, corner);
+            var v = s.Samples[k].Vel;
+            s.ChannelMask[0][k] = reach;
+            s.ChannelMask[1][k] = reach;
+            s.ChannelMask[2][k] = reach && hold != Vector2.Zero;
+            s.ChannelMask[3][k] = reach && s.Samples[k].Pos.Y > corner.Y;
+            s.ChannelCap[0][k] = cfg.LipLiftForce * Fade(pace, -v.Y);
+            s.ChannelCap[1][k] = cfg.LipPushForce * Fade(pace, overDir * v.X);
+            s.ChannelCap[2][k] = cfg.LipLiftForce * Fade(pace, Vector2.Dot(v, hold));
+            s.ChannelCap[3][k] = cfg.LipPushForce * Fade(pace, -overDir * v.X);
+        }
+        var ch = s.Problem.Channels;
+        ch[0] = new ChannelDef {
+            Id = CorrectionChannel.GripLift,
+            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], ActiveMask = s.ChannelMask[0] };
+        ch[1] = new ChannelDef {
+            Id = CorrectionChannel.GripPull,
+            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(overDir, 0f), CapPerTick = s.ChannelCap[1], ActiveMask = s.ChannelMask[1] };
+        ch[2] = new ChannelDef {
+            Id = CorrectionChannel.GripHold,
+            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
+            Axis = hold, CapPerTick = s.ChannelCap[2], ActiveMask = s.ChannelMask[2] };
+        ch[3] = new ChannelDef {
+            Id = CorrectionChannel.GripBrace,
+            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(-overDir, 0f), CapPerTick = s.ChannelCap[3], ActiveMask = s.ChannelMask[3] };
+        return 4;
+    }
+
+    private static float Fade(float pace, float speedAlong)
+        => Math.Clamp((pace - speedAlong) / SpeedFadeBand, 0f, 1f);
+
     // Cross-frame Δ-anchor leak shared by every corrector loop: continuity
     // without DC memory (a full-strength anchor lets a force channel sustain
     // thrust with no remaining demand).

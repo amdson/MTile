@@ -132,7 +132,7 @@ public class DeliberateClimbTests(ITestOutputHelper output)
     public void JumpPressFromTheHang_LaunchesOffTheCorner()
     {
         // Grab the ledge (standing + Up), then press jump with NO direction:
-        // the hang releases and JumpingState fires off the corner — not
+        // the hang releases and LedgeJumpState launches off the corner — not
         // WallJump (that's the away-press bail), not a dead input.
         // Fixed timing (Until inflates downstream segment offsets by its
         // 9999-frame placeholder): the walk-in stalls by ~f55, the Up edge
@@ -140,15 +140,15 @@ public class DeliberateClimbTests(ITestOutputHelper output)
         var frames = Run(HangRise, new InputScript()
             .For(60, new PlayerInput { Right = true })
             .For(8,  new PlayerInput { Right = true, Up = true })
-            .For(12, new PlayerInput { Up = true })
-            .For(6,  new PlayerInput { Up = true, Space = true })
+            .For(12, new PlayerInput { })              // released: a held Up would climb (hold-to-climb)
+            .For(6,  new PlayerInput { Space = true })
             .Forever(default));
         Dump(frames);
 
         int grabAt = Array.FindIndex(frames, f => f.State.Contains("LedgeGrab"));
         Assert.True(grabAt > 0, "never grabbed the ledge");
         var after = frames.Skip(grabAt).ToArray();
-        int jumpAt = Array.FindIndex(after, f => f.State == "JumpingState");
+        int jumpAt = Array.FindIndex(after, f => f.State == "LedgeJumpState");
         float maxRise = after.Select(f => -f.Vy).Max();
         output.WriteLine($"grab f{grabAt}, jump at +{jumpAt}, max rise {maxRise:F1}");
         Assert.True(jumpAt > 0, "jump press from the hang never launched (dead input?)");
