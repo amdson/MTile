@@ -179,7 +179,7 @@ namespace edit, and both compile globs (`MTile.Core`, and `MTile.Web`'s `..\**\*
 | [`Input/`](Character/Input/) | Raw hardware → intent: `Controller` (+`PlayerInput`), `InputParser`, `IntentBuffer`, `InputIntent`, `SmoothPen`. |
 | [`Movement/`](Character/Movement/) | The movement FSM (`Movement`, the six `*States.cs` families, `MovementPriorities`) plus its plumbing (`MovementConfig`, `MovementVars`, `MovementModifiers`, `MovementCapability`, `AirControl`, `JumpServo`). |
 | [`Action/`](Character/Action/) | The action/combat FSM: `ActionStates` (+`ActionVars`), `CombatState`, `ConditionState`, `PlayerAbilityState`, `BuildMeters`, `IHittable`. |
-| [`Corrector/`](Character/Corrector/) | The ballistic corrector stack — `AmbientCorrector`, `CorrectionSolver`, `BallisticPredictor`, `FoldReference`, `TrajectoryLm`, the `Corrector*` support types, and the geometry/path helpers (`CObstacle`, `CorridorProbe`, `ClearanceConstraints`, `ReferencePath`, `GuidedPath`, `HermiteClip`, `LatticePlanner`). |
+| [`Corrector/`](Character/Corrector/) | The ballistic corrector stack — `AmbientCorrector`, `CorrectionSolver`, `BallisticPredictor`, `FoldReference`, `TrajectoryLm`, the `Corrector*` support types, the path tracker (`PathTracker` + its policies `GripPathPolicy` / `SlidePathPolicy`), and the geometry/path helpers (`CObstacle`, `CorridorProbe`, `ClearanceConstraints`, `ReferencePath` — clip retargeting + `ReferenceClipRegistry`, `GuidedPath`, `HermiteClip`, `LatticePlanner`). |
 | [`Sensing/`](Character/Sensing/) | `EnvironmentContext` and the five terrain checkers it caches (`Ground`/`Ceiling`/`Wall`/`ExposedUpperCorner`/`ExposedLowerCorner`). |
 
 ### `PlayerCharacter` ([Character/PlayerCharacter.cs](Character/PlayerCharacter.cs))
@@ -234,6 +234,21 @@ Each `Update`:
 > (lateral + tiny vertical — no redirect against nothing). Non-fold states
 > keep their owned servo mechanics and gate ambient assists via
 > `AmbientPolicy`.
+>
+> **Path tracking** (Plans/PATH_TRACKER_UNIFICATION_PLAN.md, 2026-10-16):
+> `PathTracker` is the lattice tracker's bead / band / progress solve made
+> reusable behind `IPathTrackPolicy` — `LatticeTracker` runs on it, and the
+> authored moves follow their `ReferenceClips/` clips as geometric paths
+> through it (`BuildClipPolyline` + `FollowPolyline`; no clock — the pace is
+> the channels' fade speed, so arriving momentum carries). Each move brings
+> only its physical actuators: `LedgePull` and the climb family
+> (`Parkour`/`Mantle`/`ArcJump`, whose trigger still runs the old
+> `ManeuverCorrector` probe) use the grip (`BuildGrip`: lift / pull / hold /
+> brace on the corner); `Dropdown` the feet (`BuildSlide`). Jump launches stay
+> velocity writes, with the tracker riding a jump profile (hybrid;
+> `FoldProfile.Legs` / `ImpulseJump` keep the legs from launching twice).
+> `TerrainCarried` runs with the corrector off. On the lattice engine no state
+> reaches the old ballistic-coast ambient path any more.
 
 **Fold states**: `FallingState` (0/0, fallback), `StandingState` (10/10), `CrouchedState` (15/15) — support/locomotion via the ambient fold (above). **Wall**: `WallSlidingState(dir)` (owned; publishes `AmbientPolicy.Off`).
 **Stun**: `StunnedState` (25/25) — heavy-hit lockout; muted air control while `Combat.StunActive`. Preempts free air but not active jumps. `TumbleState` (**51 active / 26 passive**) — the airborne heavy-hit launch variant: its high Active keeps it in the launch band so nothing steals the body mid-launch, while its low Passive lets a player hit mid-jump finish the arc first.

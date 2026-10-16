@@ -1,8 +1,10 @@
 # Path-Tracker Unification Plan
 
-Status: **PLAN** — written 2026-10-16 on `fighter-plan`, after the ledge-pull
-rework. Nothing below is built yet except what §1 lists as done. BACKLOG 1.25
-points here.
+Status (2026-10-16, end of day): **phases 1, 2, 4 DONE; phase 3 step 1 DONE**
+(the climbs follow their clips on `PathTracker`); phase 3's trigger kept on the
+old `ManeuverCorrector` probe by decision (§5.3), so its step-3 deletions
+(`ManeuverCorrector`, `BallisticPredictor.PredictGuided`) wait on a trigger
+revisit. Phase 5 docs done. BACKLOG 1.25 points here.
 
 Goal: every movement state that steers the body along a trajectory does it the
 same way — **a geometric path, followed by the bead / band / progress solve
@@ -302,6 +304,10 @@ sweep over entry speed × rise height in each band delivers everywhere the old
 loop did; no climb times out at `MaxLipManeuverTime`.
 
 ## 6. Phase 4 — TerrainCarried (cautious)
+
+> **DONE 2026-10-16 at step 2.** The assist acted on 50 of 1633 carried frames
+> (mean 11 vs the servo's ~790); `AmbientPolicy.Off` changed no test — the one
+> trace difference is the drop after a ride ends (~100 px/s landing, was ~70).
 
 Today: the ride-anchor servo is the whole control law; the ambient corrector
 runs "clearance-only" (`AmbientPolicy.Default`, `FoldProfile.None`), which on

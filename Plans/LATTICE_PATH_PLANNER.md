@@ -150,6 +150,12 @@ orders of magnitude cheaper than the state-space search prototype.
 > path (the bead's arc), not along x — capping x let a 45° bevel run at
 > |v| = 141 and a staircase became a chain of hops (rise 167 → 99).
 > `LATTICE_SCENARIOS.md`.
+>
+> **Correction, 2026-10-16:** "no state runs the qp coast path on it any more"
+> was not true until PATH_TRACKER_UNIFICATION_PLAN phases 1 and 4 —
+> `RunningJump` and `TerrainCarried` passed `FoldProfile.None` and fell through
+> to the ballistic-coast ambient path. Now true; the tracker's bead/band/
+> progress core is `PathTracker`, shared with the authored moves.
 
 `FoldReference.TryApply` (`Character/Corrector/FoldReference.cs`, the
 `FoldEngine = "ref"` engine) already has exactly the shape this algorithm wants:
