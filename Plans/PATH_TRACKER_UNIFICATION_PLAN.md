@@ -258,6 +258,26 @@ authored arc a sane route here" — the per-tick tracker owns the rest, and a
 climb it can't finish still ends through cancel-on-release / the timeout as
 today.
 
+> **Measured 2026-10-16 — D3 as written does not hold; decision needed.** With
+> the per-tick swap landed (step 1, `8e364c8`), both triggers were logged side
+> by side over the movement + corrector suites and the climb sweep (1000
+> decisions; old trigger in charge). Two findings:
+> 1. The old trigger accepted reference arcs penetrating up to **7.8 px** — the
+>    authored parkour arc grazes its OWN lip corner from some entries (the
+>    per-tick solve steers it off), and refused many arcs penetrating nothing
+>    (median 1.3 px, min 0), almost all 1-tile Parkour at ~100 px/s.
+> 2. Swapped in as the trigger: allowance ≥ 2 px keeps the suites green but 13
+>    climbs time out (old: 1); 1 px matches the old deliveries but refuses a
+>    plain 1-tile vault (`CorrectorAnchorTests.TriggerFeasibility_SlabOverApproach`).
+>    The timeouts are TIMING failures — vaults started too close to the face
+>    at speed; their arcs are clear, so no geometric allowance can see them.
+>    Contacts with the climbed step's own lip can be excluded (like flush
+>    starts), but that only fixes (1).
+> Options: keep the old probe solve as the trigger (ManeuverCorrector stays,
+> trigger-only); the dynamic check (tracker rollout on the probe — original
+> D3 (a)); or the geometric sweep plus an explicit closed-form timing refusal
+> (hop reaches lip height before the face arrives).
+
 ### 5.4 Order inside the phase
 
 1. Per-tick correction only: replace feedforward + `ManeuverCorrector.Apply`
