@@ -32,19 +32,25 @@ public class LedgeGrabState : MovementState
     // gating the grab already prevents the pull; it carries the flag too for clarity.
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
 
-    // From the hang, as mid-pull (LedgePullState.Suppresses): only an AWAY press
-    // reads as "kick off the wall"; Space + inward means "jump up onto the ledge",
-    // which is LedgeJumpState's — WallJump's precondition accepts either horizontal
-    // and would otherwise eject the body from the ledge it is reaching for.
-    public override bool Suppresses(MovementState candidate, EnvironmentContext ctx)
+    // The hands-on-a-corner rule for wall jumps, shared by the hang and the pull
+    // (their Suppresses): only an AWAY press reads as "kick off the wall"; Space +
+    // inward means "jump up onto the ledge", which is LedgeJumpState's. WallJump's
+    // own precondition accepts an inward press on purpose — on a bare wall face
+    // that is the classic wall-slide jump — so the rule belongs to the states
+    // that hold a corner, not to WallJump.
+    internal static bool IsInwardWallJump(MovementState candidate, EnvironmentContext ctx)
         => candidate is WallJumpingState wj
            && !(wj.WallDir == 1 ? ctx.Input.Left : ctx.Input.Right);
 
+    public override bool Suppresses(MovementState candidate, EnvironmentContext ctx)
+        => IsInwardWallJump(candidate, ctx);
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
-        // Path A: approach from side — Up pressed, wall + ledge corner above head detected
+        // Path A: approach from side — a buffered Up press (IntentType.UpPress), wall +
+        // ledge corner above head detected
         if (ctx.TryGetWall(_wallDir, out _) && ctx.TryGetLedgeCorner(_wallDir, out _)
-            && RecentUpPress(ctx))
+            && ctx.Intents.Peek(IntentType.UpPress, ctx.CurrentFrame, out _, ctx.UpBufferFrames))
             return true;
         // Path B: drop from above — Down just pressed, exposed corner at foot level
         if (abilities.DownJustPressed && ctx.TryGetExposedCorner(_wallDir, out _))
@@ -63,21 +69,6 @@ public class LedgeGrabState : MovementState
         // pose; one-frame window, same Exit-before-scan idiom as path C.
         if (ctx.PreviousState(0) is DropdownState && abilities.DropChainDir == _wallDir)
             return true;
-        return false;
-    }
-
-    // An Up press within the last few frames (a slightly early press still catches a
-    // ledge the body is about to reach), not one the ledge family already consumed.
-    // Shared by the grab's side approach and the pull-from-above entry.
-    internal static bool RecentUpPress(EnvironmentContext ctx)
-    {
-        const int Buffer = 6;
-        for (int i = 0; i < Buffer; i++)
-        {
-            if (ctx.PreviousState(i + 1) is LedgeGrabState or LedgePullState) break;
-            if (ctx.Controller.GetPrevious(i).Up && !ctx.Controller.GetPrevious(i + 1).Up)
-                return true;
-        }
         return false;
     }
 
@@ -117,6 +108,7 @@ public class LedgeGrabState : MovementState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         vars.TimeInState = 0f;
+        vars.EntryFrame  = ctx.CurrentFrame;
 
         // Re-grab (path C) keeps the corner the pull was working on — the checkers
         // can't see it from the risen pose. A dropdown chain (path D) is the same
@@ -130,6 +122,9 @@ public class LedgeGrabState : MovementState
         abilities.DropChainDir = 0;   // offer consumed (or moot) either way
         if (!regrab && !chain)
         {
+            // A fresh grab spends the Up press that made it (path A) — the pull needs a
+            // press of its own, or the same press held (UpHold).
+            ctx.Intents.Consume(IntentType.UpPress, ctx.CurrentFrame, ctx.UpBufferFrames);
             // Prefer above-head corner (approach from side); fall back to foot-level (drop from above)
             Vector2 cornerEdge;
             if (ctx.TryGetLedgeCorner(_wallDir, out var grabCorner))
@@ -206,10 +201,11 @@ public class LedgeGrabState : MovementState
         float hangX = corner.X - _wallDir * PlayerCharacter.Radius;
 
         // A tap resolves: the grabbing press came up before LedgeAutoPullHoldTime
-        // (held through the grab's every earlier frame, released now). The tap
-        // is a plain grab, so it catches impulsively — velocity zeroed, the hang
+        // (the hold that ended this frame began at or before the grab). The tap is
+        // a plain grab, so it catches impulsively — velocity zeroed, the hang
         // spring takes it from wherever the coast left it.
-        if (!ctx.Input.Up && UpHeldSinceEntry(ctx, vars, from: 1))
+        int sinceEntry = ctx.CurrentFrame - vars.EntryFrame;
+        if (sinceEntry > 0 && ctx.UpReleasedHoldFrames >= sinceEntry)
             ctx.Body.Velocity = Vector2.Zero;
 
         var force = Vector2.Zero;
@@ -219,7 +215,7 @@ public class LedgeGrabState : MovementState
         // a rising body is not caught. It coasts under gravity alone, so the
         // momentum it grabbed with is still there when the pull takes over. A
         // release (a tap) or the top of the rise hands it back to the hang spring.
-        bool coastRise = ctx.Body.Velocity.Y < 0f && UpHeldSinceEntry(ctx, vars);
+        bool coastRise = ctx.Body.Velocity.Y < 0f && ctx.UpHeldFrames > sinceEntry;
         force.Y = coastRise ? 0f
                 : -cfg.GrabGravityCancel
                 + SpringDampForce(ctx.Body.Position.Y - hangY, ctx.Body.Velocity.Y, cfg, ctx.Dt);
@@ -228,20 +224,6 @@ public class LedgeGrabState : MovementState
         // Ambient Off: body is pinned to the corner — an ambient redirect would fight
         // the hang contacts. Still called so cross-frame anchor state is cleared.
         ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
-    }
-
-    // Up held on every frame of this grab, the entry frame included — the grabbing
-    // press is still down. `from` skips the newest frames (1: every frame before this
-    // one). Frames in state come from TimeInState, which Update advances by dt before
-    // reading this; the Controller keeps 32 frames, past any decision.
-    private static bool UpHeldSinceEntry(EnvironmentContext ctx, in MovementVars vars, int from = 0)
-    {
-        if (ctx.Dt <= 0f) return false;
-        int frames = Math.Min((int)MathF.Round(vars.TimeInState / ctx.Dt), 31);
-        if (frames <= from) return false;
-        for (int i = from; i < frames; i++)
-            if (!ctx.Controller.GetPrevious(i).Up) return false;
-        return true;
     }
 
     // Spring toward an anchor with a saturated damper. The raw linear damping term
@@ -293,8 +275,13 @@ public class LedgePullState : MovementState
         {
             if (abilities.GrabWallDir != _wallDir) return false;
             // Fresh press from the hang: tap-to-grab, tap-again-to-pull.
-            if (abilities.UpJustPressed) return true;
-            return HeldThroughGrab(ctx);
+            if (ctx.Intents.Peek(IntentType.UpPress, ctx.CurrentFrame, out _, ctx.UpBufferFrames)) return true;
+            // Hold-to-climb: the press that grabbed, still held at LedgeAutoPullHoldTime
+            // (InputParser's one-shot UpHold) rolls straight into the pull; a tap hangs.
+            // One-shot per press, and a pull spends any UpHold (Enter/Update), so a held
+            // Up can't loop pulls through a timed-out re-grab.
+            return ctx.Input.Up
+                && ctx.Intents.Peek(IntentType.UpHold, ctx.CurrentFrame, out _, ctx.UpBufferFrames);
         }
         return FromAbove(ctx);
     }
@@ -308,27 +295,8 @@ public class LedgePullState : MovementState
     private bool FromAbove(EnvironmentContext ctx)
         => ctx.PreviousState(0) is not ClimbManeuverBase
            && !ctx.TryGetGround(out _)
-           && LedgeGrabState.RecentUpPress(ctx)
+           && ctx.Intents.Peek(IntentType.UpPress, ctx.CurrentFrame, out _, ctx.UpBufferFrames)
            && ExposedUpperCornerChecker.TryFindPullable(ctx.Body, ctx.Chunks, _wallDir, out _);
-
-    // Hold-to-climb: the same Up press that caught the ledge, held past
-    // LedgeAutoPullHoldTime, rolls straight into the pull — a tap still just hangs.
-    // One-shot per press: a pull anywhere inside the current hold (e.g. a timed-out
-    // pull that re-grabbed via path C) disarms it, so a held Up can't loop pulls.
-    // A hold longer than the input history can't be attributed to a grab and never fires.
-    private static bool HeldThroughGrab(EnvironmentContext ctx)
-    {
-        float holdTime = MovementConfig.Current.LedgeAutoPullHoldTime;
-        if (holdTime <= 0f || ctx.Dt <= 0f || !ctx.Input.Up) return false;
-        const int History = 31;   // Controller / state-history depth (32) minus one
-        for (int i = 1; i < History; i++)
-        {
-            if (ctx.PreviousState(i - 1) is LedgePullState) return false;
-            if (!ctx.Controller.GetPrevious(i).Up)
-                return i * ctx.Dt >= holdTime;   // i frames held, counting this one
-        }
-        return false;
-    }
 
     // The pull owns the corner while it executes — and for the one frame after it exits,
     // since the selection loop calls Suppresses on PreviousState(0). Both rules below
@@ -341,16 +309,9 @@ public class LedgePullState : MovementState
         // steal the maneuver from the pull (43). The pull completes/exits on its own terms
         // and a queued jump routes to LedgeJumpState (LEDGE_PULL_INPUT_MATRIX.md rows B, K).
         if (candidate is ClimbManeuverBase) return true;
-        // Mid-pull, only an *away* press reads as "kick off the wall and bail". An inward
-        // press means "jump up onto the ledge" — suppress WallJump so LedgeJumpState
-        // launches off the corner instead (row K). Use the candidate's own wall side,
-        // exactly as the old in-WallJump gate did.
-        if (candidate is WallJumpingState wj)
-        {
-            bool pressingAway = wj.WallDir == 1 ? ctx.Input.Left : ctx.Input.Right;
-            return !pressingAway;
-        }
-        return false;
+        // Mid-pull, only an *away* press reads as "kick off the wall and bail"; an
+        // inward press launches LedgeJumpState off the corner instead (row K).
+        return LedgeGrabState.IsInwardWallJump(candidate, ctx);
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -370,6 +331,8 @@ public class LedgePullState : MovementState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
         vars.TimeInState = 0f;
+        ctx.Intents.Consume(IntentType.UpPress, ctx.CurrentFrame, ctx.UpBufferFrames);
+        ctx.Intents.Consume(IntentType.UpHold,  ctx.CurrentFrame, ctx.UpBufferFrames);
         // From above (no hang first): grip the lip the probe found, as a grab would.
         if (!abilities.IsLedgeGrabbing
             && ExposedUpperCornerChecker.TryFindPullable(ctx.Body, ctx.Chunks, _wallDir, out var lip))
@@ -401,6 +364,9 @@ public class LedgePullState : MovementState
         // can't bid (the corner briefly out of grip reach). It stops when the pull
         // ends, so an unconsumed press expires on its normal window.
         ctx.Intents.Refresh(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
+        // An UpHold issued while this pull runs belongs to this press — spent here,
+        // so it can't restart a pull after a timed-out re-grab.
+        ctx.Intents.Consume(IntentType.UpHold, ctx.CurrentFrame, ctx.UpBufferFrames);
 
         ctx.Body.AppliedForce = Vector2.Zero;   // the hands are the only actuator
         var clip = ReferenceClipRegistry.Get(ReferenceClipRegistry.LedgePull);

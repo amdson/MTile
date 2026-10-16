@@ -45,6 +45,13 @@ public class EnvironmentContext
     // pass this to Intents.Peek/Consume/Refresh so the real-time window
     // (IntentBuffer.JumpBufferSeconds) is rate-independent.
     public int JumpBufferFrames => SimFrames.FromSeconds(IntentBuffer.JumpBufferSeconds, Dt);
+    // Up-gesture window (UpPress / UpHold) at this step rate.
+    public int UpBufferFrames => SimFrames.FromSeconds(IntentBuffer.UpBufferSeconds, Dt);
+    // The current Up hold's length in frames, counting this one (0 when up), and on
+    // the frame Up comes up, the length of the hold that just ended (else 0) —
+    // InputParser's, so states never re-derive holds from controller history.
+    public int UpHeldFrames;
+    public int UpReleasedHoldFrames;
     public PhysicsBody Body;
     // Owning player's mass — collision-mode attacks stamp Hitbox.StrikeMass from it
     // (PhysicsBody itself is massless). Set by PlayerCharacter.Update.

@@ -63,6 +63,21 @@ public class InputParser
     private int _lastStabEmitted      = int.MinValue;
     private int _lastCircleEmitted    = int.MinValue;
     private int _lastJumpEmitted      = int.MinValue;
+    // Up hold tracking (movement-side gestures UpPress / UpHold): the frame the
+    // current continuous hold began (MinValue when Up is up), whether this hold has
+    // emitted its UpHold, and the length + frame of the last hold to end.
+    private int  _upHeldSince         = int.MinValue;
+    private bool _upHoldEmitted;
+    private int  _lastUpHoldFrames;
+    private int  _lastUpReleaseFrame  = int.MinValue;
+
+    // Frames Up has been held continuously, counting this one (0 when up).
+    public int UpHeldFrames(int currentFrame)
+        => _upHeldSince == int.MinValue ? 0 : currentFrame - _upHeldSince + 1;
+
+    // On the frame Up comes up: how many frames that hold lasted. 0 otherwise.
+    public int UpReleasedHoldFrames(int currentFrame)
+        => _lastUpReleaseFrame == currentFrame ? _lastUpHoldFrames : 0;
 
     // playerPosition: the player's body position this frame; all cursor geometry is
     // taken relative to it (see class comment).
@@ -82,6 +97,32 @@ public class InputParser
         {
             buffer.Issue(new ActionIntent { Type = IntentType.Jump, IssuedFrame = currentFrame });
             _lastJumpEmitted = currentFrame;
+        }
+
+        // Up gestures — movement-side, like Jump. UpPress on the down edge; UpHold
+        // once per press when it has been held LedgeAutoPullHoldTime (hold-to-climb);
+        // and the hold's length for states that ask "is the press that started me
+        // still down?" (UpHeldFrames / UpReleasedHoldFrames).
+        if (cur.Up && !prev.Up)
+        {
+            buffer.Issue(new ActionIntent { Type = IntentType.UpPress, IssuedFrame = currentFrame });
+            _upHeldSince   = currentFrame;
+            _upHoldEmitted = false;
+        }
+        else if (!cur.Up && prev.Up && _upHeldSince != int.MinValue)
+        {
+            _lastUpHoldFrames   = currentFrame - _upHeldSince;
+            _lastUpReleaseFrame = currentFrame;
+            _upHeldSince        = int.MinValue;
+        }
+        if (cur.Up && _upHeldSince != int.MinValue && !_upHoldEmitted)
+        {
+            float holdTime = MovementConfig.Current.LedgeAutoPullHoldTime;
+            if (holdTime > 0f && UpHeldFrames(currentFrame) * dt >= holdTime)
+            {
+                buffer.Issue(new ActionIntent { Type = IntentType.UpHold, IssuedFrame = currentFrame });
+                _upHoldEmitted = true;
+            }
         }
 
         // Press edge — LMB just went down. Start tracking the press.
@@ -197,6 +238,10 @@ public class InputParser
         LastStabEmitted      = _lastStabEmitted,
         LastCircleEmitted    = _lastCircleEmitted,
         LastJumpEmitted      = _lastJumpEmitted,
+        UpHeldSince          = _upHeldSince,
+        UpHoldEmitted        = _upHoldEmitted,
+        LastUpHoldFrames     = _lastUpHoldFrames,
+        LastUpReleaseFrame   = _lastUpReleaseFrame,
     };
 
     public void Restore(in InputParserState s)
@@ -212,6 +257,10 @@ public class InputParser
         _lastStabEmitted      = s.LastStabEmitted;
         _lastCircleEmitted    = s.LastCircleEmitted;
         _lastJumpEmitted      = s.LastJumpEmitted;
+        _upHeldSince          = s.UpHeldSince;
+        _upHoldEmitted        = s.UpHoldEmitted;
+        _lastUpHoldFrames     = s.LastUpHoldFrames;
+        _lastUpReleaseFrame   = s.LastUpReleaseFrame;
     }
 }
 
@@ -229,4 +278,8 @@ public struct InputParserState
     public int     LastStabEmitted;
     public int     LastCircleEmitted;
     public int     LastJumpEmitted;
+    public int     UpHeldSince;
+    public bool    UpHoldEmitted;
+    public int     LastUpHoldFrames;
+    public int     LastUpReleaseFrame;
 }

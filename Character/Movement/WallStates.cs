@@ -145,8 +145,9 @@ public class WallJumpingState : MovementState
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
     public override AnimTag AnimationTag => AnimTag.WallJump;
 
-    // Read by LedgePullState.Suppresses to decide whether a mid-pull wall jump is an
-    // away-press bail-out (allowed) or an inward press (suppressed → queues for LedgeJump).
+    // Read by LedgeGrabState.IsInwardWallJump (the hang's and the pull's Suppresses)
+    // to tell an away-press bail-out (allowed) from an inward press (suppressed —
+    // LedgeJump launches off the corner instead).
     public int WallDir => _wallDir;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
@@ -154,8 +155,9 @@ public class WallJumpingState : MovementState
         // Any horizontal arrow held — either pressing INTO the wall (the classic wall-slide jump) or
         // pressing AWAY from it (falling alongside a wall, kicking off it). Both should fire WallJump.
         // The no-input case (`Space` with no arrow held) falls through to DoubleJumping.
-        // (The mid-pull "inward press queues for LedgeJump instead" rule lives in
-        // LedgePullState.Suppresses, not here.)
+        // (While the hands hold a corner — the hang or the pull — an inward press is
+        // LedgeJump's, not this state's: that rule lives with the corner holders,
+        // LedgeGrabState.IsInwardWallJump, not here.)
         bool pressingHorizontal = ctx.Input.Left || ctx.Input.Right;
         if (!pressingHorizontal) return false;
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;

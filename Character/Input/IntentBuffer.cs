@@ -13,6 +13,8 @@ public enum IntentType
     Stab,        // long press + swipe (starts a Stab; Direction = swipe vector)
     Circle,      // long press + roughly-circular drag (starts a Pulse)
     Jump,        // Space went from up → down this frame (movement-side; short window)
+    UpPress,     // Up went from up → down (movement-side; UpBufferSeconds window) — grabs a ledge / starts a pull
+    UpHold,      // the same Up press, still held at LedgeAutoPullHoldTime (one-shot per press) — hold-to-climb
 }
 
 public struct ActionIntent
@@ -104,6 +106,11 @@ public class IntentBuffer
     // via Refresh so it fires at the maneuver's natural jump point.
     public const float JumpBufferSeconds = 4f / 30f;
 
+    // Up gestures (UpPress, UpHold) live this long: a slightly-early press still
+    // catches a ledge the body is about to reach. The old per-state history walk's
+    // 6 frames at the game's 60 Hz. Movement states read ctx.UpBufferFrames.
+    public const float UpBufferSeconds = 6f / 60f;
+
     private readonly List<ActionIntent> _intents = new();
     public IReadOnlyList<ActionIntent> All => _intents;
 
@@ -165,10 +172,11 @@ public class IntentBuffer
     }
 
     // `jumpBufferFrames` is the rate-converted jump window (the caller owns dt).
-    public void Prune(int currentFrame, int jumpBufferFrames)
+    public void Prune(int currentFrame, int jumpBufferFrames, int upBufferFrames)
         => _intents.RemoveAll(i => i.Consumed
             || currentFrame - i.IssuedFrame > MaxAgeFrames
-            || (i.Type == IntentType.Jump && currentFrame - i.IssuedFrame > jumpBufferFrames));
+            || (i.Type == IntentType.Jump && currentFrame - i.IssuedFrame > jumpBufferFrames)
+            || (i.Type is IntentType.UpPress or IntentType.UpHold && currentFrame - i.IssuedFrame > upBufferFrames));
 
     // Snapshot/restore (roadmap goal 4 §E). ActionIntent is a struct, so the array
     // copy is a deep copy; restore replaces the live list contents in place.

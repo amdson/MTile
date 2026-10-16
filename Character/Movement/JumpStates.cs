@@ -79,24 +79,17 @@ public class JumpingState : MovementState
         => ctx.PreviousState(0) is StairClimbState stair
            && StairChecker.TryFind(ctx.Body, ctx.Chunks, stair.Dir, out _);
 
-    // A corner the body just gripped (hang, or a climb's animation grip) within
-    // arm's reach counts as a push-off point.
+    // A corner the body's hands hold — the hang, or a climb's lip — within arm's
+    // reach counts as a push-off point. Both publish it as sim state in
+    // abilities.GrabbedCorner (snapshotted); nothing here reads animation data.
+    // (From the hang LedgeJumpState outbids this launch; the case still matters to
+    // HasLaunchSource, which keeps DoubleJump from bidding while a corner is held.)
     private const float CornerLaunchReach = 24f;
     internal static bool TryCornerLaunch(EnvironmentContext ctx, PlayerAbilityState abilities,
                                          out Vector2 corner)
     {
-        corner = default;
-        switch (ctx.PreviousState(0))
-        {
-            case LedgeGrabState:
-                corner = abilities.GrabbedCorner;
-                break;
-            //TODO remove dependency on Animation layer data
-            case ClimbManeuverBase climb when climb.TryAnimationGrip(out corner):
-                break;
-            default:
-                return false;
-        }
+        corner = abilities.GrabbedCorner;
+        if (ctx.PreviousState(0) is not (LedgeGrabState or ClimbManeuverBase)) return false;
         return Vector2.DistanceSquared(corner, ctx.Body.Position)
                <= CornerLaunchReach * CornerLaunchReach;
     }

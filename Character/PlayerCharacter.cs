@@ -634,6 +634,8 @@ public class PlayerCharacter : IHittable
             CombatSystem   = CombatSystem,
             ActiveBlockType = _activeBlockType,
             Intents        = _intents,
+            UpHeldFrames         = _inputParser.UpHeldFrames(_frame),
+            UpReleasedHoldFrames = _inputParser.UpReleasedHoldFrames(_frame),
             ActionRegistry = _actionRegistry,
             CurrentActionVars = _actionVars,
             Condition      = _abilities.Condition,
@@ -815,7 +817,7 @@ public class PlayerCharacter : IHittable
         // Drop consumed + aged-out intents so the buffer stays small. Pruning here
         // (rather than at the top) lets a newly-issued intent be Peeked + Consumed
         // in the same frame it was emitted.
-        _intents.Prune(_frame, ctx.JumpBufferFrames);
+        _intents.Prune(_frame, ctx.JumpBufferFrames, ctx.UpBufferFrames);
     }
 
     public bool IsGrounded => _currentState is StandingState || _currentState is CrouchedState;

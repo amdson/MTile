@@ -211,6 +211,9 @@ public abstract class ClimbManeuverBase : MovementState
                                     vars.MantleTargetY + 2f);
         abilities.Facing = _dir;
         abilities.HasDoubleJumped = false;
+        // The lip the hands go for, as sim state: JumpingState.TryCornerLaunch reads
+        // it (a jump mid-climb pushes off the lip) — never the animation's grip.
+        abilities.GrabbedCorner = rise.Pos;
 
         // One-shot entry hop — the launch, a velocity write (jumps are hybrid):
         // the honest ballistic hop to the gate height + ArcJumpApexMargin, no more.

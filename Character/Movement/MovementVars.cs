@@ -59,6 +59,7 @@ public enum CoveredJumpPhase { SlidingOut, Jumping }
 public struct MovementVars
 {
     public float TimeInState;       // Jumping, RunningJump, WallJumping, DoubleJumping, LedgeGrab, LedgePull
+    public int   EntryFrame;        // LedgeGrab: frame of Enter (is the grabbing Up press still held?)
     public bool  JumpReleased;      // Jumping, RunningJump, WallJumping, DoubleJumping, CoveredJump
     public float SlideSpeed;        // CoveredJump, Dropdown
     public float SlideTime;         // CoveredJump, Dropdown
