@@ -307,13 +307,15 @@ public static class LatticeTracker
                 // anyway. It helps the slow, late contacts.
                 s.ChannelMask[3][k] = cfg.FoldRedirectEnabled
                     && ((near && !ballistic) || s.CornerPlant[k]);
-                // No legs for a profile that neither hovers nor rises (Fall):
-                // its plan is a level line at the body's height, and legs in
-                // reach would hold it there — a re-planned level line, a hard
-                // band and the legs make a fixed point (a wall slide hung 27
-                // px above the floor once the solve converged). Falling has no
-                // upward force; the catch is Standing's, where the legs are.
-                if (!fold.Hover && !fold.Rising) s.ChannelMask[0][k] = false;
+                // Legs only where the profile permits them (FoldProfile.Legs).
+                // Fall has none: its plan is a level line at the body's
+                // height, and legs in reach would hold it there — a re-planned
+                // level line, a hard band and the legs make a fixed point (a
+                // wall slide hung 27 px above the floor once the solve
+                // converged); the catch is Standing's, where the legs are. A
+                // hybrid jump (ImpulseJump) has none either: its impulse is
+                // the launch.
+                if (!fold.Legs) s.ChannelMask[0][k] = false;
                 // Drive: along the plan's first segment, wherever the legs
                 // are. BuildFold masks it off at dir == 0 (qp's "no x channel
                 // at station"); on the engine the plan is the authority — a

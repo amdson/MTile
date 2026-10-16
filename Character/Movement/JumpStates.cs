@@ -335,7 +335,11 @@ public class RunningJumpState : MovementState
 
         ctx.Body.AppliedForce = force;
 
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
+        // Hybrid on the lattice engine (like DoubleJump/WallJump): the impulse
+        // above is the launch; the tracker follows the rising plan with the
+        // legs off (FoldProfile.ImpulseJump) so they don't launch it again.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
+            OnLattice ? FoldProfile.ImpulseJump : FoldProfile.None);
     }
 
     private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)

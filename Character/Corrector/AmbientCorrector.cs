@@ -42,6 +42,11 @@ public struct FoldProfile
     // (dir, −1)^ — while a jump is held. The launch is then the tracker
     // spending the legs along a rising path; nothing fires an impulse.
     public bool  Rising;
+    // Lattice engine: the leg servo is a permitted channel. Stated per profile
+    // rather than inferred from Hover/Rising: a hybrid jump (the state's own
+    // impulse IS the launch) rises without legs, or they would launch it a
+    // second time on top of the impulse (ImpulseJump).
+    public bool  Legs;
 
     public static FoldProfile None => default;
 
@@ -69,10 +74,18 @@ public struct FoldProfile
     // along a rising path before leg reach runs out.
     public static FoldProfile Jump => new()
     {
-        Fold = true, Hover = false, Rising = true,
+        Fold = true, Hover = false, Rising = true, Legs = true,
         HoverOffset = 0f, ClimbReachUp = 0f,
         MaxSpeed = MovementConfig.Current.MaxAirSpeed, RiseCost = 0f,
     };
+
+    // A hybrid ground jump (RunningJumpState): the state's velocity write is
+    // the launch, so the rising plan runs WITHOUT the legs — corner plants,
+    // clearance and redirect still act; nothing launches it twice.
+    public static FoldProfile ImpulseJump
+    {
+        get { var p = Jump; p.Legs = false; return p; }
+    }
 
     // Standing/Falling: hover ≈ the old spring equilibrium; 1-high ledges ramp
     // the reference (16 ≤ 20), 2-high walls never do (32 > 20).
@@ -84,6 +97,7 @@ public struct FoldProfile
         MaxSpeed     = MovementConfig.Current.MaxWalkSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
         Hover        = true,
+        Legs         = true,
     };
 
     // StairClimbState: Standing's profile with the climb priced FREE. On a regular flight
@@ -108,6 +122,7 @@ public struct FoldProfile
         MaxSpeed     = MovementConfig.Current.CrouchMaxWalkSpeed,
         RiseCost     = MovementConfig.Current.CrouchRiseCost,
         Hover        = true,
+        Legs         = true,
     };
 }
 

@@ -88,6 +88,15 @@ Each of these cost a debugging round on the pull. Check them up front.
 
 ## 3. Phase 1 — RunningJump → hybrid (small)
 
+> **DONE 2026-10-16.** `FoldProfile.Legs` (explicit; `Stand`/`Crouch`/`Stairs`/
+> `Jump` on, `Fall` off — identical to the old inferred rule) and
+> `FoldProfile.ImpulseJump` (`Jump` with legs off); `RunningJumpState` passes it
+> on lattice. Masking the leg servo alone was enough — drive and tuck were left
+> permitted (the measured rise matched without touching them, so the "ground
+> set" below shrank to the legs). Held running jump: 52.1 px (old ballistic
+> assist: 52.0; `RunJumpApexRise` 49.4); with legs permitted it was 85.7 px.
+> `RunningJumpLatticeTests` pins it at 60 and 30 Hz.
+
 Today: `RunJumpVelocity` write + `RunJumpHoldForce`, then
 `ApplyAmbient(Default, FoldProfile.None)` — which on the lattice engine falls
 through to the old ballistic-prediction assist.
@@ -309,13 +318,16 @@ Done when: the sprout/ride tests are unchanged against the baseline
 
 ## 10. Size
 
+Estimated in agent-session time (the LedgePull rework, the `PathTracker`
+extraction and this plan took ~3 h together), excluding playtest rounds:
+
 | Phase | Size | Main risk |
 |---|---|---|
-| 1 RunningJump | ~half a day | double launch if the ground set isn't fully masked |
-| 2 Dropdown | ~1 day | chain-to-grab hand-off geometry (lesson 4) |
-| 3 Climbs | ~3 days | sizing the D3 allowance so the trigger is neither stricter nor looser than today; crest band answerability (lesson 1) |
-| 4 TerrainCarried | ½ day if step 2 suffices; 1–2 if step 3 | regressions in rides no test covers |
-| 5 Cleanup | ~half a day | — |
+| 1 RunningJump | ~30–60 min | double launch if leg permission isn't explicit |
+| 2 Dropdown | ~1 h | chain-to-grab hand-off geometry (lesson 4) |
+| 3 Climbs | ~3–4 h | sizing the D3 allowance so the trigger is neither stricter nor looser than today; crest band answerability (lesson 1) |
+| 4 TerrainCarried | ~30 min if step 2 suffices; ~2 h if step 3 | regressions in rides no test covers |
+| 5 Cleanup | ~30 min | — |
 
 All decisions are settled (2026-10-16): D1 explicit ground-channel permission,
 D2 the existing climb clips, D3 reference sweep with a measured graze allowance,
