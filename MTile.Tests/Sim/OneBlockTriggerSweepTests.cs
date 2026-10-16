@@ -14,7 +14,7 @@ namespace MTile.Tests;
 public class OneBlockTriggerSweepTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 60f;
-    private const float HalfW = 10.392f;   // R·sin60°: face = x + HalfW; lip at x = 128
+    private const float HalfW = 10.392f;  // a 10.4 px standoff from the wall, NOT the body half-width (~5 px since the 0.485 width scale) — BACKLOG 5.19
 
     // One-block step: floor row 3 (top y=48), step row 2 at cols 8..15 (lip x=128, top y=32).
     // Standing rest center ≈ top − 22.4 → ≈ 25.6 on the floor, ≈ 9.6 on the step.

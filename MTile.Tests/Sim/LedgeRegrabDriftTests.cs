@@ -30,7 +30,7 @@ public class LedgeRegrabDriftTests(ITestOutputHelper output)
 
     private const float GroundTop = 5 * TS;
     private const float WallLeft  = 9 * TS;   // 99
-    private const float HalfW     = 10.392f;  // R·sin60° at R=12
+    private const float HalfW     = 10.392f;  // a 10.4 px standoff from the wall, NOT the body half-width (~5 px since the 0.485 width scale) — BACKLOG 5.19
     private const float HangX     = WallLeft - HalfW;  // resting X against the wall face
 
     // Sweep how long Up is held before release — short pulls release low, long pulls

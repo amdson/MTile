@@ -105,7 +105,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildShortLedgeTerrain();
         const float groundTop = 4 * TS;
         const float wallLeft  = 9 * TS;
-        float halfW = 10.392f;   // R·sin60° at R=12
+        float halfW = 10.392f;   // standoff from the wall, not the half-width (BACKLOG 5.19)
         var script = new InputScript()
             .For(15, new PlayerInput { Right = true })
             .Forever(new PlayerInput { Right = true, Up = true });
@@ -133,7 +133,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildTallLedgeTerrain();
         const float groundTop = 5 * TS;
         const float wallLeft  = 9 * TS;
-        float halfW = 10.392f;   // R·sin60° at R=12
+        float halfW = 10.392f;   // standoff from the wall, not the half-width (BACKLOG 5.19)
         var script = new InputScript()
             .For(30, new PlayerInput { })
             .For(3,  new PlayerInput { Up = true })   // tap: a held Up now climbs (hold-to-climb)
@@ -182,7 +182,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildTallPillarTerrain();
         const float pillarTop = 5 * TS;     // 80
         const float pillarLeft = 9 * TS;    // 144
-        float halfW = 10.392f;   // R·sin60° at R=12
+        float halfW = 10.392f;   // standoff from the wall, not the half-width (BACKLOG 5.19)
 
         // Body just left of the pillar's left face, two tiles above the lip,
         // falling straight down with Up held the whole run — the natural "drop
@@ -220,7 +220,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildTallPillarTerrain();
         const float pillarTop = 5 * TS;
         const float pillarLeft = 9 * TS;
-        float halfW = 10.392f;   // R·sin60° at R=12
+        float halfW = 10.392f;   // standoff from the wall, not the half-width (BACKLOG 5.19)
 
         var cfg = new SimConfig
         {
@@ -246,7 +246,7 @@ public class LedgeGrabFlickerTests(ITestOutputHelper output)
         var terrain = BuildTallPillarTerrain();
         const float pillarTop = 5 * TS;
         const float pillarLeft = 9 * TS;
-        float halfW = 10.392f;   // R·sin60° at R=12
+        float halfW = 10.392f;   // standoff from the wall, not the half-width (BACKLOG 5.19)
 
         var cfg = new SimConfig
         {

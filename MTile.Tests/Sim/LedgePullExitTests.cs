@@ -33,7 +33,7 @@ public class LedgePullExitTests(ITestOutputHelper output)
     private const float GroundTop    = 5 * TS;   // 80
     private const float WallLeft     = 9 * TS;   // 144
     private const float CornerTopY   = 2 * TS;   // 32 (3-tall wall: lip at the R=12 head line)
-    private const float HalfW        = 10.392f;  // R·sin60° at R=12
+    private const float HalfW        = 10.392f;  // a 10.4 px standoff from the wall, NOT the body half-width (~5 px since the 0.485 width scale) — BACKLOG 5.19
     private static float StandingLineY => CornerTopY - 2f * PlayerCharacter.Radius; // ~29
 
     // Settle → tap Up (grab) → hang → press Up again (pull). Callers append the
