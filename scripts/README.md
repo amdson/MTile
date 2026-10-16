@@ -9,6 +9,7 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 | [`publish-web.sh`](publish-web.sh) | AOT-publish the Blazor/KNI web build and push it to GitHub Pages (macOS/Linux). |
 | [`publish-web.ps1`](publish-web.ps1) | The same, on Windows. |
 | [`extract-sfx-candidates.ps1`](extract-sfx-candidates.ps1) | Pull the hand-picked SFX candidates out of the Sonniss zips into `Audio/candidates/`. |
+| [`gen-guard-sfx.py`](gen-guard-sfx.py) | Synthesize the guard block / perfect-parry SFX sources into `Audio/raw/` (pure stdlib; the clips have no sample-library origin). |
 | [`build-sfx.sh`](build-sfx.sh) | Batch-convert hand-cut sound slices into game-ready Ogg (macOS/Linux). |
 | [`build-sfx.ps1`](build-sfx.ps1) | The same, on Windows. |
 | [`sync-sounds.sh`](sync-sounds.sh) | Wire the built Ogg clips into the content pipeline + sound manifest (macOS/Linux). |

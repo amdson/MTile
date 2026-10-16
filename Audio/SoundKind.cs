@@ -34,7 +34,8 @@ public enum SoundKind
     Throw,        // built, not yet wired — see GameAudio
     Swing,        // attack whoosh — see GameAudio.Swing
     LaserBlast,   // orphaned — the laser action was removed; kept so the manifest stays stable
-    GuardBlock,   // a guard parry absorbed a hit — see GameAudio.GuardBlock
+    GuardBlock,   // a LATE guard took part of a hit and broke — see GameAudio.GuardBlock
+    GuardParry,   // a PERFECT guard absorbed a hit outright — see GameAudio.GuardParry
 
     // Tier 3, but already flowing through the presentation seam.
     Respawn,
@@ -78,11 +79,11 @@ public static class SoundKinds
     public static SoundKind Fallback(SoundKind k) => k switch
     {
         SoundKind.Land => SoundKind.Footstep,
-        // No guard_block clip cut yet. HitConnect is the nearest contact sound in the
-        // bank; GameAudio.GuardBlock pitches it up hard so a parry still reads as a
-        // bright clang rather than as taking the hit. Dropping guard_block_01.ogg into
-        // Assets/Sounds later takes over automatically, with no code change.
+        // Both guard clips are synthesized (scripts/gen-guard-sfx.py). Should either set
+        // go missing, a block is still a contact and a parry is still a block, so each
+        // borrows the nearest thing rather than going silent.
         SoundKind.GuardBlock => SoundKind.HitConnect,
+        SoundKind.GuardParry => SoundKind.GuardBlock,
         _              => SoundKind.None,
     };
 

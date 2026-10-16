@@ -17,6 +17,7 @@ Stab
     - Start-up time for bigger moves
     - Small recovery time for moves, even when they are cancelled. E.g. don't let player immediately swap from large stab attack to a slash. 
 
+───────────────────────────────────────────────────────────────────────────────────────
 Scenario:
 Frame 0: Player is in Null, Mouse up -> Mouse down
 Frame 3: Mouse up

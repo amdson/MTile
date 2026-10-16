@@ -71,6 +71,42 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/grunt_01.ogg;Sounds/grunt_01.xnb
 
+#begin ../Assets/Sounds/guard_block_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/guard_block_01.ogg;Sounds/guard_block_01.xnb
+
+#begin ../Assets/Sounds/guard_block_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/guard_block_02.ogg;Sounds/guard_block_02.xnb
+
+#begin ../Assets/Sounds/guard_block_03.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/guard_block_03.ogg;Sounds/guard_block_03.xnb
+
+#begin ../Assets/Sounds/guard_parry_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/guard_parry_01.ogg;Sounds/guard_parry_01.xnb
+
+#begin ../Assets/Sounds/guard_parry_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/guard_parry_02.ogg;Sounds/guard_parry_02.xnb
+
+#begin ../Assets/Sounds/guard_parry_03.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/guard_parry_03.ogg;Sounds/guard_parry_03.xnb
+
 #begin ../Assets/Sounds/hit_connect_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor

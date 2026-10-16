@@ -73,6 +73,20 @@ public enum EntityKind
     Wizard,
     WizardOrb,      // Wizard ordnance (WizardOrbProjectile)
 
+    // Warlord — mobile duelist boss: cleave combo, ram, leap-slam, and a foam cage
+    // it leaps into. Subclass; see Entities/Enemies/Types/WarlordEnemy.cs.
+    Warlord,
+
+    // Prism — player-sized boss that moves only by dashing and plants ray emitters.
+    // Subclass; see Entities/Enemies/Types/PrismEnemy.cs.
+    Prism,
+    RayEmitter,     // a planted cone-ray node (Entities/RayEmitter.cs)
+
+    // Quillback — small fast armored hedgehog boss: shell over a tiny HP bar, close-range
+    // flurry/spin/roll, digs and builds, a punishable quill storm at range.
+    // Subclass; see Entities/Enemies/Types/QuillbackEnemy.cs.
+    Quillback,
+
     // ── Fighters (Plans/FIGHTER_DESIGN_PLAN.md) ─────────────────────────────
     // Compiled from FighterSpecs by FighterCompiler and registered with EnemyFactory.
     // KEEP THIS BLOCK CONTIGUOUS AND LAST: EntityKinds.IsFighter is a range check.

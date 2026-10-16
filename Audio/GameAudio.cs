@@ -99,6 +99,7 @@ public sealed class GameAudio
         WallScrape(p, index);
         HitConnect(p, index);
         GuardBlock(p, index);
+        GuardParry(p, index);
         Swing(p, index);
         Jump(p, index);
         DoubleJump(p, index);
@@ -133,30 +134,61 @@ public sealed class GameAudio
         int age = p.Frame - c.LastHitFrame;
         if (age < 0 || age > StampWindowFrames) return;
 
-        float t = MathF.Min(c.LastHitImpulse / 900f, 1f);
+        float t    = MathF.Min(c.LastHitImpulse / 900f, 1f);
+        float gain = 0.55f + 0.45f * t;
+
+        // A late block landed this same hit (GuardBlock below carries the contact), so
+        // the hit clip is only mixed in by how much actually got through: a block that
+        // just missed the window is all shield and no hit, a saturated one is both.
+        if (c.LastBlockFrame == c.LastHitFrame)
+        {
+            gain *= c.LastBlockLeak;
+            if (gain < 0.08f) return;
+        }
+
         _mixer.Fire(new SoundId(SoundKind.HitConnect, index, c.LastHitFrame),
                     simFrame: c.LastHitFrame,
-                    gain:     0.55f + 0.45f * t,
+                    gain:     gain,
                     pitch:    0.1f - 0.25f * t,
                     pos:      p.Body.Position);
     }
 
-    // A parry absorbed a hit. CombatState.LastParryFrame is the same kind of sim-side
-    // stamp HitConnect keys off, so this needs no event either. Pitched well up and
-    // kept short: it borrows the hit_connect clips (SoundKinds.Fallback) and has to
-    // read as "that bounced off" rather than as taking the hit — a charged parry
-    // (GuardRetaliate armed) rings brighter still, so the reward is audible.
+    // A LATE block: the stance met the hit but the window had closed, so part of it
+    // leaked and the guard broke (CombatState.LastBlockFrame — the same kind of sim-side
+    // stamp HitConnect keys off, so no event). The clip is a dull thump with a crack
+    // in it; it sinks lower the more leaked, so a near-miss block sounds solid and a
+    // held-forever one sounds like it is giving way. HitConnect above hands the hit
+    // clip back by the same leak, so the two never stack into one louder hit.
     private void GuardBlock(PlayerCharacter p, int index)
+    {
+        var c = p.Combat;
+        if (c == null || c.LastBlockFrame <= 0) return;
+        int age = p.Frame - c.LastBlockFrame;
+        if (age < 0 || age > StampWindowFrames) return;
+
+        _mixer.Fire(new SoundId(SoundKind.GuardBlock, index, c.LastBlockFrame),
+                    simFrame: c.LastBlockFrame,
+                    gain:     0.8f,
+                    pitch:    -0.3f * c.LastBlockLeak + Jitter(c.LastBlockFrame),
+                    pos:      p.Body.Position);
+    }
+
+    // A PERFECT block: the hit was absorbed outright (CombatState.LastParryFrame). This
+    // is the reward sound, so it gets its own clip — a bright struck-metal ting that
+    // rings on after the contact — and sits a touch above the hit in the mix. A
+    // charged parry (GuardRetaliate armed) is pitched up so the counter being
+    // available is audible before the player looks for it.
+    private void GuardParry(PlayerCharacter p, int index)
     {
         var c = p.Combat;
         if (c == null || c.LastParryFrame <= 0) return;
         int age = p.Frame - c.LastParryFrame;
         if (age < 0 || age > StampWindowFrames) return;
 
-        _mixer.Fire(new SoundId(SoundKind.GuardBlock, index, c.LastParryFrame),
+        _mixer.Fire(new SoundId(SoundKind.GuardParry, index, c.LastParryFrame),
                     simFrame: c.LastParryFrame,
-                    gain:     0.7f,
-                    pitch:    c.LastParryCharged ? 0.85f : 0.6f,
+                    gain:     0.9f,
+                    pitch:    (c.LastParryCharged ? 0.15f : 0f) + Jitter(c.LastParryFrame),
                     pos:      p.Body.Position);
     }
 

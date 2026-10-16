@@ -1,0 +1,10 @@
+{
+  "Image": "knife_hit_wall.png",
+  "FrameWidth": 330,
+  "FrameHeight": 702,
+  "FrameCount": 9,
+  "PivotX": 306.0,
+  "PivotY": 351.0,
+  "RigUnitsPerPixel": 0.09,
+  "TrailSeconds": 0
+}

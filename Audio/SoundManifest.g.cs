@@ -19,6 +19,8 @@ public static class SoundManifest
         ("eruption", 1),
         ("footstep", 2),
         ("grunt", 1),
+        ("guard_block", 3),
+        ("guard_parry", 3),
         ("hit_connect", 7),
         ("jump", 1),
         ("laser_blast", 1),

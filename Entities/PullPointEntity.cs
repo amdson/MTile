@@ -131,10 +131,9 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
             if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
             var type = chunks.GetCellType(gtx, gty);
             if (!TileTypes.IsGrabbable(type)) continue;   // hardened rock isn't harvestable
-            // Read the charge BEFORE the break — BreakCell clears the flag, so asking
-            // afterwards always says no.
-            bool wasCharged = chunks.Charge.IsCharged(gtx, gty);
-            if (!chunks.BreakCell(gtx, gty)) continue;
+            // Harvested, not destroyed: a charged tile's charge goes into the clod
+            // rather than detonating here (ChunkMap.HarvestCell).
+            if (!chunks.HarvestCell(gtx, gty, out bool wasCharged)) continue;
             counts[(int)type]++;
             if (wasCharged) charged++;
             taken++;
@@ -361,11 +360,10 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         {
             ref var m = ref _group.Members[i];
             var type = chunks.GetCellType(m.Gtx, m.Gty);
-            // Charge is read before the break for the same reason as in RipBlocks:
-            // BreakCell clears it. A charged tile peeled into the clod is what turns
-            // the throw from a splat into a demolition charge (LobbedAreaProjectile).
-            bool wasCharged = chunks.Charge.IsCharged(m.Gtx, m.Gty);
-            if (!chunks.BreakCell(m.Gtx, m.Gty)) continue;
+            // Harvested, as in RipBlocks: a charged tile peeled into the clod carries
+            // its charge with it instead of going off here — it is what turns the throw
+            // from a splat into a demolition charge (LobbedAreaProjectile).
+            if (!chunks.HarvestCell(m.Gtx, m.Gty, out bool wasCharged)) continue;
             counts[(int)type]++;
             if (wasCharged) charged++;
             taken++;

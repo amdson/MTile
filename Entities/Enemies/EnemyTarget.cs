@@ -109,4 +109,7 @@ public interface ITargetSource
     // Live fighter mines, in a fixed (spawn) order, up to into.Length; returns the count
     // written. Default none, for sources that never hold mines.
     int Mines(System.Span<MineView> into) => 0;
+    // Live ray emitters (Entities/RayEmitter.cs), in spawn order, up to into.Length;
+    // returns the count written. What PrismPlantAction counts against its cap.
+    int Rays(System.Span<RayView> into) => 0;
 }

@@ -147,7 +147,10 @@ mass/velocity access up into CombatSystem — same centralization via
    - `MaterialStrength.Restitution` (stone 0.70 rings / dirt 0.35 / sand 0.05 /
      foam 0.15), tunable via material_strengths.json.
    - `HitResolver.TileRecoil`: attacker Δv = (1+e)·approach·RecoilScale opposite
-     the strike dir, floored at `Hitbox.MinRecoilSpeed`, zero when retreating.
+     the strike dir, floored at `Hitbox.MinRecoilSpeed`, zero when retreating. Capped at
+     `Hitbox.MaxRecoilSpeed` (0 = off) — `CombatSystem.AccumulateRecoil` clamps the per-frame
+     tally's magnitude on every recoil path, so entity recoil is covered too. The stab sets
+     both ends to a jump's worth (280) so pogo is a fixed-size movement tool.
      NOT self-limiting across frames (the swing speed re-adds every re-publish) —
      CombatSystem latches the bounce once per attack via an `EntityId.None`
      sentinel in the dedupe set, which snapshots for free.

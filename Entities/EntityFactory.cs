@@ -88,6 +88,10 @@ public static class EntityFactory
             EntityKind.Warden        => new WardenEnemy(body.Position),
             EntityKind.Wizard        => new WizardEnemy(body.Position),
             EntityKind.WizardOrb     => new WizardOrbProjectile(body.Position, d.Aim.X, d.Aim.Y, d.HitId, d.Faction),
+            EntityKind.Warlord       => new WarlordEnemy(body.Position),
+            EntityKind.Prism         => new PrismEnemy(body.Position),
+            EntityKind.RayEmitter    => RayEmitter.FromState(in d, body.Position),
+            EntityKind.Quillback     => new QuillbackEnemy(body.Position),
             // Spawn-point placeholder — RestoreState's ReadState overwrites it from
             // the snapshotted Aim slot right after construction.
             EntityKind.PracticeBall  => new PracticeBall(body.Position),

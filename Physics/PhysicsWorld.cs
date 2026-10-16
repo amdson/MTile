@@ -52,7 +52,6 @@ public static class PhysicsWorld
             nextPos = ResolveChunkCollisions(body, chunks, nextPos, savedForce, dt);
             body.Position = nextPos;
 
-            var bodyBounds = body.Polygon.GetBounds(body.Position);
             body.Constraints.RemoveAll(c =>
             {
                 if (c is not SurfaceDistance sd) return false;
@@ -78,7 +77,7 @@ public static class PhysicsWorld
                 if (sep < -allow) return true;
                 // Query-driven refresh: re-probe each frame so a moving source surface's
                 // current velocity overwrites the snapshot stamped at collision time.
-                if (!TryFindContactSurface(chunks, bodyBounds, sd.Normal, out var surfaceVel)) return true;
+                if (!TryFindContactSurface(chunks, body, sd.Normal, out var surfaceVel)) return true;
                 sd.SurfaceVelocity = surfaceVel;
                 return false;
             });
@@ -292,7 +291,6 @@ public static class PhysicsWorld
 
             body.Position = ResolveChunkCollisionsSwept(body, chunks, body.Position, body.Position + body.Velocity * dt, savedForce, dt);
 
-            var bodyBounds = body.Polygon.GetBounds(body.Position);
             body.Constraints.RemoveAll(c =>
             {
                 if (c is not SurfaceDistance sd) return false;
@@ -318,7 +316,7 @@ public static class PhysicsWorld
                 if (sep < -allow) return true;
                 // Query-driven refresh: re-probe each frame so a moving source surface's
                 // current velocity overwrites the snapshot stamped at collision time.
-                if (!TryFindContactSurface(chunks, bodyBounds, sd.Normal, out var surfaceVel)) return true;
+                if (!TryFindContactSurface(chunks, body, sd.Normal, out var surfaceVel)) return true;
                 sd.SurfaceVelocity = surfaceVel;
                 return false;
             });
@@ -691,19 +689,31 @@ public static class PhysicsWorld
     // that refresh, a sinusoidal platform's constraint clamps the body to its
     // collision-time velocity even as the platform decelerates, sending the body
     // ballistic on direction reversals.
-    private static bool TryFindContactSurface(ChunkMap chunks, Rectangle bodyBounds, Vector2 normal, out Vector2 surfaceVelocity)
+    private static bool TryFindContactSurface(ChunkMap chunks, PhysicsBody body, Vector2 normal, out Vector2 surfaceVelocity)
     {
         const float probe = 2f;
 
+        // "Is the surface still there?" asked exactly for static surfaces: nudge the
+        // body `probe` px toward the contact (−normal) and keep the contact only if
+        // the nudged polygon overlaps a solid shape. The old test — any shape in a strip under
+        // the bounding-box face — was wrong for the pointed hex: over a 1-wide hole
+        // (11 px vs the 10.08 px body) the box overlapped the floor tiles on both
+        // sides almost everywhere, so a flat floor contact stamped before the body
+        // crawled out over the hole never expired; its plane held the body up over
+        // the gap and its friction pinned it there. The face strip stays as the
+        // broad phase — it is also what keeps shapes beside the body out of a floor
+        // contact's surface-velocity pick — and the polygon test decides, so a short
+        // surface pressing a slanted edge (a growing sprout) still counts.
+        var bounds = body.Polygon.GetBounds(body.Position);
         BoundingBox strip;
         if (MathF.Abs(normal.Y) >= MathF.Abs(normal.X))
             strip = normal.Y < 0
-                ? new BoundingBox(bodyBounds.Left, bodyBounds.Bottom,         bodyBounds.Right, bodyBounds.Bottom + probe)
-                : new BoundingBox(bodyBounds.Left, bodyBounds.Top - probe,    bodyBounds.Right, bodyBounds.Top);
+                ? new BoundingBox(bounds.Left, bounds.Bottom,         bounds.Right, bounds.Bottom + probe)
+                : new BoundingBox(bounds.Left, bounds.Top - probe,    bounds.Right, bounds.Top);
         else
             strip = normal.X < 0
-                ? new BoundingBox(bodyBounds.Right,         bodyBounds.Top, bodyBounds.Right + probe, bodyBounds.Bottom)
-                : new BoundingBox(bodyBounds.Left - probe,  bodyBounds.Top, bodyBounds.Left,          bodyBounds.Bottom);
+                ? new BoundingBox(bounds.Right,         bounds.Top, bounds.Right + probe, bounds.Bottom)
+                : new BoundingBox(bounds.Left - probe,  bounds.Top, bounds.Left,          bounds.Bottom);
 
         // Among the shapes behind the face, refresh from the one advancing on the
         // body fastest along the contact normal. First-found was wrong whenever a
@@ -716,6 +726,11 @@ public static class PhysicsWorld
         surfaceVelocity = Vector2.Zero;
         foreach (var shape in WorldQuery.SolidShapesInRect(chunks, strip))
         {
+            // Static surfaces only: a moving one (a sprout) lags the body it
+            // carries by its own advance and keeps the box test — the carry
+            // classification reads those contacts (SproutLiftJumpTests).
+            if (shape.Velocity == Vector2.Zero && !Collision.Check(body.Polygon, body.Position - normal * probe, 0f,
+                                 shape.Polygon, shape.Position, 0f).Intersects) continue;
             float vn = Vector2.Dot(shape.Velocity, normal);
             if (!found || vn > bestVn)
             {

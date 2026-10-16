@@ -55,6 +55,12 @@ public sealed class CombatSystem
     // ordering when the hitbox is occluded (see TileReach).
     private readonly List<(float key, int gtx, int gty)> _scratchCells = new();
 
+    // Cosmetic: a player-owned hitbox with an origin touched terrain this frame —
+    // (HitId, contact point on the nearest reachable cell, unit direction into the
+    // surface). Raised every frame of overlap and before damage, so it also fires
+    // for a cell the hit breaks. Subscribers dedupe by HitId; nothing sim-side reads it.
+    public event Action<int, Vector2, Vector2> OnTerrainStrike;
+
     public Vector2 PeekRecoil(int hitId)
         => _recoilByHitId.TryGetValue(hitId, out var v) ? v : Vector2.Zero;
 
@@ -140,10 +146,25 @@ public sealed class CombatSystem
                 }
                 if (hit.Occluded) _scratchCells.Sort();
 
+                // Terrain-strike cue: of the reachable cells, the one nearest the
+                // hitbox's centre (where the blade actually is, not the attacker's feet).
+                bool wantStrike = OnTerrainStrike != null && hit.Occluded && Factions.IsPlayer(hit.Owner);
+                var aim = new Vector2((hit.Region.Left + hit.Region.Right) * .5f,
+                                      (hit.Region.Top + hit.Region.Bottom) * .5f);
+                float bestStrike = float.MaxValue;
+                Vector2 strikeAt = default;
                 foreach (var (_, gtx, gty) in _scratchCells)
                 {
                     if (hit.Occluded && !TileReach.IsCellReachable(chunks, hit.Origin, gtx, gty))
                         continue;
+                    if (wantStrike)
+                    {
+                        float ts = Chunk.TileSize;
+                        var p = new Vector2(Math.Clamp(aim.X, gtx * ts, (gtx + 1) * ts),
+                                            Math.Clamp(aim.Y, gty * ts, (gty + 1) * ts));
+                        float d = Vector2.DistanceSquared(p, aim);
+                        if (d < bestStrike) { bestStrike = d; strikeAt = p; }
+                    }
                     // Snapshot the material BEFORE DamageCell, since a break clears
                     // the cell and we'd lose the type info for the hardness gate.
                     var typeBefore = chunks.GetCellType(gtx, gty);
@@ -165,8 +186,15 @@ public sealed class CombatSystem
                         }
                         else
                             // Legacy impulse recoil: authored vector, per cell, per frame.
-                            AccumulateRecoil(hit.HitId, -hit.KnockbackImpulse * hit.RecoilScale);
+                            AccumulateRecoil(in hit, -hit.KnockbackImpulse * hit.RecoilScale);
                     }
+                }
+
+                if (bestStrike < float.MaxValue)
+                {
+                    var into = strikeAt - hit.Origin;
+                    into = into.LengthSquared() > 1e-4f ? Vector2.Normalize(into) : hit.StrikeDir;
+                    OnTerrainStrike(hit.HitId, strikeAt, into);
                 }
 
                 // One pogo per ATTACK, not per frame: the authored swing speed in
@@ -178,7 +206,7 @@ public sealed class CombatSystem
                 // latch snapshot/restores for free with the Dedupe table.
                 if (surfaceRestitution >= 0f && !alreadyHit.Contains(EntityId.None))
                 {
-                    AccumulateRecoil(hit.HitId, HitResolver.TileRecoil(in hit, surfaceRestitution));
+                    AccumulateRecoil(in hit, HitResolver.TileRecoil(in hit, surfaceRestitution));
                     alreadyHit.Add(EntityId.None);
                 }
             }
@@ -214,7 +242,7 @@ public sealed class CombatSystem
                         if (stop > curStop) _hitstopByHitId[hit.HitId] = stop;
                     }
                     if (hit.RecoilScale > 0f)
-                        AccumulateRecoil(hit.HitId, -delivered * hit.RecoilScale);
+                        AccumulateRecoil(in hit, -delivered * hit.RecoilScale);
                 }
             }
         }
@@ -305,10 +333,23 @@ public sealed class CombatSystem
         foreach (var (hitId, n) in data) _entityHitsByHitId[hitId] = n;
     }
 
-    private void AccumulateRecoil(int hitId, Vector2 impulse)
+    // The cap (Hitbox.MaxRecoilSpeed) is applied to the running TALLY, not to each
+    // contribution: the stab's tile bounce and its entity recoil can land on the same
+    // frame, and the legacy path sums per cell, so clamping each piece alone would
+    // still let the total overshoot. Direction is preserved — only the magnitude is
+    // brought down to the ceiling.
+    private void AccumulateRecoil(in Hitbox hit, Vector2 impulse)
     {
+        int hitId = hit.HitId;
         _recoilByHitId.TryGetValue(hitId, out var cur);
-        _recoilByHitId[hitId] = cur + impulse;
+        var total = cur + impulse;
+        float cap = hit.MaxRecoilSpeed;
+        if (cap > 0f)
+        {
+            float len = total.Length();
+            if (len > cap) total *= cap / len;
+        }
+        _recoilByHitId[hitId] = total;
     }
 
     // SAT: arbitrary convex polygon (given by its pre-computed world vertices +

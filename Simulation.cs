@@ -223,6 +223,21 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         return n;
     }
 
+    // ITargetSource: live ray emitters in World (spawn) order.
+    public int Rays(Span<RayView> into)
+    {
+        int n = 0;
+        foreach (var r in _world.Query<EntityRef>())
+        {
+            if (n >= into.Length) break;
+            if (r.Component1.Obj is not RayEmitter e || e.IsDead) continue;
+            into[n++] = new RayView { Position = e.Body.Position, Angle = e.Angle, HalfAngle = e.HalfAngle,
+                                      Range = e.Range, Firing = e.Firing, LifeLeft = e.LifeLeft,
+                                      Owner = e.Owner, Team = e.Team };
+        }
+        return n;
+    }
+
     // IEntitySpawner — cosmetic: a thrown/lobbed mass ball landed and erupted. Fired from
     // inside Step; subscribers must key on (Frame, id) like the tile events do.
     public event Action<EntityId, Vector2, TileType, int> OnMassLanded;
@@ -233,6 +248,13 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     public event Action<EntityId, Vector2, float> OnChargedBlast;
     public void NotifyChargedBlast(EntityId id, Vector2 pos, float radius)
         => OnChargedBlast?.Invoke(id, pos, radius);
+    // Cosmetic: a player's attack struck terrain (HitId, contact, into-surface dir) —
+    // see CombatSystem.OnTerrainStrike. Raised every overlapping frame; dedupe by HitId.
+    public event Action<int, Vector2, Vector2> OnTerrainStrike
+    {
+        add => _combat.OnTerrainStrike += value;
+        remove => _combat.OnTerrainStrike -= value;
+    }
 
     // Fired when the player dies and respawns. Game1 hooks this for the cosmetic puff;
     // the respawn itself happens inside Step so it stays deterministic.

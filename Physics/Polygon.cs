@@ -10,6 +10,8 @@ public class Polygon
     private readonly Vector2[] _vertices;
 
     public int VertexCount => _vertices.Length;
+    // Local-space vertex i (no allocation — GetVertices copies).
+    public Vector2 LocalVertex(int i) => _vertices[i];
 
     public Polygon(Vector2[] vertices)
     {

@@ -306,7 +306,16 @@ public sealed class DebugOverlayRenderer
 
         if (hb.Shape != null)
         {
-            _spriteBatch.Draw(_pixel, rect, color * 0.12f);
+            // The polygon is what the sim tests; the broad-phase box is only outlined,
+            // faintly, so a fan of long shaped hitboxes (a ray's wedges) doesn't stack
+            // its boxes into one solid slab that hides the shapes.
+            var faint = color * 0.25f;
+            var tl = new Vector2(hb.Region.Left,  hb.Region.Top);
+            var tr = new Vector2(hb.Region.Right, hb.Region.Top);
+            var br = new Vector2(hb.Region.Right, hb.Region.Bottom);
+            var bl = new Vector2(hb.Region.Left,  hb.Region.Bottom);
+            DrawLine(tl, tr, faint, 1); DrawLine(tr, br, faint, 1);
+            DrawLine(br, bl, faint, 1); DrawLine(bl, tl, faint, 1);
             var verts = hb.Shape.GetVertices(hb.ShapePos, hb.ShapeRotation);
             for (int i = 0; i < verts.Length; i++)
                 DrawLine(verts[i], verts[(i + 1) % verts.Length], color, 1);

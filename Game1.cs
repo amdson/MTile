@@ -67,6 +67,11 @@ public class Game1 : Game
     private GlowTrailField _glowField;
     private AttackGlowSystem _attackGlow;
     private SpriteAttachmentRenderer _attachments;
+    private HitSparkRenderer _hitSparks;
+    // HitIds whose terrain-strike burst already played. The sim raises the strike every
+    // frame the hitbox overlaps terrain; one burst per attack. Bounded FIFO.
+    private readonly HashSet<int> _sparkedHitIds = new();
+    private readonly Queue<int> _sparkedOrder = new();
     private readonly ParticleSystem _particles = new(capacity: 2048);
     // Edge-triggered sim events on their way to the render shell, deduped by
     // (sim frame, id) so a rollback replay doesn't re-present them. Particles and audio
@@ -454,6 +459,8 @@ public class Game1 : Game
         // again for every rolled-back frame and used to spray a duplicate burst each
         // time. The log drains once per rendered frame, below.
         _events.Reset();   // fresh sim ⇒ frame counter restarts ⇒ old keys are stale
+        _sparkedHitIds.Clear(); _sparkedOrder.Clear();   // HitIds restart with the sim
+        _hitSparks?.Clear();
         _audio.StopAll();  // and no voice should survive into a different world
         _sim.OnPlayerRespawn += pos =>
             _events.Emit(_sim.Frame, new PresentationId(PresentationKind.PlayerRespawn), pos);
@@ -475,6 +482,9 @@ public class Game1 : Game
             _events.Emit(_sim.Frame,
                          new PresentationId(PresentationKind.MassLand, id.Index, id.Generation),
                          pos, (int)type | (Math.Min(blocks, 255) << 8));
+        _sim.OnTerrainStrike += (hitId, pos, dir) =>
+            _events.Emit(_sim.Frame, new PresentationId(PresentationKind.TerrainStrike, hitId),
+                         pos, (int)MathF.Round(MathF.Atan2(dir.Y, dir.X) * 1000f));
         _sim.OnChargedBlast += (id, pos, radius) =>
             _events.Emit(_sim.Frame,
                          new PresentationId(PresentationKind.ChargedBlast, id.Index, id.Generation),
@@ -506,6 +516,15 @@ public class Game1 : Game
                 case PresentationKind.MassLand:
                     Effects.MassSplash(_particles, e.Position,
                         TilePalette.BaseColor((TileType)(e.Payload & 0xFF)), e.Payload >> 8);
+                    break;
+                case PresentationKind.TerrainStrike:
+                    if (_hitSparks != null && _sparkedHitIds.Add(e.Id.A))
+                    {
+                        _sparkedOrder.Enqueue(e.Id.A);
+                        if (_sparkedOrder.Count > 64) _sparkedHitIds.Remove(_sparkedOrder.Dequeue());
+                        float ang = e.Payload / 1000f;
+                        _hitSparks.SpawnWall(e.Position, new Vector2(MathF.Cos(ang), MathF.Sin(ang)));
+                    }
                     break;
                 case PresentationKind.ChargedBlast:
                     Effects.Blast(_particles, e.Position, e.Payload);
@@ -725,6 +744,7 @@ public class Game1 : Game
         }
         _attackGlow = new AttackGlowSystem(_animator, _glow, _glowField, SkeletonScale);
         _attachments = new SpriteAttachmentRenderer(GraphicsDevice);
+        _hitSparks = new HitSparkRenderer(GraphicsDevice);
         _attackGlow.ReplacesSlash = p =>
         {
             if (ReferenceEquals(p, _sim.Player)) return _attachments.ReplacesEffect(_animator, "knife");
@@ -1345,6 +1365,8 @@ public class Game1 : Game
             }
         }
         else _attachments.ClearHistory();
+        _hitSparks.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+        _hitSparks.Draw(camTransform);
 
         if (_config.DebugDrawGlowDemo)
             _devDemos.DrawGlowDemo(camTransform,

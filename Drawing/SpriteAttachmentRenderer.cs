@@ -230,9 +230,17 @@ public sealed class SpriteAttachmentRenderer : IDisposable
     }
     private static VertexPositionColorTexture Vertex(Vector2 p, Color c, float u = 0, float v = 0)
         => new(new Vector3(p, 0), c, new Vector2(u, v));
+    // Streak look: an additive pale-blue sheet over the swept blade span (faint at the
+    // hand, bright at the tip), plus a hot white band hugging the tip path so the cutting
+    // edge reads as a crisp arc. Both fade with sample age.
+    private static readonly Color TrailSheet = new(150, 200, 255);
+    private static readonly Color TrailEdge  = new(235, 248, 255);
+    private const float EdgeBand = .22f;   // fraction of the blade, measured in from the tip
+
     private void DrawTrail(History h)
     {
         _effect.TextureEnabled = false;
+        _device.BlendState = BlendState.Additive;
         var points = h.Trail.Points;
         for (int i = 1; i < points.Count; i++)
         {
@@ -242,23 +250,32 @@ public sealed class SpriteAttachmentRenderer : IDisposable
             // Smooth the ribbon between real pose samples; a fast swing often has
             // only a few rendered poses, and straight quads make its arc polygonal.
             Vector2 start = a.Base, tip = a.Tip;
-            float Opacity(float t) => MathF.Pow(Math.Clamp(1 - MathHelper.Lerp(a.Age, b.Age, t) / h.Lifetime, 0, 1), 2)
-                                      * MathHelper.Lerp(a.Weight, b.Weight, t) * .7f;
+            float Opacity(float t) => MathF.Pow(Math.Clamp(1 - MathHelper.Lerp(a.Age, b.Age, t) / h.Lifetime, 0, 1), 1.5f)
+                                      * MathHelper.Lerp(a.Weight, b.Weight, t);
             float wa = Opacity(0);
-            for (int step = 1; step <= 4; step++)
+            for (int step = 1; step <= 6; step++)
             {
-                float t = step / 4f;
+                float t = step / 6f;
                 var end = Vector2.CatmullRom(prev.Base, a.Base, b.Base, next.Base, t);
                 var endTip = Vector2.CatmullRom(prev.Tip, a.Tip, b.Tip, next.Tip, t);
                 float wb = Opacity(t);
-                _ribbon[0] = Vertex(start, Color.White * (wa * .15f));
-                _ribbon[1] = Vertex(tip, Color.White * wa);
-                _ribbon[2] = Vertex(endTip, Color.White * wb);
-                _ribbon[3] = Vertex(end, Color.White * (wb * .15f));
+                _ribbon[0] = Vertex(start, TrailSheet * (wa * .1f));
+                _ribbon[1] = Vertex(tip, TrailSheet * (wa * .8f));
+                _ribbon[2] = Vertex(endTip, TrailSheet * (wb * .8f));
+                _ribbon[3] = Vertex(end, TrailSheet * (wb * .1f));
+                Submit(_ribbon);
+                // Edge band: the outer slice of the blade, solid at the tip, fading inward.
+                var inA = Vector2.Lerp(tip, start, EdgeBand);
+                var inB = Vector2.Lerp(endTip, end, EdgeBand);
+                _ribbon[0] = Vertex(inA, TrailEdge * 0f);
+                _ribbon[1] = Vertex(tip, TrailEdge * wa);
+                _ribbon[2] = Vertex(endTip, TrailEdge * wb);
+                _ribbon[3] = Vertex(inB, TrailEdge * 0f);
                 Submit(_ribbon);
                 start = end; tip = endTip; wa = wb;
             }
         }
+        _device.BlendState = BlendState.AlphaBlend;
     }
     private void Submit(VertexPositionColorTexture[] vertices)
     {

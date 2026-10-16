@@ -151,6 +151,17 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     // assert which attack in a kit actually fired without reaching into the FSM.
     public string CurrentActionName =>
         _currentAction >= 0 ? _actions[_currentAction].GetType().Name : "";
+    // The running action's index in this enemy's action list, or -1 when idle. A
+    // brain that schedules its own repertoire (WarlordController) reads this to
+    // see which of its requests the FSM actually took.
+    public int CurrentActionIndex => _currentAction;
+    // Seconds into the running action (0 when idle). Paired with the index it lets a
+    // brain see a same-action restart — the FSM drops a finished action and re-enters
+    // it inside one SelectAction, so the index alone never shows a gap.
+    public float CurrentActionTime => _currentAction >= 0 ? _actionVars.TimeInState : 0f;
+    // The running action's vars, read-only, for render-side views (a subtype's
+    // SyncSprite choosing a pose by phase). Default when idle.
+    public ref readonly EnemyActionVars CurrentActionVars => ref _actionVars;
 
     // Quadratic air resistance every enemy gets (PhysicsBody.QuadraticDrag). Stronger
     // than the player's: enemies are lighter and low-friction, so knockback is what

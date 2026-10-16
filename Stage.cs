@@ -99,6 +99,41 @@ public static class Stages
             Populate      = _ => { },
         });
 
+        // ─── warlord ──────────────────────────────────────────────────────────
+        // WarlordEnemy boss fight (Levels/warlord.json): a wide walled hall, floor at
+        // tile row 12, with a low dirt ledge on each side for the player to use as
+        // high ground (and for the boss to leap onto). One Warlord to your right; it
+        // respawns 4 s after dying. See Entities/Enemies/Types/WarlordEnemy.cs.
+        Register(new Stage {
+            Name          = "warlord",
+            TerrainConfig = "warlord.json",
+            PlayerSpawn   = WarlordPlayerSpawn,
+            Populate      = PopulateWarlord,
+        });
+
+        // ─── prism ────────────────────────────────────────────────────────────
+        // PrismEnemy boss fight (Levels/prism.json — the Warlord hall: floor at tile
+        // row 12, a dirt ledge each side). One Prism to your right; it respawns 4 s
+        // after dying. See Entities/Enemies/Types/PrismEnemy.cs.
+        Register(new Stage {
+            Name          = "prism",
+            TerrainConfig = "prism.json",
+            PlayerSpawn   = WarlordPlayerSpawn,
+            Populate      = PopulatePrism,
+        });
+
+        // ─── quillback ────────────────────────────────────────────────────────
+        // QuillbackEnemy boss fight (Levels/quillback.json — the Warlord hall: floor at
+        // tile row 12, a dirt ledge each side, which it digs through or builds up to).
+        // One Quillback to your right; it respawns 4 s after dying. See
+        // Entities/Enemies/Types/QuillbackEnemy.cs.
+        Register(new Stage {
+            Name          = "quillback",
+            TerrainConfig = "quillback.json",
+            PlayerSpawn   = WarlordPlayerSpawn,
+            Populate      = PopulateQuillback,
+        });
+
         // ─── weights ──────────────────────────────────────────────────────────
         // Knockback-by-mass testbed: a flat walled hall with a row of passive balls
         // (left) and a row of proximity-triggered melee enemies (right), one per
@@ -914,6 +949,63 @@ public static class Stages
                         && (e.Body.Position.X < wallX) == left) alive = true;
                 if (!alive) g.SpawnEntity(new WardenEnemy(spawn));
             }
+        });
+    }
+
+    // Warlord stage geometry (Levels/warlord.json): floor surface at tile row 12.
+    private const float WarlordFloorTopY = 12 * Chunk.TileSize;
+    private static readonly Vector2 WarlordPlayerSpawn = new(-10 * Chunk.TileSize, WarlordFloorTopY - 30f);
+    private static readonly Vector2 WarlordSpawn       = new( 18 * Chunk.TileSize, WarlordFloorTopY - WarlordEnemy.Radius - 2f);
+
+    private static void PopulateWarlord(Simulation g)
+    {
+        g.SpawnEntity(new WarlordEnemy(WarlordSpawn));
+
+        // Respawn on the 4 s beat once no Warlord is alive. Pure function of sim state.
+        int period = SimFrames.FromSeconds(4f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            foreach (var e in g.Entities)
+                if (e.Kind == EntityKind.Warlord && !e.IsDead) return;
+            g.SpawnEntity(new WarlordEnemy(WarlordSpawn));
+        });
+    }
+
+    private static readonly Vector2 PrismSpawn = new(18 * Chunk.TileSize, WarlordFloorTopY - PrismEnemy.FootDrop - 2f);
+
+    private static void PopulatePrism(Simulation g)
+    {
+        g.SpawnEntity(new PrismEnemy(PrismSpawn));
+
+        // Respawn on the 4 s beat once no Prism is alive. Pure function of sim state.
+        int period = SimFrames.FromSeconds(4f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            foreach (var e in g.Entities)
+                if (e.Kind == EntityKind.Prism && !e.IsDead) return;
+            g.SpawnEntity(new PrismEnemy(PrismSpawn));
+        });
+    }
+
+    private static readonly Vector2 QuillbackSpawn = new(18 * Chunk.TileSize, WarlordFloorTopY - QuillbackEnemy.HalfHeight - 2f);
+
+    private static void PopulateQuillback(Simulation g)
+    {
+        g.SpawnEntity(new QuillbackEnemy(QuillbackSpawn));
+
+        // Respawn on the 4 s beat once no Quillback is alive. Pure function of sim state.
+        int period = SimFrames.FromSeconds(4f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            foreach (var e in g.Entities)
+                if (e.Kind == EntityKind.Quillback && !e.IsDead) return;
+            g.SpawnEntity(new QuillbackEnemy(QuillbackSpawn));
         });
     }
 

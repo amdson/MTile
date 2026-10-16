@@ -14,8 +14,9 @@ namespace MTile.Tests;
 // mistimed guess is not.
 //
 // These tests pin both halves of that: the penetration curve itself, and the render-side
-// cue stamps (LastParryFrame / LastParryDir / LastParryCharged) that GameAudio.GuardBlock
-// and HitFeelSystem derive the block sound and sparks from. If the stamps stop being
+// cue stamps (LastParryFrame / LastParryDir / LastParryCharged for a perfect block,
+// LastBlockFrame / LastBlockDir / LastBlockLeak for a late one) that GameAudio.GuardParry,
+// GameAudio.GuardBlock and HitFeelSystem derive the sounds and sparks from. If the stamps stop being
 // written, or stop surviving a snapshot restore, the cue silently stops firing (or
 // double-fires after a rollback) with nothing else in the suite noticing.
 public class GuardTests(ITestOutputHelper output)
@@ -171,16 +172,49 @@ public class GuardTests(ITestOutputHelper output)
         Assert.Equal(0.50f, g.KnockbackScale, 3);
     }
 
-    // A leaked hit is still a hit that landed: it must not stamp the block cue, or the
-    // clean-parry clang would play over a hit that actually got through.
+    // A leaked hit is still a hit that landed: it must not stamp the PARRY cue, or the
+    // clean-parry ting would play over a hit that actually got through. It stamps the
+    // late-block cue instead, with the leak saturated.
     [Fact]
-    public void LeakedHitLeavesNoBlockCue()
+    public void LeakedHitStampsTheBlockCueNotTheParryCue()
     {
         var c = Guarding();
 
         HitAt(c, GuardFrame + 600);
 
         Assert.Equal(0, c.LastParryFrame);
+        Assert.Equal(GuardFrame + 600, c.LastBlockFrame);
+        Assert.True(c.LastBlockDir.X > 0.99f);         // unit vector toward the attacker
+        Assert.Equal(1f, c.LastBlockDir.Length(), 3);
+        Assert.Equal(1f, c.LastBlockLeak, 3);
+    }
+
+    // Just past the window the guard still stops everything — it just breaks doing it.
+    // The block cue carries that: leak ≈ 0, so the sound reads as a solid block and
+    // GameAudio.HitConnect mixes the hit clip back by (nearly) nothing.
+    [Fact]
+    public void JustLateBlockStampsANearZeroLeak()
+    {
+        var c = Guarding();
+
+        var g = HitAt(c, GuardFrame + PerfectWindowFrames + 1);
+
+        Assert.False(g.Absorbed);
+        Assert.Equal(GuardFrame + PerfectWindowFrames + 1, c.LastBlockFrame);
+        Assert.Equal(1f / FalloffFrames, c.LastBlockLeak, 3);
+        Assert.Equal(g.DamageScale, 0.75f * c.LastBlockLeak, 4);   // the same t the scales use
+    }
+
+    // The two cues are exclusive: a perfect block never writes the late-block stamp.
+    [Fact]
+    public void PerfectBlockLeavesNoLateBlockCue()
+    {
+        var c = Guarding();
+
+        HitAt(c, GuardFrame + PerfectWindowFrames);
+
+        Assert.Equal(0, c.LastBlockFrame);
+        Assert.Equal(GuardFrame + PerfectWindowFrames, c.LastParryFrame);
     }
 
     // ── Break + recovery ────────────────────────────────────────────────────────
@@ -209,6 +243,7 @@ public class GuardTests(ITestOutputHelper output)
         Assert.Equal(1f, g.DamageScale);
         Assert.Equal(1f, g.KnockbackScale);
         Assert.Equal(0, c.LastParryFrame);
+        Assert.Equal(0, c.LastBlockFrame);     // the guard never met it: not a block either
         Assert.True(c.GuardBroken);
     }
 
@@ -336,6 +371,9 @@ public class GuardTests(ITestOutputHelper output)
         Assert.True(c.GuardBroken);
         Assert.False(c.GuardBlockRefund);
         Assert.Equal(GuardFrame + 600 + BreakRecoveryFrames, c.GuardBreakExpireFrame);
+        Assert.Equal(GuardFrame + 600, c.LastBlockFrame);   // the late-block cue rolls back too
+        Assert.True(c.LastBlockDir.X > 0.99f);
+        Assert.Equal(1f, c.LastBlockLeak, 3);
     }
 
     [Fact]

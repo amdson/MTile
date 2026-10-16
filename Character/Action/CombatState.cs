@@ -208,6 +208,16 @@ public class CombatState
     public Vector2 LastParryDir;
     public bool    LastParryCharged;   // that parry also armed GuardRetaliate
 
+    // The same stamps for a LATE block — the hit came in through the front cone after
+    // the perfect window had closed (ResolveGuard's falloff branch), so the stance took
+    // part of it and broke. Leak is the falloff position, 0 = just missed the window and
+    // nothing got through .. 1 = saturated, so a cue can grade from "held it" to
+    // "barely slowed it". An out-of-cone hit is not a block and leaves these alone;
+    // a perfect block writes the parry stamps instead, never these.
+    public int     LastBlockFrame;
+    public Vector2 LastBlockDir;
+    public float   LastBlockLeak;
+
     // A parry only "charges" off weak incoming hits — strong attacks parry to
     // zero damage but don't reward a counter. Threshold compares against
     // Hitbox.Damage (HP off the victim), NOT the knockback, so an attack that
@@ -487,6 +497,9 @@ public class CombatState
         // saturation values, reached GuardFalloffSeconds later and held from there on.
         float falloff = MathF.Max(SimFrames.FromSeconds(GuardFalloffSeconds, dt), 1);
         float t       = MathHelper.Clamp((age - perfect) / falloff, 0f, 1f);
+        LastBlockFrame = currentFrame;
+        LastBlockDir   = fromAttacker;
+        LastBlockLeak  = t;
         BreakGuard(currentFrame, dt);
         return new GuardOutcome(absorbed:       false,
                                 damageScale:    GuardMaxDamagePenetration    * t,
@@ -529,5 +542,7 @@ public class CombatState
         GuardBroken = o.GuardBroken; GuardBreakExpireFrame = o.GuardBreakExpireFrame;
         LastParryFrame = o.LastParryFrame; LastParryDir = o.LastParryDir;
         LastParryCharged = o.LastParryCharged;
+        LastBlockFrame = o.LastBlockFrame; LastBlockDir = o.LastBlockDir;
+        LastBlockLeak = o.LastBlockLeak;
     }
 }

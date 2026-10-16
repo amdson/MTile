@@ -728,6 +728,21 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
 
     // Queue a blast if the cell about to go Empty was charged. Called from BreakCell
     // immediately BEFORE Charge.Clear, which is the last moment the flag still exists.
+    // Take a cell out of the world by HARVESTING it (a block grab peeling it into a
+    // clod) rather than destroying it: a charged cell's charge leaves with the block
+    // instead of detonating where it stood (ChargedBlast) — the clod cashes it in on
+    // impact. Otherwise identical to BreakCell. wasCharged reports what was carried off.
+    public bool HarvestCell(int gtx, int gty, out bool wasCharged)
+    {
+        wasCharged = Charge.IsCharged(gtx, gty);
+        // Lift the charge first so BreakCell's NoteChargedBreak sees an ordinary cell.
+        if (wasCharged) Charge.Clear(gtx, gty);
+        if (BreakCell(gtx, gty)) return true;
+        if (wasCharged) Charge.Set(gtx, gty);      // nothing taken: the charge stays put
+        wasCharged = false;
+        return false;
+    }
+
     private void NoteChargedBreak(int gtx, int gty)
     {
         if (Charge.IsCharged(gtx, gty)) _chargedBreaks.Add(CellCenter(gtx, gty));

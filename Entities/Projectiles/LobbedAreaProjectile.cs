@@ -57,7 +57,22 @@ public class LobbedAreaProjectile : Projectile
     private const int   ExplosionSegments = 10;
     private const float SegmentHalfSize   = 9f;
     private const float ExplosionKnockback = 320f;
+    // TILE damage of the burst (what it chips off terrain). Flat: a clod's terrain bite
+    // doesn't grow with its size — the mound it deposits does.
     private const float ExplosionDamage   = TileDamage.TileMaxHP * 0.8f;
+    // BODY damage scales with what's in the clod, and charge counts twice:
+    //   (BodyDamagePerBlock · (plain + ChargedBlockWeight · charged)) · (1 + ChargedBodyMul · charged)
+    // Additive — a charged block is worth ChargedBlockWeight plain ones in the sum —
+    // and multiplicative — each one also scales the whole clod. The carry bleed eats
+    // plain blocks, never charged ones. With the player's 5 HP:
+    //   4 plain 0.8 · 9 plain 1.8 · 1c+4p 2.56 · 2c+4p 5.28 · 3c alone 6.72 ·
+    //   3c+2p 7.84 · 3c+4p 8.96 · 4c+5p 14.3 · 6c+3p 25.0   (uncapped)
+    // No guard special case: a perfect parry still absorbs it, but a held guard leaks
+    // up to 75% (CombatState.ResolveGuard), so anything over ~6.7 kills through one —
+    // which three charged blocks always clear.
+    private const float BodyDamagePerBlock = 0.2f;
+    private const float ChargedBlockWeight = 4f;
+    private const float ChargedBodyMul     = 0.6f;
     // The core hit, at the blast's center — the radial segments ring the center at
     // ExplosionRadius, so without this the body actually struck (which sits AT the
     // center) is the one thing the explosion misses. Half-size tracks the drawn orb so
@@ -69,13 +84,9 @@ public class LobbedAreaProjectile : Projectile
     // so a clod with even one in it is a deliberately expensive object and the payoff
     // has to read as such. Damage leads, knockback and reach follow more gently: the
     // point is that a charged clod BREAKS things, not that it launches them to orbit.
-    private const float ChargedDamagePerBlock    = 1.5f;   // ×2.5 at one, ×4 at two
+    private const float ChargedDamagePerBlock    = 1.5f;   // TILE damage: ×2.5 at one, ×4 at two
     private const float ChargedKnockbackPerBlock = 0.6f;
     private const float ChargedRadiusPerBlock    = 0.35f;
-    // Cap on how many charged tiles one clod can cash in. A grab that happened to peel
-    // a whole charged wall shouldn't produce a screen-clearing blast — the fantasy is a
-    // demolition charge, not a nuke.
-    private const int   ChargedMax               = 4;
     // How far a charged clod's orb is pulled toward white. Same language as the tile
     // tint in ChunkRenderer, so "this thing is charged" reads identically on the ground
     // and in the air.
@@ -109,8 +120,6 @@ public class LobbedAreaProjectile : Projectile
     public int      Budget        => _budget;
     public int      HarvestBlocks => _harvest;
     public int      ChargedBlocks => _charged;
-    // Charged tiles this clod will actually cash in — the raw count, capped.
-    public int      EffectiveCharge => Math.Min(_charged, ChargedMax);
     public TileType TileType      => _tileType;
 
     // hitId/tileType are immutable (ctor) — recorded so Rehydrate can reconstruct via
@@ -238,12 +247,15 @@ public class LobbedAreaProjectile : Projectile
     // whatever is at the center, and the radial segments catch everything around it.
     private void Detonate(HitboxWorld hitboxes, IEntitySpawner spawner)
     {
-        // Charged tiles in the clod scale the whole burst. One is a big hit; the cap
-        // keeps a lucky harvest of a charged wall from clearing the screen.
-        int   charged = EffectiveCharge;
+        // Charged tiles in the clod scale the whole burst, uncapped: a clod packed
+        // with a whole charged wall is a nuke, and the player paid for every block.
+        int   charged = _charged;
         float dmgMul  = 1f + ChargedDamagePerBlock    * charged;
         float kbMul   = 1f + ChargedKnockbackPerBlock * charged;
         float radMul  = 1f + ChargedRadiusPerBlock    * charged;
+        // Only a grabbed clod (HarvestBlocks > 0) scales; the charge-lob's budget runs to
+        // 50 and keeps the old flat hit.
+        float bodyDmg = _harvest > 0 ? BodyDamage(_budget, charged) : ExplosionDamage * dmgMul;
 
         // 1) Eruption mound at the burst site — but ONLY for an ordinary clod. Chunks
         // come from the spawner (Game1 implements both IEntitySpawner and
@@ -292,6 +304,7 @@ public class LobbedAreaProjectile : Projectile
                 coreDir * (ExplosionKnockback * kbMul),
                 Faction, Id, Color.Goldenrod,
                 targets: charged > 0 ? HitTargets.All : HitTargets.EntitiesOnly,
+                bodyDamage: bodyDmg,
                 origin: center));
 
             // The ring grows with the charge, and the segments grow with it — the boxes
@@ -311,6 +324,7 @@ public class LobbedAreaProjectile : Projectile
                     region, _hitId, ExplosionDamage * dmgMul,
                     dir * (ExplosionKnockback * kbMul),
                     Faction, Id, Color.Goldenrod,
+                    bodyDamage: bodyDmg,
                     origin: center));
             }
         }
@@ -319,6 +333,17 @@ public class LobbedAreaProjectile : Projectile
         // goes out as a sim event keyed by this entity's id — the render shell dedupes
         // it against rollback replays (Presentation/PresentationEvents.cs).
         spawner?.NotifyMassLanded(Id, Body.Position, _tileType, _budget);
+    }
+
+    // Body damage of a burst holding `blocks` blocks (the live budget, after any carry
+    // bleed), `charged` of them charged (capped, never bled). Charged blocks are part
+    // of the harvest, so they're moved from the plain count to the weighted one; a
+    // carry that bled the budget below the charge still pays the charge in full. See
+    // the constants for the curve.
+    public static float BodyDamage(int blocks, int charged)
+    {
+        int plain = Math.Max(0, blocks - charged);
+        return BodyDamagePerBlock * (plain + ChargedBlockWeight * charged) * (1f + ChargedBodyMul * charged);
     }
 
     // One frame of following the pulling point. Velocity-matching (critically damped),

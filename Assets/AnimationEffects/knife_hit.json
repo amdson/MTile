@@ -1,0 +1,10 @@
+{
+  "Image": "knife_hit.png",
+  "FrameWidth": 378,
+  "FrameHeight": 708,
+  "FrameCount": 8,
+  "PivotX": 188.5,
+  "PivotY": 353.5,
+  "RigUnitsPerPixel": 0.09,
+  "TrailSeconds": 0
+}

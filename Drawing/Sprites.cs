@@ -262,6 +262,76 @@ public static class Sprites
         return sprite;
     }
 
+    // Warlord: the duelist boss. A heavy octagonal shell over a second plate, two
+    // forward-raked horns off the crown, and a single slit eye that pulses. The
+    // silhouette has to say *big and coming for you* — unlike the Bastion it has no
+    // struts, because nothing about it is bolted down.
+    public static AnimatedSprite Warlord(float radius)
+    {
+        var shell = new Color(150, 60, 50);
+        var plate = new Color(90, 35, 35);
+        var horn  = new Color(240, 225, 200);
+        var eye   = new Color(255, 200, 80);
+
+        Pose Frame(float glow) => new Pose()
+            .Ring(Vector2.Zero, radius,         shell, 8, 2.5f)
+            .Ring(Vector2.Zero, radius * 0.62f, plate, 8, 1.5f)
+            // Horns: from the upper shell, raked up and out.
+            .Line(new Vector2(-radius * 0.55f, -radius * 0.75f), new Vector2(-radius * 0.95f, -radius * 1.35f), horn, 2f)
+            .Line(new Vector2( radius * 0.55f, -radius * 0.75f), new Vector2( radius * 0.95f, -radius * 1.35f), horn, 2f)
+            // Slit eye: a short horizontal bar that brightens on the pulse.
+            .Line(new Vector2(-radius * 0.3f, -radius * 0.15f), new Vector2(radius * 0.3f, -radius * 0.15f),
+                  Color.Lerp(eye, Color.White, glow), 2f + glow);
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(0f), Frame(0.35f), Frame(0.7f), Frame(0.35f) },
+            frameDuration: 0.2f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
+    // Prism: the ray boss, drawn as a player-proportioned stick figure — head at the
+    // player's head height, feet on the floor, a lens diamond at the chest. One
+    // SpriteAnimation per (pose, facing); PrismEnemy.SyncSprite picks the pose from its
+    // action phase each rendered frame and plays it only on change, so the idle breath
+    // and the dash stride keep their own clocks.
+    public static PrismFigure Prism() => new();
+
+    // Quillback: the armored hedgehog boss — a quilled dome, snout, and a spiked tail
+    // club; curls into a spiky ball for the roll, the spin and the storm. One
+    // SpriteAnimation per (pose, facing); QuillbackEnemy.SyncSprite picks the pose.
+    public static QuillbackFigure Quillback() => new();
+
+    // Ray emitter: a small hexagonal node    // Ray emitter: a small hexagonal node with a spinning inner triangle, so even
+    // before it fires it reads as something running.
+    public static AnimatedSprite RayEmitter(float radius)
+    {
+        var shell = new Color(200, 120, 255);
+        var core  = new Color(255, 235, 250);
+
+        Pose Frame(float spin)
+        {
+            var p = new Pose().Ring(Vector2.Zero, radius, shell, 6, 1.5f);
+            float r = radius * 0.55f;
+            for (int i = 0; i < 3; i++)
+            {
+                float a0 = spin + i * MathHelper.TwoPi / 3f, a1 = spin + (i + 1) * MathHelper.TwoPi / 3f;
+                p.Line(new Vector2(MathF.Cos(a0), MathF.Sin(a0)) * r, new Vector2(MathF.Cos(a1), MathF.Sin(a1)) * r, core, 1f);
+            }
+            return p;
+        }
+
+        var anim = new SpriteAnimation(
+            new[] { Frame(0f), Frame(0.35f), Frame(0.7f), Frame(1.05f) },
+            frameDuration: 0.1f, loop: true);
+
+        var sprite = new AnimatedSprite();
+        sprite.Play(anim);
+        return sprite;
+    }
+
     // Pouncer: compact triangular body (apex down — it lands point-first) with
     // coiled hind legs and a pair of forward eyes. Read at a glance it should
     // look sprung, so the two idle frames swap between a loaded and a released

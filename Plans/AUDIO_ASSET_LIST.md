@@ -75,7 +75,10 @@ as clips:
   applied to hit sounds, than as a clip. Cheapest real version: bias hit-connect pitch
   upward with `DamagePercent`, which gets the escalation read for zero new assets.
 - **Hitstun / guard / grabbed** — states, better served by ducking/filtering the existing
-  mix than by their own sounds. Defer until there's a bus structure.
+  mix than by their own sounds. Defer until there's a bus structure. (The guard *events*
+  are a different matter and do have clips: `guard_block` for a late block that broke the
+  stance and `guard_parry` for a perfect one, both synthesized by
+  `scripts/gen-guard-sfx.py` and wired in `Audio/GameAudio.cs`.)
 
 ---
 

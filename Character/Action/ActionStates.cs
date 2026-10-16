@@ -997,7 +997,7 @@ public class AirTurnSlash : SlashLikeAction
     protected override float Duration            => 0.20f;   // retime: 7f/3f
     protected override float HurtboxStartSeconds  => 7f / 60f;
     protected override float HurtboxActiveSeconds => 3f / 60f;
-    protected override float ArcRadiusScale      => 1.70f;   // long reach
+    protected override float ArcRadiusScale      => 1.20f;   // long reach
     protected override float SweepAngleDeg       => 60f;     // narrow
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 150f;
@@ -1219,8 +1219,8 @@ public class StabAction : ActionState
     // Roadmap §1.7 hitbox bump (1.75×). Reach + half-width both grow so the
     // stab feels longer AND wider, not just longer-thin. BlockReach/HalfWidth
     // below get the same scale.
-    private const float Reach                 = PlayerCharacter.Radius * 3.3f  * 1.75f;
-    private const float PrimaryHalfWidth      = PlayerCharacter.Radius * 0.55f * 1.75f;
+    private const float Reach                 = PlayerCharacter.Radius * 2.3f  * 1.75f;
+    private const float PrimaryHalfWidth      = PlayerCharacter.Radius * 0.4f * 1.75f;
     // Soft mid-attack steering. The captured _stabDir rotates toward the current
     // mouse direction at up to MaxSteerSpeed rad/s, with the total deviation from
     // the initial swipe angle capped at MaxTotalSteer. Lets the player adjust the
@@ -1270,15 +1270,21 @@ public class StabAction : ActionState
     private const float MinLaunch             = 120f;
     // Tile recoil (HitResolver.TileRecoil): bounce = (1+e_material)·approach·RecoilScale,
     // fired ONCE PER ATTACK (CombatSystem latches on the dedupe set) against the
-    // bounciest surviving surface, floored at MinRecoilSpeed. Tuned so the
-    // DEFAULT stab-into-ground pogo is exactly a jump's worth of upward momentum
-    // (full-hop launch ≈ -100 initial + -1500·0.12 hold ≈ 280 px/s): a standing
-    // stab into stone computes 1.7·650·0.2 ≈ 221 and rides the 280 floor. Speed
-    // earns more — a 400 px/s dive → 1.7·1050·0.2 ≈ 357, terminal ~700 → ≈ 459.
+    // bounciest surviving surface, floored at MinRecoilSpeed and capped at
+    // MaxRecoilSpeed (Hitbox.MaxRecoilSpeed — CombatSystem clamps the per-frame tally,
+    // so the cap also covers recoil off a struck body). Both ends are tuned to a
+    // jump: a full hop leaves the ground at 100 px/s and gains (1500−600)·0.12 more
+    // under the hold, ≈ 54 px of apex, and the one-shot Δv that reaches the same
+    // apex is √(2·600·54) ≈ 255 px/s. So a standing stab into stone (1.7·650·0.2 ≈
+    // 221) rides the floor up to a jump, and a 400 px/s dive (≈ 357 raw) or a heavy
+    // target that barely moved is pulled back DOWN to one — pogo is a movement tool
+    // of a known size, not a launch that scales with how fast you arrived. The
+    // excess used to read as the attack throwing the player, hence the ceiling.
     // BreakProtected ⇒ cells the stab destroys don't contribute (ploughing
     // through sand / dirt stays thrust-positive); survivors (stone) pogo.
     private const float RecoilScale           = 0.2f;
     private const float MinRecoilSpeed        = 280f;
+    private const float MaxRecoilSpeed        = 280f;
     // Hardness floor: sand (MaxHP 0.5) doesn't pogo even on its first contact
     // frame (when BreakProtected can't yet save us — sand takes 2 hits to
     // break). Dirt (1.0) and stone (2.0) still pogo.
@@ -1562,6 +1568,7 @@ public class StabAction : ActionState
                 restitution: Restitution,
                 minLaunch: MinLaunch,
                 minRecoilSpeed: MinRecoilSpeed,
+                maxRecoilSpeed: MaxRecoilSpeed,
                 origin: ctx.Body.Position));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No

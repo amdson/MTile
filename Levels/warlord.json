@@ -1,0 +1,14 @@
+{
+  "//": "WarlordEnemy boss fight (stage 'warlord'). A wide walled hall: floor surface at tile row 12 (world y 132), walls at tile x -60 / 60, ceiling at row -16. Two authored chunks carry a low dirt ledge each side of the spawn (warlord_left.txt at chunk -2, warlord_right.txt at chunk 2) so there is high ground to fight from and for the boss to leap onto. Placement + respawn in Stage.cs (PopulateWarlord).",
+  "Extents": 4,
+  "ChunkFiles": {
+    "-2,0": "warlord_left.txt",
+    "2,0":  "warlord_right.txt"
+  },
+  "Rules": [
+    { "Condition": "y >= 12",  "IsSolid": true },
+    { "Condition": "x <= -60", "IsSolid": true },
+    { "Condition": "x >= 60",  "IsSolid": true },
+    { "Condition": "y <= -16", "IsSolid": true }
+  ]
+}

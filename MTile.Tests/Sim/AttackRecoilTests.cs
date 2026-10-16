@@ -199,13 +199,79 @@ public class AttackRecoilTests(ITestOutputHelper output)
 
     private static Hitbox MakeCollisionHitbox(BoundingBox region, int hitId, float damage,
                                               Vector2 dir, Vector2 strikeVel, float recoilScale,
-                                              bool breakProtected = true)
+                                              bool breakProtected = true, float maxRecoilSpeed = 0f)
         => new Hitbox(region, hitId, damage,
                       knockbackImpulse: dir * 1000f,   // direction hint; unused for momentum
                       owner: Faction.Player1, source: EntityId.None,
                       recoilScale: recoilScale, recoilBreakProtected: breakProtected,
                       mode: KnockbackMode.Collision, strikeDir: dir,
-                      strikeVelocity: strikeVel, strikeMass: 2.5f);
+                      strikeVelocity: strikeVel, strikeMass: 2.5f,
+                      maxRecoilSpeed: maxRecoilSpeed);
+
+    // ──────────────── Recoil ceiling (Hitbox.MaxRecoilSpeed) ────────────────
+
+    // The same stone bounce as above (-340 uncapped) is pulled down to the ceiling,
+    // direction intact. This is the stab's "a pogo is at most a jump" rule.
+    [Fact]
+    public void CollisionMode_MaxRecoilSpeed_CapsTheBounce()
+    {
+        var chunks = SimTerrain.FromAscii("X");
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+
+        var region = new BoundingBox(0f, 0f, 16f, 16f);
+        hitboxes.Publish(MakeCollisionHitbox(region, hitId: 21, damage: 0.25f,
+            dir: new Vector2(1f, 0f), strikeVel: new Vector2(400f, 0f), recoilScale: 0.5f,
+            maxRecoilSpeed: 200f));
+
+        combat.Apply(chunks, hitboxes, hurtboxes, _ => null);
+
+        Assert.Equal(-200f, combat.PeekRecoil(21).X, precision: 2);
+        Assert.Equal(   0f, combat.PeekRecoil(21).Y, precision: 2);
+    }
+
+    // The cap is on the per-frame TALLY, not on each contribution: two legacy cells
+    // that would sum to -2000 (see TwoStoneCells_RecoilSums) stop at the ceiling.
+    [Fact]
+    public void LegacyMode_MaxRecoilSpeed_CapsTheSummedTally()
+    {
+        var chunks = SimTerrain.FromAscii("XX");
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+
+        var region = new BoundingBox(0f, 0f, 2 * Chunk.TileSize, Chunk.TileSize);
+        hitboxes.Publish(new Hitbox(
+            region, 22, damage: 0.1f,
+            knockbackImpulse: new Vector2(1000f, 0f),
+            owner: Faction.Player1, source: EntityId.None,
+            recoilScale: 1f, recoilBreakProtected: true,
+            maxRecoilSpeed: 1500f));
+
+        combat.Apply(chunks, hitboxes, hurtboxes, _ => null);
+
+        Assert.Equal(-1500f, combat.PeekRecoil(22).X, precision: 2);
+    }
+
+    // Default (0) is uncapped — the slashes don't set it and must not change.
+    [Fact]
+    public void MaxRecoilSpeed_ZeroMeansUncapped()
+    {
+        var chunks = SimTerrain.FromAscii("X");
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+
+        var region = new BoundingBox(0f, 0f, 16f, 16f);
+        hitboxes.Publish(MakeCollisionHitbox(region, hitId: 23, damage: 0.25f,
+            dir: new Vector2(1f, 0f), strikeVel: new Vector2(400f, 0f), recoilScale: 0.5f,
+            maxRecoilSpeed: 0f));
+
+        combat.Apply(chunks, hitboxes, hurtboxes, _ => null);
+
+        Assert.Equal(-340f, combat.PeekRecoil(23).X, precision: 2);
+    }
 
     // A stone surface reflects the approach: recoil = -(1+e_stone)·u·scale, NOT the
     // authored knockback vector (which stays a direction hint in collision mode).

@@ -5,6 +5,7 @@
   "Duration": 0.1,
   "Loop": true,
   "Region": "UpperBody",
+  "SettleShare": 0.45,
   "Scene": {
     "Guides": [
       {
@@ -18,6 +19,44 @@
       }
     ]
   },
+  "Points": [
+    {
+      "Id": "knife_tip",
+      "Bone": "knife",
+      "End": "End",
+      "Role": "contact"
+    }
+  ],
+  "ExtraBones": [
+    {
+      "Name": "knife",
+      "Parent": "arm_r_lower",
+      "Rotation": 0,
+      "Length": 0
+    }
+  ],
+  "Attachments": [
+    {
+      "Point": "knife_tip",
+      "Effect": "knife",
+      "Start": 0.0,
+      "End": 1.0,
+      "FrameTimes": [
+        0.0,
+        0.025,
+        0.05,
+        0.075,
+        0.4,
+        0.82,
+        0.88,
+        0.94
+      ],
+      "TrailStart": 0.04,
+      "TrailEnd": 0.8,
+      "TrailWidth": 1.0,
+      "TrailOpacity": 0.8
+    }
+  ],
   "Keyframes": [
     {
       "Time": 0,
@@ -64,6 +103,10 @@
         },
         {
           "Bone": "leg_r_lower",
+          "Rotation": 0
+        },
+        {
+          "Bone": "knife",
           "Rotation": 0
         }
       ],

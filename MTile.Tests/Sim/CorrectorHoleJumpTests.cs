@@ -57,4 +57,43 @@ public class CorrectorHoleJumpTests(ITestOutputHelper output)
         float minY = res.Min(f => f.Y);
         Assert.True(minY + bottom < CeilTop, $"did not clear the hole: min center y={minY:F2} (needs < {CeilTop - bottom:F2})");
     }
+
+    // The inverse: crouched in a 2-high corridor, holding Down over a 1-wide hole
+    // in its floor must drop the body through. A flat floor contact stamped while
+    // the body was still over solid floor used to outlive the floor — physics
+    // refreshed it from any tile under the bounding box, which over an 11 px hole
+    // is almost always one of the neighbours — so its plane held the crouched body
+    // up over the gap and its friction pinned DropdownState in place.
+    [Theory]
+    [InlineData(0)]   // crouch-walk in (Down+Right), stop over the hole, keep Down
+    [InlineData(1)]   // Down+Right throughout: crawl straight across it
+    public void CrouchedInCorridor_DownOverHole_DropsThrough(int mode)
+    {
+        // Ceiling bottom y=55, corridor rows 5-6 (22 px), floor row 7 (top 77)
+        // with the hole at col 10 (x 110..121); lower floor row 12.
+        var terrain = SimTerrain.FromAscii(@"
+            XXXXXXXXXXXXXXXXXXXXX
+            XXXXXXXXXXXXXXXXXXXXX
+            XXXXXXXXXXXXXXXXXXXXX
+            OOOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXOXXXXXXXXXX
+            OOOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 2);
+        var sim = new Simulation(terrain, new Vector2(60f, 66f));
+        bool stopped = false;
+        float maxY = 0f;
+        for (int f = 0; f < 240; f++)
+        {
+            var b = sim.Player.Body;
+            if (mode == 0 && b.Position.X >= HoleMid - 2.5f) stopped = true;
+            sim.Step(new PlayerInput { Down = true, Right = mode == 1 || !stopped });
+            maxY = MathF.Max(maxY, sim.Player.Body.Position.Y);
+        }
+        output.WriteLine($"mode {mode}: max center y {maxY:F1}");
+        Assert.True(maxY > 100f, $"stayed in the corridor: max center y {maxY:F1}");
+    }
 }

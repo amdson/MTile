@@ -118,6 +118,14 @@ public readonly struct Hitbox
     // a retreating swing); CombatSystem additionally latches the bounce to fire
     // once per attack, so a multi-frame overlap can't machine-gun the floor.
     public readonly float       MinRecoilSpeed;
+    // Ceiling on the attacker's recoil Δv (px/s) per frame, every path: collision-mode
+    // tile bounce, legacy per-cell impulse sums, and entity recoil alike. CombatSystem
+    // clamps the per-HitId tally's MAGNITUDE as it accumulates, so a dive stab into
+    // stone, a wall face of many cells, or a heavy target that barely moved all kick
+    // back at most this hard. Default 0 ⇒ uncapped (existing behavior). The stab sets
+    // it to a jump's worth so a pogo is a movement tool with a known size, not a
+    // speed-dependent launch.
+    public readonly float       MaxRecoilSpeed;
     // Terrain occlusion (TileReach). When Occluded, the hit only lands on cells and
     // hurtboxes with a clear line from Origin — the attacker's body, a blast
     // center, a projectile — so a swing can't reach through a wall, and tile
@@ -144,6 +152,7 @@ public readonly struct Hitbox
     //              + n·strikeSpeed) · strikeMass · restitution (vs entities;
     //              tiles use their material's) · minLaunch (target Δv floor)
     //              · minRecoilSpeed (tile-pogo floor)
+    //   Recoil cap maxRecoilSpeed (per-frame |Δv| ceiling on every recoil path; 0 = off)
     //   Occlusion  origin (null = no terrain occlusion)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
@@ -157,6 +166,7 @@ public readonly struct Hitbox
                   Vector2 strikeDir = default, Vector2 strikeVelocity = default,
                   float strikeMass = 0f, float restitution = 0.5f, float minLaunch = 0f,
                   float minRecoilSpeed = 0f,
+                  float maxRecoilSpeed = 0f,
                   Vector2? origin = null,
                   bool guardBreak = false)
     {
@@ -187,5 +197,6 @@ public readonly struct Hitbox
         Restitution          = restitution;
         MinLaunch            = minLaunch;
         MinRecoilSpeed       = minRecoilSpeed;
+        MaxRecoilSpeed       = maxRecoilSpeed;
     }
 }

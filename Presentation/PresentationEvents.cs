@@ -28,6 +28,7 @@ public enum PresentationKind : byte
     PlayerRespawn,
     MassLand,      // a thrown/lobbed mass ball landed and erupted (A/B = entity id index/generation; payload = TileType | blocks << 8)
     ChargedBlast,  // a destroyed charged block detonated (A/B = entity id index/generation; payload = blast radius in px)
+    TerrainStrike, // a player's attack struck terrain (A = HitId; payload = into-surface angle in milliradians)
 }
 
 // Identity of a presentation event. Must be derivable from sim state alone — never a

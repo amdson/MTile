@@ -88,9 +88,13 @@ public class ChargedBlockUseTests(ITestOutputHelper output)
                         }
                 });
 
-            output.WriteLine($"harvest={maxHarvest} charged={maxCharged}");
+            output.WriteLine($"harvest={maxHarvest} charged={maxCharged} armed-blasts={terrain.ChargedBreaks.Count}");
             Assert.True(maxHarvest > 0, "setup: the block should have been peeled into a clod");
             Assert.True(maxCharged > 0, "a charged block peeled into the clod should arm it");
+            // Harvested, not destroyed: the charge leaves with the block. An armed break
+            // here becomes a ChargedBlast at the grab site the moment the clod is made.
+            // (SimRunner never drains the queue, so anything armed is still in it.)
+            Assert.Empty(terrain.ChargedBreaks);
         });
     }
 
@@ -184,19 +188,6 @@ public class ChargedBlockUseTests(ITestOutputHelper output)
         output.WriteLine($"plain delta={plain:+#;-#;0}, charged delta={boosted:+#;-#;0}");
         Assert.True(plain > 0, $"a plain clod should leave a mound, not a hole (delta {plain})");
         Assert.True(boosted < 0, $"a charged clod should crater (delta {boosted})");
-    }
-
-    // The cap is what keeps a lucky harvest of a whole charged wall from clearing the
-    // screen — the fantasy is a demolition charge, not a nuke.
-    [Fact]
-    public void ClodCharge_IsCappedForTheBlastMath()
-    {
-        var ball = LobbedAreaProjectile.MakeTracking(
-            Vector2.Zero, blocks: 40, TileType.Stone, hitId: 1, Faction.Player1, EntityId.None, charged: 40);
-
-        output.WriteLine($"raw={ball.ChargedBlocks} effective={ball.EffectiveCharge}");
-        Assert.Equal(40, ball.ChargedBlocks);
-        Assert.True(ball.EffectiveCharge < ball.ChargedBlocks, "the blast multiplier must be capped");
     }
 
     // ── 2. The eruption ─────────────────────────────────────────────────────────

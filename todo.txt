@@ -1,6 +1,2 @@
-1. Improve hit feel
-- increase lifetime of particles from hit, add trail effect
-- Better animation, showing windup, follow-through, etc for hits. (long term, don't attempt)
-2. Make sure all slash attachs can hit when the entity is very close to the player
-3. Make slash attack hit boxes smaller, and better matches to the animation (but still extended a bit extra)
-4. Make distinction between knockback in air vs on ground stronger
+1. improve movement feel. 
+- make sure jumping works from any point of ledge grab or ledge pull
