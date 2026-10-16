@@ -559,8 +559,61 @@ public static class CorrectorChannels
         return 4;
     }
 
+    // The slide channel set — feet on a platform the body is slipping off
+    // (DropdownState): LEGS up and TUCK down while the floor is in leg reach
+    // (the band's two vertical sides — lesson 1 of the unification plan), and
+    // DRIVE along the slide, unilateral. The movers fade at `pace` along their
+    // own axis AND along the path (pathDir), whichever binds first
+    // (PaceFade) — so the feet never push the body faster than the authored
+    // pace and never brake a faster entry. Unfaded, the tuck yanked the body
+    // off the edge at twice the old exit speed; faded per axis only, the
+    // diagonal slip-off reached the pace on both axes (√2 × pace). Off the
+    // floor: nothing — the fold's "no actuators in free air".
+    // Caps are the fold's (FoldLegForce with its push fade, FoldTuckForce,
+    // FoldDriveForce). Returns the channel count.
+    public static int BuildSlide(CorrectorScratch s, int n, int dir, Vector2 pathDir, float pace)
+    {
+        var cfg = MovementConfig.Current;
+        for (int k = 0; k < n; k++)
+        {
+            bool near = IsNearFloor(s.Samples[k]);
+            var v = s.Samples[k].Vel;
+            s.ChannelMask[0][k] = near;
+            s.ChannelMask[1][k] = near;
+            s.ChannelMask[2][k] = near;
+            s.ChannelCap[0][k] = cfg.FoldLegForce * Math.Clamp(1f - MathF.Max(0f, -v.Y) / cfg.FoldLegPushFadeSpeed, 0f, 1f);
+            s.ChannelCap[1][k] = cfg.FoldTuckForce  * PaceFade(pace, v, new Vector2(0f, 1f), pathDir);
+            s.ChannelCap[2][k] = cfg.FoldDriveForce * PaceFade(pace, v, new Vector2(dir, 0f), pathDir);
+        }
+        var ch = s.Problem.Channels;
+        ch[0] = new ChannelDef {
+            Id = CorrectionChannel.LegServo,
+            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(0f, -1f), CapPerTick = s.ChannelCap[0], ActiveMask = s.ChannelMask[0] };
+        ch[1] = new ChannelDef {
+            Id = CorrectionChannel.Tuck,
+            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(0f, 1f), CapPerTick = s.ChannelCap[1], ActiveMask = s.ChannelMask[1] };
+        ch[2] = new ChannelDef {
+            Id = CorrectionChannel.Drive,
+            Lever = LeverKind.Force, Weight = 0.01f, AxisOnly = true, Unilateral = true,
+            Axis = new Vector2(dir, 0f), CapPerTick = s.ChannelCap[2], ActiveMask = s.ChannelMask[2] };
+        return 3;
+    }
+
+    // The fold's "legs can act" test on a held sample: floor within LegReach.
+    public static bool IsNearFloor(in CoastSample sample)
+        => !float.IsPositiveInfinity(sample.FloorY) && sample.FloorY - sample.Pos.Y <= LegReach;
+
     private static float Fade(float pace, float speedAlong)
         => Math.Clamp((pace - speedAlong) / SpeedFadeBand, 0f, 1f);
+
+    // A path actuator's pace fade: the tighter of its own axis's speed and the
+    // speed along the path. Per-axis alone lets a diagonal path run at √2 ×
+    // pace; path-speed alone leaves an axis at full authority where the path
+    // turns across it (a flat crest — see BuildGrip).
+    private static float PaceFade(float pace, Vector2 v, Vector2 axis, Vector2 pathDir)
+        => MathF.Min(Fade(pace, Vector2.Dot(v, axis)), Fade(pace, Vector2.Dot(v, pathDir)));
 
     // Cross-frame Δ-anchor leak shared by every corrector loop: continuity
     // without DC memory (a full-strength anchor lets a force channel sustain

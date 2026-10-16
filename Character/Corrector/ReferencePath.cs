@@ -5,16 +5,14 @@ using Microsoft.Xna.Framework;
 namespace MTile;
 
 // Runtime half of the reference-clip system (BALLISTIC_CORRECTOR_PLAN §1):
-// retarget an authored HermiteClip at state Enter, then servo the body along it.
+// retarget an authored HermiteClip at state Enter; the state then FOLLOWS it as
+// a geometric path (PathTracker.BuildClipPolyline + FollowPolyline — LedgePull,
+// Dropdown). There is no clock: arc-length progress is the tracker's bead.
 //
-// PROTOTYPE SCOPE (movement_todo 7+8): the retarget is the affine two-point map —
+// The retarget is the affine two-point map —
 // the clip's Entry anchor → the body's position at Enter, its Gate anchor → the
 // measured gate point — with independent x/y scaling (a left-facing move falls
-// out of a negative x scale, a descent out of a negative y scale). The plan's
-// fuller contract (entry tangent bound to the incoming velocity, arc-length
-// progress) is deliberately not built yet: the two migrated moves enter at
-// near-zero speed from known poses, so the authored tangents already are the
-// entry velocities up to frame scale. Revisit when a fast-entry move migrates.
+// out of a negative x scale, a descent out of a negative y scale).
 public readonly struct ReferenceFrame
 {
     public readonly Vector2 ClipEntry;   // clip-space point that binds to Entry
@@ -65,36 +63,6 @@ public readonly struct ReferenceFrame
         return ClipEntry + new Vector2(
             MathF.Abs(Scale.X) < 1e-6f ? 0f : d.X / Scale.X,
             MathF.Abs(Scale.Y) < 1e-6f ? 0f : d.Y / Scale.Y);
-    }
-}
-
-public static class ReferencePath
-{
-    // Critically-damped PD servo toward the retargeted clip point at `progress`,
-    // with velocity feedforward from the clip tangent and full gravity cancel
-    // (the clip authors the descent; gravity must not double-apply on top of it).
-    // Magnitude-capped so a blocked path stalls against terrain honestly instead
-    // of grinding with unbounded force.
-    public static Vector2 TrackForce(HermiteClipDocument clip, in ReferenceFrame frame,
-        float progress, float duration, PhysicsBody body, Vector2 gravity, MovementConfig cfg)
-    {
-        duration = MathF.Max(duration, 1e-4f);
-        Vector2 target    = frame.Map(clip.Eval(progress));
-        Vector2 targetVel = frame.MapTangent(clip.EvalTangent(progress)) / duration;
-        return TrackForce(target, targetVel, body, gravity, cfg);
-    }
-
-    // Explicit-target form: the servo core, for callers whose target has been
-    // adjusted after clip evaluation (ReferenceCorrector's terrain-deformed arc).
-    public static Vector2 TrackForce(Vector2 target, Vector2 targetVel,
-        PhysicsBody body, Vector2 gravity, MovementConfig cfg)
-    {
-        Vector2 force = (target - body.Position) * cfg.GuidedSpringK
-                      + (targetVel - body.Velocity) * cfg.GuidedDamping
-                      - gravity;
-        float len = force.Length();
-        if (len > cfg.GuidedMaxForce) force *= cfg.GuidedMaxForce / len;
-        return force;
     }
 }
 

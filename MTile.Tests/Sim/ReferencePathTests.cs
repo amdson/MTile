@@ -164,23 +164,6 @@ public class ReferencePathTests(ITestOutputHelper output)
             $"apex y={minY:F1} — ballooned above the authored crest");
     }
 
-    [Fact]
-    public void LedgePull_BespokeFallback_StillDelivers()
-    {
-        MovementConfig.Current.UseReferenceClips = false;
-        try
-        {
-            var trace = RunPull();
-            int pullStart = Array.FindIndex(trace, f => f.State == "LedgePullState");
-            Assert.True(pullStart > 0, "bespoke pull never started");
-            Assert.Contains(trace.Skip(pullStart), f => f.State == "StandingState" && f.X > WallLeft && f.Y < CornerTopY - 18f);
-        }
-        finally
-        {
-            MovementConfig.Current.UseReferenceClips = true;
-        }
-    }
-
     // ── Dropdown: same terrain family as DropdownTests ─────────────────────────
     // Platform at row 5 cols 0..9 (top y=80, drop edge x=160), floor at row 8
     // (top y=128). Hold Down while hanging over → clip-shaped slide-out → Falling
@@ -238,21 +221,5 @@ public class ReferencePathTests(ITestOutputHelper output)
         Assert.True(last.Y > lowerFloorTop - 28f, $"never descended to the lower floor: y={last.Y:F1}");
         Assert.True(last.X > DropEdgeX && last.X < DropEdgeX + 50f,
             $"landed at x={last.X:F1} — expected just past the edge ({DropEdgeX:F0}..{DropEdgeX + 50f:F0})");
-    }
-
-    [Fact]
-    public void Dropdown_BespokeFallback_StillDrops()
-    {
-        MovementConfig.Current.UseReferenceClips = false;
-        try
-        {
-            var trace = RunDrop();
-            Assert.Contains(trace, f => f.State.Contains("Dropdown"));
-            Assert.True(trace[^1].Y > 8f * TS - 28f, $"bespoke drop never reached the floor: y={trace[^1].Y:F1}");
-        }
-        finally
-        {
-            MovementConfig.Current.UseReferenceClips = true;
-        }
     }
 }

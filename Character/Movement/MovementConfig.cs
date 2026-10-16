@@ -146,34 +146,23 @@ public class MovementConfig
     // Keep it above a deliberate tap (~0.1 s) or taps start pulling.
     public float LedgeAutoPullHoldTime { get; set; } = 0.15f;
 
-    // Guided States (reference-clip tracking — ReferencePath.TrackForce PD servo,
-    // consumed by LedgePull/Dropdown when UseReferenceClips is on)
-    // Stability condition for 30fps Euler integration: K·dt² + D·dt < 2
-    // At dt=1/30: K·0.001 + D·0.033 < 2 → with K=200, D=40: 0.20+1.32=1.52 ✓
-    public float GuidedSpringK        { get; set; } = 200f;
-    public float GuidedDamping        { get; set; } = 40f;
+    // Free-force cap of FoldReference's servo (the "ref" FoldEngine only).
     public float GuidedMaxForce       { get; set; } = 10000f;
-    public float GuidedLookahead      { get; set; } = 0.05f;  // fraction of path to look ahead
-    public float GuidedGravityCancel  { get; set; } = 600f;
 
-    // Reference clips (movement_todo 7+8): LedgePull/Dropdown track authored
-    // Hermite clips (ReferenceClips/<name>.json, baked defaults in
-    // ReferenceClipRegistry) instead of their legacy bespoke force logic.
-    // Hot-reloadable A/B toggle; durations are the nominal clip playback times
-    // (must stay under MaxLipManeuverTime / MaxDropdownTime respectively — the state
-    // timeouts still govern).
-    public bool  UseReferenceClips    { get; set; } = true;
-    // LedgePull follows its clip as a PATH (PathTracker), so this is not a clock:
-    // the pull's pace is the arc's length over this duration — the speed the grip
-    // channels fade out at. A body arriving faster keeps its speed. 0.45: a pull
-    // from a dead hang completes in ~0.4 s, inside MaxLipManeuverTime (at 0.60 the
-    // constant-pace follower crossed the corner right at the 0.5 s timeout and
-    // re-grabbed — the pull "gave up" and sagged back).
+    // Reference clips (ReferenceClips/<name>.json, baked defaults in
+    // ReferenceClipRegistry): LedgePull and Dropdown FOLLOW their clips as paths
+    // (PathTracker), so these durations are not clocks — each move's pace is its
+    // arc's length over its duration, the speed its channels fade out at, and a
+    // body arriving faster keeps its speed. Both are 0.45 because a constant-pace
+    // follower must be re-derived against the state's own timing:
+    //   LedgePull — at 0.60 it crossed the corner right at the 0.5 s
+    //     MaxLipManeuverTime and re-grabbed (the pull "gave up" and sagged back);
+    //     0.45 completes from a dead hang in ~0.4 s.
+    //   Dropdown — only the clip's on-platform stretch plays, which the old clock
+    //     entered slowly; at 0.30 the average-speed pace slipped off at twice the
+    //     old exit speed. 0.45 matches the old slip-off (exit vy ≈ 120–195 px/s).
     public float LedgePullRefDuration { get; set; } = 0.45f;
-    public float DropdownRefDuration  { get; set; } = 0.30f;
-    public float GuidedMinDuration    { get; set; } = 0.15f;
-    public float GuidedMaxDuration    { get; set; } = 0.6f;
-    public float GuidedRefSpeed       { get; set; } = 80f;    // fallback for duration estimate
+    public float DropdownRefDuration  { get; set; } = 0.45f;
 
     // Corridor probe (shared local-geometry sensing for the maneuver layer —
     // see Plans/CORRIDOR_MANEUVER_PLAN.md and Character/CorridorProbe.cs).

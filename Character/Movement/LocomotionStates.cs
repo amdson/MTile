@@ -211,10 +211,9 @@ public class CrouchedState : MovementState
 // constraint so the body's no longer spring-held above the surface (gravity + tile collision keep
 // it on the platform until its center clears the edge), applies a horizontal slide force in the
 // chosen direction (so a crouched/sunken body actually gets pushed out from over the platform —
-// same idiom as CoveredJumpState's phase 1). Corrector: clip mode is a GUIDED move, so it feeds
-// the authored arc to ReferenceCorrector (no coast) and servos the deformed target; the bespoke
-// fallback's future is physics (slide at speed, fall), so it runs the maneuver solve
-// (ManeuverCorrector.Apply, grounded entry) around its slide force. Exits to FallingState the
+// same idiom as CoveredJumpState's phase 1). The slide FOLLOWS the authored dropdown clip as a
+// geometric path (PathTracker), actuated only by the feet on the platform (legs, tuck, a drive
+// fading at the clip's pace — CorrectorChannels.BuildSlide). Exits to FallingState the
 // instant the body's no longer over any floor — unless Down is RELEASED with the slide committed,
 // which offers the lip to LedgeGrab instead (the chain-to-hang, see Exit).
 public class DropdownState : MovementState
@@ -283,24 +282,16 @@ public class DropdownState : MovementState
         vars.SlideSpeed = MovementConfig.Current.MaxWalkSpeed;
         vars.SlideTime = 0f;
         vars.ExitingAirborne = false;
-        vars.ManeuverChannelPrev = default;   // fresh Δ anchors for this maneuver's solve
         // No FloatingSurfaceDistance: the body's leaving the surface, so don't spring it back up.
         // StandingState/CrouchedState's ground constraint was already removed on their Exit.
 
-        var clip = MovementConfig.Current.UseReferenceClips
-            ? ReferenceClipRegistry.Get(ReferenceClipRegistry.Dropdown) : null;
-        vars.RefActive = clip != null && vars.DropDir != 0;
-        if (vars.RefActive)
-        {
-            // Retarget at Enter: the clip's Entry anchor = where the slide starts; its Gate anchor = past
-            // the drop corner and a body-height below it. Only the on-platform stretch
-            // plays (going airborne exits to Falling), so the clip shapes the slide-out
-            // speed profile and the velocity carried into the drop.
-            vars.RefEntry    = ctx.Body.Position;
-            vars.RefGate     = new Vector2(corner.X + vars.DropDir * (PlayerCharacter.Radius + 2f),
-                                           corner.Y + 2f * PlayerCharacter.Radius);
-            vars.RefProgress = 0f;
-        }
+        // Retarget at Enter: the clip's Entry anchor = where the slide starts; its Gate anchor =
+        // past the drop corner and a body-height below it. Only the on-platform stretch plays
+        // (going airborne exits to Falling), so the clip shapes the slide-out and the velocity
+        // carried into the drop.
+        vars.RefEntry = ctx.Body.Position;
+        vars.RefGate  = new Vector2(corner.X + vars.DropDir * (PlayerCharacter.Radius + 2f),
+                                    corner.Y + 2f * PlayerCharacter.Radius);
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -328,47 +319,26 @@ public class DropdownState : MovementState
     {
         vars.SlideTime += ctx.Dt;
         var cfg = MovementConfig.Current;
+        var body = ctx.Body;
+        body.AppliedForce = Vector2.Zero;   // the feet are the only actuator
 
-        if (vars.RefActive)
+        var clip = ReferenceClipRegistry.Get(ReferenceClipRegistry.Dropdown);
+        var s = ctx.Corrector;
+        if (clip != null && s != null && ctx.Dt > 0f)
         {
-            var clip = ReferenceClipRegistry.Get(ReferenceClipRegistry.Dropdown);
-            if (clip != null)
-            {
-                vars.RefProgress += ctx.Dt / MathF.Max(cfg.DropdownRefDuration, 1e-4f);
-                // Guided move: feed the authored arc to the corrector and servo
-                // the deformed target (no coast — see ReferenceCorrector).
-                ReferenceCorrector.DeformedTarget(ctx, clip,
-                    new ReferenceFrame(clip, vars.RefEntry, vars.RefGate),
-                    vars.RefProgress, cfg.DropdownRefDuration, ref vars.ManeuverChannelPrev,
-                    out var target, out var targetVel);
-                ctx.Body.AppliedForce = ReferencePath.TrackForce(
-                    target, targetVel, ctx.Body, ctx.Gravity, cfg);
-                // Ambient Off: owned maneuver with its own solve (clip servo /
-                // maneuver solve below) — the ambient layer must not stack a
-                // second correction on top (the climb family's rule). Still
-                // called so Apply's early-out clears cross-frame anchor state.
-                ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
-                return;
-            }
-            vars.RefActive = false;   // clip vanished (dev-only): fall through to bespoke
+            // The clip as a path from the body onward; its pace — the authored duration over
+            // the arc's length — is the speed the drive pushes to, not a clock.
+            int nv = PathTracker.BuildClipPolyline(s, body.Position, clip,
+                new ReferenceFrame(clip, vars.RefEntry, vars.RefGate), out float arcLength);
+            float pace = arcLength / MathF.Max(cfg.DropdownRefDuration, 1e-4f);
+            float floorY = AmbientCorrector.FloorEnvelope(ctx.Chunks, CObstacleTemplate.For(body.Polygon),
+                body.Position.X, body.Position.Y - 2f, body.Position.Y + CorrectorChannels.LegReach, out bool floorFound);
+            var slide = new SlidePathPolicy(vars.DropDir, pace);
+            PathTracker.FollowPolyline(ctx, s, nv, ref slide,
+                floorFound ? floorY : float.PositiveInfinity, grounded: floorFound);
         }
-
-        // Slide toward the edge, but never brake a faster-than-target body — a running entry should
-        // keep its momentum through the slide. Gravity does the vertical work.
-        float along = vars.DropDir * ctx.Body.Velocity.X;
-        float fx = 0f;
-        if (along < vars.SlideSpeed)
-            fx = vars.DropDir * AirControl.SoftClampVelocity(along, vars.SlideSpeed, cfg.WalkAccel, ctx.Dt);
-        ctx.Body.AppliedForce = new Vector2(fx, 0f);
-        ApplyCorrector(ctx, ref vars);
+        // Ambient Off: the path solve is this state's corrector — the ambient layer must not
+        // stack a second correction on top. Still called so cross-frame anchor state clears.
         ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
-
-    // Bespoke fallback only (the clip path uses ReferenceCorrector above): the
-    // shared maneuver solve around the committed slide-off (the drive the
-    // predictor mirrors is the slide's own dir·SlideSpeed servo). Grounded
-    // entry: the coast starts ON the platform, unlike the climbs' post-hop arc.
-    private static void ApplyCorrector(EnvironmentContext ctx, ref MovementVars vars)
-        => ManeuverCorrector.Apply(ctx, vars.DropDir, vars.SlideSpeed,
-                                   ref vars.ManeuverChannelPrev, startGrounded: true);
 }

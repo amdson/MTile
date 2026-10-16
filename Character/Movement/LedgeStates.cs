@@ -271,17 +271,11 @@ public class LedgeGrabState : MovementState
 // the only actuator is the hands on the corner (CorrectorChannels.BuildGrip),
 // capped and pace-faded. Where along the arc the body is comes from its
 // position, so a body that arrives rising keeps its momentum through the pull.
-// The bespoke fallback (UseReferenceClips=false) has no authored arc and keeps
-// its plain spring/ramp shape, uncorrected.
 public class LedgePullState : MovementState
 {
     public override AnimTag AnimationTag => AnimTag.LedgePull;
 
     private readonly int _wallDir;
-    private PointForceContact _spring;
-    private FloatingSurfaceDistance _ramp;
-
-    public override void ResetTransient() { _spring = null; _ramp = null; }
 
     public LedgePullState(int wallDir) => _wallDir = wallDir;
 
@@ -364,13 +358,8 @@ public class LedgePullState : MovementState
         if (!ctx.Input.Up) return false;
         if (vars.TimeInState >= MovementConfig.Current.MaxLipManeuverTime) return false;
 
-        // Completion is judged against the grabbed corner. Reference mode has no
-        // spring contact — the corner comes straight from abilities (the same
-        // value the bespoke spring was seeded with, and snapshot-covered).
-        Vector2 corner;
-        if (vars.RefActive) corner = abilities.GrabbedCorner;
-        else { if (_spring == null) return false; corner = _spring.Position; }
-
+        // Completion is judged against the grabbed corner (snapshot-covered abilities).
+        var corner = abilities.GrabbedCorner;
         bool atStandingHeight = ctx.Body.Position.Y < corner.Y - 2f * PlayerCharacter.Radius;
         bool pastCorner       = _wallDir == 1
             ? ctx.Body.Position.X > corner.X
@@ -389,56 +378,18 @@ public class LedgePullState : MovementState
             abilities.HasDoubleJumped = false;
             abilities.Facing          = _wallDir;
         }
-        var clip = MovementConfig.Current.UseReferenceClips
-            ? ReferenceClipRegistry.Get(ReferenceClipRegistry.LedgePull) : null;
-        vars.RefActive = clip != null;
-        if (vars.RefActive)
-        {
-            // Retarget at Enter (BALLISTIC_CORRECTOR_PLAN §1): the clip's Entry anchor
-            // = the hang pose the body holds; its Gate anchor = standing on top just past the corner,
-            // placed a few px beyond the completion test's thresholds so the path
-            // carries the body through them rather than ending on them.
-            var corner = abilities.GrabbedCorner;
-            // Anchored at the hang height or below: a body already risen above it
-            // (a rising grab carried by hold-to-climb) joins the arc partway up
-            // rather than retargeting the clip to start above its own gate.
-            vars.RefEntry    = new Vector2(ctx.Body.Position.X,
-                                           MathF.Max(ctx.Body.Position.Y, corner.Y + PlayerCharacter.Radius));
-            vars.RefGate     = new Vector2(corner.X + _wallDir * (PlayerCharacter.Radius + 2f),
-                                           corner.Y - (2f * PlayerCharacter.Radius + 4f));
-            return;
-        }
-        EnsureContacts(ctx, abilities);
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        if (_spring != null) ctx.Body.Constraints.Remove(_spring);
-        if (_ramp   != null) ctx.Body.Constraints.Remove(_ramp);
-        _spring = null;
-        _ramp   = null;
-    }
-
-    // Idempotent acquisition, rebuilt from the (snapshotted) GrabbedCorner. The
-    // spring lasts the whole pull; the ramp only applies until the body rises past
-    // the corner lip (Update removes it then) — so its rebuild is gated on the same
-    // height test, otherwise a restore taken after the ramp was dropped would wrongly
-    // re-add it. No-op in normal play.
-    private void EnsureContacts(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        var cornerEdge = abilities.GrabbedCorner;
-        if (_spring == null)
-        {
-            _spring = new PointForceContact(cornerEdge);
-            ctx.Body.Constraints.Add(_spring);
-        }
-        bool rampApplies = ctx.Body.Position.Y >= cornerEdge.Y - 2f * PlayerCharacter.Radius;
-        if (_ramp == null && rampApplies)
-        {
-            var rampNormal = new Vector2(-_wallDir * 0.5f, -0.5f);
-            _ramp = new FloatingSurfaceDistance(cornerEdge, rampNormal, 1000f);
-            ctx.Body.Constraints.Add(_ramp);
-        }
+        // Retarget at Enter (BALLISTIC_CORRECTOR_PLAN §1): the clip's Entry anchor
+        // = the hang pose the body holds; its Gate anchor = standing on top just past the corner,
+        // placed a few px beyond the completion test's thresholds so the path
+        // carries the body through them rather than ending on them.
+        var corner = abilities.GrabbedCorner;
+        // Anchored at the hang height or below: a body already risen above it
+        // (a rising grab carried by hold-to-climb) joins the arc partway up
+        // rather than retargeting the clip to start above its own gate.
+        vars.RefEntry = new Vector2(ctx.Body.Position.X,
+                                    MathF.Max(ctx.Body.Position.Y, corner.Y + PlayerCharacter.Radius));
+        vars.RefGate  = new Vector2(corner.X + _wallDir * (PlayerCharacter.Radius + 2f),
+                                    corner.Y - (2f * PlayerCharacter.Radius + 4f));
     }
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
@@ -451,52 +402,22 @@ public class LedgePullState : MovementState
         // ends, so an unconsumed press expires on its normal window.
         ctx.Intents.Refresh(IntentType.Jump, ctx.CurrentFrame, ctx.JumpBufferFrames);
 
-        if (vars.RefActive)
+        ctx.Body.AppliedForce = Vector2.Zero;   // the hands are the only actuator
+        var clip = ReferenceClipRegistry.Get(ReferenceClipRegistry.LedgePull);
+        var s = ctx.Corrector;
+        if (clip != null && s != null && ctx.Dt > 0f)
         {
-            var clip = ReferenceClipRegistry.Get(ReferenceClipRegistry.LedgePull);
-            var s = ctx.Corrector;
-            if (clip != null && s != null && ctx.Dt > 0f)
-            {
-                // A mid-pull hot-reload flip can leave bespoke contacts attached —
-                // the grip replaces them, so drop any strays.
-                if (_spring != null) { ctx.Body.Constraints.Remove(_spring); _spring = null; }
-                if (_ramp   != null) { ctx.Body.Constraints.Remove(_ramp);   _ramp   = null; }
-                // The arc retargeted at Enter, as a path from the body onward.
-                // Its pace: the authored duration over the arc's length — the
-                // speed the arms pull to, not a clock the body is held to.
-                int nv = PathTracker.BuildClipPolyline(s, ctx.Body.Position, clip,
-                    new ReferenceFrame(clip, vars.RefEntry, vars.RefGate), out float arcLength);
-                float pace = arcLength / MathF.Max(MovementConfig.Current.LedgePullRefDuration, 1e-4f);
-                var grip = new GripPathPolicy(abilities.GrabbedCorner, _wallDir, pace);
-                ctx.Body.AppliedForce = Vector2.Zero;   // the hands are the only actuator
-                PathTracker.FollowPolyline(ctx, s, nv, ref grip);
-                // Ambient Off: the grip solve is this state's corrector — no
-                // ambient redirect on top. Still called so cross-frame anchor
-                // state is cleared.
-                ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
-                return;
-            }
-            vars.RefActive = false;   // no clip (dev-only) or no scratch: fall through to bespoke
+            // The arc retargeted at Enter, as a path from the body onward.
+            // Its pace: the authored duration over the arc's length — the
+            // speed the arms pull to, not a clock the body is held to.
+            int nv = PathTracker.BuildClipPolyline(s, ctx.Body.Position, clip,
+                new ReferenceFrame(clip, vars.RefEntry, vars.RefGate), out float arcLength);
+            float pace = arcLength / MathF.Max(MovementConfig.Current.LedgePullRefDuration, 1e-4f);
+            var grip = new GripPathPolicy(abilities.GrabbedCorner, _wallDir, pace);
+            PathTracker.FollowPolyline(ctx, s, nv, ref grip);
         }
-
-        EnsureContacts(ctx, abilities);
-        float cornerTopY = _spring.Position.Y;
-        var   cfg        = MovementConfig.Current;
-        var   force      = Vector2.Zero;
-
-        if (ctx.Body.Position.Y >= cornerTopY - 2f * PlayerCharacter.Radius)
-        {
-            force.Y = -cfg.LipLiftForce;
-        }
-        else
-        {
-            if (_ramp != null) { ctx.Body.Constraints.Remove(_ramp); _ramp = null; }
-            if (ctx.Body.Velocity.Y < 0f && ctx.Dt > 0f)
-                force.Y = Math.Min(-ctx.Body.Velocity.Y / ctx.Dt, 2f * cfg.LipLiftForce);
-            force.X = _wallDir * cfg.LipPushForce;
-        }
-
-        ctx.Body.AppliedForce = force;
+        // Ambient Off: the grip solve is this state's corrector — no ambient
+        // redirect on top. Still called so cross-frame anchor state is cleared.
         ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
     }
 }

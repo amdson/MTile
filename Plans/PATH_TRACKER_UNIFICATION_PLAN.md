@@ -126,6 +126,23 @@ rows and a 60 Hz running-jump test pass.
 
 ## 4. Phase 2 — Dropdown → PathTracker (medium-small)
 
+> **DONE 2026-10-16.** `PathTracker.BuildClipPolyline` on the dropdown clip +
+> `SlidePathPolicy` over a new `CorrectorChannels.BuildSlide` (legs up, tuck
+> down, drive along — a small explicit set rather than `BuildFold`'s masks,
+> which carry corner/plant/air machinery a slide never uses). Two findings:
+> (1) **fade on the axis AND along the path** (`PaceFade`, the tighter of the
+> two) — per-axis alone let the diagonal slip-off reach the pace on both axes;
+> (2) **re-derive the duration** (lesson 3 again): only the clip's on-platform
+> stretch plays, so the average-speed pace at 0.30 s yanked the body off at
+> twice the old exit speed; `DropdownRefDuration` 0.30 → 0.45 matches the old
+> slip-off (exit vy 70–170 px/s at 60 Hz). Both fallbacks deleted
+> (`UseReferenceClips` gone — LedgePull's too), with `ReferenceCorrector`,
+> `ReferencePath.TrackForce`, `GuidedSpringK`/`GuidedDamping` and the
+> never-read `Guided*` fields, `MovementVars.RefActive`/`RefProgress`.
+> `GuidedMaxForce` stays (the `ref` engine reads it). `DropdownPathTests` sweeps
+> 8 starts at 60 Hz. Not yet applied: `PaceFade` to `BuildGrip` (the pull works;
+> change it only with a pull playtest).
+
 Today: `ReferenceClipRegistry.Dropdown` clip → `ReferenceCorrector` deforms the
 clock-sampled arc → `ReferencePath.TrackForce` servos it (free force capped at
 `GuidedMaxForce` 10 000). Bespoke fallback (clips off) uses `ManeuverCorrector`.
@@ -331,6 +348,4 @@ extraction and this plan took ~3 h together), excluding playtest rounds:
 
 All decisions are settled (2026-10-16): D1 explicit ground-channel permission,
 D2 the existing climb clips, D3 reference sweep with a measured graze allowance,
-dropdown fallback deleted. Open only: whether `LedgePull`'s own
-`UseReferenceClips = false` fallback goes the same way (it is the last reader of
-the flag once the dropdown's is gone).
+both `UseReferenceClips` fallbacks deleted (done in phase 2).

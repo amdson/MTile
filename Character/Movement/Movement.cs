@@ -24,14 +24,14 @@ namespace MTile;
 //     passing a fold profile to the same call; the profile shapes the
 //     reference (hover height, progress cap).
 //   - ManeuverCorrector.Apply: a committed maneuver whose future is PHYSICS
-//     (a launch arc, a slide) predicts its guided coast and solves body-force
+//     (a launch arc) predicts its guided coast and solves body-force
 //     corrections around it, per-tick and as a trigger-by-feasibility probe
-//     (the climb family, Dropdown's bespoke fallback).
-//   - ReferenceCorrector.DeformedTarget: a GUIDED move whose future is an
-//     AUTHORED arc (a retargeted clip) has no coast — the reference path is
-//     the swept trajectory, the solve deforms the arc around terrain, and the
-//     state's servo tracks the deformed target (LedgePull, Dropdown's clip
-//     mode).
+//     (the climb family — moving to the path tracker, see
+//     Plans/PATH_TRACKER_UNIFICATION_PLAN.md phase 3).
+//   - PathTracker.FollowPolyline: a GUIDED move follows an AUTHORED arc (a
+//     retargeted clip) as a geometric path — beads, band, progress — with its
+//     own capped channel set as the only actuator (LedgePull: the grip;
+//     Dropdown: the feet).
 // Whatever path a state uses, the applied solve's output is bookkept in
 // CorrectorLedger (per-channel forces + per-contact tile attribution).
 public abstract class MovementState

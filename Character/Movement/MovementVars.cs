@@ -96,12 +96,8 @@ public struct MovementVars
     public bool JumpFromCorner;     // JumpingState launched off a gripped corner (no
                                     // source FSD exists) — keeps the hold window alive
                                     // where TryFindSource would end the jump.
-    public bool    RefActive;       // LedgePull, Dropdown: tracking a reference clip this
-                                    // activation (latched at Enter so a mid-state
-                                    // UseReferenceClips hot-reload can't read stale frames)
-    public float   RefProgress;     // Dropdown: clip parameter t (advances dt/duration); LedgePull follows its clip as a path
-    public Vector2 RefEntry;        // LedgePull, Dropdown: body position at Enter — clip (0,0)
-    public Vector2 RefGate;         // LedgePull, Dropdown: measured gate point — clip (1,-1)
+    public Vector2 RefEntry;        // LedgePull, Dropdown: the clip's entry anchor (set at Enter)
+    public Vector2 RefGate;         // LedgePull, Dropdown: the clip's gate anchor (set at Enter)
     public sbyte AmbientElectiveLatch; // Elective-refusal hysteresis (AmbientCorrector):
                                     // >0 = committed to the R1 climb for n frames,
                                     // <0 = refusal window (R0) counting back to 0
