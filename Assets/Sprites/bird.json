@@ -1,0 +1,175 @@
+{
+ "frames": [
+  {
+   "filename": "bird 0",
+   "frame": {
+    "x": 1,
+    "y": 1,
+    "w": 159,
+    "h": 225
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 10,
+    "y": 0,
+    "w": 159,
+    "h": 225
+   },
+   "sourceSize": {
+    "w": 180,
+    "h": 226
+   },
+   "duration": 70
+  },
+  {
+   "filename": "bird 1",
+   "frame": {
+    "x": 162,
+    "y": 1,
+    "w": 159,
+    "h": 185
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 10,
+    "y": 20,
+    "w": 159,
+    "h": 185
+   },
+   "sourceSize": {
+    "w": 180,
+    "h": 226
+   },
+   "duration": 70
+  },
+  {
+   "filename": "bird 2",
+   "frame": {
+    "x": 323,
+    "y": 1,
+    "w": 168,
+    "h": 157
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 6,
+    "y": 34,
+    "w": 168,
+    "h": 157
+   },
+   "sourceSize": {
+    "w": 180,
+    "h": 226
+   },
+   "duration": 70
+  },
+  {
+   "filename": "bird 3",
+   "frame": {
+    "x": 493,
+    "y": 1,
+    "w": 180,
+    "h": 125
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 50,
+    "w": 180,
+    "h": 125
+   },
+   "sourceSize": {
+    "w": 180,
+    "h": 226
+   },
+   "duration": 70
+  },
+  {
+   "filename": "bird 4",
+   "frame": {
+    "x": 675,
+    "y": 1,
+    "w": 168,
+    "h": 181
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 6,
+    "y": 22,
+    "w": 168,
+    "h": 181
+   },
+   "sourceSize": {
+    "w": 180,
+    "h": 226
+   },
+   "duration": 70
+  },
+  {
+   "filename": "bird 5",
+   "frame": {
+    "x": 845,
+    "y": 1,
+    "w": 158,
+    "h": 225
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 11,
+    "y": 0,
+    "w": 158,
+    "h": 225
+   },
+   "sourceSize": {
+    "w": 180,
+    "h": 226
+   },
+   "duration": 70
+  }
+ ],
+ "meta": {
+  "app": "scripts/import-strip.py",
+  "image": "bird.png",
+  "format": "RGBA8888",
+  "size": {
+   "w": 1004,
+   "h": 227
+  },
+  "scale": "0.5",
+  "frameTags": [
+   {
+    "name": "idle",
+    "from": 0,
+    "to": 5,
+    "direction": "forward"
+   }
+  ],
+  "slices": [
+   {
+    "name": "pivot",
+    "color": "#0000ffff",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 90,
+       "y": 113,
+       "w": 1,
+       "h": 1
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -150,6 +150,7 @@ public sealed partial class DemoGame : Game
     // editor can't desync it.
     private readonly string _bindingArg;
     private SpriteSkin   _skin;
+    private CharacterElements _elements;
     private Skeleton     _skinRig;
     private SkeletonPose _skinPose;
     private bool _showSkin = true, _skinWire, _showRig = true;
@@ -208,6 +209,8 @@ public sealed partial class DemoGame : Game
         }
         catch { /* the overlays fall back to code defaults; never block startup on tuning */ }
         _attachments = new SpriteAttachmentRenderer(GraphicsDevice,
+            Path.GetFullPath(Path.Combine(_dir, "..", "..", "Assets", "AnimationEffects")));
+        _elements = new CharacterElements(GraphicsDevice,
             Path.GetFullPath(Path.Combine(_dir, "..", "..", "Assets", "AnimationEffects")));
         if (_bindingArg != null)
         {
@@ -879,7 +882,15 @@ public sealed partial class DemoGame : Game
         if (_skin != null && (_showSkin || _skinWire))
         {
             SyncSkinPose();
+            // The binding's always-on elements (a cloak) preview here with live physics,
+            // so their tuning is judged against real clip motion.
+            if (_showSkin)
+            {
+                _elements.Update(this, _skin, _skinPose, _root, (float)gameTime.ElapsedGameTime.TotalSeconds);
+                _elements.Draw(Matrix.Identity, this, _skin.Elements, front: false);
+            }
             _skin.Draw(Matrix.Identity, _skinPose, _root, fill: _showSkin);
+            if (_showSkin) _elements.Draw(Matrix.Identity, this, _skin.Elements, front: true);
         }
 
         _attachmentSamples.Clear();
@@ -1866,6 +1877,7 @@ public sealed partial class DemoGame : Game
     {
         _attachments?.Dispose();
         _skin?.Dispose();
+        _elements?.Dispose();
         _ui?.Dispose();
         base.UnloadContent();
     }

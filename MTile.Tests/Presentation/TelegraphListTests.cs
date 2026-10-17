@@ -96,41 +96,37 @@ public class TelegraphListTests
     }
 
     [Fact]
-    public void GuardActionTelegraphsAShieldBarAndTheCoveredCone()
+    public void GuardActionTelegraphsAShieldInsideTheCoveredCone()
     {
         var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), new Vector2(100f, 200f));
         var t = new TelegraphList();
         var vars = new ActionVars { Facing = 1 };
         new GuardAction().Telegraph(t, body, in vars);
 
-        Assert.Equal(TelegraphKind.Box, t[0].Kind);
-        Assert.True(t[0].A.Y < body.Position.Y - PlayerCharacter.Radius, "shield bar sits above the head");
-
-        // The rest is the cone: arc segments plus the two end ticks, all Lines.
-        Assert.True(t.Count > 3);
-        for (int i = 1; i < t.Count; i++) Assert.Equal(TelegraphKind.Line, t[i].Kind);
-
-        // Every arc vertex lies inside the guarded cone: fromAttacker direction within
+        // The placeholder shield is an arc of Lines in front of the body.
+        Assert.True(t.Count > 2);
+        // Every vertex lies inside the guarded cone: fromAttacker direction within
         // GuardConeHalfAngle of facing is exactly what ResolveGuard absorbs.
         float cos = MathF.Cos(CombatState.GuardConeHalfAngle);
-        for (int i = 1; i < t.Count - 2; i++)   // skip the two end ticks
+        for (int i = 0; i < t.Count; i++)
         {
+            Assert.Equal(TelegraphKind.Line, t[i].Kind);
             var dir = t[i].A - body.Position;
             dir.Normalize();
             Assert.True(Vector2.Dot(dir, Vector2.UnitX) >= cos - 1e-3f,
-                        $"arc vertex {i} is outside the guarded cone");
+                        $"shield vertex {i} is outside the guarded cone");
         }
     }
 
     [Fact]
-    public void GuardConeTelegraphMirrorsWithFacing()
+    public void GuardShieldTelegraphMirrorsWithFacing()
     {
         var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), new Vector2(100f, 200f));
         var left = new TelegraphList();
         var vars = new ActionVars { Facing = -1 };
         new GuardAction().Telegraph(left, body, in vars);
 
-        for (int i = 1; i < left.Count; i++)
+        for (int i = 0; i < left.Count; i++)
             Assert.True(left[i].A.X <= body.Position.X + 1e-3f,
                         "a left-facing guard covers the left side");
     }
@@ -143,5 +139,26 @@ public class TelegraphListTests
         var vars = new ActionVars { TimeInState = 0f, IsGrounded = true };
         new PulseAction().Telegraph(t, body, in vars);
         Assert.Equal(0, t.Count);
+    }
+
+    // A Sprite carries a name the renderer resolves, and counts the primitives emitted
+    // after it as its stand-in — drawn only when the art is missing.
+    [Fact]
+    public void Sprite_RecordsArtAndCountsItsFallbackShapes()
+    {
+        var t = new TelegraphList();
+        t.Line(Vector2.Zero, Vector2.One, Color.Red);                       // not part of it
+        int mark = t.Sprite("spear", "lock", 0.5f, new Vector2(3, 4), 1f, Color.White, mirror: true);
+        t.Line(Vector2.Zero, Vector2.One, Color.Brown);
+        t.RotatedRect(Vector2.One, Vector2.One, 0f, Color.Gray);
+        t.EndFallback(mark);
+        t.Line(Vector2.Zero, Vector2.One, Color.Red);                       // after it: always drawn
+
+        Assert.Equal(1, mark);
+        Assert.Equal(TelegraphKind.Sprite, t[1].Kind);
+        Assert.Equal("spear", t[1].Art);
+        Assert.Equal("lock", t[1].Tag);
+        Assert.True(t[1].Mirror);
+        Assert.Equal(2, t[1].Fallback);
     }
 }

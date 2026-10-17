@@ -1,0 +1,237 @@
+{
+ "frames": [
+  {
+   "filename": "aspid 0",
+   "frame": {
+    "x": 1,
+    "y": 1,
+    "w": 121,
+    "h": 161
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 38,
+    "y": 2,
+    "w": 121,
+    "h": 161
+   },
+   "sourceSize": {
+    "w": 196,
+    "h": 164
+   },
+   "duration": 70
+  },
+  {
+   "filename": "aspid 1",
+   "frame": {
+    "x": 124,
+    "y": 1,
+    "w": 130,
+    "h": 150
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 33,
+    "y": 7,
+    "w": 130,
+    "h": 150
+   },
+   "sourceSize": {
+    "w": 196,
+    "h": 164
+   },
+   "duration": 70
+  },
+  {
+   "filename": "aspid 2",
+   "frame": {
+    "x": 256,
+    "y": 1,
+    "w": 131,
+    "h": 118
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 32,
+    "y": 23,
+    "w": 131,
+    "h": 118
+   },
+   "sourceSize": {
+    "w": 196,
+    "h": 164
+   },
+   "duration": 70
+  },
+  {
+   "filename": "aspid 3",
+   "frame": {
+    "x": 389,
+    "y": 1,
+    "w": 132,
+    "h": 149
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 32,
+    "y": 8,
+    "w": 132,
+    "h": 149
+   },
+   "sourceSize": {
+    "w": 196,
+    "h": 164
+   },
+   "duration": 70
+  },
+  {
+   "filename": "aspid 4",
+   "frame": {
+    "x": 523,
+    "y": 1,
+    "w": 116,
+    "h": 140
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 40,
+    "y": 12,
+    "w": 116,
+    "h": 140
+   },
+   "sourceSize": {
+    "w": 196,
+    "h": 164
+   },
+   "duration": 70
+  },
+  {
+   "filename": "aspid 5",
+   "frame": {
+    "x": 641,
+    "y": 1,
+    "w": 109,
+    "h": 163
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 44,
+    "y": 0,
+    "w": 109,
+    "h": 163
+   },
+   "sourceSize": {
+    "w": 196,
+    "h": 164
+   },
+   "duration": 70
+  },
+  {
+   "filename": "aspid 6",
+   "frame": {
+    "x": 752,
+    "y": 1,
+    "w": 196,
+    "h": 113
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 26,
+    "w": 196,
+    "h": 113
+   },
+   "sourceSize": {
+    "w": 196,
+    "h": 164
+   },
+   "duration": 70
+  },
+  {
+   "filename": "aspid 7",
+   "frame": {
+    "x": 950,
+    "y": 1,
+    "w": 125,
+    "h": 149
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 36,
+    "y": 8,
+    "w": 125,
+    "h": 149
+   },
+   "sourceSize": {
+    "w": 196,
+    "h": 164
+   },
+   "duration": 70
+  }
+ ],
+ "meta": {
+  "app": "scripts/import-strip.py",
+  "image": "aspid.png",
+  "format": "RGBA8888",
+  "size": {
+   "w": 1076,
+   "h": 165
+  },
+  "scale": "0.5",
+  "frameTags": [
+   {
+    "name": "idle",
+    "from": 0,
+    "to": 3,
+    "direction": "forward"
+   },
+   {
+    "name": "windup",
+    "from": 4,
+    "to": 5,
+    "direction": "forward"
+   },
+   {
+    "name": "attack",
+    "from": 6,
+    "to": 6,
+    "direction": "forward"
+   },
+   {
+    "name": "recover",
+    "from": 7,
+    "to": 7,
+    "direction": "forward"
+   }
+  ],
+  "slices": [
+   {
+    "name": "pivot",
+    "color": "#0000ffff",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 98,
+       "y": 82,
+       "w": 1,
+       "h": 1
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

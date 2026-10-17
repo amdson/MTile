@@ -91,7 +91,8 @@ public static class ForceFieldSystem
     public static void Apply(ForceFieldWorld fields, HurtboxWorld hurtboxes,
                              Func<EntityId, PhysicsBody> resolveBody, float dt,
                              Action<EntityId> onGrabHeld = null,
-                             Action<EntityId> onThrown = null)
+                             Action<EntityId> onThrown = null,
+                             bool coop = false)
     {
         if (fields == null || dt <= 0f) return;
         foreach (var f in fields.All)
@@ -99,6 +100,7 @@ public static class ForceFieldSystem
             foreach (var hb in hurtboxes.All)
             {
                 if (hb.Owner == f.Owner) continue;          // self/team immune
+                if (coop && Factions.IsPlayer(f.Owner) && Factions.IsPlayer(hb.Owner)) continue;   // allies: no player-on-player grab/pull
                 if (hb.Target == f.Source) continue;        // never pull the publisher
                 if (!f.Only.IsNone && hb.Target != f.Only) continue;   // single-target lock (grab)
                 if (!HitboxWorld.Overlaps(f.Region, hb.Region)) continue;

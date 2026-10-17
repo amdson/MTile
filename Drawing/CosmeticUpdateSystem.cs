@@ -24,6 +24,8 @@ public sealed class CosmeticUpdateSystem
     // single most expensive cosmetic sub-pass and the one most likely to dominate a WASM
     // frame, so it gets its own slot rather than hiding inside the cosmetic lump.
     public FrameProfiler Profiler;
+    // Entity art (sheets etc.) — null leaves every entity on its procedural sprite.
+    public EntityArtSystem Art;
     public int AnimSlot = -1;
 
     // Tracked frame-to-frame so the landing puff fires exactly once on the
@@ -127,6 +129,9 @@ public sealed class CosmeticUpdateSystem
         }
         foreach (var e in sim.Entities)
         {
+            // First: may give a catalogued kind its art (even one drawn sprite-less) and
+            // feeds the art this frame's VisualState.
+            Art?.Sync(e);
             if (e.Sprite == null) continue;
             e.SyncSprite();
             e.Sprite.Update(dt);

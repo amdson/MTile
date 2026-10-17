@@ -1,0 +1,22 @@
+// Entity art catalog, read by Drawing/EntityArt.cs (EntityArtSystem). Keyed by EntityKind
+// name; a kind not listed here keeps its procedural sprite from Drawing/Sprites.cs.
+//
+//   "Bird": { "Type": "Sheet", "Sheet": "bird", "PixelSize": 0.1, "FlipWithFacing": true }
+//
+// Sheet = Assets/Sprites/<Sheet>.json + its PNG — an Aseprite JSON export, or the output
+// of scripts/import-strip.py --out Assets/Sprites. Draw the art facing RIGHT; put the
+// "pivot" slice at the body center. PixelSize is world px per original art pixel.
+//
+// Tags are picked from what the entity is doing; the first one the sheet has wins:
+//   <action>_<phase>   e.g. Lunge_windup   timed across that phase
+//   <action>           e.g. Lunge          timed across the whole action
+//   windup | attack | recover              timed across that phase
+//   hurt | move | idle                     loop on their own frame durations
+// <action> is the enemy's action class name without its "Action" suffix.
+{
+  // Generated with Codex (gpt-6-luna) from the rabbit + backdrop art as style refs, then
+  // scripts/import-strip.py --key ff00ff --downsample 2 (see each sheet's meta.app).
+  "Bird":     { "Sheet": "bird",     "PixelSize": 0.10 },
+  "Aspid":    { "Sheet": "aspid",    "PixelSize": 0.10 },
+  "Spearman": { "Sheet": "spearman", "PixelSize": 0.15, "OffsetY": 15 }
+}

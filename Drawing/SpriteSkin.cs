@@ -47,6 +47,14 @@ public sealed class SpriteSkin : IDisposable
     private readonly Affine2[]      _world;    // identity-root forward pass (private —
                                                // never clobbers the pose's cached world)
 
+    // The binding's always-on elements (Drawing/Elements.cs), or null.
+    public IReadOnlyList<AnimAttachment> Elements { get; }
+
+    // Each bone's rig-local direction (radians) in the bind pose the art was drawn in —
+    // what an element that follows a bone measures its turn against.
+    private readonly float[] _bindAngles;
+    public float BindAngle(int bone) => _bindAngles[bone];
+
     public int VertexCount   { get; private set; }
     public int TriangleCount { get; private set; }
 
@@ -100,6 +108,7 @@ public sealed class SpriteSkin : IDisposable
                       Texture2D texture, bool ownsTexture, bool premultiply = true)
     {
         _gd = gd; _baseTexture = texture; _ownsBaseTexture = ownsTexture; _skeleton = skel;
+        Elements = doc.Elements;
         if (!string.Equals(doc.Skeleton, skel.Name, StringComparison.OrdinalIgnoreCase))
             throw new ArgumentException(
                 $"Binding is for rig '{doc.Skeleton}', got '{skel.Name}'.");
@@ -123,6 +132,12 @@ public sealed class SpriteSkin : IDisposable
         _world = new Affine2[skel.Count];
         var bindPose = doc.CreateBindPose(skel);
         ComputeWorldLocal(bindPose);
+        _bindAngles = new float[skel.Count];
+        for (int i = 0; i < skel.Count; i++)
+        {
+            var d = _world[i].TransformVector(Vector2.UnitX);
+            _bindAngles[i] = MathF.Atan2(d.Y, d.X);
+        }
 
         int  step   = Math.Max(2, doc.MeshStep);
         byte thresh = (byte)Math.Clamp(doc.AlphaThreshold, 1, 255);

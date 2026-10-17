@@ -77,7 +77,12 @@ public sealed class AttachmentTrail
 
 public sealed class SpriteAttachmentRenderer : IDisposable
 {
-    private sealed record Loaded(SpriteAttachmentAsset Spec, Texture2D Texture);
+    // A resolved effect: the sheet and play order, its size in RIG units per ORIGINAL art
+    // pixel, and its blend. Spec is the legacy strip behind it (blade tip + trail), or null.
+    private sealed record Loaded(SpriteSheet Sheet, int[] Sequence, float Unit, Color Tint, float Glow)
+    {
+        public SpriteAttachmentAsset Spec => Sheet.Data.Strip;
+    }
     private sealed class History
     {
         public readonly AttachmentTrail Trail = new();
@@ -85,7 +90,9 @@ public sealed class SpriteAttachmentRenderer : IDisposable
     }
     private readonly GraphicsDevice _device;
     private readonly BasicEffect _effect;
-    private readonly string _assetDirectory;
+    private readonly SpriteSheetLibrary _sheets;
+    private readonly bool _ownsSheets;
+    private readonly Dictionary<string, VfxDefinition> _catalog;
     private readonly Dictionary<string, Loaded> _assets = new(StringComparer.Ordinal);
     private readonly Dictionary<object, Dictionary<AnimAttachment, History>> _histories = new();
     private readonly VertexPositionColorTexture[] _quad = new VertexPositionColorTexture[4];
@@ -93,10 +100,17 @@ public sealed class SpriteAttachmentRenderer : IDisposable
     private static readonly short[] Indices = { 0, 1, 2, 0, 2, 3 };
     private readonly List<AttachmentSample> _samples = new();
 
-    public SpriteAttachmentRenderer(GraphicsDevice device, string assetDirectory = "Assets/AnimationEffects")
+    // An attachment's Effect names either a vfx.json catalog entry (any sheet format, sized
+    // and blended by the entry) or a legacy strip spec directly (sized by its own
+    // RigUnitsPerPixel). Pass the host's library to share textures with VfxPlayer.
+    public SpriteAttachmentRenderer(GraphicsDevice device, string assetDirectory = "Assets/AnimationEffects",
+                                    SpriteSheetLibrary sheets = null)
     {
         _device = device;
-        _assetDirectory = assetDirectory;
+        _sheets = sheets ?? new SpriteSheetLibrary(device, assetDirectory);
+        _ownsSheets = sheets == null;
+        _catalog = new Dictionary<string, VfxDefinition>(
+            VfxPlayer.LoadCatalog(Path.Combine(assetDirectory, "vfx.json")), StringComparer.Ordinal);
         _effect = new BasicEffect(device) { VertexColorEnabled = true, TextureEnabled = true,
             LightingEnabled = false, View = Matrix.Identity };
     }
@@ -105,30 +119,28 @@ public sealed class SpriteAttachmentRenderer : IDisposable
     {
         if (string.IsNullOrWhiteSpace(name)) return null;
         if (_assets.TryGetValue(name, out var cached)) return cached;
-        Texture2D texture = null;
         try
         {
             // Effect is a catalog name, never an arbitrary path from a clip.
             if (name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0 || name.Contains(".."))
                 throw new InvalidDataException("Effect must be a catalog name.");
-            using var stream = TitleContent.TryOpenRead(Path.Combine(_assetDirectory, name + ".json"));
-            if (stream == null) throw new FileNotFoundException("Effect definition missing.");
-            var spec = JsonSerializer.Deserialize<SpriteAttachmentAsset>(stream);
-            if (spec == null || string.IsNullOrWhiteSpace(spec.Image)) throw new InvalidDataException("Missing image.");
-            using var png = TitleContent.TryOpenRead(Path.Combine(_assetDirectory, spec.Image));
-            if (png == null) throw new FileNotFoundException(spec.Image);
-            texture = Texture2D.FromStream(_device, png);
-            if (!spec.IsValid(texture.Width, texture.Height)) throw new InvalidDataException("Invalid strip dimensions or parameters.");
-            var pixels = new Color[texture.Width * texture.Height];
-            texture.GetData(pixels);
-            for (int i = 0; i < pixels.Length; i++)
-                pixels[i] = Color.FromNonPremultiplied(pixels[i].R, pixels[i].G, pixels[i].B, pixels[i].A);
-            texture.SetData(pixels);
-            return _assets[name] = new Loaded(spec, texture);
+            if (_catalog.TryGetValue(name, out var def))
+            {
+                var sheet = _sheets.Get(def.Sheet) ?? throw new InvalidDataException($"Sheet '{def.Sheet}' did not load.");
+                if (!(def.PixelSize > 0f)) throw new InvalidDataException("PixelSize must be positive.");
+                // Catalog sizes are WORLD px; the attachment frame is rig space.
+                return _assets[name] = new Loaded(sheet, sheet.Data.Sequence(def.Tag),
+                    def.PixelSize / Game1.SkeletonScale, VfxPlayer.ParseTint(def.Tint), Math.Clamp(def.Glow, 0f, 1f));
+            }
+            var strip = _sheets.Get(name) ?? throw new InvalidDataException("Sheet did not load.");
+            var spec = strip.Data.Strip
+                ?? throw new InvalidDataException("An Aseprite sheet needs a vfx.json entry to give it a size.");
+            if (!spec.IsValid(strip.Texture.Width, strip.Texture.Height))
+                throw new InvalidDataException("Invalid strip dimensions or parameters.");
+            return _assets[name] = new Loaded(strip, strip.Data.Sequence(null), spec.RigUnitsPerPixel, Color.White, 0f);
         }
         catch (Exception e)
         {
-            texture?.Dispose();
             Console.WriteLine($"Attachment '{name}': {e.Message}");
             return _assets[name] = null;
         }
@@ -175,7 +187,7 @@ public sealed class SpriteAttachmentRenderer : IDisposable
             if (asset == null || !a.TryProgress(sample.Time, out float t)) continue;
             var spec = asset.Spec;
             var transform = AttachmentSampling.Transform(world, root, pose.Skeleton, sample.Point, a);
-            if (history != null && spec.TrailSeconds > 0 && spec.TipPixels != null && a.EmitsTrail(sample.Time))
+            if (history != null && spec != null && spec.TrailSeconds > 0 && spec.TipPixels != null && a.EmitsTrail(sample.Time))
             {
                 if (!history.TryGetValue(a, out var h)) history[a] = h = new History();
                 h.Lifetime = spec.TrailSeconds;
@@ -193,27 +205,24 @@ public sealed class SpriteAttachmentRenderer : IDisposable
                 h.Trail.EndFrame();
             }
         _effect.TextureEnabled = true;
+        Span<Vector2> corners = stackalloc Vector2[4];
+        Span<Vector2> uvs = stackalloc Vector2[4];
         foreach (var sample in samples)
         {
             var a = sample.Attachment;
             var asset = Load(a.Effect);
             if (asset == null || !a.TryProgress(sample.Time, out float t)) continue;
-            var spec = asset.Spec;
-            int frame = a.FrameAt(sample.Time, t, spec.FrameCount);
+            // The window (FrameTimes / Progress curve) picks a step through the play order.
+            int frame = asset.Sequence[a.FrameAt(sample.Time, t, asset.Sequence.Length)];
             var transform = AttachmentSampling.Transform(world, root, pose.Skeleton, sample.Point, a);
-            float unit = spec.RigUnitsPerPixel;
-            float left = -spec.PivotX * unit, top = -spec.PivotY * unit;
-            float right = left + spec.FrameWidth * unit, bottom = top + spec.FrameHeight * unit;
-            // Half texel inset prevents adjacent frame bleed under linear filtering.
-            float u0 = (frame * spec.FrameWidth + .5f) / asset.Texture.Width;
-            float u1 = ((frame + 1) * spec.FrameWidth - .5f) / asset.Texture.Width;
-            float v0 = .5f / spec.FrameHeight, v1 = 1 - v0;
-            Color color = Color.White * sample.Weight;
-            _quad[0] = Vertex(transform.TransformPoint(new Vector2(left, top)), color, u0, v0);
-            _quad[1] = Vertex(transform.TransformPoint(new Vector2(right, top)), color, u1, v0);
-            _quad[2] = Vertex(transform.TransformPoint(new Vector2(right, bottom)), color, u1, v1);
-            _quad[3] = Vertex(transform.TransformPoint(new Vector2(left, bottom)), color, u0, v1);
-            _effect.Texture = asset.Texture;
+            asset.Sheet.Quad(frame, asset.Unit, corners, uvs);
+            // Premultiplied: vertex alpha is how much the effect occludes, so Glow (→ 0 alpha)
+            // adds instead of covering — VfxPlayer's convention.
+            var color = new Color(asset.Tint.ToVector3() * sample.Weight);
+            color.A = (byte)MathF.Round(255f * sample.Weight * (1f - asset.Glow));
+            for (int i = 0; i < 4; i++)
+                _quad[i] = Vertex(transform.TransformPoint(corners[i]), color, uvs[i].X, uvs[i].Y);
+            _effect.Texture = asset.Sheet.Texture;
             Submit(_quad);
         }
     }
@@ -288,7 +297,7 @@ public sealed class SpriteAttachmentRenderer : IDisposable
     public void ClearHistory() => _histories.Clear();
     public void Dispose()
     {
-        foreach (var asset in _assets.Values) asset?.Texture.Dispose();
+        if (_ownsSheets) _sheets.Dispose();
         _effect.Dispose();
         _histories.Clear();
     }

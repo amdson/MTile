@@ -16,6 +16,7 @@ public sealed class SimSnapshot
     public float Elapsed;               // absolute sim clock (drives platform tickers)
     public int   Frame;                 // step counter; rewinds with rollback (presentation dedup key)
     public int   PlayerDeaths;          // Simulation.PlayerDeaths
+    public Vector2 RespawnPoint;        // Simulation.RespawnPoint (a stage checkpoint moves it)
     public int[] StageVars;             // Simulation.StageVars (a copy)
 
     // The ECS world snapshot: slot generations + free list (EntityId bookkeeping) PLUS

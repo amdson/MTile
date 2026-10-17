@@ -87,6 +87,21 @@ public enum EntityKind
     // Subclass; see Entities/Enemies/Types/QuillbackEnemy.cs.
     Quillback,
 
+    // Spearman — minion-tier walker: a long telegraphed stab along a tracked-then-locked
+    // line, a spear that regrows after every thrust (open until it does), and a snap
+    // parry that stabs projectiles out of the air. Subclass; see
+    // Entities/Enemies/Types/SpearmanEnemy.cs.
+    Spearman,
+
+    // Pulser — slow, tough surface-crawler (gravity off while touching terrain) with
+    // one move: a long-charged, terrain-occluded pulse. Subclass; see
+    // Entities/Enemies/Types/PulserEnemy.cs.
+    Pulser,
+
+    // Spawner — destructible nest that keeps up to N of one enemy kind alive near it.
+    // See Entities/EnemySpawner.cs.
+    Spawner,
+
     // ── Fighters (Plans/FIGHTER_DESIGN_PLAN.md) ─────────────────────────────
     // Compiled from FighterSpecs by FighterCompiler and registered with EnemyFactory.
     // KEEP THIS BLOCK CONTIGUOUS AND LAST: EntityKinds.IsFighter is a range check.

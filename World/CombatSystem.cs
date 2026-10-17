@@ -25,6 +25,10 @@ namespace MTile;
 // static — it's a pure function.
 public sealed class CombatSystem
 {
+    // Set by Simulation from Stage.Coop: player factions don't hit each other. Fixed for
+    // the match, so it is not snapshotted.
+    public bool Coop { get; set; }
+
     private readonly Dictionary<int, HashSet<EntityId>> _hitDedupe = new();
     private readonly HashSet<int> _liveHitIds = new();
     private readonly List<int> _scratchPrune = new();
@@ -217,6 +221,10 @@ public sealed class CombatSystem
                 foreach (var hb in hurtboxes.All)
                 {
                     if (hit.Owner == hb.Owner && !AcrossTeams(in hit, in hb, resolve)) continue;
+                    // Co-op: the two players are allies — no player-faction hit lands on
+                    // the other player (slashes, projectiles and thrown blocks all carry
+                    // their thrower's player faction as Owner).
+                    if (Coop && Factions.IsPlayer(hit.Owner) && Factions.IsPlayer(hb.Owner)) continue;
                     if (alreadyHit.Contains(hb.Target)) continue;
                     if (!HitboxWorld.Overlaps(hit.Region, hb.Region)) continue;
                     if (hit.Shape != null && !OverlapsPolyAABB(hitVerts, hitAxes, hb.Region)) continue;

@@ -14,6 +14,7 @@ part of a normal build; `dotnet build MTile.sln` and `dotnet test` need nothing 
 | [`build-sfx.ps1`](build-sfx.ps1) | The same, on Windows. |
 | [`sync-sounds.sh`](sync-sounds.sh) | Wire the built Ogg clips into the content pipeline + sound manifest (macOS/Linux). |
 | [`sync-sounds.ps1`](sync-sounds.ps1) | The same, on Windows. |
+| [`import-strip.py`](import-strip.py) | Turn a loose row of effect/sprite drawings into an Aseprite-format sheet in `Assets/AnimationEffects/` (trimmed, packed, anchors aligned on a `pivot` slice, optional `--downsample`). Prints each frame's source span — check it, and pass `--cuts` when the automatic split guesses wrong. Effects using a sheet are named in `Assets/AnimationEffects/vfx.json` (`Drawing/VfxPlayer.cs`). |
 | [`gen-tower.py`](gen-tower.py) | Regenerate the Zeus tower's terrain (`Levels/hill_*.txt`) from its geometry constants. |
 | [`sync-rabbit-derived.sh`](sync-rabbit-derived.sh) | Regenerate `SkeletonStates/rabbit_derived/` (machine-made rabbit clips) from the biped pool: probe retarget + bakeyaw. |
 | [`competition.py`](competition.py) | Fighter competition git plumbing: `base` (cut the holdout-free base branch in a temp worktree), `worktree` (one competitor branch), `collect` (accept one-new-package branches and copy the file in, never merge), `brief` (render `Plans/FIGHTER_COMPETITOR_BRIEF.md` for a slot). See `Plans/FIGHTER_COMPETITION.md`. |

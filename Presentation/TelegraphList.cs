@@ -26,6 +26,7 @@ public enum TelegraphKind : byte
     Box,           // axis-aligned filled rect, A = top-left, B = size
     RotatedRect,   // filled rect centred on A, size B, rotated by `Rotation`
     Ring,          // N-gon outline centred on A, radius B.X, `Segments` sides
+    Sprite,        // catalog art `Art` with its pivot at A, forward along `Rotation`
 }
 
 public struct TelegraphShape
@@ -37,6 +38,14 @@ public struct TelegraphShape
     public float   Thickness;
     public int     Segments;
     public Color   Color;
+    // Sprite only. Art names an entry of the effect catalog (Assets/AnimationEffects/
+    // vfx.json); Tag + Progress (0..1) pick its frame; Mirror flips it across its forward
+    // axis; Fallback counts the shapes right after it that stand in when the art is absent.
+    public string  Art;
+    public string  Tag;
+    public float   Progress;
+    public bool    Mirror;
+    public int     Fallback;
 }
 
 public sealed class TelegraphList
@@ -133,6 +142,22 @@ public sealed class TelegraphList
             prev = next;
         }
     }
+
+    // Catalog art instead of primitives — still no graphics types, just a name the
+    // renderer resolves. Returns a mark: shapes emitted before EndFallback(mark) are the
+    // sprite's stand-in, drawn only when the art can't load, so a source keeps working
+    // (and stays headless-testable) whether or not its art exists.
+    public int Sprite(string art, string tag, float progress, Vector2 at, float rotation,
+                      Color tint, bool mirror = false)
+    {
+        int mark = _count;
+        ref var s = ref Next();
+        s.Kind = TelegraphKind.Sprite; s.Art = art; s.Tag = tag; s.Progress = progress;
+        s.A = at; s.Rotation = rotation; s.Color = tint; s.Mirror = mirror;
+        return mark;
+    }
+
+    public void EndFallback(int mark) => _shapes[mark].Fallback = _count - mark - 1;
 
     // ── Storage ────────────────────────────────────────────────────────────────
 

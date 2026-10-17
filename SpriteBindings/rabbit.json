@@ -156,5 +156,8 @@
       "Rotation": -1.3258177,
       "Length": 0.246211
     }
+  ],
+  "Elements": [
+    { "Point": "chest", "Effect": "rabbit_cloak" }
   ]
 }

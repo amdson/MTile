@@ -57,29 +57,29 @@ public sealed class WardenController : EnemyController
         if (MathF.Abs(to.X) > EngageRange)
         {
             input.MoveDir.X = side;
-            input.Jump      = StepAhead(ctx, side);
+            input.Jump      = StepAhead(in ctx, side, MaxStepTiles, ProbeAhead);
         }
         return input;
     }
 
     // True when the column just ahead of the feet is blocked by a step 1..MaxStepTiles
     // tall. A taller wall (or nothing at all) returns false — it walks into the wall
-    // and waits, which is the honest failure mode.
-    private bool StepAhead(in EnemyContext ctx, int side)
+    // and waits, which is the honest failure mode. Shared with SpearmanController.
+    public static bool StepAhead(in EnemyContext ctx, int side, int maxStepTiles, float probeAhead)
     {
         var chunks = ctx.Spawner?.Chunks;
         if (chunks == null) return false;
         var   b      = ctx.Self.Body.Bounds;
-        float probeX = side > 0 ? b.Right + ProbeAhead : b.Left - ProbeAhead;
+        float probeX = side > 0 ? b.Right + probeAhead : b.Left - probeAhead;
         const float ts = Chunk.TileSize;
 
         int rise = 0;
-        for (int k = 1; k <= MaxStepTiles + 1; k++)
+        for (int k = 1; k <= maxStepTiles + 1; k++)
         {
             if (!TileQuery.IsSolidAt(chunks, probeX, b.Bottom - (k - 0.5f) * ts)) break;
             rise = k;
         }
-        return rise >= 1 && rise <= MaxStepTiles;
+        return rise >= 1 && rise <= maxStepTiles;
     }
 }
 

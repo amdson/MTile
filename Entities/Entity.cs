@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -285,6 +286,12 @@ public interface IEntitySpawner
     // Default null: an enemy handed a spawner without one targets the player it was
     // given, which is what every enemy did before teams existed.
     ITargetSource Targets => null;
+    // Every live entity in spawn order (deterministic), for entities that count their
+    // surroundings (EnemySpawner). Read-only; default empty for stubs.
+    IEnumerable<Entity> LiveEntities => System.Array.Empty<Entity>();
+    // The sim's own enemy-blueprint table, for spawning enemies by kind
+    // (EntityFactory.CreateEnemy). Default null: only registry/subclass kinds resolve.
+    IReadOnlyDictionary<EntityKind, EnemyBlueprint> BlueprintTable => null;
 }
 
 // Entities that show something beyond their Sprite in the world-space overlay pass

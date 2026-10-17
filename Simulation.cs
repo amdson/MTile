@@ -55,6 +55,13 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     private PlayerCharacter _player;
     private readonly Controller _controller = new();
     private Vector2 _playerSpawn;
+    // Co-op (Stage.Coop): no player-vs-player hits, and secondary players respawn too.
+    // Set at construction from the stage; never changes mid-match.
+    public bool Coop { get; private set; }
+    // Where dead players come back. Starts at the stage's PlayerSpawn; a stage may move
+    // it (a checkpoint). Snapshotted, so a stage ticker that moves it rolls back cleanly.
+    private const float CoopRespawnOffsetX = 24f;
+    public Vector2 RespawnPoint { get => _playerSpawn; set => _playerSpawn = value; }
 
     // Secondary PlayerCharacters: full hittables whose Controllers are never fed
     // hardware input (real input drives _player only). See Game1.AddSecondaryPlayer
@@ -272,6 +279,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     {
         get { var l = new List<Entity>(); foreach (var r in _world.Query<EntityRef>()) l.Add(r.Component1.Obj); return l; }
     }
+    IEnumerable<Entity> IEntitySpawner.LiveEntities => Entities;
+    IReadOnlyDictionary<EntityKind, EnemyBlueprint> IEntitySpawner.BlueprintTable => Blueprints;
     public IReadOnlyList<(MovingRectangle Rect, Color Color)> Platforms => _platforms;
     public IReadOnlyList<PhysicsBody> Bodies
     {
@@ -326,6 +335,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             TerrainLoader.Load(cfgPath, _chunks);
         }
 
+        Coop = stage.Coop;
+        _combat.Coop = Coop;
         _playerSpawn = stage.PlayerSpawn;
         // Endless levels have no authored ground to aim a spawn at — the surface under
         // any given X is whatever the noise says. Drop the stage's spawn onto that
@@ -499,7 +510,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             // that read GrabbedActive line up next step.
             onGrabHeld: id => { if (ResolveHittable(id) is PlayerCharacter pc) pc.Combat.MarkGrabbed(pc.Frame); },
             // Throw fields stun their victim so they exit the throw into Tumble.
-            onThrown:   id => { if (ResolveHittable(id) is PlayerCharacter pc) pc.Combat.RegisterThrown(pc.Frame, dt); });
+            onThrown:   id => { if (ResolveHittable(id) is PlayerCharacter pc) pc.Combat.RegisterThrown(pc.Frame, dt); },
+            coop: Coop);
 
         // Player respawn on death.
         if (!_player.IsAlive)
@@ -508,6 +520,17 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             _playerDeaths++;
             OnPlayerRespawn?.Invoke(_player.Body.Position);
         }
+        // Co-op: a dead partner comes back too, beside the checkpoint so the two don't
+        // overlap. Outside co-op a dead secondary is a PvP kill and stays dead (the
+        // match layer decides what that means).
+        if (Coop)
+            foreach (var (p, _) in _secondaryPlayers)
+                if (!p.IsAlive)
+                {
+                    p.Respawn(_playerSpawn + new Vector2(CoopRespawnOffsetX, 0f));
+                    _playerDeaths++;
+                    OnPlayerRespawn?.Invoke(p.Body.Position);
+                }
 
         // Entity gravity-scale opt-out, applied right before uniform gravity integrates.
         // Fresh query so entities spawned this frame are included (as before).
@@ -658,6 +681,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             Elapsed              = _elapsed,
             Frame                = _frame,
             PlayerDeaths         = _playerDeaths,
+            RespawnPoint         = _playerSpawn,
             StageVars            = (int[])StageVars.Clone(),
             PrimaryController    = _controller.Capture(),
             SecondaryControllers = secCtrls,
@@ -676,6 +700,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         _elapsed      = snap.Elapsed;
         _frame        = snap.Frame;
         _playerDeaths = snap.PlayerDeaths;
+        _playerSpawn  = snap.RespawnPoint;
         if (snap.StageVars != null) Array.Copy(snap.StageVars, StageVars, StageVars.Length);
 
         // Snapshot the live entity set (by id) BEFORE the World restore clears the

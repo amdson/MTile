@@ -67,7 +67,10 @@ public class Game1 : Game
     private GlowTrailField _glowField;
     private AttackGlowSystem _attackGlow;
     private SpriteAttachmentRenderer _attachments;
-    private HitSparkRenderer _hitSparks;
+    private SpriteSheetLibrary _sheets;
+    private VfxPlayer _vfx;
+    private CharacterElements _elements;   // always-on character elements (cloaks…)
+    private Func<Vector2, bool> _elementSolid;   // their terrain contact (render-side read)
     // HitIds whose terrain-strike burst already played. The sim raises the strike every
     // frame the hitbox overlaps terrain; one burst per attack. Bounded FIFO.
     private readonly HashSet<int> _sparkedHitIds = new();
@@ -147,6 +150,7 @@ public class Game1 : Game
     // stepped frame and you can walk a movement/animation transition forward one frame at
     // a time. Skipped in netplay — see FrameStepper.
     private readonly FrameStepper _stepper = new();
+    private readonly CreativeMode _creative = new();   // Tab: level editing, sim frozen
 
     // Stage save/reload dev tool (desktop, offline only). Ctrl+M captures the player
     // position + nearby chunks into Levels/saved/ as a new stage (StageSaver); F5
@@ -431,6 +435,49 @@ public class Game1 : Game
         return n > 0 ? sum / n : _sim.Player.Body.Position;
     }
 
+    // Creative Ctrl+S: write the edited terrain back into the active stage's level file
+    // (LevelWriter), in the SOURCE Levels/ (CWD-relative, so launch from the repo root)
+    // and mirrored into the build's copy that TitleContainer actually loads, so F5
+    // re-enters the edit without a rebuild.
+    private void SaveLevel()
+    {
+        if (OperatingSystem.IsBrowser()) { Toast("level save needs the desktop build"); return; }
+        var stage = Stages.Get(_activeStage);
+        if (stage.Terrain != null || string.IsNullOrEmpty(stage.TerrainConfig))
+        {
+            Toast($"stage '{_activeStage}' is built in code, not a level file - Ctrl+M snapshots it to Levels/saved/");
+            return;
+        }
+        bool rooted = Path.IsPathRooted(stage.TerrainConfig);
+        string src = rooted ? stage.TerrainConfig : Path.GetFullPath(Path.Combine("Levels", stage.TerrainConfig));
+        if (!File.Exists(src))
+        {
+            Toast($"level save FAILED: no {src} - launch from the repo root");
+            return;
+        }
+        try
+        {
+            var r = LevelWriter.Overwrite(_sim.Chunks, src);
+            if (!rooted)
+            {
+                string srcRoot = Path.GetFullPath("Levels");
+                string binRoot = Path.Combine(AppContext.BaseDirectory, "Levels");
+                if (Directory.Exists(binRoot) && !string.Equals(Path.GetFullPath(binRoot).TrimEnd('/', '\\'),
+                                                                srcRoot.TrimEnd('/', '\\'), StringComparison.Ordinal))
+                    foreach (string f in r.WrittenFiles)
+                    {
+                        string dst = Path.Combine(binRoot, Path.GetRelativePath(srcRoot, f));
+                        Directory.CreateDirectory(Path.GetDirectoryName(dst)!);
+                        File.Copy(f, dst, overwrite: true);
+                    }
+            }
+            _creative.MarkSaved();
+            Toast($"saved {Path.GetFileName(src)}: {r.ChunksWritten} chunk file(s) written"
+                  + (r.NewExtents > r.OldExtents ? $", Extents {r.OldExtents} -> {r.NewExtents}" : ""));
+        }
+        catch (Exception ex) { Toast($"level save FAILED: {ex.Message}"); }
+    }
+
     private void Toast(string msg)
     {
         _toast = msg;
@@ -445,6 +492,7 @@ public class Game1 : Game
     {
         _sim = new Simulation(_config, stage);
         _activeStage = stage.Name;
+        _creative.ResetHistory();
         _simAccum = 0f;
         // Fight viewer: record from frame 0 so the whole bout is scrubbable (Ctrl+P).
         if (_fight != null) _recorder.StartRecording();
@@ -460,7 +508,8 @@ public class Game1 : Game
         // time. The log drains once per rendered frame, below.
         _events.Reset();   // fresh sim ⇒ frame counter restarts ⇒ old keys are stale
         _sparkedHitIds.Clear(); _sparkedOrder.Clear();   // HitIds restart with the sim
-        _hitSparks?.Clear();
+        _vfx?.Clear();
+        _elements?.Clear();
         _audio.StopAll();  // and no voice should survive into a different world
         _sim.OnPlayerRespawn += pos =>
             _events.Emit(_sim.Frame, new PresentationId(PresentationKind.PlayerRespawn), pos);
@@ -518,12 +567,12 @@ public class Game1 : Game
                         TilePalette.BaseColor((TileType)(e.Payload & 0xFF)), e.Payload >> 8);
                     break;
                 case PresentationKind.TerrainStrike:
-                    if (_hitSparks != null && _sparkedHitIds.Add(e.Id.A))
+                    if (_vfx != null && _sparkedHitIds.Add(e.Id.A))
                     {
                         _sparkedOrder.Enqueue(e.Id.A);
                         if (_sparkedOrder.Count > 64) _sparkedHitIds.Remove(_sparkedOrder.Dequeue());
                         float ang = e.Payload / 1000f;
-                        _hitSparks.SpawnWall(e.Position, new Vector2(MathF.Cos(ang), MathF.Sin(ang)));
+                        _vfx.Spawn("terrain_strike", e.Position, new Vector2(MathF.Cos(ang), MathF.Sin(ang)));
                     }
                     break;
                 case PresentationKind.ChargedBlast:
@@ -743,8 +792,12 @@ public class Game1 : Game
             catch (Exception) { _background = null; }
         }
         _attackGlow = new AttackGlowSystem(_animator, _glow, _glowField, SkeletonScale);
-        _attachments = new SpriteAttachmentRenderer(GraphicsDevice);
-        _hitSparks = new HitSparkRenderer(GraphicsDevice);
+        _sheets = new SpriteSheetLibrary(GraphicsDevice);
+        _attachments = new SpriteAttachmentRenderer(GraphicsDevice, sheets: _sheets);
+        _vfx = new VfxPlayer(GraphicsDevice, _sheets);
+        _elements = new CharacterElements(GraphicsDevice);
+        _elementSolid = p => TileQuery.IsSolidAt(_sim.Chunks, p.X, p.Y);
+        _hitFeel.Vfx = _vfx;
         _attackGlow.ReplacesSlash = p =>
         {
             if (ReferenceEquals(p, _sim.Player)) return _attachments.ReplacesEffect(_animator, "knife");
@@ -759,6 +812,7 @@ public class Game1 : Game
             CameraTarget = _fight != null ? FightCameraTarget : null,
             Profiler = _prof, AnimSlot = _sAnim,
         };
+        _cosmetics.Art = new EntityArtSystem(GraphicsDevice);
 
         // Audio. The bank is optional: with no clips built every kind resolves to null
         // and the mixer no-ops, so the game runs exactly as it does today.
@@ -893,6 +947,19 @@ public class Game1 : Game
             if (_audio.Mixer.Muted) _audio.StopAll();
             Toast(_audio.Mixer.Muted ? "audio muted" : "audio on");
         }
+        // Tab: creative (level-editing) mode. Offline only, and not over a recorder
+        // playback, which owns the sim and camera itself.
+        bool creativeToggled = false;
+        if (_session == null && !_recorder.IsPlayback
+            && keyboardState.IsKeyDown(Keys.Tab) && !_prevKeys.IsKeyDown(Keys.Tab))
+        {
+            _creative.Toggle(_camera, _config.CameraZoom);
+            creativeToggled = true;
+            Toast(_creative.Active ? "creative mode: sim frozen - Tab to play" : "play");
+        }
+        bool saveLevel = _creative.Active && !creativeToggled
+            && (keyboardState.IsKeyDown(Keys.LeftControl) || keyboardState.IsKeyDown(Keys.RightControl))
+            && keyboardState.IsKeyDown(Keys.S) && !_prevKeys.IsKeyDown(Keys.S);
         _prevKeys = keyboardState;
 
         var mouseState = Mouse.GetState();
@@ -956,6 +1023,13 @@ public class Game1 : Game
             _cosmetics.Update(_sim, _config, dt, netSteps * Simulation.FixedDt,
                               mouseWorldPos, _screenCenter, LocalPlayer);
             _prof.End(_sCosmetic, tNetCos);
+        }
+        else if (_creative.Active)
+        {
+            // Creative: no Step, no cosmetics (its camera tracking would fight the free
+            // camera). Everything still draws from the frozen state.
+            _creative.Update(keyboardState, mouseState, _camera, _screenCenter, _sim, dt);
+            if (saveLevel) SaveLevel();
         }
         else
         {
@@ -1128,6 +1202,7 @@ public class Game1 : Game
         if (_config.DrawPlayerSpriteSkin)
         {
             var cam = _camera.GetDrawTransform(_screenCenter);
+            float frameDt = (float)gameTime.ElapsedGameTime.TotalSeconds;
             bool split = false;
             var skin0 = SkinForPlayer(0);
             if (skin0 != null)
@@ -1137,9 +1212,11 @@ public class Game1 : Game
                 if (_recorder.TryPlaybackPrimary(out var pc)) { root = pc.RootWorldPos; facing = pc.Facing; }
                 else { root = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); facing = player.Facing; }
                 int dir = facing == 0 ? 1 : facing;
-                skin0.Draw(cam, _animator.Pose,
-                    Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)),
-                    flash: _hitFlash.Intensity(player.Id));
+                var rootXf = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale));
+                _elements.Update(player, skin0, _animator.Pose, rootXf, frameDt, _elementSolid);
+                _elements.Draw(cam, player, skin0.Elements, front: false);
+                skin0.Draw(cam, _animator.Pose, rootXf, flash: _hitFlash.Intensity(player.Id));
+                _elements.Draw(cam, player, skin0.Elements, front: true);
             }
             for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
             {
@@ -1152,9 +1229,11 @@ public class Game1 : Game
                 if (_recorder.TryPlaybackSecondary(i, out var sc)) { root = sc.RootWorldPos; facing = sc.Facing; }
                 else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = p.Facing; }
                 int dir = facing == 0 ? 1 : facing;
-                skin.Draw(cam, anim.Pose,
-                    Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale)),
-                    flash: _hitFlash.Intensity(p.Id));
+                var rootXf = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale));
+                _elements.Update(p, skin, anim.Pose, rootXf, frameDt, _elementSolid);
+                _elements.Draw(cam, p, skin.Elements, front: false);
+                skin.Draw(cam, anim.Pose, rootXf, flash: _hitFlash.Intensity(p.Id));
+                _elements.Draw(cam, p, skin.Elements, front: true);
             }
             if (split) _spriteBatch.Begin(transformMatrix: cam);
         }
@@ -1215,7 +1294,7 @@ public class Game1 : Game
             p.CurrentAction.Telegraph(_telegraphs, p.Body, p.CurrentActionVars);
         foreach (var e in _sim.Entities)
             if (e is ITelegraphSource ts) ts.Telegraph(_telegraphs);
-        TelegraphRenderer.Draw(_draw, _telegraphs);
+        TelegraphRenderer.Draw(_draw, _telegraphs, _vfx);
         _prof.End(_sParticles, tFx);
 
         long tDbg = _prof.Begin();
@@ -1365,8 +1444,8 @@ public class Game1 : Game
             }
         }
         else _attachments.ClearHistory();
-        _hitSparks.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
-        _hitSparks.Draw(camTransform);
+        _vfx.Update((float)gameTime.ElapsedGameTime.TotalSeconds);
+        _vfx.Draw(camTransform);
 
         if (_config.DebugDrawGlowDemo)
             _devDemos.DrawGlowDemo(camTransform,
@@ -1403,6 +1482,11 @@ public class Game1 : Game
             _spriteBatch.DrawString(_debugFont, "[TRACE]  Ctrl+L stop+save",
                                     tracePos, new Color(255, 90, 70));
             _spriteBatch.End();
+        }
+        if (_creative.Active)
+        {
+            _creative.DrawWorld(_spriteBatch, _pixel, _camera, _screenCenter);
+            _creative.DrawHud(_spriteBatch, _debugFont, _pixel, GraphicsDevice.Viewport.Width);
         }
         _prof.End(_sHud, tHud);
 

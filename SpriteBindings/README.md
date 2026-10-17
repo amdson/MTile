@@ -72,6 +72,30 @@ color per region over the sprite's silhouette:
   few pixels past the seam — the back layer keeps drawing underneath, the front covers it.
 - Layers rebake at load: after editing the mask, relaunch the editor/game to see it.
 
+## Elements (always-on add-ons: cloaks, ears…)
+
+A binding can list what the character always wears, in the same schema clips use for
+the knife (`Attachments`) — a named point and an effect name, nothing else:
+
+```jsonc
+"Elements": [ { "Point": "chest", "Effect": "rabbit_cloak" } ]
+```
+
+The effect is `Assets/AnimationEffects/<Effect>.json`; its `Type` says what manages it.
+`"Curtain"` is a cloth sheet over a PNG drawn hanging at rest, as worn facing right: a
+`Columns × Rows` grid over its opaque bounds, top row pinned to the point, the rest
+trailing with inertia, settling on terrain, and mirrored (staying behind the body) on a
+turn. Its knobs — `PixelSize`, `AnchorX/Y` (the point on the image), `Stiffness`,
+`StiffnessTip`, `Damping` (air drag), `Gravity`, `Bend` (fold resistance), `Front`,
+`PinBottom` (stands up from its base — ears), `FollowBone` (tilts with the point's bone,
+relative to this binding's bind pose) — live in that file, not here,
+so the same cloak goes on any character. Preview and tune against real motion in the
+animation editor: `dotnet run --project MTile.Demo -- <clip> --usebind <name>`.
+Physics state is per character and survives clip changes; the solver is
+`Drawing/Elements.cs` (`CurtainSim`). Worked examples: `rabbit.json` (cloak) and
+`rabbit_floppy.json` (ears cut out of the head art onto the same canvas, so the
+ears' `AnchorX/Y` is simply the head bone's bind-pose tip in `head.png` pixels).
+
 ## Settings (json, all optional)
 
 | Key | Default | Meaning |

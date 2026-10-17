@@ -1,0 +1,219 @@
+{
+ "frames": [
+  {
+   "filename": "fx_wall_sparks 0",
+   "frame": {
+    "x": 1,
+    "y": 1,
+    "w": 121,
+    "h": 33
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 34,
+    "y": 92,
+    "w": 121,
+    "h": 33
+   },
+   "sourceSize": {
+    "w": 155,
+    "h": 219
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_wall_sparks 1",
+   "frame": {
+    "x": 124,
+    "y": 1,
+    "w": 80,
+    "h": 88
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 75,
+    "y": 57,
+    "w": 80,
+    "h": 88
+   },
+   "sourceSize": {
+    "w": 155,
+    "h": 219
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_wall_sparks 2",
+   "frame": {
+    "x": 206,
+    "y": 1,
+    "w": 98,
+    "h": 115
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 57,
+    "y": 50,
+    "w": 98,
+    "h": 115
+   },
+   "sourceSize": {
+    "w": 155,
+    "h": 219
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_wall_sparks 3",
+   "frame": {
+    "x": 306,
+    "y": 1,
+    "w": 155,
+    "h": 218
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 1,
+    "w": 155,
+    "h": 218
+   },
+   "sourceSize": {
+    "w": 155,
+    "h": 219
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_wall_sparks 4",
+   "frame": {
+    "x": 463,
+    "y": 1,
+    "w": 123,
+    "h": 154
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 32,
+    "y": 29,
+    "w": 123,
+    "h": 154
+   },
+   "sourceSize": {
+    "w": 155,
+    "h": 219
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_wall_sparks 5",
+   "frame": {
+    "x": 588,
+    "y": 1,
+    "w": 122,
+    "h": 111
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 33,
+    "y": 52,
+    "w": 122,
+    "h": 111
+   },
+   "sourceSize": {
+    "w": 155,
+    "h": 219
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_wall_sparks 6",
+   "frame": {
+    "x": 712,
+    "y": 1,
+    "w": 88,
+    "h": 48
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 67,
+    "y": 88,
+    "w": 88,
+    "h": 48
+   },
+   "sourceSize": {
+    "w": 155,
+    "h": 219
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_wall_sparks 7",
+   "frame": {
+    "x": 802,
+    "y": 1,
+    "w": 22,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 133,
+    "y": 92,
+    "w": 22,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 155,
+    "h": 219
+   },
+   "duration": 40
+  }
+ ],
+ "meta": {
+  "app": "scripts/import-strip.py",
+  "image": "fx_wall_sparks.png",
+  "format": "RGBA8888",
+  "size": {
+   "w": 825,
+   "h": 220
+  },
+  "scale": "0.5",
+  "frameTags": [
+   {
+    "name": "fx_wall_sparks",
+    "from": 0,
+    "to": 7,
+    "direction": "forward"
+   }
+  ],
+  "slices": [
+   {
+    "name": "pivot",
+    "color": "#0000ffff",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 155,
+       "y": 108,
+       "w": 1,
+       "h": 1
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

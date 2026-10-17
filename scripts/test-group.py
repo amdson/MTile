@@ -27,7 +27,7 @@ GROUPS = {
  "combat": ["Combat","Guard","Grab","DirectDamage","AttackRecoil","Commitment","HitResolver",
             "HitboxOcclusion","HitEviction","HitFlash","ActionOverlay","ActionAimSolver",
             "ClipBinding","DownAirSlash","InputParserGesture","RecoveryTransition","Laser",
-            "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","WizardEnemy","Warlord","Prism","RayEmitter","Quillback","GauntletEnemy","Zeus","TelegraphList",
+            "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","SpearmanEnemy","PulserEnemy","EnemySpawner","WizardEnemy","Warlord","Prism","RayEmitter","Quillback","GauntletEnemy","Zeus","TelegraphList",
             "PresentationEventLog","SandImpactDamage","PlayerImpactByVelocity","ImpactCrater",
             "RunningOverUnderImpact","ChargedBlast","SlashCombo"],
  "movement": ["Dropdown","Jump","Ledge","Mantle","ArcJump","WallJump","Tumble","StandingJitter",
@@ -39,13 +39,13 @@ GROUPS = {
                "SolverRestEquilibrium","CorrectionSolver"],
  "terrain": ["World","Block","Sprout","Foam","Terrain","SeamGuard","ExposedCorner","TileMassField",
              "Eruption","OneBlockTrigger","DenseTerrainScrub","BuriedInIntactTiles","OpenTailLoop",
-             "ChargedBlockUse","BlockCharge","ChargedBlast","PullPoint","Avalanche"],
+             "ChargedBlockUse","BlockCharge","ChargedBlast","PullPoint","Avalanche","DepthsLayout"],
  "physics": ["Physics","HighSpeedTunneling","NoPenetrationSolver","FixedPointSolver","QrStep"],
  "animation": ["Anim","Pose","Skeleton","BoneMask","CharacterAnimator","MlsDeformer",
                "SpriteBinding","Smoothing","MotionProbe","ParkourGrip","TerrainNoPen","NoPenetration",
-               "Attachment","SlashCombo"],
+               "Attachment","SlashCombo","SpriteSheet","VfxCatalog","SheetAnimator","EntityArt","CurtainSim"],
  "simcore": ["Snapshot","Rollback","InputCodec","Simulation","TwoPlayerStep","ConfigLayout",
-             "TraceExport","StageSaver","Rtc","PracticeBall","TrainingStage","GauntletStage"],
+             "TraceExport","StageSaver","Rtc","PracticeBall","TrainingStage","GauntletStage","CoopMode","DepthsStage","DepthsLayout"],
 }
 
 # Excluded from every group AND from plain `full`; included only with --slow. These are

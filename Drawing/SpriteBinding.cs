@@ -115,6 +115,11 @@ public sealed class SpriteBindingDocument
 
     public List<SpriteBindPoseEntry> BindPose { get; set; } = new();
 
+    // Character-scoped elements: what this character always wears (a cloak, ears). Same
+    // schema as a clip's Attachments — a named point and an Effect name; the effect's
+    // own asset holds its art and behavior. Drawn by Drawing/Elements.cs.
+    public List<AnimAttachment> Elements { get; set; }
+
     [System.Text.Json.Serialization.JsonIgnore]
     public string FilePath { get; set; }
 

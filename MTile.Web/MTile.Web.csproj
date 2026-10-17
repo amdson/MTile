@@ -95,6 +95,7 @@
            web build 404ing all four and falling back to the single legacy pine. -->
       <_ImageAsset         Include="..\Assets\**\*.png" />
       <_EffectAsset        Include="..\Assets\AnimationEffects\*.json" />
+      <_EntityArtAsset     Include="..\Assets\Sprites\*.json" />
       <_SpriteBindingAsset Include="..\SpriteBindings\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(_ImageAsset)"
@@ -102,6 +103,9 @@
           SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_EffectAsset)"
           DestinationFiles="@(_EffectAsset->'$(MSBuildThisFileDirectory)wwwroot\Assets\AnimationEffects\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_EntityArtAsset)"
+          DestinationFiles="@(_EntityArtAsset->'$(MSBuildThisFileDirectory)wwwroot\Assets\Sprites\%(Filename)%(Extension)')"
           SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_SpriteBindingAsset)"
           DestinationFiles="@(_SpriteBindingAsset->'$(MSBuildThisFileDirectory)wwwroot\SpriteBindings\%(RecursiveDir)%(Filename)%(Extension)')"

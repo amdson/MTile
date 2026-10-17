@@ -10,7 +10,9 @@ namespace MTile;
 // on top) exactly as it would with immediate draws.
 public static class TelegraphRenderer
 {
-    public static void Draw(DrawContext ctx, TelegraphList list)
+    // `art` resolves Sprite shapes; null (or art that fails to load) draws their
+    // fallback primitives instead.
+    public static void Draw(DrawContext ctx, TelegraphList list, VfxPlayer art = null)
     {
         for (int i = 0; i < list.Count; i++)
         {
@@ -28,6 +30,11 @@ public static class TelegraphRenderer
                     break;
                 case TelegraphKind.Ring:
                     ctx.Ring(s.A, s.B.X, s.Color, s.Segments, s.Thickness);
+                    break;
+                case TelegraphKind.Sprite:
+                    if (art != null && art.DrawInBatch(ctx.SpriteBatch, s.Art, s.Tag, s.Progress,
+                                                       s.A, s.Rotation, s.Mirror, s.Color))
+                        i += s.Fallback;
                     break;
             }
         }

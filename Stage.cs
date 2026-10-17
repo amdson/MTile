@@ -20,9 +20,12 @@ public sealed class Stage
     public Func<ChunkMap>     Terrain;
     public Vector2            PlayerSpawn;
     public Action<Simulation> Populate;
+    // Co-op stage: players can't hurt each other, and every player (not just the
+    // primary) respawns at Simulation.RespawnPoint. See Simulation.Coop.
+    public bool               Coop;
 }
 
-public static class Stages
+public static partial class Stages
 {
     private static readonly Dictionary<string, Stage> _registry = new(StringComparer.OrdinalIgnoreCase);
 
@@ -133,6 +136,34 @@ public static class Stages
             PlayerSpawn   = WarlordPlayerSpawn,
             Populate      = PopulateQuillback,
         });
+
+        // ─── spearman ─────────────────────────────────────────────────────────
+        // SpearmanEnemy demo, on the Warden's terrain (Levels/warden.json). One
+        // Spearman holds the 3-block ledge to your right — it won't walk off it, so
+        // standing under the lip is the "come at it from below" answer. A second one
+        // walks at you across the left floor. Dead Spearmen come back on a 3 s beat.
+        Register(new Stage {
+            Name          = "spearman",
+            TerrainConfig = "warden.json",
+            PlayerSpawn   = WardenPlayerSpawn,
+            Populate      = PopulateSpearman,
+        });
+
+        // ─── pulser ───────────────────────────────────────────────────────────
+        // PulserEnemy demo, on the Warden's terrain (Levels/warden.json): one on the
+        // 3-block ledge to your right, one on the left floor in front of the 3-block
+        // wall. The ledge lip and the wall are the cover its pulse can't see through,
+        // and both are surfaces it crawls over. Dead Pulsers come back on a 3 s beat.
+        Register(new Stage {
+            Name          = "pulser",
+            TerrainConfig = "warden.json",
+            PlayerSpawn   = WardenPlayerSpawn,
+            Populate      = PopulatePulser,
+        });
+
+        // ─── depths ───────────────────────────────────────────────────────────
+        // Two-player co-op gauntlet through underground stone rooms. Stages/DepthsStage.cs.
+        RegisterDepths();
 
         // ─── weights ──────────────────────────────────────────────────────────
         // Knockback-by-mass testbed: a flat walled hall with a row of passive balls
@@ -948,6 +979,55 @@ public static class Stages
                     if (e.Kind == EntityKind.Warden && !e.IsDead
                         && (e.Body.Position.X < wallX) == left) alive = true;
                 if (!alive) g.SpawnEntity(new WardenEnemy(spawn));
+            }
+        });
+    }
+
+    private static readonly Vector2[] SpearmanSpawns =
+    {
+        new(20 * Chunk.TileSize, WardenFloorTopY - 3 * Chunk.TileSize - SpearmanEnemy.HalfHeight - 1f),   // the ledge
+        new(-12 * Chunk.TileSize, WardenFloorTopY - SpearmanEnemy.HalfHeight - 1f),                        // the left floor
+    };
+
+    private static void PopulateSpearman(Simulation g)
+        => KeepStocked(g, EntityKind.Spearman, SpearmanSpawns, p => new SpearmanEnemy(p));
+
+    private static readonly Vector2[] PulserSpawns =
+    {
+        new(28 * Chunk.TileSize, WardenFloorTopY - 3 * Chunk.TileSize - PulserEnemy.BodyRadius - 1f),   // the ledge
+        new(-12 * Chunk.TileSize, WardenFloorTopY - PulserEnemy.BodyRadius - 1f),                        // the left floor
+    };
+
+    private static void PopulatePulser(Simulation g)
+        => KeepStocked(g, EntityKind.Pulser, PulserSpawns, p => new PulserEnemy(p));
+
+    // Spawn one `kind` at each of `spawns`, then keep that many alive: on the 3 s beat,
+    // refill the spawn point farthest from every live one. A pure function of sim
+    // state, so it replays under rollback.
+    private static void KeepStocked(Simulation g, EntityKind kind, Vector2[] spawns, Func<Vector2, Entity> make)
+    {
+        foreach (var p in spawns) g.SpawnEntity(make(p));
+
+        int period = SimFrames.FromSeconds(3f, Simulation.FixedDt);
+        g.AddTicker(t =>
+        {
+            int frame = (int)MathF.Round(t / Simulation.FixedDt);
+            if (frame == 0 || frame % period != 0) return;
+            var live = new List<Vector2>();
+            foreach (var e in g.Entities)
+                if (e.Kind == kind && !e.IsDead) live.Add(e.Body.Position);
+            while (live.Count < spawns.Length)
+            {
+                Vector2 best = spawns[0];
+                float bestD = -1f;
+                foreach (var spawn in spawns)
+                {
+                    float d = float.MaxValue;
+                    foreach (var l in live) d = MathF.Min(d, Vector2.DistanceSquared(l, spawn));
+                    if (d > bestD) { bestD = d; best = spawn; }
+                }
+                g.SpawnEntity(make(best));
+                live.Add(best);
             }
         });
     }

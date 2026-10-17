@@ -24,6 +24,9 @@ public sealed class HitFeelSystem
     private readonly Dictionary<int, int> _lastHandledFrame = new();
     private readonly Dictionary<int, int> _lastHandledParryFrame = new();
     private readonly Dictionary<EntityId, int> _lastHandledGeneration = new();
+    // Sprite bursts ride the same edge-detect as the shake and particles. Optional:
+    // null (no effect sheets loaded) leaves the particle cues alone.
+    public VfxPlayer Vfx;
 
     public HitFeelSystem(ParticleSystem particles, Camera camera)
     {
@@ -80,6 +83,8 @@ public sealed class HitFeelSystem
 
         _camera.Shake(c.LastParryCharged ? 0.14f : 0.08f);
         Effects.GuardSpark(_particles, pos, dir, c.LastParryCharged);
+        Vfx?.Spawn("parry", pos, dir, c.LastParryCharged ? 1.3f : 1f,
+                   c.LastParryCharged ? Color.Cyan : null);
     }
 
     // Balloons/balls/future combat targets (Entities/Entity.cs) — anything hit
@@ -116,5 +121,6 @@ public sealed class HitFeelSystem
             Effects.KnockbackCue(_particles, pos, dir, t);
             Effects.HitSpark(_particles, pos, dir, count: 3 + (int)(5f * t));
         }
+        Vfx?.Spawn("body_hit", pos, dir, 0.8f + 0.4f * t);
     }
 }

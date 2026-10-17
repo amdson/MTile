@@ -54,6 +54,14 @@ public static class TerrainLoader
             var opts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
             config = JsonSerializer.Deserialize<TerrainConfig>(stream, opts);
         }
+        Load(config, dir, chunks);
+    }
+
+    // The same, from an already-parsed config. `dir` is where its ChunkFiles live
+    // (title-relative or rooted, as TitleContent reads it). CreativeMode uses this to
+    // rebuild what a level file would load, so a save writes only what differs.
+    public static void Load(TerrainConfig config, string dir, ChunkMap chunks)
+    {
 
         // Endless level: install the generator and load only the authored overrides.
         // Walking the Extents box here would be worse than pointless — it would stamp

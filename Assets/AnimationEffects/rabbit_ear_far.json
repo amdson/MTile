@@ -1,0 +1,17 @@
+{
+  "Type": "Curtain",
+  "PixelSize": 0.0764,
+  "Columns": 2,
+  "Rows": 3,
+  "AnchorX": 99.3,
+  "AnchorY": 193.8,
+  "PinBottom": true,
+  "FollowBone": true,
+  "Stiffness": 0.6,
+  "StiffnessTip": 0.3,
+  "Damping": 0.08,
+  "Gravity": 300,
+  "Image": "rabbit_ear_far.png",
+  "Front": true,
+  "Bend": 0.8
+}

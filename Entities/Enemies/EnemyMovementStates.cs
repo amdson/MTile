@@ -349,6 +349,7 @@ public class EnemyClingMoveState : EnemyMovementState
             // the cling from walking off the edge of a tile cluster.
             var landing = pos + dir * moveLen;
             if (!IsAnchored(landing, ctx)) continue;
+            if (!IsOpen(landing, dir, in ctx)) continue;
 
             float dot = Vector2.Dot(reqN, dir);
             if (dot > bestDot)
@@ -364,6 +365,12 @@ public class EnemyClingMoveState : EnemyMovementState
         // which is fine.
         ctx.Self.Body.Velocity = best * Speed;
     }
+
+    // Extra per-direction veto for subclasses. The stock crawl leaves wall-blocking to
+    // the physics sweep, which is fine for a clinger that only lashes from where it is,
+    // but one that has to travel needs to discard "into the wall" or it stalls pushing
+    // against a corner. Default: every anchored direction is open.
+    protected virtual bool IsOpen(Vector2 landing, Vector2 dir, in EnemyContext ctx) => true;
 
     // True iff any of NumSamples ring-probes at AnchorDist from `pos` lands
     // inside a solid tile. Cheap and direction-agnostic — same probe ring as

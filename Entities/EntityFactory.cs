@@ -54,6 +54,38 @@ public static class EntityFactory
         };
     }
 
+    // A fresh, live enemy of `kind` at `pos`, for anything that spawns enemies by kind at
+    // runtime (EnemySpawner, stage scripts): a hand-written subclass (Spearman, Pulser,
+    // Warlord, …), a blueprint in the sim's own table `local` (compiled league fighters in
+    // their slot kinds), or one registered with EnemyFactory, in that order of lookup.
+    public static Entity CreateEnemy(EntityKind kind, Vector2 pos,
+                                     IReadOnlyDictionary<EntityKind, EnemyBlueprint> local = null)
+    {
+        if (local != null && local.TryGetValue(kind, out var bp)) return new BlueprintEnemy(bp, pos);
+        var sub = SubclassEnemy(kind, pos);
+        if (sub != null) return sub;
+        if (EnemyFactory.IsRegistered(kind) || EntityKinds.IsFighter(kind)) return EnemyFactory.Create(kind, pos);
+        throw new System.InvalidOperationException(
+            $"EntityFactory.CreateEnemy: {kind} is not an enemy kind (no local blueprint, subclass, or registered blueprint).");
+    }
+
+    // The hand-written EnemyEntity subclasses, by kind (null for anything else). One
+    // table shared by CreateEnemy and Rehydrate so a new subclass is added in one place.
+    private static Entity SubclassEnemy(EntityKind kind, Vector2 pos) => kind switch
+    {
+        EntityKind.Stalker   => new StalkerEnemy(pos),
+        EntityKind.Turret    => new TurretEnemy(pos),
+        EntityKind.Brute     => new BruteEnemy(pos),
+        EntityKind.Warden    => new WardenEnemy(pos),
+        EntityKind.Wizard    => new WizardEnemy(pos),
+        EntityKind.Warlord   => new WarlordEnemy(pos),
+        EntityKind.Prism     => new PrismEnemy(pos),
+        EntityKind.Quillback => new QuillbackEnemy(pos),
+        EntityKind.Spearman  => new SpearmanEnemy(pos),
+        EntityKind.Pulser    => new PulserEnemy(pos),
+        _ => null,
+    };
+
     // Construct a fresh entity of the captured Kind from the snapshot components, for
     // restore of an entity that despawned since the snapshot frame (a live entity is
     // restored in place by RestoreState instead). The gameplay ctor runs (sprite,
@@ -65,11 +97,13 @@ public static class EntityFactory
     // `local` is the sim's own blueprint table (Simulation.Blueprints), consulted before the registry.
     public static Entity Rehydrate(in EntityData d, in BodyState body, HitIdAllocator hitIds,
                                    IReadOnlyDictionary<EntityKind, EnemyBlueprint> local = null)
-        => local != null && local.TryGetValue(d.Kind, out var bp) ? new BlueprintEnemy(bp, body.Position) : d.Kind switch
+    {
+        if (local != null && local.TryGetValue(d.Kind, out var bp)) return new BlueprintEnemy(bp, body.Position);
+        var sub = SubclassEnemy(d.Kind, body.Position);
+        if (sub != null) return sub;
+        return d.Kind switch
         {
             EntityKind.Generic       => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
-            EntityKind.Stalker       => new StalkerEnemy(body.Position),
-            EntityKind.Turret        => new TurretEnemy(body.Position),
             EntityKind.Bullet        => new BulletProjectile(body.Position, body.Velocity, hitIds),
             // Speed rides in body.Velocity; damage comes back through ProjDamage.
             EntityKind.EnergyBall    => new EnergyBallProjectile(body.Position, body.Velocity, d.HitId, d.Faction, damage: d.ProjDamage),
@@ -84,14 +118,9 @@ public static class EntityFactory
             // EntityData slot LobbedArea uses (disjoint kinds, one slot).
             EntityKind.RailBolt      => new RailBoltProjectile(body.Position, body.Velocity, d.HitId, d.Faction, d.Budget, bodyDamage: d.ProjDamage),
             EntityKind.AspidFireball => new AspidFireballProjectile(body.Position, body.Velocity, d.HitId, d.Faction),
-            EntityKind.Brute         => new BruteEnemy(body.Position),
-            EntityKind.Warden        => new WardenEnemy(body.Position),
-            EntityKind.Wizard        => new WizardEnemy(body.Position),
             EntityKind.WizardOrb     => new WizardOrbProjectile(body.Position, d.Aim.X, d.Aim.Y, d.HitId, d.Faction),
-            EntityKind.Warlord       => new WarlordEnemy(body.Position),
-            EntityKind.Prism         => new PrismEnemy(body.Position),
             EntityKind.RayEmitter    => RayEmitter.FromState(in d, body.Position),
-            EntityKind.Quillback     => new QuillbackEnemy(body.Position),
+            EntityKind.Spawner       => EnemySpawner.FromState(in d, body.Position),
             // Spawn-point placeholder — RestoreState's ReadState overwrites it from
             // the snapshotted Aim slot right after construction.
             EntityKind.PracticeBall  => new PracticeBall(body.Position),
@@ -104,4 +133,5 @@ public static class EntityFactory
             _ when EntityKinds.IsFighter(d.Kind)     => EnemyFactory.Create(d.Kind, body.Position),
             _                        => new Entity(new PhysicsBody(d.Polygon, body.Position) { Impact = d.Impact }, d.MaxHealth),
         };
+    }
 }

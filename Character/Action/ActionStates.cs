@@ -1776,36 +1776,21 @@ public class GuardAction : ActionState
         vars.Facing = ab.Facing == 0 ? 1 : ab.Facing;
     }
 
-    // How far out the cone arc sits, and how thick it reads.
-    private const float ArcRadius    = PlayerCharacter.Radius * 1.6f;
-    private const float ArcThickness = 2f;
+    // Placeholder shield: a thick bronze slice of a circle hugging the front of the body,
+    // ~14px tall — the size of the buckler art it stands in for. Its arc stays inside
+    // the guarded cone (CombatState.GuardConeHalfAngle), so it still says "covered here".
+    private const float ShieldRadius    = PlayerCharacter.Radius * 0.9f;
+    private const float ShieldHalfAngle = 0.7f;   // radians; chord ≈ 2·r·sin(0.7) ≈ 14px
+    private const float ShieldThickness = 4f;
+    private const float ShieldLift      = 2f;     // a touch above centre
+    private static readonly Color ShieldColor = new(205, 127, 50);   // bronze
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
-        // Shield indicator above the head. Charged-state cue is the
-        // GuardRetaliateAction firing on click, not a Draw tint (Draw doesn't
-        // have ab and we'd rather not thread a static through for visuals).
-        const int W = 4;
-        const int H = 12;
-        var pos = body.Position;
-        t.Box((int)pos.X - W / 2, (int)pos.Y - (int)PlayerCharacter.Radius - H - 2, W, H,
-              Color.LightSteelBlue * 0.8f);
-
-        // ...and the covered arc, so "protected from WHERE" is readable at a glance
-        // instead of learned by getting hit from behind. Same 120° cone ResolveGuard
-        // tests (CombatState.GuardConeHalfAngle), centred on facing — the arc is the
-        // rule, not a decoration near it. Radial ticks at both ends close the wedge
-        // visually so the edge of coverage is a hard line rather than a fade.
         int   facing = vars.Facing == 0 ? 1 : vars.Facing;
         float centre = facing < 0 ? MathF.PI : 0f;
-        float half   = CombatState.GuardConeHalfAngle;
-        var   color  = Color.LightSteelBlue * 0.8f;
-        t.Arc(pos, ArcRadius, centre, half, color, segments: 12, thickness: ArcThickness);
-        for (int i = -1; i <= 1; i += 2)
-        {
-            var dir = new Vector2(MathF.Cos(centre + i * half), MathF.Sin(centre + i * half));
-            t.Line(pos + dir * (ArcRadius - 4f), pos + dir * (ArcRadius + 2f), color, ArcThickness);
-        }
+        t.Arc(body.Position - new Vector2(0f, ShieldLift), ShieldRadius, centre, ShieldHalfAngle,
+              ShieldColor, segments: 8, thickness: ShieldThickness);
     }
 }
 

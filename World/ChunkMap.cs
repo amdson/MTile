@@ -726,6 +726,33 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         return true;
     }
 
+    // Level-editor write (CreativeMode): set a cell to Solid `type`, or to Empty, with no
+    // support rule, no sprout growth and no OnTileBroken (an edit, not destruction — no
+    // debris, no sound). Journaled through WriteTile like every other mutation, and it
+    // clears the cell's side tables (damage / charge / foam timer / a live sprout) so the
+    // result is exactly what a level file would load. Returns true if the cell changed.
+    public bool EditorSetCell(int gtx, int gty, TileState state, TileType type)
+    {
+        var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
+        if (state == TileState.Sprouting) throw new ArgumentException("editor writes Solid or Empty", nameof(state));
+        Chunk chunk;
+        if (state == TileState.Empty)
+        {
+            if (!_dict.TryGetValue(chunkPos, out chunk)) return false;
+        }
+        else chunk = GetOrCreateChunk(chunkPos);
+
+        ref var t = ref chunk.Tiles[tx, ty];
+        if (t.State == state && (state == TileState.Empty || t.Type == type)) return false;
+        if (t.State == TileState.Sprouting && t.Sprout != null) Graph.Remove(t.Sprout);
+        WriteTile(chunk, tx, ty, state, state == TileState.Empty ? t.Type : type, null);
+        Damage.Clear(gtx, gty);
+        Charge.Clear(gtx, gty);
+        Foam.Clear(gtx, gty);
+        if (state == TileState.Empty) DropSupportFor(gtx, gty);
+        return true;
+    }
+
     // Queue a blast if the cell about to go Empty was charged. Called from BreakCell
     // immediately BEFORE Charge.Clear, which is the last moment the flag still exists.
     // Take a cell out of the world by HARVESTING it (a block grab peeling it into a

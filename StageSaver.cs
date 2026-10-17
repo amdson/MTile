@@ -123,7 +123,7 @@ public static class StageSaver
         return false;
     }
 
-    private static void WriteChunk(Chunk c, string path)
+    internal static void WriteChunk(Chunk c, string path)
     {
         var sb = new StringBuilder(Chunk.Size * (Chunk.Size + 1));
         for (int ty = 0; ty < Chunk.Size; ty++)

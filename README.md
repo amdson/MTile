@@ -17,7 +17,8 @@ dotnet test MTile.Tests/MTile.Tests.csproj --filter "FullyQualifiedName!~Zzz"
 dotnet run --project MTile.Web            # web build, local dev server
 ```
 
-Architecture: [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md). Build/test mechanics and
+Keys, creative (level-editing) mode, pause/step, and config settings:
+[CONTROLS.md](CONTROLS.md). Architecture: [CODEBASE_OVERVIEW.md](CODEBASE_OVERVIEW.md). Build/test mechanics and
 conventions: [CLAUDE.md](CLAUDE.md). Design docs and roadmaps: [Plans/](Plans/).
 
 ## Publishing the web build

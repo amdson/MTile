@@ -1,0 +1,9 @@
+{
+  "Type": "Curtain",
+  "Image": "rabbit_cloak.png",
+  "PixelSize": 0.075,
+  "Columns": 4,
+  "Rows": 8,
+  "AnchorX": 172,
+  "AnchorY": 30
+}

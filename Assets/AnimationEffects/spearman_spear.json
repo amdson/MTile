@@ -1,0 +1,469 @@
+{
+ "frames": [
+  {
+   "filename": "spearman_spear 0",
+   "frame": {
+    "x": 1,
+    "y": 1,
+    "w": 27,
+    "h": 272
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 12,
+    "y": 21,
+    "w": 27,
+    "h": 272
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 1",
+   "frame": {
+    "x": 30,
+    "y": 1,
+    "w": 35,
+    "h": 272
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 8,
+    "y": 21,
+    "w": 35,
+    "h": 272
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 2",
+   "frame": {
+    "x": 67,
+    "y": 1,
+    "w": 39,
+    "h": 278
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 6,
+    "y": 15,
+    "w": 39,
+    "h": 278
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 3",
+   "frame": {
+    "x": 108,
+    "y": 1,
+    "w": 40,
+    "h": 278
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 6,
+    "y": 15,
+    "w": 40,
+    "h": 278
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 4",
+   "frame": {
+    "x": 150,
+    "y": 1,
+    "w": 48,
+    "h": 279
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 2,
+    "y": 15,
+    "w": 48,
+    "h": 279
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 5",
+   "frame": {
+    "x": 200,
+    "y": 1,
+    "w": 46,
+    "h": 286
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 3,
+    "y": 14,
+    "w": 46,
+    "h": 286
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 6",
+   "frame": {
+    "x": 248,
+    "y": 1,
+    "w": 31,
+    "h": 275
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 10,
+    "y": 18,
+    "w": 31,
+    "h": 275
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 7",
+   "frame": {
+    "x": 281,
+    "y": 1,
+    "w": 31,
+    "h": 283
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 10,
+    "y": 20,
+    "w": 31,
+    "h": 283
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 8",
+   "frame": {
+    "x": 314,
+    "y": 1,
+    "w": 46,
+    "h": 311
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 3,
+    "y": 8,
+    "w": 46,
+    "h": 311
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 9",
+   "frame": {
+    "x": 362,
+    "y": 1,
+    "w": 35,
+    "h": 293
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 8,
+    "y": 0,
+    "w": 35,
+    "h": 293
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 10",
+   "frame": {
+    "x": 399,
+    "y": 1,
+    "w": 43,
+    "h": 271
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 4,
+    "y": 22,
+    "w": 43,
+    "h": 271
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 11",
+   "frame": {
+    "x": 444,
+    "y": 1,
+    "w": 42,
+    "h": 270
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 5,
+    "y": 23,
+    "w": 42,
+    "h": 270
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 12",
+   "frame": {
+    "x": 488,
+    "y": 1,
+    "w": 46,
+    "h": 271
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 3,
+    "y": 22,
+    "w": 46,
+    "h": 271
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 13",
+   "frame": {
+    "x": 536,
+    "y": 1,
+    "w": 46,
+    "h": 271
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 3,
+    "y": 21,
+    "w": 46,
+    "h": 271
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 14",
+   "frame": {
+    "x": 584,
+    "y": 1,
+    "w": 33,
+    "h": 67
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 10,
+    "y": 226,
+    "w": 33,
+    "h": 67
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 15",
+   "frame": {
+    "x": 619,
+    "y": 1,
+    "w": 33,
+    "h": 206
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 10,
+    "y": 87,
+    "w": 33,
+    "h": 206
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 16",
+   "frame": {
+    "x": 654,
+    "y": 1,
+    "w": 33,
+    "h": 268
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 10,
+    "y": 25,
+    "w": 33,
+    "h": 268
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  },
+  {
+   "filename": "spearman_spear 17",
+   "frame": {
+    "x": 689,
+    "y": 1,
+    "w": 51,
+    "h": 271
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 22,
+    "w": 51,
+    "h": 271
+   },
+   "sourceSize": {
+    "w": 52,
+    "h": 319
+   },
+   "duration": 40
+  }
+ ],
+ "meta": {
+  "app": "scripts/import-strip.py",
+  "image": "spearman_spear.png",
+  "format": "RGBA8888",
+  "size": {
+   "w": 741,
+   "h": 313
+  },
+  "scale": "0.5",
+  "frameTags": [
+   {
+    "name": "held",
+    "from": 0,
+    "to": 1,
+    "direction": "forward"
+   },
+   {
+    "name": "charge",
+    "from": 2,
+    "to": 4,
+    "direction": "forward"
+   },
+   {
+    "name": "lock",
+    "from": 5,
+    "to": 6,
+    "direction": "forward"
+   },
+   {
+    "name": "thrust",
+    "from": 7,
+    "to": 8,
+    "direction": "forward"
+   },
+   {
+    "name": "spent",
+    "from": 9,
+    "to": 13,
+    "direction": "forward"
+   },
+   {
+    "name": "regrow",
+    "from": 14,
+    "to": 17,
+    "direction": "forward"
+   }
+  ],
+  "slices": [
+   {
+    "name": "pivot",
+    "color": "#0000ffff",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 26,
+       "y": 21,
+       "w": 1,
+       "h": 1
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

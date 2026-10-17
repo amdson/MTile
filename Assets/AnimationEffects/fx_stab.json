@@ -1,0 +1,219 @@
+{
+ "frames": [
+  {
+   "filename": "fx_stab 0",
+   "frame": {
+    "x": 1,
+    "y": 1,
+    "w": 46,
+    "h": 35
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 146,
+    "y": 41,
+    "w": 46,
+    "h": 35
+   },
+   "sourceSize": {
+    "w": 192,
+    "h": 114
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_stab 1",
+   "frame": {
+    "x": 49,
+    "y": 1,
+    "w": 86,
+    "h": 50
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 106,
+    "y": 34,
+    "w": 86,
+    "h": 50
+   },
+   "sourceSize": {
+    "w": 192,
+    "h": 114
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_stab 2",
+   "frame": {
+    "x": 137,
+    "y": 1,
+    "w": 139,
+    "h": 69
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 53,
+    "y": 23,
+    "w": 139,
+    "h": 69
+   },
+   "sourceSize": {
+    "w": 192,
+    "h": 114
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_stab 3",
+   "frame": {
+    "x": 278,
+    "y": 1,
+    "w": 192,
+    "h": 113
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 192,
+    "h": 113
+   },
+   "sourceSize": {
+    "w": 192,
+    "h": 114
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_stab 4",
+   "frame": {
+    "x": 472,
+    "y": 1,
+    "w": 179,
+    "h": 92
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 13,
+    "y": 11,
+    "w": 179,
+    "h": 92
+   },
+   "sourceSize": {
+    "w": 192,
+    "h": 114
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_stab 5",
+   "frame": {
+    "x": 653,
+    "y": 1,
+    "w": 136,
+    "h": 74
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 56,
+    "y": 22,
+    "w": 136,
+    "h": 74
+   },
+   "sourceSize": {
+    "w": 192,
+    "h": 114
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_stab 6",
+   "frame": {
+    "x": 791,
+    "y": 1,
+    "w": 128,
+    "h": 76
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 64,
+    "y": 18,
+    "w": 128,
+    "h": 76
+   },
+   "sourceSize": {
+    "w": 192,
+    "h": 114
+   },
+   "duration": 40
+  },
+  {
+   "filename": "fx_stab 7",
+   "frame": {
+    "x": 921,
+    "y": 1,
+    "w": 55,
+    "h": 30
+   },
+   "rotated": false,
+   "trimmed": true,
+   "spriteSourceSize": {
+    "x": 137,
+    "y": 40,
+    "w": 55,
+    "h": 30
+   },
+   "sourceSize": {
+    "w": 192,
+    "h": 114
+   },
+   "duration": 40
+  }
+ ],
+ "meta": {
+  "app": "scripts/import-strip.py",
+  "image": "fx_stab.png",
+  "format": "RGBA8888",
+  "size": {
+   "w": 977,
+   "h": 115
+  },
+  "scale": "0.5",
+  "frameTags": [
+   {
+    "name": "fx_stab",
+    "from": 0,
+    "to": 7,
+    "direction": "forward"
+   }
+  ],
+  "slices": [
+   {
+    "name": "pivot",
+    "color": "#0000ffff",
+    "keys": [
+     {
+      "frame": 0,
+      "bounds": {
+       "x": 192,
+       "y": 58,
+       "w": 1,
+       "h": 1
+      },
+      "pivot": {
+       "x": 0,
+       "y": 0
+      }
+     }
+    ]
+   }
+  ]
+ }
+}

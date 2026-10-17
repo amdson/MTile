@@ -1,0 +1,31 @@
+// One-shot effect catalog, read by Drawing/VfxPlayer.cs. Fields: VfxDefinition.
+// Sheet = a <name>.json beside this file (Aseprite export or legacy strip spec).
+{
+  // A body taking a hit (HitFeelSystem.React): the radial knife flower.
+  "body_hit": {
+    "Sheet": "knife_hit", "Seconds": 0.24, "PixelSize": 0.09,
+    "Align": "Random", "ScaleJitter": 0.1
+  },
+  // A player's attack striking terrain: +X points into the surface, spray kicks back out.
+  "terrain_strike": {
+    "Sheet": "knife_hit_wall", "Seconds": 0.26, "PixelSize": 0.09, "Align": "Direction"
+  },
+  // A guard parry: sparks thrown back along the incoming axis, toward the attacker.
+  "parry": {
+    "Sheet": "fx_wall_sparks", "Seconds": 0.2, "PixelSize": 0.08,
+    "Align": "AgainstDirection", "RandomMirror": true, "Tint": "#d8e6ff", "Glow": 0.5
+  },
+  // Clip attachments: hang these on a point in the animation editor (Add element ▸
+  // Custom…). On a clip the attachment window times the strip; Seconds applies only to
+  // one-shot spawns. PixelSize is world px per art px either way.
+  "stab_burst": {
+    "Sheet": "fx_stab", "Seconds": 0.22, "PixelSize": 0.07,
+    "Align": "Direction", "Glow": 0.4
+  },
+  "slash_up":   { "Sheet": "fx_slash_up",   "Seconds": 0.25, "PixelSize": 0.065, "Align": "None", "Glow": 0.4 },
+  "slash_down": { "Sheet": "fx_slash_down", "Seconds": 0.25, "PixelSize": 0.065, "Align": "None", "Glow": 0.4 },
+  // The Spearman's spear, drawn by its telegraph (Spear.Draw) every frame along the live
+  // aim, pivot at the tip. Tags: held, charge, lock, thrust, spent, regrow. Drawn
+  // pointing up (Codex gpt-6-luna strip, scripts/import-strip.py --anchor tip-up).
+  "spearman_spear": { "Sheet": "spearman_spear", "PixelSize": 0.1, "ArtForward": -90 }
+}
