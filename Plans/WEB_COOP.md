@@ -41,6 +41,8 @@ Also in this pass: a mid-match **disconnect overlay** (INTERNET_READY_PLAN Phase
   beside a stalactite falls much slower than in open air — likely a holding/cling channel
   (wall slide, ledge hang, ceiling contact, corrector hover) activating on the spike's
   tapered faces when it shouldn't.
+- **Jumping out of movement states.** Jumping out of many movement states (parkour among
+  them) fails or does something unexpected.
 
 ## Inherited, not in this pass
 
