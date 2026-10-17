@@ -1285,6 +1285,11 @@ public class StabAction : ActionState
     private const float RecoilScale           = 0.2f;
     private const float MinRecoilSpeed        = 280f;
     private const float MaxRecoilSpeed        = 280f;
+    // Ceiling on the upward speed recoil can LEAVE the player with, whatever stacks
+    // into it — a body hit and a tile pogo resolving on different frames each clear
+    // MaxRecoilSpeed's per-frame cap alone. Just above DownSlash's PogoMaxSpeed (270):
+    // a stab off a mob below is the bigger bounce, but stays a jump-sized one.
+    private const float MaxRecoilRiseSpeed    = 300f;
     // Hardness floor: sand (MaxHP 0.5) doesn't pogo even on its first contact
     // frame (when BreakProtected can't yet save us — sand takes 2 hits to
     // break). Dirt (1.0) and stone (2.0) still pogo.
@@ -1491,7 +1496,16 @@ public class StabAction : ActionState
         if (ctx.CombatSystem != null)
         {
             var recoil = ctx.CombatSystem.PeekRecoil(vars.HitId);
-            if (recoil != Vector2.Zero) ctx.Body.Velocity += recoil;
+            if (recoil != Vector2.Zero)
+            {
+                var before = ctx.Body.Velocity;
+                var v = before + recoil;
+                // y is down. Clamp only the rise the recoil produced: a player already
+                // climbing faster than the ceiling keeps that ascent.
+                if (recoil.Y < 0f)
+                    v.Y = MathF.Max(v.Y, MathF.Min(before.Y, -MaxRecoilRiseSpeed));
+                ctx.Body.Velocity = v;
+            }
         }
     }
 
