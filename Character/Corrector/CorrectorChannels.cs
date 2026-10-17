@@ -444,7 +444,8 @@ public static class CorrectorChannels
     // body that meets a corridor mouth too high meets it rising (that is why
     // it is high), and the lip is the one thing it can push down against;
     // the descending-only rule below is about corners underfoot (bump-hops,
-    // ledges), which a lip above the head is not.
+    // ledges), which a lip above the head is not. The mirror holds for a
+    // DESCENDING tick: only corners at or below the center.
     public static void MarkCornerPlants(ChunkMap chunks, CoastSample[] samples, int n,
                                         bool[] outMask, bool risingLips = false)
     {
@@ -477,6 +478,15 @@ public static class CorrectorChannels
                                  && !TileQuery.IsSolidAt(chunks, cx + ts, below);
                 float cornerY = gy * ts + ts;
                 if (rising && cornerY >= pos.Y) continue;           // rising: lips above the center only
+                // Descending: corners at or below the center only — the
+                // descending plant is ONTO a corner (underfoot, or a lip met
+                // beside the body). A corner above a falling body is one it
+                // is moving away from: nothing there to push off, and the
+                // disc's only use of it was to cancel the fall — a body
+                // drifting under a stalactite's tip with a direction held
+                // was held up (vy 85 -> 9 over 12 frames) for as long as the
+                // tip stayed in hand reach.
+                if (!rising && cornerY < pos.Y) continue;
                 if (leftOpen && Vector2.DistanceSquared(pos, new Vector2(gx * ts, cornerY)) <= R * R)
                     outMask[k] = true;
                 else if (rightOpen && Vector2.DistanceSquared(pos, new Vector2(gx * ts + ts, cornerY)) <= R * R)
