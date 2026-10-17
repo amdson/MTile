@@ -695,6 +695,11 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         foreach (var s in _chunks.ActiveSprouts)
             t ^= CellF(s.Gtx, s.Gty, s.Age,
                        0x05 ^ ((ulong)(byte)s.Type << 8) ^ ((ulong)(uint)s.WaveId.Index << 16));
+        // Block ownership: owner + exact placed frame ride the salt (a float value would
+        // round the frame). Faded-but-unpruned claims are still state, so they count.
+        foreach (var d in _chunks.Ownership.Entries)
+            t ^= CellF(d.Key.gtx, d.Key.gty, 0f,
+                       0x06 ^ ((ulong)d.Value.Owner << 8) ^ ((ulong)(uint)d.Value.PlacedFrame << 16));
 
         Mix((uint)t); Mix((uint)(t >> 32));
         return h;

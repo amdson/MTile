@@ -277,7 +277,8 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         {
             ref var m = ref _group.Members[i];
             float baseGlue = BaseGlue(chunks, m.Gtx, m.Gty, cfg);
-            glueTotal += MathF.Max(baseGlue * cfg.PeelGlueFloor, baseGlue - m.GlueWear);
+            glueTotal += OwnedResistance(chunks, m.Gtx, m.Gty)
+                       * MathF.Max(baseGlue * cfg.PeelGlueFloor, baseGlue - m.GlueWear);
         }
 
         if (force >= glueTotal)
@@ -372,6 +373,17 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
         _group.Strain = 0f;
         if (taken == 0) return;
         SpawnBall(spawner, com, taken, DominantType(counts), charged);
+    }
+
+    // Block ownership (Plans/BLOCK_OWNERSHIP_SPIKES.md §1): a cell the grabbing player
+    // built doesn't resist its owner's drag. Its glue is scaled by (1 - s), s being the
+    // claim's fading strength, so a fresh own wall rips out almost at once and an old
+    // one resists nearly as stone does. Enemy-owned and unowned cells return 1 — they
+    // resist exactly as before. Per cell, so a mixed clod scales cell by cell.
+    private float OwnedResistance(ChunkMap chunks, int gtx, int gty)
+    {
+        byte me = BlockOwnership.OwnerFor(Faction);
+        return 1f - chunks.Ownership.StrengthFor(gtx, gty, me, chunks.TerrainFrame);
     }
 
     private int FindMember(int gtx, int gty)

@@ -2357,7 +2357,8 @@ public class BlockPaintAction : ActionState
         float paid = ab.Meters.SpendForTiles(want, ctx.ActiveBlockType);
         if (paid <= 0f) return;
 
-        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, paid, ctx.ActiveBlockType);
+        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, paid, ctx.ActiveBlockType,
+                                owner: BlockOwnership.OwnerFor(ctx.Faction));
     }
 
     internal static bool HasSproutNeighbour(ChunkMap chunks, int gtx, int gty) =>
@@ -2435,7 +2436,8 @@ public class BlockPlaceAction : ActionState
         if (Vector2.DistanceSquared(ctx.Body.Position, cell) > maxReach * maxReach) return;
 
         if (!ab.Meters.CanAfford(ctx.ActiveBlockType)) return;
-        if (ctx.Chunks.TryRequestTile(gtx, gty, ctx.ActiveBlockType) == null) return;
+        if (ctx.Chunks.TryRequestTile(gtx, gty, ctx.ActiveBlockType,
+                                      owner: BlockOwnership.OwnerFor(ctx.Faction)) == null) return;
 
         // Charge only for a placement that actually took.
         ab.Meters.SpendForTiles(1f, ctx.ActiveBlockType);
@@ -2533,8 +2535,9 @@ public class BlockBurstAction : ActionState
         // and those commit off the center once they have a full unit. So the plus isn't
         // hardcoded — it's the shape four units of mass takes when it flows out of a
         // filled cell. Raise MassInjection and it grows a fatter blob for free.
-        ctx.Chunks.ForceSprout(gtx, gty, TileType.Foam);
-        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, MassInjection, TileType.Foam);
+        byte owner = BlockOwnership.OwnerFor(ctx.Faction);
+        ctx.Chunks.ForceSprout(gtx, gty, TileType.Foam, owner);
+        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, MassInjection, TileType.Foam, owner: owner);
 
         // Spend the click so releasing LMB afterwards can't also buy a slash.
         ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);

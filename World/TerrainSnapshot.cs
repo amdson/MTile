@@ -24,7 +24,9 @@ public sealed class TerrainSnapshot
     public Dictionary<(int gtx, int gty), float> Impact;
     public Dictionary<(int gtx, int gty), TileMassField.MassBucket> Mass;
     public Dictionary<EntityId, AvalancheWaves.WaveInfo>            Waves;
+    public Dictionary<(int gtx, int gty), BlockOwnership.Claim>     Ownership;
     public float SproutClock;
+    public int   TerrainFrame;
 }
 
 // Flat capture of the TileSproutGraph: every Pending/Growing node's data. Sprouts
@@ -47,4 +49,5 @@ public struct SproutNodeData
     public float            Age;
     public EntityId         WaveId;
     public float            RequestTime;
+    public byte             Owner;
 }

@@ -53,6 +53,10 @@ public sealed class TileSproutNode
     public EntityId WaveId;
     public float    RequestTime;
 
+    // Who requested it (BlockOwnership owner id; None = pre-existing / enemy build).
+    // Rides the node so a ghost that promotes frames later still stamps its placer.
+    public byte Owner;
+
     public float Lifetime;
     public float Age;
 

@@ -43,6 +43,8 @@ public sealed class ChunkRenderer
         foreach (var chunk in chunks)
             DrawChunk(chunk, chunks);
 
+        DrawOwnership(chunks);
+
         foreach (var (r, color) in sim.Platforms)
             _spriteBatch.Draw(_pixel, new Rectangle(
                 (int)r.Left, (int)r.Top,
@@ -80,6 +82,43 @@ public sealed class ChunkRenderer
             _spriteBatch.Draw(_pixel, new Rectangle(left,            top + size - 1, size, 1),    ghost);
             _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            1,    size), ghost);
             _spriteBatch.Draw(_pixel, new Rectangle(left + size - 1, top,            1,    size), ghost);
+        }
+    }
+
+    // Placeholder owner colours for the block-ownership ring (P1 cyan, P2 orange).
+    private static readonly Color OwnerP1 = new(90, 200, 255);
+    private static readonly Color OwnerP2 = new(255, 140, 60);
+
+    // Block ownership overlay (Plans/BLOCK_OWNERSHIP_SPIKES.md §1): a hollow ring in the
+    // owner's colour inset inside each owned solid cell, alpha = the claim's strength, so
+    // a wall visibly cools from "yours" to plain terrain over a few minutes. Pure render:
+    // reads the sim's table, writes nothing.
+    private void DrawOwnership(ChunkMap chunks)
+    {
+        if (chunks.Ownership.Count == 0) return;
+        var viewport = _graphicsDevice.Viewport;
+        float halfW = viewport.Width / (2f * _camera.Zoom);
+        float halfH = viewport.Height / (2f * _camera.Zoom);
+        float minX = _camera.Position.X - halfW - Chunk.TileSize, maxX = _camera.Position.X + halfW;
+        float minY = _camera.Position.Y - halfH - Chunk.TileSize, maxY = _camera.Position.Y + halfH;
+        int now = chunks.TerrainFrame;
+
+        int inset = Math.Max(1, Chunk.TileSize / 5);
+        int size  = TileDrawSize - 2 * inset;
+        if (size < 3) return;
+        foreach (var kv in chunks.Ownership.Entries)
+        {
+            var (gtx, gty) = kv.Key;
+            float x = gtx * Chunk.TileSize, y = gty * Chunk.TileSize;
+            if (x < minX || x > maxX || y < minY || y > maxY) continue;
+            if (chunks.GetCellState(gtx, gty) == TileState.Empty) continue;
+            if (!chunks.Ownership.TryGet(gtx, gty, now, out byte owner, out float s)) continue;
+            var c = (owner == BlockOwnership.Player2 ? OwnerP2 : OwnerP1) * s;
+            int left = (int)x + inset, top = (int)y + inset;
+            _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            size, 1),    c);
+            _spriteBatch.Draw(_pixel, new Rectangle(left,            top + size - 1, size, 1),    c);
+            _spriteBatch.Draw(_pixel, new Rectangle(left,            top + 1,        1,    size - 2), c);
+            _spriteBatch.Draw(_pixel, new Rectangle(left + size - 1, top + 1,        1,    size - 2), c);
         }
     }
 

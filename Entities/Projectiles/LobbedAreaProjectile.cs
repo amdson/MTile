@@ -275,7 +275,9 @@ public class LobbedAreaProjectile : Projectile
             // player had selected when they threw.
             int gtx = (int)MathF.Floor(Body.Position.X / Chunk.TileSize);
             int gty = (int)MathF.Floor(Body.Position.Y / Chunk.TileSize);
-            chunks.Mass.Deposit(chunks, gtx, gty, _budget, _tileType);
+            // The mound belongs to the thrower (an enemy lob's faction maps to nobody).
+            chunks.Mass.Deposit(chunks, gtx, gty, _budget, _tileType,
+                                owner: BlockOwnership.OwnerFor(Faction));
         }
 
         // 2) AOE damage — a core hit plus the radial-shove segments StickyGrenade uses.

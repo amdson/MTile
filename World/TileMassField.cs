@@ -71,13 +71,15 @@ public sealed class TileMassField
 
     // Drop `amount` of mass at (gtx, gty). Returns the number of tiles committed by
     // this deposit and everything it cascaded into. `wave` tags the mass with its
-    // avalanche (EntityId.None = untagged manual building).
+    // avalanche (EntityId.None = untagged manual building). `owner` is the placer
+    // (BlockOwnership) every tile this deposit commits is stamped with. It is not stored
+    // on the bucket: pooled mass belongs to whoever's deposit tips it over Threshold.
     public int Deposit(ChunkMap chunks, int gtx, int gty, float amount, TileType type,
-                       EntityId wave = default)
-        => DepositAt(chunks, gtx, gty, amount, type, wave, 0);
+                       EntityId wave = default, byte owner = BlockOwnership.None)
+        => DepositAt(chunks, gtx, gty, amount, type, wave, owner, 0);
 
     private int DepositAt(ChunkMap chunks, int gtx, int gty, float amount, TileType type,
-                          EntityId wave, int depth)
+                          EntityId wave, byte owner, int depth)
     {
         if (amount < EpsAmount || depth > MaxSpillDepth) return 0;
 
@@ -101,12 +103,12 @@ public sealed class TileMassField
         {
             var state = chunks.GetCellState(gtx, gty);
             bool free = state == TileState.Empty && !chunks.Graph.TryGet(gtx, gty, out _);
-            if (free && chunks.TryRequestTile(gtx, gty, type, wave) != null)
+            if (free && chunks.TryRequestTile(gtx, gty, type, wave, owner) != null)
             {
                 // Committed here. Anything left over keeps flowing outward.
                 cur -= Threshold;
                 committed++;
-                committed += Spill(chunks, gtx, gty, cur, type, wave, depth);
+                committed += Spill(chunks, gtx, gty, cur, type, wave, owner, depth);
                 cur = 0f;
                 break;
             }
@@ -114,7 +116,7 @@ public sealed class TileMassField
             // Occupied, or free but unsupported: hand one unit to the neighbours and
             // keep looping on what's left.
             cur -= Threshold;
-            committed += Spill(chunks, gtx, gty, Threshold, type, wave, depth);
+            committed += Spill(chunks, gtx, gty, Threshold, type, wave, owner, depth);
         }
 
         if (cur > 0f) _mass[key] = new MassBucket { Amount = cur, Wave = wave };
@@ -123,15 +125,15 @@ public sealed class TileMassField
     }
 
     private int Spill(ChunkMap chunks, int gtx, int gty, float amount, TileType type,
-                      EntityId wave, int depth)
+                      EntityId wave, byte owner, int depth)
     {
         if (amount < EpsAmount) return 0;
         float share = amount * SpillShare;
         int n = 0;
-        n += DepositAt(chunks, gtx,     gty - 1, share, type, wave, depth + 1);
-        n += DepositAt(chunks, gtx + 1, gty,     share, type, wave, depth + 1);
-        n += DepositAt(chunks, gtx,     gty + 1, share, type, wave, depth + 1);
-        n += DepositAt(chunks, gtx - 1, gty,     share, type, wave, depth + 1);
+        n += DepositAt(chunks, gtx,     gty - 1, share, type, wave, owner, depth + 1);
+        n += DepositAt(chunks, gtx + 1, gty,     share, type, wave, owner, depth + 1);
+        n += DepositAt(chunks, gtx,     gty + 1, share, type, wave, owner, depth + 1);
+        n += DepositAt(chunks, gtx - 1, gty,     share, type, wave, owner, depth + 1);
         return n;
     }
 

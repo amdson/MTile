@@ -90,6 +90,7 @@ public class MassBall : Projectile
         // touch (drag is scalar and there's no gravity, so it never changes);
         // the tag rides the mass through spill → request → the schedule gate.
         chunks.TouchWave(Id, Body.Velocity);
-        chunks.Mass.Deposit(chunks, gtx, gty, leak, _tileType, Id);
+        // The eruption builds for whoever launched it (Faction rides the snapshot).
+        chunks.Mass.Deposit(chunks, gtx, gty, leak, _tileType, Id, BlockOwnership.OwnerFor(Faction));
     }
 }

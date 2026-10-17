@@ -91,6 +91,7 @@ public sealed class TileSproutGraph
                 Age      = n.Age,
                 WaveId      = n.WaveId,
                 RequestTime = n.RequestTime,
+                Owner       = n.Owner,
             };
         }
         return new SproutGraphData { Nodes = nodes };
@@ -114,6 +115,7 @@ public sealed class TileSproutGraph
                 Age      = d.Age,
                 WaveId      = d.WaveId,
                 RequestTime = d.RequestTime,
+                Owner       = d.Owner,
             };
             _nodes[(d.Gtx, d.Gty)] = n;
             if (d.Status == TileSproutStatus.Growing) _growing.Add(n); else _pending.Add(n);

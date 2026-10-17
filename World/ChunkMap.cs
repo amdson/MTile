@@ -44,6 +44,16 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // RequestTime against it and promote only once it passes RequestTime + lag.
     public float SproutClock { get; private set; }
 
+    // Integer terrain frame: +1 per TickSprouts, i.e. once per sim step. The clock
+    // block ownership is stamped and aged against (BlockOwnership) — exact, unlike the
+    // float SproutClock — and snapshotted with it.
+    public int TerrainFrame { get; private set; }
+
+    // Sparse per-cell placer + placed frame (Plans/BLOCK_OWNERSHIP_SPIKES.md §1).
+    // Stamped when a player-requested sprout first becomes visible terrain; cleared on
+    // every path that empties a cell. Sim state (the block grab reads it), snapshotted.
+    public readonly BlockOwnership Ownership = new();
+
     // Register/refresh a wave's identity from its ball. Called on every deposit;
     // direction locks on the first nonzero-velocity touch (the ball never turns).
     public void TouchWave(EntityId wave, Vector2 velocity)
@@ -387,7 +397,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // due-scan). The accept/reject decision is IDENTICAL to the untagged path —
     // that is what keeps the final avalanche shape invariant under the gate.
     public TileSproutNode TryRequestTile(int gtx, int gty, TileType type = TileType.Stone,
-                                         EntityId wave = default)
+                                         EntityId wave = default, byte owner = BlockOwnership.None)
     {
         if (GetCellState(gtx, gty) != TileState.Empty) return null;
         if (Graph.TryGet(gtx, gty, out _)) return null;   // already requested
@@ -406,6 +416,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 parked.Type        = type;
                 parked.WaveId      = wave;
                 parked.RequestTime = SproutClock;
+                parked.Owner       = owner;
                 return parked;
             }
             var chunk = GetOrCreateChunk(chunkPos);
@@ -414,7 +425,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             node.Type   = type;
             node.WaveId = wave;
             node.RequestTime = SproutClock;
+            node.Owner  = owner;
             WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
+            StampPlaced(node);
             OnTilePlaced?.Invoke(CellCenter(gtx, gty), type);
             return node;
         }
@@ -428,6 +441,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         pending.Type        = type;
         pending.WaveId      = wave;
         pending.RequestTime = SproutClock;
+        pending.Owner       = owner;
         return pending;
     }
 
@@ -448,7 +462,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // of it normally; with nothing adjacent it grows on all four at once, which reads as
     // a puff condensing in place. Once it solidifies, ordinary TryRequestTile ghosts
     // parked on its neighbours promote off it like any other terrain.
-    public TileSproutNode ForceSprout(int gtx, int gty, TileType type)
+    public TileSproutNode ForceSprout(int gtx, int gty, TileType type, byte owner = BlockOwnership.None)
     {
         if (GetCellState(gtx, gty) != TileState.Empty) return null;
         if (Graph.TryGet(gtx, gty, out _)) return null;
@@ -461,11 +475,19 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         var chunk = GetOrCreateChunk(chunkPos);
         var node = Graph.AddGrowing(chunkPos, tx, ty, gtx, gty,
             faces, MovementConfig.Current.SproutLifetime);
-        node.Type = type;
+        node.Type  = type;
+        node.Owner = owner;
         WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
+        StampPlaced(node);
         OnTilePlaced?.Invoke(CellCenter(gtx, gty), type);
         return node;
     }
+
+    // A node just became visible terrain (Sprouting): its placer owns the cell from this
+    // frame. An unowned node clears any claim, so "re-placing re-stamps" holds for
+    // every placer, not just players.
+    private void StampPlaced(TileSproutNode n)
+        => Ownership.Stamp(n.Gtx, n.Gty, n.Owner, TerrainFrame);
 
     // Advance every Growing sprout, finalize the complete ones (cell flips to
     // Solid, sprout dropped from the graph), then promote any Pending ghost that
@@ -485,7 +507,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // try to read it as solid.
         // The avalanche schedule clock advances with the sprouts it gates.
         SproutClock += dt;
+        TerrainFrame++;
         Waves.Tick(SproutClock);
+        if (TerrainFrame % BlockOwnership.PruneCadenceFrames == 0) Ownership.Prune(TerrainFrame);
 
         Foam.Tick(dt, _breakCellAction);
         // Bleed stale partial build mass so the table stays bounded (see TileMassField).
@@ -546,6 +570,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 // Materialize the chunk + tile state now that the ghost is physical.
                 var ghostChunk = GetOrCreateChunk(ghost.ChunkPos);
                 WriteTile(ghostChunk, ghost.Tx, ghost.Ty, TileState.Sprouting, ghost.Type, ghost);
+                StampPlaced(ghost);
             }
         }
 
@@ -573,6 +598,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
 
                 var ghostChunk = GetOrCreateChunk(ghost.ChunkPos);
                 WriteTile(ghostChunk, ghost.Tx, ghost.Ty, TileState.Sprouting, ghost.Type, ghost);
+                StampPlaced(ghost);
             }
         }
     }
@@ -610,6 +636,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
 
             if (_dict.TryGetValue(n.ChunkPos, out var chunk))
                 WriteTile(chunk, n.Tx, n.Ty, TileState.Empty, chunk.Tiles[n.Tx, n.Ty].Type, null);
+            Ownership.Clear(n.Gtx, n.Gty);
             Graph.Remove(n);
         }
     }
@@ -703,6 +730,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             Damage.Clear(gtx, gty);
             NoteChargedBreak(gtx, gty);
             Charge.Clear(gtx, gty);
+            Ownership.Clear(gtx, gty);
             DropSupportFor(gtx, gty);
             OnTileBroken?.Invoke(CellCenter(gtx, gty), sproutType);
             return true;
@@ -715,6 +743,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Damage.Clear(gtx, gty);
         NoteChargedBreak(gtx, gty);
         Charge.Clear(gtx, gty);
+        Ownership.Clear(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
         // a foam tile broken early would still trigger another BreakCell when
         // its timer expires (no-op on an empty cell, but a needless call).
@@ -749,6 +778,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Damage.Clear(gtx, gty);
         Charge.Clear(gtx, gty);
         Foam.Clear(gtx, gty);
+        Ownership.Clear(gtx, gty);   // an edit is level data: nobody owns it
         if (state == TileState.Empty) DropSupportFor(gtx, gty);
         return true;
     }
@@ -789,7 +819,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Impact      = Impact.Capture(),
         Mass        = Mass.Capture(),
         Waves       = Waves.Capture(),
+        Ownership   = Ownership.Capture(),
         SproutClock = SproutClock,
+        TerrainFrame = TerrainFrame,
     };
 
     public void RestoreTerrain(TerrainSnapshot s)
@@ -806,7 +838,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Impact.Restore(s.Impact);
         Mass.Restore(s.Mass);
         Waves.Restore(s.Waves);
+        Ownership.Restore(s.Ownership);
         SproutClock = s.SproutClock;
+        TerrainFrame = s.TerrainFrame;
 
         // 3. Re-link tile→sprout refs. Every Growing node's cell is Sprouting at the
         //    restored frame (grid and graph were captured together), so this rebuilds
