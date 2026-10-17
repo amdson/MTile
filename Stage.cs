@@ -26,6 +26,9 @@ public sealed class Stage
     // Co-op stage: players can't hurt each other, and every player (not just the
     // primary) respawns at Simulation.RespawnPoint. See Simulation.Coop.
     public bool               Coop;
+    // Versus stage: every player respawns at their own start — the primary at
+    // PlayerSpawn, the others at SecondSpawn — instead of a dead secondary staying dead.
+    public bool               Versus;
 }
 
 public static partial class Stages
@@ -167,6 +170,7 @@ public static partial class Stages
         // ─── depths ───────────────────────────────────────────────────────────
         // Two-player co-op gauntlet through underground stone rooms. Stages/DepthsStage.cs.
         RegisterDepths();
+        RegisterDuels();
 
         // ─── weights ──────────────────────────────────────────────────────────
         // Knockback-by-mass testbed: a flat walled hall with a row of passive balls

@@ -58,6 +58,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     // Co-op (Stage.Coop): no player-vs-player hits, and secondary players respawn too.
     // Set at construction from the stage; never changes mid-match.
     public bool Coop { get; private set; }
+    // Versus (Stage.Versus): dead secondaries respawn at the stage's second start.
+    public bool Versus { get; private set; }
+    private Vector2 _secondSpawn;
     // Where dead players come back. Starts at the stage's PlayerSpawn; a stage may move
     // it (a checkpoint). Snapshotted, so a stage ticker that moves it rolls back cleanly.
     private const float CoopRespawnOffsetX = 24f;
@@ -379,6 +382,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         }
 
         Coop = stage.Coop;
+        Versus = stage.Versus && !stage.Coop;
         _combat.Coop = Coop;
         _playerSpawn = stage.PlayerSpawn;
         // Endless levels have no authored ground to aim a spawn at — the surface under
@@ -402,7 +406,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         if (config.SpawnSecondPlayer)
         {
             var offset = new Vector2(config.SecondPlayerOffsetX, config.SecondPlayerOffsetY);
-            AddSecondaryPlayer(stage.SecondSpawn ?? (_playerSpawn + offset));
+            _secondSpawn = stage.SecondSpawn ?? (_playerSpawn + offset);
+            AddSecondaryPlayer(_secondSpawn);
         }
 
         // Hand control to the stage: it populates platforms, tickers, and entities.
@@ -566,11 +571,12 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         // Co-op: a dead partner comes back too, beside the checkpoint so the two don't
         // overlap. Outside co-op a dead secondary is a PvP kill and stays dead (the
         // match layer decides what that means).
-        if (Coop)
+        // Versus: a dead secondary comes back at its own start.
+        if (Coop || Versus)
             foreach (var (p, _) in _secondaryPlayers)
                 if (!p.IsAlive)
                 {
-                    p.Respawn(CoopRespawnSpot());
+                    p.Respawn(Coop ? CoopRespawnSpot() : _secondSpawn);
                     _playerDeaths++;
                     OnPlayerRespawn?.Invoke(p.Body.Position);
                 }

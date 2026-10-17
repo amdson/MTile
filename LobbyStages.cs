@@ -12,6 +12,8 @@ public static class LobbyStages
     public static readonly LobbyStage[] All =
     {
         new("depths",   "Depths",   true,  "Two-player co-op cave gauntlet, room by room."),
+        new("duel_hall",  "Duel Hall",  false, "Big roofed stone hall. Just the two of you."),
+        new("duel_plain", "Duel Plain", false, "Flat open plain under the sky. Just the two of you."),
         new("arena",    "Arena",    false, "Walled combat room — fight each other (and the stalkers)."),
         new("gauntlet", "Gauntlet", false, "Left-to-right combat run."),
         new("training", "Training", false, "Plateau over the void with a training dummy."),
