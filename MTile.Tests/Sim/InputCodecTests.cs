@@ -26,6 +26,8 @@ public class InputCodecTests
         Num2       = (seed & 2048) != 0,
         Num3       = (seed & 4096) != 0,
         Num4       = (seed & 8192) != 0,
+        R          = (seed & 16384) != 0,
+        Num5       = (seed & 32768) != 0,
         MouseWorldPosition = new Vector2(12.5f + seed, -7.25f - seed),
         MousePosition      = new Point(seed, seed * 2),   // must be dropped on the wire
     };
@@ -61,6 +63,21 @@ public class InputCodecTests
             // Screen position is not on the wire — decode leaves it at default.
             Assert.Equal(Point.Zero, back.Inputs[i].MousePosition);
         }
+    }
+
+    // Every one of the 16 flag bits, one at a time — the top bit (Num5, the spike
+    // picker) included, so a button that silently falls off the wire shows up here.
+    [Fact]
+    public void EachFlagBit_RoundTripsAlone()
+    {
+        for (int bit = 0; bit < 16; bit++)
+        {
+            var input = Sample(1 << bit);
+            var packet = new InputPacket { Player = 0, FirstFrame = 0, ChecksumFrame = -1, Inputs = new[] { input } };
+            Assert.True(InputCodec.TryDecode(InputCodec.Encode(packet), out var back));
+            Assert.True(InputCompare.Equal(input, back.Inputs[0]), $"flag bit {bit} lost on the wire");
+        }
+        Assert.True(Sample(32768).Num5);
     }
 
     [Fact]

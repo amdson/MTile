@@ -26,13 +26,15 @@ namespace MTile
         // edge-detect (toggle on press) happens deterministically inside the sim,
         // not by polling hardware mid-update.
         public bool P;
-        // Block-picker number keys (1=Stone, 2=Dirt, 3=Sand, 4=Foam). Raw key state;
+        // Block-picker number keys (1=Stone, 2=Dirt, 3=Sand, 4=Foam, 5=Spikes — the
+        // spike overlay, placed onto existing solid cells). Raw key state;
         // the sim interprets them into the active block type each Step. Part of input
         // so the selection is per-player and rollback-deterministic.
         public bool Num1;
         public bool Num2;
         public bool Num3;
         public bool Num4;
+        public bool Num5;
     }
 
     public class Controller
@@ -91,6 +93,7 @@ namespace MTile
                 Num2  = keyboardState.IsKeyDown(Keys.D2),
                 Num3  = keyboardState.IsKeyDown(Keys.D3),
                 Num4  = keyboardState.IsKeyDown(Keys.D4),
+                Num5  = keyboardState.IsKeyDown(Keys.D5),
             };
         }
 

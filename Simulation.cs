@@ -49,6 +49,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     private readonly List<EntityId>    _restoreIdScratch = new();
     // Per-frame intersection pass; owns the cross-frame (HitId,Target) dedupe table.
     private readonly CombatSystem _combat = new();
+    // Spike-overlay contact damage (BLOCK_OWNERSHIP_SPIKES §2). Instance-owned like
+    // _combat: its per-victim cooldown table is cross-frame sim state (snapshotted).
+    private readonly SpikeContactSystem _spikes = new();
     // Single deterministic HitId source shared by all players + entities.
     private readonly HitIdAllocator _hitIds = new();
 
@@ -338,6 +341,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     public PlayerInput CurrentInput => _controller.Current;
     // Primary player's current block selection — surfaced for the HUD.
     public TileType ActiveBlockType => _player.ActiveBlockType;
+    // Primary player's spike-overlay selection (block picker key 5) — HUD.
+    public bool SpikesSelected => _player.SpikesSelected;
 
     // Headless/test constructor: terrain is supplied directly (no file load) and the
     // scene is populated by an optional delegate (spawn entities / platforms via the
@@ -591,7 +596,16 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         // Project the World's bodies into the scratch list (spawn order) for the solver.
         _bodyScratch.Clear();
         foreach (var r in _world.Query<PhysicsBodyComponent>()) _bodyScratch.Add(r.Component1.Body);
+        _spikes.CapturePreStep(_bodyScratch);
         PhysicsWorld.StepSwept(_bodyScratch, _chunks, dt, Gravity);
+
+        // Spike contact damage: after the sweep, so contacts are where bodies came to
+        // rest and the impact speed is the pre-sweep approach (CapturePreStep). Before
+        // the charged-break drain and the dead sweep, so an entity spiked to death is
+        // swept this same frame.
+        _spikes.Apply(_chunks, _hurtboxes, ResolveHittable,
+            id => _world.Has<PhysicsBodyComponent>(id) ? _world.Get<PhysicsBodyComponent>(id).Body : null,
+            _hitIds, _frame, Coop);
 
         // Charged blocks destroyed anywhere in this Step arm their blast. Drained HERE,
         // at the very end, because the step breaks tiles in three different places —
@@ -685,6 +699,13 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         foreach (var d in _chunks.Damage.Damaged) t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x01);
         foreach (var d in _chunks.Foam.Entries)   t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x02);
         foreach (var d in _chunks.Impact.Entries) t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x03);
+        // Spike overlays: the owning side rides in the value slot + salt.
+        foreach (var d in _chunks.Spikes.Entries)
+            t ^= CellF(d.Key.gtx, d.Key.gty, d.Value.Team,
+                       0x06 ^ ((ulong)(byte)d.Value.Faction << 8));
+        // Spike contact cooldowns (per-victim last-hit frame).
+        foreach (var d in _spikes.Cooldowns)
+            t ^= CellF(d.Key.Index, d.Key.Generation, d.Value, 0x07);
         foreach (var d in _chunks.Mass.Entries)
             t ^= CellF(d.Key.gtx, d.Key.gty, d.Value.Amount,
                        0x04 ^ ((ulong)(uint)d.Value.Wave.Index << 16));
@@ -699,7 +720,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         // round the frame). Faded-but-unpruned claims are still state, so they count.
         foreach (var d in _chunks.Ownership.Entries)
             t ^= CellF(d.Key.gtx, d.Key.gty, 0f,
-                       0x06 ^ ((ulong)d.Value.Owner << 8) ^ ((ulong)(uint)d.Value.PlacedFrame << 16));
+                       0x08 ^ ((ulong)d.Value.Owner << 8) ^ ((ulong)(uint)d.Value.PlacedFrame << 16));
 
         Mix((uint)t); Mix((uint)(t >> 32));
         return h;
@@ -743,6 +764,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             HitConfirm           = _combat.CaptureHitConfirm(),
             Recoil               = _combat.CaptureRecoil(),
             AttackerHitstop      = _combat.CaptureHitstop(),
+            SpikeCooldowns       = _spikes.CaptureCooldowns(),
             Platforms            = platforms,
             Terrain              = _chunks.CaptureTerrain(),
         };
@@ -824,5 +846,6 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         _combat.RestoreHitConfirm(snap.HitConfirm);
         _combat.RestoreRecoil(snap.Recoil);
         _combat.RestoreHitstop(snap.AttackerHitstop);
+        _spikes.RestoreCooldowns(snap.SpikeCooldowns);
     }
 }

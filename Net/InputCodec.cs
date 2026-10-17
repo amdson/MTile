@@ -24,11 +24,11 @@ public static class InputCodec
     public const int HeaderBytes = 22;
     public const int InputBytes  = 10;
 
-    // ── Flag bit layout (15 of 16 bits used) ──
+    // ── Flag bit layout (all 16 bits used — a further button needs a wider field) ──
     private const int FLeft = 0, FRight = 1, FUp = 2, FDown = 3,
                       FLeftClick = 4, FRightClick = 5, FSpace = 6, FShift = 7,
                       FF = 8, FP = 9, FNum1 = 10, FNum2 = 11, FNum3 = 12, FNum4 = 13,
-                      FR = 14;
+                      FR = 14, FNum5 = 15;
 
     private static ushort PackFlags(in PlayerInput p)
     {
@@ -48,6 +48,7 @@ public static class InputCodec
         if (p.Num3)       f |= 1 << FNum3;
         if (p.Num4)       f |= 1 << FNum4;
         if (p.R)          f |= 1 << FR;
+        if (p.Num5)       f |= 1 << FNum5;
         return f;
     }
 
@@ -68,6 +69,7 @@ public static class InputCodec
         Num3       = (f & (1 << FNum3))       != 0,
         Num4       = (f & (1 << FNum4))       != 0,
         R          = (f & (1 << FR))          != 0,
+        Num5       = (f & (1 << FNum5))       != 0,
         MouseWorldPosition = world,
         // MousePosition (screen) intentionally not transmitted — render/debug only.
     };

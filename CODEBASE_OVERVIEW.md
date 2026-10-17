@@ -104,7 +104,7 @@ Built and running, not planned. [`RollbackSession`](Net/RollbackSession.cs) does
 
 ### Determinism rules (when touching sim code)
 - **No sim-affecting mutable statics.** `HitId`s come from the per-`Simulation` [`HitIdAllocator`](World/HitIdAllocator.cs); block type is per-`PlayerCharacter` (driven by that player's own input), not global.
-- **All input arrives via `PlayerInput`** — no polling hardware mid-step. Block-picker (1-4) and planner toggle (P) are interpreted inside `PlayerCharacter.Update`.
+- **All input arrives via `PlayerInput`** — no polling hardware mid-step. Block-picker (1-4 materials, 5 = spike overlay) and planner toggle (P) are interpreted inside `PlayerCharacter.Update`.
 - **Same iteration order on restore.** Lists are rebuilt deterministically.
 - `MovementConfig` hot-reload is gated behind `GameConfig.HotReloadMovementConfig` (off for MP).
 
@@ -153,6 +153,7 @@ Dictionary of `Point → Chunk`. Each chunk = 16×16 tiles; each tile = 16px (`C
 
 ### Side-structures
 - [`TileDamage`](World/TileDamage.cs) — per-cell HP accumulator; `MaxHPFor(type)`.
+- [`TileSpikes`](World/TileSpikes.cs) (`ChunkMap.Spikes`) — spike overlay per cell + placer's side (Plans/BLOCK_OWNERSHIP_SPIKES.md §2). Placed on existing solid by `BlockPlaceAction.TrySpikeCell` (picker key 5; 2× stone's build cost), reinforces the cell 2× in `DamageCell`, cleared by `BreakCell`. [`SpikeContactSystem`](World/SpikeContactSystem.cs) (Simulation-owned, runs right after `StepSwept`) deals opposing-side contact damage scaled by pre-sweep normal approach speed through `IHittable.OnHit`, with a snapshotted per-victim cooldown.
 - [`TileImpactAccumulator`](World/TileImpactAccumulator.cs) (`ChunkMap.Impact`) — per-cell impact buildup that bleeds off via `Tick(dt)`.
 - [`TileSproutGraph`](World/TileSproutGraph.cs) — DAG of pending/growing sprouts; first parent to finalize promotes a child to Growing and decides its growth direction. Used by drag-build and the eruption planner.
 

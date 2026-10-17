@@ -24,6 +24,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // Cleared on break alongside Damage so a rebuilt cell starts uncharged.
     public readonly TileCharge Charge = new();
 
+    // Sparse per-cell spike overlay (placer's side per cell). Reinforces the cell in
+    // DamageCell and drives SpikeContactSystem. Cleared on break like Charge.
+    public readonly TileSpikes Spikes = new();
+
     // Per-cell accumulated impact impulse, with decay. PhysicsWorld routes
     // contact impulses through this so a spring-padded landing (player) accrues
     // damage over the frames the spring spreads the impulse across — see
@@ -701,6 +705,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // Lookup the cell's material type so TileDamage can compare accumulated damage
         // against the per-type max HP (Sand ≈ 0.5, Dirt ≈ 1.0, Stone ≈ 2.0).
         var type = GetCellType(gtx, gty);
+        // A spiked cell is reinforced: the same hit chips proportionally less of it.
+        if (Spikes.IsSpiked(gtx, gty)) amount /= TileSpikes.HpMultiplier;
         if (!Damage.ApplyDamage(gtx, gty, amount, type)) return false;
         return BreakCell(gtx, gty);
     }
@@ -731,6 +737,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             NoteChargedBreak(gtx, gty);
             Charge.Clear(gtx, gty);
             Ownership.Clear(gtx, gty);
+            Spikes.Clear(gtx, gty);
             DropSupportFor(gtx, gty);
             OnTileBroken?.Invoke(CellCenter(gtx, gty), sproutType);
             return true;
@@ -744,6 +751,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         NoteChargedBreak(gtx, gty);
         Charge.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);
+        // The spike overlay goes with the cell it sat on.
+        Spikes.Clear(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
         // a foam tile broken early would still trigger another BreakCell when
         // its timer expires (no-op on an empty cell, but a needless call).
@@ -777,6 +786,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         WriteTile(chunk, tx, ty, state, state == TileState.Empty ? t.Type : type, null);
         Damage.Clear(gtx, gty);
         Charge.Clear(gtx, gty);
+        Spikes.Clear(gtx, gty);
         Foam.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);   // an edit is level data: nobody owns it
         if (state == TileState.Empty) DropSupportFor(gtx, gty);
@@ -815,6 +825,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Graph       = Graph.Capture(),
         Damage      = Damage.Capture(),
         Charge      = Charge.Capture(),
+        Spikes      = Spikes.Capture(),
         Foam        = Foam.Capture(),
         Impact      = Impact.Capture(),
         Mass        = Mass.Capture(),
@@ -834,6 +845,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Graph.Restore(s.Graph);
         Damage.Restore(s.Damage);
         Charge.Restore(s.Charge);
+        Spikes.Restore(s.Spikes);
         Foam.Restore(s.Foam);
         Impact.Restore(s.Impact);
         Mass.Restore(s.Mass);

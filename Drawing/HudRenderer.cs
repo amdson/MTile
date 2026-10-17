@@ -73,11 +73,13 @@ public sealed class HudRenderer
         Bar(y + BarH + Gap,        m.BuildMove / BuildMeters.MoveMax,  new Color(120, 200, 235), "mov");
     }
 
-    // Top-right block-picker indicator: four 24x24 swatches in a row, one per
-    // pickable TileType, the selected one brightened and outlined, with 1-4 labels.
+    // Top-right block-picker indicator: 24x24 swatches in a row, one per pickable
+    // TileType plus a fifth for the spike overlay, the selected one brightened and
+    // outlined, with 1-5 labels.
     private void DrawBlockPickerHud(Simulation sim)
     {
         var types = new[] { TileType.Stone, TileType.Dirt, TileType.Sand, TileType.Foam };
+        const int Slots = 5;   // the four materials + spikes
 
         const int SwatchSize    = 24;
         const int SwatchGap     = 6;
@@ -86,17 +88,20 @@ public sealed class HudRenderer
         const int LabelOffset   = SwatchSize + 4;
 
         int viewportW = _graphicsDevice.Viewport.Width;
-        int totalW    = types.Length * SwatchSize + (types.Length - 1) * SwatchGap;
+        int totalW    = Slots * SwatchSize + (Slots - 1) * SwatchGap;
         int x0        = viewportW - RightPadding - totalW;
         int y0        = TopPadding;
 
         var activeBlockType = sim.ActiveBlockType;
-        for (int i = 0; i < types.Length; i++)
+        bool spikes = sim.SpikesSelected;
+        for (int i = 0; i < Slots; i++)
         {
             int x = x0 + i * (SwatchSize + SwatchGap);
-            bool selected = types[i] == activeBlockType;
+            bool isSpikeSlot = i == types.Length;
+            bool selected = isSpikeSlot ? spikes : !spikes && types[i] == activeBlockType;
 
-            var col = TilePalette.BaseColor(types[i]);
+            var col = isSpikeSlot ? TilePalette.SpikeColor(sim.Player.Faction)
+                                  : TilePalette.BaseColor(types[i]);
             var fill = selected ? col : new Color((int)(col.R * 0.4f), (int)(col.G * 0.4f), (int)(col.B * 0.4f));
             _spriteBatch.Draw(_pixel, new Rectangle(x, y0, SwatchSize, SwatchSize), fill);
 
@@ -105,6 +110,7 @@ public sealed class HudRenderer
             _spriteBatch.Draw(_pixel, new Rectangle(x,                  y0 + SwatchSize - 1, SwatchSize, 1), border);
             _spriteBatch.Draw(_pixel, new Rectangle(x,                  y0,                  1, SwatchSize), border);
             _spriteBatch.Draw(_pixel, new Rectangle(x + SwatchSize - 1, y0,                  1, SwatchSize), border);
+            if (isSpikeSlot) SpikeGlyph(x, y0, SwatchSize, selected ? Color.White : new Color(150, 150, 150));
 
             string keyLabel = (i + 1).ToString();
             _spriteBatch.DrawString(_debugFont, keyLabel,
@@ -112,8 +118,26 @@ public sealed class HudRenderer
                 selected ? Color.White : new Color(160, 160, 160));
         }
 
-        _spriteBatch.DrawString(_debugFont, activeBlockType.ToString(),
+        _spriteBatch.DrawString(_debugFont, spikes ? "Spikes" : activeBlockType.ToString(),
             new Vector2(x0, y0 + LabelOffset + 16), Color.White);
+    }
+
+    // Three little teeth along the bottom of a swatch, so the spike slot reads as
+    // "spikes" rather than as a fifth material.
+    private void SpikeGlyph(int x, int y, int size, Color color)
+    {
+        const int Teeth = 3;
+        int baseW = (size - 4) / Teeth;
+        int h     = size / 2;
+        for (int k = 0; k < Teeth; k++)
+        {
+            int bx = x + 2 + k * baseW;
+            for (int r = 0; r < h; r++)
+            {
+                int w = Math.Max(1, baseW * (h - r) / h);
+                _spriteBatch.Draw(_pixel, new Rectangle(bx + (baseW - w) / 2, y + size - 3 - r, w, 1), color);
+            }
+        }
     }
 
     // ── Avalanche charge ─────────────────────────────────────────────────────────
@@ -255,19 +279,22 @@ public sealed class HudRenderer
     private void DrawBlocksRow(Simulation sim, int x, int y, int rowH)
     {
         var type   = sim.ActiveBlockType;
+        bool spikes = sim.SpikesSelected;
         var meters = sim.Player.Abilities.Meters;
-        float cost = MaterialStrengths.BuildCostFor(type);
+        float cost = spikes ? MaterialStrengths.SpikeBuildCost : MaterialStrengths.BuildCostFor(type);
         int blocks = cost > 0f ? (int)(meters.Build / cost) : 0;
 
         int sy = y + (rowH - SwatchS) / 2;
-        _spriteBatch.Draw(_pixel, new Rectangle(x, sy, SwatchS, SwatchS), TilePalette.BaseColor(type));
+        _spriteBatch.Draw(_pixel, new Rectangle(x, sy, SwatchS, SwatchS),
+            spikes ? TilePalette.SpikeColor(sim.Player.Faction) : TilePalette.BaseColor(type));
         Frame(x, sy, SwatchS, SwatchS, new Color(30, 30, 34));
 
         // The count comes from the reservoir, but the warning tint asks the pool that
         // actually pays for a placement (CanAfford spends working + charge). Colouring
         // off the reservoir instead would flash red while you still had a full working
         // pool to place from.
-        var textColor = meters.CanAfford(type) ? new Color(225, 225, 235) : new Color(205, 90, 70);
+        bool affordable = spikes ? meters.BuildMove + meters.EruptMove >= cost : meters.CanAfford(type);
+        var textColor = affordable ? new Color(225, 225, 235) : new Color(205, 90, 70);
         _spriteBatch.DrawString(_debugFont, $"x {blocks}",
             new Vector2(x + SwatchS + 8, y + (rowH - _debugFont.LineSpacing) / 2f), textColor);
     }

@@ -20,4 +20,15 @@ public static class TilePalette
         TileType.Hardened => new Color(44, 38, 40),
         _              => Color.Gray,
     };
+
+    // Spike-overlay tint by owning side, so a player can tell their own spikes (safe)
+    // from an opponent's (not) at a glance. Saturated and light so the teeth read
+    // against every material fill, dark stone included.
+    public static Color SpikeColor(Faction side) => side switch
+    {
+        Faction.Player1 => new Color(120, 200, 255),   // cool blue
+        Faction.Player2 => new Color(255, 120, 110),   // warm red
+        Faction.Enemy   => new Color(200, 120, 255),   // violet
+        _               => new Color(230, 230, 230),
+    };
 }

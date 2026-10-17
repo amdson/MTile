@@ -31,6 +31,9 @@ public class EnvironmentContext
     // Read by every action that deposits terrain. Carried here (rather than a static)
     // so each player's selection is independent and rollback-deterministic.
     public TileType ActiveBlockType;
+    // Block picker key 5: the RMB build gestures spike existing solid cells instead of
+    // building (BlockPlaceAction.TrySpikeCell). Player-local, like ActiveBlockType.
+    public bool SpikesSelected;
     public IntentBuffer Intents;      // gesture-parsed action intents (Click, Stab, PressEdge); action FSM reads + consumes
     public ConditionState Condition;  // combat condition flags (Slash2Ready, RecoveryActive, …) — lives on PlayerAbilityState
     public CombatState    Combat;     // defensive condition: hitstun, stun, last-hit data — gates jump preconditions etc.
