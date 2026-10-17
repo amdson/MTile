@@ -55,6 +55,9 @@ public class Game1 : Game
     // which is the desktop default.
     public string StageOverride { get; set; }
 
+    // Set (browser only) when the player asks to quit — Escape / gamepad Back.
+    public bool ExitRequested { get; private set; }
+
     private readonly Camera _camera = new();
     private IBackdrop _background;
 
@@ -850,7 +853,12 @@ public class Game1 : Game
 
         if (GamePad.GetState(PlayerIndex.One).Buttons.Back == ButtonState.Pressed ||
             keyboardState.IsKeyDown(Keys.Escape))
-            Exit();
+        {
+            // A browser page can't Exit() (it throws under KNI/Blazor); the web host polls
+            // ExitRequested and takes the player back to the lobby instead.
+            if (OperatingSystem.IsBrowser()) ExitRequested = true;
+            else Exit();
+        }
 
         _screenshots.Update(keyboardState);
 

@@ -493,6 +493,15 @@ public partial class Index : IDisposable
             }
 
             _game.Tick();
+            if (_game is MTile.Game1 { ExitRequested: true })
+            {
+                // Escape: drop the connection (the partner gets the disconnect overlay) and
+                // reload the page onto the lobby — the same as the overlay's "Back to lobby".
+                _ticking = false;
+                _ = JsRuntime.InvokeVoidAsync("mtileRtc.close");
+                Nav.NavigateTo(Nav.BaseUri, forceLoad: true);
+                return false;
+            }
             return true;
         }
         catch (Exception ex)
