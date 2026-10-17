@@ -48,6 +48,9 @@ public sealed class DepthsRoom
     public List<Point> ExitDoor = new();
     // A clear standing spot just inside the room's entrance, for respawning players.
     public Vector2   Entry;
+    // A second clear standing spot a few tiles right of Entry on the same floor, where the
+    // co-op partner spawns/respawns. Falls back to Entry when no such spot exists.
+    public Vector2   Entry2;
     // Size class (0 small, 1 medium, 2 large / boss-capable).
     public int       Size;
     // World-px centre of the room interior.
@@ -70,6 +73,11 @@ public sealed class DepthsMap
     public List<DepthsRoom> Rooms = new();
     // Where the players start (room 0's Entry).
     public Vector2          PlayerSpawn;
+    // Where the second player starts (room 0's Entry2).
+    public Vector2          SecondSpawn;
+    // The solid/air grid the chunks were built from (immutable after Build; the room
+    // data above is likewise read-only, so one DepthsMap can back many Simulations).
+    public char[,]          Grid;
     // Map extent in tiles; the whole box [0,Width) x [0,Height) is solid except rooms and tunnels.
     public int              Width, Height;
 }
@@ -219,13 +227,25 @@ public static class DepthsLayout
             };
             r.Center = new Vector2((r.Interior.X + L.W * 0.5f) * T, (r.Interior.Y + L.H * 0.5f) * T);
             r.Entry  = new Vector2((x0[i] + 2) * T + T * 0.5f, r.EntryFloorRow * T - 16f);
+            r.Entry2 = CompanionSpot(g, r);
             Spots(g, r);
             map.Rooms.Add(r);
         }
         map.PlayerSpawn = map.Rooms[0].Entry;
+        map.SecondSpawn = map.Rooms[0].Entry2;
+        map.Grid = g;
         map.Width = W; map.Height = H;
 
-        // ── Chunks ──
+        map.Chunks = MakeChunks(g, W, H);
+        return map;
+    }
+
+    // A FRESH ChunkMap from the grid. Chunks are mutated by play (and F5 reloads), so every
+    // Simulation gets its own; the grid itself is never written after Build.
+    public static ChunkMap MakeChunks(DepthsMap m) => MakeChunks(m.Grid, m.Width, m.Height);
+
+    private static ChunkMap MakeChunks(char[,] g, int W, int H)
+    {
         var chunks = new ChunkMap();
         for (int cx = 0; cx < W / 16; cx++)
             for (int cy = 0; cy < H / 16; cy++)
@@ -241,8 +261,23 @@ public static class DepthsLayout
                     }
                 chunks[ch.ChunkPos] = ch;
             }
-        map.Chunks = chunks;
-        return map;
+        return chunks;
+    }
+
+    // First standing spot 2..8 tiles right of the room's Entry on the entry floor: solid
+    // underfoot, clear for a radius-16 body. Falls back to Entry.
+    private static Vector2 CompanionSpot(char[,] g, DepthsRoom r)
+    {
+        int T = Chunk.TileSize;
+        int fr = r.EntryFloorRow;
+        for (int dx = 2; dx <= 8; dx++)
+        {
+            float x = r.Entry.X + dx * T, y = fr * T - 16f;
+            int tx = (int)System.MathF.Floor(x / T);
+            if (tx + 1 >= g.GetLength(0) || fr >= g.GetLength(1)) break;
+            if (g[tx, fr] != Air && ClearBox(g, x, y, 16f)) return new Vector2(x, y);
+        }
+        return r.Entry;
     }
 
     // Debug dump: one char per tile, '.' air, 'X' stone, 'H' hardened.

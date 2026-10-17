@@ -117,3 +117,56 @@ public class CoopModeTests
         Assert.Equal(new Vector2(500f, -20f), sim.RespawnPoint);
     }
 }
+
+// Stalker/Turret predate EnemyEntity's target source; they chase the NEAREST LIVING player.
+public class CoopLegacyEnemyTargetTests
+{
+    private static ChunkMap Floor() => SimTerrain.FromAscii(@"
+        OOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOO
+        OOOOOOOOOOOOOOOOOOOOOOOO
+        XXXXXXXXXXXXXXXXXXXXXXXX", originTileX: -4, originTileY: 0);
+
+    private static (Simulation Sim, PlayerCharacter P2) Build()
+    {
+        var stage = new Stage { Name = "coop-test", Terrain = Floor, PlayerSpawn = new Vector2(0f, 38f), Coop = true, Populate = _ => { } };
+        var sim = new Simulation(new GameConfig { SpawnSecondPlayer = false }, stage);
+        var (p2, _) = sim.AddSecondaryPlayer(new Vector2(90f, 38f));
+        return (sim, p2);
+    }
+
+    [Fact]
+    public void Stalker_ChasesNearerPlayer_ThenTheLivingOne()
+    {
+        var (sim, p2) = Build();
+        sim.Player.Body.Position = new Vector2(0f, 38f);
+        p2.Body.Position         = new Vector2(90f, 38f);
+        var s = new StalkerEnemy(new Vector2(70f, 38f));
+        s.Update(1f / 60f, sim.Player, new HitboxWorld(), sim);
+        Assert.True(s.Body.Velocity.X > 0f, "should head toward P2 (20 px away), not P1 (70 px)");
+
+        p2.Health = 0f;   // nearest is dead: fall back to the living P1
+        var s2 = new StalkerEnemy(new Vector2(70f, 38f));
+        s2.Update(1f / 60f, sim.Player, new HitboxWorld(), sim);
+        Assert.True(s2.Body.Velocity.X < 0f);
+    }
+
+    [Fact]
+    public void Turret_AimsAtNearerPlayer()
+    {
+        var (sim, p2) = Build();
+        sim.Player.Body.Position = new Vector2(0f, 38f);
+        p2.Body.Position         = new Vector2(90f, 38f);
+        var t = new TurretEnemy(new Vector2(70f, 38f));
+        t.Update(1f / 60f, sim.Player, new HitboxWorld(), sim);
+        Assert.True(t.Aim.X > 0f);
+    }
+
+    [Fact]
+    public void NearestPlayer_FallsBackWhenNobodyAlive()
+    {
+        var (sim, p2) = Build();
+        sim.Player.Health = 0f; p2.Health = 0f;
+        Assert.Same(sim.Player, sim.NearestPlayer(Vector2.Zero, sim.Player));
+    }
+}

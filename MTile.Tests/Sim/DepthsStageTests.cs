@@ -136,4 +136,69 @@ public class DepthsStageTests
             Assert.Equal(i + 1, g.StageVars[0]);
         }
     }
+
+    private static bool BodyClear(ChunkMap c, Vector2 p, float r = 16f)
+    {
+        int T = Chunk.TileSize;
+        for (int a = (int)System.MathF.Floor((p.X - r) / T); a <= (int)System.MathF.Ceiling((p.X + r) / T) - 1; a++)
+            for (int b = (int)System.MathF.Floor((p.Y - r) / T); b <= (int)System.MathF.Ceiling((p.Y + r) / T) - 1; b++)
+                if (c.GetCellState(a, b) == TileState.Solid) return false;
+        return true;
+    }
+
+    [Fact]
+    public void SecondSpawn_IsExplicit_Clear_AndStandsOnFloor()
+    {
+        var stage = Stages.Get("depths");
+        Assert.NotNull(stage.SecondSpawn);
+        var g = new Simulation(new GameConfig { SpawnSecondPlayer = true }, stage);
+        var p2 = g.SecondaryPlayers[0].Player;
+        Assert.Equal(stage.SecondSpawn.Value, p2.Body.Position);
+        Assert.NotEqual(stage.PlayerSpawn, p2.Body.Position);
+        Assert.True(BodyClear(g.Chunks, p2.Body.Position), "P2 spawn overlaps rock");
+        Assert.Equal(TileState.Solid, g.Chunks.GetCellState(
+            (int)System.MathF.Floor(p2.Body.Position.X / Chunk.TileSize),
+            (int)System.MathF.Floor((p2.Body.Position.Y + 16f) / Chunk.TileSize)));
+    }
+
+    [Fact]
+    public void EntryPoints_AreClear_InEveryRoom()
+    {
+        var map = Stages.DepthsMapCached;
+        var chunks = DepthsLayout.MakeChunks(map);
+        foreach (var r in map.Rooms)
+        {
+            Assert.True(BodyClear(chunks, r.Entry), $"room {r.Index} Entry blocked");
+            Assert.True(BodyClear(chunks, r.Entry2), $"room {r.Index} Entry2 blocked");
+        }
+    }
+
+    [Fact]
+    public void Terrain_IsFreshPerCall_AndMapBuiltOnce()
+    {
+        var stage = Stages.Get("depths");
+        var a = stage.Terrain();
+        var b = stage.Terrain();
+        Assert.NotSame(a, b);
+        int x = (int)(stage.PlayerSpawn.X / Chunk.TileSize), y = (int)(stage.PlayerSpawn.Y / Chunk.TileSize) + 2;
+        Assert.Equal(TileState.Solid, a.GetCellState(x, y));
+        a.BreakCell(x, y);
+        Assert.Equal(TileState.Solid, b.GetCellState(x, y));   // b unaffected by a's edit
+        Assert.Equal(TileState.Solid, stage.Terrain().GetCellState(x, y));
+        Assert.Same(Stages.DepthsMapCached, Stages.DepthsMapCached);
+    }
+
+    [Fact]
+    public void CoopRespawn_OfPartner_IsNeverInRock_InAnyRoom()
+    {
+        var g = NewSim();
+        var p2 = g.SecondaryPlayers.Count > 0 ? g.SecondaryPlayers[0].Player : g.AddSecondaryPlayer(Stages.Get("depths").SecondSpawn.Value).Player;
+        foreach (var r in Stages.DepthsMapCached.Rooms)
+        {
+            g.RespawnPoint = r.Entry;
+            p2.Health = 0f;
+            g.Step(default);
+            Assert.True(BodyClear(g.Chunks, p2.Body.Position), $"room {r.Index}: partner respawned in rock at {p2.Body.Position}");
+        }
+    }
 }

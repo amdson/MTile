@@ -106,6 +106,8 @@ public class StalkerEnemy : Entity
     {
         if (IsDead) return;
         _stateTime += dt;
+        // Nearest living player (co-op); the handed-in primary when the spawner has no opinion.
+        if (spawner != null) player = spawner.NearestPlayer(Body.Position, player);
 
         var toPlayer = player.Body.Position - Body.Position;
         if (MathF.Abs(toPlayer.X) > 1f) _facing = MathF.Sign(toPlayer.X) >= 0 ? 1 : -1;

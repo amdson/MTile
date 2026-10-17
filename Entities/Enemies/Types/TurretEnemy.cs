@@ -72,6 +72,8 @@ public class TurretEnemy : Entity
     {
         if (IsDead) return;
         _stateTime += dt;
+        // Nearest living player (co-op); the handed-in primary when the spawner has no opinion.
+        if (spawner != null) player = spawner.NearestPlayer(Body.Position, player);
 
         // Track the player except while locked into a charge. Skip when too close
         // to avoid jitter as toPlayer goes through zero.

@@ -61,6 +61,33 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     // Where dead players come back. Starts at the stage's PlayerSpawn; a stage may move
     // it (a checkpoint). Snapshotted, so a stage ticker that moves it rolls back cleanly.
     private const float CoopRespawnOffsetX = 24f;
+
+    // Where a dead co-op partner comes back: beside the checkpoint, at the first of a few
+    // fixed offsets whose body box is free of solid tiles (a cave checkpoint can sit
+    // against a wall), else on the checkpoint itself. Pure function of terrain + RespawnPoint.
+    private Vector2 CoopRespawnSpot()
+    {
+        // A checkpoint that is itself not clear (a hand-placed test fixture) can't be judged: keep the plain offset.
+        if (!BodyBoxClear(_playerSpawn, 16f)) return _playerSpawn + new Vector2(CoopRespawnOffsetX, 0f);
+        ReadOnlySpan<float> offsets = stackalloc float[] { CoopRespawnOffsetX, 2 * CoopRespawnOffsetX, 3 * CoopRespawnOffsetX, -CoopRespawnOffsetX, 0f };
+        foreach (float dx in offsets)
+        {
+            var p = _playerSpawn + new Vector2(dx, 0f);
+            if (BodyBoxClear(p, 16f)) return p;
+        }
+        return _playerSpawn;
+    }
+
+    private bool BodyBoxClear(Vector2 c, float r)
+    {
+        int T = Chunk.TileSize;
+        int a0 = (int)MathF.Floor((c.X - r) / T), a1 = (int)MathF.Ceiling((c.X + r) / T) - 1;
+        int b0 = (int)MathF.Floor((c.Y - r) / T), b1 = (int)MathF.Ceiling((c.Y + r) / T) - 1;
+        for (int a = a0; a <= a1; a++)
+            for (int b = b0; b <= b1; b++)
+                if (_chunks.GetCellState(a, b) == TileState.Solid) return false;
+        return true;
+    }
     public Vector2 RespawnPoint { get => _playerSpawn; set => _playerSpawn = value; }
 
     // Secondary PlayerCharacters: full hittables whose Controllers are never fed
@@ -150,6 +177,22 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         => _world.IsAlive(id) && _world.Has<EntityRef>(id) ? _world.Get<EntityRef>(id).Obj : null;
     // IEntitySpawner — enemy target selection (Plans/FIGHTER_DESIGN_PLAN.md §5.3).
     public ITargetSource Targets => this;
+
+    // IEntitySpawner — nearest living player; fixed order (primary, then secondaries), so
+    // a replay picks the same one. Stateless: nothing to snapshot.
+    public PlayerCharacter NearestPlayer(Vector2 from, PlayerCharacter fallback)
+    {
+        PlayerCharacter best = null;
+        float bestD2 = float.MaxValue;
+        if (_player.IsAlive) { best = _player; bestD2 = Vector2.DistanceSquared(_player.Body.Position, from); }
+        foreach (var (p, _) in _secondaryPlayers)
+        {
+            if (!p.IsAlive) continue;
+            float d2 = Vector2.DistanceSquared(p.Body.Position, from);
+            if (d2 < bestD2) { bestD2 = d2; best = p; }
+        }
+        return best ?? fallback;
+    }
 
     // A sticky target is kept unless a challenger is closer than this fraction of its
     // distance (i.e. at least 25% closer). Compared squared: 0.75² = 0.5625.
@@ -359,7 +402,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         if (config.SpawnSecondPlayer)
         {
             var offset = new Vector2(config.SecondPlayerOffsetX, config.SecondPlayerOffsetY);
-            AddSecondaryPlayer(_playerSpawn + offset);
+            AddSecondaryPlayer(stage.SecondSpawn ?? (_playerSpawn + offset));
         }
 
         // Hand control to the stage: it populates platforms, tickers, and entities.
@@ -527,7 +570,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             foreach (var (p, _) in _secondaryPlayers)
                 if (!p.IsAlive)
                 {
-                    p.Respawn(_playerSpawn + new Vector2(CoopRespawnOffsetX, 0f));
+                    p.Respawn(CoopRespawnSpot());
                     _playerDeaths++;
                     OnPlayerRespawn?.Invoke(p.Body.Position);
                 }

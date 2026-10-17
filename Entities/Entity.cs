@@ -286,6 +286,11 @@ public interface IEntitySpawner
     // Default null: an enemy handed a spawner without one targets the player it was
     // given, which is what every enemy did before teams existed.
     ITargetSource Targets => null;
+    // The nearest living player to `from` (primary first, then secondaries in add order;
+    // ties go to the earlier). Returns `fallback` when the spawner has no better answer —
+    // stubs, or nobody alive. For the older enemies (Stalker, Turret) that are handed only
+    // the primary player and never went through ITargetSource.
+    PlayerCharacter NearestPlayer(Vector2 from, PlayerCharacter fallback) => fallback;
     // Every live entity in spawn order (deterministic), for entities that count their
     // surroundings (EnemySpawner). Read-only; default empty for stubs.
     IEnumerable<Entity> LiveEntities => System.Array.Empty<Entity>();

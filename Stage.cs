@@ -19,6 +19,9 @@ public sealed class Stage
     // arena as ascii). When set, TerrainConfig is ignored.
     public Func<ChunkMap>     Terrain;
     public Vector2            PlayerSpawn;
+    // Where a second player (netplay / SpawnSecondPlayer) starts. Null = PlayerSpawn plus
+    // the config's SecondPlayerOffset, which is a blind offset a cave can put in rock.
+    public Vector2?           SecondSpawn;
     public Action<Simulation> Populate;
     // Co-op stage: players can't hurt each other, and every player (not just the
     // primary) respawns at Simulation.RespawnPoint. See Simulation.Coop.
