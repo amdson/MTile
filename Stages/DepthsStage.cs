@@ -209,16 +209,20 @@ public static partial class Stages
          : EntityKinds.FighterSlot(Array.FindIndex(DepthsFighters, n => string.Equals(n, fighter, StringComparison.OrdinalIgnoreCase)));
 
     public static DepthsShape[] DepthsShapes() => DepthsPlan.Select(r => r.Shape).ToArray();
-    private static DepthsMap BuildDepths() => DepthsLayout.Build(DepthsSeed, DepthsShapes());
+    // Built once per process: the rooms/spots/grid are read-only after Build, so every
+    // Simulation shares them. Only the ChunkMap (mutated by play) is made fresh per call.
+    private static readonly Lazy<DepthsMap> _depthsMap = new(() => DepthsLayout.Build(DepthsSeed, DepthsShapes()));
+    internal static DepthsMap DepthsMapCached => _depthsMap.Value;
 
     private static void RegisterDepths()
     {
-        var spawn = BuildDepths().PlayerSpawn;
+        var map = DepthsMapCached;
         Register(new Stage {
             Name        = "depths",
             Coop        = true,
-            Terrain     = () => BuildDepths().Chunks,   // fresh map per call (F5 reloads)
-            PlayerSpawn = spawn,
+            Terrain     = () => DepthsLayout.MakeChunks(map),   // fresh map per call (F5 reloads)
+            PlayerSpawn = map.PlayerSpawn,
+            SecondSpawn = map.SecondSpawn,
             Populate    = PopulateDepths,
         });
     }
@@ -245,7 +249,7 @@ public static partial class Stages
             g.Blueprints[spec.Kind] = r.Blueprint;
         }
 
-        var rooms = BuildDepths().Rooms;
+        var rooms = DepthsMapCached.Rooms;
         var v     = g.StageVars;
         int delay = SimFrames.FromSeconds(1.5f, Simulation.FixedDt);
         v[0] = 0; v[1] = 0; v[2] = 0; v[3] = 0; v[4] = 0;

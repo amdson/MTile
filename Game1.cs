@@ -58,6 +58,7 @@ public class Game1 : Game
     private readonly CoastSample[] _coastScratch = new CoastSample[BallisticPredictor.MaxHorizon];
     private readonly ClearanceRow[] _rowScratch  = new ClearanceRow[ClearanceConstraintBuilder.MaxEvents];
     private HudRenderer _hud;
+    private readonly DepthsHud _depthsHud = new();
     private PrimitiveBatch _prims;
     private DensityField _density;
     private SkeletonMetaballRenderer _metaballs;
@@ -1455,6 +1456,8 @@ public class Game1 : Game
 
         long tHud = _prof.Begin();
         _hud.Draw(_sim, _animator);
+        if (string.Equals(_activeStage, "depths", StringComparison.OrdinalIgnoreCase))
+            _depthsHud.Draw(_spriteBatch, _debugFont, GraphicsDevice.Viewport, _sim);
         if (_config.DrawFighterNames)
             FightHud.DrawNameLabels(_spriteBatch, _debugFont, camTransform, _sim.Entities);
         if (_fight != null)
