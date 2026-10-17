@@ -10,7 +10,7 @@ namespace MTile.Tests.Sim;
 // LobbedAreaProjectile that follows the pulling point; release hands the point off at
 // the cursor's swipe velocity and the ball converges to it and detaches. These pin the
 // three feel rules — a still release drops, a swipe throws at swipe speed, and the held
-// clod rests near the hand however far the cursor is — plus the entity bookkeeping.
+// clod stays within GrabHoldReach however far the cursor is — plus the entity bookkeeping.
 public class BlockThrowTests(ITestOutputHelper output)
 {
     private const float Dt = 1f / 60f;
@@ -147,20 +147,20 @@ public class BlockThrowTests(ITestOutputHelper output)
         });
     }
 
-    // The held clod rests near the hand — GrabHandDistance + GrabHandLean at most —
-    // even with the cursor parked ~48 px away, and it never sinks below the feet.
+    // The held clod follows the cursor but never strays past GrabHoldReach from the
+    // body, even with the cursor parked well beyond it.
     [Fact]
-    public void HeldClod_RestsNearTheHand()
+    public void HeldClod_StaysWithinHoldReach()
     {
         WithPeel(() =>
         {
-            var far    = Start + new Vector2(48f, -10f);
+            var far    = Start + new Vector2(110f, -10f);
             var script = GrabThenHold(far, 40)
                 .Forever(new PlayerInput { MouseWorldPosition = far });
             var t = Run(script, 80, output);
 
             var cfg = MovementConfig.Current;
-            float limit = cfg.GrabHandDistance + cfg.GrabHandLean + 6f;   // + tracker lag
+            float limit = cfg.GrabHoldReach + 6f;   // + tracker lag
             Assert.True(t.SawTracking);
             Assert.True(t.LastHeldFrame > 40, "the clod should be held through the hold window");
             Assert.True(t.MaxHeldDist <= limit, $"held clod strayed to {t.MaxHeldDist:F1} px (limit {limit:F1})");

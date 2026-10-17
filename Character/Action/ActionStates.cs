@@ -3225,7 +3225,7 @@ public class LobbedAreaAction : ActionState
 // Let go with the mouse still and the point stops, the ball is already on it, it drops.
 // Swipe and let go and the point flies at the swipe velocity — an EMA of the raw
 // cursor's world velocity, measured on the unclamped cursor even though the held ball
-// sits near the hand — and the ball converges to that velocity and detaches. Same
+// is clamped to GrabHoldReach — and the ball converges to that velocity and detaches. Same
 // rule whether the clod was in hand or still in the ground when the button came up.
 //
 // Keep holding and the clod dissipates over GrabDissipateSeconds; at zero the ball is
@@ -3234,7 +3234,10 @@ public class LobbedAreaAction : ActionState
 // Priority 46/46, above Beam/EnergyBall's 40/45 — both also live on Shift+LMB, and
 // this has to win the press frame AND still be holding the button when they'd
 // otherwise fire on release. The cursor-in-solid gate is what keeps the three from
-// fighting: on terrain you grab, off terrain you beam. Nothing preempts the carry
+// fighting: on terrain you grab, off terrain you beam. The split with GrabAction is
+// one shared predicate, PressIsBlockGrab: terrain under the cursor wins even with a
+// body nearby; only a cursor directly on a body hands the press to the entity grab.
+// Nothing preempts the carry
 // (46 Active), which is intentional — the orb is a commitment. A preempting exit
 // (GrabAction 48 / GuardRetaliate 55) hands the point off like a release.
 public class BlockGrabAction : ActionState
@@ -3249,7 +3252,7 @@ public class BlockGrabAction : ActionState
     // How long the press waits for that drag / the first tethered cell before giving up.
     private const float GrabWindow      = 0.60f;
     private const float RecoverySeconds = 0.20f;
-    // The ball body's radius — the held rest position keeps that much above the feet.
+    // The ball body's radius — the held target keeps that much clear of terrain.
     private const float BallRadius      = 5f;
 
     public override int ActivePriority  => 46;
@@ -3264,13 +3267,46 @@ public class BlockGrabAction : ActionState
         if (!ctx.Input.Shift || !ctx.Input.LeftClick) return false;
         if (ctx.Controller == null || ctx.Controller.GetPrevious(1).LeftClick) return false;  // press-edge only
         if (ab.Condition.RecoveryActive) return false;
-        // The grab is an entity; without a spawner (some headless harnesses) it can't exist.
-        if (ctx.Spawner == null) return false;
         // From-set: neutral/recovery, or over a live Guard (Shift is already down).
         if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
-        // Terrain-only gesture: the cursor must be ON a block, and within arm's reach.
+        // Terrain-only gesture: the press must be aimed at grabbable terrain.
+        return PressIsBlockGrab(ctx);
+    }
+
+    // THE Shift+LMB arbitration rule, shared verbatim by GrabAction so the two actions
+    // can never disagree about who owns a press. The press is a BLOCK grab when the
+    // cursor is on a solid cell within GrabReach of the body — regardless of how many
+    // grabbable bodies happen to be standing nearby — unless the cursor is directly ON
+    // an opposing body's hurtbox (an enemy standing in front of the wall the cursor is
+    // on). Everything else (open air, terrain out of reach, a body under the cursor)
+    // belongs to GrabAction. Pointing at the block is the stronger statement of intent
+    // than proximity; pointing at the body is stronger still.
+    internal static bool PressIsBlockGrab(EnvironmentContext ctx)
+    {
+        // The grab is an entity; without a spawner (some headless harnesses) it can't exist.
+        if (ctx.Spawner == null) return false;
         if (!BlockEruptionHelpers.IsCursorInSolid(ctx)) return false;
-        return (ctx.Input.MouseWorldPosition - ctx.Body.Position).LengthSquared() <= GrabReach * GrabReach;
+        if ((ctx.Input.MouseWorldPosition - ctx.Body.Position).LengthSquared() > GrabReach * GrabReach)
+            return false;
+        return !CursorOnBody(ctx);
+    }
+
+    // A few px of slop around the cursor point, so a cursor resting on the edge of a
+    // body's hurtbox still reads as "on" it. Px, tile-size independent.
+    private const float CursorBodySlop = 3f;
+
+    // Is the cursor directly over a body this player could grab? Same filter as
+    // GrabAction.PickVictim (own faction and self excluded), so "on a body" here means
+    // exactly "a body the entity grab could latch".
+    private static bool CursorOnBody(EnvironmentContext ctx)
+    {
+        if (ctx.Hurtboxes == null) return false;
+        var c = ctx.Input.MouseWorldPosition;
+        var probe = new BoundingBox(c.X - CursorBodySlop, c.Y - CursorBodySlop,
+                                    c.X + CursorBodySlop, c.Y + CursorBodySlop);
+        foreach (var hb in ctx.Hurtboxes.Overlapping(probe, exclude: ctx.Faction))
+            if (hb.Target != ctx.SelfId) return true;
+        return false;
     }
 
     // The point this activation spawned, or null once it has died (snapped, bled out,
@@ -3371,12 +3407,17 @@ public class BlockGrabAction : ActionState
         if (ball != null) vars.BallPos = ball.Body.Position;
     }
 
-    // Where the held clod rests (plan §5 "Held rest position"): orbiting the body at
-    // GrabHandDistance in the cursor's direction, leaning outward by at most
-    // GrabHandLean as the cursor moves away. A soft constraint on where the ball SITS
-    // only — the throw is the cursor's velocity, so a tight hold still throws hard.
-    // Kept above the feet so the tracker isn't grinding a floor-pinned body into the
-    // ground when the cursor points down.
+    // Where the held clod goes: the cursor itself, in both axes, out to GrabHoldReach
+    // from the body (tanh-saturated, so it is ~1:1 near the body and eases onto the
+    // reach instead of stopping dead at it). The throw is still the cursor's velocity,
+    // so a tight hold still throws hard.
+    //
+    // The target is then pulled back along the body→cursor line to the last point the
+    // ball could sit without overlapping a solid cell. The ball is a tile-colliding body
+    // and would slide along terrain anyway; this keeps the tracker from GRINDING it into
+    // the wall the cursor is behind — which is what would otherwise leave a big contact
+    // impulse on the ball at the moment of release. It is a pure geometry query on the
+    // current terrain, so it adds no state.
     private static Vector2 RestPosition(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 cursor)
     {
         var cfg  = MovementConfig.Current;
@@ -3384,14 +3425,39 @@ public class BlockGrabAction : ActionState
         var d    = cursor - body;
         float r  = d.Length();
         var dir  = r > 1e-3f ? d / r : new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
-        float hand = cfg.GrabHandDistance;
-        float lean = MathF.Max(1e-3f, cfg.GrabHandLean);
-        float rho  = hand + lean * MathF.Tanh(MathF.Max(0f, r - hand) / lean);
-        var target = body + dir * rho;
-        float floorY = body.Y + PlayerCharacter.Radius - BallRadius;
-        if (target.Y > floorY) target.Y = floorY;
-        return target;
+        float reach = MathF.Max(1e-3f, cfg.GrabHoldReach);
+        float rho   = reach * MathF.Tanh(r / reach);
+        rho = ClearDistance(ctx.Chunks, body, dir, rho);
+        return body + dir * rho;
     }
+
+    // March step for the line-of-sight clamp, px. Fine enough that a clamped target
+    // never lands more than this short of the surface.
+    private const float HoldClearStep = 2f;
+
+    // Furthest distance t ≤ maxDist along dir from `from` at which a ball of BallRadius
+    // (probed at its leading point and both flanks) overlaps no solid cell. Fixed-step
+    // march from the body outward — deterministic, no allocation.
+    private static float ClearDistance(ChunkMap chunks, Vector2 from, Vector2 dir, float maxDist)
+    {
+        if (chunks == null) return maxDist;
+        var side = new Vector2(-dir.Y, dir.X) * (BallRadius * 0.7f);
+        var lead = dir * BallRadius;
+        float clear = 0f;
+        for (float t = 0f; ; t += HoldClearStep)
+        {
+            float tt = MathF.Min(t, maxDist);
+            var c = from + dir * tt;
+            if (Solid(chunks, c + lead) || Solid(chunks, c + side) || Solid(chunks, c - side))
+                return clear;
+            clear = tt;
+            if (tt >= maxDist) return maxDist;
+        }
+    }
+
+    private static bool Solid(ChunkMap chunks, Vector2 p)
+        => chunks.GetCellState((int)MathF.Floor(p.X / Chunk.TileSize),
+                               (int)MathF.Floor(p.Y / Chunk.TileSize)) == TileState.Solid;
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
@@ -3489,10 +3555,11 @@ public class GrabAction : ActionState
             : HoldShare * (vars.TimeInState / HoldEndSeconds);
     private const float ThrowAccel  = 12000f;
 
-    // 48/48 — above BlockGrabAction (46/46), which shares the Shift+LMB press. The two
-    // deliberately collide: grabbing a body is the more urgent read, so it takes the
-    // press whenever a body is there to take, and falls through to the block grab when
-    // there isn't. Still below GuardRetaliate(55).
+    // 48/48 — above BlockGrabAction (46/46), which shares the Shift+LMB press. They
+    // never actually compete on priority: both gate on BlockGrabAction.PressIsBlockGrab
+    // (this one negated), so exactly one of them is a candidate on any press. Cursor on
+    // reachable terrain → block grab; anywhere else, or directly on a body → this.
+    // Still below GuardRetaliate(55).
     public override int ActivePriority  => 48;
     public override int PassivePriority => 48;
 
@@ -3505,33 +3572,13 @@ public class GrabAction : ActionState
         if (ab.Condition.RecoveryActive) return false;
         // From-set: neutral/recovery, or over a live Guard (Shift is already down).
         if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
-        // Yield the press to BlockGrabAction ONLY when it could actually use it: the
-        // cursor is on a block inside its reach AND there's nobody to grab. Aim at a
-        // body and the grab wins on priority; aim at open air and the grab still fires
-        // and WHIFFS — which preserves the punish window (the unconditional recovery in
-        // Exit is the whole punish, see the header). Terrain aim is the only thing that
-        // hands the gesture over.
-        if (!AimedAtGrabbableTerrain(ctx)) return true;
-        return HasVictimInRange(ctx, ab);
+        // Yield the press to BlockGrabAction exactly when its own rule claims it: the
+        // cursor on a block inside its reach, and not directly on a body. A body merely
+        // NEARBY no longer steals a press aimed at terrain. Aim at open air and the grab
+        // still fires and WHIFFS — which preserves the punish window (the unconditional
+        // recovery in Exit is the whole punish, see the header).
+        return !BlockGrabAction.PressIsBlockGrab(ctx);
     }
-
-    // Cursor over a solid cell within BlockGrabAction's own reach — i.e. that action's
-    // precondition, minus the press-edge. Shares BlockGrabAction.GrabReach so "aimed at
-    // terrain" means the same thing on both sides of the handoff.
-    private static bool AimedAtGrabbableTerrain(EnvironmentContext ctx)
-    {
-        if (!BlockEruptionHelpers.IsCursorInSolid(ctx)) return false;
-        float reach = BlockGrabAction.GrabReach;
-        return (ctx.Input.MouseWorldPosition - ctx.Body.Position).LengthSquared() <= reach * reach;
-    }
-
-    // Any non-self hurtbox inside the region the hold field would cover. Same geometry
-    // as the hold field in Update (focus in front along the aim, Range half-size), so
-    // the gate and the field can't disagree about who is grabbable. Hurtboxes for the
-    // frame are already published by the time the action FSM runs (Simulation.Step).
-    private static bool HasVictimInRange(EnvironmentContext ctx, PlayerAbilityState ab)
-        => !PickVictim(ctx, RegionAround(ctx.Body.Position + AimDir(ctx, ab) * FocusDist),
-                       EntityId.None).IsNone;
 
     // The field's AABB, from its focus. One helper so the latch query and the published
     // field are the same box by construction.
