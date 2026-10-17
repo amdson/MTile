@@ -5,6 +5,10 @@
 //   • non-trickle signaling — ICE gathering completes BEFORE the blob is produced, so every
 //     candidate is embedded in the SDP and the blob is the whole handshake;
 //   • blob format = base64(UTF8(JSON {"type":"offer"|"answer","sdp":"..."})), single line.
+//     The browser host's offer also carries "mtile":{"stage":..,"build":..} (the lobby's
+//     stage choice + build id) so the joiner knows the level before building Game1; it
+//     rides inside the blob, so the Firestore room doc schema is unchanged. Decoders
+//     ignore unknown fields.
 //
 // Deliberately free of DOM coupling: the four entry points are plain async functions, so a
 // future signaling server can drive them programmatically instead of a copy/paste lobby.
@@ -42,8 +46,10 @@
         return bytes;
     }
 
-    function encodeBlob(desc) {
-        var json = JSON.stringify({ type: desc.type, sdp: desc.sdp });
+    function encodeBlob(desc, meta) {
+        var obj = { type: desc.type, sdp: desc.sdp };
+        if (meta) obj.mtile = meta;
+        var json = JSON.stringify(obj);
         return bytesToBase64(new TextEncoder().encode(json));
     }
 
@@ -53,7 +59,7 @@
         var clean = String(blob || '').replace(/\s+/g, '');
         if (clean.length === 0) throw new Error('empty signaling blob');
         var json = JSON.parse(new TextDecoder().decode(base64ToBytes(clean)));
-        return { type: String(json.type || '').toLowerCase(), sdp: json.sdp };
+        return { type: String(json.type || '').toLowerCase(), sdp: json.sdp, mtile: json.mtile || null };
     }
 
     // ── .NET callbacks ───────────────────────────────────────────────────────────
@@ -153,19 +159,32 @@
 
         // Host: build the channel first (it must exist before createOffer so the SDP
         // carries the SCTP m-line), then gather and return the offer blob.
-        createOffer: async function (stunUrls) {
+        // stage / build (optional) ride the blob as "mtile" metadata — see readOfferMeta.
+        createOffer: async function (stunUrls, stage, build) {
             pc = makePeerConnection(stunUrls);
             bindChannel(pc.createDataChannel('mtile', { ordered: false, maxRetransmits: 0 }));
 
             var offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             await waitForIce(pc, ICE_TIMEOUT_MS);
-            return encodeBlob(pc.localDescription);
+            var meta = (stage || build) ? { stage: String(stage || ''), build: String(build || '') } : null;
+            return encodeBlob(pc.localDescription, meta);
+        },
+
+        // Joiner: peek the host's lobby settings without touching any connection state.
+        // Returns "stage\nbuild", or "" for a blob that carries none (an older build,
+        // which by definition is a different version). Throws on an undecodable blob.
+        readOfferMeta: function (offerBlob) {
+            var d = decodeBlob(offerBlob);
+            if (d.type !== 'offer') throw new Error('that blob is an ' + (d.type || 'unknown') + ', not an offer');
+            if (!d.mtile) return '';
+            return String(d.mtile.stage || '') + '\n' + String(d.mtile.build || '');
         },
 
         // Joiner: apply the host's offer and return the answer blob to paste back.
         acceptOfferCreateAnswer: async function (offerBlob, stunUrls) {
-            var offer = decodeBlob(offerBlob);
+            var d = decodeBlob(offerBlob);
+            var offer = { type: d.type, sdp: d.sdp };
             pc = makePeerConnection(stunUrls);
             pc.ondatachannel = function (ev) { bindChannel(ev.channel); };
 
@@ -179,7 +198,8 @@
         // Host: finalize with the joiner's answer.
         acceptAnswer: async function (answerBlob) {
             if (!pc) throw new Error('no peer connection — createOffer first');
-            await pc.setRemoteDescription(decodeBlob(answerBlob));
+            var d = decodeBlob(answerBlob);
+            await pc.setRemoteDescription({ type: d.type, sdp: d.sdp });
         },
 
         // Accepts a Uint8Array (the normal .NET byte[] marshaling), a plain number array,

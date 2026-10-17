@@ -35,6 +35,13 @@ it over the existing WebRTC rollback session. First target: the `depths` co-op g
 
 Also in this pass: a mid-match **disconnect overlay** (INTERNET_READY_PLAN Phase 4).
 
+**Status (2026-10-17, branch web-coop-lobby):** steps 1-3 and the disconnect overlay are
+in. `Game1.StageOverride`; `LobbyStages.cs` (curated list, guarded by
+`LobbyStageCatalogTests`); `LobbyHello.cs` (0xFE-tagged hello/ack, build id = MVID of
+the game assembly); the offer blob carries `mtile:{stage,build}` so the Firestore schema
+and rules are unchanged. `smoke/pvp_move.py` covers stage pick, version refusal and the
+disconnect overlay.
+
 ## Pre-release bugs
 
 - **Slow fall beside a stalactite.** Rarely, a player holding right while falling below or

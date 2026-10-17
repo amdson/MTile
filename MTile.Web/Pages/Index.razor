@@ -32,6 +32,25 @@
     </div>
 }
 
+@if (_phase == Phase.Playing && _bootDone && _peerLost && !_overlayDismissed)
+{
+    <div class="mtile-overlay">
+        <div class="mtile-panel mtile-overlay-panel">
+            <h2 class="mtile-bad">The other player disconnected</h2>
+            <p class="mtile-hint">Your @PeerNoun's connection closed, so the match can't continue.
+               Reload to return to the lobby and start a new one.</p>
+            <div class="mtile-row">
+                <a class="mtile-btn" href="">Back to lobby</a>
+                <button class="mtile-btn mtile-btn-quiet" @onclick="DismissOverlay">Dismiss</button>
+            </div>
+        </div>
+    </div>
+}
+else if (_phase == Phase.Playing && _bootDone && _peerInterrupted && !_peerLost)
+{
+    <div class="mtile-banner">Connection to the other player interrupted &mdash; trying to recover&hellip;</div>
+}
+
 @if (_phase != Phase.Playing)
 {
     <div class="mtile-lobby">
@@ -41,8 +60,31 @@
             @switch (_phase)
             {
                 case Phase.Menu:
-                    <p class="mtile-hint">Play solo against a bot, or host / join a two-player match.
-                       Matches connect peer-to-peer.</p>
+                    <h2>Stage</h2>
+                    <div class="mtile-stages">
+                        @foreach (var st in LobbyStages.All)
+                        {
+                            var pick = st;
+                            <button class="mtile-stage @(pick.Name == _stage ? "mtile-stage-on" : "")"
+                                    aria-pressed="@(pick.Name == _stage ? "true" : "false")"
+                                    @onclick="() => _stage = pick.Name">
+                                <span class="mtile-stage-name">@pick.Label</span>
+                                <span class="mtile-tag @(pick.Coop ? "mtile-tag-coop" : "")">@(pick.Coop ? "co-op" : "versus")</span>
+                                <span class="mtile-stage-blurb">@pick.Blurb</span>
+                            </button>
+                        }
+                    </div>
+                    <p class="mtile-hint">
+                        @if (IsCoop)
+                        {
+                            <text>Play it solo, or host / join to team up with a partner. </text>
+                        }
+                        else
+                        {
+                            <text>Play it solo, or host / join a two-player match. </text>
+                        }
+                        The host picks the stage; matches connect peer-to-peer.
+                    </p>
                     <div class="mtile-row">
                         <button class="mtile-btn" @onclick="StartSolo">Solo</button>
                         @if (_signalReady)
@@ -67,9 +109,10 @@
                     break;
 
                 case Phase.HostShowCode:
+                    @StageLine
                     <h2>Room code</h2>
                     <div class="mtile-code">@_roomCode</div>
-                    <p class="mtile-hint">Send the code (or the invite link) to your opponent.
+                    <p class="mtile-hint">Send the code (or the invite link) to your @PeerNoun.
                        Waiting for them to join&hellip;</p>
                     <div class="mtile-row">
                         <button class="mtile-btn" @onclick="() => Copy(JoinUrl)">Copy invite link</button>
@@ -90,7 +133,8 @@
                     break;
 
                 case Phase.HostShowOffer:
-                    <h2>1. Send this offer to your opponent</h2>
+                    @StageLine
+                    <h2>1. Send this offer to your @PeerNoun</h2>
                     <textarea class="mtile-blob" readonly>@_offerBlob</textarea>
                     <div class="mtile-row">
                         <button class="mtile-btn" @onclick="() => Copy(_offerBlob)">Copy offer</button>
@@ -116,6 +160,7 @@
                     break;
 
                 case Phase.JoinShowAnswer:
+                    @StageLine
                     <h2>2. Send this answer back to the host</h2>
                     <textarea class="mtile-blob" readonly>@_answerBlob</textarea>
                     <div class="mtile-row">
@@ -125,11 +170,17 @@
                     break;
 
                 case Phase.Connecting:
+                    @if (_isHost || _stageKnown) { @StageLine }
                     <p class="mtile-hint">Connecting&hellip;</p>
                     break;
 
+                case Phase.Handshaking:
+                    @StageLine
+                    <p class="mtile-hint">Connected &mdash; agreeing on match settings&hellip;</p>
+                    break;
+
                 case Phase.Failed:
-                    <h2 class="mtile-bad">Connection failed</h2>
+                    <h2 class="mtile-bad">@_failTitle</h2>
                     <pre class="mtile-error">@_error</pre>
                     <div class="mtile-row">
                         <a class="mtile-btn" href="">Reload</a>
@@ -143,6 +194,17 @@
             }
         </div>
     </div>
+}
+
+@code {
+    // Read-only "which level" line: what the host picked, as the joiner sees it.
+    private RenderFragment StageLine => __builder =>
+    {
+        <p class="mtile-stageline">Stage: <strong>@StageLabel</strong>
+            <span class="mtile-tag @(IsCoop ? "mtile-tag-coop" : "")">@(IsCoop ? "co-op" : "versus")</span>
+            @if (!_isHost) { <span class="mtile-hint"> &middot; chosen by the host</span> }
+        </p>
+    };
 }
 
 <style>
@@ -181,7 +243,32 @@
         padding: 0.5rem; font-family: ui-monospace, monospace; font-size: 1.2rem;
         letter-spacing: 0.2em;
     }
-    .mtile-bad { color: #f77; }
+    .mtile-bad, .mtile-panel h2.mtile-bad { color: #f77; }
+    .mtile-stages { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.5rem; }
+    .mtile-stage {
+        text-align: left; background: #1b1b1b; color: #eee; border: 1px solid #333;
+        border-radius: 4px; padding: 0.55rem 0.7rem; font: inherit; cursor: pointer;
+    }
+    .mtile-stage:hover { border-color: #666; }
+    .mtile-stage-on { border-color: #9cf; background: #1d2630; }
+    .mtile-stage-name { font-weight: 600; margin-right: 0.4rem; }
+    .mtile-stage-blurb { display: block; color: #999; font-size: 0.8rem; margin-top: 0.25rem; }
+    .mtile-tag {
+        font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+        border: 1px solid #a86; color: #fc9; border-radius: 3px; padding: 0 0.3rem;
+    }
+    .mtile-tag-coop { border-color: #6a8; color: #9fc; }
+    .mtile-stageline { margin: 0.4rem 0; }
+    .mtile-overlay {
+        position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, 0.72); color: #eee;
+        font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center;
+    }
+    .mtile-overlay-panel { background: #161616; border: 1px solid #333; border-radius: 6px; padding: 1.2rem 1.4rem; }
+    .mtile-banner {
+        position: fixed; top: 0.6rem; left: 50%; transform: translateX(-50%); z-index: 20;
+        background: rgba(40, 30, 10, 0.9); color: #fc9; border: 1px solid #a86; border-radius: 4px;
+        padding: 0.35rem 0.8rem; font: 0.85rem system-ui, sans-serif;
+    }
     .mtile-error {
         white-space: pre-wrap; word-break: break-word; color: #f99;
         background: #1b1b1b; border: 1px solid #333; border-radius: 4px;

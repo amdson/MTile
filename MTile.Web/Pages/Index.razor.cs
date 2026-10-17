@@ -5,7 +5,7 @@ using Microsoft.Xna.Framework;
 
 namespace MTile.Web.Pages;
 
-// Host page + lobby for browser-vs-browser PvP.
+// Host page + lobby for browser two-player play (versus and co-op).
 //
 // The lobby is a small state machine over wwwroot/mtileRtc.js (the browser twin of
 // MTile.Rtc/RtcConnection.cs). It hands Game1 a NetSetup — the transport-agnostic seam the
@@ -19,7 +19,14 @@ namespace MTile.Web.Pages;
 //   Manual copy/paste fallback (no server; also what the smoke harness drives):
 //     Host : createOffer -> show blob -> paste peer's answer -> acceptAnswer -> channel open
 //     Join : paste offer -> acceptOfferCreateAnswer -> show blob -> wait -> channel open
-//   Solo : no NetSetup, Game1's parameterless ctor (bot opponent)
+//   Solo : no NetSetup, Game1's parameterless ctor
+//
+// Stage choice: the host (or solo player) picks from LobbyStages; Game1.StageOverride
+// carries it. The host's offer blob embeds {stage, build} (mtileRtc.createOffer), so a
+// joiner sees the level — and a version mismatch — before answering. Once the data channel
+// opens, both sides run a resend-until-acked LobbyHello {stage, buildId} handshake
+// (Phase.Handshaking) and only then StartTicking; hello/ack packets are peeled off in
+// Route by their 0xFE tag so RollbackSession never sees them.
 //
 // The render loop (initRenderJS -> rAF -> TickDotNet) only starts once we reach Playing, so
 // the game is never constructed behind the lobby overlay.
@@ -35,6 +42,7 @@ public partial class Index : IDisposable
         JoinPasteOffer,
         JoinShowAnswer,
         Connecting,
+        Handshaking,
         Playing,
         Failed,
     }
@@ -64,6 +72,25 @@ public partial class Index : IDisposable
 
     private string JoinUrl => Nav.BaseUri + "?room=" + _roomCode;
 
+    // ── stage selection + handshake state ──
+    private string _stage = LobbyStages.All[0].Name;   // host/solo choice; joiner adopts the host's
+    private LobbyStage StageInfo => LobbyStages.Find(_stage);
+    private bool IsCoop => StageInfo?.Coop ?? false;
+    private string StageLabel => StageInfo?.Label ?? _stage;
+    private string PeerNoun => IsCoop ? "partner" : "opponent";
+    private bool _isHost;
+    private bool _stageKnown;        // joiner: the host's stage has been read from the offer/hello
+    private bool _peerHelloSeen;     // got the peer's hello (and its build matched)
+    private bool _helloAcked;        // the peer acked ours
+    private string _failTitle = "Connection failed";
+    private const int HelloResendMs = 150;
+
+    // Disconnect overlay (once Playing). _peerLost = failed/closed (terminal);
+    // _peerInterrupted = "disconnected", which WebRTC can recover from on its own.
+    private bool _peerLost;
+    private bool _peerInterrupted;
+    private bool _overlayDismissed;
+
     private bool _ticking;
     private bool _sendBase64;   // latched if byte[] -> JS marshaling ever fails
     private int _connectEpoch;  // bumped to cancel an armed connect timeout
@@ -90,6 +117,9 @@ public partial class Index : IDisposable
                 _enteredCode = Uri.UnescapeDataString(kv[1]).Trim().ToUpperInvariant();
                 _phase = Phase.JoinEnterCode;
             }
+            // ?stage=NAME preselects a lobby stage (handy for links and the smoke harness).
+            if (kv.Length == 2 && kv[0] == "stage" && LobbyStages.Find(Uri.UnescapeDataString(kv[1])) is { } pick)
+                _stage = pick.Name;
         }
     }
 
@@ -123,12 +153,14 @@ public partial class Index : IDisposable
         {
             await EnsureRtcAsync();
             _net = new MTile.NetSetup { LocalPlayerIndex = 0, Send = SendBytes };
+            _isHost = true;
 
             _error = "";
             _phase = Phase.HostGathering;
             StateHasChanged();
 
-            _offerBlob = await JsRuntime.InvokeAsync<string>("mtileRtc.createOffer", (object)StunUrls);
+            _offerBlob = await JsRuntime.InvokeAsync<string>(
+                "mtileRtc.createOffer", (object)StunUrls, _stage, LobbyHello.BuildId);
             _roomCode = await JsRuntime.InvokeAsync<string>("mtileSignal.createRoom", _offerBlob);
             _phase = Phase.HostShowCode;
             StateHasChanged();
@@ -179,6 +211,13 @@ public partial class Index : IDisposable
             _net = new MTile.NetSetup { LocalPlayerIndex = 1, Send = SendBytes };
 
             var offer = await JsRuntime.InvokeAsync<string>("mtileSignal.fetchOffer", code);
+            if (!await ReadOfferMetaAsync(offer))
+            {
+                _net = null;
+                if (_phase != Phase.Failed) _phase = Phase.JoinEnterCode;
+                StateHasChanged();
+                return;
+            }
             _answerBlob = await JsRuntime.InvokeAsync<string>(
                 "mtileRtc.acceptOfferCreateAnswer", offer, (object)StunUrls);
             await JsRuntime.InvokeVoidAsync("mtileSignal.postAnswer", code, _answerBlob);
@@ -202,12 +241,14 @@ public partial class Index : IDisposable
             await EnsureRtcAsync();
             // Created before the channel can open so any packet that beats us just queues.
             _net = new MTile.NetSetup { LocalPlayerIndex = 0, Send = SendBytes };
+            _isHost = true;
 
             _error = "";
             _phase = Phase.HostGathering;
             StateHasChanged();
 
-            _offerBlob = await JsRuntime.InvokeAsync<string>("mtileRtc.createOffer", (object)StunUrls);
+            _offerBlob = await JsRuntime.InvokeAsync<string>(
+                "mtileRtc.createOffer", (object)StunUrls, _stage, LobbyHello.BuildId);
             _phase = Phase.HostShowOffer;
         }
         catch (Exception ex)
@@ -222,7 +263,7 @@ public partial class Index : IDisposable
         var blob = (_pastedAnswer ?? "").Trim();
         if (blob.Length == 0)
         {
-            _error = "Paste the answer blob from your opponent first.";
+            _error = $"Paste the answer blob from your {PeerNoun} first.";
             return;
         }
 
@@ -263,6 +304,7 @@ public partial class Index : IDisposable
             _net = new MTile.NetSetup { LocalPlayerIndex = 1, Send = SendBytes };
 
             _error = "";
+            if (!await ReadOfferMetaAsync(blob)) { _net = null; StateHasChanged(); return; }
             _answerBlob = await JsRuntime.InvokeAsync<string>(
                 "mtileRtc.acceptOfferCreateAnswer", blob, (object)StunUrls);
 
@@ -282,6 +324,7 @@ public partial class Index : IDisposable
         _error = "";
         _offerBlob = _answerBlob = _pastedOffer = _pastedAnswer = "";
         _roomCode = _enteredCode = "";
+        _isHost = _stageKnown = _peerHelloSeen = _helloAcked = false;
         _connectEpoch++;
         _phase = Phase.Menu;
         _ = JsRuntime.InvokeVoidAsync("mtileSignal.cancel");   // rejects a pending waitForAnswer
@@ -292,35 +335,141 @@ public partial class Index : IDisposable
 
     // ── transport callbacks (from mtileRtc.js) ──────────────────────────────────
 
+    // Channel open: don't start yet — first agree on stage + build (LobbyHello).
     [JSInvokable]
     public void OnRtcOpen()
     {
-        _connectEpoch++;   // disarm the connect timeout
-        StartTicking();
+        if (_net == null || _phase is Phase.Handshaking or Phase.Playing or Phase.Failed) return;
+        _phase = Phase.Handshaking;
+        ArmConnectTimeout("Timed out after 30 s agreeing on match settings with the other player.");
+        _ = HelloLoopAsync(_connectEpoch);
+        TryFinishHandshake();
+        StateHasChanged();
+    }
+
+    // Unreliable channel, so resend until the peer acks (or we leave the handshake).
+    private async Task HelloLoopAsync(int epoch)
+    {
+        while (!_helloAcked && epoch == _connectEpoch && _phase == Phase.Handshaking)
+        {
+            SendBytes(LobbyHello.EncodeHello(_stage, LobbyHello.BuildId));
+            await Task.Delay(HelloResendMs);
+        }
     }
 
     // Normal path: .NET 6+ marshals a JS Uint8Array straight into byte[].
     [JSInvokable]
-    public void OnRtcMessage(byte[] bytes) => _net?.Deliver(bytes);
+    public void OnRtcMessage(byte[] bytes) => Route(bytes);
 
     // Fallback the JS side latches onto if the byte[] marshaling above ever throws.
     [JSInvokable]
     public void OnRtcMessageB64(string base64)
     {
-        if (_net == null || string.IsNullOrEmpty(base64)) return;
-        _net.Deliver(Convert.FromBase64String(base64));
+        if (string.IsNullOrEmpty(base64)) return;
+        Route(Convert.FromBase64String(base64));
+    }
+
+    // Lobby packets (0xFE tag) stop here; everything else is an InputPacket for the session.
+    private void Route(byte[] bytes)
+    {
+        if (_net == null || bytes == null) return;
+        if (!LobbyHello.IsLobbyPacket(bytes)) { _net.Deliver(bytes); return; }
+
+        if (LobbyHello.IsAck(bytes))
+        {
+            _helloAcked = true;
+            TryFinishHandshake();
+            return;
+        }
+        if (!LobbyHello.TryDecodeHello(bytes, out var stage, out var build)) return;
+
+        // Ack every hello, even after we started: our earlier ack may have been dropped and
+        // the peer is still waiting on it.
+        SendBytes(LobbyHello.EncodeAck());
+        if (_peerHelloSeen || _phase is Phase.Playing or Phase.Failed) return;
+
+        if (build != LobbyHello.BuildId)
+        {
+            // Make sure the peer hears our build too so it shows the same message.
+            for (int i = 0; i < 3; i++) SendBytes(LobbyHello.EncodeHello(_stage, LobbyHello.BuildId));
+            FailVersions(build);
+            StateHasChanged();
+            return;
+        }
+        if (!_isHost)
+        {
+            // The host's choice is authoritative (it already matches the offer's normally).
+            if (stage.Length > 0) _stage = stage;
+            _stageKnown = true;
+        }
+        _peerHelloSeen = true;
+        TryFinishHandshake();
+    }
+
+    private void TryFinishHandshake()
+    {
+        if (_phase != Phase.Handshaking || !_peerHelloSeen || !_helloAcked) return;
+        _connectEpoch++;   // disarm the handshake timeout + stop the hello loop
+        StartTicking();
     }
 
     [JSInvokable]
     public void OnRtcState(string state)
     {
-        if (_phase == Phase.Playing || _phase == Phase.Failed) return;
+        if (_phase == Phase.Failed) return;
+        if (_phase == Phase.Playing)
+        {
+            // Mid-match: the rollback session would just stall silently, so say why.
+            if (_net == null) return;
+            if (state is "failed" or "closed") _peerLost = true;
+            else if (state == "disconnected") _peerInterrupted = true;
+            else if (state == "connected") _peerInterrupted = false;
+            StateHasChanged();
+            return;
+        }
         if (state is "failed" or "disconnected" or "closed")
         {
             Fail($"Peer connection {state}. The blobs may be stale — reload and try again.");
             StateHasChanged();
         }
     }
+
+    // Joiner: learn the host's stage + build from the offer before answering it. Returns
+    // false (with _error set, or the UI switched to Failed) when we must not continue.
+    private async Task<bool> ReadOfferMetaAsync(string offerBlob)
+    {
+        string meta;
+        try { meta = await JsRuntime.InvokeAsync<string>("mtileRtc.readOfferMeta", offerBlob); }
+        catch (Exception ex)
+        {
+            _error = "That doesn't look like a host offer: " + ex.Message;
+            return false;
+        }
+        meta ??= "";
+        int nl = meta.IndexOf('\n');
+        string stage = nl < 0 ? "" : meta.Substring(0, nl);
+        string build = nl < 0 ? "" : meta.Substring(nl + 1);
+        if (build != LobbyHello.BuildId)
+        {
+            FailVersions(build.Length == 0 ? "(older build)" : build);
+            return false;
+        }
+        if (stage.Length > 0) _stage = stage;
+        _stageKnown = true;
+        return true;
+    }
+
+    private void FailVersions(string theirs)
+    {
+        _connectEpoch++;
+        _failTitle = "Different versions";
+        Fail("You and the other player are running different builds of MTile, so the match "
+           + "would desync. Both of you reload the page (a hard refresh, Ctrl/Cmd+Shift+R, "
+           + "if it keeps happening) to get the latest version, then try again.\n\n"
+           + $"yours: {LobbyHello.BuildId}   theirs: {theirs}");
+    }
+
+    private void DismissOverlay() => _overlayDismissed = true;
 
     // ── game loop ───────────────────────────────────────────────────────────────
 
@@ -335,7 +484,9 @@ public partial class Index : IDisposable
 
             if (_game == null)
             {
-                _game = _net != null ? new MTile.Game1(_net) : new MTile.Game1();
+                var g = _net != null ? new MTile.Game1(_net) : new MTile.Game1();
+                g.StageOverride = _stage;
+                _game = g;
                 _game.Run();
                 _bootDone = true;
                 StateHasChanged();
@@ -403,18 +554,18 @@ public partial class Index : IDisposable
     }
 
     // Mirrors the desktop console flow's 30 s open timeout.
-    private void ArmConnectTimeout()
+    private void ArmConnectTimeout(string message = "Timed out after 30 s waiting for the data channel to open.")
     {
         int epoch = ++_connectEpoch;
-        _ = TimeoutAsync(epoch);
+        _ = TimeoutAsync(epoch, message);
     }
 
-    private async Task TimeoutAsync(int epoch)
+    private async Task TimeoutAsync(int epoch, string message)
     {
         await Task.Delay(ConnectTimeoutMs);
         if (epoch != _connectEpoch || _phase == Phase.Playing || _phase == Phase.Failed) return;
 
-        Fail("Timed out after 30 s waiting for the data channel to open.");
+        Fail(message);
         StateHasChanged();
     }
 

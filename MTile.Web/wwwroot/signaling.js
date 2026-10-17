@@ -5,7 +5,9 @@
 //   rooms/{CODE} = { offer: <blob>, createdAt: serverTimestamp, expireAt: now+1h }
 //   the joiner later adds { answer: <blob> }
 // The blobs are mtileRtc.js's non-trickle base64 SDP blobs, unchanged — this file
-// only moves them; mtileRtc.js still owns the RTCPeerConnection.
+// only moves them; mtileRtc.js still owns the RTCPeerConnection. The lobby's stage choice
+// and build id ride INSIDE the offer blob (mtileRtc.createOffer), so this schema — and the
+// deployed firestore.rules — did not change when the stage selector arrived.
 //
 // Firebase is loaded lazily via dynamic import from the gstatic CDN, so the page
 // works fully offline (solo / manual mode) when the CDN or config is unavailable.
