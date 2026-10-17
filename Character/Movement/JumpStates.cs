@@ -102,10 +102,35 @@ public class JumpingState : MovementState
     // the tracker FoldProfile.Jump (hover off, u up-and-along-intent) and the
     // legs spend themselves along the rising path. The state lasts while the
     // button is held and the body rises; Falling owns the descent as before.
+    //
+    // ...when there are legs to spend. A planned rise is the LEGS' launch, and
+    // the legs act only with a floor within LegReach (LatticeTracker's tick-0
+    // `near`, the same test). A launch entered with nothing under the feet —
+    // the corner push-off out of a vault, a mantle or an arc jump at the lip,
+    // where the body is airborne beside the step — had no actuator at all: the
+    // body coasted on as if the press never happened (rise 1-6 px against a
+    // ground jump's 41), or fell back into leg reach and launched late. Such a
+    // launch is hybrid instead, like every other jump with nothing to plant
+    // on (DoubleJump, WallJump, LedgeJump, and RunningJump's impulse): the
+    // ref engine's velocity write + hold force, with the tracker riding
+    // FoldProfile.ImpulseJump (legs off — nothing launches it twice). Decided
+    // once, at Enter (vars.JumpImpulse), so a launch never switches mechanism
+    // mid-rise.
+    private static bool LegsInReach(EnvironmentContext ctx)
+    {
+        var body = ctx.Body;
+        float floorY = AmbientCorrector.FloorEnvelope(ctx.Chunks, CObstacleTemplate.For(body.Polygon),
+            body.Position.X, body.Position.Y - 2f, body.Position.Y + CorrectorChannels.LegReach,
+            out bool found);
+        return found && floorY - body.Position.Y <= CorrectorChannels.LegReach;
+    }
+
+    // The lattice-native planned rise (above), as opposed to the hybrid impulse.
+    private static bool PlannedRise(in MovementVars vars) => OnLattice && !vars.JumpImpulse;
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        if (OnLattice)
+        if (PlannedRise(vars))
         {
             if (vars.JumpReleased) return false;
             // The apex ends the jump — once the body has risen (a covered
@@ -134,7 +159,9 @@ public class JumpingState : MovementState
         // Replace any pre-existing FSD (e.g. StandingState's _ground) with our own
         // source FSD: same kind of contact, just tuned for an airborne body.
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
-        if (OnLattice)
+        // Planned rise only where the legs can launch it (see LegsInReach).
+        vars.JumpImpulse = OnLattice && !LegsInReach(ctx);
+        if (PlannedRise(vars))
         {
             // No source constraint, no impulse: the tracker's legs are the
             // support and the launch (see OnLattice).
@@ -186,7 +213,7 @@ public class JumpingState : MovementState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
-        if (OnLattice)
+        if (PlannedRise(vars))
         {
             vars.TimeInState += ctx.Dt;
             if (!ctx.Input.Space) vars.JumpReleased = true;
@@ -224,7 +251,11 @@ public class JumpingState : MovementState
 
         ctx.Body.AppliedForce = force;
 
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.None);
+        // Hybrid on the lattice engine (a launch with no legs under it — see
+        // LegsInReach): the impulse above is the launch, the tracker rides the
+        // rising plan with the legs off, as RunningJumpState does.
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
+            OnLattice ? FoldProfile.ImpulseJump : FoldProfile.None);
     }
 
     private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
