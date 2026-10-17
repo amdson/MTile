@@ -24,7 +24,9 @@ namespace MTile;
 // the same code whether the point is still in the player's hand or already flying
 // after release. While tracking: gravity off, tiles ON (a held clod is a physical
 // object — it can't be dragged into the floor, it slides along a wall the cursor
-// crosses), no hurtbox, and the budget bleeds while the point is held. The tracker
+// crosses), no hurtbox, and the budget bleeds while the point is held. Terrain contact
+// never bursts a HELD clod, but touching a body it can hurt does — the same burst a
+// thrown one makes (the held fuse in Track). The tracker
 // writes only Body.Velocity; PhysicsWorld integrates the position. Once the point has
 // been released the ball DETACHES when its velocity has converged to the point's (or
 // after GrabChaseMaxSeconds, or if the point is gone): gravity on, and the ordinary
@@ -121,6 +123,8 @@ public class LobbedAreaProjectile : Projectile
     public int      HarvestBlocks => _harvest;
     public int      ChargedBlocks => _charged;
     public TileType TileType      => _tileType;
+    // Has this clod burst? Read-only, for tests and probes.
+    public bool     Detonated     => _detonated;
 
     // hitId/tileType are immutable (ctor) — recorded so Rehydrate can reconstruct via
     // the ctor. Budget bleeds during a carry; the tracking fields are per-frame state.
@@ -209,14 +213,22 @@ public class LobbedAreaProjectile : Projectile
     // DRAWN radius, not the small collision disc, so the burst fires when the orb
     // visibly meets the target. Own faction is excluded, so a thrower can't set off
     // their own throw (and two clods of one player pass through each other).
-    private bool TouchesBody(HurtboxWorld hurtboxes)
+    //
+    // `coop` (held fuse only) also skips other players' bodies in a co-op match, where
+    // the burst could never hurt them anyway (CombatSystem.Coop) — so carrying a clod
+    // past a teammate doesn't waste it. The thrown fuses keep the plain faction test.
+    private bool TouchesBody(HurtboxWorld hurtboxes, bool coop = false)
     {
         if (hurtboxes == null) return false;
         float r = DrawRadius;
         var p = Body.Position;
         var region = new BoundingBox(p.X - r, p.Y - r, p.X + r, p.Y + r);
         foreach (var hb in hurtboxes.Overlapping(region, exclude: Faction))
-            if (hb.Target != Id) return true;
+        {
+            if (hb.Target == Id) continue;
+            if (coop && Factions.IsPlayer(Faction) && Factions.IsPlayer(hb.Owner)) continue;
+            return true;
+        }
         return false;
     }
 
@@ -368,6 +380,20 @@ public class LobbedAreaProjectile : Projectile
             // consumed a block; reach zero exactly at GrabDissipateSeconds.
             _budget = frac <= 0f ? 0 : (int)MathF.Ceiling(_harvest * frac);
             if (_budget <= 0) { Health = 0f; return; }
+
+            // Held fuse: terrain never sets a held clod off (it scrapes and slides —
+            // the player is still aiming it), but swinging it into someone who can be
+            // hurt does, through exactly the thrown clod's burst: same Detonate, same
+            // hitboxes, same HitId, so CombatSystem's faction gate, co-op filter,
+            // hitstop and dedupe all apply unchanged. Detach first, as the chase path
+            // does, so the point and the action see the ball leave the hand this frame
+            // (the point dies, the action ends and hands off) — no action-side state.
+            if (TouchesBody(spawner?.Hurtboxes, coop: spawner?.Coop == true))
+            {
+                Detach();
+                Detonate(hitboxes, spawner);
+                return;
+            }
         }
         else
         {

@@ -472,11 +472,11 @@ public class MovementConfig
     // further before it crumbles away.
     public float GrabDissipateSeconds { get; set; } = 2.0f;
     // ── Block throw (Plans/BLOCK_THROW_PLAN.md §5) ───────────────────────────────
-    // Held rest position: the clod orbits the body at GrabHandDistance in the cursor's
-    // direction and leans outward by at most GrabHandLean (tanh-saturated) as the cursor
-    // moves away. Shapes only where the ball SITS — the throw is the cursor's velocity.
-    public float GrabHandDistance    { get; set; } = 1.4f * PlayerCharacter.Radius;
-    public float GrabHandLean        { get; set; } = 20f;
+    // Held position: the clod follows the cursor freely in both axes out to this far
+    // from the body center (tanh-saturated), clamped short of terrain along the line
+    // of sight. Px — an arm's swing, calibrated against the player, not the tile grid.
+    // Shapes only where the ball SITS — the throw is the cursor's velocity.
+    public float GrabHoldReach       { get; set; } = 64f;
     // The ball's critically damped tracker toward the pulling point: lag time constant
     // while the point is in hand, tighter once it has been released (so detach comes
     // fast), and the cap on the ball's speed in both — which is THE throw-speed cap.

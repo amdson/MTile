@@ -29,7 +29,7 @@ GROUPS = {
             "ClipBinding","DownAirSlash","InputParserGesture","RecoveryTransition","Laser",
             "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","SpearmanEnemy","PulserEnemy","EnemySpawner","WizardEnemy","Warlord","Prism","RayEmitter","Quillback","GauntletEnemy","Zeus","TelegraphList",
             "PresentationEventLog","SandImpactDamage","PlayerImpactByVelocity","ImpactCrater",
-            "RunningOverUnderImpact","ChargedBlast","SlashCombo","BlockOwnership"],
+            "RunningOverUnderImpact","ChargedBlast","SlashCombo","BlockOwnership","ClodGrab"],
  "movement": ["Dropdown","Jump","Ledge","Mantle","ArcJump","WallJump","Tumble","StandingJitter",
               "GroundFriction","GroundChecker","MovingPlatform","StairClimb","DeliberateClimb",
               "ClimbArbitration","PreRunAirborne","CoveredJump","PhaseAccel","Bounce",

@@ -275,6 +275,10 @@ public interface IEntitySpawner
     // sampling; publishing from inside an entity update would be order-dependent.
     // Default null so spawner stubs that never need it are unaffected.
     HurtboxWorld Hurtboxes => null;
+    // Co-op match (Stage.Coop): player factions can't hurt each other. Read by contact
+    // fuses that should ignore bodies their burst could never damage. Default false;
+    // Simulation implements it with its own Coop.
+    bool Coop => false;
     // A mass ball landed and erupted: a cosmetic event for the render shell (particle
     // splash, audio). Default no-op — only Simulation forwards it, as OnMassLanded.
     void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks) { }
