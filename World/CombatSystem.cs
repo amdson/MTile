@@ -31,6 +31,13 @@ public sealed class CombatSystem
 
     private readonly Dictionary<int, HashSet<EntityId>> _hitDedupe = new();
     private readonly HashSet<int> _liveHitIds = new();
+    // HitIds whose attack is paused, not over (attacker hitstop freezes the action, so
+    // its hitbox doesn't publish). Exempt from the prune below so the dedupe set — and
+    // the tile-pogo latch riding on it — survives the freeze; without this, the attack
+    // re-hit the same target (and re-pogoed) the frame hitstop ended. Filled during the
+    // player updates, consumed by the Apply in the same Step, so it is always empty at
+    // a frame boundary and needs no snapshot.
+    private readonly HashSet<int> _heldHitIds = new();
     private readonly List<int> _scratchPrune = new();
     // Per-frame recoil tally — accumulated Δv to apply to each hitbox's
     // attacker, keyed by HitId. Cleared at the start of every Apply. Attackers
@@ -64,6 +71,9 @@ public sealed class CombatSystem
     // surface). Raised every frame of overlap and before damage, so it also fires
     // for a cell the hit breaks. Subscribers dedupe by HitId; nothing sim-side reads it.
     public event Action<int, Vector2, Vector2> OnTerrainStrike;
+
+    // Keep this HitId's dedupe entry alive through a frame it doesn't broadcast.
+    public void HoldHitId(int hitId) => _heldHitIds.Add(hitId);
 
     public Vector2 PeekRecoil(int hitId)
         => _recoilByHitId.TryGetValue(hitId, out var v) ? v : Vector2.Zero;
@@ -257,10 +267,12 @@ public sealed class CombatSystem
         
         // Prune dedupe entries for HitIds that didn't broadcast this frame —
         // their attack is over, future hitboxes will use fresh HitIds anyway.
+        // Held HitIds (attacker in hitstop) are paused, not over.
         _scratchPrune.Clear();
         foreach (var k in _hitDedupe.Keys)
-            if (!_liveHitIds.Contains(k)) _scratchPrune.Add(k);
+            if (!_liveHitIds.Contains(k) && !_heldHitIds.Contains(k)) _scratchPrune.Add(k);
         foreach (var k in _scratchPrune) _hitDedupe.Remove(k);
+        _heldHitIds.Clear();
     }
 
     // The faction gate above skips any pair whose Owner factions match — self-immunity,

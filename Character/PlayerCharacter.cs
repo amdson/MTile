@@ -786,6 +786,10 @@ public class PlayerCharacter : IHittable
             Body.AppliedForce += Gravity * (ctx.Modifiers.GravityScale - 1f);
 
         if (!hitstopFrozen) _currentAction.Update(ctx, _abilities, ref _actionVars);
+        // A frozen action publishes no hitbox, which would otherwise read to CombatSystem
+        // as "attack over" and drop its dedupe set — letting the same swing hit the same
+        // target again (and pogo again) once the freeze lifts.
+        else CombatSystem?.HoldHitId(_actionVars.HitId);
 
         // Block-economy upkeep, once per frame per player and AFTER the action ran, so a
         // placement action has had its chance to request charging. Runs unconditionally —

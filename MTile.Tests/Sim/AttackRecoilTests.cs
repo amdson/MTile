@@ -479,4 +479,128 @@ public class AttackRecoilTests(ITestOutputHelper output)
         Assert.True(minVxObserved > -20f,
             $"Expected stab into sand to plough through (no backward pogo); observed min Vx = {minVxObserved}");
     }
+
+    // ──────────────── Hitstop must not reset the attack's dedupe ────────────────
+
+    private sealed class Dummy : IHittable
+    {
+        public Faction Faction => Faction.Enemy;
+        public EntityId Id { get; } = new EntityId(50);
+        public BoundingBox Region = new(0f, 0f, 16f, 16f);
+        public int Hits;
+        public void PublishHurtboxes(HurtboxWorld world) => world.Publish(new Hurtbox(Region, Faction, Id));
+        public Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox) { Hits++; return hit.KnockbackImpulse; }
+    }
+
+    // An attacker in hitstop doesn't publish its hitbox. That pause used to read as
+    // "attack over": the dedupe set was pruned and the same swing landed on the same
+    // target again when the freeze lifted. HoldHitId keeps the set across the gap.
+    [Theory]
+    [InlineData(true,  1)]
+    [InlineData(false, 2)]   // an unheld gap is still a real end-of-attack prune
+    public void HeldHitId_SurvivesFramesWithoutBroadcast(bool hold, int expectedHits)
+    {
+        var chunks    = SimTerrain.FromAscii("O");
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+        var dummy     = new Dummy();
+        IHittable Resolve(EntityId id) => id == dummy.Id ? dummy : null;
+
+        void Frame(bool publish)
+        {
+            hitboxes.Clear(); hurtboxes.Clear();
+            dummy.PublishHurtboxes(hurtboxes);
+            if (publish)
+                hitboxes.Publish(new Hitbox(dummy.Region, 31, 0.1f, new Vector2(100f, 0f),
+                                            Faction.Player1, EntityId.None, recoilScale: 1f));
+            else if (hold) combat.HoldHitId(31);
+            combat.Apply(chunks, hitboxes, hurtboxes, Resolve);
+        }
+
+        Frame(publish: true);
+        Frame(publish: false);
+        Frame(publish: false);
+        Frame(publish: true);
+        Assert.Equal(expectedHits, dummy.Hits);
+    }
+
+    // A hold lasts one Apply: an attack that ends while held is pruned the frame after.
+    [Fact]
+    public void HeldHitId_ExpiresAfterOneApply()
+    {
+        var chunks    = SimTerrain.FromAscii("O");
+        var hitboxes  = new HitboxWorld();
+        var hurtboxes = new HurtboxWorld();
+        var combat    = new CombatSystem();
+        var dummy     = new Dummy();
+        IHittable Resolve(EntityId id) => id == dummy.Id ? dummy : null;
+        dummy.PublishHurtboxes(hurtboxes);
+
+        hitboxes.Publish(new Hitbox(dummy.Region, 32, 0.1f, new Vector2(100f, 0f),
+                                    Faction.Player1, EntityId.None));
+        combat.Apply(chunks, hitboxes, hurtboxes, Resolve);
+        hitboxes.Clear();
+        combat.HoldHitId(32);
+        combat.Apply(chunks, hitboxes, hurtboxes, Resolve);   // held
+        combat.Apply(chunks, hitboxes, hurtboxes, Resolve);   // not held → pruned
+        Assert.Empty(combat.CaptureDedupe());
+    }
+
+    // End to end: a stab straight down onto a player standing below lands ONCE, and
+    // the bounce it hands the attacker stays jump-sized (StabAction.MaxRecoilRiseSpeed)
+    // rather than the stacked launch a re-hit after hitstop used to produce.
+    [Fact]
+    public void DownStabOntoPlayer_HitsOnce_RiseCapped()
+    {
+        var terrain = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+
+        const float dt = 1f / 60f;
+        var attackerStart = new Vector2(120f, 30f);
+        var victimStart   = new Vector2(120f, 8 * Chunk.TileSize - PlayerCharacter.Radius - 1f);
+        var press   = new Vector2(120f, 100f);
+        var release = new Vector2(120f, 160f);
+        var attackerScript = new InputScript()
+            .For   ( 2, new PlayerInput { MouseWorldPosition = press })
+            .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = press })
+            .For   (16, new PlayerInput { LeftClick = true, MouseWorldPosition = release })
+            .Forever   (new PlayerInput { MouseWorldPosition = release });
+
+        var cfg = new SimConfigMulti
+        {
+            Terrain = terrain,
+            Frames  = 90,
+            Dt      = dt,
+            Gravity = new Vector2(0f, 600f),
+            Players = new[]
+            {
+                new SimPlayer { StartPosition = attackerStart, Script = attackerScript },
+                new SimPlayer { StartPosition = victimStart,   Script = new InputScript().Forever(new PlayerInput()),
+                                Faction = Faction.Neutral },
+            },
+        };
+
+        int hits = 0;
+        float lastHp = float.NaN, minVy = float.MaxValue;
+        SimRunner.RunMulti(cfg, onFrame: (f, ps) =>
+        {
+            if (!float.IsNaN(lastHp) && ps[1].Health < lastHp) { hits++; output.WriteLine($"f{f}: hit, hp {ps[1].Health}"); }
+            lastHp = ps[1].Health;
+            minVy = MathF.Min(minVy, ps[0].Body.Velocity.Y);
+            output.WriteLine($"f{f} a=({ps[0].Body.Position.X:F0},{ps[0].Body.Position.Y:F0}) v=({ps[0].Body.Velocity.X:F0},{ps[0].Body.Velocity.Y:F0}) act={ps[0].CurrentAction?.GetType().Name} victim=({ps[1].Body.Position.Y:F0}, v{ps[1].Body.Velocity.Y:F0}, hp{ps[1].Health}, hit{ps[1].Abilities.Combat.LastHitFrame})");
+        });
+
+        output.WriteLine($"hits={hits} minVy={minVy}");
+        Assert.Equal(1, hits);
+        Assert.True(minVy >= -300.5f, $"stab bounce launched the attacker at {minVy} px/s");
+    }
 }
