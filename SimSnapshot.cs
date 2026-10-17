@@ -49,6 +49,10 @@ public sealed class SimSnapshot
     // (seconds) the attacker stamps on itself next frame (PeekHitstop, symmetric hitlag).
     public Dictionary<int, float> AttackerHitstop;
 
+    // Spike-overlay contact cooldowns: victim → sim frame of its last spike tick
+    // (SpikeContactSystem). The spiked cells themselves ride in Terrain.
+    public Dictionary<EntityId, int> SpikeCooldowns;
+
     // Moving-platform poses, in registration order. Position+velocity is enough since
     // the tickers re-derive motion purely from Elapsed.
     public PlatformState[] Platforms;

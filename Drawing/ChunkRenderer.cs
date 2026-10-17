@@ -43,6 +43,8 @@ public sealed class ChunkRenderer
         foreach (var chunk in chunks)
             DrawChunk(chunk, chunks);
 
+        DrawSpikes(chunks);
+
         foreach (var (r, color) in sim.Platforms)
             _spriteBatch.Draw(_pixel, new Rectangle(
                 (int)r.Left, (int)r.Top,
@@ -80,6 +82,66 @@ public sealed class ChunkRenderer
             _spriteBatch.Draw(_pixel, new Rectangle(left,            top + size - 1, size, 1),    ghost);
             _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            1,    size), ghost);
             _spriteBatch.Draw(_pixel, new Rectangle(left + size - 1, top,            1,    size), ghost);
+        }
+    }
+
+    // Spike overlay look: SpikeTeeth small triangles standing out of each EXPOSED face
+    // of a spiked cell (a face against another solid cell is buried, so no teeth),
+    // tinted by the owning side. Teeth stand in the neighbouring air, outside the cell,
+    // so they read as a hazard on the surface rather than a texture on the block.
+    private const int   SpikeTeeth  = 2;
+    private const float SpikeHeight = Chunk.TileSize * 0.4f;
+
+    private void DrawSpikes(ChunkMap chunks)
+    {
+        if (chunks.Spikes.Count == 0) return;
+        var viewport = _graphicsDevice.Viewport;
+        float halfW = viewport.Width  / (2f * _camera.Zoom) + Chunk.TileSize;
+        float halfH = viewport.Height / (2f * _camera.Zoom) + Chunk.TileSize;
+        foreach (var (cell, side) in chunks.Spikes.Entries)
+        {
+            var (gtx, gty) = cell;
+            if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
+            float left = gtx * Chunk.TileSize, top = gty * Chunk.TileSize;
+            if (MathF.Abs(left - _camera.Position.X) > halfW || MathF.Abs(top - _camera.Position.Y) > halfH)
+                continue;
+            var color = TilePalette.SpikeColor(side.Faction);
+            if (chunks.GetCellState(gtx, gty - 1) != TileState.Solid) Teeth(left, top, 0, -1, color);
+            if (chunks.GetCellState(gtx, gty + 1) != TileState.Solid) Teeth(left, top, 0,  1, color);
+            if (chunks.GetCellState(gtx - 1, gty) != TileState.Solid) Teeth(left, top, -1, 0, color);
+            if (chunks.GetCellState(gtx + 1, gty) != TileState.Solid) Teeth(left, top,  1, 0, color);
+        }
+    }
+
+    // One face's teeth, rasterized as stacked 1px slices so it needs nothing but the
+    // pixel texture (identical under DesktopGL and KNI). (nx, ny) is the face's outward
+    // normal; each tooth's base sits on the face and its tip points along the normal.
+    private void Teeth(float left, float top, int nx, int ny, Color color)
+    {
+        const float T = Chunk.TileSize;
+        float baseW = T / SpikeTeeth;
+        int rows = Math.Max(1, (int)MathF.Round(SpikeHeight));
+        for (int k = 0; k < SpikeTeeth; k++)
+        {
+            float along0 = k * baseW;                 // tooth's start along the face
+            for (int r = 0; r < rows; r++)
+            {
+                float w = baseW * (1f - (r + 0.5f) / rows);
+                if (w < 1f) w = 1f;
+                float a = along0 + (baseW - w) * 0.5f;
+                Rectangle rect;
+                if (ny != 0)
+                {
+                    float y = ny < 0 ? top - 1 - r : top + T + r;
+                    rect = new Rectangle((int)(left + a), (int)y, Math.Max(1, (int)MathF.Round(w)), 1);
+                }
+                else
+                {
+                    float x = nx < 0 ? left - 1 - r : left + T + r;
+                    rect = new Rectangle((int)x, (int)(top + a), 1, Math.Max(1, (int)MathF.Round(w)));
+                }
+                _spriteBatch.Draw(_pixel, rect, color);
+            }
         }
     }
 

@@ -69,6 +69,13 @@ public static class MaterialStrengths
     public static float BuildCostFor(TileType type)
         => _current.TryGetValue(type, out var m) ? m.BuildCost : 1f;
 
+    // Spike overlay price, in Stone placements (BLOCK_OWNERSHIP_SPIKES §2: "about twice
+    // the cost of stone placement"). Derived from Stone's loaded BuildCost rather than
+    // authored separately, so retuning stone in material_strengths.json keeps spikes at
+    // the same relative price.
+    public const float SpikeCostInStone = 2f;
+    public static float SpikeBuildCost => SpikeCostInStone * BuildCostFor(TileType.Stone);
+
     public static float RestitutionFor(TileType type)
         => _current.TryGetValue(type, out var m) ? m.Restitution : 0.5f;
 

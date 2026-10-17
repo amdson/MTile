@@ -270,6 +270,20 @@ public sealed class BuildMeters
     public bool CanAfford(TileType type)
         => BuildMove + EruptMove >= MaterialStrengths.BuildCostFor(type);
 
+    // All-or-nothing spend of a raw meter-unit cost from the same pools placement
+    // draws on (working pool first, then charge). For purchases that aren't a tile of a
+    // material — the spike overlay (MaterialStrengths.SpikeBuildCost). Returns false and
+    // spends nothing if the pools can't cover it.
+    public bool TrySpendUnits(float cost)
+    {
+        if (cost <= 0f) return true;
+        if (BuildMove + EruptMove < cost) return false;
+        float fromMove = MathF.Min(cost, BuildMove);
+        BuildMove -= fromMove;
+        EruptMove -= cost - fromMove;
+        return true;
+    }
+
     // Convert the banked eruption charge into ball mass (tile-equivalents) and clear it.
     //
     // `bonusUnits` is charge the METER never held: charged blocks recruited from around

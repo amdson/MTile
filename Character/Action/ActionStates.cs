@@ -2250,13 +2250,17 @@ public class BlockPaintAction : ActionState
         // Plain RMB, no press-edge requirement: this is the resting state of a held right
         // button, so it also resumes after an attack interrupted a stroke.
         if (!ctx.Input.RightClick || ctx.Input.Shift) return false;
+        // With spikes selected RMB spikes cells instead (BlockPlaceAction) — spikes only
+        // ever overlay existing solid, so there is no mass to paint.
+        if (ctx.SpikesSelected) return false;
         return ctx.Combat?.HitstunActive != true;
     }
 
     // Alive while RMB is held. Deliberately not gated on Shift: tapping Shift midway
-    // through a stroke shouldn't tear the ball away.
+    // through a stroke shouldn't tear the ball away. Selecting spikes mid-stroke does
+    // end it, handing the held button to BlockPlaceAction's spike path.
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => ctx.Input.RightClick;
+        => ctx.Input.RightClick && !ctx.SpikesSelected;
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
@@ -2404,14 +2408,21 @@ public class BlockPlaceAction : ActionState
 
     public override float AnimationProgress(in ActionVars vars) => -1f;
 
+    // Shift+RMB places blocks; with spikes selected (picker key 5) plain RMB or
+    // Shift+RMB spikes cells instead — one deliberate overlay per cell, the same
+    // gesture shape as a single placement, so spikes ride this action rather than a
+    // new ActionState.
+    private static bool Held(EnvironmentContext ctx)
+        => ctx.Input.RightClick && (ctx.Input.Shift || ctx.SpikesSelected);
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        if (!ctx.Input.RightClick || !ctx.Input.Shift) return false;
+        if (!Held(ctx)) return false;
         return ctx.Combat?.HitstunActive != true;
     }
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => ctx.Input.RightClick && ctx.Input.Shift;
+        => Held(ctx);
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
@@ -2430,6 +2441,13 @@ public class BlockPlaceAction : ActionState
         // single-tile line rather than re-requesting the same cell every frame.
         if (cell == vars.OriginCell) return;
 
+        if (ctx.SpikesSelected)
+        {
+            if (Vector2.DistanceSquared(ctx.Body.Position, cell) > Reach * Reach) return;
+            if (TrySpikeCell(ctx, ab, gtx, gty)) vars.OriginCell = cell;
+            return;
+        }
+
         float maxReach = BlockPaintAction.HasSproutNeighbour(ctx.Chunks, gtx, gty)
             ? Reach * ChainReachMul : Reach;
         if (Vector2.DistanceSquared(ctx.Body.Position, cell) > maxReach * maxReach) return;
@@ -2440,6 +2458,22 @@ public class BlockPlaceAction : ActionState
         // Charge only for a placement that actually took.
         ab.Meters.SpendForTiles(1f, ctx.ActiveBlockType);
         vars.OriginCell = cell;
+    }
+
+    // Spike overlay (BLOCK_OWNERSHIP_SPIKES §2): only an existing SOLID cell — never air,
+    // never a still-growing sprout — so spikes can't be conjured into open space to crush
+    // someone. Not already spiked (by anyone: no paying to repaint an enemy's spikes),
+    // and the full SpikeBuildCost (2× stone) must be affordable; charged only when the
+    // overlay actually lands. Stamps the placer's side, which is what makes the cell
+    // harmless to them and their co-op partner.
+    public static bool TrySpikeCell(EnvironmentContext ctx, PlayerAbilityState ab, int gtx, int gty)
+    {
+        if (ctx.Chunks == null || ab?.Meters == null) return false;
+        if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Solid) return false;
+        if (ctx.Chunks.Spikes.IsSpiked(gtx, gty)) return false;
+        if (!ab.Meters.TrySpendUnits(MaterialStrengths.SpikeBuildCost)) return false;
+        ctx.Chunks.Spikes.Set(gtx, gty, new TileSpikes.Side(ctx.Faction, ctx.Team));
+        return true;
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)

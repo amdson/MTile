@@ -384,6 +384,18 @@ public class PlayerCharacter : IHittable
         set { if (TileTypes.IsPlaceable(value)) _activeBlockType = value; }
     }
 
+    // Spike-overlay selection (block picker key 5). A separate flag rather than a
+    // TileType because spikes are not a material: they overlay an existing solid cell
+    // (BLOCK_OWNERSHIP_SPIKES §2). While set, the RMB build gestures spike the cell
+    // under the cursor instead of building; _activeBlockType keeps the last material so
+    // keys 1-4 drop straight back to it. Snapshotted alongside it in PlayerData.
+    private bool _spikesSelected;
+    public bool SpikesSelected
+    {
+        get => _spikesSelected;
+        set => _spikesSelected = value;
+    }
+
     public MovementState GetPreviousState(int framesBack)
     {
         if ((uint)framesBack >= HistorySize) return null;
@@ -566,10 +578,11 @@ public class PlayerCharacter : IHittable
         // level-triggered (re-assign harmlessly). Formerly interpreted in
         // Game1/Simulation against a global static — now player-local and
         // rollback-deterministic. (The P planner toggle that lived here is gone.)
-        if (input.Num1) _activeBlockType = TileType.Stone;
-        if (input.Num2) _activeBlockType = TileType.Dirt;
-        if (input.Num3) _activeBlockType = TileType.Sand;
-        if (input.Num4) _activeBlockType = TileType.Foam;
+        if (input.Num1) { _activeBlockType = TileType.Stone; _spikesSelected = false; }
+        if (input.Num2) { _activeBlockType = TileType.Dirt;  _spikesSelected = false; }
+        if (input.Num3) { _activeBlockType = TileType.Sand;  _spikesSelected = false; }
+        if (input.Num4) { _activeBlockType = TileType.Foam;  _spikesSelected = false; }
+        if (input.Num5) _spikesSelected = true;
 
         _abilities.JumpJustPressed  = input.Space && !prev.Space;
         _abilities.UpJustPressed    = input.Up    && !prev.Up;
@@ -633,6 +646,7 @@ public class PlayerCharacter : IHittable
             HitIds         = HitIds,
             CombatSystem   = CombatSystem,
             ActiveBlockType = _activeBlockType,
+            SpikesSelected  = _spikesSelected,
             Intents        = _intents,
             UpHeldFrames         = _inputParser.UpHeldFrames(_frame),
             UpReleasedHoldFrames = _inputParser.UpReleasedHoldFrames(_frame),
@@ -865,6 +879,7 @@ public class PlayerCharacter : IHittable
         d.Parser             = _inputParser.Capture();
         d.Intents            = _intents.Capture();
         d.ActiveBlockType    = _activeBlockType;
+        d.SpikesSelected     = _spikesSelected;
         world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
 
@@ -891,6 +906,7 @@ public class PlayerCharacter : IHittable
         _intents.Restore(s.Intents);
 
         _activeBlockType = s.ActiveBlockType;
+        _spikesSelected  = s.SpikesSelected;
 
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
 
