@@ -40,6 +40,7 @@ internal static class Program
         // inflates the numbers and buries the table in scrollback.
         SimTrace.Enabled = false;
 
+        if (Array.IndexOf(args, "--depths") >= 0) return DepthsBench.Run(args);
         if (Array.IndexOf(args, "--anim-baseline") >= 0) return AnimBaseline.Run(args);
         if (Array.IndexOf(args, "--forge") >= 0) return Forge.Run(args);
         if (Array.IndexOf(args, "--record-fight") >= 0) return FightRecorderCli.Run(args);
