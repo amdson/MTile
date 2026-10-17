@@ -13,6 +13,10 @@ Two Playwright scripts that boot the KNI/Blazor build in headless Chromium
   copy-paste blob exchange, waits for both to enter Playing, holds `d` on the
   host, and asserts the joiner's play-area pixels changed (remote player
   visibly moved). PASS = handshake + input mirroring work.
+  Also: the host picks Arena and the joiner must see it before playing; an offer
+  with a tampered build id must be refused ("Different versions"); after the
+  move check the host closes its connection and the joiner must show the
+  "other player disconnected" overlay.
 
 ## Setup (once per machine)
 

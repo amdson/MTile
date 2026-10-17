@@ -1,4 +1,4 @@
-import asyncio, sys
+import asyncio, base64, json, re, sys
 from playwright.async_api import async_playwright
 
 from PIL import Image, ImageChops
@@ -15,6 +15,14 @@ URL = sys.argv[1]; PRE = sys.argv[2]
 ARGS = ["--enable-unsafe-swiftshader", "--use-angle=swiftshader", "--disable-dev-shm-usage",
         "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
         "--disable-backgrounding-occluded-windows"]
+
+def _tamper_build(offer):
+    """The host's offer blob with its embedded build id swapped for a bogus one."""
+    d = json.loads(base64.b64decode(offer))
+    assert "mtile" in d, "offer blob carries no lobby metadata"
+    d["mtile"]["build"] = "not-this-build"
+    return base64.b64encode(json.dumps(d).encode()).decode()
+
 
 async def main():
     logs, errors = [], []
@@ -33,14 +41,29 @@ async def main():
         await a.get_by_role("button", name="Host (manual)").wait_for(timeout=90000)
         await b.get_by_role("button", name="Join (manual)").wait_for(timeout=90000)
 
+        # Host picks a non-default stage; the joiner must see it before playing.
+        await a.get_by_role("button", name=re.compile(r"^Arena")).click()
         await a.get_by_role("button", name="Host (manual)").click()
         offer_el = a.locator("textarea[readonly]"); await offer_el.wait_for(timeout=20000)
         offer = (await offer_el.input_value()).strip()
+
+        # Version gate: an offer from a different build must be refused up front.
+        await b.get_by_role("button", name="Join (manual)").click()
+        await b.locator("textarea:not([readonly])").fill(_tamper_build(offer))
+        await b.get_by_role("button", name="Create answer").click()
+        await b.get_by_text("Different versions").wait_for(timeout=10000)
+        print("version mismatch refused")
+        await b.goto(URL, wait_until="load")
+        await b.get_by_role("button", name="Join (manual)").wait_for(timeout=90000)
+
         await b.get_by_role("button", name="Join (manual)").click()
         await b.locator("textarea:not([readonly])").fill(offer)
         await b.get_by_role("button", name="Create answer").click()
         ans_el = b.locator("textarea[readonly]"); await ans_el.wait_for(timeout=20000)
         answer = (await ans_el.input_value()).strip()
+        stage_line = await b.locator(".mtile-stageline").inner_text()
+        assert "Arena" in stage_line, f"joiner did not see the host's stage: {stage_line!r}"
+        print("joiner sees:", " ".join(stage_line.split()))
         await a.locator("textarea:not([readonly])").fill(answer)
         await a.get_by_role("button", name="Connect").click()
         await a.wait_for_selector(".mtile-lobby", state="detached", timeout=30000)
@@ -55,6 +78,17 @@ async def main():
         await a.screenshot(path=PRE + "_host_t1.png")
         await a.keyboard.up("d")
         await asyncio.sleep(1)
+
+        # Disconnect overlay: the host drops the connection mid-match.
+        await a.evaluate("window.mtileRtc.close()")
+        overlay_ok = True
+        try:
+            await b.get_by_text("The other player disconnected").wait_for(timeout=45000)
+            print("joiner shows disconnect overlay")
+        except Exception as e:
+            overlay_ok = False
+            print("disconnect overlay NOT shown:", e)
+        await b.screenshot(path=PRE + "_join_disconnected.png")
         await ba.close(); await bb.close()
 
     t0 = Image.open(PRE + "_join_t0.png").convert("L")
@@ -66,7 +100,7 @@ async def main():
     print(f"join-page changed pixels in play area: {changed}")
     stalls = [l for l in logs if "stall" in l.lower()]
     print("errors:", errors[:3])
-    ok = not errors and changed > 300
+    ok = not errors and changed > 300 and overlay_ok
     print("RESULT:", "PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)
 

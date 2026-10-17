@@ -49,6 +49,12 @@ public class Game1 : Game
         _net = net;
     }
 
+    // Optional stage name that wins over game_config's "Stage" (the web lobby's level
+    // selector; a networked match passes the host's choice so both peers build the same
+    // world). Read once in Initialize, so set it before Run(). Null ⇒ the config decides,
+    // which is the desktop default.
+    public string StageOverride { get; set; }
+
     private readonly Camera _camera = new();
     private IBackdrop _background;
 
@@ -280,7 +286,7 @@ public class Game1 : Game
         if (!OperatingSystem.IsBrowser())
             StageSaver.RegisterSavedStages(Path.GetFullPath(Path.Combine("Levels", "saved")));
 
-        var stage = Stages.Get(_config.Stage);
+        var stage = Stages.Get(string.IsNullOrEmpty(StageOverride) ? _config.Stage : StageOverride);
 
         // Movement tuning. On desktop, point at the absolute repo-source path so
         // FileSystemWatcher can hot-reload tuning edits. On web (Blazor WASM), the
