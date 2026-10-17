@@ -97,6 +97,9 @@ public struct MovementVars
     public bool JumpFromCorner;     // JumpingState launched off a gripped corner (no
                                     // source FSD exists) — keeps the hold window alive
                                     // where TryFindSource would end the jump.
+    public bool JumpImpulse;        // JumpingState on the lattice engine: entered with no
+                                    // floor in leg reach, so the launch is the hybrid
+                                    // impulse rather than the legs' planned rise
     public Vector2 RefEntry;        // LedgePull, Dropdown: the clip's entry anchor (set at Enter)
     public Vector2 RefGate;         // LedgePull, Dropdown: the clip's gate anchor (set at Enter)
     public sbyte AmbientElectiveLatch; // Elective-refusal hysteresis (AmbientCorrector):
