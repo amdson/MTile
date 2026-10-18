@@ -38,6 +38,21 @@ public class ConditionState
         expire = currentFrame + durationFrames;
     }
 
+    // The recovery stamp. Unlike SetFor it keeps the LATER of the pending and the new
+    // expiry: no move can cut a tail already owed short (a parry counter used to
+    // overwrite a finisher's 36f with its own 8f). A combo step that is meant to wipe
+    // the countdown clears RecoveryActive in its Enter (OnEnterClearFlags) first, so
+    // its own Exit stamps fresh.
+    public void StampRecovery(int durationFrames, int currentFrame)
+    {
+        int expire = currentFrame + durationFrames;
+        if (!RecoveryActive || expire > RecoveryExpireFrame) RecoveryExpireFrame = expire;
+        RecoveryActive = true;
+    }
+
+    public void StampRecoveryForSeconds(float seconds, int currentFrame, float dt)
+        => StampRecovery(SimFrames.FromSeconds(seconds, dt), currentFrame);
+
     // Seconds-authored variant — durations are tuned in real time and converted at
     // the caller's actual step rate, so combo windows / recovery feel identical at
     // 60 fps (Simulation.FixedDt) and in headless tests stepping a different dt.

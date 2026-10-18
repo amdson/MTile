@@ -836,7 +836,9 @@ public class GroundSlash1 : SlashLikeAction
         // exists once S1 EXITS (12f in), so the earliest S2 is frame ~13 — no explicit
         // transition gate needed.
         ConditionState.SetForSeconds(ref c.Slash2Ready, ref c.Slash2ExpireFrame, 1.0f, f, dt);
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.167f, f, dt);
+        // Leaving the combo pays the finisher's tail (36f, 2026-10-18); the next combo
+        // step ignores the countdown, so continuing stays lag-free.
+        c.StampRecoveryForSeconds(0.60f, f, dt);
     }
 }
 
@@ -870,7 +872,7 @@ public class GroundSlash2 : SlashLikeAction
     {
         // `connected` tracked but not gating — see GroundSlash1.OnExitSetFlags.
         ConditionState.SetForSeconds(ref c.Slash3Ready, ref c.Slash3ExpireFrame, 1.0f, f, dt);
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.167f, f, dt);
+        c.StampRecoveryForSeconds(0.60f, f, dt);   // see GroundSlash1
     }
 }
 
@@ -901,8 +903,9 @@ public class GroundSlash3 : SlashLikeAction
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
         // End of chain — no further combo flag. The finisher pays the long tail
-        // (retime: 18f — the launch is the reward, the lag is the price).
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.30f, f, dt);
+        // (retime: 18f — the launch is the reward, the lag is the price; doubled to
+        // 36f 2026-10-18).
+        c.StampRecoveryForSeconds(0.60f, f, dt);
     }
 }
 
@@ -946,7 +949,7 @@ public class CrouchSlash : SlashLikeAction
     // (dtilt-like): the low poke is the safest normal in the kit.
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.15f, f, dt);
+        c.StampRecoveryForSeconds(0.15f, f, dt);
     }
 }
 
@@ -970,7 +973,9 @@ public class AirSlash1 : SlashLikeAction
     {
         // `connected` tracked but not gating — see GroundSlash1.OnExitSetFlags.
         ConditionState.SetForSeconds(ref c.AirSlash2Ready, ref c.AirSlash2ExpireFrame, 1.0f, f, dt);
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame,  0.167f, f, dt);
+        // Leaving the air combo pays AirSlash2's tail (28f, 2026-10-18); AirSlash2
+        // itself ignores the countdown.
+        c.StampRecoveryForSeconds(0.46f, f, dt);
     }
 }
 
@@ -1000,7 +1005,8 @@ public class AirSlash2 : SlashLikeAction
     }
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.23f, f, dt);
+        // Air finisher's tail: 14f, doubled to 28f 2026-10-18.
+        c.StampRecoveryForSeconds(0.46f, f, dt);
     }
 }
 
@@ -1050,7 +1056,7 @@ public class AirTurnSlash : SlashLikeAction
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
         // No combo follow-up — turn-around is one-and-done.
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.20f, f, dt);
+        c.StampRecoveryForSeconds(0.20f, f, dt);
     }
 }
 
@@ -1168,7 +1174,7 @@ public class DownAirSlash : SlashLikeAction
     // still roll into the next down-air on the enemy below, one readable beat later.
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.23f, f, dt);
+        c.StampRecoveryForSeconds(0.23f, f, dt);
     }
 
     // Replaces the base's plain `Velocity += recoil` on an ENTITY connect (see the
@@ -1468,9 +1474,7 @@ public class StabAction : ActionState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        ConditionState.SetFor(ref ab.Condition.RecoveryActive,
-                              ref ab.Condition.RecoveryExpireFrame,
-                              CommitProfile(ctx, in vars), ctx.CurrentFrame);
+        ab.Condition.StampRecovery(CommitProfile(ctx, in vars), ctx.CurrentFrame);
     }
 
     // Heavy-stance modifiers throughout the stab; friction dips during the lunge
@@ -1873,7 +1877,7 @@ public class GuardRetaliateAction : SlashLikeAction
 
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.13f, f, dt);
+        c.StampRecoveryForSeconds(0.13f, f, dt);
     }
 }
 
@@ -1942,9 +1946,7 @@ public class PulseAction : ActionState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        ConditionState.SetFor(ref ab.Condition.RecoveryActive,
-                              ref ab.Condition.RecoveryExpireFrame,
-                              CommitProfile(ctx, in vars), ctx.CurrentFrame);
+        ab.Condition.StampRecovery(CommitProfile(ctx, in vars), ctx.CurrentFrame);
     }
 
     // Heavy stance throughout the pulse — applies on ground AND in air, unlike
@@ -2107,8 +2109,7 @@ public class BurstAction : ActionState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
-                              ref ab.Condition.RecoveryExpireFrame, 0.30f, ctx.CurrentFrame, ctx.Dt);
+        ab.Condition.StampRecoveryForSeconds(0.30f, ctx.CurrentFrame, ctx.Dt);
     }
 
     // Planted stance while the shell goes out — the player is bracing against the
@@ -2602,8 +2603,7 @@ public class BlockBurstAction : ActionState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
-                              ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+        ab.Condition.StampRecoveryForSeconds(RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
     }
 
     // Light planted stance — a flick of the wrist, not a commitment.
@@ -3015,7 +3015,7 @@ public class BeamAction : ActionState
         // Recovery on exit no matter how we left — a successful beam locks the
         // player out of follow-up Shift+LMB for a moment, an interrupted charge
         // does likewise (which is a feel-call; it punishes spamming).
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+        ab.Condition.StampRecoveryForSeconds(RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
     }
 
     // Heavy stance while charging + firing — beam needs the player committed.
@@ -3131,7 +3131,7 @@ public class LobbedAreaAction : ActionState
     {
         // Recovery regardless — short-charge release still locks out a follow-up
         // throw for a moment so spamming low-budget lobs is throttled.
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive, ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+        ab.Condition.StampRecoveryForSeconds(RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
 
         // RMB still held = forced exit (preemption) — don't fire.
         if (ctx.Input.RightClick) return;
@@ -3491,8 +3491,7 @@ public class BlockGrabAction : ActionState
             // Recovery only for a grab that actually took something — a lapsed press
             // shouldn't cost the player lag.
             if (point.HarvestBlocks > 0)
-                ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
-                                      ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+                ab.Condition.StampRecoveryForSeconds(RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
         }
 
         // Spend the gesture either way, so the release frame can't also route a Click
@@ -3724,8 +3723,7 @@ public class GrabAction : ActionState
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        ConditionState.SetForSeconds(ref ab.Condition.RecoveryActive,
-            ref ab.Condition.RecoveryExpireFrame, RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+        ab.Condition.StampRecoveryForSeconds(RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
@@ -3787,6 +3785,6 @@ public class GrabbedSlash : SlashLikeAction
     }
 
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
-        => ConditionState.SetForSeconds(ref c.RecoveryActive, ref c.RecoveryExpireFrame, 0.15f, f, dt);
+        => c.StampRecoveryForSeconds(0.15f, f, dt);
 }
 
