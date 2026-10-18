@@ -44,7 +44,10 @@ public class JumpingState : MovementState
             // Stair push-off: a body riding a flight's corner line drifts out
             // of the ground probe's window for a few frames of every riser;
             // the stair probe still has the tread under it (see OnStairTread).
-            if (!OnStairTread(ctx) && !TryCornerLaunch(ctx, abilities, out _)) return false;
+            // Anything else the legs could push off — a floor just out of the probe's
+            // reach, or the lip of a ledge beside the body (JumpSupportChecker).
+            if (!OnStairTread(ctx) && !TryCornerLaunch(ctx, abilities, out _)
+                && !JumpSupportChecker.TryFind(ctx.Body, ctx.Chunks, out _)) return false;
             return OnLattice || !(ctx.TryGetCeiling(out var c)
                      && ctx.Body.Position.Y - c.Position.Y <= JumpClearance.Headroom);
         }
@@ -68,9 +71,11 @@ public class JumpingState : MovementState
     internal static bool HasLaunchSource(EnvironmentContext ctx, PlayerAbilityState abilities)
         => HasGroundSource(ctx) || TryCornerLaunch(ctx, abilities, out _);
 
-    // Standing on something: ground, or a stair tread. WallJumpingState yields to it.
+    // Standing on something: ground, a stair tread, or a surface/ledge lip in leg
+    // reach (JumpSupportChecker). WallJumpingState yields to it.
     internal static bool HasGroundSource(EnvironmentContext ctx)
-        => ctx.TryGetGround(out _) || OnStairTread(ctx);
+        => ctx.TryGetGround(out _) || OnStairTread(ctx)
+           || JumpSupportChecker.TryFind(ctx.Body, ctx.Chunks, out _);
 
     // Climbing a flight, the stair probe (StairClimbState's own continuation) is the
     // authority on support — not the generic ground probe, whose rest-band window the
