@@ -6,6 +6,13 @@ namespace MTile;
 public static class GroundChecker
 {
     public const float ProbeSlack = 5f;
+    // The STANDING probe's slack (EnvironmentContext.TryGetGround): ProbeSlack measured
+    // from where the legs end, not from the polygon bottom. The 2026-09-04 shrink raised
+    // the polygon bottom by BodyHeightTrim and the stand hover rose with it, which left
+    // this probe 0.44 px of slack at rest: a walking body's ride-height bob flickered
+    // Standing↔Falling over solid floor, and a jump pressed on a flicker frame was spent
+    // as the double jump. CorrectorChannels.LegReach is built from this same constant.
+    public const float StandingProbeSlack = ProbeSlack + PlayerCharacter.BodyHeightTrim;
     // Pull the left/right faces inward so a wall tile the body's side vertex is merely flush
     // against (its column shares the strip-below's boundary) isn't reported as a floor under the
     // body. Mirror of WallChecker.VerticalInset — without it, pressing jump while wall-sliding
