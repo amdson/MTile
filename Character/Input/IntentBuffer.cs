@@ -88,15 +88,22 @@ losing capacity. holding right click beyond this point should continue pulling f
 //   The winning action's Enter calls Consume to mark its intent used.
 //   PlayerCharacter.Update calls Prune at the end to drop Consumed + aged-out entries.
 //
-// One global age cap (MaxAgeFrames) — matches the 2-second buffer in the plan.
-// Per-intent-type caps are easy to add later if a specific gesture needs a shorter
-// memory.
+// One global age cap (MaxAgeFrames) — matches the 2-second buffer in the plan —
+// bounds how long an intent is KEPT. How far back a read LOOKS is separate:
+// Peek/Consume/Refresh default to DefaultLookbackFrames, and movement states pass
+// their own narrower jump/up windows.
 public class IntentBuffer
 {
     // Loose upper bound on gesture replay (~2 s at 60 fps). Deliberately a frame
     // count, not seconds-derived: it's a safety cap, not a feel knob, and Peek's
     // default parameter must be a compile-time constant.
     private const int MaxAgeFrames = 120;
+
+    // Default read window for Peek/Consume/Refresh — the effective action-input
+    // buffer. A press made during another move's recovery still fires when the
+    // move ends, but one older than this never resurfaces long after the fact.
+    // Compile-time constant because it's a default parameter value.
+    public const int DefaultLookbackFrames = 20;
 
     // Jump presses use a much shorter window than the global gesture cap: a
     // slightly-early press should buffer onto the next landing/launch, not replay
@@ -117,9 +124,9 @@ public class IntentBuffer
     public void Issue(in ActionIntent intent) => _intents.Add(intent);
 
     // First non-consumed, non-expired intent of `type`. Pure peek — no side effect.
-    // maxAgeFrames narrows the acceptance window below the global cap (jump states
-    // pass JumpBufferFrames).
-    public bool Peek(IntentType type, int currentFrame, out ActionIntent intent, int maxAgeFrames = MaxAgeFrames)
+    // maxAgeFrames sets the acceptance window (default DefaultLookbackFrames; jump
+    // states pass JumpBufferFrames).
+    public bool Peek(IntentType type, int currentFrame, out ActionIntent intent, int maxAgeFrames = DefaultLookbackFrames)
     {
         for (int i = 0; i < _intents.Count; i++)
         {
@@ -135,7 +142,7 @@ public class IntentBuffer
     }
 
     // Mark the first matching intent as Consumed. Pruned on the next Prune call.
-    public bool Consume(IntentType type, int currentFrame, int maxAgeFrames = MaxAgeFrames)
+    public bool Consume(IntentType type, int currentFrame, int maxAgeFrames = DefaultLookbackFrames)
     {
         for (int i = 0; i < _intents.Count; i++)
         {
@@ -156,7 +163,7 @@ public class IntentBuffer
     // exit point; the keep-alive stops when the state ends, so the intent then expires
     // on its normal window. Only refreshes intents still inside maxAgeFrames — a
     // long-dead press can't be resurrected.
-    public bool Refresh(IntentType type, int currentFrame, int maxAgeFrames = MaxAgeFrames)
+    public bool Refresh(IntentType type, int currentFrame, int maxAgeFrames = DefaultLookbackFrames)
     {
         for (int i = 0; i < _intents.Count; i++)
         {
