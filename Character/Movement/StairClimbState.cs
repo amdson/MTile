@@ -34,6 +34,7 @@ public class StairClimbState : MovementState
     // not start climbing it (Stunned's Active 25 would otherwise lose to this 29).
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
     public override AnimTag AnimationTag => AnimTag.Stairs;
+    public override bool GroundedForActions => true;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {

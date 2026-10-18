@@ -90,7 +90,7 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         Assert.True(sim.Player.SpikesSelected);
         Run(sim, 1, f => new PlayerInput { Num1 = true });
         Assert.False(sim.Player.SpikesSelected);
-        Assert.Equal(TileType.Stone, sim.ActiveBlockType);
+        Assert.Equal(TileType.Stone, sim.Player.ActiveBlockType);
     }
 
     [Fact]

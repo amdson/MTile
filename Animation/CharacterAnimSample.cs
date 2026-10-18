@@ -269,7 +269,7 @@ public readonly struct CharacterAnimSample
         {
             groundGap = 1e6f;   // no floor within the probe — clearly airborne
             if (GroundChecker.TryFind(p.Body, chunks, PlayerCharacter.Radius, PlayerCharacter.Radius,
-                                      GroundChecker.ProbeSlack, dt, out var g))
+                                      GroundChecker.StandingProbeSlack, dt, out var g))
                 groundGap = MathF.Max(0f, (g.Position.Y - pos.Y) - g.MinDistance);
         }
 

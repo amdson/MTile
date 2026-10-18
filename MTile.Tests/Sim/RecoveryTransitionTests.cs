@@ -261,4 +261,69 @@ public class RecoveryTransitionTests(ITestOutputHelper output)
             $"Release after an overhold should still fire the stab promptly (release≈f{release}, stab@f{stabFirst}).");
     }
 
+    // A grounded charge must stay planted. The charge's 0.3× gravity dip used to apply
+    // on the ground too, where the standing spring (tuned against full gravity) lifted
+    // the body until the probe lost the floor — Standing↔Falling flicker for the whole
+    // ramp. The dip is air-only now.
+    [Fact]
+    public void GroundedCharge_StaysPlanted_NoStateFlicker()
+    {
+        var terrain = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        var sim = new Simulation(terrain, new Vector2(10 * Chunk.TileSize, 3 * Chunk.TileSize - PlayerCharacter.Radius));
+        var p = sim.Player;
+        for (int i = 0; i < 60; i++) sim.Step(default);
+        float y0 = p.Body.Position.Y;
+        var hold = new PlayerInput { LeftClick = true, MouseWorldPosition = p.Body.Position + new Vector2(80f, 0f) };
+
+        float maxRise = 0f;
+        for (int i = 0; i < 90; i++)
+        {
+            sim.Step(hold);
+            if (i < 2) continue;   // the press frame resolves into the charge posture
+            Assert.Equal(nameof(RecoveryAction), p.CurrentActionName);
+            Assert.True(p.IsGrounded, $"f{i}: charge left the ground ({p.CurrentStateName})");
+            maxRise = System.MathF.Max(maxRise, y0 - p.Body.Position.Y);
+        }
+        output.WriteLine($"max rise {maxRise:F2} px");
+        Assert.True(maxRise < 1f, $"grounded charge rose {maxRise:F2} px");
+    }
+
+    // A double jump disrupts a charge, and the still-held button does not restart it —
+    // a new charge needs a new press.
+    [Fact]
+    public void DoubleJump_DisruptsCharge_HeldButtonDoesNotRelatch()
+    {
+        var terrain = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+        var sim = new Simulation(terrain, new Vector2(10 * Chunk.TileSize, 5 * Chunk.TileSize - PlayerCharacter.Radius));
+        var p = sim.Player;
+        for (int i = 0; i < 60; i++) sim.Step(default);
+        var mouse = p.Body.Position + new Vector2(80f, 0f);
+
+        sim.Step(new PlayerInput { Space = true });
+        for (int i = 0; i < 6; i++) sim.Step(default);
+        var hold = new PlayerInput { LeftClick = true, MouseWorldPosition = mouse };
+        for (int i = 0; i < 8; i++) sim.Step(hold);
+        Assert.Equal(nameof(RecoveryAction), p.CurrentActionName);   // charging in the air
+
+        var holdAndJump = hold; holdAndJump.Space = true;
+        sim.Step(holdAndJump);
+        int f = 0;
+        while (p.CurrentState is not DoubleJumpingState && f++ < 6) sim.Step(hold);
+        Assert.IsType<DoubleJumpingState>(p.CurrentState);
+        for (int i = 0; i < 20; i++)
+        {
+            sim.Step(hold);
+            Assert.NotEqual(nameof(RecoveryAction), p.CurrentActionName);
+        }
+    }
 }

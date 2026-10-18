@@ -93,6 +93,12 @@ public abstract class MovementState
     // virtuals below: the sim never reads it.
     public virtual AnimTag AnimationTag => AnimTag.None;
 
+    // True for states that are on their feet even when the ground probe misses: a vault
+    // or stair climb lifts the body off the floor for a few frames, but an attack
+    // started there should still be a GROUND attack (EnvironmentContext.GroundedForActions).
+    // Sim-affecting, unlike the render-only virtuals around it.
+    public virtual bool GroundedForActions => false;
+
     // Normalized progress [0,1] of a guided maneuver, exposed to the animation layer for
     // overlays whose clip time is driven by SPATIAL progress rather than a clock — a vault
     // advances by body position vs. the ledge corner, not elapsed time, so its hand overlay

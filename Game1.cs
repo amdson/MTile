@@ -841,10 +841,22 @@ public class Game1 : Game
 
     // The player this client controls + the camera follows. Host (index 0) = primary;
     // joiner (index 1) = the secondary player. Offline = primary.
+    // This machine's cursor in screen pixels, sampled in Update for the HUD marker.
+    private Point _mouseScreen;
+
     private PlayerCharacter LocalPlayer =>
         _net != null && _net.LocalPlayerIndex == 1 && _sim.SecondaryPlayers.Count > 0
             ? _sim.SecondaryPlayers[0].Player
             : _sim.Player;
+
+    // The local player's rig + held input, paired with LocalPlayer. The HUD and the
+    // "about me" debug overlays read these; reading _sim.Player / _sim.CurrentInput
+    // instead showed the joiner the host's health, blocks and meters.
+    private CharacterAnimator LocalAnimator =>
+        ReferenceEquals(LocalPlayer, _sim.Player) || _secondaryAnimators.Count == 0
+            ? _animator : _secondaryAnimators[0];
+    private PlayerInput LocalHeldInput =>
+        ReferenceEquals(LocalPlayer, _sim.Player) ? _sim.CurrentInput : _sim.SecondaryPlayers[0].Ctrl.Current;
 
     protected override void Update(GameTime gameTime)
     {
@@ -978,6 +990,7 @@ public class Game1 : Game
         _prevKeys = keyboardState;
 
         var mouseState = Mouse.GetState();
+        _mouseScreen = mouseState.Position;
         var viewport = GraphicsDevice.Viewport;
         _screenCenter = new Vector2(viewport.Width / 2f, viewport.Height / 2f);
         var mouseWorldPos = _camera.ScreenToWorld(mouseState.Position.ToVector2(), _screenCenter);
@@ -1325,11 +1338,13 @@ public class Game1 : Game
             foreach (var hb in _sim.Hurtboxes.All)
                 _debugOverlay.DrawHurtbox(hb);
 
+        // The debug overlays below are about "me": the player this client controls.
+        var local = LocalPlayer;
         if (_config.DebugDrawPlayerOrientation)
         {
-            var bodyPos = player.Body.Position;
-            _debugOverlay.DrawConstraintArrow(bodyPos, new Vector2(player.Facing, 0f), Color.Magenta);
-            _debugOverlay.DrawLine(bodyPos, _sim.CurrentInput.MouseWorldPosition, Color.Yellow * 0.6f, 1);
+            var bodyPos = local.Body.Position;
+            _debugOverlay.DrawConstraintArrow(bodyPos, new Vector2(local.Facing, 0f), Color.Magenta);
+            _debugOverlay.DrawLine(bodyPos, LocalHeldInput.MouseWorldPosition, Color.Yellow * 0.6f, 1);
         }
 
         if (_config.DebugDrawConstraints)
@@ -1339,37 +1354,37 @@ public class Game1 : Game
                         _debugOverlay.DrawConstraintArrow(sc.Position, sc.Normal,
                             c is FloatingSurfaceDistance ? Color.Cyan : Color.Yellow);
 
-        // Corridor probe ahead of the primary player, in their facing direction. The scan is
+        // Corridor probe ahead of the local player, in their facing direction. The scan is
         // pure and render-local — this call never feeds back into the sim.
         if (_config.DebugDrawCorridor)
-            _debugOverlay.DrawCorridor(CorridorProbe.Scan(player.Body, _sim.Chunks, player.Facing));
+            _debugOverlay.DrawCorridor(CorridorProbe.Scan(local.Body, _sim.Chunks, local.Facing));
 
         // C-space obstacle boundary near the player — what the row builder plans against.
         if (_config.DebugDrawCObstacles)
-            _debugOverlay.DrawCObstacles(_sim.Chunks, player.Body.Polygon, player.Body.Position, 160f);
+            _debugOverlay.DrawCObstacles(_sim.Chunks, local.Body.Polygon, local.Body.Position, 160f);
 
         // Step-planner plans: treads, foot targets, landing wishes, rejections.
         // Draws nothing unless a locomotion clip with contact spans is running over terrain.
-        if (_config.DebugDrawStepPlanner && _animator != null)
-            _debugOverlay.DrawStepPlan(_animator.Planner);
+        if (_config.DebugDrawStepPlanner && LocalAnimator != null)
+            _debugOverlay.DrawStepPlan(LocalAnimator.Planner);
 
         // Predicted coast (BallisticPredictor) from the player's current state under the
         // currently-held input. Pure render-local rollout — identity modifiers (action
         // modifiers aren't reproduced here; the overlay approximates the baseline coast).
         if (_config.DebugDrawCoast)
         {
-            var inp = _sim.CurrentInput;
+            var inp = LocalHeldInput;
             int dirX = (inp.Right ? 1 : 0) - (inp.Left ? 1 : 0);
             int n = BallisticPredictor.Predict(
-                player.Body, _sim.Chunks, dirX, inp.Down, player.IsGrounded,
-                MovementModifiers.Identity, player.Gravity,
+                local.Body, _sim.Chunks, dirX, inp.Down, local.IsGrounded,
+                MovementModifiers.Identity, local.Gravity,
                 Simulation.FixedDt, 20, _coastScratch);
-            _debugOverlay.DrawCoast(player.Body.Position, _coastScratch, n);
+            _debugOverlay.DrawCoast(local.Body.Position, _coastScratch, n);
 
             // Clearance rows the coast implies (constraint builder, step 2) —
             // the violations the corrector will exist to resolve.
             int nRows = ClearanceConstraintBuilder.Build(
-                _sim.Chunks, player.Body.Polygon, _coastScratch, n,
+                _sim.Chunks, local.Body.Polygon, _coastScratch, n,
                 margin: 2f, ClearanceConstraintBuilder.DefaultDeepViolation,
                 _rowScratch, out _);
             _debugOverlay.DrawClearanceRows(_coastScratch, _rowScratch, nRows);
@@ -1469,7 +1484,7 @@ public class Game1 : Game
         _prof.End(_sGlow, tGlow);
 
         long tHud = _prof.Begin();
-        _hud.Draw(_sim, _animator);
+        _hud.Draw(LocalPlayer, LocalAnimator, _mouseScreen);
         if (string.Equals(_activeStage, "depths", StringComparison.OrdinalIgnoreCase))
             _depthsHud.Draw(_spriteBatch, _debugFont, GraphicsDevice.Viewport, _sim);
         if (_config.DrawFighterNames)

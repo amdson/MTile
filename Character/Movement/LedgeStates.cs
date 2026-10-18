@@ -48,11 +48,19 @@ public class LedgeGrabState : MovementState
     public override bool Suppresses(MovementState candidate, EnvironmentContext ctx)
         => IsInwardWallJump(candidate, ctx);
 
+    // Up only climbs a lip the body FACES (2026-10-18): a press with your back to a
+    // corner — jumping past it, or a wall behind you — must not haul you over it.
+    // Gates the Up-driven entries (the side grab here, LedgePull's from-above pull);
+    // a hang already faces its wall, and the drop-in grab (Down) is not an Up press.
+    internal static bool FacesLip(PlayerAbilityState abilities, int wallDir)
+        => (abilities.Facing == 0 ? 1 : abilities.Facing) == wallDir;
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         // Path A: approach from side — a buffered Up press (IntentType.UpPress), wall +
         // ledge corner above head detected
-        if (ctx.TryGetWall(_wallDir, out _) && ctx.TryGetLedgeCorner(_wallDir, out _)
+        if (FacesLip(abilities, _wallDir)
+            && ctx.TryGetWall(_wallDir, out _) && ctx.TryGetLedgeCorner(_wallDir, out _)
             && ctx.Intents.Peek(IntentType.UpPress, ctx.CurrentFrame, out _, ctx.UpBufferFrames))
             return true;
         // Path B: drop from above — Down just pressed, exposed corner at foot level
@@ -286,7 +294,7 @@ public class LedgePullState : MovementState
             return ctx.Input.Up
                 && ctx.Intents.Peek(IntentType.UpHold, ctx.CurrentFrame, out _, ctx.UpBufferFrames);
         }
-        return FromAbove(ctx);
+        return LedgeGrabState.FacesLip(abilities, _wallDir) && FromAbove(ctx);
     }
 
     // Entry without a hang: the body is already where the pull would carry it —
