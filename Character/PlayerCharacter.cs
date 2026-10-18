@@ -728,6 +728,8 @@ public class PlayerCharacter : IHittable
         // Action FSM selection moved BEFORE Movement.Update so the freshly-selected
         // action's modifiers are in effect when movement reads physics knobs this
         // same frame. Action.Update still runs after Movement.Update (below).
+        // This frame's movement state is already chosen; actions may read it.
+        ctx.CurrentMovement = _currentState;
         if (!_currentAction.CheckConditions(ctx, _abilities, ref _actionVars))
         {
             _currentAction.Exit(ctx, _abilities, ref _actionVars);

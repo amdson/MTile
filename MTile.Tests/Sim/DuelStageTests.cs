@@ -28,6 +28,25 @@ public class DuelStageTests
         Assert.True(System.MathF.Abs(g.Player.Body.Velocity.Y) < 5f);
     }
 
+    // Block selection is per-player state: both start on the configured material, and
+    // P2's number key moves only P2's picker.
+    [Fact]
+    public void BlockPicker_IsPerPlayer()
+    {
+        var g = new Simulation(new GameConfig { SpawnSecondPlayer = true, StartingBlockType = "Sand" },
+                               Stages.Get("duel_plain"));
+        var p1 = g.SecondaryPlayers[0].Player;
+        Assert.Equal(TileType.Sand, g.Player.ActiveBlockType);
+        Assert.Equal(TileType.Sand, p1.ActiveBlockType);
+
+        g.Step(default, new PlayerInput { Num1 = true });
+        g.Step(default, new PlayerInput { Num5 = true });
+        Assert.Equal(TileType.Stone, p1.ActiveBlockType);
+        Assert.True(p1.SpikesSelected);
+        Assert.Equal(TileType.Sand, g.Player.ActiveBlockType);
+        Assert.False(g.Player.SpikesSelected);
+    }
+
     [Fact]
     public void HallHasARoof_PlainIsOpen()
     {

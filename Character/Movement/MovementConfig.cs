@@ -207,6 +207,10 @@ public class MovementConfig
     // StairClimbState A/B (hot-reload): off = a regular flight is climbed by the vault
     // chain again (one Parkour re-entry per riser).
     public bool  StairClimbEnabled              { get; set; } = true;
+    // ParkourState alone (hot-reload): off = no at-speed 1-block vault. Mantle keeps its
+    // slow/flush entries and ArcJump its taller band; an at-speed 1-block step is left
+    // to the ambient fold. Turned off 2026-10-18 in configs/movement_config.json.
+    public bool  ParkourEnabled                 { get; set; } = true;
     public int   CorrectorHorizon               { get; set; } = 18;
     public float CorrectorMargin                { get; set; } = 2f;
     public float CorrectorDeltaWeight           { get; set; } = 5f;

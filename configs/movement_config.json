@@ -1,4 +1,6 @@
 {
+  // ParkourState (at-speed 1-block vault) off switch — set true to restore it.
+  "ParkourEnabled": false,
   // options: "full" | "redirect-traction" | "legs-only"  (hot-reloads while running)
   "CorrectorScenario": "full",
   // Stand-fold engine: "qp" (linearized channel solve) | "ref" (terrain-

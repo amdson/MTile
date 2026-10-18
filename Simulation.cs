@@ -338,11 +338,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     public HitboxWorld  Hitboxes  => _hitboxes;
     public HurtboxWorld Hurtboxes => _hurtboxes;
     public ForceFieldWorld ForceFields => _fields;
+    // The PRIMARY player's input. Per-player HUD state (health, block selection,
+    // meters) is read off the PlayerCharacter the client controls, never off the sim.
     public PlayerInput CurrentInput => _controller.Current;
-    // Primary player's current block selection — surfaced for the HUD.
-    public TileType ActiveBlockType => _player.ActiveBlockType;
-    // Primary player's spike-overlay selection (block picker key 5) — HUD.
-    public bool SpikesSelected => _player.SpikesSelected;
 
     // Headless/test constructor: terrain is supplied directly (no file load) and the
     // scene is populated by an optional delegate (spawn entities / platforms via the
@@ -403,16 +401,20 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         _player = new PlayerCharacter(_playerSpawn) { HitIds = _hitIds, CombatSystem = _combat };
         RegisterPlayer(_player);
 
-        // Seed the block picker from config. Falls back to Dirt on any unknown string.
-        if (Enum.TryParse<TileType>(config.StartingBlockType, ignoreCase: true, out var startType))
-            _player.ActiveBlockType = startType;
-
         // Optional second player for manual combat testing.
         if (config.SpawnSecondPlayer)
         {
             var offset = new Vector2(config.SecondPlayerOffsetX, config.SecondPlayerOffsetY);
             _secondSpawn = stage.SecondSpawn ?? (_playerSpawn + offset);
             AddSecondaryPlayer(_secondSpawn);
+        }
+
+        // Seed every player's block picker from config (P2 used to keep the Dirt
+        // default). Falls back to Dirt on any unknown string.
+        if (Enum.TryParse<TileType>(config.StartingBlockType, ignoreCase: true, out var startType))
+        {
+            _player.ActiveBlockType = startType;
+            foreach (var (p, _) in _secondaryPlayers) p.ActiveBlockType = startType;
         }
 
         // Hand control to the stage: it populates platforms, tickers, and entities.

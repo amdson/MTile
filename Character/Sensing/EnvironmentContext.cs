@@ -77,6 +77,14 @@ public class EnvironmentContext
     // stamp is still ticking. Refreshed by PlayerCharacter.Update right before
     // the action scan; null in hand-built test contexts (treated as neutral).
     public ActionState CurrentAction;
+    // This frame's movement state (selection runs before the action FSM), for actions
+    // that ask GroundedForActions. Set by PlayerCharacter.Update.
+    public MovementState CurrentMovement;
+
+    // "Am I on the ground?" as attacks see it: the ground probe, OR a movement state
+    // that is footwork even while the probe misses (vault, mantle, stair climb).
+    public bool GroundedForActions
+        => TryGetGround(out _) || CurrentMovement?.GroundedForActions == true;
     // Lookahead overlay: while RecoveryAction probes a hypothetical future frame,
     // this carries the hypothetical countdown index and RecoveryIndex() returns
     // it verbatim (CurrentFrame is shifted by the same probe). Null outside it.

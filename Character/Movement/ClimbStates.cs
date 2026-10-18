@@ -40,6 +40,8 @@ public abstract class ClimbManeuverBase : MovementState
     // The authored arc this climb follows (ReferenceClips/<name>.json, baked in
     // ReferenceClipRegistry) — the same arc the animation's body path maps from.
     protected abstract string ClipName { get; }
+    // Per-maneuver off switch (MovementConfig), checked with CorrectorClimbEnabled.
+    protected virtual bool Enabled => true;
 
     // Each subclass names its own clip family. They shared AnimTag.Parkour (and so one clip)
     // until 2026-08-04 — a speed vault, a flush climb and a two-block arc all reading as the
@@ -48,6 +50,8 @@ public abstract class ClimbManeuverBase : MovementState
     public override int ActivePriority  => MovementPriorities.ClimbActive;
     public override int PassivePriority => MovementPriorities.ClimbPassive;
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
+    // A vault/mantle/arc-jump is footwork, not a jump: a slash out of it is a ground slash.
+    public override bool GroundedForActions => true;
 
     // Height-fraction progress + lip grip for the hands overlay — pure functions
     // of MovementVars/body, so a restore rebuilds them (LedgeStates idiom).
@@ -61,7 +65,7 @@ public abstract class ClimbManeuverBase : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         var cfg = MovementConfig.Current;
-        if (!cfg.CorrectorClimbEnabled) return false;
+        if (!cfg.CorrectorClimbEnabled || !Enabled) return false;
         if (ctx.Intent.HeldHorizontal != _dir || !ctx.TryGetGround(out _)) return false;
         // Launch gate (StandingState's entry rule): a body rising faster than
         // support could ever push it is ballistic — the ground probe merely
@@ -353,6 +357,7 @@ public class ParkourState : ClimbManeuverBase
     public ParkourState(int dir) : base(dir) { }
     protected override string ClipName => ReferenceClipRegistry.Parkour;
     public override AnimTag AnimationTag => AnimTag.Parkour;
+    protected override bool Enabled => MovementConfig.Current.ParkourEnabled;
     protected override float RiseBandMin => MovementConfig.Current.MantleMinRise;
     protected override float RiseBandMax => MovementConfig.Current.MantleMaxRise;
     protected override bool  RequiresRunningEntry => true;

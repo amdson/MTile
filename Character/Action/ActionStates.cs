@@ -315,6 +315,14 @@ public class RecoveryAction : ActionState
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
+        // A double jump disrupts the wind-up. Drop the charge BEFORE Exit (so it stamps
+        // nothing) and spend the press, or the still-held button re-latches a fresh
+        // charge off the same PressEdge next frame — a new charge needs a new press.
+        if (vars.Charging && ctx.CurrentMovement is DoubleJumpingState)
+        {
+            vars.Charging = false;
+            ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
+        }
         if (ab.Condition.RecoveryActive || ctx.HitDisadvantageFrames() > 0) return true;
         // Index 0 — the READY posture: persist while a held LMB charge lives. No
         // time cap — an overheld charge settles at SettleFraction rather than
@@ -329,7 +337,7 @@ public class RecoveryAction : ActionState
         // continuation in Update re-broadcasts the exiting slash's aim.
         vars.TimeInState = 0f;
         vars.Facing      = ab.Facing == 0 ? 1 : ab.Facing;
-        vars.IsGrounded  = ctx.TryGetGround(out _);
+        vars.IsGrounded  = ctx.GroundedForActions;
         vars.Charging    = ChargeInputLive(ctx);
     }
 
@@ -353,10 +361,14 @@ public class RecoveryAction : ActionState
         {
             vars.Charging    = true;
             vars.TimeInState = 0f;   // charge clock — drives the curve + pulse indicator
-            vars.IsGrounded  = ctx.TryGetGround(out _);
+            vars.IsGrounded  = ctx.GroundedForActions;
             vars.Facing      = ab.Facing == 0 ? 1 : ab.Facing;
         }
         else if (!ctx.Input.LeftClick || ctx.Input.Shift) vars.Charging = false;
+        // Live, not latched at the charge start: the gravity dip below keys off it, so
+        // a charge that walks off a ledge floats and one that lands stops floating.
+        // Update runs after movement, so the modifier reads it one frame late — fine.
+        if (vars.Charging) vars.IsGrounded = ctx.GroundedForActions;
         // (The hold-field continuation that used to live here is gone — see the
         // HoldVictims note on SlashLikeAction. It ran off Slash2Ready/Slash3Ready
         // rather than off HoldVictims, so it kept pulling victims through the combo
@@ -387,7 +399,10 @@ public class RecoveryAction : ActionState
     // is live, never during a bare countdown. Slashes flick through the wind-up in
     // 1–2 frames so the dip is imperceptible; a long-held stab charge lingers and
     // feels heavy. The GravityScale dip gives a floaty hover while winding up in
-    // the air; grounded, the standing spring overrides gravity so it's a no-op.
+    // the air — AIR ONLY. Grounded it is not a no-op: the standing spring is tuned
+    // against full gravity, so at 0.3× it lifted the body ~3.4 px until the probe
+    // lost the floor, and the state flickered Standing↔Falling every few frames for
+    // the whole ramp (the charge "hover + spasm", fixed 2026-10-18).
     public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
     {
         if (!vars.Charging) return;
@@ -399,7 +414,7 @@ public class RecoveryAction : ActionState
         // now, so a settle-length dip would be a free 0.3-gravity glide for as
         // long as LMB stays down — the charge stance outstays its wind-up, the
         // hover must not.
-        if (vars.TimeInState < ChargeRampSeconds + SweetSpotSeconds)
+        if (!vars.IsGrounded && vars.TimeInState < ChargeRampSeconds + SweetSpotSeconds)
             m.GravityScale *= 0.3f;
     }
 
@@ -644,7 +659,9 @@ public abstract class SlashLikeAction : ActionState
         // the recovery index inside EntryOk above. Guard's escape from stun is
         // its own 0.2s entry window — see GuardAction.
         if (ctx.Combat?.BlocksAttack == true) return false;
-        bool grounded = ctx.TryGetGround(out _);
+        // GroundedForActions, not the raw probe: a vault lifts the body clear of the
+        // floor, and a slash out of it should still be a ground slash.
+        bool grounded = ctx.GroundedForActions;
         if (RequireGround && !grounded) return false;
         if (RequireAir    &&  grounded) return false;
         if (!CombosOk(ab.Condition)) return false;
@@ -920,7 +937,7 @@ public class CrouchSlash : SlashLikeAction
         if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
         if (!EntryOk(ctx)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
-        if (!ctx.TryGetGround(out _)) return false;
+        if (!ctx.GroundedForActions) return false;
         if (ctx.PreviousState(0) is not CrouchedState) return false;
         return true;
     }
@@ -1208,13 +1225,15 @@ public class StabAction : ActionState
     private const float HurtboxStartTime      = 0.18f;
     private const float HurtboxActiveDuration = 7f / 60f;
 
-    // Lunge window: a short forward-glide phase AFTER the hitbox active window
-    // (0.25–0.40) and BEFORE the settle (0.55–0.60). During this window the
-    // ground-friction modifier dips so the velocity assist below can actually
-    // translate the body — outside it, friction is back up to sell the plant.
-    private const float LungeStart   = 0.10f;
+    // Lunge window: a forward glide that opens early in the wind-up (3f), carries
+    // through the active window (0.18–0.30) and ends before the settle (0.55–0.60).
+    // During this window the ground-friction modifier dips so the velocity assist
+    // below can actually translate the body — outside it, friction is back up to sell
+    // the plant. 2026-10-18: start 0.10 → 0.05 and speed 90 → 135 (×1.5), so the lunge
+    // is under way before the hit instead of arriving with it.
+    private const float LungeStart   = 0.05f;
     private const float LungeEnd     = 0.4f;
-    private const float LungeSpeed   = 90f;     // px/s horizontal target during lunge
+    private const float LungeSpeed   = 135f;    // px/s horizontal target during lunge
 
     // Roadmap §1.7 hitbox bump (1.75×). Reach + half-width both grow so the
     // stab feels longer AND wider, not just longer-thin. BlockReach/HalfWidth
@@ -1364,7 +1383,7 @@ public class StabAction : ActionState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState = 0f;
-        vars.IsGrounded  = ctx.TryGetGround(out _);
+        vars.IsGrounded  = ctx.GroundedForActions;
         vars.HitId       = ctx.HitIds.Next();
         _tipTrail.Clear();
 
@@ -1674,7 +1693,7 @@ public class AirSpinStab : StabAction
     {
         if (!base.CheckPreConditions(ctx, ab)) return false;
         // Air-only.
-        if (ctx.TryGetGround(out _)) return false;
+        if (ctx.GroundedForActions) return false;
         // Backward swipe — intent direction's X must oppose Facing.
         if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent)) return false;
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
@@ -1904,7 +1923,7 @@ public class PulseAction : ActionState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState = 0f;
-        vars.IsGrounded  = ctx.TryGetGround(out _);
+        vars.IsGrounded  = ctx.GroundedForActions;
         vars.HitId       = ctx.HitIds.Next();
         ctx.Intents.Consume(IntentType.Circle, ctx.CurrentFrame);
     }
@@ -2078,7 +2097,7 @@ public class BurstAction : ActionState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState = 0f;
-        vars.IsGrounded  = ctx.TryGetGround(out _);
+        vars.IsGrounded  = ctx.GroundedForActions;
         vars.HitId       = ctx.HitIds.Next();
         vars.AttackDir   = ComputeBurstDir(ctx, ab); 
         // Eat the wind-up's press so releasing LMB after the burst can't also
@@ -3349,7 +3368,7 @@ public class BlockGrabAction : ActionState
         vars.SwipeVel      = Vector2.Zero;
         vars.PrevCursor    = ctx.Input.MouseWorldPosition;
         vars.CursorAtPress = ctx.Input.MouseWorldPosition;
-        vars.IsGrounded    = ctx.TryGetGround(out _);
+        vars.IsGrounded    = ctx.GroundedForActions;
         vars.GrabDir       = new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
 
         var point = new PullPointEntity(ctx.Input.MouseWorldPosition, ctx.Faction, ctx.ActiveBlockType)

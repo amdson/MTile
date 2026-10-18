@@ -25,22 +25,23 @@ public sealed class HudRenderer
         _graphicsDevice = graphicsDevice;
     }
 
-    public void Draw(Simulation sim, CharacterAnimator animator)
+    // `player` / `animator` are the player THIS client controls (the joiner is P2), and
+    // `mouseScreen` is this machine's cursor. Never read sim.Player or the sim's input
+    // here: those are P1's, so in a match both screens showed the host's health, blocks
+    // and charge ring.
+    public void Draw(PlayerCharacter player, CharacterAnimator animator, Point mouseScreen)
     {
-        var player = sim.Player;
-
         _spriteBatch.Begin();
-        var mousePos = sim.CurrentInput.MousePosition;
-        _spriteBatch.Draw(_pixel, new Rectangle(mousePos.X - 2, mousePos.Y - 2, 5, 5), Color.Red);
-        DrawAvalancheCharge(sim);
+        _spriteBatch.Draw(_pixel, new Rectangle(mouseScreen.X - 2, mouseScreen.Y - 2, 5, 5), Color.Red);
+        DrawAvalancheCharge(player, mouseScreen);
         // Always on: health and blocks are what the player steers by, so unlike the
         // readouts below they are not behind a GameConfig debug flag.
-        DrawPlayerHud(sim);
+        DrawPlayerHud(player);
         _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8,  8), Color.White);
         _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, 24), Color.White);
         _spriteBatch.DrawString(_debugFont, $"Anim: {animator.State.Clip}", new Vector2(8, 40), Color.Aqua);
-        DrawBlockPickerHud(sim);
-        DrawBuildMetersHud(sim);
+        DrawBlockPickerHud(player);
+        DrawBuildMetersHud(player);
 
         _spriteBatch.End();
     }
@@ -50,9 +51,9 @@ public sealed class HudRenderer
     // reason about: a reservoir that drains while you hold a button is invisible without
     // this. The third pool, the eruption charge, is NOT here: it moved to the ring around
     // the cursor (DrawAvalancheCharge), which is where that mechanic actually happens.
-    private void DrawBuildMetersHud(Simulation sim)
+    private void DrawBuildMetersHud(PlayerCharacter player)
     {
-        var m = sim.Player.Abilities.Meters;
+        var m = player.Abilities.Meters;
 
         const int BarW = 126, BarH = 7, Gap = 4;
         const int RightPadding = 12;
@@ -76,7 +77,7 @@ public sealed class HudRenderer
     // Top-right block-picker indicator: 24x24 swatches in a row, one per pickable
     // TileType plus a fifth for the spike overlay, the selected one brightened and
     // outlined, with 1-5 labels.
-    private void DrawBlockPickerHud(Simulation sim)
+    private void DrawBlockPickerHud(PlayerCharacter player)
     {
         var types = new[] { TileType.Stone, TileType.Dirt, TileType.Sand, TileType.Foam };
         const int Slots = 5;   // the four materials + spikes
@@ -92,15 +93,15 @@ public sealed class HudRenderer
         int x0        = viewportW - RightPadding - totalW;
         int y0        = TopPadding;
 
-        var activeBlockType = sim.ActiveBlockType;
-        bool spikes = sim.SpikesSelected;
+        var activeBlockType = player.ActiveBlockType;
+        bool spikes = player.SpikesSelected;
         for (int i = 0; i < Slots; i++)
         {
             int x = x0 + i * (SwatchSize + SwatchGap);
             bool isSpikeSlot = i == types.Length;
             bool selected = isSpikeSlot ? spikes : !spikes && types[i] == activeBlockType;
 
-            var col = isSpikeSlot ? TilePalette.SpikeColor(sim.Player.Faction)
+            var col = isSpikeSlot ? TilePalette.SpikeColor(player.Faction)
                                   : TilePalette.BaseColor(types[i]);
             var fill = selected ? col : new Color((int)(col.R * 0.4f), (int)(col.G * 0.4f), (int)(col.B * 0.4f));
             _spriteBatch.Draw(_pixel, new Rectangle(x, y0, SwatchSize, SwatchSize), fill);
@@ -159,13 +160,12 @@ public sealed class HudRenderer
     // How far the flash's second ring races past the charge ring as it fades.
     private const float FlashSpread   = 26f;
 
-    private void DrawAvalancheCharge(Simulation sim)
+    private void DrawAvalancheCharge(PlayerCharacter player, Point mouse)
     {
-        var m = sim.Player.Abilities.Meters;
+        var m = player.Abilities.Meters;
         float frac = MathHelper.Clamp(m.ChargeFraction, 0f, 1f);
         if (frac <= 0.001f) return;      // nothing banked and nothing building
 
-        var mouse  = sim.CurrentInput.MousePosition;
         var center = new Vector2(mouse.X, mouse.Y);
         float radius = MathHelper.Lerp(RingMinRadius, RingMaxRadius, frac);
 
@@ -224,16 +224,16 @@ public sealed class HudRenderer
     private const int   HealthBarH   = 12;
     private const int   SwatchS      = 14;
 
-    private void DrawPlayerHud(Simulation sim)
+    private void DrawPlayerHud(PlayerCharacter player)
     {
         var vp = _graphicsDevice.Viewport;
         int blocksH  = Math.Max(SwatchS, _debugFont.LineSpacing);
 
         int y = vp.Height - PanelBottom - blocksH;
-        DrawBlocksRow(sim, PanelX, y, blocksH);
+        DrawBlocksRow(player, PanelX, y, blocksH);
 
         y -= RowGap + HealthBarH;
-        DrawHealthRow(sim, PanelX, y);
+        DrawHealthRow(player, PanelX, y);
     }
 
     // Health is the whole damage model now: every landed hit comes off it (a stock
@@ -241,9 +241,8 @@ public sealed class HudRenderer
     // enough of it that a smooth bar reads as noise, so it is segmented at 1 HP — a
     // lost point is a visibly lost chunk — and the slow out-of-combat regen is what
     // makes the leading segment partial.
-    private void DrawHealthRow(Simulation sim, int x, int y)
+    private void DrawHealthRow(PlayerCharacter p, int x, int y)
     {
-        var p = sim.Player;
         float frac = MathHelper.Clamp(p.Health / p.MaxHealth, 0f, 1f);
 
         _spriteBatch.Draw(_pixel, new Rectangle(x, y, PanelW, HealthBarH), new Color(24, 24, 28));
@@ -276,17 +275,17 @@ public sealed class HudRenderer
     // banked eruption charge. Those two are the fast tiers and both refill out of this
     // one, so the reservoir is what actually caps a long build; the three-bar breakdown
     // top-right stays for the moment-to-moment detail.
-    private void DrawBlocksRow(Simulation sim, int x, int y, int rowH)
+    private void DrawBlocksRow(PlayerCharacter player, int x, int y, int rowH)
     {
-        var type   = sim.ActiveBlockType;
-        bool spikes = sim.SpikesSelected;
-        var meters = sim.Player.Abilities.Meters;
+        var type   = player.ActiveBlockType;
+        bool spikes = player.SpikesSelected;
+        var meters = player.Abilities.Meters;
         float cost = spikes ? MaterialStrengths.SpikeBuildCost : MaterialStrengths.BuildCostFor(type);
         int blocks = cost > 0f ? (int)(meters.Build / cost) : 0;
 
         int sy = y + (rowH - SwatchS) / 2;
         _spriteBatch.Draw(_pixel, new Rectangle(x, sy, SwatchS, SwatchS),
-            spikes ? TilePalette.SpikeColor(sim.Player.Faction) : TilePalette.BaseColor(type));
+            spikes ? TilePalette.SpikeColor(player.Faction) : TilePalette.BaseColor(type));
         Frame(x, sy, SwatchS, SwatchS, new Color(30, 30, 34));
 
         // The count comes from the reservoir, but the warning tint asks the pool that
