@@ -184,16 +184,17 @@ public class RecoveryTransitionTests(ITestOutputHelper output)
     [Fact]
     public void MashedClickDuringStabStrike_DoesNotEvict()
     {
-        // Stab gesture, then a quick click 5 frames into the stab (inside the
+        // Stab gesture, then a quick click 10 frames into the stab (inside the
         // strike). GroundSlash1's Passive 30 does not beat the stab's Active 30,
         // so recovery's inherited bid loses: the stab must run its full 18-frame
         // activation, and the buffered click fires only once the countdown
-        // reaches index 0 (9 frames of tail).
+        // reaches index 0 (9 frames of tail). The click has to land late enough
+        // to still be inside IntentBuffer.DefaultLookbackFrames when the tail ends.
         var script = new InputScript()
             .For   (15, new PlayerInput { MouseWorldPosition = PressMouse })
             .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = PressMouse })
             .For   ( 8, new PlayerInput { LeftClick = true, MouseWorldPosition = ReleaseMouse })
-            .For   ( 5, new PlayerInput { MouseWorldPosition = ReleaseMouse })
+            .For   (10, new PlayerInput { MouseWorldPosition = ReleaseMouse })
             .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = ReleaseMouse })  // mash press
             .Forever   (new PlayerInput { MouseWorldPosition = ReleaseMouse });                   // release ⇒ Click
 
