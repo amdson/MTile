@@ -21,6 +21,8 @@ public sealed class SkeletonBoneRecord
     public float  Length   { get; set; }
     public float? MinRotation { get; set; }
     public float? MaxRotation { get; set; }
+    // 3D length when the art draws the bone foreshortened (Bone.TrueLength); null = Length.
+    public float? TrueLength { get; set; }
 }
 
 // A serializable rig: bone proportions live here, NOT in the per-keyframe pose. The
@@ -108,6 +110,7 @@ public static class SkeletonStore
                 Length   = b.Length,
                 MinRotation = b.MinRotation,
                 MaxRotation = b.MaxRotation,
+                TrueLength  = b.TrueLength,
             });
         }
         return doc;
@@ -142,8 +145,8 @@ public static class SkeletonStore
         foreach (var r in ordered)
         {
             int idx = r.Parent == null
-                ? b.AddRoot(r.Name, r.Rotation, r.Length, r.MinRotation, r.MaxRotation)
-                : b.Add(r.Name, indexByName[r.Parent], r.Rotation, r.Length, r.MinRotation, r.MaxRotation);
+                ? b.AddRoot(r.Name, r.Rotation, r.Length, r.MinRotation, r.MaxRotation, r.TrueLength)
+                : b.Add(r.Name, indexByName[r.Parent], r.Rotation, r.Length, r.MinRotation, r.MaxRotation, r.TrueLength);
             indexByName[r.Name] = idx;
         }
         if (doc.Points != null)

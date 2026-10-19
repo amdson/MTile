@@ -690,7 +690,7 @@ static class Probe
             var orig = new Dictionary<AnimationKeyframe, List<PoseBoneEntry>>();
             foreach (var kf in clip.Keyframes)
             {
-                orig[kf] = kf.Bones?.ConvertAll(b => new PoseBoneEntry { Bone = b.Bone, Rotation = b.Rotation, Stretch = b.Stretch });
+                orig[kf] = kf.Bones?.ConvertAll(b => b.Clone());
                 if (kf.Bones == null) continue;
                 foreach (var e in kf.Bones)
                 {
@@ -775,8 +775,9 @@ static class Probe
     }
 
     // stretch <clip> <t> <bone> <s> — set one bone's per-keyframe length stretch
-    // (multiplier on the rig Length; 1 clears the channel). The manual escape hatch
-    // next to bakeyaw's law-driven baking.
+    // (multiplier on the bone's true length, Bone.StretchLength; the drawn length clears
+    // the channel). Clamped to [-1, 1]: a bone can't project longer than it is. The manual
+    // escape hatch next to bakeyaw's law-driven baking.
     static int StretchCmd(string[] args)
     {
         var clip = Find(Arg(args, 1));
@@ -785,6 +786,11 @@ static class Probe
         int bi = _rig.IndexOf(bone);
         if (bi < 0) throw new ArgumentException($"no bone '{bone}' in rig");
         float v = ParseF(Arg(args, 4));
+        if (MathF.Abs(v) > 1f)
+        {
+            Console.WriteLine($"# stretch {v:0.###} clamped to ±1 (give '{bone}' a TrueLength in the rig if the art is drawn foreshortened)");
+            v = Math.Clamp(v, -1f, 1f);
+        }
         SetStretch(kf, bone, v);
         AnimationStore.Save(clip, _statesDir);
         Console.WriteLine($"key t={kf.Time:0.000} {bone} stretch = {v:0.###}");
@@ -841,6 +847,9 @@ static class Probe
     // and ψa is solved from the pin s(−1) = --swap (default −0.2: at full leg swap the
     // struts flip a touch past the depth axis, keeping the 3/4 read). Dividing by cos ψ0
     // makes the authored strut length the neutral-scissor length, so idle is a near-no-op.
+    // A strut with a rig TrueLength (Bone.TrueLength) is already measured against its 3D
+    // length, so it takes the bare cos(ψ0 − ψa·χ̂) — |s| <= 1, a real depth angle; set
+    // TrueLength = Length / cos ψ0 to keep the drawn length as the neutral pose.
     // Shoulders take the same law driven by the ARM scissor (naturally counter-phased in
     // the data, so no sign flip), scaled by --shoulderamp (default 0.5) — torso counter-
     // rotation is much smaller than pelvis yaw, so shoulders foreshorten gently and never
@@ -860,6 +869,8 @@ static class Probe
         float psi0      = MathHelper.ToRadians(viewDeg);
         float psiA      = MathF.Acos(MathHelper.Clamp(swap * MathF.Cos(psi0), -1f, 1f)) - psi0;
         float Project(float chiHat) => MathF.Cos(psi0 - psiA * chiHat) / MathF.Cos(psi0);
+        float ProjectBone(string bone, float chiHat)
+            => _rig.Bones[_rig.IndexOf(bone)].TrueLength.HasValue ? MathF.Cos(psi0 - psiA * chiHat) : Project(chiHat);
 
         string only = null;
         for (int ai = 1; ai < args.Length; ai++)
@@ -882,16 +893,16 @@ static class Probe
                 PoseData.Apply(kf.Bones, pose);
                 var w = pose.ComputeWorld(Affine2.Identity);
                 float chiLeg = MathHelper.Clamp((Alpha(w, "leg_r_upper") - Alpha(w, "leg_l_upper")) / refAmp, -1f, 1f);
-                float sHip = Project(chiLeg);
+                float sHip = ProjectBone("hip_l", chiLeg);
                 SetStretch(kf, "hip_l", sHip);
-                SetStretch(kf, "hip_r", sHip);
+                SetStretch(kf, "hip_r", ProjectBone("hip_r", chiLeg));
                 line.Append($"  {kf.Time:0.00}:χ{chiLeg,5:+0.00;-0.00}→{sHip,5:+0.00;-0.00}");
                 if (shoulders)
                 {
                     float chiArm = MathHelper.Clamp((Alpha(w, "arm_r_upper") - Alpha(w, "arm_l_upper")) / refAmp, -1f, 1f);
-                    float sSh = Project(chiArm * shAmp);
+                    float sSh = ProjectBone("shoulder_l", chiArm * shAmp);
                     SetStretch(kf, "shoulder_l", sSh);
-                    SetStretch(kf, "shoulder_r", sSh);
+                    SetStretch(kf, "shoulder_r", ProjectBone("shoulder_r", chiArm * shAmp));
                     line.Append($"/sh{sSh,5:+0.00;-0.00}");
                 }
             }
@@ -919,7 +930,8 @@ static class Probe
     {
         int i = _rig.IndexOf(bone);
         if (i < 0) return;
-        bool noop = MathF.Abs(s - 1f) < 1e-3f;
+        var rb = _rig.Bones[i];
+        bool noop = MathF.Abs(s * rb.StretchLength - rb.Length) < 1e-3f * MathF.Max(rb.StretchLength, 1e-3f);
         var e = kf.Bones.Find(b => b.Bone == bone);
         if (e == null)
         {

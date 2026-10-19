@@ -265,7 +265,7 @@ public static class ClipSceneBake
                     if (BodyPath.TrySampleAnchor(doc, kf.Time, out var com, out _)) target += com;   // root-local
                     PoseData.Apply(kf.Bones, pose);
                     var res = PoseIk.Solve(rig, pose, f.Bone, target, chain, priorWeight: 0.2f);
-                    kf.Bones = PoseData.Capture(pose);
+                    kf.Bones = PoseData.Capture(pose, kf.Bones);
                     edited++;
                     sb.AppendLine($"  {f.Node} key t={kf.Time:0.00} (u={u:0.00}) toe → scene ({F.X:0.0},{F.Y:0.0}) miss {res.Miss:0.00} rig");
                 }

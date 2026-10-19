@@ -58,9 +58,8 @@ public static class PoseIk
 
         int Residuals(ReadOnlySpan<float> xs, Span<float> r)
         {
-            for (int i = 0; i < n; i++)
-                pose.SetLocal(chain[i], new BoneTransform(
-                    Vector2.UnitX * rig.Bones[chain[i]].Length, xs[i], Vector2.One));
+            // Rotations only: each bone keeps its local translation (the keyframe's Stretch).
+            for (int i = 0; i < n; i++) pose.Local[chain[i]].Rotation = xs[i];
             Vector2 tip = pose.ComputeWorld(root)[tipBone].Translation;
             r[0] = tip.X - target.X;
             r[1] = tip.Y - target.Y;
@@ -90,13 +89,26 @@ public static class PoseIk
     // ("elbows don't bend backwards") — pragmatic until runtime §8 defines rig-level joint
     // limits, which this should then consume. Solver and arrays are allocated once per
     // session (PoseIk.Solve allocates per call — fine for the probe, not for a 60 Hz drag).
-    // Translations (a keyframe's Stretch) are left as they are; only rotations move.
+    //
+    // FORESHORTENED BONES. A bone with a small Stretch barely moves the tip when it turns,
+    // so the solver would treat its rotation as nearly free and spin it to fix tiny errors.
+    // Its pull toward the drag-start angle is scaled by 1/|Stretch|, and a bone nearly
+    // end-on (|Stretch| < FreezeStretch at drag start) is held fixed for the drag.
+    //
+    // DEPTH MODE (solveStretch). A short reach can mean "bend" or "turn toward the camera".
+    // The plain drag only bends (Stretch is left as it is). In depth mode each chain bone's
+    // Stretch is a variable too, bounded to |s| in [MinStretch, 1] on its drag-start side,
+    // with rotations held harder than stretches — so pulling the hand in foreshortens the
+    // limb instead of folding it. The fold guard is off: a limb turning through the camera
+    // axis legitimately flips which side its 2D bend reads on.
     public sealed class DragSession
     {
         public readonly int   Tip;
         public readonly int[] Chain;
+        public readonly bool  SolveStretch;
         private readonly Skeleton _rig;
-        private readonly float[] _orig, _prev, _x, _lo, _hi;
+        private readonly float[] _orig, _prev, _x, _lo, _hi, _rotW;
+        private readonly float[] _origT;     // drag-start local translations (+X = length)
         private readonly LeastSquaresSolver _ls;
         private readonly Affine2 _identity = Affine2.FromTRS(Vector2.Zero, 0f, Vector2.One);
         private SkeletonPose _pose;
@@ -104,45 +116,83 @@ public static class PoseIk
         public float WeightOriginal = 0.2f;   // rig units per radian toward the drag-start pose
         public float WeightPrevious = 0.05f;  // toward last frame's solution (continuity)
         public float Range          = 2.5f;   // per-joint |Δ| bound from the drag-start angle
+        public const float FreezeStretch = 0.2f;   // |s| below this at drag start: bone held fixed
+        public const float MinStretch    = 0.15f;  // depth mode's floor on |s|
+        // Depth mode: rotations held this much harder than plain mode, and Stretch's own pull
+        // toward its drag-start value (rig units per unit of s). Foreshortening a 10-unit bone
+        // by 0.2 costs 0.1 here against ~0.6·(rotation) for the bend that would do the same.
+        public float DepthRotationScale = 3f;
+        public float WeightStretch      = 0.5f;
         public Result Last { get; private set; }
 
-        public DragSession(Skeleton rig, SkeletonPose pose, int tip, int[] chain = null)
+        public DragSession(Skeleton rig, SkeletonPose pose, int tip, int[] chain = null, bool solveStretch = false)
         {
-            _rig = rig; Tip = tip;
+            _rig = rig; Tip = tip; SolveStretch = solveStretch;
             Chain = chain ?? DefaultChain(rig, tip);
-            int n = Chain.Length;
-            _orig = new float[n]; _prev = new float[n]; _x = new float[n]; _lo = new float[n]; _hi = new float[n];
-            for (int i = 0; i < n; i++) _orig[i] = _prev[i] = pose.Local[Chain[i]].Rotation;
-            _ls = new LeastSquaresSolver(Math.Max(n, 1), 2 + 2 * n);
+            int n = Chain.Length, nv = solveStretch ? 2 * n : n;
+            _orig = new float[nv]; _prev = new float[nv]; _x = new float[nv]; _lo = new float[nv]; _hi = new float[nv];
+            _rotW = new float[n]; _origT = new float[n];
+            for (int i = 0; i < n; i++)
+            {
+                _orig[i] = _prev[i] = pose.Local[Chain[i]].Rotation;
+                _origT[i] = pose.Local[Chain[i]].Translation.X;
+                if (solveStretch) _orig[n + i] = _prev[n + i] = StretchOf(i, _origT[i]);
+            }
+            _ls = new LeastSquaresSolver(Math.Max(nv, 1), 2 + 2 * nv);
         }
 
-        // Restore the drag-start rotations (Escape mid-drag).
+        private float StretchOf(int i, float tx)
+        {
+            float len = _rig.Bones[Chain[i]].StretchLength;
+            return len > 1e-4f ? tx / len : 1f;
+        }
+
+        // Restore the drag-start rotations and lengths (Escape mid-drag).
         public void Restore(SkeletonPose pose)
         {
-            for (int i = 0; i < Chain.Length; i++) pose.Local[Chain[i]].Rotation = _orig[i];
+            for (int i = 0; i < Chain.Length; i++)
+            {
+                pose.Local[Chain[i]].Rotation = _orig[i];
+                pose.Local[Chain[i]].Translation = Vector2.UnitX * _origT[i];
+            }
         }
 
         // One frame: pull `Tip` toward `targetLocal` (root-local rig units). Solves in place.
         public Result Step(SkeletonPose pose, Vector2 targetLocal)
         {
-            int n = Chain.Length;
+            int n = Chain.Length, nv = _x.Length;
             _pose = pose; _target = targetLocal;
             for (int i = 0; i < n; i++)
             {
                 _x[i] = _prev[i];   // warm start
                 float o = _orig[i];
                 float lo = o - Range, hi = o + Range;
+                float s0 = MathF.Abs(StretchOf(i, _origT[i]));
                 // Fold guard: a `*_lower` bone's bend keeps the drag-start sign of its local angle.
-                if (_rig.Bones[Chain[i]].Name.EndsWith("_lower", StringComparison.Ordinal) && MathF.Abs(o) > 0.05f)
+                if (!SolveStretch && _rig.Bones[Chain[i]].Name.EndsWith("_lower", StringComparison.Ordinal) && MathF.Abs(o) > 0.05f)
                 {
                     if (o > 0f) lo = MathF.Max(lo, 0f); else hi = MathF.Min(hi, 0f);
                 }
+                if (s0 < FreezeStretch) lo = hi = o;   // nearly end-on: its angle is noise
                 _lo[i] = lo; _hi[i] = hi;
+                _rotW[i] = WeightOriginal * (SolveStretch ? DepthRotationScale : 1f) / MathF.Max(s0, FreezeStretch);
             }
+            if (SolveStretch)
+                for (int i = 0; i < n; i++)
+                {
+                    int k = n + i;
+                    _x[k] = _prev[k];
+                    float s0 = _orig[k];
+                    // Stay on the drag-start side of the depth axis; a legacy |s| > 1 key keeps
+                    // its value reachable rather than snapping to 1 on the first frame.
+                    if (s0 >= 0f) { _lo[k] = MathF.Min(MinStretch, s0); _hi[k] = MathF.Max(1f, s0); }
+                    else          { _lo[k] = MathF.Min(-1f, s0);        _hi[k] = MathF.Max(-MinStretch, s0); }
+                    if (MathF.Abs(s0) < FreezeStretch || _rig.Bones[Chain[i]].StretchLength < 1e-4f) _lo[k] = _hi[k] = s0;
+                }
             _ls.Minimize(Residuals, _x, _lo, _hi, iters: 40);
-            Span<float> final = stackalloc float[2 + 2 * n];
+            Span<float> final = stackalloc float[2 + 2 * nv];
             Residuals(_x, final);
-            for (int i = 0; i < n; i++) _prev[i] = _x[i];
+            for (int i = 0; i < nv; i++) _prev[i] = _x[i];
             Last = new Result(targetLocal + new Vector2(final[0], final[1]),
                               MathF.Sqrt(final[0] * final[0] + final[1] * final[1]));
             return Last;
@@ -150,17 +200,23 @@ public static class PoseIk
 
         private int Residuals(ReadOnlySpan<float> xs, Span<float> r)
         {
-            int n = Chain.Length;
-            for (int i = 0; i < n; i++) _pose.Local[Chain[i]].Rotation = xs[i];
+            int n = Chain.Length, nv = xs.Length;
+            for (int i = 0; i < n; i++)
+            {
+                _pose.Local[Chain[i]].Rotation = xs[i];
+                if (SolveStretch)
+                    _pose.Local[Chain[i]].Translation = Vector2.UnitX * (xs[n + i] * _rig.Bones[Chain[i]].StretchLength);
+            }
             Vector2 tip = _pose.ComputeWorld(_identity)[Tip].Translation;
             r[0] = tip.X - _target.X;
             r[1] = tip.Y - _target.Y;
-            for (int i = 0; i < n; i++)
+            for (int i = 0; i < nv; i++)
             {
-                r[2 + i]     = WeightOriginal * (xs[i] - _orig[i]);
-                r[2 + n + i] = WeightPrevious * (xs[i] - _prev[i]);
+                float w = i < n ? _rotW[i] : WeightStretch;
+                r[2 + i]      = w * (xs[i] - _orig[i]);
+                r[2 + nv + i] = WeightPrevious * (xs[i] - _prev[i]);
             }
-            return 2 + 2 * n;
+            return 2 + 2 * nv;
         }
     }
 }

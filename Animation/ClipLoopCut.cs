@@ -262,7 +262,7 @@ public static class ClipLoopCut
     {
         if (bones == null) return new List<PoseBoneEntry>();
         var list = new List<PoseBoneEntry>(bones.Count);
-        foreach (var e in bones) list.Add(new PoseBoneEntry { Bone = e.Bone, Rotation = e.Rotation, Stretch = e.Stretch });
+        foreach (var e in bones) list.Add(e.Clone());
         return list;
     }
 

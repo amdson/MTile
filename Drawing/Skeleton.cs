@@ -13,17 +13,33 @@ public readonly struct Bone
     public readonly float         Rotation; // rest-pose local rotation
     public readonly float         Length;   // drawn length along local +X (leaf orientation ticks)
     public readonly float?        MinRotation, MaxRotation; // optional local joint interval, radians
+    // The bone's length in 3D when the art draws it foreshortened (a pelvis strut drawn in a
+    // 3/4 view is shorter on the page than it is). A keyframe's Stretch is measured against
+    // THIS length, so |Stretch| <= 1 is a real depth angle (Stretch = cos of the bone's tilt
+    // out of the screen plane). Null = the drawn Length is the true length.
+    public readonly float?        TrueLength;
+
+    // What a keyframe's Stretch multiplies.
+    public float StretchLength => TrueLength ?? Length;
 
     public Bone(string name, int parent, float rotation, float length,
-                float? minRotation = null, float? maxRotation = null)
+                float? minRotation = null, float? maxRotation = null, float? trueLength = null)
     {
+        if (trueLength.HasValue && (!float.IsFinite(trueLength.Value) || trueLength.Value < length - 1e-4f))
+            throw new ArgumentException($"Bone '{name}' needs a finite TrueLength no shorter than its drawn Length.");
         if (minRotation.HasValue != maxRotation.HasValue || (minRotation.HasValue &&
             (!float.IsFinite(minRotation.Value) || !float.IsFinite(maxRotation.Value) ||
              minRotation.Value > maxRotation.Value || maxRotation.Value - minRotation.Value > MathF.Tau)))
             throw new ArgumentException($"Bone '{name}' needs a finite, ordered joint interval of at most one turn.");
         Name = name; Parent = parent; Rotation = rotation; Length = length; 
-        MinRotation = minRotation; MaxRotation = maxRotation;
+        MinRotation = minRotation; MaxRotation = maxRotation; TrueLength = trueLength;
     }
+
+    // The same bone with a new drawn Length. A TrueLength scales with it, so the rest
+    // view's depth angle (Length / TrueLength) is kept.
+    public Bone WithLength(float length)
+        => new(Name, Parent, Rotation, length, MinRotation, MaxRotation,
+               TrueLength.HasValue && Length > 1e-6f ? TrueLength.Value * length / Length : TrueLength);
 
     // The interval on the same angular branch as the pose. Clips may serialize equivalent
     // angles several turns apart; that must not change the joint's permitted bend.
@@ -108,19 +124,19 @@ public sealed class SkeletonBuilder
     public void AddPoint(NamedPoint p) => _points.Add(p);
 
     public int Add(string name, int parent, float rotation, float length = 0f,
-                   float? minRotation = null, float? maxRotation = null)
+                   float? minRotation = null, float? maxRotation = null, float? trueLength = null)
     {
         if (parent >= _bones.Count)
             throw new ArgumentOutOfRangeException(nameof(parent),
                 "A parent bone must be added before its children.");
-        _bones.Add(new Bone(name, parent, rotation, length, minRotation, maxRotation));
+        _bones.Add(new Bone(name, parent, rotation, length, minRotation, maxRotation, trueLength));
         return _bones.Count - 1;
     }
 
     // A root bone (no parent).
     public int AddRoot(string name, float rotation, float length = 0f,
-                       float? minRotation = null, float? maxRotation = null)
-        => Add(name, -1, rotation, length, minRotation, maxRotation);
+                       float? minRotation = null, float? maxRotation = null, float? trueLength = null)
+        => Add(name, -1, rotation, length, minRotation, maxRotation, trueLength);
 
     public Skeleton Build() => new(_name, _bones.ToArray(), _points.Count > 0 ? _points.ToArray() : null);
 }

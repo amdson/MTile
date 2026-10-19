@@ -61,6 +61,7 @@ public sealed partial class DemoGame
         AttachmentCurveWindow();
         NameModal();
         HelpWindow(menuH);
+        DepthWindow(menuH, w);
 
         _canvas = new Rectangle((int)LeftW, (int)menuH,
                                 (int)MathF.Max(1f, w - LeftW - RightW),
@@ -124,6 +125,7 @@ public sealed partial class DemoGame
             if (ImGui.MenuItem("Contact marks", null, _preview.ShowContacts)) _preview.ShowContacts = !_preview.ShowContacts;
             if (ImGui.MenuItem("Physics body", "O", _preview.ShowBody)) _preview.ShowBody = !_preview.ShowBody;
             if (ImGui.MenuItem("Tile grid", "`", _preview.ShowGrid)) _preview.ShowGrid = !_preview.ShowGrid;
+            if (ImGui.MenuItem("Depth view", null, _showDepth)) _showDepth = !_showDepth;
             ImGui.Separator();
             if (ImGui.MenuItem("Follow view", null, _placement.FollowView)) _placement.FollowView = !_placement.FollowView;
             if (ImGui.MenuItem("Continuous loop preview", null, _placement.ContinuousLoop)) _placement.ContinuousLoop = !_placement.ContinuousLoop;
@@ -302,6 +304,7 @@ public sealed partial class DemoGame
         if (ImGui.Checkbox("IK drag", ref ik)) { _ikMode = ik; if (!_ikMode) _ikDrag = null; }
         if (_selectedEndpoint >= 0 && _selectedEndpoint < _skeleton.Count)
             ImGui.TextWrapped($"endpoint: {_skeleton.Bones[_selectedEndpoint].Name} (right-click a joint for its menu)");
+        ImGui.TextDisabled("Alt+drag a joint: depth IK (foreshortens instead of bending)");
         if (_selectedAttachment != null)
             ImGui.TextWrapped($"element: {_selectedAttachment.Effect} on {_selectedAttachment.Point} "
                             + $"[{_selectedAttachment.Start:0.00}-{_selectedAttachment.End:0.00}]"
@@ -310,6 +313,15 @@ public sealed partial class DemoGame
 
         // The warnings that used to run off the header as one long line.
         if (_guides.Hint != null) { ImGui.Separator(); ImGui.TextColored(Rgba(220, 190, 140), "guides"); ImGui.TextWrapped(_guides.Hint); }
+        int overLength = OverLengthKeys(doc, out string overBone);
+        if (overLength > 0)
+        {
+            ImGui.Separator();
+            ImGui.TextColored(Rgba(255, 170, 70), "OVER-LENGTH STRETCH");
+            ImGui.TextWrapped($"{overLength} bone key(s) have |stretch| > 1 (e.g. {overBone}) — longer than the bone's true "
+                            + "length, so they have no depth angle. They still draw; give the rig bone a TrueLength "
+                            + "or re-bake to bring them into [-1, 1].");
+        }
         if (AnimationSampler.SeamMismatch(doc, out string seamBone, out float seamDelta))
         {
             ImGui.Separator();
@@ -1430,6 +1442,19 @@ public sealed partial class DemoGame
                                          | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoBringToFrontOnFocus;
 
     // How many keyframes author a body_path point — the clip's path, in one number.
+    // Bone keys whose Stretch exceeds the bone's true length (Bone.StretchLength).
+    private int OverLengthKeys(AnimationDocument doc, out string example)
+    {
+        example = null;
+        int n = 0;
+        foreach (var kf in doc.Keyframes)
+            if (kf.Bones != null)
+                foreach (var e in kf.Bones)
+                    if (e.Stretch is float s && MathF.Abs(s) > 1.001f && _skeleton.IndexOf(e.Bone) >= 0)
+                    { n++; example ??= e.Bone; }
+        return n;
+    }
+
     private static int BodyPathKeys(AnimationDocument doc)
     {
         int n = 0;

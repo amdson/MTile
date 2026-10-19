@@ -13,17 +13,39 @@ public sealed class PoseBoneEntry
 {
     public string Bone     { get; set; }
     public float  Rotation { get; set; }
-    // Length multiplier on the rig bone's Length for this keyframe — pseudo-3D
-    // foreshortening (a pelvis strut shrinking as the hips yaw about the implicit
-    // depth axis). May go slightly negative (a strut swung past the depth axis).
-    // Null = 1 (unstretched); omitted from JSON so legacy files round-trip clean.
+    // Length multiplier for this keyframe — pseudo-3D foreshortening, measured against the
+    // rig bone's StretchLength (its TrueLength, else its drawn Length). Within [-1, 1] it
+    // is cos of the bone's tilt out of the screen plane; negative = swung past the depth
+    // axis (a strut whose socket crosses the centerline). The editor clamps to [-1, 1];
+    // older keys above 1 still load and draw. Null = the drawn Length (unstretched);
+    // omitted from JSON so legacy files round-trip clean.
     public float? Stretch  { get; set; }
+    // Which side of the screen plane a foreshortened bone leans: +1 its far end comes
+    // toward the viewer, -1 it goes away. Null = unset (reads as toward). Authoring data
+    // for the editor's depth view and IK; nothing at runtime reads it yet.
+    public int?   DepthSide { get; set; }
+
+    public PoseBoneEntry Clone() => new() { Bone = Bone, Rotation = Rotation, Stretch = Stretch, DepthSide = DepthSide };
 }
 
 // Convert between a live SkeletonPose and the serializable per-bone list. Shared by
 // single poses and animation keyframes.
 public static class PoseData
 {
+    // Capture, carrying each bone's DepthSide over from `previous` (the keyframe being
+    // re-captured): the side is not part of a SkeletonPose, so a plain Capture drops it.
+    public static List<PoseBoneEntry> Capture(SkeletonPose pose, List<PoseBoneEntry> previous)
+    {
+        var list = Capture(pose);
+        if (previous == null) return list;
+        foreach (var e in list)
+        {
+            var old = previous.Find(p => p.Bone == e.Bone);
+            if (old != null) e.DepthSide = old.DepthSide;
+        }
+        return list;
+    }
+
     public static List<PoseBoneEntry> Capture(SkeletonPose pose)
     {
         var list = new List<PoseBoneEntry>(pose.Count);
@@ -32,13 +54,11 @@ public static class PoseData
             // Recover the stretch from the local translation (always along local ±X by
             // construction). Free-form editor translations (TRANSLATE drag) keep their
             // legacy fate — only the axial component persists, as a stretch.
-            float length   = pose.Skeleton.Bones[i].Length;
+            var bone       = pose.Skeleton.Bones[i];
+            float length   = bone.StretchLength;
             float? stretch = null;
-            if (length > 1e-4f)
-            {
-                float s = pose.Local[i].Translation.X / length;
-                if (MathF.Abs(s - 1f) > 1e-4f) stretch = s;
-            }
+            if (length > 1e-4f && MathF.Abs(pose.Local[i].Translation.X - bone.Length) > 1e-4f * length)
+                stretch = pose.Local[i].Translation.X / length;
             list.Add(new PoseBoneEntry
             {
                 Bone     = pose.Skeleton.Bones[i].Name,
@@ -61,7 +81,8 @@ public static class PoseData
         {
             int i = pose.Skeleton.IndexOf(e.Bone);
             if (i < 0) continue;
-            float length = pose.Skeleton.Bones[i].Length * (e.Stretch ?? 1f);
+            var bone = pose.Skeleton.Bones[i];
+            float length = e.Stretch.HasValue ? bone.StretchLength * e.Stretch.Value : bone.Length;
             pose.SetLocal(i, new BoneTransform(Vector2.UnitX * length, e.Rotation, Vector2.One));
         }
     }

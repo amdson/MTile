@@ -286,7 +286,7 @@ public sealed partial class DemoGame : Game
             {
                 // Cancel the IK drag: back to the drag-start pose (the drag itself ends).
                 _ikDrag.Restore(_pose);
-                if (Doc != null && _activeKey >= 0) Doc.Keyframes[_activeKey].Bones = PoseData.Capture(_pose);
+                if (Doc != null && _activeKey >= 0) Doc.Keyframes[_activeKey].Bones = PoseData.Capture(_pose, Doc.Keyframes[_activeKey].Bones);
                 _ikDrag = null; _dragBone = -1;
             }
             else if (!_guides.Cancel(Doc)) Exit();
@@ -371,11 +371,14 @@ public sealed partial class DemoGame : Game
                     {
                         _dragBone = pickJoint;
                         // IK mode: a limb chain (up to the torso) — the root/torso themselves keep
-                        // the direct edit (a chain of length 0 has nothing to solve).
+                        // the direct edit (a chain of length 0 has nothing to solve). Alt+drag is
+                        // the DEPTH drag in any mode: the same IK, with each chain bone's Stretch
+                        // solved too, so a shorter reach foreshortens the limb instead of folding it.
                         _ikDrag = null;
-                        if (_ikMode)
+                        bool alt = kb.IsKeyDown(Keys.LeftAlt) || kb.IsKeyDown(Keys.RightAlt);
+                        if (_ikMode || alt)
                         {
-                            var session = new PoseIk.DragSession(_skeleton, _pose, pickJoint);
+                            var session = new PoseIk.DragSession(_skeleton, _pose, pickJoint, solveStretch: alt);
                             if (session.Chain.Length > 0) _ikDrag = session;
                         }
                     }
@@ -427,7 +430,7 @@ public sealed partial class DemoGame : Game
             // exactly as the direct edit does (save / dirty / Escape semantics unchanged).
             Vector2 local = _root.Inverse().TransformPoint(mp);
             _ikDrag.Step(_pose, local);
-            Doc.Keyframes[_activeKey].Bones = PoseData.Capture(_pose);
+            Doc.Keyframes[_activeKey].Bones = PoseData.Capture(_pose, Doc.Keyframes[_activeKey].Bones);
             _dirty = true;
         }
         else if (leftDown && _dragBone >= 0 && _activeKey >= 0)
@@ -435,7 +438,7 @@ public sealed partial class DemoGame : Game
             var touched = EditBone(world, _dragBone, mp);
             if ((touched & EditTouched.Pose) != 0)
             {
-                Doc.Keyframes[_activeKey].Bones = PoseData.Capture(_pose);
+                Doc.Keyframes[_activeKey].Bones = PoseData.Capture(_pose, Doc.Keyframes[_activeKey].Bones);
                 _dirty = true;
             }
             if ((touched & EditTouched.Rig) != 0)
@@ -583,10 +586,11 @@ public sealed partial class DemoGame : Game
     //               radial part scales the bone's rest Length on the rig so its tip
     //               reaches the cursor.
     //   • Stretch — pose only, PER-KEYFRAME. Projects the cursor onto the bone's axis
-    //               and writes the ratio as this keyframe's length Stretch (pseudo-3D
-    //               foreshortening; see bakeyaw). Signed — dragging past the joint
-    //               flips the bone slightly negative. Rotation is untouched, the rig
-    //               is untouched, and other keyframes keep their own stretch.
+    //               and writes the ratio to the bone's true length (Bone.StretchLength)
+    //               as this keyframe's Stretch (pseudo-3D foreshortening; see bakeyaw),
+    //               clamped to [-1, 1] — a bone can't project longer than it is. Signed —
+    //               dragging past the joint flips the bone negative. Rotation is
+    //               untouched, the rig is untouched, and other keyframes keep their own.
     private EditTouched EditBone(Affine2[] world, int bone, Vector2 mp)
     {
         int parent = _skeleton.Bones[bone].Parent;
@@ -600,11 +604,11 @@ public sealed partial class DemoGame : Game
         {
             // Axis from the bone's world +X (magnitude = root scale) — NOT from boneVec,
             // which collapses at stretch 0 and would block dragging through the flip.
-            float restLen = _skeleton.Bones[bone].Length;
+            float restLen = _skeleton.Bones[bone].StretchLength;
             Vector2 axis  = world[bone].TransformVector(Vector2.UnitX);
             float axisSq  = axis.LengthSquared();
             if (restLen < 1e-3f || axisSq < 1e-6f) return EditTouched.None;
-            float s = Vector2.Dot(cursorVec, axis) / (axisSq * restLen);
+            float s = Math.Clamp(Vector2.Dot(cursorVec, axis) / (axisSq * restLen), -1f, 1f);
             _pose.Local[bone].Translation = Vector2.UnitX * (restLen * s);
             return EditTouched.Pose;
         }
@@ -637,7 +641,7 @@ public sealed partial class DemoGame : Game
     private void SetBoneLength(int i, float length)
     {
         var old = _skeleton.Bones[i];
-        _skeleton.Bones[i] = new Bone(old.Name, old.Parent, old.Rotation, length);
+        _skeleton.Bones[i] = old.WithLength(length);
         _pose.Local[i].Translation = Vector2.UnitX * length;
 
         // Mirror into the backing store so the edit survives a recompose / save. A base
@@ -647,7 +651,7 @@ public sealed partial class DemoGame : Game
         if (bi >= 0)
         {
             var b = _baseSkeleton.Bones[bi];
-            _baseSkeleton.Bones[bi] = new Bone(b.Name, b.Parent, b.Rotation, length);
+            _baseSkeleton.Bones[bi] = b.WithLength(length);
         }
         else
         {
@@ -1029,7 +1033,7 @@ public sealed partial class DemoGame : Game
             var c = new Color(255, 200, 120);
             _draw.Line(mp - new Vector2(6f, 0f), mp + new Vector2(6f, 0f), c, 1.5f);
             _draw.Line(mp - new Vector2(0f, 6f), mp + new Vector2(0f, 6f), c, 1.5f);
-            _spriteBatch.DrawString(_font, $"miss {_ikDrag.Last.Miss:0.00}", mp + new Vector2(10f, -6f), c);
+            _spriteBatch.DrawString(_font, $"{(_ikDrag.SolveStretch ? "depth  " : "")}miss {_ikDrag.Last.Miss:0.00}", mp + new Vector2(10f, -6f), c);
         }
     }
 
@@ -1584,7 +1588,8 @@ public sealed partial class DemoGame : Game
     private static readonly (string Group, string Keys)[] HelpRows =
     {
         ("Clip",     "[ ] duration    L loop    R region    T type    N new    C clone"),
-        ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip    IK drag box (header): drag a joint = IK pull of its limb, Esc restores"),
+        ("Edit",     "Tab mode (rotate/resize/stretch)    drag joint    M+click contact    F flip    IK drag box (header): drag a joint = IK pull of its limb, Esc restores    Alt+drag = depth IK (shorter reach foreshortens instead of bending)"),
+        ("Depth",    "View > Depth view: top-down of the selected bone — drag its tip round the circle to tilt it toward/away from the viewer (Stretch + side); 'turn with children' carries the limb below along"),
         ("Move",     "drag root joint = place body vs fixed ground/com (edits keyframe com)    arrows pan view (Shift faster)    Home recenter"),
         ("View",     "wheel zoom (about the cursor)    middle-drag pan    Ctrl+0 reset zoom    View > Frame scene/path fits    ` block grid on/off (1 cell = 1 game tile, anchored to the floor line)    O physics hexagon at the com"),
         ("Scene",    "Scene menu (top right): add/select/duplicate/delete/hide/lock guides, snap, motion source, path/ghosts, frame/follow view"),
@@ -1697,7 +1702,8 @@ public sealed partial class DemoGame : Game
         var kf = new AnimationKeyframe
         {
             Time = _scrubT,
-            Bones = PoseData.Capture(_pose),
+            // Sides carry over from the key in effect at the playhead (sides snap, they don't blend).
+            Bones = PoseData.Capture(_pose, doc.Keyframes.FindLast(k => k.Time <= _scrubT + 1e-5f)?.Bones),
             Additions = AnimAdditionSampler.CloneEffectiveAt(doc, _scrubT),
         };
         doc.Keyframes.Add(kf);
@@ -1783,7 +1789,7 @@ public sealed partial class DemoGame : Game
         if (src == null) return new List<PoseBoneEntry>();
         var copy = new List<PoseBoneEntry>(src.Count);
         foreach (var b in src)
-            copy.Add(new PoseBoneEntry { Bone = b.Bone, Rotation = b.Rotation, Stretch = b.Stretch });
+            copy.Add(b.Clone());
         return copy;
     }
 
