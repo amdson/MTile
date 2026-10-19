@@ -24,9 +24,24 @@ Needs Pillow + numpy (`python -m venv v && v/bin/pip install pillow numpy`).
 | E3: walk as 16×16 px pixel art | start pose + legend | `gpt_walk_pixel.png` — clean and consistent, but arms barely move; too coarse for angles |
 
 Decode (no agent, ~100 lines): the slash decodes nearly frame-perfect
-(`decoded_slash_b.png`, zero flags). The walk fails on 11/16 frames — the added
-feet make each shin an L, so the shin axis flips 180° (`decoded_walk.png`). The
-flags caught every one. That is the case for the agent-in-the-loop mapping step.
+(`decoded_slash_b.png`, zero flags). The walk first failed on 11/16 frames
+(`decoded_walk.png`). I initially blamed the added feet; inspecting the stage
+panels showed the real cause: 3 anti-aliased pixels on the orange forearm's rim
+classified as yellow shin, stretching its endpoint so the shin was oriented from
+the wrong end (`walk_frame02_before_fix.png`). Keeping each color's largest
+connected blob fixed all 16.
+
+Still wrong and **unflagged**: slash frames 4–5, the arm raised over the head
+decodes as pointing forward-down. The shoulder is estimated from each upper
+arm's highest end, which for a raised arm is the elbow. Only knees are checked
+today. That is the case for an agent inspecting overlays, not just flags.
+
+## Walkthrough
+`python walkthrough.py <out_dir> --raw <~/.codex/generated_images/<session>>
+--discarded samples/codex_pil_redraw_discarded.png --before samples/walk_frame02_before_fix.png`
+writes `index.html` + per-stage images: clip→sprite, the image model's
+inputs/outputs, sprite→clip stage by stage, the decoded clip + round trip + GIFs,
+and the walk before/after.
 
 ### Lessons for the next round
 - Say **"no feet, no hands — limbs end in round caps"** and **"thin torso line"**.

@@ -6,6 +6,7 @@ away from the parent joint (torso: hip=mean of thigh pixels' top end).
 """
 import sys, os, math, json
 import numpy as np
+from scipy import ndimage
 from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from stick import COLORS, BONES, fk, draw_pose, sole_y
@@ -32,17 +33,27 @@ def axis(pts):
     return c, v, c + v * proj.min(), c + v * proj.max(), s
 
 
-def decode_cell(cell):
+def decode_cell(cell, debug=None):
+    """debug: optional dict, filled with the intermediate stages (for walkthrough.py)."""
     lab, ok = classify(cell)
     segs = {}
     for i, b in enumerate(LIMBS):
-        ys, xs = np.nonzero(ok & (lab == i))
+        m = ok & (lab == i)
+        # keep the largest blob: anti-aliased edges of a neighboring color (orange
+        # forearm rim -> "yellow") otherwise stretch this bone's extreme endpoint
+        cc, n = ndimage.label(m)
+        if n > 1:
+            m = cc == (np.argmax(ndimage.sum(m, cc, range(1, n + 1))) + 1)
+        ys, xs = np.nonzero(m)
         if len(xs) < 30:
             segs[b] = None
             continue
         pts = np.stack([xs, ys], 1).astype(float)
         segs[b] = axis(pts)
     flags = [b for b in LIMBS if segs[b] is None]
+    chain = []
+    if debug is not None:
+        debug.update(lab=lab, ok=ok, segs=segs, chain=chain)
     # joints: shoulder = upper-arm end nearest the other arm's; hip = thigh ends nearest each other
     def near_end(b, ref):
         _, _, e0, e1, _ = segs[b]
@@ -55,14 +66,19 @@ def decode_cell(cell):
         hip = np.mean([min((tl[2], tl[3]), key=lambda p: p[1]), min((tr[2], tr[3]), key=lambda p: p[1])], 0)
         sh = np.mean([min((al[2], al[3]), key=lambda p: p[1]), min((ar[2], ar[3]), key=lambda p: p[1])], 0)
         ang['chest'] = math.atan2(*(sh - hip)[::-1])
+        chain.append(('chest', hip, sh))
+        if debug is not None:
+            debug.update(hip=hip, sh=sh)
         for side in 'lr':
             for limb, root in (('arm', sh), ('leg', hip)):
                 up, lo = f'{limb}_{side}_upper', f'{limb}_{side}_lower'
                 s0, s1 = near_end(up, root)
                 ang[up] = math.atan2(*(s1 - s0)[::-1])
+                chain.append((up, s0, s1))
                 if segs[lo] is not None:
                     l0, l1 = near_end(lo, s1)
                     ang[lo] = math.atan2(*(l1 - l0)[::-1])
+                    chain.append((lo, l0, l1))
                 else:
                     ang[lo] = ang[up]
     except TypeError:
