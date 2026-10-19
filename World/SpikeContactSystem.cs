@@ -31,7 +31,7 @@ public sealed class SpikeContactSystem
     // spikes. Linear between the two.
     public const float MaxImpactDamage  = 1.5f;
     // Normal approach speed (px/s) at or below which a contact counts as "walking"
-    // and deals ContactDamage. Pinned to the movement config's MaxWalkSpeed (100), so
+    // and deals ContactDamage. At or above the movement config's MaxWalkSpeed (80), so
     // strolling into a spiked wall reads the same as standing on a spiked floor.
     public const float RampStartSpeed   = 100f;
     public const float FullImpactSpeed  = 400f;
