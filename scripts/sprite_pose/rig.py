@@ -146,7 +146,7 @@ def lowest_y(seg, prof):
 
 # ---- rendering -----------------------------------------------------------------------
 
-def draw_figure(dr, seg, prof, ox, oy, s, width, after_core=None):
+def draw_figure(dr, seg, prof, ox, oy, s, width, after_core=None, markers=None):
     """Far limbs, then core (torso + head disc), then near limbs, then weapon."""
     P = lambda q: (ox + q[0] * s, oy + q[1] * s)
     order = ([n for n in prof['drawn'] if prof['sides'][n] == 'far'] +
@@ -171,42 +171,81 @@ def draw_figure(dr, seg, prof, ox, oy, s, width, after_core=None):
     if '__weapon' in seg:
         a, b, _ = seg['__weapon']
         dr.line([P(a), P(b)], fill=prof['weapon']['color'], width=max(2, width * 2 // 3))
+    if markers:
+        draw_markers(dr, seg, prof, P, width, markers)
 
 
-def render_cell(rig, prof, pose, size=256, weapon=None, label=None, ground_frac=0.86):
+def draw_markers(dr, seg, prof, P, width, style):
+    """Joint labels drawn by the image model too, so matching becomes detection:
+    'dots'   - every limb joint tip is a big filled dot in its bone's colour;
+    'shapes' - elbows/knees (upper-bone tips) are hollow rings, hands/feet filled dots.
+    The blade tip is a violet dot in both."""
+    r = max(4, width * 1.6)
+    has_child = {n for n in prof['drawn'] for c in prof['drawn'] if c != n and n in c and False}
+    uppers = {n for n in prof['drawn'] if n.endswith('upper')}
+    for n in prof['drawn']:
+        if prof['sides'][n] == 'core':
+            continue
+        q = P(seg[n][1])
+        col = prof['colors'][n]
+        if style == 'shapes' and n in uppers:
+            dr.ellipse([q[0] - r, q[1] - r, q[0] + r, q[1] + r], fill='white', outline=col, width=max(2, int(r * 0.45)))
+        else:
+            dr.ellipse([q[0] - r, q[1] - r, q[0] + r, q[1] + r], fill=col)
+    if '__weapon' in seg:
+        q = P(seg['__weapon'][1])
+        rr = r * 0.85
+        dr.ellipse([q[0] - rr, q[1] - rr, q[0] + rr, q[1] + rr], fill=prof['weapon']['color'])
+
+
+def render_cell(rig, prof, pose, size=256, weapon=None, label=None, ground_frac=0.86, markers=None, thin=False):
     im = Image.new('RGB', (size, size), 'white')
     dr = ImageDraw.Draw(im)
     seg = fk(rig, pose, weapon)
     s = size / 64.0
     ground = size * ground_frac
     dr.line([(8, ground), (size - 8, ground)], fill=GROUND, width=max(2, size // 128))
-    draw_figure(dr, seg, prof, size / 2, ground - lowest_y(seg, prof) * s, s, max(3, size // 32))
+    draw_figure(dr, seg, prof, size / 2, ground - lowest_y(seg, prof) * s, s,
+                max(2, size // 80) if thin else max(3, size // 32), markers=markers)
     if label:
         dr.text((6, 4), label, fill=(120, 120, 120))
     return im
 
 
-def render_sheet(rig, prof, poses, cols=4, size=256, weapons=None, labels=True):
+def render_sheet(rig, prof, poses, cols=4, size=256, weapons=None, labels=True, markers=None, thin=False):
     rows = (len(poses) + cols - 1) // cols
     sheet = Image.new('RGB', (cols * size, rows * size), 'white')
     dr = ImageDraw.Draw(sheet)
     for i, pose in enumerate(poses):
         x, y = (i % cols) * size, (i // cols) * size
         w = weapons[i] if weapons else None
-        sheet.paste(render_cell(rig, prof, pose, size, w, str(i + 1) if labels else None), (x, y))
+        sheet.paste(render_cell(rig, prof, pose, size, w, str(i + 1) if labels else None,
+                                markers=markers, thin=thin), (x, y))
         dr.rectangle([x, y, x + size - 1, y + size - 1], outline=(200, 200, 200), width=2)
     return sheet
 
 
-def render_legend(prof, with_weapon=True):
+def render_legend(prof, with_weapon=True, markers=None):
     items = [(prof['colors'][n], prof['labels'][n]) for n in prof['drawn'] if n != prof['head']]
     items = [i for k, i in enumerate(items) if i not in items[:k]]
     if with_weapon:
         items.append((prof['weapon']['color'], 'weapon (sword/knife blade)'))
-    im = Image.new('RGB', (420, 16 + 30 * len(items)), 'white')
+    extra = []
+    if markers == 'dots':
+        extra = ['JOINT DOTS: a big filled dot at the END of every limb bone, in that bone\'s colour',
+                 '(red dot = near elbow, orange dot = near hand, magenta = near knee, yellow = near foot,',
+                 ' blue = far elbow, cyan = far hand, green = far knee, light-green = far foot,',
+                 ' violet dot = blade tip). Every dot is drawn even when it overlaps something.']
+    elif markers == 'shapes':
+        extra = ['JOINT SHAPES: elbows and knees are HOLLOW RINGS (white centre) in the upper bone\'s colour;',
+                 'hands and feet are FILLED DOTS in the lower bone\'s colour; the blade tip is a violet dot.',
+                 'Every ring and dot is drawn even when it overlaps something.']
+    im = Image.new('RGB', (620, 16 + 30 * len(items) + 18 * len(extra)), 'white')
     dr = ImageDraw.Draw(im)
     for k, (c, l) in enumerate(items):
         y = 10 + k * 30
         dr.line([(12, y + 8), (72, y + 8)], fill=c, width=12)
         dr.text((86, y + 2), f'{l}   rgb{tuple(c)}', fill='black')
+    for k, t in enumerate(extra):
+        dr.text((12, 14 + 30 * len(items) + 18 * k), t, fill='black')
     return im

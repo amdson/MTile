@@ -24,6 +24,8 @@ from PIL import Image, ImageDraw, ImageFont
 import rig as R
 import fit as F
 import joints as J
+import solve2 as S2
+import markers as M
 
 RUNS = os.path.join(R.REPO, '.probe', 'sprite')
 DRAFTS = os.path.join(R.REPO, 'SkeletonDrafts')  # NOT under SkeletonStates/: Desktop + Web copy that tree recursively
@@ -56,15 +58,28 @@ def ref_pose(cfg, which='from'):
 # ---- refs ----------------------------------------------------------------------------
 
 def cmd_refs(a):
-    cfg = {'rig': a.rig, 'from': a.__dict__['from'], 'to': a.to, 'weapon': a.weapon}
+    cfg = {'rig': a.rig, 'from': a.__dict__['from'], 'to': a.to, 'weapon': a.weapon, 'markers': a.markers}
     save_run(a.run, cfg)
     rig, prof = R.load_rig(a.rig), R.profile(a.rig)
     d = run_dir(a.run)
     knife = (prof['weapon']['parent'], 0.0, prof['weapon']['length']) if a.weapon else None
     poses = [ref_pose(cfg, 'from')] + ([ref_pose(cfg, 'to')] if a.to else [])
+    thin = bool(a.markers)
     R.render_sheet(rig, prof, poses, cols=len(poses), size=512, weapons=[knife] * len(poses),
-                   labels=False).save(os.path.join(d, 'ref.png'))
-    R.render_legend(prof, a.weapon).save(os.path.join(d, 'legend.png'))
+                   labels=False, markers=a.markers, thin=thin).save(os.path.join(d, 'ref.png'))
+    R.render_legend(prof, a.weapon, a.markers).save(os.path.join(d, 'legend.png'))
+    if a.example:  # a programmatically drawn sheet of a DIFFERENT move in the exact format
+        clip = R.load_clip(a.example, a.rig)
+        ex, ws = [], []
+        for i in range(8):
+            pz = sample_clip(clip, i / 7)
+            ka = pz.pop('knife', (0.0, None))[0]
+            ex.append(pz)
+            ws.append((prof['weapon']['parent'], ka, prof['weapon']['length']) if a.weapon else None)
+        R.render_sheet(rig, prof, ex, cols=4, size=320, weapons=ws, markers=a.markers,
+                       thin=thin).save(os.path.join(d, 'example.png'))
+        cfg['example'] = a.example
+        save_run(a.run, cfg)
     print('refs ->', d)
 
 
@@ -96,18 +111,31 @@ Make the motion strong and readable, with clear anticipation, a committed strike
 def cmd_gen(a):
     cfg = load_run(a.run)
     d = run_dir(a.run)
-    cols = rows = int(round(math.sqrt(a.frames)))
+    cols, rows = grid_dims(a.frames)
     end = ('Frame 1 starts in the LEFT pose of ref.png; the motion ends in (or settles toward) the RIGHT pose.'
            if cfg.get('to') else 'Frame 1 starts in the pose shown in ref.png.')
     wl = ('\n- The character holds a short blade in the near hand, drawn as a straight VIOLET stroke '
           '(rgb 120,0,255) starting at the near hand - it stays the same length in every frame.'
           if cfg.get('weapon') else '')
+    mk = cfg.get('markers')
+    if mk == 'dots':
+        wl += ('\n- JOINT DOTS: draw a big filled dot at the END of every limb bone, in that bone\'s colour '
+               '(elbow dot red/blue, hand dot orange/cyan, knee dot magenta/green, foot dot yellow/light-green) '
+               'and a violet dot at the blade tip. Limbs are THIN lines; every dot is drawn even where it overlaps.')
+    elif mk == 'shapes':
+        wl += ('\n- JOINT SHAPES: elbows and knees are HOLLOW RINGS with a white centre in the upper bone\'s colour; '
+               'hands and feet are FILLED DOTS in the lower bone\'s colour; the blade tip is a violet dot. '
+               'Limbs are THIN lines; every ring and dot is drawn even where it overlaps.')
+    if os.path.exists(os.path.join(d, 'example.png')):
+        wl += ('\n- example.png shows the EXACT drawing format on a different move (8 frames, 4x2). Copy its '
+               'style precisely; do not copy its poses.')
     prompt = PROMPT.format(frames=a.frames, move=a.move, endpoints=end, cols=cols, rows=rows, weapon_line=wl)
     k = len(glob.glob(os.path.join(d, 'gen_*.prompt.txt'))) + 1
     open(os.path.join(d, f'gen_{k}.prompt.txt'), 'w').write(prompt)
     t0 = time.time()
     cmd = ['codex', 'exec', '-m', 'gpt-6-luna', '--skip-git-repo-check', '-s', 'read-only', '-C', d,
-           prompt, '-i', os.path.join(d, 'ref.png'), os.path.join(d, 'legend.png')]
+           prompt, '-i', os.path.join(d, 'ref.png'), os.path.join(d, 'legend.png')] + \
+          ([os.path.join(d, 'example.png')] if os.path.exists(os.path.join(d, 'example.png')) else [])
     with open(os.path.join(d, f'gen_{k}.log'), 'w') as log:
         subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, timeout=900)
     new = session_images(os.path.join(d, f'gen_{k}.log'))
@@ -135,13 +163,21 @@ def session_images(log_path):
 
 # ---- decode --------------------------------------------------------------------------
 
-def split_cells(sheet, frames):
+def grid_dims(frames):
+    """(cols, rows): 8 frames -> 4x2, else square."""
+    if frames == 8:
+        return 4, 2
     n = int(round(math.sqrt(frames)))
+    return n, n
+
+
+def split_cells(sheet, frames):
+    cols, rows = grid_dims(frames)
     W, H = sheet.size
-    cw, ch = W / n, H / n
+    cw, ch = W / cols, H / rows
     m = 0.02  # trim grid lines / borders
-    return [sheet.crop((int((i % n + m) * cw), int((i // n + m) * ch),
-                        int((i % n + 1 - m) * cw), int((i // n + 1 - m) * ch))) for i in range(frames)]
+    return [sheet.crop((int((i % cols + m) * cw), int((i // cols + m) * ch),
+                        int((i % cols + 1 - m) * cw), int((i // cols + 1 - m) * ch))) for i in range(frames)]
 
 
 def ground_row(cell):
@@ -402,6 +438,97 @@ def cmd_score(a):
            'worst_by_frame': [round(w) for w in worst]}
     print(json.dumps(res))
     return res
+
+
+def cmd_detect(a):
+    """Read the joint labels the image model drew (markers.py) into state.json as fixed tips,
+    and draw them for review (joints_review.png). Missing joints stay free for `solve`."""
+    cfg = load_run(a.run)
+    d = run_dir(a.run)
+    rig, prof = R.load_rig(cfg['rig']), R.profile(cfg['rig'])
+    frames = cfg.get('frames', 16)
+    cells = split_cells(Image.open(os.path.join(d, 'sheet.png')).convert('RGB'), frames)
+    sp = os.path.join(d, 'state.json')
+    states = json.load(open(sp)) if os.path.exists(sp) else {'frames': {}}
+    tiles, total = [], 0
+    for f in range(1, frames + 1):
+        marks, missing = M.detect(cells[f - 1], prof, cfg.get('markers') or 'dots')
+        states['frames'][str(f)] = M.to_state(marks)
+        total += len(marks)
+        tiles.append(J.review_image(cells[f - 1], marks, prof, f'frame {f}' + (f'  missing: {", ".join(missing)}' if missing else '')))
+        print(f'frame {f}: {len(marks)} joints found' + (f'; missing {", ".join(missing)}' if missing else ''))
+    json.dump(states, open(sp, 'w'), indent=1)
+    cols = 4
+    w, h = tiles[0].size
+    g = Image.new('RGB', (cols * w, ((len(tiles) + cols - 1) // cols) * h), 'white')
+    for i, t in enumerate(tiles):
+        g.paste(t, ((i % cols) * w, (i // cols) * h))
+    g.save(os.path.join(d, 'joints_review.png'))
+    print(f'{total} joints detected over {frames} frames -> state.json, joints_review.png')
+
+
+def cmd_solve(a):
+    """Hard-masked solve (solve2.py). state.json holds one state per frame: whatever the
+    agent marked "fixed" is kept exactly, everything else is solved, warm-started from the
+    previous frame. Writes the solved states back (fixed flags preserved) + decoded.json."""
+    cfg = load_run(a.run)
+    d = run_dir(a.run)
+    rig, prof = R.load_rig(cfg['rig']), R.profile(cfg['rig'])
+    frames = cfg.get('frames', 16)
+    cells = split_cells(Image.open(os.path.join(d, 'sheet.png')).convert('RGB'), frames)
+    os.makedirs(os.path.join(d, 'cells'), exist_ok=True)
+    for i, c in enumerate(cells):
+        c.save(os.path.join(d, 'cells', f'{i + 1:02d}.png'))
+    ref = ref_pose(cfg, 'from')
+    sp = os.path.join(d, 'state.json')
+    states = json.load(open(sp)) if os.path.exists(sp) else {'frames': {}}
+    if a.recalibrate or 'lengths' not in cfg:
+        cfg['lengths'] = calibrate_lengths(cells, rig, prof, ref, {})
+        save_run(a.run, cfg)
+    lengths = cfg['lengths']
+    dp = os.path.join(d, 'decoded.json')
+    decoded = {r['frame']: r for r in json.load(open(dp))} if os.path.exists(dp) and a.frames else {}
+    want = [int(f) for f in a.frames.split(',')] if a.frames else list(range(1, frames + 1))
+    scales = [r['scale'] for r in decoded.values() if 'scale' in r]
+    for f in want:
+        sf = states['frames'].get(str(f), {})
+        if sf.get('reject'):
+            decoded[f] = {'frame': f, 'rejected': True}
+            continue
+        # warm start: the nearest earlier solved, non-rejected frame
+        warm = None
+        for g in range(f - 1, 0, -1):
+            sg = states['frames'].get(str(g))
+            if sg and not sg.get('reject') and 'scale' in sg:
+                warm = {n: {'rot': b['rot'], 'stretch': b.get('stretch', 1.0)} for n, b in sg['bones'].items()}
+                warm['root'], warm['scale'] = sg['root']['pos'], sg['scale']['value']
+                break
+        obs = F.observe(cells[f - 1], prof)
+        scale0 = float(np.median(scales)) if len(scales) >= 2 else None
+        fr, x, cost = S2.solve(rig, prof, ref, obs, sf, warm, lengths, scale0)
+        ev, root, sc = fr.evaluate(x)
+        knife, kentry = S2.blade(fr, ev, sc) if cfg.get('weapon') else (None, None)
+        if kentry is not None and (sf.get('knife') or {}).get('fixed'):
+            kentry['fixed'] = sf['knife']['fixed']
+        solved, ev = S2.solved_state(fr, x, kentry)
+        flags = S2.diagnose(fr, ev, sc, warm)
+        states['frames'][str(f)] = solved
+        scales.append(float(sc))
+        gr = ground_row(cells[f - 1])
+        planted = {pt['Id']: bool(gr is not None and abs(ev[pt['Bone']]['tip'][1] - gr) < 1.5 * sc)
+                   for pt in rig.get('Points', []) if pt.get('Role') == 'support' and pt['Bone'] in ev}
+        nfix = sum(1 for b in sf.get('bones', {}).values() if b.get('fixed')) + bool((sf.get('root') or {}).get('fixed'))
+        decoded[f] = {'frame': f, 'pose': {n: solved['bones'][n]['rot'] for n in fr.drawn},
+                      'stretch': {n: solved['bones'][n]['stretch'] for n in fr.drawn},
+                      'knife': knife, 'flags': flags, 'notes': [f'fixed:{nfix}'] if nfix else [],
+                      'cost': round(cost, 3), 'root_px': [float(v) for v in root], 'scale': float(sc),
+                      'ground_row': gr, 'planted': planted, 'occluded': [], 'marked': nfix > 0}
+        print(f'frame {f:2d}: cost {cost:.2f}  fixed {nfix:2d}  ' + ('FLAGS ' + ' '.join(flags) if flags else 'ok'))
+    json.dump(states, open(sp, 'w'), indent=1)
+    out = [decoded[k] for k in sorted(decoded)]
+    json.dump(out, open(dp, 'w'), indent=1)
+    print(f'solved {len(want)} frame(s); flagged: {[r["frame"] for r in out if r.get("flags")] or "none"}')
+    render_decode_sheets(a.run)
 
 
 # ---- assemble ------------------------------------------------------------------------
@@ -794,6 +921,7 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('refs'); p.add_argument('--run', required=True); p.add_argument('--rig', default='biped')
     p.add_argument('--from', required=True); p.add_argument('--to'); p.add_argument('--weapon', action='store_true')
+    p.add_argument('--markers', choices=['dots', 'shapes']); p.add_argument('--example', help='clip for a format example sheet')
     p = sub.add_parser('gen'); p.add_argument('--run', required=True); p.add_argument('--move', required=True)
     p.add_argument('--frames', type=int, default=16)
     p = sub.add_parser('decode'); p.add_argument('--run', required=True); p.add_argument('--sheet')
@@ -805,6 +933,9 @@ def main():
     p.add_argument('--clip', required=True); p.add_argument('--frames', type=int, default=16)
     p.add_argument('--fore', action='store_true'); p.add_argument('--seed', type=int, default=0)
     p = sub.add_parser('score'); p.add_argument('--run', required=True)
+    p = sub.add_parser('detect'); p.add_argument('--run', required=True)
+    p = sub.add_parser('solve'); p.add_argument('--run', required=True); p.add_argument('--frames')
+    p.add_argument('--recalibrate', action='store_true')
     p = sub.add_parser('points'); p.add_argument('--run', required=True); p.add_argument('--frames')
     p = sub.add_parser('assemble'); p.add_argument('--run', required=True)
     p.add_argument('--duration', type=float, default=0.5); p.add_argument('--loop', action='store_true')
@@ -817,7 +948,7 @@ def main():
     p = sub.add_parser('report'); p.add_argument('--run', required=True)
     a = ap.parse_args()
     {'refs': cmd_refs, 'gen': cmd_gen, 'decode': cmd_decode, 'points': cmd_points, 'assemble': cmd_assemble,
-     'joints': cmd_joints, 'synth': cmd_synth, 'score': cmd_score,
+     'joints': cmd_joints, 'synth': cmd_synth, 'score': cmd_score, 'solve': cmd_solve, 'detect': cmd_detect,
      'verify': cmd_verify, 'report': cmd_report}[a.cmd](a)
 
 
