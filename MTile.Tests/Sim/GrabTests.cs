@@ -77,6 +77,31 @@ public class GrabTests(ITestOutputHelper output)
         Assert.False(grabbedFlagWithoutState, "Once in GrabbedState the victim stays there while flagged grabbed.");
     }
 
+    // The hold is NOT clamped clear of terrain (unlike a held clod): aim into the floor
+    // and the tracker drives the victim into it, so the floor contact takes a real
+    // impact — the slam. Clamped, the target sat at standing height and the victim was
+    // only ever set down (contact impulse ≈ 0).
+    [Fact]
+    public void Hold_AimedIntoFloor_DrivesVictimIntoIt()
+    {
+        var mouseDown = new Vector2(VictimStart.X, RestY + 200f);
+        var attacker = new InputScript()
+            .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
+            .For(10, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight })
+            .Forever(new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = mouseDown });
+
+        float maxImpulse = 0f;
+        SimRunner.RunMulti(Build(attacker, InputScript.Always(default)),
+            onFrame: (f, ps) =>
+            {
+                if (f >= 20 && ps[1].Combat.GrabbedActive)
+                    maxImpulse = MathF.Max(maxImpulse, ps[1].Body.LastImpulseMagnitude);
+            });
+
+        output.WriteLine($"victim max floor impulse while held aimed down = {maxImpulse:F1}");
+        Assert.True(maxImpulse > 100f, $"A hold aimed into the floor should slam the victim into it (impulse {maxImpulse:F1}).");
+    }
+
     // The grab leads with a windup: for StartupSeconds (0.2s) the grab is the live action
     // state but publishes no field, so nobody is flagged, pulled or latched. Measured as
     // the gap between the grab becoming the action and the victim first reading grabbed.
