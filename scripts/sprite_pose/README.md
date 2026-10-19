@@ -1,66 +1,50 @@
-# sprite_pose — image-model animation drafts → skeleton poses (experiment)
+# sprite_pose — image-model animation drafts → rig clips
 
-Hypothesis: LLMs are bad at authoring joint angles, but image models are good at
-drawing bodies in motion. So ask an image model for a **sprite sheet in a
-color-coded stick format** (OpenPose-style, in-distribution for image models) and
-decode it back to rig rotations with code, with an agent checking the mapping.
+The engine behind the `/sprite-anim` skill (`.claude/skills/sprite-anim/SKILL.md` is the
+how-to; `Plans/SPRITE_ANIM_SKILL_PLAN.md` the design). An image model draws a move as a
+color-coded stick-figure sprite sheet; this code decodes it into rig rotations, an agent
+checks/corrects the mapping, and the result is assembled into a draft clip and verified
+in-engine. LLMs never author joint angles.
 
-- `stick.py` — FK + renderer for `Skeletons/biped.json` poses. Near limbs (`_r`)
-  warm colors, far limbs (`_l`) cool. `python stick.py <outdir>` writes the
-  reference renders, using poses from the pre-wipe clip backup.
-- `decode.py` — `python decode.py <sheet.png> <out.png>`: splits a 4×4 sheet,
-  classifies pixels by nearest legend color, fits each bone's axis, rebuilds the
-  pose at true rig bone lengths, and writes a source|decoded comparison sheet + a
-  `.json` of per-frame rotations and flags (backward knee, missing bone).
+| File | Role |
+|---|---|
+| `sprite_anim.py` | CLI: `refs` · `gen` · `decode` · `points` · `assemble` · `verify` · `report` |
+| `fit.py` | Decoder: pixel observation → whole-skeleton least-squares fit at TRUE rig lengths, hard joint limits, wrong-end escapes, diagnostics |
+| `rig.py` | Rig-agnostic sprite profiles, FK (with `Stretch`), stick renderer, legend |
+| `bench.py` | Zero-GPT decoder benchmark: authored poses rendered clean / GPT-degraded, decoded, scored |
+| `profiles/<rig>.json` | Auto-derived sprite profiles (drawn / held / derived bones, colors); hand-editable |
+| `prompts/`, `samples/` | The 2026-10-19 first experiment (prompts, GPT sheets, the old decoder's walkthrough images) |
 
-Needs Pillow + numpy (`python -m venv v && v/bin/pip install pillow numpy`).
+Python 3 + Pillow, numpy, scipy. Runs live in `.probe/sprite/<name>/` (gitignored);
+drafts land in `SkeletonDrafts/<rig>/` (deliberately outside `SkeletonStates/`, which the
+Desktop and Web hosts copy recursively).
 
-## Experiment, 2026-10-19 (`codex exec -m gpt-6-luna`, image generation)
+## Decoder benchmark (`bench.py --n 24`, biped, authored poses from the clip backup)
 
-| Request | Inputs | Result (`samples/`) |
-|---|---|---|
-| E1: 16-frame walk cycle, 4×4 | start pose + legend | `gpt_walk.png` — reads as a walk, colors held. But frames clump (1–4 ≈ 13–16), torso drawn as a blob, **feet added** |
-| E2: 16-frame slash, start→end | start/end pair + legend | `gpt_slash_a/b.png` — **convincing**: anticipation, overhead windup, lunge, follow-through, recovery. Ignored the end-pose constraint (drifts back to start) |
-| E3: walk as 16×16 px pixel art | start pose + legend | `gpt_walk_pixel.png` — clean and consistent, but arms barely move; too coarse for angles |
+| Mode | Median bone error | 90th pct | Poses with a bone off > 45° | Broken poses left unflagged | Knife angle |
+|---|---|---|---|---|---|
+| clean render | ~1.6° | ~6° | 2/24 (curled tumbles) | 0 | ~1° |
+| GPT-like degraded¹ | ~4° | ~16° | 5–6/24 (occluded climb/tumble poses) | 0 | ~3.5° |
 
-Decode (no agent, ~100 lines): the slash decodes nearly frame-perfect
-(`decoded_slash_b.png`, zero flags). The walk first failed on 11/16 frames
-(`decoded_walk.png`). I initially blamed the added feet; inspecting the stage
-panels showed the real cause: 3 anti-aliased pixels on the orange forearm's rim
-classified as yellow shin, stretching its endpoint so the shin was oriented from
-the wrong end (`walk_frame02_before_fix.png`). Keeping each color's largest
-connected blob fixed all 16.
+¹ bone lengths ×0.8–1.25, thick torso blob, feet stubs, color drift ±25, blur + JPEG, scale/offset jitter.
+(Numbers from the run before the final solver changes; see the plan's status section for the latest.)
 
-Still wrong and **unflagged**: slash frames 4–5, the arm raised over the head
-decodes as pointing forward-down. The shoulder is estimated from each upper
-arm's highest end, which for a raised arm is the elbow. Only knees are checked
-today. That is the case for an agent inspecting overlays, not just flags.
+## Findings that shaped the design
 
-## Walkthrough
-`python walkthrough.py <out_dir> --raw <~/.codex/generated_images/<session>>
---discarded samples/codex_pil_redraw_discarded.png --before samples/walk_frame02_before_fix.png`
-writes `index.html` + per-stage images: clip→sprite, the image model's
-inputs/outputs, sprite→clip stage by stage, the decoded clip + round trip + GIFs,
-and the walk before/after.
-
-### Lessons for the next round
-- Say **"no feet, no hands — limbs end in round caps"** and **"thin torso line"**.
-- The end-pose constraint was not honored; either drop it or decode-then-blend
-  to the authored end pose.
-- Ask for **evenly spaced** frames explicitly, or accept clumping and retime after decoding.
-- Codex mechanics: put the prompt before `-i a.png b.png` (variadic). Unprompted,
-  each run regenerated 4–7 times (15 generations for 3 asks) and E2's delivered
-  `out.png` was redrawn by Codex in PIL (discarded; raw generations live in
-  `~/.codex/generated_images/`). Prompt for exactly one generation, no code, no saving.
-
-### Prompt used (E2; E1/E3 differ only in the task sentence)
-> Task: a 16-frame SWORD SLASH sprite sheet for this stick character (the sword
-> itself is NOT drawn — only the body). The attached ref_pair.png shows the START
-> pose (left) and the END pose (right). Frame 1 must match the start pose, frame 16
-> must match the end pose. In between: anticipation (wind the near arm up and back
-> behind the head, body coils slightly), then a fast overhead swing forward and down
-> with a lunge, settling into the end pose. Draw in EXACTLY the visual format of the
-> attached reference: a flat colored stick figure on a pure white background, side
-> view, facing right, no shading … Every bone keeps its color from the attached
-> legend … Keep the bone lengths and proportions identical … 4×4 grid of equal
-> square cells.
+- **The first experiment's decode failures were anti-aliasing, not feet**: keep each
+  color's largest connected blob.
+- **Fit the whole skeleton at true lengths**, not bone by bone: connectivity is exact
+  by construction, and GPT's proportion drift becomes a residual instead of a pose error.
+- **Head = thickest disc at an END of the dark shape, measured on all ink** (an arm
+  crossing the head is still ink); also try the torso reversed. Fixed every upside-down decode.
+- **Joint limits must be hard bounds** (elbow ≤ ~150°): a hidden upper arm otherwise
+  decodes as an impossible fold. Bounding turns that into a fold *at* the limit, so
+  `at_limit` flags it — a bound must never silently convert a flagged error into an
+  unflagged one.
+- **The digest's STEEP gate caps a clip at ~7–8 rad of travel per bone**; a full
+  windup + strike + return rarely fits. Key reduction (Douglas–Peucker) removes the
+  decoder's jitter in holds; trimming (`--keep`) and prompting for "end at the
+  follow-through" do the rest. Retiming to satisfy STEEP slows the big swings — timing is
+  the weakest part of a draft.
+- **Codex**: prompt before `-i` (variadic); demand exactly one generation, no code;
+  `-s read-only`; collect images by session id (parallel-safe).

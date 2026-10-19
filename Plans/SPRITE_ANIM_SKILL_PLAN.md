@@ -1,6 +1,32 @@
 # Sprite-anim skill: one-shot animation drafts from an image model
 
-Status: **plan**, 2026-10-19. Prototype + findings: `scripts/sprite_pose/` (README, `walkthrough.py`).
+Status: **built (A–G), 2026-10-19.** Code: `scripts/sprite_pose/` (README has the findings).
+Skill: `.claude/skills/sprite-anim/SKILL.md`. Test target: three ground slashes on `biped`
+(`SkeletonDrafts/biped/slash_{overhead,sweep,rising}.json`), each one GPT call, all passing
+Probe `digest` with 0 FLAG lines.
+
+### Deviations from the plan below
+
+- **Decoder stayed in Python** (`fit.py`), not ported into Probe. Engine-side checks still
+  run through Probe (`digest`) and MTile.Demo (`--strip`) via `sprite_anim.py verify`.
+- **Profiles live in `scripts/sprite_pose/profiles/`**, not `Skeletons/` (the game's rig dir).
+- **Drafts land in `SkeletonDrafts/<rig>/`**, not `SkeletonStates/_drafts/`: the Desktop and
+  Web hosts copy `SkeletonStates/**` recursively (and Web writes a manifest per subdir).
+- **Added**: hard joint-limit bounds + `at_limit` flag; key reduction; STEEP-aware retime;
+  `--keep` trimming; per-key `com` grounding anchor (K = sole−com.Y of the rig's idle, 40.06
+  on biped — the anim-probe skill's 31.64 does not apply to this rig); `points` helper for pins.
+
+### Open
+
+- **Timing.** Retiming to satisfy STEEP gives big swings more phase, so strikes lose snap
+  (overhead chop: windup 0.22–0.79, strike 0.79–0.96). Options: let attacks exceed STEEP
+  (it is a readability convention, the engine plays them), prompt for smaller swings, or a
+  timing pass that keeps the strike fast and spends the budget on anticipation.
+- **Proportions.** GPT draws a shorter torso and lower shoulders than `biped`; raised arms
+  read as folded elbows (`at_limit`). A per-sheet "GPT proportion" pre-fit could absorb it.
+- The Demo `--strip` renders clips hip-pinned, so the `com` grounding is invisible there;
+  only the game shows crouches sinking.
+- `biped_rabbit` is profiled and rendered but no clip has been generated on it yet.
 
 Goal: `/sprite-anim "<move>" --rig <rig> --from <clip@t> [--to <clip@t>]` produces a
 **convincing first-draft clip** for any rig, with an inspectable record of every step.
