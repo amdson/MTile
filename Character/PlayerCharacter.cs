@@ -102,37 +102,34 @@ public class PlayerCharacter : IHittable
     private const float HitInvulnDuration = 0.4f;
     private float _hitInvulnRemaining;
 
-    // Crush-damage tuning. Reads PhysicsBody.LastImpulseMagnitude (max |vnRel|
-    // absorbed by collision resolution last step). Below the threshold normal
-    // landings and casual wall-bumps are free; above it the excess scales into
-    // HP damage and also routes through Combat.OnHitRegistered so hitstun / stun
-    // gates kick in (a hard fall briefly locks jump even though no attack hit).
-    // Separate from _hitInvulnRemaining: a slash-then-thrown-into-wall combo
-    // should land both the slash damage AND the crush damage, not one or the
-    // other. _lastCrushFrame is the cross-event cooldown that prevents the same
-    // wall-slam being charged twice.
+    // Crush-damage tuning. Reads PhysicsBody.LastCrushImpulse — the hard-stop Δv the
+    // body absorbed in collision resolution last step, summed over the step's hits and
+    // with the share cushioned by tiles the impact broke taken out (see PhysicsWorld.
+    // RecordImpulse). Below the threshold normal landings and casual wall-bumps are
+    // free; above it the excess scales into HP damage and also routes through
+    // Combat.OnHitRegistered so hitstun / stun gates kick in (a hard fall briefly locks
+    // jump even though no attack hit). Separate from _hitInvulnRemaining: a slash-then-
+    // thrown-into-wall combo should land both the slash damage AND the crush damage,
+    // not one or the other. _lastCrushFrame is the cross-event cooldown that prevents
+    // the same wall-slam being charged twice.
     //
-    // Threshold sized so the player's own jumps + sand impacts don't self-damage:
-    //   * Held single jump lands at vy ≈ 260-270 (measured)
-    //   * Held running jump (RunJumpVelocity -120) lands ~290
-    //   * Held jump + double jump compounds to ~340-370 in worst case
-    //   * Sand impact: PhysicsWorld now caps the body's per-hit Δv at the tile
-    //     face's absorption capacity. For sand that's
-    //     (ImpulseThreshold + MaxHp/DamagePerUnitImpulse)/Mass per cell —
-    //     290 px/s on one cell, 580 on two (worst case for the hex body),
-    //     regardless of incoming speed. Threshold of 700 means hitting any
-    //     amount of sand never reaches the crush gate.
-    // Plunges onto stone (cap 1040 per cell, no break-through ⇒ full carry-zero
-    // at vnAbs ≈ 849 from terminal velocity) still trigger crush; 2-cell-dirt
-    // plunges likewise. Was 400 — pre-absorption-cap that was sized for self-
-    // jumps only, before sand impacts could legally exceed it.
+    // Sized so a plain ~20-tile drop (no fast-fall) onto unbreakable ground bites,
+    // and the player's own jumps don't (measured at FixedDt, crush Δv on Hardened):
+    //   * Double-jump apex height (~10 tiles) lands at ≈ 367 — free
+    //   * 20-tile drop ≈ 430-475 (tile-seam landings read low) → ≈ 0.1-0.2 HP
+    //   * 40-tile drop ≈ 650 → ≈ 0.6 HP; terminal (~1000) → ≈ 1.4 HP
+    //   * Fast-fall (Down held) 20 tiles ≈ 790 → ≈ 1 HP
+    // Breakable ground cushions in proportion to what it loses: sand saturates near
+    // 750 however fast you arrive, dirt and stone take a slice off, Hardened none.
+    // Was 700 / 0.003, which no pure fall short of ~47 tiles could reach.
+
     // Armored hits are damped, not no-sold: the body still visibly reacts so a
     // tanked hit reads as armor, not a whiff (HIT_AIRLOCK_PLAN open q. 3 —
     // knockback scaling chosen over the binary no-sell).
     private const float ArmorKnockbackScale = 0.3f;
 
-    private const float CrushImpulseThreshold = 700f;
-    private const float CrushDamagePerImpulse = 0.003f;
+    private const float CrushImpulseThreshold = 400f;
+    private const float CrushDamagePerImpulse = 0.0025f;
     private const float CrushCooldownSeconds  = 0.2f;   // ≈ the original 6 frames at 30 fps
     // Sprout crush (a growing block wedged us against terrain, so physics destroyed it).
     // Flat HP per destroyed cell — one cell costs the same as taking a stock slash,
@@ -531,10 +528,10 @@ public class PlayerCharacter : IHittable
         // Magnitude (written by PhysicsWorld.StepSwept). Routes through
         // OnHitRegistered so a hard fall / wall slam also lights up Hitstun and
         // (if hard enough) Stun — "I just slammed down, give me a sec."
-        if (Body.LastImpulseMagnitude > CrushImpulseThreshold
+        if (Body.LastCrushImpulse > CrushImpulseThreshold
             && _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt))
         {
-            float excess = Body.LastImpulseMagnitude - CrushImpulseThreshold;
+            float excess = Body.LastCrushImpulse - CrushImpulseThreshold;
             float crushHp = excess * CrushDamagePerImpulse;
             Health -= crushHp;
             _abilities.Combat.AddDamage(crushHp);
@@ -542,7 +539,7 @@ public class PlayerCharacter : IHittable
             // Short fixed hitstun (the old 8-frames-at-30fps feel) and NO control
             // mute: a hard landing briefly gates jump ("give me a sec") but doesn't
             // turn walking to mush — that treatment is for combat hits.
-            _abilities.Combat.OnHitRegistered(_frame, Body.LastImpulseMagnitude, dt,
+            _abilities.Combat.OnHitRegistered(_frame, Body.LastCrushImpulse, dt,
                 hitstunSecondsOverride: 0.27f, muteControl: false);
             _lastCrushFrame = _frame;
         }

@@ -9,8 +9,8 @@ namespace MTile;
 //
 // What's snapshotted:
 //   • Pose + kinematics: Position, Velocity, AppliedForce, LastImpulseMagnitude,
-//     SproutCrushCount, FrictionScale — all value types, trivially copied. The two
-//     step outputs (impulse, crush count) are read by PlayerCharacter.Update at the
+//     LastCrushImpulse, SproutCrushCount, FrictionScale — all value types, trivially
+//     copied. The step outputs (impulses, crush count) are read by PlayerCharacter.Update at the
 //     START of the next frame, before StepSwept resets them, so they cross the frame
 //     boundary a snapshot sits on.
 //   • Every constraint, in list order: the Maintained hard contacts the collision
@@ -32,6 +32,7 @@ public struct BodyState
     public Vector2 Velocity;
     public Vector2 AppliedForce;
     public float   LastImpulseMagnitude;
+    public float   LastCrushImpulse;
     public int     SproutCrushCount;
     public float   FrictionScale;
     public PhysicsContact[] Contacts;
@@ -48,6 +49,7 @@ public struct BodyState
             Velocity             = b.Velocity,
             AppliedForce         = b.AppliedForce,
             LastImpulseMagnitude = b.LastImpulseMagnitude,
+            LastCrushImpulse     = b.LastCrushImpulse,
             SproutCrushCount     = b.SproutCrushCount,
             FrictionScale        = b.FrictionScale,
             Contacts             = kept?.ToArray() ?? System.Array.Empty<PhysicsContact>(),
@@ -60,6 +62,7 @@ public struct BodyState
         b.Velocity             = Velocity;
         b.AppliedForce         = AppliedForce;
         b.LastImpulseMagnitude = LastImpulseMagnitude;
+        b.LastCrushImpulse     = LastCrushImpulse;
         b.SproutCrushCount     = SproutCrushCount;
         b.FrictionScale        = FrictionScale;
 
