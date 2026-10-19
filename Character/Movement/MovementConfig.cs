@@ -514,6 +514,11 @@ public class MovementConfig
     public float PlayerGrabChaseMaxSeconds  { get; set; } = 0.25f;
     public float PlayerGrabSwipeSmoothing   { get; set; } = 0.35f;
     public float PlayerGrabMaxAccel         { get; set; } = 30000f;
+    // The held victim's own steering (GrabbedState): a flat push along their held
+    // direction, px/s². Limited by construction — the hold's tracker absorbs it, so in
+    // the hold it shifts the victim by ≈ accel·(PlayerGrabSmoothTime/2)² (≈10px at
+    // 6000): a wriggle against the grip, not an escape. 0 = no control.
+    public float PlayerGrabbedDriftAccel    { get; set; } = 6000f;
 
     public float PeelWeight(TileType t) => t switch
     {

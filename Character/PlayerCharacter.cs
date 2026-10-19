@@ -469,6 +469,7 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new FallingState());
         _stateRegistry.Add(new StunnedState());
         _stateRegistry.Add(new TumbleState());
+        _stateRegistry.Add(new GrabbedState());
         _stateRegistry.Add(new StandingState());
         _stateRegistry.Add(new CrouchedState());
         _stateRegistry.Add(new TerrainCarriedState());
@@ -670,8 +671,10 @@ public class PlayerCharacter : IHittable
         // (slash from a stop) still have a direction. Movement code doesn't read this.
         // Roadmap §1.6: facing is sticky in air — only ground-state input writes here.
         // Air-direction changes route through AirTurnSlash / AirSpinStab, which flip
-        // Facing themselves on Enter.
-        if (IsGrounded && ctx.Intent.CurrentHorizontal != 0) _abilities.Facing = ctx.Intent.CurrentHorizontal;
+        // Facing themselves on Enter. A held player turns freely too: the struggle slash
+        // is aimed by facing, and the grabber can be on either side.
+        if ((IsGrounded || _currentState is GrabbedState) && ctx.Intent.CurrentHorizontal != 0)
+            _abilities.Facing = ctx.Intent.CurrentHorizontal;
 
         if (IsGrounded)
         {

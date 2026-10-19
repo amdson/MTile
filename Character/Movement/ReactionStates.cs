@@ -8,6 +8,50 @@ namespace MTile;
 // muted-DI profile; both run with the ambient corrector Off so knockback plows
 // into terrain honestly.
 
+// Held by another player's grab (Combat.GrabbedActive, re-marked every frame the grab
+// field holds this body). The body is a carried object: no fold support, no hover, no
+// landing catch, no jump servo — the grab field (which cancels gravity) is the only
+// thing positioning it, and terrain contact is plain collision. Without this the
+// victim stayed in Standing, whose ambient solve read every pull toward the floor as a
+// landing to cushion.
+//
+// The victim keeps a little directional control: a flat push along their held
+// direction (PlayerGrabbedDriftAccel), with no speed cap and no braking — the field
+// owns their velocity, so input only leans against the grip. Ends when the flag lapses
+// (GrabbedGraceFrames after the field stops); a throw's stun then hands the body to
+// Tumble/Stunned on their passives.
+public class GrabbedState : MovementState
+{
+    public override int ActivePriority  => MovementPriorities.GrabbedActive;
+    public override int PassivePriority => MovementPriorities.GrabbedPassive;
+
+    // Held off the ground and flailing — the tumble clip reads right; a dedicated
+    // grabbed clip would need its own tag.
+    public override AnimTag AnimationTag => AnimTag.Tumble;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
+        => ctx.Combat?.GrabbedActive == true;
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+        => ctx.Combat?.GrabbedActive == true;
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
+    {
+        // Nothing the victim's own movement does may brake the carry or the throw.
+        ctx.Modifiers.PreserveExternalVelocity = true;
+
+        var dir = new Vector2(
+            (ctx.Input.Right ? 1f : 0f) - (ctx.Input.Left ? 1f : 0f),
+            (ctx.Input.Down  ? 1f : 0f) - (ctx.Input.Up   ? 1f : 0f));
+        if (dir.LengthSquared() > 1f) dir = Vector2.Normalize(dir);
+        ctx.Body.AppliedForce = dir * MovementConfig.Current.PlayerGrabbedDriftAccel;
+
+        // No reflex assists while held. (Called even though Off: clears cross-frame
+        // ambient anchor state.)
+        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+    }
+}
+
 // Heavy-hit lock-out. Preempts Standing/Crouched/WallSliding/Falling so the
 // muted air-control profile applies as soon as a stun-flagged hit lands. Does
 // NOT preempt active jumps (50+) — a player hit mid-jump finishes the existing

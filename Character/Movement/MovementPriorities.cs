@@ -26,8 +26,16 @@ namespace MTile;
 //   jump passives     30–48  the launch family's bids (low — trigger-driven)
 //   holds             42–44  LedgeGrab / LedgePull / LedgeJump's bid
 //   launch actives    50–60  jump family's resistance-while-active
+//   grabbed           70     GrabbedState — someone else's hold beats everything
 public static class MovementPriorities
 {
+    // Grabbed: another player's grab field holds this body (Combat.GrabbedActive). Above
+    // every other band, Passive included, so the hold takes over even mid-jump: a
+    // jump's own forces (and the fold states' hover/landing catch) would otherwise
+    // fight the carry and cushion every throw. Leaves the moment the flag lapses.
+    public const int GrabbedActive  = 70;
+    public const int GrabbedPassive = 70;
+
     // Free / passive (Active == Passive: trivially enter and leave).
     public const int FallingActive    = 0;
     public const int FallingPassive   = 0;

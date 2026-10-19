@@ -59,6 +59,24 @@ public class GrabTests(ITestOutputHelper output)
         Assert.True(sawGrabbed, "Victim should be flagged GrabbedActive while held.");
     }
 
+    // A held victim runs GrabbedState — not Standing, whose fold solve would cushion the
+    // carry — and leaves it once the hold ends (here: the struggle-free hold cap).
+    [Fact]
+    public void Grab_PutsVictimInGrabbedState()
+    {
+        bool sawGrabbedState = false, grabbedFlagWithoutState = false;
+        SimRunner.RunMulti(Build(GrabHold(), InputScript.Always(default)),
+            onFrame: (f, ps) =>
+            {
+                bool inState = ps[1].CurrentStateName == nameof(GrabbedState);
+                if (inState) sawGrabbedState = true;
+                // One frame of lag is the flag landing after the victim's own update.
+                if (!inState && ps[1].Combat.GrabbedActive && sawGrabbedState) grabbedFlagWithoutState = true;
+            });
+        Assert.True(sawGrabbedState, "A held victim should be in GrabbedState.");
+        Assert.False(grabbedFlagWithoutState, "Once in GrabbedState the victim stays there while flagged grabbed.");
+    }
+
     // The grab leads with a windup: for StartupSeconds (0.2s) the grab is the live action
     // state but publishes no field, so nobody is flagged, pulled or latched. Measured as
     // the gap between the grab becoming the action and the victim first reading grabbed.
@@ -129,7 +147,9 @@ public class GrabTests(ITestOutputHelper output)
             onFrame: (f, ps) =>
             {
                 if (ps[1].CurrentActionName == "GrabbedSlash") sawStruggle = true;
-                if (ps[0].Combat.HitstunActive) grabberHitstun = true;
+                // Only while held: once freed, the script's remaining clicks are NORMAL
+                // slashes, which may stun the grabber — that is the escape working.
+                if (ps[0].Combat.HitstunActive && !victimFreedAfterGrabbed) grabberHitstun = true;
                 if (ps[1].Combat.GrabbedActive) sawGrabbed = true;
                 // Only track strength while the grab is live (it's reset on grab Enter).
                 if (ps[0].CurrentActionName == "GrabAction")
@@ -146,16 +166,30 @@ public class GrabTests(ITestOutputHelper output)
         Assert.True(victimFreedAfterGrabbed, "Grab should break (victim freed) once grab strength is depleted.");
     }
 
-    // Releasing the grab flings the victim away (the throw). With the grabber facing/
-    // aiming right, the victim is launched rightward.
+    // Hold Shift+LMB through frame 24 — the last SwipeFrames of it dragging the cursor
+    // right — then release mid-swipe. The throw is the cursor's swipe velocity (a still
+    // mouse hands off ≈0), so the swipe IS the throw.
+    private const int   SwipeFrames  = 5;
+    private const float SwipeStepPx  = 25f;   // per frame at Dt 1/30 ⇒ 750 px/s
+    private static InputScript GrabSwipeRightThrow()
+    {
+        var s = new InputScript()
+            .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
+            .For(15 - SwipeFrames, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight });
+        var mouse = MouseRight;
+        for (int i = 0; i < SwipeFrames; i++)
+        {
+            mouse.X += SwipeStepPx;
+            s.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = mouse });
+        }
+        return s.Forever(new PlayerInput { MouseWorldPosition = mouse });
+    }
+
+    // Releasing the grab mid-swipe flings the victim along it (the throw).
     [Fact]
     public void Throw_FlingsVictim()
     {
-        // Hold Shift+LMB through frame 24, then release (keep aiming right) → throw.
-        var attacker = new InputScript()
-            .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
-            .For(15, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight })
-            .Forever(new PlayerInput { MouseWorldPosition = MouseRight });
+        var attacker = GrabSwipeRightThrow();
 
         float maxVx = 0f;
         bool sawStun = false;
@@ -218,10 +252,7 @@ public class GrabTests(ITestOutputHelper output)
     [Fact]
     public void Throw_FlingsOnlyTheHeldVictim()
     {
-        var attacker = new InputScript()
-            .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
-            .For(15, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight })
-            .Forever(new PlayerInput { MouseWorldPosition = MouseRight });
+        var attacker = GrabSwipeRightThrow();
 
         float nearVx = 0f, farVx = 0f;
         bool farStunned = false;
