@@ -9,7 +9,10 @@ namespace MTile;
 //
 // What's snapshotted:
 //   • Pose + kinematics: Position, Velocity, AppliedForce, LastImpulseMagnitude,
-//     FrictionScale — all value types, trivially copied.
+//     SproutCrushCount, FrictionScale — all value types, trivially copied. The two
+//     step outputs (impulse, crush count) are read by PlayerCharacter.Update at the
+//     START of the next frame, before StepSwept resets them, so they cross the frame
+//     boundary a snapshot sits on.
 //   • Every constraint, in list order: the Maintained hard contacts the collision
 //     solver persists AND the soft state-owned ones (FloatingSurfaceDistance,
 //     PointForceContact). The solver walks the list in order, and a state's held
@@ -29,6 +32,7 @@ public struct BodyState
     public Vector2 Velocity;
     public Vector2 AppliedForce;
     public float   LastImpulseMagnitude;
+    public int     SproutCrushCount;
     public float   FrictionScale;
     public PhysicsContact[] Contacts;
 
@@ -44,6 +48,7 @@ public struct BodyState
             Velocity             = b.Velocity,
             AppliedForce         = b.AppliedForce,
             LastImpulseMagnitude = b.LastImpulseMagnitude,
+            SproutCrushCount     = b.SproutCrushCount,
             FrictionScale        = b.FrictionScale,
             Contacts             = kept?.ToArray() ?? System.Array.Empty<PhysicsContact>(),
         };
@@ -55,6 +60,7 @@ public struct BodyState
         b.Velocity             = Velocity;
         b.AppliedForce         = AppliedForce;
         b.LastImpulseMagnitude = LastImpulseMagnitude;
+        b.SproutCrushCount     = SproutCrushCount;
         b.FrictionScale        = FrictionScale;
 
         // Drop everything, re-add fresh clones of every contact in captured order.

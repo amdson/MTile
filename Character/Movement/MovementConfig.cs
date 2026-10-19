@@ -8,9 +8,13 @@ namespace MTile;
 public class MovementConfig
 {
     // General Air Movement
-    public float AirAccel { get; set; } = 1500f;
-    public float MaxAirSpeed { get; set; } = 150f;
-    public float AirDrag { get; set; } = 500f;
+    // Horizontal locomotion (air/walk/crouch/wall-jump speeds, their accel/drag, and
+    // the entry-speed gates keyed off them) was scaled x0.8 on 2026-10-19 to slow
+    // movement ~20%. Vertical jump speeds were left alone: gravity is fixed, so
+    // scaling them would cut jump height to 64% and break the tile-height climbs.
+    public float AirAccel { get; set; } = 1200f;
+    public float MaxAirSpeed { get; set; } = 120f;
+    public float AirDrag { get; set; } = 400f;
     // Quadratic air resistance on the player body (PhysicsBody.QuadraticDrag, 1/px):
     // decel = k·|v|², always on, both axes. Terminal fall speed = √(600 / k).
     public float QuadraticAirDrag { get; set; } = 0.0005f;
@@ -65,15 +69,15 @@ public class MovementConfig
     public float JumpSourceProbeSlack { get; set; } = 60f;
 
     // Wall Sliding
-    public float SlideTerminalSpeed { get; set; } = 40f;
+    public float SlideTerminalSpeed { get; set; } = 32f;
     public float SlideDrag { get; set; } = 300f;
 
     // Wall Jumping
-    public float WallJumpInitialVelX { get; set; } = 250f;
+    public float WallJumpInitialVelX { get; set; } = 200f;
     public float WallJumpInitialVelY { get; set; } = -150f;
-    public float WallJumpAirAccel { get; set; } = 1500f;
-    public float WallJumpMaxAirSpeed { get; set; } = 150f;
-    public float WallJumpAirDrag { get; set; } = 500f;
+    public float WallJumpAirAccel { get; set; } = 1200f;
+    public float WallJumpMaxAirSpeed { get; set; } = 120f;
+    public float WallJumpAirDrag { get; set; } = 400f;
     public float WallJumpHoldForce { get; set; } = -1000f;
     public float WallJumpMaxHoldTime { get; set; } = 0.12f;
 
@@ -89,8 +93,8 @@ public class MovementConfig
     // before. Bodies that want to bounce off non-breaking tiles (e.g. the
     // player off stone) lower this so the swept-impact path sees the hit.
     public float MaxGroundEngageVnRel { get; set; } = 300f;
-    public float WalkAccel { get; set; } = 3000f;
-    public float MaxWalkSpeed { get; set; } = 100f;
+    public float WalkAccel { get; set; } = 2400f;
+    public float MaxWalkSpeed { get; set; } = 80f;
     // Legacy: used to be StandingState/CrouchedState's brake force when no input.
     // Now the equivalent role is played by SurfaceContact.Friction (set on floor
     // contacts at collision time, value below).
@@ -102,22 +106,22 @@ public class MovementConfig
     public float GroundFriction { get; set; } = 3000f;
     
     // Crouching
-    public float CrouchMaxWalkSpeed { get; set; } = 50f;
-    
+    public float CrouchMaxWalkSpeed { get; set; } = 40f;
+
     // Fast Falling / Sliding
     public float FastFallForce { get; set; } = 1000f;
-    public float FastSlideTerminalSpeed { get; set; } = 200f;
+    public float FastSlideTerminalSpeed { get; set; } = 160f;
 
     // The 2-block arc (ArcJumpState) only fires when genuinely
     // running in — |vx along dir| at or above this — AND Up is held
     // (movement_todo #6). Half of MaxWalkSpeed: moving with intent, without
     // demanding a full-speed runway.
-    public float ArcJumpRunSpeed { get; set; } = 50f;
+    public float ArcJumpRunSpeed { get; set; } = 40f;
 
     // Running Jump
     public float RunJumpVelocity { get; set; } = -120f;
     public float RunJumpHoldForce { get; set; } = -1200f;
-    public float RunJumpMinSpeed { get; set; } = 80f;
+    public float RunJumpMinSpeed { get; set; } = 64f;
 
 
     // Ledge Grab / Pull
@@ -187,7 +191,7 @@ public class MovementConfig
     public float MantleMaxRise { get; set; } = 20f;
     // |vx| gate: above this the body is mid-run and the reflex ramps own the vault; the
     // mantle only claims stalled/deliberate entries. Below MaxWalkSpeed by a wide margin.
-    public float MantleMaxEntrySpeed { get; set; } = 60f;
+    public float MantleMaxEntrySpeed { get; set; } = 48f;
 
     // Arc jump (automatic ballistic arc over a 1-block rise hit AT SPEED — see ArcJumpState).
     // The running companion to the mantle: same rise band (MantleMinRise..MantleMaxRise), split

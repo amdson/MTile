@@ -39,10 +39,12 @@
     {
       "Point": "knife_tip",
       "Effect": "knife",
-      "Start": 0.0,
-      "End": 1.0,
+      "Start": 0.20792079,
+      "End": 1,
+      "Scale": 1,
+      "Rotation": 0,
       "FrameTimes": [
-        0.0,
+        0,
         0.025,
         0.05,
         0.075,
@@ -51,9 +53,9 @@
         0.88,
         0.94
       ],
-      "TrailStart": 0.04,
-      "TrailEnd": 0.8,
-      "TrailWidth": 1.0,
+      "TrailStart": 0.20792079,
+      "TrailEnd": 0.9386139,
+      "TrailWidth": 1,
       "TrailOpacity": 0.8
     }
   ],
@@ -335,7 +337,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": -0.37
+          "Rotation": -3.7521784
         },
         {
           "Bone": "arm_r_lower",

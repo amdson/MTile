@@ -1,2 +1,5 @@
 1. improve movement feel. 
-- make sure jumping works from any point of ledge grab or ledge pull
+- fix issue with overly long time horizon on lattice planning, esp when jumping up 
+- slow movement
+- add fall damage
+- add more advantages to being on the ground

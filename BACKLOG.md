@@ -185,6 +185,22 @@ Each encodes a specific missing capability. Un-skip as the capability lands.
 and are *not* a regression from whatever you just changed. Check a new failure against this list
 before bisecting; only a name **not** here is worth chasing.
 
+**2026-10-19 global ~20% movement slowdown** (horizontal speeds, their accel/drag, and the
+entry-speed gates ×0.8 in `MovementConfig` + `configs/movement_config.json`; jump verticals
+untouched — see the note atop `MovementConfig.cs`). Full sweep afterwards: **1563 / 68 / 14**.
+Not baselined (no pre-change run), so this list is "red after, not in the table / §5.0's clip
+stubs", and the speed-calibrated sim scenarios are the likely movers. Left red on purpose until
+the new pace is felt in play: `JumpExitSweepTests` (Running, Parkour, Parkour(long run-in),
+ArcJump), `FighterBlockActionTests.SpawnBlockInAir…` ("only moved 14→12"),
+`StairClimbTests.RegularFlight…`, `LedgeGrabFlickerTests.FallTowardTallPillar…`,
+`LedgePullExitTests.JumpPlusAwayMidPull…`, `CorrectorLedgerTests.Landing…`,
+`LandingContinuityTests.SteadyRun…`, `StairAnimationTests.RenderedStairs…`,
+`GrabTests` (Throw ×2, StruggleSlash), `CombatHitstunTests.Crush_HardFallDealsDamage`,
+`AttackRecoilTests.StabIntoStoneWall…`, `RecoveryTransitionTests.PressHeldThroughRecovery…`,
+`QuillbackEnemyTests` (Mauls, BuildsUp). Also red and already present before the change:
+`ConfigLayoutTests.ShippedMovementConfigMatches…` on `ParkourEnabled` alone (JSON false,
+C# default true).
+
 **2026-09-04 body-polygon shrink update** (−20% tall bottom-anchored / −3% wide, hover +4.8 —
 see `PlayerCharacter.BodyHeightTrim`): the table below shifted by net ±0. Went **green**:
 `SimulationTests.HoldSpaceRight_CoveredJumpOutOfTunnel` and
