@@ -21,13 +21,19 @@ Desktop and Web hosts copy recursively).
 
 ## Decoder benchmark (`bench.py --n 24`, biped, authored poses from the clip backup)
 
-| Mode | Median bone error | 90th pct | Poses with a bone off > 45° | Broken poses left unflagged | Knife angle |
-|---|---|---|---|---|---|
-| clean render | ~1.6° | ~6° | 2/24 (curled tumbles) | 0 | ~1° |
-| GPT-like degraded¹ | ~4° | ~16° | 5–6/24 (occluded climb/tumble poses) | 0 | ~3.5° |
+Final solver (hard joint limits, `at_limit`, calibrated thresholds):
+
+| Mode | Median bone error | 90th pct | Poses with a bone off > 45° | Poses flagged | Broken but unflagged | Knife angle |
+|---|---|---|---|---|---|---|
+| clean render | 2.0° | 12.5° | 4/24 | 7 | 1 | 1.9° |
+| GPT-like degraded¹ | 4.3° | 22.6° | 6/24 | 7 | 2 | 3.3° |
 
 ¹ bone lengths ×0.8–1.25, thick torso blob, feet stubs, color drift ±25, blur + JPEG, scale/offset jitter.
-(Numbers from the run before the final solver changes; see the plan's status section for the latest.)
+
+Before the thresholds were calibrated on real GPT sheets, 22–23/24 poses were flagged with 0
+broken-unflagged (useless as a signal). Now flags are precise but recall is imperfect, so the
+skill requires reading every overlay frame. Broken poses are occluded climb/tumble/curl poses;
+the hard elbow bound (≤ ~150°) costs a little on authored poses that fold past it.
 
 ## Findings that shaped the design
 
