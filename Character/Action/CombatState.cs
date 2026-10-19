@@ -179,6 +179,11 @@ public class CombatState
     // is (currentFrame - GuardStartFrame): guard is a parry you time, not a shield
     // you hold.
     public int     GuardStartFrame;
+    // Which way the shield points: a unit vector from the body toward the cursor,
+    // written every frame by GuardAction. ResolveGuard centres its cone on this, so the
+    // guard covers wherever the player aims it rather than just left/right. Zero means
+    // "no aim set" and falls back to facing (callers that drive CombatState directly).
+    public Vector2 GuardDir;
     // Re-entry cooldown, set every time the stance comes DOWN (EndGuard) — including a
     // clean release, a movement cancel, or a break. Without it the timing model is free
     // to game: tapping Shift over and over hands out a fresh perfect window per press,
@@ -227,7 +232,7 @@ public class CombatState
     // Zeus laser (2.6) — parries clean but hands back no counter.
     private const float GuardChargeMaxDamage = 1.0f;
     private const float GuardChargedSeconds   = 0.8f;
-    // Cone half-angle in radians — 60° each side of facing → 120° total coverage.
+    // Cone half-angle in radians — 60° each side of GuardDir → 120° total coverage.
     // Public because GuardAction's telegraph draws exactly this cone: the arc the
     // player sees and the arc ResolveGuard tests are the same number, so a retune
     // here can't leave the indicator lying about what's covered.
@@ -435,7 +440,7 @@ public class CombatState
     // stance; the caller applies the scales and, if Absorbed, skips the hit entirely.
     //
     // Three outcomes:
-    //   - Not guarding, or the hit came from outside the front cone -> nothing filtered
+    //   - Not guarding, or the hit came from outside the shield's cone -> nothing filtered
     //     (GuardOutcome.None, full damage and knockback). An out-of-cone hit still
     //     breaks the stance: the guard didn't meet it, so it isn't holding anything.
     //   - Guarding and hit inside the perfect window -> Absorbed. No damage, no
@@ -445,7 +450,8 @@ public class CombatState
     //   - Guarding and hit late -> partial penetration ramping with how long the button
     //     has been held, and the guard BREAKS (see GuardBroken).
     //
-    // facing: +1 = facing right, -1 = facing left. knockbackImpulse is the attack's
+    // facing: +1 = facing right, -1 = facing left — the cone's centre only when
+    // GuardDir is unset; a live GuardAction always aims it. knockbackImpulse is the attack's
     // directional impulse - the source direction is the opposite (attacker -> player,
     // so the "into the cone" vector is -knockbackImpulse).
     public GuardOutcome ResolveGuard(in Vector2 knockbackImpulse, float hitDamage, int facing,
@@ -455,9 +461,11 @@ public class CombatState
         if (knockbackImpulse.LengthSquared() < 1e-4f) return GuardOutcome.None;
         var fromAttacker = -knockbackImpulse;
         fromAttacker.Normalize();
-        var facingVec = new Vector2(facing == 0 ? 1f : facing, 0f);
-        // dot > GuardConeCos => fromAttacker is within +/-60 deg of the facing direction.
-        if (Vector2.Dot(fromAttacker, facingVec) < GuardConeCos)
+        var coneDir = GuardDir.LengthSquared() > 1e-6f
+            ? GuardDir
+            : new Vector2(facing == 0 ? 1f : facing, 0f);
+        // dot > GuardConeCos => fromAttacker is within +/-60 deg of the shield's aim.
+        if (Vector2.Dot(fromAttacker, coneDir) < GuardConeCos)
         {
             BreakGuard(currentFrame, dt);
             return GuardOutcome.None;
@@ -537,6 +545,7 @@ public class CombatState
         GuardActive = o.GuardActive;
         GuardCharged = o.GuardCharged; GuardChargedExpireFrame = o.GuardChargedExpireFrame;
         GuardStartFrame = o.GuardStartFrame;
+        GuardDir = o.GuardDir;
         GuardCooldownExpireFrame = o.GuardCooldownExpireFrame;
         GuardBlockRefund = o.GuardBlockRefund;
         GuardBroken = o.GuardBroken; GuardBreakExpireFrame = o.GuardBreakExpireFrame;

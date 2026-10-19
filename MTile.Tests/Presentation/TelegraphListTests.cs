@@ -132,6 +132,26 @@ public class TelegraphListTests
     }
 
     [Fact]
+    public void GuardShieldTelegraphRotatesWithTheAim()
+    {
+        var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), new Vector2(100f, 200f));
+        var t = new TelegraphList();
+        var aim  = Vector2.Normalize(new Vector2(1f, -1f));   // up and to the right
+        var vars = new ActionVars { Facing = 1, GuardDir = aim };
+        new GuardAction().Telegraph(t, body, in vars);
+
+        Assert.True(t.Count > 2);
+        float cos = MathF.Cos(CombatState.GuardConeHalfAngle);
+        for (int i = 0; i < t.Count; i++)
+        {
+            var dir = t[i].A - body.Position;
+            dir.Normalize();
+            Assert.True(Vector2.Dot(dir, aim) >= cos - 1e-3f,
+                        $"shield vertex {i} is outside the aimed cone");
+        }
+    }
+
+    [Fact]
     public void PulseActionTelegraphsNothingOutsideItsHitboxWindow()
     {
         var body = new PhysicsBody(Polygon.CreateRegular(PlayerCharacter.Radius, 6), new Vector2(100f, 200f));

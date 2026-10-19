@@ -1730,7 +1730,8 @@ public class AirSpinStab : StabAction
 
 // Defensive posture. Held while Shift is down (with no L/R held — moving cancels
 // the guard). Calls Combat.BeginGuard so PlayerCharacter.OnHit's guard path can
-// run; applies a slowdown to walk/air speeds; draws a small shield indicator.
+// run; applies a slowdown to walk/air speeds; draws a small shield indicator aimed
+// at the cursor — the block cone is centred on that aim (CombatState.GuardDir).
 //
 // Guard is a TIMED parry, not a shield (CombatState.ResolveGuard): the stance only
 // absorbs a hit outright in the brief window right after it comes up, and leaks
@@ -1803,7 +1804,7 @@ public class GuardAction : ActionState
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         ctx.Combat?.BeginGuard(ctx.CurrentFrame);
-        vars.Facing = ab.Facing == 0 ? 1 : ab.Facing;
+        Aim(ctx, ab, ref vars);
     }
 
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -1820,17 +1821,32 @@ public class GuardAction : ActionState
         m.AirAccel     *= 0.8f;
     }
 
-    // Track facing for the telegraph. ResolveGuard tests the cone against the LIVE
-    // ab.Facing, so mirroring it every frame keeps the drawn arc honest even if
-    // something else turns the player mid-stance.
+    // The shield follows the cursor every frame: guard is directional, and the aim can
+    // be re-read mid-stance (the timing window doesn't care where it points).
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        vars.Facing = ab.Facing == 0 ? 1 : ab.Facing;
+        Aim(ctx, ab, ref vars);
     }
 
-    // Placeholder shield: a thick bronze slice of a circle hugging the front of the body,
-    // ~14px tall — the size of the buckler art it stands in for. Its arc stays inside
-    // the guarded cone (CombatState.GuardConeHalfAngle), so it still says "covered here".
+    // Point the shield from the body toward the cursor and publish it to CombatState,
+    // whose cone ResolveGuard tests — the arc drawn and the arc that blocks are the same
+    // vector. The body turns to the shield's side, so it is never held behind the back;
+    // a cursor dead above/below (|x| tiny) keeps the current facing rather than jitter.
+    private static void Aim(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        int facing = ab.Facing == 0 ? 1 : ab.Facing;
+        Vector2 raw = ctx.Input.MouseWorldPosition - ctx.Body.Position;
+        Vector2 dir = raw.LengthSquared() > 1e-6f ? Vector2.Normalize(raw) : new Vector2(facing, 0f);
+        if (MathF.Abs(dir.X) > 0.1f) ab.Facing = dir.X > 0f ? 1 : -1;
+        vars.Facing   = ab.Facing == 0 ? 1 : ab.Facing;
+        vars.GuardDir = dir;
+        if (ctx.Combat != null) ctx.Combat.GuardDir = dir;
+    }
+
+    // Placeholder shield: a thick bronze slice of a circle hugging the body on the side
+    // the cursor is, ~14px tall — the size of the buckler art it stands in for. Its arc
+    // stays inside the guarded cone (CombatState.GuardConeHalfAngle) around GuardDir, so
+    // it still says "covered here".
     private const float ShieldRadius    = PlayerCharacter.Radius * 0.9f;
     private const float ShieldHalfAngle = 0.7f;   // radians; chord ≈ 2·r·sin(0.7) ≈ 14px
     private const float ShieldThickness = 4f;
@@ -1840,7 +1856,9 @@ public class GuardAction : ActionState
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         int   facing = vars.Facing == 0 ? 1 : vars.Facing;
-        float centre = facing < 0 ? MathF.PI : 0f;
+        float centre = vars.GuardDir.LengthSquared() > 1e-6f
+            ? MathF.Atan2(vars.GuardDir.Y, vars.GuardDir.X)
+            : (facing < 0 ? MathF.PI : 0f);
         t.Arc(body.Position - new Vector2(0f, ShieldLift), ShieldRadius, centre, ShieldHalfAngle,
               ShieldColor, segments: 8, thickness: ShieldThickness);
     }
