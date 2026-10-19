@@ -3454,19 +3454,31 @@ public class BlockGrabAction : ActionState
     // the wall the cursor is behind — which is what would otherwise leave a big contact
     // impulse on the ball at the moment of release. It is a pure geometry query on the
     // current terrain, so it adds no state.
-    // Shared with GrabAction, which carries a body the same way (its own reach, and
-    // a body-sized clearance).
     internal static Vector2 RestPosition(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 cursor,
                                          float holdReach, float clearRadius)
+    {
+        var body   = ctx.Body.Position;
+        var target = HoldTarget(ctx, ab, cursor, holdReach);
+        var d      = target - body;
+        float rho  = d.Length();
+        if (rho <= 1e-3f) return target;
+        var dir = d / rho;
+        return body + dir * ClearDistance(ctx.Chunks, body, dir, rho, clearRadius);
+    }
+
+    // The unclamped half of RestPosition: the cursor, tanh-saturated onto holdReach
+    // around the body. GrabAction carries a body on this directly — terrain is left to
+    // collision, so a hold aimed into the floor drives the victim INTO it (the slam)
+    // rather than setting them down a body-width short.
+    internal static Vector2 HoldTarget(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 cursor,
+                                       float holdReach)
     {
         var body = ctx.Body.Position;
         var d    = cursor - body;
         float r  = d.Length();
         var dir  = r > 1e-3f ? d / r : new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
         float reach = MathF.Max(1e-3f, holdReach);
-        float rho   = reach * MathF.Tanh(r / reach);
-        rho = ClearDistance(ctx.Chunks, body, dir, rho, clearRadius);
-        return body + dir * rho;
+        return body + dir * (reach * MathF.Tanh(r / reach));
     }
 
     // March step for the line-of-sight clamp, px. Fine enough that a clamped target
@@ -3573,11 +3585,11 @@ public class GrabAction : ActionState
     private const float GrabStrengthMax    = 3f;
     private const float ThrowSeconds       = 0.12f;   // the clip's throw tail (animation only now)
     private const float RecoverySeconds    = 0.3f;    // lag after a grab (the whiff-punish window)
-    // Carry (2026-10-18, the block throw's mechanism): the held victim keeps this much
-    // clear of terrain along the grabber→cursor line, and stays held while inside the
-    // grabber-centred box of half-size PlayerGrabHoldReach + CarrySlack.
-    private const float CarryClearRadius   = PlayerCharacter.Radius;
-    private const float CarrySlack         = PlayerCharacter.Radius * 3f;
+    // Carry (2026-10-18, the block throw's mechanism): the held victim tracks the
+    // cursor out to PlayerGrabHoldReach — NOT clamped clear of terrain like a clod, so
+    // collision is what stops a victim pulled into the floor — and stays held while
+    // inside the grabber-centred box of half-size PlayerGrabHoldReach + CarrySlack.
+    private const float CarrySlack        = PlayerCharacter.Radius * 3f;
     private const float Range       = PlayerCharacter.Radius * 2.4f;   // field region half-size
     private const float FocusDist   = PlayerCharacter.Radius * 1.6f;   // hold focus in front of the grabber
 
@@ -3714,7 +3726,7 @@ public class GrabAction : ActionState
         // Carry: the victim follows the cursor's rest position on the clod tracker. One
         // victim, locked on the field; the box around the grabber is how far the hold
         // reaches — a victim knocked out of it is free until it comes back in.
-        var target = BlockGrabAction.RestPosition(ctx, ab, cursor, cfg.PlayerGrabHoldReach, CarryClearRadius);
+        var target = BlockGrabAction.HoldTarget(ctx, ab, cursor, cfg.PlayerGrabHoldReach);
         vars.BallPos = target;
         float half = cfg.PlayerGrabHoldReach + CarrySlack;
         var me = ctx.Body.Position;
