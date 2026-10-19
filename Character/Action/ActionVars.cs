@@ -82,6 +82,8 @@ public struct ActionVars
 
     public bool    GrabThrowing;      // GrabAction — false during the hold phase, true once releasing into the throw
     public Vector2 GrabDir;           // GrabAction — hold focus / throw direction
+    public Vector2 GuardDir;          // Guard — unit aim (body → cursor), tracked every frame;
+                                      // mirrors CombatState.GuardDir for the shield telegraph
     // GrabAction — the one body this grab has hold of. A grab is a pair of hands, not
     // an area effect, so the action latches a single victim and stamps it on its force
     // field (ForceField.Only); everyone else the field's region covers is ignored.

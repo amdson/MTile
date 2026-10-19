@@ -180,7 +180,7 @@ public class PlayerCharacter : IHittable
         // parrying/invulnerable player recoils the attacker exactly as before.
         if (_abilities.Combat.IsInvulnerable(_frame)) return hit.KnockbackImpulse;
 
-        // Guard — timing-based (CombatState.ResolveGuard). A front-cone hit arriving
+        // Guard — timing-based (CombatState.ResolveGuard). A hit inside the aimed cone arriving
         // inside the window right after the stance came up is absorbed completely: no
         // damage, no knockback, no hitstun, and a weak one also charges GuardRetaliate.
         // Anything later leaks through — harder the longer the button has been held —
