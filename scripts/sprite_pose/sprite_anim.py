@@ -159,6 +159,27 @@ def swap_obs(obs, prof, kinds):
             obs['bones'][n], obs['bones'][f] = obs['bones'].get(f), obs['bones'].get(n)
 
 
+def calibrate_lengths(cells, rig, prof, ref, fm):
+    """Per-sheet drawn proportions: a planar pass over every frame, then per bone the 80th
+    percentile of (drawn stroke length / rig length * scale). The image model's STYLE (GPT draws
+    a shorter torso and low shoulders, so upper arms read ~0.55 in every frame) must not decode
+    as foreshortening; only a stroke shorter than its own sheet-typical length is a tilt."""
+    ratios = {}
+    for i, cell in enumerate(cells):
+        o = fm.get(i + 1, {})
+        if o.get('reject'):
+            continue
+        obs = F.observe(cell, prof)
+        if o.get('swap'):
+            swap_obs(obs, prof, o['swap'])
+        sol = F.solve(rig, prof, ref, obs, skip=o.get('occluded', ()))
+        _, _, per_bone = F.diagnose(sol, rig, prof)
+        for n, pb in per_bone.items():
+            if n not in o.get('occluded', ()):
+                ratios.setdefault(n, []).append(pb['drawn_len_ratio'])
+    return {n: round(float(min(max(np.percentile(v, 80), 0.5), 1.6)), 3) for n, v in ratios.items() if len(v) >= 3}
+
+
 def cmd_decode(a):
     cfg = load_run(a.run)
     d = run_dir(a.run)
@@ -170,7 +191,11 @@ def cmd_decode(a):
     fm = {int(k): v for k, v in mp.get('frames', {}).items()}
     ref = ref_pose(cfg, 'from')
     os.makedirs(os.path.join(d, 'cells'), exist_ok=True)
-    out, prev, scales = [], None, []
+    mode3d = not a.planar
+    lengths = calibrate_lengths(cells, rig, prof, ref, fm) if mode3d else {}
+    if lengths:
+        print('sheet proportions (drawn/rig):', ' '.join(f'{k}={v}' for k, v in sorted(lengths.items())))
+    out, prev, prev_pose, scales = [], None, None, []
     for i, cell in enumerate(cells):
         f = i + 1
         o = fm.get(f, {})
@@ -182,15 +207,16 @@ def cmd_decode(a):
         if o.get('swap'):
             swap_obs(obs, prof, o['swap'])
         scale0 = float(np.median(scales)) if len(scales) >= 2 else None
-        sol = F.solve(rig, prof, ref, obs, prev=prev, scale0=scale0, pins=o.get('pin'),
-                      skip=o.get('occluded', ()))
+        kw = dict(scale0=scale0, pins=o.get('pin'), skip=o.get('occluded', ()), mode3d=mode3d, lengths=lengths)
+        sol = F.solve(rig, prof, ref, obs, prev=prev, **kw)
         for b in o.get('flip', []):  # forced orientation: re-run from the flipped solution
-            init = dict(sol['pose'])
+            init = dict(sol['params'])
+            if mode3d and any(b == l for _, l in sol['model'].chains):
+                print(f'  frame {f}: flip of hinge bone {b} ignored (the hinge is joint-limited) - flip its upper bone')
+                continue
             init[b] = F.wrap(init[b] + math.pi)
-            sol = F.solve(rig, prof, ref, obs, scale0=scale0, pins=o.get('pin'),
-                          skip=o.get('occluded', ()), init=init)
-            sol['pose'][b] = F.wrap(init[b]) if abs(F.wrap(sol['pose'][b] - init[b])) > 1.5 else sol['pose'][b]
-        flags, notes, per_bone = F.diagnose(sol, rig, prof, prev)
+            sol = F.solve(rig, prof, ref, obs, init=init, **kw)
+        flags, notes, per_bone = F.diagnose(sol, rig, prof, prev_pose)
         knife = o['knife'] if 'knife' in o else (F.weapon_angle(sol, prof) if cfg.get('weapon') else None)
         if cfg.get('weapon') and knife is None and 'knife' not in o:
             notes.append('blade:not_found')
@@ -203,25 +229,38 @@ def cmd_decode(a):
             if pt.get('Role') == 'support' and pt['Bone'] in seg:
                 tip = org + s * np.asarray(seg[pt['Bone']][1])
                 soles[pt['Id']] = bool(gr is not None and abs(tip[1] - gr) < 1.5 * s)
-        out.append({'frame': f, 'pose': sol['pose'], 'knife': knife, 'flags': flags, 'notes': notes,
+        out.append({'frame': f, 'pose': sol['pose'], 'stretch': {k: round(v, 4) for k, v in sol['stretch'].items()},
+                    'depth': {k: round(v, 3) for k, v in sol['depth'].items()}, 'params': sol['params'],
+                    'knife': knife, 'flags': flags, 'notes': notes,
                     'per_bone': per_bone, 'cost': round(sol['cost'], 3), 'root_px': [float(x[0]), float(x[1])],
                     'scale': float(x[2]), 'ground_row': gr, 'planted': soles,
                     'occluded': o.get('occluded', [])})
-        prev = {k: v for k, v in sol['pose'].items() if k not in o.get('occluded', ())}
+        occ = set(o.get('occluded', ()))
+        prev = {k: v for k, v in sol['params'].items() if k not in occ}
+        prev_pose = {k: v for k, v in sol['pose'].items() if k not in occ}
         print(f'frame {f:2d}: cost {sol["cost"]:.2f}  ' + ('FLAGS ' + ' '.join(flags) if flags else 'ok')
               + ('  notes ' + ' '.join(notes) if notes else ''))
-    # occluded bones: interpolate their local angle from the nearest frames that saw them
+    # occluded bones: interpolate rotation (and stretch) from the nearest frames that saw them
     for k, r in enumerate(out):
         for b in r.get('occluded', []):
-            seen = [(j, q['pose'][b]) for j, q in enumerate(out) if 'pose' in q and b not in q.get('occluded', [])]
+            seen = [(j, q['pose'][b], q.get('stretch', {}).get(b, 1.0)) for j, q in enumerate(out)
+                    if 'pose' in q and b not in q.get('occluded', [])]
             lo = [t for t in seen if t[0] < k]
             hi = [t for t in seen if t[0] > k]
             if lo and hi:
-                (j0, v0), (j1, v1) = lo[-1], hi[0]
-                r['pose'][b] = v0 + (k - j0) / (j1 - j0) * F.wrap(v1 - v0)
+                (j0, v0, s0), (j1, v1, s1) = lo[-1], hi[0]
+                u = (k - j0) / (j1 - j0)
+                r['pose'][b] = v0 + u * F.wrap(v1 - v0)
+                if b in r.get('stretch', {}):
+                    r['stretch'][b] = s0 + u * (s1 - s0)
             elif lo or hi:
-                r['pose'][b] = (lo[-1] if lo else hi[0])[1]
+                t = lo[-1] if lo else hi[0]
+                r['pose'][b] = t[1]
+                if b in r.get('stretch', {}):
+                    r['stretch'][b] = t[2]
     json.dump(out, open(os.path.join(d, 'decoded.json'), 'w'), indent=1)
+    cfg['lengths'], cfg['mode3d'] = lengths, mode3d
+    save_run(a.run, cfg)
     flagged = [r['frame'] for r in out if r.get('flags')]
     print(f'decoded {len(out)} frames; flagged: {flagged or "none"}; rejected: '
           f'{[r["frame"] for r in out if r.get("rejected")] or "none"}')
@@ -300,12 +339,14 @@ def cmd_assemble(a):
         for b in rig['Bones']:
             nme = b['Name']
             if nme in r['pose']:
-                rot, st = r['pose'][nme], None
+                rot, st = r['pose'][nme], r.get('stretch', {}).get(nme)
+                if st is not None and abs(st - 1) < 0.02:
+                    st = None
             else:
                 rot, st = ref.get(nme, (b['Rotation'], None))
             e = {'Bone': nme, 'Rotation': round(float(rot), 5)}
             if st is not None:
-                e['Stretch'] = st
+                e['Stretch'] = round(float(st), 4)
             bones.append(e)
         if have_knife:
             bones.append({'Bone': prof['weapon']['bone'], 'Rotation': round(float(kv), 5)})
@@ -399,6 +440,11 @@ def reduce_keys(dec, tol):
                 e = abs(F.wrap(v - interp))
                 if e > best:
                     best, at = e, k
+            for b, v in dec[k].get('stretch', {}).items():
+                si, sj = dec[i].get('stretch', {}).get(b, 1.0), dec[j].get('stretch', {}).get(b, 1.0)
+                e = abs(v - (si + u * (sj - si)))
+                if e > best:
+                    best, at = e, k
         return best, at
 
     keep = {0, len(dec) - 1}
@@ -486,10 +532,11 @@ def overlay(cell, r, rig, prof):
         ImageDraw.Draw(im).line([(0, 0), cell.size], fill='red', width=4)
         return im
     dr = ImageDraw.Draw(im)
-    pose = {k: (v, None) for k, v in r['pose'].items()}
+    pose = {k: (v, r.get('stretch', {}).get(k)) for k, v in r['pose'].items()}
     full = ref_pose_cache(rig, prof, r)
     full.update(pose)
-    seg = R.fk(rig, full, (prof['weapon']['parent'], r['knife'], prof['weapon']['length']) if r.get('knife') is not None else None)
+    rig_fit = _REF.get('rig_fit', rig)
+    seg = R.fk(rig_fit, full, (prof['weapon']['parent'], r['knife'], prof['weapon']['length']) if r.get('knife') is not None else None)
     ox, oy = r['root_px']
     s = r['scale']
     P = lambda q: (ox + q[0] * s, oy + q[1] * s)
@@ -535,6 +582,10 @@ def render_decode_sheets(name):
     d = run_dir(name)
     rig, prof = R.load_rig(cfg['rig']), R.profile(cfg['rig'])
     _REF['pose'] = ref_pose(cfg, 'from')
+    rf = json.loads(json.dumps(rig))
+    for bn in rf['Bones']:
+        bn['Length'] *= cfg.get('lengths', {}).get(bn['Name'], 1.0)
+    _REF['rig_fit'] = rf
     dec = json.load(open(os.path.join(d, 'decoded.json')))
     T = 260
     ov, rb, cl = [], [], []
@@ -557,7 +608,7 @@ def render_decode_sheets(name):
         cl.append(label(Image.fromarray(a).resize((T, T)), f'{r["frame"]}'))
         if 'pose' in r:
             full = dict(_REF['pose'])
-            full.update({k: (v, None) for k, v in r['pose'].items()})
+            full.update({k: (v, r.get('stretch', {}).get(k)) for k, v in r['pose'].items()})
             w = (prof['weapon']['parent'], r['knife'], prof['weapon']['length']) if r.get('knife') is not None else None
             rb.append(label(R.render_cell(rig, prof, full, T, weapon=w), f'{r["frame"]}'))
         else:
@@ -635,6 +686,7 @@ def main():
     p = sub.add_parser('gen'); p.add_argument('--run', required=True); p.add_argument('--move', required=True)
     p.add_argument('--frames', type=int, default=16)
     p = sub.add_parser('decode'); p.add_argument('--run', required=True); p.add_argument('--sheet')
+    p.add_argument('--planar', action='store_true', help='2D-only fit (no tilt/swivel, no Stretch)')
     p = sub.add_parser('points'); p.add_argument('--run', required=True); p.add_argument('--frames')
     p = sub.add_parser('assemble'); p.add_argument('--run', required=True)
     p.add_argument('--duration', type=float, default=0.5); p.add_argument('--loop', action='store_true')

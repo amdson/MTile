@@ -16,7 +16,9 @@ import math
 import numpy as np
 from scipy import ndimage
 from scipy.optimize import least_squares
+import copy
 from rig import fk
+import limb3d
 
 SAMPLES = 40  # observed points kept per bone
 
@@ -42,8 +44,9 @@ def observe(cell, prof):
     for i, n in enumerate(names):
         m = ok & (lab == i)
         cc, k = ndimage.label(m)
-        if k > 1:
-            m = cc == (np.argmax(ndimage.sum(m, cc, range(1, k + 1))) + 1)
+        if k > 1:  # drop anti-aliasing specks, keep pieces of a stroke split by an occluder
+            sizes = ndimage.sum(m, cc, range(1, k + 1))
+            m = np.isin(cc, [i + 1 for i, sz in enumerate(sizes) if sz >= 0.15 * sizes.max()])
         ys, xs = np.nonzero(m)
         if len(xs) < 25:
             obs['bones'][n] = None
@@ -112,26 +115,95 @@ def seg_dist(p, a, b):
     return np.linalg.norm(p - (a + t[:, None] * ab), axis=1)
 
 
+W_PHI, W_PSI, W_TEMPORAL = 1.2, 1.0, 0.8   # priors: planar unless the drawing says otherwise; smooth in time
+PHI_MAX, PSI_MAX = 1.2, 1.4                   # tilt <= ~69 deg (Stretch >= 0.36)
+
+
 class Model:
-    def __init__(self, rig, prof, ref_pose, obs, pins=None, skip=()):
+    """mode3d: limb chains are ball (upper) + hinge (lower) joints with an out-of-plane tilt
+    phi and hinge swivel psi per chain (limb3d.py); the clip receives the projection as
+    Rotation + Stretch. `lengths` = per-sheet drawn-proportion factors (GPT's style, not
+    foreshortening): the fit matches the image with them, the clip keeps the rig's lengths."""
+
+    def __init__(self, rig, prof, ref_pose, obs, pins=None, skip=(), mode3d=False, lengths=None):
         self.rig, self.prof, self.obs = rig, prof, obs
+        self.rig_fit = copy.deepcopy(rig)
+        for bn in self.rig_fit['Bones']:
+            bn['Length'] *= (lengths or {}).get(bn['Name'], 1.0)
         self.ref = dict(ref_pose)
         self.drawn = [n for n in prof['drawn'] if n != prof['head']]
         self.free = list(self.drawn)  # pinned bones stay free; the pin is a residual on the tip
         self.pins = pins or {}          # bone -> (x, y) pixel the bone's tip must reach
         self.skip = set(skip)           # bones whose observation is ignored (occluded)
         self.scale0 = None
+        self.mode3d = mode3d
+        self.chains = [c[:2] for c in limb_chains(prof, rig) if len(c) >= 2] if mode3d else []
+        self.n_base = 3 + len(self.free)
+        self.occ = self._occluders()
+        self.prev3d = None              # {upper: (phi, psi)} of the previous frame
+        self.anchored = False           # scale0 is the sheet's running median, not a guess
 
-    def pose(self, x):
+    def _occluders(self):
+        """Pixels drawn in front of each limb bone: draw order is far limbs < torso/head <
+        near limbs < weapon (the renderer's and the prompt's layering). A predicted point
+        of a bone that lands on one of these is hidden, not missing."""
+        ob = self.obs
+        if 'lab' not in ob:
+            return {}
+        layer = lambda n: {'far': 0, 'core': 1, 'near': 2}[self.prof['sides'][n]]
+        names = ob['names']
+        occ = {}
+        for n in self.drawn:
+            if self.prof['sides'][n] == 'core':
+                continue
+            L = layer(n)
+            front = [i for i, m in enumerate(names) if m == '__weapon' or (m != n and m in self.prof['sides'] and layer(m) > L)]
+            mask = np.isin(ob['lab'], front) & ob['ok']
+            if L < 1 and ob.get('dark') is not None:
+                mask = mask | ob['dark']
+            occ[n] = ndimage.binary_dilation(mask, iterations=2)
+        return occ
+
+    def hidden(self, n, pt):
+        m = self.occ.get(n)
+        if m is None:
+            return False
+        x, y = int(round(pt[0])), int(round(pt[1]))
+        return 0 <= y < m.shape[0] and 0 <= x < m.shape[1] and bool(m[y, x])
+
+    def nparams(self):
+        return self.n_base + 2 * len(self.chains)
+
+    def extras(self, x, k):
+        if len(x) < self.nparams():
+            return 0.0, 0.0  # initialisation runs on the planar base vector
+        return x[self.n_base + 2 * k], x[self.n_base + 2 * k + 1]
+
+    def project(self, x):
+        """-> (pose dict for FK on rig_fit, stretch {bone: s}, depth {bone: z})."""
         p = dict(self.ref)
         for i, n in enumerate(self.free):
             old = p.get(n)
             st = old[1] if isinstance(old, (tuple, list)) else None
             p[n] = (x[3 + i], st)
-        return p
+        stretch, depth = {}, {}
+        if self.chains:
+            seg = fk(self.rig_fit, p)
+            idx = {n: 3 + i for i, n in enumerate(self.free)}
+            for k, (u, l) in enumerate(self.chains):
+                phi, psi = self.extras(x, k)
+                theta, alpha = x[idx[u]], x[idx[l]]
+                parent_world = seg[u][2] - theta
+                lu, su, ll, sl, zu, zl = limb3d.project(parent_world, theta, phi, alpha, psi)
+                p[u], p[l] = (lu, su), (ll, sl)
+                stretch[u], stretch[l], depth[u], depth[l] = su, sl, zu, zl
+        return p, stretch, depth
+
+    def pose(self, x):
+        return self.project(x)[0]
 
     def segs(self, x):
-        return fk(self.rig, self.pose(x)), np.array([x[0], x[1]]), x[2]
+        return fk(self.rig_fit, self.pose(x)), np.array([x[0], x[1]]), x[2]
 
     def residuals(self, x):
         seg, o, s = self.segs(x)
@@ -154,14 +226,22 @@ class Model:
             res.append(w * seg_dist(b['pts'], a_, t_) / s)
             for q in np.linspace(0, 1, 8):
                 pt = a_ + q * (t_ - a_)
-                res.append([w * np.min(np.linalg.norm(b['pts'] - pt, axis=1)) / s])
+                # a predicted point under something drawn in front is hidden, not missing
+                d_ = 0.0 if self.hidden(n, pt) else np.min(np.linalg.norm(b['pts'] - pt, axis=1)) / s
+                res.append([w * d_])
         if self.prof['head'] and ob.get('head') is not None:
             hs, ht = P(seg[self.prof['head']][0]), P(seg[self.prof['head']][1])
             res.append(2.0 * (0.5 * (hs + ht) - ob['head']['c']) / s)
         for n, px in self.pins.items():
             res.append(4.0 * (P(seg[n][1]) - np.asarray(px)) / s)
-        if self.scale0:  # weak prior: keep the figure's size near the torso/sheet estimate
-            res.append([2.0 * math.log(x[2] / self.scale0)])
+        if self.scale0:  # keep the figure's size near the torso/sheet estimate
+            res.append([(6.0 if self.anchored else 2.0) * math.log(x[2] / self.scale0)])
+        for k, (u, _) in enumerate(self.chains):
+            phi, psi = self.extras(x, k)
+            res.append([W_PHI * phi, W_PSI * psi])
+            if self.prev3d and u in self.prev3d:
+                pp, ps = self.prev3d[u]
+                res.append([W_TEMPORAL * (phi - pp), W_TEMPORAL * (psi - ps)])
         return np.concatenate([np.atleast_1d(np.asarray(r, float)) for r in res])
 
     def cost(self, x):
@@ -246,11 +326,15 @@ def joint_limits(b):
 
 # ---- solve ---------------------------------------------------------------------------
 
-def solve(rig, prof, ref_pose, obs, prev=None, scale0=None, pins=None, skip=(), init=None):
-    m = Model(rig, prof, ref_pose, obs, pins, skip)
+def solve(rig, prof, ref_pose, obs, prev=None, scale0=None, pins=None, skip=(), init=None,
+          mode3d=False, lengths=None):
+    """prev/init: a previous solution's 'params' ({bone: theta-or-alpha, '__3d': {upper: (phi, psi)}})."""
+    m = Model(rig, prof, ref_pose, obs, pins, skip, mode3d, lengths)
     m.scale0 = scale0
-    lo = np.full(3 + len(m.free), -np.inf)
-    hi = np.full(3 + len(m.free), np.inf)
+    if prev and mode3d:
+        m.prev3d = prev.get('__3d')
+    lo = np.full(m.nparams(), -np.inf)
+    hi = np.full(m.nparams(), np.inf)
     lo[2], hi[2] = 0.3, 40.0
     # joint limits are HARD bounds: an elbow/knee folded past its range is never the right
     # reading of a drawing (it is how hidden upper arms used to decode), so the solver may
@@ -260,9 +344,32 @@ def solve(rig, prof, ref_pose, obs, prev=None, scale0=None, pins=None, skip=(), 
         lim = joint_limits(bm[n])
         if lim:
             lo[3 + i], hi[3 + i] = lim[0] - 0.05, lim[1] + 0.05
+    for k in range(len(m.chains)):
+        lo[m.n_base + 2 * k], hi[m.n_base + 2 * k] = -PHI_MAX, PHI_MAX
+        lo[m.n_base + 2 * k + 1], hi[m.n_base + 2 * k + 1] = -PSI_MAX, PSI_MAX
+
+    def seeded(x0, src=None, sign=1.0):
+        """Append (phi, psi) per chain: from a previous solution, else seeded off the planar
+        saddle from how short the stroke is drawn (phi = acos(drawn/expected))."""
+        if len(x0) >= m.nparams():
+            return x0
+        ext = []
+        for (u, l) in m.chains:
+            if src and u in src:
+                ext += list(src[u])
+                continue
+            bo = m.obs['bones'].get(u)
+            L = next(b_['Length'] for b_ in m.rig_fit['Bones'] if b_['Name'] == u)
+            ratio = bo['len_px'] / (x0[2] * L) if bo is not None else 1.0
+            phi = math.acos(min(max(ratio, 0.36), 1.0)) if ratio < 0.9 else 0.0
+            bl = m.obs['bones'].get(l)
+            Ll = next(b_['Length'] for b_ in m.rig_fit['Bones'] if b_['Name'] == l)
+            rl = bl['len_px'] / (x0[2] * Ll) if bl is not None else 1.0
+            ext += [sign * max(phi, 0.05), sign * (0.6 if rl < 0.85 else 0.05)]
+        return np.concatenate([x0, ext])
 
     def run(x0):
-        x0 = x0.copy()
+        x0 = seeded(x0, (prev or {}).get('__3d')).copy()
         for k in range(3, len(x0)):
             if np.isfinite(lo[k]):
                 v = wrap(x0[k])
@@ -280,7 +387,9 @@ def solve(rig, prof, ref_pose, obs, prev=None, scale0=None, pins=None, skip=(), 
         m.obs = obs
     s0 = starts[0][2]
     m.scale0 = scale0 or s0
-    lo[2], hi[2] = 0.6 * m.scale0, 1.7 * m.scale0
+    m.anchored = scale0 is not None
+    lo[2], hi[2] = ((0.8, 1.25) if m.anchored else (0.6, 1.7))
+    lo[2], hi[2] = lo[2] * m.scale0, hi[2] * m.scale0
     if prev is not None:
         starts.append(init_guess(m, prev))
     if init is not None:
@@ -288,9 +397,31 @@ def solve(rig, prof, ref_pose, obs, prev=None, scale0=None, pins=None, skip=(), 
     best = min((run(x0) for x0 in starts), key=lambda t: t[1])
     # escape wrong-end minima chain by chain
     idx = {n: 3 + i for i, n in enumerate(m.free)}
+    for kc, (u, l) in enumerate(m.chains):
+        for dphi, dpsi in ((1, -1), (-1, 1)):
+            x = best[0].copy()
+            x[m.n_base + 2 * kc] *= dphi
+            x[m.n_base + 2 * kc + 1] *= dpsi
+            cand = run(x)
+            if cand[1] < best[1] - 1e-4:
+                best = cand
+    # 3D: the hinge can't flip (joint-limited), so a wrong-end limb is escaped by flipping the
+    # upper bone AND re-seeding the hinge at a moderate and a deep bend inside its limits
+    for (u, l) in m.chains:
+        lim = joint_limits(bm[l])
+        if not lim:
+            continue
+        fold = lim[0] if abs(lim[0]) > abs(lim[1]) else lim[1]
+        for bend in (0.35 * fold, 0.7 * fold):
+            x = best[0].copy()
+            x[idx[u]] = wrap(x[idx[u]] + math.pi)
+            x[idx[l]] = bend
+            cand = run(x)
+            if cand[1] < best[1] - 1e-4:
+                best = cand
     for ch in limb_chains(prof, rig):
         ch = [n for n in ch if n in idx]
-        for flips in ([ch[0]], ch[1:2], ch[:2]):
+        for flips in (([ch[0]],) if m.chains else ([ch[0]], ch[1:2], ch[:2])):
             if not flips:
                 continue
             x = best[0].copy()
@@ -298,16 +429,19 @@ def solve(rig, prof, ref_pose, obs, prev=None, scale0=None, pins=None, skip=(), 
                 if n in flips:
                     x[idx[n]] = wrap(x[idx[n]] + math.pi)
                     # keep the next bone's world angle: compensate its local rotation
-                    if k + 1 < len(ch) and ch[k + 1] not in flips:
+                    if k + 1 < len(ch) and ch[k + 1] not in flips and not m.chains:
                         x[idx[ch[k + 1]]] = wrap(x[idx[ch[k + 1]]] - math.pi)
             cand = run(x)
             if cand[1] < best[1] - 1e-4:
                 best = cand
     x, c = best
-    pose = {n: wrap(x[3 + i]) for i, n in enumerate(m.free)}
-    for n, v in m.pins.items():
-        pass
-    return {'x': x, 'pose': pose, 'cost': c, 'model': m}
+    p, stretch, depth = m.project(x)
+    pose = {n: wrap(p[n][0]) for n in m.free}
+    params = {n: float(x[3 + i]) for i, n in enumerate(m.free)}
+    params['__3d'] = {u: (float(x[m.n_base + 2 * k]), float(x[m.n_base + 2 * k + 1]))
+                      for k, (u, l) in enumerate(m.chains)}
+    return {'x': x, 'pose': pose, 'stretch': stretch, 'depth': depth, 'params': params,
+            'cost': c, 'model': m}
 
 
 # ---- weapon + diagnostics -----------------------------------------------------------
@@ -348,7 +482,8 @@ def diagnose(sol, rig, prof, prev_pose=None):
             continue
         a_, t_ = o + s * np.asarray(seg[n][0]), o + s * np.asarray(seg[n][1])
         fit = float(np.median(seg_dist(b['pts'], a_, t_)) / s)
-        ratio = b['len_px'] / (s * bm[n]['Length'])
+        modelled = float(np.linalg.norm(t_ - a_))
+        ratio = b['len_px'] / max(modelled, 1e-6)
         per_bone[n] = {'fit': round(fit, 2), 'drawn_len_ratio': round(ratio, 2)}
         if fit > 1.8:
             flags.append(f'poor_fit:{n}({fit:.1f})')
@@ -356,8 +491,16 @@ def diagnose(sol, rig, prof, prev_pose=None):
             flags.append(f'foreshortened:{n}({ratio:.2f})')
         elif ratio < 0.6:
             notes.append(f'short:{n}({ratio:.2f})')
+    for n, st in sol.get('stretch', {}).items():
+        if st < 0.85:
+            notes.append(f'tilted:{n}({st:.2f})')
+    hinge = sol.get('params', {})
     for n, v in sol['pose'].items():
         b = bm[n]
+        if prev_pose and n in prev_pose and abs(wrap(v - prev_pose[n])) > 2.5:
+            flags.append(f'jump:{n}({wrap(v - prev_pose[n]):+.2f})')  # projected vs projected
+        if m.chains and any(n == l for _, l in m.chains):
+            v = hinge.get(n, v)  # judge the hinge's own flexion, not its projection
         lim = joint_limits(b)
         lo_, hi_ = lim if lim else (None, None)
         if lo_ is not None and not (lo_ - 0.3 <= v <= hi_ + 0.3):
@@ -368,8 +511,6 @@ def diagnose(sol, rig, prof, prev_pose=None):
                 # pinned at max flexion by the solver's bound: usually a limb drawn shorter than
                 # the rig's (hidden/foreshortened upper arm) folding to match - look at it
                 flags.append(f'at_limit:{n}({v:.2f})')
-        if prev_pose and n in prev_pose and abs(wrap(v - prev_pose[n])) > 2.5:
-            flags.append(f'jump:{n}({wrap(v - prev_pose[n]):+.2f})')
     if m.obs.get('torso') is None:
         flags.append('missing:torso')
     return flags, notes, per_bone

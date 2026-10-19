@@ -9,12 +9,16 @@ Modes:
   clean  the reference renderer, untouched
   gpt    per-bone length ×U(0.8,1.25), thick torso blob, little feet, color drift,
          line-width variation, blur + JPEG, cell scale/offset jitter, random knife angle
+  fore   gpt-style damage (milder length jitter) on a FORESHORTENED truth: each limb chain
+         tilted/swivelled out of plane with p=0.6 (limb3d ball+hinge), rendered with Stretch
+--d3 decodes with the ball+hinge model (mode3d); stretch error is reported for tilted bones.
 """
 import argparse, copy, io, json, math, random, sys, tarfile, time
 import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 import rig as R
 import fit as F
+import limb3d
 
 
 def all_poses(rig_name):
@@ -28,13 +32,38 @@ def all_poses(rig_name):
     return out
 
 
+def foreshorten(rig, prof, pose, rng):
+    """Tilt/swivel limb chains out of plane (ball + hinge), returning the projected truth pose."""
+    out = dict(pose)
+    chains = [c[:2] for c in F.limb_chains(prof, rig) if len(c) >= 2]
+    bm = {b['Name']: b for b in rig['Bones']}
+    for u, l in chains:
+        if rng.random() > 0.6:
+            continue
+        seg = R.fk(rig, out)
+        theta = out.get(u, (bm[u]['Rotation'], None))[0]
+        alpha = out.get(l, (bm[l]['Rotation'], None))[0]
+        lim = F.joint_limits(bm[l])
+        if lim:
+            alpha = min(max(alpha, lim[0]), lim[1])
+        if abs(alpha) < 0.3:  # give the hinge something to swivel
+            alpha = (lim[0] * 0.4) if lim and abs(lim[0]) > abs(lim[1]) else (lim[1] * 0.4 if lim else alpha)
+        phi = rng.choice([-1, 1]) * rng.uniform(0.35, 1.1)
+        psi = rng.uniform(-1.0, 1.0)
+        pw = seg[u][2] - theta
+        lu, su, ll, sl, _, _ = limb3d.project(pw, theta, phi, alpha, psi)
+        out[u], out[l] = (lu, su), (ll, sl)
+    return out
+
+
 def degrade_render(rig, prof, pose, size, rng, mode, knife):
     if mode == 'clean':
         return R.render_cell(rig, prof, pose, size, weapon=knife)
     rg = copy.deepcopy(rig)
+    jl, jh = (0.92, 1.08) if mode == 'fore' else (0.8, 1.25)
     for b in rg['Bones']:
         if b['Name'] in prof['drawn'] and b['Name'] != prof['head']:
-            b['Length'] *= rng.uniform(0.8, 1.25)
+            b['Length'] *= rng.uniform(jl, jh)
     jit = {n: tuple(int(np.clip(c + rng.uniform(-25, 25), 0, 255)) for c in col) for n, col in prof['colors'].items()}
     pf = dict(prof, colors=jit)
     pf['weapon'] = dict(prof['weapon'], color=tuple(int(np.clip(c + rng.uniform(-25, 25), 0, 255)) for c in prof['weapon']['color']))
@@ -64,7 +93,7 @@ def degrade_render(rig, prof, pose, size, rng, mode, knife):
     return Image.open(io.BytesIO(buf.getvalue())).convert('RGB')
 
 
-def run(rig_name, n, modes, seed, show=None):
+def run(rig_name, n, modes, seed, show=None, d3=False):
     rig, prof = R.load_rig(rig_name), R.profile(rig_name)
     rng = random.Random(seed)
     poses = all_poses(rig_name)
@@ -75,21 +104,27 @@ def run(rig_name, n, modes, seed, show=None):
     shows = []
     for mode in modes:
         errs, flips, werrs, t0, flagged = [], 0, [], time.time(), 0
+        serrs = []  # |stretch error| on truth-tilted bones
         fstats = {}  # flag kind -> [fired on broken pose, fired on good pose]
         missed = 0  # broken poses with no flag
         for clip, t, pose in poses:
             ka = rng.uniform(-1.2, 1.2)
             knife = (prof['weapon']['parent'], ka, prof['weapon']['length'])
+            if mode == 'fore':
+                pose = foreshorten(rig, prof, pose, rng)
             cell = degrade_render(rig, prof, pose, 300, rng, mode, knife)
             # undrawn bones are given (struts/feet hold the true value): measure the drawn fit only
             ref = dict(bind)
             ref.update({k: v for k, v in pose.items() if k not in prof['drawn']})
             obs = F.observe(cell, prof)
-            sol = F.solve(rig, prof, ref, obs)
+            sol = F.solve(rig, prof, ref, obs, mode3d=d3)
             flags, _, _ = F.diagnose(sol, rig, prof)
             flagged += bool(flags)
             dec = dict(ref)
-            dec.update({k: (v, pose.get(k, (0, None))[1]) for k, v in sol['pose'].items()})
+            dec.update({k: (v, sol['stretch'].get(k)) for k, v in sol['pose'].items()})
+            for k, v in pose.items():
+                if k in prof['drawn'] and v[1] is not None and v[1] < 0.95:
+                    serrs.append(abs(sol['stretch'].get(k, 1.0) - v[1]))
             st, sd = R.fk(rig, pose), R.fk(rig, dec)
             worst = 0
             for b in prof['drawn']:
@@ -115,6 +150,8 @@ def run(rig_name, n, modes, seed, show=None):
             'knife_median_deg': round(float(np.median(werrs)), 2) if werrs else None,
             'knife_found': f'{len(werrs)}/{len(poses)}', 'sec_per_pose': round((time.time() - t0) / len(poses), 2),
             'flags_[on_broken,on_good]': fstats, 'broken_unflagged': missed,
+            'stretch_err_median': round(float(np.median(serrs)), 3) if serrs else None,
+            'tilted_bones': len(serrs),
         }
         print(mode, json.dumps(report[mode]))
     if show and shows:
@@ -137,5 +174,6 @@ if __name__ == '__main__':
     ap.add_argument('--modes', default='clean,gpt')
     ap.add_argument('--seed', type=int, default=0)
     ap.add_argument('--show')
+    ap.add_argument('--d3', action='store_true', help='decode with the ball+hinge model')
     a = ap.parse_args()
-    run(a.rig, a.n, a.modes.split(','), a.seed, a.show)
+    run(a.rig, a.n, a.modes.split(','), a.seed, a.show, a.d3)
