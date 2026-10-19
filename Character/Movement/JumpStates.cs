@@ -25,7 +25,7 @@ public class JumpingState : MovementState
 
     private FloatingSurfaceDistance _source;
 
-    public override void ResetTransient() => _source = null;
+    public override void ResetTransient(PhysicsBody body) => _source = Owned(body, SoftContactOwner.JumpSource);
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -212,7 +212,7 @@ public class JumpingState : MovementState
             // Airborne — no tangential coupling to the source surface, else friction
             // would dominate the gentle air-drag tangential dynamics.
             _source.Friction = 0f;
-            ctx.Body.Constraints.Add(_source);
+            Hold(ctx.Body, _source, SoftContactOwner.JumpSource);
         }
     }
 
@@ -280,7 +280,7 @@ public class RunningJumpState : MovementState
 
     private FloatingSurfaceDistance _source;
 
-    public override void ResetTransient() => _source = null;
+    public override void ResetTransient(PhysicsBody body) => _source = Owned(body, SoftContactOwner.RunningJumpSource);
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
@@ -334,7 +334,7 @@ public class RunningJumpState : MovementState
         if (TryFindSource(ctx, out _source))
         {
             _source.Friction = 0f;
-            ctx.Body.Constraints.Add(_source);
+            Hold(ctx.Body, _source, SoftContactOwner.RunningJumpSource);
         }
     }
 
@@ -459,7 +459,13 @@ public class CoveredJumpState : MovementState
     // Scalar per-activation state (OpenDir, SlideSpeed, CoveredPhase, SlideTime,
     // JumpHoldTime, JumpReleased) lives in MovementVars now; only the soft-contact
     // refs stay as transient instance caches (rebuilt by EnsureContacts).
-    public override void ResetTransient() { _ground = null; _groundIsCrouch = false; }
+    public override void ResetTransient(PhysicsBody body)
+    {
+        _groundIsCrouch = false;
+        _ground = Owned(body, SoftContactOwner.CoveredGroundStand);
+        if (_ground == null && (_ground = Owned(body, SoftContactOwner.CoveredGroundCrouch)) != null)
+            _groundIsCrouch = true;
+    }
     private FloatingSurfaceDistance _ground;  // held through phase 1: the body keeps its rest
                                               // height so the ceiling probe (anchored on the
                                               // head) doesn't slip off the overhead slab and fire
@@ -561,7 +567,8 @@ public class CoveredJumpState : MovementState
             if (_groundIsCrouch ? ctx.TryGetCrouchGround(out var ground) : ctx.TryGetGround(out ground))
             {
                 _ground = ground;
-                ctx.Body.Constraints.Add(_ground);
+                Hold(ctx.Body, _ground, _groundIsCrouch ? SoftContactOwner.CoveredGroundCrouch
+                                                        : SoftContactOwner.CoveredGroundStand);
             }
         }
     }

@@ -912,11 +912,10 @@ public class PlayerCharacter : IHittable
 
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
 
-        // The restored body keeps only its Maintained (hard) contacts; the soft
-        // contacts are gone, so every movement state's transient contact-ref cache is
-        // now stale. Null them all so the active state's idempotent Ensure… rebuilds
-        // its contact next Update from the restored pose (see ResetTransient).
-        foreach (var st in _stateRegistry) st.ResetTransient();
+        // The restored body's contacts are fresh clones, so every movement state's
+        // contact-ref cache points at the pre-restore objects. Each re-takes its own
+        // clone by Owner tag (see ResetTransient).
+        foreach (var st in _stateRegistry) st.ResetTransient(Body);
     }
 
     private int[] MapStateRing(MovementState[] ring)

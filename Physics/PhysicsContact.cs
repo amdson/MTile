@@ -4,14 +4,18 @@ namespace MTile;
 
 public abstract class PhysicsContact
 {
-    // True for contacts that are *durable simulation state* and must survive a
-    // snapshot/restore: the resting SurfaceDistance contacts the collision solver
+    // True for the resting SurfaceDistance hard contacts the collision solver
     // persists across frames (a body at rest doesn't re-collide, so they aren't
     // regenerated). State-owned soft contacts (FloatingSurfaceDistance,
-    // PointForceContact) leave this false — they're re-derived each frame from
-    // {state scalars + abilities + body pose + a world query}, so snapshot skips
-    // them and the owning state rebuilds them. See Plans/STATE_SNAPSHOT_PLAN.md.
+    // PointForceContact) leave this false. Both kinds are snapshotted, in list order
+    // (see BodyState): a state holds its soft contact across frames and keeps its last
+    // pose when a refresh query misses, which no re-query after a restore reproduces.
     public bool Maintained;
+
+    // Which movement-state field holds this soft contact (a SoftContactOwner), so a
+    // restore can hand each state back the clone of its own contact. 0 = unowned
+    // (collision contacts).
+    public byte Owner;
 
     // Per-step transient: total impulse delivered TO the body through this contact
     // during the most recent PhysicsWorld.StepSwept. Accumulates both normal-resolve

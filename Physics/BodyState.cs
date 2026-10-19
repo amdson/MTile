@@ -10,11 +10,12 @@ namespace MTile;
 // What's snapshotted:
 //   • Pose + kinematics: Position, Velocity, AppliedForce, LastImpulseMagnitude,
 //     FrictionScale — all value types, trivially copied.
-//   • Maintained constraints only (the resting SurfaceDistance hard contacts the
-//     collision solver persists). Soft state-owned contacts (FloatingSurfaceDistance,
-//     PointForceContact) leave Maintained == false; they are NOT
-//     captured — the owning movement state rebuilds them idempotently after a
-//     restore (see PhysicsContact.Maintained + the per-state Ensure… methods).
+//   • Every constraint, in list order: the Maintained hard contacts the collision
+//     solver persists AND the soft state-owned ones (FloatingSurfaceDistance,
+//     PointForceContact). The solver walks the list in order, and a state's held
+//     contact keeps a pose no re-query reproduces, so both the values and the order
+//     must come back exactly. Movement states re-take their soft contacts from the
+//     restored list by PhysicsContact.Owner (MovementState.ResetTransient).
 //
 // What's NOT here: Polygon (immutable shape) and Impact (immutable config) — those
 // are shared/rebuilt at the entity/player level, never mutated mid-sim.
@@ -29,17 +30,14 @@ public struct BodyState
     public Vector2 AppliedForce;
     public float   LastImpulseMagnitude;
     public float   FrictionScale;
-    public PhysicsContact[] Maintained;
+    public PhysicsContact[] Contacts;
 
     public static BodyState Capture(PhysicsBody b)
     {
         List<PhysicsContact> kept = null;
         var cons = b.Constraints;
         for (int i = 0; i < cons.Count; i++)
-        {
-            if (!cons[i].Maintained) continue;
             (kept ??= new List<PhysicsContact>()).Add(Clone(cons[i]));
-        }
         return new BodyState
         {
             Position             = b.Position,
@@ -47,7 +45,7 @@ public struct BodyState
             AppliedForce         = b.AppliedForce,
             LastImpulseMagnitude = b.LastImpulseMagnitude,
             FrictionScale        = b.FrictionScale,
-            Maintained           = kept?.ToArray() ?? System.Array.Empty<PhysicsContact>(),
+            Contacts             = kept?.ToArray() ?? System.Array.Empty<PhysicsContact>(),
         };
     }
 
@@ -59,40 +57,39 @@ public struct BodyState
         b.LastImpulseMagnitude = LastImpulseMagnitude;
         b.FrictionScale        = FrictionScale;
 
-        // Drop everything, re-add fresh clones of the maintained contacts. Soft
-        // contacts are intentionally gone — states re-derive them next frame.
+        // Drop everything, re-add fresh clones of every contact in captured order.
         b.Constraints.Clear();
-        if (Maintained != null)
-            for (int i = 0; i < Maintained.Length; i++)
-                b.Constraints.Add(Clone(Maintained[i]));
+        if (Contacts != null)
+            for (int i = 0; i < Contacts.Length; i++)
+                b.Constraints.Add(Clone(Contacts[i]));
     }
 
-    // Deep-copy this snapshot, including a fresh clone of every maintained contact.
+    // Deep-copy this snapshot, including a fresh clone of every contact.
     // Used as the World store's Cloner for BodyStateComp so capture/restore never
     // alias the contact array (the structs copy by value, but the PhysicsContact[]
     // is a shared ref until re-cloned). Pose/kinematics are value types, copied free.
     public readonly BodyState DeepCopy()
     {
         var copy = this;
-        if (Maintained != null && Maintained.Length > 0)
+        if (Contacts != null && Contacts.Length > 0)
         {
-            var contacts = new PhysicsContact[Maintained.Length];
-            for (int i = 0; i < Maintained.Length; i++) contacts[i] = Clone(Maintained[i]);
-            copy.Maintained = contacts;
+            var contacts = new PhysicsContact[Contacts.Length];
+            for (int i = 0; i < Contacts.Length; i++) contacts[i] = Clone(Contacts[i]);
+            copy.Contacts = contacts;
         }
         return copy;
     }
 
-    // Deep-copy a single contact, preserving its concrete type + Maintained flag.
+    // Deep-copy a single contact, preserving its concrete type, Maintained flag and
+    // Owner tag. LastImpulse is a per-step diagnostic (zeroed by StepSwept) — not copied.
     private static PhysicsContact Clone(PhysicsContact c) => c switch
     {
         SurfaceDistance sd => new SurfaceDistance(sd.Position, sd.Normal, sd.MinDistance)
-            { SurfaceVelocity = sd.SurfaceVelocity, Friction = sd.Friction, Maintained = sd.Maintained },
+            { SurfaceVelocity = sd.SurfaceVelocity, Friction = sd.Friction, Maintained = sd.Maintained, Owner = sd.Owner },
         FloatingSurfaceDistance f => new FloatingSurfaceDistance(f.Position, f.Normal, f.MinDistance)
-            { SurfaceVelocity = f.SurfaceVelocity, Friction = f.Friction, Maintained = f.Maintained },
-        PointForceContact p => new PointForceContact(p.Position) { Maintained = p.Maintained },
-        // Soft (non-Maintained) contacts never reach
-        // capture/clone — no branch needed. Any other type would be a bug.
-        _ => null,
+            { SurfaceVelocity = f.SurfaceVelocity, Friction = f.Friction, Maintained = f.Maintained, Owner = f.Owner },
+        PointForceContact p => new PointForceContact(p.Position) { Maintained = p.Maintained, Owner = p.Owner },
+        // Any other type would be a bug.
+        _ => throw new System.InvalidOperationException($"BodyState can't clone a {c.GetType().Name}."),
     };
 }

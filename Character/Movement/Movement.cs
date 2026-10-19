@@ -34,6 +34,19 @@ namespace MTile;
 //     Dropdown: the feet).
 // Whatever path a state uses, the applied solve's output is bookkept in
 // CorrectorLedger (per-channel forces + per-contact tile attribution).
+// Which movement-state field a soft contact belongs to (PhysicsContact.Owner) — how a
+// state finds its own contact again in a restored constraint list. One value per
+// field; CoveredJump encodes the float height it acquired at in the tag, since that
+// height is part of what the contact means.
+public enum SoftContactOwner : byte
+{
+    None = 0,
+    JumpSource, RunningJumpSource,
+    CoveredGroundStand, CoveredGroundCrouch,
+    LedgeWall, LedgeFloor,
+    WallSlideWall, WallSlideGround,
+}
+
 public abstract class MovementState
 {
     public abstract int ActivePriority { get; }
@@ -66,13 +79,29 @@ public abstract class MovementState
 
     // Snapshot/restore hook (roadmap goal 4). The only per-player instance data left
     // on a movement state is its transient soft-contact ref cache(s) (_ground,
-    // _source, _wall, …). A restore drops the soft contacts from Body.Constraints
-    // (only Maintained hard contacts survive — see BodyState), so these caches would
-    // be left dangling. PlayerCharacter.RestoreState calls this on every registry
-    // state to null them; the owning state's idempotent Ensure… then rebuilds its
-    // contact on the next Update from the restored body pose. No-op for stateless
-    // states (Falling, Stunned, jumps without a source cache).
-    public virtual void ResetTransient() { }
+    // _source, _wall, …). A restore replaces Body.Constraints with clones of every
+    // contact in captured order (see BodyState), so these caches would point at the
+    // pre-restore objects. PlayerCharacter.RestoreState calls this on every registry
+    // state to re-take its own clone by Owner tag (Owned) — null when it held none,
+    // and the idempotent Ensure… then acquires as in normal play. Re-querying instead
+    // is not equivalent: a held contact keeps its last pose when a refresh misses.
+    // No-op for stateless states (Falling, Stunned, jumps without a source cache).
+    public virtual void ResetTransient(PhysicsBody body) { }
+
+    // The restored body's soft contact tagged `owner`, or null.
+    protected static FloatingSurfaceDistance Owned(PhysicsBody body, SoftContactOwner owner)
+    {
+        foreach (var c in body.Constraints)
+            if (c.Owner == (byte)owner && c is FloatingSurfaceDistance f) return f;
+        return null;
+    }
+
+    // Tag a soft contact as `owner`'s and add it to the body.
+    protected static void Hold(PhysicsBody body, FloatingSurfaceDistance c, SoftContactOwner owner)
+    {
+        c.Owner = (byte)owner;
+        body.Constraints.Add(c);
+    }
 
 
     // The lattice engine (Plans/LATTICE_PATH_PLANNER.md) changes what several

@@ -60,7 +60,7 @@ public abstract class ClimbManeuverBase : MovementState
     private bool    _hasGrip;
     public override float AnimationProgress => _progress;
     public override bool TryAnimationGrip(out Vector2 target) { target = _gripCorner; return _hasGrip; }
-    public override void ResetTransient() { _progress = 0f; _gripCorner = default; _hasGrip = false; }
+    public override void ResetTransient(PhysicsBody body) { _progress = 0f; _gripCorner = default; _hasGrip = false; }
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {

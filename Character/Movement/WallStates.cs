@@ -15,7 +15,11 @@ public class WallSlidingState : MovementState
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _ground;
 
-    public override void ResetTransient() { _wall = null; _ground = null; }
+    public override void ResetTransient(PhysicsBody body)
+    {
+        _wall   = Owned(body, SoftContactOwner.WallSlideWall);
+        _ground = Owned(body, SoftContactOwner.WallSlideGround);
+    }
 
     public WallSlidingState(int wallDir)
     {
@@ -82,12 +86,12 @@ public class WallSlidingState : MovementState
         if (_wall == null && ctx.TryGetWall(_wallDir, out var contact))
         {
             _wall = contact;
-            ctx.Body.Constraints.Add(_wall);
+            Hold(ctx.Body, _wall, SoftContactOwner.WallSlideWall);
         }
         if (_ground == null && ctx.TryGetGround(out var ground))
         {
             _ground = ground;
-            ctx.Body.Constraints.Add(_ground);
+            Hold(ctx.Body, _ground, SoftContactOwner.WallSlideGround);
         }
     }
 

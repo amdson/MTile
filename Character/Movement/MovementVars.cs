@@ -51,8 +51,8 @@ public enum CoveredJumpPhase { SlidingOut, Jumping }
 //
 // This is the snapshot unit for movement: a flat value type, so capture/restore is
 // a struct copy (roadmap goal 4 / Plans/STATE_SNAPSHOT_PLAN.md). Soft constraints
-// are NOT here — they're rebuilt by the states (see PhysicsContact.Maintained); only
-// re-derivable scalars live in this struct. It's the superset of every movement
+// are NOT here — they ride in the body's BodyState and the states re-take them by
+// tag (see PhysicsContact.Owner); only scalars live in this struct. It's the superset of every movement
 // state's mutable fields; fields are reused across states where the meaning matches
 // (TimeInState, JumpReleased, SlideSpeed/SlideTime), since states are mutually
 // exclusive in time.

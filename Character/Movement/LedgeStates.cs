@@ -18,7 +18,11 @@ public class LedgeGrabState : MovementState
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _floor;
 
-    public override void ResetTransient() { _wall = null; _floor = null; }
+    public override void ResetTransient(PhysicsBody body)
+    {
+        _wall  = Owned(body, SoftContactOwner.LedgeWall);
+        _floor = Owned(body, SoftContactOwner.LedgeFloor);
+    }
 
     // How long a fresh hang holds against away/Down exits (CheckConditions).
     private const float HangSettleSeconds = 0.1f;
@@ -183,7 +187,7 @@ public class LedgeGrabState : MovementState
                     new Vector2(cornerEdge.X, ctx.Body.Position.Y),
                     new Vector2(-_wallDir, 0f),
                     PlayerCharacter.Radius);
-            ctx.Body.Constraints.Add(_wall);
+            Hold(ctx.Body, _wall, SoftContactOwner.LedgeWall);
         }
         if (_floor == null)
         {
@@ -191,7 +195,7 @@ public class LedgeGrabState : MovementState
                 new Vector2(ctx.Body.Position.X, cornerEdge.Y + 2f * PlayerCharacter.Radius),
                 new Vector2(0f, -1f),
                 PlayerCharacter.Radius);
-            ctx.Body.Constraints.Add(_floor);
+            Hold(ctx.Body, _floor, SoftContactOwner.LedgeFloor);
         }
     }
 
