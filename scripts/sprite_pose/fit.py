@@ -116,6 +116,7 @@ def seg_dist(p, a, b):
 
 
 W_PHI, W_PSI, W_TEMPORAL = 1.2, 1.0, 0.8   # priors: planar unless the drawing says otherwise; smooth in time
+W_PIN_MARKED, W_DATA_MARKED = 12.0, 0.35     # agent-marked frame: the marks lead, strokes refine
 PHI_MAX, PSI_MAX = 1.2, 1.4                   # tilt <= ~69 deg (Stretch >= 0.36)
 
 
@@ -133,7 +134,10 @@ class Model:
         self.ref = dict(ref_pose)
         self.drawn = [n for n in prof['drawn'] if n != prof['head']]
         self.free = list(self.drawn)  # pinned bones stay free; the pin is a residual on the tip
-        self.pins = pins or {}          # bone -> (x, y) pixel the bone's tip must reach
+        # bone -> (x, y) pixel the bone's TIP must reach ('__root' = the root/hip pixel). An
+        # agent's joint marks arrive here; 'hidden' entries and the blade tip are not pins.
+        self.pins = {k: v for k, v in (pins or {}).items()
+                     if isinstance(v, (list, tuple)) and len(v) == 2 and k != '__blade'}
         self.skip = set(skip)           # bones whose observation is ignored (occluded)
         self.scale0 = None
         self.mode3d = mode3d
@@ -142,6 +146,8 @@ class Model:
         self.occ = self._occluders()
         self.prev3d = None              # {upper: (phi, psi)} of the previous frame
         self.anchored = False           # scale0 is the sheet's running median, not a guess
+        # an agent-marked frame: its reading leads, pixels only refine locally
+        self.marked = '__root' in self.pins or len(self.pins) >= 3
 
     def _occluders(self):
         """Pixels drawn in front of each limb bone: draw order is far limbs < torso/head <
@@ -215,14 +221,15 @@ class Model:
             a_, t_ = P(seg[n][0]), P(seg[n][1])
             if self.prof['sides'][n] == 'core':
                 if ob.get('torso') is not None:
-                    res.append(seg_dist(ob['torso']['pts'], a_, t_) / s)
+                    wt = W_DATA_MARKED if self.marked else 1.0
+                    res.append(wt * seg_dist(ob['torso']['pts'], a_, t_) / s)
                     for q in np.linspace(0, 1, 6):
                         pt = a_ + q * (t_ - a_)
-                        res.append([np.min(np.linalg.norm(ob['torso']['pts'] - pt, axis=1)) / s])
+                        res.append([wt * np.min(np.linalg.norm(ob['torso']['pts'] - pt, axis=1)) / s])
                 continue
             if b is None or n in self.skip:
                 continue
-            w = 1.0
+            w = W_DATA_MARKED if self.marked else 1.0
             res.append(w * seg_dist(b['pts'], a_, t_) / s)
             for q in np.linspace(0, 1, 8):
                 pt = a_ + q * (t_ - a_)
@@ -232,9 +239,14 @@ class Model:
         if self.prof['head'] and ob.get('head') is not None:
             hs, ht = P(seg[self.prof['head']][0]), P(seg[self.prof['head']][1])
             res.append(2.0 * (0.5 * (hs + ht) - ob['head']['c']) / s)
+        wp = W_PIN_MARKED if self.marked else 4.0
         for n, px in self.pins.items():
-            res.append(4.0 * (P(seg[n][1]) - np.asarray(px)) / s)
-        if self.scale0:  # keep the figure's size near the torso/sheet estimate
+            if n == '__root':
+                res.append(wp * (o - np.asarray(px)) / s)
+            elif n in seg:
+                res.append(wp * (P(seg[n][1]) - np.asarray(px)) / s)
+        if self.scale0 and not ('__root' in self.pins and 'chest' in self.pins):
+            # keep the figure's size near the torso/sheet estimate (hip + neck marks fix it instead)
             res.append([(6.0 if self.anchored else 2.0) * math.log(x[2] / self.scale0)])
         for k, (u, _) in enumerate(self.chains):
             phi, psi = self.extras(x, k)
@@ -257,7 +269,12 @@ def init_guess(model, prev=None):
     rig, prof, ob = model.rig, model.prof, model.obs
     bm = {b['Name']: b for b in rig['Bones']}
     chest_len = bm['chest']['Length'] if 'chest' in bm else 16.0
-    if ob.get('torso') is not None:
+    pins = model.pins
+    chest_fit = next((b['Length'] for b in model.rig_fit['Bones'] if b['Name'] == 'chest'), chest_len)
+    if '__root' in pins and 'chest' in pins:  # the agent's reading wins over the torso detector
+        hip, neck = np.asarray(pins['__root'], float), np.asarray(pins['chest'], float)
+        s = max(np.linalg.norm(neck - hip) / chest_fit, 0.5)
+    elif ob.get('torso') is not None:
         hip, neck = ob['torso']['hip'], ob['torso']['neck']
         s = max(np.linalg.norm(neck - hip) / chest_len, 0.5)
     else:
@@ -269,7 +286,7 @@ def init_guess(model, prev=None):
             return v[0] if isinstance(v, (tuple, list)) else v
         return np.array([hip[0], hip[1], s] + [prev.get(n, ref_rot(n)) for n in model.free], float)
     pose = dict(model.ref)
-    if ob.get('torso') is not None:
+    if ob.get('torso') is not None or ('__root' in pins and 'chest' in pins):
         wa = math.atan2(*(neck - hip)[::-1])
         pose['chest'] = (wa, None)
     x = np.array([hip[0], hip[1], s] + [0.0] * len(model.free))
@@ -279,12 +296,15 @@ def init_guess(model, prev=None):
     # chain order = rig order (parents before children)
     for i, n in enumerate(model.free):
         b = ob['bones'].get(n) if prof['sides'][n] != 'core' else None
-        if b is None:
+        if n not in pins and b is None:
             continue
         seg, o, sc = model.segs(x)
         start = o + sc * np.asarray(seg[n][0])
-        e0, e1 = b['ends']
-        far = e1 if np.linalg.norm(e0 - start) < np.linalg.norm(e1 - start) else e0
+        if n in pins:  # aim straight at the agent's mark
+            far = np.asarray(pins[n], float)
+        else:
+            e0, e1 = b['ends']
+            far = e1 if np.linalg.norm(e0 - start) < np.linalg.norm(e1 - start) else e0
         world = math.atan2(*(far - start)[::-1])
         parent_world = seg[n][2] - x[3 + i]
         x[3 + i] = wrap(world - parent_world)
@@ -387,7 +407,7 @@ def solve(rig, prof, ref_pose, obs, prev=None, scale0=None, pins=None, skip=(), 
         m.obs = obs
     s0 = starts[0][2]
     m.scale0 = scale0 or s0
-    m.anchored = scale0 is not None
+    m.anchored = scale0 is not None and not ('__root' in m.pins and 'chest' in m.pins)
     lo[2], hi[2] = ((0.8, 1.25) if m.anchored else (0.6, 1.7))
     lo[2], hi[2] = lo[2] * m.scale0, hi[2] * m.scale0
     if prev is not None:

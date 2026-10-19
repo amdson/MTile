@@ -23,6 +23,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import rig as R
 import fit as F
+import joints as J
 
 RUNS = os.path.join(R.REPO, '.probe', 'sprite')
 DRAFTS = os.path.join(R.REPO, 'SkeletonDrafts')  # NOT under SkeletonStates/: Desktop + Web copy that tree recursively
@@ -195,10 +196,17 @@ def cmd_decode(a):
     lengths = calibrate_lengths(cells, rig, prof, ref, fm) if mode3d else {}
     if lengths:
         print('sheet proportions (drawn/rig):', ' '.join(f'{k}={v}' for k, v in sorted(lengths.items())))
+    jpath = os.path.join(d, 'joints.json')
+    jm_all = {int(k): v for k, v in json.load(open(jpath)).get('frames', {}).items()} if os.path.exists(jpath) else {}
     out, prev, prev_pose, scales = [], None, None, []
     for i, cell in enumerate(cells):
         f = i + 1
-        o = fm.get(f, {})
+        o = dict(fm.get(f, {}))
+        jm = jm_all.get(f)
+        if a.auto_joints and jm is None:
+            jm = J.candidates(F.observe(cell, prof), prof, rig)[0]
+        if jm:  # the agent's marks are pins; explicit mapping pins win on conflict
+            o['pin'] = {**{k: v for k, v in jm.items() if isinstance(v, list) and k != '__blade'}, **o.get('pin', {})}
         cell.save(os.path.join(d, 'cells', f'{f:02d}.png'))
         if o.get('reject'):
             out.append({'frame': f, 'rejected': True})
@@ -218,6 +226,11 @@ def cmd_decode(a):
             sol = F.solve(rig, prof, ref, obs, init=init, **kw)
         flags, notes, per_bone = F.diagnose(sol, rig, prof, prev_pose)
         knife = o['knife'] if 'knife' in o else (F.weapon_angle(sol, prof) if cfg.get('weapon') else None)
+        if jm and isinstance(jm.get('__blade'), list) and 'knife' not in o and prof['weapon']['parent']:
+            sg, og, sc = sol['model'].segs(sol['x'])
+            hp = og + sc * np.asarray(sg[prof['weapon']['parent']][1])
+            bt = np.asarray(jm['__blade'], float)
+            knife = F.wrap(math.atan2(bt[1] - hp[1], bt[0] - hp[0]) - sg[prof['weapon']['parent']][2])
         if cfg.get('weapon') and knife is None and 'knife' not in o:
             notes.append('blade:not_found')
         x = sol['x']
@@ -234,7 +247,7 @@ def cmd_decode(a):
                     'knife': knife, 'flags': flags, 'notes': notes,
                     'per_bone': per_bone, 'cost': round(sol['cost'], 3), 'root_px': [float(x[0]), float(x[1])],
                     'scale': float(x[2]), 'ground_row': gr, 'planted': soles,
-                    'occluded': o.get('occluded', [])})
+                    'occluded': o.get('occluded', []), 'marked': bool(jm)})
         occ = set(o.get('occluded', ()))
         prev = {k: v for k, v in sol['params'].items() if k not in occ}
         prev_pose = {k: v for k, v in sol['pose'].items() if k not in occ}
@@ -291,6 +304,104 @@ def cmd_points(a):
             hp = (fe[dd[0]] + be[dd[1]]) / 2
             parts.append(f'HAND (forearm/blade junction) ~ [{hp[0]:.0f}, {hp[1]:.0f}]')
         print(f'frame {f}: ' + ' | '.join(parts))
+
+
+def cmd_joints(a):
+    """Propose joint marks for the agent: joints_auto.json + joints_review.png. With
+    --current, draw the agent's joints.json instead (to check its own marks)."""
+    cfg = load_run(a.run)
+    d = run_dir(a.run)
+    rig, prof = R.load_rig(cfg['rig']), R.profile(cfg['rig'])
+    frames = cfg.get('frames', 16)
+    cells = split_cells(Image.open(os.path.join(d, 'sheet.png')).convert('RGB'), frames)
+    want = [int(f) for f in a.frames.split(',')] if a.frames else range(1, frames + 1)
+    cur = {}
+    if a.current and os.path.exists(os.path.join(d, 'joints.json')):
+        cur = json.load(open(os.path.join(d, 'joints.json'))).get('frames', {})
+    auto, tiles = {}, []
+    for f in want:
+        cand, notes = J.candidates(F.observe(cells[f - 1], prof), prof, rig)
+        auto[str(f)] = cand
+        marks = cur.get(str(f), cand) if a.current else cand
+        tiles.append(J.review_image(cells[f - 1], marks, prof, f'frame {f}' + ('  (' + '; '.join(notes) + ')' if notes else '')))
+        print(f'frame {f}: ' + ' '.join(f'{J.short_label(k, prof)}={v}' for k, v in marks.items())
+              + (f'   NOTE {"; ".join(notes)}' if notes else ''))
+    json.dump({'frames': auto}, open(os.path.join(d, 'joints_auto.json'), 'w'), indent=1)
+    cols = min(4, len(tiles))
+    w, h = tiles[0].size
+    g = Image.new('RGB', (cols * w, ((len(tiles) + cols - 1) // cols) * h), 'white')
+    for i, t in enumerate(tiles):
+        g.paste(t, ((i % cols) * w, (i // cols) * h))
+    g.save(os.path.join(d, 'joints_review.png'))
+    print('->', os.path.join(d, 'joints_review.png'))
+
+
+def cmd_synth(a):
+    """Experiment tooling: a synthetic sheet from an authored clip with GPT-like damage (and
+    optional foreshortening), plus truth.json (poses + joint pixels) for `score`."""
+    import random, bench as B
+    rig, prof = R.load_rig(a.rig), R.profile(a.rig)
+    rng = random.Random(a.seed)
+    clip = R.load_clip(a.clip, a.rig)
+    n = a.frames
+    cols = int(round(math.sqrt(n)))
+    size = 300
+    sheet = Image.new('RGB', (cols * size, cols * size), 'white')
+    truth = []
+    m = int(0.02 * size)  # split_cells trims this margin
+    for i in range(n):
+        t = i / (n - 1)
+        pose = sample_clip(clip, t)
+        knife_ang = pose.pop('knife', (0.0, None))[0] + rng.uniform(-0.3, 0.3)
+        if a.fore:
+            pose = B.foreshorten(rig, prof, pose, rng)
+        knife = (prof['weapon']['parent'], knife_ang, prof['weapon']['length'])
+        cell, (ox, oy, sc, seg) = B.degrade_render(rig, prof, pose, size, rng, 'fore' if a.fore else 'gpt', knife, return_xform=True)
+        sheet.paste(cell, ((i % cols) * size, (i // cols) * size))
+        px = lambda q: [round(ox + sc * q[0] - m, 1), round(oy + sc * q[1] - m, 1)]
+        jt = {'__root': [round(ox - m, 1), round(oy - m, 1)]}
+        for nme in prof['drawn']:
+            if nme != prof['head']:
+                jt[nme] = px(seg[nme][1])
+        jt['__blade'] = px(seg['__weapon'][1])
+        truth.append({'frame': i + 1, 'pose': {k: list(v) if isinstance(v, tuple) else v for k, v in pose.items()},
+                      'knife': knife_ang, 'joints': jt})
+    cfg = {'rig': a.rig, 'from': a.clip + '@0', 'weapon': True, 'frames': n, 'synthetic': True}
+    save_run(a.run, cfg)
+    sheet.save(os.path.join(run_dir(a.run), 'sheet.png'))
+    json.dump(truth, open(os.path.join(run_dir(a.run), 'truth.json'), 'w'), indent=1)
+    print('synthetic sheet ->', run_dir(a.run))
+
+
+def cmd_score(a):
+    """Experiment tooling (NOT for agents in real runs): decoded vs truth, per frame."""
+    cfg = load_run(a.run)
+    d = run_dir(a.run)
+    rig, prof = R.load_rig(cfg['rig']), R.profile(cfg['rig'])
+    truth = {t['frame']: t for t in json.load(open(os.path.join(d, 'truth.json')))}
+    dec = json.load(open(os.path.join(d, 'decoded.json')))
+    errs, worst, serr = [], [], []
+    for r in dec:
+        if 'pose' not in r:
+            continue
+        tp = {k: tuple(v) if isinstance(v, list) else v for k, v in truth[r['frame']]['pose'].items()}
+        dp = dict(tp)
+        dp.update({k: (v, r.get('stretch', {}).get(k)) for k, v in r['pose'].items()})
+        st, sd = R.fk(rig, tp), R.fk(rig, dp)
+        e = [abs(math.degrees(F.wrap(st[b][2] - sd[b][2]))) for b in prof['drawn'] if b != prof['head']]
+        errs += e
+        worst.append(max(e))
+        for b in prof['drawn']:
+            v = tp.get(b)
+            if isinstance(v, tuple) and v[1] is not None and v[1] < 0.95:
+                serr.append(abs(r.get('stretch', {}).get(b, 1.0) - v[1]))
+    e = np.array(errs)
+    res = {'frames': len(worst), 'median_deg': round(float(np.median(e)), 2), 'p90_deg': round(float(np.percentile(e, 90)), 2),
+           'frames_with_a_bone_off_30deg': int(sum(w > 30 for w in worst)),
+           'stretch_err_median': round(float(np.median(serr)), 3) if serr else None,
+           'worst_by_frame': [round(w) for w in worst]}
+    print(json.dumps(res))
+    return res
 
 
 # ---- assemble ------------------------------------------------------------------------
@@ -687,6 +798,13 @@ def main():
     p.add_argument('--frames', type=int, default=16)
     p = sub.add_parser('decode'); p.add_argument('--run', required=True); p.add_argument('--sheet')
     p.add_argument('--planar', action='store_true', help='2D-only fit (no tilt/swivel, no Stretch)')
+    p.add_argument('--auto-joints', action='store_true', help='pin every unmarked frame to the candidate joints')
+    p = sub.add_parser('joints'); p.add_argument('--run', required=True); p.add_argument('--frames')
+    p.add_argument('--current', action='store_true', help="draw joints.json instead of fresh candidates")
+    p = sub.add_parser('synth'); p.add_argument('--run', required=True); p.add_argument('--rig', default='biped')
+    p.add_argument('--clip', required=True); p.add_argument('--frames', type=int, default=16)
+    p.add_argument('--fore', action='store_true'); p.add_argument('--seed', type=int, default=0)
+    p = sub.add_parser('score'); p.add_argument('--run', required=True)
     p = sub.add_parser('points'); p.add_argument('--run', required=True); p.add_argument('--frames')
     p = sub.add_parser('assemble'); p.add_argument('--run', required=True)
     p.add_argument('--duration', type=float, default=0.5); p.add_argument('--loop', action='store_true')
@@ -699,6 +817,7 @@ def main():
     p = sub.add_parser('report'); p.add_argument('--run', required=True)
     a = ap.parse_args()
     {'refs': cmd_refs, 'gen': cmd_gen, 'decode': cmd_decode, 'points': cmd_points, 'assemble': cmd_assemble,
+     'joints': cmd_joints, 'synth': cmd_synth, 'score': cmd_score,
      'verify': cmd_verify, 'report': cmd_report}[a.cmd](a)
 
 

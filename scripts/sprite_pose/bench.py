@@ -56,8 +56,9 @@ def foreshorten(rig, prof, pose, rng):
     return out
 
 
-def degrade_render(rig, prof, pose, size, rng, mode, knife):
+def degrade_render(rig, prof, pose, size, rng, mode, knife, return_xform=False):
     if mode == 'clean':
+        assert not return_xform
         return R.render_cell(rig, prof, pose, size, weapon=knife)
     rg = copy.deepcopy(rig)
     jl, jh = (0.92, 1.08) if mode == 'fore' else (0.8, 1.25)
@@ -90,7 +91,11 @@ def degrade_render(rig, prof, pose, size, rng, mode, knife):
     im = im.filter(ImageFilter.GaussianBlur(rng.uniform(0.3, 1.2)))
     buf = io.BytesIO()
     im.save(buf, 'JPEG', quality=int(rng.uniform(60, 90)))
-    return Image.open(io.BytesIO(buf.getvalue())).convert('RGB')
+    out = Image.open(io.BytesIO(buf.getvalue())).convert('RGB')
+    if return_xform:
+        # truth geometry in the image: drawn lengths (jittered rig), not the rig's own
+        return out, (ox, oy, s, seg)
+    return out
 
 
 def run(rig_name, n, modes, seed, show=None, d3=False):
