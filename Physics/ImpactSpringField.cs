@@ -87,7 +87,7 @@ public static class ImpactSpringField
     // β = k_n / k_g — the coupling-to-anchor stiffness ratio, and the only crater-shape
     // knob. Higher transmits energy further (wider, shallower); lower keeps it local
     // (narrower, deeper).
-    private const float Beta = 9f;
+    private const float Beta = 3f;
 
     // Kinetic energy (½·Mass·v², in px/s and the Impact profile's mass units) per unit of
     // tile HP. Calibrated so a single Dirt cell gives way at roughly the speed it used to
