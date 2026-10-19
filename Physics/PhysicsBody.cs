@@ -44,9 +44,10 @@ public class PhysicsBody
     // Number of sprout cells destroyed out from under this body during the most-recent
     // StepSwept because the depenetration solver could not resolve the overlap within
     // its iteration budget. Reset to 0 at the start of each step, same as
-    // LastImpulseMagnitude; read post-step by PlayerCharacter.Update to dispatch crush
-    // damage. A per-step transient, so it needs no snapshot — it is recomputed from
-    // scratch on every replayed frame during a rollback.
+    // LastImpulseMagnitude; read by the NEXT frame's PlayerCharacter.Update to dispatch
+    // crush damage — so, like LastImpulseMagnitude, it crosses the frame boundary and
+    // is snapshotted (BodyState). Unsnapshotted, a crush seen only on mispredicted
+    // frames survived the rollback and billed a phantom hit on the replay.
     public int SproutCrushCount;
 
     // Float-precision AABB of the polygon at the body's current position. Recomputes on access (cheap
