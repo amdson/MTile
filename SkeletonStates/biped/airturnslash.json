@@ -39,10 +39,12 @@
     {
       "Point": "knife_tip",
       "Effect": "knife",
-      "Start": 0.0,
-      "End": 1.0,
+      "Start": 0,
+      "End": 1,
+      "Scale": 1,
+      "Rotation": 0,
       "FrameTimes": [
-        0.0,
+        0,
         0.025,
         0.05,
         0.075,
@@ -53,7 +55,7 @@
       ],
       "TrailStart": 0.04,
       "TrailEnd": 0.8,
-      "TrailWidth": 1.0,
+      "TrailWidth": 1,
       "TrailOpacity": 0.8
     }
   ],

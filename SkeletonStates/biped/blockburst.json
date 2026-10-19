@@ -29,7 +29,7 @@
         },
         {
           "Bone": "chest",
-          "Rotation": -1.5707964
+          "Rotation": -1.5829818
         },
         {
           "Bone": "head",
@@ -37,7 +37,7 @@
         },
         {
           "Bone": "arm_l_upper",
-          "Rotation": 3.1415927
+          "Rotation": 3.8171575
         },
         {
           "Bone": "arm_l_lower",
@@ -45,7 +45,7 @@
         },
         {
           "Bone": "arm_r_upper",
-          "Rotation": 3.1415927
+          "Rotation": 2.323765
         },
         {
           "Bone": "arm_r_lower",
