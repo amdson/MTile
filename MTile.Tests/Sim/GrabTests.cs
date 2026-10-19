@@ -295,4 +295,58 @@ public class GrabTests(ITestOutputHelper output)
         Assert.True(farVx < 50f, $"The unheld bystander must not be flung (max Vx {farVx:F1}).");
         Assert.False(farStunned, "The unheld bystander must not be stunned by someone else's throw.");
     }
+
+    // ---- Throw into a wall -----------------------------------------------------------
+    //
+    // The released point flies through tiles, so a chase still running when the victim
+    // hits a wall used to cancel the rebound the next frame and pin them there until
+    // the chase timed out — released at rest. The throw now lets go on impact and the
+    // physics bounce stands. 60 fps, a 900 px/s swipe into stone (no tiles break at the
+    // ~760 px/s it lands with, so the impact is a bounce).
+    [Fact]
+    public void Throw_IntoWall_Bounces_NotPinned()
+    {
+        const float dt = 1f / 60f;
+        var terrain = SimTerrain.FromAscii(@"
+            OOOOOOOOOOOOOOOOOOOOOOOOXXXXXX
+            OOOOOOOOOOOOOOOOOOOOOOOOXXXXXX
+            OOOOOOOOOOOOOOOOOOOOOOOOXXXXXX
+            OOOOOOOOOOOOOOOOOOOOOOOOXXXXXX
+            OOOOOOOOOOOOOOOOOOOOOOOOXXXXXX
+            XXXXXXXXXXXXXXXXXXXXXXXXXXXXXX");
+        float restY = 5f * Chunk.TileSize - PlayerCharacter.Radius;
+        var mouse = new Vector2(220f, restY - 10f);
+        var attacker = new InputScript()
+            .For(20, new PlayerInput { MouseWorldPosition = mouse })
+            .For(30, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = mouse });
+        for (int i = 0; i < 8; i++)
+        {
+            mouse.X += 15f;
+            attacker.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = mouse });
+        }
+        attacker.Forever(new PlayerInput { MouseWorldPosition = mouse });
+
+        var cfg = new SimConfigMulti
+        {
+            Terrain = terrain, Frames = 100, Dt = dt, Gravity = new Vector2(0f, Gravity),
+            Players = new[]
+            {
+                new SimPlayer { StartPosition = new Vector2(150f, restY), Script = attacker },
+                new SimPlayer { StartPosition = new Vector2(175f, restY), Script = InputScript.Always(default), Faction = Faction.Neutral },
+            },
+        };
+
+        int impactFrame = -1, reboundFrames = 0;
+        float impactSpeed = 0f;
+        SimRunner.RunMulti(cfg, onFrame: (f, ps) =>
+        {
+            var b = ps[1].Body;
+            if (impactFrame < 0 && b.LastImpulseMagnitude > 300f) { impactFrame = f; impactSpeed = b.LastImpulseMagnitude; }
+            if (impactFrame >= 0 && f > impactFrame && f <= impactFrame + 6 && b.Velocity.X < -50f) reboundFrames++;
+        });
+
+        output.WriteLine($"impact at frame {impactFrame} ({impactSpeed:F0} px/s), rebounding frames after = {reboundFrames}");
+        Assert.True(impactFrame >= 0, "The thrown victim should hit the wall hard.");
+        Assert.True(reboundFrames >= 4, $"The victim should keep moving away from the wall after the hit, not be pinned ({reboundFrames}/6 frames).");
+    }
 }

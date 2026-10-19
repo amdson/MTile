@@ -1,3 +1,4 @@
+using System;
 using Microsoft.Xna.Framework;
 
 namespace MTile;
@@ -13,9 +14,10 @@ namespace MTile;
 // registered once) and a plain tracking pull after — on the same clod
 // tracker with the tighter chase smooth time, so the victim converges onto the point's
 // velocity exactly as a released clod does. It ends — the victim flying free — once
-// their velocities agree within PlayerGrabCatchSpeed, or at PlayerGrabChaseMaxSeconds
-// (the point outran the speed cap ⇒ the victim flies at the cap). A still mouse hands
-// off ≈0: the victim is caught almost at once and just drops.
+// their velocities agree within PlayerGrabCatchSpeed, the moment terrain pushes the
+// victim back against the throw (the impact is then left to physics), or at
+// PlayerGrabChaseMaxSeconds (the point outran the speed cap ⇒ the victim flies at the
+// cap). A still mouse hands off ≈0: the victim is caught almost at once and just drops.
 public sealed class GrabThrowEntity : Entity
 {
     // The field's reach around the point. The victim trails the point by the tracker's
@@ -58,6 +60,15 @@ public sealed class GrabThrowEntity : Entity
             Health = 0f;
             return;
         }
+        // Hit terrain: let go, so the impact plays out as physics — bounce, stop or break
+        // through, exactly as a launched body would. The point flies through tiles, so a
+        // chase past the wall would cancel the rebound next frame and then pin the
+        // victim there until PlayerGrabChaseMaxSeconds, releasing them at rest.
+        if (ChaseTime > dt && TerrainPushback(victim, Body.Velocity) > cfg.PlayerGrabCatchSpeed)
+        {
+            Health = 0f;
+            return;
+        }
 
         // IsThrow on the release frame only: it registers the throw (the Tumble stun,
         // and with it the hit stamp the hit sound keys on), which must happen once per
@@ -68,6 +79,26 @@ public sealed class GrabThrowEntity : Entity
             p, 0f, cfg.PlayerGrabMaxAccel, Faction, Id, Color.HotPink,
             isThrow: ChaseTime <= dt, only: Victim,
             trackSmoothTime: cfg.PlayerGrabChaseSmoothTime, trackMaxSpeed: cfg.PlayerGrabMaxSpeed));
+    }
+
+    // How hard terrain pushed the victim back against the throw in the last physics
+    // step, px/s: the normal impulse of each contact, weighted by how squarely its
+    // surface faces the throw. A floor under a sideways throw faces across it (and its
+    // friction is tangential), so it counts for nothing; a wall ahead, or the floor
+    // under a downward throw, counts in full.
+    private static float TerrainPushback(PhysicsBody victim, Vector2 throwVel)
+    {
+        if (throwVel.LengthSquared() < 1e-4f) return 0f;
+        var dir = Vector2.Normalize(throwVel);
+        float push = 0f;
+        foreach (var c in victim.Constraints)
+        {
+            if (c is not SurfaceContact sc) continue;
+            float facing = -Vector2.Dot(sc.Normal, dir);
+            if (facing <= 0f) continue;
+            push += MathF.Max(0f, Vector2.Dot(sc.LastImpulse, sc.Normal)) * facing;
+        }
+        return push;
     }
 
     // ── Snapshot ────────────────────────────────────────────────────────────────────
