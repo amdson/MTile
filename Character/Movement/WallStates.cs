@@ -14,16 +14,20 @@ public class WallSlidingState : MovementState
     private readonly int _wallDir;
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _ground;
+    // Per-side owner tags (see SoftContactOwner): both sides are registered.
+    private readonly SoftContactOwner _wallOwner, _groundOwner;
 
     public override void ResetTransient(PhysicsBody body)
     {
-        _wall   = Owned(body, SoftContactOwner.WallSlideWall);
-        _ground = Owned(body, SoftContactOwner.WallSlideGround);
+        _wall   = Owned(body, _wallOwner);
+        _ground = Owned(body, _groundOwner);
     }
 
     public WallSlidingState(int wallDir)
     {
         _wallDir = wallDir;
+        _wallOwner   = wallDir > 0 ? SoftContactOwner.WallSlideWallRight   : SoftContactOwner.WallSlideWallLeft;
+        _groundOwner = wallDir > 0 ? SoftContactOwner.WallSlideGroundRight : SoftContactOwner.WallSlideGroundLeft;
     }
 
     public override int ActivePriority => MovementPriorities.WallSlideActive;
@@ -86,12 +90,12 @@ public class WallSlidingState : MovementState
         if (_wall == null && ctx.TryGetWall(_wallDir, out var contact))
         {
             _wall = contact;
-            Hold(ctx.Body, _wall, SoftContactOwner.WallSlideWall);
+            Hold(ctx.Body, _wall, _wallOwner);
         }
         if (_ground == null && ctx.TryGetGround(out var ground))
         {
             _ground = ground;
-            Hold(ctx.Body, _ground, SoftContactOwner.WallSlideGround);
+            Hold(ctx.Body, _ground, _groundOwner);
         }
     }
 

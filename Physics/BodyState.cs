@@ -89,9 +89,20 @@ public struct BodyState
         return copy;
     }
 
-    // Deep-copy a single contact, preserving its concrete type, Maintained flag and
-    // Owner tag. LastImpulse is a per-step diagnostic (zeroed by StepSwept) — not copied.
-    private static PhysicsContact Clone(PhysicsContact c) => c switch
+    // Deep-copy a single contact, preserving its concrete type, Maintained flag, Owner
+    // tag and LastImpulse. LastImpulse is zeroed at the top of every StepSwept, but it is
+    // READ between steps (GrabThrowEntity.TerrainPushback reads the victim's contacts'
+    // impulses from the previous step), so it crosses the frame boundary a snapshot sits
+    // on — dropping it made a snapshot round trip diverge on the frame after a thrown
+    // victim hit terrain.
+    private static PhysicsContact Clone(PhysicsContact c)
+    {
+        var copy = CloneShape(c);
+        copy.LastImpulse = c.LastImpulse;
+        return copy;
+    }
+
+    private static PhysicsContact CloneShape(PhysicsContact c) => c switch
     {
         SurfaceDistance sd => new SurfaceDistance(sd.Position, sd.Normal, sd.MinDistance)
             { SurfaceVelocity = sd.SurfaceVelocity, Friction = sd.Friction, Maintained = sd.Maintained, Owner = sd.Owner },

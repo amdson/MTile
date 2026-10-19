@@ -17,11 +17,14 @@ public class LedgeGrabState : MovementState
     private readonly int _wallDir;
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _floor;
+    // Per-side owner tags (see SoftContactOwner): both sides are registered.
+    private SoftContactOwner WallOwner  => _wallDir > 0 ? SoftContactOwner.LedgeWallRight  : SoftContactOwner.LedgeWallLeft;
+    private SoftContactOwner FloorOwner => _wallDir > 0 ? SoftContactOwner.LedgeFloorRight : SoftContactOwner.LedgeFloorLeft;
 
     public override void ResetTransient(PhysicsBody body)
     {
-        _wall  = Owned(body, SoftContactOwner.LedgeWall);
-        _floor = Owned(body, SoftContactOwner.LedgeFloor);
+        _wall  = Owned(body, WallOwner);
+        _floor = Owned(body, FloorOwner);
     }
 
     // How long a fresh hang holds against away/Down exits (CheckConditions).
@@ -187,7 +190,7 @@ public class LedgeGrabState : MovementState
                     new Vector2(cornerEdge.X, ctx.Body.Position.Y),
                     new Vector2(-_wallDir, 0f),
                     PlayerCharacter.Radius);
-            Hold(ctx.Body, _wall, SoftContactOwner.LedgeWall);
+            Hold(ctx.Body, _wall, WallOwner);
         }
         if (_floor == null)
         {
@@ -195,7 +198,7 @@ public class LedgeGrabState : MovementState
                 new Vector2(ctx.Body.Position.X, cornerEdge.Y + 2f * PlayerCharacter.Radius),
                 new Vector2(0f, -1f),
                 PlayerCharacter.Radius);
-            Hold(ctx.Body, _floor, SoftContactOwner.LedgeFloor);
+            Hold(ctx.Body, _floor, FloorOwner);
         }
     }
 
