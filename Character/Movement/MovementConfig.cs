@@ -497,6 +497,23 @@ public class MovementConfig
     public float GrabSwipeSmoothing  { get; set; } = 0.35f;
     // Lifetime of a released point that still has a peel contest to finish.
     public float GrabPointMaxSeconds { get; set; } = 0.25f;
+    // ── Player grab-throw (GrabAction / GrabThrowEntity) ────────────────────────────
+    // Started 2026-10-18 as a copy of the block throw's numbers above, kept separate so
+    // carrying a body can be tuned apart from carrying a clod. Held: the victim tracks
+    // the cursor's rest position (out to PlayerGrabHoldReach, tanh-saturated, clamped
+    // short of terrain) on the clod tracker. Released: a flying point carries on at the
+    // swipe velocity and the victim chases it until |Δv| < PlayerGrabCatchSpeed or
+    // PlayerGrabChaseMaxSeconds, then flies free. PlayerGrabMaxSpeed caps both — the
+    // throw-speed cap — and PlayerGrabMaxAccel bounds the force, so a body can still
+    // be dragged against terrain without teleporting.
+    public float PlayerGrabHoldReach        { get; set; } = 64f;
+    public float PlayerGrabSmoothTime       { get; set; } = 0.08f;
+    public float PlayerGrabChaseSmoothTime  { get; set; } = 0.05f;
+    public float PlayerGrabMaxSpeed         { get; set; } = 800f;
+    public float PlayerGrabCatchSpeed       { get; set; } = 40f;
+    public float PlayerGrabChaseMaxSeconds  { get; set; } = 0.25f;
+    public float PlayerGrabSwipeSmoothing   { get; set; } = 0.35f;
+    public float PlayerGrabMaxAccel         { get; set; } = 30000f;
 
     public float PeelWeight(TileType t) => t switch
     {

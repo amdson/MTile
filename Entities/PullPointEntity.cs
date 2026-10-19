@@ -225,6 +225,18 @@ public sealed class PullPointEntity : Entity, ITelegraphSource
 
         if (_group.Count == 0) { _group.Strain = 0f; return; }
 
+        // 2b. Held, the cursor pulls only from open air. While it is inside the earth it
+        // is still gathering, and a spring stretched across the cells it sweeps would
+        // break out the first, easy blocks of a group the player is still painting
+        // further in. Slack: no force, no wear, no snap. After hand-off the flying point
+        // is not the cursor, so it pulls wherever it is.
+        if (paint && chunks.GetCellState((int)MathF.Floor(TargetPos.X / Chunk.TileSize),
+                                         (int)MathF.Floor(TargetPos.Y / Chunk.TileSize)) == TileState.Solid)
+        {
+            _group.Strain = 0f;
+            return;
+        }
+
         // 3. The target→group spring, superlinear in target distance from the COM.
         var com = Vector2.Zero;
         for (int i = 0; i < _group.Count; i++)

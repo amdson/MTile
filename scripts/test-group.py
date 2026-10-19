@@ -46,7 +46,7 @@ GROUPS = {
                "SpriteBinding","Smoothing","MotionProbe","ParkourGrip","TerrainNoPen","NoPenetration",
                "Attachment","SlashCombo","SpriteSheet","VfxCatalog","SheetAnimator","EntityArt","CurtainSim"],
  "simcore": ["Snapshot","Rollback","InputCodec","Simulation","TwoPlayerStep","ConfigLayout",
-             "TraceExport","StageSaver","Rtc","PracticeBall","TrainingStage","GauntletStage","CoopMode","CoopLegacy","DepthsStage","DepthsLayout","DepthsDeterminism","Lobby","DuelStage"],
+             "TraceExport","StageSaver","Rtc","PracticeBall","TrainingStage","GauntletStage","CoopMode","CoopLegacy","DepthsStage","DepthsLayout","DepthsDeterminism","Lobby","DuelStage","WallDummyStage"],
 }
 
 # Excluded from every group AND from plain `full`; included only with --slow. These are

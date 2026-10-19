@@ -508,7 +508,7 @@ public class Game1 : Game
         if (_fight != null) _recorder.StartRecording();
 
         // Offline only: if the stage spawned a second player, spoof its input with a bot.
-        _botInput = _net == null && _sim.SecondaryPlayers.Count > 0
+        _botInput = _net == null && _sim.SecondaryPlayers.Count > 0 && !stage.IdleSecondary
             ? new MTile.Net.BotInputSource(seed: 1234)
             : null;
 

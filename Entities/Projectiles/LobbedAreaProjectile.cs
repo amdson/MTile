@@ -197,7 +197,15 @@ public class LobbedAreaProjectile : Projectile
         if (_tracking) { Track(dt, hitboxes, spawner); return; }
 
         if (_detonated) { Health = 0f; return; }
-        if (Age < ArmDelay) return;
+        // The arm delay guards only the SETTLE fuse (a dropped clod must not read as
+        // "landed" on its first free frame). A hard strike stays live through it: the
+        // strike impulse is visible for exactly one frame, so a clod that detached
+        // near a wall and hit inside the delay used to lose it and drop to the floor.
+        if (Age < ArmDelay)
+        {
+            if (TerrainStruck(settleCounts: false)) Detonate(hitboxes, spawner);
+            return;
+        }
 
         // Fuse 1 — contact. A thrown clod bursts on the first body it touches instead
         // of sailing through it to land somewhere behind. Hurtboxes are published

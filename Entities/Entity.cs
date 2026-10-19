@@ -275,6 +275,14 @@ public interface IEntitySpawner
     // sampling; publishing from inside an entity update would be order-dependent.
     // Default null so spawner stubs that never need it are unaffected.
     HurtboxWorld Hurtboxes => null;
+    // This frame's force-field registry, for entities that carry a body after an action
+    // hands it off (GrabThrowEntity). Fields are only READ in ForceFieldSystem.Apply,
+    // after every update, so publishing from an entity is order-independent. Default
+    // null: such entities just end.
+    ForceFieldWorld ForceFields => null;
+    // Any body by id — players included, which Resolve (entities only) cannot reach.
+    // Default null.
+    PhysicsBody ResolveBody(EntityId id) => null;
     // Co-op match (Stage.Coop): player factions can't hurt each other. Read by contact
     // fuses that should ignore bodies their burst could never damage. Default false;
     // Simulation implements it with its own Coop.

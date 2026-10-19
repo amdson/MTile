@@ -121,6 +121,56 @@ public class BlockPeelTests(ITestOutputHelper output)
         });
     }
 
+    // Held, the cursor pulls only from open air. With material weak enough to break
+    // under a short stretch, sweeping the cursor THROUGH the earth used to pop the first
+    // painted cells while the player was still reaching for the ones further in. Now
+    // nothing breaks until the cursor comes up into the air, and then the whole painted
+    // group comes out together.
+    [Fact]
+    public void WeakEarth_SweptThroughUnderground_BreaksOnlyOnceTheCursorIsInAir()
+    {
+        WithPeel(true, () =>
+        {
+            var cfg = MovementConfig.Current;
+            float prevDirt = cfg.PeelWeightDirt, prevStone = cfg.PeelWeightStone, prevSand = cfg.PeelWeightSand;
+            cfg.PeelWeightDirt = cfg.PeelWeightStone = cfg.PeelWeightSand = 0.02f;
+            try
+            {
+                var terrain = DeepGround();
+                float ts = Chunk.TileSize;
+                var from  = new Vector2(7.5f * ts, 4.5f * ts);    // inside the earth, row 4
+                var to    = new Vector2(13.5f * ts, 4.5f * ts);
+                var inAir = new Vector2(10.5f * ts, 0.5f * ts);   // up over open air
+                int before = SolidCount(terrain, 0, 23, 3, 5);
+
+                var script = new InputScript()
+                    .For(10, new PlayerInput { MouseWorldPosition = from })
+                    .For(10, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = from });
+                Sweep(script, from, to, 20);
+                Sweep(script, to, inAir, 6);
+                script.For(10, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = inAir })
+                      .Forever(new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = inAir });
+
+                int afterSweep = -1, orbFrame = -1;
+                SimRunner.RunMulti(Build(script, terrain, new Vector2(10.5f * ts, 3f * ts - ts * 0.5f), frames: 60),
+                    onFrame: (f, ps) =>
+                    {
+                        if (f == 40) afterSweep = SolidCount(terrain, 0, 23, 3, 5);
+                        if (orbFrame < 0 && ps[0].CurrentActionVars.OrbHeld) orbFrame = f;
+                    });
+                output.WriteLine($"solid before {before}, after the underground sweep {afterSweep}, orb at f{orbFrame}, end {SolidCount(terrain, 0, 23, 3, 5)}");
+
+                Assert.Equal(before, afterSweep);
+                Assert.True(orbFrame > 40, $"the group should break out once the cursor is in the air (orb at f{orbFrame})");
+                Assert.True(before - SolidCount(terrain, 0, 23, 3, 5) >= 3, "the swept group should come out together");
+            }
+            finally
+            {
+                cfg.PeelWeightDirt = prevDirt; cfg.PeelWeightStone = prevStone; cfg.PeelWeightSand = prevSand;
+            }
+        });
+    }
+
     // Anchored stone: a gentle pull (force below the group's aggregate glue) holds,
     // and releasing mid-peel takes nothing — no half-broken terrain, no orb.
     [Fact]

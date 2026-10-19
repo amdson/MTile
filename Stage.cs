@@ -29,6 +29,9 @@ public sealed class Stage
     // Versus stage: every player respawns at their own start — the primary at
     // PlayerSpawn, the others at SecondSpawn — instead of a dead secondary staying dead.
     public bool               Versus;
+    // The second player is a training prop: offline, Game1 leaves its controller
+    // undriven (no BotInputSource), so it stands AFK. See Stages/WallDummyStage.cs.
+    public bool               IdleSecondary;
 }
 
 public static partial class Stages
@@ -171,6 +174,7 @@ public static partial class Stages
         // Two-player co-op gauntlet through underground stone rooms. Stages/DepthsStage.cs.
         RegisterDepths();
         RegisterDuels();
+        RegisterWallDummy();
 
         // ─── weights ──────────────────────────────────────────────────────────
         // Knockback-by-mass testbed: a flat walled hall with a row of passive balls

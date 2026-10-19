@@ -337,6 +337,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     }
     public HitboxWorld  Hitboxes  => _hitboxes;
     public HurtboxWorld Hurtboxes => _hurtboxes;
+    // IEntitySpawner — a body lookup that reaches players too (ForceFields, above,
+    // doubles as the spawner's field registry).
+    public PhysicsBody ResolveBody(EntityId id)
+        => _world.Has<PhysicsBodyComponent>(id) ? _world.Get<PhysicsBodyComponent>(id).Body : null;
     public ForceFieldWorld ForceFields => _fields;
     // The PRIMARY player's input. Per-player HUD state (health, block selection,
     // meters) is read off the PlayerCharacter the client controls, never off the sim.
@@ -566,7 +570,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             onGrabHeld: id => { if (ResolveHittable(id) is PlayerCharacter pc) pc.Combat.MarkGrabbed(pc.Frame); },
             // Throw fields stun their victim so they exit the throw into Tumble.
             onThrown:   id => { if (ResolveHittable(id) is PlayerCharacter pc) pc.Combat.RegisterThrown(pc.Frame, dt); },
-            coop: Coop);
+            coop: Coop, gravity: Gravity);
 
         // Player respawn on death.
         if (!_player.IsAlive)

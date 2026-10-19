@@ -554,6 +554,14 @@ public abstract class SlashLikeAction : ActionState
     // Combo steps may fire from ANY point of the recovery countdown (their combo
     // flag is the real gate); openers must wait for index 0.
     protected virtual  bool    EntryFromAnyRecoveryIndex => false;
+    // Time between combo swings, as a fraction of the previous swing's Duration: the
+    // next step can start ComboGapFraction × Duration after this one ends (2026-10-18:
+    // swing-to-swing raised 40%, from Duration to 1.4 × Duration). A click inside the
+    // gap stays buffered and fires when it closes. Combo steps are the
+    // EntryFromAnyRecoveryIndex slashes; openers call OpenComboGap from their Exit.
+    protected const float ComboGapFraction = 0.4f;
+    protected void OpenComboGap(ConditionState c, int currentFrame, float dt)
+        => c.ComboGapExpireFrame = currentFrame + SimFrames.FromSeconds(ComboGapFraction * Duration, dt);
     // Override to clear the flag we just used + the recovery flag.
     protected virtual  void    OnEnterClearFlags(ConditionState cond) { }
     // Override to set the next-stage flag + recovery duration. Durations are
@@ -665,6 +673,7 @@ public abstract class SlashLikeAction : ActionState
         if (RequireGround && !grounded) return false;
         if (RequireAir    &&  grounded) return false;
         if (!CombosOk(ab.Condition)) return false;
+        if (EntryFromAnyRecoveryIndex && ctx.CurrentFrame < ab.Condition.ComboGapExpireFrame) return false;
         return true;
     }
 
@@ -832,13 +841,14 @@ public class GroundSlash1 : SlashLikeAction
         // chain right now — the S2 window opens whether or not S1 landed. To make
         // the combo hit-confirmed (Phase 3 whiff-punish), wrap the Slash2Ready set in
         // `if (connected)`.
-        // Note the Dancing-Blade rhythm falls out of the Duration alone: the flag only
-        // exists once S1 EXITS (12f in), so the earliest S2 is frame ~13 — no explicit
-        // transition gate needed.
+        // The Dancing-Blade rhythm: the flag only exists once S1 EXITS (12f in), and
+        // OpenComboGap holds S2 off for another 0.4 × Duration, so the earliest S2 is
+        // frame ~17.
         ConditionState.SetForSeconds(ref c.Slash2Ready, ref c.Slash2ExpireFrame, 1.0f, f, dt);
         // Leaving the combo pays the finisher's tail (36f, 2026-10-18); the next combo
         // step ignores the countdown, so continuing stays lag-free.
         c.StampRecoveryForSeconds(0.60f, f, dt);
+        OpenComboGap(c, f, dt);
     }
 }
 
@@ -873,6 +883,7 @@ public class GroundSlash2 : SlashLikeAction
         // `connected` tracked but not gating — see GroundSlash1.OnExitSetFlags.
         ConditionState.SetForSeconds(ref c.Slash3Ready, ref c.Slash3ExpireFrame, 1.0f, f, dt);
         c.StampRecoveryForSeconds(0.60f, f, dt);   // see GroundSlash1
+        OpenComboGap(c, f, dt);
     }
 }
 
@@ -976,6 +987,7 @@ public class AirSlash1 : SlashLikeAction
         // Leaving the air combo pays AirSlash2's tail (28f, 2026-10-18); AirSlash2
         // itself ignores the countdown.
         c.StampRecoveryForSeconds(0.46f, f, dt);
+        OpenComboGap(c, f, dt);
     }
 }
 
@@ -1020,7 +1032,7 @@ public class AirTurnSlash : SlashLikeAction
     protected override float Duration            => 0.20f;   // retime: 7f/3f
     protected override float HurtboxStartSeconds  => 7f / 60f;
     protected override float HurtboxActiveSeconds => 3f / 60f;
-    protected override float ArcRadiusScale      => 1.20f;   // long reach
+    protected override float ArcRadiusScale      => 0.90f;   // long reach; 0.75x of 1.20 (2026-10-18)
     protected override float SweepAngleDeg       => 60f;     // narrow
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 150f;
@@ -1118,7 +1130,7 @@ public class DownAirSlash : SlashLikeAction
     protected override float Duration             => 0.27f;   // the most committed air swing (retime: 10f/4f, dair-shaped)
     protected override float HurtboxStartSeconds  => 10f / 60f;
     protected override float HurtboxActiveSeconds => 4f / 60f;
-    protected override float ArcRadiusScale       => 1.25f;   // reach below the feet
+    protected override float ArcRadiusScale       => 0.625f;  // reach below the feet; halved from 1.25 (2026-10-18)
     protected override float SweepAngleDeg        => 70f;     // narrow — a chop, not a fan
     protected override float SweepDirection       => +1f;
     protected override float KnockbackMagnitude   => 210f;
@@ -1740,10 +1752,12 @@ public class AirSpinStab : StabAction
 // slowdown via modifiers is identical air-vs-ground; no separate movement state.
 public class GuardAction : ActionState
 {
-    // How deep into a recovery countdown guard may fire: the defensive move gets
-    // the TAIL of any recovery (attack re-arm stays the full countdown). This is
-    // also what the eviction lookahead keys off — a stab wind-up's short evict
-    // stamp lands inside this window, so guard comes out almost immediately.
+    // Guard's stun escape: it may fire with up to this much HIT disadvantage
+    // (hitstun/stun) left. The player's OWN recovery never delays it (2026-10-18):
+    // guard comes up from any point of an attack's tail, and — through the eviction
+    // lookahead, which finds it passing at once — straight out of a live swing, so
+    // it is near-instant even mid-combo. The tail keeps ticking underneath (guard
+    // neither clears nor re-stamps it), so guarding is no way to skip end-lag.
     private const float MaxEntrySeconds = 0.2f;
 
     public override int ActivePriority  => 35;   // beats slash candidates (30)
@@ -1759,9 +1773,10 @@ public class GuardAction : ActionState
         // ...and a brief lockout after ANY deactivation, so guard can't be mashed into
         // continuous perfect-window coverage.
         if (ctx.Combat?.GuardOnCooldown(ctx.CurrentFrame) == true) return false;
-        // Strict from-set: neutral or the tail of recovery — never over a live
+        // Strict from-set: neutral or any point of recovery — never over a live
         // action (reaching one is the eviction lookahead's call, not a priority race).
-        if (!EntryOk(ctx, SimFrames.FromSeconds(MaxEntrySeconds, ctx.Dt))) return false;
+        if (ctx.RecoveryIndex(includeHitDisadvantage: false) is null) return false;
+        if (ctx.HitDisadvantageFrames() > SimFrames.FromSeconds(MaxEntrySeconds, ctx.Dt)) return false;
         return true;
     }
 
@@ -3403,7 +3418,9 @@ public class BlockGrabAction : ActionState
         // Drive: peel at the raw cursor; once a clod is in hand, the point becomes the
         // held rest position and the ball tracks it there.
         var ball   = HeldBall(ctx, point);
-        var target = ball != null ? RestPosition(ctx, ab, cursor) : cursor;
+        var target = ball != null
+            ? RestPosition(ctx, ab, cursor, MovementConfig.Current.GrabHoldReach, BallRadius)
+            : cursor;
         point.TargetPos     = target;
         point.OwnerPos      = ctx.Body.Position;
         point.Body.Position = target;
@@ -3437,16 +3454,18 @@ public class BlockGrabAction : ActionState
     // the wall the cursor is behind — which is what would otherwise leave a big contact
     // impulse on the ball at the moment of release. It is a pure geometry query on the
     // current terrain, so it adds no state.
-    private static Vector2 RestPosition(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 cursor)
+    // Shared with GrabAction, which carries a body the same way (its own reach, and
+    // a body-sized clearance).
+    internal static Vector2 RestPosition(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 cursor,
+                                         float holdReach, float clearRadius)
     {
-        var cfg  = MovementConfig.Current;
         var body = ctx.Body.Position;
         var d    = cursor - body;
         float r  = d.Length();
         var dir  = r > 1e-3f ? d / r : new Vector2(ab.Facing == 0 ? 1f : ab.Facing, 0f);
-        float reach = MathF.Max(1e-3f, cfg.GrabHoldReach);
+        float reach = MathF.Max(1e-3f, holdReach);
         float rho   = reach * MathF.Tanh(r / reach);
-        rho = ClearDistance(ctx.Chunks, body, dir, rho);
+        rho = ClearDistance(ctx.Chunks, body, dir, rho, clearRadius);
         return body + dir * rho;
     }
 
@@ -3454,14 +3473,14 @@ public class BlockGrabAction : ActionState
     // never lands more than this short of the surface.
     private const float HoldClearStep = 2f;
 
-    // Furthest distance t ≤ maxDist along dir from `from` at which a ball of BallRadius
+    // Furthest distance t ≤ maxDist along dir from `from` at which a ball of `radius`
     // (probed at its leading point and both flanks) overlaps no solid cell. Fixed-step
     // march from the body outward — deterministic, no allocation.
-    private static float ClearDistance(ChunkMap chunks, Vector2 from, Vector2 dir, float maxDist)
+    private static float ClearDistance(ChunkMap chunks, Vector2 from, Vector2 dir, float maxDist, float radius)
     {
         if (chunks == null) return maxDist;
-        var side = new Vector2(-dir.Y, dir.X) * (BallRadius * 0.7f);
-        var lead = dir * BallRadius;
+        var side = new Vector2(-dir.Y, dir.X) * (radius * 0.7f);
+        var lead = dir * radius;
         float clear = 0f;
         for (float t = 0f; ; t += HoldClearStep)
         {
@@ -3552,13 +3571,15 @@ public class GrabAction : ActionState
     // GrabbedSlash.GrabStrengthDamage (1.0), so a fresh grab survives 2 struggles and
     // breaks on the 3rd. Bump for a stickier grab, lower for an easier mash-out.
     private const float GrabStrengthMax    = 3f;
-    private const float ThrowSeconds       = 0.12f;   // throw-field duration
+    private const float ThrowSeconds       = 0.12f;   // the clip's throw tail (animation only now)
     private const float RecoverySeconds    = 0.3f;    // lag after a grab (the whiff-punish window)
+    // Carry (2026-10-18, the block throw's mechanism): the held victim keeps this much
+    // clear of terrain along the grabber→cursor line, and stays held while inside the
+    // grabber-centred box of half-size PlayerGrabHoldReach + CarrySlack.
+    private const float CarryClearRadius   = PlayerCharacter.Radius;
+    private const float CarrySlack         = PlayerCharacter.Radius * 3f;
     private const float Range       = PlayerCharacter.Radius * 2.4f;   // field region half-size
     private const float FocusDist   = PlayerCharacter.Radius * 1.6f;   // hold focus in front of the grabber
-    private const float PullSpeed   = 320f;
-    private const float PullAccel   = 9000f;          // strong — overpowers the victim walking away
-    private const float ThrowSpeed  = 520f;
 
     // Two phases with INDEPENDENT lengths, which is why the old fixed-duration remap could
     // not express this: the hold runs until the player releases (up to HoldEndSeconds),
@@ -3571,7 +3592,6 @@ public class GrabAction : ActionState
         => vars.GrabThrowing
             ? HoldShare + (1f - HoldShare) * (vars.ChargeTime / ThrowSeconds)
             : HoldShare * (vars.TimeInState / HoldEndSeconds);
-    private const float ThrowAccel  = 12000f;
 
     // 48/48 — above BlockGrabAction (46/46), which shares the Shift+LMB press. They
     // never actually compete on priority: both gate on BlockGrabAction.PressIsBlockGrab
@@ -3633,8 +3653,11 @@ public class GrabAction : ActionState
         // eroded GrabStrength to 0, the grab releases (the new primary break path).
         if (ctx.Combat?.HitstunActive == true) return false;
         if (ctx.Combat != null && ctx.Combat.GrabStrength <= 0f) return false;
-        if (vars.GrabThrowing) return vars.ChargeTime < ThrowSeconds;
-        return true;   // hold phase persists; Update transitions to the throw
+        // The windup runs to completion (a tap can't skip it); past it the hold lasts
+        // while LMB is down, up to the cap. Release or cap ends the action, and Exit
+        // hands the victim to a GrabThrowEntity at the swipe velocity — the throw.
+        if (vars.TimeInState < StartupSeconds) return true;
+        return ctx.Input.LeftClick && vars.TimeInState < HoldEndSeconds;
     }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
@@ -3644,6 +3667,9 @@ public class GrabAction : ActionState
         vars.GrabThrowing = false;
         vars.GrabDir      = AimDir(ctx, ab);
         vars.GrabVictim   = EntityId.None;   // latched in Update, off the field's own region
+        vars.SwipeVel     = Vector2.Zero;
+        vars.PrevCursor   = ctx.Input.MouseWorldPosition;
+        vars.BallPos      = ctx.Body.Position;
         if (ctx.Combat != null) ctx.Combat.GrabStrength = GrabStrengthMax;
     }
 
@@ -3656,61 +3682,47 @@ public class GrabAction : ActionState
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
+        var cfg    = MovementConfig.Current;
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
-        if (!vars.GrabThrowing)
-        {
-            vars.TimeInState += ctx.Dt;
-            // Windup. Nothing is grabbed yet: no field, so no GrabbedActive, no pull, and
-            // vars.GrabVictim stays None. The release check is deliberately BELOW this —
-            // the startup is a commitment and runs to completion, so a tap can't skip the
-            // windup to reach the throw early. It just arrives at the throw having held
-            // nobody, which is the existing whiff (and its recovery lag) either way.
-            if (vars.TimeInState < StartupSeconds) return;
+        vars.TimeInState += ctx.Dt;
 
-            bool holding = ctx.Input.LeftClick && vars.TimeInState < HoldEndSeconds;
-            if (holding)
-            {
-                var focus  = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;
-                var region = RegionAround(focus);
-                // One victim per grab: latch (or keep) a single target and hand it to the
-                // field, which then ignores every other body its region covers. Without
-                // this the field grabs the whole region at once — the hold flag, the pull
-                // and the throw all landing on every opponent standing nearby.
-                vars.GrabVictim = PickVictim(ctx, region, vars.GrabVictim);
-                if (ctx.ForceFields != null)
-                    ctx.ForceFields.Publish(new ForceField(
-                        region, focus, PullSpeed, PullAccel, ctx.Faction, ctx.SelfId,
-                        Color.Magenta, isGrab: true, only: vars.GrabVictim));
-                return;
-            }
-            // Release or hold-cap → enter the throw.
-            vars.GrabThrowing = true;
-            vars.ChargeTime   = 0f;
-            vars.GrabDir      = AimDir(ctx, ab);
+        // The swipe estimate, as BlockGrabAction: an EMA of the raw cursor's world
+        // velocity. It is the throw.
+        var cursor = ctx.Input.MouseWorldPosition;
+        if (ctx.Dt > 0f)
+        {
+            var inst = (cursor - vars.PrevCursor) / ctx.Dt;
+            vars.SwipeVel = Vector2.Lerp(vars.SwipeVel, inst, cfg.PlayerGrabSwipeSmoothing);
+        }
+        vars.PrevCursor = cursor;
+        var aim = cursor - ctx.Body.Position;
+        if (aim.LengthSquared() > 1e-4f) vars.GrabDir = Vector2.Normalize(aim);
+
+        // Windup. Nothing is grabbed yet: no field, so no GrabbedActive and no carry.
+        if (vars.TimeInState < StartupSeconds) return;
+
+        if (vars.GrabVictim.IsNone)
+        {
+            // Latch: the nearest body in the region in front of the grabber. Until one
+            // is caught the grab holds nobody (a whiff, which pays the recovery).
+            var focus = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;
+            vars.GrabVictim = PickVictim(ctx, RegionAround(focus), EntityId.None);
+            vars.BallPos    = focus;
+            if (vars.GrabVictim.IsNone) return;
         }
 
-        // Throw phase: a brief high-speed directional field flings whoever's still
-        // held-adjacent along GrabDir (no IsGrab — the victim is released, not held).
-        vars.ChargeTime += ctx.Dt;
-        if (ctx.ForceFields != null)
-        {
-            // Region hugs the held position; focus is far down GrabDir so the servo
-            // drives the victim to ThrowSpeed away from the grabber.
-            var hold   = ctx.Body.Position + vars.GrabDir * FocusDist;
-            var focus  = ctx.Body.Position + vars.GrabDir * 400f;
-            var region = RegionAround(hold);
-            // The throw flings the body this grab was holding — and only that body. A grab
-            // that never caught anyone may still latch here, so an opponent who walks into
-            // the release gets thrown; but once a victim is latched the throw never
-            // re-latches, because the fling carries the victim out of the region within a
-            // frame or two and a re-latch would then hand the same throw to the next body
-            // standing in it (that is the multi-victim bug, arriving one frame late).
-            if (vars.GrabVictim.IsNone)
-                vars.GrabVictim = PickVictim(ctx, region, EntityId.None);
-            ctx.ForceFields.Publish(new ForceField(
-                region, focus, ThrowSpeed, ThrowAccel, ctx.Faction, ctx.SelfId, Color.HotPink,
-                isGrab: false, isThrow: true, only: vars.GrabVictim));
-        }
+        // Carry: the victim follows the cursor's rest position on the clod tracker. One
+        // victim, locked on the field; the box around the grabber is how far the hold
+        // reaches — a victim knocked out of it is free until it comes back in.
+        var target = BlockGrabAction.RestPosition(ctx, ab, cursor, cfg.PlayerGrabHoldReach, CarryClearRadius);
+        vars.BallPos = target;
+        float half = cfg.PlayerGrabHoldReach + CarrySlack;
+        var me = ctx.Body.Position;
+        ctx.ForceFields?.Publish(new ForceField(
+            new BoundingBox(me.X - half, me.Y - half, me.X + half, me.Y + half),
+            target, 0f, cfg.PlayerGrabMaxAccel, ctx.Faction, ctx.SelfId,
+            Color.Magenta, isGrab: true, only: vars.GrabVictim,
+            trackSmoothTime: cfg.PlayerGrabSmoothTime, trackMaxSpeed: cfg.PlayerGrabMaxSpeed));
     }
 
     // Heavy stance while grabbing — the grabber is committed.
@@ -3724,16 +3736,29 @@ public class GrabAction : ActionState
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         ab.Condition.StampRecoveryForSeconds(RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
+
+        // The throw: hand the victim off to a flying point at the swipe velocity, as
+        // BlockGrabAction releases its PullPointEntity. Not when the hold was broken —
+        // struggled out (strength 0) or the grabber hit — and not on a whiff.
+        bool broken = ctx.Combat?.HitstunActive == true
+                   || (ctx.Combat != null && ctx.Combat.GrabStrength <= 0f);
+        if (!vars.GrabVictim.IsNone && !broken && ctx.Spawner != null)
+            ctx.Spawner.SpawnEntity(new GrabThrowEntity(vars.BallPos, vars.SwipeVel, vars.GrabVictim, ctx.Faction)
+            {
+                Team = ctx.Team,
+            });
+        vars.GrabThrowing = false;
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
-        int facing = vars.GrabDir.X >= 0f ? 1 : -1;
-        var focus = body.Position + (vars.GrabThrowing ? vars.GrabDir : new Vector2(facing, 0f)) * FocusDist;
-        var color = vars.GrabThrowing ? Color.HotPink : Color.Magenta;
-        // Dim through the windup so the cue reads as "winding up" rather than "holding you".
-        bool startup = !vars.GrabThrowing && vars.TimeInState < StartupSeconds;
-        t.Rect(focus, 6f, color * (startup ? 0.35f : 0.8f));
+        // The hold point: in front of the grabber while latching, the carry target once
+        // a body is held. Dim through the windup so the cue reads as "winding up".
+        bool startup = vars.TimeInState < StartupSeconds;
+        var focus = startup
+            ? body.Position + new Vector2(vars.GrabDir.X >= 0f ? 1 : -1, 0f) * FocusDist
+            : vars.BallPos;
+        t.Rect(focus, 6f, Color.Magenta * (startup ? 0.35f : 0.8f));
     }
 }
 

@@ -114,6 +114,8 @@ public static class EntityFactory
             // Driven/orb/group state is overwritten by RestoreState (incl. the sparse
             // PeelGroupComp) right after construction.
             EntityKind.PullPoint     => new PullPointEntity(body.Position, d.Faction, d.TileType),
+            // Victim and chase clock come back through ReadState.
+            EntityKind.GrabThrow     => new GrabThrowEntity(body.Position, body.Velocity, EntityId.None, d.Faction),
             // Budget is the penetration counter, restored through the same
             // EntityData slot LobbedArea uses (disjoint kinds, one slot).
             EntityKind.RailBolt      => new RailBoltProjectile(body.Position, body.Velocity, d.HitId, d.Faction, d.Budget, bodyDamage: d.ProjDamage),

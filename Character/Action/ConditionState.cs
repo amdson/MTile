@@ -17,6 +17,10 @@ public class ConditionState
     public bool Slash2Ready;     public int Slash2ExpireFrame;
     public bool Slash3Ready;     public int Slash3ExpireFrame;
     public bool AirSlash2Ready;  public int AirSlash2ExpireFrame;
+    // The gap between combo swings: the next combo step may not start before this
+    // frame (SlashLikeAction.OpenComboGap). A plain frame, no flag — it only ever
+    // gates, and a stale value in the past gates nothing.
+    public int ComboGapExpireFrame;
     // RecoveryActive + its expire frame double as the recovery COUNTDOWN: the
     // frames remaining (expire − now) are the "recovery index" entrants gate on
     // via EnvironmentContext.RecoveryIndex(). (The old GuardWindow flag is gone —
@@ -68,6 +72,7 @@ public class ConditionState
         Slash2Ready = o.Slash2Ready; Slash2ExpireFrame = o.Slash2ExpireFrame;
         Slash3Ready = o.Slash3Ready; Slash3ExpireFrame = o.Slash3ExpireFrame;
         AirSlash2Ready = o.AirSlash2Ready; AirSlash2ExpireFrame = o.AirSlash2ExpireFrame;
+        ComboGapExpireFrame = o.ComboGapExpireFrame;
         RecoveryActive = o.RecoveryActive; RecoveryExpireFrame = o.RecoveryExpireFrame;
     }
 }

@@ -45,11 +45,21 @@ public readonly struct ForceField
     // because the geometry is what makes the hold FEEL right; only the target set is
     // wrong.
     public readonly EntityId    Only;
+    // Tracking mode (> 0): instead of the speed servo, the body follows Focus on the
+    // block-throw clod's critically damped tracker (SmoothPen.CriticallyDampedStep with
+    // this smooth time), speed-capped at TrackMaxSpeed, and gravity is cancelled — a
+    // held body is carried like a held clod. Still force-capped by MaxAccel, so escape
+    // stays a physics question. TargetSpeed is unused in this mode.
+    public readonly float       TrackSmoothTime;
+    public readonly float       TrackMaxSpeed;
 
     public ForceField(BoundingBox region, Vector2 focus, float targetSpeed, float maxAccel,
                       Faction owner, EntityId source, Color? debugColor = null,
-                      bool isGrab = false, bool isThrow = false, EntityId only = default)
+                      bool isGrab = false, bool isThrow = false, EntityId only = default,
+                      float trackSmoothTime = 0f, float trackMaxSpeed = float.MaxValue)
     {
+        TrackSmoothTime = trackSmoothTime;
+        TrackMaxSpeed   = trackMaxSpeed;
         Region      = region;
         Focus       = focus;
         TargetSpeed = targetSpeed;
@@ -92,7 +102,7 @@ public static class ForceFieldSystem
                              Func<EntityId, PhysicsBody> resolveBody, float dt,
                              Action<EntityId> onGrabHeld = null,
                              Action<EntityId> onThrown = null,
-                             bool coop = false)
+                             bool coop = false, Vector2 gravity = default)
     {
         if (fields == null || dt <= 0f) return;
         foreach (var f in fields.All)
@@ -108,6 +118,21 @@ public static class ForceFieldSystem
                 if (body == null) continue;
                 if (f.IsGrab)  onGrabHeld?.Invoke(hb.Target);
                 if (f.IsThrow) onThrown?.Invoke(hb.Target);
+
+                if (f.TrackSmoothTime > 0f)
+                {
+                    // The clod tracker on a copy; only the velocity it lands on is used.
+                    var p = body.Position;
+                    var v = body.Velocity;
+                    SmoothPen.CriticallyDampedStep(ref p, ref v, f.Focus, f.TrackSmoothTime, dt);
+                    float s = v.Length();
+                    if (s > f.TrackMaxSpeed) v *= f.TrackMaxSpeed / s;
+                    var want = (v - body.Velocity) / dt - gravity;
+                    float wm = want.Length();
+                    if (wm > f.MaxAccel) want *= f.MaxAccel / wm;
+                    body.AppliedForce += want;
+                    continue;
+                }
 
                 var toFocus = f.Focus - body.Position;
                 float dist = toFocus.Length();

@@ -1,7 +1,7 @@
 ﻿{
   // options: "spires" (endless procedural world - spiky hills + rare thousand-tile spires, Levels/spires.json) | "start" | "hill" | "arena" | "plain" | "gauntlet" (left-to-right combat run) | "sandbox" (one Template enemy — see Entities/Enemies/Types/TemplateEnemy.cs) | "aspid" (Primal-Aspid fight room, respawning waves of 3) | "training" | "warden" (armored walker demo) | "warlord" (mobile boss: cleave/ram/leap-slam + foam cage) | "prism" (dashing boss that plants long cone-ray emitters) | "quillback" (fast armored hedgehog: regenerating shell, close-range flurry, digs/builds, punishable quill storm at range) | "wizard" (caster: orb waves + pillars) | "weights" (knockback-by-mass rows: passive balls left, melee sparrers right, 0.3 → 40) | "flat" | "fighter_gauntlet" (every league fighter in turn, weakest first; dying restarts) | "corridor" (bumpy tunnel) | "gym" (1-high ledges, CorrectorScenario applies)
   // entity options: aspid, wizard, quillback, warden, warlord, prism, fighter_gauntlet, spearman, pulser, depths (2-player co-op cave gauntlet)
-  "Stage": "depths",
+  "Stage": "prism",
   "WindowWidth": 1000,
   "WindowHeight": 900,
   "Fullscreen": true,

@@ -70,6 +70,11 @@ public sealed class HeadlessEntityWorld : IEntitySpawner, IChunkProvider
     // thrown clod bursting on the body it touches) see the same list Simulation gives
     // them. Set before the entity update pass; null is a legal "no bodies to touch".
     public HurtboxWorld Hurtboxes { get; set; }
+    // The frame's field registry and a body lookup reaching the players, as Simulation
+    // gives them (GrabThrowEntity). Set by the runner; null is legal.
+    public ForceFieldWorld ForceFields { get; set; }
+    public Func<EntityId, PhysicsBody> BodyResolver { get; set; }
+    public PhysicsBody ResolveBody(EntityId id) => BodyResolver?.Invoke(id);
 
     public HeadlessEntityWorld(ChunkMap chunks, HitIdAllocator hitIds, int firstIndex)
     {
@@ -229,6 +234,12 @@ public static class SimRunner
             // Simulation.Step; ones spawned by a player's action run this frame.
             entityScratch.Clear();
             entityScratch.AddRange(world.Entities);
+            world.ForceFields  = fields;
+            world.BodyResolver = id =>
+            {
+                foreach (var p in players) if (p.Id == id) return p.Body;
+                return world.Resolve(id)?.Body;
+            };
             foreach (var e in entityScratch) e.Update(cfg.Dt, players[0], hitboxes, world);
 
             combat.Apply(cfg.Terrain, hitboxes, hurtboxes, ResolveHittable);
@@ -240,7 +251,8 @@ public static class SimRunner
             }
             ForceFieldSystem.Apply(fields, hurtboxes, ResolveBody, cfg.Dt,
                 onGrabHeld: id => { foreach (var p in players) if (p.Id == id) p.Combat.MarkGrabbed(p.Frame); },
-                onThrown:   id => { foreach (var p in players) if (p.Id == id) p.Combat.RegisterThrown(p.Frame, cfg.Dt); });
+                onThrown:   id => { foreach (var p in players) if (p.Id == id) p.Combat.RegisterThrown(p.Frame, cfg.Dt); },
+                gravity: cfg.Gravity);
 
             // Entity gravity-scale opt-out, then every body (players + live entities,
             // spawn order) through the solver.
