@@ -26,7 +26,7 @@ import subprocess, sys
 GROUPS = {
  "combat": ["Combat","Guard","Grab","DirectDamage","AttackRecoil","Commitment","HitResolver",
             "HitboxOcclusion","HitEviction","HitFlash","ActionOverlay","ActionAimSolver",
-            "ClipBinding","DownAirSlash","InputParserGesture","RecoveryTransition","Laser",
+            "ClipBinding","DownAirSlash","AirHammer","InputParserGesture","RecoveryTransition","Laser",
             "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","SpearmanEnemy","PulserEnemy","EnemySpawner","WizardEnemy","Warlord","Prism","RayEmitter","Quillback","GauntletEnemy","Zeus","TelegraphList",
             "PresentationEventLog","SandImpactDamage","PlayerImpactByVelocity","ImpactCrater",
             "RunningOverUnderImpact","ChargedBlast","SlashCombo","BlockOwnership","SpikeOverlay","ClodGrab","GroundedForActions"],

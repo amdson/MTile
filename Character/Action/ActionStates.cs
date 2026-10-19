@@ -1726,6 +1726,191 @@ public class AirSpinStab : StabAction
     }
 }
 
+// ---------- Air hammer — the down-swipe stab, airborne ---------------------------
+
+// Double-fisted overhead hammer. Same long-hold + swipe gesture as the stab, but an
+// airborne swipe within 30° of straight down routes here instead of into a downward
+// stab (StabAction / AirSpinStab). Slower than the stab to come out, with two small
+// square boxes under the player instead of a thrust line:
+//   • the outer box — a moderate square just below and slightly ahead of the body;
+//   • the sweet spot — a smaller square at its center, 2× damage and 4× launch.
+// Both share one HitId and the sweet spot is published FIRST: CombatSystem resolves
+// boxes in publish order and dedupes entities per (HitId, target), so a victim inside
+// the core takes the sweet-spot hit alone, never core + outer stacked.
+//
+// "Weighty": the striker is heavier than the player (StrikeMassScale), so more of the
+// swing transfers into the victim, and almost none comes back — RecoilScale is tiny
+// and MaxRecoilSpeed caps what a heavy victim can kick back. No pogo.
+public class AirHammerAction : ActionState
+{
+    // Bottom sextant, same wedge DownAirSlash uses for the click: the swipe's
+    // normalized +y component must be at least cos(30°).
+    private const float AimCosThreshold = 0.8660254f;
+
+    private const float Duration              = 0.62f;
+    // Moderate wind-up: 15f, a beat longer than the stab's 11f — the hands have to
+    // come up and together overhead before they come down.
+    private const float HurtboxStartTime      = 0.25f;
+    private const float HurtboxActiveDuration = 4f / 60f;
+
+    // Outer box: a square one body-diameter wide, centered under the feet and nudged
+    // a little toward Facing. Sweet spot: a square ~40% of that, at the same center.
+    private const float OuterSide       = PlayerCharacter.Radius * 2.0f;
+    private const float SweetSide       = PlayerCharacter.Radius * 0.8f;
+    private const float ForwardOffset   = PlayerCharacter.Radius * 0.35f;
+    private const float DownOffset      = PlayerCharacter.Radius * 1.6f;
+
+    // Body damage is per connect (deduped), tile damage per active frame. The outer
+    // box takes 2× a stock slash off a body; the sweet spot doubles both channels.
+    // Over the 4 active frames the outer box digs 1.6 (breaks dirt, chips stone)
+    // and the core cell takes another 3.2 on top, so the strike punches a stone hole.
+    private const float OuterBodyDamage = 1.0f;
+    private const float OuterTileDamage = TileDamage.TileMaxHP * 0.4f;
+    private const float SweetDamageMult = 2f;
+
+    // Collision-mode striker. Launch on an equal-mass target is (1+e)·μ/m_t·u, linear
+    // in u, so the sweet spot's 4× is 4× the strike speed. Outer: ≈300 px/s on a
+    // standing player (between GroundSlash3 and the stab's ≈488); sweet spot ≈1200,
+    // a spike that out-launches everything else in the kit, by request.
+    private const float StrikeSpeed           = 300f;
+    private const float SweetKnockbackMult    = 4f;
+    private const float StrikeMassScale       = 2f;       // × attacker mass
+    private const float StrikeBodyVelocityShare = 0.3f;   // dive adds a little, as DownAirSlash
+    private const float Restitution           = 0.5f;
+    private const float MinLaunch             = 120f;
+    // Slight lean toward Facing, so the victim is driven down-and-away rather than
+    // pinned directly under the attacker.
+    private const float StrikeForwardLean     = 0.2f;
+    // Direction hint for parry cones / deflection (see StabAction.KnockbackMagnitude).
+    private const float KnockbackMagnitude    = 900f;
+
+    // Little recoil: a sweet-spot connect on a player (J ≈ 3000) comes back at ≈60.
+    private const float RecoilScale           = 0.02f;
+    private const float MaxRecoilSpeed        = 60f;
+
+    // The fists drive the body down with them through the active window — an
+    // "ensure at least" on downward speed, never a brake on a faster fall.
+    private const float SlamSpeed             = 180f;
+
+    // Armor through wind-up + strike, same threshold and reasoning as the stab.
+    private const float ArmorStrength         = 190f;
+    private const float RecoverySeconds       = 0.4f;
+    private const float WindupEvictSeconds    = 0.10f;
+
+    private static readonly Color HammerColor = Color.OrangeRed;
+
+    public override int ActivePriority  => 30;
+    // Beats StabAction (30) and AirSpinStab (35): a backward-down swipe is still a
+    // hammer, not a spin-stab.
+    public override int PassivePriority => 36;
+
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent)) return false;
+        if (!EntryOk(ctx)) return false;
+        if (ctx.Combat?.BlocksAttack == true) return false;
+        if (ctx.Input.Shift) return false;   // Shift-swipe belongs to Beam (see StabAction)
+        if (ctx.GroundedForActions) return false;
+        var d = intent.Direction;
+        float lenSq = d.LengthSquared();
+        if (lenSq < 1e-4f || d.Y <= 0f) return false;
+        return d.Y >= AimCosThreshold * MathF.Sqrt(lenSq);
+    }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+        => vars.TimeInState < Duration;
+
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState = 0f;
+        vars.IsGrounded  = false;
+        vars.HitId       = ctx.HitIds.Next();
+        vars.Facing      = ab.Facing == 0 ? 1 : ab.Facing;
+        ctx.Intents.Consume(IntentType.Stab, ctx.CurrentFrame);
+        // The wind-up hold stamps a stab charge on release; the hammer's damage is
+        // fixed, so drop it rather than let a later buffered stab inherit it.
+        vars.StabCharge  = 0f;
+    }
+
+    public override float ArmorProfile(in ActionVars vars)
+        => vars.TimeInState < HurtboxStartTime + HurtboxActiveDuration ? ArmorStrength : 0f;
+
+    public override int CommitProfile(EnvironmentContext ctx, in ActionVars vars)
+        => vars.TimeInState < HurtboxStartTime
+            ? SimFrames.FromSeconds(WindupEvictSeconds, ctx.Dt)
+            : SimFrames.FromSeconds(RecoverySeconds,    ctx.Dt);
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        ab.Condition.StampRecovery(CommitProfile(ctx, in vars), ctx.CurrentFrame);
+    }
+
+    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
+    {
+        m.MaxAirSpeed *= 0.6f;
+        m.AirDrag     *= 1.3f;
+    }
+
+    private static bool InActiveWindow(float t)
+        => t >= HurtboxStartTime && t <= HurtboxStartTime + HurtboxActiveDuration;
+
+    public override void ApplyActionForces(EnvironmentContext ctx, in ActionVars vars)
+    {
+        if (InActiveWindow(vars.TimeInState) && ctx.Body.Velocity.Y < SlamSpeed)
+            ctx.Body.Velocity = new Vector2(ctx.Body.Velocity.X, SlamSpeed);
+
+        if (ctx.CombatSystem == null) return;
+        var recoil = ctx.CombatSystem.PeekRecoil(vars.HitId);
+        if (recoil != Vector2.Zero) ctx.Body.Velocity += recoil;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState += ctx.Dt;
+        if (!InActiveWindow(vars.TimeInState) || ctx.Hitboxes == null) return;
+
+        var center    = ctx.Body.Position + new Vector2(vars.Facing * ForwardOffset, DownOffset);
+        var strikeDir = Vector2.Normalize(new Vector2(vars.Facing * StrikeForwardLean, 1f));
+        var bodyVel   = ctx.Body.Velocity * StrikeBodyVelocityShare;
+        float mass    = ctx.Mass * StrikeMassScale;
+
+        // Sweet spot first — see the class comment on publish order.
+        PublishBox(ctx, vars.HitId, center, SweetSide,
+                   OuterTileDamage * SweetDamageMult, OuterBodyDamage * SweetDamageMult,
+                   strikeDir, bodyVel + strikeDir * (StrikeSpeed * SweetKnockbackMult),
+                   mass, MinLaunch * SweetKnockbackMult, Color.White);
+        PublishBox(ctx, vars.HitId, center, OuterSide,
+                   OuterTileDamage, OuterBodyDamage,
+                   strikeDir, bodyVel + strikeDir * StrikeSpeed,
+                   mass, MinLaunch, HammerColor);
+    }
+
+    private static void PublishBox(EnvironmentContext ctx, int hitId, Vector2 center, float side,
+                                   float tileDamage, float bodyDamage,
+                                   Vector2 strikeDir, Vector2 strikeVelocity, float strikeMass,
+                                   float minLaunch, Color color)
+    {
+        float h = side * 0.5f;
+        var region = new BoundingBox(center.X - h, center.Y - h, center.X + h, center.Y + h);
+        ctx.Hitboxes.Publish(new Hitbox(
+            region, hitId, tileDamage,
+            strikeDir * KnockbackMagnitude,
+            ctx.Faction, ctx.SelfId, color,
+            bodyDamage: bodyDamage,
+            recoilScale: RecoilScale,
+            mode: KnockbackMode.Collision,
+            strikeDir: strikeDir,
+            strikeVelocity: strikeVelocity,
+            strikeMass: strikeMass,
+            restitution: Restitution,
+            minLaunch: minLaunch,
+            maxRecoilSpeed: MaxRecoilSpeed,
+            origin: ctx.Body.Position));
+    }
+}
+
 // ---------- Guard — hold Shift to parry incoming hits ---------------------------
 
 // Defensive posture. Held while Shift is down (with no L/R held — moving cancels

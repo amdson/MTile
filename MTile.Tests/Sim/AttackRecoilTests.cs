@@ -547,9 +547,12 @@ public class AttackRecoilTests(ITestOutputHelper output)
         Assert.Empty(combat.CaptureDedupe());
     }
 
-    // End to end: a stab straight down onto a player standing below lands ONCE, and
+    // End to end: a stab down onto a player standing below lands ONCE, and
     // the bounce it hands the attacker stays jump-sized (StabAction.MaxRecoilRiseSpeed)
     // rather than the stacked launch a re-hit after hitstop used to produce.
+    // The swipe is diagonal (~50° off vertical) on purpose: an air swipe within 30° of
+    // straight down is AirHammerAction now, not a stab. The cursor is released on the
+    // victim, so the stab's mouse-steer carries the thrust onto them.
     [Fact]
     public void DownStabOntoPlayer_HitsOnce_RiseCapped()
     {
@@ -565,10 +568,10 @@ public class AttackRecoilTests(ITestOutputHelper output)
             XXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
         const float dt = 1f / 60f;
-        var attackerStart = new Vector2(120f, 30f);
+        var attackerStart = new Vector2(80f, 30f);
         var victimStart   = new Vector2(120f, 8 * Chunk.TileSize - PlayerCharacter.Radius - 1f);
-        var press   = new Vector2(120f, 100f);
-        var release = new Vector2(120f, 160f);
+        var release = victimStart;
+        var press   = release - new Vector2(60f, 50f);
         var attackerScript = new InputScript()
             .For   ( 2, new PlayerInput { MouseWorldPosition = press })
             .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = press })
