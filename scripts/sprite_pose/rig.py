@@ -188,6 +188,8 @@ def draw_markers(dr, seg, prof, P, width, style):
             continue
         q = P(seg[n][1])
         col = prof['colors'][n]
+        if style == 'ends' and n in uppers:
+            continue  # only hands/feet get dots; elbows/knees are read from the colour change
         if style == 'shapes' and n in uppers:
             dr.ellipse([q[0] - r, q[1] - r, q[0] + r, q[1] + r], fill='white', outline=col, width=max(2, int(r * 0.45)))
         else:
@@ -236,6 +238,10 @@ def render_legend(prof, with_weapon=True, markers=None):
                  '(red dot = near elbow, orange dot = near hand, magenta = near knee, yellow = near foot,',
                  ' blue = far elbow, cyan = far hand, green = far knee, light-green = far foot,',
                  ' violet dot = blade tip). Every dot is drawn even when it overlaps something.']
+    elif markers == 'ends':
+        extra = ['END DOTS: a big filled dot ONLY at each hand and each foot, in that limb\'s lower-bone colour',
+                 '(orange = near hand, cyan = far hand, yellow = near foot, light-green = far foot), and a violet',
+                 'dot at the blade tip. Elbows and knees get NO dot. Every dot is drawn even where it overlaps.']
     elif markers == 'shapes':
         extra = ['JOINT SHAPES: elbows and knees are HOLLOW RINGS (white centre) in the upper bone\'s colour;',
                  'hands and feet are FILLED DOTS in the lower bone\'s colour; the blade tip is a violet dot.',

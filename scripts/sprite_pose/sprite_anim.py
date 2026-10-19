@@ -122,6 +122,11 @@ def cmd_gen(a):
         wl += ('\n- JOINT DOTS: draw a big filled dot at the END of every limb bone, in that bone\'s colour '
                '(elbow dot red/blue, hand dot orange/cyan, knee dot magenta/green, foot dot yellow/light-green) '
                'and a violet dot at the blade tip. Limbs are THIN lines; every dot is drawn even where it overlaps.')
+    elif mk == 'ends':
+        wl += ('\n- END DOTS: draw a big filled dot ONLY at each hand and each foot, in that limb\'s lower-bone '
+               'colour (orange near hand, cyan far hand, yellow near foot, light-green far foot), and a violet dot '
+               'at the blade tip. Elbows and knees get NO dot - the colour simply changes there. Limbs are THIN '
+               'lines; every dot is drawn even where it overlaps.')
     elif mk == 'shapes':
         wl += ('\n- JOINT SHAPES: elbows and knees are HOLLOW RINGS with a white centre in the upper bone\'s colour; '
                'hands and feet are FILLED DOTS in the lower bone\'s colour; the blade tip is a violet dot. '
@@ -921,7 +926,7 @@ def main():
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('refs'); p.add_argument('--run', required=True); p.add_argument('--rig', default='biped')
     p.add_argument('--from', required=True); p.add_argument('--to'); p.add_argument('--weapon', action='store_true')
-    p.add_argument('--markers', choices=['dots', 'shapes']); p.add_argument('--example', help='clip for a format example sheet')
+    p.add_argument('--markers', choices=['dots', 'shapes', 'ends']); p.add_argument('--example', help='clip for a format example sheet')
     p = sub.add_parser('gen'); p.add_argument('--run', required=True); p.add_argument('--move', required=True)
     p.add_argument('--frames', type=int, default=16)
     p = sub.add_parser('decode'); p.add_argument('--run', required=True); p.add_argument('--sheet')

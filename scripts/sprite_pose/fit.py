@@ -312,6 +312,9 @@ def init_guess(model, prev=None):
 
 
 def limb_chains(prof, rig):
+    if rig is None:
+        import rig as _R
+        rig = _R.load_rig(prof['rig'])
     bm = {b['Name']: b for b in rig['Bones']}
     chains = []
     for n in prof['drawn']:
