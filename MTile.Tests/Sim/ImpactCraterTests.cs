@@ -200,4 +200,41 @@ public class ImpactCraterTests
         Assert.True(hole.Broken == 0,
             $"a 300px/s landing on Stone broke {hole.Broken} cells\n{hole.Art}");
     }
+
+    // Yield is judged on the load offered, not on the load after capping it to what a
+    // cell has left. Capped first, a cell chipped below YieldFraction of full strength
+    // could never yield again: every later impact, however hard, left it standing.
+    [Theory]
+    [InlineData(TileType.Stone, 0.9f)]
+    [InlineData(TileType.Dirt,  0.9f)]
+    public void AChippedCellStillBreaksUnderAHardImpact(TileType mat, float damageFrac)
+    {
+        var rows = new StringBuilder();
+        for (int r = 0; r < 30; r++) rows.AppendLine(new string('X', 30));
+        var map = AsciiTerrain.FromAscii(rows.ToString());
+        for (int r = 0; r < 30; r++) for (int c = 0; c < 30; c++) map.EditorSetCell(c, r, TileState.Solid, mat);
+        map.DamageCell(15, 15, TileDamage.MaxHPFor(mat) * damageFrac);
+
+        ImpactSpringField.Apply(map, 15, 15, new Vector2(1f, 0f), 500f, new List<(int, int)> { (15, 15) });
+
+        Assert.True(map.GetCellState(15, 15) != TileState.Solid,
+            $"{mat} chipped to {1f - damageFrac:P0} survived a max-energy impact");
+    }
+
+    // ...while a tap below the yield point still leaves a chipped cell alone.
+    [Fact]
+    public void AChippedCellIgnoresASubYieldTap()
+    {
+        var rows = new StringBuilder();
+        for (int r = 0; r < 30; r++) rows.AppendLine(new string('X', 30));
+        var map = AsciiTerrain.FromAscii(rows.ToString());
+        for (int r = 0; r < 30; r++) for (int c = 0; c < 30; c++) map.EditorSetCell(c, r, TileState.Solid, TileType.Stone);
+        map.DamageCell(15, 15, TileDamage.MaxHPFor(TileType.Stone) * 0.9f);
+        float before = map.Damage.Get(15, 15);
+
+        ImpactSpringField.Apply(map, 15, 15, new Vector2(1f, 0f), 0.01f, new List<(int, int)> { (15, 15) });
+
+        Assert.Equal(TileState.Solid, map.GetCellState(15, 15));
+        Assert.Equal(before, map.Damage.Get(15, 15));
+    }
 }

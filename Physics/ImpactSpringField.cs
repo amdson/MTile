@@ -297,6 +297,12 @@ public static class ImpactSpringField
         {
             if (!solid[i]) { energy[i] = 0f; continue; }
             energy[i] = 0.5f * s2 * phi[i].LengthSquared();
+            // Yield is judged on the load OFFERED, before the cap to what the cell has
+            // left. Judged after it, a cell chipped below YieldFraction of full strength
+            // could never be offered enough to yield again — immune to every impact
+            // forever, and a free energy sink that stops a body dead. A load past yield
+            // finishes such a cell; a sub-yield tap still leaves no mark.
+            if (energy[i] >= yield[i]) yield[i] = 0f;
             if (energy[i] > hp[i]) { surplus += energy[i] - hp[i]; energy[i] = hp[i]; }
         }
 
