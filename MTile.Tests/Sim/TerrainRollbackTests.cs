@@ -13,22 +13,35 @@ namespace MTile.Tests.Sim;
 //   B  rollback as RollbackSession does it: snapshot at frame k, step ahead on WRONG
 //      predicted inputs, Restore, replay the true ones,
 //   C  Snapshot->Restore round trip before every frame.
-// Two players on wall_dummy (flat stone floor, tall wall) cycle through every build
+// Two players (wall_dummy: flat stone floor, tall wall; and depths) cycle through every build
 // gesture while walking and jumping into what they build, so the movement states that
 // hold soft contacts (wall slide, ledge hang, jumps) meet terrain that changes under them.
 public class TerrainRollbackTests(ITestOutputHelper output)
 {
-    private static Simulation Build()
-        => new(new GameConfig { SpawnSecondPlayer = true }, Stages.Get("wall_dummy"));
+    private static Simulation Build(string stage)
+        => new(new GameConfig { SpawnSecondPlayer = true }, Stages.Get(stage));
 
-    // One gesture per 70-frame phase, players a phase apart. `wrong` shifts the script
-    // in time — a different, equally plausible input stream for the mispredicted pass.
-    private static PlayerInput Input(Simulation g, int f, int who, bool wrong)
+    // Stateless per-(seed, player, slot) hash, so the script stays a pure function of
+    // the frame — the true and mispredicted streams must each replay identically.
+    private static uint Hash(int seed, int who, int slot)
+    {
+        uint h = (uint)seed * 0x9E3779B1u ^ (uint)who * 0x85EBCA77u ^ (uint)slot * 0xC2B2AE3Du;
+        h ^= h >> 15; h *= 0x2C1B3C6Du; h ^= h >> 12; h *= 0x297A2D39u; h ^= h >> 15;
+        return h;
+    }
+
+    // One gesture per 70-frame phase, players a phase apart. Seed 0 cycles the gestures
+    // in order; any other seed draws each phase's gesture and direction from Hash.
+    // `wrong` shifts the script in time — a different, equally plausible input stream
+    // for the mispredicted pass.
+    private static PlayerInput Input(Simulation g, int f, int who, bool wrong, int seed)
     {
         var p = who == 0 ? g.Player : g.SecondaryPlayers[0].Player;
         int t = (wrong ? f + 17 * (who + 2) : f) + who * 70;
-        int phase = (t / 70) % 6, k = t % 70;
-        int dir = ((t / 210) % 2 == 0) ? 1 : -1;      // mostly toward the wall, sometimes back
+        int slot = t / 70, k = t % 70;
+        int phase = seed == 0 ? slot % 6 : (int)(Hash(seed, who, slot) % 6);
+        int dir = seed == 0 ? ((t / 210) % 2 == 0 ? 1 : -1)      // mostly toward the wall, sometimes back
+                            : ((Hash(seed, who + 7, slot) & 1) == 0 ? 1 : -1);
         float wob = MathF.Sin(t * 0.21f) * 12f;
         var i = new PlayerInput
         {
@@ -83,16 +96,26 @@ public class TerrainRollbackTests(ITestOutputHelper output)
              + $"{g.Entities.Count}|{g.Chunks.ActiveSprouts.Count}/{g.Chunks.PendingSprouts.Count}";
     }
 
-    [Fact]
-    public void BuildingAndAvalanches_StayDeterministic_UnderRollbackAndSnapshotRoundTrip()
+    // wall_dummy: flat floor + wall, nothing else alive. depths: the co-op stage browser
+    // play ran on, its first room's enemies included. Ahead 8 = a deeper misprediction
+    // than RollbackSession's stall cap lets build up.
+    [Theory]
+    [InlineData("wall_dummy", 0)]
+    [InlineData("wall_dummy", 1)]
+    [InlineData("wall_dummy", 2)]
+    [InlineData("depths", 0)]
+    [InlineData("depths", 3)]
+    [InlineData("depths", 5)]
+    [InlineData("depths", 8)]
+    public void BuildingAndAvalanches_StayDeterministic_UnderRollbackAndSnapshotRoundTrip(string stage, int seed)
     {
-        const int N = 3000, Block = 40, Ahead = 6;
-        var a = Build(); var b = Build(); var c = Build();
+        const int N = 3000, Block = 40, Ahead = 8;
+        var a = Build(stage); var b = Build(stage); var c = Build(stage);
         int rollbacks = 0, maxSprouts = 0, terrainChanges = 0;
         var kinds = new SortedSet<string>(); var states = new SortedSet<string>(); var actions = new SortedSet<string>();
         ulong lastHash = a.Chunks.TerrainHash;
 
-        void Run(Simulation g, int f, bool wrong) => g.Step(Input(g, f, 0, wrong), Input(g, f, 1, wrong));
+        void Run(Simulation g, int f, bool wrong) => g.Step(Input(g, f, 0, wrong, seed), Input(g, f, 1, wrong, seed));
 
         for (int f0 = 0; f0 < N; f0 += Block)
         {
@@ -128,7 +151,7 @@ public class TerrainRollbackTests(ITestOutputHelper output)
                 Assert.True(refSigs[f - f0] == Sig(b), $"rollback desync at frame {f} (rolled back from {k})\n A {refSigs[f - f0]}\n B {Sig(b)}");
             }
         }
-        output.WriteLine($"frames={N} rollbacks={rollbacks} terrainChanges={terrainChanges} maxSprouts={maxSprouts}");
+        output.WriteLine($"{stage} seed={seed} frames={N} rollbacks={rollbacks} terrainChanges={terrainChanges} maxSprouts={maxSprouts}");
         output.WriteLine($"entities=[{string.Join(",", kinds)}]");
         output.WriteLine($"states=[{string.Join(",", states)}]");
         output.WriteLine($"actions=[{string.Join(",", actions)}]");
