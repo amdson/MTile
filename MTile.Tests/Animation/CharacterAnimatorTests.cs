@@ -179,7 +179,7 @@ public class CharacterAnimatorTests
                                      AnimTag tag = AnimTag.None)
     {
         var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
-        float dt = 1f / 30f, vx = speed * facing, x = 0f, prev = anim.State.Phase, total = 0f;
+        float dt = 1f / 60f, vx = speed * facing, x = 0f, prev = anim.State.Phase, total = 0f;
         for (int i = 0; i < 40; i++)
         {
             x += vx * dt;
@@ -216,7 +216,7 @@ public class CharacterAnimatorTests
         // vx is in the run band, so bind a Run clip too (escalation has no procedural fallback).
         var anim = new CharacterAnimator(skel, 0.6f, new[] { BuildWalkClip(skel), BuildRunClip(skel) });
 
-        float dt = 1f / 30f, vx = 120f, x = 0f, prev = anim.State.Phase, total = 0f;
+        float dt = 1f / 60f, vx = 120f, x = 0f, prev = anim.State.Phase, total = 0f;
         for (int i = 0; i < 30; i++)
         {
             x += vx * dt;
@@ -261,7 +261,7 @@ public class CharacterAnimatorTests
         // vx is in the run band, so bind a Run clip too (escalation has no procedural fallback).
         var anim = new CharacterAnimator(skel, 0.6f, new[] { BuildWalkClip(skel), BuildRunClip(skel) });
 
-        float dt = 1f / 30f, vx = 140f, x = 0f, prev = anim.State.Phase, maxStep = 0f;
+        float dt = 1f / 60f, vx = 140f, x = 0f, prev = anim.State.Phase, maxStep = 0f;
         int stalls = 0;
         for (int i = 0; i < 60; i++)
         {
@@ -299,7 +299,7 @@ public class CharacterAnimatorTests
 
         // 12 frames of the trace from a real grab-settle, alternating Vy < 0 and Vy = 0.
         float[] vyTrace = { -30f, 0f, -23f, 0f, -16f, 0f, -10f, 0f, -7f, 0f, -4f, 0f };
-        float dt = 1f / 30f;
+        float dt = 1f / 60f;
         var clips = new System.Collections.Generic.List<AnimClip>();
         foreach (var vy in vyTrace)
         {
@@ -338,7 +338,7 @@ public class CharacterAnimatorTests
         });
 
         float[] vyTrace = { -100f, 0f, -50f, 0f, -25f, 0f };
-        float dt = 1f / 30f;
+        float dt = 1f / 60f;
         var clips = new System.Collections.Generic.List<AnimClip>();
         foreach (var vy in vyTrace)
         {
@@ -361,7 +361,7 @@ public class CharacterAnimatorTests
     private static float WalkPhase(Skeleton skel, float vx, int frames)
     {
         var anim = new CharacterAnimator(skel, 0.6f, new[] { BuildWalkClip(skel) });
-        float dt = 1f / 30f, x = 0f, prev = anim.State.Phase, total = 0f;
+        float dt = 1f / 60f, x = 0f, prev = anim.State.Phase, total = 0f;
         for (int i = 0; i < frames; i++)
         {
             x += vx * dt;

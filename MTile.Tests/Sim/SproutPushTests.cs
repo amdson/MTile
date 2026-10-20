@@ -22,7 +22,7 @@ namespace MTile.Tests;
 // magnitude 16 / 0.1 = 160 px/s.
 public class SproutPushTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     // ── Stack on the left, sprout grows rightward into the player ──────────

@@ -205,7 +205,7 @@ public sealed class GameAudio
                     simFrame: p.Frame, gain: 0.6f, pitch: Jitter(p.Frame), pos: p.Body.Position);
     }
 
-    private static bool IsSwing(ActionState a) => a is SlashLikeAction || a is StabAction;
+    private static bool IsSwing(ActionState a) => a is SlashLikeAction || a is StabAction || a is AirHammerAction;
 
     // Entering a jump state is an edge, but a derivable one: the state ring is snapshotted,
     // so "current is a jump, previous frame was not" re-derives identically after a

@@ -9,8 +9,8 @@ namespace MTile;
 //
 // What's snapshotted:
 //   • Pose + kinematics: Position, Velocity, AppliedForce, LastImpulseMagnitude,
-//     SproutCrushCount, FrictionScale — all value types, trivially copied. The two
-//     step outputs (impulse, crush count) are read by PlayerCharacter.Update at the
+//     LastCrushImpulse, SproutCrushCount, FrictionScale — all value types, trivially
+//     copied. The step outputs (impulses, crush count) are read by PlayerCharacter.Update at the
 //     START of the next frame, before StepSwept resets them, so they cross the frame
 //     boundary a snapshot sits on.
 //   • Every constraint, in list order: the Maintained hard contacts the collision
@@ -32,6 +32,7 @@ public struct BodyState
     public Vector2 Velocity;
     public Vector2 AppliedForce;
     public float   LastImpulseMagnitude;
+    public float   LastCrushImpulse;
     public int     SproutCrushCount;
     public float   FrictionScale;
     public PhysicsContact[] Contacts;
@@ -48,6 +49,7 @@ public struct BodyState
             Velocity             = b.Velocity,
             AppliedForce         = b.AppliedForce,
             LastImpulseMagnitude = b.LastImpulseMagnitude,
+            LastCrushImpulse     = b.LastCrushImpulse,
             SproutCrushCount     = b.SproutCrushCount,
             FrictionScale        = b.FrictionScale,
             Contacts             = kept?.ToArray() ?? System.Array.Empty<PhysicsContact>(),
@@ -60,6 +62,7 @@ public struct BodyState
         b.Velocity             = Velocity;
         b.AppliedForce         = AppliedForce;
         b.LastImpulseMagnitude = LastImpulseMagnitude;
+        b.LastCrushImpulse     = LastCrushImpulse;
         b.SproutCrushCount     = SproutCrushCount;
         b.FrictionScale        = FrictionScale;
 
@@ -86,9 +89,20 @@ public struct BodyState
         return copy;
     }
 
-    // Deep-copy a single contact, preserving its concrete type, Maintained flag and
-    // Owner tag. LastImpulse is a per-step diagnostic (zeroed by StepSwept) — not copied.
-    private static PhysicsContact Clone(PhysicsContact c) => c switch
+    // Deep-copy a single contact, preserving its concrete type, Maintained flag, Owner
+    // tag and LastImpulse. LastImpulse is zeroed at the top of every StepSwept, but it is
+    // READ between steps (GrabThrowEntity.TerrainPushback reads the victim's contacts'
+    // impulses from the previous step), so it crosses the frame boundary a snapshot sits
+    // on — dropping it made a snapshot round trip diverge on the frame after a thrown
+    // victim hit terrain.
+    private static PhysicsContact Clone(PhysicsContact c)
+    {
+        var copy = CloneShape(c);
+        copy.LastImpulse = c.LastImpulse;
+        return copy;
+    }
+
+    private static PhysicsContact CloneShape(PhysicsContact c) => c switch
     {
         SurfaceDistance sd => new SurfaceDistance(sd.Position, sd.Normal, sd.MinDistance)
             { SurfaceVelocity = sd.SurfaceVelocity, Friction = sd.Friction, Maintained = sd.Maintained, Owner = sd.Owner },

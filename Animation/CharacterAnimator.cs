@@ -727,7 +727,7 @@ public sealed partial class CharacterAnimator
                 BodyPos = s.Position, BodyVel = s.Velocity,
                 Facing = s.Facing, Scale = _scale,
                 Phase = _state.Phase,
-                NominalRate = _rate, Dt = dt,
+                NominalRate = TravelRate(dt), Dt = dt,
                 Track = planTrack, Chunks = s.Chunks, PredictAt = s.PredictAt,
                 LoopBack = AnimSolverConfig.Current.LoopBackEnabled ? LoopBackFor(anim) : null,
             });
@@ -958,6 +958,20 @@ public sealed partial class CharacterAnimator
     // squared wrapped angle difference over all bones (uniform weights — the torso/limb
     // distinction matters little for a coarse 32-way scan). Uses the _kf quad + _scratch;
     // runs only on a clip-change frame, before any solve, so the scratch reuse is safe.
+    // The planner's pace for time-to-touchdown: the cycle rate the body's TRAVEL implies
+    // (this frame's travel over the authored cycle distance), not the timing stage's
+    // emitted rate. The emitted rate carries the foot servo, which surges ~+50% for a few
+    // frames after every touchdown; read as the pace for the whole remaining swing, it
+    // shrank the predicted travel to touchdown by a third and committed the other foot's
+    // landing 4-7 px short — the backward snap when the contact then pinned it there.
+    // Falls back to the emitted rate where travel says nothing (a stationary cycle).
+    private float TravelRate(float dt)
+    {
+        var t = _lastTiming;
+        if (t.CycleDistance < 1f || dt <= 0f) return _rate;
+        return MathF.Max(0f, t.Travel) / t.CycleDistance / dt;
+    }
+
     private float BestMatchingPhase(AnimationDocument anim)
     {
         if (!_haveEmitted) return 0f;

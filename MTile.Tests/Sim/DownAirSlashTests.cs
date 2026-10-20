@@ -18,7 +18,7 @@ namespace MTile.Tests;
 //      couldn't do (see DownAirSlash.ApplyActionForces).
 public class DownAirSlashTests(ITestOutputHelper output)
 {
-    private const float Dt      = 1f / 30f;
+    private const float Dt      = 1f / 60f;
     private const float Gravity = 600f;
 
     // Number of open rows needed above a solid floor row so the floor TOP sits at or

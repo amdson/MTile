@@ -12,7 +12,7 @@ namespace MTile.Tests.Sim;
 // the code they exercise earns trust.
 public class CorrectorAnchorTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float TS = Chunk.TileSize;
     private static readonly Vector2 Up = new(0f, -1f);
     private static readonly float R = PlayerCharacter.Radius;

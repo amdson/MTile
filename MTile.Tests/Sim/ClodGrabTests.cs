@@ -18,7 +18,7 @@ public class ClodGrabTests(ITestOutputHelper output)
 {
     // ── 1. Press arbitration ───────────────────────────────────────────────────────
 
-    private const float GrabDt = 1f / 30f;
+    private const float GrabDt = 1f / 60f;
 
     private static ChunkMap FlatGround() => SimTerrain.FromAscii(@"
         OOOOOOOOOOOOOOOOOOOOOOOOOOOO

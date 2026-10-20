@@ -10,7 +10,7 @@ namespace MTile.Tests;
 // scenario: one attacker spamming slashes, one victim holding a movement key.
 public class CombatHitstunTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     // Slash hits a stationary victim → Combat.HitstunActive fires → Space presses
@@ -248,14 +248,14 @@ public class CombatHitstunTests(ITestOutputHelper output)
     }
 
     // Single-player crush test: drop the player from height onto solid ground.
-    // Free-fall velocity at impact exceeds CrushImpulseThreshold (700 px/s, vs
-    // ~270 for a max-hold self-jump landing and ≤580 for sand impacts), so HP
-    // should drop. A normal short fall (no excess) leaves HP at MaxHealth.
+    // Free-fall velocity at impact exceeds CrushImpulseThreshold (400 px/s, vs
+    // ~270 for a max-hold self-jump landing and ~367 for a double-jump-height
+    // drop), so HP should drop. A normal short fall (no excess) leaves HP at MaxHealth.
     [Fact]
     public void Crush_HardFallDealsDamage()
     {
-        // Tall column of empty above flat ground. Need vy > 700 at impact for
-        // crush damage to fire; from rest under gravity 600, that's ~408 px of
+        // Tall column of empty above flat ground. Need vy > 400 at impact for
+        // crush damage to fire; from rest under gravity 600 that's ~20 tiles of
         // free fall. Use 32 rows of empty above the floor to give plenty of
         // headroom (~480 px drop ⇒ vy ≈ 760 at impact).
         var terrain = SimTerrain.FromAscii(@"
@@ -295,7 +295,7 @@ public class CombatHitstunTests(ITestOutputHelper output)
 
         // Floor top = row 32 (Chunk.TileSize-scaled). Drop the same ~492px fall used before the
         // grid change (impact vy depends only on fall height and gravity, both grid-independent) —
-        // impact vy ≈ 770, comfortably past the 700 CrushImpulseThreshold.
+        // impact vy ≈ 770, comfortably past the 400 CrushImpulseThreshold.
         float floorTopY = 32 * Chunk.TileSize;
         var cfg = new SimConfig
         {

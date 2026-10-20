@@ -24,7 +24,7 @@ namespace MTile.Tests;
 // covered-jumps.
 public class CoveredJumpStunGateTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     private const string Terrain = @"

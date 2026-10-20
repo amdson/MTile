@@ -24,7 +24,7 @@ public class SimConfig
     public Vector2      StartVelocity { get; init; } = Vector2.Zero;
     public InputScript  Script        { get; init; } = InputScript.Always(default);
     public int          Frames        { get; init; } = 120;
-    public float        Dt            { get; init; } = 1f / 30f;
+    public float        Dt            { get; init; } = Simulation.FixedDt;
     public Vector2      Gravity       { get; init; } = new Vector2(0f, 600f);
 }
 
@@ -48,7 +48,7 @@ public class SimConfigMulti
     public ChunkMap         Terrain { get; init; } = new ChunkMap();
     public IList<SimPlayer> Players { get; init; } = new List<SimPlayer>();
     public int              Frames  { get; init; } = 120;
-    public float            Dt      { get; init; } = 1f / 30f;
+    public float            Dt      { get; init; } = Simulation.FixedDt;
     public Vector2          Gravity { get; init; } = new Vector2(0f, 600f);
 }
 

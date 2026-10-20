@@ -41,6 +41,20 @@ public class PhysicsBody
     // dispatch crush damage when the body's "ouch" exceeds CrushThreshold.
     public float LastImpulseMagnitude;
 
+    // The part of LastImpulseMagnitude that was a HARD stop — what crush damage bills.
+    // Equal to it everywhere except a terrain impact that broke material: tile HP the
+    // impact permanently destroyed cushioned the stop, so its energy is taken off the
+    // body's before the Δv is counted (see PhysicsWorld.ResolveChunkCollisionsSwept).
+    // A separate field rather than a rewrite of LastImpulseMagnitude because that one
+    // is also a contact detector (LobbedAreaProjectile's strike fuse, landing audio),
+    // which must still see a clod that ploughs into sand. Reset, max'd and
+    // snapshotted alongside it.
+    public float LastCrushImpulse;
+    // Scratch for the above: the vector sum of this step's hard-stop Δv so far, whose
+    // length LastCrushImpulse tracks. Reset at the top of every StepSwept and only read
+    // inside it, so it never crosses a frame boundary and needs no snapshot.
+    internal Vector2 CrushDvThisStep;
+
     // Number of sprout cells destroyed out from under this body during the most-recent
     // StepSwept because the depenetration solver could not resolve the overlap within
     // its iteration budget. Reset to 0 at the start of each step, same as

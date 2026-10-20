@@ -41,7 +41,7 @@ public static class PhysicsWorld
                         body.Velocity -= vnRel * sc.Normal;
                         sc.LastImpulse += -vnRel * sc.Normal;
                         float mag = MathF.Abs(vnRel);
-                        if (mag > body.LastImpulseMagnitude) body.LastImpulseMagnitude = mag;
+                        RecordImpulse(body, mag, mag, sc.Normal);
                     }
                 }
 
@@ -132,7 +132,7 @@ public static class PhysicsWorld
             {
                 body.Velocity -= vnRel * normal;
                 float mag = MathF.Abs(vnRel);
-                if (mag > body.LastImpulseMagnitude) body.LastImpulseMagnitude = mag;
+                RecordImpulse(body, mag, mag, normal);
                 frictionDv = ApplyFrictionAtImpact(body, normal, bestShapeVel, ComputeFrictionForNormal(body, normal), savedForce, dt);
                 if (body.Impact != null
                     && body.Impact.BounceRestitution > 0f
@@ -205,6 +205,23 @@ public static class PhysicsWorld
     // dv/dt = −k|v|v, integrated semi-implicitly (v ← v / (1 + k|v|dt)): exact in
     // direction, never overshoots zero or reverses however large k·|v|·dt gets.
     // Public form is for predictors that mirror the step (BallisticPredictor).
+    // Fold one collision's impulse into the body's per-step accumulators. `crush` is the
+    // hard-stop share of `raw` (see PhysicsBody.LastCrushImpulse); paths with no
+    // material to cushion them pass the same value twice.
+    //
+    // Raw is a max over hits, crush a VECTOR SUM. One stop is routinely delivered as
+    // several hits in a step — a hex body landing on a tile seam meets a bevel first and
+    // the flat face after, each taking a slice of the Δv — and the max of the slices
+    // under-billed a 475 px/s landing as 350. The sum puts the slices back together
+    // without double-counting: each hit only removes velocity the previous ones left.
+    private static void RecordImpulse(PhysicsBody body, float raw, float crush, Vector2 normal)
+    {
+        if (raw > body.LastImpulseMagnitude) body.LastImpulseMagnitude = raw;
+        body.CrushDvThisStep += crush * normal;
+        float sum = body.CrushDvThisStep.Length();
+        if (sum > body.LastCrushImpulse) body.LastCrushImpulse = sum;
+    }
+
     private static void ApplyQuadraticDrag(PhysicsBody body, float dt)
         => body.Velocity = QuadraticDrag(body.Velocity, body.QuadraticDrag, dt);
 
@@ -232,6 +249,8 @@ public static class PhysicsWorld
             // each collision's |vnRel|; the largest one is what callers (e.g.
             // PlayerCharacter.Update) read post-step for crush-damage dispatch.
             body.LastImpulseMagnitude = 0f;
+            body.LastCrushImpulse = 0f;
+            body.CrushDvThisStep = Vector2.Zero;
             body.SproutCrushCount = 0;
 
             // Terrain-transparent bodies just integrate (see PhysicsBody.IgnoreTiles).
@@ -272,7 +291,7 @@ public static class PhysicsWorld
                         body.Velocity -= vnRel * sc.Normal;
                         sc.LastImpulse += -vnRel * sc.Normal;
                         float mag = MathF.Abs(vnRel);
-                        if (mag > body.LastImpulseMagnitude) body.LastImpulseMagnitude = mag;
+                        RecordImpulse(body, mag, mag, sc.Normal);
                     }
                 }
                 // See the matching note in Step(): friction is gated on contact
@@ -412,6 +431,10 @@ public static class PhysicsWorld
             {
                 float vnAbs = MathF.Abs(vnRel);
                 float dvCapMag = vnAbs;
+                // Speed the body would have arrived with had the material it destroyed
+                // not cushioned the hit — what the crush Δv is measured from. Stays vnAbs
+                // when nothing broke.
+                float vnHard = vnAbs;
 
                 if (!hitFromFloating && body.Impact != null)
                 {
@@ -439,6 +462,14 @@ public static class PhysicsWorld
                             chunks, seed.gtx, seed.gty, -hitNormal,
                             ImpactSpringField.HpForEnergy(ke), pathCells);
 
+                        // Rock that gave way took its share of the impact as it crumbled
+                        // instead of handing it straight back to the body, so that energy
+                        // is a soft stop. Only BROKEN cells count: energy a material shrugged
+                        // off elastically or as a chip (all of it, for Hardened) came back
+                        // as a hard stop, and bills as one.
+                        float cushion = ImpactSpringField.EnergyForHp(impact.HpBroken);
+                        vnHard = MathF.Sqrt(2f * MathF.Max(0f, ke - cushion) / mass);
+
                         if (impact.PathCleared)
                         {
                             // Kinetic energy is spent on the HP it destroyed; whatever is
@@ -462,7 +493,11 @@ public static class PhysicsWorld
 
                 dvNormalMag = dvCapMag;
                 body.Velocity += dvCapMag * hitNormal;
-                if (dvCapMag > body.LastImpulseMagnitude) body.LastImpulseMagnitude = dvCapMag;
+                // The hard part of the stop: the Δv from the cushioned arrival speed down
+                // to whatever the body keeps moving at (vnAbs − dvCapMag after a break-
+                // through, 0 after a dead stop).
+                float crushMag = MathF.Min(dvCapMag, MathF.Max(0f, vnHard - (vnAbs - dvCapMag)));
+                RecordImpulse(body, dvCapMag, crushMag, hitNormal);
 
                 frictionDv = ApplyFrictionAtImpact(body, hitNormal, hitSurfaceVel, hitFriction, savedForce, dt);
 

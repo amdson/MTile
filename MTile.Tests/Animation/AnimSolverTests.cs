@@ -71,7 +71,7 @@ public class AnimSolverTests
         var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
 
         const int frames = 90;
-        float dt = 1f / 30f, vx = speed * facing, x = 0f, maxAll = 0f;
+        float dt = 1f / 60f, vx = speed * facing, x = 0f, maxAll = 0f;
         float prev = anim.State.Phase, totalPhase = 0f;
         float earlyPeak = 0f, latePeak = 0f;   // max |Δθ| over the middle third vs the last third
         for (int i = 0; i < frames; i++)
@@ -120,7 +120,7 @@ public class AnimSolverTests
         var skel = SkeletonExamples.Biped();
         var anim = new CharacterAnimator(skel, 0.6f, new[] { clip });
 
-        float dt = 1f / 30f, vx = speed * facing, x = 0f, maxAbs = 0f, prevAbs = 0f;
+        float dt = 1f / 60f, vx = speed * facing, x = 0f, maxAbs = 0f, prevAbs = 0f;
         int flightFrames = 0, stanceBobFrames = 0, flightGrew = 0;
         for (int i = 0; i < 60; i++)
         {
@@ -180,7 +180,7 @@ public class AnimSolverTests
         var skel = SkeletonExamples.Load(rig);
         var anim = new CharacterAnimator(skel, 0.6f, overlay == null ? new[] { clip } : new[] { clip, overlay });
 
-        float dt = 1f / 30f, vx = speed * facing, x = 0f, worst = 0f;
+        float dt = 1f / 60f, vx = speed * facing, x = 0f, worst = 0f;
         int checks = 0, wc = -1, wr = -1; float wfd = 0f, wan = 0f;
         for (int i = 0; i < 60; i++)
         {

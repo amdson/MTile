@@ -36,15 +36,20 @@ namespace MTile;
 // CorrectorLedger (per-channel forces + per-contact tile attribution).
 // Which movement-state field a soft contact belongs to (PhysicsContact.Owner) — how a
 // state finds its own contact again in a restored constraint list. One value per
-// field; CoveredJump encodes the float height it acquired at in the tag, since that
-// height is part of what the contact means.
+// field OF EACH REGISTERED INSTANCE: ResetTransient runs on every registry state, so
+// a tag two instances share is adopted by both. The direction flyweights (one
+// WallSliding / LedgeGrab per side) therefore get a tag per side — with a shared tag
+// the off side kept a ref to the on side's contact after a restore, its idempotent
+// Ensure… then skipped acquiring a contact of its own, and the replay diverged.
+// CoveredJump encodes the float height it acquired at in the tag, since that height
+// is part of what the contact means.
 public enum SoftContactOwner : byte
 {
     None = 0,
     JumpSource, RunningJumpSource,
     CoveredGroundStand, CoveredGroundCrouch,
-    LedgeWall, LedgeFloor,
-    WallSlideWall, WallSlideGround,
+    LedgeWallLeft, LedgeFloorLeft, LedgeWallRight, LedgeFloorRight,
+    WallSlideWallLeft, WallSlideGroundLeft, WallSlideWallRight, WallSlideGroundRight,
 }
 
 public abstract class MovementState

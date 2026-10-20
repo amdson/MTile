@@ -30,7 +30,7 @@ public class ActionAimSolverTests
         int up    = anim.Skeleton.IndexOf("arm_r_upper");
         int chest = anim.Skeleton.IndexOf("chest");
 
-        const float dt = 1f / 30f;
+        const float dt = 1f / 60f;
         var pos = new Vector2(0f, 0f);
         // Aim direction in world: rotate horizontal-forward (facing,0) by aimDeg (screen-down +y).
         float a = aimDeg * MathF.PI / 180f;

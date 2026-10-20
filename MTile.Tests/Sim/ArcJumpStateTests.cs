@@ -17,7 +17,7 @@ namespace MTile.Tests;
 //      3 blocks no longer does, since 33px now sits inside ArcJumpState's own band.)
 public class ArcJumpStateTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float TS = Chunk.TileSize;
     private static readonly float R = PlayerCharacter.Radius;
     private static readonly float HalfW = R * MathF.Sin(MathF.PI / 3f);       // R·sin60°

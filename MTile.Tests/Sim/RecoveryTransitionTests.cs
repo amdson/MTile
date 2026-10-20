@@ -25,7 +25,7 @@ namespace MTile.Tests;
 //      the stab completes and the buffered click fires only out of index 0.
 public class RecoveryTransitionTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
 
     private static ChunkMap FlatGround() => SimTerrain.FromAscii(@"
         OOOOOOOOOOOOOOOOOOOOOOOOOOOO

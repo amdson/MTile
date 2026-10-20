@@ -16,7 +16,7 @@ namespace MTile.Tests.Sim;
 // preemptive-duck spec, red until the StandServo/ambient mode lands, plan §7).
 public class CorrectorOperationsTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
 
     private SimFrame[] Run(ChunkMap terrain, Vector2 start, int frames, string label)
     {

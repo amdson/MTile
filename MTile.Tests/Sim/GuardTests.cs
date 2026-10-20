@@ -247,6 +247,49 @@ public class GuardTests(ITestOutputHelper output)
         Assert.True(c.GuardBroken);
     }
 
+    // ── Aim ──────────────────────────────────────────────────────────────────────
+    // GuardAction points the shield at the cursor (CombatState.GuardDir); the cone is
+    // centred on that aim, not on left/right facing.
+
+    [Fact]
+    public void AimedGuardBlocksWhereItPointsRegardlessOfFacing()
+    {
+        var c = Guarding();
+        c.GuardDir = new Vector2(0f, -1f);              // shield held overhead
+
+        // Attacker above: the impulse pushes the player DOWN (+Y).
+        var g = c.ResolveGuard(new Vector2(0f, 200f), WeakDamage, facing: 1, GuardFrame + 1, Dt);
+
+        Assert.True(g.Absorbed);
+        Assert.True(c.LastParryDir.Y < -0.99f);
+    }
+
+    [Fact]
+    public void AimedGuardLeavesTheFacingSideOpen()
+    {
+        var c = Guarding();
+        c.GuardDir = new Vector2(0f, -1f);              // overhead, while facing right
+
+        var g = HitAt(c, GuardFrame + 1);               // straight in from the right
+
+        Assert.False(g.Absorbed);
+        Assert.Equal(1f, g.DamageScale);
+        Assert.True(c.GuardBroken);
+    }
+
+    [Fact]
+    public void GuardAimSurvivesSnapshotRestore()
+    {
+        var c = Guarding();
+        c.GuardDir = new Vector2(0f, -1f);
+        var saved = c.Clone();
+        c.GuardDir = new Vector2(1f, 0f);
+
+        c.CopyFrom(saved);
+
+        Assert.Equal(new Vector2(0f, -1f), c.GuardDir);
+    }
+
     [Fact]
     public void UnguardedHitIsUnfiltered()
     {
@@ -399,7 +442,7 @@ public class GuardTests(ITestOutputHelper output)
     public void MashingShiftCannotKeepGuardUp()
     {
         // dt is 1/30 here (SimConfigMulti's default), so the cooldown is 4 frames.
-        const float SimDt = 1f / 30f;
+        const float SimDt = 1f / 60f;
         int cooldown = SimFrames.FromSeconds(0.15f, SimDt);
 
         var terrain = SimTerrain.FromAscii(@"

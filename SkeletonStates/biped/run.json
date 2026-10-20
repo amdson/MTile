@@ -401,11 +401,11 @@
         },
         {
           "Bone": "leg_l_upper",
-          "Rotation": 0.8535746
+          "Rotation": 0.9056458
         },
         {
           "Bone": "leg_l_lower",
-          "Rotation": 0.5414023
+          "Rotation": 0.38390502
         },
         {
           "Bone": "leg_r_upper",
@@ -421,7 +421,7 @@
           "Name": "com",
           "Kind": "Point",
           "Px": 0,
-          "Py": -16,
+          "Py": -17.9,
           "Dx": 0,
           "Dy": 0
         },
@@ -945,11 +945,11 @@
         },
         {
           "Bone": "leg_r_upper",
-          "Rotation": 0.53512913
+          "Rotation": 0.7932893
         },
         {
           "Bone": "leg_r_lower",
-          "Rotation": 0.66261363
+          "Rotation": 0.4299366
         }
       ],
       "Additions": [
@@ -957,7 +957,7 @@
           "Name": "com",
           "Kind": "Point",
           "Px": 0,
-          "Py": -16,
+          "Py": -17.9,
           "Dx": 0,
           "Dy": 0
         },

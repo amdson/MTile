@@ -36,7 +36,7 @@ internal static class ReferenceClipRegistryTestHelper
 
 public class ReferencePathTests(ITestOutputHelper output)
 {
-    private const float Dt      = 1f / 30f;
+    private const float Dt      = 1f / 60f;
     private const float Gravity = 600f;
     private const float TS      = Chunk.TileSize; // 16
 

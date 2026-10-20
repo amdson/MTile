@@ -87,7 +87,7 @@ public static class ImpactSpringField
     // β = k_n / k_g — the coupling-to-anchor stiffness ratio, and the only crater-shape
     // knob. Higher transmits energy further (wider, shallower); lower keeps it local
     // (narrower, deeper).
-    private const float Beta = 9f;
+    private const float Beta = 3f;
 
     // Kinetic energy (½·Mass·v², in px/s and the Impact profile's mass units) per unit of
     // tile HP. Calibrated so a single Dirt cell gives way at roughly the speed it used to
@@ -151,10 +151,17 @@ public static class ImpactSpringField
         // widen the crater but do not open a path.
         public readonly bool PathCleared;
 
-        public Result(float hpConsumed, bool pathCleared)
+        // The part of HpConsumed that went into cells this impact BROKE. What cushions
+        // the impactor: rock that gives way under it softens the stop. Chipped cells
+        // don't count — a scar is cosmetic next to a cell that is gone, and counting
+        // chips let a wide spray of them across stone soak up most of any hit.
+        public readonly float HpBroken;
+
+        public Result(float hpConsumed, bool pathCleared, float hpBroken = 0f)
         {
             HpConsumed = hpConsumed;
             PathCleared = pathCleared;
+            HpBroken = hpBroken;
         }
     }
 
@@ -338,6 +345,7 @@ public static class ImpactSpringField
 
         // ---- chip and break -----------------------------------------------------------
         float consumed = 0f;
+        float brokenHp = 0f;
         int broken = 0;
         for (int ly = 0; ly < Span; ly++)
         {
@@ -359,7 +367,7 @@ public static class ImpactSpringField
 
                 int gtx = gtx0 + lx - Radius;
                 int gty = gty0 + ly - Radius;
-                if (chunks.DamageCell(gtx, gty, energy[i])) broken++;
+                if (chunks.DamageCell(gtx, gty, energy[i])) { broken++; brokenHp += hp[i]; }
             }
         }
 
@@ -373,6 +381,6 @@ public static class ImpactSpringField
             }
         }
 
-        return new Result(consumed, pathCleared);
+        return new Result(consumed, pathCleared, brokenHp);
     }
 }

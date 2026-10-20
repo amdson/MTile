@@ -29,7 +29,7 @@ public class ParkourGripSolverTests
         int up    = anim.Skeleton.IndexOf("arm_l_upper");
         int chest = anim.Skeleton.IndexOf("chest");
 
-        const float dt = 1f / 30f, progress = 0.6f;   // inside the grab window [0.45, 0.85]
+        const float dt = 1f / 60f, progress = 0.6f;   // inside the grab window [0.45, 0.85]
         var pos = new Vector2(0f, 0f);
         const int facing = +1;
 

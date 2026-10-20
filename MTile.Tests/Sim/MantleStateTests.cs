@@ -14,7 +14,7 @@ namespace MTile.Tests;
 //   3. A too-tall wall offers no mantle: the body just stays put (honest bonk).
 public class MantleStateTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
 
     // One-block step: floor row 3, step row 2 at cols 8..15. Step lip at x=128, top y=32.
     // Standing rest (R=12): center ≈ floorTop − (R + R·sin60°) ≈ floorTop − 22.4 → y ≈ 9 on

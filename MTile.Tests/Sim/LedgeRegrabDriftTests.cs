@@ -14,7 +14,7 @@ namespace MTile.Tests;
 // to the hang point on X as well as Y). See LedgeGrabState.Update.
 public class LedgeRegrabDriftTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
     private const float TS = Chunk.TileSize;
 

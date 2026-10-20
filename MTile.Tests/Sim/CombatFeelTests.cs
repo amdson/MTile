@@ -19,7 +19,7 @@ namespace MTile.Tests;
 // for the combo follow-up instead of shoving them out of it.
 public class CombatFeelTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     private static ChunkMap FlatGround() => SimTerrain.FromAscii(@"

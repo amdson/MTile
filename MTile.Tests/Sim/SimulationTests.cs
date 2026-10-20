@@ -10,7 +10,7 @@ namespace MTile.Tests;
 // CSV files are written to the working directory for spreadsheet inspection.
 public class SimulationTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     // ── Flat ground: hold right ────────────────────────────────────────────

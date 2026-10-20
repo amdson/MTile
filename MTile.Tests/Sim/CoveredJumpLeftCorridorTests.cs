@@ -13,7 +13,7 @@ namespace MTile.Tests;
 // "any portion sticking out" means body.Bounds.Left < corner.X.
 public class CoveredJumpLeftCorridorTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     // Mirror of HoldSpaceRight_CoveredJumpOutOfTunnel. Ceiling slab at cols 5..19,

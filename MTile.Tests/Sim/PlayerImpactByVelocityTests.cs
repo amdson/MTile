@@ -29,7 +29,7 @@ public class PlayerImpactByVelocityTests
     private readonly ITestOutputHelper _out;
     public PlayerImpactByVelocityTests(ITestOutputHelper o) => _out = o;
 
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private static readonly Vector2 Gravity = new(0f, 600f);
     private const int FloorRow = 20;
     private const float FloorTopY = FloorRow * Chunk.TileSize;
@@ -318,5 +318,69 @@ public class PlayerImpactByVelocityTests
         // 120-frame window. Direct-damage combat slowed regen to a trickle, which is
         // what exposed it.)
         Assert.InRange(startHealth - player.Health, 0f, 1f);
+    }
+
+    // ── Crush damage: breaking material cushions, unbreakable ground does not ──
+
+    // Starts the player just above a WidePlatform face moving down at `speed` and
+    // returns the HP the impact cost (lowest HP seen, so regen can't hide it).
+    private static float CrushHpAt(TileType type, float speed)
+    {
+        var terrain = WidePlatform(type);
+        var player = new PlayerCharacter(new Vector2(PlayerCenterX, FloorTopY - 30f));
+        player.Body.Velocity = new Vector2(0f, speed);
+        return RunAndMeasureHpLoss(terrain, player, 40);
+    }
+
+    private static float RunAndMeasureHpLoss(ChunkMap terrain, PlayerCharacter player, int frames)
+    {
+        var bodies = new List<PhysicsBody> { player.Body };
+        var ctrl = new Controller();
+        float start = player.Health, min = player.Health;
+        for (int f = 0; f < frames; f++)
+        {
+            ctrl.InjectInput(new PlayerInput());
+            terrain.TickSprouts(Simulation.FixedDt);
+            terrain.Impact.Tick(Simulation.FixedDt);
+            player.Update(ctrl, terrain, new HitboxWorld(), new HurtboxWorld(), Simulation.FixedDt);
+            PhysicsWorld.StepSwept(bodies, terrain, Simulation.FixedDt, Gravity);
+            min = MathF.Min(min, player.Health);
+        }
+        return start - min;
+    }
+
+    // The same 1000 px/s slam costs least where the most material gave way: tile HP the
+    // impact destroyed is taken off the hard stop crush damage bills.
+    [Fact]
+    public void Crush_BreakingMaterialCushionsTheHit()
+    {
+        float sand = CrushHpAt(TileType.Sand, 1000f);
+        float stone = CrushHpAt(TileType.Stone, 1000f);
+        float hardened = CrushHpAt(TileType.Hardened, 1000f);
+        _out.WriteLine($"crush HP at 1000 px/s: sand={sand:F2} stone={stone:F2} hardened={hardened:F2}");
+        Assert.True(hardened > 0f, "an unbreakable floor should bill the full stop");
+        Assert.True(stone < hardened, "stone breaking under the hit should soften it");
+        Assert.True(sand < stone, "sand gives way most, so it should hurt least");
+    }
+
+    // A plain 20-tile drop (no fast-fall) onto ground that won't break bites; a drop
+    // from double-jump apex height doesn't.
+    [Fact]
+    public void Crush_TwentyTileDropHurts_DoubleJumpHeightDoesNot()
+    {
+        float DropHp(int tiles)
+        {
+            var terrain = WidePlatform(TileType.Hardened);
+            var probe = new PlayerCharacter(Vector2.Zero);
+            float halfH = probe.Body.Polygon.GetBoundingBox(Vector2.Zero).Bottom;
+            // WidePlatform's floor is at row 20; the drop starts above the map, which
+            // is open air.
+            var player = new PlayerCharacter(new Vector2(PlayerCenterX, FloorTopY - halfH - tiles * Chunk.TileSize));
+            return RunAndMeasureHpLoss(terrain, player, 180);
+        }
+        float twenty = DropHp(20), ten = DropHp(10);
+        _out.WriteLine($"drop HP: 20 tiles={twenty:F2}, 10 tiles={ten:F2}");
+        Assert.True(twenty > 0f, "a 20-tile drop onto Hardened should deal crush damage");
+        Assert.Equal(0f, ten);
     }
 }

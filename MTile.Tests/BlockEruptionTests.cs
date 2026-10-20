@@ -56,7 +56,7 @@ public class BlockEruptionTests(ITestOutputHelper output)
         var ctrl   = new Controller();
         var hb     = new HitboxWorld();
         var hu     = new HurtboxWorld();
-        const float dt = 1f / 30f;
+        const float dt = 1f / 60f;
         var g = new Vector2(0f, 600f);
 
         Vector2 cursorInSolid = new(80f, 12 * Chunk.TileSize + Chunk.TileSize / 2f);   // row 12, solid

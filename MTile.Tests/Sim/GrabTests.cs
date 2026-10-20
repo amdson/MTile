@@ -15,7 +15,7 @@ namespace MTile.Tests;
 // (grab-break). Releasing LMB flings the victim.
 public class GrabTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     private static ChunkMap FlatGround() => SimTerrain.FromAscii(@"

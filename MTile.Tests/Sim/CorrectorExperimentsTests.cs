@@ -36,12 +36,12 @@ public class CorrectorExperimentsTests(ITestOutputHelper output)
         try
         {
             cfg.CorrectorClimbEnabled = false;
-            var frames = Run(StepTerrain(), new Vector2(12f, 20f), Vector2.Zero, 120, 1f / 30f);
+            var frames = Run(StepTerrain(), new Vector2(12f, 20f), Vector2.Zero, 120, 1f / 60f);
             Assert.DoesNotContain(frames, f => f.State.Contains("Parkour") || f.State.Contains("ArcJump"));
             output.WriteLine($"flag off: final x={frames[^1].X:F1} (stalled at the step or mantled slow)");
 
             cfg.CorrectorClimbEnabled = true;
-            frames = Run(StepTerrain(), new Vector2(12f, 20f), Vector2.Zero, 120, 1f / 30f);
+            frames = Run(StepTerrain(), new Vector2(12f, 20f), Vector2.Zero, 120, 1f / 60f);
             Assert.Contains(frames, f => f.State.Contains("Parkour"));
             Assert.True(frames.Any(f => f.X > 140f && f.Y < 12f), "flag on: vault should deliver on top");
         }
@@ -61,7 +61,7 @@ public class CorrectorExperimentsTests(ITestOutputHelper output)
     {
         // Start close enough that the approach doesn't re-equilibrate the speed:
         // trigger distance is 32, so begin 64px out with the target velocity.
-        var frames = Run(StepTerrain(), new Vector2(64f, 24f), new Vector2(entrySpeed, 0f), 90, 1f / 30f);
+        var frames = Run(StepTerrain(), new Vector2(64f, 24f), new Vector2(entrySpeed, 0f), 90, 1f / 60f);
         bool vaulted = frames.Any(f => f.State.Contains("Parkour") || f.State.Contains("Mantle"));
         bool delivered = frames.Any(f => f.X > 140f && f.Y < 12f);
         output.WriteLine($"entry {entrySpeed}: vaulted={vaulted} delivered={delivered} " +
@@ -88,7 +88,7 @@ public class CorrectorExperimentsTests(ITestOutputHelper output)
                 OOOOOOOOOOOOOOOOOOOOOO
                 OOOOOOOOOOOOOOOOOOOOOO
                 XXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 4);
-            SimFrame[] Arc() => Run(terrain, new Vector2(90f, 130f), new Vector2(150f, -200f), 60, 1f / 30f);
+            SimFrame[] Arc() => Run(terrain, new Vector2(90f, 130f), new Vector2(150f, -200f), 60, 1f / 60f);
 
             cfg.AmbientCorrectorEnabled = false;
             float minVxOff = Arc().Where(f => f.X > 130f && f.X < 175f).Min(f => f.Vx);

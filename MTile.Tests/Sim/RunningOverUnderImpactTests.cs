@@ -32,7 +32,7 @@ public class RunningOverUnderImpactTests
     private readonly ITestOutputHelper _out;
     public RunningOverUnderImpactTests(ITestOutputHelper o) => _out = o;
 
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float TS = Chunk.TileSize;
     private static readonly Vector2 Gravity = new(0f, 600f);
 
