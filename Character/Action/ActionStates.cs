@@ -176,6 +176,7 @@ public class RecoveryAction : ActionState
     public const float ChargeRampSeconds = 1.0f;   // linear 0 → 1 (the old MaxChargeHold)
     public const float SweetSpotSeconds  = 0.1f;   // full-charge window after the ramp
     public const float SettleFraction    = 0.6f;   // flat value for an overheld charge
+    public const float ChargeFallSpeed   = 120f;   // px/s terminal fall while charging in the air
 
     private const int   PassiveBase   = 45;     // countdown handoff / wind-up entry bid
     // Flinch bid — above every action's Active (Grab is 48), so a registered hit
@@ -398,11 +399,15 @@ public class RecoveryAction : ActionState
     // The old ReadyAction's charge slowdown — applied only while the wind-up hold
     // is live, never during a bare countdown. Slashes flick through the wind-up in
     // 1–2 frames so the dip is imperceptible; a long-held stab charge lingers and
-    // feels heavy. The GravityScale dip gives a floaty hover while winding up in
-    // the air — AIR ONLY. Grounded it is not a no-op: the standing spring is tuned
-    // against full gravity, so at 0.3× it lifted the body ~3.4 px until the probe
-    // lost the floor, and the state flickered Standing↔Falling every few frames for
-    // the whole ramp (the charge "hover + spasm", fixed 2026-10-18).
+    // feels heavy. The fall cap gives a slow descent while winding up in the air.
+    // It used to be a 0.3× GravityScale dip, which stretched a charged jump's
+    // ASCENT ~4× (≈200 px over ~1.4 s — the whole hover window spent drifting up)
+    // and never capped a fall already in progress; a fall-only drag leaves the
+    // rise physical and brakes toward ChargeFallSpeed from any speed. AIR ONLY:
+    // grounded, the standing spring is tuned against undisturbed vertical forces —
+    // the old 0.3× dip lifted the body ~3.4 px until the probe lost the floor and
+    // the state flickered Standing↔Falling (the charge "hover + spasm", fixed
+    // 2026-10-18); a drag on the spring's settle would detune it the same way.
     public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
     {
         if (!vars.Charging) return;
@@ -410,12 +415,12 @@ public class RecoveryAction : ActionState
         m.WalkAccel      *= 0.7f;
         m.GroundFriction *= 1.3f;
         m.MaxAirSpeed    *= 0.7f;
-        // Floaty hover only through the ramp + sweet spot. The hold is uncapped
-        // now, so a settle-length dip would be a free 0.3-gravity glide for as
+        // Slow fall only through the ramp + sweet spot. The hold is uncapped
+        // now, so a settle-length cap would be a free parachute glide for as
         // long as LMB stays down — the charge stance outstays its wind-up, the
         // hover must not.
         if (!vars.IsGrounded && vars.TimeInState < ChargeRampSeconds + SweetSpotSeconds)
-            m.GravityScale *= 0.3f;
+            m.FallTerminalSpeed = MathF.Min(m.FallTerminalSpeed, ChargeFallSpeed);
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
