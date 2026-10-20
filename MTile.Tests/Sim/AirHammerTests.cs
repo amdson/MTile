@@ -58,7 +58,7 @@ public class AirHammerTests(ITestOutputHelper output)
         {
             var a = ps[0].CurrentActionName;
             if (a == nameof(AirHammerAction)) hammer = true;
-            if (a == nameof(StabAction) || a == nameof(AirSpinStab)) stab = true;
+            if (a == nameof(StabAction) || a == nameof(AirWhipKick)) stab = true;
         });
         return (hammer, stab);
     }

@@ -264,7 +264,7 @@ Same FSM shape, separate registry/history, lifecycle takes `ref ActionVars`. Eac
 
 - `NullAction` (0/0) fallback; `ReadyAction` (10/15) LMB wind-up; `RecoveryAction` (40/45) post-attack lockout gating combos.
 - **Slashes** — `SlashLikeAction` base parametrizes arc shape + damage window. `GroundSlash1/2/3` (combo via `Slash2Ready`/`Slash3Ready`), `CrouchSlash` (crouch-only), `AirSlash1/2`, `AirTurnSlash` (air backward-click turnaround), `GuardRetaliateAction` (counter after a charged parry).
-- `StabAction` (30/30) — long thrust with air-stab dive boost; `AirSpinStab` (air backward-swipe variant).
+- `StabAction` (30/30) — long thrust with air-stab dive boost; `AirWhipKick` (air backward-swipe: flips facing, thin fast long kick, ±25° aim).
 - `PulseAction` (30/30) — Circle gesture; 12-segment expanding knockback ring that carries the caster's momentum.
 - **Guard** — `GuardAction` (35/40, Shift held + no L/R) sets `GuardActive`; a weak in-cone hit parries to zero and arms `GuardCharged`, enabling `GuardRetaliateAction`.
 - **Grab / throw** — `GrabAction` (46/46) publishes a hold force field; `GrabbedSlash` (36/36) is the victim's exempt struggle attack, which erodes `GrabStrength` rather than dealing knockback. Throws stun the victim into Tumble.

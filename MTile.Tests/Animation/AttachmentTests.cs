@@ -67,7 +67,9 @@ public class AttachmentTests
     public void ActualRabbitStabs_GenerateTheLanceAcrossTheAuthoredPhases()
     {
         var clips = AnimationStore.LoadAll(Path.Combine(Root(), "SkeletonStates", "biped_rabbit"));
-        var stabs = clips.Where(c => c.Type is "StabAction" or "AirSpinStab").ToArray();
+        // The rabbit's AirWhipKick clip is its old spin-stab, renamed only to stay bound
+        // (biped-only animation) — it still carries the lance.
+        var stabs = clips.Where(c => c.Type is "StabAction" or "AirWhipKick").ToArray();
         Assert.Equal(2, stabs.Length);
         foreach (var clip in stabs)
         {

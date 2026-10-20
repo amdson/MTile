@@ -80,7 +80,7 @@ Contact drop keys precede toe-off to avoid pinning the cadence at the swing reve
 [:731](../Animation/CharacterAnimator.cs#L731)). No aliases, no fallback.
 
 `GroundSlash1` · `GroundSlash2` · `GroundSlash3` · `CrouchSlash` ·
-`AirSlash1` · `AirSlash2` · `AirTurnSlash` · `StabAction` · `AirSpinStab` · `GuardAction` ·
+`AirSlash1` · `AirSlash2` · `AirTurnSlash` · `StabAction` · `AirWhipKick` · `GuardAction` ·
 `GuardRetaliateAction` · `PulseAction` · `BlockReadyAction` · `BlockEruptionAction` ·
 `EnergyBallAction` · `BeamAction` · `GrenadeAction` · `GrabAction` · `GrabbedSlash` — each
 has exactly one matching clip. `NullAction`/`ReadyAction`/`RecoveryAction` are excluded by

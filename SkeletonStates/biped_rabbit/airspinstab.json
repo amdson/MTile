@@ -1,6 +1,6 @@
 {
   "Name": "airspinstab",
-  "Type": "AirSpinStab",
+  "Type": "AirWhipKick",
   "Skeleton": "biped_rabbit",
   "Duration": 0.6,
   "Loop": false,

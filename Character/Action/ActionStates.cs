@@ -706,7 +706,7 @@ public abstract class SlashLikeAction : ActionState
     {
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
         Vector2 raw = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-        if (!AllowBackward && raw.X * facing < 0f) raw.X = 0f;
+        if (raw.X * facing < 0f) raw.X = 0f;
         if (raw.LengthSquared() < 1e-4f) return new Vector2(facing, 0f);
         return Vector2.Normalize(raw);
     }
@@ -1382,10 +1382,6 @@ public class StabAction : ActionState
 
     private static Color ColorFor(bool isGrounded) => isGrounded ? Color.Goldenrod : Color.MediumPurple;
 
-    // AirSpinStab overrides true so the swipe (and mid-attack mouse-steer clamp)
-    // can point backward relative to Facing. Default Stab still clamps to front.
-    protected virtual bool AllowBackward => false;
-
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out _)) return false;
@@ -1395,7 +1391,6 @@ public class StabAction : ActionState
         // Shift+LMB-hold-swipe is reserved for BeamAction. A Stab intent
         // emitted from a Shift-held press would otherwise route to a normal
         // stab on release; gate it off so the beam path doesn't double-fire.
-        // AirSpinStab overrides this by checking its own preconditions.
         if (ctx.Input.Shift) return false;
         return true;
     }
@@ -1411,12 +1406,12 @@ public class StabAction : ActionState
         _tipTrail.Clear();
 
         // Capture swipe direction from the intent; hemisphere-clamp like slash
-        // (unless AllowBackward — AirSpinStab keeps backward swipes intact).
+        // (a backward air swipe routes to AirWhipKick instead).
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
         if (ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent))
         {
             var raw = intent.Direction;
-            if (!AllowBackward && raw.X * facing < 0f) raw.X = 0f;
+            if (raw.X * facing < 0f) raw.X = 0f;
             if (raw.LengthSquared() < 1e-4f) raw = new Vector2(facing, 0f);
             vars.StabDir = Vector2.Normalize(raw);
             ctx.Intents.Consume(IntentType.Stab, ctx.CurrentFrame);
@@ -1560,7 +1555,7 @@ public class StabAction : ActionState
         // so a cursor behind the player doesn't yank the stab backwards.
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
         Vector2 toMouse = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-        if (!AllowBackward && toMouse.X * facing < 0f) toMouse.X = 0f;
+        if (toMouse.X * facing < 0f) toMouse.X = 0f;
         if (toMouse.LengthSquared() > 1e-4f)
         {
             float targetAngle = MathF.Atan2(toMouse.Y, toMouse.X);
@@ -1700,42 +1695,179 @@ public class StabAction : ActionState
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars) { }
 }
 
-// Air spin-stab. Roadmap §1.6: a Stab swipe pointed opposite of facing while in
-// air. Inherits stab's hitboxes, dive-boost, and steer logic — the only delta is
-// AllowBackward + an air+backward-swipe precondition + a Facing flip on Enter.
-public class AirSpinStab : StabAction
-{
-    protected override bool AllowBackward => true;
+// ---------- Air whip-kick — the backward air swipe ---------------------------------
 
-    // Beat the default StabAction (30/30) on ties when both could fire.
+// Turn-around whip kick (replaced AirSpinStab 2026-10-20). A Stab swipe pointed
+// opposite Facing while airborne flips Facing and snaps the near leg out the new way:
+// a thin, fast, long line where the stab is a fat, slow, aimed thrust. Same trigger and
+// endlag as the old spin-stab; what changed is the hit shape and the timing:
+//   • startup 6f (stab 11f), active 5f — the leg is out before the opponent can react;
+//   • one rotated rectangle ~1.3× the stab's reach and about a third of its width,
+//     full length for the whole active window (a whip lands at the tip, it doesn't
+//     sweep out from the body the way a thrust does);
+//   • aim is the swipe's, clamped to ±MaxAimAngle of horizontal at commit and fixed
+//     after — limited adjustment, no mid-move homing toward the cursor;
+//   • launch well below the stab (StabAction stays the kit's launcher), no dive boost,
+//     no armor, no pogo — it's a poke for turning a chase around, not a commitment.
+// The glow pass chases the same sim tip (body + StabDir · TipExt) the stab's does, so
+// the streak runs out along the hitbox line.
+public class AirWhipKick : ActionState
+{
+    private const float Duration              = 0.48f;
+    private const float HurtboxStartTime      = 6f / 60f;
+    private const float HurtboxActiveDuration = 5f / 60f;
+    private const float Reach                 = PlayerCharacter.Radius * 5.2f;
+    private const float HalfWidth             = PlayerCharacter.Radius * 0.25f;
+    // ±25° of horizontal: up-back and down-back kicks read, a vertical one doesn't
+    // (the down-swipe belongs to AirHammerAction anyway).
+    private const float MaxAimAngle           = 0.44f;
+    // Tile number per active frame — 5 frames ≈ 1.25 TileMaxHP, so the kick slits dirt
+    // along its line and bounces off stone. Body damage is the stock slash's 0.5.
+    private const float TileDamagePerFrame    = TileDamage.TileMaxHP / 4f;
+    private const float BodyDamage            = 0.5f;
+    // Collision-mode launch (HIT_MOMENTUM_PLAN): between GroundSlash3 (300) and the
+    // counter (380), about half the stab's 650. KnockbackMagnitude is the direction
+    // hint the parry cone and bullet deflection read, same as the stab's.
+    private const float StrikeSpeed           = 340f;
+    private const float KnockbackMagnitude    = 600f;
+    private const float Restitution           = 0.5f;
+    private const float MinLaunch             = 100f;
+    // Endlag matches the stab it replaced: the same tail after the active window
+    // (≈0.3 s) and the same recovery stamp, with the stab's cheap wind-up cancel.
+    private const float RecoverySeconds       = 0.4f;
+    private const float WindupEvictSeconds    = 0.10f;
+
+    // Tip-extension beats (normalized time): chamber, snap out to full reach by the
+    // first active frame, hold through the window, then fold the leg back.
+    private const float ChamberEnd = 0.10f;
+    private const float SnapEnd    = HurtboxStartTime / Duration;
+    private const float HoldEnd    = (HurtboxStartTime + HurtboxActiveDuration) / Duration + 0.05f;
+
+    private static readonly Color KickColor = Color.Orchid;
+
+    // Render-only fallback ribbon, as StabAction.TipTrail.
+    private readonly Trail _tipTrail = new(capacity: 10, lifetime: 0.12f);
+    public Trail TipTrail => _tipTrail;
+    public Color KickGlowColor => KickColor;
+
+    public override int ActivePriority  => 30;
+    // Beats StabAction (30) on a backward air swipe; AirHammerAction (36) still takes
+    // a swipe near straight down.
     public override int PassivePriority => 35;
+
+    public override float AnimationProgress(in ActionVars vars) => vars.TimeInState / Duration;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        if (!base.CheckPreConditions(ctx, ab)) return false;
-        // Air-only.
-        if (ctx.GroundedForActions) return false;
-        // Backward swipe — intent direction's X must oppose Facing.
         if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent)) return false;
+        if (!EntryOk(ctx)) return false;
+        if (ctx.Combat?.BlocksAttack == true) return false;
+        if (ctx.Input.Shift) return false;              // Shift+swipe is BeamAction's
+        if (ctx.GroundedForActions) return false;        // air-only
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
-        return intent.Direction.X * facing < 0f;
+        return intent.Direction.X * facing < 0f;         // backward swipe
     }
+
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+        => vars.TimeInState < Duration;
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
-        // Flip facing so the spin-stab leaves the player oriented the new way.
-        // Done BEFORE base.Enter so any facing-derived fallback in capture
-        // matches the new direction.
+        vars.TimeInState = 0f;
+        vars.IsGrounded  = false;
+        vars.HitId       = ctx.HitIds.Next();
+        vars.TipExt      = 0f;
+        _tipTrail.Clear();
+
         ab.Facing = -(ab.Facing == 0 ? 1 : ab.Facing);
-        base.Enter(ctx, ab, ref vars);
+        int facing = ab.Facing;
+
+        // Swipe angle measured from the NEW facing's horizontal, clamped to the cone.
+        float angle = 0f;
+        if (ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent))
+        {
+            var d = intent.Direction;
+            if (d.LengthSquared() > 1e-4f)
+                angle = MathF.Atan2(d.Y, MathF.Abs(d.X));
+            ctx.Intents.Consume(IntentType.Stab, ctx.CurrentFrame);
+        }
+        angle = MathHelper.Clamp(angle, -MaxAimAngle, MaxAimAngle);
+        vars.StabDir = new Vector2(facing * MathF.Cos(angle), MathF.Sin(angle));
+        vars.InitialStabAngle = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
+
+        // A stab wind-up that resolved into the kick doesn't carry its charge — and
+        // must not leave it for a later stab either.
+        vars.StabCharge = 0f;
     }
+
+    public override int CommitProfile(EnvironmentContext ctx, in ActionVars vars)
+        => vars.TimeInState < HurtboxStartTime
+            ? SimFrames.FromSeconds(WindupEvictSeconds, ctx.Dt)
+            : SimFrames.FromSeconds(RecoverySeconds,    ctx.Dt);
+
+    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        ab.Condition.StampRecovery(CommitProfile(ctx, in vars), ctx.CurrentFrame);
+    }
+
+    // Light air stance — the kick holds the body's line rather than braking it.
+    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
+    {
+        m.MaxAirSpeed *= 0.8f;
+        m.AirDrag     *= 1.15f;
+    }
+
+    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.TimeInState += ctx.Dt;
+        _tipTrail.Tick(ctx.Dt);
+        vars.TipExt = TipExtension(vars.TimeInState / Duration);
+        _tipTrail.Push(ctx.Body.Position + vars.StabDir * vars.TipExt);
+
+        if (vars.TimeInState < HurtboxStartTime ||
+            vars.TimeInState > HurtboxStartTime + HurtboxActiveDuration ||
+            ctx.Hitboxes == null) return;
+
+        float rotation = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
+        var poly   = Polygon.CreateRectangle(Reach, HalfWidth * 2f);
+        var center = ctx.Body.Position + vars.StabDir * (Reach * 0.5f);
+        ctx.Hitboxes.Publish(new Hitbox(
+            poly.GetBoundingBox(center, rotation), vars.HitId, TileDamagePerFrame,
+            vars.StabDir * KnockbackMagnitude,
+            ctx.Faction, ctx.SelfId, KickColor,
+            bodyDamage: BodyDamage,
+            shape: poly, shapePos: center, shapeRotation: rotation,
+            mode: KnockbackMode.Collision,
+            strikeDir: vars.StabDir,
+            strikeVelocity: ctx.Body.Velocity + vars.StabDir * StrikeSpeed,
+            strikeMass: ctx.Mass,
+            restitution: Restitution,
+            minLaunch: MinLaunch,
+            origin: ctx.Body.Position));
+    }
+
+    // Tip extension along StabDir at normalized time t, in px: a short chamber at the
+    // body, a snap to full reach timed to the first active frame, a hold through the
+    // window, then the fold back in.
+    private static float TipExtension(float t)
+    {
+        t = MathHelper.Clamp(t, 0f, 1f);
+        float chamber = PlayerCharacter.Radius * 0.5f;
+        if (t < ChamberEnd) return Bezier.Cubic(0f, 0f, chamber, chamber, t / ChamberEnd);
+        if (t < SnapEnd)    return Bezier.Cubic(chamber, chamber, Reach * 1.05f, Reach,
+                                                (t - ChamberEnd) / (SnapEnd - ChamberEnd));
+        if (t < HoldEnd)    return Reach;
+        return Bezier.Cubic(Reach, Reach, 0f, 0f, (t - HoldEnd) / (1f - HoldEnd));
+    }
+
+    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars) { }
 }
 
 // ---------- Air hammer — the down-swipe stab, airborne ---------------------------
 
 // Double-fisted overhead hammer. Same long-hold + swipe gesture as the stab, but an
 // airborne swipe within 30° of straight down routes here instead of into a downward
-// stab (StabAction / AirSpinStab). Slower than the stab to come out, with two small
+// stab (StabAction / AirWhipKick). Slower than the stab to come out, with two small
 // square boxes under the player instead of a thrust line:
 //   • the outer box — a moderate square just below and slightly ahead of the body;
 //   • the sweet spot — a smaller square at its center, 2× damage and 4× launch.
@@ -1805,7 +1937,7 @@ public class AirHammerAction : ActionState
     private static readonly Color HammerColor = Color.OrangeRed;
 
     public override int ActivePriority  => 30;
-    // Beats StabAction (30) and AirSpinStab (35): a backward-down swipe is still a
+    // Beats StabAction (30) and AirWhipKick (35): a backward-down swipe is still a
     // hammer, not a spin-stab.
     public override int PassivePriority => 36;
 
