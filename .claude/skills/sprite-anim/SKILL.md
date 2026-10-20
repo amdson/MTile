@@ -142,7 +142,8 @@ copies or loads it).
 **7. verify** — `.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py verify --run NAME`: copies the clip into the pool as `zzdraft_NAME`
 only for the command, runs Probe `digest` (→ `digest.txt`) and `motion` (→ `motion.txt`)
 and MTile.Demo `--strip` (→ `engine_strip.png`, hip-pinned so travel isn't visible), then
-deletes the copy. Pose flags (recurvatum etc.) must be 0. STEEP lines are informational —
+deletes the copy. The strip briefly opens an MTile.Demo window; pass `--no-strip` when
+the user doesn't want windows popping up (digest + motion still run). Pose flags (recurvatum etc.) must be 0. STEEP lines are informational —
 that rule is calibrated for walk cycles, not attacks.
 
 **8. report** — `.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py report --run NAME` → `.probe/sprite/NAME/index.html`. Hand the user

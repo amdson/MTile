@@ -858,6 +858,9 @@ def cmd_verify(a):
                            capture_output=True, text=True, timeout=300)
         open(os.path.join(d, 'motion.txt'), 'w').write(r.stdout + r.stderr)
         print('motion:', (r.stdout.strip().splitlines() or ['(none)'])[0][:160])
+        if a.no_strip:
+            print('engine strip: skipped (--no-strip)')
+            return
         demo = os.path.join(R.REPO, 'MTile.Demo', 'bin', 'Debug', 'net8.0', 'MTile.Demo.dll')
         strip = os.path.join(d, 'engine_strip.png')
         r = subprocess.run(['dotnet', demo, tmp_name, '--rig', rig, '--strip', strip, '--frames', '12',
@@ -1057,6 +1060,8 @@ def main():
                    help='a move with no planted foot: implies --no-motion --no-ground, and verify marks the '
                         'digest\'s PLANTED labels as meaningless')
     p = sub.add_parser('verify'); p.add_argument('--run', required=True)
+    p.add_argument('--no-strip', action='store_true',
+                   help='skip the MTile.Demo engine strip (it opens a window); digest + motion only')
     p = sub.add_parser('report'); p.add_argument('--run', required=True)
     a = ap.parse_args()
     {'refs': cmd_refs, 'gen': cmd_gen, 'decode': cmd_decode, 'points': cmd_points, 'assemble': cmd_assemble,
