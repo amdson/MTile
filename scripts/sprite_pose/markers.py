@@ -9,6 +9,7 @@ Found joints become FIXED tips in the frame state; missing ones stay free for th
 import numpy as np
 from scipy import ndimage
 import fit as F
+import rig as R
 
 JUNCTION_GAP_PX = 14  # upper/lower stroke ends this close = a visible elbow/knee
 
@@ -22,6 +23,21 @@ def _dot(mask, min_ratio=1.5):
         return None
     y, x = np.unravel_index(dt.argmax(), dt.shape)
     return [int(x), int(y)]
+
+
+def _colour_dot(cell, col, tol=60):
+    """Centre of the largest blob close to a dot-only colour (hip/neck dots)."""
+    a = np.asarray(cell.convert('RGB'), float)
+    m = ((a - np.array(col, float)) ** 2).sum(2) < tol ** 2
+    lab, k = ndimage.label(m)
+    if not k:
+        return None
+    sizes = ndimage.sum(m, lab, range(1, k + 1))
+    i = int(np.argmax(sizes))
+    if sizes[i] < 15:
+        return None
+    y, x = ndimage.center_of_mass(m, lab, i + 1)
+    return [int(round(x)), int(round(y))]
 
 
 def _ring(mask):
@@ -43,7 +59,16 @@ def detect(cell, prof, style):
     names = obs['names']
     marks, missing = {}, []
     t = obs.get('torso')
-    if t is not None:
+    if style == 'ends_torso':  # hip/neck from their own dots; the torso line only as fallback
+        for key, col, fb in (('__root', R.HIP_DOT, 'hip'), ('chest', R.NECK_DOT, 'neck')):
+            p = _colour_dot(cell, col)
+            if p:
+                marks[key] = p
+            elif t is not None:
+                marks[key] = [int(round(v)) for v in t[fb]]
+            else:
+                missing.append(fb)
+    elif t is not None:
         marks['__root'] = [int(round(v)) for v in t['hip']]
         marks['chest'] = [int(round(v)) for v in t['neck']]
     else:
@@ -57,7 +82,7 @@ def detect(cell, prof, style):
             else:
                 missing.append('blade tip')
             continue
-        if style == 'ends' and n.endswith('upper'):
+        if style in ('ends', 'ends_torso') and n.endswith('upper'):
             continue  # elbows/knees: from the colour junction, below
         p = _ring(mask) if (style == 'shapes' and n.endswith('upper')) else None
         p = p or _dot(mask)
@@ -65,7 +90,7 @@ def detect(cell, prof, style):
             marks[n] = p
         else:
             missing.append(n)
-    if style == 'ends':
+    if style in ('ends', 'ends_torso'):
         # elbow/knee = where the upper and lower strokes meet; fixed only when they clearly
         # touch, otherwise left free for the solver's IK (fixed hand/foot + joint limits)
         for ch in F.limb_chains(prof, None):

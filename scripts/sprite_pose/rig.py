@@ -22,6 +22,8 @@ WEAPON_LEN = 9.0         # rig units, drawn from the weapon's parent tip (the ha
 CORE = (40, 40, 40)
 WEAPON = (120, 0, 255)
 GROUND = (150, 150, 150)
+HIP_DOT = (255, 120, 180)    # pink  - far from magenta/red/orange in RGB
+NECK_DOT = (140, 70, 20)     # brown - far from red/orange
 PALETTES = {             # (side, limb kind) -> colors by depth along the limb
     ('near', 'arm'): [(230, 30, 30), (255, 150, 0)],
     ('near', 'leg'): [(220, 0, 200), (245, 215, 0)],
@@ -188,11 +190,14 @@ def draw_markers(dr, seg, prof, P, width, style):
             continue
         q = P(seg[n][1])
         col = prof['colors'][n]
-        if style == 'ends' and n in uppers:
+        if style in ('ends', 'ends_torso') and n in uppers:
             continue  # only hands/feet get dots; elbows/knees are read from the colour change
         if style == 'shapes' and n in uppers:
             dr.ellipse([q[0] - r, q[1] - r, q[0] + r, q[1] + r], fill='white', outline=col, width=max(2, int(r * 0.45)))
         else:
+            dr.ellipse([q[0] - r, q[1] - r, q[0] + r, q[1] + r], fill=col)
+    if style == 'ends_torso' and 'chest' in seg:
+        for q, col in ((P(seg['chest'][0]), HIP_DOT), (P(seg['chest'][1]), NECK_DOT)):
             dr.ellipse([q[0] - r, q[1] - r, q[0] + r, q[1] + r], fill=col)
     if '__weapon' in seg:
         q = P(seg['__weapon'][1])
@@ -238,6 +243,11 @@ def render_legend(prof, with_weapon=True, markers=None):
                  '(red dot = near elbow, orange dot = near hand, magenta = near knee, yellow = near foot,',
                  ' blue = far elbow, cyan = far hand, green = far knee, light-green = far foot,',
                  ' violet dot = blade tip). Every dot is drawn even when it overlaps something.']
+    elif markers == 'ends_torso':
+        extra = ['END DOTS: a big filled dot at each hand and each foot, in that limb\'s lower-bone colour',
+                 '(orange = near hand, cyan = far hand, yellow = near foot, light-green = far foot), a violet dot at',
+                 'the blade tip, a PINK dot at the hip (bottom of the torso line) and a BROWN dot at the neck (top of',
+                 'the torso line). Elbows and knees get NO dot. Every dot is drawn even where it overlaps.']
     elif markers == 'ends':
         extra = ['END DOTS: a big filled dot ONLY at each hand and each foot, in that limb\'s lower-bone colour',
                  '(orange = near hand, cyan = far hand, yellow = near foot, light-green = far foot), and a violet',
