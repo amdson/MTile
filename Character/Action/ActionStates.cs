@@ -1721,8 +1721,15 @@ public class AirWhipKick : ActionState
     private const float Duration              = 0.48f;
     private const float HurtboxStartTime      = 6f / 60f;
     private const float HurtboxActiveDuration = 5f / 60f;
-    private const float Reach                 = PlayerCharacter.Radius * 5.2f;
+    // 5.2R → 4.16R (2026-10-20, ×0.8 after the first playtest: too long).
+    private const float Reach                 = PlayerCharacter.Radius * 4.16f;
     private const float HalfWidth             = PlayerCharacter.Radius * 0.25f;
+    // The line starts at the drawn HIP, not the body center: at Game1.SkeletonScale the
+    // clip draws the hip 10 px below Body.Position and the kicking leg runs flat at that
+    // height through the active window (measured off airwhipkick.json through the real
+    // animator + AttackGlowSystem.RigRoot). Centered on the body, the 6 px line sat
+    // wholly above the leg.
+    private const float HipDrop               = PlayerCharacter.Radius * 0.83f;
     // ±25° of horizontal: up-back and down-back kicks read, a vertical one doesn't
     // (the down-swipe belongs to AirHammerAction anyway).
     private const float MaxAimAngle           = 0.44f;
@@ -1740,7 +1747,7 @@ public class AirWhipKick : ActionState
     // Sweet spot: the last SweetLength of the line (the foot), a little fatter than the
     // shin so it's hittable, 2× damage (body AND tile) and 3× launch. 3 × 340 out-launches
     // the stab's 650 — the reward for spacing a fast poke perfectly.
-    private const float SweetLength           = PlayerCharacter.Radius * 1.3f;
+    private const float SweetLength           = PlayerCharacter.Radius * 1.04f;   // ×0.8 with Reach
     private const float SweetHalfWidth        = PlayerCharacter.Radius * 0.35f;
     private const float SweetDamageMult       = 2f;
     private const float SweetKnockbackMult    = 3f;
@@ -1761,6 +1768,9 @@ public class AirWhipKick : ActionState
     private readonly Trail _tipTrail = new(capacity: 10, lifetime: 0.12f);
     public Trail TipTrail => _tipTrail;
     public Color KickGlowColor => KickColor;
+
+    // Where the kick's line (hitboxes, glow tip) starts: the drawn hip.
+    public static Vector2 LineOrigin(Vector2 bodyPos) => bodyPos + new Vector2(0f, HipDrop);
 
     public override int ActivePriority  => 30;
     // Beats StabAction (30) on a backward air swipe; AirHammerAction (36) still takes
@@ -1834,7 +1844,7 @@ public class AirWhipKick : ActionState
         vars.TimeInState += ctx.Dt;
         _tipTrail.Tick(ctx.Dt);
         vars.TipExt = TipExtension(vars.TimeInState / Duration);
-        _tipTrail.Push(ctx.Body.Position + vars.StabDir * vars.TipExt);
+        _tipTrail.Push(LineOrigin(ctx.Body.Position) + vars.StabDir * vars.TipExt);
 
         if (vars.TimeInState < HurtboxStartTime ||
             vars.TimeInState > HurtboxStartTime + HurtboxActiveDuration ||
@@ -1847,14 +1857,15 @@ public class AirWhipKick : ActionState
     }
 
     // One rotated rectangle along StabDir, spanning [start, start + length] px from the
-    // body. Damage and launch scale by the given multipliers.
+    // hip (LineOrigin). Damage and launch scale by the given multipliers.
     private static void PublishLine(EnvironmentContext ctx, in ActionVars vars,
                                     float start, float length, float halfWidth,
                                     float damageMult, float knockbackMult, Color color)
     {
         float rotation = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
         var poly   = Polygon.CreateRectangle(length, halfWidth * 2f);
-        var center = ctx.Body.Position + vars.StabDir * (start + length * 0.5f);
+        var origin = LineOrigin(ctx.Body.Position);
+        var center = origin + vars.StabDir * (start + length * 0.5f);
         ctx.Hitboxes.Publish(new Hitbox(
             poly.GetBoundingBox(center, rotation), vars.HitId, TileDamagePerFrame * damageMult,
             vars.StabDir * KnockbackMagnitude,
@@ -1867,7 +1878,7 @@ public class AirWhipKick : ActionState
             strikeMass: ctx.Mass,
             restitution: Restitution,
             minLaunch: MinLaunch * knockbackMult,
-            origin: ctx.Body.Position));
+            origin: origin));
     }
 
     // Tip extension along StabDir at normalized time t, in px: a short chamber at the

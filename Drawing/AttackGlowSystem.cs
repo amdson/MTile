@@ -164,7 +164,9 @@ public sealed class AttackGlowSystem
         {
             var v = player.CurrentActionVars;
             if (v.StabDir.LengthSquared() < 1e-6f) return false;
-            tip = player.Body.Position + v.StabDir * MathF.Max(v.TipExt, 0f);
+            var from = player.CurrentAction is AirWhipKick
+                ? AirWhipKick.LineOrigin(player.Body.Position) : player.Body.Position;
+            tip = from + v.StabDir * MathF.Max(v.TipExt, 0f);
             return true;
         }
         if (player.CurrentAction is SlashLikeAction)

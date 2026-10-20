@@ -136,13 +136,14 @@ public class AirWhipKickTests
     [Fact]
     public void TipSweetSpot_DoublesDamage_WithoutStacking_AndLaunchesHarder()
     {
-        // The line runs 0..5.2R from the body, the sweet spot its last 1.3R (3.9R..5.2R).
-        // A victim's hurtbox is ≈0.49R in half-width: centered at 4.6R it sits in the tip,
-        // at 2.2R it is clear of it (1.7R..2.7R) but on the line.
+        // The line runs 0..4.16R from the hip (0.83R below the body), the sweet spot its
+        // last 1.04R (3.12R..4.16R). A victim's hurtbox is ≈0.49R in half-width: centered
+        // at 3.7R it sits in the tip, at 1.8R it is clear of it (1.3R..2.3R) but on the line.
         const float R = PlayerCharacter.Radius;
+        const float Hip = 0.83f * R;
         var drift = DriftAtStrike();
-        var tip   = StrikeVictimAt(new Vector2(-4.6f * R, 0f), drift);
-        var line  = StrikeVictimAt(new Vector2(-2.2f * R, 0f), drift);
+        var tip   = StrikeVictimAt(new Vector2(-3.7f * R, Hip), drift);
+        var line  = StrikeVictimAt(new Vector2(-1.8f * R, Hip), drift);
 
         Assert.Equal(0.5f, line.hpLost, 3);
         Assert.Equal(1.0f, tip.hpLost, 3);
