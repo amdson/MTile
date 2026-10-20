@@ -552,15 +552,24 @@ def cmd_assemble(a):
     if a.airborne:
         a.no_motion = a.no_ground = True    # no planted foot: body_path and the com anchor both assume one
     dec = [r for r in json.load(open(os.path.join(d, 'decoded.json'))) if not r.get('rejected')]
+    all_dec = list(dec)
     if a.keep:
         k0, k1 = (int(x) for x in a.keep.split('-'))
         dec = [r for r in dec if k0 <= r['frame'] <= k1]
     n = len(dec)
     ref = ref_pose(cfg, 'from')
+    renorm = renormalize_stretch(all_dec, dec)
+    if renorm:
+        print('stretch renormalised to the sheet norm (p80 -> 1): '
+              + ' '.join(f'{b}={v:.2f}' for b, v in sorted(renorm.items())))
     clamp_limits(dec, rig)
     if not a.no_smooth:
         dec = smooth_decoded(dec)
         print('smoothed: rotations (light), Stretch / root / joint positions (1-2-1)')
+    if not a.no_ground:
+        lev = level_planted_feet(dec, rig)
+        if lev:
+            print(f'planted feet levelled (true-length legs lifted a sole): {lev}')
     if a.key_tol > 0:
         before = len(dec)
         dec = reduce_keys(dec, a.key_tol)
@@ -653,16 +662,36 @@ def cmd_assemble(a):
                 else:
                     i += 1
         clip['Contacts'] = spans
+    straight = []
+    if a.straighten and prof.get('weapon'):
+        for spec in sorted(a.straighten.split(','), key=lambda x: -int(x.split('-')[0])):
+            i = int(spec.split('-')[0]) - 1   # keys are 1-based; insert from the last interval back
+            if not 0 <= i < len(kfs) - 1:
+                sys.exit(f'--straighten {spec}: the clip has keys 1-{len(kfs)}')
+            straighten_interval(kfs, rig, prof, i)
+            for half in (i + 1, i):  # a second level when a half still strays
+                if max(interval_dips(kfs[half:half + 2], rig, prof)[0].values(), default=0) > 0.1:
+                    straighten_interval(kfs, rig, prof, half)
+            straight.append(spec)
+        print(f'straightened key interval(s) {straight}: {len(kfs)} keys now')
+    dips = interval_dips(kfs, rig, prof)
+    bad = [(i + 1, dv) for i, dv in enumerate(dips) if max(dv.values(), default=0) > 0.15]
+    for k, dv in bad:
+        print(f'DIP keys {k}-{k + 1}: near hand/blade tip strays ' + ', '.join(f'{e} {v:.2f}' for e, v in dv.items())
+              + ' arm-reach outside its keys between them. A real arc (slash) is fine; if the drawing '
+              f'meant a straight path (thrust, poke), re-assemble with --straighten {k}-{k + 1}')
     clip['Keyframes'] = kfs
     path = os.path.join(d, a.run + '.json')
     json.dump(clip, open(path, 'w'), indent=2)
     os.makedirs(os.path.join(DRAFTS, cfg['rig']), exist_ok=True)
     shutil.copy(path, os.path.join(DRAFTS, cfg['rig'], a.run + '.json'))
-    cfg['clip'] = {'duration': a.duration, 'loop': a.loop, 'contacts': a.contacts, 'keys': n,
+    cfg['clip'] = {'duration': a.duration, 'loop': a.loop, 'contacts': a.contacts, 'keys': len(kfs),
                    'keep': a.keep, 'fastest_travel': [fb, round(travel.get(fb, 0), 2)] if fb else None,
-                   'steep_intervals': steep, 'airborne': a.airborne}
+                   'steep_intervals': steep, 'airborne': a.airborne, 'straighten': straight,
+                   'stretch_norm': {b: round(v, 3) for b, v in renorm.items()},
+                   'dips': [{'keys': f'{k}-{k + 1}', **dv} for k, dv in bad]}
     save_run(a.run, cfg)
-    print(f'assembled {n} keys -> {path} (+ SkeletonDrafts/{cfg["rig"]}/)')
+    print(f'assembled {len(kfs)} keys -> {path} (+ SkeletonDrafts/{cfg["rig"]}/)')
     render_playback(a.run, clip, rig, prof)
 
 
@@ -761,6 +790,155 @@ def clamp_limits(dec, rig, tol=0.35):
                 r['pose'][n] = lo + 0.03
             elif hi < v <= hi + tol:
                 r['pose'][n] = hi - 0.03
+
+
+def renormalize_stretch(all_dec, dec, floor=0.03):
+    """GPT draws a style, not foreshortening: even after the per-sheet length calibration the
+    chest decodes at ~0.6-0.8 and forearms/shins at ~0.75-0.9 in EVERY frame, which the clip
+    would bake in as a squashed torso and short limbs. Per bone, divide by its sheet-typical
+    (80th percentile) Stretch so typical frames come out at rig length and only a bone shorter
+    than its own norm stays foreshortened; never past rig length. Returns {bone: p80} changed."""
+    changed = {}
+    for b in all_dec[0].get('stretch', {}):
+        p = float(np.percentile([r['stretch'].get(b, 1.0) for r in all_dec], 80))
+        if abs(p - 1.0) > floor:
+            changed[b] = p
+    for r in dec:
+        for b, p in changed.items():
+            r['stretch'][b] = min(r['stretch'].get(b, 1.0) / p, 1.0)
+    return changed
+
+
+def ik_two_bone(rig, pose, stretch, upper, lower, target):
+    """Set pose[upper], pose[lower] (local rotations) so lower's tip reaches `target` (rig
+    units, root at origin), keeping the elbow/knee on the side nearest the current bend and
+    inside the rig's joint limits; an out-of-reach target gets the closest straight/folded arm."""
+    bm = R.bone_map(rig)
+    seg = R.fk(rig, {n: (v, stretch.get(n)) for n, v in pose.items()})
+    s = seg[upper][0]
+    pw = seg[upper][2] - pose[upper]
+    L1 = bm[upper]['Length'] * (stretch.get(upper) or 1.0)
+    L2 = bm[lower]['Length'] * (stretch.get(lower) or 1.0)
+    dx, dy = target[0] - s[0], target[1] - s[1]
+    dist = min(max(math.hypot(dx, dy), abs(L1 - L2) + 1e-3), L1 + L2 - 1e-3)
+    phi = math.atan2(dy, dx)
+    a = math.acos(min(max((L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist), -1.0), 1.0))
+    lo, hi = bm[lower].get('MinRotation'), bm[lower].get('MaxRotation')
+    lim = (lo, hi) if lo is not None else F.joint_limits(bm[lower])
+    cands = []
+    for sgn in (1, -1):
+        wu = phi - sgn * a
+        ex, ey = s[0] + L1 * math.cos(wu), s[1] + L1 * math.sin(wu)
+        tx, ty = s[0] + dist * math.cos(phi), s[1] + dist * math.sin(phi)
+        loc_l = F.wrap(math.atan2(ty - ey, tx - ex) - wu)
+        illegal = bool(lim) and not (lim[0] - 0.05 <= loc_l <= lim[1] + 0.05)
+        cands.append((illegal, abs(F.wrap(loc_l - pose[lower])), F.wrap(wu - pw), loc_l))
+    _, _, pose[upper], pose[lower] = min(cands)
+
+
+def level_planted_feet(dec, rig, tol=0.5):
+    """Both feet planted in the drawing -> both soles on one floor in the clip. The solver fits
+    the sheet's calibrated proportions (what decode_overlay shows), but the clip plays them on
+    the rig's true lengths, which can lift a planted foot off the floor; leg IK puts the higher
+    sole back at the lower one's height, x unchanged. Returns [(frame, foot, lift)] fixed."""
+    feet = [(p_['Id'], p_['Bone']) for p_ in rig.get('Points', []) if p_.get('Role') == 'support']
+    parent = {b['Name']: b.get('Parent') for b in rig['Bones']}
+    fixed = []
+    for r in dec:
+        on = [(pid, bone) for pid, bone in feet if r.get('planted', {}).get(pid)]
+        if len(on) < 2:
+            continue
+        seg = R.fk(rig, {n: (v, r['stretch'].get(n)) for n, v in r['pose'].items()})
+        floor = max(seg[bone][1][1] for _, bone in on)
+        for pid, bone in on:
+            lift = floor - seg[bone][1][1]
+            if lift > tol:
+                ik_two_bone(rig, r['pose'], r['stretch'], parent[bone], bone, (seg[bone][1][0], floor))
+                fixed.append((r['frame'], pid, round(lift, 1)))
+    return fixed
+
+
+def _kf_pose(kf):
+    return {b['Bone']: (b['Rotation'], b.get('Stretch')) for b in kf['Bones']}
+
+
+def _effectors(rig, prof, pose):
+    """Near hand (and blade tip, when the pose carries the weapon bone), hip-relative."""
+    w = prof.get('weapon') or {}
+    hand = w.get('parent')
+    if not hand:
+        return {}
+    wb = w.get('bone')
+    seg = R.fk(rig, pose, (hand, pose[wb][0], w['length']) if wb in pose else None)
+    out = {'hand': seg[hand][1]}
+    if '__weapon' in seg:
+        out['tip'] = seg['__weapon'][1]
+    return out
+
+
+def _lerp_pose(p0, p1, u):
+    out = {}
+    for n, (r0, s0) in p0.items():
+        r1, s1 = p1.get(n, (r0, s0))
+        st = None if s0 is None and s1 is None else (s0 or 1.0) + ((s1 or 1.0) - (s0 or 1.0)) * u
+        out[n] = (r0 + F.wrap(r1 - r0) * u, st)
+    return out
+
+
+def interval_dips(kfs, rig, prof, samples=8):
+    """Per key interval, how far the near hand / blade tip strays outside the box spanned by
+    its two keyed positions under angle interpolation (fraction of arm reach). Large values are
+    either a real arc (a slash sweeping through) or an artifact: two keys far apart in shoulder
+    angle with a near-straight elbow swing the hand down through the body, where the drawing
+    meant a straight thrust. Only the drawing can tell which."""
+    bm = R.bone_map(rig)
+    hand = (prof.get('weapon') or {}).get('parent')
+    if not hand:
+        return []
+    reach = bm[hand]['Length'] + bm[bm[hand]['Parent']]['Length']
+    out = []
+    for i in range(len(kfs) - 1):
+        p0, p1 = _kf_pose(kfs[i]), _kf_pose(kfs[i + 1])
+        a, b = _effectors(rig, prof, p0), _effectors(rig, prof, p1)
+        worst = {}
+        for j in range(1, samples):
+            m = _effectors(rig, prof, _lerp_pose(p0, p1, j / samples))
+            for e, q in m.items():
+                ex = max(max(min(a[e][d], b[e][d]) - q[d], q[d] - max(a[e][d], b[e][d]), 0.0) for d in (0, 1))
+                worst[e] = max(worst.get(e, 0.0), ex / reach)
+        out.append({e: round(v, 2) for e, v in worst.items()})
+    return out
+
+
+def straighten_interval(kfs, rig, prof, i):
+    """Insert a key midway between keys i and i+1 whose near arm is IK-solved so the hand sits on
+    the straight line between the two keyed hands; the grip (blade angle in the hand) is the
+    midway one, so the blade follows the forearm forward instead of sweeping through straight
+    down as a world-angle blend from a chambered (backward) blade would."""
+    k0, k1 = kfs[i], kfs[i + 1]
+    p0, p1 = _kf_pose(k0), _kf_pose(k1)
+    mid = _lerp_pose(p0, p1, 0.5)
+    w = prof['weapon']
+    hand = w['parent']
+    upper = R.bone_map(rig)[hand]['Parent']
+    a, b = _effectors(rig, prof, p0), _effectors(rig, prof, p1)
+    target = ((a['hand'][0] + b['hand'][0]) / 2, (a['hand'][1] + b['hand'][1]) / 2)
+    pose = {n: v[0] for n, v in mid.items()}
+    st = {n: v[1] for n, v in mid.items() if v[1] is not None}
+    ik_two_bone(rig, pose, st, upper, hand, target)
+    kf = {'Time': round((k0['Time'] + k1['Time']) / 2, 5), 'Bones': []}
+    for e in k0['Bones']:
+        n = e['Bone']
+        ne = {'Bone': n, 'Rotation': round(float(pose[n]), 5)}
+        if st.get(n) is not None and abs(st[n] - 1) >= 0.02:
+            ne['Stretch'] = round(float(st[n]), 4)
+        kf['Bones'].append(ne)
+    adds1 = {x['Name']: x for x in k1.get('Additions', [])}
+    if k0.get('Additions'):
+        kf['Additions'] = [{**x, 'Px': round((x['Px'] + adds1.get(x['Name'], x)['Px']) / 2, 4),
+                            'Py': round((x['Py'] + adds1.get(x['Name'], x)['Py']) / 2, 4)}
+                           for x in k0['Additions']]
+    kfs.insert(i + 1, kf)
 
 
 def reduce_keys(dec, tol):
@@ -1056,6 +1234,8 @@ def main():
     p.add_argument('--no-motion', action='store_true', help='skip the body_path track (stationary clip)')
     p.add_argument('--no-smooth', action='store_true', help='skip temporal smoothing of the decoded frames')
     p.add_argument('--no-ground', action='store_true', help='skip the per-key com anchor (feet-on-floor)')
+    p.add_argument('--straighten', help='key intervals (1-based, as DIP lines print them, e.g. 2-3,5-6) '
+                                        'to in-between with the hand on a straight line (thrusts)')
     p.add_argument('--airborne', action='store_true',
                    help='a move with no planted foot: implies --no-motion --no-ground, and verify marks the '
                         'digest\'s PLANTED labels as meaningless')

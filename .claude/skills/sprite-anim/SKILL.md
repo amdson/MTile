@@ -23,9 +23,11 @@ Code: `scripts/sprite_pose/` (`sprite_anim.py` is the CLI). Design + history:
 python3 -m venv .probe/venv && .probe/venv/bin/pip install pillow numpy scipy
 dotnet build MTile.Probe && dotnet build MTile.Demo        # verify needs both
 ```
+Skip the builds when `MTile.Probe/bin/Debug/net8.0/MTile.Probe.dll` already exists — never
+rebuild while other agents may be running `verify`.
 Run every command from the repo root and type the CLI out in full each time
 (`.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py ...`): the worktree command guard
-refuses a command whose name comes from a shell variable (`.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py refs ...`), and it may refuse a
+refuses a command whose name comes from a shell variable (`SA=...; $SA refs ...`), and it may refuse a
 long inline `python - <<EOF` heredoc, so put throwaway helpers in a script file under the job's
 tmp dir. A run lives in `.probe/sprite/NAME/` (gitignored).
 
@@ -38,6 +40,17 @@ unusable as a whole (wrong move, broken format in most frames) — at most once 
 without asking the user.
 
 ## The workflow
+
+**0. Read the action first.** Find the clip's ActionState (`Type` in
+`SkeletonStates/<rig>/<clip>.json`; classes in `Character/Action/ActionStates.cs`) and note:
+- grounded or airborne (`RequireAir`) → `--airborne` at assemble;
+- `Duration` → `--duration`;
+- the hitbox window (start frame / active frames at 60 fps) as a phase range;
+- whether it drives `AnimationProgress` (`TimeInState / Duration` → a one-shot clip, no
+  `--loop`) or declines it (needs a looping clip).
+With N evenly spaced keys, key k sits at phase (k-1)/(N-1); pick `--keep` (1-based sheet
+frames, e.g. `--keep 2-8`) so the impact frame lands inside the hit window. Put the
+anticipation / impact / follow-through beats into the `gen` description to match.
 
 **1. refs** — the inputs GPT gets, all rendered from the rig by code:
 ```bash
@@ -78,10 +91,14 @@ warm-started from the previous one):
 .probe/venv/bin/python scripts/sprite_pose/sprite_anim.py solve --run NAME           # -> state.json (solved), decoded.json, decode_overlay.png
 ```
 Read `decode_overlay.png` for EVERY frame (fitted rig in black over GPT's drawing), not
-just flagged ones.
+just flagged ones. The overlay draws the sheet's calibrated proportions (`run.json`
+`lengths`, kept across re-solves; `solve --recalibrate` recomputes them); the clip plays on
+the rig's true lengths, so foot contact is judged from the digest and `playback.gif`, not
+the overlay.
 
 **5. Fix flagged frames — the agent's job.** Edit `.probe/sprite/NAME/state.json`, then
-re-solve only those frames: `.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py solve --run NAME --frames 3,5`. A frame's state:
+re-solve only those frames: `.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py solve --run NAME --frames 3,5`. The file is `{"frames": {"1": {...}, "2": {...}}}` (string keys = 1-based sheet frames);
+one frame's state:
 ```json
 {"root":  {"pos": [212, 245], "fixed": true},
  "bones": {"arm_r_upper": {"tip": [270, 230], "fixed": ["tip"]},
@@ -93,8 +110,8 @@ re-solve only those frames: `.probe/venv/bin/python scripts/sprite_pose/sprite_a
 A bone's key is its TIP (`arm_r_upper` = near elbow, `arm_r_lower` = near hand,
 `leg_*_upper` = knee, `leg_*_lower` = foot, `chest` = neck; `root` = hip; `_r` = near,
 `_l` = far). Allowed edits, each with a stated reason (add a `"note"`):
-- **move a mark**: set `tip` to the right pixel (read pixels off `cells/NN.png`;
-  `joints_review.png` is drawn at 2× — halve its coordinates);
+- **move a mark**: set `tip` to the right pixel. Read pixel coordinates off `cells/NN.png`
+  only — `joints_review.png` is ~1.9× (not exactly 2×) and image viewers downscale it again;
 - **free a mark**: remove `"fixed"` — the solver then places that joint by IK (use it when
   a mark is right but GPT drew that bone out of proportion);
 - **hidden**: `"hidden": true` for a bone with no usable pixels (stays smooth with its
@@ -102,6 +119,14 @@ A bone's key is its TIP (`arm_r_upper` = near elbow, `arm_r_lower` = near hand,
 - **fix a rotation/stretch** only when you're certain of it (e.g. a forearm pointing at
   the camera → `"stretch": 0.5, "fixed": ["stretch"]`);
 - **reject** the frame (`"reject": true`) when it is unusable — its neighbours carry the pose.
+
+**Limb drawn in the wrong colour.** GPT sometimes draws both upper arms (or thighs) in one
+colour; `detect` then misses that elbow/knee and the solver guesses. Find the junction where
+the two stroke colours meet in `cells/NN.png` and set that bone's `tip` there, with a note.
+
+**Blade tip.** `detect` reports 11 joints but `solve` says `fixed 10`: the blade-tip dot sets
+the knife's direction, not its length (the rig's knife length is used), so the black blade
+may run past the violet dot in the overlay. That's expected.
 
 **Elbow drawn bent backwards.** GPT often draws the far elbow flared behind the arm (a 3D
 pose flattened into 2D), which reads as a hyperextended elbow → `joint_limit` on the forearm.
@@ -127,7 +152,19 @@ the clip should show the pose GPT *meant*.
 Defaults: every frame becomes an evenly spaced key (GPT's timing); light temporal smoothing
 (`--no-smooth` to skip); a **moving com** — `Motion: Track` + per-key `body_path` (the hip
 measured against the planted foot) + ground guide, with the per-key `com` anchor sinking
-crouches (`--no-motion` for a stationary clip). Opt-ins:
+crouches (`--no-motion` for a stationary clip). Also automatic: **stretch renormalisation**
+(GPT draws the torso at ~0.6-0.8 and forearms/shins at ~0.8 in every frame — a style, not
+foreshortening — so each bone's Stretch is divided by its sheet-typical value; printed as
+`stretch renormalised`), and for grounded clips **planted-feet levelling** (frames where the
+drawing plants both feet get leg IK so both soles share one floor on the true-length rig).
+
+**DIP lines.** Angle interpolation between two keys far apart in shoulder angle can swing the
+hand/blade through the body (the blade dipping under the feet mid-thrust). assemble prints
+`DIP keys K-K+1` for every interval where the near hand or blade tip strays outside its two
+keys. Judge it against the drawing: a slash sweeping through that arc is right — leave it; a
+thrust, poke or stab meant a straight path — re-assemble with `--straighten K-K+1` (adds an
+IK in-between with the hand on the straight line). DIP key numbers are clip keys (after
+`--keep`), not sheet frames. Opt-ins:
 `--airborne` for a move with no planted foot (air attacks, falls) — it implies `--no-motion
 --no-ground`, since both the body_path and the com anchor measure against a planted foot (on
 the air hammer they invented a 13-unit hip rise), and `verify` then marks the digest's
@@ -138,6 +175,11 @@ target phase, trim with `--keep` or retime keys afterwards with Probe
 (`dotnet run --project MTile.Probe -- retime <clip> <t> <newT>`) — don't add retiming here. Output: `.probe/sprite/NAME/NAME.json` and
 `SkeletonDrafts/<rig>/NAME.json` (`Type: "Draft"`; outside `SkeletonStates/`, so no host
 copies or loads it).
+
+**Review the motion.** `assemble` writes `playback.gif` (left: GPT's frames, right: the
+clip). A viewer shows only its first frame, so tile its frames into one PNG with a small
+script saved under the run dir (`.probe/sprite/NAME/tmp/`) and look at the in-betweens too,
+not just the keys.
 
 **7. verify** — `.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py verify --run NAME`: copies the clip into the pool as `zzdraft_NAME`
 only for the command, runs Probe `digest` (→ `digest.txt`) and `motion` (→ `motion.txt`)
