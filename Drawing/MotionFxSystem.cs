@@ -159,17 +159,18 @@ public sealed class MotionFxSystem
             for (int i = 0; i < n; i++) Effects.LaunchSmoke(_particles, pos, vel, s);
         }
 
-        // ── Stab charge: motes gather onto the body, flash on the sweet spot ──
+        // ── Stab charge: motes gather onto the hand, flash on the sweet spot ──
         bool sweet = false;
         if (action is RecoveryAction && p.CurrentActionVars.Charging)
         {
             var v = p.CurrentActionVars;
             float f = RecoveryAction.ChargeFraction(v.TimeInState);
             var hue = v.IsGrounded ? new Color(255, 210, 110) : new Color(200, 140, 255);
+            var hand = AttackGlowSystem.ChargeCenter(p, anim, _skeletonScale);
             int n = Tick(ref t.MoteAcc, 20f + 50f * f, dt);
-            for (int i = 0; i < n; i++) Effects.ChargeMotes(_particles, pos, hue, f);
+            for (int i = 0; i < n; i++) Effects.ChargeMotes(_particles, hand, hue, f);
             sweet = RecoveryAction.InSweetSpot(v.TimeInState);
-            if (sweet && !t.InSweetSpot) Effects.Flash(_particles, pos, 34f, Color.White, 0.1f);
+            if (sweet && !t.InSweetSpot) Effects.Flash(_particles, hand, 34f, Color.White, 0.1f);
         }
 
         // ── Blade sparks along the knife's swept segment ──────────────────────

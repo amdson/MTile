@@ -26,6 +26,9 @@ public sealed class AttackGlowSystem
     private bool    _knifeFieldActive;
     // The host suppresses the legacy slash only when its clip attachment asset loaded.
     public Predicate<PlayerCharacter> ReplacesSlash { get; set; }
+    // The host's animator for a secondary player (null = none), so the charge glow can
+    // sit on that player's hand too.
+    public Func<PlayerCharacter, CharacterAnimator> AnimatorFor { get; set; }
 
     public AttackGlowSystem(CharacterAnimator animator, GlowRenderer glow,
                             GlowTrailField glowField, float skeletonScale)
@@ -98,18 +101,18 @@ public sealed class AttackGlowSystem
         // Charge glow rides its own orb pass either way — it's a stationary circle on
         // the body, not a motion streak, so the reaction–diffusion field (built for
         // swept segments that linger) is the wrong tool for it.
-        RenderChargeGlow(cam, player);
+        RenderChargeGlow(cam, player, _animator);
         foreach (var (p, _) in sim.SecondaryPlayers)
-            RenderChargeGlow(cam, p);
+            RenderChargeGlow(cam, p, AnimatorFor?.Invoke(p));
     }
 
     // The stab-charge wind-up (RecoveryAction's ready posture): a circle of glow
-    // centred on the body that intensifies and widens along the charge curve, snaps
+    // centred on the weapon hand (ChargeCenter) that intensifies and widens along the charge curve, snaps
     // to a white flash through the release sweet spot, and dims to the settle level
     // on an overhold. All inputs are sim state (vars.TimeInState is the charge
     // clock), so the effect is deterministic and rollback-consistent; hue matches
     // the stab the charge becomes (gold grounded / purple airborne).
-    private void RenderChargeGlow(Matrix cam, PlayerCharacter player)
+    private void RenderChargeGlow(Matrix cam, PlayerCharacter player, CharacterAnimator anim)
     {
         if (player.CurrentAction is not RecoveryAction) return;
         var vars = player.CurrentActionVars;
@@ -129,7 +132,17 @@ public sealed class AttackGlowSystem
             inten  = 1f;
             aura  *= 1.25f;
         }
-        _glow.DrawChargeOrb(cam, player.Body.Position, aura, core, hue, inten);
+        _glow.DrawChargeOrb(cam, ChargeCenter(player, anim, _skeletonScale), aura, core, hue, inten);
+    }
+
+    // Where the stab charge gathers: the weapon hand — the knife bone's origin on the
+    // drawn (live) pose — falling back to the body centre with no animator or no knife.
+    internal static Vector2 ChargeCenter(PlayerCharacter player, CharacterAnimator anim, float scale)
+    {
+        if (anim != null && anim.TryBoneOrigin(KnifeBone, RigRoot(player, anim, scale),
+                                               anim.DisplayFacing, out var hand))
+            return hand;
+        return player.Body.Position;
     }
 
     // The world position the attack glow chases this frame, or false when no attack clip

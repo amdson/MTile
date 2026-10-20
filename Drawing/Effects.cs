@@ -456,27 +456,34 @@ public static class Effects
 
     // ── Combat ──────────────────────────────────────────────────────────────────
 
-    // Blade trail: tiny sparkles strewn along the knife's swept segment this frame,
-    // drifting a little with the swing and twinkling out. `color` is the attack glow.
+    // Blade trail: thin spark streaks strewn along the knife's swept segment this frame,
+    // shed backwards off the blade (a narrow cone opposite the tip's motion), braking and
+    // shrinking as they burn out. `color` is the attack glow.
     public static void BladeSparks(ParticleSystem ps, Vector2 from, Vector2 to, Color color, float dt)
     {
         var seg = to - from;
         float len = seg.Length();
-        if (len < 0.5f) return;
-        var vel = dt > 0f ? seg / dt : Vector2.Zero;
+        if (len < 0.5f || dt <= 0f) return;
+        var dir = seg / len;
+        float tipSpeed = len / dt;
         int count = Math.Clamp((int)(len / 5f), 1, 6);
         for (int i = 0; i < count; i++)
         {
             ref var p = ref ps.Spawn();
+            // Speed rides the swing but is clamped, so a fast flick doesn't throw sparks
+            // across the screen. Drag × life stays under 1 so the streak never stalls
+            // and loses its heading (Line draws along velocity).
+            float speed = MathHelper.Clamp(tipSpeed * (0.25f + 0.3f * R()), 90f, 420f);
             p.Position     = from + seg * R();
-            p.Velocity     = vel * (0.05f + R() * 0.1f) + new Vector2(Rs(), Rs()) * 15f;
-            p.Acceleration = -p.Velocity * 3f + new Vector2(0f, 40f);
-            p.MaxLife      = p.Life = 0.18f + R() * 0.2f;
-            p.StartColor   = Add(Color.Lerp(color, Color.White, 0.5f * R()));
+            p.Velocity     = Rotate(-dir, Rs() * 0.3f) * speed;
+            p.Acceleration = -p.Velocity * 3f + new Vector2(0f, 25f);
+            p.MaxLife      = p.Life = 0.14f + R() * 0.14f;
+            p.StartColor   = Add(Color.Lerp(color, Color.White, 0.3f + 0.5f * R()));
             p.EndColor     = Color.Transparent;
-            p.StartSize    = 2.5f + R() * 3f;
-            p.EndSize      = 0.5f;
-            p.Kind         = ParticleKind.Glow;
+            p.StartSize    = 7f + R() * 7f;   // streak length
+            p.EndSize      = 1.5f;
+            p.Thickness    = 1f;
+            p.Kind         = ParticleKind.Line;
         }
     }
 
@@ -574,7 +581,7 @@ public static class Effects
         Embers(ps, pos, dir, charged ? new Color(150, 240, 255) : new Color(255, 200, 120), charged ? 10 : 6);
     }
 
-    // Stab charge wind-up: motes spawned on a ring that converge onto the body, so
+    // Stab charge wind-up: motes spawned on a ring that converge onto `center` (the weapon hand), so
     // the energy visibly gathers. `f` 0..1 is the charge fraction.
     public static void ChargeMotes(ParticleSystem ps, Vector2 center, Color color, float f)
     {

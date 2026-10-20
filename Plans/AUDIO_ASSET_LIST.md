@@ -18,6 +18,74 @@ list, ordered so that the first tier alone makes the game feel alive.
 
 ---
 
+## TODO — gap audit (2026-10-20)
+
+Every sound the game plausibly needs that is missing or weak, audited against
+`Audio/GameAudio.cs`, `Audio/SoundKind.cs` and `Assets/Sounds/` after the dash / whip-kick
+merges. Supersedes the tier tables below where they overlap (those predate most of the combat
+kit). Hook labels: *event* = a `PresentationKind` already exists; *derivable* = readable off
+the snapshotted state/action ring like Jump/DoubleJump; *needs stamp* = needs a small sim-side
+frame stamp first.
+
+Suggested order: the five no-sim-work items (wall scrape, respawn, and the three ready events)
+→ enemy hit sound → swing split → stab charge sweet-spot ping → tile-break / footstep variants.
+
+### Fix what's there
+- [ ] **Wall-slide scrape** — wired in `GameAudio.WallScrape` but has no clip, so it's silent. Needs a seamless loop.
+- [ ] **Respawn** — wired in `GameAudio.Present` but has no clip, so it's silent. One clip.
+- [ ] **Tile break** — 1 clip for the most-heard sound in the game. Needs 6–8, ideally one set per material (stone / dirt / sand / foam). The `TileBreak` event only carries tile coords, so the material has to be looked up (or added to the payload).
+- [ ] **Tile place** — 1 clip; fires in bursts from paint/place. Needs 4–6.
+- [ ] **Footsteps** — 2 clips, distance-bucket cadence placeholder. Needs 6–8, and timing from the animator's stride phase (`AUDIO_PLAN.md` §9).
+- [ ] **Landing** — borrows the footstep clips at `LandGain`. A dedicated `land_*` set takes over automatically; then drop `LandGain` toward 1.0.
+- [ ] **Swing split** — 2 whooshes shared by every slash/stab/whip-kick/hammer/dash-slash (`GameAudio.IsSwing`). Split by family: light slash, heavy finisher (GroundSlash3 / AirSlash2), stab thrust, air hammer, whip kick, dash-slash.
+- [ ] **Jump / double jump / climb grunt** — 1 clip each; 2–4 each to stop the repetition.
+- [ ] **Guard block / parry** — synthesized tones (`scripts/gen-guard-sfx.py`); real metal-on-metal would sell the parry.
+- [ ] **Eruption** — 1 clip.
+- [ ] **Throw** — clip exists, unwired. *needs stamp*: `CombatState.RegisterThrown` shares the hit stamp, so a throw is indistinguishable from a hit render-side.
+- [ ] **Laser blast** — orphaned (its action was removed); delete the clip + `SoundKind`.
+
+### Combat
+- [ ] **Hit on enemy / object** — the biggest combat gap. `HitConnect` keys off the *victim's* `CombatState`, so only player victims make a sound; hitting an enemy or the practice ball is silent except the swing. *derivable* from the attacker's HitId connect counts (`CombatSystem.PeekHits`).
+- [ ] **Sweet-spot hit layer** — heavy extra layer for the air-hammer core, whip-kick tip and full-charge stab; precision should be audible.
+- [ ] **Stab charge loop + sweet-spot ping** — loop rides `RecoveryAction.ChargeFraction`; a ping when `InSweetSpot` opens makes the release timing playable by ear.
+- [ ] **Dash** — `DashState` entry, *derivable*. Short air burst, distinct from the double jump.
+- [ ] **Dash-slash** — sharper, higher whoosh than the generic swing.
+- [ ] **Pulse ring** — circle gesture.
+- [ ] **Burst** — RMB during a wind-up.
+- [ ] **Beam** — charge loop → firing loop → end.
+- [ ] **Grab latch / grabbed struggle** — grab connects; the held player mashing.
+- [ ] **Guard retaliate** — bright counter slash; could reuse the parry ring.
+- [ ] **Crush damage** — hard fall / wall slam / sprout crush; should be the most painful sound in the bank. Impulse crushes already go through `OnHitRegistered` (*derivable*); sprout crush *needs stamp*.
+- [ ] **Tumble / stun onset** — short whoosh or wobble on entry.
+- [ ] **Hitstop crunch** — probably a pitch/filter treatment on the hit during hitstop, not a new clip.
+
+### Terrain & building
+- [ ] **Attack into terrain** — *event* `TerrainStrike` (carries the into-surface angle), unhandled. Pick-on-stone clink.
+- [ ] **Mass ball lands** — *event* `MassLand` (carries tile type + block count), unhandled.
+- [ ] **Charged block detonates** — *event* `ChargedBlast` (carries blast radius), unhandled.
+- [ ] **Paint hiss** — loop, gain on the funded deposition rate (stutters when the meter starves — keep that).
+- [ ] **Eruption charge whine** — loop through ramping / peak / overheld; overheld should sound like a mistake.
+- [ ] **Block-grab peel tension + snap** — tension loop on `PeelStrain` (0..1); snap when the group tears free.
+- [ ] **Orb throw / impact** — the thrown peel orb.
+- [ ] **Mass ball in flight** — whoosh loop, voice-capped.
+- [ ] **Foam puff / foam decay pop** — `BlockBurstAction`; foam expiring.
+- [ ] **Spikes place / impale** — picker key 5.
+- [ ] **Sprout growth / terrain-carried rumble** — low loop.
+- [ ] **Meter empty** — "out of material" click when a build input does nothing.
+
+### Enemies (nothing on the enemy side makes sound)
+- [ ] **Enemy hurt / death** — one shared set, pitched by enemy size.
+- [ ] **Attack telegraph** — wind-up cue; the sim already declares wind-up states for the overlays (`ITelegraphSource`).
+- [ ] **Signature attacks** — Zeus thunder column, Prism dash, Quillback quills, rail bolt / turret shots, fighter mines (beep → blast).
+
+### Match / UI
+- [ ] **Death / stock lost** — distinct sting before the respawn sound.
+- [ ] **Low-HP warning** — optional heartbeat/loop below ~1.5 HP.
+- [ ] **Match start / win** — countdown, victory sting.
+- [ ] **Menu / lobby** — click, join. Low priority.
+
+---
+
 ## Tier 1 — the vertical slice and the core loop
 
 If only these existed, the game would already feel dramatically better. Roughly in the

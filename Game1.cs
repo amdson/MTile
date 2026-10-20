@@ -825,6 +825,12 @@ public class Game1 : Game
                     return _attachments.ReplacesEffect(_secondaryAnimators[i], "knife");
             return false;
         };
+        _attackGlow.AnimatorFor = p =>
+        {
+            for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
+                if (ReferenceEquals(p, _sim.SecondaryPlayers[i].Player)) return _secondaryAnimators[i];
+            return null;
+        };
         _cosmetics = new CosmeticUpdateSystem(_animator, _secondaryAnimators, _skeletonAnims, SkeletonScale,
                                               _camera, _particles, _cursorTrail, _attackGlow)
         {

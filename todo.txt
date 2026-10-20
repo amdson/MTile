@@ -2,4 +2,9 @@
 - fix issue with overly long time horizon on lattice planning, esp when jumping up 
 - slow movement
 - add fall damage
-- add more advantages to being on the ground
+- add more advantages to being on the ground (probably lower knockback)
+- fix bug where some blocks are seemingly invincible to breaking under impact
+
+- add a specific animation for wall jumping while controls are holding player into wall 
+- merge in worktree-sprite-pose-experiment
+- 
