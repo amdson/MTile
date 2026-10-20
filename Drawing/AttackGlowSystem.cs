@@ -158,7 +158,7 @@ public sealed class AttackGlowSystem
         }
         if (player.CurrentAction is SlashLikeAction)
             return _animator.TryBoneOrigin(KnifeBone, RigRoot(player, _animator, _skeletonScale),
-                                           player.Facing, out tip, fromOverlay: false);
+                                           _animator.DisplayFacing, out tip, fromOverlay: false);
         return false;
     }
 
@@ -169,7 +169,7 @@ public sealed class AttackGlowSystem
     // leaves the ground). Clips that don't author a COM fall back to the legacy rule:
     // drop the rig until the current pose's lowest point rests on the ground line.
     public static Vector2 RigRoot(PlayerCharacter player, CharacterAnimator anim, float scale)
-        => RigRoot(player.Body.Position, player.Facing, anim, scale);
+        => RigRoot(player.Body.Position, anim.DisplayFacing, anim, scale);
 
     // Overload for hosts without a live PlayerCharacter (the offline take viewer replays
     // recorded samples): same anchoring math from just the body position + facing.

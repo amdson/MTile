@@ -1238,7 +1238,7 @@ public class Game1 : Game
                 _spriteBatch.End(); split = true;
                 Vector2 root; int facing;
                 if (_recorder.TryPlaybackPrimary(out var pc)) { root = pc.RootWorldPos; facing = pc.Facing; }
-                else { root = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); facing = player.Facing; }
+                else { root = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); facing = _animator.DisplayFacing; }
                 int dir = facing == 0 ? 1 : facing;
                 var rootXf = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale));
                 _elements.Update(player, skin0, _animator.Pose, rootXf, frameDt, _elementSolid);
@@ -1255,7 +1255,7 @@ public class Game1 : Game
                 var anim = _secondaryAnimators[i];
                 Vector2 root; int facing;
                 if (_recorder.TryPlaybackSecondary(i, out var sc)) { root = sc.RootWorldPos; facing = sc.Facing; }
-                else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = p.Facing; }
+                else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = anim.DisplayFacing; }
                 int dir = facing == 0 ? 1 : facing;
                 var rootXf = Affine2.FromTRS(root, 0f, new Vector2(dir * SkeletonScale, SkeletonScale));
                 _elements.Update(p, skin, anim.Pose, rootXf, frameDt, _elementSolid);
@@ -1275,7 +1275,7 @@ public class Game1 : Game
             // clip/δ state the snapshot doesn't restore, so the live recompute would drift.
             Vector2 primRoot; int primFacing;
             if (_recorder.TryPlaybackPrimary(out var pc)) { primRoot = pc.RootWorldPos; primFacing = pc.Facing; }
-            else { primRoot = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); primFacing = player.Facing; }
+            else { primRoot = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale); primFacing = _animator.DisplayFacing; }
             _animator.Draw(_draw, primRoot, primFacing,
                            _config.DebugDrawSkeletonJoints, _config.DebugHighlightPlantFoot);
 
@@ -1286,7 +1286,7 @@ public class Game1 : Game
                 var anim = _secondaryAnimators[i];
                 Vector2 root; int facing;
                 if (_recorder.TryPlaybackSecondary(i, out var sc)) { root = sc.RootWorldPos; facing = sc.Facing; }
-                else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = p.Facing; }
+                else { root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale); facing = anim.DisplayFacing; }
                 anim.Draw(_draw, root, facing,
                           _config.DebugDrawSkeletonJoints, _config.DebugHighlightPlantFoot);
             }
@@ -1463,14 +1463,14 @@ public class Game1 : Game
             float dt = (float)gameTime.ElapsedGameTime.TotalSeconds;
             var root = AttackGlowSystem.RigRoot(player, _animator, SkeletonScale);
             _attachments.DrawAnimator(camTransform, _animator,
-                Affine2.FromTRS(root, 0, new Vector2((player.Facing == 0 ? 1 : player.Facing) * SkeletonScale, SkeletonScale)), dt);
+                Affine2.FromTRS(root, 0, new Vector2(_animator.DisplayFacing * SkeletonScale, SkeletonScale)), dt);
             for (int i = 0; i < _sim.SecondaryPlayers.Count && i < _secondaryAnimators.Count; i++)
             {
                 var p = _sim.SecondaryPlayers[i].Player;
                 var anim = _secondaryAnimators[i];
                 root = AttackGlowSystem.RigRoot(p, anim, SkeletonScale);
                 _attachments.DrawAnimator(camTransform, anim,
-                    Affine2.FromTRS(root, 0, new Vector2((p.Facing == 0 ? 1 : p.Facing) * SkeletonScale, SkeletonScale)), dt);
+                    Affine2.FromTRS(root, 0, new Vector2(anim.DisplayFacing * SkeletonScale, SkeletonScale)), dt);
             }
         }
         else _attachments.ClearHistory();

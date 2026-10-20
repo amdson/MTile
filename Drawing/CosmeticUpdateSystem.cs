@@ -99,7 +99,7 @@ public sealed class CosmeticUpdateSystem
             // Terrain no-penetration: extract nearby exposed tile faces around LAST frame's
             // pose (must run before this animator's Update) and ride them into the sample.
             int tc = TerrainSurfaces.Extract(sim.Chunks, _animator, player.Body.Position,
-                                             player.Facing, _skeletonScale, _terrainScratch,
+                                             _animator.DisplayFacing, _skeletonScale, _terrainScratch,
                                              out bool near);
             _pathSampler.Bind(player);
             _animator.Update(CharacterAnimSample.From(player, simDt, _terrainScratch, tc, near,
@@ -112,7 +112,7 @@ public sealed class CosmeticUpdateSystem
             {
                 var sp = sim.SecondaryPlayers[i].Player;
                 tc = TerrainSurfaces.Extract(sim.Chunks, _secondaryAnimators[i], sp.Body.Position,
-                                             sp.Facing, _skeletonScale, _terrainScratch, out near);
+                                             _secondaryAnimators[i].DisplayFacing, _skeletonScale, _terrainScratch, out near);
                 _secondarySamplers[i].Bind(sp);
                 _secondaryAnimators[i].Update(
                     CharacterAnimSample.From(sp, simDt, _terrainScratch, tc, near,

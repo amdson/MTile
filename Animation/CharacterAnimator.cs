@@ -240,6 +240,13 @@ public sealed partial class CharacterAnimator
     private float             _easeBase;          // this frame's base ease factor b = 1 − exp(−Stiffness·dt)
     private bool              _haveCorr;          // a Δθ-correction solve ran this frame
 
+    // The facing the rig is DRAWN in (AnimationDocument.FlipAt): the sim's facing, except
+    // while a turning action clip is still before its FlipAt, when it is the opposite — the
+    // way the character faced before the turn. Resolved at the top of Update; the whole
+    // frame (drivers, solve, aim) runs in it, and hosts draw with it (DisplayFacing).
+    private int  _displayFacing = 1;
+    private bool _flipHeld;        // this frame is before the current action clip's FlipAt
+
     // Action-aim state (the stab re-aim, §STAB_AIM_PLAN), resolved each frame in step 1.7 and
     // frozen for the solve. û* is captured once at solve start from the Δθ=0 pose into
     // _problem.AimTarget (CaptureAimTarget).
@@ -465,7 +472,30 @@ public sealed partial class CharacterAnimator
         _drivers = MoveDrivers.CreateDefault(rig, _actionClips);
     }
 
+    // The facing to draw this rig with: the sim's, or its opposite while a turning action
+    // clip hasn't reached its FlipAt yet. Pass it wherever a host would pass the player's
+    // Facing for this animator (Draw, RigRoot, skins, attachments, bone lookups).
+    public int DisplayFacing => _displayFacing;
+
+    // The bound action clip's FlipAt (null: no such clip, or it doesn't turn).
+    public float? ActionClipFlipAt(string actionType)
+        => _actionClips.TryGetValue(actionType, out var clip) ? clip.FlipAt : null;
+
     public void Update(in CharacterAnimSample s)
+    {
+        int simFacing = s.Facing == 0 ? 1 : s.Facing;
+        _flipHeld = TryActionOverlay(in s, out _, out var clip, out float tau)
+                    && clip.FlipAt is float flipAt && tau < flipAt;
+        _displayFacing = _flipHeld ? -simFacing : simFacing;
+        if (_displayFacing == s.Facing) UpdateCore(in s);
+        else
+        {
+            var shown = s.WithFacing(_displayFacing);
+            UpdateCore(in shown);
+        }
+    }
+
+    private void UpdateCore(in CharacterAnimSample s)
     {
         float dt = s.Dt;
         _haveCorr = false;   // cleared until a cadence solve produces Δθ this frame
@@ -596,15 +626,8 @@ public sealed partial class CharacterAnimator
         //     A clip with a SettleShare splits that timeline: the action's progress sweeps only
         //     the swing [0, 1−share]; the settle tail plays afterwards, down the recovery
         //     countdown (ResolveSettle), so the follow-through IS the end-lag.
-        string actKey = IsOverlayAction(s.Action) ? s.Action : null;
-        AnimationDocument actClip =
-            actKey != null && _actionClips.TryGetValue(actKey, out var ac) ? ac : null;
-        float actTau = 0f;
-        if (actClip != null)
+        if (TryActionOverlay(in s, out string actKey, out AnimationDocument actClip, out float actTau))
         {
-            actTau = s.ActionProgress >= 0f ? MathHelper.Clamp(s.ActionProgress, 0f, 1f)
-                   : AnimationSampler.NormalizedTime(actClip, s.ActionTime);
-            if (s.ActionProgress >= 0f) actTau *= 1f - SettleShareOf(actClip);
             _settleKey = actKey; _settleClip = actClip; _settleTotal = 0;   // arm the settle
         }
         else if (!ResolveSettle(in s, out actKey, out actClip, out actTau))
@@ -625,9 +648,13 @@ public sealed partial class CharacterAnimator
             _easeBase = MathF.Max(bBase, 1e-4f);   // the root offset d eases at the base rate (see _dyEmitted)
             float upperK = Stiffness + (UpperBodyStiffness - Stiffness) * _state.ActionWeight;
             float bUpper = 1f - MathF.Exp(-upperK * dt);
+            // The fast set is the bound attack clip's own region — the chest subtree for the
+            // usual UpperBody slash, every bone for a FullBody one (the spin stab's legs are
+            // part of the attack and must hit its poses, notably the symmetric one at FlipAt).
+            var fast = _overlays.ActionBound ? _regionMasks[(int)_overlays.ActionRegion] : _upperMask;
             for (int i = 0; i < _skeleton.Count; i++)
             {
-                float b  = MathF.Max(_upperMask[i] ? bUpper : bBase, 1e-4f);   // dt→0 guard
+                float b  = MathF.Max(fast[i] ? bUpper : bBase, 1e-4f);   // dt→0 guard
                 float lp = _isCore[i] ? cfg0.CorePosePrior : cfg0.LimbPosePrior;
                 _easeB[i]        = b;
                 _lambdaSmooth[i] = lp * (1f - b) / b;
@@ -907,6 +934,21 @@ public sealed partial class CharacterAnimator
     // is also what bridges the gaps inside a slash combo. This string policy lives
     // here (not in the sample) for the same reason the move drivers own clip policy:
     // the sample stays a dumb snapshot.
+    // The current action's overlay clip and its normalized time τ: the progress the action
+    // REPORTS (scaled into the swing when the clip has a settle), else the clip's own seconds.
+    private bool TryActionOverlay(in CharacterAnimSample s, out string key,
+                                  out AnimationDocument clip, out float tau)
+    {
+        key = IsOverlayAction(s.Action) ? s.Action : null;
+        clip = key != null && _actionClips.TryGetValue(key, out var ac) ? ac : null;
+        tau = 0f;
+        if (clip == null) { key = null; return false; }
+        tau = s.ActionProgress >= 0f ? MathHelper.Clamp(s.ActionProgress, 0f, 1f)
+            : AnimationSampler.NormalizedTime(clip, s.ActionTime);
+        if (s.ActionProgress >= 0f) tau *= 1f - SettleShareOf(clip);
+        return true;
+    }
+
     private static bool IsOverlayAction(string action)
         => !string.IsNullOrEmpty(action)
            && action != "None" && action != "NullAction"
@@ -1378,6 +1420,10 @@ public sealed partial class CharacterAnimator
     {
         _aimActive = false;
         if (_aimBoneL < 0 || _aimBoneR < 0) return;
+        // Before a turning clip's FlipAt the rig still faces the OLD way while the aim points
+        // the new one — re-aiming would wrench the windup through 180°. The aim engages at
+        // the flip, which a turning attack places before its strike.
+        if (_flipHeld) return;
         // Through the settle the FSM is in RecoveryAction, which has no aim of its own — the
         // stab's arm would snap back to horizontal for its follow-through. Hold the swing's
         // aim until the settle ends.

@@ -144,7 +144,7 @@ public sealed class GameRecorder
             {
                 Pose         = secondaries[i].Pose.CloneLocal(),
                 RootWorldPos = AttackGlowSystem.RigRoot(p, secondaries[i], scale),
-                Facing       = p.Facing,
+                Facing       = secondaries[i].DisplayFacing,
             };
         }
 
@@ -168,7 +168,7 @@ public sealed class GameRecorder
             {
                 Pose         = primary.Pose.CloneLocal(),
                 RootWorldPos = AttackGlowSystem.RigRoot(sim.Player, primary, scale),
-                Facing       = sim.Player.Facing,
+                Facing       = primary.DisplayFacing,
             },
             Secondaries = secs,
             Camera      = new CameraState { Position = cam.Position, Zoom = cam.Zoom },

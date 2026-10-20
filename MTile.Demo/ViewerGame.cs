@@ -128,8 +128,8 @@ public sealed class ViewerGame : Game
             _cache[i] = new Cached
             {
                 Pose   = _anim.Pose.CloneLocal(),
-                Root   = AttackGlowSystem.RigRoot(s.Position, s.Facing, _anim, _take.SkeletonScale),
-                Facing = s.Facing,
+                Root   = AttackGlowSystem.RigRoot(s.Position, _anim.DisplayFacing, _anim, _take.SkeletonScale),
+                Facing = _anim.DisplayFacing,
                 Dbg    = _anim.CaptureDebug(),
             };
         }

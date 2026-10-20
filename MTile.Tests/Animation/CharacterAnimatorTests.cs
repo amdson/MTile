@@ -122,6 +122,40 @@ public class CharacterAnimatorTests
         Assert.Equal(AnimClip.Idle, anim.State.Clip);
     }
 
+    // ─── the turning attack (AnimationDocument.FlipAt) ─────────────────────────────────
+    // AirSpinStab flips the sim's Facing on Enter, but its clip winds up facing the OLD way
+    // and turns at FlipAt: the rig is drawn in the opposite facing until then, and in the
+    // sim's facing after — on both sides, so a left-facing turn mirrors a right-facing one.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(-1)]
+    public void TurningClip_DrawsTheOldFacing_UntilFlipAt(int simFacing)
+    {
+        var anim = RealAnimator();
+        Fall(anim, 5);
+        float flipAt = anim.ActionClipFlipAt("AirSpinStab")
+                       ?? throw new Xunit.Sdk.XunitException("airspinstab.json has no FlipAt");
+        anim.Update(SpinStab(simFacing, flipAt * 0.5f));
+        Assert.Equal(-simFacing, anim.DisplayFacing);
+        anim.Update(SpinStab(simFacing, MathF.Min(1f, flipAt + 0.1f)));
+        Assert.Equal(simFacing, anim.DisplayFacing);
+    }
+
+    // A clip without FlipAt never touches the drawn facing.
+    [Fact]
+    public void NonTurningClip_DrawsTheSimFacing()
+    {
+        var anim = RealAnimator();
+        Fall(anim, 5);
+        anim.Update(new CharacterAnimSample(Vector2.Zero, new Vector2(0f, 120f), -1, false,
+            "FallingState", "StabAction", 1f / 60f, actionProgress: 0.1f));
+        Assert.Equal(-1, anim.DisplayFacing);
+    }
+
+    private static CharacterAnimSample SpinStab(int facing, float progress)
+        => new(Vector2.Zero, new Vector2(0f, 120f), facing, false, "FallingState", "AirSpinStab",
+               1f / 60f, actionProgress: progress);
+
     // ─── the airborne launches (LaunchClipDriver) ────────────────────────────────────────
     // DoubleJumpingState ends long before its tuck-and-push clip does (a tapped jump lasts a
     // frame or two), so the clip must outlive the tag while the body is still airborne and

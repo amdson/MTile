@@ -174,6 +174,15 @@ public readonly struct CharacterAnimSample
         SurfacesNear = surfacesNear ?? (surfaces != null && (surfaceCount < 0 ? surfaces.Length : surfaceCount) > 0);
     }
 
+    // This sample as seen in another facing — the animator's DISPLAYED facing, which lags the
+    // sim's through a turning clip (AnimationDocument.FlipAt). Everything else is world-space
+    // and carries over unchanged.
+    public CharacterAnimSample WithFacing(int facing)
+        => new(Position, Velocity, facing, Grounded, MovementState, Action, Dt, ActionTime,
+               ActionProgress, MovementProgress, Pins, Surfaces, HasGrip, GripTarget, HasAim, AimDir,
+               Tag, SurfaceCount, SurfacesNear, LowCeiling, GroundGap, RecoveryFramesLeft, Chunks,
+               PredictAt);
+
     // How far above the body's top (px) a solid tile counts as "right over the head" for a
     // grounded, non-crouched sample's LowCeiling. Deliberately TIGHTER than the FSM's
     // CeilingChecker.ProbeSlack (20px): Standing at fold hover clears a 2-high/32px corridor

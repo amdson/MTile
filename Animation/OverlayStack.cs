@@ -76,6 +76,8 @@ public sealed class OverlayStack
     // upper-body stiffness ramp) and whether an action clip is currently bound (vs fading).
     public float        ActionWeight => _slots[0].Weight;
     public bool         ActionBound  => _slots[0].Clip != null;
+    // The bound action clip's region (meaningful only while ActionBound).
+    public AnimRegion   ActionRegion => _slots[0].Clip?.Region ?? AnimRegion.UpperBody;
     // The raw action-overlay pose (authored attack trajectory at its τ, full weight, no pose
     // smoothing) — for hosts anchoring effects to the full authored motion (the slash glow).
     public SkeletonPose ActionPose   => _slots[0].Pose;

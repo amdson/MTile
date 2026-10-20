@@ -82,6 +82,15 @@ public sealed class AnimationDocument
     // behavior. See CharacterAnimator's action-overlay resolve.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public float                   SettleShare { get; set; } = 0f;
+    // A clip that TURNS the character: the normalized time at which its authored facing
+    // flips. [0, FlipAt) is authored facing the way the character faced BEFORE the turn,
+    // [FlipAt, 1] facing the new way; place it on the clip's most symmetric pose, where the
+    // mirror can't be seen. The sim flips Facing at once (AirSpinStab.Enter); the animator
+    // keeps DRAWING the old facing until the clip reaches FlipAt (CharacterAnimator.
+    // DisplayFacing) — render-only, so rollback never sees it. Null (default, omitted on
+    // save) = no turn. Action overlays only.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public float?                  FlipAt { get; set; }
     // EXPLICIT motion intent (ClipMotion): Track when the clip authors its own body_path,
     // InPlace for a deliberately stationary clip. Null (legacy) resolves to whichever the
     // clip's data implies — a track if one is authored, else stationary.

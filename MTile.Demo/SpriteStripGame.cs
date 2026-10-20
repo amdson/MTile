@@ -208,9 +208,9 @@ public sealed class SpriteStripGame : Game
             while (panel < indices.Length && indices[panel] == i)
             {
                 _panels.Add(new Frame(animator.Pose.CloneLocal(),
-                    AttackGlowSystem.RigRoot(sample.Position, sample.Facing, animator, _take.SkeletonScale),
+                    AttackGlowSystem.RigRoot(sample.Position, animator.DisplayFacing, animator, _take.SkeletonScale),
                     _world ? Vector2.Zero : sample.Position, _take.SkeletonScale,
-                    sample.Facing == 0 ? 1 : sample.Facing,
+                    animator.DisplayFacing,
                     $"f{i} {seconds:0.00}s {animator.State.Clip}", _take.Frames[i].Terrain));
                 panel++;
             }
@@ -292,25 +292,25 @@ public sealed class SpriteStripGame : Game
             // Same ordering and APIs as CosmeticUpdateSystem: previous-pose surfaces,
             // live character sample, full solver, then the game's CoM-anchored rig root.
             int count = TerrainSurfaces.Extract(terrain, animator, sim.Player.Body.Position,
-                sim.Player.Facing, Game1.SkeletonScale, surfaces, out bool near);
+                animator.DisplayFacing, Game1.SkeletonScale, surfaces, out bool near);
             predictor.Bind(sim.Player);
             var sample = CharacterAnimSample.From(sim.Player, Simulation.FixedDt, surfaces, count, near, terrain, predictor.PredictAt);
             animator.Update(sample);
             while (panel < indices.Length && indices[panel] == f)
             {
                 _take.AddFrame(sample, terrain.CaptureDense());
-                var rigRoot = AttackGlowSystem.RigRoot(sample.Position, sample.Facing, animator, Game1.SkeletonScale);
+                var rigRoot = AttackGlowSystem.RigRoot(sample.Position, animator.DisplayFacing, animator, Game1.SkeletonScale);
                 FootDebug[] feet = null;
                 if (_contacts)
                 {
                     var world = animator.Pose.ComputeWorld(Affine2.FromTRS(rigRoot, 0,
-                        new Vector2(sample.Facing * Game1.SkeletonScale, Game1.SkeletonScale)));
+                        new Vector2(animator.DisplayFacing * Game1.SkeletonScale, Game1.SkeletonScale)));
                     feet = animator.Planner.Plans.Take(animator.Planner.FeetCount)
                         .Select(p => new FootDebug(animator.Skeleton.Bones[p.Bone].Name, p, world[p.Bone].Translation)).ToArray();
                 }
                 _panels.Add(new Frame(animator.Pose.CloneLocal(),
                     rigRoot,
-                    _world ? Vector2.Zero : sample.Position, Game1.SkeletonScale, sample.Facing,
+                    _world ? Vector2.Zero : sample.Position, Game1.SkeletonScale, animator.DisplayFacing,
                     $"f{f} p{animator.State.Phase:0.000} loop{animator.LoopBackJumps}", _take.Frames[^1].Terrain, Feet: feet));
                 string plants = string.Join(",", animator.Planner.Plans.Take(animator.Planner.FeetCount)
                     .Where(p => p.State == FootPlanState.Stance && p.HasSupport)

@@ -123,12 +123,22 @@ Pull model. Each render frame `Update(in CharacterAnimSample s)` runs, in order:
 3.5 **Compose overlays** onto `_target` (`ComposeOverlays`) — the same blend the
    solver used, so the drawn skeleton is bit-identical to the optimized one.
 3b. **Directional lean** for locomotion; **3c. land squash** on top.
-4. **Ease** the live `_pose` toward `_target`, framerate-independent. The upper-body
-   subtree (`_upperMask`: chest + arms + knife) stiffens with `ActionWeight` so a fast
-   attack swing isn't low-passed away; everything else keeps the soft locomotion rate.
+4. **Ease** the live `_pose` toward `_target`, framerate-independent. The bound attack
+   clip's region (the chest subtree for an UpperBody slash; every bone for a FullBody one
+   like the spin stab) stiffens with `ActionWeight` so a fast attack swing isn't low-passed
+   away; everything else keeps the soft locomotion rate.
 
 `Draw(ctx, worldPos, facing, …)` renders the eased pose; `facing=-1` flips X (mirror).
 **Author for facing-right** (the right arm leads forward on the +X side).
+
+**Turning clips (`FlipAt`).** The sim flips `Facing` instantly (AirSpinStab/AirTurnSlash on
+Enter), but an action clip with `FlipAt` keeps the rig DRAWN in the old facing until its τ
+reaches `FlipAt`: `CharacterAnimator.DisplayFacing` is `-Facing` before it, `Facing` after,
+and the whole Update (drivers, solve, aim) runs in it. Hosts must draw with
+`animator.DisplayFacing`, never the player's `Facing`. Author the clip facing right on both
+sides of the flip (mirror a sheet's post-turn cells before decoding), and put `FlipAt` inside
+a short hold on a symmetric pose — limbs vertical, blade straight up — so the mirror lands
+on a pose that looks the same both ways. The stab aim is suspended until the flip.
 
 ---
 
