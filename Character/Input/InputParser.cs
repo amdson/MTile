@@ -63,6 +63,10 @@ public class InputParser
     private int _lastStabEmitted      = int.MinValue;
     private int _lastCircleEmitted    = int.MinValue;
     private int _lastJumpEmitted      = int.MinValue;
+    private int _lastDashEmitted      = int.MinValue;
+    // Shift may land this many frames after Space and still complete the dash chord —
+    // pressed "together" by hand is rarely the same frame.
+    private const int DashChordGraceFrames = 3;
     // Up hold tracking (movement-side gestures UpPress / UpHold): the frame the
     // current continuous hold began (MinValue when Up is up), whether this hold has
     // emitted its UpHold, and the length + frame of the last hold to end.
@@ -97,6 +101,19 @@ public class InputParser
         {
             buffer.Issue(new ActionIntent { Type = IntentType.Jump, IssuedFrame = currentFrame });
             _lastJumpEmitted = currentFrame;
+        }
+
+        // Dash chord — Space pressed with Shift held, or Shift pressed just after
+        // Space (within DashChordGraceFrames, Space still down). Runs after the Jump
+        // edge above so _lastJumpEmitted is this frame's. Space still issues its Jump
+        // intent: on the ground the chord is a jump that dashes off the take-off.
+        bool spaceEdgeUnderShift = cur.Space && !prev.Space && cur.Shift;
+        bool shiftAfterSpace     = cur.Shift && !prev.Shift && cur.Space
+                                   && currentFrame - _lastJumpEmitted <= DashChordGraceFrames;
+        if ((spaceEdgeUnderShift || shiftAfterSpace) && currentFrame > _lastDashEmitted)
+        {
+            buffer.Issue(new ActionIntent { Type = IntentType.Dash, IssuedFrame = currentFrame });
+            _lastDashEmitted = currentFrame;
         }
 
         // Up gestures — movement-side, like Jump. UpPress on the down edge; UpHold
@@ -238,6 +255,7 @@ public class InputParser
         LastStabEmitted      = _lastStabEmitted,
         LastCircleEmitted    = _lastCircleEmitted,
         LastJumpEmitted      = _lastJumpEmitted,
+        LastDashEmitted      = _lastDashEmitted,
         UpHeldSince          = _upHeldSince,
         UpHoldEmitted        = _upHoldEmitted,
         LastUpHoldFrames     = _lastUpHoldFrames,
@@ -257,6 +275,7 @@ public class InputParser
         _lastStabEmitted      = s.LastStabEmitted;
         _lastCircleEmitted    = s.LastCircleEmitted;
         _lastJumpEmitted      = s.LastJumpEmitted;
+        _lastDashEmitted      = s.LastDashEmitted;
         _upHeldSince          = s.UpHeldSince;
         _upHoldEmitted        = s.UpHoldEmitted;
         _lastUpHoldFrames     = s.LastUpHoldFrames;
@@ -278,6 +297,7 @@ public struct InputParserState
     public int     LastStabEmitted;
     public int     LastCircleEmitted;
     public int     LastJumpEmitted;
+    public int     LastDashEmitted;
     public int     UpHeldSince;
     public bool    UpHoldEmitted;
     public int     LastUpHoldFrames;

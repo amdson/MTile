@@ -6,6 +6,9 @@ public class PlayerAbilityState
 {
     public float TimeInState;
     public bool HasDoubleJumped;
+    // DashState spent this airtime. Refreshed by PlayerCharacter.Update on ground /
+    // wall slide / ledge hang.
+    public bool HasDashed;
     public bool JumpJustPressed;
     public bool UpJustPressed;
     public bool DownJustPressed;
@@ -52,6 +55,7 @@ public class PlayerAbilityState
     {
         TimeInState     = o.TimeInState;
         HasDoubleJumped = o.HasDoubleJumped;
+        HasDashed       = o.HasDashed;
         JumpJustPressed = o.JumpJustPressed;
         UpJustPressed   = o.UpJustPressed;
         DownJustPressed = o.DownJustPressed;

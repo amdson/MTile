@@ -395,6 +395,8 @@ public class DoubleJumpingState : MovementState
         // (its Passive 45 beats DoubleJump's 40). When they're NOT pressing into a wall — e.g.
         // dropping off a platform while holding the away direction — DoubleJump is the right fire.
         // Only with nothing to launch a ground jump from — see JumpingState.HasLaunchSource.
+        // Shift+Space in the air is the dash chord (DashState), never a double jump.
+        if (ctx.Input.Shift) return false;
         return ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)
             && !abilities.HasDoubleJumped && !JumpingState.HasLaunchSource(ctx, abilities);
     }

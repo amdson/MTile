@@ -460,7 +460,8 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new DownAirSlash());      // 30/52  — air click in the bottom sextant → pogo chop
         _actionRegistry.Add(new AirSpinStab());       // 30/35  — air backward-swipe stab
         _actionRegistry.Add(new AirHammerAction());   // 30/36  — air down-swipe → two-fisted hammer
-        _actionRegistry.Add(new GuardAction());       // 35/40  — Shift held, no L/R, parry posture
+        _actionRegistry.Add(new GuardAction());       // 35/40  — Shift held on the ground, no L/R, parry posture
+        _actionRegistry.Add(new DashSlash());         // 30/53  — LMB press during a dash (Shift or not) → fast cut, long end-lag
         _actionRegistry.Add(new GuardRetaliateAction()); // 30/55 — click during GuardCharged
         _actionRegistry.Add(new BeamAction());           // 40/45 — Shift+LMB hold, sustained beam after charge
         // LobbedAreaAction (Shift+RMB charge) deactivated in COMBAT_FEEL_PLAN Phase 6
@@ -508,6 +509,7 @@ public class PlayerCharacter : IHittable
         _stateRegistry.Add(new LedgePullState(-1));
         _stateRegistry.Add(new LedgeJumpState(1));
         _stateRegistry.Add(new LedgeJumpState(-1));
+        _stateRegistry.Add(new DashState());   // Shift+Space in the air (or off a jump) → dash toward the cursor
 
         _currentState = _stateRegistry[0]; // falling
     }
@@ -686,6 +688,12 @@ public class PlayerCharacter : IHittable
         {
             _abilities.HasDoubleJumped = false;
         }
+        // The air dash comes back on anything the feet or hands can reset off —
+        // ground, a wall slide, a ledge hang — the same surfaces that refresh the
+        // double jump (those reset it inside the movement states, which must not
+        // know about actions, so the dash's refresh lives here).
+        if (IsGrounded || _currentState is WallSlidingState || _currentState is LedgeGrabState)
+            _abilities.HasDashed = false;
 
         if (!_currentState.CheckConditions(ctx, _abilities, ref _moveVars))
         {
@@ -847,7 +855,7 @@ public class PlayerCharacter : IHittable
         // Drop consumed + aged-out intents so the buffer stays small. Pruning here
         // (rather than at the top) lets a newly-issued intent be Peeked + Consumed
         // in the same frame it was emitted.
-        _intents.Prune(_frame, ctx.JumpBufferFrames, ctx.UpBufferFrames);
+        _intents.Prune(_frame, ctx.JumpBufferFrames, ctx.UpBufferFrames, ctx.DashBufferFrames);
     }
 
     public bool IsGrounded => _currentState is StandingState || _currentState is CrouchedState;

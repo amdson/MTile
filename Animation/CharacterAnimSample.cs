@@ -56,7 +56,7 @@ public readonly struct SolverSurface
 // Parkour/Mantle/ArcJump are the three CLIMB states (ClimbStates.cs), split by entry speed and
 // rise band; they share the hands overlay and grip machinery but each gets its own clip so the
 // speed vault, the flush climb and the two-block arc can be authored apart.
-public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump, LedgeJump, Dropdown, Mantle, ArcJump, StepUp, Stairs }
+public enum AnimTag { None, Parkour, WallSlide, Crouch, LedgeGrab, LedgePull, Stunned, Tumble, WallJump, DoubleJump, LedgeJump, Dropdown, Mantle, ArcJump, StepUp, Stairs, Dash }
 
 // A read-only snapshot of everything the animation layer is allowed to look at,
 // gathered once per render frame. This is the *one-way* boundary between the sim

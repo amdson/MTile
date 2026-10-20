@@ -65,6 +65,7 @@ public struct MovementVars
     public float SlideTime;         // CoveredJump, Dropdown
     public int   OpenDir;           // CoveredJump
     public int   DropDir;           // Dropdown
+    public Vector2 DashDir;         // Dash: unit direction (body → cursor), locked at Enter
     public Vector2 DropCorner;      // Dropdown: the drop edge (edgeX, platformTopY) from
                                     // TryPickDropDir — handed to LedgeGrab on a late-release
                                     // chain (the corner checkers can't see a foot-level

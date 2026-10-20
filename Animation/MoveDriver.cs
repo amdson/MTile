@@ -156,6 +156,7 @@ public static class MoveDrivers
             new TagClipDriver(AnimTag.Tumble,     AnimClip.Tumble),
             new LaunchClipDriver(AnimTag.WallJump,  AnimClip.WallJumpKick, LaunchClipDriver.WallJumpWindow),
             new LaunchClipDriver(AnimTag.DoubleJump, AnimClip.DoubleJump, LaunchClipDriver.DoubleJumpWindow),
+            new LaunchClipDriver(AnimTag.Dash,      AnimClip.Dash,       LaunchClipDriver.DashWindow),
             new LandingDriver(),
             new AirborneDriver(),
             new GroundLocomotionDriver(),
@@ -280,6 +281,7 @@ public sealed class LaunchClipDriver : IMoveDriver
     public const float DoubleJumpWindow = 0.36f;
     public const float WallJumpWindow   = 0.35f;
     public const float LedgeJumpWindow  = 0.40f;
+    public const float DashWindow       = 0.36f;
 
     private readonly AnimTag _tag; private readonly AnimClip _clip; private readonly float _window;
     public LaunchClipDriver(AnimTag tag, AnimClip clip, float window)

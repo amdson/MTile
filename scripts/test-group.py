@@ -24,7 +24,7 @@ import subprocess, sys
 # for either one. When adding a test, check its class name matches a term below; if it
 # matches nothing it runs ONLY in the periodic full sweep, which is how coverage rots.
 GROUPS = {
- "combat": ["Combat","Guard","Grab","DirectDamage","AttackRecoil","Commitment","HitResolver",
+ "combat": ["Combat","Guard","DashTests","Grab","DirectDamage","AttackRecoil","Commitment","HitResolver",
             "HitboxOcclusion","HitEviction","HitFlash","ActionOverlay","ActionAimSolver",
             "ClipBinding","DownAirSlash","AirHammer","InputParserGesture","RecoveryTransition","Laser",
             "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","SpearmanEnemy","PulserEnemy","EnemySpawner","WizardEnemy","Warlord","Prism","RayEmitter","Quillback","GauntletEnemy","Zeus","TelegraphList",

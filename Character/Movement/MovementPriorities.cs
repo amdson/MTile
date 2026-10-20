@@ -142,4 +142,12 @@ public static class MovementPriorities
     // source (ground, stair tread, or gripped corner — JumpingState.HasLaunchSource).
     public const int DoubleJumpActive  = 60;
     public const int DoubleJumpPassive = 40;
+
+    // Air dash (DashState): the Shift+Space chord. Passive 56 clears every launch's
+    // Active (Jump 50 … RunningJump/LedgeJump 55), so the chord fires out of any jump —
+    // including one frame into the ground take-off it started — and out of the holds
+    // and wall slide. Active 60 keeps everything but Grabbed (70) from stealing the
+    // burst; hits end it through its own CheckConditions, not a priority race.
+    public const int DashActive  = 60;
+    public const int DashPassive = 56;
 }

@@ -50,6 +50,7 @@ public class EnvironmentContext
     public int JumpBufferFrames => SimFrames.FromSeconds(IntentBuffer.JumpBufferSeconds, Dt);
     // Up-gesture window (UpPress / UpHold) at this step rate.
     public int UpBufferFrames => SimFrames.FromSeconds(IntentBuffer.UpBufferSeconds, Dt);
+    public int DashBufferFrames => SimFrames.FromSeconds(IntentBuffer.DashBufferSeconds, Dt);
     // The current Up hold's length in frames, counting this one (0 when up), and on
     // the frame Up comes up, the length of the hold that just ended (else 0) —
     // InputParser's, so states never re-derive holds from controller history.

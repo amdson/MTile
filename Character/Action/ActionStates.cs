@@ -1939,8 +1939,10 @@ public class AirHammerAction : ActionState
 //
 // A weak in-cone hit absorbed inside the perfect window sets Combat.GuardCharged,
 // arming GuardRetaliateAction (LMB-press while charged → fast forward slash).
-// Air-allowed per user note in the roadmap §9: yes, allow guard in air. The
-// slowdown via modifiers is identical air-vs-ground; no separate movement state.
+// Ground-only (2026-10-20, the user's call — reverses roadmap §9's "allow guard in
+// air"): the air belongs to the dash. Guard uses DashState.Airborne, where any jump
+// state counts as air, so a jump drops the stance on its first frame and a guard
+// held into Shift+Space hands straight over to the dash.
 public class GuardAction : ActionState
 {
     // Guard's stun escape: it may fire with up to this much HIT disadvantage
@@ -1959,6 +1961,7 @@ public class GuardAction : ActionState
         if (!ctx.Input.Shift)        return false;
         if (ctx.Input.Left || ctx.Input.Right) return false;  // no activation while pushing L/R
         if (ctx.Input.RightClick)    return false;            // Shift+RMB is the build gesture
+        if (DashState.Airborne(ctx, ctx.CurrentMovement)) return false;           // ground-only
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (ctx.Combat?.GuardBroken  == true) return false;   // still recovering from a break
         // ...and a brief lockout after ANY deactivation, so guard can't be mashed into
@@ -1980,6 +1983,8 @@ public class GuardAction : ActionState
         if (!ctx.Input.Shift) return false;
         if (ctx.Input.Left || ctx.Input.Right) return false;
         if (ctx.Input.RightClick) return false;
+        // Ground-only: leaving the ground (a jump, a walk off a ledge) drops the stance.
+        if (DashState.Airborne(ctx, ctx.CurrentMovement)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         // A break drops the stance the same frame it happens, so the shield indicator
         // disappears on contact instead of lingering over a guard that isn't guarding.
@@ -2051,6 +2056,70 @@ public class GuardAction : ActionState
             : (facing < 0 ? MathF.PI : 0f);
         t.Arc(body.Position - new Vector2(0f, ShieldLift), ShieldRadius, centre, ShieldHalfAngle,
               ShieldColor, segments: 8, thickness: ShieldThickness);
+    }
+}
+
+// ---------- DashSlash — click during a dash: a fast cut that rides the momentum -----
+
+// A click while DashState runs throws a quick, wide slice on top of it: 3f
+// startup, the fastest in the kit, so a dash through someone can be turned into a hit
+// on reaction. The price is the tail — RecoverySeconds of end-lag with no air dash
+// left (HasDashed stays spent), so a whiffed dash-slash leaves you drifting and open.
+// The dash is a movement state, so the slice never shortens it: the burst keeps
+// carrying the body through the swing, and part of that speed goes into the strike.
+//
+// Fires on the LMB press edge (or a buffered Click), not the release: the cut should
+// come out the moment the button goes down, and Shift — usually still held from the
+// dash chord — makes that press a Shift+LMB one, whose release can easily land after
+// the dash is over. Shift is ignored: mid-dash, the click is this move's, not Grab's
+// or BlockGrab's.
+//
+// P53 beats every other candidate for the press — Grab 48 / BlockGrab 46 / Beam 45 on
+// the Shift+LMB chord, DownAirSlash 52 and the combo steps 50 on the click; the
+// precondition only passes during a dash, so it never competes with the ordinary air
+// slashes. Like any opener it fires from neutral / a finished recovery.
+public class DashSlash : SlashLikeAction
+{
+    private const float RecoverySeconds = 0.55f;   // 33f — between AirSlash2 (28f) and GroundSlash3 (36f)
+
+    protected override float Duration            => 0.18f;
+    protected override float HurtboxStartSeconds  => 3f / 60f;
+    protected override float HurtboxActiveSeconds => 4f / 60f;
+    protected override float ArcRadiusScale      => 1.15f;
+    protected override float SweepAngleDeg       => 120f;
+    protected override float SweepDirection      => +1f;
+    protected override float KnockbackMagnitude  => 180f;
+    protected override float StrikeSpeed         => 240f;
+    // Mid-burst the body is doing 360 px/s; at full share it would out-launch the stab.
+    protected override float StrikeBodyVelocityShare => 0.25f;
+    protected override Color SlashColor          => Color.Aquamarine;
+    protected override bool  RequireGround       => false;
+    protected override bool  RequireAir          => false;
+
+    public override int PassivePriority => 53;
+
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
+    {
+        if (ctx.CurrentMovement is not DashState) return false;
+        if (!EntryOk(ctx)) return false;
+        if (!ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out _)
+            && !ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (ctx.Combat?.BlocksAttack == true) return false;
+        return true;
+    }
+
+    // Spend the press too (base.Enter takes the Click), so the held button can't
+    // re-latch a wind-up or a Shift+LMB chord off it. The release's Click arrives
+    // within ClickMaxHoldSeconds and ages out of the lookback long before the tail ends.
+    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        base.Enter(ctx, ab, ref vars);
+        ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
+    }
+
+    protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
+    {
+        c.StampRecoveryForSeconds(RecoverySeconds, f, dt);
     }
 }
 

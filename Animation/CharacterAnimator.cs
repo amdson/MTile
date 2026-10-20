@@ -15,7 +15,7 @@ namespace MTile;
 public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, 
 DuckUnder, Jump, Fall, Parkour, Run, WallSlide, Hang, Hitstun, 
 Tumble, WallJumpKick, DoubleJump, RunTurn, Land, LedgeJump, 
-Dropdown, Mantle, ArcJump, LedgePull, StepUp, Stairs }
+Dropdown, Mantle, ArcJump, LedgePull, StepUp, Stairs, Dash }
 
 // The animation-side state, deliberately separate from any character/sim state.
 // The animator owns and evolves this; it is the "previous state" the animator is
