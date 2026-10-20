@@ -26,6 +26,8 @@ public sealed class CosmeticUpdateSystem
     public FrameProfiler Profiler;
     // Entity art (sheets etc.) — null leaves every entity on its procedural sprite.
     public EntityArtSystem Art;
+    // Movement/attack particles (GameConfig.MotionParticles). Null → legacy landing puff.
+    public MotionFxSystem MotionFx;
     public int AnimSlot = -1;
 
     // Tracked frame-to-frame so the landing puff fires exactly once on the
@@ -150,12 +152,23 @@ public sealed class CosmeticUpdateSystem
             }
         }
 
-        // Air→ground transition: small dust puff at the local player's feet.
-        bool grounded = localPlayer.IsGrounded;
-        if (grounded && !_wasGroundedLastFrame)
-            Effects.Puff(_particles, localPlayer.Body.Position + new Vector2(0f, PlayerCharacter.Radius * 0.8f),
-                new Color(180, 160, 120));
-        _wasGroundedLastFrame = grounded;
+        // Movement/attack particles for every player (jump dust, air-jump ring, landing,
+        // speed lines, dash, blade sparks …). Ticks on SIM time so a paused or slowed sim
+        // doesn't keep spraying level-triggered effects at render rate. Off → the legacy
+        // local-player landing puff only.
+        if (MotionFx != null && config.MotionParticles)
+        {
+            if (simDt > 0f) MotionFx.Update(sim, simDt);
+        }
+        else
+        {
+            // Air→ground transition: small dust puff at the local player's feet.
+            bool grounded = localPlayer.IsGrounded;
+            if (grounded && !_wasGroundedLastFrame)
+                Effects.Puff(_particles, localPlayer.Body.Position + new Vector2(0f, PlayerCharacter.Radius * 0.8f),
+                    new Color(180, 160, 120));
+            _wasGroundedLastFrame = grounded;
+        }
 
         _particles.Update(dt);
 

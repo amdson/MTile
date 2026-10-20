@@ -107,6 +107,7 @@ public class Game1 : Game
     // entities this frame; cleared and refilled in Draw, rendered by TelegraphRenderer.
     private readonly TelegraphList _telegraphs = new();
     private CosmeticUpdateSystem _cosmetics;
+    private MotionFxSystem _motionFx;
 
     private FileSystemWatcher _movementConfigWatcher;
     private FileSystemWatcher _animConfigWatcher;
@@ -518,6 +519,7 @@ public class Game1 : Game
         // time. The log drains once per rendered frame, below.
         _events.Reset();   // fresh sim ⇒ frame counter restarts ⇒ old keys are stale
         _sparkedHitIds.Clear(); _sparkedOrder.Clear();   // HitIds restart with the sim
+        _motionFx?.Clear();
         _vfx?.Clear();
         _elements?.Clear();
         _audio.StopAll();  // and no voice should survive into a different world
@@ -577,12 +579,19 @@ public class Game1 : Game
                         TilePalette.BaseColor((TileType)(e.Payload & 0xFF)), e.Payload >> 8);
                     break;
                 case PresentationKind.TerrainStrike:
-                    if (_vfx != null && _sparkedHitIds.Add(e.Id.A))
+                    if (_sparkedHitIds.Add(e.Id.A))
                     {
                         _sparkedOrder.Enqueue(e.Id.A);
                         if (_sparkedOrder.Count > 64) _sparkedHitIds.Remove(_sparkedOrder.Dequeue());
                         float ang = e.Payload / 1000f;
-                        _vfx.Spawn("terrain_strike", e.Position, new Vector2(MathF.Cos(ang), MathF.Sin(ang)));
+                        var into = new Vector2(MathF.Cos(ang), MathF.Sin(ang));
+                        _vfx?.Spawn("terrain_strike", e.Position, into);
+                        // Sparks kick back off the surface, out against the strike.
+                        if (_config.MotionParticles)
+                        {
+                            Effects.HitSpark(_particles, e.Position, -into, count: 5);
+                            Effects.Flash(_particles, e.Position, 14f, new Color(255, 220, 160), 0.06f);
+                        }
                     }
                     break;
                 case PresentationKind.ChargedBlast:
@@ -823,6 +832,9 @@ public class Game1 : Game
             Profiler = _prof, AnimSlot = _sAnim,
         };
         _cosmetics.Art = new EntityArtSystem(GraphicsDevice);
+        _particles.SoftDot = ParticleSystem.CreateSoftDot(GraphicsDevice);
+        _motionFx = new MotionFxSystem(_particles, _animator, _secondaryAnimators, SkeletonScale);
+        _cosmetics.MotionFx = _motionFx;
 
         // Audio. The bank is optional: with no clips built every kind resolves to null
         // and the mixer no-ops, so the game runs exactly as it does today.

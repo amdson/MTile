@@ -82,6 +82,16 @@ public sealed class DrawContext
         }
     }
 
+    // A square texture centred on `center`, scaled to `diameter` px — the soft-dot
+    // particle draw (ParticleSystem.SoftDot) and anything else that stamps a
+    // pre-baked round sprite.
+    public void Stamp(Texture2D tex, Vector2 center, float diameter, Color color, float rotation = 0f)
+    {
+        SpriteBatch.Draw(tex, center, null, color, rotation,
+            new Vector2(tex.Width * 0.5f, tex.Height * 0.5f), diameter / tex.Width,
+            SpriteEffects.None, 0f);
+    }
+
     // "Filled disc" — actually a rotated square of the same diameter. We don't have
     // a triangle renderer; at particle sizes (≤8 px) a square reads as a chunky disc
     // and stays cheap. For larger shapes use Ring instead.
