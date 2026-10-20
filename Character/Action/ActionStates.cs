@@ -2478,6 +2478,11 @@ public class BlockPaintAction : ActionState
     // short sustained sweep the damped ball genuinely carries this speed, unlike at the
     // solid→air crossing where it always lags near zero.
     private const float EruptReleaseSpeed = 220f;
+    // Grace before a press inside terrain starts charging. A paint stroke often begins
+    // with the cursor just inside the ground; sweeping out within this window demotes the
+    // hold to an ordinary stroke without banking any charge first. Skipped when a banked
+    // charge already locks the hold into charging (ChargeLocksPaint).
+    internal const float ChargeDelay = 0.1f;
 
     public override int ActivePriority  => 8;
     public override int PassivePriority => 10;
@@ -2535,12 +2540,16 @@ public class BlockPaintAction : ActionState
 
         if (!vars.ChargeGesture) { Paint(ctx, ab, vars.BallPos, vars.BallVel.Length()); return; }
 
-        if (BlockEruptionHelpers.IsCursorInSolid(ctx) || ab.Meters.ChargeLocksPaint)
+        bool locked = ab.Meters.ChargeLocksPaint;
+        if (BlockEruptionHelpers.IsCursorInSolid(ctx) || locked)
         {
             // Charging: BuildMeters converts reservoir into eruption charge this frame.
             // Out in open air too, once there's a charge worth protecting — the meter
             // keeps filling instead of the hold demoting into a stroke that spends it.
-            ab.Meters.ChargingRequested = true;
+            // Inside the ChargeDelay grace nothing is banked yet, so leaving the ground
+            // still falls through to the demotion below.
+            if (locked || vars.TimeInState >= ChargeDelay - 1e-4f)
+                ab.Meters.ChargingRequested = true;
         }
         else
         {
