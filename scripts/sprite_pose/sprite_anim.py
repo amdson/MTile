@@ -556,6 +556,9 @@ def cmd_assemble(a):
     n = len(dec)
     ref = ref_pose(cfg, 'from')
     clamp_limits(dec, rig)
+    if not a.no_smooth:
+        dec = smooth_decoded(dec)
+        print('smoothed: rotations (light), Stretch / root / joint positions (1-2-1)')
     if a.key_tol > 0:
         before = len(dec)
         dec = reduce_keys(dec, a.key_tol)
@@ -659,6 +662,48 @@ def cmd_assemble(a):
     save_run(a.run, cfg)
     print(f'assembled {n} keys -> {path} (+ SkeletonDrafts/{cfg["rig"]}/)')
     render_playback(a.run, clip, rig, prof)
+
+
+def smooth_series(vals, w, wrap_angles=False):
+    """Symmetric 3-tap smoothing (w = centre weight; the two neighbours share 1 - w), endpoints
+    kept. Angles are unwrapped first so a +-pi crossing can't average to the wrong side."""
+    if len(vals) < 3:
+        return list(vals)
+    v = np.unwrap(np.asarray(vals, float)) if wrap_angles else np.asarray(vals, float)
+    out = v.copy()
+    side = (1 - w) / 2
+    out[1:-1] = w * v[1:-1] + side * (v[:-2] + v[2:])
+    return [F.wrap(x) if wrap_angles else float(x) for x in out]
+
+
+def smooth_decoded(dec, rot_w=0.7, other_w=0.5):
+    """Temporal smoothing of the per-frame decode before keys are written: each frame is
+    decoded on its own, so rotations, Stretch and the root carry a few px/deg of jitter the
+    drawing doesn't have - visible as jerk once keyed. Rotations get a light pass (fast
+    strikes keep their snap); Stretch, the root and the scale a stronger one."""
+    if len(dec) < 3:
+        return dec
+    for b in dec[0]['pose']:
+        sm = smooth_series([r['pose'][b] for r in dec], rot_w, wrap_angles=True)
+        for r, v in zip(dec, sm):
+            r['pose'][b] = v
+    for b in dec[0].get('stretch', {}):
+        sm = smooth_series([r['stretch'].get(b, 1.0) for r in dec], other_w)
+        for r, v in zip(dec, sm):
+            r['stretch'][b] = v
+    kn = [r.get('knife') for r in dec]
+    if all(k is not None for k in kn):
+        for r, v in zip(dec, smooth_series(kn, rot_w, wrap_angles=True)):
+            r['knife'] = v
+    for axis in (0, 1):
+        for r, v in zip(dec, smooth_series([r['root_px'][axis] for r in dec], other_w)):
+            r['root_px'][axis] = v
+    if 'tips_px' in dec[0]:
+        for b in dec[0]['tips_px']:
+            for axis in (0, 1):
+                for r, v in zip(dec, smooth_series([r['tips_px'][b][axis] for r in dec], other_w)):
+                    r['tips_px'][b][axis] = v
+    return dec
 
 
 def body_path(dec, rig):
@@ -1001,6 +1046,7 @@ def main():
     p.add_argument('--keep', help='frame range to keep, e.g. 4-13 (trim to the strike)')
     p.add_argument('--key-tol', type=float, default=0.0, help='key reduction tolerance, rad (default 0 = keep every frame)')
     p.add_argument('--no-motion', action='store_true', help='skip the body_path track (stationary clip)')
+    p.add_argument('--no-smooth', action='store_true', help='skip temporal smoothing of the decoded frames')
     p.add_argument('--no-ground', action='store_true', help='skip the per-key com anchor (feet-on-floor)')
     p = sub.add_parser('verify'); p.add_argument('--run', required=True)
     p = sub.add_parser('report'); p.add_argument('--run', required=True)
