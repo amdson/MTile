@@ -1,0 +1,107 @@
+{
+ "rig": "biped",
+ "root": "hip",
+ "head": "head",
+ "drawn": [
+  "chest",
+  "head",
+  "arm_l_upper",
+  "arm_l_lower",
+  "arm_r_upper",
+  "arm_r_lower",
+  "leg_l_upper",
+  "leg_l_lower",
+  "leg_r_upper",
+  "leg_r_lower"
+ ],
+ "colors": {
+  "chest": [
+   40,
+   40,
+   40
+  ],
+  "head": [
+   40,
+   40,
+   40
+  ],
+  "arm_l_upper": [
+   30,
+   70,
+   230
+  ],
+  "arm_l_lower": [
+   0,
+   200,
+   230
+  ],
+  "arm_r_upper": [
+   230,
+   30,
+   30
+  ],
+  "arm_r_lower": [
+   255,
+   150,
+   0
+  ],
+  "leg_l_upper": [
+   0,
+   170,
+   60
+  ],
+  "leg_l_lower": [
+   120,
+   230,
+   40
+  ],
+  "leg_r_upper": [
+   220,
+   0,
+   200
+  ],
+  "leg_r_lower": [
+   245,
+   215,
+   0
+  ]
+ },
+ "labels": {
+  "chest": "torso",
+  "head": "head",
+  "arm_l_upper": "far upper arm",
+  "arm_l_lower": "far forearm",
+  "arm_r_upper": "near upper arm",
+  "arm_r_lower": "near forearm",
+  "leg_l_upper": "far thigh",
+  "leg_l_lower": "far shin",
+  "leg_r_upper": "near thigh",
+  "leg_r_lower": "near shin"
+ },
+ "sides": {
+  "chest": "core",
+  "head": "core",
+  "arm_l_upper": "far",
+  "arm_l_lower": "far",
+  "arm_r_upper": "near",
+  "arm_r_lower": "near",
+  "leg_l_upper": "far",
+  "leg_l_lower": "far",
+  "leg_r_upper": "near",
+  "leg_r_lower": "near"
+ },
+ "undrawn": {
+  "hip": "hold"
+ },
+ "weapon": {
+  "parent": "arm_r_lower",
+  "color": [
+   120,
+   0,
+   255
+  ],
+  "length": 14.0,
+  "bone": "knife"
+ },
+ "min_draw": 4.0
+}
