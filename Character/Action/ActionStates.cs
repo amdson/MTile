@@ -1705,6 +1705,11 @@ public class StabAction : ActionState
 //   • one rotated rectangle ~1.3× the stab's reach and about a third of its width,
 //     full length for the whole active window (a whip lands at the tip, it doesn't
 //     sweep out from the body the way a thrust does);
+//   • a sweet spot at the tip (the last SweetLength), 2× damage and 3× launch. Both
+//     boxes share one HitId and the sweet spot is published FIRST: CombatSystem
+//     resolves boxes in publish order and dedupes entities per (HitId, target), so a
+//     victim at the tip takes the sweet hit alone, never tip + line stacked (the same
+//     arrangement as AirHammerAction's core);
 //   • aim is the swipe's, clamped to ±MaxAimAngle of horizontal at commit and fixed
 //     after — limited adjustment, no mid-move homing toward the cursor;
 //   • launch well below the stab (StabAction stays the kit's launcher), no dive boost,
@@ -1732,6 +1737,13 @@ public class AirWhipKick : ActionState
     private const float KnockbackMagnitude    = 600f;
     private const float Restitution           = 0.5f;
     private const float MinLaunch             = 100f;
+    // Sweet spot: the last SweetLength of the line (the foot), a little fatter than the
+    // shin so it's hittable, 2× damage (body AND tile) and 3× launch. 3 × 340 out-launches
+    // the stab's 650 — the reward for spacing a fast poke perfectly.
+    private const float SweetLength           = PlayerCharacter.Radius * 1.3f;
+    private const float SweetHalfWidth        = PlayerCharacter.Radius * 0.35f;
+    private const float SweetDamageMult       = 2f;
+    private const float SweetKnockbackMult    = 3f;
     // Endlag matches the stab it replaced: the same tail after the active window
     // (≈0.3 s) and the same recovery stamp, with the stab's cheap wind-up cancel.
     private const float RecoverySeconds       = 0.4f;
@@ -1828,21 +1840,33 @@ public class AirWhipKick : ActionState
             vars.TimeInState > HurtboxStartTime + HurtboxActiveDuration ||
             ctx.Hitboxes == null) return;
 
+        // Sweet spot first — see the class comment on publish order.
+        PublishLine(ctx, vars, Reach - SweetLength, SweetLength, SweetHalfWidth,
+                    SweetDamageMult, SweetKnockbackMult, Color.White);
+        PublishLine(ctx, vars, 0f, Reach, HalfWidth, 1f, 1f, KickColor);
+    }
+
+    // One rotated rectangle along StabDir, spanning [start, start + length] px from the
+    // body. Damage and launch scale by the given multipliers.
+    private static void PublishLine(EnvironmentContext ctx, in ActionVars vars,
+                                    float start, float length, float halfWidth,
+                                    float damageMult, float knockbackMult, Color color)
+    {
         float rotation = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
-        var poly   = Polygon.CreateRectangle(Reach, HalfWidth * 2f);
-        var center = ctx.Body.Position + vars.StabDir * (Reach * 0.5f);
+        var poly   = Polygon.CreateRectangle(length, halfWidth * 2f);
+        var center = ctx.Body.Position + vars.StabDir * (start + length * 0.5f);
         ctx.Hitboxes.Publish(new Hitbox(
-            poly.GetBoundingBox(center, rotation), vars.HitId, TileDamagePerFrame,
+            poly.GetBoundingBox(center, rotation), vars.HitId, TileDamagePerFrame * damageMult,
             vars.StabDir * KnockbackMagnitude,
-            ctx.Faction, ctx.SelfId, KickColor,
-            bodyDamage: BodyDamage,
+            ctx.Faction, ctx.SelfId, color,
+            bodyDamage: BodyDamage * damageMult,
             shape: poly, shapePos: center, shapeRotation: rotation,
             mode: KnockbackMode.Collision,
             strikeDir: vars.StabDir,
-            strikeVelocity: ctx.Body.Velocity + vars.StabDir * StrikeSpeed,
+            strikeVelocity: ctx.Body.Velocity + vars.StabDir * (StrikeSpeed * knockbackMult),
             strikeMass: ctx.Mass,
             restitution: Restitution,
-            minLaunch: MinLaunch,
+            minLaunch: MinLaunch * knockbackMult,
             origin: ctx.Body.Position));
     }
 

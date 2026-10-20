@@ -76,6 +76,80 @@ public class AirWhipKickTests
         Assert.True(o.Stab);
     }
 
+    // ─── sweet spot ───────────────────────────────────────────────────────────────────
+    // A level backward swipe; the kick fires toward -X (the player spawns facing +X).
+    private static InputScript LevelKick() =>
+        Swipe(AirStart + new Vector2(-40f, 0f), AirStart + new Vector2(-300f, 0f));
+
+    private const int Frames = 40;
+    private const int StrikeLag = 7;   // frames from entering the kick to mid-active
+
+    // The stab gesture's hold changes the attacker's fall, so a free-falling victim drifts
+    // relative to it. Measure that drift on a dummy out of reach, then pre-compensate.
+    private static Vector2 DriftAtStrike()
+    {
+        var dummyStart = AirStart + new Vector2(300f, 0f);
+        int entered = -1;
+        Vector2 drift = Vector2.Zero;
+        SimRunner.RunMulti(new SimConfigMulti
+        {
+            Terrain = Shaft(), Frames = Frames, Dt = Dt, Gravity = new Vector2(0f, 600f),
+            Players = new[]
+            {
+                new SimPlayer { StartPosition = AirStart, Script = LevelKick() },
+                new SimPlayer { StartPosition = dummyStart, Faction = Faction.Neutral,
+                                Script = InputScript.Always(default) },
+            },
+        }, onFrame: (f, ps) =>
+        {
+            if (entered < 0 && ps[0].CurrentActionName == nameof(AirWhipKick)) entered = f;
+            if (entered >= 0 && f == entered + StrikeLag)
+                drift = (ps[0].Body.Position - AirStart) - (ps[1].Body.Position - dummyStart);
+        });
+        Assert.True(entered >= 0, "the level backward swipe never entered the kick");
+        return drift;
+    }
+
+    private static (float hpLost, float launch) StrikeVictimAt(Vector2 offset, Vector2 drift)
+    {
+        float hp0 = float.NaN, hpMin = float.MaxValue, launch = 0f;
+        Vector2 prevV = Vector2.Zero;
+        SimRunner.RunMulti(new SimConfigMulti
+        {
+            Terrain = Shaft(), Frames = Frames, Dt = Dt, Gravity = new Vector2(0f, 600f),
+            Players = new[]
+            {
+                new SimPlayer { StartPosition = AirStart, Script = LevelKick() },
+                new SimPlayer { StartPosition = AirStart + offset + drift, Faction = Faction.Neutral,
+                                Script = InputScript.Always(default) },
+            },
+        }, onFrame: (f, ps) =>
+        {
+            if (float.IsNaN(hp0)) hp0 = ps[1].Health;
+            hpMin  = MathF.Min(hpMin, ps[1].Health);
+            launch = MathF.Max(launch, (ps[1].Body.Velocity - prevV).Length());
+            prevV  = ps[1].Body.Velocity;
+        });
+        return (hp0 - hpMin, launch);
+    }
+
+    [Fact]
+    public void TipSweetSpot_DoublesDamage_WithoutStacking_AndLaunchesHarder()
+    {
+        // The line runs 0..5.2R from the body, the sweet spot its last 1.3R (3.9R..5.2R).
+        // A victim's hurtbox is ≈0.49R in half-width: centered at 4.6R it sits in the tip,
+        // at 2.2R it is clear of it (1.7R..2.7R) but on the line.
+        const float R = PlayerCharacter.Radius;
+        var drift = DriftAtStrike();
+        var tip   = StrikeVictimAt(new Vector2(-4.6f * R, 0f), drift);
+        var line  = StrikeVictimAt(new Vector2(-2.2f * R, 0f), drift);
+
+        Assert.Equal(0.5f, line.hpLost, 3);
+        Assert.Equal(1.0f, tip.hpLost, 3);
+        Assert.True(tip.launch > 2f * line.launch,
+            $"sweet-spot launch {tip.launch} should far exceed the line's {line.launch}");
+    }
+
     [Fact]
     public void SteepBackwardSwipe_IsClampedToTheAimCone()
     {
