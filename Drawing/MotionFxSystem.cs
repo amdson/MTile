@@ -136,7 +136,10 @@ public sealed class MotionFxSystem
         {
             float s = MathHelper.Clamp((speed - SpeedLineMin) / (SpeedLineFull - SpeedLineMin), 0f, 1f);
             int n = Tick(ref t.SpeedAcc, 20f + 60f * s, dt);
-            if (n > 0) Effects.SpeedLines(_particles, pos, vel, PlayerCharacter.Radius, s, n);
+            // Centred on the drawn figure (midway head → feet), not Body.Position, which
+            // sits a radius below the head — lines spread about it rode above the head.
+            var mid = new Vector2(pos.X, (pos.Y - PlayerCharacter.Radius + feet.Y) * 0.5f);
+            if (n > 0) Effects.SpeedLines(_particles, mid, vel, PlayerCharacter.Radius, s, n);
         }
 
         // ── Dash ──────────────────────────────────────────────────────────────
