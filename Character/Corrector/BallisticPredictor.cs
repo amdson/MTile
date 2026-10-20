@@ -141,6 +141,7 @@ public static class BallisticPredictor
             // Gravity-scale modifier as a counter-force (PlayerCharacter.Update's shape).
             if (modifiers.GravityScale != 1f)
                 force += gravity * (modifiers.GravityScale - 1f);
+            force.Y += PlayerCharacter.FallDrag(vel.Y, gravity.Y, modifiers.FallTerminalSpeed);
 
             vel += force * dt;
             vel += gravity * dt;

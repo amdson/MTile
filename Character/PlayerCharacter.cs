@@ -71,6 +71,14 @@ public class PlayerCharacter : IHittable
     // player instead of the entity factory.
     public Vector2 Gravity = new(0f, 600f);
 
+    // MovementModifiers.FallTerminalSpeed's drag — the vertical force that settles a
+    // fall toward vTerm. Zero while rising or when off. Shared with BallisticPredictor.
+    public static float FallDrag(float velY, float gravityY, float vTerm)
+    {
+        if (velY <= 0f || float.IsPositiveInfinity(vTerm) || vTerm <= 0f) return 0f;
+        return -gravityY / vTerm * velY;
+    }
+
     // Combat faction. Default Player; settable so a second PlayerCharacter spawned
     // for two-player combat (Game1.AddSecondaryPlayer / SimRunner.RunMulti) can be
     // re-tagged Enemy/Neutral and become a valid target through CombatSystem's
@@ -801,6 +809,7 @@ public class PlayerCharacter : IHittable
         // experiences only 30% of gravity → floaty mid-air feel during charge.
         if (ctx.Modifiers.GravityScale != 1f)
             Body.AppliedForce += Gravity * (ctx.Modifiers.GravityScale - 1f);
+        Body.AppliedForce.Y += FallDrag(Body.Velocity.Y, Gravity.Y, ctx.Modifiers.FallTerminalSpeed);
 
         if (!hitstopFrozen) _currentAction.Update(ctx, _abilities, ref _actionVars);
         // A frozen action publishes no hitbox, which would otherwise read to CombatSystem

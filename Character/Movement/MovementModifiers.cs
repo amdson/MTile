@@ -20,6 +20,14 @@ public struct MovementModifiers
     // Applied by PlayerCharacter.Update via a counter-force at the very end of the frame,
     // identical in shape to what Entity.PreStep does for entities.
     public float GravityScale;
+    // Terminal fall speed (px/s, absolute — NOT a scalar like the fields above).
+    // While falling (Velocity.Y > 0) PlayerCharacter.Update adds a linear drag
+    // F = -k·vy with k = g / FallTerminalSpeed, so fall speed settles toward it
+    // exponentially (time constant 1/k). Rising is untouched — unlike a gravity
+    // cut, it can't stretch the ascent into a slow upward drift — and the force
+    // is zero at the apex, so it fades in without a hitch. Stack with MathF.Min;
+    // +∞ = off.
+    public float FallTerminalSpeed;
     // When true, the walk/air speed caps stop BRAKING velocity that already exceeds
     // them — input can still add speed up to the cap, but externally-applied velocity
     // (knockback, throws) is left to drag/friction instead of being clipped back to
@@ -37,6 +45,7 @@ public struct MovementModifiers
         MaxAirSpeed    = 1f,
         AirDrag        = 1f,
         GravityScale   = 1f,
+        FallTerminalSpeed = float.PositiveInfinity,
         PreserveExternalVelocity = false,
     };
 }
