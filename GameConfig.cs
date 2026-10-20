@@ -114,6 +114,11 @@ public sealed class GameConfig
     // against busy terrain. Set false to disable; toggle independently of debug overlays.
     public bool MouseTrail { get; set; } = true;
 
+    // Cosmetic: movement/attack particles (Drawing/MotionFxSystem) — jump dust, air-jump
+    // ring, landing/skid/wall-slide dust, speed lines, dash burst, launch smoke, charge
+    // motes, blade sparks. False → only the legacy landing puff. Render-only.
+    public bool MotionParticles { get; set; } = true;
+
     // Dev preview for the new PrimitiveBatch layer (gradients / stroked Bezier curves /
     // parametric surfaces). Draws a demo card in world space above the player. Render-only.
     public bool DebugDrawPrimitiveDemo { get; set; } = false;

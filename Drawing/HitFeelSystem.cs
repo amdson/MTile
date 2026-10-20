@@ -82,7 +82,7 @@ public sealed class HitFeelSystem
         var pos = p.Body.Position + dir * PlayerCharacter.Radius;
 
         _camera.Shake(c.LastParryCharged ? 0.14f : 0.08f);
-        Effects.GuardSpark(_particles, pos, dir, c.LastParryCharged);
+        Effects.ShieldHit(_particles, pos, dir, c.LastParryCharged);
         Vfx?.Spawn("parry", pos, dir, c.LastParryCharged ? 1.3f : 1f,
                    c.LastParryCharged ? Color.Cyan : null);
     }
@@ -119,7 +119,17 @@ public sealed class HitFeelSystem
         if (dir.LengthSquared() > 1e-4f)
         {
             Effects.KnockbackCue(_particles, pos, dir, t);
-            Effects.HitSpark(_particles, pos, dir, count: 3 + (int)(5f * t));
+            // Contact sits on the struck side of the body — `dir` points away from the
+            // attacker, so step back against it.
+            var contact = pos - Vector2.Normalize(dir) * (PlayerCharacter.Radius * 0.6f);
+            if (hitstopSeconds > 0f)
+                // Strong hit (earned hitstop): flash + shockwave + radial sparks + embers.
+                Effects.HeavyHit(_particles, contact, dir, t);
+            else
+            {
+                Effects.HitSpark(_particles, contact, dir, count: 4 + (int)(6f * t));
+                Effects.Flash(_particles, contact, 16f + 14f * t, new Color(255, 235, 190), 0.07f);
+            }
         }
         Vfx?.Spawn("body_hit", pos, dir, 0.8f + 0.4f * t);
     }

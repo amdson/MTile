@@ -242,6 +242,362 @@ public static class Effects
         }
     }
 
+    // ── Movement ────────────────────────────────────────────────────────────────
+    // Soft-cloud presets use ParticleKind.Glow (ParticleSystem.SoftDot); opaque colors
+    // read as dust, alpha-0 colors add light. Movement presets are fired by
+    // MotionFxSystem off rendered-frame edges/levels — see its header.
+
+    public static readonly Color DustColor = new(200, 185, 150);
+    public static readonly Color AirColor  = new(235, 245, 255);
+
+    // One soft cloud puff: grows while it drifts and decelerates, fades out.
+    private static void Cloud(ParticleSystem ps, Vector2 pos, Vector2 vel, Color color,
+                              float size, float life, float drag = 3f)
+    {
+        ref var p = ref ps.Spawn();
+        p.Position     = pos;
+        p.Velocity     = vel;
+        p.Acceleration = -vel * drag + new Vector2(0f, -8f);
+        p.MaxLife      = life * (0.8f + R() * 0.4f);
+        p.Life         = p.MaxLife;
+        p.StartColor   = color * 0.85f;
+        p.EndColor     = color * 0f;
+        p.StartSize    = size * (0.8f + R() * 0.4f);
+        p.EndSize      = p.StartSize * 2.2f;
+        p.Rotation     = R() * MathHelper.TwoPi;
+        p.Kind         = ParticleKind.Glow;
+    }
+
+    // Ground take-off: dust kicked out along the floor both ways, biased against the
+    // launch's horizontal travel (the feet push back), plus a little lift under the body.
+    public static void JumpDust(ParticleSystem ps, Vector2 feet, float vx, float scale = 1f)
+    {
+        int count = (int)(6 * scale) + 2;
+        float back = -MathF.Sign(vx) * MathF.Min(MathF.Abs(vx) / 200f, 1f);
+        for (int i = 0; i < count; i++)
+        {
+            float side = i % 2 == 0 ? -1f : 1f;
+            float spd  = (40f + R() * 50f) * scale * (1f + 0.6f * side * back);
+            Cloud(ps, feet + new Vector2(Rs() * 4f, -1f), new Vector2(side * spd, -6f - R() * 14f),
+                  DustColor, 6f * scale, 0.45f);
+        }
+        Cloud(ps, feet + new Vector2(0f, -3f), new Vector2(0f, -20f), DustColor, 9f * scale, 0.35f);
+    }
+
+    // Mid-air jump: a flat ring of air puffs blown out horizontally under the feet
+    // (the "kicked off nothing" read), with a faint ring outline for definition.
+    public static void AirJumpRing(ParticleSystem ps, Vector2 feet, float vx)
+    {
+        const int Count = 12;
+        for (int i = 0; i < Count; i++)
+        {
+            float a   = i / (float)Count * MathHelper.TwoPi + R() * 0.3f;
+            var   dir = new Vector2(MathF.Cos(a), MathF.Sin(a) * 0.3f);
+            Cloud(ps, feet + dir * 4f, dir * (90f + R() * 30f) + new Vector2(-vx * 0.15f, 30f),
+                  AirColor, 7f, 0.38f, drag: 4.5f);
+        }
+        ref var r = ref ps.Spawn();
+        r.Position     = feet;
+        r.Velocity     = new Vector2(-vx * 0.1f, 40f);
+        r.MaxLife      = r.Life = 0.22f;
+        r.StartColor   = new Color(255, 255, 255, 0) * 0.9f;
+        r.EndColor     = Color.Transparent;
+        r.StartSize    = 10f;
+        r.EndSize      = 30f;
+        r.Thickness    = 2f;
+        r.Kind         = ParticleKind.Ring;
+    }
+
+    // Push off a wall: puffs fanned along the wall face (up and down) and a few
+    // thrown out from it. `wallDir` is the side the wall is on (+1 = right).
+    public static void WallJumpPuff(ParticleSystem ps, Vector2 contact, int wallDir)
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            float along = Rs();
+            var v = new Vector2(-wallDir * (15f + R() * 40f), along * 80f);
+            Cloud(ps, contact + new Vector2(0f, along * 6f), v, DustColor, 6f, 0.4f);
+        }
+    }
+
+    // Landing: dust splashed sideways along the floor, scaled by impact speed.
+    // `impact` is the downward speed at touchdown (px/s).
+    public static void LandingDust(ParticleSystem ps, Vector2 feet, float impact)
+    {
+        float s = MathHelper.Clamp((impact - 150f) / 450f, 0f, 1f);
+        int count = 4 + (int)(10 * s);
+        for (int i = 0; i < count; i++)
+        {
+            float side = i % 2 == 0 ? -1f : 1f;
+            Cloud(ps, feet + new Vector2(Rs() * 5f, -1f),
+                  new Vector2(side * (30f + R() * 60f) * (0.6f + s), -4f - R() * 12f),
+                  DustColor, 5f + 4f * s, 0.4f + 0.2f * s);
+        }
+        if (s > 0.5f) Debris(ps, feet, DustColor, (int)(6 * s));
+    }
+
+    // Small grit chips popped up off the floor (hard landings, skids).
+    private static void Debris(ParticleSystem ps, Vector2 pos, Color color, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            p.Position        = pos + new Vector2(Rs() * 8f, -1f);
+            p.Velocity        = new Vector2(Rs() * 70f, -60f - R() * 90f);
+            p.Acceleration    = new Vector2(0f, 500f);
+            p.MaxLife         = p.Life = 0.3f + R() * 0.2f;
+            p.StartColor      = color;
+            p.EndColor        = color * 0f;
+            p.StartSize       = 2f;
+            p.EndSize         = 1f;
+            p.AngularVelocity = Rs() * 10f;
+            p.Kind            = ParticleKind.Square;
+        }
+    }
+
+    // Ground skid on a hard reversal/stop: dust thrown forward along the travel.
+    public static void SkidDust(ParticleSystem ps, Vector2 feet, float vx)
+    {
+        Cloud(ps, feet + new Vector2(Rs() * 3f, -1f),
+              new Vector2(vx * (0.25f + R() * 0.25f), -10f - R() * 15f), DustColor, 5f, 0.35f);
+        if (R() < 0.35f) Debris(ps, feet, DustColor, 1);
+    }
+
+    // Friction dust while sliding down a wall. `contact` sits on the wall face.
+    public static void WallSlideDust(ParticleSystem ps, Vector2 contact, int wallDir, float vy)
+    {
+        Cloud(ps, contact + new Vector2(0f, Rs() * 3f),
+              new Vector2(-wallDir * (10f + R() * 20f), -vy * 0.2f), DustColor, 4f, 0.3f);
+    }
+
+    // Speed lines: thin white streaks spawned around the body that hang nearly still
+    // in world space as the body leaves them behind, so they read as wind rushing past.
+    // `strength` 0..1 from how far over the threshold speed the body is.
+    public static void SpeedLines(ParticleSystem ps, Vector2 center, Vector2 vel, float radius,
+                                  float strength, int count)
+    {
+        if (vel.LengthSquared() < 1e-3f) return;
+        var dir  = Vector2.Normalize(vel);
+        var perp = new Vector2(-dir.Y, dir.X);
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            p.Position     = center + perp * Rs() * radius * 1.3f - dir * (radius * (0.2f + R() * 0.8f));
+            p.Velocity     = vel * 0.12f;
+            p.MaxLife      = p.Life = 0.10f + R() * 0.08f;
+            p.StartColor   = new Color(255, 255, 255, 0) * (0.35f + 0.45f * strength);
+            p.EndColor     = Color.Transparent;
+            p.StartSize    = 10f + 22f * strength + R() * 8f;
+            p.EndSize      = p.StartSize * 0.4f;
+            p.Kind         = ParticleKind.Line;
+        }
+    }
+
+    // Dash start: a burst of streaks and air thrown back opposite the dash, dust off the
+    // floor when grounded, and a brief flash where the body launched from.
+    public static void DashBurst(ParticleSystem ps, Vector2 pos, Vector2 dir, bool grounded, Vector2 feet)
+    {
+        if (dir.LengthSquared() > 1e-4f) dir.Normalize(); else dir = new Vector2(1f, 0f);
+        for (int i = 0; i < 10; i++)
+        {
+            ref var p = ref ps.Spawn();
+            var v = Rotate(-dir, Rs() * 0.7f) * (160f + R() * 160f);
+            p.Position     = pos + new Vector2(Rs(), Rs()) * 4f;
+            p.Velocity     = v;
+            p.Acceleration = -v * 5f;
+            p.MaxLife      = p.Life = 0.14f + R() * 0.08f;
+            p.StartColor   = new Color(230, 245, 255, 0);
+            p.EndColor     = Color.Transparent;
+            p.StartSize    = 12f + R() * 10f;
+            p.EndSize      = 2f;
+            p.Thickness    = 1.5f;
+            p.Kind         = ParticleKind.Line;
+        }
+        for (int i = 0; i < 5; i++)
+            Cloud(ps, pos - dir * 4f, Rotate(-dir, Rs() * 0.9f) * (60f + R() * 60f), AirColor, 7f, 0.3f, drag: 5f);
+        if (grounded) JumpDust(ps, feet, dir.X * 300f, 0.8f);
+        Flash(ps, pos, 26f, new Color(200, 230, 255), 0.08f);
+    }
+
+    // While dashing: a fading afterimage blob + a streak or two left at the body.
+    public static void DashTrail(ParticleSystem ps, Vector2 pos, Vector2 vel, Color tint)
+    {
+        ref var p = ref ps.Spawn();
+        p.Position   = pos;
+        p.MaxLife    = p.Life = 0.18f;
+        p.StartColor = new Color(tint.R, tint.G, tint.B, (byte)0) * 0.45f;
+        p.EndColor   = Color.Transparent;
+        p.StartSize  = PlayerCharacter.Radius * 2.2f;
+        p.EndSize    = PlayerCharacter.Radius * 1.4f;
+        p.Kind       = ParticleKind.Glow;
+        SpeedLines(ps, pos, vel, PlayerCharacter.Radius, 1f, 2);
+    }
+
+    // Airborne after a launch: grey smoke left behind the tumbling body (the "you got
+    // sent" cue). `strength` 0..1 by speed.
+    public static void LaunchSmoke(ParticleSystem ps, Vector2 pos, Vector2 vel, float strength)
+    {
+        Cloud(ps, pos + new Vector2(Rs(), Rs()) * 4f, -vel * 0.05f + new Vector2(Rs(), Rs()) * 10f,
+              new Color(170, 170, 175), 6f + 6f * strength, 0.5f + 0.3f * strength, drag: 1.5f);
+        if (R() < 0.5f * strength)
+        {
+            ref var p = ref ps.Spawn();
+            p.Position     = pos;
+            p.Velocity     = new Vector2(Rs(), Rs()) * 40f - vel * 0.1f;
+            p.Acceleration = new Vector2(0f, 120f);
+            p.MaxLife      = p.Life = 0.3f + R() * 0.2f;
+            p.StartColor   = new Color(255, 200, 120, 0);
+            p.EndColor     = Color.Transparent;
+            p.StartSize    = 3f;
+            p.EndSize      = 1f;
+            p.Kind         = ParticleKind.Glow;
+        }
+    }
+
+    // ── Combat ──────────────────────────────────────────────────────────────────
+
+    // Blade trail: tiny sparkles strewn along the knife's swept segment this frame,
+    // drifting a little with the swing and twinkling out. `color` is the attack glow.
+    public static void BladeSparks(ParticleSystem ps, Vector2 from, Vector2 to, Color color, float dt)
+    {
+        var seg = to - from;
+        float len = seg.Length();
+        if (len < 0.5f) return;
+        var vel = dt > 0f ? seg / dt : Vector2.Zero;
+        int count = Math.Clamp((int)(len / 5f), 1, 6);
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            p.Position     = from + seg * R();
+            p.Velocity     = vel * (0.05f + R() * 0.1f) + new Vector2(Rs(), Rs()) * 15f;
+            p.Acceleration = -p.Velocity * 3f + new Vector2(0f, 40f);
+            p.MaxLife      = p.Life = 0.18f + R() * 0.2f;
+            p.StartColor   = Add(Color.Lerp(color, Color.White, 0.5f * R()));
+            p.EndColor     = Color.Transparent;
+            p.StartSize    = 2.5f + R() * 3f;
+            p.EndSize      = 0.5f;
+            p.Kind         = ParticleKind.Glow;
+        }
+    }
+
+    // One additive flash: a short-lived glow that pops large and shrinks.
+    public static void Flash(ParticleSystem ps, Vector2 pos, float size, Color color, float life = 0.1f)
+    {
+        ref var p = ref ps.Spawn();
+        p.Position   = pos;
+        p.MaxLife    = p.Life = life;
+        p.StartColor = Add(color);
+        p.EndColor   = Color.Transparent;
+        p.StartSize  = size;
+        p.EndSize    = size * 0.5f;
+        p.Kind       = ParticleKind.Glow;
+        ref var c = ref ps.Spawn();   // hot white core
+        c.Position   = pos;
+        c.MaxLife    = c.Life = life * 0.6f;
+        c.StartColor = new Color(255, 255, 255, 0);
+        c.EndColor   = Color.Transparent;
+        c.StartSize  = size * 0.45f;
+        c.EndSize    = size * 0.2f;
+        c.Kind       = ParticleKind.Glow;
+    }
+
+    // Expanding outline ring — shockwave off a heavy hit or a parry.
+    public static void Shockwave(ParticleSystem ps, Vector2 pos, float radius, Color color,
+                                 float life = 0.2f, float thickness = 2f)
+    {
+        ref var p = ref ps.Spawn();
+        p.Position   = pos;
+        p.MaxLife    = p.Life = life;
+        p.StartColor = Add(color);
+        p.EndColor   = Color.Transparent;
+        p.StartSize  = radius * 0.4f;
+        p.EndSize    = radius * 2f;
+        p.Thickness  = thickness;
+        p.Kind       = ParticleKind.Ring;
+    }
+
+    // Hot embers: slow glowing motes that fall under gravity after the spark burst.
+    public static void Embers(ParticleSystem ps, Vector2 pos, Vector2 dir, Color color, int count)
+    {
+        if (dir.LengthSquared() > 1e-4f) dir.Normalize(); else dir = new Vector2(0f, -1f);
+        for (int i = 0; i < count; i++)
+        {
+            ref var p = ref ps.Spawn();
+            p.Position     = pos;
+            p.Velocity     = Rotate(dir, Rs() * 1.4f) * (50f + R() * 110f);
+            p.Acceleration = new Vector2(0f, 260f) - p.Velocity * 1.2f;
+            p.MaxLife      = p.Life = 0.35f + R() * 0.35f;
+            p.StartColor   = Add(color);
+            p.EndColor     = new Color(255, 60, 10, 0) * 0f;
+            p.StartSize    = 2.5f + R() * 2f;
+            p.EndSize      = 1f;
+            p.Kind         = ParticleKind.Glow;
+        }
+    }
+
+    // A strong hit (one that earned hitstop): flash, shockwave, a radial ring of thick
+    // sparks, a hard spray along the knockback, and falling embers. `strength` 0..1.
+    public static void HeavyHit(ParticleSystem ps, Vector2 pos, Vector2 dir, float strength)
+    {
+        if (dir.LengthSquared() > 1e-4f) dir.Normalize(); else dir = new Vector2(1f, 0f);
+        Flash(ps, pos, 40f + 30f * strength, new Color(255, 230, 170), 0.12f);
+        Shockwave(ps, pos, 13f + 9f * strength, new Color(255, 240, 210), 0.22f, 2.5f);
+        int radial = 10 + (int)(8 * strength);
+        for (int i = 0; i < radial; i++)
+        {
+            ref var p = ref ps.Spawn();
+            float a = i / (float)radial * MathHelper.TwoPi + R() * 0.3f;
+            var v = new Vector2(MathF.Cos(a), MathF.Sin(a)) * (180f + R() * 160f) * (0.8f + strength * 0.5f);
+            p.Position     = pos;
+            p.Velocity     = v;
+            p.Acceleration = -v * 5f;
+            p.MaxLife      = p.Life = 0.12f + R() * 0.08f;
+            p.StartColor   = new Color(255, 250, 220, 0);
+            p.EndColor     = new Color(255, 120, 30, 0) * 0f;
+            p.StartSize    = 10f + R() * 8f;
+            p.EndSize      = 2f;
+            p.Thickness    = 2f;
+            p.Kind         = ParticleKind.Line;
+        }
+        HitSpark(ps, pos, dir, count: 6 + (int)(6 * strength));
+        Embers(ps, pos, dir, new Color(255, 190, 90), 6 + (int)(6 * strength));
+    }
+
+    // A hit landing on a guard/shield: the parry fan (GuardSpark) plus a cold flash at
+    // the contact, a tight shockwave, and metallic embers that drop off the shield face.
+    public static void ShieldHit(ParticleSystem ps, Vector2 pos, Vector2 dir, bool charged)
+    {
+        var hue = charged ? Color.Cyan : new Color(255, 210, 150);   // bronze shield glint
+        GuardSpark(ps, pos, dir, charged);
+        Flash(ps, pos, charged ? 42f : 30f, hue, charged ? 0.14f : 0.1f);
+        Shockwave(ps, pos, charged ? 15f : 10f, hue, 0.18f, charged ? 2.5f : 1.5f);
+        Embers(ps, pos, dir, charged ? new Color(150, 240, 255) : new Color(255, 200, 120), charged ? 10 : 6);
+    }
+
+    // Stab charge wind-up: motes spawned on a ring that converge onto the body, so
+    // the energy visibly gathers. `f` 0..1 is the charge fraction.
+    public static void ChargeMotes(ParticleSystem ps, Vector2 center, Color color, float f)
+    {
+        float life = 0.25f;
+        float r    = 26f - 8f * f;
+        float a    = R() * MathHelper.TwoPi;
+        var   dir  = new Vector2(MathF.Cos(a), MathF.Sin(a));
+        ref var p = ref ps.Spawn();
+        p.Position   = center + dir * r;
+        p.Velocity   = -dir * (r / life);
+        p.MaxLife    = p.Life = life;
+        p.StartColor = Add(color) * 0.2f;
+        p.EndColor   = Add(color);
+        p.StartSize  = 2f + 2f * f;
+        p.EndSize    = 1.5f;
+        p.Kind       = ParticleKind.Glow;
+    }
+
+    // Premultiplied color with alpha 0: drawn through the AlphaBlend batch it adds light.
+    private static Color Add(Color c) => new(c.R, c.G, c.B, (byte)0);
+    private static float R()  => (float)_rng.NextDouble();
+    private static float Rs() => (float)_rng.NextDouble() * 2f - 1f;
+
     private static Vector2 Rotate(Vector2 v, float radians)
     {
         float c = MathF.Cos(radians), s = MathF.Sin(radians);

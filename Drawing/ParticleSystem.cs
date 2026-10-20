@@ -1,5 +1,6 @@
 using System;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 
 namespace MTile;
 
@@ -8,6 +9,8 @@ public enum ParticleKind : byte
     Square, // small filled rotated square (size = side length)
     Disc,   // DrawContext.Disc — visually a chunky square at particle sizes
     Line,   // velocity-aligned streak of length = size
+    Glow,   // soft round falloff blob (size = diameter) — clouds, flashes, embers
+    Ring,   // expanding outline (size = diameter) — shockwaves, air-jump rings
 }
 
 public struct Particle
@@ -18,6 +21,7 @@ public struct Particle
     public Color   StartColor, EndColor;
     public float   StartSize, EndSize;
     public float   Rotation, AngularVelocity;
+    public float   Thickness;   // Line/Ring stroke width; 0 = 1 px
     public ParticleKind Kind;
 
     public readonly bool  Alive => Life > 0f;
@@ -33,6 +37,11 @@ public sealed class ParticleSystem
     private readonly Particle[] _pool;
     private int _count;
     private int _ring;  // wrap cursor used when the pool is saturated
+
+    // Soft radial-falloff dot for ParticleKind.Glow, built once by the host
+    // (CreateSoftDot). Null falls back to the square Disc so a host without a
+    // GraphicsDevice (tests, tools) still draws something.
+    public Texture2D SoftDot;
 
     public int Count    => _count;
     public int Capacity => _pool.Length;
@@ -101,11 +110,42 @@ public sealed class ParticleSystem
                     else dir.Normalize();
                     var a = p.Position - dir * sz * 0.5f;
                     var b = p.Position + dir * sz * 0.5f;
-                    ctx.Line(a, b, col, 1f);
+                    ctx.Line(a, b, col, p.Thickness > 0f ? p.Thickness : 1f);
+                    break;
+                }
+                case ParticleKind.Glow:
+                    if (SoftDot != null) ctx.Stamp(SoftDot, p.Position, sz, col, p.Rotation);
+                    else                 ctx.Disc(p.Position, sz * 0.5f, col);
+                    break;
+                case ParticleKind.Ring:
+                {
+                    float r = sz * 0.5f;
+                    ctx.Ring(p.Position, r, col, segments: r > 12f ? 20 : 12,
+                             thickness: p.Thickness > 0f ? p.Thickness : 1f);
                     break;
                 }
             }
         }
+    }
+
+    // Premultiplied radial falloff (smoothstep to the rim). The world batch's AlphaBlend
+    // is premultiplied, so a color with alpha 0 drawn through this dot ADDS light
+    // (flashes, embers) while an opaque one reads as a soft cloud.
+    public static Texture2D CreateSoftDot(GraphicsDevice device, int size = 32)
+    {
+        var tex  = new Texture2D(device, size, size);
+        var data = new Color[size * size];
+        float c = (size - 1) * 0.5f;
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            float d = MathF.Sqrt((x - c) * (x - c) + (y - c) * (y - c)) / c;
+            float a = MathHelper.Clamp(1f - d, 0f, 1f);
+            a = a * a * (3f - 2f * a);
+            data[y * size + x] = new Color(a, a, a, a);
+        }
+        tex.SetData(data);
+        return tex;
     }
 
     public void Clear()

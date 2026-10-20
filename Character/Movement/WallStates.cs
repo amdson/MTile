@@ -12,6 +12,7 @@ public class WallSlidingState : MovementState
     public override AnimTag AnimationTag => AnimTag.WallSlide;
 
     private readonly int _wallDir;
+    public int WallDir => _wallDir;
     private FloatingSurfaceDistance _wall;
     private FloatingSurfaceDistance _ground;
     // Per-side owner tags (see SoftContactOwner): both sides are registered.

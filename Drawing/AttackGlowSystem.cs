@@ -147,7 +147,17 @@ public sealed class AttackGlowSystem
     {
         tip = default;
         if (player.CurrentAction is SlashLikeAction && ReplacesSlash?.Invoke(player) == true) return false;
-        if (!_animator.OverlayActive) return false;
+        return TryAttackTipPos(player, _animator, _skeletonScale, out tip);
+    }
+
+    // The same tip, for any player/animator pair and regardless of whether a sprite
+    // attachment replaces the slash glow — the blade-spark trail (MotionFxSystem) rides
+    // the knife whichever way the slash itself is drawn.
+    internal static bool TryAttackTipPos(PlayerCharacter player, CharacterAnimator anim, float scale,
+                                         out Vector2 tip)
+    {
+        tip = default;
+        if (!anim.OverlayActive) return false;
 
         if (player.CurrentAction is StabAction)
         {
@@ -157,8 +167,8 @@ public sealed class AttackGlowSystem
             return true;
         }
         if (player.CurrentAction is SlashLikeAction)
-            return _animator.TryBoneOrigin(KnifeBone, RigRoot(player, _animator, _skeletonScale),
-                                           _animator.DisplayFacing, out tip, fromOverlay: false);
+            return anim.TryBoneOrigin(KnifeBone, RigRoot(player, anim, scale),
+                                      anim.DisplayFacing, out tip, fromOverlay: false);
         return false;
     }
 
@@ -190,7 +200,7 @@ public sealed class AttackGlowSystem
     }
 
     // The glow color for an attack: per-action (slash hue, stab gold/purple by stance).
-    private static Color AttackGlowColor(ActionState action, in ActionVars vars) => action switch
+    internal static Color AttackGlowColor(ActionState action, in ActionVars vars) => action switch
     {
         SlashLikeAction slash => slash.SlashGlowColor,
         StabAction      stab  => stab.StabColorFor(vars.IsGrounded),
