@@ -159,7 +159,8 @@ public sealed class AttackGlowSystem
         tip = default;
         if (!anim.OverlayActive) return false;
 
-        if (player.CurrentAction is StabAction)
+        // The whip kick's tip is the same sim construct (body + StabDir · TipExt).
+        if (player.CurrentAction is StabAction or AirWhipKick)
         {
             var v = player.CurrentActionVars;
             if (v.StabDir.LengthSquared() < 1e-6f) return false;
@@ -204,7 +205,8 @@ public sealed class AttackGlowSystem
     {
         SlashLikeAction slash => slash.SlashGlowColor,
         StabAction      stab  => stab.StabColorFor(vars.IsGrounded),
-        _                     => Color.White,
+        AirWhipKick     kick  => kick.KickGlowColor,
+        _                    => Color.White,
     };
 
     // Render the glowing-shape effect for an attack: a slash sweeps a glowing triangle, a
@@ -226,6 +228,13 @@ public sealed class AttackGlowSystem
             Trail t = (knifeTrail != null && knifeTrail.Count >= 2) ? knifeTrail : stab.TipTrail;
             _glow.DrawTrailRibbon(cam, t, stab.StabColorFor(vars.IsGrounded),
                                   headWidth: 19f, intensity: 0.85f, widthTaper: 0.9f);
+        }
+        else if (action is AirWhipKick kick)
+        {
+            // Thinner head than the stab's: the streak should read as the kick's line.
+            Trail t = (knifeTrail != null && knifeTrail.Count >= 2) ? knifeTrail : kick.TipTrail;
+            _glow.DrawTrailRibbon(cam, t, kick.KickGlowColor,
+                                  headWidth: 10f, intensity: 0.85f, widthTaper: 0.9f);
         }
     }
 }

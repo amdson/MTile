@@ -33,7 +33,7 @@ public struct ActionVars
 
     public Vector2 AttackDir;          // Slash* (incl. GuardRetaliate)
 
-    public Vector2 StabDir;           // Stab / AirSpinStab
+    public Vector2 StabDir;           // Stab / AirWhipKick (aim)
     public float   InitialStabAngle;  // Stab
     public float   Boost;             // Stab (air-dive multiplier on damage + block box size)
     public float   StabCharge;        // Recovery → Stab handoff: charge fraction [0,1] stamped by

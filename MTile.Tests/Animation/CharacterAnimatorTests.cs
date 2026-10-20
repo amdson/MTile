@@ -123,7 +123,7 @@ public class CharacterAnimatorTests
     }
 
     // ─── the turning attack (AnimationDocument.FlipAt) ─────────────────────────────────
-    // AirSpinStab flips the sim's Facing on Enter, but its clip winds up facing the OLD way
+    // AirWhipKick flips the sim's Facing on Enter, but its clip winds up facing the OLD way
     // and turns at FlipAt: the rig is drawn in the opposite facing until then, and in the
     // sim's facing after — on both sides, so a left-facing turn mirrors a right-facing one.
     [Theory]
@@ -133,8 +133,8 @@ public class CharacterAnimatorTests
     {
         var anim = RealAnimator();
         Fall(anim, 5);
-        float flipAt = anim.ActionClipFlipAt("AirSpinStab")
-                       ?? throw new Xunit.Sdk.XunitException("airspinstab.json has no FlipAt");
+        float flipAt = anim.ActionClipFlipAt("AirWhipKick")
+                       ?? throw new Xunit.Sdk.XunitException("airwhipkick.json has no FlipAt");
         anim.Update(SpinStab(simFacing, flipAt * 0.5f));
         Assert.Equal(-simFacing, anim.DisplayFacing);
         anim.Update(SpinStab(simFacing, MathF.Min(1f, flipAt + 0.1f)));
@@ -153,7 +153,7 @@ public class CharacterAnimatorTests
     }
 
     private static CharacterAnimSample SpinStab(int facing, float progress)
-        => new(Vector2.Zero, new Vector2(0f, 120f), facing, false, "FallingState", "AirSpinStab",
+        => new(Vector2.Zero, new Vector2(0f, 120f), facing, false, "FallingState", "AirWhipKick",
                1f / 60f, actionProgress: progress);
 
     // ─── the airborne launches (LaunchClipDriver) ────────────────────────────────────────
