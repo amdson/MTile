@@ -40,16 +40,22 @@ public sealed class LatticePathSampler
         if (s == null || count < 2 || p.Frame - s.LatticePathFrame > FreshFrames)
             return pos + vel * dtAhead;
 
-        // Nearest path node to the body, then advance by speed·dtAhead of arc length.
+        // The body's nearest point ON the path (closest segment projection), then advance by
+        // speed·dtAhead of arc length from there. Starting at the nearest NODE instead walked
+        // back to it whenever it lay behind the body, spending up to twice that gap of the
+        // budget — a short prediction that pulsed every time the body passed a node.
         var path = s.LatticePath;
-        int j = 0; float bestD = float.MaxValue;
-        for (int i = 0; i < count; i++)
+        int j = 1; Vector2 at = path[0].Pos; float bestD = float.MaxValue;
+        for (int i = 1; i < count; i++)
         {
-            float d = Vector2.DistanceSquared(path[i].Pos, pos);
-            if (d < bestD) { bestD = d; j = i; }
+            Vector2 a = path[i - 1].Pos, ab = path[i].Pos - a;
+            float len2 = ab.LengthSquared();
+            float t = len2 > 1e-6f ? MathHelper.Clamp(Vector2.Dot(pos - a, ab) / len2, 0f, 1f) : 0f;
+            Vector2 q = a + ab * t;
+            float d = Vector2.DistanceSquared(q, pos);
+            if (d < bestD) { bestD = d; j = i; at = q; }
         }
         float remaining = MathF.Max(vel.Length(), MinWalkSpeed) * MathF.Max(dtAhead, 0f);
-        Vector2 at = pos;
         for (int i = j; i < count && remaining > 0f; i++)
         {
             Vector2 next = path[i].Pos;
