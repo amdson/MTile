@@ -533,7 +533,8 @@ def cmd_solve(a):
                       'stretch': {n: solved['bones'][n]['stretch'] for n in fr.drawn},
                       'knife': knife, 'flags': flags, 'notes': [f'fixed:{nfix}'] if nfix else [],
                       'cost': round(cost, 3), 'root_px': [float(v) for v in root], 'scale': float(sc),
-                      'ground_row': gr, 'planted': planted, 'occluded': [], 'marked': nfix > 0}
+                      'ground_row': gr, 'planted': planted, 'occluded': [], 'marked': nfix > 0,
+                      'tips_px': {n: [round(float(v), 1) for v in ev[n]['tip']] for n in fr.drawn}}
         print(f'frame {f:2d}: cost {cost:.2f}  fixed {nfix:2d}  ' + ('FLAGS ' + ' '.join(flags) if flags else 'ok'))
     json.dump(states, open(sp, 'w'), indent=1)
     out = [decoded[k] for k in sorted(decoded)]
@@ -566,9 +567,15 @@ def cmd_assemble(a):
             travel[b] = travel.get(b, 0) + abs(F.wrap(dec[i + 1]['pose'][b] - dec[i]['pose'][b]))
     fb = max(travel, key=travel.get) if travel else None
     if fb:
-        print(f'fastest bone travel: {fb} {travel[fb]:.1f} rad over the clip '
-              f'(digest STEEP needs <= 8 per unit phase, so <= ~{a.steep_limit:.0f} total fits)')
-    times, steep = retime(dec, rig, a.steep_limit)
+        print(f'fastest bone travel: {fb} {travel[fb]:.1f} rad over the clip'
+              + (f' (STEEP retime at {a.steep_limit:.0f} rad/phase)' if a.steep_limit > 0
+                 else ' (even spacing kept; digest STEEP is informational)'))
+    if a.steep_limit > 0:
+        times, steep = retime(dec, rig, a.steep_limit)
+    else:  # the image model's even spacing (rejected frames leave proportional gaps)
+        f0, f1 = dec[0]['frame'], dec[-1]['frame']
+        times = [round((r['frame'] - f0) / max(f1 - f0, 1), 5) for r in dec]
+        steep = []
     if steep:
         print(f'retime: {len(steep)} interval(s) still above {a.steep_limit} rad/phase '
               f'(the motion needs more phase than the clip has): {steep}')
@@ -610,6 +617,14 @@ def cmd_assemble(a):
                                 'Dx': 0, 'Dy': 0}]
         kfs.append(kf)
     clip = {'Name': a.run, 'Type': 'Draft', 'Skeleton': cfg['rig'], 'Duration': a.duration, 'Loop': a.loop}
+    path = None if a.no_motion else body_path(dec, rig)
+    if path is not None:
+        clip['Motion'] = 'Track'
+        clip['Scene'] = {'Guides': [{'Id': 'g1', 'Kind': 'Ground', 'X': 0, 'Y': round(ground_k, 4), 'W': 0, 'H': 0}]}
+        for kf, (px, py) in zip(kfs, path):
+            kf.setdefault('Additions', []).append({'Name': 'body_path', 'Kind': 'Point', 'Px': round(px, 4),
+                                                   'Py': round(py, 4), 'Dx': 0, 'Dy': 0})
+        print(f'body_path: travel ({path[-1][0] - path[0][0]:+.1f}, {path[-1][1] - path[0][1]:+.1f}) rig units over the clip')
     if have_knife:
         clip['ExtraBones'] = [{'Name': prof['weapon']['bone'], 'Parent': prof['weapon']['parent'],
                                'Rotation': 0, 'Length': 0}]
@@ -644,6 +659,31 @@ def cmd_assemble(a):
     save_run(a.run, cfg)
     print(f'assembled {n} keys -> {path} (+ SkeletonDrafts/{cfg["rig"]}/)')
     render_playback(a.run, clip, rig, prof)
+
+
+def body_path(dec, rig):
+    """Scene path of the com anchor per key (rig units, +x forward, +y down, frame 1 at x=0),
+    the canonical moving-com channel (Animation/BodyPath.cs). Horizontal: the hip measured
+    against the PLANTED foot (the one that slips least across the sheet), so the image model's
+    camera drift between cells cancels. Vertical: the lowest foot's height above the ground
+    line (0 = standing on it; negative = airborne). The per-key `com` anchor stays the
+    grounding offset, so runtime crouches still sink. Pixels -> rig units at the sheet's
+    median scale."""
+    if not dec or 'tips_px' not in dec[0]:
+        return None
+    feet = [p_['Bone'] for p_ in rig.get('Points', []) if p_.get('Role') == 'support']
+    S = float(np.median([r['scale'] for r in dec]))
+    gr = [r['ground_row'] for r in dec if r.get('ground_row') is not None]
+    ground = float(np.median(gr)) if gr else max(max(r['tips_px'][f_][1] for f_ in feet) for r in dec)
+    xs = {f_: [r['tips_px'][f_][0] for r in dec] for f_ in feet}
+    anchor = min(feet, key=lambda f_: float(np.std(xs[f_])))
+    out = []
+    for r in dec:
+        rel = r['root_px'][0] - r['tips_px'][anchor][0]
+        lowest = max(r['tips_px'][f_][1] for f_ in feet)
+        out.append([rel / S, min((lowest - ground) / S, 0.0)])
+    x0 = out[0][0]
+    return [[x - x0, y] for x, y in out]
 
 
 def com_ground_offset(rig_name, default=39.9):
@@ -764,6 +804,10 @@ def cmd_verify(a):
         print(f'digest: {len(flags)} FLAG line(s) -> digest.txt')
         for l in flags[:12]:
             print('  ', l.strip())
+        r = subprocess.run(['dotnet', probe, 'motion', tmp_name, '8', '--rig', rig], cwd=R.REPO,
+                           capture_output=True, text=True, timeout=300)
+        open(os.path.join(d, 'motion.txt'), 'w').write(r.stdout + r.stderr)
+        print('motion:', (r.stdout.strip().splitlines() or ['(none)'])[0][:160])
         demo = os.path.join(R.REPO, 'MTile.Demo', 'bin', 'Debug', 'net8.0', 'MTile.Demo.dll')
         strip = os.path.join(d, 'engine_strip.png')
         r = subprocess.run(['dotnet', demo, tmp_name, '--rig', rig, '--strip', strip, '--frames', '12',
@@ -951,9 +995,12 @@ def main():
     p = sub.add_parser('assemble'); p.add_argument('--run', required=True)
     p.add_argument('--duration', type=float, default=0.5); p.add_argument('--loop', action='store_true')
     p.add_argument('--contacts', action='store_true')
-    p.add_argument('--steep-limit', type=float, default=7.0, help='rad per unit phase (digest gate is 8)')
+    p.add_argument('--steep-limit', type=float, default=0.0,
+                   help='rad per unit phase; > 0 widens intervals above it (the digest STEEP gate is 8). '
+                        'Default 0 = keep the image model\'s even spacing')
     p.add_argument('--keep', help='frame range to keep, e.g. 4-13 (trim to the strike)')
-    p.add_argument('--key-tol', type=float, default=0.12, help='key reduction tolerance, rad (0 = keep all)')
+    p.add_argument('--key-tol', type=float, default=0.0, help='key reduction tolerance, rad (default 0 = keep every frame)')
+    p.add_argument('--no-motion', action='store_true', help='skip the body_path track (stationary clip)')
     p.add_argument('--no-ground', action='store_true', help='skip the per-key com anchor (feet-on-floor)')
     p = sub.add_parser('verify'); p.add_argument('--run', required=True)
     p = sub.add_parser('report'); p.add_argument('--run', required=True)
