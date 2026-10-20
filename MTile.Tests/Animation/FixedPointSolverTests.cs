@@ -35,7 +35,7 @@ public class FixedPointSolverTests
         int up    = main.Skeleton.IndexOf("arm_l_upper");
         int chest = main.Skeleton.IndexOf("chest");
 
-        float dt = 1f / 30f, vx = speed * facing, x = 0f;
+        float dt = 1f / 60f, vx = speed * facing, x = 0f;
         float maxReach = 0f, maxArm = 0f, maxChest = 0f; int solves = 0;
         // Warm-up (frames 0..39, unpinned): track the natural hand's min/max relative to the
         // body across the arm swing, then pin at the swing MIDPOINT (+ a touch of lift) — so

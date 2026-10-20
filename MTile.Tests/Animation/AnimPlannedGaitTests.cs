@@ -47,7 +47,7 @@ public class AnimPlannedGaitTests
         float floorTop = 3 * TS;
         var anim = Animator();
 
-        float dt = 1f / 30f, vx = 25f, x = 40f;
+        float dt = 1f / 60f, vx = 25f, x = 40f;
         float prev = anim.State.Phase, totalPhase = 0f;
         int plannedContactFrames = 0, selfPlantFrames = 0, stanceOnFloor = 0;
         for (int i = 0; i < 90; i++)
@@ -90,7 +90,7 @@ public class AnimPlannedGaitTests
         try
         {
             var anim = Animator();
-            float dt = 1f / 30f, vx = 25f, x = 40f;
+            float dt = 1f / 60f, vx = 25f, x = 40f;
             int contactFrames = 0;
             for (int i = 0; i < 60; i++)
             {
@@ -113,7 +113,7 @@ public class AnimPlannedGaitTests
     public void NoChunks_RunsSelfPlantPath()
     {
         var anim = Animator();
-        float dt = 1f / 30f, vx = 25f, x = 0f;
+        float dt = 1f / 60f, vx = 25f, x = 0f;
         float prev = anim.State.Phase, totalPhase = 0f;
         for (int i = 0; i < 60; i++)
         {
@@ -141,7 +141,7 @@ public class AnimPlannedGaitTests
         float lowerTop = 3 * TS, upperTop = 2 * TS, lipX = 16 * TS;
         var anim = Animator();
 
-        float dt = 1f / 30f, vx = 25f, x = lipX - 60f;
+        float dt = 1f / 60f, vx = 25f, x = lipX - 60f;
         int lowerStance = 0, upperStance = 0;
         for (int i = 0; i < 200; i++)
         {

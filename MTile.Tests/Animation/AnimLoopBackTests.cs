@@ -123,7 +123,7 @@ public class AnimLoopBackTests
         {
             var rig = Rig();
             var anim = new CharacterAnimator(rig, 0.6f, new[] { Swing("Walk", 1.5f), Swing("Run", 1.5f) });
-            float dt = 1f / 30f, vx = 25f, x = 0f;
+            float dt = 1f / 60f, vx = 25f, x = 0f;
             float prevPhase = anim.State.Phase;
             int jumps = 0, wraps = 0;
             LoopBackPlan? plan = null;

@@ -18,7 +18,7 @@ public class ActionOverlayTests
     // straddle a rounding boundary (0.03045 vs 0.03044 at precision 4).
     private const float UntouchedTolerance = 1e-3f;
 
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float WalkVx = 25f;          // walk band (12 < v < 40)
     private const float SlashArm = 2.0f;       // distinctive arm_r_upper rotation in the slash clip
 

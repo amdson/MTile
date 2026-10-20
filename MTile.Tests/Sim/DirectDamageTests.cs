@@ -22,7 +22,7 @@ namespace MTile.Tests;
 // regen can't out-heal a fight, and the stab is the launcher.
 public class DirectDamageTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private static readonly Vector2 Gravity = new(0f, 600f);
 
     private static ChunkMap FlatGround() => SimTerrain.FromAscii(@"

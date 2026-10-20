@@ -21,7 +21,7 @@ namespace MTile.Tests;
 //      button, so the victim can't just keep the shield pinned down.
 public class HitEvictionTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
 
     private static ChunkMap FlatGround() => SimTerrain.FromAscii(@"
         OOOOOOOOOOOOOOOOOOOOOOOOOOOO

@@ -10,7 +10,7 @@ namespace MTile.Tests;
 // scenario: one attacker spamming slashes, one victim holding a movement key.
 public class CombatHitstunTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     // Slash hits a stationary victim → Combat.HitstunActive fires → Space presses

@@ -15,7 +15,7 @@ namespace MTile.Tests;
 // x = 10 * Chunk.TileSize = 110.
 public class DropdownTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
     private const string Terrain = @"

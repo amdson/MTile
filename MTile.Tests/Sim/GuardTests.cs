@@ -442,7 +442,7 @@ public class GuardTests(ITestOutputHelper output)
     public void MashingShiftCannotKeepGuardUp()
     {
         // dt is 1/30 here (SimConfigMulti's default), so the cooldown is 4 frames.
-        const float SimDt = 1f / 30f;
+        const float SimDt = 1f / 60f;
         int cooldown = SimFrames.FromSeconds(0.15f, SimDt);
 
         var terrain = SimTerrain.FromAscii(@"

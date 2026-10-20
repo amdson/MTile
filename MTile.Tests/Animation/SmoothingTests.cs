@@ -16,7 +16,7 @@ namespace MTile.Tests;
 //    pose) persists across the switch, so the pose crossfades the gap instead of popping.
 public class SmoothingTests
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     // Must mirror CharacterAnimator.Stiffness (private const). The parity assertion is what
     // notices if these drift apart.
     private const float Stiffness = 20f;

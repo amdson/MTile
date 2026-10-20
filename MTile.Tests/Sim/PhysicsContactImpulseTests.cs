@@ -13,7 +13,7 @@ namespace MTile.Tests;
 // resting weight, horizontal accumulation for a wall push), not exact values.
 public class PhysicsContactImpulseTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private static readonly Vector2 Gravity = new(0f, 600f);
 
     private static PhysicsBody NewBody(Vector2 pos)

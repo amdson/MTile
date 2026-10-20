@@ -17,7 +17,7 @@ public class WallJumpReproTests
     private readonly ITestOutputHelper _out;
     public WallJumpReproTests(ITestOutputHelper output) => _out = output;
 
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
     private static readonly Vector2 Gravity = new(0f, 600f);
 
     // Tall wall on the right (column 10, rows 0..40); open air to its left, no floor in the

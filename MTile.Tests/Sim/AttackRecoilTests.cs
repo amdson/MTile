@@ -12,7 +12,7 @@ namespace MTile.Tests;
 // material too tough to break in one hit).
 public class AttackRecoilTests(ITestOutputHelper output)
 {
-    private const float Dt = 1f / 30f;
+    private const float Dt = 1f / 60f;
 
     // Helper: a 16×16 hitbox sitting on top of cell (gtx, gty), with caller-chosen
     // recoil parameters. KnockbackImpulse is +X, magnitude 1000, so recoil should be

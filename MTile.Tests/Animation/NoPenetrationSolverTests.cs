@@ -26,7 +26,7 @@ public class NoPenetrationSolverTests
         int hand  = anim.Skeleton.IndexOf("arm_l_lower");
         int up    = anim.Skeleton.IndexOf("arm_l_upper");
 
-        const float dt = 1f / 30f;
+        const float dt = 1f / 60f;
         var pos = new Vector2(0f, 0f);
         const int facing = +1;
 
