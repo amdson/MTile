@@ -549,6 +549,8 @@ def cmd_assemble(a):
     cfg = load_run(a.run)
     d = run_dir(a.run)
     rig, prof = R.load_rig(cfg['rig']), R.profile(cfg['rig'])
+    if a.airborne:
+        a.no_motion = a.no_ground = True    # no planted foot: body_path and the com anchor both assume one
     dec = [r for r in json.load(open(os.path.join(d, 'decoded.json'))) if not r.get('rejected')]
     if a.keep:
         k0, k1 = (int(x) for x in a.keep.split('-'))
@@ -658,7 +660,7 @@ def cmd_assemble(a):
     shutil.copy(path, os.path.join(DRAFTS, cfg['rig'], a.run + '.json'))
     cfg['clip'] = {'duration': a.duration, 'loop': a.loop, 'contacts': a.contacts, 'keys': n,
                    'keep': a.keep, 'fastest_travel': [fb, round(travel.get(fb, 0), 2)] if fb else None,
-                   'steep_intervals': steep}
+                   'steep_intervals': steep, 'airborne': a.airborne}
     save_run(a.run, cfg)
     print(f'assembled {n} keys -> {path} (+ SkeletonDrafts/{cfg["rig"]}/)')
     render_playback(a.run, clip, rig, prof)
@@ -844,7 +846,10 @@ def cmd_verify(a):
         probe = os.path.join(R.REPO, 'MTile.Probe', 'bin', 'Debug', 'net8.0', 'MTile.Probe.dll')
         r = subprocess.run(['dotnet', probe, 'digest', tmp_name, '--rig', rig], cwd=R.REPO,
                            capture_output=True, text=True, timeout=300)
-        open(os.path.join(d, 'digest.txt'), 'w').write(r.stdout + r.stderr)
+        note = ('# NOTE: airborne clip (assembled with --airborne) - the PLANTED/swing labels and the\n'
+                '# foot bob line below measure against the pose\'s lowest point, not a floor; ignore them.\n'
+                if cfg.get('clip', {}).get('airborne') else '')
+        open(os.path.join(d, 'digest.txt'), 'w').write(note + r.stdout + r.stderr)
         flags = [l for l in (r.stdout + r.stderr).splitlines() if 'FLAG' in l.upper()]
         print(f'digest: {len(flags)} FLAG line(s) -> digest.txt')
         for l in flags[:12]:
@@ -1048,6 +1053,9 @@ def main():
     p.add_argument('--no-motion', action='store_true', help='skip the body_path track (stationary clip)')
     p.add_argument('--no-smooth', action='store_true', help='skip temporal smoothing of the decoded frames')
     p.add_argument('--no-ground', action='store_true', help='skip the per-key com anchor (feet-on-floor)')
+    p.add_argument('--airborne', action='store_true',
+                   help='a move with no planted foot: implies --no-motion --no-ground, and verify marks the '
+                        'digest\'s PLANTED labels as meaningless')
     p = sub.add_parser('verify'); p.add_argument('--run', required=True)
     p = sub.add_parser('report'); p.add_argument('--run', required=True)
     a = ap.parse_args()

@@ -22,9 +22,12 @@ Code: `scripts/sprite_pose/` (`sprite_anim.py` is the CLI). Design + history:
 ```bash
 python3 -m venv .probe/venv && .probe/venv/bin/pip install pillow numpy scipy
 dotnet build MTile.Probe && dotnet build MTile.Demo        # verify needs both
-SA=".probe/venv/bin/python scripts/sprite_pose/sprite_anim.py"
 ```
-Run every command from the repo root. A run lives in `.probe/sprite/NAME/` (gitignored).
+Run every command from the repo root and type the CLI out in full each time
+(`.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py ...`): the worktree command guard
+refuses a command whose name comes from a shell variable (`.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py refs ...`), and it may refuse a
+long inline `python - <<EOF` heredoc, so put throwaway helpers in a script file under the job's
+tmp dir. A run lives in `.probe/sprite/NAME/` (gitignored).
 
 ## Budget — read first
 
@@ -38,7 +41,7 @@ without asking the user.
 
 **1. refs** — the inputs GPT gets, all rendered from the rig by code:
 ```bash
-$SA refs --run NAME --rig biped --from backup:idle@0 --weapon \
+.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py refs --run NAME --rig biped --from backup:idle@0 --weapon \
          --markers ends_torso --example backup:groundslash3
 ```
 - `--from CLIP@T` is the start pose (`idle@0` = live pool, `backup:idle@0` = the
@@ -49,21 +52,22 @@ $SA refs --run NAME --rig biped --from backup:idle@0 --weapon \
   lower bone's colour), a violet blade-tip dot, a **pink hip dot** and a **brown neck dot**.
   Elbows/knees get no dot (read from where two stroke colours meet).
 - `--example CLIP` renders a DIFFERENT authored move in the exact format as `example.png`;
-  GPT copies the style from it. Always pass one.
+  GPT copies the style from it. Always pass one; for unarmed moves pick an unarmed clip
+  (`backup:pulse` worked for the air hammer).
 
 **2. gen** — one GPT call, 8 frames on a 4×2 grid:
 ```bash
-$SA gen --run NAME --frames 8 --move "<description>"
+.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py gen --run NAME --frames 8 --move "<description>"
 ```
 Write the move like a director: anticipation, the strike, follow-through, what legs and
 torso do. Add "the far arm only moves a little for balance" and, for attacks, "end at
-the follow-through — do NOT return to the starting pose". For airborne moves say the feet
+the follow-through — do NOT return to the starting pose". For airborne moves (assemble them with `--airborne`) say the feet
 never touch the ground line. Then LOOK at `sheet.png`: 4×2 grid, legend colours, the dots
 present, the move readable and with impact.
 
 **3. detect** — the drawn dots become FIXED joints in `state.json`:
 ```bash
-$SA detect --run NAME          # -> state.json, joints_review.png
+.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py detect --run NAME          # -> state.json, joints_review.png
 ```
 Expect "11 joints found" per frame (10 without `--weapon`). Look at `joints_review.png`:
 every label should sit on its dot / stroke junction.
@@ -71,13 +75,13 @@ every label should sit on its dot / stroke junction.
 **4. solve** — fixed values are kept exactly, only free values are optimised (per frame,
 warm-started from the previous one):
 ```bash
-$SA solve --run NAME           # -> state.json (solved), decoded.json, decode_overlay.png
+.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py solve --run NAME           # -> state.json (solved), decoded.json, decode_overlay.png
 ```
 Read `decode_overlay.png` for EVERY frame (fitted rig in black over GPT's drawing), not
 just flagged ones.
 
 **5. Fix flagged frames — the agent's job.** Edit `.probe/sprite/NAME/state.json`, then
-re-solve only those frames: `$SA solve --run NAME --frames 3,5`. A frame's state:
+re-solve only those frames: `.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py solve --run NAME --frames 3,5`. A frame's state:
 ```json
 {"root":  {"pos": [212, 245], "fixed": true},
  "bones": {"arm_r_upper": {"tip": [270, 230], "fixed": ["tip"]},
@@ -99,9 +103,16 @@ A bone's key is its TIP (`arm_r_upper` = near elbow, `arm_r_lower` = near hand,
   the camera → `"stretch": 0.5, "fixed": ["stretch"]`);
 - **reject** the frame (`"reject": true`) when it is unusable — its neighbours carry the pose.
 
+**Elbow drawn bent backwards.** GPT often draws the far elbow flared behind the arm (a 3D
+pose flattened into 2D), which reads as a hyperextended elbow → `joint_limit` on the forearm.
+Freeing the elbow mark does NOT fix it: the solve is warm-started and stays on the illegal
+side. Instead MOVE the elbow mark to its mirror image across the shoulder-to-hand line (for a
+clasped two-hand pose, near the other elbow), with a note. One round is usually enough.
+
 Flags: `conflict` — a fixed mark is impossible for that bone (too far/near: a misplaced
 mark, or GPT drew the bone out of proportion → free it); `joint_limit` — an elbow/knee
-outside its range; `poor_fit` — a free bone far off its stroke; `jump` — a bone flipped
+outside its range (elbow range -2.6..+0.9, so authored start poses pass; on an
+elbow see "Elbow drawn bent backwards" above); `poor_fit` — a free bone far off its stroke; `jump` — a bone flipped
 since the previous frame.
 
 **Rules for the loop (don't chase numbers):** there is no score to optimise. A frame is
@@ -111,24 +122,30 @@ the clip should show the pose GPT *meant*.
 
 **6. assemble** — the clip:
 ```bash
-$SA assemble --run NAME --duration S [--loop] [--contacts]
+.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py assemble --run NAME --duration S [--loop] [--contacts]
 ```
 Defaults: every frame becomes an evenly spaced key (GPT's timing); light temporal smoothing
 (`--no-smooth` to skip); a **moving com** — `Motion: Track` + per-key `body_path` (the hip
 measured against the planted foot) + ground guide, with the per-key `com` anchor sinking
-crouches (`--no-motion` for a stationary clip). Opt-ins: `--key-tol 0.12` (key
+crouches (`--no-motion` for a stationary clip). Opt-ins:
+`--airborne` for a move with no planted foot (air attacks, falls) — it implies `--no-motion
+--no-ground`, since both the body_path and the com anchor measure against a planted foot (on
+the air hammer they invented a 13-unit hip rise), and `verify` then marks the digest's
+PLANTED/swing labels as meaningless; `--key-tol 0.12` (key
 reduction), `--steep-limit 7` (stretch intervals to satisfy the digest's STEEP rule),
-`--keep A-B` (trim frames). Output: `.probe/sprite/NAME/NAME.json` and
+`--keep A-B` (trim frames). Keys stay evenly spaced; to move the impact to a
+target phase, trim with `--keep` or retime keys afterwards with Probe
+(`dotnet run --project MTile.Probe -- retime <clip> <t> <newT>`) — don't add retiming here. Output: `.probe/sprite/NAME/NAME.json` and
 `SkeletonDrafts/<rig>/NAME.json` (`Type: "Draft"`; outside `SkeletonStates/`, so no host
 copies or loads it).
 
-**7. verify** — `$SA verify --run NAME`: copies the clip into the pool as `zzdraft_NAME`
+**7. verify** — `.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py verify --run NAME`: copies the clip into the pool as `zzdraft_NAME`
 only for the command, runs Probe `digest` (→ `digest.txt`) and `motion` (→ `motion.txt`)
 and MTile.Demo `--strip` (→ `engine_strip.png`, hip-pinned so travel isn't visible), then
 deletes the copy. Pose flags (recurvatum etc.) must be 0. STEEP lines are informational —
 that rule is calibrated for walk cycles, not attacks.
 
-**8. report** — `$SA report --run NAME` → `.probe/sprite/NAME/index.html`. Hand the user
+**8. report** — `.probe/venv/bin/python scripts/sprite_pose/sprite_anim.py report --run NAME` → `.probe/sprite/NAME/index.html`. Hand the user
 that path, the number of GPT calls and agent edits, and your verdict.
 
 ## Out of scope (leave for the user)
@@ -140,7 +157,8 @@ frame state, or regenerate.
 
 ## Known limits
 
-- Tested on 5 ground slashes + a lunge on `biped`; locomotion loops, airborne moves and
+- Tested on 5 ground slashes + a lunge + one airborne move (airhammer_v2) on `biped`;
+  locomotion loops, other airborne moves and
   `biped_rabbit` are less proven (the rabbit's struts/feet hold the start pose; run Probe
   `bakeyaw` on strutted drafts).
 - GPT's proportions vary between frames; `solve` reads a per-sheet proportion estimate, so a

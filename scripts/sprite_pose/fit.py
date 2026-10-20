@@ -334,7 +334,8 @@ def limb_chains(prof, rig):
     return chains
 
 
-ARM_LIMIT = (-2.6, 0.15)    # elbows bend one way, to ~150° (authored arms sit at lower ≈ -0.5..-0.9)
+ARM_LIMIT = (-2.6, 0.9)     # elbows bend one way, to ~150°; the +0.9 slack admits authored start poses
+                            # (backup fall@0 has 0.80; 31 of the 404 authored biped forearm keys exceed it)
 
 
 def joint_limits(b):
