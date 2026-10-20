@@ -150,12 +150,12 @@ public static class MoveDrivers
             new TagClipDriver(AnimTag.WallSlide,  AnimClip.WallSlide),
             new TagClipDriver(AnimTag.LedgePull,  AnimClip.LedgePull),
             new TagClipDriver(AnimTag.LedgeGrab,  AnimClip.Hang),    // stable vs. the grab spring's Vy ringing
-            new TagClipDriver(AnimTag.LedgeJump,  AnimClip.LedgeJump),
+            new LaunchClipDriver(AnimTag.LedgeJump, AnimClip.LedgeJump, LaunchClipDriver.LedgeJumpWindow),
             new TagClipDriver(AnimTag.Dropdown,   AnimClip.Dropdown),
             new TagClipDriver(AnimTag.Stunned,    AnimClip.Hitstun),
             new TagClipDriver(AnimTag.Tumble,     AnimClip.Tumble),
-            new TagClipDriver(AnimTag.WallJump,   AnimClip.WallJumpKick),
-            new DoubleJumpDriver(),
+            new LaunchClipDriver(AnimTag.WallJump,  AnimClip.WallJumpKick, LaunchClipDriver.WallJumpWindow),
+            new LaunchClipDriver(AnimTag.DoubleJump, AnimClip.DoubleJump, LaunchClipDriver.DoubleJumpWindow),
             new LandingDriver(),
             new AirborneDriver(),
             new GroundLocomotionDriver(),
@@ -268,23 +268,30 @@ public sealed class LandingDriver : IMoveDriver
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }
 
-// The mid-air jump: tuck the legs in, then push them down. DoubleJumpingState lasts at most
-// DoubleJumpMaxHoldTime (0.12 s, and a tap releases it within a frame or two) — shorter than
-// the tuck-and-push — so once started the clip keeps the untagged airborne band until it has
-// played out, the way LandingDriver keeps the idle band after a touchdown. Any tagged state
-// (wall slide, ledge grab, …) still takes over, since those drivers sit above this one.
-public sealed class DoubleJumpDriver : IMoveDriver
+// An airborne launch whose state is shorter than its clip. DoubleJumpingState and
+// WallJumpingState last at most their MaxHoldTime (0.12 s; a tap releases them within a frame
+// or two), and LedgeJumpState only until the legs clear the corner — all shorter than the
+// tuck-and-push they play. So once started, the clip keeps the untagged airborne band until it
+// has played out, the way LandingDriver keeps the idle band after a touchdown. Any tagged state
+// (wall slide, ledge grab, …) still takes over: the hold only ever matches an untagged sample.
+public sealed class LaunchClipDriver : IMoveDriver
 {
-    // Keep == doublejump.json Duration: the clip is Clock-timed and holds its last pose.
-    public const float Window = 0.36f;
+    // Keep each == the clip's Duration: the clips are Clock-timed and hold their last pose.
+    public const float DoubleJumpWindow = 0.36f;
+    public const float WallJumpWindow   = 0.35f;
+    public const float LedgeJumpWindow  = 0.40f;
+
+    private readonly AnimTag _tag; private readonly AnimClip _clip; private readonly float _window;
+    public LaunchClipDriver(AnimTag tag, AnimClip clip, float window)
+    { _tag = tag; _clip = clip; _window = window; }
 
     public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
-        => s.Tag == AnimTag.DoubleJump
+        => s.Tag == _tag
            || (s.Tag == AnimTag.None && !s.Grounded
-               && st.Clip == AnimClip.DoubleJump && st.ClipTime < Window);
+               && st.Clip == _clip && st.ClipTime < _window);
 
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
-        => new(AnimClip.DoubleJump, ClipTimeMode.Clock);
+        => new(_clip, ClipTimeMode.Clock);
 
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }

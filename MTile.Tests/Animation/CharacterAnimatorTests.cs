@@ -122,7 +122,7 @@ public class CharacterAnimatorTests
         Assert.Equal(AnimClip.Idle, anim.State.Clip);
     }
 
-    // ─── the double jump (DoubleJumpDriver) ─────────────────────────────────────────────
+    // ─── the airborne launches (LaunchClipDriver) ────────────────────────────────────────
     // DoubleJumpingState ends long before its tuck-and-push clip does (a tapped jump lasts a
     // frame or two), so the clip must outlive the tag while the body is still airborne and
     // untagged — and hand back to the generic Jump once it has played out.
@@ -142,6 +142,22 @@ public class CharacterAnimatorTests
             Assert.Equal(AnimClip.DoubleJump, anim.State.Clip);
         }
         for (int i = 0; i < 8; i++) Rise(anim, AnimTag.None);   // carry past the window
+        Assert.Equal(AnimClip.Jump, anim.State.Clip);
+    }
+
+    // The wall kick holds the same way.
+    [Fact]
+    public void WallJump_OutlivesItsState_ThenHandsBackToJump()
+    {
+        var anim = RealAnimator();
+        Fall(anim, 5);
+        Rise(anim, AnimTag.WallJump);
+        for (int i = 0; i < 15; i++)  // inside the 0.35s window
+        {
+            Rise(anim, AnimTag.None);
+            Assert.Equal(AnimClip.WallJumpKick, anim.State.Clip);
+        }
+        for (int i = 0; i < 8; i++) Rise(anim, AnimTag.None);
         Assert.Equal(AnimClip.Jump, anim.State.Clip);
     }
 

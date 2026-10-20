@@ -35,12 +35,12 @@ not name matching.
 | `JumpingState` | *None* | Jump / Fall | `jump.json` | — |
 | `RunningJumpState` | *None* | Jump / Fall | `jump.json` | — |
 | `CoveredJumpState` | *None* | Jump / Fall | `jump.json` | — |
-| `DoubleJumpingState` | DoubleJump | DoubleJump | `doublejump.json` | — (DoubleJumpDriver holds it past the state while airborne) |
+| `DoubleJumpingState` | DoubleJump | DoubleJump | `doublejump.json` | — (LaunchClipDriver holds it past the state while airborne) |
 | `WallSlidingState` | WallSlide | WallSlide | `wallslide.json` | — |
-| `WallJumpingState` | WallJump | WallJumpKick | `walljumpkick.json` | — |
+| `WallJumpingState` | WallJump | WallJumpKick | `walljumpkick.json` | — (LaunchClipDriver holds it past the state while airborne) |
 | `LedgeGrabState` | LedgeGrab | Hang | `hang.json` | — |
 | `LedgePullState` | LedgePull | LedgePull | `ledgepull.json` | **`ledge_pull`** (sim + editor) |
-| `LedgeJumpState` | LedgeJump | LedgeJump | `ledgejump.json` | — |
+| `LedgeJumpState` | LedgeJump | LedgeJump | `ledgejump.json` | — (LaunchClipDriver holds it past the state while airborne) |
 | `StunnedState` | Stunned | Hitstun | `hitstun.json` | — |
 | `TumbleState` | Tumble | Tumble | `tumble.json` | — |
 | `ParkourState` | Parkour | Parkour + ClimbHands overlay | `parkour.json` + `climbhands.json` | `parkour` (editor only) |
