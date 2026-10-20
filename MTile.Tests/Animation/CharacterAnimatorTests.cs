@@ -122,6 +122,46 @@ public class CharacterAnimatorTests
         Assert.Equal(AnimClip.Idle, anim.State.Clip);
     }
 
+    // ─── the double jump (DoubleJumpDriver) ─────────────────────────────────────────────
+    // DoubleJumpingState ends long before its tuck-and-push clip does (a tapped jump lasts a
+    // frame or two), so the clip must outlive the tag while the body is still airborne and
+    // untagged — and hand back to the generic Jump once it has played out.
+    [Fact]
+    public void DoubleJump_OutlivesItsState_ThenHandsBackToJump()
+    {
+        var anim = RealAnimator();
+        Fall(anim, 5);
+        for (int i = 0; i < 2; i++)   // a tapped double jump: two frames of the state
+        {
+            Rise(anim, AnimTag.DoubleJump);
+            Assert.Equal(AnimClip.DoubleJump, anim.State.Clip);
+        }
+        for (int i = 0; i < 15; i++)  // ≈0.28s total, inside the 0.36s window
+        {
+            Rise(anim, AnimTag.None);
+            Assert.Equal(AnimClip.DoubleJump, anim.State.Clip);
+        }
+        for (int i = 0; i < 8; i++) Rise(anim, AnimTag.None);   // carry past the window
+        Assert.Equal(AnimClip.Jump, anim.State.Clip);
+    }
+
+    // A tagged state cuts the held double jump short: grabbing a wall mid-tuck slides.
+    [Fact]
+    public void DoubleJump_Hold_YieldsToATaggedState()
+    {
+        var anim = RealAnimator();
+        Fall(anim, 5);
+        Rise(anim, AnimTag.DoubleJump);
+        Rise(anim, AnimTag.None);
+        Rise(anim, AnimTag.WallSlide);
+        Assert.Equal(AnimClip.WallSlide, anim.State.Clip);
+    }
+
+    private static void Rise(CharacterAnimator anim, AnimTag tag)
+        => anim.Update(new CharacterAnimSample(
+            Vector2.Zero, new Vector2(0f, -150f), 1, false, "DoubleJumpingState", "", 1f / 60f,
+            tag: tag));
+
     // Landing into a walk keeps the locomotion cycle — the feet are already cycling and a
     // one-shot would stutter them. Same band GroundLocomotionDriver picks Idle for, which is
     // why LandingDriver tests against its threshold rather than a second copy.

@@ -35,7 +35,7 @@ not name matching.
 | `JumpingState` | *None* | Jump / Fall | `jump.json` | — |
 | `RunningJumpState` | *None* | Jump / Fall | `jump.json` | — |
 | `CoveredJumpState` | *None* | Jump / Fall | `jump.json` | — |
-| `DoubleJumpingState` | DoubleJump | DoubleJumpFlip | `doublejumpflip.json` | — |
+| `DoubleJumpingState` | DoubleJump | DoubleJump | `doublejump.json` | — (DoubleJumpDriver holds it past the state while airborne) |
 | `WallSlidingState` | WallSlide | WallSlide | `wallslide.json` | — |
 | `WallJumpingState` | WallJump | WallJumpKick | `walljumpkick.json` | — |
 | `LedgeGrabState` | LedgeGrab | Hang | `hang.json` | — |

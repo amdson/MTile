@@ -14,7 +14,7 @@ namespace MTile;
 // EVERY value here must have a clip file whose Type matches, or binding throws at construction.
 public enum AnimClip { Idle, Walk, WalkBack, Crouch, CrouchWalk, 
 DuckUnder, Jump, Fall, Parkour, Run, WallSlide, Hang, Hitstun, 
-Tumble, WallJumpKick, DoubleJumpFlip, RunTurn, Land, LedgeJump, 
+Tumble, WallJumpKick, DoubleJump, RunTurn, Land, LedgeJump, 
 Dropdown, Mantle, ArcJump, LedgePull, StepUp, Stairs }
 
 // The animation-side state, deliberately separate from any character/sim state.

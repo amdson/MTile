@@ -155,7 +155,7 @@ public static class MoveDrivers
             new TagClipDriver(AnimTag.Stunned,    AnimClip.Hitstun),
             new TagClipDriver(AnimTag.Tumble,     AnimClip.Tumble),
             new TagClipDriver(AnimTag.WallJump,   AnimClip.WallJumpKick),
-            new TagClipDriver(AnimTag.DoubleJump, AnimClip.DoubleJumpFlip),
+            new DoubleJumpDriver(),
             new LandingDriver(),
             new AirborneDriver(),
             new GroundLocomotionDriver(),
@@ -264,6 +264,27 @@ public sealed class LandingDriver : IMoveDriver
 
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => new(AnimClip.Land, ClipTimeMode.Clock);
+
+    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+}
+
+// The mid-air jump: tuck the legs in, then push them down. DoubleJumpingState lasts at most
+// DoubleJumpMaxHoldTime (0.12 s, and a tap releases it within a frame or two) — shorter than
+// the tuck-and-push — so once started the clip keeps the untagged airborne band until it has
+// played out, the way LandingDriver keeps the idle band after a touchdown. Any tagged state
+// (wall slide, ledge grab, …) still takes over, since those drivers sit above this one.
+public sealed class DoubleJumpDriver : IMoveDriver
+{
+    // Keep == doublejump.json Duration: the clip is Clock-timed and holds its last pose.
+    public const float Window = 0.36f;
+
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => s.Tag == AnimTag.DoubleJump
+           || (s.Tag == AnimTag.None && !s.Grounded
+               && st.Clip == AnimClip.DoubleJump && st.ClipTime < Window);
+
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => new(AnimClip.DoubleJump, ClipTimeMode.Clock);
 
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }
