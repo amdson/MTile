@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Content;
 
@@ -41,6 +42,10 @@ public sealed class GameAudio
     private readonly SoundBank  _bank  = new();
     private readonly AudioMixer _mixer;
 
+    // HitIds whose terrain strike already sounded (see Present). Bounded FIFO; render-only.
+    private readonly HashSet<int> _struckHitIds = new();
+    private readonly Queue<int>   _struckOrder  = new();
+
     public GameAudio() { _mixer = new AudioMixer(_bank); }
 
     public AudioMixer Mixer   => _mixer;
@@ -74,6 +79,13 @@ public sealed class GameAudio
                 break;
 
             case PresentationKind.TerrainStrike:
+                // Raised on every frame the hitbox overlaps terrain, and the log dedupes
+                // per (frame, id) only — so without this one slash dragging through blocks
+                // re-fired the clip each frame. Once per HitId, same as Game1's sparks.
+                if (!_struckHitIds.Add(e.Id.A)) break;
+                _struckOrder.Enqueue(e.Id.A);
+                if (_struckOrder.Count > 64) _struckHitIds.Remove(_struckOrder.Dequeue());
+
                 _mixer.Fire(new SoundId(SoundKind.TerrainStrike, e.Id.A, e.Id.B),
                             e.SimFrame, gain: 0.7f, pitch: Jitter(e.Id.A * 13), pos: e.Position);
                 break;
