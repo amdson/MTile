@@ -1,14 +1,14 @@
 {
-  "//": "PrismEnemy boss fight (stage 'prism'). The Warlord hall reused: floor surface at tile row 12 (world y 132), walls at tile x -60 / 60, ceiling at row -16, a low dirt ledge each side of the spawn (warlord_left.txt at chunk -2, warlord_right.txt at chunk 2). Placement + respawn in Stage.cs (PopulatePrism).",
+  "//": "PrismEnemy boss fight (stage 'prism'). A 60x20 hall: floor surface at tile row 12 (world y 132), walls at tile x -31 / 30, ceiling at row -9, a low dirt ledge each side of the spawn at row 7, x -27..-22 and 21..26 (prism_ledge.txt at chunks -2 and 1). Placement + respawn in Stage.cs (PopulatePrism).",
   "Extents": 4,
   "ChunkFiles": {
-    "-2,0": "warlord_left.txt",
-    "2,0":  "warlord_right.txt"
+    "-2,0": "prism_ledge.txt",
+    "1,0":  "prism_ledge.txt"
   },
   "Rules": [
     { "Condition": "y >= 12",  "IsSolid": true },
-    { "Condition": "x <= -60", "IsSolid": true },
-    { "Condition": "x >= 60",  "IsSolid": true },
-    { "Condition": "y <= -16", "IsSolid": true }
+    { "Condition": "x <= -31", "IsSolid": true },
+    { "Condition": "x >= 30",  "IsSolid": true },
+    { "Condition": "y <= -9", "IsSolid": true }
   ]
 }

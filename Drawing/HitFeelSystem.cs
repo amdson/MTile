@@ -131,6 +131,5 @@ public sealed class HitFeelSystem
                 Effects.Flash(_particles, contact, 16f + 14f * t, new Color(255, 235, 190), 0.07f);
             }
         }
-        Vfx?.Spawn("body_hit", pos, dir, 0.8f + 0.4f * t);
     }
 }

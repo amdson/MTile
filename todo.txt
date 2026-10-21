@@ -6,5 +6,8 @@
 - fix bug where some blocks are seemingly invincible to breaking under impact
 
 - add a specific animation for wall jumping while controls are holding player into wall 
-- merge in worktree-sprite-pose-experiment
+- merge in worktree-sprite-pose-experiment, worktree-fall-drag
+- 
+
+- a boss that generates a damaging rain/wind that permeates the stage, blowing to the left and doing decent damage and knockback per second. the boss is on the right side, at the very end, with knockback dealing attacks and fairly low health. in addition to the wind and melee attacks, the boss can lob explosives at enemies
 - 

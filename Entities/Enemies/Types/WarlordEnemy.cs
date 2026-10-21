@@ -916,6 +916,7 @@ public sealed class WarlordEnemy : EnemyEntity
 
     public override EntityKind Kind        => EntityKind.Warlord;
     public override string     DisplayName => "Warlord";
+    public override string     BossTitle   => "Warlord";
 
     public bool Enraged   => (Scratch.I0 & 1) != 0;
     public bool Exhausted => Scratch.F1 > 0f;

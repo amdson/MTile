@@ -124,7 +124,7 @@ public static partial class Stages
         });
 
         // ─── prism ────────────────────────────────────────────────────────────
-        // PrismEnemy boss fight (Levels/prism.json — the Warlord hall: floor at tile
+        // PrismEnemy boss fight (Levels/prism.json — a 60x20 hall: floor at tile
         // row 12, a dirt ledge each side). One Prism to your right; it respawns 4 s
         // after dying. See Entities/Enemies/Types/PrismEnemy.cs.
         Register(new Stage {

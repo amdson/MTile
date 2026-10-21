@@ -126,8 +126,10 @@ public sealed class MotionFxSystem
         if (state is WallSlidingState ws && vel.Y > 40f)
         {
             int n = Tick(ref t.WallAcc, 12f + vel.Y * 0.1f, dt);
+            var contact = n > 0 ? WallHand(p, anim, ws.WallDir, pos + new Vector2(ws.WallDir * halfW, 6f))
+                                : default;
             for (int i = 0; i < n; i++)
-                Effects.WallSlideDust(_particles, pos + new Vector2(ws.WallDir * halfW, 6f), ws.WallDir, vel.Y);
+                Effects.WallSlideDust(_particles, contact, ws.WallDir, vel.Y);
         }
 
         // ── Speed lines ───────────────────────────────────────────────────────
@@ -188,6 +190,18 @@ public sealed class MotionFxSystem
 
         t.State = stateT; t.Action = actName; t.Grounded = grounded; t.DoubleJumped = dj;
         t.Vel = vel; t.InSweetSpot = sweet;
+    }
+
+    // The drawn hand braced on the wall: whichever lower arm's end reaches further toward
+    // `wallDir`. Falls back to `fallback` (the body's wall face) with no animator or arms.
+    private Vector2 WallHand(PlayerCharacter p, CharacterAnimator anim, int wallDir, Vector2 fallback)
+    {
+        if (anim == null) return fallback;
+        var root = AttackGlowSystem.RigRoot(p, anim, _skeletonScale);
+        bool hasL = anim.TryBoneEnd("arm_l_lower", root, anim.DisplayFacing, out var l);
+        bool hasR = anim.TryBoneEnd("arm_r_lower", root, anim.DisplayFacing, out var r);
+        if (hasL && hasR) return l.X * wallDir >= r.X * wallDir ? l : r;
+        return hasL ? l : hasR ? r : fallback;
     }
 
     // Rate accumulator: returns how many emissions `rate`/s owes this frame.

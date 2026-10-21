@@ -915,6 +915,18 @@ public sealed partial class CharacterAnimator
         return true;
     }
 
+    // World position of a named bone's far end (origin + Length along its local +X) on
+    // the live pose — e.g. a hand at the end of a lower arm. Same root as TryBoneOrigin.
+    public bool TryBoneEnd(string name, Vector2 worldPos, int facing, out Vector2 end)
+    {
+        int b = _skeleton.IndexOf(name);
+        if (b < 0) { end = worldPos; return false; }
+        int dir = facing == 0 ? 1 : facing;
+        var root = Affine2.FromTRS(worldPos, 0f, new Vector2(dir * _scale, _scale));
+        end = _pose.ComputeWorld(root)[b].TransformPoint(new Vector2(_skeleton.Bones[b].Length, 0f));
+        return true;
+    }
+
     // The clip's bundled center-of-mass reference point (the "com" Point addition),
     // in rig-local space, sampled at the pose drawn this frame. This is the anchor a
     // host maps onto the character's physics body (its polygon centroid = the real

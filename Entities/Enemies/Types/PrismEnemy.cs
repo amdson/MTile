@@ -395,8 +395,9 @@ public class PrismDashAction : EnemyActionState
 // side of it from the boss (Side = +1) or the near side (−1) — and Rise px above,
 // chosen at Enter (LockedAim, an absolute point) and shown through the windup. It
 // appears on the windup→active transition, aimed at wherever the target IS on that
-// frame; its own silhouette is the real tell. A destination inside rock is nudged
-// upward a few cells, and fizzles if that doesn't find air.
+// frame; its own silhouette is the real tell. A destination inside rock (a wall or the
+// ceiling past a cornered target) is walked back toward the target to the first spot
+// with room for the emitter, and fizzles if the whole line is buried.
 public class PrismPlantAction : EnemyActionState
 {
     public PrismPlantAction(int side) { Side = side; }
@@ -407,7 +408,6 @@ public class PrismPlantAction : EnemyActionState
     protected virtual float Recovery   => 0.45f;
     protected virtual float SideOffset => 110f;
     protected virtual float Rise       => 70f;
-    protected virtual int   NudgeCells => 6;
 
     // The ray's parameters. Wide: the two cones have to cross on the target and
     // between them cover the ground on both sides of it.
@@ -438,12 +438,26 @@ public class PrismPlantAction : EnemyActionState
         var at = ctx.Target.Position + new Vector2(away * Side * SideOffset, -Rise);
         var chunks = ctx.Spawner?.Chunks;
         if (chunks == null) return at;
-        for (int k = 0; k <= NudgeCells; k++)
+        // March from the plant point to the target in half-tile steps; plant at the first
+        // point the emitter's body fits in air.
+        var to   = ctx.Target.Position - at;
+        float len = to.Length();
+        float step = Chunk.TileSize * 0.5f;
+        for (float d = 0f; d <= len; d += step)
         {
-            var q = at - new Vector2(0f, k * Chunk.TileSize);
-            if (!TileQuery.IsSolidAt(chunks, q.X, q.Y)) return q;
+            var q = len > 1e-3f ? at + to * (d / len) : at;
+            if (Clear(chunks, q)) return q;
         }
         return at;      // buried: Update fizzles
+    }
+
+    // The emitter's centre and the four extremes of its body are all air.
+    private static bool Clear(ChunkMap chunks, Vector2 q)
+    {
+        const float r = RayEmitter.BodyRadius;
+        return !TileQuery.IsSolidAt(chunks, q.X,     q.Y)
+            && !TileQuery.IsSolidAt(chunks, q.X - r, q.Y) && !TileQuery.IsSolidAt(chunks, q.X + r, q.Y)
+            && !TileQuery.IsSolidAt(chunks, q.X, q.Y - r) && !TileQuery.IsSolidAt(chunks, q.X, q.Y + r);
     }
 
     public override void Exit(in EnemyContext ctx, ref EnemyActionVars v) => v.Committed = false;
@@ -507,6 +521,7 @@ public sealed class PrismEnemy : EnemyEntity
 
     public override EntityKind Kind        => EntityKind.Prism;
     public override string     DisplayName => "Prism";
+    public override string     BossTitle   => "Prism";
 
     private static Polygon CreateBodyPolygon()
     {

@@ -68,6 +68,7 @@ public class Game1 : Game
     private readonly ClearanceRow[] _rowScratch  = new ClearanceRow[ClearanceConstraintBuilder.MaxEvents];
     private HudRenderer _hud;
     private readonly DepthsHud _depthsHud = new();
+    private readonly BossBarHud _bossBars = new();
     private PrimitiveBatch _prims;
     private DensityField _density;
     private SkeletonMetaballRenderer _metaballs;
@@ -521,6 +522,7 @@ public class Game1 : Game
         _sparkedHitIds.Clear(); _sparkedOrder.Clear();   // HitIds restart with the sim
         _motionFx?.Clear();
         _vfx?.Clear();
+        _bossBars.Clear();
         _elements?.Clear();
         _audio.StopAll();  // and no voice should survive into a different world
         _sim.OnPlayerRespawn += pos =>
@@ -1503,6 +1505,8 @@ public class Game1 : Game
 
         long tHud = _prof.Begin();
         _hud.Draw(LocalPlayer, LocalAnimator, _mouseScreen);
+        _bossBars.Draw(_spriteBatch, _debugFont, _pixel, GraphicsDevice.Viewport, _sim.Entities,
+                       (float)gameTime.ElapsedGameTime.TotalSeconds);
         if (string.Equals(_activeStage, "depths", StringComparison.OrdinalIgnoreCase))
             _depthsHud.Draw(_spriteBatch, _debugFont, GraphicsDevice.Viewport, _sim);
         if (_config.DrawFighterNames)

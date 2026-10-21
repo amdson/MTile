@@ -123,6 +123,11 @@ public abstract class EnemyEntity : Entity, ITelegraphSource
     public bool IsActionCommitted => _currentAction >= 0 && _actionVars.Committed;
     // Overlay label (a compiled fighter's name); null = unlabelled. Render-only.
     public virtual string DisplayName => null;
+    // Non-null marks a major boss: BossBarHud gives it a named bar across the top of the
+    // screen. Render-only.
+    public virtual string BossTitle => null;
+    // A second, shield-style pool drawn above the boss bar (0..1), or < 0 for none.
+    public virtual float BossShieldFraction => -1f;
 
     // No hurtbox while the running action makes the body untouchable (a dash's first
     // frames). Hurtboxes are published before entities update, so this reads the action

@@ -919,6 +919,8 @@ public sealed class QuillbackEnemy : EnemyEntity
 
     public override EntityKind Kind        => EntityKind.Quillback;
     public override string     DisplayName => "Quillback";
+    public override string     BossTitle   => "Quillback";
+    public override float      BossShieldFraction => Shield / ShieldMax;
 
     public float Shield
     {

@@ -70,7 +70,6 @@ else if (_phase == Phase.Playing && _bootDone && _peerInterrupted && !_peerLost)
                                     @onclick="() => _stage = pick.Name">
                                 <span class="mtile-stage-name">@pick.Label</span>
                                 <span class="mtile-tag @(pick.Coop ? "mtile-tag-coop" : "")">@(pick.Coop ? "co-op" : "versus")</span>
-                                <span class="mtile-stage-blurb">@pick.Blurb</span>
                             </button>
                         }
                     </div>
@@ -252,7 +251,6 @@ else if (_phase == Phase.Playing && _bootDone && _peerInterrupted && !_peerLost)
     .mtile-stage:hover { border-color: #666; }
     .mtile-stage-on { border-color: #9cf; background: #1d2630; }
     .mtile-stage-name { font-weight: 600; margin-right: 0.4rem; }
-    .mtile-stage-blurb { display: block; color: #999; font-size: 0.8rem; margin-top: 0.25rem; }
     .mtile-tag {
         font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
         border: 1px solid #a86; color: #fc9; border-radius: 3px; padding: 0 0.3rem;

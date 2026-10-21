@@ -229,7 +229,8 @@ public sealed class WardenEnemy : EnemyEntity
     private static readonly Color ArmoredColor = new(125, 135, 155);
     private static readonly Color OpenColor    = new(255, 90, 60);
 
-    public override EntityKind Kind => EntityKind.Warden;
+    public override EntityKind Kind      => EntityKind.Warden;
+    public override string     BossTitle => "Warden";
 
     // Open from the start of the windup to the end of the recovery — exactly the
     // span the smash holds Committed.
