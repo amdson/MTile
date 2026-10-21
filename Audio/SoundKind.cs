@@ -39,11 +39,22 @@ public enum SoundKind
 
     // Tier 3, but already flowing through the presentation seam.
     Respawn,
+
+    // The swing split (GameAudio.SwingKind). Each falls back to the generic Swing set,
+    // so a family with no clips of its own still whooshes.
+    SwingHeavy,   // combo finishers: GroundSlash3, AirSlash2
+    Stab,
+    AirHammer,
+    DashSlash,
+
+    Dash,           // DashState entry
+    TerrainStrike,  // PresentationKind.TerrainStrike — an attack hit terrain
+    ChargedBlast,   // PresentationKind.ChargedBlast — a charged block detonated
 }
 
 public static class SoundKinds
 {
-    public const int Count = (int)SoundKind.Respawn + 1;
+    public const int Count = (int)SoundKind.ChargedBlast + 1;
 
     // Stems, derived once from the enum names: PascalCase -> snake_case. This used to be
     // a hand-maintained parallel array, which silently mis-mapped every kind after the
@@ -84,6 +95,7 @@ public static class SoundKinds
         // borrows the nearest thing rather than going silent.
         SoundKind.GuardBlock => SoundKind.HitConnect,
         SoundKind.GuardParry => SoundKind.GuardBlock,
+        SoundKind.SwingHeavy or SoundKind.Stab or SoundKind.AirHammer or SoundKind.DashSlash => SoundKind.Swing,
         _              => SoundKind.None,
     };
 

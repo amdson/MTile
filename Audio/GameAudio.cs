@@ -22,9 +22,9 @@ public sealed class GameAudio
     // event would be missed entirely rather than merely late.
     private const int StampWindowFrames = 6;
 
-    // Landing borrows the footstep clips (SoundKinds.Fallback), so it needs to sit
-    // clearly above a step. Drop this toward 1.0 once a dedicated land clip exists.
-    private const float LandGain = 1.35f;
+    // Landing has its own land_* set now, so it no longer needs pushing above a borrowed
+    // footstep. Back to 1.35 if those clips ever go and it falls back to Footstep again.
+    private const float LandGain = 1.0f;
 
     // Footstep placeholder (see Footsteps). Cadence is speed/stride, so the strides are
     // set against *measured* top ground speed, not against config: an upright walk
@@ -72,6 +72,16 @@ public sealed class GameAudio
                 _mixer.Fire(new SoundId(SoundKind.Respawn), e.SimFrame,
                             gain: 1f, pitch: 0f, pos: e.Position);
                 break;
+
+            case PresentationKind.TerrainStrike:
+                _mixer.Fire(new SoundId(SoundKind.TerrainStrike, e.Id.A, e.Id.B),
+                            e.SimFrame, gain: 0.7f, pitch: Jitter(e.Id.A * 13), pos: e.Position);
+                break;
+
+            case PresentationKind.ChargedBlast:
+                _mixer.Fire(new SoundId(SoundKind.ChargedBlast, e.Id.A, e.Id.B),
+                            e.SimFrame, gain: 1f, pitch: Jitter(e.Id.A * 3 + e.Id.B), pos: e.Position);
+                break;
         }
     }
 
@@ -103,6 +113,7 @@ public sealed class GameAudio
         Swing(p, index);
         Jump(p, index);
         DoubleJump(p, index);
+        Dash(p, index);
         ClimbEffort(p, index);
         Land(p, index);
         Footsteps(p, index);
@@ -201,11 +212,22 @@ public sealed class GameAudio
         if (!IsSwing(p.CurrentAction)) return;
         if (IsSwing(p.GetPreviousAction(1))) return;
 
-        _mixer.Fire(new SoundId(SoundKind.Swing, index, p.Frame),
+        _mixer.Fire(new SoundId(SwingKind(p.CurrentAction), index, p.Frame),
                     simFrame: p.Frame, gain: 0.6f, pitch: Jitter(p.Frame), pos: p.Body.Position);
     }
 
     private static bool IsSwing(ActionState a) => a is SlashLikeAction || a is StabAction || a is AirWhipKick || a is AirHammerAction;
+
+    // Which family's clips a swing plays. The whip kick and every other slash use the
+    // generic light set; the rest fall back to it (SoundKinds.Fallback) when unsourced.
+    private static SoundKind SwingKind(ActionState a) => a switch
+    {
+        GroundSlash3 or AirSlash2 => SoundKind.SwingHeavy,
+        DashSlash                 => SoundKind.DashSlash,
+        StabAction                => SoundKind.Stab,
+        AirHammerAction           => SoundKind.AirHammer,
+        _                         => SoundKind.Swing,
+    };
 
     // Entering a jump state is an edge, but a derivable one: the state ring is snapshotted,
     // so "current is a jump, previous frame was not" re-derives identically after a
@@ -246,6 +268,17 @@ public sealed class GameAudio
 
         _mixer.Fire(new SoundId(SoundKind.DoubleJump, index, p.Frame),
                     simFrame: p.Frame, gain: 0.7f, pitch: Jitter(p.Frame), pos: p.Body.Position);
+    }
+
+    // Entering an air dash: a short burst of air, distinct from the double jump it
+    // replaces mid-air. Same state-entry derivation as the jumps.
+    private void Dash(PlayerCharacter p, int index)
+    {
+        if (p.CurrentState is not DashState) return;
+        if (p.GetPreviousState(1) is DashState) return;
+
+        _mixer.Fire(new SoundId(SoundKind.Dash, index, p.Frame),
+                    simFrame: p.Frame, gain: 0.7f, pitch: Jitter(p.Frame * 3), pos: p.Body.Position);
     }
 
     // Effort grunt on a climb that costs something: hauling over a ledge or mantling.

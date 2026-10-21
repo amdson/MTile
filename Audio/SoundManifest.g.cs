@@ -14,19 +14,29 @@ public static class SoundManifest
     // (stem, variant count). Count 0 means "one unnumbered file", <stem>.ogg.
     public static readonly (string Stem, int Variants)[] Entries =
     {
+        ("air_hammer", 1),
+        ("charged_blast", 1),
+        ("dash", 2),
+        ("dash_slash", 1),
         ("dev_tone", 0),
         ("double_jump", 1),
-        ("eruption", 1),
+        ("eruption", 7),
         ("footstep", 2),
         ("grunt", 1),
         ("guard_block", 3),
-        ("guard_parry", 3),
+        ("guard_parry", 1),
         ("hit_connect", 7),
         ("jump", 1),
+        ("land", 3),
         ("laser_blast", 1),
-        ("swing", 2),
+        ("respawn", 1),
+        ("stab", 2),
+        ("swing", 3),
+        ("swing_heavy", 2),
+        ("terrain_strike", 1),
         ("throw", 1),
-        ("tile_break", 1),
+        ("tile_break", 2),
         ("tile_place", 1),
+        ("wall_scrape", 1),
     };
 }

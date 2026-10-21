@@ -35,6 +35,36 @@
 #--------------------------- GENERATED SOUNDS -------------------------------#
 # Written by scripts/sync-sounds (.ps1/.sh) — do not hand-edit; your changes will be lost.
 
+#begin ../Assets/Sounds/air_hammer_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/air_hammer_01.ogg;Sounds/air_hammer_01.xnb
+
+#begin ../Assets/Sounds/charged_blast_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/charged_blast_01.ogg;Sounds/charged_blast_01.xnb
+
+#begin ../Assets/Sounds/dash_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/dash_01.ogg;Sounds/dash_01.xnb
+
+#begin ../Assets/Sounds/dash_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/dash_02.ogg;Sounds/dash_02.xnb
+
+#begin ../Assets/Sounds/dash_slash_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/dash_slash_01.ogg;Sounds/dash_slash_01.xnb
+
 #begin ../Assets/Sounds/dev_tone.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor
@@ -52,6 +82,42 @@
 /processor:SoundEffectProcessor
 /processorParam:Quality=Best
 /build:../Assets/Sounds/eruption_01.ogg;Sounds/eruption_01.xnb
+
+#begin ../Assets/Sounds/eruption_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/eruption_02.ogg;Sounds/eruption_02.xnb
+
+#begin ../Assets/Sounds/eruption_03.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/eruption_03.ogg;Sounds/eruption_03.xnb
+
+#begin ../Assets/Sounds/eruption_04.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/eruption_04.ogg;Sounds/eruption_04.xnb
+
+#begin ../Assets/Sounds/eruption_05.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/eruption_05.ogg;Sounds/eruption_05.xnb
+
+#begin ../Assets/Sounds/eruption_06.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/eruption_06.ogg;Sounds/eruption_06.xnb
+
+#begin ../Assets/Sounds/eruption_07.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/eruption_07.ogg;Sounds/eruption_07.xnb
 
 #begin ../Assets/Sounds/footstep_01.ogg
 /importer:OggImporter
@@ -94,18 +160,6 @@
 /processor:SoundEffectProcessor
 /processorParam:Quality=Best
 /build:../Assets/Sounds/guard_parry_01.ogg;Sounds/guard_parry_01.xnb
-
-#begin ../Assets/Sounds/guard_parry_02.ogg
-/importer:OggImporter
-/processor:SoundEffectProcessor
-/processorParam:Quality=Best
-/build:../Assets/Sounds/guard_parry_02.ogg;Sounds/guard_parry_02.xnb
-
-#begin ../Assets/Sounds/guard_parry_03.ogg
-/importer:OggImporter
-/processor:SoundEffectProcessor
-/processorParam:Quality=Best
-/build:../Assets/Sounds/guard_parry_03.ogg;Sounds/guard_parry_03.xnb
 
 #begin ../Assets/Sounds/hit_connect_01.ogg
 /importer:OggImporter
@@ -155,11 +209,47 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/jump_01.ogg;Sounds/jump_01.xnb
 
+#begin ../Assets/Sounds/land_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/land_01.ogg;Sounds/land_01.xnb
+
+#begin ../Assets/Sounds/land_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/land_02.ogg;Sounds/land_02.xnb
+
+#begin ../Assets/Sounds/land_03.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/land_03.ogg;Sounds/land_03.xnb
+
 #begin ../Assets/Sounds/laser_blast_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor
 /processorParam:Quality=Best
 /build:../Assets/Sounds/laser_blast_01.ogg;Sounds/laser_blast_01.xnb
+
+#begin ../Assets/Sounds/respawn_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/respawn_01.ogg;Sounds/respawn_01.xnb
+
+#begin ../Assets/Sounds/stab_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/stab_01.ogg;Sounds/stab_01.xnb
+
+#begin ../Assets/Sounds/stab_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/stab_02.ogg;Sounds/stab_02.xnb
 
 #begin ../Assets/Sounds/swing_01.ogg
 /importer:OggImporter
@@ -173,6 +263,30 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/swing_02.ogg;Sounds/swing_02.xnb
 
+#begin ../Assets/Sounds/swing_03.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/swing_03.ogg;Sounds/swing_03.xnb
+
+#begin ../Assets/Sounds/swing_heavy_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/swing_heavy_01.ogg;Sounds/swing_heavy_01.xnb
+
+#begin ../Assets/Sounds/swing_heavy_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/swing_heavy_02.ogg;Sounds/swing_heavy_02.xnb
+
+#begin ../Assets/Sounds/terrain_strike_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/terrain_strike_01.ogg;Sounds/terrain_strike_01.xnb
+
 #begin ../Assets/Sounds/throw_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor
@@ -185,10 +299,22 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/tile_break_01.ogg;Sounds/tile_break_01.xnb
 
+#begin ../Assets/Sounds/tile_break_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/tile_break_02.ogg;Sounds/tile_break_02.xnb
+
 #begin ../Assets/Sounds/tile_place_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor
 /processorParam:Quality=Best
 /build:../Assets/Sounds/tile_place_01.ogg;Sounds/tile_place_01.xnb
+
+#begin ../Assets/Sounds/wall_scrape_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/wall_scrape_01.ogg;Sounds/wall_scrape_01.xnb
 
 #------------------------- END GENERATED SOUNDS -----------------------------#
