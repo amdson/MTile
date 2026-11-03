@@ -153,7 +153,8 @@ internal sealed class BarrierLayer
 
     // Done-ness of one cell for this layer's mode.
     private bool Finished(BotView v, Point c)
-        => Spikes ? v.Sim.Chunks.Spikes.IsSpiked(c.X, c.Y) : BarrierPlanner.Requested(v, c);
+        => Spikes ? (v.Sim.Chunks.Spikes.IsSpiked(c.X, c.Y) || v.Sim.Chunks.SpikeSeeds.Has(c.X, c.Y))
+                 : BarrierPlanner.Requested(v, c);   // a seeded cell is placed: it grows on its own
 
     public Status Step(BotView v, ref PlayerInput input)
     {

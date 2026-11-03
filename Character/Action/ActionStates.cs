@@ -3105,17 +3105,23 @@ public class BlockPlaceAction : ActionState
 
     // Spike overlay (BLOCK_OWNERSHIP_SPIKES §2): only an existing SOLID cell — never air,
     // never a still-growing sprout — so spikes can't be conjured into open space to crush
-    // someone. Not already spiked (by anyone: no paying to repaint an enemy's spikes),
-    // and the full SpikeBuildCost (2× stone) must be affordable; charged only when the
-    // overlay actually lands. Stamps the placer's side, which is what makes the cell
-    // harmless to them and their co-op partner.
+    // someone. Not already spiked OR seeded (by anyone: no paying to repaint an enemy's
+    // spikes, no double charge for a cell whose crystal is still growing), and the full
+    // SpikeBuildCost (2× stone) must be affordable. Stamps the placer's side, which is
+    // what makes the eventual spike harmless to them and their co-op partner.
+    //
+    // todo.txt #8: this SEEDS the cell (TileSpikeSeeds) rather than spiking it — a small
+    // crystal that flashes and grows into the ordinary spike overlay after
+    // CrystalLifecycle.SpikePlacement (1.0 s seed + 0.25 s flash). The full cost is
+    // charged now, at seeding, as the instant placement used to; a seed lost to its block
+    // breaking is not refunded.
     public static bool TrySpikeCell(EnvironmentContext ctx, PlayerAbilityState ab, int gtx, int gty)
     {
         if (ctx.Chunks == null || ab?.Meters == null) return false;
         if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Solid) return false;
-        if (ctx.Chunks.Spikes.IsSpiked(gtx, gty)) return false;
+        if (ctx.Chunks.Spikes.IsSpiked(gtx, gty) || ctx.Chunks.SpikeSeeds.Has(gtx, gty)) return false;
         if (!ab.Meters.TrySpendUnits(MaterialStrengths.SpikeBuildCost)) return false;
-        ctx.Chunks.Spikes.Set(gtx, gty, new TileSpikes.Side(ctx.Faction, ctx.Team));
+        ctx.Chunks.SpikeSeeds.Set(gtx, gty, new TileSpikes.Side(ctx.Faction, ctx.Team), ctx.Chunks.TerrainFrame);
         return true;
     }
 
