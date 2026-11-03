@@ -227,7 +227,7 @@ public class CombatState
     // zero damage but don't reward a counter. Threshold compares against
     // Hitbox.Damage (HP off the victim), NOT the knockback, so an attack that
     // shoves hard but barely hurts still qualifies. At 1.0 the whole slash kit
-    // (0.5), a plain stab (0.5; a dive or charge boosts it past 1.0) and a creature's melee swing (1.0) charge, while the
+    // (0.5), a plain stab (0.75; a dive or charge boosts it past 1.0) and a creature's melee swing (1.0) charge, while the
     // heavy end — a brute's dive (1.6), a charged blast (1.5), a rail bolt or a
     // Zeus laser (2.6) — parries clean but hands back no counter.
     private const float GuardChargeMaxDamage = 1.0f;

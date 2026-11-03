@@ -541,7 +541,7 @@ public abstract class SlashLikeAction : ActionState
     // Per-frame damage: with the retime the active window is ~3 frames at 60 fps, so a
     // full pass totals ~1.5 TileMaxHP — sand crumbles, dirt cracks hard, same feel band
     // as before the retime (which totalled ~2).
-    private const float SlashDamagePerFrame   = TileDamage.TileMaxHP / 2f;
+    internal const float SlashDamagePerFrame  = TileDamage.TileMaxHP / 2f;
     // Hitbox scale bump per roadmap §1.7 (1.75× — was 1.0×). Combat felt
     // unrewarding with apex-only hitboxes that just barely covered the dot's
     // visible reach; widening makes near-misses rarer without changing the
@@ -1374,6 +1374,10 @@ public class StabAction : ActionState
     // Doubled with the active-window cut (22f → 7f) so the channel still digs — see
     // the window comment above.
     private const float DamagePerFrame        = TileDamage.TileMaxHP / 2f;
+    // What a stab takes off a BODY before the dive/charge boosts: 1.5× a stock slash
+    // (0.75 HP). Split from DamagePerFrame so the dig stays tuned on its own — the
+    // launcher should hurt more without carving more.
+    private const float BodyDamageBase        = 1.5f * SlashLikeAction.SlashDamagePerFrame;
     // Collision-mode striker (HitResolver.Resolve): the stab is a virtual body
     // flying at StrikeSpeed along the thrust, on top of the attacker's real
     // velocity — so a dive stab genuinely hits (and pogos) harder than a
@@ -1673,6 +1677,7 @@ public class StabAction : ActionState
             // still reads correctly.
             float rotation = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
             float dmg = DamagePerFrame * vars.Boost * vars.ChargeBoost;
+            float bodyDmg = BodyDamageBase * vars.Boost * vars.ChargeBoost;
 
             // Each box grows from the body out to the LIVE tip (vars.TipExt, the same
             // curve that drives the visible thrust + glow), floored so a point-blank
@@ -1693,6 +1698,7 @@ public class StabAction : ActionState
                 primaryAABB, vars.HitId, dmg,
                 vars.StabDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, ColorFor(vars.IsGrounded),
+                bodyDamage: bodyDmg,
                 shape: primaryPoly, shapePos: primaryCenter, shapeRotation: rotation,
                 recoilScale: RecoilScale, recoilBreakProtected: true,
                 recoilMinMaterialHP: RecoilMinMaterialHP,
