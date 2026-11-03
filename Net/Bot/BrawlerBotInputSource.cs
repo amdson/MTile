@@ -75,6 +75,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         new BeamManeuver(),          // disabled until GrabAction stops shadowing BeamAction
         // Spacing and navigation.
         new WallClimbManeuver(),
+        new BuildClimbManeuver(),
         new DropdownManeuver(),
         new BreachManeuver(),
         new BackoffManeuver(),
