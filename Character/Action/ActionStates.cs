@@ -2571,9 +2571,16 @@ public class BurstAction : ActionState
     // shell's sweep cut 13f → 8f so the shove is a bang, not a wash.
     private const float HitboxStartTime      = FrameData.BurstAction.Startup;
     private const float HitboxActiveDuration = FrameData.BurstAction.Active;
-    // 20 segments at EndRadius keeps the shell gap-free: spacing at r = 6R is
-    // 2π·6R/20 ≈ 1.9R, just under each segment's 2R width.
+    // Point-blank stage: one box hugging the front of the body for the first frames
+    // of the active window, THEN the fan goes out. The fan starts 1.5R past the
+    // anchor, so without this a body already touching you sat inside the shell's
+    // hole and never got hit. It shares the fan's HitId, so a body is hit once either way.
+    private const float NearDuration         = 2f / 60f;
+    private const float FanStartTime         = HitboxStartTime + NearDuration;
+    // A fan of segments toward the cursor (FanHalfAngle either side of AttackDir),
+    // not a full ring: the shell breaks terrain where you aim, not all around you.
     private const int   Segments             = 5;
+    private const float FanHalfAngle         = 0.07f * MathHelper.TwoPi;   // ≈25°
     private const float StartDist          = PlayerCharacter.Radius * 1.5f;
     private const float EndDist            = PlayerCharacter.Radius * 2.5f;
     private const float SegmentHalfSize      = PlayerCharacter.Radius * 1.0f;
@@ -2589,6 +2596,14 @@ public class BurstAction : ActionState
     // Declared rather than derived: the impulse is huge but the hit is meant to
     // displace, not to lock the victim down for a follow-up.
     private const float HitstunSeconds       = 0.20f;
+
+    // Charge scaling (RecoveryAction's wind-up curve → vars.StabCharge → vars.ChargeBoost,
+    // the same handoff StabAction reads). A burst fired straight out of the press is 1×;
+    // a sweet-spot charge throws harder and reaches further, an overheld one settles at
+    // SettleFraction of that. Knockback and reach only — the shell already breaks dirt
+    // in one pass, and the damage is meant to stay a tickle at any charge.
+    private const float MaxChargeKnockback   = 1.8f;
+    private const float MaxChargeReach       = 1.6f;
 
     // Pogo: an AIR burst aimed into DownAirSlash's bottom sextant bounces you off
     // whatever body it connects with, exactly as the down-air does — same aim wedge,
@@ -2608,14 +2623,16 @@ public class BurstAction : ActionState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        // Must be mid-wind-up with LMB still down: the merged Recovery at index 0,
-        // charging a live press. PreviousAction(0) is last frame's settled action,
-        // so this needs the wind-up to have picked up the press first — LMB-then-RMB
-        // in the same frame charges first and the burst lands a couple frames later.
-        if (ctx.PreviousAction(0) is not RecoveryAction) return false;
+        // Must be mid-wind-up: the live Recovery with its charge latched. Keyed on the
+        // wind-up's own Charging flag rather than on the PressEdge intent — Peek's
+        // 20-frame lookback used to make any charge held past ~⅓ s unburstable while
+        // the stance itself was still up. The wind-up has to have picked up the press
+        // first, so LMB-then-RMB in the same frame charges first and bursts a couple
+        // frames later.
+        var cur = ctx.CurrentAction ?? ctx.PreviousAction(0);
+        if (cur is not RecoveryAction || !ctx.CurrentActionVars.Charging) return false;
         if (ctx.RecoveryIndex() != 0) return false;
         if (!ctx.Input.LeftClick) return false;
-        if (!ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out _)) return false;
         // RMB press-edge only, so a held right button (drag-build) doesn't re-fire.
         if (!ctx.Input.RightClick) return false;
         if (ctx.Controller == null || ctx.Controller.GetPrevious(1).RightClick) return false;
@@ -2640,7 +2657,13 @@ public class BurstAction : ActionState
         vars.TimeInState = 0f;
         vars.IsGrounded  = ctx.GroundedForActions;
         vars.HitId       = ctx.HitIds.Next();
-        vars.AttackDir   = ComputeBurstDir(ctx, ab); 
+        vars.AttackDir   = ComputeBurstDir(ctx, ab);
+        // Wind-up charge → knockback/reach scale. Recovery.Exit stamped it this same
+        // frame (it was preempted just before this Enter); the freshness gate and the
+        // consume mirror StabAction.Enter.
+        bool chargeFresh = vars.StabCharge > 0f && ctx.CurrentFrame - vars.StabChargeFrame <= 1;
+        vars.ChargeBoost = chargeFresh ? vars.StabCharge : 0f;
+        vars.StabCharge  = 0f;
         // Eat the wind-up's press so releasing LMB after the burst can't also
         // spend the gesture on a slash.
         ctx.Intents.Consume(IntentType.PressEdge, ctx.CurrentFrame);
@@ -2668,48 +2691,52 @@ public class BurstAction : ActionState
         vars.TimeInState += ctx.Dt;
 
         if (vars.TimeInState < HitboxStartTime ||
-            vars.TimeInState > HitboxStartTime + HitboxActiveDuration ||
+            vars.TimeInState > FanStartTime + HitboxActiveDuration ||
             ctx.Hitboxes == null) return;
 
-        float r = BurstDist(vars.TimeInState);
-        // Anchored to the CURRENT body position, like Pulse — the shell rides with
-        // the caster instead of hanging at the detonation point.
-        var anchor  = ctx.Body.Position + PlayerCharacter.Radius * vars.AttackDir;
-        var bodyVel = ctx.Body.Velocity;
-        var color   = BurstColorFor(vars.IsGrounded);
-        var tileColor = Color.Lerp(color, Color.Gray, 0.4f);
-        var angleSpread = (float) 0.07 * MathHelper.TwoPi; 
-        var anchorTheta = MathF.Atan2(vars.AttackDir.Y, vars.AttackDir.X);
+        float knockback = KnockbackMagnitude * MathHelper.Lerp(1f, MaxChargeKnockback, vars.ChargeBoost);
+        if (vars.TimeInState < FanStartTime)
+        {
+            PublishSegment(ctx, in vars, NearCenter(ctx.Body.Position, vars.AttackDir), vars.AttackDir, knockback);
+            return;
+        }
 
+        float r = BurstDist(vars.TimeInState, vars.ChargeBoost);
         for (int i = 0; i < Segments; i++)
         {
-            float angle = i * 2 * angleSpread / Segments - angleSpread + anchorTheta;
-            var dir    = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
-            var center = anchor + dir * r;
-            var region = new BoundingBox(
-                center.X - SegmentHalfSize, center.Y - SegmentHalfSize,
-                center.X + SegmentHalfSize, center.Y + SegmentHalfSize);
-
-            // Terrain channel — breaks blocks, imparts nothing.
-            ctx.Hitboxes.Publish(new Hitbox(
-                region, vars.HitId, TileDamagePerFrame,
-                Vector2.Zero,
-                ctx.Faction, ctx.SelfId, tileColor,
-                HitTargets.TilesOnly,
-                origin: ctx.Body.Position));
-
-            // Knockback channel — radial shove plus the caster's momentum. Impulse
-            // mode (not Collision): this is an AoE field, so every target in the
-            // shell should get the same push regardless of closing speed.
-            ctx.Hitboxes.Publish(new Hitbox(
-                region, vars.HitId, EntityDamage,
-                dir * KnockbackMagnitude + bodyVel,
-                ctx.Faction, ctx.SelfId, color,
-                HitTargets.EntitiesOnly,
-                recoilScale: IsPogo(in vars) ? DownAirSlash.PogoRecoilScale : 0f,
-                hitstunSecondsOverride: HitstunSeconds,
-                origin: ctx.Body.Position));
+            var center = SegmentCenter(ctx.Body.Position, vars.AttackDir, r, i, out var dir);
+            PublishSegment(ctx, in vars, center, dir, knockback);
         }
+    }
+
+    // One shell box: a terrain box and a knockback box over the same square.
+    private static void PublishSegment(EnvironmentContext ctx, in ActionVars vars,
+                                       Vector2 center, Vector2 dir, float knockback)
+    {
+        var color     = BurstColorFor(vars.IsGrounded);
+        var tileColor = Color.Lerp(color, Color.Gray, 0.4f);
+        var region = new BoundingBox(
+            center.X - SegmentHalfSize, center.Y - SegmentHalfSize,
+            center.X + SegmentHalfSize, center.Y + SegmentHalfSize);
+        // Terrain channel — breaks blocks, imparts nothing.
+        ctx.Hitboxes.Publish(new Hitbox(
+            region, vars.HitId, TileDamagePerFrame,
+            Vector2.Zero,
+            ctx.Faction, ctx.SelfId, tileColor,
+            HitTargets.TilesOnly,
+            origin: ctx.Body.Position));
+
+        // Knockback channel — radial shove plus the caster's momentum. Impulse
+        // mode (not Collision): this is an AoE field, so every target in the
+        // shell should get the same push regardless of closing speed.
+        ctx.Hitboxes.Publish(new Hitbox(
+            region, vars.HitId, EntityDamage,
+            dir * knockback + ctx.Body.Velocity,
+            ctx.Faction, ctx.SelfId, color,
+            HitTargets.EntitiesOnly,
+            recoilScale: IsPogo(in vars) ? DownAirSlash.PogoRecoilScale : 0f,
+            hitstunSecondsOverride: HitstunSeconds,
+            origin: ctx.Body.Position));
     }
 
     // Same 1-frame inbox read as DownAirSlash: PeekHits is per-victim deduped across
@@ -2724,25 +2751,43 @@ public class BurstAction : ActionState
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
         if (vars.TimeInState < HitboxStartTime ||
-            vars.TimeInState > HitboxStartTime + HitboxActiveDuration) return;
-        float r = BurstDist(vars.TimeInState);
+            vars.TimeInState > FanStartTime + HitboxActiveDuration) return;
         var color = BurstColorFor(vars.IsGrounded);
-        for (int i = 0; i < Segments; i++)
+        if (vars.TimeInState < FanStartTime)
         {
-            float angle = i * MathHelper.TwoPi / Segments;
-            var pos = body.Position + new Vector2(MathF.Cos(angle), MathF.Sin(angle)) * r;
-            t.Rect(pos, 5f, color);
+            t.Rect(NearCenter(body.Position, vars.AttackDir), 5f, color);
+            return;
         }
+        float r = BurstDist(vars.TimeInState, vars.ChargeBoost);
+        for (int i = 0; i < Segments; i++)
+            t.Rect(SegmentCenter(body.Position, vars.AttackDir, r, i, out _), 5f, color);
+    }
+
+    // Center of fan segment `i` at shell radius `r` — shared by the hitboxes and the
+    // telegraph so the overlay can't drift from what actually hits (it once drew a
+    // full ring while the boxes went out as a fan). Anchored to the CURRENT body
+    // position, like Pulse — the shell rides with the caster instead of hanging at
+    // the detonation point — and pushed one radius out along the aim.
+    // The point-blank box: one radius out along the aim, so its 2R square runs from
+    // the body's center to just past its front edge.
+    private static Vector2 NearCenter(Vector2 bodyPos, Vector2 aim)
+        => bodyPos + PlayerCharacter.Radius * aim;
+
+    private static Vector2 SegmentCenter(Vector2 bodyPos, Vector2 aim, float r, int i, out Vector2 dir)
+    {
+        float angle = MathF.Atan2(aim.Y, aim.X) + (2f * i / (Segments - 1) - 1f) * FanHalfAngle;
+        dir = new Vector2(MathF.Cos(angle), MathF.Sin(angle));
+        return bodyPos + PlayerCharacter.Radius * aim + dir * r;
     }
 
     // Shell radius at state-time `t`. Eased out (1-(1-u)²) so the burst leaves the
     // body fast and decelerates at the rim — reads as a detonation rather than the
-    // linear ring sweep Pulse uses.
-    private static float BurstDist(float t)
+    // linear ring sweep Pulse uses. `charge` (vars.ChargeBoost, 0..1) pushes the rim out.
+    private static float BurstDist(float t, float charge)
     {
-        float u = MathHelper.Clamp((t - HitboxStartTime) / HitboxActiveDuration, 0f, 1f);
+        float u = MathHelper.Clamp((t - FanStartTime) / HitboxActiveDuration, 0f, 1f);
         float eased = 1f - (1f - u) * (1f - u);
-        return MathHelper.Lerp(StartDist, EndDist, eased);
+        return MathHelper.Lerp(StartDist, EndDist * MathHelper.Lerp(1f, MaxChargeReach, charge), eased);
     }
 }
 
