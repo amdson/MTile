@@ -72,14 +72,17 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         new CrouchSlashManeuver(),
         new DownAirManeuver(),
         new DashManeuver(),
+        new AvalancheChargeManeuver(),   // fleeing targets only; covers the dash's cooldown
         // Mid range.
         new BlockThrowManeuver(),
         new EruptionManeuver(),
+        new AvalancheCrushManeuver(),    // pins a target in a roofed pocket
         new BlockBurstManeuver(),
         new WallUpManeuver(),
         new BeamManeuver(),          // disabled until GrabAction stops shadowing BeamAction
         // Spacing and navigation.
         new WallClimbManeuver(),
+        new AvalancheRideManeuver(),     // across pits to ledges; outranks BuildClimb there
         new BuildClimbManeuver(),
         new DropdownManeuver(),
         new BreachManeuver(),

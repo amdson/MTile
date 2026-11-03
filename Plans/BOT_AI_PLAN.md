@@ -12,8 +12,8 @@ Tests: `scripts/test-group.py bot` (`BotManeuver*Tests`, harness `MTile.Tests/Si
 | Melee | `Slash`, `Stab` (+ finisher), `AirHammer`, `AirWhipKick` (cross-up), `CrouchSlash`, `DownAir` (pogo), `Burst` (shove), `Dash` (+ DashSlash) |
 | Reactive | `Guard` (timed parry + `GuardRetaliate`), `Pulse` (hugged + hurt), `EscapeGrab` (~10 clicks/s mash) |
 | Grabs | `Grab` (throw into wall/floor), `BlockThrow` (peel a clod, fling it) |
-| Terrain | `Eruption` (charged ridge along the floor), `BlockBurst` (foam puff — crushes under low ceilings), `Enclose` (stone box + spiked floor around a still/stunned target), `WallUp` (wall against an approaching/charging target) |
-| Navigation | `WallClimb`, `BuildClimb` (block elevator up sheer pillars), `Dropdown`, `Breach` (dig through walls), `Backoff` (gap filler + hit-and-run after its own attack) |
+| Terrain | `AvalancheCrush` (wave through P1 into a roofed pocket — crushes where Eruption can't), `Eruption` (charged ridge along the floor), `BlockBurst` (foam puff — crushes under low ceilings), `Enclose` (stone box + spiked floor around a still/stunned target), `WallUp` (wall against an approaching/charging target) |
+| Navigation | `AvalancheRide` (wave across pits to ledges), `AvalancheCharge` (ride down a fleeing target), `WallClimb`, `BuildClimb` (block elevator up sheer pillars), `Dropdown`, `Breach` (dig through walls), `Backoff` (gap filler + hit-and-run after its own attack) |
 | Disabled | `Beam` — `GrabAction` (passive 48) shadows `BeamAction` (45) on every Shift+LMB press off terrain, so the beam never starts for anyone; flip `Enabled` when that is fixed |
 
 Known weakness: a P1 that just spams slash whenever the bot is inside 40 px out-trades
