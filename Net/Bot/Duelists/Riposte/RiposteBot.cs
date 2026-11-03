@@ -52,6 +52,9 @@ public sealed class RiposteBot : IRemoteInputSource
             new RiposteRetreat(_sense),
             new RiposteGated(new WallClimbManeuver(), v => MathF.Abs(v.Dx) > 50f),
             new BreachManeuver(),
+            // Added by the arbiter after the re-run (not the author's): wall off a crystal
+            // wave, nothing else.
+            new WallUpManeuver { CrystalOnly = true },
         };
     }
 

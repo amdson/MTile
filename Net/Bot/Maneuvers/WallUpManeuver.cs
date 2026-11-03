@@ -37,6 +37,9 @@ namespace MTile.Net;
 // hard frame ceiling.
 public sealed class WallUpManeuver : BotManeuver
 {
+    // Only answer crystal waves — skip the ranged-charge / low-HP / approach walls. For
+    // bots whose style is not walling (the duelists' wave instinct). Default off.
+    public bool  CrystalOnly;
     public float MinRange   = 2.5f * Chunk.TileSize;   // closer than this there's no room for a column
     public float MaxRange   = 9f * Chunk.TileSize;
     public float ApproachSpeed = 30f;                  // perceived closing speed (px/s) that counts as "coming at me"
@@ -100,6 +103,7 @@ public sealed class WallUpManeuver : BotManeuver
                 && TryPickColumn(v, cdir, cx, out _, out _))
                 return CrystalUtility;
         }
+        if (CrystalOnly) return 0f;
         float gap = MathF.Abs(v.Dx);
         if (gap < MinRange || gap > MaxRange || MathF.Abs(v.Dy) > 2f * Chunk.TileSize) return 0f;
 

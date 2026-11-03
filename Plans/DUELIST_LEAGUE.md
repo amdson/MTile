@@ -114,6 +114,28 @@ much harder to walk through. Three things changed at once, so this isn't cleanly
 attributable to the waves alone (clanking also blunts Bulldog's slash pressure), but the
 other two matchups barely moved.
 
+### Second re-run: Bulldog and Riposte get a wave instinct
+
+The arbiter added the shared `WallUpManeuver` to both, in a new `CrystalOnly` mode (wall
+off a crystal wave, nothing else — the stock one also walls against approaches, which
+would turn the rushdown into a turtle). Standings barely moved: Rampart 88.0, Riposte
+67.5, Bulldog 56.5; Bulldog–Rampart 17.5–18.5 (was 16.5–19.5), Riposte–Rampart 2–34.
+Riposte walled up 25 times over its 36 Rampart bouts, Bulldog twice.
+
+**Why: the waves are not what wins.** Rampart's own damage ledger (credited to the
+maneuver started in the last 1.5 s) and its hits by size, over the 18 bouts per foe:
+
+| vs | spike ticks (0.25) | 0.5 hits (slash; crystals also 0.5) | credited to CrystalWave |
+|---|---|---|---|
+| Bulldog | 310 ≈ 78 HP | 264 ≈ 132 HP | 3.2 HP |
+| Riposte | 545 ≈ 136 HP | 103 ≈ 52 HP | 21.4 HP |
+
+Against Bulldog it wins the melee — `RampartBackoff` hit-and-run (swing, retreat onto its
+own carpet) is credited with 170 of ~290 HP — with the carpet second. Against Riposte it
+is the carpet. So the Bulldog–Rampart flip most likely comes from clanking and/or the
+stab buff, not the crystal-wave fix; an ablation (league with clank off) would tell
+which. Riposte's fix is hazard awareness (don't park on spiked cells), not walls.
+
 ## Next steps if the league continues
 
 - Give Riposte terrain awareness (avoid spiked cells, treat a fort as a zone) — its one

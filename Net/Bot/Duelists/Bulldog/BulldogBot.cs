@@ -79,6 +79,9 @@ public sealed class BulldogBot : IRemoteInputSource
             new DashManeuver(),
             new BreachManeuver(),
             new WallClimbManeuver(),
+            // Added by the arbiter after the re-run (not the author's): wall off a crystal
+            // wave, nothing else.
+            new WallUpManeuver { CrystalOnly = true },
         };
     }
 
