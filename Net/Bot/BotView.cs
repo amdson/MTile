@@ -21,6 +21,18 @@ public sealed class BotView
     public Vector2 MyVel;
     public Vector2 TargetPos;          // target position as the bot perceives it (ReactionFrames stale)
     public Vector2 TargetVel;          // perceived target velocity (from the stale samples), px/s
+    // The target's action as the bot perceives it — the same ReactionFrames stale as
+    // TargetPos, so reactions (guarding a swing) happen at a human delay, not on the
+    // swing's first frame.
+    public string  TargetAction = "NullAction";
+
+    // Self's own sim frame counter — the clock CombatState stamps (LastHitFrame, guard
+    // cooldowns) are in. Not the same number as Frame in general.
+    public int   SelfFrame => Self.Frame;
+    // Sim frames since self last took a hit (int.MaxValue if never).
+    public int   FramesSinceHit => Self.Combat.DamageTaken > 0f ? SelfFrame - Self.Combat.LastHitFrame : int.MaxValue;
+    public float TargetHealth => Target.Health;
+    public float MyHealth     => Self.Health;
 
     public float Dx => TargetPos.X - Me.X;
     public float Dy => TargetPos.Y - Me.Y;          // Y-down: negative ⇒ target is above

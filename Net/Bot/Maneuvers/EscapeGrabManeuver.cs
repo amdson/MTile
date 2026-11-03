@@ -22,8 +22,9 @@ public sealed class EscapeGrabManeuver : BotManeuver
     public override bool Step(BotView v, ref PlayerInput input)
     {
         if (!v.Self.Combat.GrabbedActive) return false;
-        // Press on even frames; the odd-frame release completes the Click.
-        input.LeftClick = (v.Frame & 1) == 0;
+        // Mash at a human rate, ~10 clicks/s: 3 frames down, 3 up. (Toggling every
+        // frame is 30/s, which no hand does.) Each release is a Click → GrabbedSlash.
+        input.LeftClick = v.Frame % 6 < 3;
         BotInput.Move(ref input, v.Toward);
         return true;
     }

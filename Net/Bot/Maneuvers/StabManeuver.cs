@@ -34,8 +34,7 @@ internal static class StabGesture
         return d.LengthSquared() < 1e-4f ? new Vector2(v.Facing == 0 ? 1 : v.Facing, 0f) : Vector2.Normalize(d);
     }
 
-    // Player HP left (MaxHealth 5 per CLAUDE.md; DamageTaken is the running total).
-    public static float TargetHp(BotView v) => 5f - v.Target.Combat.DamageTaken;
+    public static float TargetHp(BotView v) => v.TargetHealth;
 }
 
 // Ground (or air-forward) stab: the kit's launcher. Wind-up is ~11 frames after release

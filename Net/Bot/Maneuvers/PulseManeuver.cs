@@ -37,8 +37,7 @@ public sealed class PulseManeuver : BotManeuver
     {
         if (!v.Grounded) return 0f;
         if (MathF.Abs(v.Dx) > Range || MathF.Abs(v.Dy) > VerticalRange) return 0f;
-        var c = v.Self.Combat;
-        bool hurt    = c.DamageTaken > 0f && v.Frame - c.LastHitFrame <= RecentHitFrames;
+        bool hurt    = v.FramesSinceHit <= RecentHitFrames;
         bool hugging = MathF.Abs(v.Dx) <= 24f;
         // A slash scores 1; pulse only beats it when it is clearly the better answer.
         if (hurt && hugging) return 1.6f;

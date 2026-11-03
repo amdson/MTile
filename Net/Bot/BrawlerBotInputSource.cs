@@ -32,6 +32,8 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
     private const float JumpIfAbove     = 1.5f * Chunk.TileSize;
 
     public IReadOnlyList<BotManeuver> Maneuvers => _maneuvers;
+    // The maneuver running right now (null between maneuvers) — for debugging / HUD.
+    public BotManeuver Active => _active;
 
     private readonly Random            _rng;
     private readonly int               _selfIndex;
@@ -40,6 +42,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
 
     // Ring of past target positions for the reaction delay.
     private readonly Vector2[] _seen = new Vector2[32];
+    private readonly string[]  _seenAction = new string[32];
     private int _seenCount;
 
     private BotManeuver _active;
@@ -52,7 +55,22 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
     // The full behavior set. Order breaks Score ties (earlier wins).
     public static List<BotManeuver> DefaultManeuvers() => new()
     {
+        // Reactions first: nothing else is possible while held, and a parry beats a trade.
+        new EscapeGrabManeuver(),
+        new GuardManeuver(),
+        new PulseManeuver(),
+        // Melee, by range band.
+        new GrabManeuver(),
         new SlashManeuver(),
+        new StabManeuver(),
+        new AirHammerManeuver(),
+        new AirWhipKickManeuver(),
+        // Mid range.
+        new BlockThrowManeuver(),
+        new BeamManeuver(),          // disabled until GrabAction stops shadowing BeamAction
+        // Spacing and navigation.
+        new BreachManeuver(),
+        new BackoffManeuver(),
     };
 
     // selfIndex: which SecondaryPlayers slot this bot drives (0 = P2).
@@ -120,9 +138,11 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         v.MyVel    = v.Self.Body.Velocity;
         v.Previous = _prev;
 
-        _seen[_seenCount % _seen.Length] = sim.Player.Body.Position;
+        _seen[_seenCount % _seen.Length]       = sim.Player.Body.Position;
+        _seenAction[_seenCount % _seen.Length] = sim.Player.CurrentActionName;
         _seenCount++;
-        v.TargetPos = Seen(ReactionFrames);
+        v.TargetPos    = Seen(ReactionFrames);
+        v.TargetAction = _seenAction[SeenIndex(ReactionFrames)];
         v.TargetVel = (_seenCount > ReactionFrames + 1)
             ? (v.TargetPos - Seen(ReactionFrames + 1)) / Simulation.FixedDt
             : Vector2.Zero;
@@ -130,10 +150,12 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
     }
 
     // The target position `lag` frames ago (clamped to what has been seen).
-    private Vector2 Seen(int lag)
+    private Vector2 Seen(int lag) => _seen[SeenIndex(lag)];
+
+    private int SeenIndex(int lag)
     {
         lag = Math.Min(Math.Min(lag, _seen.Length - 1), _seenCount - 1);
-        return _seen[(_seenCount - 1 - lag) % _seen.Length];
+        return (_seenCount - 1 - lag) % _seen.Length;
     }
 
     // Default movement: close the horizontal gap, jump walls/steps and targets above,

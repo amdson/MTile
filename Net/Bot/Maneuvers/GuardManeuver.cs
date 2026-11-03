@@ -44,10 +44,10 @@ public sealed class GuardManeuver : BotManeuver
     {
         if (!v.Grounded) return 0f;                       // GuardAction is ground-only
         var c = v.Self.Combat;
-        if (c.GuardBroken || c.GuardOnCooldown(v.Frame)) return 0f;
+        if (c.GuardBroken || c.GuardOnCooldown(v.SelfFrame)) return 0f;
         if (c.HitstunActive || c.StunActive) return 0f;
         if (v.Dist > ThreatRange) return 0f;
-        if (!IsThreat(v.Target.CurrentActionName)) return 0f;
+        if (!IsThreat(v.TargetAction)) return 0f;
         // Beats an in-range slash (1.0): a swing is incoming, so parrying first is better.
         return 1.5f;
     }
@@ -69,7 +69,7 @@ public sealed class GuardManeuver : BotManeuver
 
             input.Shift = true;
             _t++;
-            _quiet = IsThreat(v.Target.CurrentActionName) ? 0 : _quiet + 1;
+            _quiet = IsThreat(v.TargetAction) ? 0 : _quiet + 1;
 
             // A block (or a break) spends the stance: GuardActive drops. Give it a few
             // frames to come up first (Begin -> next sim step), then stop if it is gone.
