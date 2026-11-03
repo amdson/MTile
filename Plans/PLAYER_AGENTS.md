@@ -145,30 +145,42 @@ spikes, not on the crystal waves everyone assumed. Know *why* your bot wins befo
 
 | Bot | Style | Points /108 | Known weakness |
 |---|---|---|---|
-| Rampart | fortress: spike carpet, hit-and-run, crystal waves | 88 | melee fallback once someone is inside; spikes now break on hit (not yet re-measured) |
+| Rampart | fortress: spike carpet, hit-and-run, crystal waves | 88 | melee fallback once someone is inside; spikes now break on hit (fell to 4th of 5 in the Citadel run) |
 | Riposte | counter-fighter: spacing, parries, punishes | 67.5 | no terrain awareness — parks on spikes (2–34 vs Rampart) |
 | Bulldog | rushdown: strings, dash punish, mix-ups | 56.5 | straight-line approach loses to stab-checks and parries |
 | Brawler | stock baseline (every maneuver, no plan) | 4 | everything |
 
-## 6. Open question to start on: is hit-and-run beatable?
+## 6. Answered: is hit-and-run beatable? (yes — and it was never Rampart's edge)
 
-The league's strongest melee pattern is Rampart's hit-and-run: swing, then walk straight
-back out of reach (`RampartBackoff`, credited with ~170 of its ~290 HP against Bulldog).
-It works because attack recovery doesn't slow movement — a deliberate design choice, not
-to be changed — so recovery only stops you attacking again, not leaving.
+Rampart's hit-and-run is swing, then walk straight back out of reach (`RampartBackoff`).
+Measured 2026-11-03 (`MTile.Tests/Sim/ZzzHitAndRunProbe.cs`, `ZzzHarrierEval.cs`):
 
-On paper it is punishable. A dropped Slash 1 locks attacks out for its 36-frame tail
-(`FrameData.GroundSlash1`), and the retreat during it is walking pace (60 px/s ≈ 1 px per
-frame). A dash moves 270 px/s for 0.24 s (~65 px), and a dash slash has a 3-frame startup
-and reaches ~54 px from the body centre. So a punisher that sees the swing end (6-frame
-delay) and dashes in should land before the retreater can swing again. No current bot
-does this deliberately.
+- **A whiffed swing is punishable on reaction.** Correction to the earlier version of
+  this section: a dropped Slash 1 does *not* lock attacks out for 36 frames — Slash 2 is
+  available ~17 frames after the press (S1's 12 + `ComboGapFraction`) and comes out 4
+  frames later. Even so, a dash slash chorded 6–8 frames after seeing the swing lands
+  from every gap tested (52–90 px) against a runner that keeps walking back; answering
+  with Slash 2 only trades into a clank at the long gaps. The runner's real answer is to
+  stop and guard on seeing the dash (guard can be entered during own recovery). A missed
+  **stab** is the big window: active ends ~18 frames in, then ~60 frames before the next
+  attack.
+- **The trap is triggering on a stab's wind-up.** The stab has an 11-frame startup and
+  ~80 px reach (48 px blade + ~20 px of lunge + the body); a punisher that dashes on
+  *seeing* a stab start runs into it. Wait for the attack's active window to end
+  (`WhiffPunishManeuver.WhiffAt`), and bait at the edge of stab range, not slash range.
+- **The counter works mechanically** — `Net/Bot/Duelists/Harrier/` (Bulldog + a
+  bait-and-dash-punish maneuver): against Rampart reduced to melee + guard + backoff,
+  242 of 339 punishes landed and none got hit back.
+- **But hit-and-run alone is weak.** Plain Bulldog already beats melee-only Rampart
+  56.5/60 (tuning seeds 1–10, all arenas, both sides); full Rampart holds it to 49.5.
+  Rampart's edge was its terrain game, not the retreat. The earlier ledger credit
+  (~170 HP to Backoff) was an attribution artifact: Backoff starts the frame after the
+  slash press, so the slash's own damage was billed to it.
+- Harrier is not an improvement over Bulldog in the full field (ties Rampart, loses
+  ground vs Riposte): the bait costs tempo, and other bots rarely whiff on their own.
 
-The task: build a bot (or a maneuver) whose plan is to punish the retreat, and measure
-whether it beats Rampart's hit-and-run. Report either a working counter — what it is,
-its frame window, and its record — or the reason none exists (which would be a game
-finding: the window too short, the dash too slow, the punish trading into a clank).
-Either answer is useful; a confident wrong one isn't, so show the numbers.
+Open from here: punishing a runner who *guards* on seeing the dash (dash in and grab,
+or dash short and wait out the guard) — the mixup the guard answer creates.
 
 ## 7. Report
 

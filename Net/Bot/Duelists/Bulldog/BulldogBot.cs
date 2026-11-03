@@ -56,7 +56,9 @@ public sealed class BulldogBot : IRemoteInputSource
     private float _lastDamage;
     private PlayerInput _prev;
 
-    public BulldogBot(int seed = 1, int selfIndex = 0)
+    // `extra`: opt-in maneuvers appended to the list (HarrierBot is Bulldog plus a
+    // whiff punish). Default null = Bulldog exactly as authored.
+    public BulldogBot(int seed = 1, int selfIndex = 0, IEnumerable<BotManeuver> extra = null)
     {
         _rng       = new Random(seed);
         _selfIndex = selfIndex;
@@ -83,6 +85,7 @@ public sealed class BulldogBot : IRemoteInputSource
             // wave, nothing else.
             new WallUpManeuver { CrystalOnly = true },
         };
+        if (extra != null) _maneuvers.AddRange(extra);
     }
 
     public PlayerInput Poll(Simulation sim, int frame)
