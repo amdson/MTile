@@ -56,6 +56,28 @@ public class HoverTargetStageTests
         Assert.Equal(home, fresh[1].Body.Position);
     }
 
+    // A target needs an Impact profile or physics' bounce gate never opens and every
+    // landing is a dead stop.
+    [Fact]
+    public void Target_DrivenIntoTheFloor_Bounces()
+    {
+        var sim = BuildSim();
+        sim.Step(default);
+        var t = Targets(sim)[1];
+        Assert.NotNull(t.Body.Impact);
+
+        t.OnHit(new Hitbox(t.Body.Bounds, sim.HitIds.Next(), 1f, new Vector2(0f, 900f),
+                           Faction.Player1, sim.Player.Id), default);
+        bool bounced = false;
+        for (int i = 0; i < 60 && !bounced; i++)
+        {
+            sim.Step(default);
+            bounced = t.Body.ContactEvents.Any(e => e.Outcome == ContactOutcome.Bounce)
+                      && t.Body.Velocity.Y < 0f;
+        }
+        Assert.True(bounced, "a hard downward hit should rebound off the floor");
+    }
+
     [Fact]
     public void DespawnCountdown_SurvivesASnapshotRoundTrip()
     {

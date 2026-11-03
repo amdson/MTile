@@ -10,7 +10,9 @@ namespace MTile;
 // knockback, and follow-up hits during the flight don't extend it.
 //
 // Deliberately undamped: no drag, so the launch is exactly the resolver's Δv. Health
-// is large so it's the timer, not damage, that ends the rally.
+// is large so it's the timer, not damage, that ends the rally. Terrain impacts use the
+// player's impact profile (bounce, chip, break-through) so a target lands the way a
+// launched player would — without one, physics' bounce gate never opens.
 public class HoverTarget : Entity
 {
     public const float RespawnSeconds = 3f;
@@ -22,7 +24,8 @@ public class HoverTarget : Entity
     public override EntityKind Kind => EntityKind.HoverTarget;
 
     public HoverTarget(Vector2 pos, float radius, float mass, Color color)
-        : this(new PhysicsBody(Polygon.CreateRegular(radius, 10), pos), radius)
+        : this(new PhysicsBody(Polygon.CreateRegular(radius, 10), pos)
+               { Impact = ImpactProfiles.Build(ImpactProfiles.Player) }, radius)
     {
         Mass  = mass;
         Color = color;
@@ -38,7 +41,7 @@ public class HoverTarget : Entity
 
     public static HoverTarget FromState(in EntityData d, Vector2 pos)
     {
-        var body = new PhysicsBody(d.Polygon, pos);
+        var body = new PhysicsBody(d.Polygon, pos) { Impact = d.Impact };
         return new HoverTarget(body, body.Bounds.Width * 0.5f);
     }
 
