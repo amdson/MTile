@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework;
 
 namespace MTile.Net;
 
+// [Rampart copy of BackoffManeuver — reads the opponent's helplessness through the stale RampartSense.]
 // Spacing: step away from the target for ~15-25 frames right after the bot has attacked,
 // or when the target is crowding the bot while its attacks are on cooldown. Without this
 // the default locomotion walks to EngageRange and stands face-hugging the target between

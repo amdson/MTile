@@ -13,15 +13,38 @@ public class BotManeuverDuelistRampartTests(ITestOutputHelper output)
 {
     // Rampart with every maneuver but `keep` switched off, driving P2 against an AFK P1.
     private (Simulation sim, RampartBot bot) Solo(string arena, int frames, params string[] keep)
+        => Solo(arena, frames, true, keep);
+
+    private (Simulation sim, RampartBot bot) Solo(string arena, int frames, bool advance, params string[] keep)
     {
         var sim = BotDuel.BuildArena(arena);
         var bot = new RampartBot(1, 0);
+        if (!advance) { bot.AdvanceFrames = int.MaxValue / 2; bot.QuietFrames = int.MaxValue / 2; }
         foreach (var m in bot.Maneuvers) if (Array.IndexOf(keep, m.Name) < 0) bot.Disabled.Add(m.Name);
         int maxCrystals = 0;
         for (int f = 0; f < frames; f++)
         {
+            var prev = bot.Active;
             sim.Step(default, bot.Poll(sim, f));
+            if (bot.Active != null && bot.Active != prev)
+                output.WriteLine($"f{f} start {bot.Active.Name} gap {(sim.SecondaryPlayers[0].Player.Body.Position.X - sim.Player.Body.Position.X) / Chunk.TileSize:F1}");
             maxCrystals = Math.Max(maxCrystals, sim.Chunks.Crystals.Count);
+            if (Environment.GetEnvironmentVariable("RAMPART_CRYS") == "1" && f % 6 == 0 && sim.Chunks.Crystals.Count > 0)
+            {
+                int now = sim.Chunks.TerrainFrame;
+                int x0 = (int)(sim.Player.Body.Position.X / Chunk.TileSize) - 2, x1 = (int)(sim.SecondaryPlayers[0].Player.Body.Position.X / Chunk.TileSize) + 2;
+                int fy = (int)MathF.Floor((sim.Player.Body.Position.Y + 20f) / Chunk.TileSize);
+                var balls = string.Join(",", sim.Entities.OfType<MassBall>().Select(b => $"{b.Body.Position.X / Chunk.TileSize:F1}/{b.Body.Position.Y / Chunk.TileSize:F1} v{b.Body.Velocity.X:F0},{b.Body.Velocity.Y:F0}"));
+                output.WriteLine($"  f{f} balls {balls}");
+                for (int y = fy - 3; y <= fy; y++)
+                {
+                    var sb = new System.Text.StringBuilder();
+                    for (int x = x0; x <= x1; x++)
+                        sb.Append(sim.Chunks.GetCellState(x, y) != TileState.Empty ? 'X'
+                            : sim.Chunks.Crystals.TryGet(x, y, out var cr) ? (cr.Pending ? ',' : cr.PhaseAt(now) == CrystalPhase.Gone ? '_' : '^') : '.');
+                    output.WriteLine($"    {y}: {sb}");
+                }
+            }
         }
         output.WriteLine($"P1 lost {sim.Player.Combat.DamageTaken:F2}, P2 lost {sim.SecondaryPlayers[0].Player.Combat.DamageTaken:F2}, " +
                          $"max crystals {maxCrystals}, starts {string.Join(" ", bot.Starts.Select(k => $"{k.Key}:{k.Value}"))}");
@@ -31,10 +54,61 @@ public class BotManeuverDuelistRampartTests(ITestOutputHelper output)
     [Fact]
     public void CrystalWave_LevelLaunch_HitsAfkTarget()
     {
-        var (sim, bot) = Solo("plain_close", 300, nameof(RampartCrystalWave));
+        var (sim, bot) = Solo("plain_close", 420, nameof(RampartCrystalWave));
         Assert.True(bot.Starts.GetValueOrDefault(nameof(RampartCrystalWave)) >= 1);
         Assert.True(sim.Player.Combat.DamageTaken >= 1.0f, "a level wave should run the 24 tiles to the AFK target");
         Assert.Equal(0f, sim.SecondaryPlayers[0].Player.Combat.DamageTaken);
+    }
+
+    [Fact]
+    public void SpikeCarpet_RingsTheFort()
+    {
+        var (sim, _) = Solo("plain_close", 240, advance: false, nameof(RampartSpikeMoat));
+        var me = sim.SecondaryPlayers[0].Player;
+        int mx = (int)MathF.Floor(me.Body.Position.X / Chunk.TileSize);
+        int front = 0, back = 0;
+        foreach (var (cell, side) in sim.Chunks.Spikes.Entries)
+        {
+            if (side.Faction != me.Faction) continue;
+            if (cell.gtx < mx) front++; else back++;   // P1 is to the left
+        }
+        output.WriteLine($"spikes front {front}, back {back}");
+        Assert.True(front >= 4, "the carpet should cover the approach side");
+        Assert.True(back >= 1, "and some of the back");
+        Assert.Equal(0f, me.Combat.DamageTaken);
+    }
+
+    [Fact]
+    public void Duel_IsDeterministic()
+    {
+        var a = BotDuel.Run("plain_close", RampartBot.Create, BotDuel.Brawler, seed: 5, frames: 900);
+        var b = BotDuel.Run("plain_close", RampartBot.Create, BotDuel.Brawler, seed: 5, frames: 900);
+        output.WriteLine(a.ToString());
+        Assert.Equal(a.ToString(), b.ToString());
+    }
+
+    // Two forts must not stare at each other: the anti-stall push brings them to blows.
+    [Fact]
+    public void Mirror_DoesNotStall()
+    {
+        var r = BotDuel.Run("hall_close", RampartBot.Create, RampartBot.Create, seed: 1, frames: 1800);
+        output.WriteLine(r.ToString());
+        Assert.True(r.DamageToP1 + r.DamageToP2 > 2f, "two Ramparts should still fight");
+    }
+
+    // The deliverable: beats the stock Brawler in the league format (all arenas, both
+    // sides, 4 seeds).
+    [Fact]
+    public void RoundRobin_BeatsBrawler()
+    {
+        var table = BotDuel.RoundRobin(new (string, DuelBot)[] { ("Rampart", RampartBot.Create), ("Brawler", BotDuel.Brawler) },
+                                       new[] { 1, 2, 3, 4 }, log: output.WriteLine);
+        foreach (var s in table) output.WriteLine(s.ToString());
+        var me = table.First(s => s.Name == "Rampart");
+        var them = table.First(s => s.Name == "Brawler");
+        Assert.True(me.Points > them.Points, "Rampart should out-point the Brawler");
+        Assert.True(me.W >= 3 * me.L, $"expected a clear margin, got {me.W}-{me.D}-{me.L}");
+        Assert.True(me.Kills > me.Deaths);
     }
 
     [Fact]
@@ -109,6 +183,7 @@ public class BotManeuverDuelistRampartTests(ITestOutputHelper output)
             {
                 "zoner"  => (s2, sd) => new BrawlerBotInputSource(sd, s2) { EngageRange = 10f * Chunk.TileSize },
                 "mirror" => (s2, sd) => new RampartBot(sd, s2),
+                "rush"   => (s2, sd) => new BrawlerBotInputSource(sd, s2, BrawlerBotInputSource.DefaultManeuvers().Where(m => m is EscapeGrabManeuver or GuardManeuver or PulseManeuver or GrabManeuver or SlashManeuver or StabManeuver or AirHammerManeuver or AirWhipKickManeuver or BurstManeuver or CrouchSlashManeuver or DownAirManeuver or DashManeuver or WallClimbManeuver or BreachManeuver or BackoffManeuver or DropdownManeuver)),
                 _        => BotDuel.Brawler,
             };
             var r = side == 0 ? BotDuel.Run(arena, mine, opp, seed, frames)

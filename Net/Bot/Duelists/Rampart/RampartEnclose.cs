@@ -4,6 +4,7 @@ using Microsoft.Xna.Framework;
 
 namespace MTile.Net;
 
+// [Rampart copy of EncloseManeuver — opponent grounded/helpless from the stale RampartSense.]
 // Box the target in: a stone wall on each side of its body, a stone lid over its head,
 // then spikes on the floor under its feet (and on the lid) so staying put costs HP and
 // digging out — stone is 12× a slash's worth of tile HP — costs time.

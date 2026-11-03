@@ -2,6 +2,7 @@ using System;
 
 namespace MTile.Net;
 
+// [Rampart copy of GuardManeuver — the counter tap is 12/s instead of a 30/s toggle.]
 // Guard + counter. GuardAction is Shift held with no Left/Right and no RightClick, on the
 // ground, and (CombatState.ResolveGuard) it is a TIMED parry: only a hit landing within
 // GuardPerfectWindowSeconds (0.12 s, ~7f) of the stance coming up is absorbed outright;

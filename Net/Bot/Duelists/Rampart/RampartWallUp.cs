@@ -4,6 +4,8 @@ using Microsoft.Xna.Framework;
 
 namespace MTile.Net;
 
+// [Rampart copy of WallUpManeuver — opponent action read stale (v.TargetAction); crystal-wave
+// walls are a 2-tall jumpable kerb (CrystalHeight); no plain approach walls (ApproachUtility 0).]
 // Defensive wall: throw up a stone column between self and the target, just in front of
 // the bot, tall enough that walking into it stops a player cold.
 //

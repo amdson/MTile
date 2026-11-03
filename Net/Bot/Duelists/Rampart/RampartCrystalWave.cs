@@ -25,12 +25,12 @@ public sealed class RampartCrystalWave : BotManeuver
 
     public float MinRange      = 9f * Chunk.TileSize;
     public float AbortRange    = 4.5f * Chunk.TileSize;   // they closed in mid-charge: bank it, fight
-    public float MaxRange      = 20f * Chunk.TileSize;
+    public float MaxRange      = 14f * Chunk.TileSize;   // a ~37-crystal wave runs out a little past this
     public float VerticalReach = 2.5f * Chunk.TileSize;
     public int   ChargeFrames  = 50;
     public int   ChargeGrace   = 30;
-    public float SkimSpeed     = 6.5f;   // cursor px/frame along the row
-    public float ReleaseSpeed  = 300f;   // ball px/s
+    public float SkimSpeed     = 7f;     // cursor px/frame along the row
+    public float ReleaseSpeed  = 330f;   // ball px/s
     public int   LiftBudget    = 24, SkimBudget = 30;
     public float Utility       = 1.25f;
     public override int  Cooldown       => 45;   // the real gate is the 8 s wave cooldown
@@ -119,7 +119,7 @@ public sealed class RampartCrystalWave : BotManeuver
                 input.MouseWorldPosition = _cursor;
                 if (v.Self.CurrentActionName != nameof(BlockPaintAction)) return Restore(ref input);
                 var av = v.Self.CurrentActionVars;
-                bool settled = MathF.Abs(av.BallPos.Y - _skimY) < 1.0f && av.BallVel.Length() < 25f;
+                bool settled = MathF.Abs(av.BallPos.Y - _skimY) < 1.5f && av.BallVel.Length() < 40f;
                 if (settled || _t > LiftBudget) { _phase = Phase.Skim; _t = 0; }
                 return true;
             }

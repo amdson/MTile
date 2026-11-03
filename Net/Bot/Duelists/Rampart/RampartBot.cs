@@ -12,19 +12,15 @@ namespace MTile.Net;
 //     velocity, action, grounded, helpless) comes out of it ReactionFrames stale. The
 //     Rampart maneuvers read the opponent only through RampartSense / BotView's stale
 //     fields; the opponent's HP (on the HUD) is the one live read.
-//   * Locomotion holds a range band instead of chasing: walk away when the opponent is
-//     inside it (unless cornered), walk in when they are beyond it, so the terrain moves
-//     (wave, eruption, spike moat, walls) are always the ones in range.
+//   * Locomotion holds a FORT instead of chasing: a home column ringed with a spiked
+//     floor (RampartSpikeMoat), held while crystal waves go out at range and melee
+//     answers whoever walks onto the spikes. The fort moves up when the opponent stays
+//     out of reach, and pushes into melee when nobody has lost HP for a while.
 public sealed class RampartBot : IRemoteInputSource
 {
     public static readonly DuelBot Create = (self, seed) => new RampartBot(seed, self);
 
     public int   ReactionFrames = 8;
-    // Preferred horizontal band (px). Inside BandMin we retreat; beyond BandMax we close.
-    public float BandMin = 7f * Chunk.TileSize;
-    public float BandMax = 12f * Chunk.TileSize;
-    // A wall this close behind (tiles) counts as cornered: stop retreating, fight.
-    public int   CornerTiles = 4;
 
     private const int   JumpHoldFrames = 14;
     private const int   StuckFrames    = 10;
@@ -174,7 +170,6 @@ public sealed class RampartBot : IRemoteInputSource
         Sense.TargetVelSmooth = _seen > ReactionFrames + 6 ? (_pos[now] - _pos[far]) / (6 * Simulation.FixedDt) : Vector2.Zero;
         Sense.TargetGrounded = _gnd[now];
         Sense.TargetHelpless = _hlp[now];
-        Sense.Cornered       = Cornered(v, -v.Toward);
         UpdateHome(v);
         return v;
     }
@@ -185,24 +180,19 @@ public sealed class RampartBot : IRemoteInputSource
         return (_seen - 1 - lag) % Ring;
     }
 
-    // A wall within CornerTiles on side `dir` at body height.
-    private bool Cornered(BotView v, int dir)
-    {
-        var c = BotView.Cell(v.Me);
-        for (int k = 1; k <= CornerTiles; k++)
-            if (v.Solid(c.X + dir * k, c.Y) || v.Solid(c.X + dir * k, c.Y - 1)) return true;
-        return false;
-    }
-
     // Fort locomotion: hold the home column (where the spike carpet is), step back onto
-    // it when knocked off. Home only moves when the opponent stays out of reach: after
-    // AdvanceFrames beyond AdvanceGap the fort relocates toward them (a fortress that
-    // never engages is a stall, not a strategy).
+    // it when knocked off. Home moves (a fortress that never engages is a stall, not a
+    // strategy): after AdvanceFrames with the opponent beyond AdvanceGap and not coming,
+    // it relocates toward them; and after QuietFrames with no HP lost on either side it
+    // pushes into melee range.
     public float HomeSlack    = 0.6f * Chunk.TileSize;
     public float AdvanceGap   = 16f * Chunk.TileSize;
     public int   AdvanceFrames = 90;
     public float AdvanceTo    = 10f * Chunk.TileSize;
-    private int  _farFrames;
+    private int  _farFrames, _quiet;
+    private bool _pushing;
+    private float _hpSum = 10f;
+    public int   QuietFrames = 300;
 
     private void UpdateHome(BotView v)
     {
@@ -220,9 +210,23 @@ public sealed class RampartBot : IRemoteInputSource
         }
         // Walking out to them and they started coming: plant the fort right here, so the
         // carpet has time to grow before they arrive.
-        if (adx > 9f * Chunk.TileSize && closing > 30f && v.Grounded
+        if (!_pushing && adx > 9f * Chunk.TileSize && closing > 30f && v.Grounded
             && MathF.Abs(s.HomeX - v.Me.X) > 2f * Chunk.TileSize)
             s.HomeX = v.Me.X;
+
+        // Anti-stall: nobody has lost HP for QuietFrames (two forts staring, waves eaten by
+        // kerbs) ⇒ push the fort forward into melee range. A fortress has to keep fighting.
+        float hpSum = v.Self.Health + v.Target.Health;
+        if (MathF.Abs(hpSum - _hpSum) > 1e-4f && hpSum < _hpSum) { _quiet = 0; _pushing = false; }
+        else _quiet++;
+        _hpSum = hpSum;
+        if (adx < 5f * Chunk.TileSize) _pushing = false;
+        if (_quiet > QuietFrames && adx > 5f * Chunk.TileSize)
+        {
+            s.HomeX = v.Me.X + v.Toward * MathF.Min(adx - 3f * Chunk.TileSize, 10f * Chunk.TileSize);
+            _pushing = true;
+            _quiet = QuietFrames / 2;
+        }
     }
 
     private void Locomote(BotView v, ref PlayerInput input)
@@ -251,7 +255,6 @@ public sealed class RampartSense
     public bool    TargetGrounded;
     public bool    TargetHelpless;
     public Vector2 TargetVelSmooth;
-    public bool    Cornered;   // a wall right behind us (away from the opponent)
     public float   HomeX;      // the fort's column (world x)
     public bool    HomeSet;
 }

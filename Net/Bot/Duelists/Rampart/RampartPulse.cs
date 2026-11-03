@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework;
 
 namespace MTile.Net;
 
+// [Rampart copy of PulseManeuver — unchanged gesture.]
 // Pulse: the Circle gesture. LMB goes down, the cursor orbits the press point through
 // more than InputParser.CircleAngleThreshold (270 deg) at radius >= MinCircleRadius
 // (16px), then LMB comes up. PulseAction's ring (radius up to 5 body radii = 60px) is

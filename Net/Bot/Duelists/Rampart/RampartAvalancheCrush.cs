@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework;
 
 namespace MTile.Net;
 
+// [Rampart copy of AvalancheCrushManeuver — opponent grounded-ness from the stale RampartSense.]
 // Offense by avalanche, the damage half: aim the wave at a target standing in a roofed
 // pocket — ideally against a wall — so the front lifts them into the roof, where growth
 // has nowhere to push them and crushes.
