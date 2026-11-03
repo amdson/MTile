@@ -90,7 +90,8 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         new BackoffManeuver(),
     };
 
-    // selfIndex: which SecondaryPlayers slot this bot drives (0 = P2).
+    // selfIndex: which SecondaryPlayers slot this bot drives (0 = P2), or -1 to drive the
+    // primary player (P1) against SecondaryPlayers[0] — bot-vs-bot duels (BotDuel).
     // maneuvers: the behavior set (null ⇒ DefaultManeuvers()). Tests pass one maneuver
     // to exercise it in isolation.
     public BrawlerBotInputSource(int seed = 1234, int selfIndex = 0, IEnumerable<BotManeuver> maneuvers = null)
@@ -103,7 +104,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
 
     public PlayerInput Poll(Simulation sim, int frame)
     {
-        if (sim.Player == null || sim.SecondaryPlayers.Count <= _selfIndex) return default;
+        if (sim.Player == null || sim.SecondaryPlayers.Count <= Math.Max(_selfIndex, 0)) return default;
         var v = Perceive(sim, frame);
 
         var input = new PlayerInput { MouseWorldPosition = v.TargetPos };
@@ -156,15 +157,15 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
     {
         var v = _view;
         v.Sim      = sim;
-        v.Self     = sim.SecondaryPlayers[_selfIndex].Player;
-        v.Target   = sim.Player;
+        v.Self     = BotDuel.Self(sim, _selfIndex);
+        v.Target   = BotDuel.Opponent(sim, _selfIndex);
         v.Frame    = frame;
         v.Me       = v.Self.Body.Position;
         v.MyVel    = v.Self.Body.Velocity;
         v.Previous = _prev;
 
-        _seen[_seenCount % _seen.Length]       = sim.Player.Body.Position;
-        _seenAction[_seenCount % _seen.Length] = sim.Player.CurrentActionName;
+        _seen[_seenCount % _seen.Length]       = v.Target.Body.Position;
+        _seenAction[_seenCount % _seen.Length] = v.Target.CurrentActionName;
         _seenCount++;
         v.TargetPos    = Seen(ReactionFrames);
         v.TargetAction = _seenAction[SeenIndex(ReactionFrames)];
