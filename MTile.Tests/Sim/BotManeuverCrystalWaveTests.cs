@@ -39,7 +39,7 @@ public class BotManeuverCrystalWaveTests(ITestOutputHelper output)
     public void WallUp_SeesCrystalWave_WallsUp_AndIsNotHit()
     {
         var p1Spawn = new Vector2(20f, BotArena.FloorBodyY);
-        var p2Spawn = new Vector2(250f, BotArena.FloorBodyY);
+        var p2Spawn = new Vector2(175f, BotArena.FloorBodyY);
         var wall = new WallUpManeuver();
         var r = BotArena.Fight(BotArena.Flat(), p1Spawn, p2Spawn, 240, BotArena.Only(wall),
                                setup: SpawnP1Wave);
@@ -65,7 +65,7 @@ public class BotManeuverCrystalWaveTests(ITestOutputHelper output)
     {
         // Same wave, same spot, P2 simply standing there (no bot, no wall).
         var sim = new Simulation(BotArena.Flat(), new Vector2(20f, BotArena.FloorBodyY));
-        var (p2, _) = sim.AddSecondaryPlayer(new Vector2(250f, BotArena.FloorBodyY));
+        var (p2, _) = sim.AddSecondaryPlayer(new Vector2(175f, BotArena.FloorBodyY));
         SpawnP1Wave(sim);
         for (int f = 0; f < 240; f++) sim.Step(default, default);
         float lost = p2.MaxHealth - p2.Health;

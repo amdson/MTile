@@ -34,6 +34,7 @@ public sealed class HudRenderer
         _spriteBatch.Begin();
         _spriteBatch.Draw(_pixel, new Rectangle(mouseScreen.X - 2, mouseScreen.Y - 2, 5, 5), Color.Red);
         DrawAvalancheCharge(player, mouseScreen);
+        DrawCrystalCooldown(player, mouseScreen);
         // Always on: health and blocks are what the player steers by, so unlike the
         // readouts below they are not behind a GameConfig debug flag.
         DrawPlayerHud(player);
@@ -196,6 +197,36 @@ public sealed class HudRenderer
             float f = PeakFlash(m);
             _draw.Ring(center, radius + (1f - f) * FlashSpread,
                        Color.White * (f * 0.7f), RingSegments, 2f);
+        }
+    }
+
+    // ── Crystal-wave cooldown ────────────────────────────────────────────────────
+    //
+    // While it runs, a spikes-selected RMB hold can only place spikes (BlockPaintAction's
+    // spike mode never offers the charge), so without this the wave just silently fails to
+    // charge. With spikes selected: a faint ring at the cursor and an ice-blue arc of the
+    // time left, unwinding clockwise from 12 o'clock. Pure function of the snapshotted
+    // BuildMeters.CrystalCooldown, like the charge ring.
+    private const float CooldownRadius = 9f;
+    private const int   CooldownSegments = 32;
+
+    private void DrawCrystalCooldown(PlayerCharacter player, Point mouse)
+    {
+        if (!player.SpikesSelected) return;
+        var m = player.Abilities.Meters;
+        if (m.CrystalWaveReady) return;
+        float left = MathHelper.Clamp(m.CrystalCooldown / CrystalWave.CooldownSeconds, 0f, 1f);
+        var center = new Vector2(mouse.X, mouse.Y);
+        _draw.Ring(center, CooldownRadius, new Color(120, 140, 160) * 0.5f, CooldownSegments);
+        int n = Math.Max(1, (int)MathF.Ceiling(CooldownSegments * left));
+        float start = -MathHelper.PiOver2, sweep = MathHelper.TwoPi * left;
+        var prev = center + CooldownRadius * new Vector2(MathF.Cos(start), MathF.Sin(start));
+        for (int i = 1; i <= n; i++)
+        {
+            float a = start + sweep * i / n;
+            var p = center + CooldownRadius * new Vector2(MathF.Cos(a), MathF.Sin(a));
+            _draw.Line(prev, p, new Color(190, 235, 255), 2f);
+            prev = p;
         }
     }
 

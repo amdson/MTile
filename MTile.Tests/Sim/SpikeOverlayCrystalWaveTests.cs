@@ -87,7 +87,8 @@ public class SpikeOverlayCrystalWaveTests(ITestOutputHelper output)
     {
         var sim = QuietSim();
         int f0 = sim.Chunks.TerrainFrame;
-        LaunchWave(sim, 8);
+        // A full-charge wave: with the ordinary avalanche leak it runs ~14 cells.
+        LaunchWave(sim, 8, mass: CrystalWave.MaxBallMass);
         int firstSeed = -1, firstGrown = -1;
         int maxGrownX = int.MinValue, frontFrame10 = -1, frontFrame20 = -1;
         for (int f = 0; f < 200; f++)
@@ -99,15 +100,15 @@ public class SpikeOverlayCrystalWaveTests(ITestOutputHelper output)
             foreach (var (cell, c) in sim.Chunks.Crystals.Entries)
                 if (!c.Pending && c.PhaseAt(sim.Chunks.TerrainFrame) >= CrystalPhase.Grown)
                     maxGrownX = Math.Max(maxGrownX, cell.gtx);
-            if (frontFrame10 < 0 && maxGrownX >= 18) frontFrame10 = now;
-            if (frontFrame20 < 0 && maxGrownX >= 28) frontFrame20 = now;
+            if (frontFrame10 < 0 && maxGrownX >= 10) frontFrame10 = now;
+            if (frontFrame20 < 0 && maxGrownX >= 20) frontFrame20 = now;
         }
-        output.WriteLine($"first seed +{firstSeed}, first grown +{firstGrown}, front x18 +{frontFrame10}, x28 +{frontFrame20}, max x {maxGrownX}");
+        output.WriteLine($"first seed +{firstSeed}, first grown +{firstGrown}, front x10 +{frontFrame10}, x20 +{frontFrame20}, max x {maxGrownX}");
         Assert.InRange(firstSeed, 0, 3);
         // The first crystals warn for ~1 s (CrystalWave.Root.FramesToGrown = 60).
         Assert.InRange(firstGrown - firstSeed, CrystalWave.Root.FramesToGrown - 1, CrystalWave.Root.FramesToGrown + 1);
         // …then the front covers 10 cells in ≈ 10 × FollowFramesPerCell frames.
-        Assert.True(frontFrame20 > 0, "the front should reach column 28");
+        Assert.True(frontFrame20 > 0, "the front should reach column 20");
         Assert.InRange(frontFrame20 - frontFrame10, 10 * CrystalWave.FollowFramesPerCell - 6, 10 * CrystalWave.FollowFramesPerCell + 6);
     }
 
@@ -138,7 +139,7 @@ public class SpikeOverlayCrystalWaveTests(ITestOutputHelper output)
     public void SeedAndFlash_Harmless_GrownDamages_CrystalBreaks_CapHolds()
     {
         // P2 stands on the wave's path; P1 launches.
-        var sim = NewSim(Arena(), Standing(4), Standing(22));
+        var sim = NewSim(Arena(), Standing(4), Standing(15));
         var p2 = sim.SecondaryPlayers[0].Player;
         LaunchWave(sim, 8, mass: 160f);
         float hp0 = p2.Health;

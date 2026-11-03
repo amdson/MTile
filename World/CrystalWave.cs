@@ -30,7 +30,7 @@ namespace MTile;
 //             capped at WaveDamageCap per victim per wave; the crystal that lands BREAKS.
 //             Flashing (forming) crystals shove bodies out along their growth normal with
 //             no damage. The grown shard's hit is occluded by terrain from its base.
-//   COST    — UnitsPerCrystal meter units per crystal (stone is 4 per tile), and a
+//   COST    — UnitsPerCrystal meter units per crystal (sand's price), and a
 //             per-player CooldownSeconds on BuildMeters, set at launch.
 public static class CrystalWave
 {
@@ -95,17 +95,17 @@ public static class CrystalWave
     public const float HalfWidth   = 0.42f * Chunk.TileSize;
 
     // ── Economy ─────────────────────────────────────────────────────────────────
-    // Meter units per crystal (a Stone tile costs 4). Cheap on purpose: the wave is
-    // supposed to be big — a full 240-unit charge buys ~120 crystals — and what keeps
-    // it in check is the cooldown and the telegraph, not the meter.
-    public const float UnitsPerCrystal = 2f;
-    public const float MaxBallMass     = 160f;
+    // Meter units per crystal: sand's price (configs/material_strengths.json — Stone
+    // 1.94, Dirt 0.77, Sand 0.44), the cheapest block that lasts. Cheap on purpose: the
+    // wave is supposed to be big, and what keeps it in check is the cooldown and the
+    // telegraph, not the meter. Capped like an ordinary avalanche's ball.
+    public const float UnitsPerCrystal = 0.44f;
+    public const float MaxBallMass     = BuildMeters.MaxBallMass;
     public const float CooldownSeconds = 8f;
     // The crystal ball's leak curve (MassBall: per second, mass·LeakFraction + LeakFloor).
-    // The build ball's 6/s spends itself in ~0.3 s ≈ 9 cells; this spreads a wave over
-    // ~25 cells of travel.
-    public const float LeakFraction = 2f;
-    public const float LeakFloor    = 30f;
+    // The same as the build ball's, so a crystal wave takes an ordinary avalanche's shape.
+    public const float LeakFraction = 6f;
+    public const float LeakFloor    = 60f;
 
     // Length of a shard at a given point in its life (Seed swells to SeedLength; Flash
     // grows to full; Grown is full). Shared by the contact system and the renderer so
