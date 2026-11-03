@@ -25,7 +25,7 @@ public static class SoundManifest
         ("grunt", 1),
         ("guard_block", 3),
         ("guard_parry", 1),
-        ("hit_connect", 7),
+        ("hit_connect", 4),
         ("jump", 1),
         ("land", 3),
         ("laser_blast", 1),
