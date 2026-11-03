@@ -87,7 +87,6 @@ public struct ActionVars
     public bool    SpikeMode;
     public byte    SpikeGesture;
 
-    public bool    GrabThrowing;      // GrabAction — false during the hold phase, true once releasing into the throw
     public Vector2 GrabDir;           // GrabAction — hold focus / throw direction
     public Vector2 GuardDir;          // Guard — unit aim (body → cursor), tracked every frame;
                                       // mirrors CombatState.GuardDir for the shield telegraph

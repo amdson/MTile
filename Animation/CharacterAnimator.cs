@@ -953,6 +953,11 @@ public sealed partial class CharacterAnimator
     {
         key = IsOverlayAction(s.Action) ? s.Action : null;
         clip = key != null && _actionClips.TryGetValue(key, out var ac) ? ac : null;
+        // A phase clip ("<Action>.<Variant>") replaces the base clip when the action names one
+        // and it is authored; an unauthored variant falls back to the base clip.
+        if (clip != null && !string.IsNullOrEmpty(s.ActionVariant)
+            && _actionClips.TryGetValue(VariantKey(key, s.ActionVariant), out var vc))
+        { key = VariantKey(key, s.ActionVariant); clip = vc; }
         tau = 0f;
         if (clip == null) { key = null; return false; }
         tau = s.ActionProgress >= 0f ? MathHelper.Clamp(s.ActionProgress, 0f, 1f)
@@ -960,6 +965,9 @@ public sealed partial class CharacterAnimator
         if (s.ActionProgress >= 0f) tau *= 1f - SettleShareOf(clip);
         return true;
     }
+
+    // The clip Type of an action's phase clip (ActionState.AnimationVariant).
+    public static string VariantKey(string action, string variant) => action + "." + variant;
 
     private static bool IsOverlayAction(string action)
         => !string.IsNullOrEmpty(action)
@@ -974,7 +982,11 @@ public sealed partial class CharacterAnimator
     // from a settle BEING DRAWN — the ease can still be fading a swing that authored none.
     private bool SettleWanted(in CharacterAnimSample s)
         => s.Action == "RecoveryAction" && s.RecoveryFramesLeft > 0
-           && _settleClip != null && SettleShareOf(_settleClip) > 0f;
+           && _settleClip != null && (SettleShareOf(_settleClip) > 0f || SettleSuccessor(_settleClip) != null);
+
+    // The clip a SettleClip names (null: none named, or not bound on this rig).
+    private AnimationDocument SettleSuccessor(AnimationDocument clip)
+        => clip?.SettleClip != null && _actionClips.TryGetValue(clip.SettleClip, out var next) ? next : null;
 
     // Keep the last swing's overlay bound through the recovery countdown, its τ walking the
     // settle tail [1−share, 1] as the frames run out. False when there's nothing to settle
@@ -987,6 +999,13 @@ public sealed partial class CharacterAnimator
         if (!SettleWanted(in s)) return false;
         _settleTotal = Math.Max(_settleTotal, s.RecoveryFramesLeft);
         float progress = 1f - (float)s.RecoveryFramesLeft / _settleTotal;
+        // A successor clip plays WHOLE down the countdown (Grab's throw / whiff).
+        var successor = SettleSuccessor(_settleClip);
+        if (successor != null)
+        {
+            key = _settleClip.SettleClip; clip = successor; tau = progress;
+            return true;
+        }
         float share    = SettleShareOf(_settleClip);
         key  = _settleKey;
         clip = _settleClip;

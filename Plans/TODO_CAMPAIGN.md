@@ -37,9 +37,21 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - [x] **7** @ab13cca (merged) Spiked avalanche (crystal wave) — see decisions below and todo.txt #7.
   Then bot hookup: WallUpManeuver threat check + a launch maneuver.
 
-- [~] **G** (added 2026-11-03, side request) Telegraphed grab: separate biped clips for
+- [x] **G** @f87568f (merged) (added 2026-11-03, side request) Telegraphed grab: separate biped clips for
   grab start / hold / throw / whiff (drafted with the sprite-anim skill, then wired into
   GrabAction) + a debug grab-box overlay when DebugDrawHitboxes is on. Opus worktree agent.
+
+- [~] **D** (added 2026-11-03, before the user went to bed) Duelist league: three Opus
+  agents each build a P2 bot with a distinct playstyle — Rushdown, Terrain zoner /
+  fortress, Counter-fighter / footsies — under `Net/Bot/Duelists/<Name>/`, exposing a
+  `DuelBot Create`. Harness: `Net/Bot/BotDuel.cs` @82e726f (arenas hall_close / hall_far /
+  plain_close on the shipped duel stages; 60 s bouts; kills, then ≥ 0.5 HP damage margin;
+  round robin plays both sides). Supervisor's job when all three land: audit each for the
+  rules in their brief (raw input, ≤ ~12 presses/s, opponent info only via BotView's
+  ≥ 6-frame-delayed view or the HUD's HP, no shared/game-code edits, no degenerate
+  stalling, determinism), patch or disqualify violations, merge, run the round robin over
+  all arenas × ≥ 6 seeds (+ the Brawler as a reference entrant), and write the results
+  to `Plans/DUELIST_LEAGUE.md`.
 
 ## Decisions (user, 2026-11-02)
 
@@ -82,6 +94,17 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   tests"; a bot retune pass (ranges, hop timing) is a follow-up once speeds settle by feel.
 
 ## For the user to review
+
+- **G grab animations:** `Plans/img/grab_strip_{start,hold,throw,whiff}.png`,
+  `grab_ingame_{throw,whiff}.png`. Startup 12f → 20f (coil-then-lunge wind-up); hold
+  loops; throw/whiff play over the 18f end-lag via a new `SettleClip` successor; phase
+  clips bind as `GrabAction.Hold/.Throw/.Whiff` through a new `AnimationVariant` hook.
+  Debug grab box (exact latch region; carry box while holding; BlockGrab reach ring) via
+  `ActionState.DebugQueryShapes`. To judge by eye: legs mostly come from locomotion
+  (0.35 weight); the throw heaves overhead (artefact of fixing GPT's backward elbows) and
+  lands ~4 frames after the victim leaves; held victim sits at the carry point, not in
+  the hands; a struggle-free escape still plays the throw clip; the live latch box is big
+  (~4.8 body radii) because that IS the real geometry. 4 of 16 image calls used.
 
 - **#7 crystal wave:** `Plans/img/crystal_wave_{warning,front,midflight}.png`. Numbers are
   code constants in `World/CrystalWave.cs`: root warning 0.8 s seed + 0.2 s flash; front
@@ -127,3 +150,4 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - 2f47da3 (merge) — #4: MassBall stops at solid its wave didn't request (cell→wave table in AvalancheWaves, snapshotted; arming after release; swept path so fast balls can't skip 1-tile walls), lump deposit at the face, foreign-solid spill dropped; wave pin crush 1.5 HP for non-riders (PhysicsWorld pin detection → PhysicsBody.WavePinned). Merge fixups: break path clears wave tag + spike seed; checksum now folds wave cells (salt 0x0A) and sprout Source. AvalancheWall 12/12; bot reds = 4 slowdown + 1 FreeRoof.
 - ab13cca (merge) — #7 crystal wave: CrystalWaveField (ChunkMap.Crystals; snapshotted; salts 0x0B–0x0D), CrystalContactSystem, MassBall crystal mode, BlockPaintAction spike-mode arbitration, BuildMeters.CrystalCooldown; bot CrystalWaveManeuver + WallUp crystal threat. SpikeOverlayCrystalWave 12/12, BotManeuverCrystalWave 4/4; targeted sweep 228 pass / 5 known reds.
 - 0ffceae — end-of-campaign `full` sweep: 1693 pass / 128 fail / 15 skip. Reds concentrate in movement/corrector classes (LedgePullExit 12, LedgeRegrabDrift 7, JumpExitSweep 5, CorrectorOperations 5, CorrectorHoleJump 4, DeliberateClimb 3, …) — consistent with the #9 slowdown (user: let speed-calibrated tests go red) on top of the BACKLOG §5 / §5.0 baseline; not individually attributed (no pre-campaign full baseline). Remaining: side task G (grab animations) in flight.
+- (merge) — G grab animations + debug grab box @f87568f. ClipBinding / ActionOverlay / Grab / BotManeuverGrab / CrystalWave / Duel / SnapshotRoundTrip: 81 pass, 2 known reds (ActionEnd_FadesOut, StruggleSlash).
