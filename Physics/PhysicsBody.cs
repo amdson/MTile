@@ -64,6 +64,28 @@ public class PhysicsBody
     // frames survived the rollback and billed a phantom hit on the replay.
     public int SproutCrushCount;
 
+    // ── Launch bookkeeping (Physics/Launch.cs) ───────────────────────────────────
+    // The share of Velocity that a hit or throw put there, and how it decays. Physics
+    // never reads it: LaunchSystem decays it before the sweep and reconciles it with
+    // what the sweep did afterwards. Snapshotted (BodyState).
+    public Launch Launch;
+
+    // Input to the sweep: multiplies Impact.Mass in the terrain-impact energy math, so
+    // a body can hit harder than its speed alone would. 1 = normal. Rewritten by
+    // LaunchSystem.PreStep before every sweep, so it never needs a snapshot.
+    public float ImpactMassScale = 1f;
+
+    // True while the body's owner has it parked this step (hitstop hold, rooting), set
+    // by Entity/PlayerCharacter.PreStep. LaunchSystem pauses on frozen bodies: their
+    // Velocity is zero and the real one sits in the owner's stash. Rewritten every step
+    // before it is read, so it needs no snapshot.
+    public bool Frozen;
+
+    // What the most recent StepSwept did at each terrain impact, in order. Physics only
+    // records here, it never reads it back; consumers read it after the step. Cleared at
+    // the top of every StepSwept and read only within the same Step, so no snapshot.
+    public readonly List<ContactEvent> ContactEvents = new();
+
     // Float-precision AABB of the polygon at the body's current position. Recomputes on access (cheap
     // for a 6-vertex hex). Doubles as a probe-region builder — `body.Bounds.StripAbove(20)` gives the
     // 20px slab right above the body for ceiling-probing, etc. See BoundingBox.

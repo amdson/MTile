@@ -9,7 +9,7 @@ namespace MTile;
 //
 // What's snapshotted:
 //   • Pose + kinematics: Position, Velocity, AppliedForce, LastImpulseMagnitude,
-//     LastCrushImpulse, SproutCrushCount, FrictionScale — all value types, trivially
+//     LastCrushImpulse, SproutCrushCount, FrictionScale, Launch — all value types, trivially
 //     copied. The step outputs (impulses, crush count) are read by PlayerCharacter.Update at the
 //     START of the next frame, before StepSwept resets them, so they cross the frame
 //     boundary a snapshot sits on.
@@ -35,6 +35,7 @@ public struct BodyState
     public float   LastCrushImpulse;
     public int     SproutCrushCount;
     public float   FrictionScale;
+    public Launch  Launch;          // value struct — copies free
     public PhysicsContact[] Contacts;
 
     public static BodyState Capture(PhysicsBody b)
@@ -52,6 +53,7 @@ public struct BodyState
             LastCrushImpulse     = b.LastCrushImpulse,
             SproutCrushCount     = b.SproutCrushCount,
             FrictionScale        = b.FrictionScale,
+            Launch               = b.Launch,
             Contacts             = kept?.ToArray() ?? System.Array.Empty<PhysicsContact>(),
         };
     }
@@ -65,6 +67,7 @@ public struct BodyState
         b.LastCrushImpulse     = LastCrushImpulse;
         b.SproutCrushCount     = SproutCrushCount;
         b.FrictionScale        = FrictionScale;
+        b.Launch               = Launch;
 
         // Drop everything, re-add fresh clones of every contact in captured order.
         b.Constraints.Clear();

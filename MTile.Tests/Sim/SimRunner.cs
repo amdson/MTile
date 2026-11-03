@@ -125,7 +125,7 @@ public static class SimRunner
             float fx = player.Body.AppliedForce.X;
             float fy = player.Body.AppliedForce.Y;
 
-            PhysicsWorld.StepSwept(bodies, cfg.Terrain, cfg.Dt, cfg.Gravity);
+            LaunchSystem.StepSwept(bodies, cfg.Terrain, cfg.Dt, cfg.Gravity);
 
             string state = player.CurrentStateName;
             bool transition = state != lastState;
@@ -261,7 +261,7 @@ public static class SimRunner
             bodyScratch.Clear();
             bodyScratch.AddRange(bodies);
             foreach (var e in world.Entities) bodyScratch.Add(e.Body);
-            PhysicsWorld.StepSwept(bodyScratch, cfg.Terrain, cfg.Dt, cfg.Gravity);
+            LaunchSystem.StepSwept(bodyScratch, cfg.Terrain, cfg.Dt, cfg.Gravity);
             world.SweepDead();
 
             for (int i = 0; i < n; i++)

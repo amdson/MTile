@@ -115,14 +115,20 @@ public class Entity : IHittable
     {
         Health -= hit.BodyDamage;
         var res = HitResolver.Resolve(in hit, KnockbackMass, Body.Velocity);
-        if (_holdingBody) _heldVelocity += res.TargetDeltaV;
-        else              Body.Velocity += res.TargetDeltaV;
+        if (hit.LaunchDecay > 0f)
+        {
+            // A decaying launch (Physics/Launch.cs), on whichever velocity is real.
+            if (_holdingBody) LaunchSystem.Hit(Body, ref _heldVelocity, res.TargetDeltaV, hit.LaunchDecay, hit.LaunchImpactMass);
+            else              LaunchSystem.Hit(Body, ref Body.Velocity, res.TargetDeltaV, hit.LaunchDecay, hit.LaunchImpactMass);
+        }
+        else if (_holdingBody) _heldVelocity += res.TargetDeltaV;
+        else                   Body.Velocity += res.TargetDeltaV;
 
         // Keyed on the hitbox's nominal strength, as the attacker's inbox is
         // (CombatSystem), so both sides of the hit freeze for the same window — or,
         // below CombatState.BigHitStrength, neither does. Immovable and rooted bodies
         // have nothing to hold; grab erosion is exempt, as it is for the attacker.
-        LastHitStopSeconds = CombatState.HitstopSecondsFor(HitResolver.NominalStrength(in hit));
+        LastHitStopSeconds = CombatState.HitstopSecondsFor(HitResolver.ImpactStrength(res.Impulse));
         if (LastHitStopSeconds > 0f && Mass > 0f && !_rooted && hit.GrabStrengthDamage <= 0f)
         {
             int frames = SimFrames.FromSeconds(LastHitStopSeconds, Simulation.FixedDt);
@@ -132,7 +138,7 @@ public class Entity : IHittable
         LastHitDir = res.TargetDeltaV.LengthSquared() > 1e-4f
             ? Vector2.Normalize(res.TargetDeltaV)
             : hit.StrikeDir;
-        LastHitImpulse = res.Strength;
+        LastHitImpulse = res.TargetDeltaV.Length();   // dv, as the player's
         HitGeneration++;
 
         return res.Impulse;
@@ -143,6 +149,8 @@ public class Entity : IHittable
     // GravityScale = 1 this is a no-op; with 0, the body is weightless.
     public void PreStep(Vector2 globalGravity)
     {
+        // Parked this step (rooted / hitstop hold) — LaunchSystem pauses on it.
+        Body.Frozen = _rooted || _hitstopFrames > 0;
         if (_rooted)
         {
             // Discard whatever the frame accumulated and hand StepSwept a body whose net

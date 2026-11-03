@@ -140,6 +140,16 @@ public readonly struct Hitbox
     // the guard and lands in full (EnemyEntity.OnHit).
     public readonly bool        GuardBreak;
 
+    // Launch (Physics/Launch.cs). 0 = off: the knockback is plain velocity, as every
+    // attack had before launches existed. > 0: the victim's knockback becomes a launch
+    // that bleeds off at this many px/s², replacing any launch already running —
+    // a fast hit can start fast and still stop in a sane distance.
+    public readonly float       LaunchDecay;
+    // Multiplier on the victim's Impact.Mass for terrain impacts while launched, fading
+    // to 1 with the launch: breaks walls as if heavier, not faster. Energy ∝ m·v², so 4
+    // breaks like double speed. Needs LaunchDecay > 0 to have a launch to ride.
+    public readonly float       LaunchImpactMass;
+
     // Input cheat-sheet (details on the fields above):
     //   Identity   region (broad AABB) · hitId (dedupe key) · owner/source · targets
     //              · shape/shapePos/shapeRotation (optional narrow-phase polygon)
@@ -154,6 +164,7 @@ public readonly struct Hitbox
     //              · minRecoilSpeed (tile-pogo floor)
     //   Recoil cap maxRecoilSpeed (per-frame |Δv| ceiling on every recoil path; 0 = off)
     //   Occlusion  origin (null = no terrain occlusion)
+    //   Launch     launchDecay (0 = plain knockback) · launchImpactMass (wall-break weight)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
                   Color? debugColor = null, HitTargets targets = HitTargets.All,
@@ -168,8 +179,12 @@ public readonly struct Hitbox
                   float minRecoilSpeed = 0f,
                   float maxRecoilSpeed = 0f,
                   Vector2? origin = null,
-                  bool guardBreak = false)
+                  bool guardBreak = false,
+                  float launchDecay = 0f,
+                  float launchImpactMass = 1f)
     {
+        LaunchDecay          = launchDecay;
+        LaunchImpactMass     = launchImpactMass;
         Occluded             = origin.HasValue;
         Origin               = origin ?? default;
         GuardBreak           = guardBreak;

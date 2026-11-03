@@ -227,6 +227,8 @@ public class PlayerCharacter : IHittable
         _abilities.Combat.AddDamage(hpLoss);
         _lastDamageFrame = _frame;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
+        // How hard this hit actually moves us, px/s — what armor, stun and hitstun read.
+        float dv = res.TargetDeltaV.Length();
 
         // Superarmor (Plans/HIT_AIRLOCK_PLAN.md §4): the live action may tank
         // hits below its armor threshold. Percent still accrued above (armor
@@ -234,7 +236,7 @@ public class PlayerCharacter : IHittable
         // way down and the hit never REGISTERS — no hitstun, no stun, and
         // therefore no flinch eviction (RecoveryAction keys off LastHitFrame).
         float armor = _currentAction?.ArmorProfile(in _actionVars) ?? 0f;
-        if (armor > 0f && res.Strength < armor)
+        if (armor > 0f && dv < armor)
         {
             AddKnockback(res.TargetDeltaV * ArmorKnockbackScale * guard.KnockbackScale);
             return res.Impulse;
@@ -243,7 +245,8 @@ public class PlayerCharacter : IHittable
         // Scaled here rather than through HitResolver's `scale` because that also feeds
         // Collision mode's MinLaunch floor, which would hand back most of the knockback
         // a leaky guard just ate.
-        AddKnockback(res.TargetDeltaV * guard.KnockbackScale);
+        if (hit.LaunchDecay > 0f) Launch(res.TargetDeltaV * guard.KnockbackScale, in hit);
+        else                      AddKnockback(res.TargetDeltaV * guard.KnockbackScale);
 
         // For render-only cosmetics (directional knockback cue, weapon flash) that
         // want more than LastHitImpulse's magnitude. Falls back to the hit's launch
@@ -260,9 +263,9 @@ public class PlayerCharacter : IHittable
         // Strength rides the same knockback share: it IS the knockback magnitude
         // (pre-mass), so leaving it whole while halving the actual velocity change
         // would stun the victim as if nothing had been blocked.
-        _abilities.Combat.OnHitRegistered(_frame, res.Strength * guard.KnockbackScale, _dt,
+        _abilities.Combat.OnHitRegistered(_frame, dv * guard.KnockbackScale, _dt,
                                           hit.HitstunSecondsOverride,
-                                          hitstopStrength: HitResolver.NominalStrength(in hit));
+                                          hitstopStrength: HitResolver.ImpactStrength(res.Impulse));
         return res.Impulse;
     }
 
@@ -292,6 +295,7 @@ public class PlayerCharacter : IHittable
     public void PreStep(Vector2 globalGravity)
     {
         var c = _abilities.Combat;
+        Body.Frozen = c.HitstopActive;   // LaunchSystem pauses while the body is held
         if (!c.HitstopActive) return;
         if (!c.HoldingBody) { c.HeldVelocity = Body.Velocity; c.HoldingBody = true; }
         Body.Velocity     = Vector2.Zero;
@@ -304,6 +308,15 @@ public class PlayerCharacter : IHittable
     {
         if (_abilities.Combat.HoldingBody) _abilities.Combat.HeldVelocity += dv;
         else                               Body.Velocity += dv;
+    }
+
+    // Same routing as AddKnockback, as a decaying launch (Physics/Launch.cs). Armored
+    // hits stay plain AddKnockback: a shove through armor is a nudge, not a launch.
+    private void Launch(Vector2 dv, in Hitbox hit)
+    {
+        var c = _abilities.Combat;
+        if (c.HoldingBody) LaunchSystem.Hit(Body, ref c.HeldVelocity, dv, hit.LaunchDecay, hit.LaunchImpactMass);
+        else               LaunchSystem.Hit(Body, ref Body.Velocity,  dv, hit.LaunchDecay, hit.LaunchImpactMass);
     }
     
     private readonly PlayerAbilityState _abilities = new();

@@ -603,7 +603,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         _bodyScratch.Clear();
         foreach (var r in _world.Query<PhysicsBodyComponent>()) _bodyScratch.Add(r.Component1.Body);
         _spikes.CapturePreStep(_bodyScratch);
-        PhysicsWorld.StepSwept(_bodyScratch, _chunks, dt, Gravity);
+        LaunchSystem.StepSwept(_bodyScratch, _chunks, dt, Gravity);
 
         // Spike contact damage: after the sweep, so contacts are where bodies came to
         // rest and the impact speed is the pre-sweep approach (CapturePreStep). Before
