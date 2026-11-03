@@ -415,8 +415,12 @@ public class MovementConfig
 
     // Tile sprout — duration of the grow animation when a new tile is placed.
     // Sprout translates from its parent tile's center to its target cell center
-    // over this window, then commits as a regular solid tile.
-    public float SproutLifetime { get; set; } = 0.1f;
+    // over this window, then commits as a regular solid tile. Per source (todo #2):
+    // an avalanche front is the fastest, painting (and every non-player builder)
+    // the default, and deliberate Shift placement the slowest. Seconds per cell.
+    public float SproutLifetime          { get; set; } = 0.07f;   // painting / default
+    public float AvalancheSproutLifetime { get; set; } = 0.04f;   // wave-tagged cells
+    public float PlaceSproutLifetime     { get; set; } = 0.1f;    // Shift+RMB placement
 
     // Avalanche schedule gate (AVALANCHE_RIDING_V2 Part 3): how long after the
     // mass ball's recorded passage a wave-tagged cell may begin growing. The one

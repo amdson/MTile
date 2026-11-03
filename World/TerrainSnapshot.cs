@@ -51,4 +51,5 @@ public struct SproutNodeData
     public EntityId         WaveId;
     public float            RequestTime;
     public byte             Owner;
+    public SproutSource     Source;
 }

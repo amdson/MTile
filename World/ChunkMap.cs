@@ -401,7 +401,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // due-scan). The accept/reject decision is IDENTICAL to the untagged path —
     // that is what keeps the final avalanche shape invariant under the gate.
     public TileSproutNode TryRequestTile(int gtx, int gty, TileType type = TileType.Stone,
-                                         EntityId wave = default, byte owner = BlockOwnership.None)
+                                         EntityId wave = default, byte owner = BlockOwnership.None,
+                                         SproutSource source = SproutSource.Paint)
     {
         if (GetCellState(gtx, gty) != TileState.Empty) return null;
         if (Graph.TryGet(gtx, gty, out _)) return null;   // already requested
@@ -421,12 +422,14 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 parked.WaveId      = wave;
                 parked.RequestTime = SproutClock;
                 parked.Owner       = owner;
+                parked.Source      = source;
                 return parked;
             }
             var chunk = GetOrCreateChunk(chunkPos);
             var node = Graph.AddGrowing(chunkPos, tx, ty, gtx, gty,
-                faces, MovementConfig.Current.SproutLifetime);
+                faces, LifetimeFor(wave, source));
             node.Type   = type;
+            node.Source = source;
             node.WaveId = wave;
             node.RequestTime = SproutClock;
             node.Owner  = owner;
@@ -446,6 +449,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         pending.WaveId      = wave;
         pending.RequestTime = SproutClock;
         pending.Owner       = owner;
+        pending.Source      = source;
         return pending;
     }
 
@@ -478,7 +482,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
         var chunk = GetOrCreateChunk(chunkPos);
         var node = Graph.AddGrowing(chunkPos, tx, ty, gtx, gty,
-            faces, MovementConfig.Current.SproutLifetime);
+            faces, LifetimeFor(default, SproutSource.Paint));
         node.Type  = type;
         node.Owner = owner;
         WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
@@ -486,6 +490,19 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         OnTilePlaced?.Invoke(CellCenter(gtx, gty), type);
         return node;
     }
+
+    // Grow time per cell for a sprout of this provenance (todo #2): avalanche < paint <
+    // Shift placement. Read at promotion, so a ghost parked under one config value
+    // grows at whatever the dial says when it actually starts.
+    public static float LifetimeFor(EntityId wave, SproutSource source)
+    {
+        var c = MovementConfig.Current;
+        if (!wave.IsNone)                 return c.AvalancheSproutLifetime;
+        if (source == SproutSource.Place) return c.PlaceSproutLifetime;
+        return c.SproutLifetime;
+    }
+
+    private static float LifetimeFor(TileSproutNode n) => LifetimeFor(n.WaveId, n.Source);
 
     // A node just became visible terrain (Sprouting): its placer owns the cell from this
     // frame. An unowned node clears any claim, so "re-placing re-stamps" holds for
@@ -531,7 +548,6 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 (finalize ??= new List<TileSproutNode>()).Add(n);
         }
 
-        float overshoot = 0f;
         if (finalize != null)
         {
             // Pass 1 — commit the completed ring.
@@ -543,14 +559,12 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 // see FoamDecay. Other types never enter the decay map.
                 if (n.Type == TileType.Foam)
                     Foam.Register(n.Gtx, n.Gty);
+                // Age crossed Lifetime this tick; pass 2 carries the overshoot
+                // (Age − Lifetime ∈ [0, dt)) into each child's starting Age so growth
+                // is continuous across the handoff instead of resuming from t=0 (which
+                // would put the new volumes exactly atop the just-Solid cells for one
+                // frame). Graph.Remove leaves the node's Age/Lifetime readable.
                 Graph.Remove(n);
-
-                // Age crossed Lifetime this tick. Carry the largest overshoot
-                // (Age − Lifetime ∈ [0, dt)) into the next ring's starting Age so
-                // growth is continuous across the handoff instead of resuming from
-                // t=0 (which would put the new volumes exactly atop the just-Solid
-                // cells for one frame). Uniform across a ring, which shares a clock.
-                overshoot = MathF.Max(overshoot, n.Age - n.Lifetime);
             }
 
             // Pass 2 — promote every ghost adjacent to a cell that just solidified.
@@ -567,8 +581,11 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 if (ghost.Status != TileSproutStatus.Pending) continue;
                 if (!WaveDue(ghost)) continue;
 
+                // Carry THIS parent's leftover: with per-source speeds a ring no longer
+                // shares one clock, so the ring-wide max would over-advance a slow
+                // neighbour's children.
                 if (!Graph.TryPromote(ghost, SolidFaces(cgtx, cgty),
-                                      MovementConfig.Current.SproutLifetime, overshoot))
+                                      LifetimeFor(ghost), MathF.Max(0f, n.Age - n.Lifetime)))
                     continue;
 
                 // Materialize the chunk + tile state now that the ghost is physical.
@@ -593,11 +610,11 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             foreach (var ghost in _dueScratch)
             {
                 // Start age carries how far past due this tick overran, mirroring
-                // pass 1's overshoot: growth is continuous against the schedule.
+                // pass 2's overshoot carry: growth is continuous against the schedule.
                 float late = MathF.Min(
                     SproutClock - (ghost.RequestTime + MovementConfig.Current.AvalancheSurfaceLag), dt);
                 if (!Graph.TryPromote(ghost, SolidFaces(ghost.Gtx, ghost.Gty),
-                                      MovementConfig.Current.SproutLifetime, MathF.Max(0f, late)))
+                                      LifetimeFor(ghost), MathF.Max(0f, late)))
                     continue;   // no solid support yet — stays pending for pass 2 / a later scan
 
                 var ghostChunk = GetOrCreateChunk(ghost.ChunkPos);

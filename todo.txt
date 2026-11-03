@@ -3,12 +3,26 @@
 - add more advantages to being on the ground (probably lower knockback)
 - add a specific animation for wall jumping while controls are holding player into wall 
 - when grabbing someone, shift+space shouldn't trigger dash
-2. speed up block generation (tile-sprout speed) add special handling for preserving the front of tile-sprouts (so that when one tile finishes sprouting on tick 5, the remaining progress it would have made within tick 5 is added to the next tile in tick 6)
+
+2. update block generation 
+- speed up tile-sprout speed-  add special handling for preserving the front of tile-sprouts (so that when one tile finishes sprouting on tick 5, the remaining progress it would have made within tick 5 is added to the next tile in tick 6)
 - make tile sprouting faster for avalanche than for normal placement, and faster for normal placement than for shit placement
 - for avalanche in particular, crush damage from being in the way and pinned against a wall should be significant
+  - should apply to the rider too, but DON'T touch riding / TerrainCarriedState for now (finicky) — non-riders first; item 4 is what creates the pin
+3. Make burst scale with charging, and actually come out when player is in charging state
+4. Make walls block avalanches
+- today waves visibly pass through walls: MassBall has Body.IgnoreTiles (so it won't wall itself in with its own deposits), so it flies through solid and keeps depositing beyond
+- fix: the ball stops on entering solid it didn't create itself (pre-existing terrain or anyone's barricade) and dumps its remaining mass against the face. needs the ball to remember the cells its own wave requested, since a finished tile doesn't record its wave
+5. make the build distance when building from a tile sprout effectively infinite
+6. add a more distinct representation for tile sprouts
+7. spiked avalanche: an avalanche launched with spikes selected becomes a wave of deadly blocks — a telegraphed, large-area, high-cooldown attack whose front damages anything it touches. the counter is a barricade: walls stop/absorb the wave (ties to 4), so building defensively pays off.
+- telegraph via a crystal lifecycle per cell: seed (small crystal appears) -> flash -> grow (large damaging shape; the ONLY damaging phase) -> vanish, after serving as the substrate that seeds the next crystal in the wave. the first crystals on the ground take a long moment to appear (that's the warning); later ones propagate fast, so warning time and wave speed are separate dials
+- phases are sim state (per-cell phase + clock, snapshotted like TileSpikes/TileCharge); crystal visuals are render-only
+- walls stop it for free: a crystal needs open space to seed into, so a barricade ends that branch. crystals vanish, so the wave leaves no terrain behind
+- decided: the wave just stops at a barricade (no chipping); grown hitbox is terrain-occluded from its base; the wave follows a normal avalanche path — build it by taking the avalanche generation code directly and adapting it (crystal cells instead of solid tiles)
+- small per-crystal placement cost, so a wave can be big — the high cooldown and long first-seed telegraph are what keep it in check, not the meter
+- once it exists, add it to the bot's WallUpManeuver threat check (the bot should wall up when it sees one coming) and give the bot a maneuver that launches it
+8. use the spike-creation mechanic when placing spikes normally as well. make a crystal appear on top of a block as a seed, wait a second, flash, and grow into a damaging spike. (but still the same spike as currently in use in the codebase, not the spikes which would take up 2d space when doing a spike avalanche)
 
-
-
-
-- a boss that generates a damaging rain/wind that permeates the stage, blowing to the left and doing decent damage and knockback per second. the boss is on the right side, at the very end, with knockback dealing attacks and fairly low health. in addition to the wind and melee attacks, the boss can lob explosives at enemies
+A. a boss that generates a damaging rain/wind that permeates the stage, blowing to the left and doing decent damage and knockback per second. the boss is on the right side, at the very end, with knockback dealing attacks and fairly low health. in addition to the wind and melee attacks, the boss can lob explosives at enemies
 - 

@@ -5,6 +5,10 @@ namespace MTile;
 
 public enum TileSproutStatus : byte { Pending, Growing }
 
+// What requested a sprout — picks its grow speed (ChunkMap.LifetimeFor). Avalanche
+// cells aren't a source of their own: a non-None WaveId already says so.
+public enum SproutSource : byte { Paint, Place }
+
 // Which neighbouring cells are supporting (parenting) a growing sprout. The name
 // is the *direction of the parent*, so Below means the parent cell is at
 // (gtx, gty+1) and this sprout's volume for that face travels upward.
@@ -56,6 +60,10 @@ public sealed class TileSproutNode
     // Who requested it (BlockOwnership owner id; None = pre-existing / enemy build).
     // Rides the node so a ghost that promotes frames later still stamps its placer.
     public byte Owner;
+
+    // Requesting gesture (grow speed); rides the node so a ghost promoted later still
+    // grows at its requester's rate.
+    public SproutSource Source;
 
     public float Lifetime;
     public float Age;

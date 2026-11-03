@@ -2837,13 +2837,16 @@ public class BlockPaintAction : ActionState
     // sprout threshold (1.0). Above threshold so painted cells solidify with spill to
     // spare.
     private const float MassPerCell    = 6f;
-    // Build reach (px) from the player center; a sprout/solid neighbour on the target
-    // cell extends it so a build can chain outward. Same numbers the old drag paint
-    // used, carried over from Simulation.HandleBuildInput before it.
+    // Build reach (px) from the player center. Same number the old drag paint used,
+    // carried over from Simulation.HandleBuildInput before it. A target cell that
+    // borders a still-growing sprout of YOUR OWN has no reach limit (todo #5): chaining
+    // off a live build front extends it as far as the stroke goes — the meter is the
+    // limit. Someone else's sprout (an enemy's build, a rival's avalanche ghosts strung
+    // across the map) only extends reach by ChainReachMul, as before. See InBuildReach.
     // Internal because BlockBurstAction needs the same reach to decide whether a held
     // RMB is actually placing at the cursor — one constant so the two can't disagree.
-    internal const float BuildReach   = 64f;
-    private const float ChainReachMul = 2f;
+    internal const float BuildReach    = 64f;
+    internal const float ChainReachMul = 2f;
     // Minimum ball speed at RELEASE for the stroke to upgrade into an eruption. Measured
     // on the ball (not the raw cursor) at the moment the button comes up — after even a
     // short sustained sweep the damped ball genuinely carries this speed, unlike at the
@@ -2971,9 +2974,7 @@ public class BlockPaintAction : ActionState
 
         // Reach is measured to the ball's cell, not the cursor — the ball is what's
         // actually depositing, so a stroke flicked out of range stops where it lags to.
-        float maxReach = HasSproutNeighbour(ctx.Chunks, gtx, gty)
-            ? BuildReach * ChainReachMul : BuildReach;
-        if (Vector2.DistanceSquared(ctx.Body.Position, cell) > maxReach * maxReach) return;
+        if (!InBuildReach(ctx, gtx, gty, cell)) return;
 
         // Ask for the demand rate, get back what the meters could actually fund, and emit
         // exactly that. Paying at emission (rather than on commit) means mass that flows
@@ -2986,6 +2987,25 @@ public class BlockPaintAction : ActionState
 
         ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, paid, ctx.ActiveBlockType,
                                 owner: BlockOwnership.OwnerFor(ctx.Faction));
+    }
+
+    // The build-reach rule shared by painting and placement (see BuildReach).
+    internal static bool InBuildReach(EnvironmentContext ctx, int gtx, int gty, Vector2 cell)
+    {
+        byte me = BlockOwnership.OwnerFor(ctx.Faction);
+        if (me != BlockOwnership.None && HasSproutNeighbour(ctx.Chunks, gtx, gty, me)) return true;
+        float reach = HasSproutNeighbour(ctx.Chunks, gtx, gty) ? BuildReach * ChainReachMul : BuildReach;
+        return Vector2.DistanceSquared(ctx.Body.Position, cell) <= reach * reach;
+    }
+
+    // Any 4-neighbour sprout node owned by `owner`.
+    private static bool HasSproutNeighbour(ChunkMap chunks, int gtx, int gty, byte owner)
+    {
+        TileSproutNode n;
+        return (chunks.Graph.TryGet(gtx,     gty + 1, out n) && n.Owner == owner)
+            || (chunks.Graph.TryGet(gtx - 1, gty,     out n) && n.Owner == owner)
+            || (chunks.Graph.TryGet(gtx + 1, gty,     out n) && n.Owner == owner)
+            || (chunks.Graph.TryGet(gtx,     gty - 1, out n) && n.Owner == owner);
     }
 
     internal static bool HasSproutNeighbour(ChunkMap chunks, int gtx, int gty) =>
@@ -3022,8 +3042,7 @@ public class BlockPaintAction : ActionState
 // a bug (a tile that appears one frame after you clicked, one cell off where you aimed).
 public class BlockPlaceAction : ActionState
 {
-    private const float Reach         = BlockPaintAction.BuildReach;
-    private const float ChainReachMul = 2f;
+    private const float Reach         = BlockPaintAction.BuildReach;   // unlimited when chaining off a sprout (todo #5)
 
     public override int ActivePriority  => 8;
     public override int PassivePriority => 10;
@@ -3072,13 +3091,12 @@ public class BlockPlaceAction : ActionState
             return;
         }
 
-        float maxReach = BlockPaintAction.HasSproutNeighbour(ctx.Chunks, gtx, gty)
-            ? Reach * ChainReachMul : Reach;
-        if (Vector2.DistanceSquared(ctx.Body.Position, cell) > maxReach * maxReach) return;
+        if (!BlockPaintAction.InBuildReach(ctx, gtx, gty, cell)) return;
 
         if (!ab.Meters.CanAfford(ctx.ActiveBlockType)) return;
         if (ctx.Chunks.TryRequestTile(gtx, gty, ctx.ActiveBlockType,
-                                      owner: BlockOwnership.OwnerFor(ctx.Faction)) == null) return;
+                                      owner: BlockOwnership.OwnerFor(ctx.Faction),
+                                      source: SproutSource.Place) == null) return;
 
         // Charge only for a placement that actually took.
         ab.Meters.SpendForTiles(1f, ctx.ActiveBlockType);
@@ -3171,7 +3189,7 @@ public class BlockBurstAction : ActionState
         // Empty air only — a cursor in solid is the eruption gesture's territory.
         if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Empty) return false;
         // If the drag-build could paint here, RMB is placing: leave the press alone.
-        if (distSq <= BlockPaintAction.BuildReach * BlockPaintAction.BuildReach &&
+        if (BlockPaintAction.InBuildReach(ctx, gtx, gty, center) &&
             ctx.Chunks.CanRequestTile(gtx, gty)) return false;
         return true;
     }
