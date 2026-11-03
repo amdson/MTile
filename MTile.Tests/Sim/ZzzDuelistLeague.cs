@@ -12,7 +12,7 @@ namespace MTile.Tests.Sim;
 // The duelist league (Plans/DUELIST_LEAGUE.md). Not a regression test — a Zzz harness,
 // excluded from every test group; run by hand:
 //   dotnet test MTile.Tests -c Release --filter FullyQualifiedName~ZzzDuelistLeague
-// Seeds 11-16 are held out: the entrants tuned on seeds 1-4.
+// Held-out seeds: 11-16 (spent, first two runs), 17-22 (Citadel's entry run).
 public class ZzzDuelistLeague(ITestOutputHelper output)
 {
     [Fact]
@@ -23,9 +23,10 @@ public class ZzzDuelistLeague(ITestOutputHelper output)
             ("Bulldog", BulldogBot.Create),
             ("Rampart", RampartBot.Create),
             ("Riposte", RiposteBot.Create),
+            ("Citadel", CitadelBot.Create),
             ("Brawler", BotDuel.Brawler),
         };
-        int[] seeds = { 11, 12, 13, 14, 15, 16 };
+        int[] seeds = { 17, 18, 19, 20, 21, 22 };
         var log = new StringBuilder();
         // Head to head: points[i,j] = points i took off j.
         var pts = new float[bots.Count, bots.Count];

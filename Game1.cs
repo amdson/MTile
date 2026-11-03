@@ -521,6 +521,7 @@ public class Game1 : Game
                   "Bulldog" => MTile.Net.BulldogBot.Create(0, 1234),
                   "Rampart" => MTile.Net.RampartBot.Create(0, 1234),
                   "Riposte" => MTile.Net.RiposteBot.Create(0, 1234),
+                  "Citadel" => MTile.Net.CitadelBot.Create(0, 1234),
                   _         => MTile.Net.BotDuel.Brawler(0, 1234),
               })
             : null;
