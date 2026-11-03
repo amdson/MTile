@@ -82,6 +82,13 @@ public sealed class AnimationDocument
     // behavior. See CharacterAnimator's action-overlay resolve.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public float                   SettleShare { get; set; } = 0f;
+    // Action overlays only: the Type of ANOTHER clip that plays over the recovery countdown
+    // after this one was the last overlay bound — the whole of that clip, start to end, down
+    // the countdown — in place of a SettleShare tail. For actions whose ending depends on how
+    // the activation went: Grab's hold settles into "GrabAction.Throw", its empty-handed start
+    // into "GrabAction.Whiff". Null (default, omitted on save) = SettleShare governs.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string                  SettleClip { get; set; }
     // A clip that TURNS the character: the normalized time at which its authored facing
     // flips. [0, FlipAt) is authored facing the way the character faced BEFORE the turn,
     // [FlipAt, 1] facing the new way; place it on the clip's most symmetric pose, where the

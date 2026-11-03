@@ -107,6 +107,7 @@ public class Game1 : Game
     // World-space overlay shapes declared by the players' actions and ITelegraphSource
     // entities this frame; cleared and refilled in Draw, rendered by TelegraphRenderer.
     private readonly TelegraphList _telegraphs = new();
+    private readonly TelegraphList _debugQueries = new(32);   // DebugQueryShapes (hitbox overlay)
     private CosmeticUpdateSystem _cosmetics;
     private MotionFxSystem _motionFx;
 
@@ -1347,8 +1348,17 @@ public class Game1 : Game
 
         long tDbg = _prof.Begin();
         if (_config.DebugDrawHitboxes)
+        {
             foreach (var hb in _sim.Hitboxes.All)
                 _debugOverlay.DrawHitbox(hb);
+            // Query regions that aren't Hitboxes (the grab's latch box, block-grab reach):
+            // actions declare them, gated here so the sim never knows the flag exists.
+            _debugQueries.Clear();
+            player.CurrentAction.DebugQueryShapes(_debugQueries, player.Body, player.CurrentActionVars);
+            foreach (var (p, _) in _sim.SecondaryPlayers)
+                p.CurrentAction.DebugQueryShapes(_debugQueries, p.Body, p.CurrentActionVars);
+            TelegraphRenderer.Draw(_draw, _debugQueries, _vfx);
+        }
 
         if (_config.DebugDrawForceFields)
             foreach (var f in _sim.ForceFields.All)

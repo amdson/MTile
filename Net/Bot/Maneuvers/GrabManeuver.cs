@@ -26,7 +26,7 @@ public sealed class GrabManeuver : BotManeuver
     public int   CooldownFrames = 90;
 
     private const int   FaceFrames   = 4;     // give up turning after this many frames
-    private const int   WindupFrames = 14;    // GrabAction startup is 12; slack to latch
+    private const int   WindupFrames = 22;    // GrabAction startup is 20; slack to latch
     private const int   CarryFrames  = 8;
     private const int   SwipeFrames  = 5;
     private const float SwipeStep    = 14f;   // px per frame ~ 840 px/s, over the 800 px/s throw cap

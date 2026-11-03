@@ -93,6 +93,17 @@ public sealed class TelegraphList
     public void Box(Vector2 topLeft, Vector2 size, Color color)
         => Box(topLeft.X, topLeft.Y, size.X, size.Y, color);
 
+    // Axis-aligned rect with a translucent fill and a 1px outline — the debug-overlay look
+    // (DebugOverlayRenderer.DrawHitbox). Composite: one Box + four Lines.
+    public void OutlinedBox(float x, float y, float w, float h, Color fill, Color outline)
+    {
+        Box(x, y, w, h, fill);
+        Line(new Vector2(x, y),         new Vector2(x + w, y),     outline);
+        Line(new Vector2(x + w, y),     new Vector2(x + w, y + h), outline);
+        Line(new Vector2(x + w, y + h), new Vector2(x, y + h),     outline);
+        Line(new Vector2(x, y + h),     new Vector2(x, y),         outline);
+    }
+
     // Axis-aligned filled rect centred on `center`.
     public void Rect(Vector2 center, Vector2 size, Color color)
         => Box(center.X - size.X * 0.5f, center.Y - size.Y * 0.5f, size.X, size.Y, color);

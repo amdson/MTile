@@ -57,9 +57,10 @@ public static class FrameData
     public static class BeamAction       { public const float Startup = 21 / F,  Active = 33 / F,           EndLag = 12    / F; }   // charge, then fire
     public static class LobbedAreaAction { public const float Startup = 24 / F,                             EndLag = 12    / F; }   // min charge to throw
     public static class BlockGrabAction  { public const float                    Active = 36 / F,           EndLag = 12    / F; }   // wait for a drag / tether
-    // Startup: committed but holding nothing. Active: the longest hold before the
-    // auto-throw. Throw: the throw tail after release (animation only).
-    public static class GrabAction       { public const float Startup = 12 / F,  Active = 72 / F, Throw = 7.2f / F, EndLag = 18 / F; }
+    // Startup: committed but holding nothing — the telegraphed wind-up (20f: 12 was too
+    // short to read). Active: the longest hold before the auto-throw. EndLag: the recovery
+    // the throw / whiff clips play over (GrabAction.Throw / GrabAction.Whiff).
+    public static class GrabAction       { public const float Startup = 20 / F,  Active = 72 / F,                 EndLag = 18 / F; }
 }
 
 // Concurrent second FSM, owned by PlayerCharacter alongside the MovementState FSM.
@@ -144,6 +145,12 @@ public abstract class ActionState
     // SpriteBatch — see Presentation/TelegraphList.cs.
     public virtual void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars) {}
 
+    // Debug-only twin of Telegraph: the exact query geometry this action tests that is NOT
+    // a published Hitbox (a grab's latch box, a reach radius), so the hitbox overlay can show
+    // it. Same contract — declare shapes, never draw — but Game1 only calls it, and only
+    // draws the list, when GameConfig.DebugDrawHitboxes is on. Default: nothing.
+    public virtual void DebugQueryShapes(TelegraphList t, PhysicsBody body, in ActionVars vars) {}
+
     // Declare multiplicative scalars on movement knobs (walk speed, friction, …).
     // Called by PlayerCharacter once per frame between action selection and
     // Movement.Update — the values go into ctx.Modifiers, movement reads them
@@ -170,6 +177,15 @@ public abstract class ActionState
     // the overlay honest when the action's real length is variable (Grab's early throw) or
     // differs from the clip's (Beam outlives its 0.6s clip).
     public virtual float AnimationProgress(in ActionVars vars) => -1f;
+
+    // The PHASE clip this activation should draw, for actions whose phases are separate clips
+    // rather than one timeline (Grab: start → hold). Render-only, same contract as
+    // AnimationProgress. Null (default) = the clip whose Type is the class name; "Hold" = the
+    // clip typed "<ClassName>.Hold", falling back to the base clip when none is authored.
+    // AnimationProgress still drives τ — return negative there to play a looping phase clip on
+    // its own clock. What plays AFTER the action exits (its recovery countdown) is the bound
+    // clip's own business: AnimationDocument.SettleClip.
+    public virtual string AnimationVariant(in ActionVars vars) => null;
 
     // The world AIM direction of an input-parametrized action (a stab's StabDir), exposed to the
     // animation layer so it can re-aim the authored (horizontal) overlay pose along the actual
@@ -3908,6 +3924,10 @@ public class BlockGrabAction : ActionState
     // so decline and let the overlay clip play at its authored rate.
     public override float AnimationProgress(in ActionVars vars) => -1f;
 
+    // Debug: GrabReach, the radius PressIsBlockGrab tests the cursor against.
+    public override void DebugQueryShapes(TelegraphList t, PhysicsBody body, in ActionVars vars)
+        => t.Ring(body.Position, GrabReach, Color.Magenta * 0.6f, segments: 32);
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
         if (!ctx.Input.Shift || !ctx.Input.LeftClick) return false;
@@ -4195,7 +4215,6 @@ public class GrabAction : ActionState
     // GrabbedSlash.GrabStrengthDamage (1.0), so a fresh grab survives 2 struggles and
     // breaks on the 3rd. Bump for a stickier grab, lower for an easier mash-out.
     private const float GrabStrengthMax    = 3f;
-    private const float ThrowSeconds       = FrameData.GrabAction.Throw;   // the clip's throw tail (animation only now)
     private const float RecoverySeconds    = FrameData.GrabAction.EndLag;    // lag after a grab (the whiff-punish window)
     // Carry (2026-10-18, the block throw's mechanism): the held victim tracks the
     // cursor out to PlayerGrabHoldReach — NOT clamped clear of terrain like a clod, so
@@ -4205,17 +4224,19 @@ public class GrabAction : ActionState
     private const float Range       = PlayerCharacter.Radius * 2.4f;   // field region half-size
     private const float FocusDist   = PlayerCharacter.Radius * 1.6f;   // hold focus in front of the grabber
 
-    // Two phases with INDEPENDENT lengths, which is why the old fixed-duration remap could
-    // not express this: the hold runs until the player releases (up to HoldEndSeconds),
-    // then the throw runs its own ThrowSeconds. The authored clip devotes its tail to the
-    // throw, so map the hold onto everything before HoldShare and the throw onto the rest —
-    // a short hold jump-cuts forward to the throw, which is right: the throw pose must play
-    // WHEN the throw happens, not whenever the clip's own clock reaches it.
-    private const float HoldShare = HoldEndSeconds / (HoldEndSeconds + ThrowSeconds);
+    // Four clips, one per phase (CharacterAnimator's phase clips + settle successors):
+    //   GrabAction        — the telegraphed wind-up, swept once over the startup, then held
+    //                       on its open-handed reach while the latch is live and empty;
+    //   GrabAction.Hold   — loops on the action clock once a victim is latched;
+    //   GrabAction.Throw  — the hold clip's SettleClip: plays over the end-lag after a hold;
+    //   GrabAction.Whiff  — the start clip's SettleClip: plays over the end-lag after a miss.
+    // The ending is chosen by which clip was bound when the action exited, so the sim needs
+    // no post-exit state for it. Render-only: nothing here is read by the sim.
     public override float AnimationProgress(in ActionVars vars)
-        => vars.GrabThrowing
-            ? HoldShare + (1f - HoldShare) * (vars.ChargeTime / ThrowSeconds)
-            : HoldShare * (vars.TimeInState / HoldEndSeconds);
+        => vars.GrabVictim.IsNone ? MathHelper.Clamp(vars.TimeInState / StartupSeconds, 0f, 1f) : -1f;
+
+    public override string AnimationVariant(in ActionVars vars)
+        => vars.GrabVictim.IsNone ? null : "Hold";
 
     // 48/48 — above BlockGrabAction (46/46), which shares the Shift+LMB press. They
     // never actually compete on priority: both gate on BlockGrabAction.PressIsBlockGrab
@@ -4288,7 +4309,6 @@ public class GrabAction : ActionState
     {
         vars.TimeInState  = 0f;
         vars.ChargeTime   = 0f;
-        vars.GrabThrowing = false;
         vars.GrabDir      = AimDir(ctx, ab);
         vars.GrabVictim   = EntityId.None;   // latched in Update, off the field's own region
         vars.SwipeVel     = Vector2.Zero;
@@ -4323,13 +4343,14 @@ public class GrabAction : ActionState
         if (aim.LengthSquared() > 1e-4f) vars.GrabDir = Vector2.Normalize(aim);
 
         // Windup. Nothing is grabbed yet: no field, so no GrabbedActive and no carry.
-        if (vars.TimeInState < StartupSeconds) return;
+        // BallPos tracks where the latch box WILL sit (telegraph + debug box only).
+        var focus = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;
+        if (vars.TimeInState < StartupSeconds) { vars.BallPos = focus; return; }
 
         if (vars.GrabVictim.IsNone)
         {
             // Latch: the nearest body in the region in front of the grabber. Until one
             // is caught the grab holds nobody (a whiff, which pays the recovery).
-            var focus = ctx.Body.Position + new Vector2(facing, 0f) * FocusDist;
             vars.GrabVictim = PickVictim(ctx, RegionAround(focus), EntityId.None);
             vars.BallPos    = focus;
             if (vars.GrabVictim.IsNone) return;
@@ -4371,7 +4392,6 @@ public class GrabAction : ActionState
             {
                 Team = ctx.Team,
             });
-        vars.GrabThrowing = false;
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
@@ -4379,10 +4399,25 @@ public class GrabAction : ActionState
         // The hold point: in front of the grabber while latching, the carry target once
         // a body is held. Dim through the windup so the cue reads as "winding up".
         bool startup = vars.TimeInState < StartupSeconds;
-        var focus = startup
-            ? body.Position + new Vector2(vars.GrabDir.X >= 0f ? 1 : -1, 0f) * FocusDist
-            : vars.BallPos;
-        t.Rect(focus, 6f, Color.Magenta * (startup ? 0.35f : 0.8f));
+        t.Rect(vars.BallPos, 6f, Color.Magenta * (startup ? 0.35f : 0.8f));
+    }
+
+    // The latch box PickVictim tests (RegionAround the focus Update last used): dashed-dim
+    // through the windup, where it is not live yet, solid once the latch window is open.
+    // Once a victim is held, the carry box instead — the hold breaks outside it.
+    public override void DebugQueryShapes(TelegraphList t, PhysicsBody body, in ActionVars vars)
+    {
+        if (vars.GrabVictim.IsNone)
+        {
+            var r = RegionAround(vars.BallPos);
+            bool live = vars.TimeInState >= StartupSeconds;
+            var c = Color.Magenta * (live ? 1f : 0.45f);
+            t.OutlinedBox(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top, c * (live ? 0.18f : 0.1f), c);
+            return;
+        }
+        float half = MovementConfig.Current.PlayerGrabHoldReach + CarrySlack;
+        var me = body.Position;
+        t.OutlinedBox(me.X - half, me.Y - half, half * 2f, half * 2f, Color.Magenta * 0.06f, Color.Magenta * 0.5f);
     }
 }
 

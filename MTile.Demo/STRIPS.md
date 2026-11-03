@@ -30,6 +30,21 @@ Use `--facing -1` for a mirrored staircase and held Left. Omit `--usebind rabbit
 the same simulation as stick figures; add `--overlay` to put the rig over the artwork.
 Default scenario range: frames 0–149. A custom range may end at frame 3599.
 
+## Live gameplay: grab (phase clips + debug grab box)
+
+```sh
+dotnet run --project MTile.Demo --no-build -- --scenario grab --rig biped --strip Plans/img/grab_ingame_throw.png --start 8 --end 86 --frames 16 --size 300
+dotnet run --project MTile.Demo --no-build -- --scenario grab-whiff --rig biped --strip Plans/img/grab_ingame_whiff.png --start 8 --end 68 --frames 12 --size 300
+```
+
+Flat ground; P1 presses Shift+LMB at frame 10 at open air in front, holds, swipes and
+releases (frame 60, or 40 for the whiff). `grab` puts an AFK second player in reach (its
+body drawn as a cyan box); `grab-whiff` has nobody. Labels show the action, its phase
+variant and the recovery countdown, so start → hold → throw (or start → whiff) is visible;
+each panel also draws the action's `DebugQueryShapes` — the latch box (dim through the
+windup, solid once live) and the carry box while holding — exactly what
+`DebugDrawHitboxes` shows in game.
+
 ## Raw authored clips (demo playback)
 
 ```sh

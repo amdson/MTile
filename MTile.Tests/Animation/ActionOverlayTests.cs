@@ -356,6 +356,74 @@ public class ActionOverlayTests
             $"a clip without a settle should be fading through recovery; weight {plain.State.ActionWeight}");
     }
 
+    // Phase clips + settle successors (GrabAction's start/hold/throw/whiff). The action names
+    // a variant → the "<Action>.<Variant>" clip replaces the base clip; on exit into recovery,
+    // the LAST bound clip's SettleClip plays whole down the countdown — so a hold ends in the
+    // throw clip and an empty-handed start ends in the whiff clip.
+    [Fact]
+    public void Overlay_PhaseVariantBindsItsClip_AndSettleClipPicksTheEnding()
+    {
+        var skel = SkeletonExamples.Biped();
+        int armR = skel.IndexOf("arm_r_upper");
+        const float Start = 0.5f, Hold = -1.5f, Throw = 1.2f, Whiff = -0.6f;
+        CharacterAnimator New() => new(skel, 0.6f, new[]
+        {
+            BuildWalkClip(skel),
+            Phase(skel, "PhaseGrab",       Start, loop: false, settle: "PhaseGrab.Whiff"),
+            Phase(skel, "PhaseGrab.Hold",  Hold,  loop: true,  settle: "PhaseGrab.Throw"),
+            Phase(skel, "PhaseGrab.Throw", Throw, loop: false, settle: null),
+            Phase(skel, "PhaseGrab.Whiff", Whiff, loop: false, settle: null),
+        });
+        // Angle-wrapped: the solver may emit the same rotation ±2π.
+        float Arm(CharacterAnimator a)
+        {
+            float r = a.Pose.Local[armR].Rotation;
+            return r - MathF.Tau * MathF.Round(r / MathF.Tau);
+        }
+
+        // Base clip with no variant; an UNAUTHORED variant falls back to it.
+        var a = New();
+        var st = new DriveState { ActionTime = 0.1f, FreezeActionTime = true, ActionProgress = 1f };
+        Drive(a, skel, ref st, frames: 40, action: "PhaseGrab");
+        Assert.True(MathF.Abs(Arm(a) - Start) < 0.1f, $"start clip expected ({Start}); got {Arm(a)}");
+        st.Variant = "Nope";
+        Drive(a, skel, ref st, frames: 20, action: "PhaseGrab");
+        Assert.True(MathF.Abs(Arm(a) - Start) < 0.1f, $"unknown variant should keep the base clip; got {Arm(a)}");
+
+        // Variant → its clip.
+        st.Variant = "Hold"; st.ActionProgress = null;
+        Drive(a, skel, ref st, frames: 40, action: "PhaseGrab");
+        Assert.True(MathF.Abs(Arm(a) - Hold) < 0.1f, $"hold clip expected ({Hold}); got {Arm(a)}");
+
+        // Exit from the hold → recovery plays the THROW successor.
+        st.Variant = null; st.RecoveryFramesLeft = 20;
+        for (int i = 0; i < 19; i++) { Drive(a, skel, ref st, frames: 1, action: "RecoveryAction"); st.RecoveryFramesLeft--; }
+        Drive(a, skel, ref st, frames: 30, action: "RecoveryAction");
+        Assert.True(a.OverlayActive, "the successor should keep the overlay bound through recovery");
+        Assert.True(MathF.Abs(Arm(a) - Throw) < 0.15f, $"throw successor expected ({Throw}); got {Arm(a)}");
+
+        // Exit from the empty-handed start → recovery plays the WHIFF successor.
+        var w = New();
+        var sw = new DriveState { ActionTime = 0.1f, FreezeActionTime = true, ActionProgress = 1f };
+        Drive(w, skel, ref sw, frames: 40, action: "PhaseGrab");
+        sw.RecoveryFramesLeft = 20;
+        for (int i = 0; i < 19; i++) { Drive(w, skel, ref sw, frames: 1, action: "RecoveryAction"); sw.RecoveryFramesLeft--; }
+        Drive(w, skel, ref sw, frames: 30, action: "RecoveryAction");
+        Assert.True(MathF.Abs(Arm(w) - Whiff) < 0.15f, $"whiff successor expected ({Whiff}); got {Arm(w)}");
+    }
+
+    private static AnimationDocument Phase(Skeleton skel, string type, float arm, bool loop, string settle)
+    {
+        var clip = new AnimationDocument
+        {
+            Name = type.ToLowerInvariant(), Type = type, Duration = 0.3f, Loop = loop,
+            Region = AnimRegion.UpperBody, SettleClip = settle,
+        };
+        clip.Keyframes.Add(ArmKf(skel, 0f, arm));
+        clip.Keyframes.Add(ArmKf(skel, 1f, arm));
+        return clip;
+    }
+
     // --- harness ------------------------------------------------------------
 
     private struct DriveState
@@ -368,6 +436,8 @@ public class ActionOverlayTests
         public float? ActionProgress;
         // Frames left on the self-recovery countdown fed to the sample (0 = none).
         public int   RecoveryFramesLeft;
+        // The action's phase-clip selector (ActionState.AnimationVariant); null = base clip.
+        public string Variant;
     }
 
     private static CharacterAnimator NewAnimator(Skeleton skel)
@@ -390,7 +460,7 @@ public class ActionOverlayTests
             anim.Update(new CharacterAnimSample(
                 new Vector2(st.X, 0f), new Vector2(WalkVx, 0f), +1, true,
                 "WalkState", action, Dt, st.ActionTime, st.ActionProgress ?? -1f,
-                recoveryFramesLeft: st.RecoveryFramesLeft));
+                recoveryFramesLeft: st.RecoveryFramesLeft, actionVariant: st.Variant));
             if (!st.FreezeActionTime) st.ActionTime += Dt;
         }
     }
