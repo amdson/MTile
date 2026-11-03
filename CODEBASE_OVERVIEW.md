@@ -86,7 +86,7 @@ Per step the World is projected into `_bodyScratch`/`_entityScratch` for the sol
 
 ### Rollback netcode ([Net/](Net/))
 
-Built and running, not planned. [`RollbackSession`](Net/RollbackSession.cs) does predict → snapshot-ring → reconcile → replay with `InputFrameDelay = 3`, `StallSlack = 3`, `BufferLen = 60`, and piggybacked `Checksum()` desync detection. Around it: `InputRing`, `SnapshotRing`, `InputCodec`/`InputPacket`, `IRemoteInputSource`, `BrawlerBotInputSource` (offline P2: walks up and slashes via raw `PlayerInput` — `Plans/BOT_AI_PLAN.md`), `BotInputSource` (seeded-random stub), `NetSetup`. Transport is `MTile.Rtc` (WebRTC, manual copy/paste SDP signaling via `MTile.Desktop -- host|join`).
+Built and running, not planned. [`RollbackSession`](Net/RollbackSession.cs) does predict → snapshot-ring → reconcile → replay with `InputFrameDelay = 3`, `StallSlack = 3`, `BufferLen = 60`, and piggybacked `Checksum()` desync detection. Around it: `InputRing`, `SnapshotRing`, `InputCodec`/`InputPacket`, `IRemoteInputSource`, `Net/Bot/BrawlerBotInputSource` (offline P2: utility brain over raw-`PlayerInput` maneuvers — `Plans/BOT_AI_PLAN.md`), `BotInputSource` (seeded-random stub), `NetSetup`. Transport is `MTile.Rtc` (WebRTC, manual copy/paste SDP signaling via `MTile.Desktop -- host|join`).
 
 `Game1` takes an optional `NetSetup`; with one present it drives `_session.TryStep()` instead of stepping the sim directly, and `LocalPlayer` follows `_net.LocalPlayerIndex`. Offline-with-a-second-player uses `BotInputSource` to spoof P2. Stage save (Ctrl+M) and reload (F5) are gated off whenever a session exists.
 

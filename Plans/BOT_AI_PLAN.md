@@ -1,9 +1,24 @@
 # Bot AI Plan — a P2 opponent that plays through raw input
 
-**Status (2026-11-02):** stage 1 built. `Net/BrawlerBotInputSource.cs` walks up to P1,
-jumps steps, and slashes; it is what Game1 hands an offline second player.
-`Net/BotInputSource.cs` stays as the seeded-random chaos monkey for sim bring-up tests.
-Scenario tests: `TwoPlayerStepTests.Brawler_*`.
+**Status (2026-11-02):** built. `Net/Bot/BrawlerBotInputSource.cs` is a utility-selector
+brain over `BotManeuver`s (`Net/Bot/BotManeuver.cs`, one file per behavior under
+`Net/Bot/Maneuvers/`, registered in `DefaultManeuvers()`), perceiving through `BotView`
+(`ReactionFrames`-stale target position *and* action). It is what Game1 hands an offline
+second player. `Net/BotInputSource.cs` stays as the seeded-random chaos monkey.
+Tests: `scripts/test-group.py bot` (`BotManeuver*Tests`, harness `MTile.Tests/Sim/BotArena.cs`).
+
+| Family | Maneuvers |
+|---|---|
+| Melee | `Slash`, `Stab` (+ finisher), `AirHammer`, `AirWhipKick` (cross-up), `CrouchSlash`, `DownAir` (pogo), `Burst` (shove), `Dash` (+ DashSlash) |
+| Reactive | `Guard` (timed parry + `GuardRetaliate`), `Pulse` (hugged + hurt), `EscapeGrab` (~10 clicks/s mash) |
+| Grabs | `Grab` (throw into wall/floor), `BlockThrow` (peel a clod, fling it) |
+| Terrain | `Eruption` (charged ridge along the floor), `BlockBurst` (foam puff — crushes under low ceilings), `Enclose` (stone box + spiked floor around a still/stunned target), `WallUp` (wall against an approaching/charging target) |
+| Navigation | `WallClimb`, `BuildClimb` (block elevator up sheer pillars), `Dropdown`, `Breach` (dig through walls), `Backoff` (gap filler + hit-and-run after its own attack) |
+| Disabled | `Beam` — `GrabAction` (passive 48) shadows `BeamAction` (45) on every Shift+LMB press off terrain, so the beam never starts for anyone; flip `Enabled` when that is fixed |
+
+Known weakness: a P1 that just spams slash whenever the bot is inside 40 px out-trades
+it on most seeds (`BotManeuverBrainTests`) — air moves and lunges end overlapping P1.
+Spacing/score balance is the next tuning pass, by feel.
 
 ## Architecture — decided: bots emit raw `PlayerInput`, nothing else
 
@@ -36,6 +51,10 @@ Because gestures carry natural windup (a stab needs its hold), part of the fairn
 budget comes for free; the remainder is explicit dials below.
 
 ## Bot internals (two layers, evaluated each `Poll`)
+
+> Original design notes. As built, the FSM became a utility selector: each state below is
+> a `BotManeuver` (Engage → the attack maneuvers, `Backoff`, `Breach`) with a `Score`,
+> and perception lives in `BotView`. The dials below are per-maneuver public fields.
 
 ### 1. Perception
 
@@ -99,15 +118,6 @@ Tier 2 (later, no new machinery): `F` edge → `GrenadeAction` at long range;
 | `AimError` | px of per-attack aim offset | 14 |
 | `Aggression` | P(engage vs. backoff) when in range off cooldown | 0.7 |
 | `EngageRange` | how far it starts attacks | 120 px |
-
-## Files
-
-- `Net/BrawlerBotInputSource.cs` — stage 1: chase (stale-target aim), stuck ⇒ jump,
-  target-above ⇒ jump, in range ⇒ 1-frame LMB tap at the target. Dials as public fields
-  (`EngageRange`, `VerticalReach`, `CooldownMin/Max`, `ReactionFrames`).
-- Next: stab/pulse gesture helpers (hold + swipe, hold + circle) in the bot, then the
-  brain FSM above (Engage/Backoff/Breach) layered on the same input output.
-- `Net/BotInputSource.cs` — keep as the dumb baseline.
 
 ## Tests
 

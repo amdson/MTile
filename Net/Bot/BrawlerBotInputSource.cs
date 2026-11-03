@@ -68,11 +68,14 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         new StabManeuver(),
         new AirHammerManeuver(),
         new AirWhipKickManeuver(),
+        new BurstManeuver(),
         new CrouchSlashManeuver(),
         new DownAirManeuver(),
         new DashManeuver(),
         // Mid range.
         new BlockThrowManeuver(),
+        new EruptionManeuver(),
+        new BlockBurstManeuver(),
         new WallUpManeuver(),
         new BeamManeuver(),          // disabled until GrabAction stops shadowing BeamAction
         // Spacing and navigation.
@@ -132,6 +135,8 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
 
         if (_active != null && !_active.Step(v, ref input)) Finish();
 
+        bool attackEdge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
+        v.FramesSinceAttack = attackEdge ? 0 : v.FramesSinceAttack + 1;
         _prev = input;
         v.FramesSinceManeuver++;
         return input;

@@ -6,8 +6,14 @@ namespace MTile.Net;
 // Spacing: step away from the target for ~15-25 frames right after the bot has attacked,
 // or when the target is crowding the bot while its attacks are on cooldown. Without this
 // the default locomotion walks to EngageRange and stands face-hugging the target between
-// swings. Backoff scores just under an available slash (1), so it only fills cooldown
-// gaps; it never replaces an attack.
+// swings.
+//
+// Two utilities. Crowded / just-maneuvered: just under an available slash (1), so it
+// fills cooldown gaps. Hit-and-run: right after the bot's own attack press, while the
+// target is close and NOT helpless, it beats every melee option — staying in to swing
+// again is what a target that swings back punishes (in full-brain fights against a
+// click-spamming P1, nearly all damage the bot took landed in its own recovery inside
+// P1's reach). A target in hitstun/stun can't punish, so then the combo continues.
 //
 // Input: a held Left/Right away from the target (the cursor stays on the target, so the
 // bot keeps aiming at it while retreating). If a wall stops the retreat, it hops (Space)
@@ -22,6 +28,9 @@ public sealed class BackoffManeuver : BotManeuver
     public int   MinFrames   = 15;
     public int   MaxFrames   = 25;
     public float Utility     = 0.8f;
+    public int   RunAfterAttack = 12;    // frames after an attack press that hit-and-run applies
+    public float RunDist        = 56f;   // the target's plausible melee reach plus a step
+    public float RunUtility     = 1.6f;
 
     private int _frames, _len;
     private int _blocked;          // consecutive frames pushing away with no progress
@@ -34,6 +43,7 @@ public sealed class BackoffManeuver : BotManeuver
     {
         float adx = MathF.Abs(v.Dx);
         if (MathF.Abs(v.Dy) > 30f) return 0f;                 // not on the same level: nothing to space against
+        if (adx < RunDist && v.FramesSinceAttack < RunAfterAttack && !v.TargetHelpless) return RunUtility;
         if (adx < CrowdDist) return Utility;                   // face-hugging
         if (adx < CloseDist && v.FramesSinceManeuver < AfterAttack) return Utility;
         return 0f;

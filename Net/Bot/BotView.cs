@@ -47,6 +47,13 @@ public sealed class BotView
     // Frames since the brain last chose to attack/maneuver; brains and maneuvers can use
     // it to pace themselves.
     public int FramesSinceManeuver;
+    // Frames since the bot last pressed an attack button (an LMB or RMB down edge) —
+    // the "I just swung, my recovery is exposed" clock spacing logic keys on.
+    public int FramesSinceAttack = int.MaxValue / 2;
+
+    // The target can't act right now (hitstun / stun / grabbed): pressing on is safe.
+    public bool TargetHelpless => Target.Combat.HitstunActive || Target.Combat.StunActive
+                                  || Target.Combat.GrabbedActive;
 
     // ── Terrain probes ──────────────────────────────────────────────────────────
 
