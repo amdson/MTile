@@ -51,9 +51,13 @@ public sealed class BotView
     // the "I just swung, my recovery is exposed" clock spacing logic keys on.
     public int FramesSinceAttack = int.MaxValue / 2;
 
-    // The target can't act right now (hitstun / stun / grabbed): pressing on is safe.
-    public bool TargetHelpless => Target.Combat.HitstunActive || Target.Combat.StunActive
-                                  || Target.Combat.GrabbedActive;
+    // Visible target state, perceived with the same ReactionFrames delay as TargetPos
+    // (filled by the brain). Maneuvers must read the target through these, never through
+    // v.Target's live fields — that would react faster than a player can (league rule).
+    public bool TargetGrounded;
+    public bool TargetGrabbed;
+    // The target couldn't act (hitstun / stun / grabbed) as of the perceived frame.
+    public bool TargetHelpless;
 
     // ── Terrain probes ──────────────────────────────────────────────────────────
 

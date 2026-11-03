@@ -73,7 +73,7 @@ public sealed class CrystalWaveManeuver : BotManeuver
         if (!v.LineOfSight()) return 0f;
         var m = v.Self.Abilities.Meters;
         if (!m.CrystalWaveReady || m.Build < BuildMeters.EruptMinToFire) return 0f;
-        bool zoning = v.TargetVel.X * v.Toward >= RetreatSpeed || StandOff.Contains(v.Target.CurrentActionName);
+        bool zoning = v.TargetVel.X * v.Toward >= RetreatSpeed || StandOff.Contains(v.TargetAction);
         float u = zoning ? ZoningUtility : StaticUtility;
         if (u <= 0f) return 0f;
         if (!FindFloor(v, v.Toward, out _, out _)) return 0f;

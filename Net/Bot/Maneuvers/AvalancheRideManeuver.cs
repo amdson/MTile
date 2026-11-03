@@ -98,7 +98,7 @@ public sealed class AvalancheRideManeuver : BotManeuver
     public override float Score(BotView v)
     {
         bool hard = MathF.Abs(v.Dx) < MaxHorizontal && v.Dy < MaxDrop
-                 && v.Target.IsGrounded && MathF.Abs(v.TargetVel.Y) < 40f
+                 && v.TargetGrounded && MathF.Abs(v.TargetVel.Y) < 40f
                  && v.Grounded && PlanCrossing(v, v.Toward, out _);
         _unreachable = hard ? _unreachable + 1 : 0;
         if (_unreachable < Patience) return 0f;

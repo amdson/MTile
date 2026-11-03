@@ -43,7 +43,7 @@ public sealed class GrabManeuver : BotManeuver
     public override float Score(BotView v)
     {
         if (v.Self.Combat.GrabbedActive || v.Self.Combat.BlocksAttack) return 0f;
-        if (v.Target.Combat.GrabbedActive) return 0f;
+        if (v.TargetGrabbed) return 0f;
         if (MathF.Abs(v.Dx) > Reach || MathF.Abs(v.Dy) > VerticalReach) return 0f;
         // Slightly above a slash: a grab beats a guard, and a thrown body takes crush damage.
         return 1.1f;
@@ -70,7 +70,7 @@ public sealed class GrabManeuver : BotManeuver
                 // Cursor is already on the target (brain default). Hold Shift+LMB; the
                 // first frame of this is the press edge.
                 input.Shift = true; input.LeftClick = true;
-                if (v.Target.Combat.GrabbedActive)
+                if (Latched(v))   // my own grab latched (own state, no delay)
                 {
                     _dir = ChooseThrow(v);
                     _phase = Phase.Carry; _t = 0;
@@ -84,7 +84,7 @@ public sealed class GrabManeuver : BotManeuver
                 input.MouseWorldPosition = v.Me + _dir * 30f;
                 if (_t >= CarryFrames) { _phase = Phase.Swipe; _t = 0; _swipeFrom = input.MouseWorldPosition; }
                 // The victim broke free mid-carry: nothing left to throw.
-                return v.Target.Combat.GrabbedActive;
+                return Latched(v);
 
             default: // Swipe
                 input.MouseWorldPosition = _swipeFrom + _dir * (SwipeStep * _t);
@@ -94,10 +94,15 @@ public sealed class GrabManeuver : BotManeuver
         }
     }
 
+    // My GrabAction has a victim — read off my own action vars, so it's free (no perception
+    // delay); the victim's GrabbedActive would be reading the opponent's live state.
+    private static bool Latched(BotView v)
+        => v.Self.CurrentActionName == nameof(GrabAction) && !v.Self.CurrentActionVars.GrabVictim.IsNone;
+
     // Wall slam if one is close, else floor slam, else just shove it away from us.
     private Vector2 ChooseThrow(BotView v)
     {
-        var p = v.Target.Body.Position;
+        var p = v.TargetPos;
         float best = WallSearch + 1f; int side = 0;
         for (int s = -1; s <= 1; s += 2)
         {
