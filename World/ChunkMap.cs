@@ -423,6 +423,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 parked.RequestTime = SproutClock;
                 parked.Owner       = owner;
                 parked.Source      = source;
+                Waves.MarkCell(wave, gtx, gty);
                 return parked;
             }
             var chunk = GetOrCreateChunk(chunkPos);
@@ -435,6 +436,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             node.Owner  = owner;
             WriteTile(chunk, tx, ty, TileState.Sprouting, type, node);
             StampPlaced(node);
+            Waves.MarkCell(wave, gtx, gty);
             OnTilePlaced?.Invoke(CellCenter(gtx, gty), type);
             return node;
         }
@@ -450,7 +452,21 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         pending.RequestTime = SproutClock;
         pending.Owner       = owner;
         pending.Source      = source;
+        Waves.MarkCell(wave, gtx, gty);
         return pending;
+    }
+
+    // Walls block avalanches (todo #4): is (gtx, gty) occupied — Solid, or a visible
+    // Sprouting cell — by something wave `wave` did NOT request itself? Pre-existing
+    // terrain, anyone's barricade (the launcher's own earlier builds included) and a
+    // rival wave's cells all count; the wave's own fresh deposits don't (see
+    // AvalancheWaves.MarkCell). Used by MassBall to stop at a face and by
+    // TileMassField to keep the wave's spill from leaking through it.
+    public bool IsForeignToWave(EntityId wave, int gtx, int gty)
+    {
+        var st = GetCellState(gtx, gty);
+        if (st == TileState.Empty) return false;
+        return !Waves.IsWaveCell(wave, gtx, gty);
     }
 
     // True iff TryRequestTile would create a node here: the cell is free AND has
@@ -658,6 +674,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             if (_dict.TryGetValue(n.ChunkPos, out var chunk))
                 WriteTile(chunk, n.Tx, n.Ty, TileState.Empty, chunk.Tiles[n.Tx, n.Ty].Type, null);
             Ownership.Clear(n.Gtx, n.Gty);
+            Waves.ForgetCell(n.Gtx, n.Gty);
             Graph.Remove(n);
         }
     }
@@ -754,6 +771,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             NoteChargedBreak(gtx, gty);
             Charge.Clear(gtx, gty);
             Ownership.Clear(gtx, gty);
+            Waves.ForgetCell(gtx, gty);
             Spikes.Clear(gtx, gty);
             DropSupportFor(gtx, gty);
             OnTileBroken?.Invoke(CellCenter(gtx, gty), sproutType);
@@ -768,6 +786,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         NoteChargedBreak(gtx, gty);
         Charge.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);
+        Waves.ForgetCell(gtx, gty);
         // The spike overlay goes with the cell it sat on.
         Spikes.Clear(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
@@ -806,6 +825,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Spikes.Clear(gtx, gty);
         Foam.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);   // an edit is level data: nobody owns it
+        Waves.ForgetCell(gtx, gty);
         if (state == TileState.Empty) DropSupportFor(gtx, gty);
         return true;
     }
@@ -847,6 +867,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Impact      = Impact.Capture(),
         Mass        = Mass.Capture(),
         Waves       = Waves.Capture(),
+        WaveCells   = Waves.CaptureCells(),
         Ownership   = Ownership.Capture(),
         SproutClock = SproutClock,
         TerrainFrame = TerrainFrame,
@@ -866,7 +887,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Foam.Restore(s.Foam);
         Impact.Restore(s.Impact);
         Mass.Restore(s.Mass);
-        Waves.Restore(s.Waves);
+        Waves.Restore(s.Waves, s.WaveCells);
         Ownership.Restore(s.Ownership);
         SproutClock = s.SproutClock;
         TerrainFrame = s.TerrainFrame;

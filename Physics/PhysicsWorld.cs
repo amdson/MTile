@@ -105,6 +105,8 @@ public static class PhysicsWorld
             float bestDepth = 0f;
             Vector2 bestMtv = Vector2.Zero;
             Vector2 bestShapeVel = Vector2.Zero;
+            SolidShapeSource bestSrc = SolidShapeSource.External;
+            int bestGx = 0, bestGy = 0;
 
             foreach (var shape in WorldQuery.SolidShapesInRect(chunks, bounds))
             {
@@ -116,6 +118,7 @@ public static class PhysicsWorld
                     bestDepth = hit.Depth;
                     bestMtv = hit.MTV;
                     bestShapeVel = shape.Velocity;
+                    bestSrc = shape.Source; bestGx = shape.Gtx; bestGy = shape.Gty;
                 }
             }
 
@@ -123,6 +126,7 @@ public static class PhysicsWorld
 
             var normal = Vector2.Normalize(bestMtv);
             nextPos += bestMtv + normal * Epsilon;
+            NotePinContact(body, chunks, normal, bestShapeVel, bestSrc, bestGx, bestGy);
 
             // Zero the *relative* normal velocity so a body landing on a moving
             // surface emerges moving with it along the contact normal
@@ -258,6 +262,9 @@ public static class PhysicsWorld
             body.LastCrushImpulse = 0f;
             body.CrushDvThisStep = Vector2.Zero;
             body.SproutCrushCount = 0;
+            body.WavePinned = false;
+            body.PinPushNormals.Clear();
+            body.PinStaticNormals.Clear();
 
             // Terrain-transparent bodies just integrate (see PhysicsBody.IgnoreTiles).
             if (body.IgnoreTiles)
@@ -345,7 +352,89 @@ public static class PhysicsWorld
                 sd.SurfaceVelocity = surfaceVel;
                 return false;
             });
+
+            body.WavePinned = ProbeWavePin(body, chunks);
         }
+    }
+
+    // Wall pin (todo #2, see PhysicsBody.WavePinned): among the body's surviving solver
+    // contacts, is there one whose surface is advancing on the body (a growing sprout,
+    // SurfaceVelocity·Normal > MinPinPush) and belongs to an AVALANCHE (wave-tagged
+    // node), opposed by a STATIC contact (normals more than ~120° apart) — the wall or
+    // roof it is driving the body into? Avalanche-only on purpose: ordinary building
+    // beside yourself in a corridor is not an attack. No owner filter, matching the
+    // sprout crush path (a launcher can pin themselves). Pure query, no allocation.
+    private const float MinPinPush    = 20f;
+    private const float PinOpposeDot  = -0.5f;
+    private static bool ProbeWavePin(PhysicsBody body, ChunkMap chunks)
+    {
+        // Contacts resolved during this step (NotePinContact). The surviving solver
+        // contacts alone miss most pins: a sprout's push hands the body the face's
+        // velocity, so the sandwich usually lasts only the step it happened in.
+        foreach (var p in body.PinPushNormals)
+        foreach (var w in body.PinStaticNormals)
+            if (Vector2.Dot(p, w) < PinOpposeDot) return true;
+
+        var cons = body.Constraints;
+        for (int i = 0; i < cons.Count; i++)
+        {
+            if (cons[i] is not SurfaceDistance push) continue;
+            if (Vector2.Dot(push.SurfaceVelocity, push.Normal) <= MinPinPush) continue;
+            bool opposed = false;
+            for (int j = 0; j < cons.Count && !opposed; j++)
+                opposed = j != i && cons[j] is SurfaceDistance wall
+                       && wall.SurfaceVelocity == Vector2.Zero
+                       && Vector2.Dot(wall.Normal, push.Normal) < PinOpposeDot;
+            if (!opposed) continue;
+            if (IsWaveSproutBehind(chunks, body, push.Normal)) return true;
+            foreach (var w in body.PinStaticNormals)
+                if (Vector2.Dot(push.Normal, w) < PinOpposeDot && IsWaveSproutBehind(chunks, body, push.Normal)) return true;
+        }
+        foreach (var p in body.PinPushNormals)
+            for (int j = 0; j < cons.Count; j++)
+                if (cons[j] is SurfaceDistance wall && wall.SurfaceVelocity == Vector2.Zero
+                    && Vector2.Dot(wall.Normal, p) < PinOpposeDot) return true;
+        return false;
+    }
+
+    // One resolved contact this step: a wave-tagged growing sprout advancing on the body
+    // along `normal`, or a static surface. Bounded (a step resolves at most 12 + 4).
+    private static void NotePinContact(PhysicsBody body, ChunkMap chunks, Vector2 normal,
+                                       Vector2 shapeVel, SolidShapeSource src, int gtx, int gty)
+    {
+        if (shapeVel == Vector2.Zero)
+        {
+            if (body.PinStaticNormals.Count < 16) body.PinStaticNormals.Add(normal);
+            return;
+        }
+        if (src != SolidShapeSource.Sprout || Vector2.Dot(shapeVel, normal) <= MinPinPush) return;
+        if (!chunks.Graph.TryGet(gtx, gty, out var node) || node.WaveId.IsNone) return;
+        if (body.PinPushNormals.Count < 16) body.PinPushNormals.Add(normal);
+    }
+
+    // Same face strip TryFindContactSurface uses: is a wave-tagged growing sprout behind
+    // the body's face along −normal, advancing on it?
+    private static bool IsWaveSproutBehind(ChunkMap chunks, PhysicsBody body, Vector2 normal)
+    {
+        const float probe = 2f;
+        var bounds = body.Polygon.GetBounds(body.Position);
+        BoundingBox strip;
+        if (MathF.Abs(normal.Y) >= MathF.Abs(normal.X))
+            strip = normal.Y < 0
+                ? new BoundingBox(bounds.Left, bounds.Bottom,         bounds.Right, bounds.Bottom + probe)
+                : new BoundingBox(bounds.Left, bounds.Top - probe,    bounds.Right, bounds.Top);
+        else
+            strip = normal.X < 0
+                ? new BoundingBox(bounds.Right,         bounds.Top, bounds.Right + probe, bounds.Bottom)
+                : new BoundingBox(bounds.Left - probe,  bounds.Top, bounds.Left,          bounds.Bottom);
+        foreach (var shape in WorldQuery.SolidShapesInRect(chunks, strip))
+        {
+            if (shape.Source != SolidShapeSource.Sprout) continue;
+            if (Vector2.Dot(shape.Velocity, normal) <= 0f) continue;
+            if (chunks.Graph.TryGet(shape.Gtx, shape.Gty, out var node) && !node.WaveId.IsNone)
+                return true;
+        }
+        return false;
     }
 
     private static Vector2 ResolveChunkCollisionsSwept(PhysicsBody body, ChunkMap chunks, Vector2 pos, Vector2 targetPos, Vector2 savedForce, float dt)
@@ -364,6 +453,8 @@ public static class PhysicsWorld
             float minT = 1f;
             Vector2 hitNormal = Vector2.Zero;
             Vector2 hitSurfaceVel = Vector2.Zero;
+            SolidShapeSource hitSrc = SolidShapeSource.External;
+            int hitGx = 0, hitGy = 0;
             float hitFriction = 0f;
             bool hitFromFloating = false;
             FloatingSurfaceDistance hitFsd = null;
@@ -380,6 +471,7 @@ public static class PhysicsWorld
                 minT = swept.T;
                 hitNormal = swept.Normal;
                 hitSurfaceVel = shape.Velocity;
+                hitSrc = shape.Source; hitGx = shape.Gtx; hitGy = shape.Gty;
                 hitFriction = ComputeFrictionForNormal(body, swept.Normal);
                 anyHit = true;
                 hitFromFloating = false;
@@ -415,6 +507,7 @@ public static class PhysicsWorld
             }
 
             pos += displacement * minT + hitNormal * Epsilon;
+            if (!hitFromFloating) NotePinContact(body, chunks, hitNormal, hitSurfaceVel, hitSrc, hitGx, hitGy);
             displacement *= 1f - minT;
 
             // Carry-zero with absorption cap: the body would ideally lose

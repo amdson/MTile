@@ -25,6 +25,7 @@ public sealed class TerrainSnapshot
     public Dictionary<(int gtx, int gty), float> Impact;
     public Dictionary<(int gtx, int gty), TileMassField.MassBucket> Mass;
     public Dictionary<EntityId, AvalancheWaves.WaveInfo>            Waves;
+    public Dictionary<(int gtx, int gty), EntityId>                 WaveCells;
     public Dictionary<(int gtx, int gty), BlockOwnership.Claim>     Ownership;
     public float SproutClock;
     public int   TerrainFrame;

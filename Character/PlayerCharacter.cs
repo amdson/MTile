@@ -149,6 +149,19 @@ public class PlayerCharacter : IHittable
     // over CrushImpulseThreshold, so it reads as a solid hit and nothing more.
     private const float SproutCrushImpulseFeel = 750f;
     private int _lastCrushFrame = int.MinValue / 2;
+    // Wall-pin crush (todo #2): an avalanche drove us into a wall/roof — a growing
+    // wave sprout pushing on one side, a static surface opposing it (PhysicsBody.
+    // WavePinned). The solver usually still resolves it (we squeeze out along the free
+    // axis, or the face's velocity flings us up the wall), so neither crush path above
+    // ever billed it: measured 0 damage in 35 of 36 wall runs. A pin is binary and
+    // brief — typically 1–3 frames — so it is billed as one flat lump per pin, sized as
+    // three slashes: being caught between an avalanche and a wall is meant to be a
+    // real threat. Own cooldown (not _lastCrushFrame): the slam that precedes a pin
+    // routinely bills a small impulse crush a frame earlier and must not mask it.
+    // Riders (TerrainCarriedState) are exempt for now — riding is off-limits this pass.
+    private const float WavePinDamage          = 1.5f;
+    private const float WavePinCooldownSeconds = 0.5f;
+    private int _lastWavePinFrame = int.MinValue / 2;
     // The last frame this player lost HP from ANY source — a landed hit or a crush.
     // Anchors the regen delay below. Separate from _lastCrushFrame, which is the
     // crush path's own re-bill cooldown and must not be pushed forward by an
@@ -547,6 +560,21 @@ public class PlayerCharacter : IHittable
         _dt = dt;
         if (_hitInvulnRemaining > 0f) _hitInvulnRemaining -= dt;
 
+        // Wall pin — see WavePinDamage. Checked first, on its own cooldown; when it fires
+        // it IS the crush for this frame, so it stamps _lastCrushFrame and the smaller
+        // impulse/sprout bills below are skipped.
+        if (Body.WavePinned && _currentState is not TerrainCarriedState
+            && _frame - _lastWavePinFrame >= SimFrames.FromSeconds(WavePinCooldownSeconds, dt))
+        {
+            Health -= WavePinDamage;
+            _abilities.Combat.AddDamage(WavePinDamage);
+            _lastDamageFrame = _frame;
+            _abilities.Combat.OnHitRegistered(_frame, SproutCrushImpulseFeel, dt,
+                hitstunSecondsOverride: 0.27f, muteControl: false);
+            _lastWavePinFrame = _frame;
+            _lastCrushFrame   = _frame;
+        }
+
         // Crush damage: turn the previous step's largest |vnRel| into HP loss
         // when it crosses CrushImpulseThreshold. Reads PhysicsBody.LastImpulse
         // Magnitude (written by PhysicsWorld.StepSwept). Routes through
@@ -898,6 +926,7 @@ public class PlayerCharacter : IHittable
         d.Health             = Health;
         d.HitInvulnRemaining = _hitInvulnRemaining;
         d.LastCrushFrame     = _lastCrushFrame;
+        d.LastWavePinFrame   = _lastWavePinFrame;
         d.LastDamageFrame    = _lastDamageFrame;
         d.Frame              = _frame;
         d.StateIndex         = _stateRegistry.IndexOf(_currentState);
@@ -922,6 +951,7 @@ public class PlayerCharacter : IHittable
         Health              = s.Health;
         _hitInvulnRemaining = s.HitInvulnRemaining;
         _lastCrushFrame     = s.LastCrushFrame;
+        _lastWavePinFrame   = s.LastWavePinFrame;
         _lastDamageFrame    = s.LastDamageFrame;
         _frame              = s.Frame;
 

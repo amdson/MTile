@@ -27,6 +27,31 @@ public sealed class AvalancheWaves
     private readonly Dictionary<EntityId, WaveInfo> _waves = new();
     private readonly List<EntityId> _scratchPrune = new();
 
+    // Which wave requested each cell (todo #4: walls block avalanches). A finished
+    // tile keeps no provenance, so this is how a MassBall tells its own fresh
+    // deposits — which it must fly through, or it would wall itself in — from
+    // solid it did NOT make (pre-existing terrain, anyone's barricade, a rival
+    // wave), which stops it. Stamped by ChunkMap.TryRequestTile for every
+    // wave-tagged request; last requester wins (a cell has one node at a time).
+    // Cleared when the cell empties; pruned with its wave. Bounded by the cells
+    // live waves have requested (a full meter is ~a few hundred). Value-typed,
+    // so the snapshot is a plain dict copy.
+    private readonly Dictionary<(int gtx, int gty), EntityId> _cellWave = new();
+    private readonly List<(int gtx, int gty)> _scratchCells = new();
+
+    public void MarkCell(EntityId wave, int gtx, int gty)
+    {
+        if (wave.IsNone) return;
+        _cellWave[(gtx, gty)] = wave;
+    }
+
+    public void ForgetCell(int gtx, int gty) => _cellWave.Remove((gtx, gty));
+
+    public bool IsWaveCell(EntityId wave, int gtx, int gty)
+        => !wave.IsNone && _cellWave.TryGetValue((gtx, gty), out var w) && w == wave;
+
+    public IEnumerable<KeyValuePair<(int gtx, int gty), EntityId>> CellEntries => _cellWave;
+
     // Register/refresh a wave. Direction is set by the first touch with a real
     // velocity and never overwritten — the ball's direction is constant, so a
     // later touch carries no new information.
@@ -58,15 +83,22 @@ public sealed class AvalancheWaves
         foreach (var kv in _waves)
             if (now - kv.Value.LastTouch > StaleSeconds) _scratchPrune.Add(kv.Key);
         foreach (var key in _scratchPrune) _waves.Remove(key);
+        if (_scratchPrune.Count == 0 || _cellWave.Count == 0) return;
+        _scratchCells.Clear();
+        foreach (var kv in _cellWave)
+            if (!_waves.ContainsKey(kv.Value)) _scratchCells.Add(kv.Key);
+        foreach (var c in _scratchCells) _cellWave.Remove(c);
     }
 
     // Snapshot/restore — dict copy is a deep copy (value-typed entries).
     public Dictionary<EntityId, WaveInfo> Capture() => new(_waves);
+    public Dictionary<(int gtx, int gty), EntityId> CaptureCells() => new(_cellWave);
 
-    public void Restore(Dictionary<EntityId, WaveInfo> s)
+    public void Restore(Dictionary<EntityId, WaveInfo> s, Dictionary<(int gtx, int gty), EntityId> cells)
     {
         _waves.Clear();
-        if (s == null) return;
-        foreach (var kv in s) _waves[kv.Key] = kv.Value;
+        _cellWave.Clear();
+        if (s != null) foreach (var kv in s) _waves[kv.Key] = kv.Value;
+        if (cells != null) foreach (var kv in cells) _cellWave[kv.Key] = kv.Value;
     }
 }
