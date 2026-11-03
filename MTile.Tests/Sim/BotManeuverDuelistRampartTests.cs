@@ -183,6 +183,7 @@ public class BotManeuverDuelistRampartTests(ITestOutputHelper output)
             {
                 "zoner"  => (s2, sd) => new BrawlerBotInputSource(sd, s2) { EngageRange = 10f * Chunk.TileSize },
                 "mirror" => (s2, sd) => new RampartBot(sd, s2),
+                "riposte" => RiposteBot.Create,
                 "rush"   => (s2, sd) => new BrawlerBotInputSource(sd, s2, BrawlerBotInputSource.DefaultManeuvers().Where(m => m is EscapeGrabManeuver or GuardManeuver or PulseManeuver or GrabManeuver or SlashManeuver or StabManeuver or AirHammerManeuver or AirWhipKickManeuver or BurstManeuver or CrouchSlashManeuver or DownAirManeuver or DashManeuver or WallClimbManeuver or BreachManeuver or BackoffManeuver or DropdownManeuver)),
                 _        => BotDuel.Brawler,
             };

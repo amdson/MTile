@@ -48,6 +48,7 @@ public sealed class RampartBot : IRemoteInputSource
     private readonly string[]  _act = new string[Ring];
     private readonly bool[]    _gnd = new bool[Ring];
     private readonly bool[]    _hlp = new bool[Ring];
+    private readonly bool[]    _grb = new bool[Ring];
     private int _seen;
 
     private BotManeuver _active;
@@ -126,7 +127,7 @@ public sealed class RampartBot : IRemoteInputSource
 
     private void Credit(BotView v)
     {
-        float th = v.Target.Health, mh = v.Self.Health;
+        float th = v.TargetHealth, mh = v.Self.Health;
         string who = _sinceManeuver <= CreditFrames || _active != null ? _lastName : "-";
         if (_tHp >= 0f && th < _tHp) { Dealt[who] = Dealt.GetValueOrDefault(who) + (_tHp - th); string k = $"{_tHp - th:F2}"; DealtBySize[k] = DealtBySize.GetValueOrDefault(k) + 1; }
         if (_myHp >= 0f && mh < _myHp) Taken[who] = Taken.GetValueOrDefault(who) + (_myHp - mh);
@@ -159,6 +160,7 @@ public sealed class RampartBot : IRemoteInputSource
         _act[i] = t.CurrentActionName;
         _gnd[i] = t.IsGrounded;
         _hlp[i] = t.Combat.HitstunActive || t.Combat.StunActive || t.Combat.GrabbedActive;
+        _grb[i] = t.Combat.GrabbedActive;
         _seen++;
 
         int now = Idx(ReactionFrames), before = Idx(ReactionFrames + 1);
@@ -170,6 +172,9 @@ public sealed class RampartBot : IRemoteInputSource
         Sense.TargetVelSmooth = _seen > ReactionFrames + 6 ? (_pos[now] - _pos[far]) / (6 * Simulation.FixedDt) : Vector2.Zero;
         Sense.TargetGrounded = _gnd[now];
         Sense.TargetHelpless = _hlp[now];
+        v.TargetGrounded = _gnd[now];
+        v.TargetHelpless = _hlp[now];
+        v.TargetGrabbed  = _grb[now];
         UpdateHome(v);
         return v;
     }
@@ -216,7 +221,7 @@ public sealed class RampartBot : IRemoteInputSource
 
         // Anti-stall: nobody has lost HP for QuietFrames (two forts staring, waves eaten by
         // kerbs) ⇒ push the fort forward into melee range. A fortress has to keep fighting.
-        float hpSum = v.Self.Health + v.Target.Health;
+        float hpSum = v.Self.Health + v.TargetHealth;
         if (MathF.Abs(hpSum - _hpSum) > 1e-4f && hpSum < _hpSum) { _quiet = 0; _pushing = false; }
         else _quiet++;
         _hpSum = hpSum;
