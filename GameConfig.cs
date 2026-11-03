@@ -157,6 +157,10 @@ public sealed class GameConfig
     // the body is a full IHittable so the primary can slash it and observe hitstun /
     // stun / knockback dynamics. SimRunner has the headless equivalent for tests.
     public bool    SpawnSecondPlayer    { get; set; } = false;
+    // Which bot drives an offline second player: "Brawler" (the stock utility brain), or a
+    // league duelist — "Bulldog" (rushdown), "Rampart" (terrain zoner), "Riposte"
+    // (counter-fighter). See Plans/DUELIST_LEAGUE.md. Unknown names fall back to Brawler.
+    public string  BotOpponent          { get; set; } = "Brawler";
     public float   SecondPlayerOffsetX  { get; set; } = 64f;
     public float   SecondPlayerOffsetY  { get; set; } = 0f;
 

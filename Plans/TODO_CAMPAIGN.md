@@ -41,7 +41,7 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   grab start / hold / throw / whiff (drafted with the sprite-anim skill, then wired into
   GrabAction) + a debug grab-box overlay when DebugDrawHitboxes is on. Opus worktree agent.
 
-- [~] **D** (added 2026-11-03, before the user went to bed) Duelist league: three Opus
+- [x] **D** (done; see Plans/DUELIST_LEAGUE.md) (added 2026-11-03, before the user went to bed) Duelist league: three Opus
   agents each build a P2 bot with a distinct playstyle — Rushdown, Terrain zoner /
   fortress, Counter-fighter / footsies — under `Net/Bot/Duelists/<Name>/`, exposing a
   `DuelBot Create`. Harness: `Net/Bot/BotDuel.cs` @82e726f (arenas hall_close / hall_far /
@@ -155,3 +155,4 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - (merge) — duelist Riposte (counter-fighter) @308b5bd merged after audit (delayed 7-frame record; HP via HUD only). vs Brawler 24-0-0; still green after the fairness patch.
 - (merge) — duelist Rampart (terrain zoner) @867b9e2 merged after audit (8-frame delay line; HP via HUD only; taps ≤ 12/s). vs Brawler 23-0-1. Ruling: the telegraphed spike carpet around its fort is reasonable play (visible seed→flash warning, still fights: waves at range, advance, 5 s push).
 - (merge) — duelist Bulldog (rushdown) @835b594 merged after audit (6-frame delay ring; HP via HUD for hit-confirm; taps ≤ 12/s). vs Brawler 23-0-1. League running (Release, held-out seeds 11-16, 3 arenas, both sides; Brawler as reference).
+- (this commit) — duelist league run (Release, held-out seeds 11-16): Rampart 80.5, Riposte 68.0, Bulldog 64.0, Brawler 3.5. Rock-paper-scissors: Bulldog>Rampart 25.5/36, Rampart>Riposte 35/36, Riposte>Bulldog 31/36. Write-up Plans/DUELIST_LEAGUE.md; GameConfig.BotOpponent picks the offline P2 bot.

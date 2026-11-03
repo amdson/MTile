@@ -512,7 +512,13 @@ public class Game1 : Game
 
         // Offline only: if the stage spawned a second player, spoof its input with a bot.
         _botInput = _net == null && _sim.SecondaryPlayers.Count > 0 && !stage.IdleSecondary
-            ? new MTile.Net.BrawlerBotInputSource(seed: 1234)
+            ? (_config.BotOpponent switch
+              {
+                  "Bulldog" => MTile.Net.BulldogBot.Create(0, 1234),
+                  "Rampart" => MTile.Net.RampartBot.Create(0, 1234),
+                  "Riposte" => MTile.Net.RiposteBot.Create(0, 1234),
+                  _         => MTile.Net.BotDuel.Brawler(0, 1234),
+              })
             : null;
 
         // Cosmetic feedback hooks. The sim raises these during Step; they land in the
