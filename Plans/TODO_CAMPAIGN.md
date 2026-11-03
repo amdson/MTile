@@ -34,7 +34,7 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   barricade), dumping remaining mass at the face; ball remembers its own wave's cells.
   Plus: crush damage for NON-riders pinned between a wave and a wall should be
   significant. Watch `BotManeuverAvalancheRideTests` (rides gain height off cliffs).
-- [~] **7** (Opus worktree agent) Spiked avalanche (crystal wave) — see decisions below and todo.txt #7.
+- [x] **7** @ab13cca (merged) Spiked avalanche (crystal wave) — see decisions below and todo.txt #7.
   Then bot hookup: WallUpManeuver threat check + a launch maneuver.
 
 - [~] **G** (added 2026-11-03, side request) Telegraphed grab: separate biped clips for
@@ -83,6 +83,26 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 
 ## For the user to review
 
+- **#7 crystal wave:** `Plans/img/crystal_wave_{warning,front,midflight}.png`. Numbers are
+  code constants in `World/CrystalWave.cs`: root warning 0.8 s seed + 0.2 s flash; front
+  3 frames/cell (~220 px/s); grown 0.35 s; 0.5 HP per crystal, cap 1.5 HP/wave/victim;
+  knockback 260 + 0.15 s hitstun; forming push 140 px/s; shard 1.8 tiles; 2 meter
+  units/crystal; 8 s cooldown; ~25-cell run. Agent's calls (defaults in force):
+  - **Shape:** crystals root only on solid ground below or on a same-wave crystal, so the
+    wave hugs the floor (1–2 rows) instead of climbing walls / hanging from ceilings like
+    a normal avalanche; a crystal ball hitting a wall shatters (no spill). This is the
+    main thing to weigh in the shape-dial discussion.
+  - Input: spikes-selected plain RMB on solid is decided after 0.15 s — tap spikes the
+    press cell on release, a stroke spikes cells as it goes, a 0.15 s stay on the press
+    cell charges (fast release = wave). Shift+RMB spiking is unchanged and immediate.
+  - Pending crystals are invisible (ball + root seeds are the telegraph); followers flash
+    only 2 frames; the forming push only affects opposing bodies; building over a
+    pending crystal evicts it (lets a wall built in the path cut the wave).
+  - Bot: WallUp scores 1.4 against visible opposing crystals; CrystalWaveManeuver fires
+    only at a target keeping its distance (fleeing / charging / guarding) — against a
+    standing target walking in was faster.
+  - Shard art is pale lavender-ice; reads a bit faint on the bright backdrop.
+
 - **#8 spike crystals:** `Plans/img/spike_crystal_phases.png` (seed → flash → grown, 3x).
   Open calls from the agent, defaults in force: no refund when the block under a seed
   breaks; seeds don't toughen their block (breaking it during the 1.25 s warning is a
@@ -105,3 +125,4 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - (this commit) — #9 slowdown. ConfigLayout only the pre-existing ParkourEnabled mismatch. Bot group 75/9/1: 4 new reds from #9, 5 crush reds from #2b (pending #4).
 - f729a46 (merge) — #8 spike seed→flash→grown via reusable `CrystalLifecycle` (World/CrystalLifecycle.cs) + `TileSpikeSeeds` (seed frame is the clock; snapshotted; checksum salt 0x09). SpikeOverlay*/BotManeuverBarrier/SnapshotRoundTrip 47/47 after merging onto the #9 slowdown.
 - 2f47da3 (merge) — #4: MassBall stops at solid its wave didn't request (cell→wave table in AvalancheWaves, snapshotted; arming after release; swept path so fast balls can't skip 1-tile walls), lump deposit at the face, foreign-solid spill dropped; wave pin crush 1.5 HP for non-riders (PhysicsWorld pin detection → PhysicsBody.WavePinned). Merge fixups: break path clears wave tag + spike seed; checksum now folds wave cells (salt 0x0A) and sprout Source. AvalancheWall 12/12; bot reds = 4 slowdown + 1 FreeRoof.
+- ab13cca (merge) — #7 crystal wave: CrystalWaveField (ChunkMap.Crystals; snapshotted; salts 0x0B–0x0D), CrystalContactSystem, MassBall crystal mode, BlockPaintAction spike-mode arbitration, BuildMeters.CrystalCooldown; bot CrystalWaveManeuver + WallUp crystal threat. SpikeOverlayCrystalWave 12/12, BotManeuverCrystalWave 4/4; targeted sweep 228 pass / 5 known reds.
