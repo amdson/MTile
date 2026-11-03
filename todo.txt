@@ -23,6 +23,12 @@
 - small per-crystal placement cost, so a wave can be big — the high cooldown and long first-seed telegraph are what keep it in check, not the meter
 - once it exists, add it to the bot's WallUpManeuver threat check (the bot should wall up when it sees one coming) and give the bot a maneuver that launches it
 8. use the spike-creation mechanic when placing spikes normally as well. make a crystal appear on top of a block as a seed, wait a second, flash, and grow into a damaging spike. (but still the same spike as currently in use in the codebase, not the spikes which would take up 2d space when doing a spike avalanche)
+9. combat is still way too fast: slow movement down by 25%
+- decided: horizontal speeds x0.75 (walk/run/air/crouch/wall-jump speeds, their accel/drag, entry-speed gates, dash, attack lunges/knockback); gravity UNCHANGED; jumps shortened by 25% — jump HEIGHT x0.75, i.e. vertical launch/hold speeds x sqrt(0.75) ~ x0.87 (not x0.75, which would cut height to ~56%)
+- check by feel that the tile-height climbs (ledge grab/vault/stair climb off a jump) still work at 75% jump height
+- don't worry about the frame-pinned/speed-calibrated tests for now — let them go red
+
+
 
 A. a boss that generates a damaging rain/wind that permeates the stage, blowing to the left and doing decent damage and knockback per second. the boss is on the right side, at the very end, with knockback dealing attacks and fairly low health. in addition to the wind and melee attacks, the boss can lob explosives at enemies
-- 
+B. More telegraphed grab animation

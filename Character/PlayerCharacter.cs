@@ -228,7 +228,10 @@ public class PlayerCharacter : IHittable
         _lastDamageFrame = _frame;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
         // How hard this hit actually moves us, px/s — what armor, stun and hitstun read.
+        // Thresholds read the attack's full dv; only the applied velocity is slowed
+        // (MovementConfig.KnockbackSpeedScale, the todo #9 slowdown).
         float dv = res.TargetDeltaV.Length();
+        float kbScale = MovementConfig.Current.KnockbackSpeedScale;
 
         // Superarmor (Plans/HIT_AIRLOCK_PLAN.md §4): the live action may tank
         // hits below its armor threshold. Percent still accrued above (armor
@@ -238,15 +241,15 @@ public class PlayerCharacter : IHittable
         float armor = _currentAction?.ArmorProfile(in _actionVars) ?? 0f;
         if (armor > 0f && dv < armor)
         {
-            AddKnockback(res.TargetDeltaV * ArmorKnockbackScale * guard.KnockbackScale);
+            AddKnockback(res.TargetDeltaV * ArmorKnockbackScale * guard.KnockbackScale * kbScale);
             return res.Impulse;
         }
 
         // Scaled here rather than through HitResolver's `scale` because that also feeds
         // Collision mode's MinLaunch floor, which would hand back most of the knockback
         // a leaky guard just ate.
-        if (hit.LaunchDecay > 0f) Launch(res.TargetDeltaV * guard.KnockbackScale, in hit);
-        else                      AddKnockback(res.TargetDeltaV * guard.KnockbackScale);
+        if (hit.LaunchDecay > 0f) Launch(res.TargetDeltaV * guard.KnockbackScale * kbScale, in hit);
+        else                      AddKnockback(res.TargetDeltaV * guard.KnockbackScale * kbScale);
 
         // For render-only cosmetics (directional knockback cue, weapon flash) that
         // want more than LastHitImpulse's magnitude. Falls back to the hit's launch

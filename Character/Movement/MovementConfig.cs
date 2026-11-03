@@ -10,17 +10,21 @@ public class MovementConfig
     // General Air Movement
     // Horizontal locomotion (air/walk/crouch/wall-jump speeds, their accel/drag, and
     // the entry-speed gates keyed off them) was scaled x0.8 on 2026-10-19 to slow
-    // movement ~20%. Vertical jump speeds were left alone: gravity is fixed, so
-    // scaling them would cut jump height to 64% and break the tile-height climbs.
-    public float AirAccel { get; set; } = 1200f;
-    public float MaxAirSpeed { get; set; } = 120f;
-    public float AirDrag { get; set; } = 400f;
+    // movement ~20%, then x0.75 again on 2026-11-03 (todo #9: "combat is still way too
+    // fast"; dash, the stab lunge and knockback-into-players went x0.75 with it).
+    // Gravity is fixed, so jumps are scaled by HEIGHT, not speed: on 2026-11-03 every
+    // jump's launch velocity and hold force went x0.875, which (solved numerically
+    // with the 0.12 s hold and quadratic drag) lands each apex at 75% — a ground jump
+    // ~4.9 → ~3.7 tiles. Scaling the speeds x0.75 instead would cut height to ~56%.
+    public float AirAccel { get; set; } = 900f;
+    public float MaxAirSpeed { get; set; } = 90f;
+    public float AirDrag { get; set; } = 300f;
     // Quadratic air resistance on the player body (PhysicsBody.QuadraticDrag, 1/px):
     // decel = k·|v|², always on, both axes. Terminal fall speed = √(600 / k).
     public float QuadraticAirDrag { get; set; } = 0.0005f;
 
     // Jumping
-    public float JumpVelocity { get; set; } = -100f;
+    public float JumpVelocity { get; set; } = -87.5f;
 
     // The speed-cap principle (movement_todo #3): no AUTOMATIC move — vault
     // hops, corrector channels, any assist — may push the body upward faster
@@ -57,7 +61,7 @@ public class MovementConfig
             return 0.5f * (v0 + v1) * t + v1 * v1 / (2f * g);
         }
     }
-    public float JumpHoldForce { get; set; } = -1500f;
+    public float JumpHoldForce { get; set; } = -1312.5f;
     public float JumpInitForce { get; set; } = 0f;
     public float MaxJumpHoldTime { get; set; } = 0.12f;
     // Wider-than-Standing probe slack for the jump-source FSD. Jumping states
@@ -73,12 +77,12 @@ public class MovementConfig
     public float SlideDrag { get; set; } = 300f;
 
     // Wall Jumping
-    public float WallJumpInitialVelX { get; set; } = 200f;
-    public float WallJumpInitialVelY { get; set; } = -150f;
-    public float WallJumpAirAccel { get; set; } = 1200f;
-    public float WallJumpMaxAirSpeed { get; set; } = 120f;
-    public float WallJumpAirDrag { get; set; } = 400f;
-    public float WallJumpHoldForce { get; set; } = -1000f;
+    public float WallJumpInitialVelX { get; set; } = 150f;
+    public float WallJumpInitialVelY { get; set; } = -131.25f;
+    public float WallJumpAirAccel { get; set; } = 900f;
+    public float WallJumpMaxAirSpeed { get; set; } = 90f;
+    public float WallJumpAirDrag { get; set; } = 300f;
+    public float WallJumpHoldForce { get; set; } = -875f;
     public float WallJumpMaxHoldTime { get; set; } = 0.12f;
 
     // Ground Movement
@@ -93,8 +97,8 @@ public class MovementConfig
     // before. Bodies that want to bounce off non-breaking tiles (e.g. the
     // player off stone) lower this so the swept-impact path sees the hit.
     public float MaxGroundEngageVnRel { get; set; } = 300f;
-    public float WalkAccel { get; set; } = 2400f;
-    public float MaxWalkSpeed { get; set; } = 80f;
+    public float WalkAccel { get; set; } = 1800f;
+    public float MaxWalkSpeed { get; set; } = 60f;
     // Legacy: used to be StandingState/CrouchedState's brake force when no input.
     // Now the equivalent role is played by SurfaceContact.Friction (set on floor
     // contacts at collision time, value below).
@@ -103,10 +107,10 @@ public class MovementConfig
     // BrakingForce in magnitude so braking from a walk still stops the body in
     // one frame on static ground; on a moving surface it pulls the body's
     // tangential velocity toward the surface's (the tangential carry).
-    public float GroundFriction { get; set; } = 3000f;
+    public float GroundFriction { get; set; } = 2250f;
     
     // Crouching
-    public float CrouchMaxWalkSpeed { get; set; } = 40f;
+    public float CrouchMaxWalkSpeed { get; set; } = 30f;
 
     // Fast Falling / Sliding
     public float FastFallForce { get; set; } = 1000f;
@@ -116,12 +120,12 @@ public class MovementConfig
     // running in — |vx along dir| at or above this — AND Up is held
     // (movement_todo #6). Half of MaxWalkSpeed: moving with intent, without
     // demanding a full-speed runway.
-    public float ArcJumpRunSpeed { get; set; } = 40f;
+    public float ArcJumpRunSpeed { get; set; } = 30f;
 
     // Running Jump
-    public float RunJumpVelocity { get; set; } = -120f;
-    public float RunJumpHoldForce { get; set; } = -1200f;
-    public float RunJumpMinSpeed { get; set; } = 64f;
+    public float RunJumpVelocity { get; set; } = -105f;
+    public float RunJumpHoldForce { get; set; } = -1050f;
+    public float RunJumpMinSpeed { get; set; } = 48f;
 
 
     // Ledge Grab / Pull
@@ -191,7 +195,7 @@ public class MovementConfig
     public float MantleMaxRise { get; set; } = 20f;
     // |vx| gate: above this the body is mid-run and the reflex ramps own the vault; the
     // mantle only claims stalled/deliberate entries. Below MaxWalkSpeed by a wide margin.
-    public float MantleMaxEntrySpeed { get; set; } = 48f;
+    public float MantleMaxEntrySpeed { get; set; } = 36f;
 
     // Arc jump (automatic ballistic arc over a 1-block rise hit AT SPEED — see ArcJumpState).
     // The running companion to the mantle: same rise band (MantleMinRise..MantleMaxRise), split
@@ -388,7 +392,7 @@ public class MovementConfig
     // arc straightened into a line off a tunnel roof). Kept as a knob for
     // the freeze-frame oracle only.
     public float LatticeSeedRunPx               { get; set; } = 0f;
-    public float LatticeSeedRunMinSpeed         { get; set; } = 20f;
+    public float LatticeSeedRunMinSpeed         { get; set; } = 15f;
     // Max unresolved clearance residual (px) an ambient plan may carry and still
     // be applied. Small: ambient assists are grazes, not commitments.
     public float AmbientRefusalResidual         { get; set; } = 1f;
@@ -418,6 +422,11 @@ public class MovementConfig
     // over this window, then commits as a regular solid tile. Per source (todo #2):
     // an avalanche front is the fastest, painting (and every non-player builder)
     // the default, and deliberate Shift placement the slowest. Seconds per cell.
+    // Knockback INTO PLAYERS: scales the velocity a hit gives the victim (PlayerCharacter
+    // .OnHit), not the hit's impulse, so armor/stun/hitstun thresholds — which read the
+    // unscaled dv — are unchanged. Part of the todo #9 slowdown.
+    public float KnockbackSpeedScale     { get; set; } = 0.75f;
+
     public float SproutLifetime          { get; set; } = 0.07f;   // painting / default
     public float AvalancheSproutLifetime { get; set; } = 0.04f;   // wave-tagged cells
     public float PlaceSproutLifetime     { get; set; } = 0.1f;    // Shift+RMB placement
@@ -430,8 +439,8 @@ public class MovementConfig
     public float AvalancheSurfaceLag { get; set; } = 0.25f;
 
     // Double Jump
-    public float DoubleJumpVelocity { get; set; } = -100f;
-    public float DoubleJumpHoldForce { get; set; } = -1500f;
+    public float DoubleJumpVelocity { get; set; } = -87.5f;
+    public float DoubleJumpHoldForce { get; set; } = -1312.5f;
     public float DoubleJumpInitForce { get; set; } = 0f;
     public float DoubleJumpMaxHoldTime { get; set; } = 0.12f;
 

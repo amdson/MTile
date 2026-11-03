@@ -22,7 +22,7 @@ namespace MTile;
 // DashSlash doesn't eat dash length.
 public class DashState : MovementState
 {
-    private const float BurstSpeed   = 360f;   // px/s along the dash — ≈ 86 px (8 tiles) over the burst
+    private const float BurstSpeed   = 270f;   // px/s along the dash — ≈ 65 px (6 tiles) over the burst (x0.75, todo #9)
     private const float BurstSeconds = 0.24f;
     private const float Duration     = 0.36f;  // burst + tail (== the Dash clip's Duration)
     // Fraction of BurstSpeed the body keeps when the burst ends; the tail doesn't

@@ -23,6 +23,10 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - [x] **5** Build reach effectively infinite when chaining from a sprouting cell
   (`ChainReachMul` in BlockPaintAction + BlockPlaceAction).
 - [x] **6** @a07d9df (merged) More distinct sprout visuals (render-only; screenshot for the user's review).
+- [x] **9** (added 2026-11-03) Slow movement 25%: horizontal x0.75, gravity untouched,
+  jump HEIGHT x0.75 (launch + hold x0.875), dash + stab lunge + knockback-into-players
+  x0.75. Measured in sim: jump rise 44.7→33.1 px (74%), walk 81.9→60.5 px/s (74%).
+  User: let speed-calibrated tests go red for now.
 - [~] **8** (Opus worktree agent) Spike placement crystal lifecycle: a crystal seed appears on top of the block,
   waits ~1 s, flashes, grows into the existing (1-cell overlay) spike. Phases are sim
   state (snapshotted); visuals render-only. Shares the phase machine with 7.
@@ -61,6 +65,11 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   `BotManeuverAvalancheCrushTests` (4 layouts) and `BotManeuverEruptionTests.LowCeiling`
   stop crushing (they pass at 0.1). Item 4 reworks wall crush anyway — revisited there.
 
+- **Bot retune after the slowdown (#9).** 4 bot tests went red on distances/timings tuned
+  at the old speeds: `Dash_ClosesGap_AndDashSlashes`, `Burst_CloseInBand…`,
+  `AirWhipKick_CrossUp…`, `BotManeuverBackoff_StillHits…`. Left red per "don't worry about
+  tests"; a bot retune pass (ranges, hop timing) is a follow-up once speeds settle by feel.
+
 ## For the user to review
 
 - **#6 sprout look** (taste item): `Plans/img/sprout_visuals_before.png` / `_after.png`.
@@ -75,3 +84,4 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - a09468e — #3 committed (user's burst work); BurstChargeTests 10/10; combat/terrain/bot reds = 40 baseline.
 - c86fc15 — #2a/#2b/#5: per-source sprout dials (SproutSource on nodes, snapshotted; LifetimeFor), per-parent overshoot carry (front continuous: 12 painted cells in 51 frames vs 60 with rounding), unlimited reach chaining off your OWN sprout (others' keep 2x). SproutSpeedTests 7/7. New reds: 2 SproutLiftJump + 5 crush (see Decisions needed); movement-group reds otherwise pre-existing (no sprout refs).
 - a07d9df (merge) — #6 sprout visuals, render-only (Drawing/ChunkRenderer.cs, Game1 passes render time). MTile.sln builds.
+- (this commit) — #9 slowdown. ConfigLayout only the pre-existing ParkourEnabled mismatch. Bot group 75/9/1: 4 new reds from #9, 5 crush reds from #2b (pending #4).

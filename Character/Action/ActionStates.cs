@@ -1320,7 +1320,7 @@ public class StabAction : ActionState
     // is under way before the hit instead of arriving with it.
     private const float LungeStart   = 0.05f;
     private const float LungeEnd     = 0.4f;
-    private const float LungeSpeed   = 135f;    // px/s horizontal target during lunge
+    private const float LungeSpeed   = 101f;    // px/s horizontal target during lunge (x0.75 of 135, todo #9)
 
     // Roadmap §1.7 hitbox bump (1.75×). Reach + half-width both grow so the
     // stab feels longer AND wider, not just longer-thin. BlockReach/HalfWidth
