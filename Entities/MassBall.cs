@@ -43,6 +43,11 @@ public class MassBall : Projectile
     private float    _mass;
     private bool     _armed;
     private readonly TileType _tileType;
+    // A crystal wave (todo.txt #7, CrystalWave.cs): the same ball and the same mass
+    // cascade, but its commits become crystal requests, and it registers itself with
+    // ChunkMap.Crystals each frame so TileMassField knows to route them.
+    private bool     _crystal;
+    public bool Crystal => _crystal;
 
     public override EntityKind Kind => EntityKind.MassBall;
 
@@ -57,6 +62,7 @@ public class MassBall : Projectile
         base.WriteState(ref s);
         s.BuildMass = _mass;
         s.BallArmed = _armed;
+        s.BallCrystal = _crystal;
         s.TileType  = _tileType;
     }
 
@@ -65,19 +71,22 @@ public class MassBall : Projectile
         base.ReadState(in s);
         _mass  = s.BuildMass;
         _armed = s.BallArmed;
+        _crystal = s.BallCrystal;
     }
 
     // True once the ball has stopped against a face (it dies the same frame).
     public bool StoppedAtWall { get; private set; }
 
-    public MassBall(Vector2 pos, Vector2 velocity, float mass, TileType tileType, Faction owner)
+    public MassBall(Vector2 pos, Vector2 velocity, float mass, TileType tileType, Faction owner,
+                    bool crystal = false)
         : base(new PhysicsBody(Polygon.CreateRegular(4f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: owner)
     {
+        _crystal         = crystal;
         Body.Velocity    = velocity;
         Body.IgnoreTiles = true;
         Mass             = 0.5f;
         GravityScale     = 0f;
-        Color            = new Color(255, 170, 60);
+        Color            = crystal ? new Color(200, 235, 255) : new Color(255, 170, 60);
         Sprite           = Sprites.Ball(4f);
         _mass            = mass;
         _tileType        = tileType;
@@ -99,7 +108,8 @@ public class MassBall : Projectile
         // Wave provenance: the ball IS the wave. Direction locks on the first
         // touch (drag is scalar and there's no gravity, so it never changes);
         // the tag rides the mass through spill → request → the schedule gate.
-        chunks.TouchWave(Id, Body.Velocity);
+        if (_crystal) chunks.Crystals.TouchWave(Id, new TileSpikes.Side(Faction, Team), chunks.TerrainFrame);
+        else          chunks.TouchWave(Id, Body.Velocity);
         byte owner = BlockOwnership.OwnerFor(Faction);
 
         // Walls block avalanches. Checked BEFORE this frame's deposit, along the segment
@@ -114,7 +124,10 @@ public class MassBall : Projectile
             // wave mass), so it banks up the near side instead of leaking through.
             float dump = _mass;
             _mass = 0f;
-            chunks.Mass.Deposit(chunks, nx, ny, dump, _tileType, Id, owner);
+            // A crystal wave just shatters on the wall: the barricade ABSORBS what's
+            // left rather than banking a crystal pile against its face (which could
+            // spill over a low wall and continue on the far side).
+            if (!_crystal) chunks.Mass.Deposit(chunks, nx, ny, dump, _tileType, Id, owner);
             Body.Position = BlockEruptionHelpers.CellCenter(nx, ny);
             Body.Velocity = Vector2.Zero;
             StoppedAtWall = true;
@@ -122,7 +135,11 @@ public class MassBall : Projectile
             return;
         }
 
-        float leak = MathF.Min(_mass, (_mass * LeakFraction + LeakFloor) * dt);
+        // A crystal wave leaks slower, so the same ball lays its (cheap, numerous)
+        // crystals over a longer run: the wave is meant to cover ground.
+        float frac  = _crystal ? CrystalWave.LeakFraction : LeakFraction;
+        float floor = _crystal ? CrystalWave.LeakFloor    : LeakFloor;
+        float leak = MathF.Min(_mass, (_mass * frac + floor) * dt);
         _mass -= leak;
         // The eruption builds for whoever launched it (Faction rides the snapshot).
         chunks.Mass.Deposit(chunks, gtx, gty, leak, _tileType, Id, owner);

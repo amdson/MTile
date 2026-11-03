@@ -2872,23 +2872,150 @@ public class BlockPaintAction : ActionState
         // Plain RMB, no press-edge requirement: this is the resting state of a held right
         // button, so it also resumes after an attack interrupted a stroke.
         if (!ctx.Input.RightClick || ctx.Input.Shift) return false;
-        // With spikes selected RMB spikes cells instead (BlockPlaceAction) — spikes only
-        // ever overlay existing solid, so there is no mass to paint.
-        if (ctx.SpikesSelected) return false;
+        // With spikes selected plain RMB still lands here, in SPIKE MODE (see below):
+        // spikes only ever overlay existing solid, so there is no mass to paint, but the
+        // charge-and-release eruption gesture is how the crystal wave is launched.
         return ctx.Combat?.HitstunActive != true;
     }
 
     // Alive while RMB is held. Deliberately not gated on Shift: tapping Shift midway
-    // through a stroke shouldn't tear the ball away. Selecting spikes mid-stroke does
-    // end it, handing the held button to BlockPlaceAction's spike path.
+    // through a stroke shouldn't tear the ball away. Toggling spikes mid-hold does end
+    // it (the mode was latched at the press); the still-held button re-enters fresh in
+    // the other mode.
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-        => ctx.Input.RightClick && !ctx.SpikesSelected;
+        => ctx.Input.RightClick && ctx.SpikesSelected == vars.SpikeMode;
+
+    // ── Spike mode: spike placement vs the crystal wave (todo.txt #7) ──────────────
+    //
+    // With spikes selected, both things plain RMB can do start the same way — the cursor
+    // ON a solid cell — so, unlike the painter's in-solid/out-of-solid split, the press
+    // alone can't tell them apart. The rule resolves it by what the hold does NEXT, and
+    // the press cell is not spiked until that is known:
+    //   TAP    — released before SpikeChargeDelay, cursor never left the press cell:
+    //            spike the press cell on release.
+    //   STROKE — the cursor left the press cell before SpikeChargeDelay: spike the press
+    //            cell and then every cell entered, one per cell (BlockPlaceAction's rule).
+    //   CHARGE — held on the press cell for SpikeChargeDelay: this hold is a crystal-wave
+    //            charge. It banks eruption charge exactly like the painter's, spikes
+    //            nothing however the cursor moves, and a fast release out of the ground
+    //            (the eruption's own gates: CanFireEruption, EruptReleaseSpeed, cursor not
+    //            buried) launches the wave. A charge too small to fire, released on the
+    //            press cell, is just a slow tap: it spikes the cell.
+    // Resolution is one-way (a stroke never becomes a charge and vice versa), so neither
+    // can misfire into the other mid-gesture. If the wave isn't available — on cooldown,
+    // or the press wasn't on solid (nothing to charge in) — there's nothing to wait for:
+    // the hold is a stroke from the press frame, which is exactly the pre-#7 spike
+    // placement. Shift+RMB never comes here (BlockPlaceAction), so the deliberate
+    // one-cell spiking path is unchanged.
+    public const byte SpikeGestureUndecided = 0;
+    public const byte SpikeGestureStroke    = 1;
+    public const byte SpikeGestureCharge    = 2;
+    // How long a spikes-mode press must sit still on its cell to become a charge. Longer
+    // than the painter's ChargeDelay so an ordinary click (~5–8 frames) is always a tap.
+    internal const float SpikeChargeDelay = 0.15f;
+
+    private static void EnterSpikeMode(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        vars.ChargeGesture = false;
+        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+        vars.CursorAtPress = BlockEruptionHelpers.CellCenter(gtx, gty);
+        vars.OriginCell    = new Vector2(float.NaN, float.NaN);
+        if (ab.Meters.CrystalWaveReady && BlockEruptionHelpers.IsCursorInSolid(ctx))
+        {
+            vars.SpikeGesture = SpikeGestureUndecided;
+            return;
+        }
+        vars.SpikeGesture = SpikeGestureStroke;
+        SpikeStroke(ctx, ab, ref vars);
+    }
+
+    private static void UpdateSpikeMode(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        switch (vars.SpikeGesture)
+        {
+            case SpikeGestureUndecided:
+            {
+                var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+                if (BlockEruptionHelpers.CellCenter(gtx, gty) != vars.CursorAtPress)
+                {
+                    // Left the press cell first: a stroke. The deferred press cell goes
+                    // down now, then the cell under the cursor.
+                    vars.SpikeGesture = SpikeGestureStroke;
+                    SpikePressCell(ctx, ab, ref vars);
+                    SpikeStroke(ctx, ab, ref vars);
+                }
+                else if (vars.TimeInState >= SpikeChargeDelay - 1e-4f)
+                {
+                    vars.SpikeGesture  = SpikeGestureCharge;
+                    vars.ChargeGesture = true;
+                    ab.Meters.ChargingRequested = true;
+                }
+                return;
+            }
+            case SpikeGestureStroke:
+                SpikeStroke(ctx, ab, ref vars);
+                return;
+            default: // Charge
+                if (BlockEruptionHelpers.IsCursorInSolid(ctx) || ab.Meters.ChargeLocksPaint)
+                    ab.Meters.ChargingRequested = true;
+                return;
+        }
+    }
+
+    private static void ExitSpikeMode(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        if (vars.SpikeGesture == SpikeGestureUndecided) { SpikePressCell(ctx, ab, ref vars); return; }
+        if (vars.SpikeGesture != SpikeGestureCharge) return;
+        if (TryLaunchCrystalWave(ctx, ab, in vars)) return;
+        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+        if (!ab.Meters.CanFireEruption && BlockEruptionHelpers.CellCenter(gtx, gty) == vars.CursorAtPress)
+            SpikePressCell(ctx, ab, ref vars);
+    }
+
+    // The eruption's release gates, then a crystal MassBall instead of a build one.
+    private static bool TryLaunchCrystalWave(EnvironmentContext ctx, PlayerAbilityState ab, in ActionVars vars)
+    {
+        if (BlockEruptionHelpers.IsCursorInSolid(ctx)) return false;
+        if (!ab.Meters.CanFireEruption || !ab.Meters.CrystalWaveReady) return false;
+        if (vars.BallVel.Length() < EruptReleaseSpeed) return false;
+        if (ctx.Spawner == null) return false;
+        float mass = ab.Meters.ConsumeCrystalMass();
+        if (mass <= 0f) return false;
+        ctx.Spawner.SpawnEntity(new MassBall(
+            vars.BallPos, vars.BallVel, mass, ctx.ActiveBlockType, ctx.Faction, crystal: true) { Team = ctx.Team });
+        return true;
+    }
+
+    private static void SpikePressCell(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        var c = vars.CursorAtPress;
+        int gtx = (int)MathF.Floor(c.X / Chunk.TileSize), gty = (int)MathF.Floor(c.Y / Chunk.TileSize);
+        if (TrySpikeInReach(ctx, ab, gtx, gty)) vars.OriginCell = c;
+    }
+
+    // One spike per cell entered (BlockPlaceAction's per-cell latch, via OriginCell).
+    private static void SpikeStroke(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
+    {
+        var (gtx, gty) = BlockEruptionHelpers.CursorCell(ctx);
+        var cell = BlockEruptionHelpers.CellCenter(gtx, gty);
+        if (cell == vars.OriginCell) return;
+        if (TrySpikeInReach(ctx, ab, gtx, gty)) vars.OriginCell = cell;
+    }
+
+    private static bool TrySpikeInReach(EnvironmentContext ctx, PlayerAbilityState ab, int gtx, int gty)
+    {
+        var cell = BlockEruptionHelpers.CellCenter(gtx, gty);
+        if (Vector2.DistanceSquared(ctx.Body.Position, cell) > BuildReach * BuildReach) return false;
+        return BlockPlaceAction.TrySpikeCell(ctx, ab, gtx, gty);
+    }
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         vars.TimeInState = 0f;
         vars.BallPos     = ctx.Input.MouseWorldPosition;   // seeded under the cursor
         vars.BallVel     = Vector2.Zero;
+        vars.SpikeMode   = ctx.SpikesSelected;
+        if (vars.SpikeMode) { EnterSpikeMode(ctx, ab, ref vars); return; }
         // The mode is decided HERE and does not get re-derived per frame: cursor buried at
         // the press means this hold is a charge, open air means it's a paint stroke —
         // UNLESS there's already a charge banked, in which case the hold is a charge
@@ -2912,6 +3039,7 @@ public class BlockPaintAction : ActionState
         SmoothPen.CriticallyDampedStep(ref vars.BallPos, ref vars.BallVel,
                                        ctx.Input.MouseWorldPosition, SmoothTime, ctx.Dt);
 
+        if (vars.SpikeMode) { UpdateSpikeMode(ctx, ab, ref vars); return; }
         if (!vars.ChargeGesture) { Paint(ctx, ab, vars.BallPos, vars.BallVel.Length()); return; }
 
         bool locked = ab.Meters.ChargeLocksPaint;
@@ -2944,6 +3072,7 @@ public class BlockPaintAction : ActionState
     public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
         if (ctx.Input.RightClick) return;
+        if (vars.SpikeMode) { ExitSpikeMode(ctx, ab, ref vars); return; }
         // Released while still buried mid-charge: bank the charge for a later stroke
         // (it decays in BuildMeters) rather than erupting from inside the ground.
         //
@@ -3024,8 +3153,10 @@ public class BlockPaintAction : ActionState
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
     {
+        // Spike mode shows the ball only once the hold is a crystal-wave charge.
+        if (vars.SpikeMode && vars.SpikeGesture != SpikeGestureCharge) return;
         // The ball, plus a bright core, so the lag behind the cursor is legible.
-        t.Rect(vars.BallPos, 7f, new Color(230, 200, 140));
+        t.Rect(vars.BallPos, 7f, vars.SpikeMode ? new Color(200, 235, 255) : new Color(230, 200, 140));
         t.Rect(vars.BallPos, 3f, Color.White);
     }
 }
@@ -3051,12 +3182,13 @@ public class BlockPlaceAction : ActionState
 
     public override float AnimationProgress(in ActionVars vars) => -1f;
 
-    // Shift+RMB places blocks; with spikes selected (picker key 5) plain RMB or
-    // Shift+RMB spikes cells instead — one deliberate overlay per cell, the same
-    // gesture shape as a single placement, so spikes ride this action rather than a
-    // new ActionState.
+    // Shift+RMB places blocks; with spikes selected (picker key 5) Shift+RMB spikes
+    // cells instead — one deliberate overlay per cell, the same gesture shape as a
+    // single placement, so spikes ride this action rather than a new ActionState.
+    // Plain RMB with spikes selected belongs to BlockPaintAction's spike mode (todo.txt
+    // #7), which also spikes on a tap/stroke but can resolve into a crystal-wave charge.
     private static bool Held(EnvironmentContext ctx)
-        => ctx.Input.RightClick && (ctx.Input.Shift || ctx.SpikesSelected);
+        => ctx.Input.RightClick && ctx.Input.Shift;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
@@ -3181,6 +3313,8 @@ public class BlockBurstAction : ActionState
         // now, so "painting" covers a charged stroke too; that's fine, the burst needs
         // LMB while the eruption is decided by how RMB comes up.)
         if (ctx.PreviousAction(0) is not BlockPaintAction) return false;
+        // Spike mode's hold is spiking or a crystal-wave charge, never a foam puff.
+        if (ctx.SpikesSelected) return false;
         // RMB held (not the press-edge — that frame belongs to BlockReady) + LMB press-edge.
         if (!ctx.Input.RightClick || !ctx.Input.LeftClick) return false;
         if (ctx.Controller == null || ctx.Controller.GetPrevious(1).LeftClick) return false;

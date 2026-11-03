@@ -209,6 +209,7 @@ public struct EntityData
     public TileType            TileType;    // LobbedArea + MassBall + PullPoint (orb material)
     public float               BuildMass;   // MassBall — remaining mass to leak
     public bool                BallArmed;   // MassBall — has left the solid it launched from (walls stop it from here on)
+    public bool                BallCrystal; // MassBall — a crystal wave (todo.txt #7): commits become crystals
 
     // PullPointEntity + the ball it spawns (Plans/BLOCK_THROW_PLAN.md). The peel group
     // itself is the sparse PeelGroupComp. LinkedId is the point→ball / ball→point

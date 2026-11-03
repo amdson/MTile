@@ -124,7 +124,10 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         Run(sim, 1, f => new PlayerInput { Num5 = true, MouseWorldPosition = target });
         var m = sim.Player.Abilities.Meters;
         float before = m.BuildMove + m.EruptMove + m.Build;
-        Run(sim, 1, f => new PlayerInput { RightClick = true, MouseWorldPosition = target });
+        // Shift+RMB: the press-frame spike path. Plain RMB with spikes selected defers
+        // the spike to tell a tap from a crystal-wave charge (todo.txt #7;
+        // SpikeOverlayCrystalWaveTests covers that gesture).
+        Run(sim, 1, f => new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target });
         float after = m.BuildMove + m.EruptMove + m.Build;
 
         // Placement SEEDS the cell (todo.txt #8); the spike overlay lands after the
@@ -143,7 +146,7 @@ public class SpikeOverlayTests(ITestOutputHelper output)
 
         // Holding on the same cell doesn't re-spike or re-charge.
         float hold0 = m.BuildMove + m.EruptMove + m.Build;
-        Run(sim, 10, f => new PlayerInput { RightClick = true, MouseWorldPosition = target });
+        Run(sim, 10, f => new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target });
         Assert.True(m.BuildMove + m.EruptMove + m.Build >= hold0 - 1e-3f);
     }
 

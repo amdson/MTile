@@ -47,6 +47,7 @@ public sealed class ChunkRenderer
         DrawOwnership(chunks);
         DrawSpikes(chunks);
         DrawSpikeSeeds(chunks);
+        DrawCrystalWave(chunks);
 
         foreach (var (r, color) in sim.Platforms)
             _spriteBatch.Draw(_pixel, new Rectangle(
@@ -287,6 +288,62 @@ public sealed class ChunkRenderer
                 color  = on ? Color.White : Color.Lerp(side, Color.White, 0.5f);
             }
             Shard(left, top, nx, ny, height, SeedHalfWidth, color);
+        }
+    }
+
+    // ---- Crystal wave (todo.txt #7) — render-only view of ChunkMap.Crystals -----------
+    // Each seeded crystal is a shard standing on its substrate face (the ground, or the
+    // crystal that seeded it), drawn with the SAME length curve the contact system tests
+    // (CrystalWave.LengthAt), so what you see is what pushes and what bites:
+    //   seed  — a small pale shard (roots sit here for the whole warning);
+    //   flash — blinks white while growing to full length (forming: pushes, no damage);
+    //   grown — full length, bright, the side's colour mixed into ice; fades out over
+    //           its last third, then vanishes. Pending and broken crystals draw nothing.
+    private static readonly Color CrystalIce = new(190, 235, 255);
+
+    private void DrawCrystalWave(ChunkMap chunks)
+    {
+        if (chunks.Crystals.Count == 0) return;
+        var viewport = _graphicsDevice.Viewport;
+        float halfW = viewport.Width  / (2f * _camera.Zoom) + 2 * Chunk.TileSize;
+        float halfH = viewport.Height / (2f * _camera.Zoom) + 2 * Chunk.TileSize;
+        int now = chunks.TerrainFrame;
+        foreach (var (cell, c) in chunks.Crystals.Entries)
+        {
+            if (c.Pending || c.Broken) continue;
+            var (gtx, gty) = cell;
+            float left = gtx * Chunk.TileSize, top = gty * Chunk.TileSize;
+            if (MathF.Abs(left - _camera.Position.X) > halfW || MathF.Abs(top - _camera.Position.Y) > halfH)
+                continue;
+
+            var life = c.Lifecycle;
+            int elapsed = now - c.SeededFrame;
+            var phase = life.PhaseAt(elapsed);
+            if (phase == CrystalPhase.Gone) continue;
+            float length = CrystalWave.LengthAt(in life, elapsed);
+            var side = Color.Lerp(CrystalIce, TilePalette.SpikeColor(c.Side.Faction), 0.35f);
+            Color color;
+            float halfWidth = CrystalWave.HalfWidth;
+            if (phase == CrystalPhase.Seed)
+            {
+                color = Color.Lerp(side, Color.White, 0.3f) * 0.85f;
+                halfWidth *= 0.55f;
+            }
+            else if (phase == CrystalPhase.Flash)
+            {
+                bool on = ((elapsed - life.SeedFrames) / 2) % 2 == 0;
+                color = on ? Color.White : side;
+            }
+            else
+            {
+                float p = life.PhaseProgress(elapsed);
+                float fade = p < 0.67f ? 1f : MathHelper.Lerp(1f, 0.25f, (p - 0.67f) / 0.33f);
+                color = side * fade;
+            }
+            // Shard() draws outward from a face of the cell it is given, so hand it the
+            // SUBSTRATE cell with the growth normal: the shard rises out of the shared face.
+            var o = TileSproutNode.FaceOffset(c.Base);
+            Shard(left + o.X * Chunk.TileSize, top + o.Y * Chunk.TileSize, -o.X, -o.Y, length, halfWidth, color);
         }
     }
 

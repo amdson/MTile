@@ -85,6 +85,12 @@ public sealed class TileMassField
 
         var key = (gtx, gty);
         _mass.TryGetValue(key, out var bucket);
+        // Crystal-wave residue yields (todo.txt #7): leftover mass a crystal wave pooled
+        // here must not claim someone's later stroke and turn it into crystals. Any
+        // other deposit simply replaces it (it is cheap mass that was going to decay).
+        if (bucket.Amount >= EpsAmount && !bucket.Wave.IsNone && bucket.Wave != wave
+            && chunks.Crystals.IsWave(bucket.Wave))
+            bucket = default;
         // First REAL wave owns the bucket. An untagged bucket (manual paint —
         // notably the live stroke that precedes an eruption at the same cells)
         // is claimed by the first tagged deposit: otherwise the eruption's mass
@@ -103,6 +109,12 @@ public sealed class TileMassField
         if (depth > 0 && !wave.IsNone && chunks.IsForeignToWave(wave, gtx, gty)) return 0;
 
         float cur = bucket.Amount + amount;
+        // A crystal wave (todo.txt #7) runs this exact cascade, but its commits are
+        // crystal requests (ChunkMap.TryRequestCrystal) rather than tiles: same
+        // free-cell + support test shape, so the wave covers the cells an ordinary
+        // avalanche would have built, and it can't enter solid (the hop test above
+        // already refuses it, since a crystal wave never marks a cell as its own).
+        bool crystal = !wave.IsNone && chunks.Crystals.IsWave(wave);
 
         // Drain in whole units rather than handling one crossing per call. A painter
         // trickles in less than a unit per frame so this loops at most once, but a lump
@@ -112,9 +124,15 @@ public sealed class TileMassField
         int committed = 0;
         while (cur >= Threshold)
         {
-            var state = chunks.GetCellState(gtx, gty);
-            bool free = state == TileState.Empty && !chunks.Graph.TryGet(gtx, gty, out _);
-            if (free && chunks.TryRequestTile(gtx, gty, type, wave, owner) != null)
+            bool took;
+            if (crystal) took = chunks.TryRequestCrystal(gtx, gty, wave);
+            else
+            {
+                var state = chunks.GetCellState(gtx, gty);
+                bool free = state == TileState.Empty && !chunks.Graph.TryGet(gtx, gty, out _);
+                took = free && chunks.TryRequestTile(gtx, gty, type, wave, owner) != null;
+            }
+            if (took)
             {
                 // Committed here. Anything left over keeps flowing outward.
                 cur -= Threshold;

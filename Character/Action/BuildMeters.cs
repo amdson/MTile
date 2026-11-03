@@ -19,7 +19,7 @@ namespace MTile;
 // charged here at the source, NOT by varying the cascade quantum, so material changes
 // how fast you build without changing the shape of what you build.
 //
-// Pure value state (six floats), so it snapshots with PlayerAbilityState's
+// Pure value state (a handful of floats), so it snapshots with PlayerAbilityState's
 // MemberwiseClone and needs no deep-copy hook.
 public sealed class BuildMeters
 {
@@ -117,6 +117,13 @@ public sealed class BuildMeters
     public bool ChargingRequested;
     public ChargePhase Phase;
 
+    // Crystal wave cooldown (todo.txt #7), seconds left. Set at launch to
+    // CrystalWave.CooldownSeconds, ticked down in Step. Lives here, on the player's
+    // snapshotted meters, because it gates what a spikes-selected RMB hold MEANS
+    // (BlockPaintAction's spike mode): on cooldown it can only place spikes.
+    public float CrystalCooldown;
+    public bool  CrystalWaveReady => CrystalCooldown <= 0f;
+
     public float ChargeFraction => EruptMove / EruptMax;
     public bool  CanFireEruption => EruptMove >= EruptMinToFire;
     // True when there's enough banked charge that a held RMB should keep charging rather
@@ -148,6 +155,7 @@ public sealed class BuildMeters
         if (ChargingRequested) Phase = StepCharging(dt);
         else                 { StepIdle(dt); Phase = ChargePhase.Ramping; }
         TickBanked(dt);
+        if (CrystalCooldown > 0f) CrystalCooldown = MathF.Max(0f, CrystalCooldown - dt);
         ChargingRequested = false;
     }
 
@@ -306,6 +314,18 @@ public sealed class BuildMeters
         return MathF.Min(mass, cap);
     }
 
+    // Convert the banked charge into a crystal wave's mass (crystals, one per unit of
+    // mass) and start the cooldown. Crystals are priced in meter units, not by material
+    // (CrystalWave.UnitsPerCrystal — deliberately cheap, the wave is meant to be big).
+    public float ConsumeCrystalMass()
+    {
+        float mass = MathF.Min(EruptMove / CrystalWave.UnitsPerCrystal, CrystalWave.MaxBallMass);
+        EruptMove       = 0f;
+        ChargeHeld      = 0f;
+        CrystalCooldown = CrystalWave.CooldownSeconds;
+        return mass;
+    }
+
     // Spend the WHOLE banked charge to charge one block. All-or-nothing: returns false
     // and touches nothing if the meter is short, so the caller can leave the gesture
     // inert rather than half-paying for it. Unlike ConsumeEruptionMass this converts to
@@ -344,6 +364,7 @@ public sealed class BuildMeters
         BankedSeconds     = o.BankedSeconds;
         ChargingRequested = o.ChargingRequested;
         Phase             = o.Phase;
+        CrystalCooldown   = o.CrystalCooldown;
     }
 }
 

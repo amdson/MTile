@@ -76,6 +76,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         // Mid range.
         new BlockThrowManeuver(),
         new EruptionManeuver(),
+        new CrystalWaveManeuver(),       // spiked avalanche at mid range, off its 8 s cooldown
         new AvalancheCrushManeuver(),    // pins a target in a roofed pocket
         new BlockBurstManeuver(),
         new WallUpManeuver(),
