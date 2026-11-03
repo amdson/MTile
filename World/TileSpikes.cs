@@ -3,9 +3,10 @@ using System.Collections.Generic;
 namespace MTile;
 
 // Sparse per-cell spike overlay (Plans/BLOCK_OWNERSHIP_SPIKES.md §2). A spiked cell is
-// an ordinary solid tile wearing an overlay that (a) reinforces it — ChunkMap.DamageCell
-// scales incoming damage down by HpMultiplier — and (b) hurts bodies of an OPPOSING side
-// that touch it (SpikeContactSystem). The overlay records which side placed it, because
+// an ordinary solid tile wearing an overlay that (a) is brittle — any hit that reaches the
+// cell knocks the spike off instead of damaging the block (ChunkMap.DamageCell), and
+// breaking the block takes it too — and (b) hurts bodies of an OPPOSING side that touch
+// it (SpikeContactSystem). The overlay records which side placed it, because
 // "opposing" is relative to the placer: the placer's side is never hurt.
 //
 // Sparse for the same reason TileDamage / TileCharge are: almost no tile is spiked.
@@ -17,12 +18,6 @@ namespace MTile;
 // rebuilt at the same coords never inherits a ghost overlay.
 public class TileSpikes
 {
-    // A spiked cell takes this many times its base material's HP to break. Applied as a
-    // divisor on incoming damage (ChunkMap.DamageCell) rather than on MaxHPFor, so the
-    // stored damage stays a fraction of the BASE HP and every reader of
-    // Damage.Get / MaxHPFor (crack tint, energy budgets) keeps reading a consistent ratio.
-    public const float HpMultiplier = 2f;
-
     // Who owns a spiked cell. Faction is the primary side test (players are Player1 /
     // Player2); Team breaks ties between two Enemy-faction parties, mirroring
     // CombatSystem.AcrossTeams.

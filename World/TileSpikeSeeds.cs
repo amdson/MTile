@@ -6,10 +6,9 @@ namespace MTile;
 // no longer spikes the cell instantly: it SEEDS it — a small crystal on the block — and
 // the seed runs CrystalLifecycle.SpikePlacement (seed → flash → grown). On its first
 // Grown frame ChunkMap.TickSprouts promotes it into the ordinary TileSpikes overlay and
-// drops it from here, so every existing spike rule (contact damage, the HpMultiplier
-// reinforcement, owner immunity) applies only from then on. Seeds are harmless and do
-// NOT reinforce their block: the 1.25 s telegraph is the counterplay window, and
-// breaking the block is a valid answer to it.
+// drops it from here, so every existing spike rule (contact damage, owner immunity)
+// applies only from then on. Seeds are harmless, and like a grown spike a hit knocks one
+// off (ChunkMap.DamageCell): the 1.25 s telegraph is the counterplay window.
 //
 // Sparse, keyed on global cell coords, pure value data (side + the TerrainFrame it was
 // seeded on), so a dictionary copy is a full deep copy — snapshotted with the terrain

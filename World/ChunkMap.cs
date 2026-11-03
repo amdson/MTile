@@ -767,8 +767,16 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // Lookup the cell's material type so TileDamage can compare accumulated damage
         // against the per-type max HP (Sand ≈ 0.5, Dirt ≈ 1.0, Stone ≈ 2.0).
         var type = GetCellType(gtx, gty);
-        // A spiked cell is reinforced: the same hit chips proportionally less of it.
-        if (Spikes.IsSpiked(gtx, gty)) amount /= TileSpikes.HpMultiplier;
+        // Spikes are brittle: a hit that reaches a spiked (or still-seeding) cell knocks
+        // the spike off and spends itself doing it — the block under it is untouched by
+        // that hit. Breaking the block (BreakCell) still takes its spike with it.
+        if (Spikes.IsSpiked(gtx, gty) || SpikeSeeds.Has(gtx, gty))
+        {
+            if (amount <= 0f) return false;
+            Spikes.Clear(gtx, gty);
+            SpikeSeeds.Clear(gtx, gty);
+            return false;
+        }
         if (!Damage.ApplyDamage(gtx, gty, amount, type)) return false;
         return BreakCell(gtx, gty);
     }

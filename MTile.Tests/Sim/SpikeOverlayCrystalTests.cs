@@ -168,13 +168,15 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         Assert.True(BlockPlaceAction.TrySpikeCell(ctx, ab, 5, FloorRow));
         chunks.TickSprouts(Simulation.FixedDt);
 
-        // A seed does not reinforce its block (only the grown spike does): stone breaks in
-        // the usual 4 quarter-HP hits.
+        // The first hit knocks the seed off and leaves the block whole; stone then breaks
+        // in its usual 4 quarter-HP hits.
         float hit = TileDamage.MaxHPFor(TileType.Stone) / 4f;
+        Assert.False(chunks.DamageCell(5, FloorRow, hit));
+        Assert.False(chunks.SpikeSeeds.Has(5, FloorRow));
+        Assert.Equal(0f, chunks.Damage.Get(5, FloorRow));
         int n = 0;
         while (!chunks.DamageCell(5, FloorRow, hit)) Assert.True(++n < 10);
         Assert.Equal(3, n);
-        Assert.False(chunks.SpikeSeeds.Has(5, FloorRow));
 
         for (int f = 0; f < 120; f++) chunks.TickSprouts(Simulation.FixedDt);
         Assert.Equal(0, chunks.Spikes.Count);

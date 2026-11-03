@@ -177,7 +177,7 @@ public class SpikeOverlayTests(ITestOutputHelper output)
     // ── Reinforcement / break ───────────────────────────────────────────────────
 
     [Fact]
-    public void SpikedCell_TakesTwiceTheHits_AndLosesOverlayOnBreak()
+    public void SpikedCell_FirstHitKnocksTheSpikeOff_AndBreakClearsIt()
     {
         var chunks = Arena();
         float hp = TileDamage.MaxHPFor(TileType.Stone);
@@ -192,11 +192,14 @@ public class SpikeOverlayTests(ITestOutputHelper output)
 
         int plain = Hits(2);
         chunks.Spikes.Set(5, FloorRow, P1Side);
-        int spiked = Hits(5);
-        output.WriteLine($"plain {plain} hits, spiked {spiked} hits");
-        Assert.Equal(4, plain);
-        Assert.Equal(2 * plain, spiked);
+        // The first hit spends itself on the spike: overlay gone, block undamaged.
+        Assert.False(chunks.DamageCell(5, FloorRow, hit));
         Assert.False(chunks.Spikes.IsSpiked(5, FloorRow));
+        Assert.Equal(0f, chunks.Damage.Get(5, FloorRow));
+        int spiked = Hits(5);
+        output.WriteLine($"plain {plain} hits, then {spiked} more once the spike is off");
+        Assert.Equal(4, plain);
+        Assert.Equal(plain, spiked);
         Assert.Equal(TileState.Empty, chunks.GetCellState(5, FloorRow));
 
         // Any break path clears it (BreakCell is the single funnel).
