@@ -47,6 +47,7 @@ public sealed class BulldogBot : IRemoteInputSource
     private readonly string[]  _seenAction   = new string[Ring];
     private readonly bool[]    _seenHelpless = new bool[Ring];
     private readonly bool[]    _seenGrounded = new bool[Ring];
+    private readonly bool[]    _seenGrabbed  = new bool[Ring];
     private readonly int[]     _seenFacing   = new int[Ring];
     private int _seenCount;
 
@@ -67,6 +68,7 @@ public sealed class BulldogBot : IRemoteInputSource
             new EscapeGrabManeuver(),
             new GuardManeuver(),
             new BulldogGuard(),
+            new BulldogBreaker(),
             new BulldogGrab(s),
             new BulldogString(s),
             new BulldogStab(s),
@@ -147,6 +149,7 @@ public sealed class BulldogBot : IRemoteInputSource
         _seenAction[w]   = t.CurrentActionName;
         _seenHelpless[w] = t.Combat.HitstunActive || t.Combat.StunActive || t.Combat.GrabbedActive;
         _seenGrounded[w] = t.IsGrounded;
+        _seenGrabbed[w]  = t.Combat.GrabbedActive;
         _seenFacing[w]   = t.Facing;
         _seenCount++;
 
@@ -158,6 +161,9 @@ public sealed class BulldogBot : IRemoteInputSource
             : Vector2.Zero;
 
         _sense.TargetHelpless = _seenHelpless[i];
+        v.TargetHelpless      = _seenHelpless[i];
+        v.TargetGrounded      = _seenGrounded[i];
+        v.TargetGrabbed       = _seenGrabbed[i];
         _sense.TargetGrounded = _seenGrounded[i];
         _sense.TargetFacing   = _seenFacing[i];
         _sense.TargetHp       = t.Health;     // HUD

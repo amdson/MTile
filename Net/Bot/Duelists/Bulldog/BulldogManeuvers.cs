@@ -30,6 +30,7 @@ internal static class BulldogKit
 public sealed class BulldogString : BotManeuver
 {
     public float Reach = 40f, VerticalReach = 28f;
+    public float FollowReach = 56f;
     public int   Tap2 = 13, Tap3 = 28, MaxFrames = 60;
 
     private readonly BulldogSense _s;
@@ -67,7 +68,7 @@ public sealed class BulldogString : BotManeuver
         bool tap = _t == 0 || _t == Tap2 || _t == Tap3;
         if (tap && _t > 0)
         {
-            bool inReach = MathF.Abs(v.Dx) <= 56f && MathF.Abs(v.Dy) <= 40f;
+            bool inReach = MathF.Abs(v.Dx) <= FollowReach && MathF.Abs(v.Dy) <= 40f;
             if (!connected && (BulldogKit.Guarding(v) || !inReach)) return false;
             if (!inReach && !_s.TargetHelpless) return false;
         }
@@ -261,6 +262,10 @@ public sealed class BulldogCrossUp : BotManeuver
 public sealed class BulldogLowPoke : BotManeuver
 {
     public float Reach = 46f;
+    // CrouchSlash's arc is 1.45 x the base radius: it connects out to ~70 px centre to
+    // centre, past every standing normal — the long poke at the edge of their reach.
+    public float PokeMin = 50f, PokeMax = 64f;
+    public float PokeUtility = 1.15f;
     public double MixLo = 0.36, MixHi = 0.52;
     private const int CrouchFrames = 3;
 
@@ -274,6 +279,7 @@ public sealed class BulldogLowPoke : BotManeuver
     {
         if (!v.Grounded || !BulldogKit.CanAttack(v)) return 0f;
         float ax = MathF.Abs(v.Dx);
+        if (ax >= PokeMin && ax <= PokeMax && MathF.Abs(v.Dy) <= 20f) return PokeUtility;
         if (ax > Reach) return 0f;
         if (v.Dy > 6f && v.Dy < 30f) return 1.1f;
         if (MathF.Abs(v.Dy) > 20f || _s.TargetHelpless) return 0f;
@@ -292,56 +298,50 @@ public sealed class BulldogLowPoke : BotManeuver
     }
 }
 
-// Parry, but only what a parry can catch. The stance comes up ReactionFrames + 1 after
-// the opponent's swing starts and is perfect for ~7 frames, so a 5-frame jab has always
-// landed by then — raising guard against one just forfeits our turn. Slow, committal
-// moves (stab, hammer, down-air, pulse, the S3 finisher) are caught, and the counter
-// (GuardRetaliate) is a free hit. Otherwise as the stock GuardManeuver.
-public sealed class BulldogGuard : BotManeuver
+// Combo breaker. Hit by an opener (S1 / AirSlash1, as we saw the opponent swing it),
+// the follow-up arrives on the combo rhythm: ~16 frames after the first hit. Guard may
+// come up with up to 0.2 s of hitstun left, so raising the stance at hit+BreakAt puts
+// the 7-frame perfect window over the second hit, and the parry arms GuardRetaliate.
+// Keyed on our OWN hit clock plus the stale view of their action — a rhythm read, not
+// a reaction to the second swing.
+public sealed class BulldogBreaker : BotManeuver
 {
-    public float ThreatRange = 80f;
-    public int   MaxGuardFrames = 22, RetaliateFrames = 10;
+    public int BreakAt = 10, HoldFrames = 12, RetaliateFrames = 10;
+    public float Range = 70f;
 
-    private enum Phase { Guard, Retaliate }
-    private Phase _phase;
-    private int _t, _quiet;
+    private int _t;
+    private bool _ret;
 
-    public override int Cooldown => 20;
+    public override int Cooldown => 30;
     public override bool OwnsLocomotion => true;
 
-    public static bool IsSlowThreat(string a)
-        => a is "StabAction" or "AirHammerAction" or "DownAirSlash" or "PulseAction"
-              or "GroundSlash3" or "BurstAction";
+    private static bool Opener(string a) => a is "GroundSlash1" or "GroundSlash2" or "AirSlash1";
 
     public override float Score(BotView v)
     {
-        if (!v.Grounded) return 0f;
         var c = v.Self.Combat;
-        if (c.GuardBroken || c.GuardOnCooldown(v.SelfFrame)) return 0f;
-        if (c.HitstunActive || c.StunActive || c.GrabbedActive) return 0f;
-        if (v.Dist > ThreatRange) return 0f;
-        if (!IsSlowThreat(v.TargetAction)) return 0f;
-        return 1.5f;
+        if (!c.HitstunActive || c.StunActive || c.GrabbedActive || c.GuardBroken) return 0f;
+        if (v.FramesSinceHit != BreakAt && v.FramesSinceHit != BreakAt + 1) return 0f;
+        if (c.GuardOnCooldown(v.SelfFrame)) return 0f;
+        if (!Opener(v.TargetAction) || v.Dist > Range) return 0f;
+        return 5f;
     }
 
-    public override void Begin(BotView v) { _phase = Phase.Guard; _t = 0; _quiet = 0; }
+    public override void Begin(BotView v) { _t = 0; _ret = false; }
 
     public override bool Step(BotView v, ref PlayerInput input)
     {
         var c = v.Self.Combat;
-        if (_phase == Phase.Guard)
+        if (!_ret && c.GuardCharged) { _ret = true; _t = 0; }
+        if (_ret)
         {
-            if (c.GuardCharged) { _phase = Phase.Retaliate; _t = 0; return Step(v, ref input); }
-            input.Shift = true;
+            if (!c.GuardCharged) return false;
+            input.LeftClick = _t % 5 == 0;
             _t++;
-            _quiet = IsSlowThreat(v.TargetAction) ? 0 : _quiet + 1;
-            if (_t > 3 && !c.GuardActive) return false;
-            if (_t > 6 && _quiet >= 6) return false;
-            return _t < MaxGuardFrames;
+            return _t < RetaliateFrames;
         }
-        if (!c.GuardCharged) return false;
-        input.LeftClick = _t % 2 == 0;
+        input.Shift = true;
         _t++;
-        return _t < RetaliateFrames;
+        return _t < HoldFrames;
     }
 }
