@@ -41,6 +41,18 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   grab start / hold / throw / whiff (drafted with the sprite-anim skill, then wired into
   GrabAction) + a debug grab-box overlay when DebugDrawHitboxes is on. Opus worktree agent.
 
+- [~] **D** (added 2026-11-03, before the user went to bed) Duelist league: three Opus
+  agents each build a P2 bot with a distinct playstyle — Rushdown, Terrain zoner /
+  fortress, Counter-fighter / footsies — under `Net/Bot/Duelists/<Name>/`, exposing a
+  `DuelBot Create`. Harness: `Net/Bot/BotDuel.cs` @82e726f (arenas hall_close / hall_far /
+  plain_close on the shipped duel stages; 60 s bouts; kills, then ≥ 0.5 HP damage margin;
+  round robin plays both sides). Supervisor's job when all three land: audit each for the
+  rules in their brief (raw input, ≤ ~12 presses/s, opponent info only via BotView's
+  ≥ 6-frame-delayed view or the HUD's HP, no shared/game-code edits, no degenerate
+  stalling, determinism), patch or disqualify violations, merge, run the round robin over
+  all arenas × ≥ 6 seeds (+ the Brawler as a reference entrant), and write the results
+  to `Plans/DUELIST_LEAGUE.md`.
+
 ## Decisions (user, 2026-11-02)
 
 - Spiked wave input: same gesture as eruption. With spikes selected, RMB held inside
