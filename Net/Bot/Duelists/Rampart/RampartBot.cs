@@ -34,9 +34,10 @@ public sealed class RampartBot : IRemoteInputSource
     public BotManeuver Active => _active;
     public readonly Dictionary<string, int> Starts = new();
     public readonly RampartSense Sense = new();
+    public readonly HashSet<string> Disabled = new();   // ablation (tests)
     // Diagnostics (tests/tuning): opponent HP lost / own HP lost, credited to the
     // maneuver that started most recently (within CreditFrames), else "-".
-    public readonly Dictionary<string, float> Dealt = new(), Taken = new();
+    public readonly Dictionary<string, float> Dealt = new(), Taken = new(), DealtBySize = new();
     private const int CreditFrames = 90;
     private string _lastName = "-";
     private float _tHp = -1f, _myHp = -1f;
@@ -68,18 +69,17 @@ public sealed class RampartBot : IRemoteInputSource
         _maneuvers = new List<BotManeuver>
         {
             new EscapeGrabManeuver(),
-            new GuardManeuver(),
+            new RampartGuard(),
             new RampartPulse(s),
             new SlashManeuver(),
             new StabManeuver(),
             new RampartEnclose(s),
             new RampartCrystalWave(s),
             new RampartAvalancheCrush(s),
-            new EruptionManeuver(),
             new RampartWallUp(s),
             new RampartSpikeMoat(s),
-            new BlockThrowManeuver(),
             new RampartBackoff(s),
+            new BreachManeuver(),
         };
     }
 
@@ -90,7 +90,7 @@ public sealed class RampartBot : IRemoteInputSource
         var input = new PlayerInput { MouseWorldPosition = v.TargetPos };
 
         float damage = v.Self.Combat.DamageTaken;
-        if (damage < _lastDamage) _lastDamage = 0f;     // respawned
+        if (damage < _lastDamage) { _lastDamage = 0f; Sense.HomeSet = false; }   // respawned: new fort at the spawn
         if (damage > _lastDamage && _active != null) { _active.Abort(v, ref input); Finish(); }
         _lastDamage = damage;
 
@@ -102,7 +102,7 @@ public sealed class RampartBot : IRemoteInputSource
             BotManeuver best = null; float bestScore = 0f;
             foreach (var m in _maneuvers)
             {
-                if (m.CooldownLeft > 0) continue;
+                if (m.CooldownLeft > 0 || Disabled.Contains(m.Name)) continue;
                 float sc = m.Score(v);
                 if (sc > bestScore) { best = m; bestScore = sc; }
             }
@@ -132,7 +132,7 @@ public sealed class RampartBot : IRemoteInputSource
     {
         float th = v.Target.Health, mh = v.Self.Health;
         string who = _sinceManeuver <= CreditFrames || _active != null ? _lastName : "-";
-        if (_tHp >= 0f && th < _tHp) Dealt[who] = Dealt.GetValueOrDefault(who) + (_tHp - th);
+        if (_tHp >= 0f && th < _tHp) { Dealt[who] = Dealt.GetValueOrDefault(who) + (_tHp - th); string k = $"{_tHp - th:F2}"; DealtBySize[k] = DealtBySize.GetValueOrDefault(k) + 1; }
         if (_myHp >= 0f && mh < _myHp) Taken[who] = Taken.GetValueOrDefault(who) + (_myHp - mh);
         _tHp = th; _myHp = mh;
     }
@@ -175,6 +175,7 @@ public sealed class RampartBot : IRemoteInputSource
         Sense.TargetGrounded = _gnd[now];
         Sense.TargetHelpless = _hlp[now];
         Sense.Cornered       = Cornered(v, -v.Toward);
+        UpdateHome(v);
         return v;
     }
 
@@ -193,13 +194,43 @@ public sealed class RampartBot : IRemoteInputSource
         return false;
     }
 
+    // Fort locomotion: hold the home column (where the spike carpet is), step back onto
+    // it when knocked off. Home only moves when the opponent stays out of reach: after
+    // AdvanceFrames beyond AdvanceGap the fort relocates toward them (a fortress that
+    // never engages is a stall, not a strategy).
+    public float HomeSlack    = 0.6f * Chunk.TileSize;
+    public float AdvanceGap   = 16f * Chunk.TileSize;
+    public int   AdvanceFrames = 90;
+    public float AdvanceTo    = 10f * Chunk.TileSize;
+    private int  _farFrames;
+
+    private void UpdateHome(BotView v)
+    {
+        var s = Sense;
+        if (!s.HomeSet)
+        { s.HomeX = v.Me.X; s.HomeSet = true; }
+        float adx = MathF.Abs(v.Dx);
+        float closing = -s.TargetVelSmooth.X * v.Toward;   // px/s, + = coming at us
+        // Out of reach and NOT coming: go to them (in a step, re-planting each time).
+        _farFrames = adx > AdvanceGap && closing < 15f ? _farFrames + 1 : 0;
+        if (_farFrames > AdvanceFrames && v.Grounded)
+        {
+            s.HomeX = v.TargetPos.X - v.Toward * AdvanceTo;
+            _farFrames = 0;
+        }
+        // Walking out to them and they started coming: plant the fort right here, so the
+        // carpet has time to grow before they arrive.
+        if (adx > 9f * Chunk.TileSize && closing > 30f && v.Grounded
+            && MathF.Abs(s.HomeX - v.Me.X) > 2f * Chunk.TileSize)
+            s.HomeX = v.Me.X;
+    }
+
     private void Locomote(BotView v, ref PlayerInput input)
     {
-        float adx = MathF.Abs(v.Dx);
-        int dir = 0;
-        if (adx > BandMax) dir = v.Toward;
-        else if (adx < BandMin && !Sense.Cornered) dir = -v.Toward;
-        else if (adx < BandMin && Sense.Cornered && adx > 3f * Chunk.TileSize) dir = 0;   // hold the corner
+        float off = Sense.HomeX - v.Me.X;
+        int dir = MathF.Abs(off) > HomeSlack ? (off > 0 ? 1 : -1) : 0;
+        // Don't walk INTO a target that is standing between us and home: fight it there.
+        if (dir == v.Toward && MathF.Abs(v.Dx) < 3f * Chunk.TileSize) dir = 0;
         if (dir != 0) BotInput.Move(ref input, dir);
 
         if (dir != 0 && MathF.Abs(v.MyVel.X) < StuckSpeed) _stuck++; else _stuck = 0;
@@ -221,4 +252,6 @@ public sealed class RampartSense
     public bool    TargetHelpless;
     public Vector2 TargetVelSmooth;
     public bool    Cornered;   // a wall right behind us (away from the opponent)
+    public float   HomeX;      // the fort's column (world x)
+    public bool    HomeSet;
 }

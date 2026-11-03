@@ -44,8 +44,12 @@ public sealed class RampartWallUp : BotManeuver
     public float MaxRange   = 9f * Chunk.TileSize;
     public float ApproachSpeed = 30f;                  // perceived closing speed (px/s) that counts as "coming at me"
     public int   Height     = 5;                       // tiles; 55 px > a standing body + its stepping reach
+    // Rampart: a crystal wave rides the first air rows and shatters on any foreign solid in
+    // its path, so a low kerb stops it — and stays jumpable, so neither side is walled in.
+    public int   CrystalHeight = 2;
     public float LeadSeconds = 0.25f;                  // how far ahead the target's box is predicted (reaction lag + build time)
     public int   MaxFrames  = 45;
+    public float ApproachUtility = 0f;   // Rampart: no plain approach walls (they hand the opponent a climb over us)
     public override int Cooldown => 180;
     public override bool OwnsLocomotion => true;
 
@@ -99,7 +103,7 @@ public sealed class RampartWallUp : BotManeuver
         if (CrystalThreat(v, CrystalThreatRange, CrystalThreatVertical, out int cdir, out float cx))
         {
             var cm = v.Self.Abilities.Meters;
-            if (cm.BuildMove + cm.EruptMove >= Height * MaterialStrengths.BuildCostFor(TileType.Stone)
+            if (cm.BuildMove + cm.EruptMove >= CrystalHeight * MaterialStrengths.BuildCostFor(TileType.Stone)
                 && TryPickColumn(v, cdir, cx, out _, out _))
                 return CrystalUtility;
         }
@@ -119,7 +123,7 @@ public sealed class RampartWallUp : BotManeuver
 
         if (charging) return 1.3f;
         if (lowHp)    return 1.2f;
-        return 0.4f;
+        return ApproachUtility;
     }
 
     // The wall column and its ground row. Starts at the first column clear of our own
@@ -166,7 +170,7 @@ public sealed class RampartWallUp : BotManeuver
                 && TryPickColumn(v, cdir, cx, out _column, out ground);
         bool picked = _crystal || TryPickColumn(v, v.Toward, v.TargetPos.X, out _column, out ground);
         if (picked)
-            BarrierPlanner.AddColumn(v, _layer.Cells, _column, ground, ground - Height, depth: 0);
+            BarrierPlanner.AddColumn(v, _layer.Cells, _column, ground, ground - (_crystal ? CrystalHeight : Height), depth: 0);
     }
 
     public override bool Step(BotView v, ref PlayerInput input)

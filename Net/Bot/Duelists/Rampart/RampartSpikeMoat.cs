@@ -18,15 +18,15 @@ public sealed class RampartSpikeMoat : BotManeuver
     private readonly RampartSense _s;
     public RampartSpikeMoat(RampartSense s) => _s = s;
 
-    public int   NearTiles  = 2;     // first moat column past our body edge
+    public int   NearTiles  = 1;     // first moat column past our body edge
     public int   FarTiles   = 5;     // last (build reach ~5.8 tiles)
-    public float MinGap     = 4f * Chunk.TileSize;   // they must still be beyond the moat
-    public float MaxGap     = 16f * Chunk.TileSize;
-    public int   MinCells   = 2;     // not worth a pass for fewer
+    public float MinGap     = 6f * Chunk.TileSize;   // they must still be beyond the moat
+    public float MaxGap     = 60f * Chunk.TileSize;
+    public int   MinCells   = 1;     // not worth a pass for fewer
     public float ReserveBuild = 60f; // keep this much reservoir for walls/waves
-    public float Utility    = 0.75f;
+    public float Utility    = 0.85f;
     public int   MaxFrames  = 60;
-    public override int Cooldown => 75;
+    public override int Cooldown => 30;
     public override bool OwnsLocomotion => true;
 
     private readonly BarrierLayer _layer = new();
@@ -39,7 +39,7 @@ public sealed class RampartSpikeMoat : BotManeuver
     {
         if (!v.Grounded) return 0f;
         float adx = MathF.Abs(v.Dx);
-        if (adx < MinGap || adx > MaxGap || MathF.Abs(v.Dy) > 3f * Chunk.TileSize) return 0f;
+        if (adx < MinGap || adx > MaxGap || MathF.Abs(v.Dy) > 6f * Chunk.TileSize) return 0f;
         var m = v.Self.Abilities.Meters;
         if (m.Build < ReserveBuild) return 0f;
         if (m.BuildMove + m.EruptMove < MaterialStrengths.SpikeBuildCost) return 0f;
@@ -48,16 +48,26 @@ public sealed class RampartSpikeMoat : BotManeuver
         return Utility;
     }
 
-    // Floor cells toward `dir`, NearTiles..FarTiles past our body edge, unspiked, in reach,
-    // and clear of the opponent's (perceived) body box.
+    // Floor cells around the fort: toward `dir` NearTiles..FarTiles past our body edge,
+    // then BackTiles behind us — unspiked, in reach, clear of the opponent's body box.
+    public int BackTiles = 3;
     private void Plan(BotView v, int dir)
     {
         _cells.Clear();
+        if (MathF.Abs(v.Me.X - _s.HomeX) > 0.8f * Chunk.TileSize) return;   // only at the fort
         var me = BarrierPlanner.BodyBox(v, v.Me, 0f);
         if (me.groundRow < 0) return;
         var them = BarrierPlanner.BodyBox(v, v.TargetPos, 3f);
+        Side(v, dir, NearTiles, FarTiles, me, them);
+        Side(v, -dir, 1, BackTiles, me, them);
+    }
+
+    private void Side(BotView v, int dir, int k0, int k1,
+                      (int minX, int maxX, int minY, int maxY, int groundRow) me,
+                      (int minX, int maxX, int minY, int maxY, int groundRow) them)
+    {
         int edge = dir > 0 ? me.maxX : me.minX;
-        for (int k = NearTiles; k <= FarTiles; k++)
+        for (int k = k0; k <= k1; k++)
         {
             int gx = edge + dir * k;
             if (gx >= them.minX - 1 && gx <= them.maxX + 1) break;
