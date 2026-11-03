@@ -108,7 +108,7 @@ public sealed class WallUpManeuver : BotManeuver
 
         // Closing speed toward us (positive = approaching).
         float closing = -v.TargetVel.X * v.Toward;
-        bool charging = RangedCharges.Contains(v.Target.CurrentActionName);
+        bool charging = RangedCharges.Contains(v.TargetAction);
         bool lowHp    = v.Self.Health < 0.5f * v.Self.MaxHealth;
         if (!charging && closing < ApproachSpeed) return 0f;
 

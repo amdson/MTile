@@ -45,6 +45,8 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
     // Ring of past target positions for the reaction delay.
     private readonly Vector2[] _seen = new Vector2[32];
     private readonly string[]  _seenAction = new string[32];
+    // Packed visible state per sample: bit0 grounded, bit1 grabbed, bit2 helpless.
+    private readonly byte[]    _seenFlags  = new byte[32];
     private int _seenCount;
 
     private BotManeuver _active;
@@ -166,9 +168,17 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
 
         _seen[_seenCount % _seen.Length]       = v.Target.Body.Position;
         _seenAction[_seenCount % _seen.Length] = v.Target.CurrentActionName;
+        var tc = v.Target.Combat;
+        _seenFlags[_seenCount % _seen.Length]  = (byte)((v.Target.IsGrounded ? 1 : 0)
+                                                      | (tc.GrabbedActive ? 2 : 0)
+                                                      | (tc.HitstunActive || tc.StunActive || tc.GrabbedActive ? 4 : 0));
         _seenCount++;
         v.TargetPos    = Seen(ReactionFrames);
         v.TargetAction = _seenAction[SeenIndex(ReactionFrames)];
+        byte fl = _seenFlags[SeenIndex(ReactionFrames)];
+        v.TargetGrounded = (fl & 1) != 0;
+        v.TargetGrabbed  = (fl & 2) != 0;
+        v.TargetHelpless = (fl & 4) != 0;
         v.TargetVel = (_seenCount > ReactionFrames + 1)
             ? (v.TargetPos - Seen(ReactionFrames + 1)) / Simulation.FixedDt
             : Vector2.Zero;

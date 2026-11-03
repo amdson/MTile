@@ -77,7 +77,7 @@ public sealed class AvalancheChargeManeuver : BotManeuver
         if (!v.Grounded) return 0f;
         float adx = MathF.Abs(v.Dx);
         if (adx < MinRange || adx > MaxRange || MathF.Abs(v.Dy) > VerticalReach) return 0f;
-        if (!v.Target.IsGrounded || !v.LineOfSight()) return 0f;
+        if (!v.TargetGrounded || !v.LineOfSight()) return 0f;
         bool fleeing = v.TargetVel.X * v.Toward >= FleeSpeed;
         float u = fleeing ? ChaseUtility : StaticUtility;
         if (u <= 0f) return 0f;

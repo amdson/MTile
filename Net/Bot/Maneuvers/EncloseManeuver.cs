@@ -56,11 +56,10 @@ public sealed class EncloseManeuver : BotManeuver
 
     public override float Score(BotView v)
     {
-        if (!v.Grounded || !v.Target.IsGrounded) return 0f;
+        if (!v.Grounded || !v.TargetGrounded) return 0f;
         if (MathF.Abs(v.Dx) > EngageRange || MathF.Abs(v.Dy) > Chunk.TileSize) return 0f;
 
-        var c = v.Target.Combat;
-        bool helpless = c.StunActive || c.HitstunActive;
+        bool helpless = v.TargetHelpless;
         bool still    = v.TargetVel.LengthSquared() < StillSpeed * StillSpeed;
         if (!helpless && !still) return 0f;
 
