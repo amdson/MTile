@@ -34,7 +34,7 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   barricade), dumping remaining mass at the face; ball remembers its own wave's cells.
   Plus: crush damage for NON-riders pinned between a wave and a wall should be
   significant. Watch `BotManeuverAvalancheRideTests` (rides gain height off cliffs).
-- [ ] **7** Spiked avalanche (crystal wave) — see decisions below and todo.txt #7.
+- [~] **7** (Opus worktree agent) Spiked avalanche (crystal wave) — see decisions below and todo.txt #7.
   Then bot hookup: WallUpManeuver threat check + a launch maneuver.
 
 ## Decisions (user, 2026-11-02)
