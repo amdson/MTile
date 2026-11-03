@@ -251,12 +251,6 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/stab_01.ogg;Sounds/stab_01.xnb
 
-#begin ../Assets/Sounds/stab_02.ogg
-/importer:OggImporter
-/processor:SoundEffectProcessor
-/processorParam:Quality=Best
-/build:../Assets/Sounds/stab_02.ogg;Sounds/stab_02.xnb
-
 #begin ../Assets/Sounds/swing_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor
@@ -280,12 +274,6 @@
 /processor:SoundEffectProcessor
 /processorParam:Quality=Best
 /build:../Assets/Sounds/swing_heavy_01.ogg;Sounds/swing_heavy_01.xnb
-
-#begin ../Assets/Sounds/swing_heavy_02.ogg
-/importer:OggImporter
-/processor:SoundEffectProcessor
-/processorParam:Quality=Best
-/build:../Assets/Sounds/swing_heavy_02.ogg;Sounds/swing_heavy_02.xnb
 
 #begin ../Assets/Sounds/terrain_strike_01.ogg
 /importer:OggImporter

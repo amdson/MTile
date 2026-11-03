@@ -37,12 +37,10 @@ screen should carry that name too.
 | `land_03.ogg` | impactfall1.flac | [Bone, Fall, Ledge Climbing, Impact (Yo Frankie!)](https://opengameart.org/content/bone-fall-ledge-climbing-impact-yo-frankie) | [lamoot](https://opengameart.org/users/lamoot) | CC-BY 3.0 |
 | `respawn_01.ogg` | 172206__fins__teleport.wav | [Teleport](https://opengameart.org/content/teleport) | [diligentcircle](https://opengameart.org/users/diligentcircle) | CC0 |
 | `stab_01.ogg` | swosh-04.flac | [Swish - bamboo stick weapon swhoshes](https://opengameart.org/content/swish-bamboo-stick-weapon-swhoshes) | [qubodup](https://opengameart.org/users/qubodup) | CC0 |
-| `stab_02.ogg` | swish-2.wav | [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
 | `swing_01.ogg` | swish-13.wav | [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
 | `swing_02.ogg` | swish-12.wav | [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
 | `swing_03.ogg` | swish-11.wav | [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
 | `swing_heavy_01.ogg` | Single_Fantasy SFX Pack Vol 1_Heavy Sword_Swing_02.wav | [JC Sounds - Fantasy SFX Pack Vol 1](https://opengameart.org/content/jc-sounds-fantasy-sfx-pack-vol-1) | [jc-sounds](https://opengameart.org/users/jc-sounds) | CC-BY 4.0 |
-| `swing_heavy_02.ogg` | swish-2.wav | [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
 | `terrain_strike_01.ogg` | bfh1_rock_hit_01.ogg | [75 CC0 breaking / falling / hit sfx](https://opengameart.org/content/75-cc0-breaking-falling-hit-sfx) | [rubberduck](https://opengameart.org/users/rubberduck) | CC0 |
 | `tile_break_02.ogg` | rock_break_0.ogg | [Breaking Rock](https://opengameart.org/content/breaking-rock) | [themightyglider](https://opengameart.org/users/themightyglider) | CC0 |
 | `wall_scrape_01.ogg` | scrape-2.ogg | [Scrapes](https://opengameart.org/content/scrapes) | [antumdeluge](https://opengameart.org/users/antumdeluge) | CC0 |
