@@ -30,6 +30,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // Spike crystals still seeding/flashing (todo.txt #8): promoted into Spikes on their
     // first Grown frame by TickSprouts. Harmless until then. Cleared on break like Spikes.
     public readonly TileSpikeSeeds SpikeSeeds = new();
+    // The crystal wave (todo.txt #7): requested / seeded / grown crystals, keyed by cell.
+    // Crystal cells stay EMPTY in the grid — see CrystalWaveField.
+    public readonly CrystalWaveField Crystals = new();
 
     // Per-cell accumulated impact impulse, with decay. PhysicsWorld routes
     // contact impulses through this so a spring-padded landing (player) accrues
@@ -109,6 +112,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     private void WriteTile(Chunk chunk, int tx, int ty, TileState state, TileType type, TileSproutNode sprout)
     {
         ref var t = ref chunk.Tiles[tx, ty];
+        // Real terrain claiming a cell evicts a crystal there (a wall raised across a
+        // pending wave cuts it). Crystals are value-snapshotted, so a rewind restores them.
+        if (state != TileState.Empty && Crystals.Count > 0)
+            Crystals.Remove(chunk.ChunkPos.X * Chunk.Size + tx, chunk.ChunkPos.Y * Chunk.Size + ty);
         _journal.RecordTileWrite(chunk.ChunkPos, tx, ty, t.State, t.Type);
         TerrainHash ^= CellHash(chunk.ChunkPos, tx, ty, t.State, t.Type);   // out with the old
         t.State  = state;
@@ -420,6 +427,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 // Supported but not due: park stamped. The due-scan re-derives
                 // SolidFaces at promotion time, so support changes in the gap
                 // are honoured.
+                Crystals.Remove(gtx, gty);
                 var parked = Graph.AddPending(chunkPos, tx, ty, gtx, gty);
                 parked.Type        = type;
                 parked.WaveId      = wave;
@@ -449,6 +457,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // Pending nodes don't touch tile state — they're invisible to the world.
         // Chunk auto-creation deferred to promotion. Type is stamped on the node
         // so it survives the Pending→Growing handoff.
+        Crystals.Remove(gtx, gty);   // a requested tile owns the cell (see WriteTile)
         var pending = Graph.AddPending(chunkPos, tx, ty, gtx, gty);
         pending.Type        = type;
         pending.WaveId      = wave;
@@ -470,6 +479,17 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         var st = GetCellState(gtx, gty);
         if (st == TileState.Empty) return false;
         return !Waves.IsWaveCell(wave, gtx, gty);
+    }
+
+    // Crystal-wave counterpart of TryRequestTile (todo.txt #7), called by TileMassField
+    // for a crystal wave's commits. A crystal needs OPEN space: empty terrain with no
+    // sprout node (Pending ghosts included) and no crystal already there. Support and
+    // seeding are CrystalWaveField.TryRequest's call. Never touches the tile grid.
+    public bool TryRequestCrystal(int gtx, int gty, EntityId wave)
+    {
+        if (GetCellState(gtx, gty) != TileState.Empty) return false;
+        if (Graph.TryGet(gtx, gty, out _)) return false;
+        return Crystals.TryRequest(this, gtx, gty, wave, TerrainFrame);
     }
 
     // True iff TryRequestTile would create a node here: the cell is free AND has
@@ -553,6 +573,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         // Spike seeds that finished seed+flash become real spike overlays this frame
         // (before SpikeContactSystem runs later in the step, so a grown spike bites at once).
         SpikeSeeds.Tick(TerrainFrame, Spikes);
+        // Crystal wave front: pending crystals beside a grown one seed this frame.
+        Crystals.Tick(this, TerrainFrame);
 
         Foam.Tick(dt, _breakCellAction);
         // Bleed stale partial build mass so the table stays bounded (see TileMassField).
@@ -874,6 +896,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Charge      = Charge.Capture(),
         Spikes      = Spikes.Capture(),
         SpikeSeeds  = SpikeSeeds.Capture(),
+        Crystals    = Crystals.Capture(),
         Foam        = Foam.Capture(),
         Impact      = Impact.Capture(),
         Mass        = Mass.Capture(),
@@ -896,6 +919,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Charge.Restore(s.Charge);
         Spikes.Restore(s.Spikes);
         SpikeSeeds.Restore(s.SpikeSeeds);
+        Crystals.Restore(s.Crystals);
         Foam.Restore(s.Foam);
         Impact.Restore(s.Impact);
         Mass.Restore(s.Mass);

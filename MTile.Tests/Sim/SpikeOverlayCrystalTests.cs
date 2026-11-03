@@ -140,14 +140,17 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         var target = new Vector2(60f + T, FloorTop + 0.5f * T);
         int gx = CellX(target.X);
         sim.Step(new PlayerInput { Num5 = true, MouseWorldPosition = target });
-        sim.Step(new PlayerInput { RightClick = true, MouseWorldPosition = target });
+        // Shift+RMB: the press-frame spike path. Plain RMB with spikes selected defers
+        // the spike to tell a tap from a crystal-wave charge (todo.txt #7;
+        // SpikeOverlayCrystalWaveTests covers that gesture).
+        sim.Step(new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target });
         Assert.True(sim.Chunks.SpikeSeeds.Has(gx, FloorRow));
         Assert.False(sim.Chunks.Spikes.IsSpiked(gx, FloorRow));
 
         // Holding RMB over a seeded cell doesn't re-seed or re-charge.
         var m = sim.Player.Abilities.Meters;
         float hold0 = m.BuildMove + m.EruptMove + m.Build;
-        for (int f = 0; f < 10; f++) sim.Step(new PlayerInput { RightClick = true, MouseWorldPosition = target });
+        for (int f = 0; f < 10; f++) sim.Step(new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target });
         Assert.True(m.BuildMove + m.EruptMove + m.Build >= hold0 - 1e-3f);
 
         for (int f = 0; f < CrystalLifecycle.SpikePlacement.FramesToGrown; f++) sim.Step(default);

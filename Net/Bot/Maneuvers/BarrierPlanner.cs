@@ -115,7 +115,7 @@ internal static class BarrierPlanner
     }
 }
 
-// Feeds an ordered cell list to the game as Shift+RMB placements (or plain RMB spike
+// Feeds an ordered cell list to the game as Shift+RMB placements (or Shift+RMB spike
 // overlays when `spikes` is set), one cell per frame. The owner keeps calling Step until
 // it reports Done; it reports Stalled when the plan has stopped making progress so the
 // maneuver can bail out instead of holding RMB forever.
@@ -191,7 +191,11 @@ internal sealed class BarrierLayer
         if (meters.BuildMove + meters.EruptMove < cost) return Status.Placing;
 
         input.RightClick = true;
-        if (!Spikes) input.Shift = true;
+        // Shift for spikes too: Shift+RMB is the deliberate one-overlay-per-cell path.
+        // Plain RMB with spikes selected is BlockPaintAction's spike mode, which defers a
+        // press until it knows the hold isn't a crystal-wave charge (todo.txt #7) — a
+        // bot re-aiming one cell for several frames would read as a charge there.
+        input.Shift = true;
         _tries++;
         return Status.Placing;
     }

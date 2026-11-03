@@ -52,6 +52,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     // Spike-overlay contact damage (BLOCK_OWNERSHIP_SPIKES §2). Instance-owned like
     // _combat: its per-victim cooldown table is cross-frame sim state (snapshotted).
     private readonly SpikeContactSystem _spikes = new();
+    // Crystal-wave contacts (todo.txt #7): push-out while forming, damage when grown.
+    // Stateless across frames (the per-wave tally lives in ChunkMap.Crystals).
+    private readonly CrystalContactSystem _crystals = new();
     // Single deterministic HitId source shared by all players + entities.
     private readonly HitIdAllocator _hitIds = new();
 
@@ -612,6 +615,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         _spikes.Apply(_chunks, _hurtboxes, ResolveHittable,
             id => _world.Has<PhysicsBodyComponent>(id) ? _world.Get<PhysicsBodyComponent>(id).Body : null,
             _hitIds, _frame, Coop);
+        // Crystal waves: same slot and reasoning as the spikes above.
+        _crystals.Apply(_chunks, _hurtboxes, ResolveHittable,
+            id => _world.Has<PhysicsBodyComponent>(id) ? _world.Get<PhysicsBodyComponent>(id).Body : null,
+            _hitIds, Coop);
 
         // Charged blocks destroyed anywhere in this Step arm their blast. Drained HERE,
         // at the very end, because the step breaks tiles in three different places —
@@ -713,6 +720,24 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         foreach (var d in _chunks.SpikeSeeds.Entries)
             t ^= CellF(d.Key.gtx, d.Key.gty, d.Value.SeededFrame,
                        0x09 ^ ((ulong)(byte)d.Value.Side.Faction << 8) ^ ((ulong)(uint)d.Value.Side.Team << 16));
+        // Crystal wave (todo.txt #7). Cells: the seed frame is the clock (value slot);
+        // request frame, wave, base face and the root/broken flags ride the salt. Salts
+        // 0x0B-0x0D are this feature's.
+        foreach (var d in _chunks.Crystals.Entries)
+        {
+            var c = d.Value;
+            t ^= CellF(d.Key.gtx, d.Key.gty, c.SeededFrame,
+                       0x0B ^ ((ulong)(uint)c.RequestFrame << 8) ^ ((ulong)(uint)c.Wave.Index << 32)
+                            ^ ((ulong)(byte)c.Base << 48) ^ ((c.Root ? 1UL : 0UL) << 56)
+                            ^ ((ulong)(uint)(c.BrokenFrame + 1) * 0x9E3779B1UL)
+                            ^ ((ulong)(byte)c.Side.Faction << 60));
+        }
+        foreach (var d in _chunks.Crystals.TallyEntries)
+            t ^= CellF(d.Key.wave.Index, d.Key.victim.Index, d.Value.Dealt,
+                       0x0C ^ ((ulong)(uint)d.Value.LastHitFrame << 16));
+        foreach (var d in _chunks.Crystals.WaveEntries)
+            t ^= CellF(d.Key.Index, d.Key.Generation, d.Value.LastTouch,
+                       0x0D ^ ((ulong)(byte)d.Value.Side.Faction << 8) ^ ((ulong)(uint)d.Value.Side.Team << 16));
         // Spike contact cooldowns (per-victim last-hit frame).
         foreach (var d in _spikes.Cooldowns)
             t ^= CellF(d.Key.Index, d.Key.Generation, d.Value, 0x07);

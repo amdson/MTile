@@ -19,7 +19,7 @@ namespace MTile.Net;
 //   2. Blocks: Shift+RMB with Num1 (stone) held, cursor hopping one planned cell per frame
 //      — each wall bottom-up (support), then the lid from both ends inward (each lid
 //      cell is supported by the one before it).
-//   3. Spikes: Num5 held, RMB, cursor on the floor cells under the body, then the lid
+//   3. Spikes: Num5 held, Shift+RMB, cursor on the floor cells under the body, then the lid
 //      cells over it. Spikes need SOLID under them, so this pass naturally lags the
 //      blocks by SproutLifetime; the layer retries until they finalize.
 //      A placed spike only SEEDS (todo.txt #8): it grows into a damaging spike
