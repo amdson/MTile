@@ -227,6 +227,8 @@ public class PlayerCharacter : IHittable
         _abilities.Combat.AddDamage(hpLoss);
         _lastDamageFrame = _frame;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
+        // How hard this hit actually moves us, px/s — what armor, stun and hitstun read.
+        float dv = res.TargetDeltaV.Length();
 
         // Superarmor (Plans/HIT_AIRLOCK_PLAN.md §4): the live action may tank
         // hits below its armor threshold. Percent still accrued above (armor
@@ -234,7 +236,7 @@ public class PlayerCharacter : IHittable
         // way down and the hit never REGISTERS — no hitstun, no stun, and
         // therefore no flinch eviction (RecoveryAction keys off LastHitFrame).
         float armor = _currentAction?.ArmorProfile(in _actionVars) ?? 0f;
-        if (armor > 0f && res.Strength < armor)
+        if (armor > 0f && dv < armor)
         {
             AddKnockback(res.TargetDeltaV * ArmorKnockbackScale * guard.KnockbackScale);
             return res.Impulse;
@@ -261,9 +263,9 @@ public class PlayerCharacter : IHittable
         // Strength rides the same knockback share: it IS the knockback magnitude
         // (pre-mass), so leaving it whole while halving the actual velocity change
         // would stun the victim as if nothing had been blocked.
-        _abilities.Combat.OnHitRegistered(_frame, res.Strength * guard.KnockbackScale, _dt,
+        _abilities.Combat.OnHitRegistered(_frame, dv * guard.KnockbackScale, _dt,
                                           hit.HitstunSecondsOverride,
-                                          hitstopStrength: HitResolver.NominalStrength(in hit));
+                                          hitstopStrength: HitResolver.ImpactStrength(res.Impulse));
         return res.Impulse;
     }
 

@@ -526,6 +526,22 @@ public class MovementConfig
     // pre-launch behavior). Sim-affecting; hot-reload is gated off in multiplayer.
     public float WhipKickLaunchDecay        { get; set; } = 1500f;
     public float ThrowLaunchDecay           { get; set; } = 1500f;
+
+    // ── Stab striker (StabAction primary box, Collision mode) ──────────────────────
+    // A heavy, slow virtual striker: Δv on the target = (1+e)·u·ms/(ms+mt), which tends
+    // to (1+e)·u as StabStrikeMassScale grows — the target can't be pushed much past the
+    // striker's own speed. Keep StabStrikeSpeed comfortably above the stun line's
+    // equivalent (dv 210 ⇒ ≈215 here) or the stab stops stunning. StabMinLaunch is the
+    // connect floor; it adds on top of a target's velocity, so it pokes through the cap.
+    // The launch carries StabLaunchImpactMass × the victim's impact mass (fading with
+    // it), so a stabbed body breaks walls as if heavier; the low decay keeps the velocity
+    // essentially "real".
+    public float StabStrikeSpeed            { get; set; } = 380f;
+    public float StabStrikeMassScale        { get; set; } = 8f;
+    public float StabRestitution            { get; set; } = 0.1f;
+    public float StabMinLaunch              { get; set; } = 60f;
+    public float StabLaunchDecay            { get; set; } = 100f;
+    public float StabLaunchImpactMass       { get; set; } = 4f;
     // The held victim's own steering (GrabbedState): a flat push along their held
     // direction, px/s². Limited by construction — the hold's tracker absorbs it, so in
     // the hold it shifts the victim by ≈ accel·(PlayerGrabSmoothTime/2)² (≈10px at

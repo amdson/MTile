@@ -128,7 +128,7 @@ public class Entity : IHittable
         // (CombatSystem), so both sides of the hit freeze for the same window — or,
         // below CombatState.BigHitStrength, neither does. Immovable and rooted bodies
         // have nothing to hold; grab erosion is exempt, as it is for the attacker.
-        LastHitStopSeconds = CombatState.HitstopSecondsFor(HitResolver.NominalStrength(in hit));
+        LastHitStopSeconds = CombatState.HitstopSecondsFor(HitResolver.ImpactStrength(res.Impulse));
         if (LastHitStopSeconds > 0f && Mass > 0f && !_rooted && hit.GrabStrengthDamage <= 0f)
         {
             int frames = SimFrames.FromSeconds(LastHitStopSeconds, Simulation.FixedDt);
@@ -138,7 +138,7 @@ public class Entity : IHittable
         LastHitDir = res.TargetDeltaV.LengthSquared() > 1e-4f
             ? Vector2.Normalize(res.TargetDeltaV)
             : hit.StrikeDir;
-        LastHitImpulse = res.Strength;
+        LastHitImpulse = res.TargetDeltaV.Length();   // dv, as the player's
         HitGeneration++;
 
         return res.Impulse;

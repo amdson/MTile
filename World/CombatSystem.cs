@@ -255,7 +255,7 @@ public sealed class CombatSystem
                     _entityHitsByHitId[hit.HitId] = prevHits + 1;
                     if (hit.GrabStrengthDamage <= 0f)
                     {
-                        float stop = CombatState.HitstopSecondsFor(HitResolver.NominalStrength(in hit));
+                        float stop = CombatState.HitstopSecondsFor(HitResolver.ImpactStrength(delivered));
                         _hitstopByHitId.TryGetValue(hit.HitId, out var curStop);
                         if (stop > curStop) _hitstopByHitId[hit.HitId] = stop;
                     }

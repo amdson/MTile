@@ -59,7 +59,7 @@ public sealed class HitFeelSystem
 
         // Same normalization GameAudio.HitConnect scales gain/pitch by, so a hit's
         // sound and its screen-space feel agree on what "big" means.
-        float t   = MathHelper.Min(c.LastHitImpulse / 900f, 1f);
+        float t   = MathHelper.Min(c.LastHitImpulse / 675f, 1f);
         var   pos = p.Body.Position;
 
         React(pos, c.LastHitDir, t, c.LastHitStopSeconds);
@@ -99,7 +99,7 @@ public sealed class HitFeelSystem
         if (e.HitGeneration == last) return;
         _lastHandledGeneration[e.Id] = e.HitGeneration;
 
-        float t = MathHelper.Min(e.LastHitImpulse / 900f, 1f);
+        float t = MathHelper.Min(e.LastHitImpulse / 675f, 1f);
         React(e.Body.Position, e.LastHitDir, t, e.LastHitStopSeconds);
     }
 

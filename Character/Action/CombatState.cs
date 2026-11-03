@@ -140,7 +140,7 @@ public class CombatState
     // of keeping full control out of the throw. Called by the throw field's onThrown.
     // No hitstop: the field fires every frame it acts, so a freeze would re-arm each
     // frame and the body hold would eat the fling the field is delivering.
-    private const float ThrowStunImpulse = 450f;   // > StunImpulseThreshold ⇒ stun + Tumble
+    private const float ThrowStunImpulse = 340f;   // ×0.75 with the dv stun line   // > StunImpulseThreshold ⇒ stun + Tumble
     public void RegisterThrown(int frame, float dt)
         => OnHitRegistered(frame, ThrowStunImpulse, dt, hitstop: false);
 
@@ -277,7 +277,10 @@ public class CombatState
     // Follow-up hits while hitstun is still active extend by only
     // HitstunExtensionScale × the fresh window — diminishing, so a true
     // stun-lock cannot grow unbounded (same principle as the old 8+4+4).
-    private const float HitstunSecondsPerImpulse = 0.0022f;
+    // Per px/s of the victim's dv (2026-11-02: was 0.0022 per unit of authored strength;
+    // ÷0.75, the dv an equal-mass e=0.5 collision delivers per unit of closing speed, so
+    // every collision-mode player attack keeps its hitstun).
+    private const float HitstunSecondsPerDv      = 0.00293f;
     private const float MinHitstunSeconds        = 0.10f;
     private const float MaxHitstunSeconds        = 0.70f;
     private const float HitstunExtensionScale    = 0.5f;
@@ -295,7 +298,16 @@ public class CombatState
     // slashes (60–80), CrouchSlash/AirTurn (200), AirSlash1/2 (150/230) and, by
     // design, every creature attack stay hitstun-only. A fast dive can still push
     // a swing over the line, which is speed earning the stun.
-    private const float StunImpulseThreshold = 280f;
+    //
+    // 2026-11-02: now compared against the victim's dv — how hard it was actually MOVED,
+    // so a heavy, slow strike stuns on what it does, not on its authored speed, and a
+    // heavy target is genuinely harder to stun. 280 → 210 (×0.75, an equal-mass e=0.5
+    // collision's dv per unit of closing speed) keeps every collision-mode player attack
+    // on the side of the line it was on. Impulse-mode hits (most creature attacks,
+    // projectiles, Pulse) now cross only at authored impulse ≥ 525 against a player:
+    // their dv there is impulse/2.5, and below that they are hitstun-only. Accepted by
+    // design — re-buff a specific one by raising its knockback.
+    private const float StunImpulseThreshold = 210f;
     private const float StunSeconds          = 0.6f;
 
     // Hitstop tuning. Deliberately much shorter than hitstun — this is a freeze-frame
@@ -307,7 +319,8 @@ public class CombatState
     // hitlag pass (2026-09-01, Lucina-anchored): Smash freezes BOTH bodies 5–14 frames
     // on every connect, and at the old floor a slash's 2-frame victim-only pause read
     // as nothing. A jab-tier hit now holds 4 frames; the launchers ~10.
-    private const float HitstopSecondsPerImpulse = 0.0005f;
+    // Per unit of HitResolver.ImpactStrength (2026-11-02: ÷0.75 with the move to it).
+    private const float HitstopSecondsPerImpulse = 0.000667f;
     public  const float MinHitstopSeconds        = 0.067f;
     public  const float MaxHitstopSeconds        = 0.167f;
 
@@ -317,7 +330,11 @@ public class CombatState
     // compute from the hitbox, so the two always agree. Set at the stun line (280), so
     // "freezes + shakes" and "stuns" are the same set of moves: Slash3, GuardRetaliate,
     // Stab, Pulse, a fast dive — the light slashes and creature attacks stay unfrozen.
-    public const float BigHitStrength = 280f;
+    //
+    // 2026-11-02: now compared against HitResolver.ImpactStrength — the delivered
+    // impulse in reference-player dv units — rather than the authored strength, so
+    // hitting a heavy body hard freezes harder. 280 → 210, same rescale as the stun line.
+    public const float BigHitStrength = 210f;
 
     // THE hitstop curve — shared by the victim paths (OnHitRegistered, Entity.OnHit)
     // and CombatSystem's attacker-side inbox, so both parties freeze for the same
@@ -355,7 +372,7 @@ public class CombatState
 
         float seconds = hitstunSecondsOverride >= 0f
             ? hitstunSecondsOverride
-            : Math.Clamp(impulse * HitstunSecondsPerImpulse, MinHitstunSeconds, MaxHitstunSeconds);
+            : Math.Clamp(impulse * HitstunSecondsPerDv, MinHitstunSeconds, MaxHitstunSeconds);
         int frames = SimFrames.FromSeconds(seconds, dt);
         if (HitstunActive)
             frames = Math.Max(1, (int)(frames * HitstunExtensionScale));

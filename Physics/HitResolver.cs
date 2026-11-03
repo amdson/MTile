@@ -109,6 +109,20 @@ public static class HitResolver
     // Unlike HitResult.Strength it ignores the target's velocity, so the attacker's
     // side (CombatSystem) and the victim's side compute the SAME number — which is what
     // lets both agree on whether a hit was big enough to earn hitstop.
+    // The mass impact strength is measured against: the player's. ImpactStrength(j) is
+    // "the speed this collision's impulse would give a standard player", so it reads in
+    // the same px/s units as the dv the stun line compares (CombatState) — and for a
+    // player victim the two are the same number. Unlike dv it grows with the TARGET's
+    // mass too (j = (1+e)·μ·u), which is the point: hitting something heavy hard is a
+    // big impact even though it barely moves.
+    public const float ReferenceMass = 2.5f;
+
+    // Hitstop strength of a delivered impulse (HitResult.Impulse / IHittable.OnHit's
+    // return). Both sides of a hit compute it from the same vector — the victim from its
+    // resolution, CombatSystem from what OnHit returned — so they freeze for the same
+    // window.
+    public static float ImpactStrength(Vector2 impulse) => impulse.Length() / ReferenceMass;
+
     public static float NominalStrength(in Hitbox hit)
         => hit.Mode == KnockbackMode.Impulse
             ? hit.KnockbackImpulse.Length()

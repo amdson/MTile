@@ -157,7 +157,7 @@ public sealed class GameAudio
         int age = p.Frame - c.LastHitFrame;
         if (age < 0 || age > StampWindowFrames) return;
 
-        float t    = MathF.Min(c.LastHitImpulse / 900f, 1f);
+        float t    = MathF.Min(c.LastHitImpulse / 675f, 1f);
         float gain = 0.55f + 0.45f * t;
 
         // A late block landed this same hit (GuardBlock below carries the contact), so

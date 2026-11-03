@@ -94,8 +94,8 @@ public abstract class ActionState
     // action: armored hits still cost their full HP and recoil the attacker, but
     // arrive at heavily scaled knockback and never register hitstun/stun — so no
     // flinch eviction and no disadvantage window. Compared against
-    // HitResult.Strength (pre-mass, the same units as CombatState's stun
-    // threshold; reference points: Slash1 ~100, Slash3 ~300, Stab ~650).
+    // the victim's dv, px/s (the same units as CombatState's stun threshold;
+    // reference points vs a player: Slash1 ~100 floor, Slash3 ~225, Stab ~490).
     // Default 0 = no armor: any hit flinches.
     public virtual float ArmorProfile(in ActionVars vars) => 0f;
 
@@ -1363,11 +1363,14 @@ public class StabAction : ActionState
     // point of pulling the rest down was to let it read that way instead of being
     // one shove among many. It is now ~2.2× GroundSlash3's launch, where it used
     // to be ~1.3×.
-    private const float StrikeSpeed           = 650f;
-    // Entity-collision restitution + minimum visible launch for a connect on a
-    // fleeing target.
-    private const float Restitution           = 0.5f;
-    private const float MinLaunch             = 120f;
+    //
+    // 2026-11-02: the striker numbers moved to movement_config.json (Stab*) — a HEAVY,
+    // SLOW striker now (speed 380, mass 8× the attacker's, e 0.1). As strike mass grows
+    // the target's Δv tends to (1+e)·u, so the stab can't push anyone much faster than it
+    // moves itself: strong, reliable "real" velocity with a built-in ceiling, and heavy
+    // targets get properly shoved. ≈370 px/s on a standing player (was ≈488).
+    // Entity-collision restitution + minimum visible launch: StabRestitution /
+    // StabMinLaunch in movement_config.json, with the striker above.
     // Tile recoil (HitResolver.TileRecoil): bounce = (1+e_material)·approach·RecoilScale,
     // fired ONCE PER ATTACK (CombatSystem latches on the dedupe set) against the
     // bounciest surviving surface, floored at MinRecoilSpeed and capped at
@@ -1519,7 +1522,8 @@ public class StabAction : ActionState
     // this comparison by ~40%. Left at 300 the stab would have become unstuffable
     // by anything but another stab — armor that was tuned to lose to the combo
     // finisher (Slash3, now u 300) would silently have started beating it.
-    private const float ArmorStrength = 190f;
+    // 190 → 143 (2026-11-02): ×0.75 with the move to comparing the victim's dv.
+    private const float ArmorStrength = 143f;
     public override float ArmorProfile(in ActionVars vars)
         => vars.TimeInState < HurtboxStartTime + HurtboxActiveDuration ? ArmorStrength : 0f;
 
@@ -1670,13 +1674,15 @@ public class StabAction : ActionState
                 recoilMinMaterialHP: RecoilMinMaterialHP,
                 mode: KnockbackMode.Collision,
                 strikeDir: vars.StabDir,
-                strikeVelocity: ctx.Body.Velocity + vars.StabDir * StrikeSpeed,
-                strikeMass: ctx.Mass,
-                restitution: Restitution,
-                minLaunch: MinLaunch,
+                strikeVelocity: ctx.Body.Velocity + vars.StabDir * MovementConfig.Current.StabStrikeSpeed,
+                strikeMass: ctx.Mass * MovementConfig.Current.StabStrikeMassScale,
+                restitution: MovementConfig.Current.StabRestitution,
+                minLaunch: MovementConfig.Current.StabMinLaunch,
                 minRecoilSpeed: MinRecoilSpeed,
                 maxRecoilSpeed: MaxRecoilSpeed,
-                origin: ctx.Body.Position));
+                origin: ctx.Body.Position,
+                launchDecay: MovementConfig.Current.StabLaunchDecay,
+                launchImpactMass: MovementConfig.Current.StabLaunchImpactMass));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No
             // knockback (knockback comes from the primary box). Tiles only — passes
@@ -2024,7 +2030,7 @@ public class AirHammerAction : ActionState
     private const float SlamSpeed             = 180f;
 
     // Armor through wind-up + strike, same threshold and reasoning as the stab.
-    private const float ArmorStrength         = 190f;
+    private const float ArmorStrength         = 143f;   // dv units, as StabAction's
     private const float RecoverySeconds       = FrameData.AirHammerAction.EndLag;
     private const float WindupEvictSeconds    = FrameData.AirHammerAction.Evict;
 
