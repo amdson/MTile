@@ -37,6 +37,10 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - [~] **7** (Opus worktree agent) Spiked avalanche (crystal wave) — see decisions below and todo.txt #7.
   Then bot hookup: WallUpManeuver threat check + a launch maneuver.
 
+- [~] **G** (added 2026-11-03, side request) Telegraphed grab: separate biped clips for
+  grab start / hold / throw / whiff (drafted with the sprite-anim skill, then wired into
+  GrabAction) + a debug grab-box overlay when DebugDrawHitboxes is on. Opus worktree agent.
+
 ## Decisions (user, 2026-11-02)
 
 - Spiked wave input: same gesture as eruption. With spikes selected, RMB held inside
