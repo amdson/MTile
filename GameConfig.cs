@@ -51,6 +51,9 @@ public sealed class GameConfig
     public bool DebugDrawCObstacles         { get; set; } = false;
     public bool DebugDrawGuidedPath        { get; set; } = true;
     public bool DebugDrawHealthBars        { get; set; } = true;
+    // Shade the cells a launched avalanche will fill, in its block's colour (render-only
+    // look-ahead, offline only — Drawing/AvalancheForecast.cs).
+    public bool ShowAvalancheForecast      { get; set; } = true;
     // Small name labels floating above named enemies (compiled fighters); the stock
     // roster has no name and is never labelled.
     public bool DrawFighterNames           { get; set; } = true;

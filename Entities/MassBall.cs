@@ -56,6 +56,8 @@ public class MassBall : Projectile
     // BlockEruptionHelpers.RecruitChargedBlocks) is simply one of these carrying a
     // number well past what a full meter alone could buy.
     public float BuildMass => _mass;
+    // The material it builds (render-side fill forecast reads it).
+    public TileType BlockType => _tileType;
 
     protected override void WriteState(ref EntityData s)
     {

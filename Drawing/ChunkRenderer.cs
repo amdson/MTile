@@ -16,6 +16,10 @@ public sealed class ChunkRenderer
     private readonly GraphicsDevice _graphicsDevice;
     // Optional grain atlas for tile fills; null → flat palette fills.
     public TileTextureAtlas Atlas;
+    // Launched-avalanche fill zone to shade (Game1 sets it; null → none).
+    public AvalancheForecast Forecast;
+    // The zone is a promise, not matter: a light wash of the incoming block's colour.
+    private const float ForecastFillAlpha = 0.28f;
 
     // Tile fills are inset by a gutter so the grid reads; scales with tile size
     // (1px per 16px of tile, rounded up) instead of a fixed 1px.
@@ -55,7 +59,27 @@ public sealed class ChunkRenderer
                 (int)(r.Right - r.Left), (int)(r.Bottom - r.Top)),
                 color);
 
+        DrawForecast(chunks);
         DrawSprouts(chunks, time);
+    }
+
+    // Cells a launched avalanche is forecast to fill and hasn't yet: shaded in the
+    // colour of what's coming (the block type, or crystal ice for a crystal wave).
+    // Drawn under the sprouts so a pending ghost's brackets still read on top.
+    private void DrawForecast(ChunkMap chunks)
+    {
+        if (Forecast == null || Forecast.Cells.Count == 0) return;
+        int now = chunks.TerrainFrame;
+        foreach (var (cell, claim) in Forecast.Cells)
+        {
+            var (gtx, gty) = cell;
+            if (chunks.GetCellState(gtx, gty) == TileState.Solid) continue;
+            if (claim.Crystal && chunks.Crystals.IsVisible(gtx, gty, now)) continue;
+            var color = claim.Crystal ? CrystalIce : TilePalette.BaseColor(claim.Type);
+            _spriteBatch.Draw(_pixel, new Rectangle(gtx * Chunk.TileSize, gty * Chunk.TileSize,
+                                                    TileDrawSize, TileDrawSize),
+                              color * ForecastFillAlpha);
+        }
     }
 
     // ---- Sprouts: one "under construction" look (todo #6) -------------------------------

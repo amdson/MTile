@@ -75,6 +75,10 @@ public class Game1 : Game
     private GlowRenderer _glow;
     private DevDemoRenderer _devDemos;
     private ChunkRenderer _chunkRenderer;
+    // Launched-avalanche fill zone (render-only look-ahead, offline only). _lastP2Input is
+    // the bot's last sample, which the look-ahead holds frozen.
+    private readonly AvalancheForecast _avalancheForecast = new();
+    private PlayerInput _lastP2Input;
     private GlowTrailField _glowField;
     private AttackGlowSystem _attackGlow;
     private SpriteAttachmentRenderer _attachments;
@@ -1133,7 +1137,7 @@ public class Game1 : Game
                     _simAccum = 0f;
                     while (_stepper.TryConsumeStep())
                     {
-                        if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
+                        if (_botInput != null) _sim.Step(input, _lastP2Input = _botInput.Poll(_sim, _sim.Player.Frame));
                         else                   _sim.Step(input);
                         stepsRun++;
                     }
@@ -1151,11 +1155,14 @@ public class Game1 : Game
                     {
                         _simAccum -= 1f;
                         // With a second player present offline, the bot spoofs its input (P2).
-                        if (_botInput != null) _sim.Step(input, _botInput.Poll(_sim, _sim.Player.Frame));
+                        if (_botInput != null) _sim.Step(input, _lastP2Input = _botInput.Poll(_sim, _sim.Player.Frame));
                         else                   _sim.Step(input);
                         stepsRun++;
                     }
                 }
+                if (_config.ShowAvalancheForecast && stepsRun > 0)
+                    _avalancheForecast.Update(_sim, input, _botInput != null ? _lastP2Input : null, _events);
+                _chunkRenderer.Forecast = _config.ShowAvalancheForecast ? _avalancheForecast : null;
                 _prof.End(_sSim, tSim);
                 float simDt = stepsRun * Simulation.FixedDt;
 

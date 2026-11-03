@@ -73,10 +73,15 @@ public sealed class PresentationEventLog
 
     public IReadOnlyList<PresentationEvent> Pending => _pending;
 
+    // While set, Emit drops everything — for render-side look-ahead that steps the sim
+    // and rewinds (AvalancheForecast). Those steps' events never happened.
+    public bool Muted;
+
     // Called from inside Step (via the sim's cosmetic events). Safe to call repeatedly
     // for the same (frame, id) — every call after the first is a no-op.
     public void Emit(int simFrame, PresentationId id, Vector2 pos, int payload = 0)
     {
+        if (Muted) return;
         var key = (simFrame, id);
         if (!_seen.Add(key)) return;
         _order.Enqueue(key);
