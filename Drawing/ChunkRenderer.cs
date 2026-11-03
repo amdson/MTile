@@ -36,7 +36,8 @@ public sealed class ChunkRenderer
     }
 
     // The full world-geometry pass: tiles, platforms, then sprouts (live + pending).
-    public void Draw(Simulation sim)
+    // `time` is render wall-clock seconds, used only for the pending-ghost pulse.
+    public void Draw(Simulation sim, float time = 0f)
     {
         var chunks = sim.Chunks;
 
@@ -52,38 +53,120 @@ public sealed class ChunkRenderer
                 (int)(r.Right - r.Left), (int)(r.Bottom - r.Top)),
                 color);
 
-        // One quad per supporting face, matching the physics volumes exactly: a
-        // sprout with two parents visibly pushes out of both and the quads meet
-        // in the middle of the target cell.
-        foreach (var s in chunks.ActiveSprouts)
-        foreach (var face in TileSproutNode.FaceOrder)
-        {
-            if ((s.Faces & face) == 0) continue;
-            var c = s.VolumeCenter(face);
-            const float half = Chunk.TileSize * 0.5f;
-            _spriteBatch.Draw(_pixel, new Rectangle(
-                (int)(c.X - half), (int)(c.Y - half),
-                TileDrawSize, TileDrawSize),
-                Color.LightSkyBlue);
-        }
+        DrawSprouts(chunks, time);
+    }
 
-        // Ghost outlines of queued (Pending) sprouts so players can preview the
-        // build they're generating before each block starts growing. Pending nodes
-        // have no live Center, so draw at the target cell (gtx*16+8, gty*16+8).
+    // ---- Sprouts: one "under construction" look (todo #6) -------------------------------
+    //
+    // A building cell has two visible parts, shared by both sprout states so they read as
+    // one family and never as finished terrain:
+    //   * the SLOT: corner brackets on the target cell, in the requester's colour. A
+    //     Pending ghost is only the slot (faint fill, brackets breathing); a Growing
+    //     sprout keeps its slot drawn so the destination is visible while it fills.
+    //   * the VOLUME: a Growing sprout's moving quad(s), exactly the physics volumes --
+    //     a flat (un-grained), lightened fill of the material, an accent rim, and a
+    //     near-white 2px growth FRONT on the edge(s) advancing into the cell. Flat +
+    //     rimmed + lit front is what separates it from a solid tile's grained,
+    //     black-guttered fill, and it reads on frame one: a cell may only live 2-6
+    //     frames at the current sprout speeds, so nothing here ramps in.
+    // Accent = owner colour (BlockOwnership), so each player's build front is theirs.
+    // Pure render: reads the sprout graph, writes nothing.
+
+    private const float SproutFillWhite   = 0.35f;  // material -> white: lit, not yet solid
+    private const float SproutRimWhite    = 0.25f;  // accent -> white for the volume rim
+    private const float SproutFrontWhite  = 0.75f;  // accent -> white for the growth front
+    private const float SlotGrowingAlpha  = 0.55f;  // the growing cell's destination brackets
+    private const float GhostAlphaLo      = 0.40f;  // pending brackets breathe between these
+    private const float GhostAlphaHi      = 0.85f;
+    private const float GhostFillAlpha    = 0.10f;
+    private const float GhostPulseHz      = 1.6f;
+    private const float GhostPhasePerCell = 0.55f;  // radians; neighbours shimmer out of phase
+
+    private static readonly Color SproutAccentNone = new(205, 225, 255);
+
+    private static Color SproutAccent(byte owner) => owner switch
+    {
+        BlockOwnership.Player1 => OwnerP1,
+        BlockOwnership.Player2 => OwnerP2,
+        _                      => SproutAccentNone,
+    };
+
+    private void DrawSprouts(ChunkMap chunks, float time)
+    {
+        const float half = Chunk.TileSize * 0.5f;
+        int bracket = Math.Max(2, Chunk.TileSize / 3);
+
+        // Pending ghosts first, so a growing volume sliding over a neighbour's slot sits
+        // on top of it.
         foreach (var s in chunks.PendingSprouts)
         {
-            const float half = Chunk.TileSize * 0.5f;
-            float cx = s.Gtx * Chunk.TileSize + half;
-            float cy = s.Gty * Chunk.TileSize + half;
-            int left = (int)(cx - half);
-            int top  = (int)(cy - half);
-            int size = TileDrawSize;
-            var ghost = Color.LightSkyBlue * 0.4f;
-            _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            size, 1),    ghost);
-            _spriteBatch.Draw(_pixel, new Rectangle(left,            top + size - 1, size, 1),    ghost);
-            _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            1,    size), ghost);
-            _spriteBatch.Draw(_pixel, new Rectangle(left + size - 1, top,            1,    size), ghost);
+            var accent = SproutAccent(s.Owner);
+            float wave = 0.5f + 0.5f * MathF.Sin(
+                time * GhostPulseHz * MathHelper.TwoPi + (s.Gtx + s.Gty) * GhostPhasePerCell);
+            float a = MathHelper.Lerp(GhostAlphaLo, GhostAlphaHi, wave);
+            int left = s.Gtx * Chunk.TileSize, top = s.Gty * Chunk.TileSize;
+            _spriteBatch.Draw(_pixel, new Rectangle(left, top, TileDrawSize, TileDrawSize),
+                accent * GhostFillAlpha);
+            Brackets(left, top, TileDrawSize, bracket, accent * a);
         }
+
+        foreach (var s in chunks.ActiveSprouts)
+        {
+            var accent = SproutAccent(s.Owner);
+            Brackets(s.Gtx * Chunk.TileSize, s.Gty * Chunk.TileSize, TileDrawSize, bracket,
+                accent * SlotGrowingAlpha);
+
+            var fill  = Color.Lerp(TilePalette.BaseColor(s.Type), Color.White, SproutFillWhite);
+            var rim   = Color.Lerp(accent, Color.White, SproutRimWhite);
+            var front = Color.Lerp(accent, Color.White, SproutFrontWhite);
+
+            // One quad per supporting face, matching the physics volumes exactly: a sprout
+            // with two opposed parents visibly pushes out of both and the quads meet in the
+            // middle. A corner sprout reports one combined volume for every face -- draw it
+            // once.
+            Vector2 last = new(float.NaN);
+            foreach (var face in TileSproutNode.FaceOrder)
+            {
+                if ((s.Faces & face) == 0) continue;
+                var c = s.VolumeCenter(face);
+                if (c == last) continue;
+                last = c;
+                int left = (int)MathF.Round(c.X - half), top = (int)MathF.Round(c.Y - half);
+                _spriteBatch.Draw(_pixel, new Rectangle(left, top, TileDrawSize, TileDrawSize), fill);
+                Outline(left, top, TileDrawSize, rim);
+                // Growth front: the edge(s) facing the direction of travel (away from the
+                // parent). Derived from the volume's own velocity, so a combined diagonal
+                // volume lights both of its leading edges.
+                var v = s.VolumeVelocity(face);
+                const int F = 2;
+                if (v.Y < 0f) _spriteBatch.Draw(_pixel, new Rectangle(left, top, TileDrawSize, F), front);
+                if (v.Y > 0f) _spriteBatch.Draw(_pixel, new Rectangle(left, top + TileDrawSize - F, TileDrawSize, F), front);
+                if (v.X < 0f) _spriteBatch.Draw(_pixel, new Rectangle(left, top, F, TileDrawSize), front);
+                if (v.X > 0f) _spriteBatch.Draw(_pixel, new Rectangle(left + TileDrawSize - F, top, F, TileDrawSize), front);
+            }
+        }
+    }
+
+    private void Outline(int left, int top, int size, Color c)
+    {
+        _spriteBatch.Draw(_pixel, new Rectangle(left,            top,            size, 1),        c);
+        _spriteBatch.Draw(_pixel, new Rectangle(left,            top + size - 1, size, 1),        c);
+        _spriteBatch.Draw(_pixel, new Rectangle(left,            top + 1,        1,    size - 2), c);
+        _spriteBatch.Draw(_pixel, new Rectangle(left + size - 1, top + 1,        1,    size - 2), c);
+    }
+
+    // Four L-shaped corner marks of arm length `arm`: the "slot" of a cell being built.
+    private void Brackets(int left, int top, int size, int arm, Color c)
+    {
+        int r = left + size - 1, b = top + size - 1;
+        _spriteBatch.Draw(_pixel, new Rectangle(left,        top,         arm, 1),       c);
+        _spriteBatch.Draw(_pixel, new Rectangle(left,        top + 1,     1,   arm - 1), c);
+        _spriteBatch.Draw(_pixel, new Rectangle(r - arm + 1, top,         arm, 1),       c);
+        _spriteBatch.Draw(_pixel, new Rectangle(r,           top + 1,     1,   arm - 1), c);
+        _spriteBatch.Draw(_pixel, new Rectangle(left,        b,           arm, 1),       c);
+        _spriteBatch.Draw(_pixel, new Rectangle(left,        b - arm + 1, 1,   arm - 1), c);
+        _spriteBatch.Draw(_pixel, new Rectangle(r - arm + 1, b,           arm, 1),       c);
+        _spriteBatch.Draw(_pixel, new Rectangle(r,           b - arm + 1, 1,   arm - 1), c);
     }
 
     // Placeholder owner colours for the block-ownership ring (P1 cyan, P2 orange).
@@ -112,7 +195,8 @@ public sealed class ChunkRenderer
             var (gtx, gty) = kv.Key;
             float x = gtx * Chunk.TileSize, y = gty * Chunk.TileSize;
             if (x < minX || x > maxX || y < minY || y > maxY) continue;
-            if (chunks.GetCellState(gtx, gty) == TileState.Empty) continue;
+            // Solid only: a Sprouting cell already wears its owner's colour via the sprout look.
+            if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
             if (!chunks.Ownership.TryGet(gtx, gty, now, out byte owner, out float s)) continue;
             var c = (owner == BlockOwnership.Player2 ? OwnerP2 : OwnerP1) * s;
             int left = (int)x + inset, top = (int)y + inset;

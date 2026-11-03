@@ -1215,7 +1215,7 @@ public class Game1 : Game
         // GPU work — SpriteBatch is deferred, so the actual submission lands in the
         // `present` scope at the closing End(). Read them as "managed cost per pass".
         using (_prof.Measure(_sChunks))
-            _chunkRenderer.Draw(_sim);
+            _chunkRenderer.Draw(_sim, (float)gameTime.TotalGameTime.TotalSeconds);
 
         long tEnt = _prof.Begin();
         // Entities before the player so the player overlays them when they overlap.
