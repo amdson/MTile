@@ -127,9 +127,12 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         Run(sim, 1, f => new PlayerInput { RightClick = true, MouseWorldPosition = target });
         float after = m.BuildMove + m.EruptMove + m.Build;
 
-        Assert.True(sim.Chunks.Spikes.TryGet(gx, FloorRow, out var side));
-        Assert.Equal(Faction.Player1, side.Faction);
-        Assert.Equal(1, sim.Chunks.Spikes.Count);
+        // Placement SEEDS the cell (todo.txt #8); the spike overlay lands after the
+        // crystal lifecycle (SpikeOverlayCrystalTests covers the phases).
+        Assert.True(sim.Chunks.SpikeSeeds.TryGet(gx, FloorRow, out var seed));
+        Assert.Equal(Faction.Player1, seed.Side.Faction);
+        Assert.Equal(1, sim.Chunks.SpikeSeeds.Count);
+        Assert.Equal(0, sim.Chunks.Spikes.Count);
 
         float stone = MaterialStrengths.BuildCostFor(TileType.Stone);
         Assert.Equal(2f * stone, MaterialStrengths.SpikeBuildCost, 4);
@@ -157,10 +160,14 @@ public class SpikeOverlayTests(ITestOutputHelper output)
 
         Assert.True(BlockPlaceAction.TrySpikeCell(ctx, ab, 3, FloorRow));
         Assert.Equal(pool - MaterialStrengths.SpikeBuildCost, ab.Meters.BuildMove + ab.Meters.EruptMove, 4);
-        Assert.True(chunks.Spikes.TryGet(3, FloorRow, out var s));
-        Assert.Equal(Faction.Player2, s.Faction);
+        Assert.True(chunks.SpikeSeeds.TryGet(3, FloorRow, out var s));
+        Assert.Equal(Faction.Player2, s.Side.Faction);
 
-        Assert.False(BlockPlaceAction.TrySpikeCell(ctx, ab, 3, FloorRow));       // already spiked
+        Assert.False(BlockPlaceAction.TrySpikeCell(ctx, ab, 3, FloorRow));       // already seeded
+        Assert.Equal(pool - MaterialStrengths.SpikeBuildCost, ab.Meters.BuildMove + ab.Meters.EruptMove, 4);
+
+        chunks.Spikes.Set(4, FloorRow, s.Side);
+        Assert.False(BlockPlaceAction.TrySpikeCell(ctx, ab, 4, FloorRow));       // already spiked
         Assert.Equal(pool - MaterialStrengths.SpikeBuildCost, ab.Meters.BuildMove + ab.Meters.EruptMove, 4);
     }
 

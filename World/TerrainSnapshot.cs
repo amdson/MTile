@@ -21,6 +21,7 @@ public sealed class TerrainSnapshot
     public Dictionary<(int gtx, int gty), float> Damage;
     public HashSet<(int gtx, int gty)>           Charge;
     public Dictionary<(int gtx, int gty), TileSpikes.Side> Spikes;
+    public Dictionary<(int gtx, int gty), TileSpikeSeeds.Seed> SpikeSeeds;
     public Dictionary<(int gtx, int gty), float> Foam;
     public Dictionary<(int gtx, int gty), float> Impact;
     public Dictionary<(int gtx, int gty), TileMassField.MassBucket> Mass;

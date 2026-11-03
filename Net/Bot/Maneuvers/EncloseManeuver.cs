@@ -22,6 +22,8 @@ namespace MTile.Net;
 //   3. Spikes: Num5 held, RMB, cursor on the floor cells under the body, then the lid
 //      cells over it. Spikes need SOLID under them, so this pass naturally lags the
 //      blocks by SproutLifetime; the layer retries until they finalize.
+//      A placed spike only SEEDS (todo.txt #8): it grows into a damaging spike
+//      CrystalLifecycle.SpikePlacement.FramesToGrown (~1.25 s) later, on its own.
 //   4. Restore: one frame pressing the picker key the bot had before (Num1..Num5), RMB up.
 //
 // Spikes hurt the target because SpikeContactSystem's FootReach covers a grounded body's

@@ -46,6 +46,7 @@ public sealed class ChunkRenderer
 
         DrawOwnership(chunks);
         DrawSpikes(chunks);
+        DrawSpikeSeeds(chunks);
 
         foreach (var (r, color) in sim.Platforms)
             _spriteBatch.Draw(_pixel, new Rectangle(
@@ -232,6 +233,92 @@ public sealed class ChunkRenderer
             if (chunks.GetCellState(gtx, gty + 1) != TileState.Solid) Teeth(left, top, 0,  1, color);
             if (chunks.GetCellState(gtx - 1, gty) != TileState.Solid) Teeth(left, top, -1, 0, color);
             if (chunks.GetCellState(gtx + 1, gty) != TileState.Solid) Teeth(left, top,  1, 0, color);
+        }
+    }
+
+    // Spike seed look (todo.txt #8), drawn purely from the seed's lifecycle phase: a
+    // small crystal standing on ONE exposed face of the block (top preferred — "a crystal
+    // appears on top of the block"; else a side, else the bottom; a fully buried cell
+    // shows nothing, same as its eventual spike). Seed: a slim side-tinted shard that
+    // swells over the wait. Flash: the full shard blinking white — the last warning
+    // before it becomes the teeth DrawSpikes draws.
+    private const float SeedMinHeight  = Chunk.TileSize * 0.25f;
+    private const float SeedMaxHeight  = Chunk.TileSize * 0.5f;
+    private const float SeedHalfWidth  = Chunk.TileSize * 0.16f;
+    private const int   FlashBlinkFrames = 3;
+
+    private void DrawSpikeSeeds(ChunkMap chunks)
+    {
+        if (chunks.SpikeSeeds.Count == 0) return;
+        var viewport = _graphicsDevice.Viewport;
+        float halfW = viewport.Width  / (2f * _camera.Zoom) + Chunk.TileSize;
+        float halfH = viewport.Height / (2f * _camera.Zoom) + Chunk.TileSize;
+        int now = chunks.TerrainFrame;
+        var life = TileSpikeSeeds.Lifecycle;
+        foreach (var (cell, seed) in chunks.SpikeSeeds.Entries)
+        {
+            var (gtx, gty) = cell;
+            if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
+            float left = gtx * Chunk.TileSize, top = gty * Chunk.TileSize;
+            if (MathF.Abs(left - _camera.Position.X) > halfW || MathF.Abs(top - _camera.Position.Y) > halfH)
+                continue;
+
+            int nx, ny;
+            if      (chunks.GetCellState(gtx, gty - 1) != TileState.Solid) { nx = 0;  ny = -1; }
+            else if (chunks.GetCellState(gtx - 1, gty) != TileState.Solid) { nx = -1; ny = 0; }
+            else if (chunks.GetCellState(gtx + 1, gty) != TileState.Solid) { nx = 1;  ny = 0; }
+            else if (chunks.GetCellState(gtx, gty + 1) != TileState.Solid) { nx = 0;  ny = 1; }
+            else continue;
+
+            int elapsed = now - seed.SeededFrame;
+            var phase = life.PhaseAt(elapsed);
+            var side = TilePalette.SpikeColor(seed.Side.Faction);
+            float height; Color color;
+            if (phase == CrystalPhase.Seed)
+            {
+                float p = life.PhaseProgress(elapsed);
+                height = MathHelper.Lerp(SeedMinHeight, SeedMaxHeight, p);
+                color  = Color.Lerp(side, Color.White, 0.25f) * 0.9f;
+            }
+            else
+            {
+                height = SeedMaxHeight;
+                bool on = ((elapsed - life.SeedFrames) / FlashBlinkFrames) % 2 == 0;
+                color  = on ? Color.White : Color.Lerp(side, Color.White, 0.5f);
+            }
+            Shard(left, top, nx, ny, height, SeedHalfWidth, color);
+        }
+    }
+
+    // A diamond shard standing on the centre of a cell face, outward normal (nx, ny):
+    // widest a third of the way up, pointed at the tip. 1px slices, like Teeth.
+    private void Shard(float left, float top, int nx, int ny, float height, float halfWidth, Color color)
+    {
+        const float T = Chunk.TileSize;
+        int rows = Math.Max(1, (int)MathF.Round(height));
+        float waist = rows / 3f;
+        for (int r = 0; r < rows; r++)
+        {
+            float f = r + 0.5f;
+            float hw = f < waist ? halfWidth * (0.4f + 0.6f * f / waist)
+                                 : halfWidth * (1f - (f - waist) / (rows - waist));
+            // Slice width matches the tile's parity so every slice centres exactly on the
+            // face (odd TileSize → odd widths) and the shard stays symmetric.
+            int w = Math.Max(1, (int)MathF.Round(2f * hw));
+            if ((w & 1) != (Chunk.TileSize & 1)) w++;
+            int a = (Chunk.TileSize - w) / 2;
+            Rectangle rect;
+            if (ny != 0)
+            {
+                float y = ny < 0 ? top - 1 - r : top + T + r;
+                rect = new Rectangle((int)left + a, (int)y, w, 1);
+            }
+            else
+            {
+                float x = nx < 0 ? left - 1 - r : left + T + r;
+                rect = new Rectangle((int)x, (int)top + a, 1, w);
+            }
+            _spriteBatch.Draw(_pixel, rect, color);
         }
     }
 

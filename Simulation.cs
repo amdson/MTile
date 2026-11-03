@@ -709,6 +709,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         foreach (var d in _chunks.Spikes.Entries)
             t ^= CellF(d.Key.gtx, d.Key.gty, d.Value.Team,
                        0x06 ^ ((ulong)(byte)d.Value.Faction << 8));
+        // Spike seeds: the seed frame is the whole clock, so it rides the value slot.
+        foreach (var d in _chunks.SpikeSeeds.Entries)
+            t ^= CellF(d.Key.gtx, d.Key.gty, d.Value.SeededFrame,
+                       0x09 ^ ((ulong)(byte)d.Value.Side.Faction << 8) ^ ((ulong)(uint)d.Value.Side.Team << 16));
         // Spike contact cooldowns (per-victim last-hit frame).
         foreach (var d in _spikes.Cooldowns)
             t ^= CellF(d.Key.Index, d.Key.Generation, d.Value, 0x07);

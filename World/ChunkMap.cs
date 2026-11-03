@@ -27,6 +27,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // Sparse per-cell spike overlay (placer's side per cell). Reinforces the cell in
     // DamageCell and drives SpikeContactSystem. Cleared on break like Charge.
     public readonly TileSpikes Spikes = new();
+    // Spike crystals still seeding/flashing (todo.txt #8): promoted into Spikes on their
+    // first Grown frame by TickSprouts. Harmless until then. Cleared on break like Spikes.
+    public readonly TileSpikeSeeds SpikeSeeds = new();
 
     // Per-cell accumulated impact impulse, with decay. PhysicsWorld routes
     // contact impulses through this so a spring-padded landing (player) accrues
@@ -531,6 +534,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         TerrainFrame++;
         Waves.Tick(SproutClock);
         if (TerrainFrame % BlockOwnership.PruneCadenceFrames == 0) Ownership.Prune(TerrainFrame);
+        // Spike seeds that finished seed+flash become real spike overlays this frame
+        // (before SpikeContactSystem runs later in the step, so a grown spike bites at once).
+        SpikeSeeds.Tick(TerrainFrame, Spikes);
 
         Foam.Tick(dt, _breakCellAction);
         // Bleed stale partial build mass so the table stays bounded (see TileMassField).
@@ -755,6 +761,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             Charge.Clear(gtx, gty);
             Ownership.Clear(gtx, gty);
             Spikes.Clear(gtx, gty);
+            SpikeSeeds.Clear(gtx, gty);
             DropSupportFor(gtx, gty);
             OnTileBroken?.Invoke(CellCenter(gtx, gty), sproutType);
             return true;
@@ -768,8 +775,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         NoteChargedBreak(gtx, gty);
         Charge.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);
-        // The spike overlay goes with the cell it sat on.
+        // The spike overlay goes with the cell it sat on — and so does a spike still
+        // seeding on it (no refund: see TileSpikeSeeds).
         Spikes.Clear(gtx, gty);
+        SpikeSeeds.Clear(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
         // a foam tile broken early would still trigger another BreakCell when
         // its timer expires (no-op on an empty cell, but a needless call).
@@ -804,6 +813,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Damage.Clear(gtx, gty);
         Charge.Clear(gtx, gty);
         Spikes.Clear(gtx, gty);
+        SpikeSeeds.Clear(gtx, gty);
         Foam.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);   // an edit is level data: nobody owns it
         if (state == TileState.Empty) DropSupportFor(gtx, gty);
@@ -843,6 +853,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Damage      = Damage.Capture(),
         Charge      = Charge.Capture(),
         Spikes      = Spikes.Capture(),
+        SpikeSeeds  = SpikeSeeds.Capture(),
         Foam        = Foam.Capture(),
         Impact      = Impact.Capture(),
         Mass        = Mass.Capture(),
@@ -863,6 +874,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Damage.Restore(s.Damage);
         Charge.Restore(s.Charge);
         Spikes.Restore(s.Spikes);
+        SpikeSeeds.Restore(s.SpikeSeeds);
         Foam.Restore(s.Foam);
         Impact.Restore(s.Impact);
         Mass.Restore(s.Mass);
