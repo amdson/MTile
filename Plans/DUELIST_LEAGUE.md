@@ -87,6 +87,33 @@ three crush the stock Brawler (≥ 33.5/36), which is now clearly obsolete as an
 - **Slash trades are even** — neither Riposte nor Bulldog can avoid trading S1-for-S1
   against a spammer that walks them down; retreat is no faster than the chase.
 
+## Re-run after the combat/crystal changes (2026-11-03, same format and seeds)
+
+Changed since the first run: crystal waves take the ordinary avalanche shape (any solid
+face supports; same leak curve) and cost sand's price (0.44/crystal, cap 400) instead of
+2 — so a full charge is a ~75-cell mound, not a ~40-cell strip; clanking (opposing melee
+cancels within 20% damage); stab body damage 0.75 base (was 0.5). No bot code changed.
+`Plans/DUELIST_LEAGUE_raw.txt` now holds this run.
+
+| Rank | Bot | Points (was) | W-D-L | K/D |
+|---|---|---|---|---|
+| 1 | **Rampart** | 89.0 (80.5) | 87-4-17 | 310/172 |
+| 2 | Riposte | 67.5 (68.0) | 66-3-39 | 265/218 |
+| 3 | Bulldog | 55.5 (64.0) | 51-9-48 | 293/285 |
+| 4 | Brawler | 4.0 (3.5) | 2-4-102 | 143/336 |
+
+| Matchup | Now | First run |
+|---|---|---|
+| Bulldog vs Rampart | 16.5–19.5 | 25.5–10.5 |
+| Riposte vs Bulldog | 29.5–6.5 | 31–5 |
+| Rampart vs Riposte | 34–2 | 35–1 |
+
+**The cycle is gone: Rampart now beats both.** The one matchup that moved is the one the
+waves decide — rushdown used to walk through a thin strip of crystals; a full mound is
+much harder to walk through. Three things changed at once, so this isn't cleanly
+attributable to the waves alone (clanking also blunts Bulldog's slash pressure), but the
+other two matchups barely moved.
+
 ## Next steps if the league continues
 
 - Give Riposte terrain awareness (avoid spiked cells, treat a fort as a zone) — its one
