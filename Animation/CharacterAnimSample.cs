@@ -87,6 +87,9 @@ public readonly struct CharacterAnimSample
     // clip at its own authored seconds (right for held, open-ended actions like Guard,
     // whose clip loops).
     public readonly float   ActionProgress;
+    // The action's phase-clip selector (ActionState.AnimationVariant): null = the clip typed
+    // with the action's class name; "Hold" = the clip typed "<Action>.Hold" when one is bound.
+    public readonly string  ActionVariant;
     // Frames left on the player's OWN recovery countdown (ConditionState's RecoveryActive
     // stamp — the end-lag an attack's Exit priced in), 0 when none is running. Deliberately
     // excludes hit disadvantage: a flinch plays the hitstun clip, not the attack's settle.
@@ -161,7 +164,7 @@ public readonly struct CharacterAnimSample
         bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None,
         int surfaceCount = -1, bool? surfacesNear = null, bool lowCeiling = false,
         float groundGap = 0f, int recoveryFramesLeft = 0, ChunkMap chunks = null,
-        Func<float, Vector2> predictAt = null)
+        Func<float, Vector2> predictAt = null, string actionVariant = null)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
@@ -169,7 +172,7 @@ public readonly struct CharacterAnimSample
         RecoveryFramesLeft = recoveryFramesLeft;
         Surfaces = surfaces; SurfaceCount = surfaceCount; HasGrip = hasGrip; GripTarget = gripTarget;
         HasAim = hasAim; AimDir = aimDir; Tag = tag; LowCeiling = lowCeiling; GroundGap = groundGap;
-        Chunks = chunks; PredictAt = predictAt;
+        Chunks = chunks; PredictAt = predictAt; ActionVariant = actionVariant;
         // Default (hand-built samples, tests): surfaces present ⇒ near — the pre-terrain behavior.
         SurfacesNear = surfacesNear ?? (surfaces != null && (surfaceCount < 0 ? surfaces.Length : surfaceCount) > 0);
     }
@@ -181,7 +184,7 @@ public readonly struct CharacterAnimSample
         => new(Position, Velocity, facing, Grounded, MovementState, Action, Dt, ActionTime,
                ActionProgress, MovementProgress, Pins, Surfaces, HasGrip, GripTarget, HasAim, AimDir,
                Tag, SurfaceCount, SurfacesNear, LowCeiling, GroundGap, RecoveryFramesLeft, Chunks,
-               PredictAt);
+               PredictAt, ActionVariant);
 
     // How far above the body's top (px) a solid tile counts as "right over the head" for a
     // grounded, non-crouched sample's LowCeiling. Deliberately TIGHTER than the FSM's
@@ -300,7 +303,8 @@ public readonly struct CharacterAnimSample
                hasGrip: hasGrip, gripTarget: gripTarget,
                hasAim: hasAim, aimDir: aimDir, tag: tag, lowCeiling: lowCeiling,
                groundGap: groundGap, recoveryFramesLeft: recoveryLeft,
-               chunks: chunks, predictAt: predictAt);
+               chunks: chunks, predictAt: predictAt,
+               actionVariant: p.CurrentAction?.AnimationVariant(p.CurrentActionVars));
     }
 
     // The most risers still ahead of the body for which the probe tags StepUp (the last

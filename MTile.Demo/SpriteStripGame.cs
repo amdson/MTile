@@ -34,7 +34,8 @@ public sealed class SpriteStripGame : Game
     private sealed record Frame(BoneTransform[] Pose, Vector2 Root, Vector2 Camera,
         float Scale, int Facing, string Label, int Terrain = -1,
         AnimationDocument Clip = null, float Tau = 0,
-        AttachmentSample[] Effects = null, float Seconds = 0, FootDebug[] Feet = null);
+        AttachmentSample[] Effects = null, float Seconds = 0, FootDebug[] Feet = null,
+        TelegraphShape[] Debug = null, Vector2[] Bodies = null);
 
     private sealed record FootDebug(string Name, FootPlan Plan, Vector2 Actual);
 
@@ -75,7 +76,7 @@ public sealed class SpriteStripGame : Game
             throw new ArgumentException("--strip requires an output .png path.");
         if (new[] { _clipName, _takePath, _scenario }.Count(s => s != null) != 1)
             throw new ArgumentException("Supply a clip name, --load <take.json>, OR --scenario stairs.");
-        if (_scenario != null && _scenario is not ("stairs" or "slash-combo" or "slash1"))
+        if (_scenario != null && _scenario is not ("stairs" or "slash-combo" or "slash1" or "grab" or "grab-whiff"))
             throw new ArgumentException("Unknown scenario: " + _scenario);
         if (!columnsSpecified) _columns = Math.Min(_columns, _frames);
         if (_frames < 2 || _frames > 64 || _columns < 1 || _columns > _frames || _size < 128 || _size > 1024
@@ -120,6 +121,7 @@ public sealed class SpriteStripGame : Game
         var rig = SkeletonExamples.Load(_rigName);
         var clips = AnimationStore.LoadAll(Path.Combine(RepoRoot(), "SkeletonStates", _rigName));
         if (_scenario is "slash-combo" or "slash1") CaptureSlashCombo(rig, clips);
+        else if (_scenario is "grab" or "grab-whiff") CaptureGrab(rig, clips, _scenario == "grab-whiff");
         else if (_scenario != null) CaptureStairs(rig, clips);
         else if (_takePath == null) SampleClip(rig, clips);
         else ReplayTake(rig, clips);
@@ -153,6 +155,27 @@ public sealed class SpriteStripGame : Game
                             _min = Vector2.Min(_min, landing); _max = Vector2.Max(_max, landing);
                         }
                     }
+            if (frame.Debug != null)
+                foreach (var d in frame.Debug)
+                {
+                    var (lo, hi) = d.Kind switch
+                    {
+                        TelegraphKind.Box  => (d.A, d.A + d.B),
+                        TelegraphKind.Line => (Vector2.Min(d.A, d.B), Vector2.Max(d.A, d.B)),
+                        TelegraphKind.Ring => (d.A - new Vector2(d.B.X), d.A + new Vector2(d.B.X)),
+                        _ => (d.A, d.A),
+                    };
+                    // Framing only: a big carry box must not shrink the rig to a speck.
+                    lo = Vector2.Max(lo - frame.Camera, new Vector2(-40)); hi = Vector2.Min(hi - frame.Camera, new Vector2(40));
+                    _min = Vector2.Min(_min, lo); _max = Vector2.Max(_max, hi);
+                }
+            if (frame.Bodies != null)
+                foreach (var b in frame.Bodies)
+                {
+                    var r = new Vector2(PlayerCharacter.Radius);
+                    if (Vector2.Distance(b, frame.Camera) > 50f) continue;   // a thrown body flies off-frame
+                    _min = Vector2.Min(_min, b - r - frame.Camera); _max = Vector2.Max(_max, b + r - frame.Camera);
+                }
             if (_skin != null)
             {
                 SyncSkin();
@@ -257,6 +280,72 @@ public sealed class SpriteStripGame : Game
             _panels.Add(sequence[(int)Math.Round(i * (sequence.Count - 1) / (double)(_frames - 1))]);
     }
 
+    // Live grab at 60 Hz: flat ground, an AFK second player in reach (none for the whiff),
+    // P1 presses Shift+LMB at open air in front, holds, swipes and releases. Same sample →
+    // animator path as CosmeticUpdateSystem, so the panels show the runtime phase clips
+    // (start → hold → throw, or start → whiff) — plus, per panel, the grab's
+    // DebugQueryShapes (what DebugDrawHitboxes shows in game) and the second body's box.
+    private void CaptureGrab(Skeleton rig, List<AnimationDocument> clips, bool whiff)
+    {
+        int first = (int)_start, last = _end < 0 ? 95 : (int)_end;
+        if (first != _start || (_end >= 0 && last != _end) || first >= last || last > 3599)
+            throw new ArgumentException("Scenario start/end are integer frames, 0 <= start < end <= 3599.");
+        MovementConfig.Load(Path.Combine(RepoRoot(), "configs", "movement_config.json"));
+        AnimSolverConfig.Load(Path.Combine(RepoRoot(), "configs", "anim_solver_config.json"));
+        var terrain = new ChunkMap();
+        const int ground = 12, width = 60;
+        for (int x = 0; x < width; x++)
+        for (int y = ground; y < ground + 4; y++)
+        {
+            var cp = new Point(x / Chunk.Size, y / Chunk.Size);
+            if (!terrain.TryGet(cp, out var chunk)) terrain[cp] = chunk = new Chunk { ChunkPos = cp };
+            chunk.Tiles[x % Chunk.Size, y % Chunk.Size].IsSolid = true;
+        }
+        var start = new Vector2(20 * Chunk.TileSize, ground * Chunk.TileSize - PlayerCharacter.Radius);
+        var sim = new Simulation(terrain, start);
+        PlayerCharacter victim = whiff ? null : sim.AddSecondaryPlayer(start + new Vector2(_facing * 40f, 0f)).Item1;
+        var animator = new CharacterAnimator(rig, Game1.SkeletonScale, clips);
+        _pose = animator.Skeleton.CreatePose();
+        _take = new AnimTake { SkeletonScale = Game1.SkeletonScale, PlayerRadius = PlayerCharacter.Radius };
+        var surfaces = new SolverSurface[SolveProblem.MaxSurfaces];
+        var shapes = new TelegraphList(32);
+        var indices = Enumerable.Range(0, _frames)
+            .Select(i => first + (int)Math.Round(i * (last - first) / (double)(_frames - 1))).ToArray();
+        int press = 10, release = whiff ? 40 : 60;
+        int panel = 0;
+        for (int f = 0; f <= last; f++)
+        {
+            var p = sim.Player.Body.Position;
+            var mouse = p + new Vector2(_facing * 30f, -4f);
+            // The last few held frames swipe the cursor up and forward: that swipe is the throw.
+            if (f >= release - 4 && f < release) mouse += new Vector2(_facing * 14f, -10f) * (f - (release - 5));
+            var input = new PlayerInput { MouseWorldPosition = mouse,
+                Shift = f >= press && f < release, LeftClick = f >= press && f < release };
+            if (victim != null) sim.Step(input, default); else sim.Step(input);
+            int count = TerrainSurfaces.Extract(terrain, animator, sim.Player.Body.Position,
+                animator.DisplayFacing, Game1.SkeletonScale, surfaces, out bool near);
+            var sample = CharacterAnimSample.From(sim.Player, Simulation.FixedDt, surfaces, count, near, terrain);
+            animator.Update(sample);
+            while (panel < indices.Length && indices[panel] == f)
+            {
+                _take.AddFrame(sample, terrain.CaptureDense());
+                shapes.Clear();
+                sim.Player.CurrentAction.DebugQueryShapes(shapes, sim.Player.Body, sim.Player.CurrentActionVars);
+                var dbg = new TelegraphShape[shapes.Count];
+                for (int k = 0; k < shapes.Count; k++) dbg[k] = shapes[k];
+                string act = sample.Action.Replace("Action", "");
+                if (sample.ActionVariant != null) act += "." + sample.ActionVariant;
+                if (sample.RecoveryFramesLeft > 0) act += $" r{sample.RecoveryFramesLeft}";
+                _panels.Add(new Frame(animator.Pose.CloneLocal(),
+                    AttackGlowSystem.RigRoot(sample.Position, animator.DisplayFacing, animator, Game1.SkeletonScale),
+                    _world ? Vector2.Zero : sample.Position, Game1.SkeletonScale, animator.DisplayFacing,
+                    $"f{f} {act}", _take.Frames[^1].Terrain,
+                    Debug: dbg, Bodies: victim != null ? new[] { victim.Body.Position } : null));
+                panel++;
+            }
+        }
+    }
+
     private void CaptureStairs(Skeleton rig, List<AnimationDocument> clips)
     {
         int first = (int)_start, last = _end < 0 ? 149 : (int)_end;
@@ -357,6 +446,22 @@ public sealed class SpriteStripGame : Game
                     if (p.X + size < 0 || p.Y + size < 28 || p.X > _size || p.Y > _size) continue;
                     _draw.Box(p, new Vector2(MathF.Max(1, size - 1)), new Color(75, 82, 94));
                 }
+            if (frame.Bodies != null)
+                foreach (var b in frame.Bodies)
+                {
+                    var tl = Screen(b - new Vector2(PlayerCharacter.Radius));
+                    float side = 2 * PlayerCharacter.Radius * zoom;
+                    _draw.Box(tl, new Vector2(side), Color.Cyan * 0.18f);
+                    _draw.Ring(Screen(b), PlayerCharacter.Radius * zoom, Color.Cyan, segments: 20);
+                }
+            if (frame.Debug != null)
+                foreach (var d in frame.Debug)
+                    switch (d.Kind)
+                    {
+                        case TelegraphKind.Box:  _draw.Box(Screen(d.A), d.B * zoom, d.Color); break;
+                        case TelegraphKind.Line: _draw.Line(Screen(d.A), Screen(d.B), d.Color); break;
+                        case TelegraphKind.Ring: _draw.Ring(Screen(d.A), d.B.X * zoom, d.Color, segments: d.Segments); break;
+                    }
             _batch.End();
             _pose.LoadLocal(frame.Pose);
             var root = Affine2.FromTRS(Screen(frame.Root), 0, new Vector2(frame.Facing * frame.Scale * zoom, frame.Scale * zoom));

@@ -173,7 +173,7 @@ public static class ClipLoopCut
         {
             Name = doc.Name, Type = doc.Type, Skeleton = doc.Skeleton,
             Duration = doc.Duration * len, Loop = true,
-            Region = doc.Region, OffRegionWeight = doc.OffRegionWeight, SettleShare = doc.SettleShare,
+            Region = doc.Region, OffRegionWeight = doc.OffRegionWeight, SettleShare = doc.SettleShare, SettleClip = doc.SettleClip,
             Motion = doc.Motion, Arcs = doc.Arcs, Scene = doc.Scene, Points = doc.Points,
             ExtraBones = doc.ExtraBones,
             Keyframes = keys,

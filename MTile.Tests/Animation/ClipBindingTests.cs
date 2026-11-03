@@ -83,7 +83,7 @@ public class ClipBindingTests
         };
         var orphans = Clips()
             .Where(c => !Enum.TryParse<AnimClip>(c.Type, ignoreCase: true, out _))
-            .Select(c => c.Type)
+            .Select(c => BaseType(c.Type))
             .Where(t => t != null && !classes.Contains(t) && !known.Contains(t))
             .Distinct(StringComparer.Ordinal)
             .OrderBy(t => t, StringComparer.Ordinal)
@@ -122,6 +122,32 @@ public class ClipBindingTests
         Assert.True(bad.Count == 0,
             "actions that neither report AnimationProgress nor loop — their overlay plays on the "
             + "clip's own clock and holds the final pose: " + string.Join("; ", bad));
+    }
+
+    // A phase clip ("GrabAction.Hold", ActionState.AnimationVariant) belongs to its action.
+    private static string BaseType(string type)
+    {
+        int dot = type?.IndexOf('.') ?? -1;
+        return dot > 0 ? type.Substring(0, dot) : type;
+    }
+
+    // Phase-clip contract: every variant clip's action exists (covered above), every
+    // SettleClip names a clip that is actually authored on the rig (else the ending silently
+    // falls back to a fade), and Grab binds all four of its phases.
+    [Fact]
+    public void SettleClips_Resolve_AndGrabBindsAllFourPhases()
+    {
+        var types = new HashSet<string>(Clips().Select(c => c.Type), StringComparer.Ordinal);
+        var dangling = Clips().Where(c => c.SettleClip != null && !types.Contains(c.SettleClip))
+                              .Select(c => $"{c.Name} -> {c.SettleClip}").ToList();
+        Assert.True(dangling.Count == 0, "SettleClip names no authored clip: " + string.Join(", ", dangling));
+
+        foreach (var t in new[] { "GrabAction", "GrabAction.Hold", "GrabAction.Throw", "GrabAction.Whiff" })
+            Assert.Contains(t, types);
+        var byType = Clips().ToDictionary(c => c.Type, c => c, StringComparer.Ordinal);
+        Assert.True(byType["GrabAction.Hold"].Loop, "the hold plays on the action clock and must loop");
+        Assert.Equal("GrabAction.Whiff", byType["GrabAction"].SettleClip);
+        Assert.Equal("GrabAction.Throw", byType["GrabAction.Hold"].SettleClip);
     }
 
     private static string StatesDir(string rig)
