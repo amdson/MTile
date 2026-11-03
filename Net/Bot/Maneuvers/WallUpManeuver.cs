@@ -131,6 +131,9 @@ public sealed class WallUpManeuver : BotManeuver
     }
 
     // RMB up, original picker key: see EncloseManeuver.Restore.
+    // Hit mid-build: the brain drops us, but the picker must still be put back.
+    public override void Abort(BotView v, ref PlayerInput input) => Restore(ref input);
+
     private bool Restore(ref PlayerInput input)
     {
         _done = true;

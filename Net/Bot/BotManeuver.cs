@@ -40,9 +40,11 @@ public abstract class BotManeuver
     // Write this frame's input on top of `input`. Return false when finished.
     public abstract bool Step(BotView v, ref PlayerInput input);
 
-    // Called when the brain abandons a running maneuver early (self got hit, target
-    // died). Default: nothing.
-    public virtual void Abort(BotView v) { }
+    // Called when the brain abandons a running maneuver early (self got hit). `input`
+    // is that frame's input, already holding default locomotion and the cursor; write a
+    // clean-up press into it if the maneuver left sticky state behind (e.g. re-select
+    // the block picker). Default: nothing.
+    public virtual void Abort(BotView v, ref PlayerInput input) { }
 
     // Per-bot bookkeeping owned by the brain.
     internal int CooldownLeft;

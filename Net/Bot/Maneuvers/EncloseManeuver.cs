@@ -185,6 +185,9 @@ public sealed class EncloseManeuver : BotManeuver
         return true;
     }
 
+    // Hit mid-build: the brain drops us, but the picker must still be put back.
+    public override void Abort(BotView v, ref PlayerInput input) => Restore(ref input);
+
     // One frame with RMB up and the original picker key held, then done. The picker is
     // a persistent per-player setting, so leaving it on spikes would make every later
     // plain-RMB paint by this bot (another maneuver's) silently spike instead.

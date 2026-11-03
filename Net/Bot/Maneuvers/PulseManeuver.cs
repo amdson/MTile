@@ -40,9 +40,11 @@ public sealed class PulseManeuver : BotManeuver
         bool hurt    = v.FramesSinceHit <= RecentHitFrames;
         bool hugging = MathF.Abs(v.Dx) <= 24f;
         // A slash scores 1; pulse only beats it when it is clearly the better answer.
-        if (hurt && hugging) return 1.6f;
-        if (hurt)            return 1.3f;
-        if (hugging)         return 0.6f;   // fallback when slash is on cooldown
+        // The circle can't release before ClickMaxHoldSeconds (12 frames), so it is a
+        // slow, punishable commitment — in brain fights it was the bot's single biggest
+        // source of damage taken when it fired merely "recently hurt" at mid range.
+        if (hurt && hugging) return 1.2f;
+        if (hugging)         return 0.3f;   // fallback when everything else is on cooldown
         return 0f;
     }
 

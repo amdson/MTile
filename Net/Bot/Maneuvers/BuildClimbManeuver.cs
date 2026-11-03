@@ -105,7 +105,7 @@ public sealed class BuildClimbManeuver : BotManeuver
         _unreachable = 0;
     }
 
-    public override void Abort(BotView v) { _unreachable = 0; }
+    public override void Abort(BotView v, ref PlayerInput input) { _unreachable = 0; }
 
     public override bool Step(BotView v, ref PlayerInput input)
     {

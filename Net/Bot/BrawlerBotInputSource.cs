@@ -63,6 +63,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         new PulseManeuver(),
         // Melee, by range band.
         new GrabManeuver(),
+        new EncloseManeuver(),
         new SlashManeuver(),
         new StabManeuver(),
         new AirHammerManeuver(),
@@ -72,6 +73,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         new DashManeuver(),
         // Mid range.
         new BlockThrowManeuver(),
+        new WallUpManeuver(),
         new BeamManeuver(),          // disabled until GrabAction stops shadowing BeamAction
         // Spacing and navigation.
         new WallClimbManeuver(),
@@ -101,7 +103,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
 
         // Got hit mid-maneuver ⇒ drop it; the script's assumptions are gone.
         float damage = v.Self.Combat.DamageTaken;
-        if (damage > _lastDamage && _active != null) { _active.Abort(v); Finish(); }
+        if (damage > _lastDamage && _active != null) { _active.Abort(v, ref input); Finish(); }
         _lastDamage = damage;
 
         foreach (var m in _maneuvers) if (m.CooldownLeft > 0) m.CooldownLeft--;
