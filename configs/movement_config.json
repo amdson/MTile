@@ -88,5 +88,9 @@
   "GrabCatchSpeed": 40,
   "GrabChaseMaxSeconds": 0.25,
   "GrabSwipeSmoothing": 0.35,
-  "GrabPointMaxSeconds": 0.25
+  "GrabPointMaxSeconds": 0.25,
+  // Launch decay (Physics/Launch.cs), px/s² on top of gravity + drag. Coast distance
+  // from speed v is v²/(2·decay). 0 = off (plain knockback velocity).
+  "WhipKickLaunchDecay": 1500,
+  "ThrowLaunchDecay": 1500
 }

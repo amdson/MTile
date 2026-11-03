@@ -243,7 +243,8 @@ public class PlayerCharacter : IHittable
         // Scaled here rather than through HitResolver's `scale` because that also feeds
         // Collision mode's MinLaunch floor, which would hand back most of the knockback
         // a leaky guard just ate.
-        AddKnockback(res.TargetDeltaV * guard.KnockbackScale);
+        if (hit.LaunchDecay > 0f) Launch(res.TargetDeltaV * guard.KnockbackScale, in hit);
+        else                      AddKnockback(res.TargetDeltaV * guard.KnockbackScale);
 
         // For render-only cosmetics (directional knockback cue, weapon flash) that
         // want more than LastHitImpulse's magnitude. Falls back to the hit's launch
@@ -292,6 +293,7 @@ public class PlayerCharacter : IHittable
     public void PreStep(Vector2 globalGravity)
     {
         var c = _abilities.Combat;
+        Body.Frozen = c.HitstopActive;   // LaunchSystem pauses while the body is held
         if (!c.HitstopActive) return;
         if (!c.HoldingBody) { c.HeldVelocity = Body.Velocity; c.HoldingBody = true; }
         Body.Velocity     = Vector2.Zero;
@@ -304,6 +306,15 @@ public class PlayerCharacter : IHittable
     {
         if (_abilities.Combat.HoldingBody) _abilities.Combat.HeldVelocity += dv;
         else                               Body.Velocity += dv;
+    }
+
+    // Same routing as AddKnockback, as a decaying launch (Physics/Launch.cs). Armored
+    // hits stay plain AddKnockback: a shove through armor is a nudge, not a launch.
+    private void Launch(Vector2 dv, in Hitbox hit)
+    {
+        var c = _abilities.Combat;
+        if (c.HoldingBody) LaunchSystem.Hit(Body, ref c.HeldVelocity, dv, hit.LaunchDecay, hit.LaunchImpactMass);
+        else               LaunchSystem.Hit(Body, ref Body.Velocity,  dv, hit.LaunchDecay, hit.LaunchImpactMass);
     }
     
     private readonly PlayerAbilityState _abilities = new();

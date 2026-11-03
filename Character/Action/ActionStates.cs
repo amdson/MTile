@@ -1936,7 +1936,8 @@ public class AirWhipKick : ActionState
             strikeMass: ctx.Mass,
             restitution: Restitution,
             minLaunch: MinLaunch * knockbackMult,
-            origin: origin));
+            origin: origin,
+            launchDecay: MovementConfig.Current.WhipKickLaunchDecay));
     }
 
     // Tip extension along StabDir at normalized time t, in px: a short chamber at the

@@ -19,6 +19,7 @@ public static class PhysicsWorld
             // Saved before reset so the friction step can tell whether the state
             // applied a tangential force this frame (walking / running / etc.).
             // If so, friction stays out of the way; otherwise it brakes / carries.
+            body.ContactEvents.Clear();
             Vector2 savedForce = body.AppliedForce;
             body.Velocity += body.AppliedForce * dt;
             body.AppliedForce = Vector2.Zero;
@@ -134,15 +135,19 @@ public static class PhysicsWorld
                 float mag = MathF.Abs(vnRel);
                 RecordImpulse(body, mag, mag, normal);
                 frictionDv = ApplyFrictionAtImpact(body, normal, bestShapeVel, ComputeFrictionForNormal(body, normal), savedForce, dt);
-                if (body.Impact != null
+                bool bounced = body.Impact != null
                     && body.Impact.BounceRestitution > 0f
-                    && MathF.Abs(vnRel) >= body.Impact.BounceImpulseThreshold)
+                    && MathF.Abs(vnRel) >= body.Impact.BounceImpulseThreshold;
+                if (bounced)
                 {
                     // Carry-zero already applied above (relative normal V = 0). Stack
                     // the rebound on top: net Δv = -(1+e)·vnRel·normal, i.e. body
                     // emerges moving away from the surface at e·|vnRel|.
                     body.Velocity -= vnRel * body.Impact.BounceRestitution * normal;
                 }
+                body.ContactEvents.Add(new ContactEvent(normal, bestShapeVel, vnRel,
+                    bounced ? ContactOutcome.Bounce : ContactOutcome.Stop,
+                    bounced ? body.Impact.BounceRestitution : 0f));
                 // Damage is no longer fired here — see ApplyContactDamage, which
                 // walks body.Constraints once per StepSwept after all impulses
                 // have been delivered to their per-contact LastImpulse fields.
@@ -240,6 +245,7 @@ public static class PhysicsWorld
     {
         foreach (var body in bodies)
         {
+            body.ContactEvents.Clear();
             Vector2 savedForce = body.AppliedForce;
             body.Velocity += body.AppliedForce * dt;
             body.AppliedForce = Vector2.Zero;
@@ -454,7 +460,7 @@ public static class PhysicsWorld
                     ComputeImpactCells(body, pos, hitNormal, chunks, pathCells);
                     if (pathCells.Count > 0)
                     {
-                        float mass = MathF.Max(body.Impact.Mass, 1e-6f);
+                        float mass = MathF.Max(body.Impact.Mass * body.ImpactMassScale, 1e-6f);
                         float ke = 0.5f * mass * vnAbs * vnAbs;
                         var seed = pathCells[0];
 
@@ -505,13 +511,16 @@ public static class PhysicsWorld
                 // body is already carrying inbound momentum into the empty
                 // space behind the broken cells — restitution on top would
                 // double-count the redirect.
-                if (!brokeThrough
+                bool bounced = !brokeThrough
                     && body.Impact != null
                     && body.Impact.BounceRestitution > 0f
-                    && vnAbs >= body.Impact.BounceImpulseThreshold)
-                {
+                    && vnAbs >= body.Impact.BounceImpulseThreshold;
+                if (bounced)
                     body.Velocity -= vnRel * body.Impact.BounceRestitution * hitNormal;
-                }
+                body.ContactEvents.Add(new ContactEvent(hitNormal, hitSurfaceVel, vnRel,
+                    brokeThrough ? ContactOutcome.BreakThrough
+                                 : bounced ? ContactOutcome.Bounce : ContactOutcome.Stop,
+                    bounced ? body.Impact.BounceRestitution : 0f));
             }
 
             float dn2 = Vector2.Dot(displacement, hitNormal);

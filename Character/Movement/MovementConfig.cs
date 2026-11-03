@@ -518,6 +518,14 @@ public class MovementConfig
     public float PlayerGrabChaseMaxSeconds  { get; set; } = 0.25f;
     public float PlayerGrabSwipeSmoothing   { get; set; } = 0.35f;
     public float PlayerGrabMaxAccel         { get; set; } = 30000f;
+
+    // ── Launch decay (Physics/Launch.cs) ─────────────────────────────────────────────
+    // px/s² a launch bleeds off at, on top of gravity and air drag. Stopping distance
+    // from speed v is v²/(2·decay): at 1500, the whip's ~770 px/s sweet spot coasts
+    // ≈200 px of launch, an 800 px/s throw ≈210 px. 0 = off (plain velocity, the
+    // pre-launch behavior). Sim-affecting; hot-reload is gated off in multiplayer.
+    public float WhipKickLaunchDecay        { get; set; } = 1500f;
+    public float ThrowLaunchDecay           { get; set; } = 1500f;
     // The held victim's own steering (GrabbedState): a flat push along their held
     // direction, px/s². Limited by construction — the hold's tracker absorbs it, so in
     // the hold it shifts the victim by ≈ accel·(PlayerGrabSmoothTime/2)² (≈10px at

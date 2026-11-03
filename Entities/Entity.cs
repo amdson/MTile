@@ -115,8 +115,14 @@ public class Entity : IHittable
     {
         Health -= hit.BodyDamage;
         var res = HitResolver.Resolve(in hit, KnockbackMass, Body.Velocity);
-        if (_holdingBody) _heldVelocity += res.TargetDeltaV;
-        else              Body.Velocity += res.TargetDeltaV;
+        if (hit.LaunchDecay > 0f)
+        {
+            // A decaying launch (Physics/Launch.cs), on whichever velocity is real.
+            if (_holdingBody) LaunchSystem.Hit(Body, ref _heldVelocity, res.TargetDeltaV, hit.LaunchDecay, hit.LaunchImpactMass);
+            else              LaunchSystem.Hit(Body, ref Body.Velocity, res.TargetDeltaV, hit.LaunchDecay, hit.LaunchImpactMass);
+        }
+        else if (_holdingBody) _heldVelocity += res.TargetDeltaV;
+        else                   Body.Velocity += res.TargetDeltaV;
 
         // Keyed on the hitbox's nominal strength, as the attacker's inbox is
         // (CombatSystem), so both sides of the hit freeze for the same window — or,
@@ -143,6 +149,8 @@ public class Entity : IHittable
     // GravityScale = 1 this is a no-op; with 0, the body is weightless.
     public void PreStep(Vector2 globalGravity)
     {
+        // Parked this step (rooted / hitstop hold) — LaunchSystem pauses on it.
+        Body.Frozen = _rooted || _hitstopFrames > 0;
         if (_rooted)
         {
             // Discard whatever the frame accumulated and hand StepSwept a body whose net

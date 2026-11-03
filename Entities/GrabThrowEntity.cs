@@ -52,12 +52,13 @@ public sealed class GrabThrowEntity : Entity
         var victim = spawner?.ResolveBody(Victim);
         var fields = spawner?.ForceFields;
         ChaseTime += dt;
-        if (victim == null || fields == null || ChaseTime > cfg.PlayerGrabChaseMaxSeconds) { Health = 0f; return; }
+        if (victim == null || fields == null) { Health = 0f; return; }
+        if (ChaseTime > cfg.PlayerGrabChaseMaxSeconds) { Release(victim, cfg); return; }
         // Caught up: let go. Not on the first frame, so even a throw that already moves
         // at the point's speed publishes one throw field (the Tumble stun is the throw).
         if (ChaseTime > dt && (victim.Velocity - Body.Velocity).Length() < cfg.PlayerGrabCatchSpeed)
         {
-            Health = 0f;
+            Release(victim, cfg);
             return;
         }
         // Hit terrain: let go, so the impact plays out as physics — bounce, stop or break
@@ -66,7 +67,7 @@ public sealed class GrabThrowEntity : Entity
         // victim there until PlayerGrabChaseMaxSeconds, releasing them at rest.
         if (ChaseTime > dt && TerrainPushback(victim, Body.Velocity) > cfg.PlayerGrabCatchSpeed)
         {
-            Health = 0f;
+            Release(victim, cfg);
             return;
         }
 
@@ -79,6 +80,16 @@ public sealed class GrabThrowEntity : Entity
             p, 0f, cfg.PlayerGrabMaxAccel, Faction, Id, Color.HotPink,
             isThrow: ChaseTime <= dt, only: Victim,
             trackSmoothTime: cfg.PlayerGrabChaseSmoothTime, trackMaxSpeed: cfg.PlayerGrabMaxSpeed));
+    }
+
+    // The victim flies free: the speed the throw gave them becomes a launch, so it bleeds
+    // off on ThrowLaunchDecay instead of coasting at the throw's full speed. On the
+    // terrain-pushback release the claim is trimmed next step by the continuity clamp
+    // (or reflected, if they bounced) like any launch meeting a wall.
+    private void Release(PhysicsBody victim, MovementConfig cfg)
+    {
+        Health = 0f;
+        LaunchSystem.Claim(victim, victim.Velocity, cfg.ThrowLaunchDecay, impactMass: 1f);
     }
 
     // How hard terrain pushed the victim back against the throw in the last physics
