@@ -1,0 +1,224 @@
+using System;
+using System.Collections.Generic;
+using Microsoft.Xna.Framework;
+
+namespace MTile.Net;
+
+// Rampart: a terrain zoner / fortress duelist (README.md alongside).
+//
+// Same skeleton as BrawlerBotInputSource — a utility selector over BotManeuvers, raw
+// PlayerInput out — with two differences:
+//   * Perception is its own ring buffer, and EVERYTHING about the opponent (position,
+//     velocity, action, grounded, helpless) comes out of it ReactionFrames stale. The
+//     Rampart maneuvers read the opponent only through RampartSense / BotView's stale
+//     fields; the opponent's HP (on the HUD) is the one live read.
+//   * Locomotion holds a range band instead of chasing: walk away when the opponent is
+//     inside it (unless cornered), walk in when they are beyond it, so the terrain moves
+//     (wave, eruption, spike moat, walls) are always the ones in range.
+public sealed class RampartBot : IRemoteInputSource
+{
+    public static readonly DuelBot Create = (self, seed) => new RampartBot(seed, self);
+
+    public int   ReactionFrames = 8;
+    // Preferred horizontal band (px). Inside BandMin we retreat; beyond BandMax we close.
+    public float BandMin = 7f * Chunk.TileSize;
+    public float BandMax = 12f * Chunk.TileSize;
+    // A wall this close behind (tiles) counts as cornered: stop retreating, fight.
+    public int   CornerTiles = 4;
+
+    private const int   JumpHoldFrames = 14;
+    private const int   StuckFrames    = 10;
+    private const float StuckSpeed     = 8f;
+
+    public IReadOnlyList<BotManeuver> Maneuvers => _maneuvers;
+    public BotManeuver Active => _active;
+    public readonly Dictionary<string, int> Starts = new();
+    public readonly RampartSense Sense = new();
+    // Diagnostics (tests/tuning): opponent HP lost / own HP lost, credited to the
+    // maneuver that started most recently (within CreditFrames), else "-".
+    public readonly Dictionary<string, float> Dealt = new(), Taken = new();
+    private const int CreditFrames = 90;
+    private string _lastName = "-";
+    private float _tHp = -1f, _myHp = -1f;
+
+    private readonly Random _rng;
+    private readonly int _selfIndex;
+    private readonly List<BotManeuver> _maneuvers;
+    private readonly BotView _view = new();
+
+    private const int Ring = 32;
+    private readonly Vector2[] _pos = new Vector2[Ring];
+    private readonly string[]  _act = new string[Ring];
+    private readonly bool[]    _gnd = new bool[Ring];
+    private readonly bool[]    _hlp = new bool[Ring];
+    private int _seen;
+
+    private BotManeuver _active;
+    private int   _jumpFrames, _jumpRelease, _stuck;
+    private float _lastDamage;
+    private PlayerInput _prev;
+    private int   _sinceAttack = int.MaxValue / 2, _sinceManeuver;
+
+    public RampartBot(int seed = 1, int selfIndex = 0)
+    {
+        _rng = new Random(seed);
+        _selfIndex = selfIndex;
+        _view.Rng = _rng;
+        var s = Sense;
+        _maneuvers = new List<BotManeuver>
+        {
+            new EscapeGrabManeuver(),
+            new GuardManeuver(),
+            new RampartPulse(s),
+            new SlashManeuver(),
+            new StabManeuver(),
+            new RampartEnclose(s),
+            new RampartCrystalWave(s),
+            new RampartAvalancheCrush(s),
+            new EruptionManeuver(),
+            new RampartWallUp(s),
+            new RampartSpikeMoat(s),
+            new BlockThrowManeuver(),
+            new RampartBackoff(s),
+        };
+    }
+
+    public PlayerInput Poll(Simulation sim, int frame)
+    {
+        if (sim.Player == null || sim.SecondaryPlayers.Count < 1) return default;
+        var v = Perceive(sim, frame);
+        var input = new PlayerInput { MouseWorldPosition = v.TargetPos };
+
+        float damage = v.Self.Combat.DamageTaken;
+        if (damage < _lastDamage) _lastDamage = 0f;     // respawned
+        if (damage > _lastDamage && _active != null) { _active.Abort(v, ref input); Finish(); }
+        _lastDamage = damage;
+
+        foreach (var m in _maneuvers) if (m.CooldownLeft > 0) m.CooldownLeft--;
+        Credit(v);
+
+        if (_active == null)
+        {
+            BotManeuver best = null; float bestScore = 0f;
+            foreach (var m in _maneuvers)
+            {
+                if (m.CooldownLeft > 0) continue;
+                float sc = m.Score(v);
+                if (sc > bestScore) { best = m; bestScore = sc; }
+            }
+            if (best != null)
+            {
+                _active = best;
+                _sinceManeuver = 0; v.FramesSinceManeuver = 0;
+                Starts[best.Name] = Starts.GetValueOrDefault(best.Name) + 1;
+                _lastName = best.Name;
+                best.Begin(v);
+            }
+        }
+
+        if (_active == null || !_active.OwnsLocomotion) Locomote(v, ref input);
+        else { _jumpFrames = 0; _stuck = 0; }
+
+        if (_active != null && !_active.Step(v, ref input)) Finish();
+
+        bool edge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
+        _sinceAttack = edge ? 0 : _sinceAttack + 1;
+        _sinceManeuver++;
+        _prev = input;
+        return input;
+    }
+
+    private void Credit(BotView v)
+    {
+        float th = v.Target.Health, mh = v.Self.Health;
+        string who = _sinceManeuver <= CreditFrames || _active != null ? _lastName : "-";
+        if (_tHp >= 0f && th < _tHp) Dealt[who] = Dealt.GetValueOrDefault(who) + (_tHp - th);
+        if (_myHp >= 0f && mh < _myHp) Taken[who] = Taken.GetValueOrDefault(who) + (_myHp - mh);
+        _tHp = th; _myHp = mh;
+    }
+
+    private void Finish()
+    {
+        _active.CooldownLeft = _active.Cooldown;
+        _active = null;
+    }
+
+    private BotView Perceive(Simulation sim, int frame)
+    {
+        var v = _view;
+        v.Sim = sim;
+        v.Self = BotDuel.Self(sim, _selfIndex);
+        v.Target = BotDuel.Opponent(sim, _selfIndex);   // read only for Health (HUD)
+        v.Frame = frame;
+        v.Me = v.Self.Body.Position;
+        v.MyVel = v.Self.Body.Velocity;
+        v.Previous = _prev;
+        v.FramesSinceAttack = _sinceAttack;
+        v.FramesSinceManeuver = _sinceManeuver;
+
+        // What is on screen this frame, pushed into the delay line.
+        var t = v.Target;
+        int i = _seen % Ring;
+        _pos[i] = t.Body.Position;
+        _act[i] = t.CurrentActionName;
+        _gnd[i] = t.IsGrounded;
+        _hlp[i] = t.Combat.HitstunActive || t.Combat.StunActive || t.Combat.GrabbedActive;
+        _seen++;
+
+        int now = Idx(ReactionFrames), before = Idx(ReactionFrames + 1);
+        v.TargetPos    = _pos[now];
+        v.TargetAction = _act[now];
+        v.TargetVel    = _seen > ReactionFrames + 1 ? (_pos[now] - _pos[before]) / Simulation.FixedDt : Vector2.Zero;
+        // Smoother velocity for planning: over 6 frames.
+        int far = Idx(ReactionFrames + 6);
+        Sense.TargetVelSmooth = _seen > ReactionFrames + 6 ? (_pos[now] - _pos[far]) / (6 * Simulation.FixedDt) : Vector2.Zero;
+        Sense.TargetGrounded = _gnd[now];
+        Sense.TargetHelpless = _hlp[now];
+        Sense.Cornered       = Cornered(v, -v.Toward);
+        return v;
+    }
+
+    private int Idx(int lag)
+    {
+        lag = Math.Min(Math.Min(lag, Ring - 1), _seen - 1);
+        return (_seen - 1 - lag) % Ring;
+    }
+
+    // A wall within CornerTiles on side `dir` at body height.
+    private bool Cornered(BotView v, int dir)
+    {
+        var c = BotView.Cell(v.Me);
+        for (int k = 1; k <= CornerTiles; k++)
+            if (v.Solid(c.X + dir * k, c.Y) || v.Solid(c.X + dir * k, c.Y - 1)) return true;
+        return false;
+    }
+
+    private void Locomote(BotView v, ref PlayerInput input)
+    {
+        float adx = MathF.Abs(v.Dx);
+        int dir = 0;
+        if (adx > BandMax) dir = v.Toward;
+        else if (adx < BandMin && !Sense.Cornered) dir = -v.Toward;
+        else if (adx < BandMin && Sense.Cornered && adx > 3f * Chunk.TileSize) dir = 0;   // hold the corner
+        if (dir != 0) BotInput.Move(ref input, dir);
+
+        if (dir != 0 && MathF.Abs(v.MyVel.X) < StuckSpeed) _stuck++; else _stuck = 0;
+        if (_jumpFrames > 0) { input.Space = true; _jumpFrames--; if (_jumpFrames == 0) _jumpRelease = 4; }
+        else if (_jumpRelease > 0) _jumpRelease--;
+        else if (v.Grounded && _stuck >= StuckFrames)
+        {
+            input.Space = true; _jumpFrames = JumpHoldFrames - 1; _stuck = 0;
+        }
+        if (!v.Grounded && dir != 0) BotInput.Move(ref input, dir);
+    }
+}
+
+// The stale facts about the opponent the brain derives each Poll, shared with the
+// Rampart maneuvers (which must not read the opponent's object for anything but HP).
+public sealed class RampartSense
+{
+    public bool    TargetGrounded;
+    public bool    TargetHelpless;
+    public Vector2 TargetVelSmooth;
+    public bool    Cornered;   // a wall right behind us (away from the opponent)
+}
