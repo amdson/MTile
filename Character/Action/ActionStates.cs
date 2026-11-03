@@ -107,6 +107,17 @@ public abstract class ActionState
     // Burst←Recovery-charge, GrabbedSlash←grabbed) or the eviction lookahead.
     public virtual bool NeutralForEntry => false;
 
+    // The grab lock-out (CombatState.BlocksAttack, raised while a grab holds this
+    // player). ONE central gate: the action-selection loop (PlayerCharacter) and
+    // RecoveryAction's eviction lookahead drop every candidate that doesn't opt in
+    // here, so a grabbed player can't start a stab, pulse, guard, build/paint/peel,
+    // or anything else — only the struggle (GrabbedSlash) and the neutral/airlock
+    // states it cycles through. Per-action BlocksAttack checks used to be the gate,
+    // and the actions that forgot one (Pulse, BlockPaint/Place, BlockGrab) were
+    // usable mid-grab. Gates ENTRY only — an action already live when the grab
+    // latches runs out on its own CheckConditions.
+    public virtual bool AllowedWhileGrabbed => false;
+
     // Standard entry gate for the strict transition graph: fire only from neutral
     // or recovery, and only once the countdown has reached maxEntryIndex frames.
     // 0 (the default) = fully recovered. The countdown includes hit-imposed
@@ -200,6 +211,7 @@ public class NullAction : ActionState
     public override int ActivePriority  => 0;
     public override int PassivePriority => 0;
     public override bool NeutralForEntry => true;
+    public override bool AllowedWhileGrabbed => true;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab) => true;
     public override bool CheckConditions  (EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars) => true;
@@ -265,6 +277,10 @@ public class RecoveryAction : ActionState
 
     public override int ActivePriority  => 10;
     public override int PassivePriority => _bid;
+    // The airlock the struggle's own recovery stamp hands off through (and where
+    // flinch lands) — a waiting room, not an attack. What it can CHAIN into is
+    // still grab-gated: the lookahead below skips grab-blocked candidates.
+    public override bool AllowedWhileGrabbed => true;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
@@ -346,6 +362,7 @@ public class RecoveryAction : ActionState
             {
                 var a = registry[i];
                 if (a is RecoveryAction or NullAction) continue;
+                if (ctx.Combat?.BlocksAttack == true && !a.AllowedWhileGrabbed) continue;   // grab lock-out
                 if (a == cur) continue;   // evicting an action to re-enter itself is a no-op
                 if (a.PassivePriority <= cur.ActivePriority) continue;   // bid couldn't win
                 if (a.PassivePriority <= best) continue;                 // can't improve
@@ -4335,8 +4352,9 @@ public class BlockGrabAction : ActionState
 // live action state but holds nobody — no field goes out, so the grab is a read the
 // opponent can jump or hit out of rather than an instant snap. What it is NOT is an area effect — a grab holds ONE body. The action
 // latches a single victim (vars.GrabVictim) and stamps it on the field (ForceField.Only)
-// so the region's geometry stays generous while the hold, the pull and the throw all
-// land on exactly that one opponent. It IGNORES guard for free (a field never goes
+// so the hold, the pull and the throw all land on exactly that one opponent. The latch
+// box is short (contact plus a little — see LatchHalfX); the carry box it then holds
+// within is the generous one. It IGNORES guard for free (a field never goes
 // through the OnHit/parry path). Releasing RMB (or hitting the hold cap) flings the victim with a brief
 // high-speed directional field — hard enough into terrain and the crush path bills them.
 //
@@ -4366,8 +4384,22 @@ public class GrabAction : ActionState
     // collision is what stops a victim pulled into the floor — and stays held while
     // inside the grabber-centred box of half-size PlayerGrabHoldReach + CarrySlack.
     private const float CarrySlack        = PlayerCharacter.Radius * 3f;
-    private const float Range       = PlayerCharacter.Radius * 2.4f;   // field region half-size
-    private const float FocusDist   = PlayerCharacter.Radius * 1.6f;   // hold focus in front of the grabber
+    // The latch box — the grab's REACH. A short-range grab: body contact plus a little,
+    // shorter than a Slash 1 (whose tip sits 1.5 × ArcRadius ≈ 47 px out, so it tags a
+    // body centred ~53 px away). The box spans x ∈ [+4.8, +31.2] px ahead of the
+    // grabber's centre and ±12 px vertically, so it latches a victim whose centre is
+    // within ~37 px ahead and ±~24 px up/down (hurtbox half-extents ≈ 5.8 × 12): a
+    // ~25 px gap between bodies. GrabManeuver's Reach/VerticalReach (36/24) is that.
+    //
+    // Was a ±28.8 px square (Radius × 2.4) centred 19.2 px ahead — a box sized for the
+    // ORIGINAL grab, whose hold field was this same region pulling the victim to the
+    // focus (so it was kept generous to not drop a struggling victim). Since the carry
+    // got its own box (PlayerGrabHoldReach + CarrySlack, below) the region only
+    // latches, and the leftover generosity read as a grab that caught from ~54 px
+    // ahead, ~41 px above/below, and from behind.
+    private const float LatchHalfX  = PlayerCharacter.Radius * 1.1f;   // latch box half-width
+    private const float LatchHalfY  = PlayerCharacter.Radius * 1.0f;   // latch box half-height
+    private const float FocusDist   = PlayerCharacter.Radius * 1.5f;   // latch-box centre in front of the grabber
 
     // Four clips, one per phase (CharacterAnimator's phase clips + settle successors):
     //   GrabAction        — the telegraphed wind-up, swept once over the startup, then held
@@ -4411,7 +4443,7 @@ public class GrabAction : ActionState
     // The field's AABB, from its focus. One helper so the latch query and the published
     // field are the same box by construction.
     private static BoundingBox RegionAround(Vector2 focus)
-        => new BoundingBox(focus.X - Range, focus.Y - Range, focus.X + Range, focus.Y + Range);
+        => new BoundingBox(focus.X - LatchHalfX, focus.Y - LatchHalfY, focus.X + LatchHalfX, focus.Y + LatchHalfY);
 
     // Which single body this grab has hold of. `current` is last frame's victim: it wins
     // as long as it is still inside the region, so the hold never hops to whoever happens
@@ -4597,6 +4629,7 @@ public class GrabbedSlash : SlashLikeAction
     // Beats NullAction; no combo. Normal slashes are gated off while grabbed, so this
     // is the only attack available.
     public override int PassivePriority => 36;
+    public override bool AllowedWhileGrabbed => true;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {

@@ -807,9 +807,13 @@ public class PlayerCharacter : IHittable
 
         ActionState bestAction = null;
         int bestActionPriority = int.MinValue;
+        // Grab lock-out: while held, only the actions that opt in (the struggle and
+        // the neutral/recovery states) are candidates — see ActionState.AllowedWhileGrabbed.
+        bool grabbed = _abilities.Combat.BlocksAttack;
         foreach (var action in _actionRegistry)
         {
             if (action == _currentAction) continue;
+            if (grabbed && !action.AllowedWhileGrabbed) continue;
             if (action.CheckPreConditions(ctx, _abilities) && action.PassivePriority > bestActionPriority)
             {
                 bestActionPriority = action.PassivePriority;

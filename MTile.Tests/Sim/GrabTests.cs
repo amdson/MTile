@@ -236,11 +236,11 @@ public class GrabTests(ITestOutputHelper output)
     // single-target lock, every hurtbox the region covered got flagged GrabbedActive,
     // pulled to the focus, and flung by the throw — one press grabbing a whole crowd.
     // GrabAction now latches one victim (ActionVars.GrabVictim → ForceField.Only).
-    // Both stand inside the region: near at 95 (~25px right of the grabber, closest to
-    // the hold focus at ~89) and far at 112 (its hurtbox still overlaps the region,
-    // which reaches ~118).
+    // Both stand inside the latch box: near at 95 (~25px right of the grabber, closest
+    // to the latch focus at 88) and far at 102 (its hurtbox, from ~96, still overlaps
+    // the box, which reaches ~101 — see GrabAction.LatchHalfX).
     private static readonly Vector2 NearVictimStart = new(95f, RestY);
-    private static readonly Vector2 FarVictimStart  = new(112f, RestY);
+    private static readonly Vector2 FarVictimStart  = new(102f, RestY);
 
     private static SimConfigMulti BuildTwoVictims(InputScript attacker) => new SimConfigMulti
     {
