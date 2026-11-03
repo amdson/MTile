@@ -124,10 +124,7 @@ public class MassBall : Projectile
             // wave mass), so it banks up the near side instead of leaking through.
             float dump = _mass;
             _mass = 0f;
-            // A crystal wave just shatters on the wall: the barricade ABSORBS what's
-            // left rather than banking a crystal pile against its face (which could
-            // spill over a low wall and continue on the far side).
-            if (!_crystal) chunks.Mass.Deposit(chunks, nx, ny, dump, _tileType, Id, owner);
+            chunks.Mass.Deposit(chunks, nx, ny, dump, _tileType, Id, owner);
             Body.Position = BlockEruptionHelpers.CellCenter(nx, ny);
             Body.Velocity = Vector2.Zero;
             StoppedAtWall = true;

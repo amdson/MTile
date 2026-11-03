@@ -111,9 +111,10 @@ public sealed class CrystalWaveField
 
     // A crystal request from the mass field (via ChunkMap.TryRequestCrystal, which has
     // already checked the cell is empty terrain with no sprout). Mirrors TryRequestTile's
-    // accept/reject: support is the ground under the cell (solid BELOW — crystals grow up
-    // out of the floor, they don't climb walls or hang from ceilings) or any crystal of
-    // the same wave beside it; with neither the request fails and the mass spills on.
+    // accept/reject: support is any solid 4-neighbour (floor, wall or ceiling — the same
+    // rule as a tile, so the wave takes the shape an ordinary avalanche would) or any
+    // crystal of the same wave beside it; with neither the request fails and the mass
+    // spills on. A crystal touching solid grows out of it (SolidBase: floor first).
     //
     // Classification of an accepted request:
     //   no same-wave crystal around          → ROOT, seeded now: the long warning. The
@@ -127,7 +128,7 @@ public sealed class CrystalWaveField
         if (!_waves.TryGetValue(wave, out var rec)) return false;
         if (_cells.ContainsKey((gtx, gty))) return false;
 
-        bool ground = chunks.GetCellState(gtx, gty + 1) == TileState.Solid;
+        var solid = SolidBase(chunks, gtx, gty);
         bool anyCrystal = false;
         SproutFaces passedFace = SproutFaces.None;
         foreach (var face in TileSproutNode.FaceOrder)
@@ -138,7 +139,7 @@ public sealed class CrystalWaveField
             if (passedFace == SproutFaces.None && !n.Pending && n.PhaseAt(now) >= CrystalPhase.Grown)
                 passedFace = face;
         }
-        if (!ground && !anyCrystal) return false;
+        if (solid == SproutFaces.None && !anyCrystal) return false;
 
         var c = new Crystal
         {
@@ -149,15 +150,27 @@ public sealed class CrystalWaveField
         {
             c.Root = true;
             c.SeededFrame = now;
-            c.Base = SproutFaces.Below;
+            c.Base = solid;
         }
         else if (passedFace != SproutFaces.None)
         {
             c.SeededFrame = now;
-            c.Base = ground ? SproutFaces.Below : passedFace;
+            c.Base = solid != SproutFaces.None ? solid : passedFace;
         }
         _cells[(gtx, gty)] = c;
         return true;
+    }
+
+    // The face a crystal grows out of when it touches terrain: the first solid
+    // 4-neighbour in FaceOrder (floor, then walls, then ceiling), else None.
+    private static SproutFaces SolidBase(ChunkMap chunks, int gtx, int gty)
+    {
+        foreach (var face in TileSproutNode.FaceOrder)
+        {
+            var o = TileSproutNode.FaceOffset(face);
+            if (chunks.GetCellState(gtx + o.X, gty + o.Y) == TileState.Solid) return face;
+        }
+        return SproutFaces.None;
     }
 
     // A grown crystal landed on a victim: it shatters (stays as residue).
@@ -199,8 +212,8 @@ public sealed class CrystalWaveField
                         var o = TileSproutNode.FaceOffset(face);
                         if (!_cells.TryGetValue((cell.gtx + o.X, cell.gty + o.Y), out var n)) continue;
                         if (n.Wave != c.Wave || n.Pending || n.PhaseAt(now) != CrystalPhase.Grown) continue;
-                        bool ground = chunks.GetCellState(cell.gtx, cell.gty + 1) == TileState.Solid;
-                        _seedScratch.Add((cell, ground ? SproutFaces.Below : face));
+                        var solid = SolidBase(chunks, cell.gtx, cell.gty);
+                        _seedScratch.Add((cell, solid != SproutFaces.None ? solid : face));
                         break;
                     }
                 }

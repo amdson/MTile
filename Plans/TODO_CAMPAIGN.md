@@ -111,10 +111,10 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   3 frames/cell (~220 px/s); grown 0.35 s; 0.5 HP per crystal, cap 1.5 HP/wave/victim;
   knockback 260 + 0.15 s hitstun; forming push 140 px/s; shard 1.8 tiles; 2 meter
   units/crystal; 8 s cooldown; ~25-cell run. Agent's calls (defaults in force):
-  - **Shape:** crystals root only on solid ground below or on a same-wave crystal, so the
-    wave hugs the floor (1–2 rows) instead of climbing walls / hanging from ceilings like
-    a normal avalanche; a crystal ball hitting a wall shatters (no spill). This is the
-    main thing to weigh in the shape-dial discussion.
+  - **Shape:** ~~floor-hugging (crystals rooted only on solid below; ball shattered at
+    walls)~~ — reverted 2026-11-03 per the user's spec: crystals take any solid face or
+    same-wave crystal as support (same rule as tiles) and the ball banks at walls like a
+    normal avalanche, so the wave has the ordinary avalanche shape.
   - Input: spikes-selected plain RMB on solid is decided after 0.15 s — tap spikes the
     press cell on release, a stroke spikes cells as it goes, a 0.15 s stay on the press
     cell charges (fast release = wave). Shift+RMB spiking is unchanged and immediate.
