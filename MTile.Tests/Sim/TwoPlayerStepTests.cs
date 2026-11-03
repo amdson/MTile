@@ -233,4 +233,42 @@ public class TwoPlayerStepTests(ITestOutputHelper output)
         }
         output.WriteLine($"Two-player snapshot/restore identical across {liveTrace.Count} frames after restore@{K}.");
     }
+
+    // ── BrawlerBotInputSource: the walk-up-and-slash P2 (harness: BotArena) ─────
+
+    [Fact]
+    public void Brawler_WalksUpAndHits_OnFlatGround()
+    {
+        // ~200px apart: the bot has to cross the floor, then keep swinging once there.
+        var r = BotArena.Fight(BotArena.Flat(), new Vector2(100f, 70f), new Vector2(300f, 70f), 600,
+                               BotArena.Only(new SlashManeuver()));
+        output.WriteLine(r.Summary());
+        Assert.True(r.FirstHitOnP1 is >= 0 and < 240, $"The brawler should reach P1 and land a slash (first hit {r.FirstHitOnP1}).");
+        Assert.True(r.DamageToP1 >= 1.5f, $"The brawler should keep landing hits once in range (P1 lost {r.DamageToP1}).");
+    }
+
+    [Fact]
+    public void Brawler_JumpsUpAStep_ToReachTarget()
+    {
+        // P1 waits on top of the two-tile step; the bot starts on the low floor and must
+        // jump (stuck detector at the step face) to get into slash range.
+        var r = BotArena.Fight(BotArena.Flat(step: true), new Vector2(350f, 48f), new Vector2(150f, 70f), 480,
+                               BotArena.Only(new SlashManeuver()));
+        output.WriteLine(r.Summary());
+        Assert.True(r.FirstHitOnP1 >= 0, "The brawler should climb the step and land a slash.");
+    }
+
+    [Fact]
+    public void Brawler_IsDeterministic()
+    {
+        static string Run()
+        {
+            var sim = new Simulation(BotArena.Flat(step: true), new Vector2(350f, 48f));
+            sim.AddSecondaryPlayer(new Vector2(150f, 70f));
+            var bot = new BrawlerBotInputSource(seed: 3);
+            for (int f = 0; f < 240; f++) sim.Step(P1At(f), bot.Poll(sim, f));
+            return Probe(sim);
+        }
+        Assert.Equal(Run(), Run());
+    }
 }

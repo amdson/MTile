@@ -1,70 +1,39 @@
-# Bot AI Plan — a moderately challenging P2 opponent
+# Bot AI Plan — a P2 opponent that plays through raw input
 
-Goal: upgrade the stub `BotInputSource` (seeded-random walk + loosely aimed pokes)
-into an opponent that pursues the player, jumps toward them, and picks among
-several attacks — challenging but readable/fair, with explicit difficulty dials.
+**Status (2026-11-02):** stage 1 built. `Net/BrawlerBotInputSource.cs` walks up to P1,
+jumps steps, and slashes; it is what Game1 hands an offline second player.
+`Net/BotInputSource.cs` stays as the seeded-random chaos monkey for sim bring-up tests.
+Scenario tests: `TwoPlayerStepTests.Brawler_*`.
 
-## Architecture
+## Architecture — decided: bots emit raw `PlayerInput`, nothing else
 
-### The bot stays outside the sim…
+A bot is an `IRemoteInputSource`: once per new frame it reads the sim and returns the
+same `PlayerInput` record a keyboard + mouse produces — held `Left/Right/Up/Space`, an
+`LeftClick` bit, and `MouseWorldPosition` as the cursor. That record is buffered as P2's
+input and replayed from the buffer during rollback; bot RNG/timers live outside the sim
+and are never snapshotted.
 
-Keep the existing seam: the bot is an `IRemoteInputSource` polled once per *new*
-frame; its output is buffered as P2's input and replayed from the buffer during
-rollback. Bot RNG/timers are never snapshotted. All sim influence flows through
-the per-frame input record.
+**Attacks are performed as gestures**, exactly as a human performs them, and decoded by
+the unchanged `InputParser`:
 
-### …but it does NOT mime human gestures
+| Want | Input to synthesize |
+|---|---|
+| Slash (`Click`) | LMB down for 1..`ClickMaxHoldSeconds` frames, cursor on the target |
+| Stab | LMB held > `ClickMaxHoldSeconds`, cursor swept ≥ `StabSwipeThreshold` px (player-relative) toward the stab direction, release |
+| Pulse (`Circle`) | LMB held while the cursor sweeps ≥ 270° around the press point at ≥ `MinCircleRadius` |
+| Jump / dash | `Space` press edge / `Space` + `Shift` chord |
+| Eruption, grenade, … | the raw button (`RightClick`, `F`, …) — no parser involved |
 
-The stub's model — synthesize mouse swipes/circles so `InputParser` can decode
-them back into intents the bot already knew it wanted — is a pointless
-encode/decode round-trip, and brittle against gesture-threshold tuning. The bot
-should produce intents directly.
+> **Superseded decision.** An earlier version of this plan rejected gesture-miming in
+> favour of bot-only virtual attack buttons (`AttackSlash/Stab/Pulse` on `PlayerInput`)
+> and a per-player `IIntentParser`/`DirectIntentParser` — an easier-to-program bot API.
+> That is reversed: no new input fields, no parser seam. Bots use the human input
+> surface, so whatever a bot can do a player can do with the same timing, and the
+> gesture layer gets exercised by every bot match. The cost — bots must know the gesture
+> thresholds — is owned by the bot (a small helper per gesture), not by the sim.
 
-The constraint that shapes *how*: intents must be **derived in-sim from the
-buffered input**, not injected from outside. `InputParser.Detect` runs inside
-`PlayerCharacter`'s update and its state is snapshotted — that's what makes
-intents recompute correctly when a rollback re-steps from the input buffer. An
-intent pushed into `IntentBuffer` at poll time would vanish (or double-fire) on
-replay, because the loop replays buffered inputs and never re-polls the source.
-
-So: the per-frame input record stays the rollback/replay unit, and we widen it
-with **virtual attack buttons** that only bots set:
-
-```csharp
-// PlayerInput additions
-public bool AttackSlash;   // → IntentType.Click
-public bool AttackStab;    // → IntentType.Stab (direction from aim point)
-public bool AttackPulse;   // → IntentType.Circle
-```
-
-Inside the sim, the gesture-classification layer becomes pluggable per player:
-
-- **Human players** keep `InputParser` (gesture decoding, unchanged).
-- **Bot players** get a `DirectIntentParser` (~30 lines): press-edge on a virtual
-  button (cur vs `controller.GetPrevious(1)`, same pattern RightClick actions
-  already use) ⇒ issue the corresponding intent. Stab `Direction` is computed
-  at parse time as `normalize(MouseWorldPosition - body position)` — pass the
-  body position into `Detect` (InputParser ignores it). Deriving everything from
-  the controller ring keeps the direct parser stateless, so it needs no snapshot.
-
-Seam: an `IIntentParser` interface over `Detect/Capture/Restore`; `PlayerCharacter`
-takes which one at construction.
-
-What this does *not* change: movement is still held keys (`Left/Right/Space/Up`)
-read continuously by movement states — the bot moves under the same physics and
-input constraints as a human. `MouseWorldPosition` remains load-bearing as the
-**aim point** (slash/stab/eruption all read it directly for aiming); the bot sets
-it to its target every frame. Raw-input actions (RightClick eruption, `F`
-grenade) already need no parser and work as-is.
-
-GGPO note: `PlayerInput` is what will cross the wire; three extra bools are
-noise size-wise, are simply never set by human sources, and mean rollback needs
-no bot-specific side channel.
-
-Tradeoff to own: gesture timing imposed a natural windup (a stab required an
-8-frame hold). With direct intents that telegraph disappears, so fairness moves
-into the brain as an explicit `TelegraphFrames` delay before each attack —
-better anyway: a dial instead of an emergent artifact.
+Because gestures carry natural windup (a stab needs its hold), part of the fairness
+budget comes for free; the remainder is explicit dials below.
 
 ## Bot internals (two layers, evaluated each `Poll`)
 
@@ -91,7 +60,7 @@ Decision tick every ~6 frames so intent reads as behavior, not per-frame noise:
 | State | Enter when | Behavior |
 |---|---|---|
 | `Pursue` | `dist > EngageRange` (~120 px) | Move toward target; jump logic active. |
-| `Engage` | `dist ≤ EngageRange`, attack off cooldown | Pick an attack, wait `TelegraphFrames` (aim already committed), press its virtual button for 1 frame. |
+| `Engage` | `dist ≤ EngageRange`, attack off cooldown | Pick an attack, wait `TelegraphFrames` (aim already committed), perform its gesture (table above). |
 | `Backoff` | Just attacked, or `dist < CrowdRange` (~30 px) while on cooldown | Move away ~15–25 frames. Prevents face-hugging; creates learnable rhythm. |
 | `Breach` | Stuck detector fired twice while pursuing | Slash aimed at the terrain in the movement direction; resume `Pursue`. |
 
@@ -133,30 +102,24 @@ Tier 2 (later, no new machinery): `F` edge → `GrenadeAction` at long range;
 
 ## Files
 
-- `Character/Input/Controller.cs` — add `AttackSlash/AttackStab/AttackPulse` to
-  `PlayerInput` (humans never set them).
-- `Character/DirectIntentParser.cs` — new; the trivial in-sim button→intent
-  frontend. `IIntentParser` interface extracted over it + `InputParser`;
-  `PlayerCharacter` picks per player at construction.
-- `Net/CombatBotInputSource.cs` — new `IRemoteInputSource`: perception + FSM +
-  locomotion (~150 lines).
-- `Net/BotInputSource.cs` — keep as the dumb baseline (useful chaos-monkey for
-  sim bring-up tests).
+- `Net/BrawlerBotInputSource.cs` — stage 1: chase (stale-target aim), stuck ⇒ jump,
+  target-above ⇒ jump, in range ⇒ 1-frame LMB tap at the target. Dials as public fields
+  (`EngageRange`, `VerticalReach`, `CooldownMin/Max`, `ReactionFrames`).
+- Next: stab/pulse gesture helpers (hold + swipe, hold + circle) in the bot, then the
+  brain FSM above (Engage/Backoff/Breach) layered on the same input output.
+- `Net/BotInputSource.cs` — keep as the dumb baseline.
 
 ## Tests
 
-1. **Parser unit test** (pure): inject virtual-button frames into a `Controller`,
-   run `DirectIntentParser.Detect`, assert exactly one intent per press edge,
-   correct stab direction, no re-fire while held.
-2. **Rollback regression**: extend `SnapshotRoundTripTests` / `RollbackHarnessTests`
-   coverage to a bot-driven P2 — attack intents must replay identically from the
-   input buffer after a restore (this is the property the whole design hangs on).
-3. **Headless scenario** (`MTile.Tests/Sim`, alongside `TwoPlayerStepTests`):
-   flat ascii terrain, stationary P1, bot P2 spawned 200 px away — assert the
-   bot closes to `EngageRange` and P1's health drops within N frames. A second
-   scenario with P1 on a 2-tile ledge exercises jump-toward/breach.
+1. **Headless scenarios** (`TwoPlayerStepTests`): flat walled arena, stationary P1,
+   brawler 200 px away — first hit inside 240 frames and ≥ 1.5 HP over 600; P1 on a
+   2-tile step — the bot climbs and lands a hit. Plus a determinism re-run.
+2. **Rollback**: nothing bot-specific — bot output is plain `PlayerInput`, covered by
+   the existing two-player snapshot/restore test.
+3. Later, per gesture helper: the synthesized input stream decodes to the intended
+   intent through a real `InputParser` (one intent per gesture, right stab direction).
 
-## Non-goals (for "moderately challenging")
+## Non-goals (for now)
 
 - No pathfinding / navmesh — reactive movement + breach only.
 - No blocking/guarding, dodge reads, or adaptive difficulty.

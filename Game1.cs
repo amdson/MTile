@@ -33,7 +33,7 @@ public class Game1 : Game
     // Stage-1 rollback bring-up: when the stage spawns a second player, a local bot
     // spoofs its input (stand-in for a future network peer — see GGPO_PLAN §G). Null
     // in solo play, in which case Step runs the primary-only path.
-    private MTile.Net.BotInputSource _botInput;
+    private MTile.Net.IRemoteInputSource _botInput;
 
     // Networked match (GGPO_PLAN stage 5). When _net is supplied, Game1 drives a
     // RollbackSession over the transport instead of stepping the sim directly: the
@@ -511,7 +511,7 @@ public class Game1 : Game
 
         // Offline only: if the stage spawned a second player, spoof its input with a bot.
         _botInput = _net == null && _sim.SecondaryPlayers.Count > 0 && !stage.IdleSecondary
-            ? new MTile.Net.BotInputSource(seed: 1234)
+            ? new MTile.Net.BrawlerBotInputSource(seed: 1234)
             : null;
 
         // Cosmetic feedback hooks. The sim raises these during Step; they land in the
