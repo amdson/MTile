@@ -22,11 +22,11 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   avalanche 0.04 s, normal paint 0.07 s, Shift placement 0.10 s (user-chosen 2026-11-02).
 - [x] **5** Build reach effectively infinite when chaining from a sprouting cell
   (`ChainReachMul` in BlockPaintAction + BlockPlaceAction).
-- [ ] **6** More distinct sprout visuals (render-only; screenshot for the user's review).
-- [ ] **8** Spike placement crystal lifecycle: a crystal seed appears on top of the block,
+- [~] **6** (Opus worktree agent) More distinct sprout visuals (render-only; screenshot for the user's review).
+- [~] **8** (Opus worktree agent) Spike placement crystal lifecycle: a crystal seed appears on top of the block,
   waits ~1 s, flashes, grows into the existing (1-cell overlay) spike. Phases are sim
   state (snapshotted); visuals render-only. Shares the phase machine with 7.
-- [ ] **4** MassBall stops on entering solid it didn't create (pre-existing or anyone's
+- [~] **4** (Opus worktree agent) MassBall stops on entering solid it didn't create (pre-existing or anyone's
   barricade), dumping remaining mass at the face; ball remembers its own wave's cells.
   Plus: crush damage for NON-riders pinned between a wave and a wall should be
   significant. Watch `BotManeuverAvalancheRideTests` (rides gain height off cliffs).
@@ -64,4 +64,4 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 ## Campaign log
 
 - a09468e — #3 committed (user's burst work); BurstChargeTests 10/10; combat/terrain/bot reds = 40 baseline.
-- (this commit) — #2a/#2b/#5: per-source sprout dials (SproutSource on nodes, snapshotted; LifetimeFor), per-parent overshoot carry (front continuous: 12 painted cells in 51 frames vs 60 with rounding), unlimited reach chaining off your OWN sprout (others' keep 2x). SproutSpeedTests 7/7. New reds: 2 SproutLiftJump + 5 crush (see Decisions needed); movement-group reds otherwise pre-existing (no sprout refs).
+- c86fc15 — #2a/#2b/#5: per-source sprout dials (SproutSource on nodes, snapshotted; LifetimeFor), per-parent overshoot carry (front continuous: 12 painted cells in 51 frames vs 60 with rounding), unlimited reach chaining off your OWN sprout (others' keep 2x). SproutSpeedTests 7/7. New reds: 2 SproutLiftJump + 5 crush (see Decisions needed); movement-group reds otherwise pre-existing (no sprout refs).
