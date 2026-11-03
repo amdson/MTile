@@ -34,6 +34,7 @@ public struct BodyState
     public float   LastImpulseMagnitude;
     public float   LastCrushImpulse;
     public int     SproutCrushCount;
+    public bool    WavePinned;
     public float   FrictionScale;
     public Launch  Launch;          // value struct — copies free
     public PhysicsContact[] Contacts;
@@ -52,6 +53,7 @@ public struct BodyState
             LastImpulseMagnitude = b.LastImpulseMagnitude,
             LastCrushImpulse     = b.LastCrushImpulse,
             SproutCrushCount     = b.SproutCrushCount,
+            WavePinned           = b.WavePinned,
             FrictionScale        = b.FrictionScale,
             Launch               = b.Launch,
             Contacts             = kept?.ToArray() ?? System.Array.Empty<PhysicsContact>(),
@@ -66,6 +68,7 @@ public struct BodyState
         b.LastImpulseMagnitude = LastImpulseMagnitude;
         b.LastCrushImpulse     = LastCrushImpulse;
         b.SproutCrushCount     = SproutCrushCount;
+        b.WavePinned           = WavePinned;
         b.FrictionScale        = FrictionScale;
         b.Launch               = Launch;
 

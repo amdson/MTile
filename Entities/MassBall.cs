@@ -16,7 +16,14 @@ namespace MTile;
 //
 // Two deliberate non-behaviours:
 //   • No terrain collision (Body.IgnoreTiles). It deposits as it flies, so a colliding
-//     ball would wall itself in within a few frames of release.
+//     ball would wall itself in within a few frames of release. Instead it does its own,
+//     provenance-aware wall test (todo #4, "walls block avalanches"): it flies through
+//     cells ITS OWN wave requested (ChunkMap.Waves tags them at request time — a
+//     finished tile keeps no provenance) but stops on entering any other occupied cell
+//     — pre-existing terrain, anyone's barricade, a rival wave — and dumps its remaining
+//     mass on the near side of that face. Arming: a release usually leaves the lagging
+//     paint ball still inside the ground it was charged in, so the test only switches
+//     on once the ball has been in a non-foreign cell.
 //   • No gravity (GravityScale 0). An upward sweep should coast upward; arcing the ball
 //     down would fight the gesture the player just made. Drag is what stops it.
 public class MassBall : Projectile
@@ -34,6 +41,7 @@ public class MassBall : Projectile
     private const float DoneMass     = 0.01f;
 
     private float    _mass;
+    private bool     _armed;
     private readonly TileType _tileType;
 
     public override EntityKind Kind => EntityKind.MassBall;
@@ -48,14 +56,19 @@ public class MassBall : Projectile
     {
         base.WriteState(ref s);
         s.BuildMass = _mass;
+        s.BallArmed = _armed;
         s.TileType  = _tileType;
     }
 
     protected override void ReadState(in EntityData s)
     {
         base.ReadState(in s);
-        _mass = s.BuildMass;
+        _mass  = s.BuildMass;
+        _armed = s.BallArmed;
     }
+
+    // True once the ball has stopped against a face (it dies the same frame).
+    public bool StoppedAtWall { get; private set; }
 
     public MassBall(Vector2 pos, Vector2 velocity, float mass, TileType tileType, Faction owner)
         : base(new PhysicsBody(Polygon.CreateRegular(4f, 6), pos), health: 0.1f, lifetime: LifeSeconds, owner: owner)
@@ -81,16 +94,75 @@ public class MassBall : Projectile
         var chunks = (spawner as IChunkProvider)?.Chunks;
         if (chunks == null) return;
 
-        float leak = MathF.Min(_mass, (_mass * LeakFraction + LeakFloor) * dt);
-        _mass -= leak;
-
         int gtx = (int)MathF.Floor(Body.Position.X / Chunk.TileSize);
         int gty = (int)MathF.Floor(Body.Position.Y / Chunk.TileSize);
         // Wave provenance: the ball IS the wave. Direction locks on the first
         // touch (drag is scalar and there's no gravity, so it never changes);
         // the tag rides the mass through spill → request → the schedule gate.
         chunks.TouchWave(Id, Body.Velocity);
+        byte owner = BlockOwnership.OwnerFor(Faction);
+
+        // Walls block avalanches. Checked BEFORE this frame's deposit, along the segment
+        // the physics sweep is about to carry the ball over (entities update before
+        // StepSwept), so a fast ball can't tunnel a 1-thick barricade between frames.
+        if (!_armed)
+            _armed = !chunks.IsForeignToWave(Id, gtx, gty);
+        if (_armed && FindStop(chunks, gtx, gty, out int nx, out int ny))
+        {
+            // Dump everything left against the face, on the side the ball came from.
+            // The spill can't enter the face (TileMassField refuses foreign solid for
+            // wave mass), so it banks up the near side instead of leaking through.
+            float dump = _mass;
+            _mass = 0f;
+            chunks.Mass.Deposit(chunks, nx, ny, dump, _tileType, Id, owner);
+            Body.Position = BlockEruptionHelpers.CellCenter(nx, ny);
+            Body.Velocity = Vector2.Zero;
+            StoppedAtWall = true;
+            Health = 0f;
+            return;
+        }
+
+        float leak = MathF.Min(_mass, (_mass * LeakFraction + LeakFloor) * dt);
+        _mass -= leak;
         // The eruption builds for whoever launched it (Faction rides the snapshot).
-        chunks.Mass.Deposit(chunks, gtx, gty, leak, _tileType, Id, BlockOwnership.OwnerFor(Faction));
+        chunks.Mass.Deposit(chunks, gtx, gty, leak, _tileType, Id, owner);
+    }
+
+    // Walk the cells from the ball's current cell along this frame's travel (Amanatides–
+    // Woo grid traversal). The first foreign cell is the face; (nx, ny) is the last cell
+    // before it. If the ball's OWN cell turned foreign (someone built on it), the near
+    // cell is one step back along the dominant axis of travel.
+    private bool FindStop(ChunkMap chunks, int gtx, int gty, out int nx, out int ny)
+    {
+        nx = gtx; ny = gty;
+        Vector2 v = Body.Velocity;
+        if (chunks.IsForeignToWave(Id, gtx, gty))
+        {
+            if (MathF.Abs(v.X) >= MathF.Abs(v.Y)) nx -= MathF.Sign(v.X);
+            else                                   ny -= MathF.Sign(v.Y);
+            return true;
+        }
+
+        float ts = Chunk.TileSize;
+        Vector2 p0 = Body.Position;
+        Vector2 d  = v * Simulation.FixedDt;
+        int stepX = MathF.Sign(d.X), stepY = MathF.Sign(d.Y);
+        float tMaxX = stepX == 0 ? float.PositiveInfinity
+            : ((stepX > 0 ? (gtx + 1) * ts : gtx * ts) - p0.X) / d.X;
+        float tMaxY = stepY == 0 ? float.PositiveInfinity
+            : ((stepY > 0 ? (gty + 1) * ts : gty * ts) - p0.Y) / d.Y;
+        float tDeltaX = stepX == 0 ? float.PositiveInfinity : ts / MathF.Abs(d.X);
+        float tDeltaY = stepY == 0 ? float.PositiveInfinity : ts / MathF.Abs(d.Y);
+        int cx = gtx, cy = gty;
+        // Bounded: one frame of travel crosses at most a handful of cells.
+        for (int i = 0; i < 64; i++)
+        {
+            if (tMaxX > 1f && tMaxY > 1f) return false;
+            if (tMaxX < tMaxY) { cx += stepX; tMaxX += tDeltaX; }
+            else               { cy += stepY; tMaxY += tDeltaY; }
+            if (chunks.IsForeignToWave(Id, cx, cy)) return true;
+            nx = cx; ny = cy;
+        }
+        return false;
     }
 }

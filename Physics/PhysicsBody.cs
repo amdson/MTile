@@ -64,6 +64,19 @@ public class PhysicsBody
     // frames survived the rollback and billed a phantom hit on the replay.
     public int SproutCrushCount;
 
+    // Wall pin (todo #2): at the end of the most recent StepSwept this body was
+    // sandwiched — a growing AVALANCHE sprout pushing it along a contact normal, and a
+    // static surface on the opposite side (a wall, a roof) it is being pushed into.
+    // Unlike SproutCrushCount this fires while the solver still resolves the overlap
+    // (the body squeezes out along the free axis — the "elevator" up a wall face), which
+    // is exactly the case that used to deal nothing. Read next frame by
+    // PlayerCharacter.Update, so snapshotted (BodyState) like SproutCrushCount.
+    public bool WavePinned;
+    // Per-step scratch for the pin test (contact normals resolved this step), cleared
+    // at the top of StepSwept — never crosses a frame boundary, so not snapshotted.
+    internal readonly System.Collections.Generic.List<Vector2> PinPushNormals   = new(4);
+    internal readonly System.Collections.Generic.List<Vector2> PinStaticNormals = new(4);
+
     // ── Launch bookkeeping (Physics/Launch.cs) ───────────────────────────────────
     // The share of Velocity that a hit or throw put there, and how it decays. Physics
     // never reads it: LaunchSystem decays it before the sweep and reconciles it with

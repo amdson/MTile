@@ -30,7 +30,7 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - [x] **8** @f729a46 (merged) Spike placement crystal lifecycle: a crystal seed appears on top of the block,
   waits ~1 s, flashes, grows into the existing (1-cell overlay) spike. Phases are sim
   state (snapshotted); visuals render-only. Shares the phase machine with 7.
-- [~] **4** (Opus worktree agent) MassBall stops on entering solid it didn't create (pre-existing or anyone's
+- [x] **4** @2f47da3 (merged) MassBall stops on entering solid it didn't create (pre-existing or anyone's
   barricade), dumping remaining mass at the face; ball remembers its own wave's cells.
   Plus: crush damage for NON-riders pinned between a wave and a wall should be
   significant. Watch `BotManeuverAvalancheRideTests` (rides gain height off cliffs).
@@ -61,9 +61,16 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   avalanche riding still passes (all `BotManeuverAvalancheRide` layouts). Left red rather
   than retuning riding (off-limits). Either retune riding later, or dial
   `SproutLifetime` back toward 0.1 in movement_config.json (hot-reloadable) if it feels off.
-- **Avalanche speed broke the bot's crush maneuvers.** At avalanche 0.04 s,
-  `BotManeuverAvalancheCrushTests` (4 layouts) and `BotManeuverEruptionTests.LowCeiling`
-  stop crushing (they pass at 0.1). Item 4 reworks wall crush anyway — revisited there.
+- **Crush after #4.** Wall pockets crush again (5/5) and Eruption.LowCeiling is green.
+  `AvalancheCrushTests.FreeRoof` (free-standing roof) is 1 of 2 red: the target slides out
+  from under the roof; the maneuver's angle/lead needs a rework.
+- **#4 calls made by the agent (defaults in force):** pin crush = flat 1.5 HP per pin with
+  a 0.5 s re-bill cooldown, NON-riders only (standing victims usually get scooped into
+  TerrainCarried, so today the pin lands mainly on stunned/tumbling victims; extending to
+  riders is a one-line gate in PlayerCharacter when riding is back on the table). Wave
+  mass that would spill into foreign solid is DROPPED (wave shapes shrink 0–8%), not
+  redistributed into a bigger mound at the face. Enemies (entities) take no crush, as
+  before.
 
 - **Bot retune after the slowdown (#9).** 4 bot tests went red on distances/timings tuned
   at the old speeds: `Dash_ClosesGap_AndDashSlashes`, `Burst_CloseInBand…`,
@@ -93,3 +100,4 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - a07d9df (merge) — #6 sprout visuals, render-only (Drawing/ChunkRenderer.cs, Game1 passes render time). MTile.sln builds.
 - (this commit) — #9 slowdown. ConfigLayout only the pre-existing ParkourEnabled mismatch. Bot group 75/9/1: 4 new reds from #9, 5 crush reds from #2b (pending #4).
 - f729a46 (merge) — #8 spike seed→flash→grown via reusable `CrystalLifecycle` (World/CrystalLifecycle.cs) + `TileSpikeSeeds` (seed frame is the clock; snapshotted; checksum salt 0x09). SpikeOverlay*/BotManeuverBarrier/SnapshotRoundTrip 47/47 after merging onto the #9 slowdown.
+- 2f47da3 (merge) — #4: MassBall stops at solid its wave didn't request (cell→wave table in AvalancheWaves, snapshotted; arming after release; swept path so fast balls can't skip 1-tile walls), lump deposit at the face, foreign-solid spill dropped; wave pin crush 1.5 HP for non-riders (PhysicsWorld pin detection → PhysicsBody.WavePinned). Merge fixups: break path clears wave tag + spike seed; checksum now folds wave cells (salt 0x0A) and sprout Source. AvalancheWall 12/12; bot reds = 4 slowdown + 1 FreeRoof.

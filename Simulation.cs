@@ -725,7 +725,13 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         // (which changes WHEN it grows, via the schedule gate) surfaces immediately.
         foreach (var s in _chunks.ActiveSprouts)
             t ^= CellF(s.Gtx, s.Gty, s.Age,
-                       0x05 ^ ((ulong)(byte)s.Type << 8) ^ ((ulong)(uint)s.WaveId.Index << 16));
+                       0x05 ^ ((ulong)(byte)s.Type << 8) ^ ((ulong)(uint)s.WaveId.Index << 16)
+                            ^ ((ulong)(byte)s.Source << 48));   // grow speed (todo #2)
+        // Wave cell provenance (todo #4): which wave grew each cell decides where a
+        // MassBall stops, so peers disagreeing on it would diverge at the next wall.
+        foreach (var d in _chunks.Waves.CellEntries)
+            t ^= CellF(d.Key.gtx, d.Key.gty, 0f,
+                       0x0A ^ ((ulong)(uint)d.Value.Index << 16) ^ ((ulong)(uint)d.Value.Generation << 40));
         // Block ownership: owner + exact placed frame ride the salt (a float value would
         // round the frame). Faded-but-unpruned claims are still state, so they count.
         foreach (var d in _chunks.Ownership.Entries)

@@ -8,16 +8,21 @@ namespace MTile.Net;
 // has nowhere to push them and crushes.
 //
 // Why a roof, not just a wall: the MassBall has no hitbox. Its sprouts only HURT a body
-// they can't shove out of the way — PhysicsWorld.CrushOverlappingSprouts fires when the
-// contact solver runs out of iterations against surfaces that disagree, breaks the
-// sprouts the body is wedged against and bills each one as SproutCrushDamage (0.5 HP,
-// with stun). A wave that drives someone into an open-topped wall does NOT crush: the
-// pile banks up the face and carries them up it like an elevator (measured: 0 damage in
-// 35 of 36 wall-only runs — the same elevator AvalancheRide climbs cliffs with). Put a
-// roof over that wall and the elevator runs them into it: all 27 wall-backed pocket
-// runs with 3–6 open rows crushed (0.5–1.5 HP), and 12/12 under a free-standing roof at
-// the chosen angle/lead (other angle/lead pairs were spottier there — the target can
-// slide out sideways — hence the lower RoofUtility).
+// they can't shove out of the way. Two channels: PhysicsWorld.CrushOverlappingSprouts
+// (the contact solver runs out of iterations, breaks the wedged sprouts, 0.5 HP each), and
+// the wall pin (todo #2, PhysicsBody.WavePinned → PlayerCharacter.WavePinDamage, a flat
+// 1.5 HP): a growing WAVE sprout driving the body into an opposing static surface. The
+// pin is NOT billed to a TerrainCarried rider (riding is off-limits this pass), and an
+// AFK target in front of an open-topped wall is caught and carried up the face like an
+// elevator — so an open wall alone still scores nothing for this maneuver. Under a roof
+// the elevator runs the target into it: the roof crush stuns them out of the ride, and
+// the stunned body is then pinned against the pocket's wall. Since walls stop the ball
+// (todo #4) and sprouts grow at 0.04 s/cell, the wall-backed pocket layouts in
+// BotManeuverAvalancheCrushTests crush 5/5 (0.6–2.35 HP; four of the five include a 1.5 HP pin).
+// The free-standing roof (no wall) crushes 0/2 at the new sprout speed (it went red with
+// the 0.04 s avalanche dial, before the wall stop, and the stop did not bring it back):
+// the target slides out sideways and is carried up the roof's edge. RoofUtility is kept
+// for now; the free-roof case needs a retune or a rework of the angle/lead.
 //
 // What it adds over EruptionManeuver: Eruption's floor-skim ridge only grows ~1–2 rows,
 // so it crushes under a 3-row ceiling and misses at 5–6 (0 of 18 runs at clearance 5–6
@@ -47,8 +52,8 @@ public sealed class AvalancheCrushManeuver : BotManeuver
     public float MinBuild      = 50f;
     public int   WatchBudget   = 90;
 
-    // 0.5–1.5 HP of crush is one to three slashes' worth, and above Eruption's best
-    // (1.3 + 0.5 confined): in a pocket this measured strictly better.
+    // 0.6–2.35 HP of crush in a pocket (one to four-plus slashes' worth), above Eruption's
+    // best (1.3 + 0.5 confined): in a pocket this measured strictly better.
     public float PocketUtility = 1.85f;  // roof + wall behind the target
     public float RoofUtility   = 1.0f;   // roof only: spottier
     // Abort the charge if the target drifts this far from where we aimed.

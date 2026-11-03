@@ -10,7 +10,10 @@ using Xunit.Abstractions;
 namespace MTile.Tests.Sim;
 
 // AvalancheCrushManeuver end to end: P1 (AFK) stands in a roofed pocket; the bot
-// launches a rising wave that lifts P1 into the roof, and the wedged sprouts crush.
+// launches a rising wave that lifts P1 into the roof, and the wedged sprouts crush — then,
+// wall-backed, the stunned P1 is pinned against the wall (todo #2 wall pin, 1.5 HP).
+// FreeRoof_CrushesP1 has been red since avalanche sprouts went to 0.04 s/cell (c86fc15);
+// the wall stop (todo #4) didn't change that — see the maneuver's header.
 public class BotManeuverAvalancheCrushTests(ITestOutputHelper output)
 {
     // Flat deep floor (top row 8, 12 rows deep), thick walls; right wall's inner face at

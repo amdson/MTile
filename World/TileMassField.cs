@@ -91,6 +91,17 @@ public sealed class TileMassField
         // merges in as None, commits ungated, and the backward race survives
         // exactly where the wave launches. Two real waves stay first-wins.
         if (bucket.Amount >= EpsAmount && !bucket.Wave.IsNone) wave = bucket.Wave;
+
+        // Walls block avalanches (todo #4): a wave's spill never ENTERS solid the wave
+        // didn't make — pre-existing terrain, anyone's barricade, another wave. The
+        // share is absorbed by the face. Without this a lump deposit beside a wall
+        // forwards whole units through the occupied cell and grows tiles on the far
+        // side of a 1-thick barricade. Hops only (depth > 0): the root deposit is the
+        // ball's own cell, which MassBall already keeps off foreign solid once armed.
+        // Its own fresh cells still forward — that is how a wave thickens — and
+        // untagged building keeps the forward-through-occupied behaviour above.
+        if (depth > 0 && !wave.IsNone && chunks.IsForeignToWave(wave, gtx, gty)) return 0;
+
         float cur = bucket.Amount + amount;
 
         // Drain in whole units rather than handling one crossing per call. A painter
