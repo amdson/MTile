@@ -315,6 +315,14 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         remove => _combat.OnTerrainStrike -= value;
     }
 
+    // Cosmetic: two attacks clanked (HitId a, HitId b, contact point, metallic) — see
+    // CombatSystem.OnClank. Raised once per clank.
+    public event Action<int, int, Vector2, bool> OnClank
+    {
+        add => _combat.OnClank += value;
+        remove => _combat.OnClank -= value;
+    }
+
     // Fired when the player dies and respawns. Game1 hooks this for the cosmetic puff;
     // the respawn itself happens inside Step so it stays deterministic.
     public event Action<Vector2> OnPlayerRespawn;

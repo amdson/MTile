@@ -555,6 +555,10 @@ public class Game1 : Game
         _sim.OnTerrainStrike += (hitId, pos, dir) =>
             _events.Emit(_sim.Frame, new PresentationId(PresentationKind.TerrainStrike, hitId),
                          pos, (int)MathF.Round(MathF.Atan2(dir.Y, dir.X) * 1000f));
+        _sim.OnClank += (a, b, pos, metallic) =>
+            _events.Emit(_sim.Frame,
+                         new PresentationId(PresentationKind.Clank, Math.Min(a, b), Math.Max(a, b)),
+                         pos, metallic ? 1 : 0);
         _sim.OnChargedBlast += (id, pos, radius) =>
             _events.Emit(_sim.Frame,
                          new PresentationId(PresentationKind.ChargedBlast, id.Index, id.Generation),
@@ -605,6 +609,14 @@ public class Game1 : Game
                     break;
                 case PresentationKind.ChargedBlast:
                     Effects.Blast(_particles, e.Position, e.Payload);
+                    break;
+                case PresentationKind.Clank:
+                    // Sparks out both ways along the contact, white for blades, hot for blunt.
+                    Effects.HitSpark(_particles, e.Position, Vector2.UnitY * -1f, count: 6);
+                    Effects.HitSpark(_particles, e.Position, Vector2.UnitX, count: 4);
+                    Effects.HitSpark(_particles, e.Position, -Vector2.UnitX, count: 4);
+                    Effects.Flash(_particles, e.Position, e.Payload != 0 ? 18f : 26f,
+                                  e.Payload != 0 ? new Color(235, 245, 255) : new Color(255, 190, 110), 0.08f);
                     break;
             }
             _audio.Present(in e);

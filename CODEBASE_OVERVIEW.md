@@ -308,6 +308,8 @@ Sprout topology changed to match: parent/child edges are **gone** from [`TileSpr
 
 Hitbox-vs-hurtbox model. Per frame: both registries cleared → `IHittable.PublishHurtboxes` populates defensive boxes → action FSM + entity AI publish offensive hitboxes → `CombatSystem.Apply` walks every hitbox × hurtbox; on AABB overlap + faction mismatch + (optional polygon-vs-AABB SAT refinement), dispatches `IHittable.OnHit`. Deduped per `(HitId, Target)` across the broadcast window so a multi-frame slash hits an entity once. The same hitbox also damages tiles via `chunks.DamageCell` — cumulatively, no dedup, so a multi-frame slash progressively chips a tile.
 
+**Clank** runs first (`ResolveClanks`): two opposing melee hitboxes (`Hitbox.Clank` = `Blade`/`Blunt`; projectiles, fields, Burst, body contact and the struggle slash are `None`) that overlap, with the contact point in sight of both origins, compare `BodyDamage` — within 20% both are cancelled, otherwise only the weaker. A cancelled HitId gets a `ClankedMark` pseudo-target in its dedupe set, so it lands on no entity for the rest of its broadcast (tiles still take damage) and snapshots for free; its attacker gets what a parried one gets (recoil + hitstop off its authored impulse). `OnClank` → `PresentationKind.Clank` → sparks + `ClankMetal`/`ClankBlast` (fallback clips: parry ping / charged-block boom).
+
 `CombatSystem` is **instance-owned by `Simulation`** (the dedupe table is cross-frame sim state); `CaptureDedupe`/`RestoreDedupe` snapshot it by `HittableId`. `HitTargets.{All, TilesOnly, EntitiesOnly}` filters dispatch.
 
 It also carries two **1-frame inboxes**, both snapshotted alongside the dedupe table:

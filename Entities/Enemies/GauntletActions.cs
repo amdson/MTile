@@ -273,7 +273,8 @@ public class EnemyPounceSlamAction : EnemyActionState
             region, v.HitId, damage * ctx.Self.Strength, impulse,
             Faction.Enemy, ctx.Self.Id, SlamColor,
             targets: HitTargets.EntitiesOnly,
-            origin: ctx.Self.Body.Position));
+            origin: ctx.Self.Body.Position,
+            clank: ClankKind.Blunt));
     }
 
     // Speed-proportional tell, read straight off the live body velocity — the
@@ -387,7 +388,8 @@ public class EnemyLashAction : EnemyActionState
             Faction.Enemy, ctx.Self.Id, LashColor,
             targets: HitTargets.EntitiesOnly,
             shape: poly, shapePos: center, shapeRotation: rotation,
-            origin: ctx.Self.Body.Position));
+            origin: ctx.Self.Body.Position,
+            clank: ClankKind.Blade));
     }
 
     // Windup extends a thin probe along the frozen axis, growing to full reach

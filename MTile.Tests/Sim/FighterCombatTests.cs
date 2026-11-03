@@ -37,6 +37,8 @@ public class FighterCombatTests(ITestOutputHelper output)
                         Brawler(team: 4), new Vector2(950f, StandY));
         var a = (EnemyEntity)sim.Entities[0];
         var b = (EnemyEntity)sim.Entities[1];
+        int clanks = 0;
+        sim.OnClank += (_, _, _, _) => clanks++;
 
         sim.Step(Idle);
         Assert.Equal(b.Id, a.CurrentTargetId);
@@ -46,10 +48,13 @@ public class FighterCombatTests(ITestOutputHelper output)
         for (int f = 0; f < 300; f++)
         {
             sim.Step(Idle);
-            if (a.Health < 4f && b.Health < 4f) { frame = f; break; }
+            // Engaged = they traded hits, or their swings met. Two identical brains from a
+            // mirror-image start swing on the same frame every time, and identical swings
+            // clank (CombatSystem.ResolveClanks) — so in this setup they never land.
+            if ((a.Health < 4f && b.Health < 4f) || clanks >= 2) { frame = f; break; }
         }
         Assert.True(frame >= 0,
-            $"after 5 s: A hp {a.Health:F2}, B hp {b.Health:F2} — opposing fighters did not trade hits.");
+            $"after 5 s: A hp {a.Health:F2}, B hp {b.Health:F2}, {clanks} clanks — opposing fighters did not engage.");
         Assert.Equal(0f, sim.Player.Combat.DamageTaken);
         output.WriteLine($"both damaged by frame {frame}: A {a.Health:F2}, B {b.Health:F2}");
     }

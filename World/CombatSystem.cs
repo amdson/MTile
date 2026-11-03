@@ -19,6 +19,8 @@ namespace MTile;
 // Occlusion: a hitbox published with an Origin only lands on cells / hurtboxes
 //            it has line of sight to through the terrain (TileReach), and its
 //            tile damage propagates nearest-first from that origin.
+// Clank:     before any of that, opposing melee hitboxes (Hitbox.Clank) that touch
+//            each other resolve first — see ResolveClanks.
 // Instance-owned (not static): the (HitId → already-hit targets) dedupe table
 // persists across frames, so it's simulation state that must be snapshot/restored
 // for rollback. One CombatSystem per Simulation. The geometry helper below stays
@@ -72,6 +74,21 @@ public sealed class CombatSystem
     // for a cell the hit breaks. Subscribers dedupe by HitId; nothing sim-side reads it.
     public event Action<int, Vector2, Vector2> OnTerrainStrike;
 
+    // Cosmetic: two attacks clanked this frame — (HitId a, HitId b, contact point,
+    // metallic = both were blades). Raised once per clank (a cancelled attack never
+    // clanks again), so it needs no dedupe beyond the presentation log's (frame, id).
+    public event Action<int, int, Vector2, bool> OnClank;
+
+    // Two clanking attacks within this fraction of each other's BodyDamage cancel
+    // each other; past it the stronger one goes through and only the weaker stops.
+    public const float ClankDamageBand = 0.2f;
+    // Pseudo-target written into a cancelled attack's dedupe set: "this HitId lost a
+    // clank, it lands on no entity for the rest of its broadcast". Riding the dedupe
+    // table means it snapshots and prunes with it. Index -1 is never minted (ids start
+    // at 1, and None — the tile-pogo latch — is 0).
+    private static readonly EntityId ClankedMark = new(-1);
+    private readonly List<int> _scratchClank = new();
+
     // Keep this HitId's dedupe entry alive through a frame it doesn't broadcast.
     public void HoldHitId(int hitId) => _heldHitIds.Add(hitId);
 
@@ -100,6 +117,8 @@ public sealed class CombatSystem
         _recoilByHitId.Clear();
         _entityHitsByHitId.Clear();
         _hitstopByHitId.Clear();
+
+        ResolveClanks(chunks, hitboxes, resolve);
 
         foreach (var hit in hitboxes.All)
         {
@@ -226,7 +245,8 @@ public sealed class CombatSystem
             }
 
             // --- Entity path (deduped per (HitId, Target) via `alreadyHit`) ------
-            if (hit.Targets != HitTargets.TilesOnly)
+            // An attack that lost a clank keeps working on tiles but no longer on bodies.
+            if (hit.Targets != HitTargets.TilesOnly && !alreadyHit.Contains(ClankedMark))
             {
                 foreach (var hb in hurtboxes.All)
                 {
@@ -273,6 +293,114 @@ public sealed class CombatSystem
             if (!_liveHitIds.Contains(k) && !_heldHitIds.Contains(k)) _scratchPrune.Add(k);
         foreach (var k in _scratchPrune) _hitDedupe.Remove(k);
         _heldHitIds.Clear();
+    }
+
+    // ── Clank (todo.txt D) ──────────────────────────────────────────────────────
+    // Hitbox-vs-hitbox, run before the hurtbox pass so a clanked swing can't also land
+    // this frame. Two melee hitboxes (Clank != None, can reach entities) from opposing
+    // sides — the same faction/team/co-op gate as a hit — that overlap, with the
+    // contact point in line of sight of each origin when occluded. By BodyDamage: within ClankDamageBand
+    // both are cancelled, otherwise only the weaker. A cancelled attacker gets exactly
+    // what a parried one gets (PlayerCharacter.OnHit's guard early-out echoes the
+    // authored impulse): recoil off its KnockbackImpulse and the hitstop that impulse
+    // earns. Nothing else about the attacker changes — its action plays on.
+    private void ResolveClanks(ChunkMap chunks, HitboxWorld hitboxes, Func<EntityId, IHittable> resolve)
+    {
+        var all = hitboxes.All;
+        _scratchClank.Clear();
+        for (int i = 0; i < all.Count; i++)
+        {
+            var h = all[i];
+            if (h.Clank == ClankKind.None || h.Targets == HitTargets.TilesOnly || h.GrabStrengthDamage > 0f) continue;
+            if (Cancelled(h.HitId)) continue;
+            _scratchClank.Add(i);
+        }
+        if (_scratchClank.Count < 2) return;
+
+        for (int x = 0; x < _scratchClank.Count; x++)
+        for (int y = x + 1; y < _scratchClank.Count; y++)
+        {
+            var a = all[_scratchClank[x]];
+            var b = all[_scratchClank[y]];
+            if (a.HitId == b.HitId) continue;
+            if (Cancelled(a.HitId) || Cancelled(b.HitId)) continue;   // settled earlier this pass
+            if (!Opposed(in a, in b, resolve)) continue;
+            if (!HitboxWorld.Overlaps(a.Region, b.Region)) continue;
+            if (!ShapesOverlap(in a, in b)) continue;
+            // Where the two meet: the centre of the AABB overlap. Each side must see it.
+            var r0 = a.Region; var r1 = b.Region;
+            var at = new Vector2((MathF.Max(r0.Left, r1.Left) + MathF.Min(r0.Right, r1.Right)) * 0.5f,
+                                 (MathF.Max(r0.Top, r1.Top) + MathF.Min(r0.Bottom, r1.Bottom)) * 0.5f);
+            // (IsPointReachable doesn't test the point's own cell; blades meeting
+            // inside a wall cell between the fighters didn't meet.)
+            if ((a.Occluded || b.Occluded)
+                && chunks.GetCellState((int)MathF.Floor(at.X / Chunk.TileSize),
+                                       (int)MathF.Floor(at.Y / Chunk.TileSize)) == TileState.Solid) continue;
+            if (a.Occluded && !TileReach.IsPointReachable(chunks, a.Origin, at)) continue;
+            if (b.Occluded && !TileReach.IsPointReachable(chunks, b.Origin, at)) continue;
+
+            float da = a.BodyDamage, db = b.BodyDamage;
+            bool even = MathF.Abs(da - db) <= ClankDamageBand * MathF.Max(da, db);
+            if (even || da < db) CancelByClank(in a);
+            if (even || db < da) CancelByClank(in b);
+
+            OnClank?.Invoke(a.HitId, b.HitId, at, a.Clank == ClankKind.Blade && b.Clank == ClankKind.Blade);
+        }
+    }
+
+    private bool Cancelled(int hitId)
+        => _hitDedupe.TryGetValue(hitId, out var set) && set.Contains(ClankedMark);
+
+    // Would a hit from one land on the other's owner? The hit pass's gate, by faction.
+    private bool Opposed(in Hitbox a, in Hitbox b, Func<EntityId, IHittable> resolve)
+    {
+        if (Coop && Factions.IsPlayer(a.Owner) && Factions.IsPlayer(b.Owner)) return false;
+        if (a.Owner != b.Owner) return true;
+        return a.Owner == Faction.Enemy
+            && resolve(a.Source) is Entity ea && resolve(b.Source) is Entity eb && ea.Team != eb.Team;
+    }
+
+    private void CancelByClank(in Hitbox hit)
+    {
+        if (!_hitDedupe.TryGetValue(hit.HitId, out var set))
+        {
+            set = new HashSet<EntityId>();
+            _hitDedupe[hit.HitId] = set;
+        }
+        set.Add(ClankedMark);
+        float stop = CombatState.HitstopSecondsFor(HitResolver.ImpactStrength(hit.KnockbackImpulse));
+        _hitstopByHitId.TryGetValue(hit.HitId, out var curStop);
+        if (stop > curStop) _hitstopByHitId[hit.HitId] = stop;
+        if (hit.RecoilScale > 0f)
+            AccumulateRecoil(in hit, -hit.KnockbackImpulse * hit.RecoilScale);
+    }
+
+    // Narrow phase for a hitbox pair: polygon SAT where either has a Shape, else the
+    // AABBs (already known to overlap).
+    private static bool ShapesOverlap(in Hitbox a, in Hitbox b)
+    {
+        if (a.Shape == null && b.Shape == null) return true;
+        if (a.Shape == null || b.Shape == null)
+        {
+            var poly = a.Shape != null ? a : b;
+            var box  = a.Shape != null ? b.Region : a.Region;
+            var v = poly.Shape.GetVertices(poly.ShapePos, poly.ShapeRotation);
+            return OverlapsPolyAABB(v, poly.Shape.GetAxes(v), box);
+        }
+        var va = a.Shape.GetVertices(a.ShapePos, a.ShapeRotation);
+        var vb = b.Shape.GetVertices(b.ShapePos, b.ShapeRotation);
+        return !SeparatedOn(a.Shape.GetAxes(va), va, vb) && !SeparatedOn(b.Shape.GetAxes(vb), va, vb);
+    }
+
+    private static bool SeparatedOn(Vector2[] axes, Vector2[] va, Vector2[] vb)
+    {
+        foreach (var axis in axes)
+        {
+            var (amin, amax) = Polygon.Project(va, axis);
+            var (bmin, bmax) = Polygon.Project(vb, axis);
+            if (amax < bmin || bmax < amin) return true;
+        }
+        return false;
     }
 
     // The faction gate above skips any pair whose Owner factions match — self-immunity,

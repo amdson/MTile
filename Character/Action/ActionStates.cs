@@ -833,7 +833,9 @@ public abstract class SlashLikeAction : ActionState
                 restitution: SlashRestitution,
                 minLaunch: MinLaunch,
                 shape: shape, shapePos: pos, shapeRotation: rot,
-                origin: ctx.Body.Position));
+                origin: ctx.Body.Position,
+                // The struggle slash erodes a grip — it is not a strike that meets one.
+                clank: GrabStrengthDamage > 0f ? ClankKind.None : ClankKind.Blade));
         }
 
         // Holding slashes broadcast their pull field for the WHOLE slash (not just
@@ -1704,7 +1706,8 @@ public class StabAction : ActionState
                 maxRecoilSpeed: MaxRecoilSpeed,
                 origin: ctx.Body.Position,
                 launchDecay: MovementConfig.Current.StabLaunchDecay,
-                launchImpactMass: MovementConfig.Current.StabLaunchImpactMass));
+                launchImpactMass: MovementConfig.Current.StabLaunchImpactMass,
+                clank: ClankKind.Blade));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No
             // knockback (knockback comes from the primary box). Tiles only — passes
@@ -1965,7 +1968,8 @@ public class AirWhipKick : ActionState
             restitution: Restitution,
             minLaunch: MinLaunch * knockbackMult,
             origin: origin,
-            launchDecay: MovementConfig.Current.WhipKickLaunchDecay));
+            launchDecay: MovementConfig.Current.WhipKickLaunchDecay,
+            clank: ClankKind.Blunt));
     }
 
     // Tip extension along StabDir at normalized time t, in px: a short chamber at the
@@ -2168,7 +2172,8 @@ public class AirHammerAction : ActionState
             restitution: Restitution,
             minLaunch: minLaunch,
             maxRecoilSpeed: MaxRecoilSpeed,
-            origin: ctx.Body.Position));
+            origin: ctx.Body.Position,
+            clank: ClankKind.Blunt));
     }
 }
 

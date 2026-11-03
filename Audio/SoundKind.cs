@@ -50,11 +50,13 @@ public enum SoundKind
     Dash,           // DashState entry
     TerrainStrike,  // PresentationKind.TerrainStrike — an attack hit terrain
     ChargedBlast,   // PresentationKind.ChargedBlast — a charged block detonated
+    ClankMetal,     // PresentationKind.Clank, two blades met
+    ClankBlast,     // PresentationKind.Clank, something blunt in the pair
 }
 
 public static class SoundKinds
 {
-    public const int Count = (int)SoundKind.ChargedBlast + 1;
+    public const int Count = (int)SoundKind.ClankBlast + 1;
 
     // Stems, derived once from the enum names: PascalCase -> snake_case. This used to be
     // a hand-maintained parallel array, which silently mis-mapped every kind after the
@@ -95,6 +97,10 @@ public static class SoundKinds
         // borrows the nearest thing rather than going silent.
         SoundKind.GuardBlock => SoundKind.HitConnect,
         SoundKind.GuardParry => SoundKind.GuardBlock,
+        // No clank clips are cut yet: a blade clank borrows the parry's metallic ping,
+        // a blunt one the charged-block boom.
+        SoundKind.ClankMetal => SoundKind.GuardParry,
+        SoundKind.ClankBlast => SoundKind.ChargedBlast,
         SoundKind.SwingHeavy or SoundKind.Stab or SoundKind.AirHammer or SoundKind.DashSlash => SoundKind.Swing,
         _              => SoundKind.None,
     };

@@ -26,6 +26,12 @@ public static class Factions
 // only, etc.). Default `All` matches the simple case — damages everything.
 public enum HitTargets { All, TilesOnly, EntitiesOnly }
 
+// Hitbox-vs-hitbox contact (CombatSystem's clank pass, todo.txt D). None = passes
+// through other attacks (projectiles, fields, Burst, body contact, struggle slashes);
+// Blade / Blunt = a melee strike that can meet another one. The kind only picks the
+// cue: two blades ring metallic, anything blunt in the pair booms.
+public enum ClankKind : byte { None, Blade, Blunt }
+
 // Value-typed, single-frame OFFENSIVE region. Renamed from the old `Hurtbox` to
 // match fighting-game conventions: the attacker broadcasts hitboxes; the target
 // broadcasts hurtboxes; intersection of the two triggers damage.
@@ -139,6 +145,8 @@ public readonly struct Hitbox
     // A shove (ActionKind.Shove): against a raised guard it is not blocked — it breaks
     // the guard and lands in full (EnemyEntity.OnHit).
     public readonly bool        GuardBreak;
+    // Melee strike that clanks against an opposing one (see ClankKind). Default None.
+    public readonly ClankKind   Clank;
 
     // Launch (Physics/Launch.cs). 0 = off: the knockback is plain velocity, as every
     // attack had before launches existed. > 0: the victim's knockback becomes a launch
@@ -165,6 +173,7 @@ public readonly struct Hitbox
     //   Recoil cap maxRecoilSpeed (per-frame |Δv| ceiling on every recoil path; 0 = off)
     //   Occlusion  origin (null = no terrain occlusion)
     //   Launch     launchDecay (0 = plain knockback) · launchImpactMass (wall-break weight)
+    //   Clank      clank (None = passes through other attacks; Blade/Blunt = melee)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
                   Color? debugColor = null, HitTargets targets = HitTargets.All,
@@ -181,8 +190,10 @@ public readonly struct Hitbox
                   Vector2? origin = null,
                   bool guardBreak = false,
                   float launchDecay = 0f,
-                  float launchImpactMass = 1f)
+                  float launchImpactMass = 1f,
+                  ClankKind clank = ClankKind.None)
     {
+        Clank                = clank;
         LaunchDecay          = launchDecay;
         LaunchImpactMass     = launchImpactMass;
         Occluded             = origin.HasValue;

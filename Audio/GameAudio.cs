@@ -90,6 +90,11 @@ public sealed class GameAudio
                             e.SimFrame, gain: 0.7f, pitch: Jitter(e.Id.A * 13), pos: e.Position);
                 break;
 
+            case PresentationKind.Clank:
+                _mixer.Fire(new SoundId(e.Payload != 0 ? SoundKind.ClankMetal : SoundKind.ClankBlast, e.Id.A, e.Id.B),
+                            e.SimFrame, gain: 1f, pitch: Jitter(e.Id.A * 7 + e.Id.B), pos: e.Position);
+                break;
+
             case PresentationKind.ChargedBlast:
                 _mixer.Fire(new SoundId(SoundKind.ChargedBlast, e.Id.A, e.Id.B),
                             e.SimFrame, gain: 1f, pitch: Jitter(e.Id.A * 3 + e.Id.B), pos: e.Position);

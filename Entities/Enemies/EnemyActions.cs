@@ -84,7 +84,8 @@ public class EnemyMeleeAction : EnemyActionState
             Faction.Enemy, ctx.Self.Id, StrikeColor,
             targets: HitTargets.EntitiesOnly,
             origin: ctx.Self.Body.Position,
-            guardBreak: BreaksGuard));
+            guardBreak: BreaksGuard,
+            clank: ClankKind.Blade));
     }
 
     // Telegraph reads everything off vars, just like the player's
@@ -288,7 +289,8 @@ public class EnemyLungeAction : EnemyActionState
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, Color.MediumPurple,
             targets: HitTargets.EntitiesOnly,
-            origin: ctx.Self.Body.Position));
+            origin: ctx.Self.Body.Position,
+            clank: ClankKind.Blunt));
     }
 
     // Layered telegraph — readable across the 0.35s windup. Phases:
@@ -437,7 +439,8 @@ public class EnemySlamAction : EnemyActionState
             new Vector2(v.LockedFacing * Knockback.X, Knockback.Y),
             Faction.Enemy, ctx.Self.Id, Color.Crimson,
             targets: HitTargets.EntitiesOnly,
-            origin: ctx.Self.Body.Position));
+            origin: ctx.Self.Body.Position,
+            clank: ClankKind.Blunt));
     }
 
     // Telegraph: short windup, so the visual is dense — overhead chevron forming
