@@ -34,6 +34,8 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
     public IReadOnlyList<BotManeuver> Maneuvers => _maneuvers;
     // The maneuver running right now (null between maneuvers) — for debugging / HUD.
     public BotManeuver Active => _active;
+    // Every maneuver start, by name — for tests and tuning.
+    public readonly Dictionary<string, int> Starts = new();
 
     private readonly Random            _rng;
     private readonly int               _selfIndex;
@@ -65,10 +67,15 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         new StabManeuver(),
         new AirHammerManeuver(),
         new AirWhipKickManeuver(),
+        new CrouchSlashManeuver(),
+        new DownAirManeuver(),
+        new DashManeuver(),
         // Mid range.
         new BlockThrowManeuver(),
         new BeamManeuver(),          // disabled until GrabAction stops shadowing BeamAction
         // Spacing and navigation.
+        new WallClimbManeuver(),
+        new DropdownManeuver(),
         new BreachManeuver(),
         new BackoffManeuver(),
     };
@@ -108,7 +115,13 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
                 float s = m.Score(v);
                 if (s > bestScore) { best = m; bestScore = s; }
             }
-            if (best != null) { _active = best; v.FramesSinceManeuver = 0; best.Begin(v); }
+            if (best != null)
+            {
+                _active = best;
+                v.FramesSinceManeuver = 0;
+                Starts[best.Name] = Starts.GetValueOrDefault(best.Name) + 1;
+                best.Begin(v);
+            }
         }
 
         if (_active == null || !_active.OwnsLocomotion) Locomote(v, ref input);
