@@ -27,7 +27,7 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   jump HEIGHT x0.75 (launch + hold x0.875), dash + stab lunge + knockback-into-players
   x0.75. Measured in sim: jump rise 44.7→33.1 px (74%), walk 81.9→60.5 px/s (74%).
   User: let speed-calibrated tests go red for now.
-- [~] **8** (Opus worktree agent) Spike placement crystal lifecycle: a crystal seed appears on top of the block,
+- [x] **8** @f729a46 (merged) Spike placement crystal lifecycle: a crystal seed appears on top of the block,
   waits ~1 s, flashes, grows into the existing (1-cell overlay) spike. Phases are sim
   state (snapshotted); visuals render-only. Shares the phase machine with 7.
 - [~] **4** (Opus worktree agent) MassBall stops on entering solid it didn't create (pre-existing or anyone's
@@ -72,6 +72,13 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 
 ## For the user to review
 
+- **#8 spike crystals:** `Plans/img/spike_crystal_phases.png` (seed → flash → grown, 3x).
+  Open calls from the agent, defaults in force: no refund when the block under a seed
+  breaks; seeds don't toughen their block (breaking it during the 1.25 s warning is a
+  counter); the shard is only ~3–5 px wide at TileSize 11 (seed vs flash read mostly by
+  colour); timings are code constants (`SpikeSeedSeconds` 1.0, `SpikeFlashSeconds` 0.25 in
+  `World/CrystalLifecycle.cs`), not config dials, because they're sim-affecting.
+
 - **#6 sprout look** (taste item): `Plans/img/sprout_visuals_before.png` / `_after.png`.
   Owner-coloured corner brackets mark the target slot; growing blocks are a flat,
   lightened material with an owner-coloured rim and a bright leading-edge bar; pending
@@ -85,3 +92,4 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
 - c86fc15 — #2a/#2b/#5: per-source sprout dials (SproutSource on nodes, snapshotted; LifetimeFor), per-parent overshoot carry (front continuous: 12 painted cells in 51 frames vs 60 with rounding), unlimited reach chaining off your OWN sprout (others' keep 2x). SproutSpeedTests 7/7. New reds: 2 SproutLiftJump + 5 crush (see Decisions needed); movement-group reds otherwise pre-existing (no sprout refs).
 - a07d9df (merge) — #6 sprout visuals, render-only (Drawing/ChunkRenderer.cs, Game1 passes render time). MTile.sln builds.
 - (this commit) — #9 slowdown. ConfigLayout only the pre-existing ParkourEnabled mismatch. Bot group 75/9/1: 4 new reds from #9, 5 crush reds from #2b (pending #4).
+- f729a46 (merge) — #8 spike seed→flash→grown via reusable `CrystalLifecycle` (World/CrystalLifecycle.cs) + `TileSpikeSeeds` (seed frame is the clock; snapshotted; checksum salt 0x09). SpikeOverlay*/BotManeuverBarrier/SnapshotRoundTrip 47/47 after merging onto the #9 slowdown.
