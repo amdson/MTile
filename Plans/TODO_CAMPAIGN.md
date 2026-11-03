@@ -22,7 +22,7 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   avalanche 0.04 s, normal paint 0.07 s, Shift placement 0.10 s (user-chosen 2026-11-02).
 - [x] **5** Build reach effectively infinite when chaining from a sprouting cell
   (`ChainReachMul` in BlockPaintAction + BlockPlaceAction).
-- [~] **6** (Opus worktree agent) More distinct sprout visuals (render-only; screenshot for the user's review).
+- [x] **6** @a07d9df (merged) More distinct sprout visuals (render-only; screenshot for the user's review).
 - [~] **8** (Opus worktree agent) Spike placement crystal lifecycle: a crystal seed appears on top of the block,
   waits ~1 s, flashes, grows into the existing (1-cell overlay) spike. Phases are sim
   state (snapshotted); visuals render-only. Shares the phase machine with 7.
@@ -61,7 +61,17 @@ Hard rule from the user: do NOT touch `TerrainCarriedState` / avalanche riding.
   `BotManeuverAvalancheCrushTests` (4 layouts) and `BotManeuverEruptionTests.LowCeiling`
   stop crushing (they pass at 0.1). Item 4 reworks wall crush anyway — revisited there.
 
+## For the user to review
+
+- **#6 sprout look** (taste item): `Plans/img/sprout_visuals_before.png` / `_after.png`.
+  Owner-coloured corner brackets mark the target slot; growing blocks are a flat,
+  lightened material with an owner-coloured rim and a bright leading-edge bar; pending
+  ghosts shimmer at 1.6 Hz (needs a live look — a still can't show it). Knobs are the
+  constants atop the sprout section of `Drawing/ChunkRenderer.cs`. Unowned builds use a
+  pale blue-white close to P1 cyan.
+
 ## Campaign log
 
 - a09468e — #3 committed (user's burst work); BurstChargeTests 10/10; combat/terrain/bot reds = 40 baseline.
 - c86fc15 — #2a/#2b/#5: per-source sprout dials (SproutSource on nodes, snapshotted; LifetimeFor), per-parent overshoot carry (front continuous: 12 painted cells in 51 frames vs 60 with rounding), unlimited reach chaining off your OWN sprout (others' keep 2x). SproutSpeedTests 7/7. New reds: 2 SproutLiftJump + 5 crush (see Decisions needed); movement-group reds otherwise pre-existing (no sprout refs).
+- a07d9df (merge) — #6 sprout visuals, render-only (Drawing/ChunkRenderer.cs, Game1 passes render time). MTile.sln builds.
