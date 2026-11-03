@@ -82,7 +82,7 @@ public sealed class GuardManeuver : BotManeuver
         // Retaliate: Shift off, then 1-frame LMB taps (press, release) until the
         // charge is spent - GuardRetaliateAction clears GuardCharged in Enter.
         if (!c.GuardCharged) return false;
-        input.LeftClick = _t % 2 == 0;
+        input.LeftClick = _t % 5 < 2;   // ~12 presses/s at most (league input-rate rule)
         _t++;
         return _t < RetaliateFrames;
     }

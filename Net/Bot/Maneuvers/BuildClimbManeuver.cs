@@ -88,7 +88,7 @@ public sealed class BuildClimbManeuver : BotManeuver
         bool outOfReach = v.Dy < -MinRise
                        && MathF.Abs(v.Dx) < MaxHorizontal
                        && MathF.Abs(v.TargetVel.Y) < 40f
-                       && v.Target.IsGrounded;
+                       && v.TargetGrounded;
         _unreachable = outOfReach ? _unreachable + 1 : 0;
         if (_unreachable < Patience || !v.Grounded) return 0f;
         // No point building into a ceiling right over our head.

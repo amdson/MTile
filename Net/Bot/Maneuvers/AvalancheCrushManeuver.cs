@@ -74,7 +74,7 @@ public sealed class AvalancheCrushManeuver : BotManeuver
 
     public override float Score(BotView v)
     {
-        if (!v.Grounded || !v.Target.IsGrounded) return 0f;
+        if (!v.Grounded || !v.TargetGrounded) return 0f;
         float adx = MathF.Abs(v.Dx);
         if (adx < MinRange || adx > MaxRange || MathF.Abs(v.Dy) > VerticalReach) return 0f;
         if (!v.LineOfSight()) return 0f;
