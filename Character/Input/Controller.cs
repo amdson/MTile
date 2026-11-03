@@ -80,8 +80,10 @@ namespace MTile
                 Right = keyboardState.IsKeyDown(Keys.Right) || keyboardState.IsKeyDown(Keys.D),
                 Up    = keyboardState.IsKeyDown(Keys.Up)    || keyboardState.IsKeyDown(Keys.W),
                 Down  = keyboardState.IsKeyDown(Keys.Down)  || keyboardState.IsKeyDown(Keys.S),
-                LeftClick = mouseState.LeftButton == ButtonState.Pressed,
-                RightClick = mouseState.RightButton == ButtonState.Pressed,
+                // J / I double as LMB / RMB so two-button chords (burst) work on a
+                // trackpad or single-button mouse.
+                LeftClick  = mouseState.LeftButton  == ButtonState.Pressed || keyboardState.IsKeyDown(Keys.J),
+                RightClick = mouseState.RightButton == ButtonState.Pressed || keyboardState.IsKeyDown(Keys.I),
                 MousePosition = mouseState.Position,
                 MouseWorldPosition = mouseWorldPosition,
                 Space = keyboardState.IsKeyDown(Keys.Space),

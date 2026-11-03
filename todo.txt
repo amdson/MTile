@@ -1,13 +1,14 @@
 1. improve movement feel. 
 - fix issue with overly long time horizon on lattice planning, esp when jumping up 
-- slow movement
-- add fall damage
 - add more advantages to being on the ground (probably lower knockback)
-- fix bug where some blocks are seemingly invincible to breaking under impact
-
 - add a specific animation for wall jumping while controls are holding player into wall 
-- merge in worktree-sprite-pose-experiment, worktree-fall-drag
-- 
+- when grabbing someone, shift+space shouldn't trigger dash
+2. speed up block generation (tile-sprout speed) add special handling for preserving the front of tile-sprouts (so that when one tile finishes sprouting on tick 5, the remaining progress it would have made within tick 5 is added to the next tile in tick 6)
+- make tile sprouting faster for avalanche than for normal placement, and faster for normal placement than for shit placement
+- for avalanche in particular, crush damage from being in the way and pinned against a wall should be significant
+
+
+
 
 - a boss that generates a damaging rain/wind that permeates the stage, blowing to the left and doing decent damage and knockback per second. the boss is on the right side, at the very end, with knockback dealing attacks and fairly low health. in addition to the wind and melee attacks, the boss can lob explosives at enemies
 - 

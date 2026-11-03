@@ -1170,7 +1170,7 @@ public class DownAirSlash : SlashLikeAction
 {
     // Aim wedge. A sextant is 60° wide, so the click direction must sit within 30°
     // of straight down — i.e. its normalized +y component is at least cos(30°).
-    private const float AimCosThreshold  = 0.8660254f;
+    internal const float AimCosThreshold  = 0.8660254f;
 
     // Pogo tuning, calibrated against the jump: JumpVelocity (-100) plus JumpHoldForce
     // (-1500) over MaxJumpHoldTime (0.12) nets roughly -280 px/s. The band sits BELOW
@@ -1178,11 +1178,11 @@ public class DownAirSlash : SlashLikeAction
     // matches one, so chaining pogos down a line of enemies is a way to stay up, not a
     // cheaper elevator than jumping. (It ran 300/520 first, which put every connect at
     // or above a full jump and made the down-air the best vertical movement in the kit.)
-    private const float PogoSpeed        = 140f;
-    private const float PogoMaxSpeed     = 270f;
+    private const float PogoSpeed        = 200f;
+    private const float PogoMaxSpeed     = 280f;
     // ~3.3× the stock slash recoil. Below PogoSpeed this never shows (the floor wins);
     // it's what makes a heavy, fast-closing connect kick back harder than a light one.
-    private const float PogoRecoilScale  = 0.50f;
+    internal const float PogoRecoilScale  = 0.50f;
     // The hitbox carries ONE RecoilScale, and it feeds the tile path too — so turning
     // it up for the entity pogo would also treble the bounce you get off stone, which
     // is a change to terrain feel nobody asked for (a down-aimed air click used to
@@ -1271,7 +1271,13 @@ public class DownAirSlash : SlashLikeAction
             return;
         }
 
-        var recoil = ctx.CombatSystem.PeekRecoil(vars.HitId);
+        ApplyEntityPogo(ctx, ctx.CombatSystem.PeekRecoil(vars.HitId));
+    }
+
+    // The entity-connect bounce, shared with a down-aimed BurstAction so the two pogos
+    // can't drift apart. `recoil` is the attack's (already RecoilScale'd) inbox read.
+    internal static void ApplyEntityPogo(EnvironmentContext ctx, Vector2 recoil)
+    {
         // Recoil opposes the swing, and the swing points (mostly) down, so -Y is the
         // upward share. Clamp it into the pogo band; the floor is what makes a bounce
         // off a featherweight still feel like a bounce.
@@ -2577,6 +2583,15 @@ public class BurstAction : ActionState
     // displace, not to lock the victim down for a follow-up.
     private const float HitstunSeconds       = 0.20f;
 
+    // Pogo: an AIR burst aimed into DownAirSlash's bottom sextant bounces you off
+    // whatever body it connects with, exactly as the down-air does — same aim wedge,
+    // same recoil scale, same 200–280 px/s band (DownAirSlash.ApplyEntityPogo).
+    // Entities only: the down-air's tile bounce is a trimmed additive nudge off rock
+    // that survived the chop, and the burst's shell breaks nearly everything it
+    // touches, so there's no surviving surface for it to kick off in practice.
+    private static bool IsPogo(in ActionVars vars)
+        => !vars.IsGrounded && vars.AttackDir.Y >= DownAirSlash.AimCosThreshold;
+
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
 
@@ -2684,9 +2699,19 @@ public class BurstAction : ActionState
                 dir * KnockbackMagnitude + bodyVel,
                 ctx.Faction, ctx.SelfId, color,
                 HitTargets.EntitiesOnly,
+                recoilScale: IsPogo(in vars) ? DownAirSlash.PogoRecoilScale : 0f,
                 hitstunSecondsOverride: HitstunSeconds,
                 origin: ctx.Body.Position));
         }
+    }
+
+    // Same 1-frame inbox read as DownAirSlash: PeekHits is per-victim deduped across
+    // all the shell's segments (they share one HitId), so this fires once per body.
+    public override void ApplyActionForces(EnvironmentContext ctx, in ActionVars vars)
+    {
+        if (ctx.CombatSystem == null || !IsPogo(in vars)) return;
+        if (ctx.CombatSystem.PeekHits(vars.HitId) <= 0) return;
+        DownAirSlash.ApplyEntityPogo(ctx, ctx.CombatSystem.PeekRecoil(vars.HitId));
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)

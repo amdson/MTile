@@ -141,6 +141,7 @@ public enum EntityKind
     // A fighter's mine (ActionKind.Mine, Entities/Projectiles/FighterMine.cs).
     FighterMine,
     GrabThrow,      // a player grab's released throw: carries the victim on (see GrabThrowEntity.cs)
+    HoverTarget,    // weightless hit-physics target — despawns a few seconds after its first hit (see HoverTarget.cs)
 }
 
 public static class EntityKinds

@@ -188,6 +188,18 @@ public static partial class Stages
             Populate      = PopulateWeights,
         });
 
+        // ─── hover_targets ────────────────────────────────────────────────────
+        // Hit-physics testbed: the weights hall with three weightless balls floating at
+        // head height — ¼×, 1× and 4× the player's mass. A hit turns gravity on; each
+        // despawns a few seconds after its first hit and reappears at its slot.
+        // See PopulateHoverTargets.
+        Register(new Stage {
+            Name          = "hover_targets",
+            TerrainConfig = "weights.json",
+            PlayerSpawn   = new Vector2(0f, 30f),
+            Populate      = PopulateHoverTargets,
+        });
+
         // ─── warden ───────────────────────────────────────────────────────────
         // WardenEnemy demo (Levels/warden.json). You spawn on the left floor. To the
         // right, a Warden has to hop a 1-block and then a 2-block step and drop off a
@@ -958,6 +970,46 @@ public static partial class Stages
         var e = EnemyFactory.Create(EntityKind.Sparring, WeightSlot(i, +1, 10f));   // blueprint Radius
         e.Mass = WeightMasses[i];
         return e;
+    }
+
+    // hover_targets slots: (x, radius, mass as a multiple of the player's), lightest
+    // nearest spawn. Centers sit at standing head height on the weights.json floor.
+    private static readonly (float X, float Radius, float MassRatio)[] HoverSlots =
+    {
+        ( 60f,  5f, 0.25f),
+        (120f,  8f, 1f),
+        (200f, 13f, 4f),
+    };
+    private const float HoverTargetY = 6 * Chunk.TileSize - 28f;
+
+    private static HoverTarget HoverTargetAt(int i)
+    {
+        var (x, r, ratio) = HoverSlots[i];
+        float shade = (float)i / (HoverSlots.Length - 1);
+        return new HoverTarget(new Vector2(x, HoverTargetY), r, ratio * PlayerMass,
+            Color.Lerp(new Color(255, 220, 120), new Color(170, 40, 40), shade));
+    }
+
+    private const float PlayerMass = 2.5f;   // PlayerCharacter.Mass's default
+
+    private static void PopulateHoverTargets(Simulation g)
+    {
+        // Refill any empty slot every frame — the target's own countdown is the delay.
+        // Slots are identified by mass (each appears once), so this is a pure function
+        // of sim state and replays identically under rollback.
+        var live = new bool[HoverSlots.Length];
+        g.AddTicker(_ =>
+        {
+            System.Array.Clear(live);
+            foreach (var e in g.Entities)
+            {
+                if (e.IsDead || e.Kind != EntityKind.HoverTarget) continue;
+                for (int i = 0; i < HoverSlots.Length; i++)
+                    if (e.Mass == HoverSlots[i].MassRatio * PlayerMass) live[i] = true;
+            }
+            for (int i = 0; i < HoverSlots.Length; i++)
+                if (!live[i]) g.SpawnEntity(HoverTargetAt(i));
+        });
     }
 
     // Warden stage geometry (Levels/warden.json): floor surface at tile row 12.

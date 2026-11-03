@@ -26,7 +26,7 @@ import subprocess, sys
 GROUPS = {
  "combat": ["Combat","Guard","DashTests","Grab","DirectDamage","AttackRecoil","Commitment","HitResolver",
             "HitboxOcclusion","HitEviction","HitFlash","ActionOverlay","ActionAimSolver",
-            "ClipBinding","DownAirSlash","AirHammer","WhipKick","InputParserGesture","RecoveryTransition","Laser",
+            "ClipBinding","DownAirSlash","BurstPogo","AirHammer","WhipKick","InputParserGesture","RecoveryTransition","Laser",
             "Bird","Shrike","Aspid","Fighter","TemplateEnemy","WardenEnemy","SpearmanEnemy","PulserEnemy","EnemySpawner","WizardEnemy","Warlord","Prism","RayEmitter","Quillback","GauntletEnemy","Zeus","TelegraphList",
             "PresentationEventLog","SandImpactDamage","PlayerImpactByVelocity","ImpactCrater",
             "RunningOverUnderImpact","ChargedBlast","SlashCombo","BlockOwnership","SpikeOverlay","ClodGrab","GroundedForActions"],
@@ -46,7 +46,7 @@ GROUPS = {
                "SpriteBinding","Smoothing","MotionProbe","ParkourGrip","TerrainNoPen","NoPenetration",
                "Attachment","SlashCombo","SpriteSheet","VfxCatalog","SheetAnimator","EntityArt","CurtainSim"],
  "simcore": ["Snapshot","Rollback","InputCodec","Simulation","TwoPlayerStep","ConfigLayout",
-             "TraceExport","StageSaver","Rtc","PracticeBall","TrainingStage","GauntletStage","CoopMode","CoopLegacy","DepthsStage","DepthsLayout","DepthsDeterminism","Lobby","DuelStage","WallDummyStage"],
+             "TraceExport","StageSaver","Rtc","PracticeBall","TrainingStage","GauntletStage","CoopMode","CoopLegacy","DepthsStage","DepthsLayout","DepthsDeterminism","Lobby","DuelStage","WallDummyStage","HoverTargetStage"],
 }
 
 # Excluded from every group AND from plain `full`; included only with --slow. These are
