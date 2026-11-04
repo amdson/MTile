@@ -54,7 +54,6 @@ public static class FrameData
     // ── Terrain / charged moves. Here Startup is the minimum charge before it can
     //    fire and Active the longest it can run; Total is player-driven.
     public static class BlockBurstAction { public const float Total = 15.6f / F,                             EndLag = 10.8f / F; }
-    public static class BeamAction       { public const float Startup = 21 / F,  Active = 33 / F,           EndLag = 12    / F; }   // charge, then fire
     public static class LobbedAreaAction { public const float Startup = 24 / F,                             EndLag = 12    / F; }   // min charge to throw
     public static class BlockGrabAction  { public const float                    Active = 36 / F,           EndLag = 12    / F; }   // wait for a drag / tether
     // Startup: committed but holding nothing — the telegraphed wind-up (20f: 12 was too
@@ -227,7 +226,7 @@ public class NullAction : ActionState
 // Three ways in (CheckPreConditions):
 //   1. An attack's Exit stamped recovery frames — the normal handoff.
 //   2. LMB press-hold from a neutral state — the wind-up role, at index 0. The
-//      press FRAME itself is left to press-edge chords (BlockBurst, Beam, Grab,
+//      press FRAME itself is left to press-edge chords (BlockBurst, Grab,
 //      all of which outrank or consume the press); the wind-up picks up what
 //      they declined one frame later.
 //   3. Eviction lookahead: re-running the candidate preconditions under the
@@ -303,7 +302,7 @@ public class RecoveryAction : ActionState
             if (ab.Condition.RecoveryActive || ctx.HitDisadvantageFrames() > 0) return true;
 
             // (2) Wind-up role. PressEdge age ≥ 1: the press frame belongs to the
-            // press-edge chords; Shift+LMB belongs to Beam/EnergyBall/Grab.
+            // press-edge chords; Shift+LMB belongs to Grab/BlockGrab.
             return !ctx.Input.Shift && ctx.Input.LeftClick
                 && ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out var pe)
                 && ctx.CurrentFrame - pe.IssuedFrame >= 1;
@@ -1494,9 +1493,8 @@ public class StabAction : ActionState
         // Strict from-set: only out of neutral/recovery, at a finished countdown.
         if (!EntryOk(ctx)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
-        // Shift+LMB-hold-swipe is reserved for BeamAction. A Stab intent
-        // emitted from a Shift-held press would otherwise route to a normal
-        // stab on release; gate it off so the beam path doesn't double-fire.
+        // Shift+LMB belongs to the Grab/BlockGrab family (the player beam that
+        // also lived there was removed 2026-11-04); a Shift-held press never stabs.
         if (ctx.Input.Shift) return false;
         return true;
     }
@@ -1896,7 +1894,7 @@ public class AirWhipKick : ActionState
         if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent)) return false;
         if (!EntryOk(ctx)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
-        if (ctx.Input.Shift) return false;              // Shift+swipe is BeamAction's
+        if (ctx.Input.Shift) return false;              // Shift+swipe is the Grab family's
         if (ctx.GroundedForActions) return false;        // air-only
         int facing = ab.Facing == 0 ? 1 : ab.Facing;
         return intent.Direction.X * facing < 0f;         // backward swipe
@@ -2097,7 +2095,7 @@ public class AirHammerAction : ActionState
         if (!ctx.Intents.Peek(IntentType.Stab, ctx.CurrentFrame, out var intent)) return false;
         if (!EntryOk(ctx)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
-        if (ctx.Input.Shift) return false;   // Shift-swipe belongs to Beam (see StabAction)
+        if (ctx.Input.Shift) return false;   // Shift-swipe belongs to the Grab family (see StabAction)
         if (ctx.GroundedForActions) return false;
         var d = intent.Direction;
         float lenSq = d.LengthSquared();
@@ -2358,7 +2356,7 @@ public class GuardAction : ActionState
 // the dash is over. Shift is ignored: mid-dash, the click is this move's, not Grab's
 // or BlockGrab's.
 //
-// P53 beats every other candidate for the press — Grab 48 / BlockGrab 46 / Beam 45 on
+// P53 beats every other candidate for the press — Grab 48 / BlockGrab 46 on
 // the Shift+LMB chord, DownAirSlash 52 and the combo steps 50 on the click; the
 // precondition only passes during a dash, so it never competes with the ordinary air
 // slashes. Like any opener it fires from neutral / a finished recovery.
@@ -3590,286 +3588,6 @@ internal static class BlockEruptionHelpers
 // an early-commit move with zero startup and no identity next to the beam; the
 // EnergyBallProjectile entity itself survives, fired by enemies in EnemyActions.)
 
-// ---------- Ranged: Beam (Shift + LMB hold) -------------------------------------
-
-// Roadmap §4.2 — sustained particle beam. Shift+LMB press-edge starts charging;
-// once _chargeTime ≥ MinChargeTime AND LMB still held, the beam fires every
-// frame for up to MaxFiringTime. Release LMB at any point during charge → no
-// beam fires (the user's "fails when interrupted early" requirement makes the
-// move non-spammable).
-//
-// Why not piggy-back on Stab intent (which is the roadmap's original gesture
-// suggestion): Stab fires on RELEASE, after a long hold + swipe. We want the
-// beam visible DURING the hold so the player can sweep it across targets while
-// firing. Press-edge + per-frame LMB poll matches the intended feel.
-//
-// Click coexistence: when a short Shift+LMB tap releases inside the charge
-// window, BeamAction.CheckConditions returns false (LMB released) and the beam
-// exits without firing. (That short tap used to route to EnergyBallAction —
-// removed 2026-09-01 — so now it just pays the recovery stamp and does nothing.)
-public class BeamAction : ActionState
-{
-    private const float MinChargeTime    = FrameData.BeamAction.Startup;
-    private const float MaxFiringTime    = FrameData.BeamAction.Active;
-    // Hard cap on reach in world pixels. The beam now marches in fixed StepSize
-    // increments out to this length; the *effective* reach is usually shorter,
-    // cut off wherever the energy model (below) decays past EnergyCutoff. Through
-    // open air the beam lances the full length; boring into stone it dies in a
-    // few cells. Extended well past the old 220px so it reads as a long lance.
-    private const float MaxBeamLength    = 420f;
-    private const float StepSize         = 14f;                              // world-px between sampled segments
-    private const int   MaxSteps         = (int)(MaxBeamLength / StepSize) + 1;
-    private const float SegmentHalfSize  = 6f;
-    private const float DamagePerFrame   = TileDamage.TileMaxHP * 0.45f;   // full-energy damage; breaks Stone in 2-3 frames of overlap
-    private const float KnockbackImpulse = 200f;
-    private const float RecoverySeconds  = FrameData.BeamAction.EndLag;
-
-    // --- Energy model (the "strength through blocks / air" math) ---------------
-    // The beam carries a normalized energy that starts at 1.0 at the muzzle and is
-    // multiplicatively attenuated each step. Damage + knockback delivered to a cell
-    // scale with the energy ARRIVING at it (before that cell's own absorption), so a
-    // tile shields whatever sits behind it. Air bleeds energy slowly (beam diffuses
-    // over distance); solids bleed it hard, weighted by the material's durability so
-    // stone chokes the beam far faster than sand.
-    private const float AirRetentionPerStep  = 0.992f;  // ~0.79 over the full air run — stays strong
-    private const float SolidRetentionBase   = 0.55f;   // per-step retention for a 1×TileMaxHP (Dirt) cell
-    private const float EnergyCutoff         = 0.05f;   // below this the beam is spent; reach ends here
-
-    // Per-step solid retention, tied to material durability so the falloff curve is
-    // driven by the same numbers that set break HP. Stone (2.0) chokes hardest.
-    private static float SolidRetention(TileType type)
-        => MathF.Pow(SolidRetentionBase, TileDamage.MaxHPFor(type) / TileDamage.TileMaxHP);
-
-    // Streaming-particle look: a handful of motes ride outward along the beam, each
-    // dragging a fading Trail ribbon (Drawing/Trail.cs). They re-launch from the
-    // muzzle on a staggered cycle so there's always a steady stream in flight.
-    private const int   MoteCount    = 5;
-    private const float MoteHz       = 12.25f;   // outward runs per second per mote
-    private const int   MoteTrailCap = 12;
-    private const float MoteTrailLife = 0.11f;
-
-    // Render-only cache. The beam's live sim state (charge/firing timers, hitId,
-    // locked BeamDir) lives in ActionVars; these only feed Draw and self-heal on the
-    // next firing Update (Trails are advanced there, where ctx.Dt is available, just
-    // like the cursor trail is ticked from Game1.Update), so they stay out of the
-    // snapshot. See ActionVars header.
-    private Vector2   _lastBeamDir   = Vector2.UnitX;
-    private float     _lastBeamReach;
-    private int       _segCount;
-    private readonly Vector2[] _segPos    = new Vector2[MaxSteps];
-    private readonly float[]   _segEnergy = new float[MaxSteps];
-    private readonly Trail[]   _motes     = new Trail[MoteCount];
-    private readonly int[]     _moteCycle = new int[MoteCount];   // last sweep index per mote; change ⇒ re-launch
-
-    public BeamAction()
-    {
-        for (int m = 0; m < MoteCount; m++)
-            _motes[m] = new Trail(MoteTrailCap, MoteTrailLife);
-    }
-
-    public override int ActivePriority  => 40;
-    public override int PassivePriority => 45;
-
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
-    {
-        if (!ctx.Input.Shift) return false;
-        if (!ctx.Input.LeftClick) return false;
-        var prev = ctx.Controller.GetPrevious(1);
-        if (prev.LeftClick) return false;
-        if (ctx.Combat?.BlocksAttack == true) return false;
-        if (ab.Condition.RecoveryActive)    return false;
-        // From-set: neutral/recovery, or straight out of a live Guard (Shift is
-        // already down in a guard stance, so the press-edge lands over Guard).
-        if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
-        return true;
-    }
-
-    // Charge then fire, both bounded — so the overlay spans the WHOLE activation rather
-    // than running out partway through the burst (the authored clip is shorter than
-    // MinChargeTime + MaxFiringTime). The split is time-proportional; retune it here if the
-    // clip is ever authored with a deliberate wind-up/fire ratio.
-    private const float ChargeShare = MinChargeTime / (MinChargeTime + MaxFiringTime);
-    public override float AnimationProgress(in ActionVars vars)
-        => vars.Firing
-            ? ChargeShare + (1f - ChargeShare) * (vars.FiringTime / MaxFiringTime)
-            : ChargeShare * (vars.ChargeTime / MinChargeTime);
-
-    // Alive while Shift + LMB both held AND we're either charging or within the
-    // firing window. Releasing LMB during charge cancels the beam; releasing
-    // during firing ends the beam cleanly.
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        if (!ctx.Input.LeftClick) return false;
-        if (!ctx.Input.Shift)     return false;
-        if (ctx.Combat?.BlocksAttack == true) return false;
-        // Moving or jumping breaks concentration — the beam demands a planted stance.
-        // Cancels during charge AND firing, so any L/R/Space input drops the beam.
-        if (ctx.Input.Left || ctx.Input.Right || ctx.Input.Space) return false;
-        if (vars.Firing && vars.FiringTime >= MaxFiringTime) return false;
-        return true;
-    }
-
-    public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        vars.ChargeTime = 0f;
-        vars.FiringTime = 0f;
-        vars.Firing     = false;
-        vars.HitId      = ctx.HitIds.Next();
-        // Drop any ribbons left over from a previous activation.
-        for (int m = 0; m < MoteCount; m++)
-        {
-            _motes[m].Clear();
-            _moteCycle[m] = int.MinValue;
-        }
-    }
-
-    public override void Update(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        if (!vars.Firing)
-        {
-            vars.ChargeTime += ctx.Dt;
-            if (vars.ChargeTime >= MinChargeTime)
-            {
-                vars.Firing = true;
-                // Lock the aim the instant firing begins. The player aims freely
-                // during the charge wind-up; once the beam lights it commits to a
-                // fixed angle for the rest of the burst (the player can still walk,
-                // so the muzzle origin tracks the body — only the direction sticks).
-                var aim = ctx.Input.MouseWorldPosition - ctx.Body.Position;
-                vars.BeamDir = aim.LengthSquared() > 1e-6f
-                    ? Vector2.Normalize(aim)
-                    : new Vector2(ab.Facing, 0f);
-            }
-            return;
-        }
-        vars.FiringTime += ctx.Dt;
-        if (ctx.Hitboxes == null) return;
-
-        // Beam emanates from the (moving) muzzle along the LOCKED direction.
-        var start = ctx.Body.Position;
-        var dir   = vars.BeamDir;
-        if (dir.LengthSquared() < 1e-6f) return;
-
-        // March outward in fixed StepSize cells, attenuating energy as we cross air
-        // and solids. Each step publishes a hitbox whose damage scales with the
-        // energy arriving there; we stop once the beam is spent (EnergyCutoff) so a
-        // wall of stone visibly shortens the beam while open air lets it run long.
-        //
-        // HitTargets.All so each segment damages BOTH tiles and entities — that's
-        // what carves tunnels while also hurting anything in the line of fire. The
-        // shared HitId means CombatSystem's (HitId,Target) dedupe treats the whole
-        // beam as ONE attack per entity, so chained segments don't multi-hit a body.
-        float energy = 1f;
-        int   count  = 0;
-        for (int s = 0; s < MaxSteps; s++)
-        {
-            float dist   = (s + 0.5f) * StepSize;
-            if (dist > MaxBeamLength) break;
-            var   center = start + dir * dist;
-
-            // Damage uses the energy ARRIVING at this cell (before its absorption).
-            float arriving = energy;
-            _segPos[count]    = center;
-            _segEnergy[count] = arriving;
-            count++;
-
-            var region = new BoundingBox(
-                center.X - SegmentHalfSize, center.Y - SegmentHalfSize,
-                center.X + SegmentHalfSize, center.Y + SegmentHalfSize);
-            ctx.Hitboxes.Publish(new Hitbox(
-                region, vars.HitId, DamagePerFrame * arriving,
-                dir * (KnockbackImpulse * arriving),
-                ctx.Faction, ctx.SelfId, Color.Magenta));
-
-            // Attenuate for the next step based on what THIS cell is made of.
-            int gtx = (int)MathF.Floor(center.X / Chunk.TileSize);
-            int gty = (int)MathF.Floor(center.Y / Chunk.TileSize);
-            if (ctx.Chunks.GetCellState(gtx, gty) == TileState.Solid)
-                energy *= SolidRetention(ctx.Chunks.GetCellType(gtx, gty));
-            else
-                energy *= AirRetentionPerStep;
-
-            if (energy < EnergyCutoff) break;
-        }
-
-        _lastBeamDir   = dir;
-        _lastBeamReach = count * StepSize;
-        _segCount      = count;
-
-        // Advance the streaming motes. Each rides a staggered phase from muzzle (f=0)
-        // to tip (f=1); when its phase rolls over to a new cycle it re-launches from
-        // the muzzle, so we Clear the ribbon to avoid a streak snapping back across
-        // the beam. Tick-then-Push mirrors the cursor trail in Game1.Update.
-        for (int m = 0; m < MoteCount; m++)
-        {
-            float phase = vars.FiringTime * MoteHz + (float)m / MoteCount;
-            int   cycle = (int)MathF.Floor(phase);
-            float f     = phase - cycle;
-            if (cycle != _moteCycle[m])
-            {
-                _motes[m].Clear();
-                _moteCycle[m] = cycle;
-            }
-            _motes[m].Tick(ctx.Dt);
-            _motes[m].Push(start + dir * (_lastBeamReach * f));
-        }
-    }
-
-    public override void Exit(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
-    {
-        // Recovery on exit no matter how we left — a successful beam locks the
-        // player out of follow-up Shift+LMB for a moment, an interrupted charge
-        // does likewise (which is a feel-call; it punishes spamming).
-        ab.Condition.StampRecoveryForSeconds(RecoverySeconds, ctx.CurrentFrame, ctx.Dt);
-    }
-
-    // Heavy stance while charging + firing — beam needs the player committed.
-    public override void ApplyMovementModifiers(ref MovementModifiers m, in ActionVars vars)
-    {
-        m.MaxWalkSpeed *= 0.4f;
-        m.WalkAccel    *= 0.6f;
-        m.MaxAirSpeed  *= 0.5f;
-        m.AirAccel     *= 0.6f;
-    }
-
-    public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
-    {
-        if (!vars.Firing)
-        {
-            // Charge ring at the player so the player can see the wind-up. Single
-            // dot pulse — keep cheap; tune later if it needs more presence.
-            float frac = vars.ChargeTime / MinChargeTime;
-            int   r    = (int)(2 + 6 * frac);
-            var col = Color.Lerp(new Color(80, 0, 100), Color.Magenta, frac);
-            t.Rect(body.Position, r * 2f, col * 0.6f);
-            return;
-        }
-        if (_segCount <= 0) return;
-
-        // Faint beam core: a thin dot at each marched step, dimmed/brightened by the
-        // energy that reached it, so the taper toward the tip (and the abrupt end
-        // where the beam bored into stone) still reads. Kept subtle — the streaming
-        // ribbons below are the main event.
-        var dimCol  = new Color(90, 0, 110);
-        var coreCol = new Color(220, 140, 255);
-        for (int i = 0; i < _segCount; i++)
-        {
-            float e   = _segEnergy[i];
-            var   col = Color.Lerp(dimCol, coreCol, e) * 0.5f;
-            int   r   = (int)(1f + 2f * e);
-            var   p   = _segPos[i];
-            t.Rect(p, r * 2f, col);
-        }
-
-        // Streaming particles: each mote's fading Trail ribbon, advanced in Update.
-        // Newer (head) end is bright white-magenta; it tapers to transparent.
-        var head = new Color(255, 220, 255);
-        var tail = new Color(180, 40, 220, 0);
-        for (int m = 0; m < MoteCount; m++)
-            _motes[m].Emit(t, head, tail, startWidth: 3.5f);
-    }
-}
-
 // ---------- Ranged: LobbedArea (Shift + RMB charge) -----------------------------
 
 // Roadmap §4.3 — ranged eruption. Hold Shift+RMB to charge a budget like
@@ -4055,7 +3773,7 @@ public class LobbedAreaAction : ActionState
 // Keep holding and the clod dissipates over GrabDissipateSeconds; at zero the ball is
 // gone, the point dies, the action ends. Carrying terrain has a cost.
 //
-// Priority 46/46, above Beam/EnergyBall's 40/45 — both also live on Shift+LMB, and
+// Priority 46/46, above the old Beam (removed 2026-11-04) — it also lived on Shift+LMB, and
 // this has to win the press frame AND still be holding the button when they'd
 // otherwise fire on release. The cursor-in-solid gate is what keeps the three from
 // fighting: on terrain you grab, off terrain you beam. The split with GrabAction is

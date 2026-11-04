@@ -49,7 +49,7 @@ public sealed class CrystalWaveManeuver : BotManeuver
     public float RetreatSpeed  = 25f;    // px/s away from us that counts as keeping distance
 
     private static readonly System.Collections.Generic.HashSet<string> StandOff =
-        new() { "BeamAction", "LobbedAreaAction", "GuardAction" };
+        new() { "LobbedAreaAction", "GuardAction" };
     public override int  Cooldown       => 60;   // the real gate is the 8 s wave cooldown
     public override bool OwnsLocomotion => true;
 

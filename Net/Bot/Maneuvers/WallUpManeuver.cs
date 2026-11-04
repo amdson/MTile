@@ -8,7 +8,7 @@ namespace MTile.Net;
 // the bot, tall enough that walking into it stops a player cold.
 //
 // When it pays off (Score):
-//   * the target is charging a ranged attack (Beam / lobbed area) — the column eats the
+//   * the target is charging a ranged attack (lobbed area) — the column eats the
 //     shot, and stone survives it where dirt would not;
 //   * the bot is low on HP and the target is closing — buys time for Health regen and
 //     for cooldowns to come back;
@@ -49,7 +49,7 @@ public sealed class WallUpManeuver : BotManeuver
     public override int Cooldown => 180;
     public override bool OwnsLocomotion => true;
 
-    private static readonly HashSet<string> RangedCharges = new() { "BeamAction", "LobbedAreaAction" };
+    private static readonly HashSet<string> RangedCharges = new() { "LobbedAreaAction" };
 
     private readonly BarrierLayer _layer = new();
     private int      _frames;

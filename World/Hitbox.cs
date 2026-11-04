@@ -138,8 +138,7 @@ public readonly struct Hitbox
     // damage propagates front-to-back from the origin (a cell hidden behind
     // another takes damage only once the one in front has broken). Publishers
     // opt in by passing `origin`; a hitbox without one behaves as before and
-    // damages everything it overlaps (BeamAction, whose march is its own
-    // occlusion model).
+    // damages everything it overlaps.
     public readonly bool        Occluded;
     public readonly Vector2     Origin;
     // A shove (ActionKind.Shove): against a raised guard it is not blocked — it breaks

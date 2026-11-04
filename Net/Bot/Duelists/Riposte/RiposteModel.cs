@@ -36,7 +36,7 @@ public sealed class RiposteModel
 
     public static bool IsRanged(string a)
         => a == "BlockPaintAction" || a == "BlockPlaceAction" || a == "BlockBurstAction"
-        || a == "BeamAction" || a == "LobbedAreaAction" || a == "BlockGrabAction";
+        || a == "LobbedAreaAction" || a == "BlockGrabAction";
 
     // How readily they swing when I'm close: attack starts per second spent in the zone.
     public float Aggression => (MeleeStartsInZone + 1f) / (ZoneFrames / 60f + 2f);

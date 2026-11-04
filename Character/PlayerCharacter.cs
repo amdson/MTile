@@ -492,7 +492,6 @@ public class PlayerCharacter : IHittable
         _actionRegistry.Add(new GuardAction());       // 35/40  — Shift held on the ground, no L/R, parry posture
         _actionRegistry.Add(new DashSlash());         // 30/53  — LMB press during a dash (Shift or not) → fast cut, long end-lag
         _actionRegistry.Add(new GuardRetaliateAction()); // 30/55 — click during GuardCharged
-        _actionRegistry.Add(new BeamAction());           // 40/45 — Shift+LMB hold, sustained beam after charge
         // LobbedAreaAction (Shift+RMB charge) deactivated in COMBAT_FEEL_PLAN Phase 6
         // when Grab took that binding. Grab has since moved to Shift+LMB, so Shift+RMB
         // is free again — re-add the line to restore the ranged eruption. (Its

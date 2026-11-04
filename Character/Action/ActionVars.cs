@@ -12,7 +12,7 @@ namespace MTile;
 // This is the snapshot unit for actions: a flat value type, so capture/restore is a
 // struct copy (roadmap goal 4 / Plans/STATE_SNAPSHOT_PLAN.md). Reference-type
 // per-activation state is deliberately NOT here:
-//   • Render-only caches (Trail _trail/_tipTrail, BeamAction._lastBeamDir/_lastBeamReach,
+//   • Render-only caches (Trail _trail/_tipTrail,
 //     BlockEruptionAction._simResult) — cosmetic, self-heal as play resumes.
 // (BlockEruptionAction used to keep a SmoothPen + List<PathSample> here for exactly this
 // reason; both are gone — its gesture is now the two Vector2s below.)
@@ -23,10 +23,10 @@ public struct ActionVars
 {
     public float   TimeInState;       // Recovery, Slash*, Stab, Pulse, EnergyBall, Grenade, BlockPaint
     public bool    Charging;          // Recovery — LMB wind-up hold live (the merged ReadyAction role)
-    public float   ChargeTime;        // Beam, LobbedArea
+    public float   ChargeTime;        // LobbedArea
     public bool    IsGrounded;        // Ready, Stab, Pulse
     public int     Facing;            // Ready
-    public int     HitId;             // Slash*, Stab, Pulse, Beam
+    public int     HitId;             // Slash*, Stab, Pulse
     public bool    AttackConnected;   // Slash* — latched true once the HitId connects with an
                                       // entity (read from CombatSystem.PeekHits), so combo
                                       // openers can gate their follow-up on a hit (Phase 3).
@@ -49,9 +49,6 @@ public struct ActionVars
 
     public Vector2 OriginCell;        // BlockPlace (last placed cell), BlockBurst (target cell)
 
-    public float   FiringTime;        // Beam
-    public bool    Firing;            // Beam
-    public Vector2 BeamDir;           // Beam — aim direction, locked the frame firing starts
                                       // (sim state: it drives hitbox placement).
 
     public Vector2 CursorAtPress;     // LobbedArea

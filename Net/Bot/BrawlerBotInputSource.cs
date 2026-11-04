@@ -84,7 +84,6 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         new AvalancheCrushManeuver(),    // pins a target in a roofed pocket
         new BlockBurstManeuver(),
         new WallUpManeuver(),
-        new BeamManeuver(),          // disabled until GrabAction stops shadowing BeamAction
         // Spacing and navigation.
         new WallClimbManeuver(),
         new AvalancheRideManeuver(),     // across pits to ledges; outranks BuildClimb there

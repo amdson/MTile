@@ -41,7 +41,7 @@ public class InputParser
     private int     _activePressFrame   = -1;
     private Vector2 _activePressMouse;
     // Was Shift down when this press STARTED? Shift+LMB belongs to the ranged/grab
-    // family (Beam, EnergyBall, Grab, BlockGrab), so a press that opened under Shift
+    // family (Grab, BlockGrab), so a press that opened under Shift
     // must not also emit the bare-LMB drag gestures — see the release-edge comment.
     //
     // Sampled at the press edge, not read at release, because the two differ in the
@@ -186,7 +186,7 @@ public class InputParser
             // A Shift-owned press emits Click but never Stab or Circle. Click is
             // shared — EnergyBallAction is a Shift+LMB tap and needs it — but the two
             // DRAG gestures are bare-LMB only, and a Shift+LMB drag is already somebody
-            // else's move (Beam, or the Grab/BlockGrab throw).
+            // else's move (the Grab/BlockGrab throw).
             //
             // This has to be suppressed at emission rather than gated in the consuming
             // action, which is what StabAction's `if (ctx.Input.Shift) return false`

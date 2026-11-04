@@ -162,7 +162,7 @@ public class HitboxOcclusionTests
     }
 
     // Without an origin, every overlapped cell takes damage regardless of cover —
-    // the legacy behaviour BeamAction still relies on.
+    // the legacy behaviour for publishers that pass none.
     [Fact]
     public void Tiles_NoOrigin_DamagesHiddenCells()
     {
