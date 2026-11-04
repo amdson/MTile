@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MTile soundboard</title>
+<style>
+:root{--bg:#16181d;--card:#1f2229;--card2:#262a33;--line:#343945;--fg:#e4e6eb;--mut:#8b92a1;--acc:#6aa9ff;--warn:#e0a24a;--bad:#e06a6a;--ok:#6ad08a}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:13px/1.35 system-ui,-apple-system,Segoe UI,sans-serif}
+body{display:grid;grid-template-rows:auto 1fr auto;height:100vh}
+header{display:flex;gap:12px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line)}
+header h1{font-size:15px;margin:0}
+header .mut{color:var(--mut)}
+#status{margin-left:auto;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55vw}
+#status.bad{color:var(--bad)} #status.ok{color:var(--ok)}
+main{display:grid;grid-template-columns:1fr 1fr;min-height:0}
+.pane{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+.pane .bar{display:flex;gap:8px;align-items:center;padding:6px 10px;border-bottom:1px solid var(--line)}
+.pane .bar input[type=search]{flex:1}
+.scroll{overflow:auto;padding:6px 10px 40px}
+input,button,select{font:inherit;color:var(--fg);background:var(--card2);border:1px solid var(--line);border-radius:5px;padding:3px 7px}
+button{cursor:pointer} button:hover{border-color:var(--acc)}
+.ev{background:var(--card);border:1px solid var(--line);border-radius:7px;margin:5px 0;padding:6px 8px}
+.ev.drop{border-color:var(--acc);background:#22314a}
+.ev.unmapped{opacity:.72}
+.ev .head{display:flex;gap:8px;align-items:baseline}
+.ev .stem{font-weight:600;font-family:ui-monospace,Menlo,monospace}
+.ev .cmt{color:var(--mut);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ev .tag{font-size:11px;color:var(--warn)}
+.clips{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;min-height:22px}
+.chip{display:flex;align-items:center;gap:4px;background:var(--card2);border:1px solid var(--line);border-radius:12px;padding:1px 4px 1px 2px;cursor:pointer;max-width:100%}
+.chip.sel{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+.chip.drop{border-color:var(--warn)}
+.chip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:230px}
+.chip .crop{color:var(--warn);font-size:11px}
+.chip button,.file button{border:none;background:none;padding:0 3px;color:var(--mut)}
+.chip button:hover,.file button:hover{color:var(--fg)}
+.empty{color:var(--mut);font-size:12px;font-style:italic}
+details.folder{margin:3px 0}
+details.folder>summary{cursor:pointer;padding:3px 4px;border-radius:4px;font-weight:600}
+details.folder>summary:hover{background:var(--card)}
+details.folder>summary .n{color:var(--mut);font-weight:400}
+.file{display:flex;align-items:center;gap:6px;padding:2px 4px 2px 18px;border-radius:4px;cursor:grab}
+.file:hover{background:var(--card)}
+.file .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file.playing,.chip.playing{color:var(--acc)}
+#editor{border-top:1px solid var(--line);padding:8px 12px;background:#1a1c22}
+#editor .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#editor .title{font-weight:600}
+#editor label{color:var(--mut);display:flex;gap:4px;align-items:center}
+#editor input[type=number]{width:78px}
+#wave{width:100%;height:150px;display:block;margin:6px 0;background:#111318;border:1px solid var(--line);border-radius:5px;cursor:crosshair}
+.hint{color:var(--mut);font-size:12px}
+kbd{border:1px solid var(--line);border-radius:3px;padding:0 4px;font-size:11px}
+</style>
+</head>
+<body>
+<header>
+  <h1>MTile soundboard</h1>
+  <span class="mut" id="libroot"></span>
+  <button id="rescan" title="re-read the library folders">Rescan</button>
+  <span id="status">loading…</span>
+</header>
+<main>
+  <section class="pane">
+    <div class="bar"><b>Events</b><input type="search" id="evq" placeholder="filter events…"><label class="mut"><input type="checkbox" id="mappedOnly"> mapped only</label></div>
+    <div class="scroll" id="events"></div>
+  </section>
+  <section class="pane">
+    <div class="bar"><b>Library</b><input type="search" id="libq" placeholder="search sounds…"><button id="collapse">Collapse all</button></div>
+    <div class="scroll" id="library"></div>
+  </section>
+</main>
+<section id="editor">
+  <div class="row">
+    <span class="title" id="edTitle">No clip selected</span>
+    <span class="hint" id="edFile"></span>
+    <span style="flex:1"></span>
+    <button id="playCrop" title="space">▶ crop</button>
+    <button id="playRendered" title="exactly what the game plays (after save + render)">▶ as in game</button>
+    <button id="playFull">▶ whole file</button>
+    <button id="stop">■</button>
+  </div>
+  <canvas id="wave"></canvas>
+  <div class="row">
+    <label>start s <input type="number" id="fStart" step="0.01" min="0"></label>
+    <label>end s <input type="number" id="fEnd" step="0.01" min="0" placeholder="end"></label>
+    <label>gain dB <input type="number" id="fGain" step="0.5"></label>
+    <label>fade in ms <input type="number" id="fFin" step="5" min="0"></label>
+    <label>fade out ms <input type="number" id="fFout" step="5" min="5"></label>
+    <label><input type="checkbox" id="fTrim"> trim lead silence</label>
+    <button id="resetCrop">Reset crop</button>
+    <button id="zoomCrop">Zoom to crop</button>
+    <button id="zoomFit">Fit</button>
+    <span class="hint">drag on the waveform to select · drag the edges to adjust · wheel to zoom · drop a sound onto an event to add it, onto a clip to replace it</span>
+  </div>
+</section>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let S = null;              // {events, map, library, defaults}
+let sel = null;            // {stem, i}
+const actx = new (window.AudioContext || window.webkitAudioContext)();
+const buffers = new Map(); // path -> Promise<AudioBuffer>
+let current = null;        // {src, el, t0, offset, dur}
+
+function status(msg, cls) { const s = $('status'); s.textContent = msg; s.className = cls || ''; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function base(p) { return p.split('/').pop(); }
+function clipDefaults(c) { return Object.assign({}, S.defaults, c); }
+
+async function load() {
+  const r = await fetch('/api/state'); S = await r.json();
+  $('libroot').textContent = S.library.root;
+  drawEvents(); drawLibrary(); drawEditor();
+  status('ready — ' + Object.keys(S.map.events).length + ' mapped events, ' +
+         S.library.folders.reduce((n, f) => n + f.files.length, 0) + ' library sounds');
+}
+
+// ── audio ──────────────────────────────────────────────────────────────────────────────
+function getBuffer(url) {
+  if (!buffers.has(url)) buffers.set(url, fetch(url).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer();
+  }).then(b => actx.decodeAudioData(b)));
+  return buffers.get(url);
+}
+const libUrl = p => '/api/audio?path=' + encodeURIComponent(p);
+function stop() {
+  if (current) { try { current.src.stop(); } catch (e) {} if (current.el) current.el.classList.remove('playing'); }
+  current = null;
+}
+async function play(url, opt = {}, el = null) {
+  stop();
+  if (!url) { status('not rendered yet — wait for the save to finish', 'bad'); return; } if (actx.state === 'suspended') await actx.resume();
+  let buf; try { buf = await getBuffer(url); } catch (e) { status('cannot play: ' + e.message, 'bad'); return; }
+  const start = opt.start || 0, end = (opt.end != null && opt.end > start) ? Math.min(opt.end, buf.duration) : buf.duration;
+  const dur = Math.max(0.01, end - start);
+  const src = actx.createBufferSource(); src.buffer = buf;
+  const g = actx.createGain(); const t = actx.currentTime + 0.01;
+  const lvl = Math.pow(10, (opt.gain_db || 0) / 20);
+  const fin = (opt.fade_in_ms || 0) / 1000, fout = Math.min(dur, (opt.fade_out_ms || 0) / 1000);
+  g.gain.setValueAtTime(fin > 0 ? 0 : lvl, t);
+  if (fin > 0) g.gain.linearRampToValueAtTime(lvl, t + Math.min(fin, dur));
+  if (fout > 0) { g.gain.setValueAtTime(lvl, t + dur - fout); g.gain.linearRampToValueAtTime(0, t + dur); }
+  src.connect(g).connect(actx.destination);
+  src.start(t, start, dur);
+  if (el) el.classList.add('playing');
+  current = {src, el, t0: t, offset: start, dur, url};
+  src.onended = () => { if (current && current.src === src) { if (el) el.classList.remove('playing'); current = null; } };
+  requestAnimationFrame(drawWave);
+}
+function renderedUrl(stem, i) {
+  const f = (S.rendered[stem] || [])[i];
+  return f ? '/api/rendered?file=' + encodeURIComponent(f) : null;
+}
+
+// ── save ───────────────────────────────────────────────────────────────────────────────
+let saveTimer = null, saving = false, again = false;
+function changed() { clearTimeout(saveTimer); saveTimer = setTimeout(save, 350); status('unsaved…'); }
+async function save() {
+  if (saving) { again = true; return; }
+  saving = true; status('saving + rendering…');
+  try {
+    const r = await fetch('/api/map', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({map: S.map})});
+    const j = await r.json();
+    if (j.files) S.rendered = j.files;
+    if (j.error) status('save failed: ' + j.error, 'bad');
+    else if (j.errors && j.errors.length) status('render errors: ' + j.errors.join(' | '), 'bad');
+    else status('saved · rendered ' + (j.rendered.length ? j.rendered.join(', ') : 'nothing new') + ' · game swaps live', 'ok');
+  } catch (e) { status('save failed: ' + e.message, 'bad'); }
+  saving = false; if (again) { again = false; save(); }
+}
+
+// ── events pane ────────────────────────────────────────────────────────────────────────
+function evEntry(stem, create) {
+  let ev = S.map.events[stem];
+  if (!ev && create) ev = S.map.events[stem] = {clips: []};
+  if (ev && !ev.clips) ev.clips = [];
+  return ev;
+}
+function cropLabel(c) {
+  c = clipDefaults(c); const bits = [];
+  if (c.start > 0 || c.end != null) bits.push(c.start.toFixed(2) + '–' + (c.end != null ? c.end.toFixed(2) : 'end'));
+  if (c.gain_db) bits.push((c.gain_db > 0 ? '+' : '') + c.gain_db + 'dB');
+  return bits.join(' ');
+}
+function drawEvents() {
+  const q = $('evq').value.toLowerCase(), mappedOnly = $('mappedOnly').checked;
+  const root = $('events'); root.innerHTML = '';
+  for (const e of S.events) {
+    const ev = S.map.events[e.stem];
+    if (q && !(e.stem + ' ' + e.comment).toLowerCase().includes(q)) continue;
+    if (mappedOnly && !ev) continue;
+    const div = document.createElement('div');
+    div.className = 'ev' + (ev ? '' : ' unmapped'); div.dataset.stem = e.stem;
+    div.innerHTML = '<div class="head"><span class="stem">' + esc(e.stem) + '</span>' +
+      '<span class="cmt" title="' + esc(e.comment) + '">' + esc(e.comment) + '</span>' +
+      (ev ? '' : '<span class="tag">unmapped — shipped clips / fallback</span>') +
+      '<label class="mut" title="render as a seamless loop: no silence trim, no tail fade"><input type="checkbox" class="loop"' + (ev && ev.loop ? ' checked' : '') + '> loop</label>' +
+      '<button class="playAll" title="play each clip as in game">▶ all</button></div><div class="clips"></div>';
+    const clips = div.querySelector('.clips');
+    (ev ? ev.clips : []).forEach((c, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'chip' + (sel && sel.stem === e.stem && sel.i === i ? ' sel' : '');
+      chip.draggable = true;
+      chip.innerHTML = '<button class="p" title="play as in game">▶</button><span class="nm" title="' + esc(c.file) + '">' + esc(base(c.file)) +
+        '</span><span class="crop">' + esc(cropLabel(c)) + '</span><button class="x" title="remove">×</button>';
+      chip.onclick = ev2 => { if (ev2.target.tagName !== 'BUTTON') select(e.stem, i); };
+      chip.querySelector('.p').onclick = () => play(renderedUrl(e.stem, i), {}, chip);
+      chip.querySelector('.x').onclick = () => {
+        evEntry(e.stem).clips.splice(i, 1);
+        if (sel && sel.stem === e.stem) sel = null;
+        drawEvents(); drawEditor(); changed();
+      };
+      chip.ondragstart = d => d.dataTransfer.setData('text/plain', JSON.stringify({clip: c}));
+      chip.ondragover = d => { d.preventDefault(); d.stopPropagation(); chip.classList.add('drop'); };
+      chip.ondragleave = () => chip.classList.remove('drop');
+      chip.ondrop = d => { d.preventDefault(); d.stopPropagation(); chip.classList.remove('drop'); dropOn(e.stem, i, d); };
+      clips.appendChild(chip);
+    });
+    if (!ev || !ev.clips.length) clips.innerHTML = '<span class="empty">' + (ev ? 'mapped to nothing — silent (or fallback)' : 'drop a sound here') + '</span>';
+    div.querySelector('.loop').onchange = x => { evEntry(e.stem, true).loop = x.target.checked; changed(); };
+    div.querySelector('.playAll').onclick = async () => {
+      const n = ev ? ev.clips.length : 0;
+      for (let i = 0; i < n; i++) { await play(renderedUrl(e.stem, i)); await new Promise(r => setTimeout(r, (current ? current.dur : 0.3) * 1000 + 150)); }
+    };
+    div.ondragover = d => { d.preventDefault(); div.classList.add('drop'); };
+    div.ondragleave = d => { if (!div.contains(d.relatedTarget)) div.classList.remove('drop'); };
+    div.ondrop = d => { d.preventDefault(); div.classList.remove('drop'); dropOn(e.stem, -1, d); };
+    root.appendChild(div);
+  }
+}
+function dropOn(stem, index, d) {
+  let data; try { data = JSON.parse(d.dataTransfer.getData('text/plain')); } catch (e) { return; }
+  const clip = data.clip ? JSON.parse(JSON.stringify(data.clip)) : {file: data.path};
+  const ev = evEntry(stem, true);
+  if (index >= 0) ev.clips[index] = clip; else ev.clips.push(clip);
+  select(stem, index >= 0 ? index : ev.clips.length - 1);
+  changed();
+}
+
+// ── library pane ───────────────────────────────────────────────────────────────────────
+function drawLibrary() {
+  const q = $('libq').value.toLowerCase();
+  const root = $('library'); root.innerHTML = '';
+  if (!S.library.folders.length) root.innerHTML = '<p class="empty">No sounds in ' + esc(S.library.root) + ' — run <code>soundboard.py seed</code> or drop folders there, then Rescan.</p>';
+  for (const f of S.library.folders) {
+    const files = q ? f.files.filter(x => (f.folder + '/' + x.name).toLowerCase().includes(q)) : f.files;
+    if (!files.length) continue;
+    const det = document.createElement('details'); det.className = 'folder';
+    det.open = !!q || openFolders.has(f.folder);
+    det.ontoggle = () => det.open ? openFolders.add(f.folder) : openFolders.delete(f.folder);
+    det.innerHTML = '<summary>' + esc(f.folder === '.' ? '(root)' : f.folder) + ' <span class="n">' + files.length + '</span></summary>';
+    for (const x of files) {
+      const row = document.createElement('div'); row.className = 'file'; row.draggable = true;
+      row.innerHTML = '<button title="play">▶</button><span class="nm" title="' + esc(x.path) + '">' + esc(x.name) + '</span>';
+      row.querySelector('button').onclick = () => play(libUrl(x.path), {}, row);
+      row.ondblclick = () => play(libUrl(x.path), {}, row);
+      row.ondragstart = d => d.dataTransfer.setData('text/plain', JSON.stringify({path: x.path}));
+      det.appendChild(row);
+    }
+    root.appendChild(det);
+  }
+}
+const openFolders = new Set();
+
+// ── editor ─────────────────────────────────────────────────────────────────────────────
+let view = {a: 0, b: 1}, edBuf = null, edPeaks = null;
+function selClip() { return sel ? (evEntry(sel.stem) || {clips: []}).clips[sel.i] : null; }
+async function select(stem, i) {
+  sel = {stem, i}; drawEvents();
+  const c = selClip(); edBuf = null; drawEditor();
+  if (!c) return;
+  try { edBuf = await getBuffer(libUrl(c.file)); } catch (e) { status('cannot load ' + c.file + ': ' + e.message, 'bad'); return; }
+  if (selClip() !== c) return;
+  view = {a: 0, b: edBuf.duration}; drawEditor();
+  zoomTo(c.start || 0, c.end != null ? c.end : edBuf.duration, true);
+}
+function drawEditor() {
+  const c = selClip();
+  $('edTitle').textContent = c ? sel.stem + ' #' + (sel.i + 1) : 'No clip selected';
+  $('edFile').textContent = c ? c.file + (edBuf ? '  (' + edBuf.duration.toFixed(2) + ' s)' : '') : 'click a clip on the left to crop it';
+  const d = c ? clipDefaults(c) : S.defaults;
+  $('fStart').value = c ? (+d.start).toFixed(3) : '';
+  $('fEnd').value = c && d.end != null ? (+d.end).toFixed(3) : '';
+  $('fGain').value = c ? d.gain_db : ''; $('fFin').value = c ? d.fade_in_ms : ''; $('fFout').value = c ? d.fade_out_ms : '';
+  $('fTrim').checked = !!d.trim_silence;
+  for (const id of ['fStart', 'fEnd', 'fGain', 'fFin', 'fFout', 'fTrim', 'playCrop', 'playRendered', 'playFull', 'resetCrop', 'zoomCrop', 'zoomFit']) $(id).disabled = !c;
+  drawWave();
+}
+function setClip(k, v) {
+  const c = selClip(); if (!c) return;
+  if (v === null || v === '' || (typeof v === 'number' && isNaN(v))) delete c[k]; else c[k] = v;
+  if (c.end != null && c.end <= (c.start || 0)) delete c.end;
+  drawEvents(); drawEditor(); changed();
+}
+$('fStart').oninput = e => setClip('start', Math.max(0, parseFloat(e.target.value) || 0));
+$('fEnd').oninput = e => setClip('end', e.target.value === '' ? null : parseFloat(e.target.value));
+$('fGain').oninput = e => setClip('gain_db', parseFloat(e.target.value) || 0);
+$('fFin').oninput = e => setClip('fade_in_ms', Math.max(0, parseFloat(e.target.value) || 0));
+$('fFout').oninput = e => setClip('fade_out_ms', Math.max(5, parseFloat(e.target.value) || 5));
+$('fTrim').onchange = e => setClip('trim_silence', e.target.checked);
+$('resetCrop').onclick = () => { const c = selClip(); if (!c) return; delete c.start; delete c.end; drawEvents(); drawEditor(); changed(); zoomTo(0, edBuf ? edBuf.duration : 1); };
+$('zoomCrop').onclick = () => { const c = clipDefaults(selClip() || {}); if (edBuf) zoomTo(c.start, c.end != null ? c.end : edBuf.duration, true); };
+$('zoomFit').onclick = () => edBuf && zoomTo(0, edBuf.duration);
+$('playCrop').onclick = () => { const c = selClip(); if (c) play(libUrl(c.file), clipDefaults(c)); };
+$('playFull').onclick = () => { const c = selClip(); if (c) play(libUrl(c.file)); };
+$('playRendered').onclick = () => sel && play(renderedUrl(sel.stem, sel.i));
+$('stop').onclick = stop;
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && !/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)) { e.preventDefault(); current ? stop() : $('playCrop').click(); }
+});
+
+function zoomTo(a, b, pad) {
+  if (!edBuf) return;
+  const dur = edBuf.duration; let m = pad ? (b - a) * 0.15 + 0.02 : 0;
+  view = {a: Math.max(0, a - m), b: Math.min(dur, b + m)};
+  if (view.b - view.a < 0.005) view.b = Math.min(dur, view.a + 0.005);
+  drawWave();
+}
+const cv = $('wave');
+function x2t(x) { return view.a + (x / cv.clientWidth) * (view.b - view.a); }
+function t2x(t) { return (t - view.a) / (view.b - view.a) * cv.clientWidth; }
+function drawWave() {
+  const W = cv.clientWidth, H = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const c = selClip();
+  if (!c || !edBuf) { g.fillStyle = '#555'; g.fillText(c ? 'loading…' : '', 10, 20); return; }
+  const d = clipDefaults(c), data = edBuf.getChannelData(0), sr = edBuf.sampleRate;
+  const end = d.end != null ? d.end : edBuf.duration;
+  g.fillStyle = '#1d2a40'; g.fillRect(t2x(d.start), 0, t2x(end) - t2x(d.start), H);
+  g.strokeStyle = '#7f8ba0'; g.beginPath();
+  for (let x = 0; x < W; x++) {
+    const i0 = Math.floor(x2t(x) * sr), i1 = Math.max(i0 + 1, Math.floor(x2t(x + 1) * sr));
+    let lo = 1, hi = -1;
+    for (let i = i0; i < i1 && i < data.length; i += Math.max(1, ((i1 - i0) / 200) | 0)) { const v = data[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (hi < lo) continue;
+    g.moveTo(x + .5, H / 2 - hi * H / 2); g.lineTo(x + .5, H / 2 - lo * H / 2 + 1);
+  }
+  g.stroke();
+  g.fillStyle = 'rgba(0,0,0,.45)'; g.fillRect(0, 0, t2x(d.start), H); g.fillRect(t2x(end), 0, W - t2x(end), H);
+  g.strokeStyle = '#6aa9ff'; g.lineWidth = 2;
+  for (const t of [d.start, end]) { g.beginPath(); g.moveTo(t2x(t), 0); g.lineTo(t2x(t), H); g.stroke(); }
+  g.lineWidth = 1; g.fillStyle = '#8b92a1';
+  g.fillText(view.a.toFixed(3) + ' s', 4, H - 4); const r = view.b.toFixed(3) + ' s'; g.fillText(r, W - g.measureText(r).width - 4, H - 4);
+  if (current && current.url && current.url === libUrl(c.file)) {
+    const t = current.offset + (actx.currentTime - current.t0);
+    if (t >= current.offset && t <= current.offset + current.dur) {
+      g.strokeStyle = '#e0a24a'; g.beginPath(); g.moveTo(t2x(t), 0); g.lineTo(t2x(t), H); g.stroke();
+      requestAnimationFrame(drawWave);
+    }
+  }
+}
+let drag = null;
+cv.onmousedown = e => {
+  const c = selClip(); if (!c || !edBuf) return;
+  const d = clipDefaults(c), end = d.end != null ? d.end : edBuf.duration, x = e.offsetX;
+  if (Math.abs(x - t2x(d.start)) < 7) drag = {mode: 'start'};
+  else if (Math.abs(x - t2x(end)) < 7) drag = {mode: 'end'};
+  else drag = {mode: 'new', t0: x2t(x)};
+};
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const r = cv.getBoundingClientRect(), t = Math.max(0, Math.min(edBuf.duration, x2t(e.clientX - r.left)));
+  const c = selClip(), d = clipDefaults(c);
+  if (drag.mode === 'start') c.start = Math.min(t, (d.end != null ? d.end : edBuf.duration) - 0.005);
+  else if (drag.mode === 'end') c.end = Math.max(t, d.start + 0.005);
+  else { c.start = Math.min(drag.t0, t); c.end = Math.max(drag.t0, t); }
+  if (c.end != null && c.end >= edBuf.duration - 1e-4) delete c.end;
+  drag.moved = true; drawWave(); drawEditor();
+});
+window.addEventListener('mouseup', () => {
+  if (!drag) return; const moved = drag.moved, mode = drag.mode; drag = null;
+  if (!moved && mode === 'new') return;
+  drawEvents(); changed();
+  const c = selClip(); if (c) play(libUrl(c.file), clipDefaults(c));
+});
+cv.addEventListener('wheel', e => {
+  if (!edBuf) return; e.preventDefault();
+  const t = x2t(e.offsetX), k = e.deltaY > 0 ? 1.25 : 0.8;
+  zoomTo(t - (t - view.a) * k, t + (view.b - t) * k);
+}, {passive: false});
+window.addEventListener('resize', drawWave);
+
+$('evq').oninput = drawEvents; $('mappedOnly').onchange = drawEvents;
+$('libq').oninput = drawLibrary;
+$('collapse').onclick = () => { openFolders.clear(); drawLibrary(); };
+$('rescan').onclick = async () => { const r = await fetch('/api/state'); const s = await r.json(); S.library = s.library; S.events = s.events; drawLibrary(); drawEvents(); status('rescanned'); };
+load().catch(e => status('load failed: ' + e.message, 'bad'));
+</script>
+</body>
+</html>

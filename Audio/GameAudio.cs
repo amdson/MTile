@@ -56,7 +56,17 @@ public sealed class GameAudio
     public AudioMixer Mixer   => _mixer;
     public string     Summary => _bank.Summary();
 
-    public void Load(ContentManager content) => _bank.Load(content);
+    public void Load(ContentManager content)
+    {
+        _bank.Load(content);
+        _dev = SoundDevOverrides.TryStart();
+    }
+
+    // Soundboard live swap (scripts/soundboard/). Call once per rendered frame, before
+    // BeginFrame. Returns a status line when the bank was just reloaded, else null.
+    private SoundDevOverrides _dev;
+    public string PollDevOverrides()
+        => _dev != null && _dev.Poll(_bank, _mixer.StopAll) ? _dev.LastStatus : null;
 
     public void BeginFrame() => _mixer.BeginFrame();
     public void EndFrame(Vector2 listener, float dt) => _mixer.EndFrame(listener, dt);

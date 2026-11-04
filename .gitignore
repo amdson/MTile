@@ -53,3 +53,6 @@ Fights/league/
 
 # League output: hundreds of recorded bouts per run; keep the tables, not the files
 Fights/wave*/
+
+# Soundboard dev renders (scripts/soundboard) — the game hot-swaps these; delete to use shipped clips.
+Audio/dev_cache/

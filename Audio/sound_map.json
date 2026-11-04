@@ -1,0 +1,269 @@
+{
+ "library": "~/dev/MTile-sfx-library",
+ "events": {
+  "tile_break": {
+   "clips": [
+    {
+     "file": "shipped/tile_break/tile_break_01.ogg"
+    },
+    {
+     "file": "shipped/tile_break/tile_break_02.ogg"
+    }
+   ]
+  },
+  "tile_place": {
+   "clips": [
+    {
+     "file": "shipped/tile_place/tile_place_01.ogg"
+    }
+   ]
+  },
+  "wall_scrape": {
+   "loop": true,
+   "clips": [
+    {
+     "file": "shipped/wall_scrape/wall_scrape_01.ogg"
+    }
+   ]
+  },
+  "land": {
+   "clips": [
+    {
+     "file": "shipped/land/land_01.ogg"
+    },
+    {
+     "file": "shipped/land/land_02.ogg"
+    },
+    {
+     "file": "shipped/land/land_03.ogg"
+    }
+   ]
+  },
+  "footstep": {
+   "clips": [
+    {
+     "file": "shipped/footstep/footstep_01.ogg"
+    },
+    {
+     "file": "shipped/footstep/footstep_02.ogg"
+    }
+   ]
+  },
+  "hit_connect": {
+   "clips": [
+    {
+     "file": "shipped/hit_connect/hit_connect_01.ogg"
+    },
+    {
+     "file": "shipped/hit_connect/hit_connect_02.ogg"
+    },
+    {
+     "file": "shipped/hit_connect/hit_connect_03.ogg"
+    },
+    {
+     "file": "shipped/hit_connect/hit_connect_04.ogg"
+    }
+   ]
+  },
+  "eruption": {
+   "clips": [
+    {
+     "file": "shipped/eruption/eruption_01.ogg"
+    },
+    {
+     "file": "shipped/eruption/eruption_02.ogg"
+    },
+    {
+     "file": "shipped/eruption/eruption_03.ogg"
+    },
+    {
+     "file": "shipped/eruption/eruption_04.ogg"
+    },
+    {
+     "file": "shipped/eruption/eruption_05.ogg"
+    },
+    {
+     "file": "shipped/eruption/eruption_06.ogg"
+    },
+    {
+     "file": "shipped/eruption/eruption_07.ogg"
+    }
+   ]
+  },
+  "jump": {
+   "clips": [
+    {
+     "file": "shipped/jump/jump_01.ogg"
+    }
+   ]
+  },
+  "double_jump": {
+   "clips": [
+    {
+     "file": "shipped/double_jump/double_jump_01.ogg"
+    }
+   ]
+  },
+  "grunt": {
+   "clips": [
+    {
+     "file": "shipped/grunt/grunt_01.ogg"
+    }
+   ]
+  },
+  "throw": {
+   "clips": [
+    {
+     "file": "shipped/throw/throw_01.ogg"
+    }
+   ]
+  },
+  "swing": {
+   "clips": [
+    {
+     "file": "shipped/swing/swing_01.ogg"
+    },
+    {
+     "file": "shipped/swing/swing_02.ogg"
+    },
+    {
+     "file": "shipped/swing/swing_03.ogg"
+    }
+   ]
+  },
+  "laser_blast": {
+   "clips": [
+    {
+     "file": "shipped/laser_blast/laser_blast_01.ogg"
+    }
+   ]
+  },
+  "guard_block": {
+   "clips": [
+    {
+     "file": "shipped/guard_block/guard_block_01.ogg"
+    },
+    {
+     "file": "shipped/guard_block/guard_block_02.ogg"
+    },
+    {
+     "file": "shipped/guard_block/guard_block_03.ogg"
+    }
+   ]
+  },
+  "guard_parry": {
+   "clips": [
+    {
+     "file": "shipped/guard_parry/guard_parry_01.ogg"
+    }
+   ]
+  },
+  "respawn": {
+   "clips": [
+    {
+     "file": "shipped/respawn/respawn_01.ogg"
+    }
+   ]
+  },
+  "swing_heavy": {
+   "clips": [
+    {
+     "file": "shipped/swing_heavy/swing_heavy_01.ogg"
+    }
+   ]
+  },
+  "stab": {
+   "clips": [
+    {
+     "file": "shipped/stab/stab_01.ogg"
+    }
+   ]
+  },
+  "air_hammer": {
+   "clips": [
+    {
+     "file": "shipped/air_hammer/air_hammer_01.ogg"
+    }
+   ]
+  },
+  "dash_slash": {
+   "clips": [
+    {
+     "file": "shipped/dash_slash/dash_slash_01.ogg"
+    }
+   ]
+  },
+  "dash": {
+   "clips": [
+    {
+     "file": "shipped/dash/dash_01.ogg"
+    },
+    {
+     "file": "shipped/dash/dash_02.ogg"
+    }
+   ]
+  },
+  "terrain_strike": {
+   "clips": [
+    {
+     "file": "shipped/terrain_strike/terrain_strike_01.ogg"
+    }
+   ]
+  },
+  "charged_blast": {
+   "clips": [
+    {
+     "file": "shipped/charged_blast/charged_blast_01.ogg"
+    }
+   ]
+  },
+  "clank_metal": {
+   "clips": [
+    {
+     "file": "shipped/clank_metal/clank_metal_01.ogg"
+    },
+    {
+     "file": "shipped/clank_metal/clank_metal_02.ogg"
+    }
+   ]
+  },
+  "clank_blast": {
+   "clips": [
+    {
+     "file": "shipped/clank_blast/clank_blast_01.ogg"
+    },
+    {
+     "file": "shipped/clank_blast/clank_blast_02.ogg"
+    },
+    {
+     "file": "shipped/clank_blast/clank_blast_03.ogg"
+    }
+   ]
+  },
+  "terrain_strike_heavy": {
+   "clips": [
+    {
+     "file": "shipped/terrain_strike_heavy/terrain_strike_heavy_01.ogg"
+    }
+   ]
+  },
+  "mass_land": {
+   "clips": [
+    {
+     "file": "shipped/mass_land/mass_land_01.ogg"
+    },
+    {
+     "file": "shipped/mass_land/mass_land_02.ogg"
+    }
+   ]
+  },
+  "mass_flight": {
+   "loop": true,
+   "clips": [
+    {
+     "file": "shipped/mass_flight/mass_flight_01.ogg"
+    }
+   ]
+  }
+ }
+}

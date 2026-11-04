@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework.Audio;
 using Microsoft.Xna.Framework.Content;
@@ -14,6 +14,10 @@ namespace MTile;
 public sealed class SoundBank
 {
     private readonly SoundEffect[][] _byKind = new SoundEffect[SoundKinds.Count][];
+    // Soundboard dev overrides (SoundDevOverrides): when set for a kind, they replace the
+    // content-loaded clips above. An empty array means "this kind is mapped to nothing"
+    // and resolves like a missing kind (fallback, else silent). Clearing restores _byKind.
+    private readonly SoundEffect[][] _override = new SoundEffect[SoundKinds.Count][];
     private readonly List<SoundKind> _missing = new();
 
     public int LoadedClips { get; private set; }
@@ -51,12 +55,23 @@ public sealed class SoundBank
 
     public bool Has(SoundKind kind) => Resolve(kind) != SoundKind.None;
 
+    public void SetOverride(SoundKind kind, SoundEffect[] clips) => _override[(int)kind] = clips;
+    public void ClearOverrides() => Array.Clear(_override, 0, _override.Length);
+    public int OverrideCount { get { int n = 0; foreach (var o in _override) if (o != null) n++; return n; } }
+
+    private SoundEffect[] Clips(SoundKind kind)
+    {
+        var o = _override[(int)kind];
+        if (o != null) return o.Length > 0 ? o : null;
+        return _byKind[(int)kind];
+    }
+
     // The kind whose clips will actually sound for `kind` — itself, or its fallback.
     private SoundKind Resolve(SoundKind kind)
     {
-        if (_byKind[(int)kind] != null) return kind;
+        if (Clips(kind) != null) return kind;
         var fb = SoundKinds.Fallback(kind);
-        return fb != SoundKind.None && _byKind[(int)fb] != null ? fb : SoundKind.None;
+        return fb != SoundKind.None && Clips(fb) != null ? fb : SoundKind.None;
     }
 
     // Round-robin by a seed the caller derives from the SoundId, so the same event
@@ -65,7 +80,7 @@ public sealed class SoundBank
     {
         var resolved = Resolve(kind);
         if (resolved == SoundKind.None) return null;
-        var clips = _byKind[(int)resolved];
+        var clips = Clips(resolved);
         int i = (seed & 0x7fffffff) % clips.Length;
         return clips[i];
     }

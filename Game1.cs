@@ -577,6 +577,10 @@ public class Game1 : Game
     // is the particle system; audio joins here (Plans/AUDIO_PLAN.md §8).
     private void PresentThisFrame(float dt)
     {
+        // Soundboard live swap: a no-op unless scripts/soundboard just re-rendered.
+        string reloaded = _audio.PollDevOverrides();
+        if (reloaded != null) { Console.WriteLine("[audio] " + reloaded); Toast(reloaded); }
+
         _audio.BeginFrame();
 
         // Edge-triggered: each event is already unique per (sim frame, id).

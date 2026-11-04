@@ -13,6 +13,15 @@ pwsh scripts/build-sfx.ps1 -Loop -Name wall_scrape    # loops: no silence trim, 
 pwsh scripts/sync-sounds.ps1                          # wire clips into the pipeline + manifest
 ```
 
+**Swapping/cropping by ear: use the soundboard** (`scripts/soundboard/README.md`).
+`python3 scripts/soundboard/soundboard.py serve` → http://localhost:8765: events (one per
+`SoundKind`) on the left, the library (`~/dev/MTile-sfx-library`, plain folders) on the right,
+drag a sound onto an event, crop on the waveform, and the running desktop game swaps it live
+(`Audio/SoundDevOverrides.cs` watches `Audio/dev_cache/manifest.json`). `Audio/sound_map.json`
+is the committed mapping; `soundboard.py ship` bakes it into `Assets/Sounds` and runs
+sync-sounds. While `Audio/dev_cache/` exists the game plays the dev renders, not the shipped
+clips — delete it to hear what ships.
+
 `build-sfx.ps1` needs ffmpeg (`winget install Gyan.FFmpeg`, then restart the shell). It outputs the
 format `Plans/AUDIO_ASSET_LIST.md` specifies — mono, 22.05 kHz, Ogg Vorbis, **loudness-matched by
 LUFS** (peak normalization does not match perceived loudness, and round-robin variants that differ
