@@ -893,6 +893,22 @@ public class Game1 : Game
             ? _sim.SecondaryPlayers[0].Player
             : _sim.Player;
 
+    // Everyone but LocalPlayer, labelled by slot (primary = P1, secondaries P2, P3, …),
+    // for the HUD's top-left health bars. Reused list: called once per frame.
+    private readonly List<(string, PlayerCharacter)> _otherPlayers = new();
+    private List<(string, PlayerCharacter)> OtherPlayers()
+    {
+        _otherPlayers.Clear();
+        var local = LocalPlayer;
+        if (_sim.Player != null && !ReferenceEquals(_sim.Player, local)) _otherPlayers.Add(("P1", _sim.Player));
+        for (int i = 0; i < _sim.SecondaryPlayers.Count; i++)
+        {
+            var p = _sim.SecondaryPlayers[i].Player;
+            if (!ReferenceEquals(p, local)) _otherPlayers.Add(($"P{i + 2}", p));
+        }
+        return _otherPlayers;
+    }
+
     // The local player's rig + held input, paired with LocalPlayer. The HUD and the
     // "about me" debug overlays read these; reading _sim.Player / _sim.CurrentInput
     // instead showed the joiner the host's health, blocks and meters.
@@ -1540,7 +1556,7 @@ public class Game1 : Game
         _prof.End(_sGlow, tGlow);
 
         long tHud = _prof.Begin();
-        _hud.Draw(LocalPlayer, LocalAnimator, _mouseScreen);
+        _hud.Draw(LocalPlayer, LocalAnimator, _mouseScreen, OtherPlayers());
         _bossBars.Draw(_spriteBatch, _debugFont, _pixel, GraphicsDevice.Viewport, _sim.Entities,
                        (float)gameTime.ElapsedGameTime.TotalSeconds);
         if (string.Equals(_activeStage, "depths", StringComparison.OrdinalIgnoreCase))

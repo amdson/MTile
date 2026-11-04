@@ -29,7 +29,11 @@ public sealed class HudRenderer
     // `mouseScreen` is this machine's cursor. Never read sim.Player or the sim's input
     // here: those are P1's, so in a match both screens showed the host's health, blocks
     // and charge ring.
-    public void Draw(PlayerCharacter player, CharacterAnimator animator, Point mouseScreen)
+    //
+    // `others` are every other player in the match (labelled "P1", "P2", …), drawn as a
+    // stack of health bars top-left — empty outside a fight.
+    public void Draw(PlayerCharacter player, CharacterAnimator animator, Point mouseScreen,
+                     System.Collections.Generic.IReadOnlyList<(string Label, PlayerCharacter Player)> others = null)
     {
         _spriteBatch.Begin();
         _spriteBatch.Draw(_pixel, new Rectangle(mouseScreen.X - 2, mouseScreen.Y - 2, 5, 5), Color.Red);
@@ -38,9 +42,10 @@ public sealed class HudRenderer
         // Always on: health and blocks are what the player steers by, so unlike the
         // readouts below they are not behind a GameConfig debug flag.
         DrawPlayerHud(player);
-        _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8,  8), Color.White);
-        _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, 24), Color.White);
-        _spriteBatch.DrawString(_debugFont, $"Anim: {animator.State.Clip}", new Vector2(8, 40), Color.Aqua);
+        int top = DrawOtherPlayers(others);
+        _spriteBatch.DrawString(_debugFont, player.CurrentStateName,  new Vector2(8, top +  8), Color.White);
+        _spriteBatch.DrawString(_debugFont, player.CurrentActionName, new Vector2(8, top + 24), Color.White);
+        _spriteBatch.DrawString(_debugFont, $"Anim: {animator.State.Clip}", new Vector2(8, top + 40), Color.Aqua);
         DrawBlockPickerHud(player);
         DrawBuildMetersHud(player);
 
@@ -265,6 +270,25 @@ public sealed class HudRenderer
 
         y -= RowGap + HealthBarH;
         DrawHealthRow(player, PanelX, y);
+    }
+
+    // The other players' health, one labelled row each, stacked down from the top-left
+    // corner — the opponent's bar in a duel, every other player in a bigger match.
+    // Returns the height used, so the debug readouts below it start underneath.
+    private const int OthersTop = 12, LabelW = 28;
+    private int DrawOtherPlayers(System.Collections.Generic.IReadOnlyList<(string Label, PlayerCharacter Player)> others)
+    {
+        if (others == null || others.Count == 0) return 0;
+        int rowH = Math.Max(HealthBarH, _debugFont.LineSpacing) + RowGap;
+        int y = OthersTop;
+        foreach (var (label, p) in others)
+        {
+            int barY = y + (rowH - RowGap - HealthBarH) / 2;
+            _spriteBatch.DrawString(_debugFont, label, new Vector2(PanelX, barY - 2), new Color(200, 200, 210));
+            DrawHealthRow(p, PanelX + LabelW, barY);
+            y += rowH;
+        }
+        return y;
     }
 
     // Health is the whole damage model now: every landed hit comes off it (a stock
