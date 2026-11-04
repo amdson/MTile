@@ -37,6 +37,10 @@ public static class RangerBot
     {
         route = new RouteManeuver();
         var extra = new List<BotManeuver> { route };
+        extra.Add(new WhiffPunishManeuver());        // Harrier's: dash in on an opponent's missed swing
+        extra.Add(new RangerBlockThrowManeuver());   // ranged pressure: an aimed clod at 60-280 px
+        extra.Add(new RangerCrystalWaveManeuver());  // ranged pressure: spiked wave at 6-14 tiles
+        extra.Add(new CornerEscapeManeuver());       // back to a wall: dash past the opponent
         if (antiAir)
         {
             extra.Add(new AntiAirJumpSlashManeuver());
