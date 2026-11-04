@@ -95,7 +95,7 @@ public sealed class BlockThrowManeuver : BotManeuver
     private static void Hold(ref PlayerInput input) { input.Shift = true; input.LeftClick = true; }
 
     // Is there a ball in this bot's hand? Its pull point tracks our body (OwnerPos).
-    private static bool HasBall(BotView v)
+    internal static bool HasBall(BotView v)
     {
         foreach (var e in v.Sim.Entities)
             if (e is PullPointEntity pp && pp.Driven && pp.HasBall
@@ -107,7 +107,7 @@ public sealed class BlockThrowManeuver : BotManeuver
     // A grabbable floor cell just ahead of our feet (toward the target), within reach.
     // Scans down from the body for the first solid cell, a tile or two toward the target
     // first and then straight below.
-    private static Vector2? FindBlock(BotView v)
+    internal static Vector2? FindBlock(BotView v)
     {
         var me = BotView.Cell(v.Me);
         for (int off = 1; off >= 0; off--)
