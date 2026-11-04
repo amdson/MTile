@@ -71,7 +71,7 @@ Run as an autonomous campaign (user, 2026-11-03) on branch `bot-routing`; not pu
   (steps, gaps, ledges, down-and-around).
 - [~] **M3 — Wall jump and ledge edges.** Calibrated: `WallClimbManeuver`'s controller climbs a single face of ANY tested height (4–24 cells), 1-wide pillars included, in ~80–200 frames (`ZzzRouteWallClimbCalibration`). So the camper's column is climbable today; next is finding why the bots don't (CamperBot baseline, pulled forward from M5), then climb edges in the graph.
 - [x] **M4 — Build edges** (dig deferred: Ranger keeps Bulldog's reactive `BreachManeuver` for sealed-in targets; meters aren't binding — a full reservoir is ~300 dirt tiles, the planner caps a column at 30).
-- [ ] **M5 — CamperBot, scenario suite, integration** as the `Ranger` duelist, vertical arena, league (Ranger vs Bulldog A/B).
+- [~] **M5 — CamperBot, scenario suite, integration** as the `Ranger` duelist, vertical arena, league (Ranger vs Bulldog A/B).
 
 ## Campaign log
 - M1: `Net/Bot/Routing/JumpTable` (+ generated `.g.cs`, 177 entries) from
@@ -93,5 +93,11 @@ Run as an autonomous campaign (user, 2026-11-03) on branch `bot-routing`; not pu
   up, else the body gets shoved off its column at a corner) + `RouteFollower.Build`
   (BuildClimbManeuver's elevator). Priced above an equal climb. `Build_UpToAFloatingPlatform`
   10 / 16 cells pass, 0 failed edges; route suite 9/9.
+
+- M5 (partial): Ranger in `Game1`'s `BotOpponent` switch (`"Ranger"`), README, tests
+  (determinism; beats Bulldog vs a 15-cell tower camper). Routing now triggers only on a
+  climb or build edge: routing on hops owned the bot mid-fight and cost flat-arena points
+  (first cut 74.5 vs Bulldog 95.5 /180; climb-or-build-or-detour-or-reach 85). Vertical
+  league arena and a league run not done — stopped here for the user to playtest.
 
 ## Decisions needed

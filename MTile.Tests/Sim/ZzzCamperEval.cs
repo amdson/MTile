@@ -81,3 +81,26 @@ public class ZzzCamperTrace(ITestOutputHelper output)
         output.WriteLine($"plans {route.Plans} fails {route.Failures} reached {route.Reached} climbs {route.PlannedClimbs}");
     }
 }
+
+public class ZzzRangerCost(ITestOutputHelper output)
+{
+    [Fact]
+    public void PollCost()
+    {
+        foreach (var (name, bot) in new (string, DuelBot)[] { ("Bulldog", BulldogBot.Create), ("Ranger", RangerBot.Create) })
+        {
+            var sim = BotDuel.BuildArena("plain_close");
+            var camper = new CamperBot(-1) { TowerRows = 15 };
+            var b = bot(0, 3);
+            var sw = new System.Diagnostics.Stopwatch(); long worst = 0;
+            for (int f = 0; f < 2400; f++)
+            {
+                long t0 = sw.ElapsedTicks; sw.Start();
+                var i2 = b.Poll(sim, f);
+                sw.Stop(); worst = Math.Max(worst, sw.ElapsedTicks - t0);
+                sim.Step(camper.Poll(sim, f), i2);
+            }
+            output.WriteLine($"{name}: avg {sw.Elapsed.TotalMilliseconds * 1000 / 2400:F0} us/poll, worst {worst * 1000.0 / System.Diagnostics.Stopwatch.Frequency:F2} ms");
+        }
+    }
+}

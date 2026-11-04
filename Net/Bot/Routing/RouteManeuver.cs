@@ -8,9 +8,8 @@ namespace MTile.Net;
 // Owns locomotion while it runs; ends when the bot is standing in the goal set (the
 // brain's melee maneuvers take over) or when the plan can't be made or keeps failing.
 //
-// Scores only when the straight chase is not enough: the target is more than a jump's
-// height above or below, or the route has any non-walking edge. On flat ground with a
-// clear walk to the target it stays out of the way.
+// Scores only when the route needs a climb or a build; otherwise the brain's own chase
+// handles it and this stays out of the way.
 public sealed class RouteManeuver : BotManeuver
 {
     public int   ReplanFrames   = 20;
@@ -73,15 +72,19 @@ public sealed class RouteManeuver : BotManeuver
         return Worth(v, _cached, _cachedReached) ? Utility : 0f;
     }
 
+    // Route only when the path needs a climb or a build — the cases the straight chase
+    // (Bulldog's walk-and-jump-at-them) can't do. While this maneuver runs it owns the
+    // bot and no attack can fire, so routing on mere hops cost real fights.
     private bool Worth(BotView v, List<NavGrid.Edge> path, bool reached)
     {
         if (path.Count == 0) return false;                       // already there (or stuck)
         if (AlwaysOn) return true;
-        if (MathF.Abs(v.Dy) > 3.5f * Chunk.TileSize) return true;
-        foreach (var e in path)
-            if (e.Kind != NavGrid.EdgeKind.Jump || e.Jump.Takeoff != JumpTable.Takeoff.Walk || e.Jump.Dy != 0) return true;
+        foreach (var e in path) if (e.Kind != NavGrid.EdgeKind.Jump) return true;
         return false;
     }
+
+    // Close enough for the melee maneuvers: hand back.
+    private bool InReach(BotView v) => MathF.Abs(v.Dx) < 3f * Chunk.TileSize && MathF.Abs(v.Dy) < 2f * Chunk.TileSize;
 
     public override void Begin(BotView v)
     {
@@ -97,6 +100,7 @@ public sealed class RouteManeuver : BotManeuver
     {
         _t++; _sincePlan++;
         if (_t > MaxFrames) return false;
+        if (!AlwaysOn && v.Grounded && InReach(v)) return false;
 
         var st = _follow.Step(v, ref input);
         if (st == RouteFollower.Status.Failed)

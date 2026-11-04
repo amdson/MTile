@@ -522,6 +522,7 @@ public class Game1 : Game
                   "Rampart" => MTile.Net.RampartBot.Create(0, 1234),
                   "Riposte" => MTile.Net.RiposteBot.Create(0, 1234),
                   "Citadel" => MTile.Net.CitadelBot.Create(0, 1234),
+                  "Ranger"  => MTile.Net.RangerBot.Create(0, 1234),
                   _         => MTile.Net.BotDuel.Brawler(0, 1234),
               })
             : null;

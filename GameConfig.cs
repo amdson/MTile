@@ -162,7 +162,8 @@ public sealed class GameConfig
     public bool    SpawnSecondPlayer    { get; set; } = false;
     // Which bot drives an offline second player: "Brawler" (the stock utility brain), or a
     // league duelist — "Bulldog" (rushdown), "Rampart" (terrain zoner), "Riposte"
-    // (counter-fighter), "Citadel" (terrain control + melee hybrid).
+    // (counter-fighter), "Citadel" (terrain control + melee hybrid), "Ranger" (Bulldog +
+    // path-planned routing: follows you up columns, across pits — Plans/BOT_ROUTING_PLAN.md).
     // See Plans/DUELIST_LEAGUE.md. Unknown names fall back to Brawler.
     public string  BotOpponent          { get; set; } = "Brawler";
     public float   SecondPlayerOffsetX  { get; set; } = 64f;
