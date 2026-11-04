@@ -39,6 +39,9 @@ public sealed class BulldogBot : IRemoteInputSource
     // Opt-in online learning: weighted choice + multiplicative-weights updates over the
     // maneuvers (ManeuverWeights). Null = Bulldog's plain highest-score choice.
     public ManeuverWeights Learn;
+    // Opt-in per-frame hook, run with the fresh view before any choice (Ranger's tactic
+    // learner ticks its credit windows here).
+    public Action<BotView> PerFrame;
     private readonly List<(BotManeuver, float)> _scored = new();
     public BotManeuver Active => _active;
     public List<BotManeuver> Maneuvers => _maneuvers;
@@ -108,6 +111,7 @@ public sealed class BulldogBot : IRemoteInputSource
         foreach (var m in _maneuvers) if (m.CooldownLeft > 0) m.CooldownLeft--;
 
         Learn?.Tick(v.MyHealth, v.TargetHealth);
+        PerFrame?.Invoke(v);
         if (_active == null)
         {
             BotManeuver best = null;

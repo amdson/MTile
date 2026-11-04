@@ -22,16 +22,17 @@ public class ZzzRangerEval(ITestOutputHelper output)
             ("Rampart", RampartBot.Create), ("Citadel", CitadelBot.Create), ("Riposte", RiposteBot.Create),
             ("Bulldog", BulldogBot.Create), ("Brawler", BotDuel.Brawler),
         };
+        var bandits = new ConcurrentBag<TacticBandit>();
         var learned = new ConcurrentDictionary<string, ConcurrentBag<ManeuverWeights>>();
-        DuelBot Mwu(string name, float taken) => (self, seed) =>
-        {
-            var b = RangerBot.Build(seed, self, out _, learn: true, takenWeight: taken);
-            learned.GetOrAdd(name, _ => new()).Add(b.Learn);
-            return b;
-        };
         var challengers = new (string, DuelBot)[]
         {
-            ("Ranger-plain", RangerBot.NoLearn), ("MWU-net", Mwu("MWU-net", 1f)), ("MWU-dealt", Mwu("MWU-dealt", 0f)),
+            ("Ranger", RangerBot.Create),
+            ("Ranger+Tactics", (self, seed) =>
+            {
+                var b = RangerBot.Build(seed, self, out _, tactics: true);
+                bandits.Add((TacticBandit)b.PerFrame!.Target!);
+                return b;
+            }),
         };
         var jobs = new List<(string C, string O, string A, int S, bool P1, DuelBot Cb, DuelBot Ob)>();
         foreach (var (cn, cb) in challengers) foreach (var (on, ob) in opponents)
@@ -50,6 +51,13 @@ public class ZzzRangerEval(ITestOutputHelper output)
         foreach (var (cn, _) in challengers)
             output.WriteLine($"{cn,-16}" + string.Join("", opponents.Select(o => $"{pts.GetValueOrDefault((cn, o.Item1)),9:F1}"))
                              + $"  {opponents.Sum(o => pts.GetValueOrDefault((cn, o.Item1))),7:F1}");
+        // Tactic weights, mean over bouts, per (decision, situation).
+        foreach (var g in bandits.SelectMany(b => b.All).GroupBy(kv => kv.Key).OrderBy(g => g.Key.Item1).ThenBy(g => g.Key.Item2))
+        {
+            int n = g.First().Value.Length;
+            var mean = Enumerable.Range(0, n).Select(i => g.Average(kv => kv.Value[i]));
+            output.WriteLine($"tactic {g.Key.Item1} ctx {g.Key.Item2} ({g.Count()} bouts): " + string.Join(" ", mean.Select(m => $"{m:F2}")));
+        }
         // What the learners ended up favouring: mean final weight per maneuver.
         foreach (var (name, bag) in learned.OrderBy(k => k.Key))
         {
