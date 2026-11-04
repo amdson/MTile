@@ -18,6 +18,8 @@ public sealed class RiposteBot : IRemoteInputSource
     public const int ReactionFrames = 7;
 
     public readonly Dictionary<string, int> Starts = new();
+
+    public readonly SpikeGuard Spikes = new();
     public BotManeuver Active => _active;
     public RiposteModel Model => _sense.Model;
     public RiposteParry Parry => (RiposteParry)_maneuvers[1];
@@ -109,6 +111,7 @@ public sealed class RiposteBot : IRemoteInputSource
         {
             if (frame - _lastSpacePress < 5) input.Space = false; else _lastSpacePress = frame;
         }
+        Spikes.Apply(v, ref input);   // shared spike sense, last pass (Net/Bot/SpikeGuard.cs)
         bool attackEdge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
         v.FramesSinceAttack = attackEdge ? 0 : v.FramesSinceAttack + 1;
         _prev = input;

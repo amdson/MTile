@@ -33,6 +33,8 @@ public sealed class BulldogBot : IRemoteInputSource
     private const float JumpIfAbove     = 1.5f * Chunk.TileSize;
 
     public readonly Dictionary<string, int> Starts = new();
+
+    public readonly SpikeGuard Spikes = new();
     public BotManeuver Active => _active;
     public List<BotManeuver> Maneuvers => _maneuvers;
 
@@ -124,6 +126,7 @@ public sealed class BulldogBot : IRemoteInputSource
 
         if (_active != null && !_active.Step(v, ref input)) Finish();
 
+        Spikes.Apply(v, ref input);   // shared spike sense, last pass (Net/Bot/SpikeGuard.cs)
         bool attackEdge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
         v.FramesSinceAttack = attackEdge ? 0 : v.FramesSinceAttack + 1;
         _prev = input;

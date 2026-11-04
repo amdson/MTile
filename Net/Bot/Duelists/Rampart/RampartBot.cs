@@ -29,6 +29,7 @@ public sealed class RampartBot : IRemoteInputSource
     public IReadOnlyList<BotManeuver> Maneuvers => _maneuvers;
     public BotManeuver Active => _active;
     public readonly Dictionary<string, int> Starts = new();
+    public readonly SpikeGuard Spikes = new();
     public readonly RampartSense Sense = new();
     public readonly HashSet<string> Disabled = new();   // ablation (tests)
     // Diagnostics (tests/tuning): opponent HP lost / own HP lost, credited to the
@@ -118,6 +119,7 @@ public sealed class RampartBot : IRemoteInputSource
 
         if (_active != null && !_active.Step(v, ref input)) Finish();
 
+        Spikes.Apply(v, ref input);   // shared spike sense, last pass (Net/Bot/SpikeGuard.cs)
         bool edge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
         _sinceAttack = edge ? 0 : _sinceAttack + 1;
         _sinceManeuver++;

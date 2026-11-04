@@ -36,6 +36,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
     public BotManeuver Active => _active;
     // Every maneuver start, by name — for tests and tuning.
     public readonly Dictionary<string, int> Starts = new();
+    public readonly SpikeGuard Spikes = new();
 
     private readonly Random            _rng;
     private readonly int               _selfIndex;
@@ -142,6 +143,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
 
         if (_active != null && !_active.Step(v, ref input)) Finish();
 
+        Spikes.Apply(v, ref input);   // shared spike sense, last pass (Net/Bot/SpikeGuard.cs)
         bool attackEdge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
         v.FramesSinceAttack = attackEdge ? 0 : v.FramesSinceAttack + 1;
         _prev = input;
