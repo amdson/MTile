@@ -19,10 +19,11 @@ public sealed class RouteManeuver : BotManeuver
     public int   GoalDx = 2, GoalDy = 1;       // melee goal set around the target node
     public float Utility        = 1.1f;
     public bool  AlwaysOn;                     // tests: score whenever a route exists
+    public bool  AllowBuild = true;            // build-up edges (stack a column under the feet)
     public int   WindowMarginX = 16, WindowUp = 24, WindowDown = 22;
 
     // Diagnostics.
-    public int Plans, Failures, Reached, PlannedClimbs;
+    public int Plans, Failures, Reached, PlannedClimbs, PlannedBuilds;
     public Action<string> Log;
     public List<NavGrid.Edge> LastPlan { get; private set; }
     public bool LastReached { get; private set; }
@@ -49,6 +50,8 @@ public sealed class RouteManeuver : BotManeuver
         if (me is not NavGrid.Node start || tn is not NavGrid.Node goal) return false;
         int x0 = Math.Min(start.X, goal.X) - WindowMarginX, x1 = Math.Max(start.X, goal.X) + WindowMarginX;
         int y0 = Math.Min(start.Y, goal.Y) - WindowUp,      y1 = Math.Max(start.Y, goal.Y) + WindowDown;
+        grid.GoalRow = goal.Y;
+        grid.AllowBuild = AllowBuild;
         grid.Build(x0, y0, Math.Min(x1 - x0 + 1, 160), Math.Min(y1 - y0 + 1, 120));
         _goalNode = goal;
         path = grid.Search(start, n => InGoal(n, goal),
@@ -57,6 +60,7 @@ public sealed class RouteManeuver : BotManeuver
         Plans++;
         LastPlan = path; LastReached = reached;
         if (path.Exists(e => e.Kind == NavGrid.EdgeKind.Climb)) PlannedClimbs++;
+        if (path.Exists(e => e.Kind == NavGrid.EdgeKind.Build)) PlannedBuilds++;
         return true;
     }
 

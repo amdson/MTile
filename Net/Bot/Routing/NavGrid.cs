@@ -38,7 +38,7 @@ public sealed class NavGrid
         public override string ToString() => $"({X},{Y})";
     }
 
-    public enum EdgeKind : byte { Jump, Climb }
+    public enum EdgeKind : byte { Jump, Climb, Build }
 
     public readonly struct Edge
     {
@@ -59,6 +59,18 @@ public sealed class NavGrid
     // height tried (4–24 cells), pillars 1 cell wide included, in ~55 + 6.2 h frames.
     public const int MinClimb = 3, MaxClimb = 40;
     public static int ClimbCost(int h) => 60 + 7 * h;
+
+    // Build-up (BuildClimbManeuver's elevator, replayed by RouteFollower): stand still and
+    // stack the column under your own feet k cells, ~6 frames a cell. The top is a
+    // VIRTUAL stand node — its floor doesn't exist yet — so it is recorded in _virtual and
+    // counts as a stand node for every later edge out of it. Off when AllowBuild is false.
+    public bool AllowBuild = true;
+    public const int MinBuild = 2, MaxBuild = 30;
+    // Priced above a climb of the same height: a climb spends no blocks and is as fast.
+    public static int BuildCost(int k) => 70 + 8 * k;
+    private readonly HashSet<Node> _virtual = new();
+    private readonly SortedSet<int> _standRows = new();
+    public int? GoalRow;
 
     private readonly Func<int, int, bool> _solid;      // cell is solid
     private readonly Func<int, int, bool> _hostile;    // cell carries an opposing spike
@@ -115,13 +127,16 @@ public sealed class NavGrid
     {
         _x0 = x0; _y0 = y0; _w = w; _h = h;
         _stand = new bool[w * h];
+        _virtual.Clear(); _standRows.Clear();
         for (int j = 0; j < h; j++)
         for (int i = 0; i < w; i++)
-            _stand[j * w + i] = IsStandCell(x0 + i, y0 + j);
+            if (_stand[j * w + i] = IsStandCell(x0 + i, y0 + j)) _standRows.Add(y0 + j);
     }
 
     public bool InWindow(int x, int y) => x >= _x0 && x < _x0 + _w && y >= _y0 && y < _y0 + _h;
-    public bool Stand(Node n) => InWindow(n.X, n.Y) && _stand[(n.Y - _y0) * _w + (n.X - _x0)];
+    public bool Stand(Node n) => _virtual.Contains(n) || (InWindow(n.X, n.Y) && _stand[(n.Y - _y0) * _w + (n.X - _x0)]);
+    public bool IsVirtual(Node n) => _virtual.Contains(n);
+    public bool StandReal(Node n) => InWindow(n.X, n.Y) && _stand[(n.Y - _y0) * _w + (n.X - _x0)];
 
     // Every edge out of `a`.
     public void EdgesFrom(Node a, List<Edge> into)
@@ -132,7 +147,7 @@ public sealed class NavGrid
         for (int dy = MaxRise; dy >= -MaxDrop; dy--)
         {
             var b = new Node(a.X + dir * dx, a.Y - dy);
-            if (!Stand(b)) continue;
+            if (!StandReal(b)) continue;   // never onto another branch's virtual column
             if (!JumpTable.TryGet(dx, dy, out var e)) continue;
             if (!SweepClear(a, dir, e)) continue;
             if (!LandingClear(a, b, dir, e)) continue;
@@ -142,6 +157,39 @@ public sealed class NavGrid
         }
         for (int dir = -1; dir <= 1; dir += 2)
             if (TryClimb(a, dir, out var top)) into.Add(new Edge(a, top, dir, EdgeKind.Climb, ClimbCost(a.Y - top.Y)));
+        if (AllowBuild) AddBuilds(a, into);
+    }
+
+    // Build edges: only to heights worth standing at — level with (or a cell under) the
+    // goal, or 0..2 cells under some row that has stand nodes (something to step or jump
+    // onto from the top). The column needs its own cells empty, headroom over the top, and
+    // empty neighbours beside every new cell: a requested cell grows out of every solid
+    // neighbour at once (ChunkMap.TryRequestTile), so one touching a wall shoves the body
+    // off its own column (BuildClimbManeuver keeps a one-cell gap for the same reason).
+    private readonly List<int> _buildRows = new();
+    private void AddBuilds(Node a, List<Edge> into)
+    {
+        _buildRows.Clear();
+        void Want(int r) { if (a.Y - r >= MinBuild && a.Y - r <= MaxBuild && !_buildRows.Contains(r)) _buildRows.Add(r); }
+        if (GoalRow is int g) { Want(g); Want(g + 1); }
+        foreach (int r in _standRows) { if (r >= a.Y) break; Want(r); Want(r + 1); Want(r + 2); }
+        if (_buildRows.Count == 0) return;
+        foreach (int r in _buildRows)
+        {
+            // Cells a.Y..r+1 become the column (empty, with empty neighbours); the body on
+            // top then needs rows r..r-3 clear.
+            // The neighbours stay clear up through the body's rows at the top as well: a
+            // body lifted past a corner beside its column gets shoved off it (the
+            // movement layer reacts to the corner), so the column keeps a one-cell gap
+            // from anything solid, all the way up.
+            bool clear = true;
+            for (int y = r - (HeadroomCells - 1); y <= a.Y && clear; y++)
+                clear = !_solid(a.X, y) && !_solid(a.X - 1, y) && !_solid(a.X + 1, y);
+            if (!clear) continue;
+            var top = new Node(a.X, r);
+            _virtual.Add(top);
+            into.Add(new Edge(a, top, 0, EdgeKind.Build, BuildCost(a.Y - r)));
+        }
     }
 
     // A face directly beside `a` (solid at leg height) whose column tops out MinClimb..
@@ -192,7 +240,7 @@ public sealed class NavGrid
     private bool LandingClear(Node a, Node b, int dir, JumpTable.Entry e)
     {
         for (int c = Math.Min(e.LandMin, e.Dx); c <= Math.Max(e.LandMax, e.Dx); c++)
-            if (!Stand(new Node(a.X + dir * c, b.Y))) return false;
+            if (!StandReal(new Node(a.X + dir * c, b.Y))) return false;
         return true;
     }
 

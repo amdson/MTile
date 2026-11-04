@@ -39,6 +39,7 @@ public sealed class RouteFollower
     // A running takeoff is committed from the start: its back-up walks the body onto an
     // earlier node, and a replan from there would throw the run-up away.
     public bool Interruptible => _path == null || _i >= _path.Count
+        || (_path[_i].Kind == NavGrid.EdgeKind.Build && !_raising)
         || (_path[_i].Kind == NavGrid.EdgeKind.Jump && _phase == Phase.Approach && _path[_i].Jump.Takeoff < JumpTable.Takeoff.Edge);
 
     public void Follow(List<NavGrid.Edge> path)
@@ -72,6 +73,7 @@ public sealed class RouteFollower
         _t++;
 
         if (e.Kind == NavGrid.EdgeKind.Climb) return Climb(v, e, ref input);
+        if (e.Kind == NavGrid.EdgeKind.Build) return Build(v, e, ref input);
 
         if (_phase == Phase.Approach)
         {
@@ -178,6 +180,51 @@ public sealed class RouteFollower
         else if (rising && v.MyVel.Y < 0f) input.Space = true;
         else if (!v.Previous.Space && st == "WallSlidingState") input.Space = true;
         else if (!v.Previous.Space && v.Grounded) input.Space = true;
+        return Status.Running;
+    }
+
+    // ── Build: BuildClimbManeuver's elevator. Pick dirt if the hand holds foam (decays)
+    // or spikes (an overlay, can't be placed in air); centre on the column and come to
+    // rest; then hold Shift+RMB with the cursor on the first empty cell of the column under
+    // the feet — each new cell grows up into the body and lifts it, and while one is still
+    // growing the cursor is already a row higher, so the lift never stalls.
+    public int BuildStallFrames = 45;
+    private float _bestY;
+    private int   _sinceGain, _settle;
+    private bool  _raising;
+    private Status Build(BotView v, NavGrid.Edge e, ref PlayerInput input)
+    {
+        int k = e.From.Y - e.To.Y, col = e.From.X;
+        if (_t > 90 + 10 * k) return Status.Failed;
+        if (_t == 1)
+        {
+            _raising = false; _settle = 0; _sinceGain = 0; _bestY = v.Me.Y;
+            if (v.Self.SpikesSelected || v.Self.ActiveBlockType == TileType.Foam) { input.Num2 = true; return Status.Running; }
+        }
+        if (NavGrid.NodeUnder(v.Solid, v.Me) is NavGrid.Node n && n.X == col && n.Y <= e.To.Y && v.Grounded)
+            return Advance();
+
+        float err = (col + 0.5f) * T - v.Me.X;
+        if (MathF.Abs(err) > 2.5f) BotInput.Move(ref input, err > 0f ? 1 : -1);
+        if (!_raising)
+        {
+            if (MathF.Abs(err) > 2.5f || !v.Grounded || MathF.Abs(v.MyVel.X) > 25f) { _settle = 0; return Status.Running; }
+            if (++_settle < 2) return Status.Running;
+            _raising = true; _bestY = v.Me.Y; _sinceGain = 0;
+        }
+        if (v.Me.Y < _bestY - 3f) { _bestY = v.Me.Y; _sinceGain = 0; }
+        else if (++_sinceGain > BuildStallFrames) return Status.Failed;
+
+        // First empty cell of the column above whatever is under the body.
+        int top = (int)MathF.Floor(v.Me.Y / T) + 1;
+        int maxRow = (int)MathF.Floor((v.Me.Y + PlayerCharacter.StandingHeight - PlayerCharacter.Radius + T) / T);
+        for (int y = top; y <= maxRow; y++)
+        {
+            if (v.Sim.Chunks.GetCellState(col, y) == TileState.Empty) continue;
+            input.Shift = true; input.RightClick = true;
+            input.MouseWorldPosition = BotView.CellCenter(new Point(col, y - 1));
+            break;
+        }
         return Status.Running;
     }
 

@@ -194,4 +194,33 @@ public class BotManeuverRouteTests(ITestOutputHelper output)
         Assert.True(route.PlannedClimbs > 0, "never planned a climb");
         Assert.True(f >= 0 && f < 600, $"never got up the {h}-cell face (frame {f})");
     }
+
+    // A floating slab `h` cells over the floor, nothing to climb, too high to jump: the
+    // only way up is to stack a column (build edge) and step or hop across from its top.
+    [Theory]
+    [InlineData(10)]
+    [InlineData(16)]
+    public void Build_UpToAFloatingPlatform(int h)
+    {
+        const int Floor = 34, Cols = 44;
+        var rows = new List<string>();
+        for (int y = 0; y < Floor + 3; y++)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int x = 0; x < Cols; x++)
+            {
+                bool solid = y >= Floor || x == 0 || x == Cols - 1 || (y == Floor - h && x >= 22 && x <= 34);
+                char ch = solid ? 'X' : '.';
+                if (y == Floor - h - 1 && x == 28) ch = 'B';
+                if (y == Floor - 1 && x == 8) ch = 'A';
+                sb.Append(ch);
+            }
+            rows.Add(sb.ToString());
+        }
+        var (f, r, route) = Go(rows.ToArray(), 900);
+        output.WriteLine($"planned builds {route.PlannedBuilds}");
+        Assert.True(route.PlannedBuilds > 0, "never planned a build");
+        Assert.True(r.Saw(nameof(BlockPlaceAction)), "never placed a block");
+        Assert.True(f >= 0 && f < 700, $"never got up to the platform (frame {f})");
+    }
 }

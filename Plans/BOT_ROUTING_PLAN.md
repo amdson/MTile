@@ -70,7 +70,7 @@ Run as an autonomous campaign (user, 2026-11-03) on branch `bot-routing`; not pu
 - [x] **M2 — Walk / jump / drop routing.** Nav graph, A*, executor; static-terrain tests
   (steps, gaps, ledges, down-and-around).
 - [~] **M3 — Wall jump and ledge edges.** Calibrated: `WallClimbManeuver`'s controller climbs a single face of ANY tested height (4–24 cells), 1-wide pillars included, in ~80–200 frames (`ZzzRouteWallClimbCalibration`). So the camper's column is climbable today; next is finding why the bots don't (CamperBot baseline, pulled forward from M5), then climb edges in the graph.
-- [ ] **M4 — Build and dig edges**, aware of the build meters.
+- [x] **M4 — Build edges** (dig deferred: Ranger keeps Bulldog's reactive `BreachManeuver` for sealed-in targets; meters aren't binding — a full reservoir is ~300 dirt tiles, the planner caps a column at 30).
 - [ ] **M5 — CamperBot, scenario suite, integration** as the `Ranger` duelist, vertical arena, league (Ranger vs Bulldog A/B).
 
 ## Campaign log
@@ -87,5 +87,11 @@ Run as an autonomous campaign (user, 2026-11-03) on branch `bot-routing`; not pu
   0 failed edges. Bugs found on the way: a lip landing read as the floor below (NodeUnder
   now checks the body's width); a periodic replan threw away running take-offs; a stale
   Score-time plan sent the bot back to its spawn. Bot group: 6 reds, all known.
+
+- M4: build edges (virtual column-top nodes, path-local; heights only where there is
+  something to step onto or the goal row; a one-cell gap from anything solid all the way
+  up, else the body gets shoved off its column at a corner) + `RouteFollower.Build`
+  (BuildClimbManeuver's elevator). Priced above an equal climb. `Build_UpToAFloatingPlatform`
+  10 / 16 cells pass, 0 failed edges; route suite 9/9.
 
 ## Decisions needed
