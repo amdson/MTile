@@ -47,6 +47,36 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/charged_blast_01.ogg;Sounds/charged_blast_01.xnb
 
+#begin ../Assets/Sounds/clank_blast_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/clank_blast_01.ogg;Sounds/clank_blast_01.xnb
+
+#begin ../Assets/Sounds/clank_blast_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/clank_blast_02.ogg;Sounds/clank_blast_02.xnb
+
+#begin ../Assets/Sounds/clank_blast_03.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/clank_blast_03.ogg;Sounds/clank_blast_03.xnb
+
+#begin ../Assets/Sounds/clank_metal_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/clank_metal_01.ogg;Sounds/clank_metal_01.xnb
+
+#begin ../Assets/Sounds/clank_metal_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/clank_metal_02.ogg;Sounds/clank_metal_02.xnb
+
 #begin ../Assets/Sounds/dash_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor
@@ -215,6 +245,24 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/laser_blast_01.ogg;Sounds/laser_blast_01.xnb
 
+#begin ../Assets/Sounds/mass_flight_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/mass_flight_01.ogg;Sounds/mass_flight_01.xnb
+
+#begin ../Assets/Sounds/mass_land_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/mass_land_01.ogg;Sounds/mass_land_01.xnb
+
+#begin ../Assets/Sounds/mass_land_02.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/mass_land_02.ogg;Sounds/mass_land_02.xnb
+
 #begin ../Assets/Sounds/respawn_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor
@@ -256,6 +304,12 @@
 /processor:SoundEffectProcessor
 /processorParam:Quality=Best
 /build:../Assets/Sounds/terrain_strike_01.ogg;Sounds/terrain_strike_01.xnb
+
+#begin ../Assets/Sounds/terrain_strike_heavy_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/terrain_strike_heavy_01.ogg;Sounds/terrain_strike_heavy_01.xnb
 
 #begin ../Assets/Sounds/throw_01.ogg
 /importer:OggImporter

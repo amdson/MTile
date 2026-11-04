@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Text;
 
 namespace MTile;
@@ -31,7 +31,7 @@ public enum SoundKind
     Jump,
     DoubleJump,
     Grunt,        // climb effort
-    Throw,        // built, not yet wired — see GameAudio
+    Throw,        // a grab throw flung its victim — CombatState.ThrowOnsetFrame
     Swing,        // attack whoosh — see GameAudio.Swing
     LaserBlast,   // orphaned — the laser action was removed; kept so the manifest stays stable
     GuardBlock,   // a LATE guard took part of a hit and broke — see GameAudio.GuardBlock
@@ -52,11 +52,15 @@ public enum SoundKind
     ChargedBlast,   // PresentationKind.ChargedBlast — a charged block detonated
     ClankMetal,     // PresentationKind.Clank, two blades met
     ClankBlast,     // PresentationKind.Clank, something blunt in the pair
+
+    TerrainStrikeHeavy, // TerrainStrike from a heavy move (air hammer, stab, finishers, burst)
+    MassLand,           // PresentationKind.MassLand — a lobbed/thrown mass clod burst
+    MassFlight,         // loop — a lobbed/thrown mass clod moving fast
 }
 
 public static class SoundKinds
 {
-    public const int Count = (int)SoundKind.ClankBlast + 1;
+    public const int Count = (int)SoundKind.MassFlight + 1;
 
     // Stems, derived once from the enum names: PascalCase -> snake_case. This used to be
     // a hand-maintained parallel array, which silently mis-mapped every kind after the
@@ -97,10 +101,12 @@ public static class SoundKinds
         // borrows the nearest thing rather than going silent.
         SoundKind.GuardBlock => SoundKind.HitConnect,
         SoundKind.GuardParry => SoundKind.GuardBlock,
-        // No clank clips are cut yet: a blade clank borrows the parry's metallic ping,
-        // a blunt one the charged-block boom.
+        // Should the clank clips go missing, a blade clank borrows the parry's metallic
+        // ping and a blunt one the charged-block boom.
         SoundKind.ClankMetal => SoundKind.GuardParry,
         SoundKind.ClankBlast => SoundKind.ChargedBlast,
+        SoundKind.TerrainStrikeHeavy => SoundKind.TerrainStrike,
+        SoundKind.MassLand           => SoundKind.ChargedBlast,
         SoundKind.SwingHeavy or SoundKind.Stab or SoundKind.AirHammer or SoundKind.DashSlash => SoundKind.Swing,
         _              => SoundKind.None,
     };
@@ -108,5 +114,5 @@ public static class SoundKinds
     // True for kinds authored as seamless loops (level-triggered — AUDIO_PLAN.md §2).
     // Drives IsLooped on the voice; a one-shot retires itself, a loop is retired by
     // the frame it stops being sustained.
-    public static bool IsLoop(SoundKind k) => k == SoundKind.WallScrape;
+    public static bool IsLoop(SoundKind k) => k == SoundKind.WallScrape || k == SoundKind.MassFlight;
 }

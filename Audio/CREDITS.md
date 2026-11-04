@@ -13,6 +13,11 @@ screen should carry that name too.
 |---|---|---|---|---|
 | `air_hammer_01.ogg` | swish-5.wav | [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
 | `charged_blast_01.ogg` | explodemini.wav | [2 High Quality Explosions](https://opengameart.org/content/2-high-quality-explosions) | [qubodup](https://opengameart.org/users/qubodup) | CC-BY 3.0 |
+| `clank_blast_01.ogg` | impact.6.ogg | [10 Impact/Shield Blocks](https://opengameart.org/content/10-impactshield-blocks) | [starninjas](https://opengameart.org/users/starninjas) | CC0 |
+| `clank_blast_02.ogg` | impact.8.ogg | [10 Impact/Shield Blocks](https://opengameart.org/content/10-impactshield-blocks) | [starninjas](https://opengameart.org/users/starninjas) | CC0 |
+| `clank_blast_03.ogg` | impact.10.ogg | [10 Impact/Shield Blocks](https://opengameart.org/content/10-impactshield-blocks) | [starninjas](https://opengameart.org/users/starninjas) | CC0 |
+| `clank_metal_01.ogg` | metal-knife-scrape-03.wav (0–0.25 s) | [Fantasy Sound Effects (Tinysized SFX)](https://opengameart.org/content/fantasy-sound-effects-tinysized-sfx) | [vehicle](https://opengameart.org/users/vehicle) | CC0 |
+| `clank_metal_02.ogg` | metal-knife-scrape-03.wav (0.38–0.62 s) | [Fantasy Sound Effects (Tinysized SFX)](https://opengameart.org/content/fantasy-sound-effects-tinysized-sfx) | [vehicle](https://opengameart.org/users/vehicle) | CC0 |
 | `dash_01.ogg` | 60009__qubodup__swosh_22.flac | [Wind, hit, time morph](https://opengameart.org/content/wind-hit-time-morph) | [qubodup](https://opengameart.org/users/qubodup) | CC0 |
 | `dash_02.ogg` | tube-plastic-whoosh-02.wav | [Fantasy Sound Effects (Tinysized SFX)](https://opengameart.org/content/fantasy-sound-effects-tinysized-sfx) | [vehicle](https://opengameart.org/users/vehicle) | CC0 |
 | `dash_slash_01.ogg` | swing.wav | [Cugzilia II Prototype Sound Effects](https://opengameart.org/content/cugzilia-ii-prototype-sound-effects) | [spring-spring](https://opengameart.org/users/spring-spring) | CC0 |
@@ -32,6 +37,9 @@ screen should carry that name too.
 | `land_01.ogg` | 45_Landing_01.wav | [12 Player Movement SFX](https://opengameart.org/content/12-player-movement-sfx) | [leohpaz](https://opengameart.org/users/leohpaz) | CC-BY 4.0 |
 | `land_02.ogg` | ledge2.flac | [Bone, Fall, Ledge Climbing, Impact (Yo Frankie!)](https://opengameart.org/content/bone-fall-ledge-climbing-impact-yo-frankie) | [lamoot](https://opengameart.org/users/lamoot) | CC-BY 3.0 |
 | `land_03.ogg` | impactfall1.flac | [Bone, Fall, Ledge Climbing, Impact (Yo Frankie!)](https://opengameart.org/content/bone-fall-ledge-climbing-impact-yo-frankie) | [lamoot](https://opengameart.org/users/lamoot) | CC-BY 3.0 |
+| `mass_flight_01.ogg` | Hollow Wind.wav (2–6 s, self-crossfaded loop) | [Random SFX](https://opengameart.org/content/random-sfx) | [écrivain](https://opengameart.org/users/%C3%A9crivain) | CC0 |
+| `mass_land_01.ogg` | explodemini.wav + Corsica_S-Walking_on_snow_covered_gravel_and_ice_01.flac | [2 High Quality Explosions](https://opengameart.org/content/2-high-quality-explosions) + [42 Snow and Gravel Footsteps](https://opengameart.org/content/42-snow-and-gravel-footsteps) | [qubodup](https://opengameart.org/users/qubodup) (gravel: Corsica_S) | CC-BY 3.0 + CC0 |
+| `mass_land_02.ogg` | dull_explosion.wav + hoe-dig.wav | [Various Sound Effects](https://opengameart.org/content/various-sound-effects-0) + [Cozy Farm SFX](https://opengameart.org/content/cozy-farm-sfx-50-farming-game-sound-effects-tools-harvest-shop-ui-jingles) | [spring-spring](https://opengameart.org/users/spring-spring) + [roberto-mellado](https://opengameart.org/users/roberto-mellado) | CC0 + CC-BY 4.0 |
 | `respawn_01.ogg` | 172206__fins__teleport.wav | [Teleport](https://opengameart.org/content/teleport) | [diligentcircle](https://opengameart.org/users/diligentcircle) | CC0 |
 | `stab_01.ogg` | swosh-04.flac | [Swish - bamboo stick weapon swhoshes](https://opengameart.org/content/swish-bamboo-stick-weapon-swhoshes) | [qubodup](https://opengameart.org/users/qubodup) | CC0 |
 | `swing_01.ogg` | swish-13.wav | [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
@@ -39,5 +47,7 @@ screen should carry that name too.
 | `swing_03.ogg` | swish-11.wav | [Swishes Sound Pack](https://opengameart.org/content/swishes-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
 | `swing_heavy_01.ogg` | Single_Fantasy SFX Pack Vol 1_Heavy Sword_Swing_02.wav | [JC Sounds - Fantasy SFX Pack Vol 1](https://opengameart.org/content/jc-sounds-fantasy-sfx-pack-vol-1) | [jc-sounds](https://opengameart.org/users/jc-sounds) | CC-BY 4.0 |
 | `terrain_strike_01.ogg` | rock_break_0.ogg | [Breaking Rock](https://opengameart.org/content/breaking-rock) | [themightyglider](https://opengameart.org/users/themightyglider) | CC0 |
+| `terrain_strike_heavy_01.ogg` | slam_04.ogg | [100 CC0 SFX](https://opengameart.org/content/100-cc0-sfx) | [rubberduck](https://opengameart.org/users/rubberduck) | CC0 |
+| `throw_01.ogg` | cloth-heavy.wav | [RPG Sound Pack](https://opengameart.org/content/rpg-sound-pack) | [artisticdude](https://opengameart.org/users/artisticdude) | CC0 |
 | `tile_break_02.ogg` | rock_break_0.ogg | [Breaking Rock](https://opengameart.org/content/breaking-rock) | [themightyglider](https://opengameart.org/users/themightyglider) | CC0 |
 | `wall_scrape_01.ogg` | scrape-2.ogg | [Scrapes](https://opengameart.org/content/scrapes) | [antumdeluge](https://opengameart.org/users/antumdeluge) | CC0 |

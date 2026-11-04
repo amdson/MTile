@@ -625,7 +625,7 @@ public class Game1 : Game
                                   e.Payload != 0 ? new Color(235, 245, 255) : new Color(255, 190, 110), 0.08f);
                     break;
             }
-            _audio.Present(in e);
+            _audio.Present(in e, _sim);
         }
         _events.Clear();
 

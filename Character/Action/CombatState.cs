@@ -142,7 +142,16 @@ public class CombatState
     // frame and the body hold would eat the fling the field is delivering.
     private const float ThrowStunImpulse = 340f;   // ×0.75 with the dv stun line   // > StunImpulseThreshold ⇒ stun + Tumble
     public void RegisterThrown(int frame, float dt)
-        => OnHitRegistered(frame, ThrowStunImpulse, dt, hitstop: false);
+    {
+        // Render-only cue stamps, same contract as LastParryFrame: the field re-registers
+        // every frame it acts, so the ONSET is the first frame of an unbroken run, and
+        // LastThrownFrame lets audio tell a throw frame's LastHitFrame from a real hit's.
+        if (frame - LastThrownFrame > 1) ThrowOnsetFrame = frame;
+        LastThrownFrame = frame;
+        OnHitRegistered(frame, ThrowStunImpulse, dt, hitstop: false);
+    }
+    public int ThrowOnsetFrame;
+    public int LastThrownFrame;
 
     // Hoisted gates so callers can write `ctx.Combat?.BlocksAttack == true` instead
     // of repeating raw flag checks at every action/movement precondition site.
@@ -570,5 +579,6 @@ public class CombatState
         LastParryCharged = o.LastParryCharged;
         LastBlockFrame = o.LastBlockFrame; LastBlockDir = o.LastBlockDir;
         LastBlockLeak = o.LastBlockLeak;
+        ThrowOnsetFrame = o.ThrowOnsetFrame; LastThrownFrame = o.LastThrownFrame;
     }
 }

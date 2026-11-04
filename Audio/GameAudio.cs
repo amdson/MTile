@@ -46,6 +46,11 @@ public sealed class GameAudio
     private readonly HashSet<int> _struckHitIds = new();
     private readonly Queue<int>   _struckOrder  = new();
 
+    // Last HitGeneration seen per entity (see EntityHits). Render-only edge detector.
+    private readonly Dictionary<EntityId, int> _entityHitGen  = new();
+    private readonly HashSet<EntityId>         _entityAlive   = new();
+    private readonly List<EntityId>            _entityScratch = new();
+
     public GameAudio() { _mixer = new AudioMixer(_bank); }
 
     public AudioMixer Mixer   => _mixer;
@@ -59,7 +64,8 @@ public sealed class GameAudio
 
     // ── Edge-triggered ──────────────────────────────────────────────────────────
     // One case per PresentationKind. Adding a sound to an existing event is a line here.
-    public void Present(in PresentationEvent e)
+    // `sim` is optional and read-only: TerrainStrike uses it to find which move struck.
+    public void Present(in PresentationEvent e, Simulation sim = null)
     {
         switch (e.Id.Kind)
         {
@@ -86,9 +92,20 @@ public sealed class GameAudio
                 _struckOrder.Enqueue(e.Id.A);
                 if (_struckOrder.Count > 64) _struckHitIds.Remove(_struckOrder.Dequeue());
 
-                _mixer.Fire(new SoundId(SoundKind.TerrainStrike, e.Id.A, e.Id.B),
-                            e.SimFrame, gain: 0.7f, pitch: Jitter(e.Id.A * 13), pos: e.Position);
+                bool heavy = IsHeavyStrike(sim, e.Id.A);
+                _mixer.Fire(new SoundId(heavy ? SoundKind.TerrainStrikeHeavy : SoundKind.TerrainStrike, e.Id.A, e.Id.B),
+                            e.SimFrame, gain: heavy ? 0.85f : 0.7f, pitch: Jitter(e.Id.A * 13), pos: e.Position);
                 break;
+
+            case PresentationKind.MassLand:
+            {
+                // Payload = TileType | blocks << 8. A bigger clod is a louder, lower burst.
+                float t = MathF.Min((e.Payload >> 8) / 24f, 1f);
+                _mixer.Fire(new SoundId(SoundKind.MassLand, e.Id.A, e.Id.B),
+                            e.SimFrame, gain: 0.6f + 0.4f * t,
+                            pitch: -0.2f * t + Jitter(e.Id.A * 3 + e.Id.B), pos: e.Position);
+                break;
+            }
 
             case PresentationKind.Clank:
                 _mixer.Fire(new SoundId(e.Payload != 0 ? SoundKind.ClankMetal : SoundKind.ClankBlast, e.Id.A, e.Id.B),
@@ -118,6 +135,8 @@ public sealed class GameAudio
         for (int i = 0; i < secondaries.Count; i++) Player(sim, secondaries[i].Player, i + 1);
 
         Eruptions(sim);
+        EntityHits(sim);
+        MassFlight(sim);
     }
 
     private void Player(Simulation sim, PlayerCharacter p, int index)
@@ -125,6 +144,7 @@ public sealed class GameAudio
         if (p == null) return;
         WallScrape(p, index);
         HitConnect(p, index);
+        Throw(p, index);
         GuardBlock(p, index);
         GuardParry(p, index);
         Swing(p, index);
@@ -161,6 +181,8 @@ public sealed class GameAudio
         if (c == null || c.LastHitFrame <= 0) return;
         int age = p.Frame - c.LastHitFrame;
         if (age < 0 || age > StampWindowFrames) return;
+        // A throw re-registers as a hit every frame the field acts; it has its own sound.
+        if (c.LastHitFrame == c.LastThrownFrame) return;
 
         float t    = MathF.Min(c.LastHitImpulse / 675f, 1f);
         float gain = 0.55f + 0.45f * t;
@@ -179,6 +201,20 @@ public sealed class GameAudio
                     gain:     gain,
                     pitch:    0.1f - 0.25f * t,
                     pos:      p.Body.Position);
+    }
+
+    // Grab throw: fires once at the onset of the fling (CombatState.ThrowOnsetFrame), on
+    // the victim — a heavy cloth whoosh, the body being hurled.
+    private void Throw(PlayerCharacter p, int index)
+    {
+        var c = p.Combat;
+        if (c == null || c.ThrowOnsetFrame <= 0) return;
+        int age = p.Frame - c.ThrowOnsetFrame;
+        if (age < 0 || age > StampWindowFrames) return;
+
+        _mixer.Fire(new SoundId(SoundKind.Throw, index, c.ThrowOnsetFrame),
+                    simFrame: c.ThrowOnsetFrame, gain: 0.9f,
+                    pitch: Jitter(c.ThrowOnsetFrame * 13), pos: p.Body.Position);
     }
 
     // A LATE block: the stance met the hit but the window had closed, so part of it
@@ -377,11 +413,76 @@ public sealed class GameAudio
         }
     }
 
-    // NOT WIRED, deliberately, though the clips are built and in the bank:
-    //
-    //   Throw — CombatState.RegisterThrown funnels into the same LastHitFrame stamp a
-    //     normal hit uses (CombatState.cs:90), so there is nothing render-side that
-    //     distinguishes a throw from a hit. Needs its own stamp to sound distinctly.
+    // Hits on enemies, the practice ball and other entities. HitConnect only covers
+    // player victims (it keys off CombatState); an entity's equivalent stamp is
+    // Entity.HitGeneration, a snapshotted per-hit counter — the same one HitFlash and
+    // HitFeelSystem edge-detect. A replayed hit restores the same generation, so the
+    // advance is seen once. First sight of an entity only records its generation.
+    private void EntityHits(Simulation sim)
+    {
+        _entityAlive.Clear();
+        var entities = sim.Entities;
+        for (int i = 0; i < entities.Count; i++)
+        {
+            var e = entities[i];
+            _entityAlive.Add(e.Id);
+            int gen = e.HitGeneration;
+            if (!_entityHitGen.TryGetValue(e.Id, out int last)) { _entityHitGen[e.Id] = gen; continue; }
+            if (gen == last) continue;
+            _entityHitGen[e.Id] = gen;
+            if (gen < last) continue;                    // rolled back past a hit: no sound
+
+            float t = MathF.Min(e.LastHitImpulse / 675f, 1f);
+            _mixer.Fire(new SoundId(SoundKind.HitConnect, e.Id.Index, gen),
+                        simFrame: sim.Frame,
+                        gain:     0.55f + 0.45f * t,
+                        pitch:    0.1f - 0.25f * t + Jitter(e.Id.Index * 13 + gen),
+                        pos:      e.Body.Position);
+        }
+
+        if (_entityHitGen.Count == _entityAlive.Count) return;
+        _entityScratch.Clear();
+        foreach (var id in _entityHitGen.Keys) if (!_entityAlive.Contains(id)) _entityScratch.Add(id);
+        foreach (var id in _entityScratch) _entityHitGen.Remove(id);
+    }
+
+    // A lobbed / thrown mass clod in flight: an airy loop whose gain and pitch ride its
+    // speed, so a clod drifting in the hand is quiet and a hard throw roars past.
+    private void MassFlight(Simulation sim)
+    {
+        var entities = sim.Entities;
+        for (int i = 0; i < entities.Count; i++)
+        {
+            if (entities[i] is not LobbedAreaProjectile clod || clod.Detonated) continue;
+            float speed = clod.Body.Velocity.Length();
+            if (speed < 120f) continue;
+
+            float t = MathF.Min((speed - 120f) / 480f, 1f);
+            _mixer.Sustain(new SoundId(SoundKind.MassFlight, clod.Id.Index, clod.Id.Generation),
+                           gain: 0.2f + 0.5f * t, pitch: -0.1f + 0.3f * t, pos: clod.Body.Position);
+        }
+    }
+
+    // A terrain strike from a heavy move gets the slam instead of the light knock. The
+    // event carries only the HitId, so find the player whose live action owns it.
+    private static bool IsHeavyStrike(Simulation sim, int hitId)
+    {
+        if (sim == null) return false;
+        if (OwnsHit(sim.Player, hitId)) return IsHeavy(sim.Player.CurrentAction);
+        var secondaries = sim.SecondaryPlayers;
+        for (int i = 0; i < secondaries.Count; i++)
+        {
+            var p = secondaries[i].Player;
+            if (OwnsHit(p, hitId)) return IsHeavy(p.CurrentAction);
+        }
+        return false;
+    }
+
+    private static bool OwnsHit(PlayerCharacter p, int hitId)
+        => p != null && p.CurrentActionVars.HitId == hitId;
+
+    private static bool IsHeavy(ActionState a)
+        => a is AirHammerAction || a is StabAction || a is GroundSlash3 || a is AirSlash2 || a is BurstAction;
 
     // ±5% pitch variety on repeated one-shots. Render-side only — the sim never sees it,
     // but it is derived from the event key so a replay picks the same jitter.
