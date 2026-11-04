@@ -14,6 +14,11 @@ and around a shelf, onto a floating platform.
   gesture closed-loop and replans on failure.
 - **When it routes:** only when the route needs a climb or a build. Otherwise it is
   plain Bulldog.
+- **Learning:** move choice is a weighted draw, P ∝ (score × weight)^3, with
+  multiplicative-weights updates per move (`Net/Bot/ManeuverWeights.cs`): w ← w·e^(0.7·r),
+  r = HP dealt in the 1.5 s after the move starts, w clamped to [0.1, 10]. Against the
+  field (seeds 1–10, all arenas, both sides): 200.5/300 with dealt-only reward, 182 with
+  dealt − taken, 177.5 with no learning. It learns to lean on Bulldog's strings.
 - **Perception:** the opponent through Bulldog's 6-frame delay line; terrain live.
 
 Play it: `"BotOpponent": "Ranger"` in `configs/game_config.json`.

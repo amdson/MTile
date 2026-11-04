@@ -22,10 +22,20 @@ public class ZzzRangerEval(ITestOutputHelper output)
             ("Rampart", RampartBot.Create), ("Citadel", CitadelBot.Create), ("Riposte", RiposteBot.Create),
             ("Bulldog", BulldogBot.Create), ("Brawler", BotDuel.Brawler),
         };
-        var challengers = new (string, DuelBot)[] { ("Bulldog", BulldogBot.Create), ("Ranger", RangerBot.Create) };
+        var learned = new ConcurrentDictionary<string, ConcurrentBag<ManeuverWeights>>();
+        DuelBot Mwu(string name, float taken) => (self, seed) =>
+        {
+            var b = RangerBot.Build(seed, self, out _, learn: true, takenWeight: taken);
+            learned.GetOrAdd(name, _ => new()).Add(b.Learn);
+            return b;
+        };
+        var challengers = new (string, DuelBot)[]
+        {
+            ("Ranger-plain", RangerBot.NoLearn), ("MWU-net", Mwu("MWU-net", 1f)), ("MWU-dealt", Mwu("MWU-dealt", 0f)),
+        };
         var jobs = new List<(string C, string O, string A, int S, bool P1, DuelBot Cb, DuelBot Ob)>();
         foreach (var (cn, cb) in challengers) foreach (var (on, ob) in opponents)
-        foreach (var a in BotDuel.Arenas) foreach (int s in Enumerable.Range(1, 6)) foreach (bool p1 in new[] { true, false })
+        foreach (var a in BotDuel.Arenas) foreach (int s in Enumerable.Range(1, 10)) foreach (bool p1 in new[] { true, false })
             jobs.Add((cn, on, a, s, p1, cb, ob));
         var pts = new ConcurrentDictionary<(string, string), float>();
         Parallel.ForEach(jobs, j =>
@@ -35,10 +45,18 @@ public class ZzzRangerEval(ITestOutputHelper output)
             float p = w > 0 ? 1f : w == 0 ? 0.5f : 0f;
             pts.AddOrUpdate((j.C, j.O), p, (_, o) => o + p);
         });
-        output.WriteLine("points out of 36 (3 arenas x 6 seeds x 2 sides)");
+        output.WriteLine("points out of 60 per opponent (3 arenas x 10 seeds x 2 sides)");
         output.WriteLine($"{"",-16}" + string.Join("", opponents.Select(o => $"{o.Item1,9}")) + "    total");
         foreach (var (cn, _) in challengers)
             output.WriteLine($"{cn,-16}" + string.Join("", opponents.Select(o => $"{pts.GetValueOrDefault((cn, o.Item1)),9:F1}"))
                              + $"  {opponents.Sum(o => pts.GetValueOrDefault((cn, o.Item1))),7:F1}");
+        // What the learners ended up favouring: mean final weight per maneuver.
+        foreach (var (name, bag) in learned.OrderBy(k => k.Key))
+        {
+            var mean = bag.SelectMany(w => w.Weight).GroupBy(kv => kv.Key)
+                          .Select(g => (g.Key, Mean: g.Sum(kv => kv.Value) / bag.Count + (bag.Count - g.Count()) / (float)bag.Count))
+                          .OrderByDescending(x => x.Mean);
+            output.WriteLine($"{name} mean final weights: " + string.Join("  ", mean.Select(x => $"{x.Key} {x.Mean:F2}")));
+        }
     }
 }

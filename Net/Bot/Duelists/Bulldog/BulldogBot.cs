@@ -36,6 +36,10 @@ public sealed class BulldogBot : IRemoteInputSource
 
     public readonly SpikeGuard Spikes = new();
     public readonly HashSet<string> Disabled = new();   // opt-in ablation (Ranger drops WallClimbManeuver)
+    // Opt-in online learning: weighted choice + multiplicative-weights updates over the
+    // maneuvers (ManeuverWeights). Null = Bulldog's plain highest-score choice.
+    public ManeuverWeights Learn;
+    private readonly List<(BotManeuver, float)> _scored = new();
     public BotManeuver Active => _active;
     public List<BotManeuver> Maneuvers => _maneuvers;
 
@@ -103,21 +107,26 @@ public sealed class BulldogBot : IRemoteInputSource
 
         foreach (var m in _maneuvers) if (m.CooldownLeft > 0) m.CooldownLeft--;
 
+        Learn?.Tick(v.MyHealth, v.TargetHealth);
         if (_active == null)
         {
             BotManeuver best = null;
             float bestScore = 0f;
+            _scored.Clear();
             foreach (var m in _maneuvers)
             {
                 if (m.CooldownLeft > 0 || Disabled.Contains(m.Name)) continue;
                 float sc = m.Score(v);
+                if (sc > 0f) _scored.Add((m, sc));
                 if (sc > bestScore) { best = m; bestScore = sc; }
             }
+            if (Learn != null) best = Learn.Pick(_scored, _rng);
             if (best != null)
             {
                 _active = best;
                 v.FramesSinceManeuver = 0;
                 Starts[best.Name] = Starts.GetValueOrDefault(best.Name) + 1;
+                Learn?.Started(best.Name);
                 best.Begin(v);
             }
         }
