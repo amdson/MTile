@@ -39,7 +39,7 @@ public sealed class RouteFollower
     // A running takeoff is committed from the start: its back-up walks the body onto an
     // earlier node, and a replan from there would throw the run-up away.
     public bool Interruptible => _path == null || _i >= _path.Count
-        || (_phase == Phase.Approach && _path[_i].Jump.Takeoff < JumpTable.Takeoff.Edge);
+        || (_path[_i].Kind == NavGrid.EdgeKind.Jump && _phase == Phase.Approach && _path[_i].Jump.Takeoff < JumpTable.Takeoff.Edge);
 
     public void Follow(List<NavGrid.Edge> path)
     {
@@ -70,6 +70,8 @@ public sealed class RouteFollower
         input.Left = input.Right = false;
         input.Space = false;
         _t++;
+
+        if (e.Kind == NavGrid.EdgeKind.Climb) return Climb(v, e, ref input);
 
         if (_phase == Phase.Approach)
         {
@@ -142,6 +144,40 @@ public sealed class RouteFollower
             // unless still on the takeoff and the jump never left (a sliding stand).
             if (at is NavGrid.Node m && !(m.Equals(e.From) && _t - _pressAt < 12)) return Status.Failed;
         }
+        return Status.Running;
+    }
+
+    // ── Climb: WallClimbManeuver's reactive controller with the side fixed to the edge's
+    // direction. Press into the face; Space on a fresh edge when grounded beside it or
+    // wall-sliding (a WallJump kicks off and re-attaches higher); keep Space while
+    // rising; hold Up once the lip is within LipReach (LedgeGrab -> LedgePull) and
+    // through the ledge states. The face top is read live: a camper stacking higher just
+    // makes the climb longer.
+    public float LipReach = 3.0f * Chunk.TileSize;
+    private Status Climb(BotView v, NavGrid.Edge e, ref PlayerInput input)
+    {
+        int h = e.From.Y - e.To.Y;
+        if (_t > 90 + 12 * h) return Status.Failed;
+        int fx = e.To.X;
+        string st = v.Self.CurrentStateName;
+        if (_t > 5 && v.Grounded && NavGrid.NodeUnder(v.Solid, v.Me) is NavGrid.Node n)
+        {
+            // On top — or higher (it grew), or a column or two further onto a wide top.
+            if (n.Y <= e.To.Y && e.Dir * (n.X - fx) >= 0 && e.Dir * (n.X - fx) <= 2) return Advance();
+            if (n.Y < e.From.Y - 1 && n.X != fx) return Status.Failed;        // landed on something else
+        }
+        BotInput.Move(ref input, e.Dir);
+        int y = (int)MathF.Floor(v.Me.Y / T);
+        while (y > -1000 && v.Solid(fx, y - 1)) y--;
+        float top = y * T;
+        bool ledge = st is "LedgeGrabState" or "LedgePullState";
+        bool nearLip = v.Solid(fx, (int)MathF.Floor(v.Me.Y / T)) && v.Me.Y - top < LipReach;
+        if (ledge || nearLip) input.Up = true;
+        bool rising = st is "JumpingState" or "RunningJumpState" or "WallJumpingState" or "DoubleJumpingState" or "LedgeJumpState";
+        if (ledge) { }
+        else if (rising && v.MyVel.Y < 0f) input.Space = true;
+        else if (!v.Previous.Space && st == "WallSlidingState") input.Space = true;
+        else if (!v.Previous.Space && v.Grounded) input.Space = true;
         return Status.Running;
     }
 

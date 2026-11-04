@@ -35,6 +35,7 @@ public sealed class BulldogBot : IRemoteInputSource
     public readonly Dictionary<string, int> Starts = new();
 
     public readonly SpikeGuard Spikes = new();
+    public readonly HashSet<string> Disabled = new();   // opt-in ablation (Ranger drops WallClimbManeuver)
     public BotManeuver Active => _active;
     public List<BotManeuver> Maneuvers => _maneuvers;
 
@@ -108,7 +109,7 @@ public sealed class BulldogBot : IRemoteInputSource
             float bestScore = 0f;
             foreach (var m in _maneuvers)
             {
-                if (m.CooldownLeft > 0) continue;
+                if (m.CooldownLeft > 0 || Disabled.Contains(m.Name)) continue;
                 float sc = m.Score(v);
                 if (sc > bestScore) { best = m; bestScore = sc; }
             }

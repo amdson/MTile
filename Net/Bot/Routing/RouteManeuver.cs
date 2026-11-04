@@ -22,7 +22,7 @@ public sealed class RouteManeuver : BotManeuver
     public int   WindowMarginX = 16, WindowUp = 24, WindowDown = 22;
 
     // Diagnostics.
-    public int Plans, Failures, Reached;
+    public int Plans, Failures, Reached, PlannedClimbs;
     public Action<string> Log;
     public List<NavGrid.Edge> LastPlan { get; private set; }
     public bool LastReached { get; private set; }
@@ -56,6 +56,7 @@ public sealed class RouteManeuver : BotManeuver
                            out reached);
         Plans++;
         LastPlan = path; LastReached = reached;
+        if (path.Exists(e => e.Kind == NavGrid.EdgeKind.Climb)) PlannedClimbs++;
         return true;
     }
 
@@ -73,7 +74,8 @@ public sealed class RouteManeuver : BotManeuver
         if (path.Count == 0) return false;                       // already there (or stuck)
         if (AlwaysOn) return true;
         if (MathF.Abs(v.Dy) > 3.5f * Chunk.TileSize) return true;
-        foreach (var e in path) if (e.Jump.Takeoff != JumpTable.Takeoff.Walk || e.Jump.Dy != 0) return true;
+        foreach (var e in path)
+            if (e.Kind != NavGrid.EdgeKind.Jump || e.Jump.Takeoff != JumpTable.Takeoff.Walk || e.Jump.Dy != 0) return true;
         return false;
     }
 

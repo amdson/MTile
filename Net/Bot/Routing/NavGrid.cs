@@ -38,16 +38,27 @@ public sealed class NavGrid
         public override string ToString() => $"({X},{Y})";
     }
 
+    public enum EdgeKind : byte { Jump, Climb }
+
     public readonly struct Edge
     {
         public readonly Node From, To;
         public readonly int Dir;                // +1 / -1: travel direction
-        public readonly JumpTable.Entry Jump;
+        public readonly EdgeKind Kind;
+        public readonly JumpTable.Entry Jump;   // Kind == Jump
         public readonly int Cost;               // frames
         public Edge(Node from, Node to, int dir, JumpTable.Entry jump, int cost)
-        { From = from; To = to; Dir = dir; Jump = jump; Cost = cost; }
-        public override string ToString() => $"{From}->{To} {Jump.Takeoff}";
+        { From = from; To = to; Dir = dir; Kind = EdgeKind.Jump; Jump = jump; Cost = cost; }
+        public Edge(Node from, Node to, int dir, EdgeKind kind, int cost)
+        { From = from; To = to; Dir = dir; Kind = kind; Jump = default; Cost = cost; }
+        public override string ToString() => Kind == EdgeKind.Jump ? $"{From}->{To} {Jump.Takeoff}" : $"{From}->{To} {Kind}";
     }
+
+    // Wall climb (WallClimbManeuver's controller, replayed by RouteFollower): up a single
+    // face from the cell beside it to the top. ZzzRouteWallClimbCalibration: every face
+    // height tried (4–24 cells), pillars 1 cell wide included, in ~55 + 6.2 h frames.
+    public const int MinClimb = 3, MaxClimb = 40;
+    public static int ClimbCost(int h) => 60 + 7 * h;
 
     private readonly Func<int, int, bool> _solid;      // cell is solid
     private readonly Func<int, int, bool> _hostile;    // cell carries an opposing spike
@@ -129,6 +140,26 @@ public sealed class NavGrid
             if (e.Takeoff >= JumpTable.Takeoff.Edge && !RunUpClear(a, dir)) continue;
             into.Add(new Edge(a, b, dir, e, Cost(e)));
         }
+        for (int dir = -1; dir <= 1; dir += 2)
+            if (TryClimb(a, dir, out var top)) into.Add(new Edge(a, top, dir, EdgeKind.Climb, ClimbCost(a.Y - top.Y)));
+    }
+
+    // A face directly beside `a` (solid at leg height) whose column tops out MinClimb..
+    // MaxClimb cells up onto a stand cell, with the lane beside it (column a.X) clear all
+    // the way up for the climbing body.
+    public bool TryClimb(Node a, int dir, out Node top)
+    {
+        top = default;
+        int fx = a.X + dir;
+        if (!_solid(fx, a.Y)) return false;
+        int y = a.Y;
+        while (y > a.Y - MaxClimb - 1 && _solid(fx, y - 1)) y--;
+        int h = a.Y - (y - 1);
+        if (h < MinClimb || h > MaxClimb) return false;
+        top = new Node(fx, y - 1);
+        if (!IsStandCell(top.X, top.Y)) return false;
+        for (int r = top.Y - HeadroomCells + 1; r <= a.Y; r++) if (_solid(a.X, r)) return false;
+        return true;
     }
 
     public static int Cost(JumpTable.Entry e) => e.Frames + e.Takeoff switch
@@ -140,7 +171,11 @@ public sealed class NavGrid
 
     private bool SweepClear(Node a, int dir, JumpTable.Entry e)
     {
-        for (int c = 0; c < e.SweepColumns; c++)
+        // Clipped at the landing: the calibration body kept walking after it came down,
+        // so the recorded sweep runs into the column past the destination — which next
+        // to a wall would reject the last step onto its foot.
+        int last = Math.Min(e.SweepColumns - 1, Math.Max(e.Dx, e.LandMax));
+        for (int c = 0; c <= last; c++)
         {
             int top = e.SweepTop(c), bottom = e.SweepBottom(c);
             if (bottom < top) continue;                  // column not touched

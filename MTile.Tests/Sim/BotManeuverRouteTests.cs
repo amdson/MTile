@@ -163,4 +163,35 @@ public class BotManeuverRouteTests(ITestOutputHelper output)
         });
         Assert.True(f >= 0 && f < 700, $"never found the way down and around (frame {f})");
     }
+
+    // Rows for an open arena with a solid block from column c0 to c1 rising `h` cells off
+    // the floor, P1 ('B') on its top, P2 ('A') on the floor at column `a`.
+    private static string[] Tower(int c0, int c1, int h, int a, int cols = 44, int floor = 34)
+    {
+        var rows = new List<string>();
+        for (int y = 0; y < floor + 3; y++)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int x = 0; x < cols; x++)
+            {
+                bool solid = y >= floor || x == 0 || x == cols - 1 || (x >= c0 && x <= c1 && y >= floor - h);
+                char ch = solid ? 'X' : '.';
+                if (y == floor - h - 1 && x == (c0 + c1) / 2) ch = 'B';
+                if (y == floor - 1 && x == a) ch = 'A';
+                sb.Append(ch);
+            }
+            rows.Add(sb.ToString());
+        }
+        return rows.ToArray();
+    }
+
+    [Theory]
+    [InlineData(25, 25, 15)]   // the camper's column: one cell wide
+    [InlineData(25, 40, 12)]   // a cliff
+    public void Climb_UpAFace(int c0, int c1, int h)
+    {
+        var (f, _, route) = Go(Tower(c0, c1, h, 8), 900);
+        Assert.True(route.PlannedClimbs > 0, "never planned a climb");
+        Assert.True(f >= 0 && f < 600, $"never got up the {h}-cell face (frame {f})");
+    }
 }
