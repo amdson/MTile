@@ -25,11 +25,24 @@ public static class RangerBot
     // guards stay on.
     public static readonly DuelBot Tactics = (self, seed) => Build(seed, self, out _, tactics: true);
 
+    // Without the anti-air moves, for A/B.
+    public static readonly DuelBot NoAntiAir = (self, seed) => Build(seed, self, out _, antiAir: false);
+
+    // antiAir: three answers to an opponent overhead (the jump-over-and-pogo a human beats
+    // Bulldog with) — hop up and air-slash, step out from under and punish the landing, or
+    // stab straight up. They overlap on purpose: the move-level learner (ManeuverWeights)
+    // picks whichever is paying off against this opponent.
     public static BulldogBot Build(int seed, int self, out RouteManeuver route, bool learn = true, float takenWeight = 0f,
-                                   bool tactics = false)
+                                   bool tactics = false, bool antiAir = true)
     {
         route = new RouteManeuver();
         var extra = new List<BotManeuver> { route };
+        if (antiAir)
+        {
+            extra.Add(new AntiAirJumpSlashManeuver());
+            extra.Add(new AntiAirSidestepManeuver());
+            extra.Add(new AntiAirStabManeuver());
+        }
         TacticBandit bandit = null;
         if (tactics)
         {

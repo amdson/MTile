@@ -27,12 +27,7 @@ public class ZzzRangerEval(ITestOutputHelper output)
         var challengers = new (string, DuelBot)[]
         {
             ("Ranger", RangerBot.Create),
-            ("Ranger+Tactics", (self, seed) =>
-            {
-                var b = RangerBot.Build(seed, self, out _, tactics: true);
-                bandits.Add((TacticBandit)b.PerFrame!.Target!);
-                return b;
-            }),
+            ("Ranger-noAA", RangerBot.NoAntiAir),
         };
         var jobs = new List<(string C, string O, string A, int S, bool P1, DuelBot Cb, DuelBot Ob)>();
         foreach (var (cn, cb) in challengers) foreach (var (on, ob) in opponents)
