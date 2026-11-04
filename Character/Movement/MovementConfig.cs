@@ -491,7 +491,7 @@ public class MovementConfig
     // Carry budget: the harvested orb bleeds linearly to nothing over this long, then the
     // grab ends empty (Plans/BLOCK_THROW_PLAN.md T1). Longer = the clod can be carried
     // further before it crumbles away.
-    public float GrabDissipateSeconds { get; set; } = 2.0f;
+    public float GrabDissipateSeconds { get; set; } = 8.0f;
     // ── Block throw (Plans/BLOCK_THROW_PLAN.md §5) ───────────────────────────────
     // Held position: the clod follows the cursor freely in both axes out to this far
     // from the body center (tanh-saturated), clamped short of terrain along the line

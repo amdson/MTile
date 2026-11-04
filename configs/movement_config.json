@@ -77,8 +77,8 @@
   "PeelWeightDirt": 1.5,
   "PeelWeightSand": 0.8,
   "PeelWeightFoam": 0.4,
-  // Carried orb bleeds to nothing over this many seconds.
-  "GrabDissipateSeconds": 2.0,
+  // Carried orb bleeds to nothing over this many seconds (8: buffed 4x from 2, 2026-11-04).
+  "GrabDissipateSeconds": 8.0,
   // Block throw (Plans/BLOCK_THROW_PLAN.md §5): held reach (clod follows the cursor out
   // to this many px from the body), ball tracker, detach.
   "GrabHoldReach": 64,
