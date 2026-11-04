@@ -217,3 +217,51 @@ public class ZzzRouteCalibration(ITestOutputHelper output)
         output.WriteLine($"{lines.Count} entries");
     }
 }
+
+// M3 calibration: how tall a face WallClimbManeuver's controller gets up, for a wide
+// cliff and for 1- and 2-wide pillars (the camper's stacked column).
+public class ZzzRouteWallClimbCalibration(ITestOutputHelper output)
+{
+    private static float T => Chunk.TileSize;
+
+    private static (ChunkMap, Vector2 top, Vector2 start) Map(int h, int width)
+    {
+        const int Rows = 40, Cols = 50, Floor = 34, Face = 25;
+        var sb = new StringBuilder();
+        for (int y = 0; y < Rows; y++)
+        {
+            for (int x = 0; x < Cols; x++)
+            {
+                bool floor = y >= Floor, wall = x == 0 || x == Cols - 1 || y == 0;
+                bool block = x >= Face && x < Face + width && y >= Floor - h;
+                sb.Append(floor || wall || block ? 'X' : 'O');
+            }
+            sb.Append('\n');
+        }
+        var top = new Vector2((Face + width / 2f) * T, (Floor - h) * T - 21f);
+        var start = new Vector2((Face - 8) * T, Floor * T - 21f);
+        return (SimTerrain.FromAscii(sb.ToString()), top, start);
+    }
+
+    [Fact]
+    public void FaceHeights()
+    {
+        var jobs = new List<(int h, int w)>();
+        foreach (int w in new[] { 1, 2, 20 }) for (int h = 4; h <= 24; h += 2) jobs.Add((h, w));
+        var res = new ConcurrentDictionary<(int, int), string>();
+        Parallel.ForEach(jobs, j =>
+        {
+            var (map, top, start) = Map(j.h, j.w);
+            int at = -1;
+            var r = BotArena.Fight(map, top, start, 600, bot: BotArena.Only(new MTile.Net.WallClimbManeuver()), p1: (f, sim) =>
+            {
+                var p2 = sim.SecondaryPlayers[0].Player;
+                if (at < 0 && p2.IsGrounded && p2.Body.Position.Y < top.Y + T) at = f;
+                return default;
+            });
+            res[j] = at >= 0 ? at.ToString() : ".";
+        });
+        foreach (int w in new[] { 1, 2, 20 })
+            output.WriteLine($"width {w,2}: " + string.Join(" ", Enumerable.Range(0, 11).Select(i => $"h{4 + 2 * i}={res[(4 + 2 * i, w)]}")));
+    }
+}

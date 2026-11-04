@@ -1,0 +1,158 @@
+using System;
+using System.Collections.Generic;
+using Microsoft.Xna.Framework;
+
+namespace MTile.Net;
+
+// Executes a NavGrid path edge by edge, replaying exactly the gesture the JumpTable was
+// calibrated with (ZzzRouteCalibration): get to the takeoff spot, press (or for Walk,
+// just cross the edge), hold Space HoldFrames, hold the travel direction until the body
+// centre passes the middle of the destination's first column, then release it.
+//
+// Closed loop: an edge succeeds when the body is standing on its destination node (or
+// one column past it, the table's overshoot); landing anywhere else, or running out of
+// time, is a failure and the owner replans from wherever the body is.
+public sealed class RouteFollower
+{
+    public enum Status { Running, Done, Failed }
+
+    // Stand takeoff window: body centre this many cells short of the takeoff cell's far
+    // edge (the generator flew 0.6 and 0.9), at rest.
+    public float StandBackMin = 0.55f, StandBackMax = 0.95f;
+    public float RestSpeed    = 8f;
+    public int   ApproachBudget = 150;    // frames to reach the takeoff
+    public int   FlightBudget   = 150;    // frames from press to landing
+
+    private enum Phase { Approach, Flight }
+
+    private List<NavGrid.Edge> _path;
+    private int   _i;
+    private Phase _phase;
+    private int   _t, _pressAt;
+    private bool  _backingUp;
+
+    public IReadOnlyList<NavGrid.Edge> Path => _path;
+    public string PhaseName => $"{_phase} t{_t} back{_backingUp}";
+    public int Index => _i;
+    public NavGrid.Edge? Current => _path != null && _i < _path.Count ? _path[_i] : null;
+    // Safe to swap the path: grounded and not yet committed to the current edge's takeoff.
+    // A running takeoff is committed from the start: its back-up walks the body onto an
+    // earlier node, and a replan from there would throw the run-up away.
+    public bool Interruptible => _path == null || _i >= _path.Count
+        || (_phase == Phase.Approach && _path[_i].Jump.Takeoff < JumpTable.Takeoff.Edge);
+
+    public void Follow(List<NavGrid.Edge> path)
+    {
+        // Same first edge as the one under way: keep its progress (a running takeoff's
+        // back-up and run-in outlasts a replan period).
+        bool same = Current is NavGrid.Edge cur && path.Count > 0
+                    && cur.From.Equals(path[0].From) && cur.To.Equals(path[0].To) && cur.Jump.Takeoff == path[0].Jump.Takeoff;
+        _path = path; _i = 0;
+        if (!same) BeginEdge();
+    }
+
+    private void BeginEdge() { _phase = Phase.Approach; _t = 0; _pressAt = -1; _backingUp = false; _rest = 0; }
+    private int _rest;
+    public int RestFrames = 12;     // the calibration started from a settled stand (20 frames)
+
+    private static float T => Chunk.TileSize;
+
+    public Status Step(BotView v, ref PlayerInput input)
+    {
+        if (_path == null || _i >= _path.Count) return Status.Done;
+        var e = _path[_i];
+        int dir = e.Dir;
+        float x = v.Me.X;
+        // The takeoff cell's far edge in the travel direction, and the brake line.
+        float edge  = dir > 0 ? (e.From.X + 1) * T : e.From.X * T;
+        float brake = (e.To.X + 0.5f) * T;
+        float ahead(float target) => dir * (x - target);   // > 0: past it
+        input.Left = input.Right = false;
+        input.Space = false;
+        _t++;
+
+        if (_phase == Phase.Approach)
+        {
+            if (_t > ApproachBudget) return Status.Failed;
+            // The body must be at (or next to) the edge's start; anything else is a stale
+            // path, and walking its gestures from here goes somewhere arbitrary.
+            if (_t == 1 && v.Grounded && NavGrid.NodeUnder(v.Solid, v.Me) is NavGrid.Node at
+                && (at.Y != e.From.Y || Math.Abs(at.X - e.From.X) > 1)) return Status.Failed;
+            switch (e.Jump.Takeoff)
+            {
+                case JumpTable.Takeoff.Walk:
+                    // A flat one-cell walk is just "keep walking"; anything else crosses an
+                    // edge and becomes a flight the moment the centre passes it.
+                    if (e.Jump.Dy == 0 && e.Jump.Dx == 1)
+                    {
+                        BotInput.Move(ref input, dir);
+                        if (ahead(brake) >= -0.4f * T) return Advance();
+                        return Status.Running;
+                    }
+                    BotInput.Move(ref input, dir);
+                    if (ahead(edge) >= 0f) Press(false);
+                    return Status.Running;
+
+                case JumpTable.Takeoff.Stand:
+                {
+                    float back = -ahead(edge) / T;          // cells short of the edge
+                    if (back > StandBackMax) { BotInput.Move(ref input, dir); _rest = 0; }
+                    else if (back < StandBackMin) { BotInput.Move(ref input, -dir); _rest = 0; }
+                    else if (MathF.Abs(v.MyVel.X) < RestSpeed && v.Grounded && ++_rest >= RestFrames)
+                    {
+                        Press(true);
+                        BotInput.Move(ref input, dir);
+                        input.Space = true;
+                    }
+                    return Status.Running;
+                }
+
+                default:
+                {
+                    // Running takeoff: from at least ~3 cells back, run in, press at the lead.
+                    float back = -ahead(edge) / T;
+                    if (!_backingUp && back < 3f && _t < 3) _backingUp = true;
+                    if (_backingUp)
+                    {
+                        BotInput.Move(ref input, -dir);
+                        if (back >= 3.5f) _backingUp = false;
+                        return back > 6f ? Status.Failed : Status.Running;
+                    }
+                    BotInput.Move(ref input, dir);
+                    if (v.Grounded && ahead(edge - dir * JumpTable.Lead(e.Jump.Takeoff)) >= 0f)
+                    {
+                        Press(true);
+                        input.Space = true;
+                    }
+                    return Status.Running;
+                }
+            }
+        }
+
+        // Flight: hold Space for HoldFrames (jumps only), the direction until the brake line.
+        if (_t - _pressAt > FlightBudget) return Status.Failed;
+        if (_jumping && _t - _pressAt < JumpTable.HoldFrames) input.Space = true;
+        if (ahead(brake) < 0f) BotInput.Move(ref input, dir);
+        if (_t - _pressAt > 4 && v.Grounded)
+        {
+            var at = NavGrid.NodeUnder(v.Solid, v.Me);
+            if (at is NavGrid.Node n && n.Y == e.To.Y && dir * (n.X - e.To.X) >= 0 && dir * (n.X - e.To.X) <= 1)
+                return Advance();
+            // Grounded somewhere else (fell short, bounced back): let the owner replan —
+            // unless still on the takeoff and the jump never left (a sliding stand).
+            if (at is NavGrid.Node m && !(m.Equals(e.From) && _t - _pressAt < 12)) return Status.Failed;
+        }
+        return Status.Running;
+    }
+
+    private bool _jumping;
+    private void Press(bool jump) { _phase = Phase.Flight; _pressAt = _t; _jumping = jump; }
+
+    private Status Advance()
+    {
+        _i++;
+        if (_i >= _path.Count) return Status.Done;
+        BeginEdge();
+        return Status.Running;
+    }
+}

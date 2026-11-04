@@ -56,6 +56,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
     private int   _stuck;
     private float _lastDamage;
     private PlayerInput _prev;
+    public PlayerInput Previous => _prev;   // last emitted input (tests, tracing)
 
     // The full behavior set. Order breaks Score ties (earlier wins).
     public static List<BotManeuver> DefaultManeuvers() => new()

@@ -67,9 +67,9 @@ Run as an autonomous campaign (user, 2026-11-03) on branch `bot-routing`; not pu
   (hold frames × run-up → dx, dy), wall-jump climb rate and limits, mantle / step-up
   heights, safe drop height, column-raise rate. Bake them as constants with a guard test
   that fails if movement tuning drifts.
-- [ ] **M2 — Walk / jump / drop routing.** Nav graph, A*, executor; static-terrain tests
+- [x] **M2 — Walk / jump / drop routing.** Nav graph, A*, executor; static-terrain tests
   (steps, gaps, ledges, down-and-around).
-- [ ] **M3 — Wall jump and ledge edges.**
+- [~] **M3 — Wall jump and ledge edges.** Calibrated: `WallClimbManeuver`'s controller climbs a single face of ANY tested height (4–24 cells), 1-wide pillars included, in ~80–200 frames (`ZzzRouteWallClimbCalibration`). So the camper's column is climbable today; next is finding why the bots don't (CamperBot baseline, pulled forward from M5), then climb edges in the graph.
 - [ ] **M4 — Build and dig edges**, aware of the build meters.
 - [ ] **M5 — CamperBot, scenario suite, integration** as the `Ranger` duelist, vertical arena, league (Ranger vs Bulldog A/B).
 
@@ -80,5 +80,12 @@ Run as an autonomous campaign (user, 2026-11-03) on branch `bot-routing`; not pu
   limit, not a game one); a standing start at the edge is robust almost everywhere; a
   direction held through the jump overshoots 3–4 columns, so the gesture brakes over the
   destination's first column; many short drops/gaps need no jump (Walk).
+
+- M2: `NavGrid` (stand nodes, table edges with swept-cell, landing-span, walk-off and
+  run-up checks; A*), `RouteFollower` (closed-loop gesture replay), `RouteManeuver`.
+  `BotManeuverRouteTests` 4/4 (stairs ×3 flights, 4-cell pit, 4-up step, down-and-around),
+  0 failed edges. Bugs found on the way: a lip landing read as the floor below (NodeUnder
+  now checks the body's width); a periodic replan threw away running take-offs; a stale
+  Score-time plan sent the bot back to its spawn. Bot group: 6 reds, all known.
 
 ## Decisions needed
