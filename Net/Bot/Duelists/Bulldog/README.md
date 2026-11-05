@@ -24,7 +24,14 @@ the preemption gap; the stance gets a staying bonus.
 
 Every behaviour bets `(dealt, taken, horizon)` in HP. The bet ledger (`BetLedger`) corrects
 each bet by a learned offset per situation bucket. It is **off by default for plain Bulldog**
-(the authored bets run as written) and **on for Ranger**. `ControllerTrace` records
+(the authored bets run as written) and **on for Ranger**, where it ships with data-calibrated
+priors (`BetCalibration.Field`), records that close at the next decision in their category and
+bootstrap off the next arm's value (SARSA over options), hierarchical offsets, a sharp softmax,
+and the mix-up die switched off so the learner picks among stab / cross-up / low poke / grab
+itself. Over 24 seeds against the duelist field the learner beats this hand-tuned brain; the
+numbers and the path to them are in `Plans/BOT_BEHAVIOR_ARCHITECTURE.md` ("Learning: what
+shipped") and `MTile.Tests/Sim/ZzzLearningEffect.cs`. With a ledger, stances switch on any
+improvement but hold at least 30 frames (no value hysteresis). `ControllerTrace` records
 occupancy, acquisitions, preemptions and oscillation; the league printout shows it.
 
 ## Playstyle

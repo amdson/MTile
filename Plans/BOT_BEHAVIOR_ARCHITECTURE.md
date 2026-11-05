@@ -207,6 +207,47 @@ fields (league rule, unchanged).
 learner shape against five fixed bots; they are not design constraints and are not carried
 forward. If their lessons are real the ledger will relearn them.
 
+## Learning: what shipped (2026-11-05)
+
+The first learner (above, as designed) changed decisions but not results. Making it fight
+took four changes, each found by measurement (`MTile.Tests/Sim/ZzzLearningEffect.cs`):
+
+1. **The learner must own the choice.** Bulldog's mix-up die gated which close-range arm was
+   even applicable, so the selector only ever chose between the string and whatever the die
+   allowed. With a ledger present `BulldogSense.AllMixArms` makes every mix-up arm applicable
+   in its geometric window. Two defend arms (`StepBackManeuver`, `CounterSlashManeuver`) give
+   guard-or-nothing a real alternative set.
+2. **Priors from data, not from authors.** A shadow ledger (`BotController.Shadow`: records
+   but never steers) measured what each arm realises under the hand policy. The authored
+   bets were 3–10× too optimistic for exactly the arms the hand policy had gated (Guard bet
+   +0.72, realised −0.06; Grab 0.6 vs 0.06; CrossUp 0.6 vs 0.05), so an un-gated learner paid
+   an exploration tax per bucket per bout. `BetCalibration.Field` holds the realised means;
+   `BotController.Calibration` substitutes them for the authored magnitudes (gating and
+   horizon stay authored). Calibrated priors alone, no online learning, already match the
+   hand policy.
+3. **Credit until the next decision, with bootstrapping.** A record used to run through its
+   horizon even after the next arm in its category started, so Idle's record collected the
+   string's damage. Now the controller closes a record when the next arm in its category
+   starts (`BetLedger.Close`), records shorter than `MinRecordFrames` are dropped, and the
+   closing target is `realised + Gamma^frames × the next arm's corrected bet` per channel:
+   SARSA over options. Without the bootstrap the target is myopic and demotes every move
+   whose payoff is the state it leaves (a guard that puts the opponent in recovery).
+4. **Estimates that don't chase noise.** The step is `1 / (PriorWeight + settles)` floored at
+   `EtaMin`, with `PriorWeight` 4 (sweep: 1 → 258, 2 → 278, 4 → 288 of 360; 6–12 flat),
+   hierarchical offsets (an arm-level offset shared by all buckets, bucket-level on top with
+   `BucketPriorWeight` 6), and softmax `Sharpness` 20 (3 → 118, 10 → 274, 20 → 278, 40 → 266).
+
+Also settled: stance hysteresis is now a hardcoded 30-frame minimum hold with a zero switch
+gap when a ledger is present (`BotController.StanceMinHold`, `StanceGap`), so sampled stances
+actually take Move and get scored; the old value gap left them unexplored and scored the same
+within noise once replaced. `PressStance` and `KiteStance` were added for the Move side and
+are neutral. Things measured and rejected, all within or below noise against the default: an
+optimism bonus for untried arms (worse: it doubles the optimistic-prior tax), a closing-speed
+feature in the bucket (72 buckets), `Lambda` 0.7 or 1.5 (1.5 is best against Riposte alone),
+`Gamma` 0.98 / 0.985 / 0.995, `EtaMin` 0.02 / 0.1, `MinRecordFrames` 4.
+
+Final numbers are under Results.
+
 ## Stability
 
 - No minimum-hold timers. Hysteresis is the preemption gap and the staying bonus.
@@ -367,12 +408,23 @@ A wash at this horizon: 60 s bouts give a few dozen settles per arm, and the lar
 
 One ledger carried across 6 sequential bouts against the same opponent: bouts 1–2 scored 45.0 and bouts 5–6 scored 44.0 (of 60); a fresh ledger each bout scored 43.0 then 46.0. No adaptation trend. The mechanism is live (offsets of up to 0.5 HP against ladder gaps of 0.01–0.3, and 9–13% of Act contests resolve differently), the ledger's unit tests show the corrections converge, and the totals of all four variants sit inside seed noise. The one repeatable exception is Riposte, the model-driven opponent, where learning gained 3.5–4 of 36 in both the argmax and the carried runs.
 
+**Learner results (2026-11-05, `ZzzLearningEffect`, Release)**, after the changes in "Learning: what shipped". Ranger variants vs the field, points of 144 per opponent (3 arenas × 24 seeds × both sides), 720 in total.
+
+| Ranger variant | Rampart | Citadel | Riposte | Bulldog | Brawler | total /720 |
+|---|---|---|---|---|---|---|
+| hand policy (no ledger, argmax) | 112.0 | 109.0 | 60.0 | 109.0 | 144.0 | 534.0 |
+| calibrated priors, no online learning | 118.0 | 124.5 | 70.0 | 71.0 | 142.0 | 525.5 |
+| **default learner** (calibrated + ledger) | 114.0 | 118.0 | 67.0 | 111.0 | 144.0 | **554.0** |
+
+The learner beats the hand policy by 20 of 720 and recovers what static calibration loses against Bulldog (71 → 111). One ledger carried across an 8-bout session against the same opponent, points of 60 per bout pair: bouts 1–2 52.0 → last two 55.5, against 46.5 → 48.5 for a fresh ledger each bout; session total 206 vs 186.5 of 240. The session gain is largest against Riposte, the adaptive opponent (28 vs 18 of 48). The 12-seed sweeps put the same default at 278–288 of 360 against 261, so the margin is about 4–8% of the available points with seed noise near ±3%.
+
 ## Decisions needed
 
-- **The learner is mechanically working and strategically idle.** Three readings, not mutually exclusive: (1) 24 situation buckets × arm cannot represent what beats a given opponent, which is usually "when they do X at range Y"; the bucket would need opponent-habit features. (2) The Score gates leave 1–2 applicable actions per contest, so most of the 9–13% divergence is Idle-vs-action flips that do not change the fight. (3) Match points are too coarse a metric: measure per-decision regret (realised HP vs the best arm's realised HP in that bucket, in hindsight) before concluding anything. Recommended next step: (3) first, since it is cheap and decides between (1) and (2).
-
-- **Stances cannot explore.** Stance hysteresis compares the softmax-sampled candidate against the holder plus PreemptGap + StayBonus (0.35 HP), so a new stance like HoldRange (value 0 vs Chase's −0.1) is sampled but never acquires Move, never opens a record, and so never learns (0.1% occupancy in the A/B). Options: an epsilon that lets a sampled stance take Move for one horizon without the gap; or an optimistic initial offset for arms with zero settles; or accept that stances are hand-ordered and only actions learn. Not decided in the campaign: it changes what "no minimum-hold timers" means in practice.
-- **BulldogBreaker is the learner's clearest signal.** Its dealt offset settles at about −0.8 HP under 40 px against the whole field, i.e. the combo-break guard almost never leads to damage within its horizon. Whether to shorten its horizon, let the ledger keep demoting it, or revisit the maneuver is a design call.
+- **(Resolved 2026-11-05) The learner was strategically idle** because of the die gating, the optimistic authored priors and the myopic credit target; see "Learning: what shipped". The regret tool suggested there became `ZzzLearningEffect.RealisedByArm` and `CalibrationDump`.
+- **(Resolved) Stances cannot explore.** Replaced the value gap with a hardcoded 30-frame minimum hold and a zero gap under learning; Press holds Move ~5% now, HoldRange and Kite are tried and found not to pay.
+- **(Resolved) BulldogBreaker's negative dealt** is what calibration now encodes (0.035 dealt, 0.114 taken per record): the learner simply uses it less.
+- **Riposte is the weak matchup** (about 45% vs ~80% against the rest). Lambda 1.5 lifts it to 57% while costing everything else, which says the answer is opponent-conditional caution the 24 buckets cannot express. Open.
+- **Calibration is a snapshot.** `BetCalibration.Field` was measured against the five duelists on the league arenas; new arms or a retuned kit need `CalibrationDump` re-run. Open: regenerate it automatically in the league harness.
 
 ## Deviations from the plan text
 

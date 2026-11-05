@@ -17,7 +17,7 @@ namespace MTile.Tests.Sim;
 //      arena/side: points by bout position, so adaptation over a longer session is visible.
 public class ZzzLearningEffect(ITestOutputHelper output)
 {
-    private const int VariantSeeds = 12;
+    private const int VariantSeeds = 24;
 
     private static readonly (string, DuelBot)[] Opponents =
     {
@@ -45,9 +45,9 @@ public class ZzzLearningEffect(ITestOutputHelper output)
         DuelBot Calib(Action<BulldogBot> more = null) => RangerBot.Variant(b => { b.Calibration = BetCalibration.Field; more?.Invoke(b); });
         var challengers = new (string, DuelBot)[]
         {
+            ("nolearn+argmax",  Collect("nolearn+argmax", RangerBot.NoLearn)),
+            ("calib+nolearn",   Collect("calib+nolearn", Calib(b => b.Ledger = null))),
             ("default",         Collect("default", RangerBot.Create)),
-            ("closing",         Collect("closing", RangerBot.Variant(b => b.Bucketer = Situation.BucketWithClosing))),
-            ("closing+bp3",     Collect("closing+bp3", RangerBot.Variant(b => { b.Bucketer = Situation.BucketWithClosing; b.Ledger.BucketPriorWeight = 3f; }))),
         };
         var jobs = new List<(string C, string O, string A, int S, bool P1, DuelBot Cb, DuelBot Ob)>();
         foreach (var (cn, cb) in challengers) foreach (var (on, ob) in Opponents)
@@ -65,7 +65,7 @@ public class ZzzLearningEffect(ITestOutputHelper output)
             output.WriteLine($"{cn,-18}" + string.Join("", Opponents.Select(o => $"{pts.GetValueOrDefault((cn, o.Item1)),9:F1}"))
                              + $"  {Opponents.Sum(o => pts.GetValueOrDefault((cn, o.Item1))),7:F1}  {div,6:P1}");
         }
-        foreach (var name in new[] { "closing" })
+        foreach (var name in new[] { "default" })
             if (bots.TryGetValue(name, out var bag)) output.WriteLine(BotTraceReport.Format(name, bag, 12));
     }
 
@@ -142,9 +142,10 @@ public class ZzzLearningEffect(ITestOutputHelper output)
         Parallel.ForEach(seqs, sq =>
         {
             var ledger = new BetLedger();
-            ledger.Gamma = 0.99f;
-            DuelBot me = (self, seed) => { var b = RangerBot.Build(seed, self, out _, learn: false); ledger.NewBout(); b.Ledger = ledger; b.Calibration = BetCalibration.Field; b.Sharpness = 10f; return b; };
-            DuelBot fr = RangerBot.Variant(b => { b.Calibration = BetCalibration.Field; b.Ledger.Gamma = 0.99f; b.Sharpness = 10f; });
+            // The default learner (RangerBot.Create) with one ledger shared across the sequence,
+            // vs the default learner with a fresh ledger per bout.
+            DuelBot me = (self, seed) => { var b = RangerBot.Build(seed, self, out _); ledger.NewBout(); b.Ledger = ledger; return b; };
+            DuelBot fr = RangerBot.Create;
             var c = new float[Bouts]; var f = new float[Bouts];
             for (int i = 0; i < Bouts; i++)
             {
@@ -153,7 +154,7 @@ public class ZzzLearningEffect(ITestOutputHelper output)
             }
             carried.Add((sq.O, c)); fresh.Add((sq.O, f));
         });
-        output.WriteLine("B. calib+Q.99+sharp10: one ledger carried across 8 bouts vs the same opponent, vs a fresh ledger per bout (points per bout position, summed over 3 arenas x 2 sides = max 6 per cell)");
+        output.WriteLine("B. default learner: one ledger carried across 8 bouts vs the same opponent, vs a fresh ledger per bout (points per bout position, summed over 3 arenas x 2 sides = max 6 per cell)");
         output.WriteLine($"{"",-10}{"variant",-8}" + string.Join("", Enumerable.Range(1, Bouts).Select(i => $"  b{i}")) + "  total");
         foreach (var (on, _) in Opponents)
         {
