@@ -18,13 +18,21 @@ public class ZzzDuelistLeague(ITestOutputHelper output)
     [Fact]
     public void RunLeague()
     {
+        // Brains built on BulldogBot are collected as they are created, for the trace printout.
+        var traced = new System.Collections.Concurrent.ConcurrentDictionary<string, System.Collections.Concurrent.ConcurrentBag<BulldogBot>>();
+        DuelBot Collect(string name, DuelBot make) => (self, seed) =>
+        {
+            var bot = make(self, seed);
+            if (bot is BulldogBot bb) traced.GetOrAdd(name, _ => new()).Add(bb);
+            return bot;
+        };
         var bots = new List<(string Name, DuelBot Bot)>
         {
-            ("Bulldog", BulldogBot.Create),
-            ("Rampart", RampartBot.Create),
-            ("Riposte", RiposteBot.Create),
-            ("Citadel", CitadelBot.Create),
-            ("Brawler", BotDuel.Brawler),
+            ("Bulldog", Collect("Bulldog", BulldogBot.Create)),
+            ("Rampart", Collect("Rampart", RampartBot.Create)),
+            ("Riposte", Collect("Riposte", RiposteBot.Create)),
+            ("Citadel", Collect("Citadel", CitadelBot.Create)),
+            ("Brawler", Collect("Brawler", BotDuel.Brawler)),
         };
         int[] seeds = { 17, 18, 19, 20, 21, 22 };
         var log = new StringBuilder();
@@ -60,6 +68,9 @@ public class ZzzDuelistLeague(ITestOutputHelper output)
         sb.AppendLine().AppendLine("POINTS BY ARENA");
         for (int i = 0; i < bots.Count; i++)
             sb.AppendLine($"{bots[i].Name,-10}" + string.Join("  ", BotDuel.Arenas.Select(a => $"{a} {perArena.GetValueOrDefault((i, a)):F1}")));
+        sb.AppendLine().AppendLine("CONTROLLER TRACE (BulldogBot-based brains)");
+        foreach (var b in bots)
+            if (traced.TryGetValue(b.Name, out var bag)) sb.AppendLine(BotTraceReport.Format(b.Name, bag));
         output.WriteLine(sb.ToString());
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir != null && !Directory.Exists(Path.Combine(dir.FullName, "Plans"))) dir = dir.Parent;

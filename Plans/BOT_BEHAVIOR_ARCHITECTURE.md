@@ -162,6 +162,14 @@ corrected bet converges to the empirical mean outcome in that bucket: an overcon
 demotes itself, a modest one promotes itself. This is the robustness property the design is
 for, and it is what makes the scheme safe for arbitrary behaviours.
 
+**Bet conventions (settled in M4).** Every bet `Pass`es when its maneuver's `Score` gate
+fails, so a gated-off behaviour is never applicable. Defensive moves bet the HP they avoid as a
+NEGATIVE `taken`, because the Idle arm bets `(0, 0, 30)` and an action must beat it to fire.
+Where today's `Score` ladder has ties, the group is stepped by 0.01 in list order so argmax
+reproduces the old brain. The ledger converges every arm, Idle included, toward realised
+*absolute* HP, so the authored priors (relative avoided damage) and the learned values differ in
+meaning; this is accepted.
+
 **Value and selection.** `value = dealt_c − λ·taken_c` with `λ` a selection-time knob (not
 learned). Within a category, pick by softmax over values with a sharpness, as today's
 `Pick` does; the holder's value gets the preemption gap and the stance's its staying bonus.
