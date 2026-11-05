@@ -291,14 +291,14 @@ Brawler over the README format (3 arenas × seeds 1–4 × both sides) scores �
 points; Ranger vs Brawler and vs legacy Bulldog over seeds 1–4 within 2 points of the
 pre-change brain run in the same harness.
 
-[~] **M3. Native claims for the Bulldog family.**
+[x] **M3. Native claims for the Bulldog family.**
 Convert the maneuvers in the mapping table to `BotBehaviour` subclasses with native Move
 claims (`Forbid(all)` for the hold-still set, `Exclusive` for movement-input actions,
 reflexes for the movers). Delete `OwnsLocomotion` overrides from converted files; leave the
 flag on `BotManeuver` for phase-2 brains. Verify in a scenario test that a slash fires while
 `ChaseStance` is still walking in, and that guard leaves Move empty.
 
-[ ] **M4. Bets and the ledger live.**
+[~] **M4. Bets and the ledger live.**
 Replace adapter bets with hand-authored HP bets on every converted behaviour. Wire the
 ledger into Bulldog's controller, `RangerBot.Create` uses it by default; delete
 `ManeuverWeights`, `TacticBandit`, `RangerTactics.cs`, `RangerBot.Tactics` and their tests
@@ -320,6 +320,8 @@ record the regression numbers here under a "Results" heading.
 
 - M2 done (6e6674a, merged): Bulldog/Harrier/Ranger run on BotController; Locomote → ChaseStance + StepOutStance + MoveExecutor; SpikeGuardConstraint; RoutePlanner behind the executor. Parity (3 arenas × seeds 1–4 × both sides): Bulldog vs Brawler 24→22 of 24; Ranger vs Brawler 24→24; Ranger vs Riposte 9→11; Ranger NoLearn vs Brawler 24→24. Bot group 180/6/186 with only the 6 known reds. One regression found and fixed: Breach's stuck counter fired mid-route, so Move-claiming actions don't bet while the route planner drives. Supervisor change: Ranger's Lambda left at the controller default (1) instead of the old dealt-only setting.
 - M3 groundwork: `BotManeuver` gained native `Category`/`Move`/`Bet` virtuals; the adapter reads them (registry wins transitionally until it is deleted).
+
+- M3 done (5e9cbbe): every maneuver declares its own Category/Move next to OwnsLocomotion; ManeuverRegistry deleted; BotManeuverClaimTests pins the table and proves a slash fires while ChaseStance walks and Guard leaves Move empty. EscapeGrab stays Exclusive (it leans toward the grabber). Parity after M3: Bulldog vs Brawler 23, Ranger vs Brawler 23.5, Ranger vs Riposte 11.5, Ranger-NoLearn vs Brawler 24. Bot group 183/6/189, known reds only.
 
 ## Decisions needed
 
