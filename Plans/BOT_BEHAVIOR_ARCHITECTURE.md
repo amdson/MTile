@@ -306,14 +306,14 @@ reflexes for the movers). Delete `OwnsLocomotion` overrides from converted files
 flag on `BotManeuver` for phase-2 brains. Verify in a scenario test that a slash fires while
 `ChaseStance` is still walking in, and that guard leaves Move empty.
 
-[~] **M4. Bets and the ledger live.**
+[x] **M4. Bets and the ledger live.**
 Replace adapter bets with hand-authored HP bets on every converted behaviour. Wire the
 ledger into Bulldog's controller, `RangerBot.Create` uses it by default; delete
 `ManeuverWeights`, `TacticBandit`, `RangerTactics.cs`, `RangerBot.Tactics` and their tests
 (fold any tactic arm worth keeping into a stance or reflex first). A light A/B in a `Zzz`
 eval: learner on vs off for Ranger over seeds 1–6 vs the field, reported, not gated.
 
-[ ] **M5. Trace, league printout, docs.**
+[x] **M5. Trace, league printout, docs.**
 Occupancy / preemption / oscillation / offsets in `ZzzDuelistLeague` and `ZzzRangerEval`
 output. Update `Net/Bot/Duelists/Bulldog/README.md`, add the controller to
 `CODEBASE_OVERVIEW.md`'s bot section if one exists, add a BACKLOG item for phase 2, and
@@ -332,6 +332,29 @@ record the regression numbers here under a "Results" heading.
 - M3 done (5e9cbbe): every maneuver declares its own Category/Move next to OwnsLocomotion; ManeuverRegistry deleted; BotManeuverClaimTests pins the table and proves a slash fires while ChaseStance walks and Guard leaves Move empty. EscapeGrab stays Exclusive (it leans toward the grabber). Parity after M3: Bulldog vs Brawler 23, Ranger vs Brawler 23.5, Ranger vs Riposte 11.5, Ranger-NoLearn vs Brawler 24. Bot group 183/6/189, known reds only.
 
 - M4 cleanup done (ee04720, merged): ManeuverWeights, TacticBandit and RangerBot.Tactics deleted; HoldRangeStance (Ranger) + BulldogBot.ExtraStances; ZzzRangerEval is now the learner-on/off A/B over seeds 1–6. First A/B with the still-derived bets: Ranger 124.5 vs Ranger-NoLearn 132.5 of 180. Reported, not gated; re-run after the authored bets land.
+
+- M4 bets done (90cfa25, merged e415f82): hand-authored HP bets on every Bulldog-family maneuver and both stances, Score gates kept, tie groups stepped 0.01 in list order so argmax reproduces the old brain. Parity after M4: Bulldog vs Brawler 23 (identical bouts to M3), Ranger vs Brawler 24, Ranger vs Riposte 14, Ranger-NoLearn vs Brawler 24 (identical). Bot group 183/6/189, known reds only.
+- M5 done (dcf19ad): BotTraceReport shared by ZzzDuelistLeague and ZzzRangerEval; Bulldog README "Brain" section; CODEBASE_OVERVIEW controller paragraph; BACKLOG 5.21 (phase 2) and 5.22 (learning gaps); "Bet conventions" in this doc.
+
+## Results (phase 1, 2026-11-04)
+
+Parity harness: `MTile.Tests/Sim/ZzzBotControllerParity.cs`, points of 24 (3 arenas × seeds 1–4 × both sides, 60 s bouts).
+
+| Matchup | Old brain | On the controller (M4) |
+|---|---|---|
+| Bulldog vs Brawler | 24.0 | 23.0 |
+| Ranger vs Brawler | 24.0 | 24.0 |
+| Ranger vs Riposte | 9.0 | 14.0 |
+| Ranger-NoLearn vs Brawler | 24.0 | 24.0 |
+
+Learner A/B: `MTile.Tests/Sim/ZzzRangerEval.cs`, points of 36 per opponent (3 arenas × seeds 1–6 × both sides).
+
+| | Rampart | Citadel | Riposte | Bulldog | Brawler | total /180 |
+|---|---|---|---|---|---|---|
+| Ranger (ledger on) | 28.5 | 25.0 | 14.5 | 29.0 | 36.0 | 133.0 |
+| Ranger-NoLearn | 31.5 | 23.5 | 15.0 | 26.5 | 36.0 | 132.5 |
+
+A wash at this horizon: 60 s bouts give a few dozen settles per arm, and the largest learned offsets are on `BulldogBreaker` (taken +0.5 HP under 40 px) and `DownAirManeuver` (dealt −0.2 in the air). Occupancy: ChaseStance holds Move ~54% of the time, no action is committed ~47% of the time, BulldogString is the top action at 14%. HoldRangeStance ran 0.2% (see Decisions needed). Not verified: the KNI web build (`MTile.Web`) was not compiled during the campaign; the new code uses only plain .NET and XNA types.
 
 ## Decisions needed
 
