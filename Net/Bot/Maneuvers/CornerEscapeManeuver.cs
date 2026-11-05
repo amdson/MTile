@@ -57,6 +57,15 @@ public sealed class CornerEscapeManeuver : BotManeuver
         return Utility;
     }
 
+    // Bet (M4): reflex, deals nothing; trading with our back to a wall costs ~0.6 (avoided taken);
+    // the 86 px dash + carry ~ 30 f. Value 0.60 clears Chase (-0.15) and StepOut (0.25) by > 0.25.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0f, -0.6f, 30);
+    }
+
     public override void Begin(BotView v) { _t = 0; _dashed = false; _away = v.Toward; }
 
     public override bool Step(BotView v, ref PlayerInput input)

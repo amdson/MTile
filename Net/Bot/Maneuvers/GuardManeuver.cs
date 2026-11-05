@@ -53,6 +53,17 @@ public sealed class GuardManeuver : BotManeuver
         return 1.5f;
     }
 
+    // Bet (M4): a parry arms GuardRetaliate (0.5 HP, 280 kb), ~90% of the time vs a seen swing;
+    // the swing would otherwise land ~half the time (-0.27 avoided); 28 f guard + 10 retaliate.
+    // Value 0.72 beats an in-range string (0.45), as Score 1.5 beat the slash's 1.0, and is
+    // 0.02 over BulldogGuard / WallClimb (also Score 1.5) so list order still breaks the tie.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.45f, -0.27f, 40);
+    }
+
     public override void Begin(BotView v)
     {
         _phase = Phase.Guard;

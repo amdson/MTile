@@ -42,6 +42,16 @@ public sealed class AntiAirSidestepManeuver : BotManeuver
         return 1.4f;
     }
 
+    // Bet (M4): reflex; out of the chop column avoids a ~1 HP pogo ~35% (-0.34), then slash the
+    // landing 0.5 ~60% (0.3); clear + wait for the landing ~45 f. Value 0.64 clears Chase / StepOut
+    // by > 0.25 but not a WhiffPunish holding Move (0.40 + 0.25), as before.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.3f, -0.34f, 45);
+    }
+
     public override void Begin(BotView v)
     {
         _t = 0; _clicked = false;

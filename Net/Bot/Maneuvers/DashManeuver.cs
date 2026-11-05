@@ -47,6 +47,16 @@ public sealed class DashManeuver : BotManeuver
         return 1.2f;
     }
 
+    // Bet (M4): 86 px dash into a DashSlash 0.5 + the string it opens, ~65% -> 0.65; the 33 f
+    // DashSlash end lag in their face ~0.1; dash ~25 f + cut + lag ~ 60 f. Score 1.2 ties are broken
+    // by list order in 0.01 steps: stab 0.57, cross-up 0.56, dash 0.55, block throw 0.53, wave 0.52.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.65f, 0.1f, 60);
+    }
+
     public override void Begin(BotView v) { _t = 0; _inDash = false; _clicked = false; }
 
     public override bool Step(BotView v, ref PlayerInput input)

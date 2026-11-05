@@ -54,6 +54,16 @@ public sealed class RangerCrystalWaveManeuver : BotManeuver
         return _wave.Score(v);
     }
 
+    // Bet (M4): 0.5 per crystal, capped 1.5 per wave; the ~1 s warning is walked out of about half
+    // the time (0.72); planted ~50 f charging at 6-14 tiles (0.2); charge + lift/skim + run ~ 120 f.
+    // 0.52: last of the Score 1.2 ties.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.72f, 0.2f, 120);
+    }
+
     public override void Begin(BotView v) => _wave.Begin(v);
     public override bool Step(BotView v, ref PlayerInput input) => _wave.Step(v, ref input);
     public override void Abort(BotView v, ref PlayerInput input) => _wave.Abort(v, ref input);

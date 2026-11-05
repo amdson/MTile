@@ -31,6 +31,16 @@ public sealed class BulldogPunish : BotManeuver
         return 1.35f;
     }
 
+    // Bet (M4): DashSlash (3 f startup) into a busy target, ~0.75 HP with the string it opens,
+    // ~85% -> 0.65; they are busy, ~0 taken; dash ~25 f + 11 f cut + 33 f lag ~ 60 f.
+    // Value 0.62 sits over a stab / dash / block throw (0.55), as Score 1.35 did over 1.2.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.65f, 0.03f, 60);
+    }
+
     public override void Begin(BotView v) { _t = 0; _inDash = false; _clicked = false; }
 
     public override bool Step(BotView v, ref PlayerInput input)

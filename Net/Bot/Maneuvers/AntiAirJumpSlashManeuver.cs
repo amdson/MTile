@@ -44,6 +44,17 @@ public sealed class AntiAirJumpSlashManeuver : BotManeuver
         return 1.4f;
     }
 
+    // Bet (M4): meet them with AirSlash1, 0.5 ~70%, plus the trade it wins (0.5); beating the
+    // pogo to it avoids ~0.14; hop + click + 14 f ride-out ~ 45 f.
+    // 0.64: the Score 1.4 ties in list order (stab finisher 0.66, wall 0.65, this, AA stab 0.63),
+    // all over BulldogPunish (0.62).
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.5f, -0.14f, 45);
+    }
+
     public override void Begin(BotView v) { _t = 0; _clicked = 0; _air = 0; }
 
     public override bool Step(BotView v, ref PlayerInput input)
