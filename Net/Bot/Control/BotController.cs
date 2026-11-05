@@ -64,6 +64,11 @@ public sealed class BotController
     private int          _idleSettle = int.MinValue;
     private float        _lastDamage;
     private readonly List<(BotBehaviour B, Bet Bet)> _cands = new();
+    private readonly List<Bet> _raw = new();   // uncorrected bets, parallel to _cands (diagnostics)
+
+    // Diagnostics: Act contests with at least one applicable action, and how many of them
+    // the ledger's corrections changed the argmax of (raw bets vs corrected bets).
+    public int ActContests, ActDivergences;
 
     public void Add(BotBehaviour b)
     {
@@ -144,7 +149,7 @@ public sealed class BotController
 
     private void SelectAction(BotView v, int bucket)
     {
-        _cands.Clear();
+        _cands.Clear(); _raw.Clear();
         // The route planner mid-route holds Move: Move-claiming actions don't even bet
         // (their Bet may keep frame-to-frame bookkeeping, e.g. Breach's stuck counter).
         bool routeHoldsMove = StanceActive && Executor.PlannerDriving;
@@ -153,11 +158,14 @@ public sealed class BotController
             if (a.CooldownLeft > 0) continue;
             if (routeHoldsMove && a.Move.Kind != MoveClaim.Mode.None) continue;
             var raw = a.Bet(v);
-            if (raw.Applicable) _cands.Add((a, Correct(a.Name, bucket, raw)));
+            if (raw.Applicable) { _cands.Add((a, Correct(a.Name, bucket, raw))); _raw.Add(raw); }
         }
         if (_cands.Count == 0) return;
         var idle = Correct(IdleName, bucket, IdleBet);
         _cands.Insert(0, (null, idle));   // first, so Idle wins value ties
+        _raw.Insert(0, IdleBet);
+        ActContests++;
+        if (Ledger != null && ArgmaxCorrected() != ArgmaxRaw()) ActDivergences++;
 
         var (b, bet) = _cands[Choose(v)];
         if (b == null)
@@ -291,6 +299,19 @@ public sealed class BotController
     private Bet Correct(string name, int bucket, Bet bet) => Ledger?.Corrected(name, bucket, bet) ?? bet;
 
     private void Open(string name, int bucket, Bet bet, int frame) => Ledger?.Open(name, bucket, bet, frame);
+
+    private int ArgmaxCorrected()
+    {
+        int best = 0; float bv = Value(_cands[0].Bet);
+        for (int i = 1; i < _cands.Count; i++) { float x = Value(_cands[i].Bet); if (x > bv) { best = i; bv = x; } }
+        return best;
+    }
+    private int ArgmaxRaw()
+    {
+        int best = 0; float bv = Value(_raw[0]);
+        for (int i = 1; i < _raw.Count; i++) { float x = Value(_raw[i]); if (x > bv) { best = i; bv = x; } }
+        return best;
+    }
 
     // Index into _cands: argmax by value (first wins ties) or a softmax sample.
     private int Choose(BotView v)

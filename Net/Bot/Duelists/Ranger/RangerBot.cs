@@ -16,6 +16,18 @@ public static class RangerBot
     public static readonly DuelBot Create  = (self, seed) => Build(seed, self, out _);
     public static readonly DuelBot NoLearn = (self, seed) => Build(seed, self, out _, learn: false);
 
+    // Diagnostics for the learner A/B (ZzzLearningEffect): learned argmax without softmax
+    // noise; softmax noise without a ledger; and a ledger carried across bouts.
+    public static readonly DuelBot LearnArgmax    = (self, seed) => { var b = Build(seed, self, out _); b.ExploreOverride = false; return b; };
+    public static readonly DuelBot NoLearnExplore = (self, seed) => { var b = Build(seed, self, out _, learn: false); b.ExploreOverride = true; return b; };
+    public static DuelBot Carry(BetLedger shared) => (self, seed) =>
+    {
+        var b = Build(seed, self, out _, learn: false);
+        shared.NewBout();
+        b.Ledger = shared;
+        return b;
+    };
+
     // Without the anti-air moves, for A/B.
     public static readonly DuelBot NoAntiAir = (self, seed) => Build(seed, self, out _, antiAir: false);
 

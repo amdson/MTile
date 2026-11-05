@@ -41,6 +41,8 @@ public sealed class BulldogBot : IRemoteInputSource
     // Opt-in online learning: the controller's bet ledger. Null = no correction and
     // argmax selection (Bulldog's plain highest-score choice). Set before the first Poll.
     public BetLedger Ledger;
+    // Diagnostics: force softmax (true) or argmax (false) selection regardless of Ledger.
+    public bool? ExploreOverride;
     // The controller's value = dealt - Lambda * taken (selection-time weight on the taken
     // channel; Ranger's learner runs dealt-only, 0). Set before the first Poll.
     public float Lambda = 1f;
@@ -119,7 +121,7 @@ public sealed class BulldogBot : IRemoteInputSource
             Ledger  = Ledger,
             Lambda  = Lambda,
             // Without a learner, argmax: the old "highest score wins" brain.
-            Explore = Ledger != null,
+            Explore = ExploreOverride ?? (Ledger != null),
         };
         if (Planner != null) c.Executor.Planner = Planner;
         var stances = new List<Stance> { new ChaseStance(this), new StepOutStance(this) };

@@ -46,6 +46,14 @@ public sealed class BetLedger : IBetLedger
     public int Settled { get; private set; }
     public int OpenCount => _open.Count;
 
+    // Keep the learned offsets but forget the bout: drop open records and the HP baseline.
+    // For a ledger carried from one bout to the next against the same opponent.
+    public void NewBout()
+    {
+        _open.Clear();
+        _hasBaseline = false;
+    }
+
     public Bet Corrected(string name, int bucket, Bet bet)
     {
         if (!_entries.TryGetValue((name, bucket), out var e)) return bet;

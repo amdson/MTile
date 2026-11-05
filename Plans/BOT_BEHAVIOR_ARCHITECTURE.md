@@ -356,7 +356,20 @@ Learner A/B: `MTile.Tests/Sim/ZzzRangerEval.cs`, points of 36 per opponent (3 ar
 
 A wash at this horizon: 60 s bouts give a few dozen settles per arm, and the largest learned offsets are on `BulldogBreaker` (taken +0.5 HP under 40 px) and `DownAirManeuver` (dealt −0.2 in the air). Occupancy: ChaseStance holds Move ~54% of the time, no action is committed ~47% of the time, BulldogString is the top action at 14%. HoldRangeStance ran 0.2% (see Decisions needed). Not verified: the KNI web build (`MTile.Web`) was not compiled during the campaign; the new code uses only plain .NET and XNA types.
 
+**Is the learning doing anything?** (`MTile.Tests/Sim/ZzzLearningEffect.cs`, Release, 2026-11-04.) It changes decisions but not results.
+
+| Ranger variant | Rampart | Citadel | Riposte | Bulldog | Brawler | total /180 | Act decisions changed by the corrections |
+|---|---|---|---|---|---|---|---|
+| ledger + softmax (default) | 28.5 | 25.0 | 14.5 | 29.0 | 36.0 | 133.0 | 8.7% |
+| ledger + argmax | 27.5 | 26.0 | 19.0 | 26.0 | 36.0 | 134.5 | 12.9% |
+| no ledger + argmax | 31.5 | 23.5 | 15.0 | 26.5 | 36.0 | 132.5 | 0 |
+| no ledger + softmax | 28.5 | 26.5 | 14.5 | 28.0 | 34.5 | 132.0 | 0 |
+
+One ledger carried across 6 sequential bouts against the same opponent: bouts 1–2 scored 45.0 and bouts 5–6 scored 44.0 (of 60); a fresh ledger each bout scored 43.0 then 46.0. No adaptation trend. The mechanism is live (offsets of up to 0.5 HP against ladder gaps of 0.01–0.3, and 9–13% of Act contests resolve differently), the ledger's unit tests show the corrections converge, and the totals of all four variants sit inside seed noise. The one repeatable exception is Riposte, the model-driven opponent, where learning gained 3.5–4 of 36 in both the argmax and the carried runs.
+
 ## Decisions needed
+
+- **The learner is mechanically working and strategically idle.** Three readings, not mutually exclusive: (1) 24 situation buckets × arm cannot represent what beats a given opponent, which is usually "when they do X at range Y"; the bucket would need opponent-habit features. (2) The Score gates leave 1–2 applicable actions per contest, so most of the 9–13% divergence is Idle-vs-action flips that do not change the fight. (3) Match points are too coarse a metric: measure per-decision regret (realised HP vs the best arm's realised HP in that bucket, in hindsight) before concluding anything. Recommended next step: (3) first, since it is cheap and decides between (1) and (2).
 
 - **Stances cannot explore.** Stance hysteresis compares the softmax-sampled candidate against the holder plus PreemptGap + StayBonus (0.35 HP), so a new stance like HoldRange (value 0 vs Chase's −0.1) is sampled but never acquires Move, never opens a record, and so never learns (0.1% occupancy in the A/B). Options: an epsilon that lets a sampled stance take Move for one horizon without the gap; or an optimistic initial offset for arms with zero settles; or accept that stances are hand-ordered and only actions learn. Not decided in the campaign: it changes what "no minimum-hold timers" means in practice.
 - **BulldogBreaker is the learner's clearest signal.** Its dealt offset settles at about −0.8 HP under 40 px against the whole field, i.e. the combo-break guard almost never leads to damage within its horizon. Whether to shorten its horizon, let the ledger keep demoting it, or revisit the maneuver is a design call.
