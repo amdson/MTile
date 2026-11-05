@@ -39,6 +39,17 @@ public sealed class DownAirManeuver : BotManeuver
         return 0f;
     }
 
+    // Bet (M4): DownAirSlash outer box 1.0 HP (sweet 2.0).
+    //   airborne over them: ~65% (0.75), 16 f + 19 f lag in the air ~0.16, 30 f (0.59, just
+    //   under a string on a flinching target, Score 1.3 too and earlier in the list);
+    //   hop in from 44-80 px: ~45%, the hop telegraphs (0.2 taken), hop + chop ~ 60 f.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return s >= 1f ? new Bet(0.75f, 0.16f, 30) : new Bet(0.45f, 0.2f, 60);
+    }
+
     public override void Begin(BotView v) { _t = 0; _grounded0 = v.Grounded; _clicked = false; }
 
     public override bool Step(BotView v, ref PlayerInput input)

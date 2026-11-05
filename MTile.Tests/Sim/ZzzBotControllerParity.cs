@@ -22,6 +22,14 @@
 //   Ranger vs Brawler            23.5/24  K/D 93/39  dmg 489.4/271.1
 //   Ranger vs Riposte            11.5/24  K/D 61/64  dmg 367.7/375.5
 //   Ranger-NoLearn vs Brawler    24.0/24  K/D 80/43  dmg 457.2/272.8
+//
+// after M4 bets (hand-authored HP bets on every Bulldog-family maneuver + both stances; Score
+// ties broken in list order by explicit 0.01 steps, since float ulps had reordered them):
+//   Bulldog vs Brawler           23.0/24  K/D 74/45  dmg 423.1/294.5
+//   Ranger vs Brawler            24.0/24  K/D 90/31  dmg 478.0/254.1
+//   Ranger vs Riposte            14.0/24  K/D 66/63  dmg 381.1/370.0
+//   Ranger-NoLearn vs Brawler    24.0/24  K/D 80/43  dmg 457.2/272.8
+//   (Bulldog and NoLearn are bit-identical to M3: argmax over the bets keeps Score's order.)
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;

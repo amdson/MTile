@@ -123,6 +123,19 @@ public sealed class WallUpManeuver : BotManeuver
         return 0.4f;
     }
 
+    // Bet (M4): a 5-tile column deals nothing; it is avoided taken. Build ~45 f + the threat's arrival.
+    //   crystal wave: cuts up to 1.5 HP ~45% (-0.65); a charging shot ~1 HP ~60% (-0.58);
+    //   low HP and closing: buys regen (-0.54); a plain approach: (-0.15).
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        if (s >= 1.35f) return new Bet(0f, -0.65f, 60);
+        if (s >= 1.25f) return new Bet(0f, -0.58f, 60);
+        if (s >= 1.15f) return new Bet(0f, -0.54f, 60);
+        return new Bet(0f, -0.15f, 60);
+    }
+
     // The wall column and its ground row. Starts at the first column clear of our own
     // body on side `dir` and walks outward a couple of cells until one fits; `beyondX`
     // (the target, or a crystal wave's nearest edge) must stay on the far side of it.

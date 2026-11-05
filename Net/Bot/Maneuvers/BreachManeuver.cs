@@ -41,6 +41,16 @@ public sealed class BreachManeuver : BotManeuver
         return _stuck >= StuckNeeded ? Utility : 0f;
     }
 
+    // Bet (M4): positional: digging through deals nothing itself; the fight it reopens is worth
+    // ~0.45 over the dig (a few 14 f swings + walking in ~ 120 f); a barricade shields us (0.04).
+    // 0.41: over WhiffPunish (also Score 0.9, later in the list).
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.45f, 0.04f, 120);
+    }
+
     public override void Begin(BotView v) { _frames = 0; _sinceTap = SwingGap; }
 
     public override bool Step(BotView v, ref PlayerInput input)

@@ -59,6 +59,16 @@ public sealed class RangerBlockThrowManeuver : BotManeuver
         return BlockThrowManeuver.FindBlock(v).HasValue ? 1.2f : 0f;
     }
 
+    // Bet (M4): aimed clod ~1 HP on a hit (impact), ~60% at 60-280 px; planted at range, little
+    // comes back (0.07); 14 paint + <=50 pull + 4 carry + 5 swipe + flight ~ 90 f.
+    // 0.53: under the stab / dash (Score 1.2 ties, earlier in the list), over the wave.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.6f, 0.07f, 90);
+    }
+
     public override void Begin(BotView v)
     {
         _block = BlockThrowManeuver.FindBlock(v) ?? v.Me;

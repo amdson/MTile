@@ -20,6 +20,15 @@ public sealed class EscapeGrabManeuver : BotManeuver
     // Dominates everything: nothing else can be done while held.
     public override float Score(BotView v) => v.Self.Combat.GrabbedActive ? 10f : 0f;
 
+    // Bet (M4): GrabbedSlash mashes chip the grabber (~0.2); staying held eats the throw and its
+    // follow-up (~1.5, as avoided taken); three breaking hits at ~9 f lag + the lean ~40 f.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.2f, -1.5f, 40);
+    }
+
     public override bool Step(BotView v, ref PlayerInput input)
     {
         if (!v.Self.Combat.GrabbedActive) return false;

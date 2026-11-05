@@ -37,6 +37,15 @@ public sealed class BulldogGuard : BotManeuver
         return 1.5f;
     }
 
+    // Bet (M4): slow moves only, so the parry lands ~80% -> retaliate 0.5 ~0.4; a stab / hammer /
+    // S3 (~0.75 HP) avoided ~40% (-0.3); 22 f guard + 10 retaliate. 0.70: just under the stock Guard.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.4f, -0.3f, 32);
+    }
+
     public override void Begin(BotView v) { _phase = Phase.Guard; _t = 0; _quiet = 0; }
 
     public override bool Step(BotView v, ref PlayerInput input)

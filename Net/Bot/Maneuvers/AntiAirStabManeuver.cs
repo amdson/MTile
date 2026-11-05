@@ -47,6 +47,15 @@ public sealed class AntiAirStabManeuver : BotManeuver
         return 1.4f;
     }
 
+    // Bet (M4): stab straight up, 0.75 + launch ~60% (0.55); a stab that beats the descent
+    // avoids ~0.08 (0.63, after the jump slash); 14 f hold + 36 f stab ~ 50 f.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.55f, -0.08f, 50);
+    }
+
     public override void Begin(BotView v) => _i = 0;
 
     public override bool Step(BotView v, ref PlayerInput input)

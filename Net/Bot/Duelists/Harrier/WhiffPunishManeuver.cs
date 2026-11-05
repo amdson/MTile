@@ -93,6 +93,16 @@ public sealed class WhiffPunishManeuver : BotManeuver
         return Utility;
     }
 
+    // Bet (M4): bait at stab range, DashSlash a seen whiff: 0.5 HP, ~1 punish per bait lands
+    // (0.5); the bait eats a stab now and then (0.1); bait ~60 f + dash/cut ~30 f. Value 0.40,
+    // just under an in-range string (0.45), as Score 0.9 sat under 1.0.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.5f, 0.1f, 90);
+    }
+
     public override void Begin(BotView v)
     {
         _phase = Phase.Bait; _t = 0; _dir = 1; Baits++;

@@ -49,6 +49,19 @@ public sealed class BulldogString : BotManeuver
         return _s.TargetHelpless ? 1.3f : 1.0f;
     }
 
+    // Bet (M4): string = 3 taps (0/13/28) + the 36 f tail ~ 55 f; 1.5 HP when it lands.
+    //   flinching target: S1 lands, S2/S3 drop out of halved hitstun ext. ~0.9; tail in face 0.3;
+    //   neutral: ~45% vs a guard-happy opponent (0.7), trading S1s ~0.25;
+    //   into a guard: the hit-confirmed opener only, 0.2 / 0.1 over ~30 f.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        if (s >= 1.2f) return new Bet(0.9f, 0.3f, 55);
+        if (s >= 0.9f) return new Bet(0.7f, 0.25f, 55);
+        return new Bet(0.2f, 0.1f, 30);
+    }
+
     public override void Begin(BotView v) { _t = 0; _hp0 = _s.TargetHp; _sawFinisher = false; }
 
     public override bool Step(BotView v, ref PlayerInput input)
@@ -115,6 +128,16 @@ public sealed class BulldogGrab : BotManeuver
         if (BulldogKit.Guarding(v)) return 1.6f;
         if (_s.TargetHelpless) return 0f;            // a flinching target eats the string instead
         return _s.Mix < MixShare ? 1.05f : 0f;
+    }
+
+    // Bet (M4): throw into a wall / floor ~1 HP; vs a planted guard the 20 f startup lands ~80%
+    // (0.8, ~0 taken); as a blind mix-up ~60% and a whiffed grab eats a punish (0.13).
+    // 4 face + 22 windup + 8 carry + 5 swipe + 18 end lag ~ 60 f.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return s >= 1.5f ? new Bet(0.8f, 0.05f, 60) : new Bet(0.6f, 0.13f, 60);
     }
 
     public override void Begin(BotView v) { _phase = Phase.Face; _t = 0; }
@@ -189,6 +212,16 @@ public sealed class BulldogStab : BotManeuver
         return finisher && _s.TargetHelpless ? 1.4f : 0f;
     }
 
+    // Bet (M4): stab = launcher, 0.75 HP + crush into terrain; 14 f hold + 36 f stab ~ 50 f.
+    //   finisher on a flinching <=1 HP target: (0.75, 0.09); lunge from 36-80 px ~70%: (0.72, 0.15).
+    // Values 0.66 / 0.57 top their Score ties (1.4 / 1.2), as list order did.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return s >= 1.3f ? new Bet(0.75f, 0.09f, 50) : new Bet(0.72f, 0.15f, 50);
+    }
+
     public override void Begin(BotView v) => _i = 0;
 
     public override bool Step(BotView v, ref PlayerInput input)
@@ -226,6 +259,16 @@ public sealed class BulldogCrossUp : BotManeuver
         if (_s.TargetHelpless) return 0f;
         bool roll = _s.Mix >= MixLo && _s.Mix < MixHi;
         return roll && MathF.Abs(v.Dx) <= LaunchRangeX && MathF.Abs(v.Dx) >= 16f && MathF.Abs(v.Dy) <= 20f ? 1.05f : 0f;
+    }
+
+    // Bet (M4): back whip-kick 0.5 + launch (~0.75) at a turned opponent ~80% -> 0.6.
+    //   already airborne behind them: ~30 f kick, ~0 taken (0.56); from the ground: hop ~30 f + kick,
+    //   a read hop eats ~0.13, 60 f.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return s >= 1.1f ? new Bet(0.6f, 0.04f, 30) : new Bet(0.6f, 0.13f, 60);
     }
 
     public override void Begin(BotView v) { _t = 0; _gi = 0; _inGesture = false; _facing = v.Facing; }
@@ -286,6 +329,18 @@ public sealed class BulldogLowPoke : BotManeuver
         return _s.Mix >= MixLo && _s.Mix < MixHi ? 1.05f : 0f;
     }
 
+    // Bet (M4): CrouchSlash 0.5, 3 f crouch + 14 f slash (9 f tail) ~ 20 f.
+    //   long poke at 50-64 px, past every standing normal: ~90%, ~0 taken (0.45);
+    //   a low target only it reaches: ~all (0.5); mix branch: 0.5, short tail 0.03.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        if (s >= 1.13f) return new Bet(0.45f, 0f, 20);
+        if (s >= 1.08f) return new Bet(0.5f, 0f, 20);
+        return new Bet(0.5f, 0.03f, 20);
+    }
+
     public override void Begin(BotView v) => _t = 0;
 
     public override bool Step(BotView v, ref PlayerInput input)
@@ -326,6 +381,15 @@ public sealed class BulldogBreaker : BotManeuver
         if (c.GuardOnCooldown(v.SelfFrame)) return 0f;
         if (!Opener(v.TargetAction) || v.Dist > Range) return 0f;
         return 5f;
+    }
+
+    // Bet (M4): parry the combo's 2nd hit -> retaliate 0.5 ~80% (0.4); skips the rest of a
+    // 1.5 HP string (~1.1 avoided); 12 f hold + 10 retaliate + slack. Second only to EscapeGrab.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.4f, -1.1f, 25);
     }
 
     public override void Begin(BotView v) { _t = 0; _ret = false; }

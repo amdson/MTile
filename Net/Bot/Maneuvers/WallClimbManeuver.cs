@@ -49,6 +49,16 @@ public sealed class WallClimbManeuver : BotManeuver
         return 0f;
     }
 
+    // Bet (M4): positional: a target 3+ tiles up is unreachable otherwise; ~0.68 HP of fight on
+    // arrival over a ~2 s climb (kick-offs + ledge pull, 120 f); nothing reaches a wall-slider. (0.68:
+    // under the two guards, which share Score 1.5 and come first in the list.)
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.68f, 0f, 120);
+    }
+
     public override void Begin(BotView v) { _t = 0; _side = v.Toward; }
 
     private bool WallAhead(BotView v, float tiles)

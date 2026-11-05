@@ -72,6 +72,16 @@ public sealed class RouteManeuver : BotManeuver
         return Worth(v, _cached, _cachedReached) ? Utility : 0f;
     }
 
+    // Bet (M4), for consistency only (RoutePlanner.Wants reads Score; nothing registers this as a
+    // behaviour, and Score keeps replan bookkeeping, so don't call both per frame): a climb/build
+    // route reaches a fight the chase can't, ~0.6 on arrival; exposed while building (0.1); ~3 s.
+    public override Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        if (s <= 0f) return Net.Bet.Pass;
+        return new Bet(0.6f, 0.1f, 180);
+    }
+
     // Route only when the path needs a climb or a build — the cases the straight chase
     // (Bulldog's walk-and-jump-at-them) can't do. While this maneuver runs it owns the
     // bot and no attack can fire, so routing on mere hops cost real fights.

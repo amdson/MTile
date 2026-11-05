@@ -41,7 +41,10 @@ public abstract class BotManeuver
 
     // The HP bet (dealt, taken, horizon) used for selection and corrected by the bet
     // ledger. Default: derived from Score with a stock slash (score 1) ≈ 0.5 HP over 90
-    // frames; M4 replaces these with hand-authored bets per maneuver.
+    // frames. Every maneuver BotController runs (the Bulldog family) overrides it with a
+    // hand-authored bet (M4) that passes exactly when Score <= 0. Convention: Taken is
+    // relative to the implicit Idle arm's 0, so a defensive move bets the HP it avoids as a
+    // negative taken (Plans/BOT_BEHAVIOR_ARCHITECTURE.md, "Learning: bets").
     public virtual Bet Bet(BotView v)
     {
         float s = Score(v);

@@ -7,10 +7,11 @@ namespace MTile.Net;
 // BulldogBot.Locomote split into two stances. The stuck hop, hop-at-a-target-above and
 // air steer are the controller's MoveExecutor, aimed at whichever stance's Target runs.
 //
-// Bets are HP guesses, placeholders until M4 tunes them. What matters now is the order:
-// while StepOut applies its value (+0.3) beats Chase's (-0.1) by more than the
-// controller's PreemptGap + StayBonus (0.35), and Chase also passes then, so StepOut
-// takes Move even with a learner correcting both.
+// Bets (M4, hand-authored, HP): Chase (0.25, 0.4, 60) = -0.15, StepOut (0, -0.25, 20) = +0.25.
+// The order is what matters: while StepOut applies its value beats Chase's by more than the
+// controller's PreemptGap + StayBonus (0.35), and Chase also passes then, so StepOut takes
+// Move even with a learner correcting both. Both stay low enough that a reflex (CornerEscape
+// 0.60, AntiAirSidestep 0.64) clears either by more than PreemptGap.
 
 // Walk into the opponent's face: stop once inside EngageRange (inside slash reach, so the
 // opponent is always within one swing).
@@ -19,7 +20,9 @@ public sealed class ChaseStance : Stance
     private readonly BulldogBot _bot;
     public ChaseStance(BulldogBot bot) { _bot = bot; }
 
-    public override Bet Bet(BotView v) => StepOutStance.Applies(_bot, v) ? Net.Bet.Pass : new Bet(0.2f, 0.3f, 60);
+    // Walking into a duel for a second: the in-face exchanges cut both ways, and the walk-in
+    // eats the first swing more often than it throws one (0.25 dealt, 0.4 taken over 60 f).
+    public override Bet Bet(BotView v) => StepOutStance.Applies(_bot, v) ? Net.Bet.Pass : new Bet(0.25f, 0.4f, 60);
 
     // The opponent itself, with the walk tolerance = EngageRange: the executor walks while
     // |dx| > EngageRange, hops at a target well above, and air-steers at the opponent
@@ -44,7 +47,9 @@ public sealed class StepOutStance : Stance
         return lagLeft > bot.RetreatUntil && MathF.Abs(v.Dx) < bot.RetreatDist && MathF.Abs(v.Dy) < 40f;
     }
 
-    public override Bet Bet(BotView v) => Applies(_bot, v) ? new Bet(0.3f, 0f, 20) : Net.Bet.Pass;
+    // Out of reach for the rest of our lag: deals nothing, avoids the ~0.5 HP punish about half
+    // the time (-0.25 taken) over the ~20 f it applies.
+    public override Bet Bet(BotView v) => Applies(_bot, v) ? new Bet(0f, -0.25f, 20) : Net.Bet.Pass;
 
     // RetreatDist from the opponent on our side, at our own height; tolerance 0 so it keeps
     // backing off for as long as it applies (which already requires |dx| < RetreatDist).
