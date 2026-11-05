@@ -289,7 +289,11 @@ public class BotManeuverControllerTests
         Assert.Equal(MoveKeys.All, guard.Move.Forbidden);
         Assert.Equal("GuardManeuver", guard.Name);
 
-        Assert.Equal(Category.Reflex, new ManeuverBehaviour(new DashManeuver()).Category);
+        Assert.Equal(Category.Reflex, new ManeuverBehaviour(new CornerEscapeManeuver()).Category);
+        // Parity: a maneuver that runs under the default chase today stays Move=None.
+        var dash = new ManeuverBehaviour(new DashManeuver());
+        Assert.Equal(Category.Action, dash.Category);
+        Assert.Equal(MoveClaim.Mode.None, dash.Move.Kind);
 
         var v = View();
         var fm = new FakeManeuver(false) { S = 2f };

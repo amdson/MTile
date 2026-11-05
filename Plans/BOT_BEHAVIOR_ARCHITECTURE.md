@@ -268,7 +268,7 @@ Commit per milestone; commit only files this work touches (the working tree has 
 uncommitted edits in `Simulation.cs`, `configs/game_config.json`, `todo.txt` and
 `MTile.Tests/Sim/CoopModeTests.cs` that must stay out of these commits).
 
-[~] **M1. Controller core, no brain changes.**
+[x] **M1. Controller core, no brain changes.**
 `BotBehaviour` (Name, Category, MoveClaim, Cooldown, `Bet`, `Begin`, `Step`, `Aborted`),
 `Stance : BotBehaviour` (`Target(view) → Vector2`, no Step), `Constraint : BotBehaviour`
 (`Mask(view, ref input)`), `MoveClaim` (None / Exclusive / Forbid(keys)), `Bet`,
@@ -282,7 +282,7 @@ committed Exclusive action and the action gets `Aborted`; a Move-None action and
 hold at the same time; idle arm wins over a negative-value action; only executed arms open
 records.
 
-[ ] **M2. Bulldog on the controller through the adapter.**
+[~] **M2. Bulldog on the controller through the adapter.**
 `BulldogBot.Poll` becomes perception + `controller.Step(v)`. `Locomote` is split into
 `ChaseStance`, `StepOutStance` and the executor. `SpikeGuard` wrapped as a constraint.
 `Harrier`/`Ranger` compile unchanged except `RouteManeuver` moves behind the executor.
@@ -316,6 +316,7 @@ record the regression numbers here under a "Results" heading.
 - 2026-11-04 branch `bot-controller` created from main @1cca026; plan committed @ee57530.
 - Baseline before any change: `scripts/test-group.py bot` = 162 pass / 6 fail / 168, 6 m 47 s. The 6 reds are pre-existing and not touched by this work: BotManeuverMovementTests.Dash_ClosesGap_AndDashSlashes, BotManeuverBurstTests.Burst_CloseInBand_ShovesAndChipsP1, BotManeuverSpacingTests.BotManeuverBackoff_StillHits_ButOverlapsLess, BotManeuverStabTests.AirWhipKick_CrossUp_KicksBackward, BotManeuverAvalancheCrushTests.WallPocket_CrushesP1(3,11,6), BotManeuverAvalancheCrushTests.FreeRoof_CrushesP1(2,29).
 - M1 shared interface committed @eba4362 (Net/Bot/Control/BotBehaviour.cs). Ledger and controller parcels dispatched to two Opus agents in worktrees.
+- M1 done: BetLedger (b362f68), BotController + MoveExecutor + ControllerTrace + ManeuverBehaviour/ManeuverRegistry (5672007), merged; registry trimmed to today's locomotion owners so the adapter is behaviour-neutral (Dash, DownAir, Burst, Brawler BlockThrow, BulldogPunish stay Move=None until M3). 17 new tests green. Controller owns v.FramesSinceManeuver; Idle arm opens ledger records once per horizon when it wins a contest.
 
 ## Decisions needed
 

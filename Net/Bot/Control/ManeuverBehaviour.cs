@@ -46,20 +46,25 @@ public static class ManeuverRegistry
 
     static ManeuverRegistry()
     {
-        // Hold still: guards, pulse, block throws, crystal waves, anti-air stab, escape grab, burst.
+        // Parity rule for the adapter: only maneuvers that already own locomotion today get
+        // a claim here, so running under the controller changes nothing about their input.
+        // Maneuvers that run under the default chase today (Dash, DownAir, Burst, the
+        // Brawler BlockThrow, BulldogPunish) stay Move=None via the default; M3 converts
+        // them natively with the claim they should have.
+
+        // Hold still: guards, pulse, the aimed throws and waves, anti-air stab, escape grab.
         foreach (var t in new[]
                  {
                      typeof(GuardManeuver), typeof(BulldogGuard), typeof(BulldogBreaker), typeof(PulseManeuver),
-                     typeof(BlockThrowManeuver), typeof(RangerBlockThrowManeuver), typeof(CrystalWaveManeuver),
+                     typeof(RangerBlockThrowManeuver), typeof(CrystalWaveManeuver),
                      typeof(RangerCrystalWaveManeuver), typeof(AntiAirStabManeuver), typeof(EscapeGrabManeuver),
-                     typeof(BurstManeuver),
                  })
             Register(t, Category.Action, MoveClaim.Still);
 
         // Movers: they only move.
         foreach (var t in new[]
                  {
-                     typeof(DashManeuver), typeof(CornerEscapeManeuver), typeof(AntiAirSidestepManeuver), typeof(BackoffManeuver),
+                     typeof(CornerEscapeManeuver), typeof(AntiAirSidestepManeuver), typeof(BackoffManeuver),
                  })
             Register(t, Category.Reflex, MoveClaim.Exclusive);
 
@@ -67,9 +72,8 @@ public static class ManeuverRegistry
         foreach (var t in new[]
                  {
                      typeof(AntiAirJumpSlashManeuver), typeof(WhiffPunishManeuver), typeof(AirHammerManeuver),
-                     typeof(AirWhipKickManeuver), typeof(DownAirManeuver), typeof(WallClimbManeuver), typeof(BreachManeuver),
+                     typeof(AirWhipKickManeuver), typeof(WallClimbManeuver), typeof(BreachManeuver),
                      typeof(BuildClimbManeuver), typeof(WallUpManeuver), typeof(EncloseManeuver), typeof(BulldogCrossUp),
-                     typeof(BulldogPunish),
                  })
             Register(t, Category.Action, MoveClaim.Exclusive);
     }
