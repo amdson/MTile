@@ -27,17 +27,22 @@ public static class FrameData
 
     // ── Ground slash combo (S1 → S2 → S3). S1/S2 quote S3's tail: it's only paid
     //    when the chain is dropped, the next step ignores the countdown.
-    public static class GroundSlash1  { public const float Total = 12   / F, Startup =  5   / F, Active = 3    / F, EndLag = 36   / F; }
-    public static class GroundSlash2  { public const float Total = 10.8f/ F, Startup =  4   / F, Active = 3    / F, EndLag = 36   / F; }
-    public static class GroundSlash3  { public const float Total = 16.2f/ F, Startup =  8   / F, Active = 4    / F, EndLag = 36   / F; }
-    public static class CrouchSlash   { public const float Total = 13.8f/ F, Startup =  7   / F, Active = 3    / F, EndLag =  9   / F; }
+    //    EndLag is the WHIFF tail; HitEndLag is stamped instead when the swing connected
+    //    (todo J, 2026-11-05): landing is rewarded, whiffing is the cost. S3's startup is
+    //    7 so the string stays a true combo (S2's full hitstun ends the frame S3 lands).
+    public static class GroundSlash1  { public const float Total = 12   / F, Startup =  5   / F, Active = 3    / F, EndLag = 36   / F, HitEndLag = 18 / F; }
+    public static class GroundSlash2  { public const float Total = 10.8f/ F, Startup =  4   / F, Active = 3    / F, EndLag = 36   / F, HitEndLag = 18 / F; }
+    public static class GroundSlash3  { public const float Total = 16.2f/ F, Startup =  7   / F, Active = 4    / F, EndLag = 36   / F, HitEndLag = 18 / F; }
+    public static class CrouchSlash   { public const float Total = 13.8f/ F, Startup =  7   / F, Active = 3    / F, EndLag =  9   / F, HitEndLag =  6 / F; }
 
     // ── Air slashes (AS1 → AS2; AS1 quotes AS2's tail, as above).
-    public static class AirSlash1     { public const float Total = 12   / F, Startup =  6   / F, Active = 3    / F, EndLag = 18f/ F; }
-    public static class AirSlash2     { public const float Total = 13.8f/ F, Startup =  7   / F, Active = 4    / F, EndLag = 18f/ F; }
-    public static class AirTurnSlash  { public const float Total = 12   / F, Startup =  7   / F, Active = 3    / F, EndLag = 19   / F; }
-    public static class DownAirSlash  { public const float Total = 16.2f/ F, Startup = 10   / F, Active = 4    / F, EndLag = 18.8f/ F; }
-    public static class DashSlash     { public const float Total = 10.8f/ F, Startup =  3   / F, Active = 4    / F, EndLag = 33   / F; }
+    public static class AirSlash1     { public const float Total = 12   / F, Startup =  6   / F, Active = 3    / F, EndLag = 18f/ F, HitEndLag = 10 / F; }
+    public static class AirSlash2     { public const float Total = 13.8f/ F, Startup =  7   / F, Active = 4    / F, EndLag = 18f/ F, HitEndLag = 10 / F; }
+    public static class AirTurnSlash  { public const float Total = 12   / F, Startup =  7   / F, Active = 3    / F, EndLag = 19   / F, HitEndLag = 10 / F; }
+    public static class DownAirSlash  { public const float Total = 16.2f/ F, Startup = 10   / F, Active = 4    / F, EndLag = 18.8f/ F, HitEndLag = 10 / F; }
+    // DashSlash (todo I): a space-creating poke. 8f startup (was 3 - a reaction tool), a
+    // short tail on a connect, the full 33f tail + spent air dash on a whiff.
+    public static class DashSlash     { public const float Total = 13   / F, Startup =  8   / F, Active = 4    / F, EndLag = 33   / F, HitEndLag = 12 / F; }
 
     // ── Counters / struggle. GrabbedSlash keeps SlashLikeAction's legacy window
     //    (20% → 70% of Total): the mash is its own rhythm.
@@ -56,10 +61,12 @@ public static class FrameData
     public static class BlockBurstAction { public const float Total = 15.6f / F,                             EndLag = 10.8f / F; }
     public static class LobbedAreaAction { public const float Startup = 24 / F,                             EndLag = 12    / F; }   // min charge to throw
     public static class BlockGrabAction  { public const float                    Active = 36 / F,           EndLag = 12    / F; }   // wait for a drag / tether
-    // Startup: committed but holding nothing — the telegraphed wind-up (20f: 12 was too
-    // short to read). Active: the longest hold before the auto-throw. EndLag: the recovery
-    // the throw / whiff clips play over (GrabAction.Throw / GrabAction.Whiff).
-    public static class GrabAction       { public const float Startup = 20 / F,  Active = 72 / F,                 EndLag = 18 / F; }
+    // Startup: committed but holding nothing — the wind-up (6f since 2026-11-05, todo F:
+    // a grab has to catch a victim coming out of something; 20 never could). Active: the
+    // longest hold before the auto-throw. EndLag: the recovery the throw / whiff clips
+    // play over (GrabAction.Throw / GrabAction.Whiff). A grab never latches a victim who
+    // is launched, stunned or in hitstun (Hurtbox.Helpless) - that is the anti-regrab.
+    public static class GrabAction       { public const float Startup =  6 / F,  Active = 72 / F,                 EndLag = 18 / F; }   // 6f: Smash's grab (todo F); was 20
 }
 
 // Concurrent second FSM, owned by PlayerCharacter alongside the MovementState FSM.
@@ -608,6 +615,14 @@ public abstract class SlashLikeAction : ActionState
     // harder in every sense. 1.0 for every stock slash; DownAirSlash
     // raises it because it's the slowest, most committed swing in the air kit.
     protected virtual  float   DamageScale         => 1f;
+    // Multiplier on what a connect takes off a BODY only (tile dig stays on DamageScale) -
+    // the damage spread (todo F, 2026-11-05): a stock slash is 0.5 HP; pokes 0.5x, mids
+    // 0.7-1.0x, the finishers 1.2x.
+    protected virtual  float   BodyDamageScale     => 1f;
+    // Launch (Physics/Launch.cs) on a connect: 0 = plain knockback. The finishers carry one
+    // so a hit pushes the victim past slash reach (todo H).
+    protected virtual  float   LaunchDecay         => 0f;
+    protected virtual  float   LaunchImpactMass    => 1f;
     // Collision-mode strike speed (px/s), stacked on the attacker's velocity at
     // publish. 0 (default) ⇒ the variant publishes legacy Impulse mode: the
     // hold-slashes (S1/S2) keep their designed tap so the hold field isn't
@@ -839,8 +854,11 @@ public abstract class SlashLikeAction : ActionState
                 region, vars.HitId, SlashDamagePerFrame * DamageScale,
                 vars.AttackDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, SlashColor,
+                bodyDamage: SlashDamagePerFrame * DamageScale * BodyDamageScale,
                 hitstunSecondsOverride: HitstunSecondsOverride,
                 stunSeconds: StunSeconds,
+                launchDecay: LaunchDecay,
+                launchImpactMass: LaunchImpactMass,
                 grabStrengthDamage: GrabStrengthDamage,
                 recoilScale: RecoilScale,
                 recoilBreakProtected: RecoilBreakProtected,
@@ -936,6 +954,7 @@ public class GroundSlash1 : SlashLikeAction
     protected override bool  RequireAir          => false;
     protected override float HitstunSecondsOverride => 0.30f;
     protected override bool  HoldVictims         => false;
+    protected override float BodyDamageScale     => 0.5f;    // poke: 0.25 HP
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
         // Hit-confirm (`connected`) is tracked but intentionally does NOT gate the
@@ -948,7 +967,7 @@ public class GroundSlash1 : SlashLikeAction
         ConditionState.SetForSeconds(ref c.Slash2Ready, ref c.Slash2ExpireFrame, 1.0f, f, dt);
         // Leaving the combo pays the finisher's tail (36f, 2026-10-18); the next combo
         // step ignores the countdown, so continuing stays lag-free.
-        c.StampRecoveryForSeconds(FrameData.GroundSlash1.EndLag, f, dt);
+        c.StampRecoveryForSeconds(connected ? FrameData.GroundSlash1.HitEndLag : FrameData.GroundSlash1.EndLag, f, dt);
         OpenComboGap(c, f, dt);
     }
 }
@@ -968,6 +987,7 @@ public class GroundSlash2 : SlashLikeAction
     protected override bool  RequireAir          => false;
     protected override float HitstunSecondsOverride => 0.30f;
     protected override bool  HoldVictims         => false;
+    protected override float BodyDamageScale     => 0.6f;    // poke: 0.30 HP
 
     // Combo moves preempt Recovery via higher passive priority.
     public override int PassivePriority => 50;
@@ -983,7 +1003,7 @@ public class GroundSlash2 : SlashLikeAction
     {
         // `connected` tracked but not gating — see GroundSlash1.OnExitSetFlags.
         ConditionState.SetForSeconds(ref c.Slash3Ready, ref c.Slash3ExpireFrame, 1.0f, f, dt);
-        c.StampRecoveryForSeconds(FrameData.GroundSlash2.EndLag, f, dt);   // see GroundSlash1
+        c.StampRecoveryForSeconds(connected ? FrameData.GroundSlash2.HitEndLag : FrameData.GroundSlash2.EndLag, f, dt);   // see GroundSlash1
         OpenComboGap(c, f, dt);
     }
 }
@@ -999,6 +1019,15 @@ public class GroundSlash3 : SlashLikeAction
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 140f;
     protected override float StrikeSpeed         => 300f;    // the combo launcher — 225 px/s on a player
+    protected override float BodyDamageScale     => 1.2f;    // finisher: 0.60 HP
+    protected override float HitstunSecondsOverride => 0.75f;   // safe on hit (todo H): past its own ~9+18f post-hit tail
+    protected override float LaunchDecay         => 350f;    // ~169 px/s applied -> ~40px carry, past slash reach
+    // Light armor through the wind-up and swing (grounded by RequireGround): tanks the
+    // 100 px/s pokes (S1/S2) so the finisher can't be jabbed out of its startup, not a
+    // crouch slash (150) or anything heavier (todo K6).
+    private const float ArmorStrength = 110f;
+    public override float ArmorProfile(in ActionVars vars)
+        => vars.TimeInState < HurtboxStartSeconds + HurtboxActiveSeconds ? ArmorStrength : 0f;
     protected override Color SlashColor          => Color.OrangeRed;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -1017,7 +1046,7 @@ public class GroundSlash3 : SlashLikeAction
         // End of chain — no further combo flag. The finisher pays the long tail
         // (retime: 18f — the launch is the reward, the lag is the price; doubled to
         // 36f 2026-10-18).
-        c.StampRecoveryForSeconds(FrameData.GroundSlash3.EndLag, f, dt);
+        c.StampRecoveryForSeconds(connected ? FrameData.GroundSlash3.HitEndLag : FrameData.GroundSlash3.EndLag, f, dt);
     }
 }
 
@@ -1035,6 +1064,7 @@ public class CrouchSlash : SlashLikeAction
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 150f;
     protected override float StrikeSpeed         => 200f;
+    protected override float BodyDamageScale     => 0.8f;    // mid: 0.40 HP
     protected override Color SlashColor          => Color.Goldenrod;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
@@ -1061,7 +1091,7 @@ public class CrouchSlash : SlashLikeAction
     // (dtilt-like): the low poke is the safest normal in the kit.
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        c.StampRecoveryForSeconds(FrameData.CrouchSlash.EndLag, f, dt);
+        c.StampRecoveryForSeconds(connected ? FrameData.CrouchSlash.HitEndLag : FrameData.CrouchSlash.EndLag, f, dt);
     }
 }
 
@@ -1078,6 +1108,7 @@ public class AirSlash1 : SlashLikeAction
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 110f;
     protected override float StrikeSpeed         => 150f;
+    protected override float BodyDamageScale     => 0.7f;    // mid: 0.35 HP
     protected override Color SlashColor          => Color.DeepSkyBlue;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
@@ -1087,7 +1118,7 @@ public class AirSlash1 : SlashLikeAction
         ConditionState.SetForSeconds(ref c.AirSlash2Ready, ref c.AirSlash2ExpireFrame, 1.0f, f, dt);
         // Leaving the air combo pays AirSlash2's tail (28f, 2026-10-18); AirSlash2
         // itself ignores the countdown.
-        c.StampRecoveryForSeconds(FrameData.AirSlash1.EndLag, f, dt);
+        c.StampRecoveryForSeconds(connected ? FrameData.AirSlash1.HitEndLag : FrameData.AirSlash1.EndLag, f, dt);
         OpenComboGap(c, f, dt);
     }
 }
@@ -1119,7 +1150,7 @@ public class AirSlash2 : SlashLikeAction
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
         // Air finisher's tail: 14f, doubled to 28f 2026-10-18.
-        c.StampRecoveryForSeconds(FrameData.AirSlash2.EndLag, f, dt);
+        c.StampRecoveryForSeconds(connected ? FrameData.AirSlash2.HitEndLag : FrameData.AirSlash2.EndLag, f, dt);
     }
 }
 
@@ -1138,6 +1169,7 @@ public class AirTurnSlash : SlashLikeAction
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 150f;
     protected override float StrikeSpeed         => 200f;
+    protected override float BodyDamageScale     => 0.8f;    // mid: 0.40 HP
     protected override Color SlashColor          => Color.Violet;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => true;
@@ -1169,7 +1201,7 @@ public class AirTurnSlash : SlashLikeAction
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
         // No combo follow-up — turn-around is one-and-done.
-        c.StampRecoveryForSeconds(FrameData.AirTurnSlash.EndLag, f, dt);
+        c.StampRecoveryForSeconds(connected ? FrameData.AirTurnSlash.HitEndLag : FrameData.AirTurnSlash.EndLag, f, dt);
     }
 }
 
@@ -1287,7 +1319,7 @@ public class DownAirSlash : SlashLikeAction
     // still roll into the next down-air on the enemy below, one readable beat later.
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        c.StampRecoveryForSeconds(FrameData.DownAirSlash.EndLag, f, dt);
+        c.StampRecoveryForSeconds(connected ? FrameData.DownAirSlash.HitEndLag : FrameData.DownAirSlash.EndLag, f, dt);
     }
 
     // Replaces the base's plain `Velocity += recoil` on an ENTITY connect (see the
@@ -1397,7 +1429,11 @@ public class StabAction : ActionState
     // What a stab takes off a BODY before the dive/charge boosts: 1.5× a stock slash
     // (0.75 HP). Split from DamagePerFrame so the dig stays tuned on its own — the
     // launcher should hurt more without carving more.
-    private const float BodyDamageBase        = 1.5f * SlashLikeAction.SlashDamagePerFrame;
+    private const float BodyDamageBase        = 1.8f * SlashLikeAction.SlashDamagePerFrame;   // 0.9 HP (todo F; was 1.5x = 0.75)
+    // Ceiling on dive x charge for BODY damage: a max stab is ~2.25 HP, not 4.5 (todo F).
+    private const float MaxCombinedBoost      = 2.5f;
+    // Safe on hit (todo H): past the stab's own ~25f remaining + 24f tail.
+    private const float HitstunSeconds        = 0.85f;
     // Collision-mode striker (HitResolver.Resolve): the stab is a virtual body
     // flying at StrikeSpeed along the thrust, on top of the attacker's real
     // velocity — so a dive stab genuinely hits (and pogos) harder than a
@@ -1570,9 +1606,11 @@ public class StabAction : ActionState
     // by anything but another stab — armor that was tuned to lose to the combo
     // finisher (Slash3, now u 300) would silently have started beating it.
     // 190 → 143 (2026-11-02): ×0.75 with the move to comparing the victim's dv.
+    // Grounded only (todo K6): plant your feet to not get interrupted; the dive stab is
+    // its own reward and can be knocked out of the air.
     private const float ArmorStrength = 143f;
     public override float ArmorProfile(in ActionVars vars)
-        => vars.TimeInState < HurtboxStartTime + HurtboxActiveDuration ? ArmorStrength : 0f;
+        => vars.IsGrounded && vars.TimeInState < HurtboxStartTime + HurtboxActiveDuration ? ArmorStrength : 0f;
 
     // Larger recovery than slashes — stab can't roll directly into anything.
     // 0.3 → 0.4 (retime): the designated launcher pays the biggest whiff tail.
@@ -1696,7 +1734,7 @@ public class StabAction : ActionState
             // still reads correctly.
             float rotation = MathF.Atan2(vars.StabDir.Y, vars.StabDir.X);
             float dmg = DamagePerFrame * vars.Boost * vars.ChargeBoost;
-            float bodyDmg = BodyDamageBase * vars.Boost * vars.ChargeBoost;
+            float bodyDmg = BodyDamageBase * MathF.Min(vars.Boost * vars.ChargeBoost, MaxCombinedBoost);
 
             // Each box grows from the body out to the LIVE tip (vars.TipExt, the same
             // curve that drives the visible thrust + glow), floored so a point-blank
@@ -1718,6 +1756,7 @@ public class StabAction : ActionState
                 vars.StabDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, ColorFor(vars.IsGrounded),
                 bodyDamage: bodyDmg,
+                hitstunSecondsOverride: HitstunSeconds,
                 shape: primaryPoly, shapePos: primaryCenter, shapeRotation: rotation,
                 recoilScale: RecoilScale, recoilBreakProtected: true,
                 recoilMinMaterialHP: RecoilMinMaterialHP,
@@ -1850,7 +1889,8 @@ public class AirWhipKick : ActionState
     // Tile number per active frame — 5 frames ≈ 1.25 TileMaxHP, so the kick slits dirt
     // along its line and bounces off stone. Body damage is the stock slash's 0.5.
     private const float TileDamagePerFrame    = TileDamage.TileMaxHP / 4f;
-    private const float BodyDamage            = 0.5f;
+    private const float BodyDamage            = 0.6f;   // heavy tier (todo F); the tip sweet spot doubles it
+    private const float HitstunSeconds        = 0.80f;  // safe on hit (todo H)
     // Collision-mode launch (HIT_MOMENTUM_PLAN): between GroundSlash3 (300) and the
     // counter (380), about half the stab's 650. KnockbackMagnitude is the direction
     // hint the parry cone and bullet deflection read, same as the stab's.
@@ -1985,6 +2025,7 @@ public class AirWhipKick : ActionState
             vars.StabDir * KnockbackMagnitude,
             ctx.Faction, ctx.SelfId, color,
             bodyDamage: BodyDamage * damageMult,
+            hitstunSecondsOverride: HitstunSeconds,
             shape: poly, shapePos: center, shapeRotation: rotation,
             mode: KnockbackMode.Collision,
             strikeDir: vars.StabDir,
@@ -2052,7 +2093,11 @@ public class AirHammerAction : ActionState
     // box takes 2× a stock slash off a body; the sweet spot doubles both channels.
     // Over the 4 active frames the outer box digs 1.6 (breaks dirt, chips stone)
     // and the core cell takes another 3.2 on top, so the strike punches a stone hole.
-    private const float OuterBodyDamage = 1.0f;
+    private const float OuterBodyDamage = 0.8f;   // heavy tier (todo F; was 1.0 / sweet 2.0)
+    private const float HitstunSeconds  = 0.80f;  // safe on hit (todo H)
+    // Launch (todo H): the outer box carries ~50px, the sweet spot several screens.
+    private const float LaunchDecay     = 500f;
+    private const float LaunchMass      = 2f;
     private const float OuterTileDamage = TileDamage.TileMaxHP * 0.4f;
     private const float SweetDamageMult = 2f;
 
@@ -2200,7 +2245,10 @@ public class AirHammerAction : ActionState
             maxRecoilSpeed: MaxRecoilSpeed,
             origin: ctx.Body.Position,
             clank: ClankKind.Blunt,
-            stunSeconds: stunSeconds));
+            stunSeconds: stunSeconds,
+            hitstunSecondsOverride: HitstunSeconds,
+            launchDecay: LaunchDecay,
+            launchImpactMass: LaunchMass));
     }
 }
 
@@ -2375,9 +2423,16 @@ public class DashSlash : SlashLikeAction
     protected override float SweepAngleDeg       => 120f;
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 320f;
-    protected override float StrikeSpeed         => 240f;
-    // Mid-burst the body is doing 360 px/s; at full share it would out-launch the stab.
-    protected override float StrikeBodyVelocityShare => 0.25f;
+    // A space-creating poke (todo I, 2026-11-05): no body-velocity share and a modest
+    // strike speed, so the victim's dv (~135) never reaches a stun; the lowest damage in
+    // the kit; a short launch that leaves both players free at the same moment a body
+    // length apart. The reach and the 65px dash burst are what it buys; the whiff tail
+    // (EndLag, air dash spent) is what it costs.
+    protected override float StrikeSpeed         => 180f;
+    protected override float StrikeBodyVelocityShare => 0f;
+    protected override float BodyDamageScale     => 0.4f;    // 0.20 HP
+    protected override float HitstunSecondsOverride => 0.20f;   // 12f, == the hit tail: neutral on hit
+    protected override float LaunchDecay         => 120f;    // ~100 px/s applied -> ~40px of carry
     protected override Color SlashColor          => Color.Aquamarine;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => false;
@@ -2405,7 +2460,7 @@ public class DashSlash : SlashLikeAction
 
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
     {
-        c.StampRecoveryForSeconds(FrameData.DashSlash.EndLag, f, dt);
+        c.StampRecoveryForSeconds(connected ? FrameData.DashSlash.HitEndLag : FrameData.DashSlash.EndLag, f, dt);
     }
 }
 
@@ -2426,6 +2481,7 @@ public class GuardRetaliateAction : SlashLikeAction
     protected override float KnockbackMagnitude  => 280f;     // top of the slash kit — counters reward heavily
     protected override float StrikeSpeed         => 380f;
     protected override float StunSeconds         => CombatState.DefaultStunSeconds;   // the one slash that stuns
+    protected override float BodyDamageScale     => 1.2f;    // counter reward: 0.60 HP
     protected override Color SlashColor          => Color.Cyan;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => false;
@@ -2487,6 +2543,8 @@ public class PulseAction : ActionState
     // Damage per frame matches SlashLikeAction.SlashDamagePerFrame so a sand tile
     // crumbles in one ring-pass and dirt cracks meaningfully — same feel as a slash.
     private const float DamagePerFrame       = TileDamage.TileMaxHP / 2f;
+    private const float BodyDamage           = 0.4f;   // mid tier (todo F); tile dig stays at DamagePerFrame
+    private const float HitstunSeconds       = 0.90f;  // safe on hit (todo H): the ring's long tail
 
 
     public override int ActivePriority  => 30;
@@ -2575,6 +2633,8 @@ public class PulseAction : ActionState
                 region, vars.HitId, DamagePerFrame,
                 dir * KnockbackMagnitude + bodyVel,
                 ctx.Faction, ctx.SelfId, color,
+                bodyDamage: BodyDamage,
+                hitstunSecondsOverride: HitstunSeconds,
                 origin: anchor));
         }
     }
@@ -4186,6 +4246,7 @@ public class GrabAction : ActionState
         {
             if (hb.Target == ctx.SelfId) continue;
             if (hb.Target == current) return current;        // keep hold of who we already have
+            if (hb.Helpless) continue;                       // never regrab a flying / stunned / hitstunned victim
             var center = new Vector2(hb.Region.CenterX, hb.Region.CenterY);
             float d = (center - focus).LengthSquared();
             if (d < bestD) { bestD = d; best = hb.Target; }

@@ -537,7 +537,7 @@ public class MovementConfig
     // from speed v is v²/(2·decay): at 1500, the whip's ~770 px/s sweet spot coasts
     // ≈200 px of launch, an 800 px/s throw ≈210 px. 0 = off (plain velocity, the
     // pre-launch behavior). Sim-affecting; hot-reload is gated off in multiplayer.
-    public float WhipKickLaunchDecay        { get; set; } = 1500f;
+    public float WhipKickLaunchDecay        { get; set; } = 400f;    // was 1500: bled out in 0.13s / 12px (todo H)
     public float ThrowLaunchDecay           { get; set; } = 1500f;
 
     // ── Stab striker (StabAction primary box, Collision mode) ──────────────────────

@@ -145,8 +145,9 @@ public class AirWhipKickTests
         var tip   = StrikeVictimAt(new Vector2(-3.7f * R, Hip), drift);
         var line  = StrikeVictimAt(new Vector2(-1.8f * R, Hip), drift);
 
-        Assert.Equal(0.5f, line.hpLost, 3);
-        Assert.Equal(1.0f, tip.hpLost, 3);
+        // Heavy tier since the 2026-11-05 damage spread: 0.6 on the line, doubled at the tip.
+        Assert.Equal(0.6f, line.hpLost, 3);
+        Assert.Equal(1.2f, tip.hpLost, 3);
         Assert.True(tip.launch > 2f * line.launch,
             $"sweet-spot launch {tip.launch} should far exceed the line's {line.launch}");
     }

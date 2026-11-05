@@ -161,8 +161,9 @@ public class AirHammerTests(ITestOutputHelper output)
         var core  = StrikeVictimAt(new Vector2(0.35f * R,          2.3f * R), drift);
         var outer = StrikeVictimAt(new Vector2(0.35f * R + 1.15f * R, 2.3f * R), drift);
 
-        Assert.Equal(1.0f, outer.hpLost, 3);
-        Assert.Equal(2.0f, core.hpLost, 3);
+        // 0.8 outer / 1.6 sweet since the 2026-11-05 damage spread (was 1.0 / 2.0).
+        Assert.Equal(0.8f, outer.hpLost, 3);
+        Assert.Equal(1.6f, core.hpLost, 3);
         Assert.True(core.launch > 2f * outer.launch,
             $"sweet-spot launch {core.launch} should far exceed the outer box's {outer.launch}");
     }

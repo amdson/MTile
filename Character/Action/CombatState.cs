@@ -372,10 +372,14 @@ public class CombatState
     // real hitstun. `dt` is the caller's fixed timestep for seconds→frames.
     // `muteControl` = false for self-inflicted registration (crush landings):
     // jump still gates, but movement modifiers are left alone.
+    // `chains`: whether this hit counts toward the full-window allowance of a string. An
+    // attack with a source entity does; a hazard tick (spikes, crystals: no source) and a
+    // self-inflicted crush do not - those are streams, and get the halved extension from
+    // their second hit on, as before the hit-count rule.
     public void OnHitRegistered(int currentFrame, float impulse, float dt,
                                 float hitstunSecondsOverride = -1f, bool muteControl = true,
                                 bool hitstop = true, float hitstopStrength = -1f,
-                                float stunSeconds = 0f)
+                                float stunSeconds = 0f, bool chains = true)
     {
         LastHitImpulse   = impulse;
         LastHitFrame     = currentFrame;
@@ -389,7 +393,7 @@ public class CombatState
             : Math.Clamp(impulse * HitstunSecondsPerDv, MinHitstunSeconds, MaxHitstunSeconds);
         int frames = SimFrames.FromSeconds(seconds, dt);
         HitstunChain = HitstunActive ? HitstunChain + 1 : 1;
-        if (HitstunChain > HitstunFullChainHits)
+        if (HitstunChain > HitstunFullChainHits || (!chains && HitstunChain > 1))
             frames = Math.Max(1, (int)(frames * HitstunExtensionScale));
 
         int newHitstunExpire = currentFrame + frames;

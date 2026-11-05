@@ -91,7 +91,7 @@
   "GrabPointMaxSeconds": 0.25,
   // Launch decay (Physics/Launch.cs), px/s² on top of gravity + drag. Coast distance
   // from speed v is v²/(2·decay). 0 = off (plain knockback velocity).
-  "WhipKickLaunchDecay": 1500,
+  "WhipKickLaunchDecay": 400,
   "ThrowLaunchDecay": 1500,
   // Stab striker: heavy + slow ⇒ target Δv → (1+e)·speed, a built-in cap. Speed must
   // stay above ~215 to keep stunning (dv line 210). Launch: low decay, 4× wall-break mass.

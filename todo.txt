@@ -208,13 +208,15 @@ Milestones (status: [ ] todo, [~] in progress, [x] done @commit, [!] blocked, [?
       extension; Launched flag; Hitbox.StunSeconds (explicit stun, first-wins + immunity, no dv-derived stun); crush-stun
       split (240 line, 20f, only after a hit; plain landings never stun); throw = launch + hitstun + 15f stun; retarget
       the pinned tests.
-- [ ] M2 Per-move pass (FrameData / action classes / movement_config): F damage spread + stab multiplier cap; H heavy
+- [x] M2 Per-move pass @M2 (see log) (FrameData / action classes / movement_config): F damage spread + stab multiplier cap; H heavy
       hitstun overrides + launches; true-string margin (S3 startup 7); I DashSlash; J slash tail split; K6 ground armor;
       F grab 6f + G anti-regrab.
 - [ ] M3 Movement: K2 MaxAirSpeed 42; K3 grounded knockback reduction; J opener buffer 12f; L descent-only gravity 0.7
       (+ BallisticPredictor rule); G wall tech.
 - [ ] M4 Bot: regenerate BetCalibration.Field (ZzzLearningEffect.CalibrationDump), bot group green (known reds only),
-      Situation bucket check, league sanity.
+      Situation bucket check, league sanity. Carried from M2: GuardManeuver must time its raise to the predicted hit
+      (perfect window 7f) instead of raising ASAP (BotManeuverPulseGuardTests x2); Rampart vs spikes with the new launches
+      (BotManeuverSpikeGuardTests Rampart row).
 - [ ] M5 Wrap: before/after frame-advantage table from ZzzComboTrace, docs (CODEBASE_OVERVIEW combat paragraph,
       BACKLOG), full sweep, final commit + push.
 
@@ -229,6 +231,21 @@ Milestones (status: [ ] todo, [~] in progress, [x] done @commit, [!] blocked, [?
   test allows equal damage. combat group: 38 red, ALL in the main baseline (39 on a clean main worktree; the one
   "fixed" is the renamed stab test) - no new reds. Traces: whip kick now -5 on hit (was -15; hitstop no longer costs
   the attacker), S2->S3 margin 0-1f (S3 startup trim is M2).
+- M2 2026-11-05: FrameData gains HitEndLag per slash (hit tail ~half: ground 18, air 10, crouch 6; DashSlash 12 vs 33
+  whiff) and S3 startup 7; GrabAction startup 6. SlashLikeAction: BodyDamageScale (body only - tile dig unchanged),
+  LaunchDecay/LaunchImpactMass per variant, bodyDamage passed to the hitbox. Damage spread as proposed (S1 .25, S2 .30,
+  S3 .60, crouch .40, AS1 .35, AS2 .50, AirTurn .40, DownAir .70, counter .60, DashSlash .20, Pulse .40, kick .60/1.2,
+  hammer .80/1.6, stab .90 base with dive x charge capped at 2.5x). Hitstun overrides: S3 .75s, stab .85, kick .80,
+  hammer .80, pulse .90, DashSlash .20. Launches: S3 decay 350, hammer 500 (mass 2), DashSlash 120, whip kick config
+  1500 -> 400. Armor: stab grounded only, S3 110 grounded. DashSlash: startup 8, strike 180, no body share. Anti-regrab:
+  Hurtbox.Helpless (player publishes launched/stunned/hitstun) and GrabAction.PickVictim skips it; test
+  Grab_NeverLatchesAHelplessVictim. Hazard ticks (no source entity) and crushes don't count toward the full-chain
+  allowance (chains:false) so spike streams decay as before. Tests retargeted: AirHammer/AirWhipKick sweet-spot damage,
+  Grab_HoldsNobody_DuringStartup reads FrameData. combat group 40 red vs 39 baseline: the 3 new reds are bot tests
+  carried to M4 (PulseGuard x2: the GuardManeuver raises guard ASAP and never lands the 7f perfect window against a
+  true string - needs a timed raise; SpikeGuard Rampart: launched into the spike carpet by the new hammer/S3 launches);
+  QuillbackEnemyTests.Quillback_BuildsUp went green. Traces: S1->S2->S3 lands fully on a mashing victim (true);
+  whip kick +1 on hit at point blank and carries 37px (was -15 / 12px).
 
 ### Decisions needed / resolved by the campaign
 - RESOLVED (M1): Tumble vs launch. G says Launch drives Tumble but also that launch must not block jump; a movement

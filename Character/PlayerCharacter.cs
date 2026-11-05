@@ -201,7 +201,9 @@ public class PlayerCharacter : IHittable
     public void PublishHurtboxes(HurtboxWorld world)
     {
         if (_hitInvulnRemaining > 0f) return;
-        world.Publish(new Hurtbox(Body.Bounds, Faction, Id));
+        var c = _abilities.Combat;
+        world.Publish(new Hurtbox(Body.Bounds, Faction, Id,
+                                  helpless: c.Launched || c.StunActive || c.HitstunActive));
     }
 
     public Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
@@ -302,7 +304,8 @@ public class PlayerCharacter : IHittable
         _abilities.Combat.OnHitRegistered(_frame, dv * guard.KnockbackScale, _dt,
                                           hit.HitstunSecondsOverride,
                                           hitstopStrength: HitResolver.ImpactStrength(res.Impulse),
-                                          stunSeconds: stunSeconds);
+                                          stunSeconds: stunSeconds,
+                                          chains: !hit.Source.IsNone);
         // Hitstop is frame-neutral: the freeze also pushes this player's own recovery /
         // combo stamps out, as it did the hitstun window inside ApplyHitstop.
         _abilities.Condition.ShiftExpiries(_abilities.Combat.TakeHitstopShift());
@@ -597,7 +600,7 @@ public class PlayerCharacter : IHittable
             _abilities.Combat.AddDamage(WavePinDamage);
             _lastDamageFrame = _frame;
             _abilities.Combat.OnHitRegistered(_frame, SproutCrushImpulseFeel, dt,
-                hitstunSecondsOverride: 0.27f, muteControl: false);
+                hitstunSecondsOverride: 0.27f, muteControl: false, chains: false);
             _lastWavePinFrame = _frame;
             _lastCrushFrame   = _frame;
         }
@@ -628,7 +631,7 @@ public class PlayerCharacter : IHittable
             // only for a slam that followed a hit (CrushStunImpulse).
             _abilities.Combat.OnHitRegistered(_frame, Body.LastCrushImpulse, dt,
                 hitstunSecondsOverride: 0.27f, muteControl: false,
-                stunSeconds: slamStuns ? CrushStunSeconds : 0f);
+                stunSeconds: slamStuns ? CrushStunSeconds : 0f, chains: false);
             _lastCrushFrame = _frame;
         }
 
@@ -646,7 +649,7 @@ public class PlayerCharacter : IHittable
             _abilities.Combat.AddDamage(sproutHp);
             _lastDamageFrame = _frame;
             _abilities.Combat.OnHitRegistered(_frame, SproutCrushImpulseFeel, dt,
-                hitstunSecondsOverride: 0.27f, muteControl: false);
+                hitstunSecondsOverride: 0.27f, muteControl: false, chains: false);
             _lastCrushFrame = _frame;
         }
 

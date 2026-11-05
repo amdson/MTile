@@ -122,9 +122,30 @@ public class GrabTests(ITestOutputHelper output)
         output.WriteLine($"grab active at frame {grabStartFrame}, victim grabbed at frame {firstGrabbedFrame}");
         Assert.True(grabStartFrame >= 0, "Grab should have become the action state.");
         Assert.True(firstGrabbedFrame >= 0, "Grab should still take hold once the startup elapses.");
-        Assert.True(firstGrabbedFrame - grabStartFrame >= 19,
-            $"Grab must hold nobody through its 0.333s startup; held after " +
+        Assert.True(firstGrabbedFrame - grabStartFrame >= SimFrames.FromSeconds(FrameData.GrabAction.Startup, Dt) - 1,
+            $"Grab must hold nobody through its {FrameData.GrabAction.Startup:F3}s startup; held after " +
             $"{firstGrabbedFrame - grabStartFrame} frames ({(firstGrabbedFrame - grabStartFrame) * Dt:F3}s).");
+    }
+
+    // Anti-regrab (todo G, 2026-11-05): a grab never latches a victim who is launched,
+    // stunned or in hitstun - the victim's hurtbox publishes Helpless and PickVictim
+    // skips it - so a throw cannot be chained into a regrab. Here the victim is held in
+    // hitstun by injection for the whole run; the same grab that latches an idle victim
+    // (Grab_HoldsVictim_SetsGrabbedActive) must hold nobody.
+    [Fact]
+    public void Grab_NeverLatchesAHelplessVictim()
+    {
+        bool sawGrabbed = false, sawGrab = false;
+        SimRunner.RunMulti(Build(GrabHold(), InputScript.Always(default)),
+            onFrame: (f, ps) =>
+            {
+                // Keep the victim in combat hitstun (a hit registered every frame, hitstop off).
+                ps[1].Combat.OnHitRegistered(ps[1].Frame + 1, 100f, Dt, hitstunSecondsOverride: 0.3f, hitstop: false);
+                if (ps[0].CurrentActionName == "GrabAction") sawGrab = true;
+                if (ps[1].Combat.GrabbedActive) sawGrabbed = true;
+            });
+        Assert.True(sawGrab, "The grab itself should still fire (it whiffs).");
+        Assert.False(sawGrabbed, "A victim in hitstun must never be latched by a grab.");
     }
 
     // Grab ignores guard: a guarding victim (Shift held) is still grabbed.
