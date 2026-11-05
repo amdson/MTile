@@ -323,9 +323,12 @@ record the regression numbers here under a "Results" heading.
 
 - M3 done (5e9cbbe): every maneuver declares its own Category/Move next to OwnsLocomotion; ManeuverRegistry deleted; BotManeuverClaimTests pins the table and proves a slash fires while ChaseStance walks and Guard leaves Move empty. EscapeGrab stays Exclusive (it leans toward the grabber). Parity after M3: Bulldog vs Brawler 23, Ranger vs Brawler 23.5, Ranger vs Riposte 11.5, Ranger-NoLearn vs Brawler 24. Bot group 183/6/189, known reds only.
 
+- M4 cleanup done (ee04720, merged): ManeuverWeights, TacticBandit and RangerBot.Tactics deleted; HoldRangeStance (Ranger) + BulldogBot.ExtraStances; ZzzRangerEval is now the learner-on/off A/B over seeds 1–6. First A/B with the still-derived bets: Ranger 124.5 vs Ranger-NoLearn 132.5 of 180. Reported, not gated; re-run after the authored bets land.
+
 ## Decisions needed
 
-(none yet)
+- **Stances cannot explore.** Stance hysteresis compares the softmax-sampled candidate against the holder plus PreemptGap + StayBonus (0.35 HP), so a new stance like HoldRange (value 0 vs Chase's −0.1) is sampled but never acquires Move, never opens a record, and so never learns (0.1% occupancy in the A/B). Options: an epsilon that lets a sampled stance take Move for one horizon without the gap; or an optimistic initial offset for arms with zero settles; or accept that stances are hand-ordered and only actions learn. Not decided in the campaign: it changes what "no minimum-hold timers" means in practice.
+- **BulldogBreaker is the learner's clearest signal.** Its dealt offset settles at about −0.8 HP under 40 px against the whole field, i.e. the combo-break guard almost never leads to damage within its horizon. Whether to shorten its horizon, let the ledger keep demoting it, or revisit the maneuver is a design call.
 
 ## Deviations from the plan text
 
