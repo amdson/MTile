@@ -21,7 +21,7 @@ namespace MTile.Net;
 public sealed class SpikeGuard
 {
     public bool Enabled = true;        // ablation (tests)
-    public int  HopCells = 2;          // widest carpet worth hopping (a short hop clears ~3 cells)
+    public int  HopCells = 1;          // widest carpet worth hopping (air speed 42 since 2026-11-05: a short hop clears ~2 cells; was 2 at air 90)
     public int  ClearEvery = 18;       // frames between spike-clearing swings
 
     // Diagnostics.

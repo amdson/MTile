@@ -161,6 +161,9 @@ public sealed class BulldogBot : IRemoteInputSource
         return c;
     }
 
+    private BotClickRetap _retap = new();
+    public  int ClickRetaps => _retap.Retaps;
+
     public PlayerInput Poll(Simulation sim, int frame)
     {
         if (sim.Player == null || sim.SecondaryPlayers.Count <= Math.Max(_selfIndex, 0)) return default;
@@ -195,6 +198,7 @@ public sealed class BulldogBot : IRemoteInputSource
                      || (prevReflex != null && _controller.CommittedReflex != prevReflex)
                      || (acquired > 0 && _controller.CommittedAction == null && _controller.CommittedReflex == null);
         if (ended && !rerolled) _sense.Mix = _rng.NextDouble();
+        _retap.Apply(ref input, in _prev, v.Self, frame);   // 1-frame taps that aged out of the 12f opener window
 
         bool attackEdge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
         v.FramesSinceAttack = attackEdge ? 0 : v.FramesSinceAttack + 1;

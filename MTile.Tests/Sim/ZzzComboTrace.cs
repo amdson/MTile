@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
+using MTile.Net;
 using MTile.Tests.Sim;
 using Xunit;
 using Xunit.Abstractions;
@@ -138,5 +139,26 @@ public class ZzzComboTrace(ITestOutputHelper output)
             if (row != last) { lines.Add($"f{f,3}: {row}"); last = row; }
         });
         foreach (var l in lines) output.WriteLine(l);
+    }
+
+    // Bot guard timing vs a scripted slasher (BotManeuverPulseGuardTests' rig): per frame,
+    // P1's action, the bot's Shift input / guard state / hitstun, and the parry stamps.
+    [Fact]
+    public void BotGuard_VsScriptedSlasher()
+    {
+        var sim = new Simulation(BotArena.Flat(), new Vector2(100f, 67f));
+        var (p2, _) = sim.AddSecondaryPlayer(new Vector2(124f, 67f));
+        var bot = BotArena.Only(new GuardManeuver());
+        string last = null;
+        for (int f = 0; f < 200; f++)
+        {
+            var p2In = bot.Poll(sim, f);
+            var p1In = new PlayerInput { LeftClick = f % 40 == 0, MouseWorldPosition = p2.Body.Position };
+            sim.Step(p1In, p2In);
+            var c = p2.Combat;
+            int hs = c.HitstunActive ? c.HitstunExpireFrame - p2.Frame : 0;
+            string row = $"P1={sim.Player.CurrentActionName,-16} P2={p2.CurrentActionName,-20} shift={(p2In.Shift ? 1 : 0)} guard={(c.GuardActive ? 1 : 0)} age={(c.GuardActive ? p2.Frame - c.GuardStartFrame : -1),3} charged={(c.GuardCharged ? 1 : 0)} broken={(c.GuardBroken ? 1 : 0)} hs={hs,2} hp2={p2.Health:F2} hp1={sim.Player.Health:F2} dist={p2.Body.Position.X - sim.Player.Body.Position.X:F0}";
+            if (row != last) { output.WriteLine($"f{f,3}: {row}"); last = row; }
+        }
     }
 }

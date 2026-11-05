@@ -26,10 +26,28 @@ public sealed class GuardManeuver : BotManeuver
     // but a counter late in the window is pointless).
     public int RetaliateFrames = 10;
 
-    private enum Phase { Guard, Retaliate }
+    private enum Phase { Wait, Guard, Retaliate }
     private Phase _phase;
     private int _t;
+    private int _wait;       // frames to hold before raising (a read on the string's next hit)
     private int _quiet;      // consecutive guard frames with the target no longer attacking
+
+    // The parry is a READ, not a reaction (2026-11-05): we see the target's action
+    // ReactionFrames (6) stale and the light slashes land at 4-7f, so raising on sight is
+    // always a frame late. What IS readable is the string: an S1 is followed by S2's hit
+    // ~21f after S1 started, an S2 by S3's ~22f after S2 started (FrameData: Total + the
+    // 0.4 x Total combo gap + the next startup). Seen at +6, the stance goes up at +16 so
+    // its 7f perfect window straddles the follow-up. A heavy with a long wind-up (stab,
+    // hammer, pulse) is still reacted to; anything faster is guarded on sight and left to
+    // luck, as before.
+    private static int WaitFor(string a) => a switch
+    {
+        "GroundSlash1"    => 10,   // S2 lands at +21 (12 + 4.8 + 4)
+        "GroundSlash2"    => 10,   // S3 lands at +22 (10.8 + 4.3 + 7)
+        "AirSlash1"       => 11,   // AS2 lands at +24 (12 + 4.8 + 7)
+        "AirHammerAction" => 4,    // 15f startup
+        _                 => 0,
+    };
 
     public override int Cooldown => 20;
     public override bool OwnsLocomotion => true;   // guard forbids Left/Right
@@ -46,7 +64,12 @@ public sealed class GuardManeuver : BotManeuver
         if (!v.Grounded) return 0f;                       // GuardAction is ground-only
         var c = v.Self.Combat;
         if (c.GuardBroken || c.GuardOnCooldown(v.SelfFrame)) return 0f;
-        if (c.HitstunActive || c.StunActive) return 0f;
+        if (c.StunActive) return 0f;
+        // GuardAction may come up inside the last 0.2 s (12f) of hit disadvantage - that is
+        // the designed escape between a true string's hits (S2 -> S3 lands a frame after the
+        // victim is free). Refusing any hitstun (as before 2026-11-05) meant the bot never
+        // guarded inside a string once every hit kept its full window.
+        if (c.HitstunActive && c.HitstunExpireFrame - v.SelfFrame > 12) return 0f;
         if (v.Dist > ThreatRange) return 0f;
         if (!IsThreat(v.TargetAction)) return 0f;
         // Beats an in-range slash (1.0): a swing is incoming, so parrying first is better.
@@ -66,7 +89,8 @@ public sealed class GuardManeuver : BotManeuver
 
     public override void Begin(BotView v)
     {
-        _phase = Phase.Guard;
+        _wait  = WaitFor(v.TargetAction);
+        _phase = _wait > 0 ? Phase.Wait : Phase.Guard;
         _t = 0;
         _quiet = 0;
     }
@@ -74,6 +98,15 @@ public sealed class GuardManeuver : BotManeuver
     public override bool Step(BotView v, ref PlayerInput input)
     {
         var c = v.Self.Combat;
+        if (_phase == Phase.Wait)
+        {
+            // Hold still (Move is Still) until the read says the follow-up is about to
+            // land. If the string was dropped - the target went neutral - stand down.
+            _t++;
+            if (!IsThreat(v.TargetAction) && v.TargetAction != "RecoveryAction") return false;
+            if (_t < _wait) return true;
+            _phase = Phase.Guard; _t = 0;
+        }
         if (_phase == Phase.Guard)
         {
             // A parry arms the counter; take it right away.

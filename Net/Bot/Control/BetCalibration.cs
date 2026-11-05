@@ -12,32 +12,37 @@ namespace MTile.Net;
 // option's return until the next decision in its category), not per hit.
 public static class BetCalibration
 {
-    // 2026-11-04, vs Rampart / Citadel / Riposte / Bulldog / Brawler on the three league arenas.
+    // 2026-11-05 (after the combat frame-data pass: damage spread, safe-on-hit heavies,
+    // launches, true strings, 12f opener buffer, air 42, fall 0.7; the string-read guard),
+    // vs Rampart / Citadel / Riposte / Bulldog / Brawler on the three league arenas.
+    // Arms the hand policy never took in this dump keep their 2026-11-04 row.
     public static readonly IReadOnlyDictionary<string, (float Dealt, float Taken)> Field = new Dictionary<string, (float, float)>
     {
-        ["AntiAirJumpSlashManeuver"]  = (0.180f, 0.119f),   // n=2231
-        ["AntiAirSidestepManeuver"]   = (0.175f, 0.080f),   // n=1183
-        ["AntiAirStabManeuver"]       = (0.122f, 0.046f),   // n=343
-        ["BulldogBreaker"]            = (0.035f, 0.114f),   // n=1133
-        ["BulldogCrossUp"]            = (0.085f, 0.233f),   // n=387
-        ["BulldogGrab"]               = (0.062f, 0.143f),   // n=128
-        ["BulldogGuard"]              = (0.030f, 0.090f),   // n=350
-        ["BulldogLowPoke"]            = (0.242f, 0.099f),   // n=265
-        ["BulldogPunish"]             = (0.192f, 0.164f),   // n=656
-        ["BulldogStab"]               = (0.138f, 0.160f),   // n=237
-        ["BulldogString"]             = (0.594f, 0.202f),   // n=2276
-        ["ChaseStance"]               = (0.197f, 0.119f),   // n=9765
-        ["CornerEscapeManeuver"]      = (0.093f, 0.028f),   // n=73
-        ["CounterSlashManeuver"]      = (0.096f, 0.167f),   // n=89
-        ["DashManeuver"]              = (0.130f, 0.082f),   // n=1348
-        ["DownAirManeuver"]           = (0.083f, 0.157f),   // n=1881
-        ["GuardManeuver"]             = (0.023f, 0.077f),   // n=554
-        ["Idle"]                      = (0.087f, 0.086f),   // n=618
-        ["RangerBlockThrowManeuver"]  = (0.329f, 0.057f),   // n=847
-        ["RangerCrystalWaveManeuver"] = (0.009f, 0.293f),   // n=339
-        ["StepBackManeuver"]          = (0.146f, 0.062f),   // n=391
-        ["StepOutStance"]             = (0.001f, 0.085f),   // n=530
-        ["WallUpManeuver"]            = (0.136f, 0.136f),   // n=50
-        ["WhiffPunishManeuver"]       = (0.127f, 0.200f),   // n=766
+        ["AntiAirJumpSlashManeuver"]    = (0.305f, 0.162f),   // n=2154
+        ["AntiAirSidestepManeuver"]     = (0.175f, 0.080f),   // n=1183, carried from 2026-11-04 (not recorded in the 2026-11-05 dump)
+        ["AntiAirStabManeuver"]         = (0.275f, 0.114f),   // n=327
+        ["BreachManeuver"]              = (0.100f, 0.027f),   // n=40
+        ["BulldogBreaker"]              = (0.150f, 0.157f),   // n=278
+        ["BulldogCrossUp"]              = (0.085f, 0.233f),   // n=387, carried from 2026-11-04 (not recorded in the 2026-11-05 dump)
+        ["BulldogGrab"]                 = (0.062f, 0.143f),   // n=128, carried from 2026-11-04 (not recorded in the 2026-11-05 dump)
+        ["BulldogGuard"]                = (0.301f, 0.174f),   // n=48
+        ["BulldogLowPoke"]              = (0.193f, 0.052f),   // n=87
+        ["BulldogPunish"]               = (0.257f, 0.287f),   // n=793
+        ["BulldogStab"]                 = (0.270f, 0.143f),   // n=90
+        ["BulldogString"]               = (0.539f, 0.152f),   // n=3919
+        ["ChaseStance"]                 = (0.235f, 0.113f),   // n=9669
+        ["CornerEscapeManeuver"]        = (0.093f, 0.028f),   // n=73, carried from 2026-11-04 (not recorded in the 2026-11-05 dump)
+        ["CounterSlashManeuver"]        = (0.096f, 0.167f),   // n=89, carried from 2026-11-04 (not recorded in the 2026-11-05 dump)
+        ["DashManeuver"]                = (0.219f, 0.146f),   // n=1304
+        ["DownAirManeuver"]             = (0.250f, 0.202f),   // n=1230
+        ["GuardManeuver"]               = (0.225f, 0.234f),   // n=962
+        ["Idle"]                        = (0.201f, 0.268f),   // n=1201
+        ["PressStance"]                 = (0.233f, 0.139f),   // n=1502
+        ["RangerBlockThrowManeuver"]    = (0.363f, 0.103f),   // n=790
+        ["RangerCrystalWaveManeuver"]   = (0.009f, 0.293f),   // n=339, carried from 2026-11-04 (not recorded in the 2026-11-05 dump)
+        ["StepBackManeuver"]            = (0.302f, 0.094f),   // n=815
+        ["StepOutStance"]               = (0.096f, 0.128f),   // n=87
+        ["WallUpManeuver"]              = (0.234f, 0.278f),   // n=43
+        ["WhiffPunishManeuver"]         = (0.133f, 0.240f),   // n=567
     };
 }

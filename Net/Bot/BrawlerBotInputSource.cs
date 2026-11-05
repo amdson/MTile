@@ -105,6 +105,9 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         _view.Rng  = _rng;
     }
 
+    private BotClickRetap _retap = new();
+    public  int ClickRetaps => _retap.Retaps;
+
     public PlayerInput Poll(Simulation sim, int frame)
     {
         if (sim.Player == null || sim.SecondaryPlayers.Count <= Math.Max(_selfIndex, 0)) return default;
@@ -144,6 +147,7 @@ public sealed class BrawlerBotInputSource : IRemoteInputSource
         if (_active != null && !_active.Step(v, ref input)) Finish();
 
         Spikes.Apply(v, ref input);   // shared spike sense, last pass (Net/Bot/SpikeGuard.cs)
+        _retap.Apply(ref input, in _prev, v.Self, frame);   // 1-frame taps that aged out of the 12f opener window
         bool attackEdge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
         v.FramesSinceAttack = attackEdge ? 0 : v.FramesSinceAttack + 1;
         _prev = input;

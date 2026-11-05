@@ -39,11 +39,14 @@ public class BotManeuverPulseGuardTests
     [Fact]
     public void Guard_ParriesSlashes_AndReducesDamage()
     {
-        // Baseline: a bot that stands there (no maneuvers), slashed every 40 frames.
+        // Baseline: a bot that stands there (no maneuvers), slashed in true strings - a
+        // click every 17 frames chains S1 -> S2 -> S3 at the combo cadence (2026-11-05: the
+        // light slashes land at 4-7f, under the bot's 6f perception, so the parry is a read
+        // on the string's follow-up rather than a reaction to a lone swing every 40f).
         var none = BotArena.Fight(BotArena.Flat(), new Vector2(100f, 67f), new Vector2(124f, 67f), 240,
-                                  BotArena.Only(), P1Slasher(40));
+                                  BotArena.Only(), P1Slasher(17));
         var guard = BotArena.Fight(BotArena.Flat(), new Vector2(100f, 67f), new Vector2(124f, 67f), 240,
-                                   BotArena.Only(new GuardManeuver()), P1Slasher(40));
+                                   BotArena.Only(new GuardManeuver()), P1Slasher(17));
         output.WriteLine("no guard: " + none.Summary());
         output.WriteLine("guard   : " + guard.Summary());
         Assert.True(none.DamageToP2 > 0f, "Baseline P1 slashes should hurt an idle bot.");
@@ -61,7 +64,7 @@ public class BotManeuverPulseGuardTests
     public void Guard_ParryIsPunishedWithRetaliate()
     {
         var r = BotArena.Fight(BotArena.Flat(), new Vector2(100f, 67f), new Vector2(124f, 67f), 240,
-                               BotArena.Only(new GuardManeuver()), P1Slasher(40));
+                               BotArena.Only(new GuardManeuver()), P1Slasher(17));
         output.WriteLine(r.Summary());
         Assert.True(r.Saw("GuardRetaliateAction"), "A successful parry should be followed by the counter.");
         Assert.True(r.DamageToP1 > 0f, $"The counter should connect (P1 lost {r.DamageToP1}).");
