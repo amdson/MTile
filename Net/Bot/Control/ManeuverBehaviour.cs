@@ -5,7 +5,8 @@ namespace MTile.Net;
 
 // Migration adapter (Plans/BOT_BEHAVIOR_ARCHITECTURE.md, "Adapter"): runs an existing
 // BotManeuver under BotController unchanged. Category and Move claim come from
-// ManeuverRegistry; the bet is (0.5 * Score, 0, 90) for a positive score, else Pass.
+// the maneuver's own Category/Move (or, transitionally, ManeuverRegistry); the bet is the
+// maneuver's Bet (default 0.5 * Score HP over 90 frames).
 // Name is the wrapped maneuver's Name, so diagnostics keep today's names.
 public sealed class ManeuverBehaviour : BotBehaviour
 {
@@ -19,7 +20,10 @@ public sealed class ManeuverBehaviour : BotBehaviour
     public ManeuverBehaviour(BotManeuver m)
     {
         Maneuver = m ?? throw new ArgumentNullException(nameof(m));
-        (_category, _move) = ManeuverRegistry.Lookup(m);
+        // Transitional: a registry entry wins while maneuvers are still being converted to
+        // native overrides (M3); once the registry is empty it is deleted and the
+        // maneuver's own Category/Move are the only source.
+        (_category, _move) = ManeuverRegistry.IsRegistered(m.GetType()) ? ManeuverRegistry.Lookup(m) : (m.Category, m.Move);
     }
 
     public override string    Name     => Maneuver.Name;
@@ -27,11 +31,7 @@ public sealed class ManeuverBehaviour : BotBehaviour
     public override MoveClaim Move     => _move;
     public override int       Cooldown => Maneuver.Cooldown;
 
-    public override Bet Bet(BotView v)
-    {
-        float s = Maneuver.Score(v);
-        return s > 0f ? new Bet(ScoreToHp * s, 0f, BetHorizon) : Net.Bet.Pass;
-    }
+    public override Bet Bet(BotView v) => Maneuver.Bet(v);
 
     public override void Begin(BotView v) => Maneuver.Begin(v);
     public override bool Step(BotView v, ref PlayerInput input) => Maneuver.Step(v, ref input);

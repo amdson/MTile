@@ -282,7 +282,7 @@ committed Exclusive action and the action gets `Aborted`; a Move-None action and
 hold at the same time; idle arm wins over a negative-value action; only executed arms open
 records.
 
-[~] **M2. Bulldog on the controller through the adapter.**
+[x] **M2. Bulldog on the controller through the adapter.**
 `BulldogBot.Poll` becomes perception + `controller.Step(v)`. `Locomote` is split into
 `ChaseStance`, `StepOutStance` and the executor. `SpikeGuard` wrapped as a constraint.
 `Harrier`/`Ranger` compile unchanged except `RouteManeuver` moves behind the executor.
@@ -291,7 +291,7 @@ Brawler over the README format (3 arenas × seeds 1–4 × both sides) scores �
 points; Ranger vs Brawler and vs legacy Bulldog over seeds 1–4 within 2 points of the
 pre-change brain run in the same harness.
 
-[ ] **M3. Native claims for the Bulldog family.**
+[~] **M3. Native claims for the Bulldog family.**
 Convert the maneuvers in the mapping table to `BotBehaviour` subclasses with native Move
 claims (`Forbid(all)` for the hold-still set, `Exclusive` for movement-input actions,
 reflexes for the movers). Delete `OwnsLocomotion` overrides from converted files; leave the
@@ -318,6 +318,13 @@ record the regression numbers here under a "Results" heading.
 - M1 shared interface committed @eba4362 (Net/Bot/Control/BotBehaviour.cs). Ledger and controller parcels dispatched to two Opus agents in worktrees.
 - M1 done: BetLedger (b362f68), BotController + MoveExecutor + ControllerTrace + ManeuverBehaviour/ManeuverRegistry (5672007), merged; registry trimmed to today's locomotion owners so the adapter is behaviour-neutral (Dash, DownAir, Burst, Brawler BlockThrow, BulldogPunish stay Move=None until M3). 17 new tests green. Controller owns v.FramesSinceManeuver; Idle arm opens ledger records once per horizon when it wins a contest.
 
+- M2 done (6e6674a, merged): Bulldog/Harrier/Ranger run on BotController; Locomote → ChaseStance + StepOutStance + MoveExecutor; SpikeGuardConstraint; RoutePlanner behind the executor. Parity (3 arenas × seeds 1–4 × both sides): Bulldog vs Brawler 24→22 of 24; Ranger vs Brawler 24→24; Ranger vs Riposte 9→11; Ranger NoLearn vs Brawler 24→24. Bot group 180/6/186 with only the 6 known reds. One regression found and fixed: Breach's stuck counter fired mid-route, so Move-claiming actions don't bet while the route planner drives. Supervisor change: Ranger's Lambda left at the controller default (1) instead of the old dealt-only setting.
+- M3 groundwork: `BotManeuver` gained native `Category`/`Move`/`Bet` virtuals; the adapter reads them (registry wins transitionally until it is deleted).
+
 ## Decisions needed
 
 (none yet)
+
+## Deviations from the plan text
+
+- **M3 converts by override, not by subclassing.** Guard, Dash, Breach, WallClimb, WallUp, EscapeGrab, DownAir and the aimers are shared with the phase-2 brains, which still take `List<BotManeuver>`. Re-basing them on `BotBehaviour` would break those brains, so a maneuver declares its claim by overriding `BotManeuver.Category`/`Move` in its own file. Same effect (claims live with the maneuver, the registry table goes away), none of the churn.

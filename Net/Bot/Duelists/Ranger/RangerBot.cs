@@ -34,7 +34,7 @@ public static class RangerBot
     // Bulldog with) — hop up and air-slash, step out from under and punish the landing, or
     // stab straight up. They overlap on purpose: the bet ledger corrects whichever is
     // paying off against this opponent.
-    public static BulldogBot Build(int seed, int self, out RouteManeuver route, bool learn = true, float takenWeight = 0f,
+    public static BulldogBot Build(int seed, int self, out RouteManeuver route, bool learn = true,
                                    bool tactics = false, bool antiAir = true)
     {
         route = new RouteManeuver();
@@ -63,11 +63,10 @@ public static class RangerBot
             b.PerFrame = bandit.Tick;
         }
         b.Disabled.Add(nameof(WallClimbManeuver));
-        if (learn)
-        {
-            b.Ledger = new BetLedger();
-            b.Lambda = takenWeight;
-        }
+        // Lambda stays at the controller default (1: net HP). The old learner's finding that
+        // dealt-only paid best was one learner shape against fixed bots and is deliberately
+        // not carried forward (Plans/BOT_BEHAVIOR_ARCHITECTURE.md, "Removed").
+        if (learn) b.Ledger = new BetLedger();
         return b;
     }
 }

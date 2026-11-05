@@ -27,8 +27,26 @@ public abstract class BotManeuver
     public virtual int Cooldown => 30;
 
     // True ⇒ the brain applies no chase/backoff while this runs; the maneuver writes
-    // all movement keys itself.
+    // all movement keys itself. Legacy brains (Brawler, Citadel, Riposte, Rampart) read
+    // this; under BotController the three members below are what count.
     public virtual bool OwnsLocomotion => false;
+
+    // Native controller claims (Plans/BOT_BEHAVIOR_ARCHITECTURE.md). A maneuver declares
+    // what it is and what it needs from Move; the defaults reproduce today's behaviour.
+    //   Category: Reflex for a mover that exists to not get hit; Action otherwise.
+    //   Move:     None (a plain slash: the stance keeps walking), Still (hold the body:
+    //             guards, aimers), Forbid(keys), or Exclusive (the input IS movement).
+    public virtual Category  Category => Category.Action;
+    public virtual MoveClaim Move     => OwnsLocomotion ? MoveClaim.Exclusive : MoveClaim.None;
+
+    // The HP bet (dealt, taken, horizon) used for selection and corrected by the bet
+    // ledger. Default: derived from Score with a stock slash (score 1) ≈ 0.5 HP over 90
+    // frames; M4 replaces these with hand-authored bets per maneuver.
+    public virtual Bet Bet(BotView v)
+    {
+        float s = Score(v);
+        return s > 0f ? new Bet(0.5f * s, 0f, 90) : Net.Bet.Pass;
+    }
 
     // Utility of starting this maneuver now. ≤ 0 ⇒ not applicable. Rough scale: 1 is a
     // stock "good idea" (an in-range slash); the brain takes the max. Must not mutate
