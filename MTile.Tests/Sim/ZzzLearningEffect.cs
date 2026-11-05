@@ -45,15 +45,9 @@ public class ZzzLearningEffect(ITestOutputHelper output)
         DuelBot Calib(Action<BulldogBot> more = null) => RangerBot.Variant(b => { b.Calibration = BetCalibration.Field; more?.Invoke(b); });
         var challengers = new (string, DuelBot)[]
         {
-            ("nolearn+argmax",  Collect("nolearn+argmax", RangerBot.NoLearn)),
             ("default",         Collect("default", RangerBot.Create)),
-            ("prior1",          Collect("prior1", RangerBot.Variant(b => b.Ledger.PriorWeight = 1f))),
-            ("prior4",          Collect("prior4", RangerBot.Variant(b => b.Ledger.PriorWeight = 4f))),
-            ("bucketprior3",    Collect("bucketprior3", RangerBot.Variant(b => b.Ledger.BucketPriorWeight = 3f))),
-            ("bucketprior12",   Collect("bucketprior12", RangerBot.Variant(b => b.Ledger.BucketPriorWeight = 12f))),
-            ("etamin.02",       Collect("etamin.02", RangerBot.Variant(b => b.Ledger.EtaMin = 0.02f))),
-            ("etamin.1",        Collect("etamin.1", RangerBot.Variant(b => b.Ledger.EtaMin = 0.1f))),
-            ("minrec4",         Collect("minrec4", RangerBot.Variant(b => b.Ledger.MinRecordFrames = 4))),
+            ("closing",         Collect("closing", RangerBot.Variant(b => b.Bucketer = Situation.BucketWithClosing))),
+            ("closing+bp3",     Collect("closing+bp3", RangerBot.Variant(b => { b.Bucketer = Situation.BucketWithClosing; b.Ledger.BucketPriorWeight = 3f; }))),
         };
         var jobs = new List<(string C, string O, string A, int S, bool P1, DuelBot Cb, DuelBot Ob)>();
         foreach (var (cn, cb) in challengers) foreach (var (on, ob) in Opponents)
@@ -71,7 +65,7 @@ public class ZzzLearningEffect(ITestOutputHelper output)
             output.WriteLine($"{cn,-18}" + string.Join("", Opponents.Select(o => $"{pts.GetValueOrDefault((cn, o.Item1)),9:F1}"))
                              + $"  {Opponents.Sum(o => pts.GetValueOrDefault((cn, o.Item1))),7:F1}  {div,6:P1}");
         }
-        foreach (var name in new[] { "default" })
+        foreach (var name in new[] { "closing" })
             if (bots.TryGetValue(name, out var bag)) output.WriteLine(BotTraceReport.Format(name, bag, 12));
     }
 
@@ -173,5 +167,57 @@ public class ZzzLearningEffect(ITestOutputHelper output)
         float cEarly = carried.Sum(x => x.ByBout[0] + x.ByBout[1]), cLate = carried.Sum(x => x.ByBout[Bouts - 2] + x.ByBout[Bouts - 1]);
         float fEarly = fresh.Sum(x => x.ByBout[0] + x.ByBout[1]),   fLate = fresh.Sum(x => x.ByBout[Bouts - 2] + x.ByBout[Bouts - 1]);
         output.WriteLine($"carry: bouts 1-2 {cEarly:F1}  last two {cLate:F1}   fresh: bouts 1-2 {fEarly:F1}  last two {fLate:F1}  (max 60 each)");
+    }
+}
+
+public class ZzzLearningTiming(ITestOutputHelper output)
+{
+    // Every bout of the sweep for two variants, in parallel; report the slow ones.
+    [Fact]
+    public void SlowBouts()
+    {
+        var variants = new (string, DuelBot)[]
+        {
+            ("default",      RangerBot.Create),
+            ("nonewstances", RangerBot.Variant(b => b.ExtraStances.RemoveAll(s => s is PressStance or KiteStance))),
+        };
+        var opps = new (string, DuelBot)[] { ("Rampart", RampartBot.Create), ("Citadel", CitadelBot.Create), ("Riposte", RiposteBot.Create), ("Bulldog", BulldogBot.Create), ("Brawler", BotDuel.Brawler) };
+        var jobs = new List<(string V, DuelBot Vb, string O, DuelBot Ob, string A, int S, bool P1)>();
+        foreach (var (vn, vb) in variants) foreach (var (on, ob) in opps) foreach (var a in BotDuel.Arenas) foreach (int s in Enumerable.Range(1, 12)) foreach (bool p1 in new[] { true, false })
+            jobs.Add((vn, vb, on, ob, a, s, p1));
+        var slow = new ConcurrentBag<string>();
+        var total = new ConcurrentDictionary<string, long>();
+        Parallel.ForEach(jobs, j =>
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            if (j.P1) BotDuel.Run(j.A, j.Vb, j.Ob, j.S); else BotDuel.Run(j.A, j.Ob, j.Vb, j.S);
+            total.AddOrUpdate(j.V, sw.ElapsedMilliseconds, (_, o) => o + sw.ElapsedMilliseconds);
+            if (sw.ElapsedMilliseconds > 4000) slow.Add($"{j.V,-14} {j.A,-11} vs {j.O,-8} s{j.S} {(j.P1 ? "P1" : "P2")} {sw.ElapsedMilliseconds,7} ms");
+        });
+        foreach (var kv in total) output.WriteLine($"{kv.Key,-14} total {kv.Value / 1000.0:F0} s over {jobs.Count / variants.Length} bouts");
+        foreach (var l in slow.OrderByDescending(x => x)) output.WriteLine(l);
+    }
+
+    [Fact]
+    public void OneBoutEach()
+    {
+        var variants = new (string, DuelBot)[]
+        {
+            ("nolearn",      RangerBot.NoLearn),
+            ("default",      RangerBot.Create),
+            ("nonewstances", RangerBot.Variant(b => b.ExtraStances.RemoveAll(s => s is PressStance or KiteStance))),
+            ("nopress",      RangerBot.Variant(b => b.ExtraStances.RemoveAll(s => s is PressStance))),
+            ("nokite",       RangerBot.Variant(b => b.ExtraStances.RemoveAll(s => s is KiteStance))),
+            ("oldgap",       RangerBot.Variant(b => b.StanceGap = 0.35f)),
+        };
+        var opps = new (string, DuelBot)[] { ("Rampart", RampartBot.Create), ("Citadel", CitadelBot.Create), ("Riposte", RiposteBot.Create), ("Bulldog", BulldogBot.Create), ("Brawler", BotDuel.Brawler) };
+        foreach (var (name, bot) in variants.Take(3))
+        foreach (var arena in BotDuel.Arenas)
+        foreach (var opp in opps)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var r = BotDuel.Run(arena, bot, opp.Item2, 2);
+            output.WriteLine($"{name,-14} {arena,-11} vs {opp.Item1,-8} {sw.ElapsedMilliseconds,6} ms  {r}");
+        }
     }
 }

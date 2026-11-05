@@ -30,3 +30,42 @@ public sealed class HoldRangeStance : Stance
     public override float Tolerance => 8f;
     public override bool  MayJump   => false;
 }
+
+// Hug: walk inside Chase's EngageRange to point-blank, where grabs and strings start and
+// the opponent's long normals whiff. Bet value 0 like HoldRange: the ledger decides.
+public sealed class PressStance : Stance
+{
+    public float HugDist = 10f;
+    public float MaxGap  = 60f;
+
+    public override Bet Bet(BotView v)
+    {
+        float gap = MathF.Abs(v.Dx);
+        if (!v.Grounded || gap > MaxGap || MathF.Abs(v.Dy) > 30f) return Net.Bet.Pass;
+        return new Bet(0.1f, 0.1f, 60);
+    }
+
+    public override Vector2 Target(BotView v) => new(v.TargetPos.X - v.Toward * HugDist, v.TargetPos.Y);
+    public override float Tolerance => 4f;
+}
+
+// Kite: hold the aimed block throw's sweet spot (RangerBlockThrowManeuver: 60-280 px, best
+// around 120) and let the throws and whiff punishes do the work. Backs off when the
+// opponent closes, walks in when they run. Bet value 0: the ledger decides.
+public sealed class KiteStance : Stance
+{
+    public float KiteDist = 120f;
+    public float MinGap   = 50f;
+    public float MaxGap   = 240f;
+
+    public override Bet Bet(BotView v)
+    {
+        float gap = MathF.Abs(v.Dx);
+        if (!v.Grounded || v.TargetHelpless || gap < MinGap || gap > MaxGap || !v.LineOfSight()) return Net.Bet.Pass;
+        return new Bet(0.1f, 0.1f, 60);
+    }
+
+    public override Vector2 Target(BotView v) => new(v.TargetPos.X - v.Toward * KiteDist, v.TargetPos.Y);
+    public override float Tolerance => 10f;
+    public override bool  MayJump   => false;
+}

@@ -104,7 +104,8 @@ public class BotManeuverControllerTests
         };
     }
 
-    private static BotController Controller(IBetLedger ledger = null) => new() { Explore = false, Ledger = ledger };
+    // StanceMinHold 0: these tests pin the value-gap rules; the hold timer has its own test.
+    private static BotController Controller(IBetLedger ledger = null) => new() { Explore = false, Ledger = ledger, StanceMinHold = 0 };
 
     private static PlayerInput Tick(BotController c, BotView v)
     {
@@ -255,6 +256,46 @@ public class BotManeuverControllerTests
         Assert.Same(b, c.CurrentStance);
         Assert.Equal(1, a.SuspendedCount);
         Assert.Equal(1, c.Trace.Preemptions["A"]);
+    }
+
+    [Fact]
+    public void Stance_MinHold_BlocksSwitch_ButNotRelease()
+    {
+        var v = View();
+        var c = Controller();
+        c.StanceMinHold = 20;
+        var a = new FakeStance("A", new Bet(0.1f, 0f, 600));
+        var b = new FakeStance("B", Bet.Pass);
+        c.Add(a); c.Add(b);
+        Tick(c, v);
+        Assert.Same(a, c.CurrentStance);
+
+        b.NextBet = new Bet(2f, 0f, 600);        // beats A by far, but A has held < 20 frames
+        for (int i = 0; i < 10; i++) Tick(c, v);
+        Assert.Same(a, c.CurrentStance);
+        for (int i = 0; i < 15; i++) Tick(c, v);  // past the hold: B takes Move
+        Assert.Same(b, c.CurrentStance);
+
+        // The hold never pins a stance that stopped applying: B passes and A is back at once.
+        b.NextBet = Bet.Pass;
+        Tick(c, v);
+        Assert.Same(a, c.CurrentStance);
+    }
+
+    // With a ledger the stance gap is 0: a sampled candidate that merely beats the holder
+    // takes Move (the hold timer, not a value gap, prevents flapping).
+    [Fact]
+    public void Stance_WithLedger_SwitchesOnAnyImprovement()
+    {
+        var v = View();
+        var c = Controller(new RecordingLedger());
+        var a = new FakeStance("A", new Bet(0.1f, 0f, 600));
+        var b = new FakeStance("B", Bet.Pass);
+        c.Add(a); c.Add(b);
+        Tick(c, v);
+        b.NextBet = new Bet(0.15f, 0f, 600);     // +0.05: below the old gap, above 0
+        Tick(c, v);
+        Assert.Same(b, c.CurrentStance);
     }
 
     [Fact]

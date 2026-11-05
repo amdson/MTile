@@ -56,7 +56,9 @@ public static class RangerBot
             extra.Add(new AntiAirStabManeuver());
         }
         var b = new BulldogBot(seed, self, extra) { Planner = new RoutePlanner(route) };
-        b.ExtraStances.Add(new HoldRangeStance());   // a second Move choice for the learner
+        b.ExtraStances.Add(new HoldRangeStance());
+        b.ExtraStances.Add(new PressStance());
+        b.ExtraStances.Add(new KiteStance());   // a second Move choice for the learner
         b.Disabled.Add(nameof(WallClimbManeuver));
         // The learner (MTile.Tests/Sim/ZzzLearningEffect.cs, 2026-11-04): data-calibrated
         // priors, SARSA-bootstrapped records (BetLedger.Gamma), hierarchical offsets, and a

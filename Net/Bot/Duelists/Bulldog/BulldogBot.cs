@@ -49,6 +49,12 @@ public sealed class BulldogBot : IRemoteInputSource
     public float ExploreBonus = 0f;
     // Softmax inverse temperature for selection (BotController.Sharpness).
     public float Sharpness = 3f;
+    // Stance switch gap (BotController.StanceGap); negative = the controller default.
+    public float StanceGap = -1f;
+    // Minimum frames a stance keeps Move once it has it (BotController.StanceMinHold).
+    public int   StanceMinHold = 30;
+    // Situation bucket function for the ledger (BotController.Bucketer); null = Situation.Bucket.
+    public Func<BotView, int> Bucketer;
     // Diagnostics: ledger records but does not steer (BotController.Shadow).
     public bool  Shadow = false;
     // Data-calibrated bet priors (BotController.Calibration); null = the authored bets.
@@ -134,6 +140,9 @@ public sealed class BulldogBot : IRemoteInputSource
             Explore = ExploreOverride ?? (Ledger != null),
             ExploreBonus = ExploreBonus,
             Sharpness = Sharpness,
+            StanceGap = StanceGap,
+            StanceMinHold = StanceMinHold,
+            Bucketer = Bucketer ?? Situation.Bucket,
             Shadow = Shadow,
             Calibration = Calibration,
         };

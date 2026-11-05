@@ -20,7 +20,7 @@ public sealed class BetLedger : IBetLedger
     // as PriorWeight samples, and after many settles it still tracks a changing opponent at
     // EtaMin. (A constant 0.3 made every estimate swing on its last two or three outcomes —
     // in a game where most horizons realise 0 and a hit is 0.5 HP, selection chased noise.)
-    public float PriorWeight = 2f;
+    public float PriorWeight = 4f;   // sweep 2026-11-04: 1 → 258, 2 → 278, 4 → 288 of 360 vs the field
     public float EtaMin      = 0.05f;
     // Hierarchical offsets: an arm-level offset (shared by all buckets of the arm, bucket key
     // -1) learns fast from every settle; the bucket-level offset on top needs more evidence

@@ -44,6 +44,15 @@ public sealed class BotController
     public float Sharpness  = 3f;     // softmax inverse temperature
     public float PreemptGap = 0.25f;  // HP a challenger must beat the holder by
     public float StayBonus  = 0.1f;   // extra HP the current stance is credited with
+    // Gap a challenger stance must beat the current stance by. Negative = the default:
+    // 0 with a ledger (the sampled candidate just takes Move, so stances get tried and
+    // scored; StanceMinHold stops the flapping), PreemptGap + StayBonus without one.
+    public float StanceGap  = -1f;
+    // Hardcoded anti-flap: a stance that took Move keeps it at least this many frames (it
+    // still lets go the moment it stops being applicable). Replaces value hysteresis as the
+    // thing that prevents two stances trading Move every frame.
+    public int   StanceMinHold = 30;
+    private int  _stanceSince = int.MinValue;
     public bool  Explore    = true;   // softmax sampling; false = argmax (deterministic)
     // Optimism bonus, HP, added to a candidate's value as ExploreBonus / sqrt(1 + settles) for
     // its (name, bucket): an arm nobody has tried looks good until it has been scored. Only
@@ -59,6 +68,9 @@ public sealed class BotController
     public Bet   IdleBet    = new(0f, 0f, 30);
 
     public IBetLedger   Ledger;
+    // The situation bucket used for learned offsets. Default Situation.Bucket (24);
+    // Situation.BucketWithClosing adds the opponent's horizontal intent (72).
+    public Func<BotView, int> Bucketer = Situation.Bucket;
     public MoveExecutor Executor = new();
     public readonly ControllerTrace Trace = new();
 
@@ -111,7 +123,7 @@ public sealed class BotController
     public void Step(BotView v, ref PlayerInput input)
     {
         Trace.BeginFrame();
-        int bucket = Situation.Bucket(v);
+        int bucket = Bucketer(v);
 
         // a. Abort on damage (stance untouched), cooldowns, ledger.
         float dmg = v.Self.Combat.DamageTaken;
@@ -257,6 +269,8 @@ public sealed class BotController
             }
         }
 
+        if (_stance != null && v.Frame - _stanceSince < StanceMinHold) return;   // minimum hold
+
         _cands.Clear();
         foreach (var s in Stances)
         {
@@ -269,12 +283,14 @@ public sealed class BotController
 
         if (_stance != null)
         {
-            if (val <= Value(_stanceBet) + PreemptGap + StayBonus) return;
+            float gap = StanceGap >= 0f ? StanceGap : Ledger != null && !Shadow ? 0f : PreemptGap + StayBonus;
+            if (val <= Value(_stanceBet) + gap) return;
             Trace.Preempted(_stance.Name);
             DropStance(v);
         }
 
         _stance = (Stance)b; _stanceBet = bet; _stanceActive = true;
+        _stanceSince = v.Frame;
         Executor.Reset();
         _stance.Begin(v);
         _stance.Resumed(v);
@@ -299,7 +315,7 @@ public sealed class BotController
         {
             _stance.Resumed(v);
             // Back on Move: a fresh record, so the suspension's outcome is not the stance's.
-            int bucket = Situation.Bucket(v);
+            int bucket = Bucketer(v);
             _stanceBet = Correct(_stance.Name, bucket, _stance.Bet(v));
             if (_stanceBet.Applicable) { OpenMove(_stance.Name, bucket, _stanceBet, v.Frame); _stanceSettle = v.Frame + Math.Max(1, _stanceBet.Horizon); }
         }

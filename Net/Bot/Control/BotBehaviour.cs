@@ -170,9 +170,24 @@ public static class Situation
     public static string Describe(int bucket)
     {
         if (bucket < 0) return "all";
+        string suffix = bucket >= Count ? (bucket / Count == 1 ? "/in" : "/out") : "";
+        bucket %= Count;
         int air = bucket % 2; bucket /= 2;
         int state = bucket % 3; int band = bucket / 3;
-        return $"{new[] { "<40", "40-85", "85-160", ">160" }[band]}/{new[] { "atk", "rec", "idle" }[state]}/{(air == 0 ? "gnd" : "air")}";
+        return $"{new[] { "<40", "40-85", "85-160", ">160" }[band]}/{new[] { "atk", "rec", "idle" }[state]}/{(air == 0 ? "gnd" : "air")}{suffix}";
+    }
+
+    // Bucket x the opponent's horizontal intent as perceived: closing on us (relative speed
+    // toward us above ClosingSpeed), backing off, or neither. 72 buckets. What beats an
+    // opponent walking in (a poke, a whiff punish) is not what beats one walking away.
+    public const float ClosingSpeed = 25f;
+    public const int   CountWithClosing = Count * 3;
+
+    public static int BucketWithClosing(BotView v)
+    {
+        float rel = (v.TargetVel.X - v.MyVel.X) * v.Toward;   // < 0: they move toward us
+        int motion = rel < -ClosingSpeed ? 1 : rel > ClosingSpeed ? 2 : 0;
+        return Bucket(v) + Count * motion;
     }
 
     public static bool IsAttack(string a)
