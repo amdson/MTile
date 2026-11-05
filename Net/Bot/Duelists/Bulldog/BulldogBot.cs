@@ -7,10 +7,12 @@ namespace MTile.Net;
 // Bulldog — a rushdown duelist (see README.md in this folder).
 //
 // Same contract as BrawlerBotInputSource: a function from "what a player can see" to a raw
-// PlayerInput record. The brain is a utility selector over its own maneuver set; what is
-// different is the perception it hands them (BulldogSense: a few extra facts about the
-// opponent, all ReactionFrames stale like BotView's) and the locomotion (walk right into
-// the opponent's face instead of stopping at slash range, hop walls, dig through them).
+// PlayerInput record. Poll is perception (BulldogSense: a few extra facts about the
+// opponent, all ReactionFrames stale like BotView's) plus one BotController step
+// (Plans/BOT_BEHAVIOR_ARCHITECTURE.md): the maneuvers run through the ManeuverBehaviour
+// adapter, positioning is ChaseStance / StepOutStance (BulldogStances.cs) driven by the
+// controller's MoveExecutor (walk right into the opponent's face instead of stopping at
+// slash range, hop walls), and SpikeGuard masks the finished input as a constraint.
 //
 // Fairness: every opponent fact comes from a ring of past frames at least ReactionFrames
 // old (position, velocity, action, "is flinching", "is on the ground") or from the HUD
@@ -20,37 +22,49 @@ public sealed class BulldogBot : IRemoteInputSource
     public static readonly DuelBot Create = (selfIndex, seed) => new BulldogBot(seed, selfIndex);
 
     public int   ReactionFrames = 6;
-    // Horizontal gap at which default locomotion stops walking in: inside slash reach,
-    // so the opponent is always within one swing.
+    // Horizontal gap at which ChaseStance stops walking in: inside slash reach, so the
+    // opponent is always within one swing.
     public float EngageRange    = 22f;
+    // StepOutStance: in our own end-lag with more than RetreatUntil frames left and the
+    // opponent within RetreatDist, back off.
     public bool  RetreatInLag   = true;
     public int   RetreatUntil   = 8;
     public float RetreatDist    = 60f;
 
-    private const int   JumpHoldFrames  = 14;
-    private const int   StuckFrames     = 8;
-    private const float StuckSpeed      = 8f;
-    private const float JumpIfAbove     = 1.5f * Chunk.TileSize;
-
+    // Reflex / action acquisitions by maneuver name (fed from the controller's trace).
     public readonly Dictionary<string, int> Starts = new();
 
     public readonly SpikeGuard Spikes = new();
-    public readonly HashSet<string> Disabled = new();   // opt-in ablation (Ranger drops WallClimbManeuver)
-    // Opt-in online learning: weighted choice + multiplicative-weights updates over the
-    // maneuvers (ManeuverWeights). Null = Bulldog's plain highest-score choice.
-    public ManeuverWeights Learn;
-    // Opt-in per-frame hook, run with the fresh view before any choice (Ranger's tactic
-    // learner ticks its credit windows here).
+    // Opt-in ablation by maneuver name (Ranger drops WallClimbManeuver). Like Maneuvers,
+    // edits must precede the first Poll: the controller is built from both then.
+    public readonly HashSet<string> Disabled = new();
+    // Opt-in online learning: the controller's bet ledger. Null = no correction and
+    // argmax selection (Bulldog's plain highest-score choice). Set before the first Poll.
+    public BetLedger Ledger;
+    // The controller's value = dealt - Lambda * taken (selection-time weight on the taken
+    // channel; Ranger's learner runs dealt-only, 0). Set before the first Poll.
+    public float Lambda = 1f;
+    // Opt-in route planner for the MoveExecutor (Ranger's RoutePlanner). Set before the
+    // first Poll.
+    public IMovePlanner Planner;
+    // Opt-in per-frame hook, run with the fresh view before the controller steps
+    // (Ranger's tactic learner ticks its credit windows here).
     public Action<BotView> PerFrame;
-    private readonly List<(BotManeuver, float)> _scored = new();
-    public BotManeuver Active => _active;
+
+    // The maneuver holding a resource: the committed action, else the committed reflex.
+    public BotManeuver Active
+        => ((_controller?.CommittedAction ?? _controller?.CommittedReflex) as ManeuverBehaviour)?.Maneuver;
     public List<BotManeuver> Maneuvers => _maneuvers;
+    // Null until the first Poll builds it.
+    public BotController Controller => _controller;
 
     private readonly Random            _rng;
     private readonly int               _selfIndex;
     private readonly List<BotManeuver> _maneuvers;
     private readonly BotView           _view = new();
     private readonly BulldogSense      _sense = new();
+    private BotController _controller;
+    private readonly HashSet<string> _stanceNames = new();
 
     private const int Ring = 32;
     private readonly Vector2[] _seen         = new Vector2[Ring];
@@ -61,8 +75,6 @@ public sealed class BulldogBot : IRemoteInputSource
     private readonly int[]     _seenFacing   = new int[Ring];
     private int _seenCount;
 
-    private BotManeuver _active;
-    private int   _jumpFrames, _jumpRelease, _stuck;
     private float _lastDamage;
     private PlayerInput _prev;
 
@@ -98,61 +110,66 @@ public sealed class BulldogBot : IRemoteInputSource
         if (extra != null) _maneuvers.AddRange(extra);
     }
 
+    private BotController Build()
+    {
+        var c = new BotController
+        {
+            Ledger  = Ledger,
+            Lambda  = Lambda,
+            // Without a learner, argmax: the old "highest score wins" brain.
+            Explore = Ledger != null,
+        };
+        if (Planner != null) c.Executor.Planner = Planner;
+        foreach (var st in new Stance[] { new ChaseStance(this), new StepOutStance(this) })
+        {
+            c.Add(st);
+            _stanceNames.Add(st.Name);
+        }
+        foreach (var m in _maneuvers)
+            if (!Disabled.Contains(m.Name)) c.Add(new ManeuverBehaviour(m));
+        c.Add(new SpikeGuardConstraint(Spikes));   // shared spike sense, last pass
+        return c;
+    }
+
     public PlayerInput Poll(Simulation sim, int frame)
     {
         if (sim.Player == null || sim.SecondaryPlayers.Count <= Math.Max(_selfIndex, 0)) return default;
+        _controller ??= Build();
         var v = Perceive(sim, frame);
         var input = new PlayerInput { MouseWorldPosition = v.TargetPos };
 
+        // The mix-up die rerolls whenever a maneuver ends. Getting hit aborts inside the
+        // controller before it selects, so reroll first, as the old brain did.
+        var prevAction = _controller.CommittedAction;
+        var prevReflex = _controller.CommittedReflex;
         float damage = v.Self.Combat.DamageTaken;
-        if (damage > _lastDamage && _active != null) { _active.Abort(v, ref input); Finish(); }
+        bool rerolled = false;
+        if (damage > _lastDamage && (prevAction != null || prevReflex != null))
+        {
+            _sense.Mix = _rng.NextDouble();
+            rerolled = true;
+        }
         _lastDamage = damage;
 
-        foreach (var m in _maneuvers) if (m.CooldownLeft > 0) m.CooldownLeft--;
-
-        Learn?.Tick(v.MyHealth, v.TargetHealth);
         PerFrame?.Invoke(v);
-        if (_active == null)
+        _controller.Step(v, ref input);
+
+        int acquired = 0;
+        foreach (var kv in _controller.Trace.Acquisitions)
         {
-            BotManeuver best = null;
-            float bestScore = 0f;
-            _scored.Clear();
-            foreach (var m in _maneuvers)
-            {
-                if (m.CooldownLeft > 0 || Disabled.Contains(m.Name)) continue;
-                float sc = m.Score(v);
-                if (sc > 0f) _scored.Add((m, sc));
-                if (sc > bestScore) { best = m; bestScore = sc; }
-            }
-            if (Learn != null) best = Learn.Pick(_scored, _rng);
-            if (best != null)
-            {
-                _active = best;
-                v.FramesSinceManeuver = 0;
-                Starts[best.Name] = Starts.GetValueOrDefault(best.Name) + 1;
-                Learn?.Started(best.Name);
-                best.Begin(v);
-            }
+            if (_stanceNames.Contains(kv.Key)) continue;
+            acquired += kv.Value - Starts.GetValueOrDefault(kv.Key);
+            Starts[kv.Key] = kv.Value;
         }
+        bool ended = (prevAction != null && _controller.CommittedAction != prevAction)
+                     || (prevReflex != null && _controller.CommittedReflex != prevReflex)
+                     || (acquired > 0 && _controller.CommittedAction == null && _controller.CommittedReflex == null);
+        if (ended && !rerolled) _sense.Mix = _rng.NextDouble();
 
-        if (_active == null || !_active.OwnsLocomotion) Locomote(v, ref input);
-        else { _jumpFrames = 0; _stuck = 0; }
-
-        if (_active != null && !_active.Step(v, ref input)) Finish();
-
-        Spikes.Apply(v, ref input);   // shared spike sense, last pass (Net/Bot/SpikeGuard.cs)
         bool attackEdge = (input.LeftClick && !_prev.LeftClick) || (input.RightClick && !_prev.RightClick);
         v.FramesSinceAttack = attackEdge ? 0 : v.FramesSinceAttack + 1;
         _prev = input;
-        v.FramesSinceManeuver++;
         return input;
-    }
-
-    private void Finish()
-    {
-        _active.CooldownLeft = _active.Cooldown;
-        _active = null;
-        _sense.Mix = _rng.NextDouble();
     }
 
     private BotView Perceive(Simulation sim, int frame)
@@ -197,37 +214,6 @@ public sealed class BulldogBot : IRemoteInputSource
     {
         lag = Math.Min(Math.Min(lag, Ring - 1), _seenCount - 1);
         return (_seenCount - 1 - lag) % Ring;
-    }
-
-    // Walk into the opponent; hop steps/walls and targets above; steer in the air.
-    private void Locomote(BotView v, ref PlayerInput input)
-    {
-        float dx = v.Dx, dy = v.Dy;
-        int toward = v.Toward;
-
-        bool walking = MathF.Abs(dx) > EngageRange;
-        // Our own end-lag is the one window we can't answer a swing in: step out of
-        // their reach until it is nearly over, then walk straight back in.
-        var cond = v.Self.Abilities.Condition;
-        int lagLeft = cond.RecoveryActive ? cond.RecoveryExpireFrame - v.SelfFrame : 0;
-        bool retreat = RetreatInLag && lagLeft > RetreatUntil && !_sense.TargetHelpless
-                       && MathF.Abs(dx) < RetreatDist && MathF.Abs(dy) < 40f && v.Grounded;
-        if (retreat) { BotInput.Move(ref input, -toward); walking = false; }
-        else if (walking) BotInput.Move(ref input, toward);
-
-        if (walking && MathF.Abs(v.MyVel.X) < StuckSpeed) _stuck++;
-        else                                               _stuck = 0;
-
-        if (_jumpFrames > 0)       { input.Space = true; _jumpFrames--; if (_jumpFrames == 0) _jumpRelease = 4; }
-        else if (_jumpRelease > 0) _jumpRelease--;
-        else if (v.Grounded && (_stuck >= StuckFrames
-                                || (dy < -JumpIfAbove && MathF.Abs(dx) < 4f * Chunk.TileSize)))
-        {
-            input.Space = true;
-            _jumpFrames = JumpHoldFrames - 1;
-            _stuck      = 0;
-        }
-        if (!v.Grounded && MathF.Abs(dx) > 6f) BotInput.Move(ref input, toward);
     }
 }
 

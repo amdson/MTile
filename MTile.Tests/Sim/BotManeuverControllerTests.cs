@@ -81,6 +81,14 @@ public class BotManeuverControllerTests
         public override bool Step(BotView v, ref PlayerInput input) => false;
     }
 
+    private sealed class FakePlanner : IMovePlanner
+    {
+        public bool Want;
+        public int Steps;
+        public bool Wants(BotView v, Vector2 target) => Want;
+        public bool Step(BotView v, Vector2 target, ref PlayerInput input) { Steps++; input.Space = true; return true; }
+    }
+
     // ── harness ──────────────────────────────────────────────────────────────────
 
     private static BotView View()
@@ -302,5 +310,46 @@ public class BotManeuverControllerTests
         Assert.Equal(90, bet.Horizon);
         fm.S = 0f;
         Assert.False(new ManeuverBehaviour(fm).Bet(v).Applicable);
+    }
+
+    // M2: a driving route planner holds Move. Move-claiming actions are not even asked to
+    // bet while it drives (Breach's Bet counts consecutive stuck frames); Move-None actions
+    // still fire alongside; once the planner lets go, the Move-claiming action can win.
+    [Fact]
+    public void RoutePlannerDriving_BlocksMoveClaimingActions_NotMoveNone()
+    {
+        var v = View();
+        var c = Controller();
+        var planner = new FakePlanner { Want = true };
+        c.Executor.Planner = planner;
+        c.Add(new FakeStance("Chase", new Bet(0.1f, 0f, 60)));
+        int jumpSteps = 0;
+        var jump = new Fake("JumpSlash", Category.Action, MoveClaim.Exclusive) { NextBet = Net.Bet.Pass };
+        c.Add(jump);
+
+        var f0 = Tick(c, v);
+        Assert.True(f0.Space, "the planner drives Move");
+        Assert.True(c.Executor.PlannerDriving);
+
+        jump.NextBet = new Bet(1f, 0f, 30);
+        jump.OnStep = (_, i) => { jumpSteps++; return (i, true); };
+        Tick(c, v);
+        Assert.Null(c.CommittedAction);
+        Assert.Equal(0, jumpSteps);
+
+        var slash = new Fake("Slash", Category.Action, MoveClaim.None) { NextBet = new Bet(0.5f, 0f, 30) };
+        c.Add(slash);
+        Tick(c, v);
+        Assert.Same(slash, c.CommittedAction);
+        Assert.True(c.StanceActive);
+        c.Actions.Remove(slash);
+        slash.OnStep = (_, i) => (i, false);
+        Tick(c, v);   // slash ends
+
+        planner.Want = false;
+        Tick(c, v);   // the straight line drives: planner released
+        Assert.False(c.Executor.PlannerDriving);
+        Tick(c, v);
+        Assert.Same(jump, c.CommittedAction);
     }
 }

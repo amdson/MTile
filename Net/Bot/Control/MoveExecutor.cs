@@ -21,18 +21,24 @@ public sealed class MoveExecutor
     // Optional route planner. Null = straight line only.
     public IMovePlanner Planner;
 
+    // True when the planner drove Move on the last Drive call. A running route is a
+    // commitment on Move (a half-built column, a climb in progress): the controller grants
+    // no Move-claiming action while it holds (Move-None actions still fire alongside).
+    public bool PlannerDriving { get; private set; }
+
     private int _jumpFrames, _jumpRelease, _stuck;
 
-    public void Reset() { _jumpFrames = 0; _jumpRelease = 0; _stuck = 0; }
+    public void Reset() { _jumpFrames = 0; _jumpRelease = 0; _stuck = 0; PlannerDriving = false; }
 
     public void Drive(BotView v, Stance stance, ref PlayerInput input)
     {
         var target = stance.Target(v);
         if (Planner != null && Planner.Wants(v, target))
         {
-            if (Planner.Step(v, target, ref input)) { Reset(); return; }
+            if (Planner.Step(v, target, ref input)) { Reset(); PlannerDriving = true; return; }
             // Planner done or failed: fall through to the straight line this frame.
         }
+        PlannerDriving = false;
 
         float dx = target.X - v.Me.X, dy = target.Y - v.Me.Y;
         int toward = dx >= 0f ? 1 : -1;

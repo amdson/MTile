@@ -4,15 +4,17 @@ namespace MTile.Net;
 
 // Ranger: Bulldog's melee plus path-planned routing (Plans/BOT_ROUTING_PLAN.md) — the
 // bot that follows you up a column, across a pit, or down and around. Built on Bulldog
-// (like Harrier) so an A/B against plain Bulldog isolates the router. Bulldog's own
-// WallClimbManeuver is switched off: the router plans climbs itself, with the same
-// controller, as one edge type among the rest.
+// (like Harrier) so an A/B against plain Bulldog isolates the router. The RouteManeuver
+// sits behind the controller's MoveExecutor as its planner (RoutePlanner), not as a
+// maneuver. Bulldog's own WallClimbManeuver is switched off: the router plans climbs
+// itself, with the same controller, as one edge type among the rest.
 public static class RangerBot
 {
-    // Default: with multiplicative-weights move selection (ManeuverWeights), rewarded on
-    // damage dealt only — benchmarked best (ZzzRangerEval, seeds 1-10 vs the field: 200.5
-    // /300 vs 182 for dealt − taken and 177.5 without learning). NoLearn is the plain
-    // highest-score brain, for A/B.
+    // Default: with the controller's bet ledger (BetLedger) and softmax selection, valued
+    // on damage dealt only (Lambda = takenWeight = 0). The pre-controller learner
+    // (ManeuverWeights) benchmarked dealt-only best: ZzzRangerEval, seeds 1-10 vs the
+    // field, 200.5/300 vs 182 for dealt − taken and 177.5 without learning. NoLearn is the
+    // plain highest-score brain, for A/B.
     public static readonly DuelBot Create  = (self, seed) => Build(seed, self, out _);
     public static readonly DuelBot NoLearn = (self, seed) => Build(seed, self, out _, learn: false);
 
@@ -30,13 +32,13 @@ public static class RangerBot
 
     // antiAir: three answers to an opponent overhead (the jump-over-and-pogo a human beats
     // Bulldog with) — hop up and air-slash, step out from under and punish the landing, or
-    // stab straight up. They overlap on purpose: the move-level learner (ManeuverWeights)
-    // picks whichever is paying off against this opponent.
+    // stab straight up. They overlap on purpose: the bet ledger corrects whichever is
+    // paying off against this opponent.
     public static BulldogBot Build(int seed, int self, out RouteManeuver route, bool learn = true, float takenWeight = 0f,
                                    bool tactics = false, bool antiAir = true)
     {
         route = new RouteManeuver();
-        var extra = new List<BotManeuver> { route };
+        var extra = new List<BotManeuver>();
         extra.Add(new WhiffPunishManeuver());        // Harrier's: dash in on an opponent's missed swing
         extra.Add(new RangerBlockThrowManeuver());   // ranged pressure: an aimed clod at 60-280 px
         extra.Add(new RangerCrystalWaveManeuver());  // ranged pressure: spiked wave at 6-14 tiles
@@ -55,13 +57,17 @@ public static class RangerBot
             extra.Add(new AfterSwingTactic(bandit));
             extra.Add(new DefendTactic(bandit));
         }
-        var b = new BulldogBot(seed, self, extra);
+        var b = new BulldogBot(seed, self, extra) { Planner = new RoutePlanner(route) };
         if (tactics)
         {
             b.PerFrame = bandit.Tick;
         }
         b.Disabled.Add(nameof(WallClimbManeuver));
-        if (learn) b.Learn = new ManeuverWeights { TakenWeight = takenWeight };
+        if (learn)
+        {
+            b.Ledger = new BetLedger();
+            b.Lambda = takenWeight;
+        }
         return b;
     }
 }

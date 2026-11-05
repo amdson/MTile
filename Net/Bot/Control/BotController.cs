@@ -18,7 +18,8 @@ public interface IBetLedger
 // The only writer of a bot's PlayerInput (Plans/BOT_BEHAVIOR_ARCHITECTURE.md). Two
 // parallel selectors over registered behaviours plus a constraint pass:
 //
-//   Move: committed reflex, else a committed action with a Move claim, else the stance.
+//   Move: committed reflex, else a committed action with a Move claim, else the stance
+//         (whose executor's route planner, while driving, also blocks Move-claiming actions).
 //   Act:  at most one committed action, chosen against an implicit Idle arm.
 //   Constraints mask the finished input, last.
 //
@@ -144,9 +145,13 @@ public sealed class BotController
     private void SelectAction(BotView v, int bucket)
     {
         _cands.Clear();
+        // The route planner mid-route holds Move: Move-claiming actions don't even bet
+        // (their Bet may keep frame-to-frame bookkeeping, e.g. Breach's stuck counter).
+        bool routeHoldsMove = StanceActive && Executor.PlannerDriving;
         foreach (var a in Actions)
         {
             if (a.CooldownLeft > 0) continue;
+            if (routeHoldsMove && a.Move.Kind != MoveClaim.Mode.None) continue;
             var raw = a.Bet(v);
             if (raw.Applicable) _cands.Add((a, Correct(a.Name, bucket, raw)));
         }

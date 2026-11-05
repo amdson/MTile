@@ -201,3 +201,22 @@ public sealed class SpikeGuard
         return 0;
     }
 }
+
+// SpikeGuard as a BotController constraint (Plans/BOT_BEHAVIOR_ARCHITECTURE.md): the same
+// last-pass filter, run by the controller after every behaviour has written its input.
+public sealed class SpikeGuardConstraint : Constraint
+{
+    public readonly SpikeGuard Guard;
+    public SpikeGuardConstraint(SpikeGuard guard) { Guard = guard ?? throw new ArgumentNullException(nameof(guard)); }
+
+    public override string Name => nameof(SpikeGuard);
+
+    public override bool Mask(BotView v, ref PlayerInput input)
+    {
+        var before = input;
+        Guard.Apply(v, ref input);
+        return before.Left != input.Left || before.Right != input.Right || before.Space != input.Space
+            || before.LeftClick != input.LeftClick || before.RightClick != input.RightClick
+            || before.MouseWorldPosition != input.MouseWorldPosition;
+    }
+}

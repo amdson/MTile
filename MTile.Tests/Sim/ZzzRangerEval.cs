@@ -23,11 +23,18 @@ public class ZzzRangerEval(ITestOutputHelper output)
             ("Bulldog", BulldogBot.Create), ("Brawler", BotDuel.Brawler),
         };
         var bandits = new ConcurrentBag<TacticBandit>();
-        var learned = new ConcurrentDictionary<string, ConcurrentBag<ManeuverWeights>>();
+        var learned = new ConcurrentDictionary<string, ConcurrentBag<BetLedger>>();
+        // Each challenger's bet ledger is collected for the offsets printout below.
+        DuelBot Collect(string name, DuelBot make) => (self, seed) =>
+        {
+            var bot = make(self, seed);
+            if (bot is BulldogBot { Ledger: { } l }) learned.GetOrAdd(name, _ => new ConcurrentBag<BetLedger>()).Add(l);
+            return bot;
+        };
         var challengers = new (string, DuelBot)[]
         {
-            ("Ranger", RangerBot.Create),
-            ("Ranger-noAA", RangerBot.NoAntiAir),
+            ("Ranger", Collect("Ranger", RangerBot.Create)),
+            ("Ranger-noAA", Collect("Ranger-noAA", RangerBot.NoAntiAir)),
         };
         var jobs = new List<(string C, string O, string A, int S, bool P1, DuelBot Cb, DuelBot Ob)>();
         foreach (var (cn, cb) in challengers) foreach (var (on, ob) in opponents)
@@ -53,13 +60,18 @@ public class ZzzRangerEval(ITestOutputHelper output)
             var mean = Enumerable.Range(0, n).Select(i => g.Average(kv => kv.Value[i]));
             output.WriteLine($"tactic {g.Key.Item1} ctx {g.Key.Item2} ({g.Count()} bouts): " + string.Join(" ", mean.Select(m => $"{m:F2}")));
         }
-        // What the learners ended up favouring: mean final weight per maneuver.
+        // What the learners ended up believing: mean final bet offset per (behaviour,
+        // situation), over bouts, largest first; then one bout's full ledger report.
         foreach (var (name, bag) in learned.OrderBy(k => k.Key))
         {
-            var mean = bag.SelectMany(w => w.Weight).GroupBy(kv => kv.Key)
-                          .Select(g => (g.Key, Mean: g.Sum(kv => kv.Value) / bag.Count + (bag.Count - g.Count()) / (float)bag.Count))
-                          .OrderByDescending(x => x.Mean);
-            output.WriteLine($"{name} mean final weights: " + string.Join("  ", mean.Select(x => $"{x.Key} {x.Mean:F2}")));
+            var mean = bag.SelectMany(l => l.Offsets).GroupBy(o => (o.Name, o.Bucket))
+                          .Select(g => (g.Key, Dealt: g.Sum(o => o.DealtOffset) / bag.Count, Taken: g.Sum(o => o.TakenOffset) / bag.Count,
+                                        N: g.Sum(o => o.Settles)))
+                          .OrderByDescending(x => System.MathF.Max(System.MathF.Abs(x.Dealt), System.MathF.Abs(x.Taken))).Take(16);
+            output.WriteLine($"{name} mean final offsets over {bag.Count} bouts:");
+            foreach (var x in mean)
+                output.WriteLine($"  {x.Key.Name,-24} {Situation.Describe(x.Key.Bucket),-16} dealt {x.Dealt,6:+0.00;-0.00} taken {x.Taken,6:+0.00;-0.00}  n={x.N}");
+            output.WriteLine(bag.First().Report());
         }
     }
 }

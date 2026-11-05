@@ -73,7 +73,7 @@ public class ZzzCamperTrace(ITestOutputHelper output)
         {
             var i2 = b.Poll(sim, f);
             sim.Step(camper.Poll(sim, f), i2);
-            string now = $"{b.Active?.Name} {route.Follower.Current}";
+            string now = $"{b.Active?.Name} move {b.Controller?.Trace.MoveHolder} route {(b.Planner as RoutePlanner)?.Running} {route.Follower.Current}";
             if (now != last || f % 60 == 0)
                 output.WriteLine($"f{f} {now} | p2 {p2.Body.Position} {p2.CurrentStateName} hp {p2.Health:F1} | camper y {p1.Body.Position.Y:F0} hp {p1.Health:F1}");
             last = now;

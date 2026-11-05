@@ -13,7 +13,7 @@ namespace MTile.Net;
 // (a rise, from respawn, counts 0) and settles at frame + Horizon, nudging the offset so the
 // corrected bet tracks the realised mean outcome. There is no early close: a preempted
 // behaviour is scored through its whole horizon, tail included.
-public sealed class BetLedger
+public sealed class BetLedger : IBetLedger
 {
     public float Eta       = 0.3f;   // step per settle
     public float Share     = 0.02f;  // fixed-share decay of offsets toward 0 per settle
