@@ -268,7 +268,7 @@ Commit per milestone; commit only files this work touches (the working tree has 
 uncommitted edits in `Simulation.cs`, `configs/game_config.json`, `todo.txt` and
 `MTile.Tests/Sim/CoopModeTests.cs` that must stay out of these commits).
 
-[ ] **M1. Controller core, no brain changes.**
+[~] **M1. Controller core, no brain changes.**
 `BotBehaviour` (Name, Category, MoveClaim, Cooldown, `Bet`, `Begin`, `Step`, `Aborted`),
 `Stance : BotBehaviour` (`Target(view) → Vector2`, no Step), `Constraint : BotBehaviour`
 (`Mask(view, ref input)`), `MoveClaim` (None / Exclusive / Forbid(keys)), `Bet`,
@@ -313,7 +313,9 @@ record the regression numbers here under a "Results" heading.
 
 ## Campaign log
 
-- 2026-11-04 branch `bot-controller` created from main @1cca026; plan committed. Baseline: see M1 entry.
+- 2026-11-04 branch `bot-controller` created from main @1cca026; plan committed @ee57530.
+- Baseline before any change: `scripts/test-group.py bot` = 162 pass / 6 fail / 168, 6 m 47 s. The 6 reds are pre-existing and not touched by this work: BotManeuverMovementTests.Dash_ClosesGap_AndDashSlashes, BotManeuverBurstTests.Burst_CloseInBand_ShovesAndChipsP1, BotManeuverSpacingTests.BotManeuverBackoff_StillHits_ButOverlapsLess, BotManeuverStabTests.AirWhipKick_CrossUp_KicksBackward, BotManeuverAvalancheCrushTests.WallPocket_CrushesP1(3,11,6), BotManeuverAvalancheCrushTests.FreeRoof_CrushesP1(2,29).
+- M1 shared interface committed @eba4362 (Net/Bot/Control/BotBehaviour.cs). Ledger and controller parcels dispatched to two Opus agents in worktrees.
 
 ## Decisions needed
 
