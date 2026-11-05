@@ -47,9 +47,11 @@ public sealed class BulldogBot : IRemoteInputSource
     // Opt-in route planner for the MoveExecutor (Ranger's RoutePlanner). Set before the
     // first Poll.
     public IMovePlanner Planner;
-    // Opt-in per-frame hook, run with the fresh view before the controller steps
-    // (Ranger's tactic learner ticks its credit windows here).
+    // Opt-in per-frame hook, run with the fresh view before the controller steps.
     public Action<BotView> PerFrame;
+    // Positioning stances a derived brain adds after Chase and StepOut (Ranger's
+    // HoldRangeStance). Like Maneuvers and Disabled, edit before the first Poll.
+    public readonly List<Stance> ExtraStances = new();
 
     // The maneuver holding a resource: the committed action, else the committed reflex.
     public BotManeuver Active
@@ -120,7 +122,9 @@ public sealed class BulldogBot : IRemoteInputSource
             Explore = Ledger != null,
         };
         if (Planner != null) c.Executor.Planner = Planner;
-        foreach (var st in new Stance[] { new ChaseStance(this), new StepOutStance(this) })
+        var stances = new List<Stance> { new ChaseStance(this), new StepOutStance(this) };
+        stances.AddRange(ExtraStances);
+        foreach (var st in stances)
         {
             c.Add(st);
             _stanceNames.Add(st.Name);
