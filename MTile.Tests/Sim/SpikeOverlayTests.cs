@@ -255,8 +255,9 @@ public class SpikeOverlayTests(ITestOutputHelper output)
     [Fact]
     public void KnockedIntoSpikes_AtSpeed_HurtsMuchMore()
     {
-        // Dropped from height onto P1's spiked floor: ~400 px/s of normal approach.
-        float dropY = FloorTop - 140f;
+        // Dropped from height onto P1's spiked floor: ~400 px/s of normal approach
+        // (descent runs at FallGravityScale x g since 2026-11-05, so the drop is taller).
+        float dropY = FloorTop - 140f / MovementConfig.Current.FallGravityScale;
         var sim = new Simulation(Arena(), StandAt(40f));
         sim.AddSecondaryPlayer(new Vector2(200f, dropY));
         var p2 = sim.SecondaryPlayers[0].Player;

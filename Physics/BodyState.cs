@@ -33,6 +33,7 @@ public struct BodyState
     public Vector2 AppliedForce;
     public float   LastImpulseMagnitude;
     public float   LastCrushImpulse;
+    public bool    LastCrushMovingSurface;
     public int     SproutCrushCount;
     public bool    WavePinned;
     public float   FrictionScale;
@@ -52,6 +53,7 @@ public struct BodyState
             AppliedForce         = b.AppliedForce,
             LastImpulseMagnitude = b.LastImpulseMagnitude,
             LastCrushImpulse     = b.LastCrushImpulse,
+            LastCrushMovingSurface = b.LastCrushMovingSurface,
             SproutCrushCount     = b.SproutCrushCount,
             WavePinned           = b.WavePinned,
             FrictionScale        = b.FrictionScale,
@@ -67,6 +69,7 @@ public struct BodyState
         b.AppliedForce         = AppliedForce;
         b.LastImpulseMagnitude = LastImpulseMagnitude;
         b.LastCrushImpulse     = LastCrushImpulse;
+        b.LastCrushMovingSurface = LastCrushMovingSurface;
         b.SproutCrushCount     = SproutCrushCount;
         b.WavePinned           = WavePinned;
         b.FrictionScale        = FrictionScale;

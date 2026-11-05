@@ -144,8 +144,9 @@ public class PlayerCharacter : IHittable
     // absorbed dv, whether or not it crosses the damage line: that is the bounce-punish
     // window after a throw or a stab into a wall. A self-inflicted fall never stuns,
     // however hard (HP + the short hitstun only). Sized under a stab's slam (~279 px/s
-    // applied) and over a stock slash's push, so launchers earn it and pokes don't.
-    private const float CrushStunImpulse  = 240f;
+    // applied, ~235 absorbed after a screen of drag, ~225 on a grounded victim) and well
+    // over a slash's push (75-130 px/s), so launchers earn it and pokes don't.
+    private const float CrushStunImpulse  = 200f;
     // Legacy stun line for un-audited creature hits (see OnHit): the dv a 525 authored
     // impulse gives a player, the line those attacks were tuned against.
     private const float CreatureStunDv    = 210f;
@@ -274,8 +275,17 @@ public class PlayerCharacter : IHittable
         // Scaled here rather than through HitResolver's `scale` because that also feeds
         // Collision mode's MinLaunch floor, which would hand back most of the knockback
         // a leaky guard just ate.
-        if (hit.LaunchDecay > 0f) Launch(res.TargetDeltaV * guard.KnockbackScale * kbScale, in hit);
-        else                      AddKnockback(res.TargetDeltaV * guard.KnockbackScale * kbScale);
+        var applied = res.TargetDeltaV * guard.KnockbackScale * kbScale;
+        // Grounded knockback reduction (MovementConfig.GroundKnockbackScale, todo K3): a
+        // planted victim staggers along the floor instead of popping up.
+        if (IsGrounded)
+        {
+            var mc = MovementConfig.Current;
+            applied.X *= mc.GroundKnockbackScale;
+            if (applied.Y < 0f) applied.Y *= mc.GroundKnockbackRiseScale;
+        }
+        if (hit.LaunchDecay > 0f) Launch(applied, in hit);
+        else                      AddKnockback(applied);
 
         // For render-only cosmetics (directional knockback cue, weapon flash) that
         // want more than LastHitImpulse's magnitude. Falls back to the hit's launch
@@ -599,8 +609,11 @@ public class PlayerCharacter : IHittable
             Health -= WavePinDamage;
             _abilities.Combat.AddDamage(WavePinDamage);
             _lastDamageFrame = _frame;
+            // Terrain that moves INTO you is an attack, not a landing: it stuns (the wave
+            // keeps its victim), unlike a self-inflicted fall.
             _abilities.Combat.OnHitRegistered(_frame, SproutCrushImpulseFeel, dt,
-                hitstunSecondsOverride: 0.27f, muteControl: false, chains: false);
+                hitstunSecondsOverride: 0.27f, muteControl: false, chains: false,
+                stunSeconds: CombatState.DefaultStunSeconds);
             _lastWavePinFrame = _frame;
             _lastCrushFrame   = _frame;
         }
@@ -611,8 +624,11 @@ public class PlayerCharacter : IHittable
         // OnHitRegistered so a hard fall / wall slam also lights up Hitstun and
         // (if hard enough) Stun — "I just slammed down, give me a sec."
         bool crushBills = Body.LastCrushImpulse > CrushImpulseThreshold;
+        // A surface that was MOVING when it hit us (an eruption front, a wave) is terrain
+        // attacking us - that crush stuns like a slam after a hit; a stationary floor we
+        // fell onto never does. (A snapshotted body flag, not ContactEvents: rollback.)
         bool slamStuns  = Body.LastCrushImpulse >= CrushStunImpulse
-                          && (_abilities.Combat.Launched
+                          && (_abilities.Combat.Launched || Body.LastCrushMovingSurface
                               || (_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl));
         if ((crushBills || slamStuns)
             && _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt))
@@ -648,8 +664,11 @@ public class PlayerCharacter : IHittable
             Health -= sproutHp;
             _abilities.Combat.AddDamage(sproutHp);
             _lastDamageFrame = _frame;
+            // Terrain that moves INTO you is an attack, not a landing: it stuns (the wave
+            // keeps its victim), unlike a self-inflicted fall.
             _abilities.Combat.OnHitRegistered(_frame, SproutCrushImpulseFeel, dt,
-                hitstunSecondsOverride: 0.27f, muteControl: false, chains: false);
+                hitstunSecondsOverride: 0.27f, muteControl: false, chains: false,
+                stunSeconds: CombatState.DefaultStunSeconds);
             _lastCrushFrame = _frame;
         }
 
@@ -906,8 +925,15 @@ public class PlayerCharacter : IHittable
         // Apply gravity-scale modifier as a counter-force, identical in shape to
         // Entity.PreStep. With GravityScale = 1 this is a no-op; with 0.3 the body
         // experiences only 30% of gravity → floaty mid-air feel during charge.
-        if (ctx.Modifiers.GravityScale != 1f)
-            Body.AppliedForce += Gravity * (ctx.Modifiers.GravityScale - 1f);
+        // ...times the descent-only fall scale (MovementConfig.FallGravityScale): airborne
+        // in a free-flight state and moving down. Multiplicative with the action's scale,
+        // kept OUT of ctx.Modifiers so BallisticPredictor can apply its own per-tick
+        // version of the same rule rather than seeing a folded constant.
+        float gravityScale = ctx.Modifiers.GravityScale;
+        if (Body.Velocity.Y > 0f && FreeAir(_currentState) && !ctx.TryGetGround(out _))
+            gravityScale *= MovementConfig.Current.FallGravityScale;
+        if (gravityScale != 1f)
+            Body.AppliedForce += Gravity * (gravityScale - 1f);
         Body.AppliedForce.Y += FallDrag(Body.Velocity.Y, Gravity.Y, ctx.Modifiers.FallTerminalSpeed);
 
         if (!hitstopFrozen) _currentAction.Update(ctx, _abilities, ref _actionVars);
@@ -954,6 +980,11 @@ public class PlayerCharacter : IHittable
     }
 
     public bool IsGrounded => _currentState is StandingState || _currentState is CrouchedState;
+    // Free flight: the states where the body is simply ballistic (no surface, no hold),
+    // i.e. where the descent-only fall scale applies.
+    public static bool FreeAir(MovementState s)
+        => s is FallingState or TumbleState or JumpingState or RunningJumpState or DoubleJumpingState
+             or CoveredJumpState or WallJumpingState or LedgeJumpState or DashState or DropdownState;
     public string CurrentStateName => _currentState?.GetType().Name ?? "None";
     public MovementState CurrentState => _currentState;
     public ActionState CurrentAction => _currentAction;

@@ -50,6 +50,12 @@ public class PhysicsBody
     // which must still see a clod that ploughs into sand. Reset, max'd and
     // snapshotted alongside it.
     public float LastCrushImpulse;
+    // True when any hard-stop contact this step was against a MOVING surface (an eruption
+    // front, a wave): terrain that came to the body rather than a floor it fell onto.
+    // PlayerCharacter's crush path stuns on such a crush and not on a landing. Reset and
+    // snapshotted with LastCrushImpulse (ContactEvents are not snapshotted, so the crush
+    // path must not read them a frame later - a rollback replay would see an empty list).
+    public bool LastCrushMovingSurface;
     // Scratch for the above: the vector sum of this step's hard-stop Δv so far, whose
     // length LastCrushImpulse tracks. Reset at the top of every StepSwept and only read
     // inside it, so it never crosses a frame boundary and needs no snapshot.

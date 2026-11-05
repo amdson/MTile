@@ -105,6 +105,12 @@ public class IntentBuffer
     // move ends, but one older than this never resurfaces long after the fact.
     // Compile-time constant because it's a default parameter value.
     public const int DefaultLookbackFrames = 20;
+    // Window for an attack OPENER's click (todo J, 2026-11-05): short, so a mashed click
+    // does not auto-fire on the first actionable frame - timing matters again. Combo
+    // steps keep DefaultLookbackFrames (a click 3f into S1 must survive the ~17f until
+    // S2 may start, or "three rapid clicks = three slashes" breaks), and the swipe /
+    // circle gestures are classified at the release edge regardless of this window.
+    public const int OpenerLookbackFrames  = 12;
 
     // Jump presses use a much shorter window than the global gesture cap: a
     // slightly-early press should buffer onto the next landing/launch, not replay

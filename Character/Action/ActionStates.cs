@@ -772,7 +772,11 @@ public abstract class SlashLikeAction : ActionState
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        // Openers accept a click only OpenerLookbackFrames old; combo steps keep the
+        // long window so a buffered follow-up survives the previous swing.
+        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _,
+                              EntryFromAnyRecoveryIndex ? IntentBuffer.DefaultLookbackFrames
+                                                        : IntentBuffer.OpenerLookbackFrames)) return false;
         // Strict from-set: fire only out of neutral/recovery (never over a live
         // action), and openers wait out the full countdown.
         if (!EntryOk(ctx, EntryFromAnyRecoveryIndex ? int.MaxValue : 0)) return false;
@@ -1079,7 +1083,7 @@ public class CrouchSlash : SlashLikeAction
         // Standard slash gating PLUS the player must be in CrouchedState. The
         // base class doesn't expose CheckPreConditions in a way we can extend
         // cleanly, so we duplicate its check and add the crouch requirement.
-        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _, IntentBuffer.OpenerLookbackFrames)) return false;
         if (!EntryOk(ctx)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         if (!ctx.GroundedForActions) return false;
@@ -2443,8 +2447,8 @@ public class DashSlash : SlashLikeAction
     {
         if (ctx.CurrentMovement is not DashState) return false;
         if (!EntryOk(ctx)) return false;
-        if (!ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out _)
-            && !ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
+        if (!ctx.Intents.Peek(IntentType.PressEdge, ctx.CurrentFrame, out _, IntentBuffer.OpenerLookbackFrames)
+            && !ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _, IntentBuffer.OpenerLookbackFrames)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
         return true;
     }

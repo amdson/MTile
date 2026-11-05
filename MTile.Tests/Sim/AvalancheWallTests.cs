@@ -209,7 +209,7 @@ public class AvalancheWallTests(ITestOutputHelper output)
         for (int f = 0; f < 90; f++)
         {
             // Keep the victim stunned through the wave's arrival (re-hit every 0.5 s).
-            if (f % 30 == 10) p1.Combat.OnHitRegistered(p1.Frame, 300f, 1f / 60f, hitstunSecondsOverride: 0.6f);
+            if (f % 30 == 10) p1.Combat.OnHitRegistered(p1.Frame, 300f, 1f / 60f, hitstunSecondsOverride: 0.6f, stunSeconds: CombatState.DefaultStunSeconds);   // stun is declared per hit now
             sim.Step(default, default);
             rode |= p1.CurrentStateName == nameof(TerrainCarriedState);
             if (p1.Body.WavePinned) pinned++;
@@ -253,7 +253,7 @@ public class AvalancheWallTests(ITestOutputHelper output)
         int pinned = 0;
         for (int f = 0; f < 90; f++)
         {
-            if (f % 30 == 0) p1.Combat.OnHitRegistered(p1.Frame, 300f, 1f / 60f, hitstunSecondsOverride: 0.6f);
+            if (f % 30 == 0) p1.Combat.OnHitRegistered(p1.Frame, 300f, 1f / 60f, hitstunSecondsOverride: 0.6f, stunSeconds: CombatState.DefaultStunSeconds);   // stun is declared per hit now
             if (f >= 5)
                 for (int x = 15; x <= 21; x++)
                 for (int y = FloorRow - 1; y >= FloorRow - 3; y--)

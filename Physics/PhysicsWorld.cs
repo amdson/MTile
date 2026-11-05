@@ -20,6 +20,7 @@ public static class PhysicsWorld
             // applied a tangential force this frame (walking / running / etc.).
             // If so, friction stays out of the way; otherwise it brakes / carries.
             body.ContactEvents.Clear();
+            body.LastCrushMovingSurface = false;
             Vector2 savedForce = body.AppliedForce;
             body.Velocity += body.AppliedForce * dt;
             body.AppliedForce = Vector2.Zero;
@@ -149,6 +150,7 @@ public static class PhysicsWorld
                     // emerges moving away from the surface at e·|vnRel|.
                     body.Velocity -= vnRel * body.Impact.BounceRestitution * normal;
                 }
+                if (bestShapeVel.LengthSquared() > 1f) body.LastCrushMovingSurface = true;
                 body.ContactEvents.Add(new ContactEvent(normal, bestShapeVel, vnRel,
                     bounced ? ContactOutcome.Bounce : ContactOutcome.Stop,
                     bounced ? body.Impact.BounceRestitution : 0f));
@@ -260,6 +262,7 @@ public static class PhysicsWorld
             // PlayerCharacter.Update) read post-step for crush-damage dispatch.
             body.LastImpulseMagnitude = 0f;
             body.LastCrushImpulse = 0f;
+            body.LastCrushMovingSurface = false;
             body.CrushDvThisStep = Vector2.Zero;
             body.SproutCrushCount = 0;
             body.WavePinned = false;
@@ -610,6 +613,7 @@ public static class PhysicsWorld
                     && vnAbs >= body.Impact.BounceImpulseThreshold;
                 if (bounced)
                     body.Velocity -= vnRel * body.Impact.BounceRestitution * hitNormal;
+                if (hitSurfaceVel.LengthSquared() > 1f) body.LastCrushMovingSurface = true;
                 body.ContactEvents.Add(new ContactEvent(hitNormal, hitSurfaceVel, vnRel,
                     brokeThrough ? ContactOutcome.BreakThrough
                                  : bounced ? ContactOutcome.Bounce : ContactOutcome.Stop,

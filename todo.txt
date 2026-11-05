@@ -45,7 +45,7 @@ F. Frame data pass (2026-11-05, see the kit table vs Lucina/Mario)
   that costs 0.1 HP is a 36f stun.
   PROPOSED: keep CrushImpulseThreshold 400 for DAMAGE (the fall-damage calibration stays). Add a separate crush-STUN
   rule: stun only when the body is Launched / in hitstun at the moment of the crush (the slam follows a hit) and the
-  absorbed dv >= ~240; a self-inflicted fall never stuns however hard (HP + 16f hitstun only, as the comment intended).
+  absorbed dv >= ~200 (240 proposed; a stab's slam measures ~235 after drag); a self-inflicted fall never stuns however hard (HP + 16f hitstun only, as the comment intended).
   Crush-stun length short, ~20f (the bounce-punish window in G), not the 36f combat stun. The stab's slam at ~279 px/s
   crosses 240; the heavier launches in H (kick, hammer, S3) will too.
 
@@ -211,7 +211,7 @@ Milestones (status: [ ] todo, [~] in progress, [x] done @commit, [!] blocked, [?
 - [x] M2 Per-move pass @M2 (see log) (FrameData / action classes / movement_config): F damage spread + stab multiplier cap; H heavy
       hitstun overrides + launches; true-string margin (S3 startup 7); I DashSlash; J slash tail split; K6 ground armor;
       F grab 6f + G anti-regrab.
-- [ ] M3 Movement: K2 MaxAirSpeed 42; K3 grounded knockback reduction; J opener buffer 12f; L descent-only gravity 0.7
+- [x] M3 Movement @M3 (see log): K2 MaxAirSpeed 42; K3 grounded knockback reduction; J opener buffer 12f; L descent-only gravity 0.7
       (+ BallisticPredictor rule); G wall tech.
 - [ ] M4 Bot: regenerate BetCalibration.Field (ZzzLearningEffect.CalibrationDump), bot group green (known reds only),
       Situation bucket check, league sanity. Carried from M2: GuardManeuver must time its raise to the predicted hit
@@ -246,6 +246,28 @@ Milestones (status: [ ] todo, [~] in progress, [x] done @commit, [!] blocked, [?
   true string - needs a timed raise; SpikeGuard Rampart: launched into the spike carpet by the new hammer/S3 launches);
   QuillbackEnemyTests.Quillback_BuildsUp went green. Traces: S1->S2->S3 lands fully on a mashing victim (true);
   whip kick +1 on hit at point blank and carries 37px (was -15 / 12px).
+- M3 2026-11-05: MovementConfig MaxAirSpeed 90 -> 42 (K2); FallGravityScale 0.7 descent-only (L), applied in
+  PlayerCharacter for free-flight states (FreeAir) and mirrored per tick in BallisticPredictor (both loops);
+  GroundKnockbackScale 0.8 / GroundKnockbackRiseScale 0.5 on a Standing/Crouched victim's applied knockback (K3);
+  IntentBuffer.OpenerLookbackFrames 12 for slash openers, DashSlash and CrouchSlash (combo steps keep 20; J); wall tech
+  in TumbleState (buffered jump + solid within 60px along the horizontal velocity -> Tech, pushed off the wall; G).
+  Crush-stun line 240 -> 200 (a stab's slam measures ~235 absorbed). Terrain that MOVES into the body stuns: wave pin,
+  sprout crush, and a crush against a moving surface (new snapshotted PhysicsBody.LastCrushMovingSurface - reading
+  ContactEvents a frame later broke TerrainRollbackTests determinism). Tests: CombatGroundAdvantageTests (K3, L),
+  TumbleTechTests wall tech (both ways), AvalancheWallTests inject stunSeconds, SpikeOverlay drop height scaled by
+  the fall scale, SpeedInvariant ceiling = max(walk, air) x 1.1.
+  FALLOUT LEFT RED (decided knobs; retune or feel-check, as the 2026-10-19 slowdown did):
+   K2 air 42 -> the corridor courses: ClimbArbitration FullRegistry_BumpyCorridor (39.8 px/s "too slow"),
+      FoldScenario BumpyCorridor_HoldRight_TraversesAtSpeed, BotManeuverRouteTests.Pit_GapJump; and the bot ROUTE
+      JUMP TABLE (JumpTable.g.cs, 26 Entry_StillLands rows) is calibrated to air 90 - regenerate with
+      ZzzRouteCalibration.ReachTable in M4. Note RunJumpMinSpeed 48 > the new air cap: a running jump is braked to 42
+      in the air (the 1.0x-cap + lower-accel fallback avoids that; both measured: at cap 60 the corridor tests still
+      fail, so the reach loss is mostly the cap being below the courses' design speed either way).
+   L fall 0.7 -> PlayerImpactByVelocityTests DoubleJump_OntoDirt/Stone_BouncesNoBreak, HighDrop_OntoSandStack (impact
+      energy from a given height dropped; the impact tuning is already flagged "pending rework" in BACKLOG).
+   K3 -> SpearmanEnemyTests x2 (the spear's throw-back no longer clears its reach on a grounded victim: enemy
+      knockback vs grounded victims wants a pass).
+   Bot (M4): BotManeuverAvalancheCharge/Ride rows, PulseGuard x2, SpikeGuard x3, ClaimTests.Guard_LeavesMoveEmpty.
 
 ### Decisions needed / resolved by the campaign
 - RESOLVED (M1): Tumble vs launch. G says Launch drives Tumble but also that launch must not block jump; a movement

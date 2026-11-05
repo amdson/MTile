@@ -203,4 +203,58 @@ public class TumbleTechTests(ITestOutputHelper output)
         Assert.True(sawTechBounce, "Tech never produced an invuln upward bounce near the ground.");
         Assert.True(stunClearedByTech, "Tech did not clear the launch (StunActive).");
     }
+
+    // Wall tech (todo G, 2026-11-05): a body LAUNCHED into a wall with a buffered jump
+    // techs off it just before the slam - invulnerable, launch cleared, pushed back away
+    // from the wall - so the wall slam never becomes a crush-stun. Without the jump the
+    // same launch slams and stuns (the bounce-punish window the attacker earned).
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Launch_IntoWall_TechsOffIt_OnlyWithABufferedJump(bool jump)
+    {
+        var terrain = RightWall();
+        float wallLeft = 10 * Chunk.TileSize;
+        // Start 90px left of the wall, mid-air, flying right at a stab-like launch speed.
+        var player = new PlayerCharacter(new Vector2(wallLeft - HalfWidth() - 90f, 60f));
+        player.Body.Velocity = new Vector2(280f, 0f);
+        var bodies = new List<PhysicsBody> { player.Body };
+        var ctrl = new Controller();
+        var hb = new HitboxWorld(); var hu = new HurtboxWorld();
+
+        // One registered hit + the launch flag: a stab's victim, in flight.
+        player.Combat.OnHitRegistered(player.Frame + 1, 300f, Dt, hitstunSecondsOverride: 0.8f, hitstop: false);
+        player.Combat.Launched = true;
+
+        bool sawTech = false, sawStun = false, movedAway = false;
+        float minGap = float.MaxValue;
+        for (int f = 0; f < 40; f++)
+        {
+            ctrl.InjectInput(new PlayerInput { Space = jump && (f % 2 == 0) });
+            terrain.TickSprouts(Dt);
+            player.Update(ctrl, terrain, hb, hu, Dt);
+            PhysicsWorld.StepSwept(bodies, terrain, Dt, Gravity);
+
+            float gap = wallLeft - player.Body.Bounds.Right;
+            minGap = MathF.Min(minGap, gap);
+            if (player.Combat.IsInvulnerable(player.Frame)) sawTech = true;
+            if (player.Combat.StunActive) sawStun = true;
+            if (sawTech && player.Body.Velocity.X < 0f) movedAway = true;
+        }
+        output.WriteLine($"jump={jump}: tech={sawTech} stun={sawStun} movedAway={movedAway} minGap={minGap:F1}");
+
+        if (jump)
+        {
+            Assert.True(sawTech, "A buffered jump flying into the wall should wall-tech (invuln).");
+            Assert.True(movedAway, "The tech should push the body back off the wall.");
+            Assert.False(player.Combat.Launched, "The tech ends the launch.");
+            Assert.False(sawStun, "A teched wall never crush-stuns.");
+        }
+        else
+        {
+            Assert.False(sawTech, "No jump, no tech.");
+            Assert.True(minGap < 2f, $"The launch should reach the wall (min gap {minGap:F1}).");
+            Assert.True(sawStun, "A launched body slamming the wall takes the crush-stun (the bounce-punish window).");
+        }
+    }
 }

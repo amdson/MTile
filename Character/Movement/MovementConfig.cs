@@ -17,7 +17,15 @@ public class MovementConfig
     // with the 0.12 s hold and quadratic drag) lands each apex at 75% — a ground jump
     // ~4.9 → ~3.7 tiles. Scaling the speeds x0.75 instead would cut height to ~56%.
     public float AirAccel { get; set; } = 900f;
-    public float MaxAirSpeed { get; set; } = 90f;
+    // 0.7x MaxWalkSpeed (todo K2, 2026-11-05): 90 (1.5x walk) was an oversight that made
+    // the air the fastest way to travel. Smash runs air at 0.55-0.65x of run speed.
+    public float MaxAirSpeed { get; set; } = 42f;
+    // Descent-only gravity scale (todo L): gravity x this while airborne and moving DOWN,
+    // full gravity on the way up, so jump height and every take-off calibration are
+    // untouched and only the fall is floatier - a floaty body is easier to juggle and a
+    // floaty hopper is easier to hit. BallisticPredictor applies the same rule. Fast fall
+    // (Down held) is the opt-in out of it.
+    public float FallGravityScale { get; set; } = 0.7f;
     public float AirDrag { get; set; } = 300f;
     // Quadratic air resistance on the player body (PhysicsBody.QuadraticDrag, 1/px):
     // decel = k·|v|², always on, both axes. Terminal fall speed = √(600 / k).
@@ -426,6 +434,13 @@ public class MovementConfig
     // .OnHit), not the hit's impulse, so armor/stun/hitstun thresholds — which read the
     // unscaled dv — are unchanged. Part of the todo #9 slowdown.
     public float KnockbackSpeedScale     { get; set; } = 0.75f;
+    // Grounded knockback reduction (todo K3, Melee crouch-cancel): a victim standing or
+    // crouching on the floor takes the applied knockback scaled by these - horizontal
+    // mildly, the UPWARD component hard, so they stagger along the floor and stay in
+    // reach instead of popping into the air where air options come back. Thresholds
+    // (armor / hitstun) still read the full dv; only the applied velocity shrinks.
+    public float GroundKnockbackScale     { get; set; } = 0.8f;
+    public float GroundKnockbackRiseScale { get; set; } = 0.5f;
 
     public float SproutLifetime          { get; set; } = 0.07f;   // painting / default
     public float AvalancheSproutLifetime { get; set; } = 0.04f;   // wave-tagged cells

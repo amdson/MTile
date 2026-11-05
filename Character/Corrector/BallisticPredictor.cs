@@ -138,9 +138,12 @@ public static class BallisticPredictor
                     force.Y += cfg.FastFallForce;
             }
 
-            // Gravity-scale modifier as a counter-force (PlayerCharacter.Update's shape).
-            if (modifiers.GravityScale != 1f)
-                force += gravity * (modifiers.GravityScale - 1f);
+            // Gravity-scale modifier as a counter-force (PlayerCharacter.Update's shape),
+            // times the descent-only fall scale while moving down - the same rule
+            // PlayerCharacter applies per tick, so the predicted arc stays honest.
+            float gravityScale = modifiers.GravityScale * (vel.Y > 0f ? cfg.FallGravityScale : 1f);
+            if (gravityScale != 1f)
+                force += gravity * (gravityScale - 1f);
             force.Y += PlayerCharacter.FallDrag(vel.Y, gravity.Y, modifiers.FallTerminalSpeed);
 
             vel += force * dt;
@@ -210,6 +213,10 @@ public static class BallisticPredictor
                     cfg.SpringK, cfg.SpringDamping, dt);
                 force.Y += spring.Y;
             }
+
+            // Descent-only fall scale (PlayerCharacter's rule), airborne only.
+            if (!grounded && vel.Y > 0f && cfg.FallGravityScale != 1f)
+                force += gravity * (cfg.FallGravityScale - 1f);
 
             vel += force * dt;
             vel += gravity * dt;
