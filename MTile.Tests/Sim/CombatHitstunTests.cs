@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using MTile.Tests.Sim;
@@ -190,27 +191,35 @@ public class CombatHitstunTests(ITestOutputHelper output)
     // entering StunnedState. The complementary case (Slash1, knockback 60, below
     // threshold) is already covered by Hitstun_BlocksJumpAfterSlashLands which
     // sees the victim stay in StandingState (only hitstun fires, not stun).
+    // A stab LAUNCHES (hitstun + Launched, a long ride) but does not stun: stun is
+    // declared per attack now, and the launchers carry none (todo G, 2026-11-05). A
+    // grounded victim therefore staggers along the floor rather than entering
+    // StunnedState; TumbleTechTests covers the airborne tumble.
     [Fact]
-    public void Stun_StabHit_PutsVictimInStunnedState()
+    public void Launch_StabHit_LaunchesVictim_WithoutStun()
     {
         var terrain = SimTerrain.FromAscii(@"
-            OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-            OOOOOOOOOOOOOOOOOOOOOOOOOOOO
-            XXXXXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
+            OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+            OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+            XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+            XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX", originTileX: 0, originTileY: 0);
 
         var attackerStart = new Vector2(70f, 20f);
         var victimStart   = new Vector2(95f, 20f);
-        // Mouse swipe: press at x=120, release at x=180. Hold for 8 frames (>6)
-        // with 60px horizontal swipe (>12) → InputParser emits Stab intent on
+        // Mouse swipe: press at x=120, release at x=180. Hold for 16 frames (past the
+        // click max-hold at 60 fps - 8 frames read as a click and threw a GroundSlash1)
+        // with a 60px horizontal swipe (>12) → InputParser emits Stab intent on
         // release. StabAction.Enter consumes it; the active hitbox window lands
         // on the still-stationary victim.
-        var pressMouse   = new Vector2(120f, 28f);
-        var releaseMouse = new Vector2(180f, 28f);
+        // Level with the body: a stab aimed even slightly downward drives a grounded
+        // victim into the floor, and a floor slam after a hit is a crush-stun by design.
+        var pressMouse   = new Vector2(120f, attackerStart.Y);
+        var releaseMouse = new Vector2(180f, attackerStart.Y);
 
         var attackerScript = new InputScript()
             .For   (15, new PlayerInput { MouseWorldPosition = pressMouse })
             .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = pressMouse })
-            .For   ( 8, new PlayerInput { LeftClick = true, MouseWorldPosition = releaseMouse })
+            .For   (16, new PlayerInput { LeftClick = true, MouseWorldPosition = releaseMouse })
             .Forever   (new PlayerInput { MouseWorldPosition = releaseMouse });
 
         // Victim idle the whole sim — we just want to observe the state machine
@@ -220,7 +229,7 @@ public class CombatHitstunTests(ITestOutputHelper output)
         var cfg = new SimConfigMulti
         {
             Terrain = terrain,
-            Frames  = 60,
+            Frames  = 90,
             Dt      = Dt,
             Gravity = new Vector2(0f, Gravity),
             Players = new[]
@@ -231,20 +240,23 @@ public class CombatHitstunTests(ITestOutputHelper output)
             },
         };
 
-        bool sawStunActive   = false;
-        bool sawStunnedState = false;
-        bool sawHitstun      = false;
+        bool sawStunActive = false;
+        bool sawLaunched   = false;
+        bool sawHitstun    = false;
+        float maxVx        = 0f;
 
         var traces = SimRunner.RunMulti(cfg, onFrame: (f, ps) =>
         {
             if (ps[1].Combat.StunActive)    sawStunActive = true;
-            if (ps[1].Combat.HitstunActive) sawHitstun   = true;
-            if (ps[1].CurrentStateName == "StunnedState") sawStunnedState = true;
+            if (ps[1].Combat.HitstunActive) sawHitstun    = true;
+            if (ps[1].Combat.Launched)      sawLaunched   = true;
+            maxVx = MathF.Max(maxVx, ps[1].Body.Velocity.X);
         });
 
-        Assert.True(sawHitstun,      "Stab should have landed and set HitstunActive.");
-        Assert.True(sawStunActive,   "Stab knockback (380) > StunImpulseThreshold (350) — StunActive should fire.");
-        Assert.True(sawStunnedState, "Victim should have entered StunnedState while stunned.");
+        Assert.True(sawHitstun,   "Stab should have landed and set HitstunActive.");
+        Assert.True(sawLaunched,  "Stab sets LaunchDecay, so the victim should be Launched.");
+        Assert.False(sawStunActive, "A stab carries no StunSeconds — it launches, it does not stun.");
+        Assert.True(maxVx > 100f, $"Stab should shove the victim along the thrust (max Vx {maxVx:F0}).");
     }
 
     // Single-player crush test: drop the player from height onto solid ground.

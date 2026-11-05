@@ -125,7 +125,9 @@ public class TumbleTechTests(ITestOutputHelper output)
         var states = new List<string>(24);
         for (int f = 0; f < 24; f++)
         {
-            player.Combat.OnHitRegistered(player.Frame + 1, 500f, Dt);   // > 280 ⇒ stun
+            // A heavy airborne hit: hitstun + launched (stun is no longer inferred from dv).
+            player.Combat.OnHitRegistered(player.Frame + 1, 500f, Dt);
+            player.Combat.Launched = true;
 
             ctrl.InjectInput(new PlayerInput { Right = true });
             terrain.TickSprouts(Dt);
@@ -139,7 +141,7 @@ public class TumbleTechTests(ITestOutputHelper output)
         }
 
         output.WriteLine($"states: {string.Join(",", states.Distinct())}");
-        Assert.True(sawTumble, "Airborne stun should have entered TumbleState.");
+        Assert.True(sawTumble, "Airborne launch in hitstun should have entered TumbleState.");
         Assert.Empty(wallSlideWhileStunned);
     }
 
@@ -172,7 +174,10 @@ public class TumbleTechTests(ITestOutputHelper output)
             // Keep the launch alive until a tech ends it. Once teched (invulnerable),
             // stop re-injecting so the tech can actually resolve.
             if (!player.Combat.IsInvulnerable(player.Frame + 1) && !stunClearedByTech)
+            {
                 player.Combat.OnHitRegistered(player.Frame + 1, 500f, Dt);
+                player.Combat.Launched = true;
+            }
 
             // Pulse Space so a fresh Jump intent is always within the buffer window.
             bool space = (f % 2) == 0;

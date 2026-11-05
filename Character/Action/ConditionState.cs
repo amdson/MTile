@@ -57,6 +57,19 @@ public class ConditionState
     public void StampRecoveryForSeconds(float seconds, int currentFrame, float dt)
         => StampRecovery(SimFrames.FromSeconds(seconds, dt), currentFrame);
 
+    // Hitstop is frame-neutral (CombatState.ApplyHitstop): while this player's action
+    // clock is frozen, every live window here moves out by the same frames so the
+    // freeze changes nothing about who is actionable first.
+    public void ShiftExpiries(int frames)
+    {
+        if (frames <= 0) return;
+        if (Slash2Ready)    Slash2ExpireFrame    += frames;
+        if (Slash3Ready)    Slash3ExpireFrame    += frames;
+        if (AirSlash2Ready) AirSlash2ExpireFrame += frames;
+        if (RecoveryActive) RecoveryExpireFrame  += frames;
+        ComboGapExpireFrame += frames;
+    }
+
     // Seconds-authored variant — durations are tuned in real time and converted at
     // the caller's actual step rate, so combo windows / recovery feel identical at
     // 60 fps (Simulation.FixedDt) and in headless tests stepping a different dt.

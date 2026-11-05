@@ -33,14 +33,30 @@ public readonly struct GuardOutcome
 // writes; movement/action FSMs read it via EnvironmentContext.Combat to gate jumps,
 // attacks, etc.
 //
-// Hitstun is the always-on disadvantage state: every hit locks Jump for a short
-// window, with diminishing extensions on follow-up hits so true infinite stun-locks
-// are impossible. Stun is the heavy-hit state — set by OnHit only when the incoming
-// knockback impulse crosses a threshold; gates more (attacks too, not just jump).
+// Three disadvantage flags, each with its own source and its own escape (2026-11-05,
+// todo item G):
+//   Hitstun  - every hit. Control mute + jump/cling block + action entry delay. Length
+//              authored per move (Hitbox.HitstunSecondsOverride) or derived from the
+//              victim's dv. Diminishing by HIT COUNT: the 2nd and 3rd consecutive hits
+//              inside one hitstun run get their full window (a three-hit string is a
+//              true combo), the 4th and later are halved (a multi-hit stream decays).
+//   Launched - the body is flying from a hit or a throw (Physics/Launch.cs put the
+//              velocity there). Drives TumbleState while hitstun lasts, lets the grab
+//              refuse a flying victim and the crush path tell a wall slam from a fall.
+//              Cleared on landing or tech. Does NOT block anything by itself.
+//   Stun     - the helpless state. DECLARED by the hitbox (Hitbox.StunSeconds), never
+//              inferred from dv. First-wins: a stun already running is not refreshed,
+//              and a short immunity follows one, so stunning hits cannot chain.
 public class CombatState
 {
     public bool    HitstunActive;     public int HitstunExpireFrame;
+    // Hits registered in the current unbroken hitstun run (1 = the hit that opened it).
+    // Reset when hitstun lapses. See HitstunFullChainHits.
+    public int     HitstunChain;
+    public bool    Launched;
     public bool    StunActive;        public int StunExpireFrame;
+    // No new stun lands before this frame (set when a stun expires).
+    public int     StunImmuneExpireFrame;
     // True while the current hitstun window came from a combat hit (vs. a
     // self-inflicted crush/landing). Only combat hitstun mutes self-control —
     // a hard landing locks jump briefly but shouldn't turn walking to mush.
@@ -134,15 +150,21 @@ public class CombatState
         if (GrabStrength < 0f) GrabStrength = 0f;
     }
 
-    // A throw flings + stuns the victim (Phase 6). Routed through OnHitRegistered with
-    // a stun-threshold impulse so the victim exits the throw into Tumble (airborne):
-    // committed, control-muted, able to tech, and bouncing hard off terrain — instead
-    // of keeping full control out of the throw. Called by the throw field's onThrown.
-    // No hitstop: the field fires every frame it acts, so a freeze would re-arm each
-    // frame and the body hold would eat the fling the field is delivering.
-    private const float ThrowStunImpulse = 340f;   // ×0.75 with the dv stun line   // > StunImpulseThreshold ⇒ stun + Tumble
+    // A throw flings the victim (Phase 6): launched + hitstun + a BRIEF stun, so they
+    // exit the throw into Tumble - committed, control-muted, able to tech, bouncing off
+    // terrain - instead of keeping full control out of the throw. The stun is short on
+    // purpose: the launch's hitstun is the ride, the wall slam's crush-stun is the
+    // punish window (PlayerCharacter crush path), and a long stun here plus a 6f grab
+    // would be a regrab loop. Called by the throw field's onThrown. No hitstop: the
+    // field fires every frame it acts, so a freeze would re-arm each frame and the
+    // body hold would eat the fling the field is delivering.
+    private const float ThrowImpulse     = 340f;   // hitstun scaling only (0.70s cap)
+    public  const float ThrowStunSeconds = 0.25f;
     public void RegisterThrown(int frame, float dt)
-        => OnHitRegistered(frame, ThrowStunImpulse, dt, hitstop: false);
+    {
+        OnHitRegistered(frame, ThrowImpulse, dt, hitstop: false, stunSeconds: ThrowStunSeconds);
+        Launched = true;
+    }
 
     // Hoisted gates so callers can write `ctx.Combat?.BlocksAttack == true` instead
     // of repeating raw flag checks at every action/movement precondition site.
@@ -274,9 +296,11 @@ public class CombatState
     // were. Dropping knockback and shortening hitstun with it would have quietly
     // deleted combo pressure too.
     //
-    // Follow-up hits while hitstun is still active extend by only
-    // HitstunExtensionScale × the fresh window — diminishing, so a true
-    // stun-lock cannot grow unbounded (same principle as the old 8+4+4).
+    // Follow-up hits while hitstun is still active: the first HitstunFullChainHits of
+    // a run get their full window (so a designed string - S1, S2, S3 - is a true combo);
+    // from the next hit on only HitstunExtensionScale × the fresh window is granted —
+    // diminishing, so a multi-hit stream (a creature flurry, projectiles, spikes)
+    // cannot hold a victim forever (same principle as the old 8+4+4).
     // Per px/s of the victim's dv (2026-11-02: was 0.0022 per unit of authored strength;
     // ÷0.75, the dv an equal-mass e=0.5 collision delivers per unit of closing speed, so
     // every collision-mode player attack keeps its hitstun).
@@ -284,31 +308,20 @@ public class CombatState
     private const float MinHitstunSeconds        = 0.10f;
     private const float MaxHitstunSeconds        = 0.70f;
     private const float HitstunExtensionScale    = 0.5f;
+    private const int   HitstunFullChainHits     = 3;
 
-    // Stun tuning. Threshold compares against HitResult.Strength (pre-mass): the
-    // authored impulse magnitude for Impulse-mode hits, the closing speed u for
-    // Collision-mode hits — so attack strength controls stun-vs-not independent
-    // of target Mass either way.
-    //
-    // Rescaled 440 → 280 alongside the knockback cut, which is what keeps the
-    // designed spectrum rather than collapsing it: with every strike speed down
-    // ~40%, holding 440 would have left the stab as the only move in the game that
-    // stuns. At 280 the same moves cross as before — Slash3 (u 300),
-    // GuardRetaliate (380), Stab (650), Pulse (impulse 300) — while the hold
-    // slashes (60–80), CrouchSlash/AirTurn (200), AirSlash1/2 (150/230) and, by
-    // design, every creature attack stay hitstun-only. A fast dive can still push
-    // a swing over the line, which is speed earning the stun.
-    //
-    // 2026-11-02: now compared against the victim's dv — how hard it was actually MOVED,
-    // so a heavy, slow strike stuns on what it does, not on its authored speed, and a
-    // heavy target is genuinely harder to stun. 280 → 210 (×0.75, an equal-mass e=0.5
-    // collision's dv per unit of closing speed) keeps every collision-mode player attack
-    // on the side of the line it was on. Impulse-mode hits (most creature attacks,
-    // projectiles, Pulse) now cross only at authored impulse ≥ 525 against a player:
-    // their dv there is impulse/2.5, and below that they are hitstun-only. Accepted by
-    // design — re-buff a specific one by raising its knockback.
-    private const float StunImpulseThreshold = 210f;
-    private const float StunSeconds          = 0.6f;
+    // Stun tuning. A stun is declared by the attack (Hitbox.StunSeconds), never
+    // inferred from the hit's dv (2026-11-05). The dv line this replaced (440 → 280 →
+    // 210 through the knockback passes) made every launcher, every creature shove over
+    // the line and every billed crush landing a 36f stun, and a second stunning hit
+    // refreshed it indefinitely. Now: GuardRetaliate and the AirHammer sweet spot carry
+    // DefaultStunSeconds, a throw carries ThrowStunSeconds, a wall slam off a launch
+    // carries PlayerCharacter.CrushStunSeconds; launchers (Stab, kick, S3) carry none -
+    // launch + hitstun is their ride. First-wins while active, then StunImmunitySeconds
+    // during which no new stun lands, so the only way to keep someone helpless is to
+    // re-launch them.
+    public  const float DefaultStunSeconds   = 0.6f;
+    private const float StunImmunitySeconds  = 0.5f;
 
     // Hitstop tuning. Deliberately much shorter than hitstun — this is a freeze-frame
     // punch, not a disadvantage window — scaled the same way (impulse-derived, clamped)
@@ -361,7 +374,8 @@ public class CombatState
     // jump still gates, but movement modifiers are left alone.
     public void OnHitRegistered(int currentFrame, float impulse, float dt,
                                 float hitstunSecondsOverride = -1f, bool muteControl = true,
-                                bool hitstop = true, float hitstopStrength = -1f)
+                                bool hitstop = true, float hitstopStrength = -1f,
+                                float stunSeconds = 0f)
     {
         LastHitImpulse   = impulse;
         LastHitFrame     = currentFrame;
@@ -374,7 +388,8 @@ public class CombatState
             ? hitstunSecondsOverride
             : Math.Clamp(impulse * HitstunSecondsPerDv, MinHitstunSeconds, MaxHitstunSeconds);
         int frames = SimFrames.FromSeconds(seconds, dt);
-        if (HitstunActive)
+        HitstunChain = HitstunActive ? HitstunChain + 1 : 1;
+        if (HitstunChain > HitstunFullChainHits)
             frames = Math.Max(1, (int)(frames * HitstunExtensionScale));
 
         int newHitstunExpire = currentFrame + frames;
@@ -382,11 +397,12 @@ public class CombatState
         HitstunActive = true;
         if (muteControl) HitstunMutesControl = true;
 
-        if (impulse >= StunImpulseThreshold)
+        // First-wins: a running stun is never refreshed, and none lands during the
+        // immunity that follows one.
+        if (stunSeconds > 0f && !StunActive && currentFrame >= StunImmuneExpireFrame)
         {
-            int newStunExpire = currentFrame + SimFrames.FromSeconds(StunSeconds, dt);
-            if (newStunExpire > StunExpireFrame) StunExpireFrame = newStunExpire;
-            StunActive = true;
+            StunExpireFrame = currentFrame + SimFrames.FromSeconds(stunSeconds, dt);
+            StunActive      = true;
         }
 
         // Real combat hits only — a self-inflicted crush/landing (muteControl=false)
@@ -397,13 +413,32 @@ public class CombatState
     // Max-merge a hitstop window ending `seconds` from now. Two callers: the victim
     // path above, and PlayerCharacter's attacker-side read of CombatSystem.PeekHitstop
     // — the symmetric half, so a landed attack freezes the one who swung it too.
-    public void ApplyHitstop(int currentFrame, float seconds, float dt)
+    //
+    // Hitstop is cosmetic and must not move frame advantage (2026-11-05): the frozen
+    // player's ACTION clock stops (PlayerCharacter skips the action's Update), so every
+    // window that is an absolute expiry frame - hitstun, stun, and the caller's
+    // ConditionState stamps - is pushed out by the frames the freeze ADDS, or the frozen
+    // side would silently lose them. Returns those added frames so the caller can shift
+    // the stamps CombatState cannot see.
+    public int ApplyHitstop(int currentFrame, float seconds, float dt)
     {
-        if (seconds <= 0f) return;   // a light hit: no freeze at all
+        if (seconds <= 0f) return 0;   // a light hit: no freeze at all
         int expire = currentFrame + SimFrames.FromSeconds(seconds, dt);
-        if (expire > HitstopExpireFrame) HitstopExpireFrame = expire;
-        HitstopActive = true;
+        int prev   = HitstopActive ? Math.Max(HitstopExpireFrame, currentFrame) : currentFrame;
+        if (expire <= prev) return 0;
+        int added = expire - prev;
+        HitstopExpireFrame = expire;
+        HitstopActive      = true;
+        if (HitstunActive) HitstunExpireFrame += added;
+        if (StunActive)    StunExpireFrame    += added;
+        _hitstopShift += added;
+        return added;
     }
+
+    // Frames the freezes since the last Take added, for the owner to shift its
+    // ConditionState stamps by (consumed within the same step; not snapshotted).
+    private int _hitstopShift;
+    public int TakeHitstopShift() { int s = _hitstopShift; _hitstopShift = 0; return s; }
 
     // Successful tech (Phase 4): end the launch (hitstun + stun + control-mute) and
     // grant a short i-frame window so the recovery isn't immediately re-punished.
@@ -412,19 +447,28 @@ public class CombatState
     {
         HitstunActive       = false;
         HitstunMutesControl = false;
+        HitstunChain        = 0;
         StunActive          = false;
+        Launched            = false;
         int expire = currentFrame + SimFrames.FromSeconds(invulnSeconds, dt);
         if (expire > InvulnExpireFrame) InvulnExpireFrame = expire;
     }
 
-    public void Tick(int currentFrame, bool guardHeld)
+    // `dt` is the fixed step (for the stun-immunity window); every sim caller has it.
+    public void Tick(int currentFrame, bool guardHeld, float dt = Simulation.FixedDt)
     {
+        _tickDt = dt;
         if (HitstunActive && currentFrame >= HitstunExpireFrame)
         {
             HitstunActive       = false;
             HitstunMutesControl = false;
+            HitstunChain        = 0;
         }
-        if (StunActive    && currentFrame >= StunExpireFrame)    StunActive    = false;
+        if (StunActive && currentFrame >= StunExpireFrame)
+        {
+            StunActive            = false;
+            StunImmuneExpireFrame = currentFrame + SimFrames.FromSeconds(StunImmunitySeconds, _tickDt);
+        }
         if (GrabbedActive && currentFrame >= GrabbedExpireFrame) GrabbedActive = false;
         if (GuardCharged  && currentFrame >= GuardChargedExpireFrame) GuardCharged = false;
         // Break recovery needs BOTH halves: the countdown, and the button back up.
@@ -452,6 +496,7 @@ public class CombatState
     }
 
     public bool GuardOnCooldown(int currentFrame) => currentFrame < GuardCooldownExpireFrame;
+    private float _tickDt = 1f / 60f;   // transient: set by Tick before it is read
 
     // Filter an incoming hit through Guard. Returns how much of the hit survives the
     // stance; the caller applies the scales and, if Absorbed, skips the hit entirely.
@@ -549,8 +594,10 @@ public class CombatState
     public void CopyFrom(CombatState o)
     {
         HitstunActive = o.HitstunActive; HitstunExpireFrame = o.HitstunExpireFrame;
-        HitstunMutesControl = o.HitstunMutesControl;
+        HitstunMutesControl = o.HitstunMutesControl; HitstunChain = o.HitstunChain;
+        Launched = o.Launched;
         StunActive = o.StunActive; StunExpireFrame = o.StunExpireFrame;
+        StunImmuneExpireFrame = o.StunImmuneExpireFrame;
         HitstopActive = o.HitstopActive; HitstopExpireFrame = o.HitstopExpireFrame;
         HoldingBody = o.HoldingBody; HeldVelocity = o.HeldVelocity;
         LastHitImpulse = o.LastHitImpulse; LastHitFrame = o.LastHitFrame;

@@ -139,6 +139,17 @@ public class PlayerCharacter : IHittable
     private const float CrushImpulseThreshold = 400f;
     private const float CrushDamagePerImpulse = 0.0025f;
     private const float CrushCooldownSeconds  = 0.2f;   // ≈ the original 6 frames at 30 fps
+    // Wall-slam stun (todo F/G, 2026-11-05). A crush that follows a HIT - the body is
+    // launched or in combat hitstun when it meets the surface - stuns briefly above this
+    // absorbed dv, whether or not it crosses the damage line: that is the bounce-punish
+    // window after a throw or a stab into a wall. A self-inflicted fall never stuns,
+    // however hard (HP + the short hitstun only). Sized under a stab's slam (~279 px/s
+    // applied) and over a stock slash's push, so launchers earn it and pokes don't.
+    private const float CrushStunImpulse  = 240f;
+    // Legacy stun line for un-audited creature hits (see OnHit): the dv a 525 authored
+    // impulse gives a player, the line those attacks were tuned against.
+    private const float CreatureStunDv    = 210f;
+    private const float CrushStunSeconds  = 0.33f;   // ~20f: a punish window, not the combat stun
     // Sprout crush (a growing block wedged us against terrain, so physics destroyed it).
     // Flat HP per destroyed cell — one cell costs the same as taking a stock slash,
     // punishing enough that being walled in is a real threat, survivable enough that a
@@ -279,9 +290,22 @@ public class PlayerCharacter : IHittable
         // Strength rides the same knockback share: it IS the knockback magnitude
         // (pre-mass), so leaving it whole while halving the actual velocity change
         // would stun the victim as if nothing had been blocked.
+        // Stun is declared by the attack (Hitbox.StunSeconds). Creature / projectile
+        // hitboxes have not been audited one by one, so until they are, an Impulse-mode
+        // hit from a non-player keeps the old rule - it stuns when it moves us at or
+        // past CreatureStunDv - and boss fights play as they did (the Warlord's cleave
+        // used to fling you clear; without it the combo is lethal).
+        float stunSeconds = hit.StunSeconds;
+        if (stunSeconds <= 0f && hit.Mode == KnockbackMode.Impulse && !Factions.IsPlayer(hit.Owner)
+            && dv * guard.KnockbackScale >= CreatureStunDv)
+            stunSeconds = CombatState.DefaultStunSeconds;
         _abilities.Combat.OnHitRegistered(_frame, dv * guard.KnockbackScale, _dt,
                                           hit.HitstunSecondsOverride,
-                                          hitstopStrength: HitResolver.ImpactStrength(res.Impulse));
+                                          hitstopStrength: HitResolver.ImpactStrength(res.Impulse),
+                                          stunSeconds: stunSeconds);
+        // Hitstop is frame-neutral: the freeze also pushes this player's own recovery /
+        // combo stamps out, as it did the hitstun window inside ApplyHitstop.
+        _abilities.Condition.ShiftExpiries(_abilities.Combat.TakeHitstopShift());
         return res.Impulse;
     }
 
@@ -333,6 +357,7 @@ public class PlayerCharacter : IHittable
         var c = _abilities.Combat;
         if (c.HoldingBody) LaunchSystem.Hit(Body, ref c.HeldVelocity, dv, hit.LaunchDecay, hit.LaunchImpactMass);
         else               LaunchSystem.Hit(Body, ref Body.Velocity,  dv, hit.LaunchDecay, hit.LaunchImpactMass);
+        c.Launched = true;
     }
     
     private readonly PlayerAbilityState _abilities = new();
@@ -582,19 +607,28 @@ public class PlayerCharacter : IHittable
         // Magnitude (written by PhysicsWorld.StepSwept). Routes through
         // OnHitRegistered so a hard fall / wall slam also lights up Hitstun and
         // (if hard enough) Stun — "I just slammed down, give me a sec."
-        if (Body.LastCrushImpulse > CrushImpulseThreshold
+        bool crushBills = Body.LastCrushImpulse > CrushImpulseThreshold;
+        bool slamStuns  = Body.LastCrushImpulse >= CrushStunImpulse
+                          && (_abilities.Combat.Launched
+                              || (_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl));
+        if ((crushBills || slamStuns)
             && _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt))
         {
-            float excess = Body.LastCrushImpulse - CrushImpulseThreshold;
-            float crushHp = excess * CrushDamagePerImpulse;
-            Health -= crushHp;
-            _abilities.Combat.AddDamage(crushHp);
-            _lastDamageFrame = _frame;
+            if (crushBills)
+            {
+                float excess = Body.LastCrushImpulse - CrushImpulseThreshold;
+                float crushHp = excess * CrushDamagePerImpulse;
+                Health -= crushHp;
+                _abilities.Combat.AddDamage(crushHp);
+                _lastDamageFrame = _frame;
+            }
             // Short fixed hitstun (the old 8-frames-at-30fps feel) and NO control
             // mute: a hard landing briefly gates jump ("give me a sec") but doesn't
-            // turn walking to mush — that treatment is for combat hits.
+            // turn walking to mush — that treatment is for combat hits. The stun is
+            // only for a slam that followed a hit (CrushStunImpulse).
             _abilities.Combat.OnHitRegistered(_frame, Body.LastCrushImpulse, dt,
-                hitstunSecondsOverride: 0.27f, muteControl: false);
+                hitstunSecondsOverride: 0.27f, muteControl: false,
+                stunSeconds: slamStuns ? CrushStunSeconds : 0f);
             _lastCrushFrame = _frame;
         }
 
@@ -643,7 +677,14 @@ public class PlayerCharacter : IHittable
         // Expire combo / recovery flags whose window closed since last frame.
         _abilities.Condition.Tick(_frame);
         // Expire hitstun / stun whose window closed.
-        _abilities.Combat.Tick(_frame, guardHeld: input.Shift);
+        _abilities.Combat.Tick(_frame, guardHeld: input.Shift, dt);
+        // A launch is over once the body is back on the floor, not on its way up, and
+        // the hit's velocity share has bled out (Physics/Launch.cs) - not while hitstop
+        // still holds the body with the launch parked in the stash, and not while a
+        // floor-level launch is still sliding the victim along the ground.
+        if (_abilities.Combat.Launched && !_abilities.Combat.HitstopActive && !Body.Launch.Active
+            && IsGrounded && Body.Velocity.Y >= 0f)
+            _abilities.Combat.Launched = false;
         // Re-read every frame so movement_config hot-reload retunes it live.
         Body.QuadraticDrag = MovementConfig.Current.QuadraticAirDrag;
         // Hitstop just ended: hand back the velocity PreStep parked, before movement
@@ -890,7 +931,11 @@ public class PlayerCharacter : IHittable
         if (CombatSystem != null)
         {
             float stop = CombatSystem.PeekHitstop(_actionVars.HitId);
-            if (stop > 0f) _abilities.Combat.ApplyHitstop(_frame, stop, dt);
+            if (stop > 0f)
+            {
+                _abilities.Combat.ApplyHitstop(_frame, stop, dt);
+                _abilities.Condition.ShiftExpiries(_abilities.Combat.TakeHitstopShift());
+            }
         }
 
         _historyHead = (_historyHead + 1) % HistorySize;

@@ -147,6 +147,13 @@ public readonly struct Hitbox
     // Melee strike that clanks against an opposing one (see ClankKind). Default None.
     public readonly ClankKind   Clank;
 
+    // Stun (CombatState): seconds of the heavy-hit helpless state this hit inflicts on a
+    // player, on top of hitstun. 0 (default) = none - stun is DECLARED per attack, never
+    // inferred from how hard the hit landed (2026-11-05: it used to be "dv >= a line",
+    // which made every launcher, creature shove and hard landing a stun). First-wins
+    // while a stun is already running, and a short immunity follows one (CombatState).
+    public readonly float       StunSeconds;
+
     // Launch (Physics/Launch.cs). 0 = off: the knockback is plain velocity, as every
     // attack had before launches existed. > 0: the victim's knockback becomes a launch
     // that bleeds off at this many px/s², replacing any launch already running —
@@ -172,6 +179,7 @@ public readonly struct Hitbox
     //   Recoil cap maxRecoilSpeed (per-frame |Δv| ceiling on every recoil path; 0 = off)
     //   Occlusion  origin (null = no terrain occlusion)
     //   Launch     launchDecay (0 = plain knockback) · launchImpactMass (wall-break weight)
+    //   Stun       stunSeconds (0 = none; declared per attack)
     //   Clank      clank (None = passes through other attacks; Blade/Blunt = melee)
     public Hitbox(BoundingBox region, int hitId, float damage,
                   Vector2 knockbackImpulse, Faction owner, EntityId source,
@@ -190,9 +198,11 @@ public readonly struct Hitbox
                   bool guardBreak = false,
                   float launchDecay = 0f,
                   float launchImpactMass = 1f,
-                  ClankKind clank = ClankKind.None)
+                  ClankKind clank = ClankKind.None,
+                  float stunSeconds = 0f)
     {
         Clank                = clank;
+        StunSeconds          = stunSeconds;
         LaunchDecay          = launchDecay;
         LaunchImpactMass     = launchImpactMass;
         Occluded             = origin.HasValue;

@@ -138,11 +138,17 @@ public class TumbleState : MovementState
     // heavy hit doesn't read.
     public override AnimTag AnimationTag => AnimTag.Tumble;
 
+    // Airborne and helpless: stunned, or flying from a hit while its hitstun lasts. A
+    // launch past its hitstun is NOT a tumble - the victim gets air control and jump
+    // back even if still in flight (todo G: launch never blocks jump by itself).
+    public static bool Tumbling(CombatState c)
+        => c != null && (c.StunActive || (c.Launched && c.HitstunActive));
+
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-        => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
+        => Tumbling(ctx.Combat) && !ctx.TryGetGround(out _);
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-        => ctx.Combat?.StunActive == true && !ctx.TryGetGround(out _);
+        => Tumbling(ctx.Combat) && !ctx.TryGetGround(out _);
 
     public override void Update(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {

@@ -48,8 +48,13 @@ public class BotManeuverPulseGuardTests
         output.WriteLine("guard   : " + guard.Summary());
         Assert.True(none.DamageToP2 > 0f, "Baseline P1 slashes should hurt an idle bot.");
         Assert.True(guard.Saw("GuardAction"), "Bot should raise a guard against incoming slashes.");
-        Assert.True(guard.DamageToP2 < none.DamageToP2,
-            $"Guarding should reduce damage ({guard.DamageToP2} vs {none.DamageToP2}).");
+        // Not strictly less: a stun now has first-wins + immunity (CombatState, 2026-11-05),
+        // so the second parry's counter no longer re-stuns the slasher and one more exchange
+        // can land either way. Guarding must never cost MORE, and the parry must pay off.
+        Assert.True(guard.DamageToP2 <= none.DamageToP2,
+            $"Guarding should not increase damage ({guard.DamageToP2} vs {none.DamageToP2}).");
+        Assert.True(guard.DamageToP1 > none.DamageToP1,
+            $"The parry should pay off as a counter (P1 lost {guard.DamageToP1} vs {none.DamageToP1} unguarded).");
     }
 
     [Fact]

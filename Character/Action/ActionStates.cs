@@ -671,6 +671,9 @@ public abstract class SlashLikeAction : ActionState
     // Hitstun override in seconds (< 0 ⇒ derive from impulse). Hold-slashes carry
     // a tiny impulse (they pull, not push) so they declare their hitstun explicitly.
     protected virtual  float   HitstunSecondsOverride => -1f;
+    // Stun this slash inflicts (Hitbox.StunSeconds). 0 for every stock slash; the
+    // counter declares one.
+    protected virtual  float   StunSeconds            => 0f;
     // When true, the slash broadcasts a holding ForceField each frame (see the
     // HoldField* constants above).
     //
@@ -837,6 +840,7 @@ public abstract class SlashLikeAction : ActionState
                 vars.AttackDir * KnockbackMagnitude,
                 ctx.Faction, ctx.SelfId, SlashColor,
                 hitstunSecondsOverride: HitstunSecondsOverride,
+                stunSeconds: StunSeconds,
                 grabStrengthDamage: GrabStrengthDamage,
                 recoilScale: RecoilScale,
                 recoilBreakProtected: RecoilBreakProtected,
@@ -2164,7 +2168,8 @@ public class AirHammerAction : ActionState
         PublishBox(ctx, vars.HitId, center, SweetSide, SweetSide * 1.5f,
                    OuterTileDamage * SweetDamageMult, OuterBodyDamage * SweetDamageMult,
                    strikeDir, bodyVel + strikeDir * (StrikeSpeed * SweetKnockbackMult),
-                   mass, MinLaunch * SweetKnockbackMult, Color.White);
+                   mass, MinLaunch * SweetKnockbackMult, Color.White,
+                   stunSeconds: CombatState.DefaultStunSeconds);   // the spike stuns; the outer box only launches
 
         PublishBox(ctx, vars.HitId, center, OuterSide, OuterSide * 1.5f, 
                    OuterTileDamage, OuterBodyDamage,
@@ -2175,7 +2180,7 @@ public class AirHammerAction : ActionState
     private static void PublishBox(EnvironmentContext ctx, int hitId, Vector2 center, float side, float height, 
                                    float tileDamage, float bodyDamage,
                                    Vector2 strikeDir, Vector2 strikeVelocity, float strikeMass,
-                                   float minLaunch, Color color)
+                                   float minLaunch, Color color, float stunSeconds = 0f)
     {
         float hw = side * 0.5f;
         float hh = height;
@@ -2194,7 +2199,8 @@ public class AirHammerAction : ActionState
             minLaunch: minLaunch,
             maxRecoilSpeed: MaxRecoilSpeed,
             origin: ctx.Body.Position,
-            clank: ClankKind.Blunt));
+            clank: ClankKind.Blunt,
+            stunSeconds: stunSeconds));
     }
 }
 
@@ -2419,6 +2425,7 @@ public class GuardRetaliateAction : SlashLikeAction
     protected override float SweepDirection      => +1f;
     protected override float KnockbackMagnitude  => 280f;     // top of the slash kit — counters reward heavily
     protected override float StrikeSpeed         => 380f;
+    protected override float StunSeconds         => CombatState.DefaultStunSeconds;   // the one slash that stuns
     protected override Color SlashColor          => Color.Cyan;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => false;
