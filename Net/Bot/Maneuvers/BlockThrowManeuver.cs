@@ -38,6 +38,7 @@ public sealed class BlockThrowManeuver : BotManeuver
     private Vector2 _swipeFrom;
 
     public override int Cooldown => CooldownFrames;
+    public override MoveClaim Move => MoveClaim.Still;   // Shift+LMB paint/carry/swipe only; walking would drag the held block off the cursor
 
     public override float Score(BotView v)
     {

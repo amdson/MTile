@@ -314,6 +314,7 @@ public sealed class BulldogBreaker : BotManeuver
 
     public override int Cooldown => 30;
     public override bool OwnsLocomotion => true;
+    public override MoveClaim Move => MoveClaim.Still;   // parry-timing guard raise; writes no Left/Right/Space/Down
 
     private static bool Opener(string a) => a is "GroundSlash1" or "GroundSlash2" or "AirSlash1";
 

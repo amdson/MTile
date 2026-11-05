@@ -33,6 +33,7 @@ public sealed class GuardManeuver : BotManeuver
 
     public override int Cooldown => 20;
     public override bool OwnsLocomotion => true;   // guard forbids Left/Right
+    public override MoveClaim Move => MoveClaim.Still;   // guard writes no Left/Right/Space/Down; the body must hold still under the raised guard
 
     // The target's action names that hurt us when they connect. Matches by substring so
     // every slash variant (Ground/Air/Crouch/Dash/Turn/DownAir) counts.

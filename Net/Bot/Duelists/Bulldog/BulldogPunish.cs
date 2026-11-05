@@ -17,6 +17,7 @@ public sealed class BulldogPunish : BotManeuver
 
     public BulldogPunish(BulldogSense s) => _s = s;
     public override int Cooldown => 60;
+    public override MoveClaim Move => MoveClaim.Exclusive;   // the input IS movement: Space+Shift dash then Left/Right toward the target
 
     public static bool Busy(string a) => a is not ("NullAction" or "None" or "GuardAction");
 

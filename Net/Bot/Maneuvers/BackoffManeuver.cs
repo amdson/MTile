@@ -38,6 +38,8 @@ public sealed class BackoffManeuver : BotManeuver
 
     public override int Cooldown => 10;
     public override bool OwnsLocomotion => true;
+    public override Category  Category => Category.Reflex;   // a mover whose job is to not get hit: drives Left/Right away and hops with Space
+    public override MoveClaim Move     => MoveClaim.Exclusive;
 
     public override float Score(BotView v)
     {

@@ -52,6 +52,7 @@ public sealed class BurstManeuver : BotManeuver
 
     private int _cooldown = 45;
     public override int Cooldown => _cooldown;
+    public override MoveClaim Move => MoveClaim.Forbid(MoveKeys.Space | MoveKeys.Down);   // turns toward the target with Left/Right; never jump or drop mid-burst
 
     private int  _t;
     private bool _fired;

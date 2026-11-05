@@ -18,6 +18,7 @@ public sealed class BulldogGuard : BotManeuver
 
     public override int Cooldown => 20;
     public override bool OwnsLocomotion => true;
+    public override MoveClaim Move => MoveClaim.Still;   // guard writes only a click rhythm; the body must hold still
 
     public bool Wide = true;
     private bool IsSlowThreat(string a)

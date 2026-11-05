@@ -31,6 +31,8 @@ public sealed class AntiAirSidestepManeuver : BotManeuver
 
     public override int Cooldown => 20;
     public override bool OwnsLocomotion => true;
+    public override Category  Category => Category.Reflex;   // a mover whose job is to not get hit: drives Left/Right itself
+    public override MoveClaim Move     => MoveClaim.Exclusive;
 
     public override float Score(BotView v)
     {

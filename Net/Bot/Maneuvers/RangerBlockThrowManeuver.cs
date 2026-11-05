@@ -45,6 +45,7 @@ public sealed class RangerBlockThrowManeuver : BotManeuver
 
     public override int Cooldown => CooldownFrames;
     public override bool OwnsLocomotion => true;   // default chase hops/dashes, which wrecks the grab
+    public override MoveClaim Move => MoveClaim.Still;   // Shift+LMB paint/carry/swipe only; chase hops/dashes would wreck the grab
 
     public override float Score(BotView v)
     {

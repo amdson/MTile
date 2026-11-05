@@ -15,6 +15,7 @@ public sealed class EscapeGrabManeuver : BotManeuver
     // Chase/backoff locomotion would fight the grab; the maneuver only leans toward the
     // grabber (to face them — the struggle arc is short and one-sided).
     public override bool OwnsLocomotion => true;
+    public override MoveClaim Move => MoveClaim.Exclusive;   // mashes LMB and leans toward the grabber with Left/Right itself; the chase must not run
 
     // Dominates everything: nothing else can be done while held.
     public override float Score(BotView v) => v.Self.Combat.GrabbedActive ? 10f : 0f;

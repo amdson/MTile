@@ -30,6 +30,7 @@ public sealed class AntiAirStabManeuver : BotManeuver
     private int _i;
     public override int Cooldown => 45;
     public override bool OwnsLocomotion => true;   // stay planted: no chase/hop while the stab is held
+    public override MoveClaim Move => MoveClaim.Still;   // holds the stab (LMB) and writes no movement keys; no chase/hop while it is held
 
     private Vector2 Predict(BotView v, int frames)
     {

@@ -30,6 +30,8 @@ public sealed class CornerEscapeManeuver : BotManeuver
 
     public override int Cooldown => 90;
     public override bool OwnsLocomotion => true;
+    public override Category  Category => Category.Reflex;   // a mover whose job is to not get hit: writes Space+Shift dash and Left/Right out of the corner
+    public override MoveClaim Move     => MoveClaim.Exclusive;
 
     private int  _t, _away;
     private bool _dashed;

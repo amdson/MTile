@@ -281,7 +281,7 @@ public class BotManeuverControllerTests
     }
 
     [Fact]
-    public void ManeuverBehaviour_DefaultsFromOwnsLocomotion_RegistryOverridesGuard()
+    public void ManeuverBehaviour_DefaultsFromOwnsLocomotion_NativeOverridesGuard()
     {
         var owns = new ManeuverBehaviour(new FakeManeuver(true));
         Assert.Equal(Category.Action, owns.Category);
@@ -298,10 +298,10 @@ public class BotManeuverControllerTests
         Assert.Equal("GuardManeuver", guard.Name);
 
         Assert.Equal(Category.Reflex, new ManeuverBehaviour(new CornerEscapeManeuver()).Category);
-        // Parity: a maneuver that runs under the default chase today stays Move=None.
+        // Dash's input IS movement: Action + Exclusive.
         var dash = new ManeuverBehaviour(new DashManeuver());
         Assert.Equal(Category.Action, dash.Category);
-        Assert.Equal(MoveClaim.Mode.None, dash.Move.Kind);
+        Assert.Equal(MoveClaim.Mode.Exclusive, dash.Move.Kind);
 
         var v = View();
         var fm = new FakeManeuver(false) { S = 2f };

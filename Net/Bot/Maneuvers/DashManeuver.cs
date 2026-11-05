@@ -32,6 +32,7 @@ public sealed class DashManeuver : BotManeuver
     private const int EnterTimeout = 12;
 
     public override int Cooldown => 90;
+    public override MoveClaim Move => MoveClaim.Exclusive;   // the input IS movement: Space+Shift dash then Left/Right toward the target
 
     private int  _t;
     private bool _inDash, _clicked;

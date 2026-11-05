@@ -52,6 +52,7 @@ public sealed class CrystalWaveManeuver : BotManeuver
         new() { "LobbedAreaAction", "GuardAction" };
     public override int  Cooldown       => 60;   // the real gate is the 8 s wave cooldown
     public override bool OwnsLocomotion => true;
+    public override MoveClaim Move => MoveClaim.Still;   // RMB aim/launch only, no movement keys; the wave is aimed from a planted body
 
     private enum Phase { Pick, Charge, Rise, Skim, Done }
     private Phase    _phase;

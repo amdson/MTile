@@ -41,6 +41,7 @@ public sealed class RangerCrystalWaveManeuver : BotManeuver
 
     public override int  Cooldown       => 45;   // the real gate is the 8 s wave cooldown
     public override bool OwnsLocomotion => true;
+    public override MoveClaim Move => MoveClaim.Still;   // RMB aim/launch only, no movement keys; the wave is aimed from a planted body
 
     // Test visibility.
     public bool Fired      => _wave.Fired;

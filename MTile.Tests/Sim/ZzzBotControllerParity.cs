@@ -15,6 +15,13 @@
 //   Ranger vs Brawler            24.0/24  K/D 87/39  dmg 487.0/266.1
 //   Ranger vs Riposte            11.0/24  K/D 63/65  dmg 372.2/380.6
 //   Ranger-NoLearn vs Brawler    24.0/24  K/D 83/34  dmg 462.4/280.1
+//
+// after M3 (maneuvers declare their own Category/Move; ManeuverRegistry deleted; Guard/Pulse/
+// waves/throws Still, Dash/DownAir/BulldogPunish Exclusive, Burst Forbid(Space|Down)):
+//   Bulldog vs Brawler           23.0/24  K/D 74/45  dmg 423.1/294.5
+//   Ranger vs Brawler            23.5/24  K/D 93/39  dmg 489.4/271.1
+//   Ranger vs Riposte            11.5/24  K/D 61/64  dmg 367.7/375.5
+//   Ranger-NoLearn vs Brawler    24.0/24  K/D 80/43  dmg 457.2/272.8
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;

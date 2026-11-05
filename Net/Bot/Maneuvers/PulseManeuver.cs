@@ -32,6 +32,7 @@ public sealed class PulseManeuver : BotManeuver
 
     public override int Cooldown => 90;
     public override bool OwnsLocomotion => true;   // stand still: the ring is centred on us
+    public override MoveClaim Move => MoveClaim.Still;   // the ring is centred on us and only Click is written; stay planted
 
     public override float Score(BotView v)
     {

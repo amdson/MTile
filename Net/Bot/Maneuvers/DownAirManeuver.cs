@@ -18,6 +18,7 @@ namespace MTile.Net;
 public sealed class DownAirManeuver : BotManeuver
 {
     public override int Cooldown => 80;
+    public override MoveClaim Move => MoveClaim.Exclusive;   // the input IS movement: Space hop then Left/Right over the target
 
     // Vertical window (target below us, Y-down so Dy > 0) in which the chop reaches.
     private const float MinBelow = 12f, MaxBelow = 46f;
