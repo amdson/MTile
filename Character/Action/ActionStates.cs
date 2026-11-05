@@ -1024,7 +1024,7 @@ public class GroundSlash3 : SlashLikeAction
     protected override float KnockbackMagnitude  => 140f;
     protected override float StrikeSpeed         => 300f;    // the combo launcher — 225 px/s on a player
     protected override float BodyDamageScale     => 1.2f;    // finisher: 0.60 HP
-    protected override float HitstunSecondsOverride => 0.75f;   // safe on hit (todo H): past its own ~9+18f post-hit tail
+    protected override float HitstunSecondsOverride => 0.40f;   // 24f: a little UNDER its ~28f post-hit tail (play-test 2026-11-05) - the 40px launch is what makes the retaliation hard, not the frames
     protected override float LaunchDecay         => 350f;    // ~169 px/s applied -> ~40px carry, past slash reach
     // Light armor through the wind-up and swing (grounded by RequireGround): tanks the
     // 100 px/s pokes (S1/S2) so the finisher can't be jabbed out of its startup, not a

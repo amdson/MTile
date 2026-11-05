@@ -11,12 +11,17 @@ namespace MTile;
 public readonly struct GuardOutcome
 {
     public readonly bool  Absorbed;
+    // A held block (2026-11-05): a light hit met a raised guard outside the perfect
+    // window. Chip damage and a small shove at the scales below, NO hitstun / stun /
+    // flinch, and the guard stays up. Heavies and grabs are what get through a held guard.
+    public readonly bool  Blocked;
     public readonly float DamageScale;
     public readonly float KnockbackScale;
 
-    public GuardOutcome(bool absorbed, float damageScale, float knockbackScale)
+    public GuardOutcome(bool absorbed, float damageScale, float knockbackScale, bool blocked = false)
     {
         Absorbed       = absorbed;
+        Blocked        = blocked;
         DamageScale    = damageScale;
         KnockbackScale = knockbackScale;
     }
@@ -177,7 +182,13 @@ public class CombatState
     // blanket refusal. Grabbed stays a flag — it's a live external hold
     // re-marked every frame, not a timed window.
     public bool BlocksAttack => GrabbedActive;
-    public bool BlocksJump   => HitstunActive || StunActive || GrabbedActive;
+    // Hitstun no longer blocks the jump (2026-11-05, play-test: "super annoying to not be
+    // able to jump while getting hit"): a lightly hit player keeps the jump as an escape
+    // (with muted air control); stun and a grab still take it. A LAUNCHED victim rides
+    // TumbleState for its hitstun, which outranks the jump states, so the heavies keep
+    // their ride. Wall cling / ledge grab stay blocked for the whole window so knockback
+    // near terrain is still pressure.
+    public bool BlocksJump   => StunActive || GrabbedActive;
 
     // Cross-cutting movement-capability lock-out (COMBAT_FEEL_PLAN Phase 4). The
     // whole combat disadvantage window (hitstun OR stun) blocks Jump and the
@@ -188,9 +199,11 @@ public class CombatState
     // this mask. Gates ENTRY only — a state already running finishes on its own
     // CheckConditions (a player hit mid-jump still completes the arc).
     public MovementCapability BlockedCapabilities =>
-        (HitstunActive || StunActive || GrabbedActive)
+        (StunActive || GrabbedActive)
             ? MovementCapability.Jump | MovementCapability.WallCling | MovementCapability.LedgeGrab
-            : MovementCapability.None;
+            : HitstunActive
+                ? MovementCapability.WallCling | MovementCapability.LedgeGrab
+                : MovementCapability.None;
 
     // Guard (parry) — roadmap §1.5. GuardActive is the moment-to-moment "Shift
     // held + no L/R" gate, written by GuardAction.Enter/Exit. GuardCharged is the
@@ -275,6 +288,17 @@ public class CombatState
     private const float GuardFalloffSeconds          = 0.60f;
     private const float GuardMaxDamagePenetration    = 0.75f;
     private const float GuardMaxKnockbackPenetration = 0.50f;
+    // Held block (2026-11-05, play-test: "it's optimal to sit in front and spam the slash
+    // string"). A hit at or under GuardHoldMaxDamage - the pokes and mids - met by a
+    // raised guard outside the perfect window is BLOCKED: chip at GuardChipFraction, a
+    // shove at GuardBlockKnockbackScale, no hitstun, no break, the stance stays up for as
+    // long as Shift is held. Heavies (> the line: S3, the counter, stab, kick, hammer) and
+    // grabs (fields bypass the parry path) are what beat a held guard, and the timed parry
+    // (perfect window) is still what arms the counter. Rock-paper-scissors: spam loses to
+    // the hold, the hold loses to grab / heavy, grab and heavy lose to the fast poke.
+    public  const float GuardHoldMaxDamage           = 0.5f;
+    private const float GuardChipFraction            = 0.15f;
+    private const float GuardBlockKnockbackScale     = 0.30f;
     // How long the stance stays down after something got through it.
     private const float GuardBreakRecoverySeconds    = 0.50f;
     // ...and after any ordinary deactivation. Deliberately a touch longer than the
@@ -567,7 +591,17 @@ public class CombatState
             return GuardOutcome.Absorb;
         }
 
-        // Late. Linear ramp from "just missed the window" (leaks nothing) to the
+        // Late and LIGHT: a held block. The stance holds; chip and a shove get through.
+        if (hitDamage <= GuardHoldMaxDamage)
+        {
+            LastBlockFrame = currentFrame;
+            LastBlockDir   = fromAttacker;
+            LastBlockLeak  = 0f;
+            return new GuardOutcome(absorbed: false, damageScale: GuardChipFraction,
+                                    knockbackScale: GuardBlockKnockbackScale, blocked: true);
+        }
+
+        // Late and heavy. Linear ramp from "just missed the window" (leaks nothing) to the
         // saturation values, reached GuardFalloffSeconds later and held from there on.
         float falloff = MathF.Max(SimFrames.FromSeconds(GuardFalloffSeconds, dt), 1);
         float t       = MathHelper.Clamp((age - perfect) / falloff, 0f, 1f);

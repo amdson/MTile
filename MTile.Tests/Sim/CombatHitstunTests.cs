@@ -14,10 +14,12 @@ public class CombatHitstunTests(ITestOutputHelper output)
     private const float Dt = 1f / 60f;
     private const float Gravity = 600f;
 
-    // Slash hits a stationary victim → Combat.HitstunActive fires → Space presses
-    // during the hitstun window do not produce JumpingState.
+    // Slash hits a stationary victim → Combat.HitstunActive fires. Since 2026-11-05 a
+    // lightly hit player KEEPS the jump (only stun / grab take it; a launched victim is
+    // in Tumble, which outranks the jump states), so Space presses during the hitstun
+    // window DO produce a jump - this is the escape the play-test asked for.
     [Fact]
-    public void Hitstun_BlocksJumpAfterSlashLands()
+    public void Hitstun_AllowsJumpAfterSlashLands()
     {
         // Flat ground; two players stand on top.
         //   Row 0..1: empty (sky)
@@ -119,16 +121,11 @@ public class CombatHitstunTests(ITestOutputHelper output)
         // 2) Hitstun must have fired at some point.
         Assert.True(sawHitstun, "Expected Combat.HitstunActive to be true at some frame after the slash landed.");
 
-        // 3) During every hitstun frame, the victim must not be in a jump state.
-        //    (CoveredJumpState is now gated by the capability mask too, but it
-        //    can't fire on flat ground without an overhead ceiling anyway, so the
-        //    "Jumping"-name check below remains sufficient here.)
+        // 3) The victim must have jumped INSIDE a hitstun frame.
+        bool jumpedInHitstun = false;
         for (int f = 0; f < traces[1].Length; f++)
-        {
-            if (!hitstunPerFrame[f]) continue;
-            Assert.False(IsJumpingState(traces[1][f].State),
-                $"Frame {f}: victim entered {traces[1][f].State} while HitstunActive — hitstun gate failed.");
-        }
+            if (hitstunPerFrame[f] && IsJumpingState(traces[1][f].State)) jumpedInHitstun = true;
+        Assert.True(jumpedInHitstun, "A hitstunned (not stunned, not launched) victim should be able to jump.");
     }
 
     // Sanity: with NO attacker contact, the same victim script DOES produce a

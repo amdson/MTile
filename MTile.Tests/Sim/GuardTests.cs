@@ -30,8 +30,12 @@ public class GuardTests(ITestOutputHelper output)
     private const int BreakRecoveryFrames = 30;   // FromSeconds(0.50, 1/60)
     private const int CooldownFrames      = 9;    // FromSeconds(0.15, 1/60)
 
-    // Weak enough to arm GuardRetaliate (GuardChargeMaxDamage is 1.0).
+    // Weak enough to arm GuardRetaliate (GuardChargeMaxDamage is 1.0) - and, since
+    // 2026-11-05, light enough (<= GuardHoldMaxDamage 0.5) to be BLOCKED by a held guard
+    // outside the perfect window. LeakDamage is the first weight that gets through a
+    // held guard (a finisher / heavy), which is what the leak and break tests need.
     private const float WeakDamage   = 0.5f;
+    private const float LeakDamage   = 0.6f;
     private const float StrongDamage = 3.0f;
 
     private static CombatState Guarding()
@@ -45,7 +49,9 @@ public class GuardTests(ITestOutputHelper output)
     // so the direction back toward the attacker is +X.
     private static Vector2 ImpulseFromTheRight => new Vector2(-200f, 0f);
 
-    private static GuardOutcome HitAt(CombatState c, int frame, float damage = WeakDamage,
+    // Default weight is the first that LEAKS through a held guard (the ramp / break tests);
+    // the parry tests are weight-blind inside the perfect window.
+    private static GuardOutcome HitAt(CombatState c, int frame, float damage = LeakDamage,
                                       int facing = 1)
         => c.ResolveGuard(ImpulseFromTheRight, damage, facing, frame, Dt);
 
@@ -232,6 +238,35 @@ public class GuardTests(ITestOutputHelper output)
 
     // Out of the front cone the guard never met the hit, so it neither filters it nor
     // survives it.
+    // A held guard BLOCKS a light hit outside the perfect window (2026-11-05): chip,
+    // a small shove, no break, the stance stays up - the answer to slash spam.
+    [Fact]
+    public void HeldGuardBlocksALightHitLate_WithoutBreaking()
+    {
+        var c = Guarding();
+        var g = HitAt(c, GuardFrame + PerfectWindowFrames + 20, WeakDamage);
+        Assert.False(g.Absorbed);
+        Assert.True(g.Blocked);
+        Assert.InRange(g.DamageScale, 0.05f, 0.30f);
+        Assert.InRange(g.KnockbackScale, 0.1f, 0.5f);
+        Assert.True(c.GuardActive, "a blocked light hit must not drop the stance");
+        Assert.False(c.GuardBroken);
+        Assert.Equal(0f, c.LastBlockLeak, 3);
+    }
+
+    // ...and the same late hit one weight class up leaks and breaks (the heavies and
+    // grabs are what beat a held guard).
+    [Fact]
+    public void HeldGuardLeaksAndBreaksOnAHeavyHitLate()
+    {
+        var c = Guarding();
+        var g = HitAt(c, GuardFrame + PerfectWindowFrames + 20, LeakDamage);
+        Assert.False(g.Blocked);
+        Assert.True(g.DamageScale > 0f);
+        Assert.False(c.GuardActive);
+        Assert.True(c.GuardBroken);
+    }
+
     [Fact]
     public void HitFromBehindIsUnfilteredAndStillBreaksTheGuard()
     {

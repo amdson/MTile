@@ -17,9 +17,15 @@ public class MovementConfig
     // with the 0.12 s hold and quadratic drag) lands each apex at 75% — a ground jump
     // ~4.9 → ~3.7 tiles. Scaling the speeds x0.75 instead would cut height to ~56%.
     public float AirAccel { get; set; } = 900f;
-    // 0.7x MaxWalkSpeed (todo K2, 2026-11-05): 90 (1.5x walk) was an oversight that made
-    // the air the fastest way to travel. Smash runs air at 0.55-0.65x of run speed.
-    public float MaxAirSpeed { get; set; } = 42f;
+    // 0.9x MaxWalkSpeed (todo K2, 2026-11-05; play-tested up from 0.7x): 90 (1.5x walk)
+    // was an oversight that made the air the fastest way to travel. This caps what air
+    // control can ADD; a jump keeps the lateral speed it took off with (AirControl).
+    public float MaxAirSpeed { get; set; } = 54f;
+    // The corrector's own horizontal speed budget in the air (fold / lattice drive,
+    // AmbientCorrector + LatticeTracker): the vault, duck and tunnel courses were designed
+    // at 90 and stall under the player's 54 cap (GauntletStage, BumpyCorridor,
+    // LipStepOff went red at 54). Kept at the old value; MaxAirSpeed is the PLAYER's cap.
+    public float CorrectorAirSpeed { get; set; } = 90f;
     // Descent-only gravity scale (todo L): gravity x this while airborne and moving DOWN,
     // full gravity on the way up, so jump height and every take-off calibration are
     // untouched and only the fall is floatier - a floaty body is easier to juggle and a

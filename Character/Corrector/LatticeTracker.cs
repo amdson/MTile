@@ -71,7 +71,7 @@ public static class LatticeTracker
 
         // ── The plan ─────────────────────────────────────────────────────
         // The x speed cap: the profile's, under the walk or air modifier.
-        float speed = fold.MaxSpeed * (fold.Hover ? ctx.Modifiers.MaxWalkSpeed : ctx.Modifiers.MaxAirSpeed);
+        float speed = fold.MaxSpeed * (fold.Hover ? ctx.Modifiers.MaxWalkSpeed : ctx.Modifiers.MaxAirSpeed);   // MaxSpeed is CorrectorAirSpeed for air profiles
         // u is intent: along dir, and up as well while a jump is held. A
         // launch's tilt is the direction the actuators produce — the legs'
         // ceiling (the push fade speed) up, the walk speed along — so the
@@ -197,7 +197,7 @@ public static class LatticeTracker
         {
             Cfg = cfg, Fold = fold, Dir = dir, Speed = speed, ArcSpeed = arcSpeed,
             Origin = body.Position, Near = near, Ballistic = ballistic, Planning = planning,
-            T0 = t0, SupportVy = supportVy, AirSpeed = cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed,
+            T0 = t0, SupportVy = supportVy, AirSpeed = cfg.CorrectorAirSpeed * ctx.Modifiers.MaxAirSpeed,
         };
         PathTracker.Solve(s, settings, ref policy);
         var pr = s.Problem;

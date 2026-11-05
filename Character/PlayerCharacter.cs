@@ -254,6 +254,13 @@ public class PlayerCharacter : IHittable
         _abilities.Combat.AddDamage(hpLoss);
         _lastDamageFrame = _frame;
         var res = HitResolver.Resolve(in hit, Mass, Body.Velocity);
+        // A held block: chip is paid above; a small shove, and nothing else registers -
+        // no hitstun, no stun, no flinch, the guard stays up (CombatState.ResolveGuard).
+        if (guard.Blocked)
+        {
+            AddKnockback(res.TargetDeltaV * guard.KnockbackScale * MovementConfig.Current.KnockbackSpeedScale);
+            return res.Impulse;
+        }
         // How hard this hit actually moves us, px/s — what armor, stun and hitstun read.
         // Thresholds read the attack's full dv; only the applied velocity is slowed
         // (MovementConfig.KnockbackSpeedScale, the todo #9 slowdown).
@@ -929,8 +936,12 @@ public class PlayerCharacter : IHittable
         // in a free-flight state and moving down. Multiplicative with the action's scale,
         // kept OUT of ctx.Modifiers so BallisticPredictor can apply its own per-tick
         // version of the same rule rather than seeing a folded constant.
+        // The gate is purely physical - airborne and moving down - so the corrector's
+        // predictors (BallisticPredictor applies the same vel.Y > 0 rule) see exactly what
+        // the sim does; a state-based gate left the sim at full g for a frame or two at
+        // a lip while the predictor was already at 0.7, and the fold pulled up against it.
         float gravityScale = ctx.Modifiers.GravityScale;
-        if (Body.Velocity.Y > 0f && FreeAir(_currentState) && !ctx.TryGetGround(out _))
+        if (Body.Velocity.Y > 0f && !ctx.TryGetGround(out _))
             gravityScale *= MovementConfig.Current.FallGravityScale;
         if (gravityScale != 1f)
             Body.AppliedForce += Gravity * (gravityScale - 1f);
@@ -980,11 +991,6 @@ public class PlayerCharacter : IHittable
     }
 
     public bool IsGrounded => _currentState is StandingState || _currentState is CrouchedState;
-    // Free flight: the states where the body is simply ballistic (no surface, no hold),
-    // i.e. where the descent-only fall scale applies.
-    public static bool FreeAir(MovementState s)
-        => s is FallingState or TumbleState or JumpingState or RunningJumpState or DoubleJumpingState
-             or CoveredJumpState or WallJumpingState or LedgeJumpState or DashState or DropdownState;
     public string CurrentStateName => _currentState?.GetType().Name ?? "None";
     public MovementState CurrentState => _currentState;
     public ActionState CurrentAction => _currentAction;

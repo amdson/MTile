@@ -32,15 +32,16 @@ public static class AirControl
             }
             else
             {
-                // At or above cap in input direction. Brake the excess so vx settles
-                // to maxSpeed in one frame; no additional accel applied. During
-                // hitstun (PreserveExternalVelocity) the brake is skipped entirely —
-                // otherwise this one line would erase knockback within a frame or
-                // two whenever the victim holds a direction. Input still can't ADD
-                // speed past the cap (the accel branch above never runs over-cap).
-                if (ctx.Modifiers.PreserveExternalVelocity) return 0f;
-                float excess = vInInputDir - maxSpeed;
-                return -inputX * excess / ctx.Dt;
+                // At or above the cap in the input direction: no accel, and NO brake
+                // (2026-11-05). The cap limits what air control can ADD; speed the body
+                // brought into the air - a running jump's takeoff at walk speed, a
+                // launch, a dash - is kept while the player holds its direction, so a
+                // jump starts with the ground's lateral speed and MaxAirSpeed (0.9x walk)
+                // only governs what you can build up from a standing jump. Releasing the
+                // direction hands the speed to the drag branch below, as before. (The old
+                // one-frame brake to the cap also erased knockback whenever the victim
+                // held a direction, which PreserveExternalVelocity used to special-case.)
+                return 0f;
             }
         }
 

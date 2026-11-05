@@ -33,7 +33,8 @@
   // Horizontal locomotion scaled x0.8 on 2026-10-19 (slow movement ~20%) — see the
   // note atop MovementConfig.cs. Values mirror the code defaults (ConfigLayoutTests).
   "AirAccel": 900,
-  "MaxAirSpeed": 42,
+  "MaxAirSpeed": 54,
+  "CorrectorAirSpeed": 90,
   "FallGravityScale": 0.7,
   "GroundKnockbackScale": 0.8,
   "GroundKnockbackRiseScale": 0.5,

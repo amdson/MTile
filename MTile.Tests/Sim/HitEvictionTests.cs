@@ -41,9 +41,13 @@ public class HitEvictionTests(ITestOutputHelper output)
         return new InputScript()
             .For   (15, new PlayerInput { MouseWorldPosition = press })
             .For   ( 1, new PlayerInput { LeftClick = true, MouseWorldPosition = press })
-            .For   ( 8, new PlayerInput { LeftClick = true, MouseWorldPosition = release })
+            .For   (16, new PlayerInput { LeftClick = true, MouseWorldPosition = release })
             .Forever   (new PlayerInput { MouseWorldPosition = release });
     }
+    // The stab fires on the release (f32) and its hitbox opens 10.8f later: it lands ≈ f43.
+    // (The hold was 8 frames, which at 60 fps read as a CLICK and threw a GroundSlash1 -
+    // a light hit that a held guard now blocks rather than leaking.)
+    private const int StabLand = 43;
 
     // Victim stab gesture aimed RIGHT (away from the attacker, so the victim's
     // own hitbox never touches the attacker). `idleFrames` positions the entry.
@@ -205,7 +209,7 @@ public class HitEvictionTests(ITestOutputHelper output)
     public void GuardRaisedJustInTime_AbsorbsCompletely()
     {
         var (actions, hitstun, damage) = Run(AttackerStabScript(),
-                                              FacingVictimGuardingAt(27), frames: 60);
+                                              FacingVictimGuardingAt(StabLand - 2), frames: 90);
 
         int guardFirst = First(actions, "GuardAction");
         output.WriteLine($"guard@{guardFirst}, damage={damage}, hitstun={hitstun.IndexOf(true)}");
@@ -223,7 +227,7 @@ public class HitEvictionTests(ITestOutputHelper output)
     public void CleanBlock_DropsGuardThenRearmsImmediately()
     {
         var (actions, _, damage) = Run(AttackerStabScript(),
-                                        FacingVictimGuardingAt(27), frames: 60);
+                                        FacingVictimGuardingAt(StabLand - 2), frames: 90);
 
         int guardFirst = First(actions, "GuardAction");
         // The block ends that run of guard frames.
@@ -246,7 +250,7 @@ public class HitEvictionTests(ITestOutputHelper output)
     public void GuardHeldSinceLongBefore_LeaksTheHitThrough()
     {
         var (actions, hitstun, damage) = Run(AttackerStabScript(),
-                                              FacingVictimGuardingAt(4), frames: 60);
+                                              FacingVictimGuardingAt(4), frames: 90);
 
         int guardFirst = First(actions, "GuardAction");
         int hitFrame   = hitstun.IndexOf(true);
@@ -265,26 +269,26 @@ public class HitEvictionTests(ITestOutputHelper output)
     [Fact]
     public void GuardReturnsAfterReleasingTheButton()
     {
-        // Hit lands ≈ f30 (see AttackerStabScript). Hold through it, release across the
-        // 0.5s (15-frame at this dt) recovery, then press again.
+        // Hit lands ≈ f43 (StabLand). Hold through it, release across the 0.5s (30-frame)
+        // recovery, then press again.
         var victim = new InputScript()
             .For   ( 5, default(PlayerInput))
-            .For   (35, new PlayerInput { Shift = true })
-            .For   (15, default(PlayerInput))
+            .For   (50, new PlayerInput { Shift = true })
+            .For   (30, default(PlayerInput))
             .Forever  (new PlayerInput { Shift = true });
-        var (actions, hitstun, _) = Run(AttackerStabScript(), victim, frames: 110);
+        var (actions, hitstun, _) = Run(AttackerStabScript(), victim, frames: 130);
 
         int hitFrame  = hitstun.IndexOf(true);
         int guardBack = First(actions, "GuardAction", hitFrame + 1);
         output.WriteLine($"hit@{hitFrame}, guard re-entry@{guardBack}");
 
         Assert.True(hitFrame > 0, "The stab should land (out-of-cone, no parry).");
-        // Nothing while Shift is still held after the break (f30-39)...
-        for (int f = hitFrame + 1; f < 40 && f < actions.Count; f++)
+        // Nothing while Shift is still held after the break (through f54)...
+        for (int f = hitFrame + 1; f < 55 && f < actions.Count; f++)
             Assert.True(actions[f] != "GuardAction",
                 $"frame {f}: a broken guard must stay down while Shift is held.");
         // ...and back on the first frame of the re-press, the release having cleared it.
-        Assert.True(guardBack >= 55,
+        Assert.True(guardBack >= 85,
             $"Guard should come back only after the release + re-press (@{guardBack}).");
     }
 }

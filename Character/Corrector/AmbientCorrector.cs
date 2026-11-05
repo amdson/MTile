@@ -63,7 +63,7 @@ public struct FoldProfile
         Fold = true, Hover = false, Rising = false,
         HoverOffset  = MovementConfig.Current.FoldHoverOffset,
         ClimbReachUp = 0f,
-        MaxSpeed     = MovementConfig.Current.MaxAirSpeed,
+        MaxSpeed     = MovementConfig.Current.CorrectorAirSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
     };
 
@@ -76,7 +76,7 @@ public struct FoldProfile
     {
         Fold = true, Hover = false, Rising = true, Legs = true,
         HoverOffset = 0f, ClimbReachUp = 0f,
-        MaxSpeed = MovementConfig.Current.MaxAirSpeed, RiseCost = 0f,
+        MaxSpeed = MovementConfig.Current.CorrectorAirSpeed, RiseCost = 0f,
     };
 
     // A hybrid ground jump (RunningJumpState): the state's velocity write is

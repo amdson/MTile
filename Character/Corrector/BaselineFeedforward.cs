@@ -37,9 +37,10 @@ public static class BaselineFeedforward
             }
             else
             {
-                if (preserveExternalVelocity) return 0f;
-                float excess = vInInputDir - maxSpeed;
-                return -inputX * excess / dt;
+                // Mirrors AirControl.Apply (2026-11-05): no brake above the cap while the
+                // input holds the direction of travel - the cap limits what air control
+                // can add, a takeoff keeps its lateral speed.
+                return 0f;
             }
         }
 

@@ -171,7 +171,8 @@ defensive (guard, counter, crouch slash, S3, building).
     split in J (an air slash that whiffs still pays its tail), and the damage spread in F (air slashes 0.35/0.5 vs
     ground 0.25/0.30/0.60). If it still pays to hop-slash after those, revisit the air tails (18f vs 36f) directly
     rather than adding a landing state.
- 2. Air slower than ground (DECIDED - 1.5x was an oversight). Try MaxAirSpeed 0.7x walk (~42; Smash runs 0.55-0.65x).
+ 2. Air slower than ground (DECIDED - 1.5x was an oversight). Was 0.7x (42); play-tested to 0.9x (54) with the takeoff
+    carrying ground speed (see the play-test block below).
     AirAccel 900 is already half of WalkAccel 1800, so leave accel alone first; "1.0x cap + low accel" is the fallback
     if 0.7x feels dead (with slower falls (L) a low-accel air still reaches the cap given hang time).
  3. Grounded knockback reduction (DECIDED), as Melee crouch-cancel: applies while standing/crouching, not running or
@@ -217,7 +218,7 @@ Milestones (status: [ ] todo, [~] in progress, [x] done @commit, [!] blocked, [?
       Situation bucket check, league sanity. Carried from M2: GuardManeuver must time its raise to the predicted hit
       (perfect window 7f) instead of raising ASAP (BotManeuverPulseGuardTests x2); Rampart vs spikes with the new launches
       (BotManeuverSpikeGuardTests Rampart row).
-- [~] M5 Wrap: before/after frame-advantage table from ZzzComboTrace, docs (CODEBASE_OVERVIEW combat paragraph,
+- [x] M5 Wrap @M5 (see log): before/after frame-advantage table from ZzzComboTrace, docs (CODEBASE_OVERVIEW combat paragraph,
       BACKLOG), full sweep, final commit + push.
 
 ### Campaign log
@@ -283,17 +284,56 @@ Milestones (status: [ ] todo, [~] in progress, [x] done @commit, [!] blocked, [?
   legacy Brawler now loses a stock to the duelist), AntiAirSidestep (the test's scripted jump-in no longer reaches a
   standing bot - its baseline takes 0). Recorded in BACKLOG 5.21 as the phase-2 migration's first job.
 
+- M5 2026-11-05: play-test feedback folded in (below): jump during hitstun, air 54 with takeoff carry, held guard
+  blocks pokes/mids, S3 hitstun 0.40s; JumpTable.g.cs regenerated again (124 entries at air 54); HitEvictionTests'
+  attacker stab gesture fixed (16f hold - the 8f one read as a click) and its guard timings moved to the real stab
+  landing (f43): GuardBrokenByHit / GuardHeldSinceLongBefore green, GuardReturnsAfterReleasingTheButton still red (new
+  reason: the launched victim never re-raises guard in the run; untraced; it was red on main). Docs: CODEBASE_OVERVIEW
+  combat paragraphs, CLAUDE.md combat convention, BACKLOG 5.22/5.23 + the 2026-11-05 fallout paragraph. Final numbers
+  (full sweep, learner eval) in the final report.
+  Learner eval on the new kit (ZzzLearningEffect.Variants, 3 arenas x 24 seeds x 2 sides = 720 bouts, points of 720):
+  hand policy 531.5 | calibrated priors, no learning 628.0 | default learner (priors + online ledger) 598.0. Both
+  calibrated variants are far above the hand policy on the new kit; the ONLINE learning now costs ~30 points against
+  its own priors (Riposte 55 vs 81.5, Bulldog 130.5 vs 138; noise is ~+-22 at this size), so the ledger is drifting
+  away from a good prior - the game's "Ranger" still ships the default learner; switching it to calib+nolearn is a
+  one-line change in Game1.cs / RangerBot if the user prefers the stronger fighter (BACKLOG 5.22).
+
+### Play-test feedback applied mid-campaign (2026-11-05, user)
+- "Super annoying to not be able to jump while getting hit": hitstun no longer blocks the jump (CombatState.BlocksJump /
+  BlockedCapabilities: only stun and grab take it; hitstun still blocks wall cling / ledge grab). A LAUNCHED victim is
+  in TumbleState for its hitstun, which outranks the jump states, so the heavies keep their ride - if the heavies'
+  ride is the annoying part too, Tumble would have to yield to a jump press (not done; say so).
+  Trade-off to feel: a light-hit victim can now jump out between S1 and S2 (the string stays true only against a
+  victim who does not jump); juggles rely on the launch, not on hitstun.
+- Air speed: MaxAirSpeed 42 -> 54 (0.9x walk) and the takeoff keeps its lateral speed - AirControl no longer brakes
+  speed above the cap while the player holds its direction; the cap only limits what air control can ADD. The
+  corridor-course reds from the 42 cap should mostly return to green; JumpTable regenerated again for 54.
+  Measured: at 54 the corrector courses (BumpyCorridor x2, GauntletStage far wall) still stall - they pass at 90 - so
+  the corrector got its own budget (MovementConfig.CorrectorAirSpeed 90, used by AmbientCorrector / LatticeTracker)
+  while the PLAYER's cap is 54; LipStepOff and the predictor coast test went green with it, the corridor/gauntlet
+  courses need the player's cap and stay red for the user to feel. BaselineFeedforward.Air mirrors the no-brake rule.
+
+- "It's optimal to sit in front and spam the slash string" (user): the held guard now BLOCKS pokes and mids (body damage
+  <= GuardHoldMaxDamage 0.5) outside the perfect window - 15% chip, a 0.3x shove, no hitstun / flinch, no break, the
+  stance stays up while Shift is held. Heavies (> 0.5: S3, the counter, stab, kick, hammer) still leak and break it;
+  grabs still bypass it; the timed parry still arms the counter. RPS: spam < hold < grab / heavy < poke.
+- Slash string: hitstun a little UNDER the attacker's post-hit tail, with the launch making retaliation hard (user):
+  GroundSlash3 hitstun 0.75 -> 0.40s (24f vs the ~28f tail: -4 on hit at point blank, but the victim is 40px away).
+  S1/S2 unchanged (18f each; the string stays true against a victim who does not jump).
+
 ### Before / after (ZzzComboTrace, point-blank, mashing victim; frames after the hit lands)
 | Exchange                         | before (main)                          | after (combat-frame-data)                  |
 |----------------------------------|----------------------------------------|--------------------------------------------|
 | S1 -> S2                         | true by 3f                             | true                                       |
 | S2 -> S3                         | NOT true: victim free 10f before S3    | true: S3 lands the frame the victim frees  |
-| S3 on hit                        | -14 (39f hitstun vs 53f commitment)    | +17 (victim free at hit+45, attacker +28)  |
+| S3 on hit                        | -14 (39f hitstun vs 53f commitment)    | -4 by design (hitstun 24f vs 28f tail), victim launched 57px away: its swing whiffs |
 | AirWhipKick on hit               | -15 (42f vs 57f; hitstop cost 10f)     | +1 at point blank                          |
 | AirWhipKick carry                | 12px (one body radius)                 | 36px (past AirSlash1's 28px reach)         |
 | Whiffed GroundSlash1 tail        | 36f                                    | 36f (18f on a connect)                     |
 | Stab launch into a wall          | no stun (slam under the 400 line)      | crush-stun 0.33s (line 200), wall-techable |
 | Throw -> regrab                  | possible (grab latched a flying victim)| impossible (Hurtbox.Helpless)              |
+| Slash spam into a held guard     | leaks, breaks the guard                | blocked: 15% chip, no hitstun, guard holds |
+| Jump during hitstun              | blocked                                | allowed (stun / grab / Tumble still block) |
 | 20-tile landing                  | 0.1 HP + 36f stun                      | 0.1 HP + 16f hitstun, no stun              |
 | Hitstop on a big hit             | attacker lost the freeze (~10f)        | frame-neutral                              |
 
