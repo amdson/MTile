@@ -127,7 +127,7 @@ public sealed class BulldogGrab : BotManeuver
         if (!BulldogKit.CanAttack(v)) return 0f;
         if (BulldogKit.Guarding(v)) return 1.6f;
         if (_s.TargetHelpless) return 0f;            // a flinching target eats the string instead
-        return _s.Mix < MixShare ? 1.05f : 0f;
+        return _s.AllMixArms || _s.Mix < MixShare ? 1.05f : 0f;
     }
 
     // Bet (M4): throw into a wall / floor ~1 HP; vs a planted guard the 20 f startup lands ~80%
@@ -208,7 +208,7 @@ public sealed class BulldogStab : BotManeuver
         if (MathF.Abs(v.Dy) > VerticalReach || adx > MaxGap) return 0f;
         if (!v.Grounded || !BulldogKit.CanAttack(v)) return 0f;
         bool finisher = _s.TargetHp <= FinisherHp;
-        if (adx >= MinGap) return _s.Mix < MixShare ? 1.2f : 0f;
+        if (adx >= MinGap) return _s.AllMixArms || _s.Mix < MixShare ? 1.2f : 0f;
         return finisher && _s.TargetHelpless ? 1.4f : 0f;
     }
 
@@ -257,7 +257,7 @@ public sealed class BulldogCrossUp : BotManeuver
         if (!v.Grounded)
             return v.Toward != v.Facing && MathF.Abs(v.Dx) <= KickReachX && MathF.Abs(v.Dy) <= 40f ? 1.2f : 0f;
         if (_s.TargetHelpless) return 0f;
-        bool roll = _s.Mix >= MixLo && _s.Mix < MixHi;
+        bool roll = _s.AllMixArms || (_s.Mix >= MixLo && _s.Mix < MixHi);
         return roll && MathF.Abs(v.Dx) <= LaunchRangeX && MathF.Abs(v.Dx) >= 16f && MathF.Abs(v.Dy) <= 20f ? 1.05f : 0f;
     }
 
@@ -326,7 +326,7 @@ public sealed class BulldogLowPoke : BotManeuver
         if (ax > Reach) return 0f;
         if (v.Dy > 6f && v.Dy < 30f) return 1.1f;
         if (MathF.Abs(v.Dy) > 20f || _s.TargetHelpless) return 0f;
-        return _s.Mix >= MixLo && _s.Mix < MixHi ? 1.05f : 0f;
+        return _s.AllMixArms || (_s.Mix >= MixLo && _s.Mix < MixHi) ? 1.05f : 0f;
     }
 
     // Bet (M4): CrouchSlash 0.5, 3 f crouch + 14 f slash (9 f tail) ~ 20 f.

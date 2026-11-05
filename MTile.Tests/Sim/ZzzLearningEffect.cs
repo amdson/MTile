@@ -17,6 +17,8 @@ namespace MTile.Tests.Sim;
 //      arena/side: points by bout position, so adaptation over a longer session is visible.
 public class ZzzLearningEffect(ITestOutputHelper output)
 {
+    private const int VariantSeeds = 12;
+
     private static readonly (string, DuelBot)[] Opponents =
     {
         ("Rampart", RampartBot.Create), ("Citadel", CitadelBot.Create), ("Riposte", RiposteBot.Create),
@@ -40,20 +42,26 @@ public class ZzzLearningEffect(ITestOutputHelper output)
             if (bot is BulldogBot bb) bots.GetOrAdd(name, _ => new ConcurrentBag<BulldogBot>()).Add(bb);
             return bot;
         };
+        DuelBot Calib(Action<BulldogBot> more = null) => RangerBot.Variant(b => { b.Calibration = BetCalibration.Field; more?.Invoke(b); });
         var challengers = new (string, DuelBot)[]
         {
-            ("ledger+softmax",   Collect("ledger+softmax", RangerBot.Create)),
-            ("ledger+argmax",    Collect("ledger+argmax", RangerBot.LearnArgmax)),
-            ("nolearn+argmax",   Collect("nolearn+argmax", RangerBot.NoLearn)),
-            ("nolearn+softmax",  Collect("nolearn+softmax", RangerBot.NoLearnExplore)),
+            ("nolearn+argmax",  Collect("nolearn+argmax", RangerBot.NoLearn)),
+            ("default",         Collect("default", RangerBot.Create)),
+            ("prior1",          Collect("prior1", RangerBot.Variant(b => b.Ledger.PriorWeight = 1f))),
+            ("prior4",          Collect("prior4", RangerBot.Variant(b => b.Ledger.PriorWeight = 4f))),
+            ("bucketprior3",    Collect("bucketprior3", RangerBot.Variant(b => b.Ledger.BucketPriorWeight = 3f))),
+            ("bucketprior12",   Collect("bucketprior12", RangerBot.Variant(b => b.Ledger.BucketPriorWeight = 12f))),
+            ("etamin.02",       Collect("etamin.02", RangerBot.Variant(b => b.Ledger.EtaMin = 0.02f))),
+            ("etamin.1",        Collect("etamin.1", RangerBot.Variant(b => b.Ledger.EtaMin = 0.1f))),
+            ("minrec4",         Collect("minrec4", RangerBot.Variant(b => b.Ledger.MinRecordFrames = 4))),
         };
         var jobs = new List<(string C, string O, string A, int S, bool P1, DuelBot Cb, DuelBot Ob)>();
         foreach (var (cn, cb) in challengers) foreach (var (on, ob) in Opponents)
-        foreach (var a in BotDuel.Arenas) foreach (int s in Enumerable.Range(1, 6)) foreach (bool p1 in new[] { true, false })
+        foreach (var a in BotDuel.Arenas) foreach (int s in Enumerable.Range(1, VariantSeeds)) foreach (bool p1 in new[] { true, false })
             jobs.Add((cn, on, a, s, p1, cb, ob));
         var pts = new ConcurrentDictionary<(string, string), float>();
         Parallel.ForEach(jobs, j => { float p = Points(j.A, j.Cb, j.Ob, j.S, j.P1); pts.AddOrUpdate((j.C, j.O), p, (_, o) => o + p); });
-        output.WriteLine("A. points out of 36 per opponent (3 arenas x 6 seeds x 2 sides)");
+        output.WriteLine($"A. points out of {6 * VariantSeeds} per opponent (3 arenas x {VariantSeeds} seeds x 2 sides)");
         output.WriteLine($"{"",-18}" + string.Join("", Opponents.Select(o => $"{o.Item1,9}")) + "    total  divergence");
         foreach (var (cn, _) in challengers)
         {
@@ -63,12 +71,75 @@ public class ZzzLearningEffect(ITestOutputHelper output)
             output.WriteLine($"{cn,-18}" + string.Join("", Opponents.Select(o => $"{pts.GetValueOrDefault((cn, o.Item1)),9:F1}"))
                              + $"  {Opponents.Sum(o => pts.GetValueOrDefault((cn, o.Item1))),7:F1}  {div,6:P1}");
         }
+        foreach (var name in new[] { "default" })
+            if (bots.TryGetValue(name, out var bag)) output.WriteLine(BotTraceReport.Format(name, bag, 12));
+    }
+
+    // What does each arm realise, per bucket, under the hand policy (shadow ledger) vs under
+    // the learner's own argmax policy? Close-range buckets only; the fight happens there.
+    [Fact]
+    public void RealisedByArm()
+    {
+        var variants = new (string, Func<BulldogBot> , ConcurrentBag<BulldogBot>)[0];
+        var shadowBag = new ConcurrentBag<BulldogBot>(); var learnBag = new ConcurrentBag<BulldogBot>();
+        DuelBot shadow = (self, seed) => { var b = RangerBot.Build(seed, self, out _); b.Shadow = true; shadowBag.Add(b); return b; };
+        DuelBot learn  = (self, seed) => { var b = RangerBot.Build(seed, self, out _); b.ExploreOverride = false; learnBag.Add(b); return b; };
+        var jobs = new List<(string, DuelBot, string, int, bool, DuelBot)>();
+        foreach (var (on, ob) in Opponents) foreach (var a in BotDuel.Arenas) foreach (int s in Enumerable.Range(1, 6)) foreach (bool p1 in new[] { true, false })
+        { jobs.Add(("shadow", shadow, a, s, p1, ob)); jobs.Add(("learn", learn, a, s, p1, ob)); }
+        var pts = new ConcurrentDictionary<string, float>();
+        Parallel.ForEach(jobs, j => { float p = Points(j.Item3, j.Item2, j.Item6, j.Item4, j.Item5); pts.AddOrUpdate(j.Item1, p, (_, o) => o + p); });
+        output.WriteLine($"points /180: shadow {pts["shadow"]:F1}  learn-argmax {pts["learn"]:F1}");
+        foreach (var (label, bag) in new[] { ("shadow (hand policy)", shadowBag), ("learn-argmax (own policy)", learnBag) })
+        {
+            output.WriteLine($"-- {label}: realised mean per arm, buckets <40 and 40-85 (gnd), n = settles summed over {bag.Count} bots");
+            var agg = new Dictionary<(string, int), (double d, double t, int n)>();
+            foreach (var b in bag)
+                foreach (var (name, bucket, d, t, n) in b.Ledger.Realised)
+                {
+                    if (bucket >= 12 || bucket % 2 == 1) continue;   // bands 0-1, grounded
+                    var cur = agg.GetValueOrDefault((name, bucket));
+                    agg[(name, bucket)] = (cur.d + d * n, cur.t + t * n, cur.n + n);
+                }
+            foreach (var kv in agg.Where(k => k.Value.n >= 60).OrderBy(k => k.Key.Item2).ThenByDescending(k => k.Value.d / k.Value.n - k.Value.t / k.Value.n))
+            {
+                var (d, t, n) = kv.Value;
+                output.WriteLine($"   {Situation.Describe(kv.Key.Item2),-14} {kv.Key.Item1,-26} dealt {d / n,6:F3} taken {t / n,6:F3} value {d / n - t / n,7:F3}  n={n}");
+            }
+        }
+    }
+
+    // Dump a calibration table: per arm, realised mean dealt/taken over ALL buckets under the
+    // hand policy (shadow ledger), weighted by settles. Paste into Net/Bot/Control/BetCalibration.cs.
+    [Fact]
+    public void CalibrationDump()
+    {
+        var bag = new ConcurrentBag<BulldogBot>();
+        DuelBot shadow = (self, seed) => { var b = RangerBot.Build(seed, self, out _); b.Shadow = true; bag.Add(b); return b; };
+        var jobs = new List<(string, int, bool, DuelBot)>();
+        foreach (var (_, ob) in Opponents) foreach (var a in BotDuel.Arenas) foreach (int s in Enumerable.Range(1, 6)) foreach (bool p1 in new[] { true, false })
+            jobs.Add((a, s, p1, ob));
+        Parallel.ForEach(jobs, j => Points(j.Item1, shadow, j.Item4, j.Item2, j.Item3));
+        var agg = new Dictionary<string, (double d, double t, int n)>();
+        foreach (var b in bag)
+            foreach (var (name, bucket, d, t, n) in b.Ledger.Realised)
+            {
+                if (bucket != -1) continue;   // the arm-level entry already sums every bucket
+                var cur = agg.GetValueOrDefault(name);
+                agg[name] = (cur.d + d * n, cur.t + t * n, cur.n + n);
+            }
+        output.WriteLine($"// Realised means under the hand policy, {bag.Count} bots x 60 s vs Rampart/Citadel/Riposte/Bulldog/Brawler (ZzzLearningEffect.CalibrationDump)");
+        foreach (var kv in agg.Where(k => k.Value.n >= 30).OrderBy(k => k.Key))
+        {
+            var (d, t, n) = kv.Value;
+            output.WriteLine($"        [\"{kv.Key}\"] = ({d / n:F3}f, {t / n:F3}f),   // n={n}");
+        }
     }
 
     [Fact]
     public void CarriedLedger()
     {
-        const int Bouts = 6;
+        const int Bouts = 8;
         var seqs = new List<(string O, DuelBot Ob, string A, bool P1)>();
         foreach (var (on, ob) in Opponents) foreach (var a in BotDuel.Arenas) foreach (bool p1 in new[] { true, false })
             seqs.Add((on, ob, a, p1));
@@ -77,16 +148,18 @@ public class ZzzLearningEffect(ITestOutputHelper output)
         Parallel.ForEach(seqs, sq =>
         {
             var ledger = new BetLedger();
-            var me = RangerBot.Carry(ledger);
+            ledger.Gamma = 0.99f;
+            DuelBot me = (self, seed) => { var b = RangerBot.Build(seed, self, out _, learn: false); ledger.NewBout(); b.Ledger = ledger; b.Calibration = BetCalibration.Field; b.Sharpness = 10f; return b; };
+            DuelBot fr = RangerBot.Variant(b => { b.Calibration = BetCalibration.Field; b.Ledger.Gamma = 0.99f; b.Sharpness = 10f; });
             var c = new float[Bouts]; var f = new float[Bouts];
             for (int i = 0; i < Bouts; i++)
             {
                 c[i] = Points(sq.A, me, sq.Ob, i + 1, sq.P1);
-                f[i] = Points(sq.A, RangerBot.NoLearn, sq.Ob, i + 1, sq.P1);
+                f[i] = Points(sq.A, fr, sq.Ob, i + 1, sq.P1);
             }
             carried.Add((sq.O, c)); fresh.Add((sq.O, f));
         });
-        output.WriteLine("B. one ledger carried across 6 bouts vs the same opponent (points per bout position, summed over 3 arenas x 2 sides = max 6 per cell)");
+        output.WriteLine("B. calib+Q.99+sharp10: one ledger carried across 8 bouts vs the same opponent, vs a fresh ledger per bout (points per bout position, summed over 3 arenas x 2 sides = max 6 per cell)");
         output.WriteLine($"{"",-10}{"variant",-8}" + string.Join("", Enumerable.Range(1, Bouts).Select(i => $"  b{i}")) + "  total");
         foreach (var (on, _) in Opponents)
         {
@@ -97,8 +170,8 @@ public class ZzzLearningEffect(ITestOutputHelper output)
                 output.WriteLine($"{on,-10}{label,-8}" + string.Join("", sum.Select(x => $"{x,4:F1}")) + $"  {sum.Sum(),5:F1}");
             }
         }
-        float cEarly = carried.Sum(x => x.ByBout[0] + x.ByBout[1]), cLate = carried.Sum(x => x.ByBout[4] + x.ByBout[5]);
-        float fEarly = fresh.Sum(x => x.ByBout[0] + x.ByBout[1]),   fLate = fresh.Sum(x => x.ByBout[4] + x.ByBout[5]);
-        output.WriteLine($"carry: bouts 1-2 {cEarly:F1}  bouts 5-6 {cLate:F1}   fresh: bouts 1-2 {fEarly:F1}  bouts 5-6 {fLate:F1}  (max 60 each)");
+        float cEarly = carried.Sum(x => x.ByBout[0] + x.ByBout[1]), cLate = carried.Sum(x => x.ByBout[Bouts - 2] + x.ByBout[Bouts - 1]);
+        float fEarly = fresh.Sum(x => x.ByBout[0] + x.ByBout[1]),   fLate = fresh.Sum(x => x.ByBout[Bouts - 2] + x.ByBout[Bouts - 1]);
+        output.WriteLine($"carry: bouts 1-2 {cEarly:F1}  last two {cLate:F1}   fresh: bouts 1-2 {fEarly:F1}  last two {fLate:F1}  (max 60 each)");
     }
 }

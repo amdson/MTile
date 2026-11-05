@@ -26,7 +26,7 @@ public class BotManeuverBetLedgerTests
     [Fact]
     public void OverconfidentBet_CorrectsDownMonotonically()
     {
-        var l = new BetLedger();
+        var l = new BetLedger { Eta = 0.3f, Hierarchical = false };
         var bet = new Bet(0.5f, 0f, 10);
         float hp = 5f; int frame = 0;
         float prev = l.Corrected(A, B, bet).Dealt;
@@ -45,7 +45,7 @@ public class BotManeuverBetLedgerTests
     [Fact]
     public void UnderconfidentBet_CorrectsUpTowardRealised()
     {
-        var l = new BetLedger();
+        var l = new BetLedger { Eta = 0.3f, Hierarchical = false };
         var bet = new Bet(0f, 0f, 10);
         float hp = 1000f; int frame = 0;
         float prev = 0f;
@@ -64,7 +64,7 @@ public class BotManeuverBetLedgerTests
     [Fact]
     public void HpRise_CountsZeroNotNegative()
     {
-        var l = new BetLedger { Share = 0f };
+        var l = new BetLedger { Eta = 0.3f, Hierarchical = false, Share = 0f };
         var bet = new Bet(0f, 0f, 5);
         l.Tick(0, 1f, 1f);
         l.Open(A, B, bet, 0);
@@ -79,7 +79,7 @@ public class BotManeuverBetLedgerTests
     [Fact]
     public void Record_SettlesExactlyAtFramePlusHorizon()
     {
-        var l = new BetLedger();
+        var l = new BetLedger { Eta = 0.3f, Hierarchical = false };
         var bet = new Bet(0.5f, 0f, 7);
         l.Tick(10, 5f, 5f);
         l.Open(A, B, bet, 10);
@@ -99,7 +99,7 @@ public class BotManeuverBetLedgerTests
     [Fact]
     public void SimultaneousRecords_BothSeeFullOutcome()
     {
-        var l = new BetLedger { Share = 0f, Eta = 1f };
+        var l = new BetLedger { Share = 0f, Eta = 1f, Hierarchical = false };
         var bet = new Bet(0f, 0f, 4);
         l.Tick(0, 5f, 5f);
         l.Open("Stance", B, bet, 0);
@@ -118,7 +118,7 @@ public class BotManeuverBetLedgerTests
     [Fact]
     public void Offset_StableWithoutSettles_DecaysUnderShareAtCorrectedValue()
     {
-        var l = new BetLedger { Share = 0f };
+        var l = new BetLedger { Eta = 0.3f, Hierarchical = false, Share = 0f };
         var bet = new Bet(0f, 0f, 3);
         float hp = 100f; int frame = 0;
         frame = Episode(l, bet, frame, 1f, ref hp);
@@ -150,13 +150,13 @@ public class BotManeuverBetLedgerTests
     [Fact]
     public void Offset_ClampsAtMaxOffset()
     {
-        var l = new BetLedger { Share = 0f, Eta = 1f, MaxOffset = 2f };
+        var l = new BetLedger { Share = 0f, Eta = 1f, MaxOffset = 2f, Hierarchical = false };
         var bet = new Bet(0f, 0f, 2);
         float hp = 100f; int frame = 0;
         for (int i = 0; i < 5; i++) frame = Episode(l, bet, frame, 10f, ref hp);
         Assert.Equal(2f, l.Corrected(A, B, bet).Dealt, 5);
 
-        var l2 = new BetLedger { Share = 0f, Eta = 1f, MaxOffset = 2f };
+        var l2 = new BetLedger { Share = 0f, Eta = 1f, MaxOffset = 2f, Hierarchical = false };
         var big = new Bet(10f, 0f, 2);
         hp = 100f; frame = 0;
         for (int i = 0; i < 5; i++) frame = Episode(l2, big, frame, 0f, ref hp);
@@ -166,7 +166,7 @@ public class BotManeuverBetLedgerTests
     [Fact]
     public void Corrected_UnknownKey_ReturnsInput()
     {
-        var l = new BetLedger();
+        var l = new BetLedger { Eta = 0.3f, Hierarchical = false };
         var bet = new Bet(0.3f, 0.1f, 20);
         var c = l.Corrected("Nobody", 7, bet);
         Assert.Equal(bet.Dealt, c.Dealt);

@@ -13,6 +13,12 @@ public interface IBetLedger
     int Open(string name, int bucket, Bet bet, int frame);
     // Once per frame: accumulate HP drops into open records, settle the elapsed ones.
     void Tick(int frame, float myHp, float theirHp);
+    // How many records have settled for (name, bucket): the controller's exploration bonus
+    // shrinks with it.
+    int Settles(string name, int bucket);
+    // The next arm in the record's category started: settle it now (or drop it if too short).
+    // `next` is that arm's corrected bet, for bootstrapping; Pass = terminal.
+    void Close(int id, int frame, Bet next);
 }
 
 // The only writer of a bot's PlayerInput (Plans/BOT_BEHAVIOR_ARCHITECTURE.md). Two
@@ -39,6 +45,17 @@ public sealed class BotController
     public float PreemptGap = 0.25f;  // HP a challenger must beat the holder by
     public float StayBonus  = 0.1f;   // extra HP the current stance is credited with
     public bool  Explore    = true;   // softmax sampling; false = argmax (deterministic)
+    // Optimism bonus, HP, added to a candidate's value as ExploreBonus / sqrt(1 + settles) for
+    // its (name, bucket): an arm nobody has tried looks good until it has been scored. Only
+    // with a ledger. It is NOT part of the bet the ledger scores.
+    public float ExploreBonus = 0f;
+    // Diagnostics: the ledger records and settles but never influences selection (raw bets,
+    // no bonus): measures what each arm realises under the hand-written policy.
+    public bool Shadow = false;
+    // Optional data-calibrated priors: arm name -> (dealt, taken) realised means measured
+    // under the hand policy (BetCalibration). Replaces the authored magnitudes; the
+    // behaviour's gating and horizon stay. Null = authored bets.
+    public IReadOnlyDictionary<string, (float Dealt, float Taken)> Calibration;
     public Bet   IdleBet    = new(0f, 0f, 30);
 
     public IBetLedger   Ledger;
@@ -62,8 +79,12 @@ public sealed class BotController
     private BotBehaviour _reflex, _action;
     private Bet          _actionBet;
     private int          _idleSettle = int.MinValue;
+    // The most recent ledger record per category (Act: action or Idle; Move: reflex or
+    // stance). A record runs until the next arm in its category starts, so the previous one
+    // is closed whenever a new one opens. -1 = none.
+    private int _actRec = -1, _moveRec = -1;
     private float        _lastDamage;
-    private readonly List<(BotBehaviour B, Bet Bet)> _cands = new();
+    private readonly List<(BotBehaviour B, Bet Bet, float Val)> _cands = new();   // Val = Value(Bet) + exploration bonus
     private readonly List<Bet> _raw = new();   // uncorrected bets, parallel to _cands (diagnostics)
 
     // Diagnostics: Act contests with at least one applicable action, and how many of them
@@ -158,20 +179,20 @@ public sealed class BotController
             if (a.CooldownLeft > 0) continue;
             if (routeHoldsMove && a.Move.Kind != MoveClaim.Mode.None) continue;
             var raw = a.Bet(v);
-            if (raw.Applicable) { _cands.Add((a, Correct(a.Name, bucket, raw))); _raw.Add(raw); }
+            if (raw.Applicable) { AddCand(a, bucket, raw); _raw.Add(raw); }
         }
         if (_cands.Count == 0) return;
         var idle = Correct(IdleName, bucket, IdleBet);
-        _cands.Insert(0, (null, idle));   // first, so Idle wins value ties
+        _cands.Insert(0, (null, idle, Value(idle) + Bonus(IdleName, bucket)));   // first, so Idle wins value ties
         _raw.Insert(0, IdleBet);
         ActContests++;
         if (Ledger != null && ArgmaxCorrected() != ArgmaxRaw()) ActDivergences++;
 
-        var (b, bet) = _cands[Choose(v)];
+        var (b, bet, val) = _cands[Choose(v)];
         if (b == null)
         {
             // Idle won a contest: it is an executed arm too, one record per horizon.
-            if (v.Frame >= _idleSettle) { Open(IdleName, bucket, idle, v.Frame); _idleSettle = v.Frame + Math.Max(1, idle.Horizon); }
+            if (v.Frame >= _idleSettle) { OpenAct(IdleName, bucket, idle, v.Frame); _idleSettle = v.Frame + Math.Max(1, idle.Horizon); }
             return;
         }
         // Atomic acquisition: a Move claim cannot be granted while a reflex holds Move.
@@ -179,7 +200,8 @@ public sealed class BotController
 
         b.Begin(v);
         _action = b; _actionBet = bet;
-        Open(b.Name, bucket, bet, v.Frame);
+        OpenAct(b.Name, bucket, bet, v.Frame);
+        _idleSettle = int.MinValue;   // Idle may open a fresh record as soon as this action ends
         Trace.Acquired(b.Name);
         v.FramesSinceManeuver = 0;
     }
@@ -191,14 +213,14 @@ public sealed class BotController
         {
             if (r.CooldownLeft > 0) continue;
             var raw = r.Bet(v);
-            if (raw.Applicable) _cands.Add((r, Correct(r.Name, bucket, raw)));
+            if (raw.Applicable) AddCand(r, bucket, raw);
         }
         if (_cands.Count == 0) return;
-        var (b, bet) = _cands[Choose(v)];
+        var (b, bet, val) = _cands[Choose(v)];
 
         bool actionHolds = _action != null && _action.Move.Kind != MoveClaim.Mode.None;
         float holder = actionHolds ? Value(_actionBet) : StanceActive ? Value(_stanceBet) : 0f;
-        if (Value(bet) <= holder + PreemptGap) return;
+        if (val <= holder + PreemptGap) return;
 
         if (actionHolds)
         {
@@ -211,7 +233,7 @@ public sealed class BotController
 
         b.Begin(v);
         _reflex = b;
-        Open(b.Name, bucket, bet, v.Frame);
+        OpenMove(b.Name, bucket, bet, v.Frame);
         Trace.Acquired(b.Name);
         v.FramesSinceManeuver = 0;
     }
@@ -230,7 +252,7 @@ public sealed class BotController
             {
                 // A stance that keeps running is a sequence of bets: re-open each horizon.
                 _stanceBet = Correct(_stance.Name, bucket, live);
-                Open(_stance.Name, bucket, _stanceBet, v.Frame);
+                OpenMove(_stance.Name, bucket, _stanceBet, v.Frame);
                 _stanceSettle = v.Frame + Math.Max(1, _stanceBet.Horizon);
             }
         }
@@ -240,14 +262,14 @@ public sealed class BotController
         {
             if (s == _stance || s.CooldownLeft > 0) continue;
             var raw = s.Bet(v);
-            if (raw.Applicable) _cands.Add((s, Correct(s.Name, bucket, raw)));
+            if (raw.Applicable) AddCand(s, bucket, raw);
         }
         if (_cands.Count == 0) return;
-        var (b, bet) = _cands[Choose(v)];
+        var (b, bet, val) = _cands[Choose(v)];
 
         if (_stance != null)
         {
-            if (Value(bet) <= Value(_stanceBet) + PreemptGap + StayBonus) return;
+            if (val <= Value(_stanceBet) + PreemptGap + StayBonus) return;
             Trace.Preempted(_stance.Name);
             DropStance(v);
         }
@@ -256,7 +278,7 @@ public sealed class BotController
         Executor.Reset();
         _stance.Begin(v);
         _stance.Resumed(v);
-        Open(b.Name, bucket, bet, v.Frame);
+        OpenMove(b.Name, bucket, bet, v.Frame);
         _stanceSettle = v.Frame + Math.Max(1, bet.Horizon);
         Trace.Acquired(b.Name);
     }
@@ -273,8 +295,19 @@ public sealed class BotController
         if (active == _stanceActive) return;
         _stanceActive = active;
         Executor.Reset();
-        if (active) _stance.Resumed(v);
-        else        _stance.Suspended(v);
+        if (active)
+        {
+            _stance.Resumed(v);
+            // Back on Move: a fresh record, so the suspension's outcome is not the stance's.
+            int bucket = Situation.Bucket(v);
+            _stanceBet = Correct(_stance.Name, bucket, _stance.Bet(v));
+            if (_stanceBet.Applicable) { OpenMove(_stance.Name, bucket, _stanceBet, v.Frame); _stanceSettle = v.Frame + Math.Max(1, _stanceBet.Horizon); }
+        }
+        else
+        {
+            _stance.Suspended(v);
+            if (_reflex == null) CloseMove(v.Frame);   // a reflex closes it itself by opening its own
+        }
     }
 
     private void DropStance(BotView v)
@@ -296,9 +329,46 @@ public sealed class BotController
         foreach (var b in list) if (b.CooldownLeft > 0) b.CooldownLeft--;
     }
 
-    private Bet Correct(string name, int bucket, Bet bet) => Ledger?.Corrected(name, bucket, bet) ?? bet;
+    private Bet Prior(string name, Bet bet)
+        => Calibration != null && Calibration.TryGetValue(name, out var c) ? new Bet(c.Dealt, c.Taken, bet.Horizon) : bet;
 
-    private void Open(string name, int bucket, Bet bet, int frame) => Ledger?.Open(name, bucket, bet, frame);
+    private Bet Correct(string name, int bucket, Bet bet)
+    {
+        bet = Prior(name, bet);
+        return Ledger == null || Shadow ? bet : Ledger.Corrected(name, bucket, bet);
+    }
+
+    private float Bonus(string name, int bucket)
+        => Ledger == null || Shadow || ExploreBonus <= 0f ? 0f : ExploreBonus / MathF.Sqrt(1f + Ledger.Settles(name, bucket));
+
+    private void AddCand(BotBehaviour b, int bucket, Bet raw)
+    {
+        var c = Correct(b.Name, bucket, raw);
+        _cands.Add((b, c, Value(c) + Bonus(b.Name, bucket)));
+    }
+
+    // `bet` is the new arm's corrected bet: it both opens the new record and bootstraps the
+    // previous one in the category (SARSA over options).
+    private void OpenAct(string name, int bucket, Bet bet, int frame)
+    {
+        if (Ledger == null) return;
+        if (_actRec >= 0) Ledger.Close(_actRec, frame, bet);
+        _actRec = Ledger.Open(name, bucket, bet, frame);
+    }
+
+    private void OpenMove(string name, int bucket, Bet bet, int frame)
+    {
+        if (Ledger == null) return;
+        if (_moveRec >= 0) Ledger.Close(_moveRec, frame, bet);
+        _moveRec = Ledger.Open(name, bucket, bet, frame);
+    }
+
+    private void CloseMove(int frame)
+    {
+        if (Ledger == null || _moveRec < 0) return;
+        Ledger.Close(_moveRec, frame, Net.Bet.Pass);
+        _moveRec = -1;
+    }
 
     private int ArgmaxCorrected()
     {
@@ -313,24 +383,24 @@ public sealed class BotController
         return best;
     }
 
-    // Index into _cands: argmax by value (first wins ties) or a softmax sample.
+    // Index into _cands: argmax by Val (first wins ties) or a softmax sample over Val.
     private int Choose(BotView v)
     {
         int best = 0;
-        float bestV = Value(_cands[0].Bet);
+        float bestV = _cands[0].Val;
         for (int i = 1; i < _cands.Count; i++)
         {
-            float val = Value(_cands[i].Bet);
+            float val = _cands[i].Val;
             if (val > bestV) { best = i; bestV = val; }
         }
         if (!Explore || _cands.Count == 1) return best;
 
         double sum = 0;
-        for (int i = 0; i < _cands.Count; i++) sum += Math.Exp(Sharpness * (Value(_cands[i].Bet) - bestV));
+        for (int i = 0; i < _cands.Count; i++) sum += Math.Exp(Sharpness * (_cands[i].Val - bestV));
         double r = v.Rng.NextDouble() * sum;
         for (int i = 0; i < _cands.Count; i++)
         {
-            r -= Math.Exp(Sharpness * (Value(_cands[i].Bet) - bestV));
+            r -= Math.Exp(Sharpness * (_cands[i].Val - bestV));
             if (r <= 0) return i;
         }
         return best;

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace MTile.Net;
@@ -20,6 +21,8 @@ public static class RangerBot
     // noise; softmax noise without a ledger; and a ledger carried across bouts.
     public static readonly DuelBot LearnArgmax    = (self, seed) => { var b = Build(seed, self, out _); b.ExploreOverride = false; return b; };
     public static readonly DuelBot NoLearnExplore = (self, seed) => { var b = Build(seed, self, out _, learn: false); b.ExploreOverride = true; return b; };
+    // Any tweak of the default Ranger, for A/B runs.
+    public static DuelBot Variant(Action<BulldogBot> tweak) => (self, seed) => { var b = Build(seed, self, out _); tweak(b); return b; };
     public static DuelBot Carry(BetLedger shared) => (self, seed) =>
     {
         var b = Build(seed, self, out _, learn: false);
@@ -44,6 +47,8 @@ public static class RangerBot
         extra.Add(new RangerBlockThrowManeuver());   // ranged pressure: an aimed clod at 60-280 px
         extra.Add(new RangerCrystalWaveManeuver());  // ranged pressure: spiked wave at 6-14 tiles
         extra.Add(new CornerEscapeManeuver());       // back to a wall: dash past the opponent
+        extra.Add(new StepBackManeuver());           // defend choice set with Guard (RangerDefend.cs)
+        extra.Add(new CounterSlashManeuver());
         if (antiAir)
         {
             extra.Add(new AntiAirJumpSlashManeuver());
@@ -53,7 +58,16 @@ public static class RangerBot
         var b = new BulldogBot(seed, self, extra) { Planner = new RoutePlanner(route) };
         b.ExtraStances.Add(new HoldRangeStance());   // a second Move choice for the learner
         b.Disabled.Add(nameof(WallClimbManeuver));
-        if (learn) b.Ledger = new BetLedger();
+        // The learner (MTile.Tests/Sim/ZzzLearningEffect.cs, 2026-11-04): data-calibrated
+        // priors, SARSA-bootstrapped records (BetLedger.Gamma), hierarchical offsets, and a
+        // sharp softmax. Over 12 seeds vs the field: 278/360 vs 261 for the hand policy and
+        // 272.5 for calibrated priors with no online learning.
+        if (learn)
+        {
+            b.Ledger      = new BetLedger();
+            b.Calibration = BetCalibration.Field;
+            b.Sharpness   = 20f;
+        }
         return b;
     }
 }

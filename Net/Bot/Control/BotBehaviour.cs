@@ -169,6 +169,7 @@ public static class Situation
 
     public static string Describe(int bucket)
     {
+        if (bucket < 0) return "all";
         int air = bucket % 2; bucket /= 2;
         int state = bucket % 3; int band = bucket / 3;
         return $"{new[] { "<40", "40-85", "85-160", ">160" }[band]}/{new[] { "atk", "rec", "idle" }[state]}/{(air == 0 ? "gnd" : "air")}";

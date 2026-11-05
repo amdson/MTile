@@ -71,6 +71,8 @@ public class BotManeuverControllerTests
         public Bet Corrected(string name, int bucket, Bet bet) => bet;
         public int Open(string name, int bucket, Bet bet, int frame) { Opens.Add((name, bucket, bet, frame)); return Opens.Count; }
         public void Tick(int frame, float myHp, float theirHp) { }
+        public int Settles(string name, int bucket) => 0;
+        public void Close(int id, int frame, Bet next) { }
     }
 
     private sealed class FakeManeuver(bool owns) : BotManeuver

@@ -43,6 +43,16 @@ public sealed class BulldogBot : IRemoteInputSource
     public BetLedger Ledger;
     // Diagnostics: force softmax (true) or argmax (false) selection regardless of Ledger.
     public bool? ExploreOverride;
+    // With a ledger: let the learner, not the mix-up die, pick among the close-range arms.
+    public bool  LearnerPicksMix = true;
+    // With a ledger: optimism bonus (HP) for little-tried arms, see BotController.ExploreBonus.
+    public float ExploreBonus = 0f;
+    // Softmax inverse temperature for selection (BotController.Sharpness).
+    public float Sharpness = 3f;
+    // Diagnostics: ledger records but does not steer (BotController.Shadow).
+    public bool  Shadow = false;
+    // Data-calibrated bet priors (BotController.Calibration); null = the authored bets.
+    public IReadOnlyDictionary<string, (float Dealt, float Taken)> Calibration;
     // The controller's value = dealt - Lambda * taken (selection-time weight on the taken
     // channel; Ranger's learner runs dealt-only, 0). Set before the first Poll.
     public float Lambda = 1f;
@@ -122,7 +132,12 @@ public sealed class BulldogBot : IRemoteInputSource
             Lambda  = Lambda,
             // Without a learner, argmax: the old "highest score wins" brain.
             Explore = ExploreOverride ?? (Ledger != null),
+            ExploreBonus = ExploreBonus,
+            Sharpness = Sharpness,
+            Shadow = Shadow,
+            Calibration = Calibration,
         };
+        _sense.AllMixArms = LearnerPicksMix && Ledger != null && !Shadow;
         if (Planner != null) c.Executor.Planner = Planner;
         var stances = new List<Stance> { new ChaseStance(this), new StepOutStance(this) };
         stances.AddRange(ExtraStances);
@@ -232,4 +247,8 @@ public sealed class BulldogSense
     public int    TargetFacing;
     public float  TargetHp;         // the HUD bar
     public double Mix;              // rerolled whenever a maneuver ends: the mix-up die
+    // When true the die gates nothing: every mix-up arm (stab, cross-up, low poke, grab) is
+    // applicable in its geometric window and the controller's selection, corrected by the
+    // bet ledger, decides. Set by the brain when a ledger is present.
+    public bool   AllMixArms;
 }
