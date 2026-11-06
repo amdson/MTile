@@ -97,11 +97,13 @@ public static class CrystalWave
     // ── Economy ─────────────────────────────────────────────────────────────────
     // Meter units per crystal: sand's price (configs/material_strengths.json — Stone
     // 1.94, Dirt 0.77, Sand 0.44), the cheapest block that lasts. Cheap on purpose: the
-    // wave is supposed to be big, and what keeps it in check is the cooldown and the
-    // telegraph, not the meter. Capped like an ordinary avalanche's ball.
+    // wave is supposed to be big, and what keeps it in check is the meter and the
+    // telegraph. Capped like an ordinary avalanche's ball.
     public const float UnitsPerCrystal = 0.44f;
     public const float MaxBallMass     = BuildMeters.MaxBallMass;
-    public const float CooldownSeconds = 8f;
+    // No cooldown (2026-11-05, user: "just remove that"); the plumbing (BuildMeters.
+    // CrystalCooldown / CrystalWaveReady) stays so one is a number away if it comes back.
+    public const float CooldownSeconds = 0f;
     // The crystal ball's leak curve (MassBall: per second, mass·LeakFraction + LeakFloor).
     // The same as the build ball's, so a crystal wave takes an ordinary avalanche's shape.
     public const float LeakFraction = 6f;

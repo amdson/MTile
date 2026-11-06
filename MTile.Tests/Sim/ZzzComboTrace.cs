@@ -161,4 +161,22 @@ public class ZzzComboTrace(ITestOutputHelper output)
             if (row != last) { output.WriteLine($"f{f,3}: {row}"); last = row; }
         }
     }
+
+    // Bot grab -> hold -> throw on an idle P1 (BotManeuverGrabTests rig): per frame, P1's
+    // state, health, crush impulse, flags and velocity.
+    [Fact]
+    public void BotGrabThrow_Trace()
+    {
+        string last = null;
+        var r = BotArena.Fight(BotArena.Flat(), new Vector2(120f, 67f), new Vector2(150f, 67f), 120,
+            BotArena.Only(new GrabManeuver()),
+            p1: (f, sim) =>
+            {
+                var p = sim.Player; var c = p.Combat;
+                string row = $"P1={p.CurrentStateName,-14} act={p.CurrentActionName,-14} hp={p.Health:F2} crush={p.Body.LastCrushImpulse,4:F0} grab={(c.GrabbedActive?1:0)} hs={(c.HitstunActive?1:0)} st={(c.StunActive?1:0)} L={(c.Launched?1:0)} v=({p.Body.Velocity.X,5:F0},{p.Body.Velocity.Y,5:F0}) pos=({p.Body.Position.X:F0},{p.Body.Position.Y:F0}) bot={sim.SecondaryPlayers[0].Player.CurrentActionName}";
+                if (row != last) { output.WriteLine($"f{f,3}: {row}"); last = row; }
+                return default;
+            });
+        output.WriteLine(r.Summary());
+    }
 }

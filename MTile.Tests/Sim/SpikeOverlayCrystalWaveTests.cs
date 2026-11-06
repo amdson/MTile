@@ -325,24 +325,24 @@ public class SpikeOverlayCrystalWaveTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void ChargedFastRelease_LaunchesWave_NoSpikes_ThenCooldownBlocksASecond()
+    public void ChargedFastRelease_LaunchesWave_NoSpikes_AndASecondRightAway()
     {
         var sim = InputSim();
         ChargeAndFling(sim);
         Assert.Equal(1, CrystalBalls(sim));
         Assert.Equal(0, sim.Chunks.SpikeSeeds.Count);   // the charge never spiked its cell
         var m = sim.Player.Abilities.Meters;
-        Assert.InRange(m.CrystalCooldown, CrystalWave.CooldownSeconds - 0.1f, CrystalWave.CooldownSeconds);
+        // No cooldown (2026-11-05): the wave is kept in check by the meter and the telegraph.
+        Assert.True(m.CrystalWaveReady);
 
         for (int f = 0; f < 200; f++) sim.Step(default);   // first ball is long gone
         Assert.Equal(0, CrystalBalls(sim));
-        // Same gesture on cooldown: it is a plain spike stroke (press spikes at once), no wave.
+        // Same gesture again launches another wave straight away.
         ChargeAndFling(sim);
-        Assert.Equal(0, CrystalBalls(sim));
-        Assert.True(sim.Chunks.SpikeSeeds.Has(12, FloorRow) || sim.Chunks.Spikes.IsSpiked(12, FloorRow));
+        Assert.Equal(1, CrystalBalls(sim));
 
-        // Off cooldown it works again.
-        for (int f = 0; f < CrystalLifecycle.Frames(CrystalWave.CooldownSeconds); f++) sim.Step(default);
+        for (int f = 0; f < 200; f++) sim.Step(default);
+        Assert.Equal(0, CrystalBalls(sim));
         Assert.True(m.CrystalWaveReady);
         var p = CellCenter(15, FloorRow);
         for (int f = 0; f < 50; f++) sim.Step(In(p, true));

@@ -59,6 +59,11 @@ public class CombatState
     // Reset when hitstun lapses. See HitstunFullChainHits.
     public int     HitstunChain;
     public bool    Launched;
+    // The current hitstun run began with a THROW (RegisterThrown); cleared when hitstun
+    // lapses. A thrown victim is unlatchable for that whole run (Helpless), which is what
+    // makes throw -> regrab impossible, while a victim in ordinary slash hitstun can still
+    // be grabbed - the slash-into-grab mixup stays.
+    public bool     Thrown;
     public bool    StunActive;        public int StunExpireFrame;
     // No new stun lands before this frame (set when a stun expires).
     public int     StunImmuneExpireFrame;
@@ -169,6 +174,7 @@ public class CombatState
     {
         OnHitRegistered(frame, ThrowImpulse, dt, hitstop: false, stunSeconds: ThrowStunSeconds);
         Launched = true;
+        Thrown   = true;
     }
 
     // Hoisted gates so callers can write `ctx.Combat?.BlocksAttack == true` instead
@@ -189,6 +195,8 @@ public class CombatState
     // their ride. Wall cling / ledge grab stay blocked for the whole window so knockback
     // near terrain is still pressure.
     public bool BlocksJump   => StunActive || GrabbedActive;
+    // Unlatchable by a grab: flying from a hit, stunned, or still in a throw's hitstun.
+    public bool Helpless     => Launched || StunActive || (HitstunActive && Thrown);
 
     // Cross-cutting movement-capability lock-out (COMBAT_FEEL_PLAN Phase 4). The
     // whole combat disadvantage window (hitstun OR stun) blocks Jump and the
@@ -438,6 +446,19 @@ public class CombatState
         if (muteControl && hitstop) ApplyHitstop(currentFrame, LastHitStopSeconds, dt);
     }
 
+    // A SLAM's stun - the body was driven into terrain while launched, held or in hitstun
+    // (PlayerCharacter's crush path). Unlike a hit's stun it max-merges with whatever is
+    // running and ignores the immunity: the throw's own brief stun (ThrowStunSeconds) is
+    // still live when the thrown body meets the floor, and first-wins would swallow the
+    // slam that the throw was for. Slams can't chain on their own - each needs a fresh
+    // launch / hold - so this is not a stun-lock path.
+    public void SlamStun(int currentFrame, float seconds, float dt)
+    {
+        int expire = currentFrame + SimFrames.FromSeconds(seconds, dt);
+        if (!StunActive || expire > StunExpireFrame) StunExpireFrame = expire;
+        StunActive = true;
+    }
+
     // Max-merge a hitstop window ending `seconds` from now. Two callers: the victim
     // path above, and PlayerCharacter's attacker-side read of CombatSystem.PeekHitstop
     // — the symmetric half, so a landed attack freezes the one who swung it too.
@@ -476,6 +497,7 @@ public class CombatState
         HitstunActive       = false;
         HitstunMutesControl = false;
         HitstunChain        = 0;
+        Thrown              = false;
         StunActive          = false;
         Launched            = false;
         int expire = currentFrame + SimFrames.FromSeconds(invulnSeconds, dt);
@@ -491,6 +513,7 @@ public class CombatState
             HitstunActive       = false;
             HitstunMutesControl = false;
             HitstunChain        = 0;
+            Thrown              = false;
         }
         if (StunActive && currentFrame >= StunExpireFrame)
         {
@@ -633,7 +656,7 @@ public class CombatState
     {
         HitstunActive = o.HitstunActive; HitstunExpireFrame = o.HitstunExpireFrame;
         HitstunMutesControl = o.HitstunMutesControl; HitstunChain = o.HitstunChain;
-        Launched = o.Launched;
+        Launched = o.Launched; Thrown = o.Thrown;
         StunActive = o.StunActive; StunExpireFrame = o.StunExpireFrame;
         StunImmuneExpireFrame = o.StunImmuneExpireFrame;
         HitstopActive = o.HitstopActive; HitstopExpireFrame = o.HitstopExpireFrame;

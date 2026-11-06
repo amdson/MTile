@@ -127,25 +127,56 @@ public class GrabTests(ITestOutputHelper output)
             $"{firstGrabbedFrame - grabStartFrame} frames ({(firstGrabbedFrame - grabStartFrame) * Dt:F3}s).");
     }
 
-    // Anti-regrab (todo G, 2026-11-05): a grab never latches a victim who is launched,
-    // stunned or in hitstun - the victim's hurtbox publishes Helpless and PickVictim
-    // skips it - so a throw cannot be chained into a regrab. Here the victim is held in
-    // hitstun by injection for the whole run; the same grab that latches an idle victim
-    // (Grab_HoldsVictim_SetsGrabbedActive) must hold nobody.
+    // A hold driven into the floor is a slam (2026-11-05): the crush stuns the held victim
+    // (it used to, through the old "every crush stuns" rule; the split keeps it for a body
+    // that is held, launched or in combat hitstun and drops it for a plain landing).
     [Fact]
-    public void Grab_NeverLatchesAHelplessVictim()
+    public void Hold_AimedIntoFloor_StunsTheVictim()
+    {
+        var mouseDown = new Vector2(VictimStart.X, VictimStart.Y + 120f);
+        var attacker = new InputScript()
+            .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
+            .For(20, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight })
+            .Forever(new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = mouseDown });
+        bool sawStun = false, sawGrabbed = false;
+        SimRunner.RunMulti(Build(attacker, InputScript.Always(default)),
+            onFrame: (f, ps) => { if (ps[1].Combat.GrabbedActive) sawGrabbed = true; if (ps[1].Combat.StunActive) sawStun = true; });
+        Assert.True(sawGrabbed, "the victim should be held first");
+        Assert.True(sawStun, "a hold slammed into the floor should stun the held victim");
+    }
+
+    // Anti-regrab (todo G, 2026-11-05): a grab never latches a victim who is launched,
+    // stunned or still in a THROW's hitstun - the victim's hurtbox publishes
+    // CombatState.Helpless and PickVictim skips it - so a throw cannot be chained into a
+    // regrab. Here the victim is re-registered as thrown every frame; the same grab that
+    // latches an idle victim (Grab_HoldsVictim_SetsGrabbedActive) must hold nobody.
+    [Fact]
+    public void Grab_NeverLatchesAThrownVictim()
     {
         bool sawGrabbed = false, sawGrab = false;
         SimRunner.RunMulti(Build(GrabHold(), InputScript.Always(default)),
             onFrame: (f, ps) =>
             {
-                // Keep the victim in combat hitstun (a hit registered every frame, hitstop off).
-                ps[1].Combat.OnHitRegistered(ps[1].Frame + 1, 100f, Dt, hitstunSecondsOverride: 0.3f, hitstop: false);
+                ps[1].Combat.RegisterThrown(ps[1].Frame + 1, Dt);
                 if (ps[0].CurrentActionName == "GrabAction") sawGrab = true;
                 if (ps[1].Combat.GrabbedActive) sawGrabbed = true;
             });
         Assert.True(sawGrab, "The grab itself should still fire (it whiffs).");
-        Assert.False(sawGrabbed, "A victim in hitstun must never be latched by a grab.");
+        Assert.False(sawGrabbed, "A thrown victim must never be latched by a grab.");
+    }
+
+    // ...but ordinary slash hitstun is grabbable: the slash-into-grab mixup stays.
+    [Fact]
+    public void Grab_LatchesAVictimInSlashHitstun()
+    {
+        bool sawGrabbed = false;
+        SimRunner.RunMulti(Build(GrabHold(), InputScript.Always(default)),
+            onFrame: (f, ps) =>
+            {
+                ps[1].Combat.OnHitRegistered(ps[1].Frame + 1, 100f, Dt, hitstunSecondsOverride: 0.3f, hitstop: false);
+                if (ps[1].Combat.GrabbedActive) sawGrabbed = true;
+            });
+        Assert.True(sawGrabbed, "A victim in slash hitstun should still be grabbable.");
     }
 
     // Grab ignores guard: a guarding victim (Shift held) is still grabbed.

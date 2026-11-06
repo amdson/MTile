@@ -202,9 +202,7 @@ public class PlayerCharacter : IHittable
     public void PublishHurtboxes(HurtboxWorld world)
     {
         if (_hitInvulnRemaining > 0f) return;
-        var c = _abilities.Combat;
-        world.Publish(new Hurtbox(Body.Bounds, Faction, Id,
-                                  helpless: c.Launched || c.StunActive || c.HitstunActive));
+        world.Publish(new Hurtbox(Body.Bounds, Faction, Id, helpless: _abilities.Combat.Helpless));
     }
 
     public Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox)
@@ -634,28 +632,36 @@ public class PlayerCharacter : IHittable
         // A surface that was MOVING when it hit us (an eruption front, a wave) is terrain
         // attacking us - that crush stuns like a slam after a hit; a stationary floor we
         // fell onto never does. (A snapshotted body flag, not ContactEvents: rollback.)
-        bool slamStuns  = Body.LastCrushImpulse >= CrushStunImpulse
-                          && (_abilities.Combat.Launched || Body.LastCrushMovingSurface
-                              || (_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl));
-        if ((crushBills || slamStuns)
-            && _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt))
+        // A slam: a body that was flying, in combat hitstun or met by moving terrain, above
+        // CrushStunImpulse - or a HELD body driven into the floor hard enough to bill
+        // (a hold dragging its victim along the floor presses at ~200 px/s and is not a slam).
+        bool slamStuns  = (Body.LastCrushImpulse >= CrushStunImpulse
+                           && (_abilities.Combat.Launched || Body.LastCrushMovingSurface
+                               || (_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl)))
+                          || (crushBills && _abilities.Combat.GrabbedActive);
+        // The cooldown is the DAMAGE bill's (a stun-only slam must not eat the bill of the
+        // real slam a few frames later - the thrown body's floor hit after a hold's press).
+        bool offCooldown = _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt);
+        if ((crushBills && offCooldown) || slamStuns)
         {
-            if (crushBills)
+            if (crushBills && offCooldown)
             {
                 float excess = Body.LastCrushImpulse - CrushImpulseThreshold;
                 float crushHp = excess * CrushDamagePerImpulse;
                 Health -= crushHp;
                 _abilities.Combat.AddDamage(crushHp);
                 _lastDamageFrame = _frame;
+                _lastCrushFrame  = _frame;
             }
             // Short fixed hitstun (the old 8-frames-at-30fps feel) and NO control
             // mute: a hard landing briefly gates jump ("give me a sec") but doesn't
             // turn walking to mush — that treatment is for combat hits. The stun is
             // only for a slam that followed a hit (CrushStunImpulse).
-            _abilities.Combat.OnHitRegistered(_frame, Body.LastCrushImpulse, dt,
-                hitstunSecondsOverride: 0.27f, muteControl: false,
-                stunSeconds: slamStuns ? CrushStunSeconds : 0f, chains: false);
-            _lastCrushFrame = _frame;
+            if (crushBills && offCooldown)
+                _abilities.Combat.OnHitRegistered(_frame, Body.LastCrushImpulse, dt,
+                    hitstunSecondsOverride: 0.27f, muteControl: false, chains: false);
+            // The slam's stun max-merges over the throw's brief one (CombatState.SlamStun).
+            if (slamStuns) _abilities.Combat.SlamStun(_frame, CrushStunSeconds, dt);
         }
 
         // Sprout crush: a block grew into us and the depenetration solver could not push

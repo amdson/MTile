@@ -5,7 +5,7 @@
 
 
 
-- Remove the cooldown from spike avalanche
+- Remove the cooldown from spike avalanche   [x] 2026-11-05: CrystalWave.CooldownSeconds 8 -> 0
 - lower clod decay rate by 80%
 - activate tile collisions for clods only after release from mouse, so that they don't get caught in terrain all the time
 - lower the time between aerial slashes, but keep the end lag if the combo ends. same for ground slashes
@@ -320,6 +320,13 @@ Milestones (status: [ ] todo, [~] in progress, [x] done @commit, [!] blocked, [?
 - Slash string: hitstun a little UNDER the attacker's post-hit tail, with the launch making retaliation hard (user):
   GroundSlash3 hitstun 0.75 -> 0.40s (24f vs the ~28f tail: -4 on hit at point blank, but the victim is 40px away).
   S1/S2 unchanged (18f each; the string stays true against a victim who does not jump).
+
+- "Slamming into the ground from a grab doesn't work" (user, post-campaign): two things swallowed the slam's stun -
+  a HELD victim driven into the floor was not counted as a slam (only launched / hitstun / moving-surface were), and a
+  THROWN victim's floor slam arrived while the throw's own 0.25s stun was running, so first-wins dropped it. Fixed:
+  GrabbedActive counts as a slam, and a slam's stun max-merges over any running stun (CombatState.SlamStun; slams
+  can't chain on their own). Also the anti-regrab rule was too wide - it refused ANY hitstunned victim, killing
+  slash-into-grab; now Helpless = launched || stunned || (hitstun that began with a throw: CombatState.Thrown).
 
 ### Before / after (ZzzComboTrace, point-blank, mashing victim; frames after the hit lands)
 | Exchange                         | before (main)                          | after (combat-frame-data)                  |

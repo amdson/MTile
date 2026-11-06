@@ -97,7 +97,7 @@ public class BotManeuverCrystalWaveTests(ITestOutputHelper output)
         output.WriteLine(r.Summary() + $"; fired {m.Fired} @ {m.FiredFrame}");
         Assert.True(m.Fired, "the bot should release a crystal wave");
         Assert.True(sawBall, "a crystal MassBall should have flown");
-        Assert.True(r.P2.Abilities.Meters.CrystalCooldown > 0f, "the launch starts the cooldown");
+        Assert.True(r.P2.Abilities.Meters.CrystalWaveReady, "no cooldown since 2026-11-05: ready again at once");
         Assert.True(r.DamageToP1 > 0f, "the wave should reach an AFK target 12 tiles out");
         Assert.Equal(0f, r.DamageToP2);   // its own wave is harmless to it
     }
