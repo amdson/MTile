@@ -3,6 +3,15 @@
 ## Loose items
 - Remove the cooldown from spike avalanche   [x] 2026-11-05: CrystalWave.CooldownSeconds 8 -> 0
 
+- [x] 2026-11-05 (commit after 4af1b45): Being grabbed should INTERRUPT a live attack. Today GrabbedActive only gates attack ENTRY (BlocksAttack in every
+  CheckPreConditions) and the flinch eviction in RecoveryAction keys off a registered hit (LastHitFrame), which a grab
+  latch (MarkGrabbed) never is - so a victim caught mid-stab keeps stabbing while held, and if the swing connects the
+  grabber takes hitstun and GrabAction drops the hold. Fix: treat the latch like a hit in the eviction lookahead - a
+  grab landing on a live action that is not AllowedWhileGrabbed evicts it at the interrupt bid, the evicted action
+  stamping its usual commit tail. Add a test (victim mid-stab is grabbed -> StabAction ends that frame).
+  DONE: RecoveryAction bids the interrupt when GrabbedActive and the live action is not AllowedWhileGrabbed; test
+  GrabTests.Grab_EvictsTheVictimsLiveAttack (slash evicted on the latch frame).
+
 ## 2026-11-05 combat frame-data pass (branch combat-frame-data, commits 4dc3894 .. 95db618)
 Items F-L below were the plan; the "## Campaign" section is its log, the play-test blocks, the before/after table and
 the decisions. Still-open follow-ups from the pass live in todo.txt item M.

@@ -330,6 +330,17 @@ public class RecoveryAction : ActionState
             return true;
         }
 
+        // (4b) GRABBED — a grab latching on a live action evicts it the same way
+        // (2026-11-05): the hold is an involuntary state like a hit, and a stab that kept
+        // swinging from inside a hold could connect with the grabber and break the hold
+        // it never resisted. Only the grab-exempt actions (the struggle, the hubs) ride
+        // it out. The evicted action still stamps its CommitProfile.
+        if (ctx.Combat != null && ctx.Combat.GrabbedActive && !cur.AllowedWhileGrabbed)
+        {
+            _bid = InterruptBid;
+            return true;
+        }
+
         // (3) Eviction lookahead against the live action, bidding with the found
         // candidate's own PassivePriority.
         if (ctx.ActionRegistry == null) return false;

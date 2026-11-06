@@ -26,12 +26,6 @@ E. Bot tournament to make better player AI
 
 M. Open follow-ups from the 2026-11-05 combat frame-data pass (branch combat-frame-data; everything implemented from
    that pass, with its logs and decisions, is in todo_done.txt)
-- Being grabbed should INTERRUPT a live attack. Today GrabbedActive only gates attack ENTRY (BlocksAttack in every
-  CheckPreConditions) and the flinch eviction in RecoveryAction keys off a registered hit (LastHitFrame), which a grab
-  latch (MarkGrabbed) never is - so a victim caught mid-stab keeps stabbing while held, and if the swing connects the
-  grabber takes hitstun and GrabAction drops the hold. Fix: treat the latch like a hit in the eviction lookahead - a
-  grab landing on a live action that is not AllowedWhileGrabbed evicts it at the interrupt bid, the evicted action
-  stamping its usual commit tail. Add a test (victim mid-stab is grabbed -> StabAction ends that frame).
 - Should Tumble yield to a jump press? Hitstun no longer blocks the jump, but a LAUNCHED victim rides TumbleState for
   its hitstun (Tumble outranks the jump states), so the heavies (stab, kick, hammer, S3) still hold their victim. Left
   as is on purpose ("Tumble kept jump free"); revisit if the heavies' ride is the annoying part.

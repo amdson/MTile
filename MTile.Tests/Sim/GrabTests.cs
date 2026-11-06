@@ -179,6 +179,38 @@ public class GrabTests(ITestOutputHelper output)
         Assert.True(sawGrabbed, "A victim in slash hitstun should still be grabbable.");
     }
 
+    // A grab latching on a live attack evicts it (2026-11-05): the victim's slash is mid-
+    // swing when the hold lands; it must end within a frame of GrabbedActive rather than
+    // run out (a stab would lunge out of the latch box, so the swing here is a slash,
+    // aimed away from the grabber so it can't connect with them).
+    [Fact]
+    public void Grab_EvictsTheVictimsLiveAttack()
+    {
+        // Attacker grabs late (press f24 -> latch ~f29). Victim clicks at f26: S1 ~f27..f39.
+        var attacker = new InputScript()
+            .For(24, new PlayerInput { MouseWorldPosition = MouseRight })
+            .Forever(new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight });
+        var away = VictimStart + new Vector2(100f, 0f);
+        var victim = new InputScript()
+            .For(26, new PlayerInput { MouseWorldPosition = away })
+            .For(1, new PlayerInput { LeftClick = true, MouseWorldPosition = away })
+            .Forever(new PlayerInput { MouseWorldPosition = away });
+        int slashFirst = -1, grabbedFirst = -1, slashLastWhileGrabbed = -1;
+        SimRunner.RunMulti(Build(attacker, victim),
+            onFrame: (f, ps) =>
+            {
+                string a = ps[1].CurrentActionName;
+                if (slashFirst < 0 && a == "GroundSlash1") slashFirst = f;
+                if (grabbedFirst < 0 && ps[1].Combat.GrabbedActive) grabbedFirst = f;
+                if (grabbedFirst >= 0 && a == "GroundSlash1") slashLastWhileGrabbed = f;
+            });
+        output.WriteLine($"slash@{slashFirst} grabbed@{grabbedFirst} last slash frame while grabbed@{slashLastWhileGrabbed}");
+        Assert.True(slashFirst >= 0, "the victim's slash should fire");
+        Assert.True(grabbedFirst > slashFirst && grabbedFirst < slashFirst + 12, "the grab should land while the slash is live");
+        Assert.True(slashLastWhileGrabbed <= grabbedFirst + 1,
+            $"the hold should evict the slash at once (still live at f{slashLastWhileGrabbed}, grabbed at f{grabbedFirst})");
+    }
+
     // Grab ignores guard: a guarding victim (Shift held) is still grabbed.
     [Fact]
     public void Grab_IgnoresGuard()
