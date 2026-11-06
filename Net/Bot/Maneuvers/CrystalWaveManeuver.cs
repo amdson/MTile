@@ -8,10 +8,9 @@ namespace MTile.Net;
 // EruptionManeuver's skim, plus picking spikes first:
 //
 //   Pick   — Num5 (spikes) for one frame, unless already selected.
-//   Charge — RMB held with the cursor buried in the floor a tile in front of us. With
-//            spikes selected the hold first sits Undecided for SpikeChargeDelay (the
-//            cursor must not leave the press cell, or it becomes a spike stroke), then
-//            banks eruption charge like the painter's.
+//   Charge — RMB held with the cursor buried in the floor a tile in front of us: a press
+//            in solid banks eruption charge like the painter's (it IS the painter's
+//            gesture; spikes selected only changes what the release launches).
 //   Rise   — cursor straight up to the first air row.
 //   Skim   — whipped along the floor toward the target; RMB up mid-skim, so the ball is
 //            moving fast and the cursor is in open air: BlockPaintAction's spike mode
@@ -40,7 +39,7 @@ public sealed class CrystalWaveManeuver : BotManeuver
     public float MinRange      = 6f * Chunk.TileSize;
     public float MaxRange      = 18f * Chunk.TileSize;
     public float VerticalReach = 2.5f * Chunk.TileSize;
-    public int   ChargeFrames  = 60;   // 9 f undecided + ~50 f of ramp ≈ 100 units ≈ 50 crystals
+    public int   ChargeFrames  = 60;   // ~60 f of ramp ≈ 120 units ≈ 60 crystals
     public int   ChargeGrace   = 30;
     public float SweepSpeed    = 22f;  // px/frame, as EruptionManeuver
     public int   SkimFrames    = 7;

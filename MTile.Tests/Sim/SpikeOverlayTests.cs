@@ -124,8 +124,8 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         Run(sim, 1, f => new PlayerInput { Num5 = true, MouseWorldPosition = target });
         var m = sim.Player.Abilities.Meters;
         float before = m.BuildMove + m.EruptMove + m.Build;
-        // Shift+RMB: the press-frame spike path. Plain RMB with spikes selected defers
-        // the spike to tell a tap from a crystal-wave charge (todo.txt #7;
+        // Shift+RMB: the press-frame spike path. Plain RMB with spikes selected is the
+        // painter's gesture — a press in solid charges the crystal wave (todo.txt #7;
         // SpikeOverlayCrystalWaveTests covers that gesture).
         Run(sim, 1, f => new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target });
         float after = m.BuildMove + m.EruptMove + m.Build;
@@ -342,7 +342,7 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         // replay crosses a placement as well as contact ticks.
         var target = new Vector2(sim.Player.Body.Position.X + T, FloorTop + 0.5f * T);
         PlayerInput P0(int f) => f == 3 ? new PlayerInput { Num5 = true, MouseWorldPosition = target }
-                               : f is >= 5 and < 8 ? new PlayerInput { RightClick = true, MouseWorldPosition = target }
+                               : f is >= 5 and < 8 ? new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target }
                                : default;
 
         var sums = new List<ulong>();

@@ -10,9 +10,10 @@ namespace MTile;
 //
 // The attack, end to end:
 //   INPUT   — spikes selected (picker 5), plain RMB held INSIDE solid charges exactly like
-//             the painter's eruption, and a fast release launches it. Arbitration against
-//             spike placement is BlockPaintAction's spike mode (read the comment above
-//             SpikeGesture there). Shift+RMB spiking is untouched (BlockPlaceAction).
+//             the painter's eruption, and a fast release launches it: the painter's own
+//             gesture (BlockPaintAction's spike mode), where a stroke spikes the cells its
+//             ball crosses instead of painting. Shift+RMB spiking is untouched
+//             (BlockPlaceAction).
 //   PATH    — the normal avalanche path: a MassBall (flagged Crystal) flies, leaks mass
 //             into TileMassField, and the cascade's commits become crystal REQUESTS
 //             (ChunkMap.TryRequestCrystal) instead of tile requests. Same accept/reject

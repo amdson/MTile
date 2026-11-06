@@ -140,8 +140,8 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         var target = new Vector2(60f + T, FloorTop + 0.5f * T);
         int gx = CellX(target.X);
         sim.Step(new PlayerInput { Num5 = true, MouseWorldPosition = target });
-        // Shift+RMB: the press-frame spike path. Plain RMB with spikes selected defers
-        // the spike to tell a tap from a crystal-wave charge (todo.txt #7;
+        // Shift+RMB: the press-frame spike path. Plain RMB with spikes selected is the
+        // painter's gesture — a press in solid charges the crystal wave (todo.txt #7;
         // SpikeOverlayCrystalWaveTests covers that gesture).
         sim.Step(new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target });
         Assert.True(sim.Chunks.SpikeSeeds.Has(gx, FloorRow));

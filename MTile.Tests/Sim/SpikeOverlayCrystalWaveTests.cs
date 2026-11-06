@@ -279,26 +279,55 @@ public class SpikeOverlayCrystalWaveTests(ITestOutputHelper output)
     private static int CrystalBalls(Simulation sim)
         => sim.Entities.Count(e => e is MassBall { Crystal: true });
 
+    // Plain RMB with spikes selected is the painter's gesture (2026-11-06): a press IN
+    // solid is a charge from its first frame, never a spike — a tap banks a few units and
+    // retires them, spiking nothing. (Deliberate single spikes are Shift+RMB.)
     [Fact]
-    public void Tap_SpikesTheCell_NoWave()
+    public void TapInSolid_IsAChargePress_NoSpike_NoWave()
     {
         var sim = InputSim();
         var floor = CellCenter(12, FloorRow);
         for (int f = 0; f < 4; f++) sim.Step(In(floor, true));
-        Assert.False(sim.Chunks.SpikeSeeds.Has(12, FloorRow));   // deferred until it's known to be a tap
+        Assert.Equal(nameof(BlockPaintAction), sim.Player.CurrentActionName);
+        Assert.True(sim.Player.CurrentActionVars.ChargeGesture);
         sim.Step(In(floor, false));
-        Assert.True(sim.Chunks.SpikeSeeds.Has(12, FloorRow));
+        Assert.False(sim.Chunks.SpikeSeeds.Has(12, FloorRow));
         Assert.Equal(0, CrystalBalls(sim));
         Assert.True(sim.Player.Abilities.Meters.CrystalWaveReady);
     }
 
+    // A charge no longer depends on the cursor sitting still on its press cell: a press 1 px
+    // inside a cell edge that drifts 2 px across it (a hand settling) still charges. This
+    // was the "can't charge the wave the second time" bug.
     [Fact]
-    public void Stroke_SpikesEachCellEntered()
+    public void ChargePress_SurvivesAHandDriftAcrossACellEdge()
     {
         var sim = InputSim();
-        for (int i = 0; i < 4; i++) sim.Step(In(CellCenter(11 + i, FloorRow), true));
+        var p = new Vector2(12 * Ts + 1f, FloorRow * Ts + Ts * 0.5f);
+        for (int f = 0; f < 60; f++)
+        {
+            if (f == 3) p.X -= 2f;
+            sim.Step(In(p, true));
+        }
+        Assert.True(sim.Player.Abilities.Meters.EruptMove > 60f, $"erupt {sim.Player.Abilities.Meters.EruptMove}");
+        Assert.Equal(0, sim.Chunks.SpikeSeeds.Count);
+    }
+
+    // A stroke — a press in open air — spikes every solid cell the ball passes through:
+    // paint the spikes INTO the ground. The ball lags the cursor (SmoothTime), so each
+    // cell gets a few frames and the hold lingers at the end for the ball to catch up.
+    [Fact]
+    public void Stroke_FromAir_SpikesEachSolidCellTheBallCrosses()
+    {
+        var sim = InputSim();
+        sim.Step(In(CellCenter(11, FloorRow - 1), true));            // press in the air row
+        Assert.False(sim.Player.CurrentActionVars.ChargeGesture);
+        for (int i = 0; i < 4; i++)
+            for (int f = 0; f < 10; f++) sim.Step(In(CellCenter(11 + i, FloorRow), true));
+        for (int f = 0; f < 20; f++) sim.Step(In(CellCenter(14, FloorRow), true));
         sim.Step(In(CellCenter(14, FloorRow), false));
         for (int x = 11; x <= 14; x++) Assert.True(sim.Chunks.SpikeSeeds.Has(x, FloorRow), $"x={x}");
+        Assert.Equal(0f, sim.Player.Abilities.Meters.EruptMove);     // a stroke never charges
         Assert.Equal(0, CrystalBalls(sim));
     }
 

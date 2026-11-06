@@ -20,6 +20,16 @@
   bounced velocity, so the field no longer pins the bounce back down; the same slam stuns (HeldSlamImpulse 300).
   Test: GrabTests.Throw_IntoFloor_BouncesTheVictimUp (down at 302 px/s, back up at 230).
 
+- [x] 2026-11-06: spikes-selected plain RMB is the painter's gesture, no special cases (user: "can't we also just
+  place spikes with rmb using the normal block painting mechanism? (masked to valid spike positions)"). Bug: "usually
+  the second time I try, I can't charge avalanche while spikes are selected" - spike mode decided charge-vs-stroke by
+  whether the cursor stayed on the press CELL for 0.15 s, one-way; a 2 px hand drift across an 11 px cell edge made
+  the hold a spike stroke that could never charge. Now: press in solid = charge (the painter's rule), press in air =
+  stroke, and spikes selected only changes what the stroke emits (a spike on each solid cell the ball crosses, via
+  BlockPlaceAction.TrySpikeCell) and what the charged fling launches (a crystal MassBall). Plain-RMB tap no longer
+  spikes a cell (Shift+RMB is the deliberate spike). SpikeGesture var + ~90 lines of arbitration deleted. Tests:
+  SpikeOverlayCrystalWaveTests ChargePress_SurvivesAHandDriftAcrossACellEdge / Stroke_FromAir_SpikesEachSolidCellTheBallCrosses.
+
 ## 2026-11-05 combat frame-data pass (branch combat-frame-data, commits 4dc3894 .. 95db618)
 Items F-L below were the plan; the "## Campaign" section is its log, the play-test blocks, the before/after table and
 the decisions. Still-open follow-ups from the pass live in todo.txt item M.
