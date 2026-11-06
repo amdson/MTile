@@ -89,7 +89,7 @@ public sealed class GrabThrowEntity : Entity
     private void Release(PhysicsBody victim, MovementConfig cfg)
     {
         Health = 0f;
-        LaunchSystem.Claim(victim, victim.Velocity, cfg.ThrowLaunchDecay, impactMass: 1f);
+        LaunchSystem.Claim(victim, victim.Velocity, cfg.ThrowLaunchDecay, impactMass: 1f, bounce: cfg.ThrowLaunchBounce);
     }
 
     // How hard terrain pushed the victim back against the throw in the last physics

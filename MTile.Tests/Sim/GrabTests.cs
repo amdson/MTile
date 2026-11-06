@@ -179,6 +179,33 @@ public class GrabTests(ITestOutputHelper output)
         Assert.True(sawGrabbed, "A victim in slash hitstun should still be grabbable.");
     }
 
+    // A slam BOUNCES the victim back up (2026-11-05): hold and swipe the cursor down fast -
+    // the hold drives the victim into the floor; the impact bounces at ThrowLaunchBounce
+    // (PhysicsBody.HeldBounce), the slam releases the hold (GrabAction.SlamReleaseImpulse)
+    // and the hand-off keeps the bounce, so the victim comes back up for the follow-up.
+    [Fact]
+    public void Throw_IntoFloor_BouncesTheVictimUp()
+    {
+        var script = new InputScript()
+            .For(10, new PlayerInput { MouseWorldPosition = MouseRight })
+            .For(20, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = MouseRight });
+        var cur = MouseRight;
+        for (int i = 0; i < 6; i++) { cur += new Vector2(0f, 60f); script = script.For(1, new PlayerInput { Shift = true, LeftClick = true, MouseWorldPosition = cur }); }
+        script = script.Forever(new PlayerInput { MouseWorldPosition = cur });
+
+        float maxDown = 0f, maxUpAfterImpact = 0f; bool impacted = false;
+        SimRunner.RunMulti(Build(script, InputScript.Always(default)),
+            onFrame: (f, ps) =>
+            {
+                var v = ps[1].Body.Velocity;
+                if (!impacted) { maxDown = MathF.Max(maxDown, v.Y); if (ps[1].Body.LastCrushImpulse > 150f) impacted = true; }
+                else maxUpAfterImpact = MathF.Max(maxUpAfterImpact, -v.Y);
+            });
+        output.WriteLine($"thrown down at {maxDown:F0} px/s, came back up at {maxUpAfterImpact:F0} px/s");
+        Assert.True(impacted, "the throw should slam the victim into the floor");
+        Assert.True(maxUpAfterImpact > 120f, $"the slam should bounce the victim up (only {maxUpAfterImpact:F0} px/s)");
+    }
+
     // A grab latching on a live attack evicts it (2026-11-05): the victim's slash is mid-
     // swing when the hold lands; it must end within a frame of GrabbedActive rather than
     // run out (a stab would lunge out of the latch box, so the swing here is a slash,

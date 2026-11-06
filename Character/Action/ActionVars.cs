@@ -95,6 +95,9 @@ public struct ActionVars
     // is kept, never the object, for the same reason PullPointId is (rollback restore
     // replaces the instance).
     public EntityId GrabVictim;
+    // The hold ended because the victim was SLAMMED into terrain (GrabAction): the hand-off
+    // keeps the victim's bounce instead of re-driving them at the swipe velocity.
+    public bool     SlamReleased;
 }
 
 // (PeelMember / PeelMemberBuffer lived here while the peel group rode ActionVars; they

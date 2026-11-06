@@ -147,6 +147,9 @@ public class PlayerCharacter : IHittable
     // applied, ~235 absorbed after a screen of drag, ~225 on a grounded victim) and well
     // over a slash's push (75-130 px/s), so launchers earn it and pokes don't.
     private const float CrushStunImpulse  = 200f;
+    // A HELD body's slam line (= GrabAction.SlamReleaseImpulse, the body's bounce threshold):
+    // the hold releases, the body bounces, and this stuns it for the follow-up.
+    private const float HeldSlamImpulse    = 300f;
     // Legacy stun line for un-audited creature hits (see OnHit): the dv a 525 authored
     // impulse gives a player, the line those attacks were tuned against.
     private const float CreatureStunDv    = 210f;
@@ -354,6 +357,9 @@ public class PlayerCharacter : IHittable
     {
         var c = _abilities.Combat;
         Body.Frozen = c.HitstopActive;   // LaunchSystem pauses while the body is held
+        // A held body slammed into terrain bounces at the throw's restitution (the hold then
+        // releases on the slam - GrabAction - so the bounce is not pulled straight back down).
+        Body.HeldBounce = c.GrabbedActive ? MovementConfig.Current.ThrowLaunchBounce : 0f;
         if (!c.HitstopActive) return;
         if (!c.HoldingBody) { c.HeldVelocity = Body.Velocity; c.HoldingBody = true; }
         Body.Velocity     = Vector2.Zero;
@@ -373,8 +379,8 @@ public class PlayerCharacter : IHittable
     private void Launch(Vector2 dv, in Hitbox hit)
     {
         var c = _abilities.Combat;
-        if (c.HoldingBody) LaunchSystem.Hit(Body, ref c.HeldVelocity, dv, hit.LaunchDecay, hit.LaunchImpactMass);
-        else               LaunchSystem.Hit(Body, ref Body.Velocity,  dv, hit.LaunchDecay, hit.LaunchImpactMass);
+        if (c.HoldingBody) LaunchSystem.Hit(Body, ref c.HeldVelocity, dv, hit.LaunchDecay, hit.LaunchImpactMass, hit.LaunchBounce);
+        else               LaunchSystem.Hit(Body, ref Body.Velocity,  dv, hit.LaunchDecay, hit.LaunchImpactMass, hit.LaunchBounce);
         c.Launched = true;
     }
     
@@ -638,7 +644,7 @@ public class PlayerCharacter : IHittable
         bool slamStuns  = (Body.LastCrushImpulse >= CrushStunImpulse
                            && (_abilities.Combat.Launched || Body.LastCrushMovingSurface
                                || (_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl)))
-                          || (crushBills && _abilities.Combat.GrabbedActive);
+                          || (Body.LastCrushImpulse >= HeldSlamImpulse && _abilities.Combat.GrabbedActive);
         // The cooldown is the DAMAGE bill's (a stun-only slam must not eat the bill of the
         // real slam a few frames later - the thrown body's floor hit after a hold's press).
         bool offCooldown = _frame - _lastCrushFrame >= SimFrames.FromSeconds(CrushCooldownSeconds, dt);

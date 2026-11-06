@@ -23,6 +23,10 @@ public struct Launch
     public Vector2 Vel;              // the hit's remaining share of Body.Velocity, px/s
     public float   Decay;            // px/s², linear
     public float   ImpactMass;       // authored Impact.Mass multiplier at full launch (1 = none)
+    // Restitution the body meets terrain with while launched (0 = the body's own Impact
+    // profile only). A slammed body bounces: a throw into the floor pops its victim back up
+    // for the follow-up (2026-11-05), a stab into a wall likewise.
+    public float   Bounce;
     public float   InitialSpeed;     // |Vel| when it began — ImpactMass fades against this
 
     public readonly bool Active => Vel.LengthSquared() > 0f;
@@ -39,29 +43,31 @@ public static class LaunchSystem
     // how much of the previous launch happened to be left). `velocity` is the body's
     // real velocity — Body.Velocity, or the owner's hitstop stash while it is held.
     public static void Hit(PhysicsBody body, ref Vector2 velocity, Vector2 dv,
-                           float decay, float impactMass)
+                           float decay, float impactMass, float bounce = 0f)
     {
         velocity -= body.Launch.Vel;
         velocity += dv;
-        Begin(body, dv, decay, impactMass);
+        Begin(body, dv, decay, impactMass, bounce);
     }
 
     // Claim velocity the body already has as a launch, without adding any (a throw: the
     // grab's force field has already brought the victim up to speed).
-    public static void Claim(PhysicsBody body, Vector2 launchVel, float decay, float impactMass)
-        => Begin(body, launchVel, decay, impactMass);
+    public static void Claim(PhysicsBody body, Vector2 launchVel, float decay, float impactMass, float bounce = 0f)
+        => Begin(body, launchVel, decay, impactMass, bounce);
 
-    private static void Begin(PhysicsBody body, Vector2 vel, float decay, float impactMass)
+    private static void Begin(PhysicsBody body, Vector2 vel, float decay, float impactMass, float bounce)
     {
         float speed = vel.Length();
-        if (decay <= 0f || speed < EndSpeed) { body.Launch = default; return; }
+        if (decay <= 0f || speed < EndSpeed) { body.Launch = default; body.LaunchBounce = 0f; return; }
         body.Launch = new Launch
         {
             Vel          = vel,
             Decay        = decay,
             ImpactMass   = MathF.Max(1f, impactMass),
+            Bounce       = Math.Clamp(bounce, 0f, 1f),
             InitialSpeed = speed,
         };
+        body.LaunchBounce = body.Launch.Bounce;
     }
 
     // The sweep with launches around it. PhysicsWorld.StepSwept stays launch-agnostic;
@@ -79,6 +85,7 @@ public static class LaunchSystem
     public static void PreStep(PhysicsBody body, float dt)
     {
         ref var l = ref body.Launch;
+        body.LaunchBounce = l.Active ? l.Bounce : 0f;
         if (!l.Active) { body.ImpactMassScale = 1f; return; }
 
         // Fades with the launch: hardest straight off the hit, normal by the time the

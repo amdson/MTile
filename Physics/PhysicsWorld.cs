@@ -140,20 +140,18 @@ public static class PhysicsWorld
                 float mag = MathF.Abs(vnRel);
                 RecordImpulse(body, mag, mag, normal);
                 frictionDv = ApplyFrictionAtImpact(body, normal, bestShapeVel, ComputeFrictionForNormal(body, normal), savedForce, dt);
-                bool bounced = body.Impact != null
-                    && body.Impact.BounceRestitution > 0f
-                    && MathF.Abs(vnRel) >= body.Impact.BounceImpulseThreshold;
+                bool bounced = TryBounce(body, MathF.Abs(vnRel), out float e);
                 if (bounced)
                 {
                     // Carry-zero already applied above (relative normal V = 0). Stack
                     // the rebound on top: net Δv = -(1+e)·vnRel·normal, i.e. body
                     // emerges moving away from the surface at e·|vnRel|.
-                    body.Velocity -= vnRel * body.Impact.BounceRestitution * normal;
+                    body.Velocity -= vnRel * e * normal;
                 }
                 if (bestShapeVel.LengthSquared() > 1f) body.LastCrushMovingSurface = true;
                 body.ContactEvents.Add(new ContactEvent(normal, bestShapeVel, vnRel,
                     bounced ? ContactOutcome.Bounce : ContactOutcome.Stop,
-                    bounced ? body.Impact.BounceRestitution : 0f));
+                    bounced ? e : 0f));
                 // Damage is no longer fired here — see ApplyContactDamage, which
                 // walks body.Constraints once per StepSwept after all impulses
                 // have been delivered to their per-contact LastImpulse fields.
@@ -225,6 +223,24 @@ public static class PhysicsWorld
     // the flat face after, each taking a slice of the Δv — and the max of the slices
     // under-billed a 475 px/s landing as 350. The sum puts the slices back together
     // without double-counting: each hit only removes velocity the previous ones left.
+    // A launched body bounces at its launch's restitution above this approach speed,
+    // whatever its Impact profile says (a slammed body pops back up for the follow-up).
+    private const float LaunchBounceMinSpeed = 150f;
+
+    // Whether a hard stop at approach speed `vnAbs` rebounds, and with what restitution:
+    // the body's Impact profile (above its own threshold), or the live launch's Bounce
+    // (Launch.Bounce via body.LaunchBounce) when that is higher.
+    private static bool TryBounce(PhysicsBody body, float vnAbs, out float e)
+    {
+        e = 0f;
+        if (body.Impact != null && body.Impact.BounceRestitution > 0f && vnAbs >= body.Impact.BounceImpulseThreshold)
+            e = body.Impact.BounceRestitution;
+        float lb = MathF.Max(body.LaunchBounce, body.HeldBounce);
+        if (lb > e && vnAbs >= LaunchBounceMinSpeed)
+            e = lb;
+        return e > 0f;
+    }
+
     private static void RecordImpulse(PhysicsBody body, float raw, float crush, Vector2 normal)
     {
         if (raw > body.LastImpulseMagnitude) body.LastImpulseMagnitude = raw;
@@ -607,17 +623,15 @@ public static class PhysicsWorld
                 // body is already carrying inbound momentum into the empty
                 // space behind the broken cells — restitution on top would
                 // double-count the redirect.
-                bool bounced = !brokeThrough
-                    && body.Impact != null
-                    && body.Impact.BounceRestitution > 0f
-                    && vnAbs >= body.Impact.BounceImpulseThreshold;
+                float e = 0f;
+                bool bounced = !brokeThrough && TryBounce(body, vnAbs, out e);
                 if (bounced)
-                    body.Velocity -= vnRel * body.Impact.BounceRestitution * hitNormal;
+                    body.Velocity -= vnRel * e * hitNormal;
                 if (hitSurfaceVel.LengthSquared() > 1f) body.LastCrushMovingSurface = true;
                 body.ContactEvents.Add(new ContactEvent(hitNormal, hitSurfaceVel, vnRel,
                     brokeThrough ? ContactOutcome.BreakThrough
                                  : bounced ? ContactOutcome.Bounce : ContactOutcome.Stop,
-                    bounced ? body.Impact.BounceRestitution : 0f));
+                    bounced ? e : 0f));
             }
 
             float dn2 = Vector2.Dot(displacement, hitNormal);

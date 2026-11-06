@@ -561,6 +561,9 @@ public class MovementConfig
     // pre-launch behavior). Sim-affecting; hot-reload is gated off in multiplayer.
     public float WhipKickLaunchDecay        { get; set; } = 400f;    // was 1500: bled out in 0.13s / 12px (todo H)
     public float ThrowLaunchDecay           { get; set; } = 1500f;
+    // Restitution a thrown body meets terrain with (Launch.Bounce): a throw into the
+    // floor pops the victim back up for the follow-up (2026-11-05). 0 = the body's own 0.35.
+    public float ThrowLaunchBounce          { get; set; } = 0.7f;
 
     // ── Stab striker (StabAction primary box, Collision mode) ──────────────────────
     // A heavy, slow virtual striker: Δv on the target = (1+e)·u·ms/(ms+mt), which tends
@@ -577,6 +580,9 @@ public class MovementConfig
     public float StabMinLaunch              { get; set; } = 60f;
     public float StabLaunchDecay            { get; set; } = 100f;
     public float StabLaunchImpactMass       { get; set; } = 4f;
+    // Restitution the stab's victim meets a wall with (Launch.Bounce): the wall slam pops
+    // them back out toward the attacker rather than pinning them (2026-11-05).
+    public float StabLaunchBounce           { get; set; } = 0.4f;
     // The held victim's own steering (GrabbedState): a flat push along their held
     // direction, px/s². Limited by construction — the hold's tracker absorbs it, so in
     // the hold it shifts the victim by ≈ accel·(PlayerGrabSmoothTime/2)² (≈10px at

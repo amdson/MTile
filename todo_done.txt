@@ -12,6 +12,14 @@
   DONE: RecoveryAction bids the interrupt when GrabbedActive and the live action is not AllowedWhileGrabbed; test
   GrabTests.Grab_EvictsTheVictimsLiveAttack (slash evicted on the latch frame).
 
+- [x] 2026-11-05: slams bounce the victim up (user: "slam is working, but it should be strong enough to make the player
+  bounce up"). Launch.Bounce / PhysicsBody.LaunchBounce + HeldBounce: a launched or held body meets terrain at the
+  launch's restitution (ThrowLaunchBounce 0.7, StabLaunchBounce 0.4; the body's own Impact profile is 0.35 above 300)
+  above 150 px/s, max'd with the profile. A hold that drives its victim into terrain past 300 px/s absorbed (the body's
+  bounce threshold) RELEASES the grab (GrabAction.SlamReleaseImpulse) and the throw hand-off flies at the victim's
+  bounced velocity, so the field no longer pins the bounce back down; the same slam stuns (HeldSlamImpulse 300).
+  Test: GrabTests.Throw_IntoFloor_BouncesTheVictimUp (down at 302 px/s, back up at 230).
+
 ## 2026-11-05 combat frame-data pass (branch combat-frame-data, commits 4dc3894 .. 95db618)
 Items F-L below were the plan; the "## Campaign" section is its log, the play-test blocks, the before/after table and
 the decisions. Still-open follow-ups from the pass live in todo.txt item M.

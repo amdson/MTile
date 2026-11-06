@@ -163,6 +163,9 @@ public readonly struct Hitbox
     // to 1 with the launch: breaks walls as if heavier, not faster. Energy ∝ m·v², so 4
     // breaks like double speed. Needs LaunchDecay > 0 to have a launch to ride.
     public readonly float       LaunchImpactMass;
+    // Restitution the launched victim meets terrain with (Launch.Bounce); 0 = the body's
+    // own. A launcher that wants its wall / floor slam to pop the victim back out sets it.
+    public readonly float       LaunchBounce;
 
     // Input cheat-sheet (details on the fields above):
     //   Identity   region (broad AABB) · hitId (dedupe key) · owner/source · targets
@@ -179,6 +182,7 @@ public readonly struct Hitbox
     //   Recoil cap maxRecoilSpeed (per-frame |Δv| ceiling on every recoil path; 0 = off)
     //   Occlusion  origin (null = no terrain occlusion)
     //   Launch     launchDecay (0 = plain knockback) · launchImpactMass (wall-break weight)
+    //              · launchBounce (terrain restitution while launched; 0 = the body's own)
     //   Stun       stunSeconds (0 = none; declared per attack)
     //   Clank      clank (None = passes through other attacks; Blade/Blunt = melee)
     public Hitbox(BoundingBox region, int hitId, float damage,
@@ -199,10 +203,12 @@ public readonly struct Hitbox
                   float launchDecay = 0f,
                   float launchImpactMass = 1f,
                   ClankKind clank = ClankKind.None,
-                  float stunSeconds = 0f)
+                  float stunSeconds = 0f,
+                  float launchBounce = 0f)
     {
         Clank                = clank;
         StunSeconds          = stunSeconds;
+        LaunchBounce         = launchBounce;
         LaunchDecay          = launchDecay;
         LaunchImpactMass     = launchImpactMass;
         Occluded             = origin.HasValue;

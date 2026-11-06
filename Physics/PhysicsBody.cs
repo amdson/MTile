@@ -93,6 +93,14 @@ public class PhysicsBody
     // a body can hit harder than its speed alone would. 1 = normal. Rewritten by
     // LaunchSystem.PreStep before every sweep, so it never needs a snapshot.
     public float ImpactMassScale = 1f;
+    // Restitution a live launch asks for against terrain (Launch.Bounce), max'd with the
+    // Impact profile's in PhysicsWorld; 0 when no launch is active. Derived from Launch
+    // (which is snapshotted) by LaunchSystem.PreStep / Begin - not snapshotted itself.
+    public float LaunchBounce;
+    // Restitution a HELD body meets terrain with (PlayerCharacter.PreStep sets it from
+    // CombatState.GrabbedActive): a grab slamming its victim into the floor pops them back
+    // up instead of pinning them. Derived each step; not snapshotted.
+    public float HeldBounce;
 
     // True while the body's owner has it parked this step (hitstop hold, rooting), set
     // by Entity/PlayerCharacter.PreStep. LaunchSystem pauses on frozen bodies: their

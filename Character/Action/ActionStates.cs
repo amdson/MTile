@@ -1786,6 +1786,7 @@ public class StabAction : ActionState
                 origin: ctx.Body.Position,
                 launchDecay: MovementConfig.Current.StabLaunchDecay,
                 launchImpactMass: MovementConfig.Current.StabLaunchImpactMass,
+                launchBounce: MovementConfig.Current.StabLaunchBounce,
                 clank: ClankKind.Blade));
 
             // Block-shockwave — same HitId so entities that overlap both count once. No
@@ -2705,12 +2706,12 @@ public class BurstAction : ActionState
     // not a full ring: the shell breaks terrain where you aim, not all around you.
     private const int   Segments             = 5;
     private const float FanHalfAngle         = 0.07f * MathHelper.TwoPi;   // ≈25°
-    private const float StartDist          = PlayerCharacter.Radius * 1.5f;
+    private const float StartDist          = PlayerCharacter.Radius * 1.15f;
     private const float EndDist            = PlayerCharacter.Radius * 2.5f;
     private const float SegmentHalfSize      = PlayerCharacter.Radius * 1.0f;
     // Hard shove — kept above GroundSlash3, since knockback is the whole point of
     // the move. Came down 700 → 430 with the rest of the kit, holding that ratio.
-    private const float KnockbackMagnitude   = 430f;
+    private const float KnockbackMagnitude   = 930f;
     // Full tile HP per frame ⇒ dirt (1.0) breaks on one shell contact, stone (2.0)
     // needs the two frames the shell dwells over a cell.
     private const float TileDamagePerFrame   = TileDamage.TileMaxHP;
@@ -4178,6 +4179,11 @@ public class GrabAction : ActionState
     // GrabbedSlash.GrabStrengthDamage (1.0), so a fresh grab survives 2 struggles and
     // breaks on the 3rd. Bump for a stickier grab, lower for an easier mash-out.
     private const float GrabStrengthMax    = 3f;
+    // Absorbed dv at which a held victim's terrain impact is a slam that releases the hold:
+    // the player body's own bounce threshold (ImpactProfiles 300), so the release and the
+    // bounce coincide; a hold dragging its victim along the floor presses at ~100-200.
+    // PlayerCharacter.HeldSlamImpulse mirrors it for the slam's stun.
+    private const float SlamReleaseImpulse = 300f;
     private const float RecoverySeconds    = FrameData.GrabAction.EndLag;    // lag after a grab (the whiff-punish window)
     // Carry (2026-10-18, the block throw's mechanism): the held victim tracks the
     // cursor out to PlayerGrabHoldReach — NOT clamped clear of terrain like a clod, so
@@ -4276,6 +4282,16 @@ public class GrabAction : ActionState
         // eroded GrabStrength to 0, the grab releases (the new primary break path).
         if (ctx.Combat?.HitstunActive == true) return false;
         if (ctx.Combat != null && ctx.Combat.GrabStrength <= 0f) return false;
+        // A slam ends the hold (2026-11-05): once the held victim has been driven into
+        // terrain hard enough to bill (their LastCrushImpulse past the damage line), let go -
+        // they bounce off it (PhysicsBody.HeldBounce) and the throw hand-off below keeps
+        // that bounce, instead of the field pulling them straight back onto the floor.
+        if (!vars.GrabVictim.IsNone && ctx.Spawner?.ResolveBody(vars.GrabVictim) is { } slammed
+            && slammed.LastCrushImpulse >= SlamReleaseImpulse)
+        {
+            vars.SlamReleased = true;
+            return false;
+        }
         // The windup runs to completion (a tap can't skip it); past it the hold lasts
         // while LMB is down, up to the cap. Release or cap ends the action, and Exit
         // hands the victim to a GrabThrowEntity at the swipe velocity — the throw.
@@ -4289,6 +4305,7 @@ public class GrabAction : ActionState
         vars.ChargeTime   = 0f;
         vars.GrabDir      = AimDir(ctx, ab);
         vars.GrabVictim   = EntityId.None;   // latched in Update, off the field's own region
+        vars.SlamReleased = false;
         vars.SwipeVel     = Vector2.Zero;
         vars.PrevCursor   = ctx.Input.MouseWorldPosition;
         vars.BallPos      = ctx.Body.Position;
@@ -4366,10 +4383,16 @@ public class GrabAction : ActionState
         bool broken = ctx.Combat?.HitstunActive == true
                    || (ctx.Combat != null && ctx.Combat.GrabStrength <= 0f);
         if (!vars.GrabVictim.IsNone && !broken && ctx.Spawner != null)
-            ctx.Spawner.SpawnEntity(new GrabThrowEntity(vars.BallPos, vars.SwipeVel, vars.GrabVictim, ctx.Faction)
+        {
+            // A slam hand-off flies at the victim's own (bounced) velocity, so the chase
+            // converges at once and the bounce is what they keep.
+            var handoff = vars.SwipeVel;
+            if (vars.SlamReleased && ctx.Spawner.ResolveBody(vars.GrabVictim) is { } vb) handoff = vb.Velocity;
+            ctx.Spawner.SpawnEntity(new GrabThrowEntity(vars.BallPos, handoff, vars.GrabVictim, ctx.Faction)
             {
                 Team = ctx.Team,
             });
+        }
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
