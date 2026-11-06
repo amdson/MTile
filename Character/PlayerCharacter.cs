@@ -936,12 +936,14 @@ public class PlayerCharacter : IHittable
         // in a free-flight state and moving down. Multiplicative with the action's scale,
         // kept OUT of ctx.Modifiers so BallisticPredictor can apply its own per-tick
         // version of the same rule rather than seeing a folded constant.
-        // The gate is purely physical - airborne and moving down - so the corrector's
-        // predictors (BallisticPredictor applies the same vel.Y > 0 rule) see exactly what
-        // the sim does; a state-based gate left the sim at full g for a frame or two at
-        // a lip while the predictor was already at 0.7, and the fold pulled up against it.
+        // The gate is physical - airborne and moving down - so the corrector's predictors
+        // (BallisticPredictor applies the same vel.Y > 0 rule) see exactly what the sim
+        // does in free flight; a state-based gate left the sim at full g for a frame or two
+        // at a lip while the predictor was already at 0.7, and the fold pulled up against
+        // it. Surface-attached states (a hang, a pull, a wall slide, a terrain ride) are
+        // not flight and keep full gravity - their own dynamics were tuned on it.
         float gravityScale = ctx.Modifiers.GravityScale;
-        if (Body.Velocity.Y > 0f && !ctx.TryGetGround(out _))
+        if (Body.Velocity.Y > 0f && !ctx.TryGetGround(out _) && !SurfaceAttached(_currentState))
             gravityScale *= MovementConfig.Current.FallGravityScale;
         if (gravityScale != 1f)
             Body.AppliedForce += Gravity * (gravityScale - 1f);
@@ -991,6 +993,10 @@ public class PlayerCharacter : IHittable
     }
 
     public bool IsGrounded => _currentState is StandingState || _currentState is CrouchedState;
+    // States where the body hangs on, slides down or rides a surface rather than flying.
+    public static bool SurfaceAttached(MovementState s)
+        => s is LedgeGrabState or LedgePullState or WallSlidingState or TerrainCarriedState
+             or StairClimbState or GrabbedState;
     public string CurrentStateName => _currentState?.GetType().Name ?? "None";
     public MovementState CurrentState => _currentState;
     public ActionState CurrentAction => _currentAction;

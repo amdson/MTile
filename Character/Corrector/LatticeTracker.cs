@@ -197,7 +197,7 @@ public static class LatticeTracker
         {
             Cfg = cfg, Fold = fold, Dir = dir, Speed = speed, ArcSpeed = arcSpeed,
             Origin = body.Position, Near = near, Ballistic = ballistic, Planning = planning,
-            T0 = t0, SupportVy = supportVy, AirSpeed = cfg.CorrectorAirSpeed * ctx.Modifiers.MaxAirSpeed,
+            T0 = t0, SupportVy = supportVy, AirSpeed = cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed,   // the PLAYER's cap: these arcs are flown on air control
         };
         PathTracker.Solve(s, settings, ref policy);
         var pr = s.Problem;

@@ -56,12 +56,18 @@ public class SpeedInvariantTests(ITestOutputHelper output)
     {
         var cfg = MovementConfig.Current;
         float riseBound = cfg.MaxAssistRiseSpeed + 5f;          // 125 at default tuning
-        float vxTight   = cfg.MaxWalkSpeed * 1.1f;              // 110 — maneuvers + ground
+        // Maneuvers + ground. +5: a landing carries the air speed it arrived with (since
+        // 2026-11-05 nothing brakes above the cap in the air), so the first grounded frames
+        // can sit a few px/s over the walk cap before friction takes it; an INCREASE past
+        // this on the ground is still caught.
+        float vxTight   = cfg.MaxWalkSpeed * 1.1f + 5f;
         // Free air control ceiling - or the walk cap, now that MaxAirSpeed sits BELOW it
         // (0.7x walk since 2026-11-05): a grounded body legitimately runs faster than air,
         // and the vault course's ground states overshoot the walk cap by a few px/s on a
         // landing (62-65 at a 60 cap), which was invisible under the old 95 ceiling.
-        float vxAir     = MathF.Max(cfg.MaxAirSpeed, cfg.MaxWalkSpeed) * 1.1f + 5f;
+        // The corrector's own air budget (CorrectorAirSpeed, 90) is the vault course's
+        // driving speed; the player's MaxAirSpeed is lower (0.9x walk) and caps only input.
+        float vxAir     = MathF.Max(MathF.Max(cfg.MaxAirSpeed, cfg.CorrectorAirSpeed), cfg.MaxWalkSpeed) * 1.1f + 5f;
         const float Eps = 0.5f;
 
         var violations = new List<string>();
