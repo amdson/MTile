@@ -90,14 +90,15 @@ public class CoopModeTests
     }
 
     [Fact]
-    public void NonCoop_DeadSecondaryStaysDead()
+    public void NonCoop_DeadSecondaryRespawns()
     {
         var sim = Build(coop: false);
         var p2 = sim.SecondaryPlayers[0].Player;
         p2.Health = -1f;
         sim.Step(new PlayerInput());
-        Assert.False(p2.IsAlive);
-        Assert.Equal(0, sim.PlayerDeaths);
+        Assert.True(p2.IsAlive);
+        Assert.Equal(p2.MaxHealth, p2.Health);
+        Assert.Equal(1, sim.PlayerDeaths);
     }
 
     [Fact]

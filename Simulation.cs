@@ -64,7 +64,8 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     // Co-op (Stage.Coop): no player-vs-player hits, and secondary players respawn too.
     // Set at construction from the stage; never changes mid-match.
     public bool Coop { get; private set; }
-    // Versus (Stage.Versus): dead secondaries respawn at the stage's second start.
+    // Versus (Stage.Versus): marks a PvP duel stage. Dead secondaries respawn at the
+    // stage's second start on every non-co-op stage, Versus or not.
     public bool Versus { get; private set; }
     private Vector2 _secondSpawn;
     // Where dead players come back. Starts at the stage's PlayerSpawn; a stage may move
@@ -591,17 +592,16 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
             OnPlayerRespawn?.Invoke(_player.Body.Position);
         }
         // Co-op: a dead partner comes back too, beside the checkpoint so the two don't
-        // overlap. Outside co-op a dead secondary is a PvP kill and stays dead (the
-        // match layer decides what that means).
-        // Versus: a dead secondary comes back at its own start.
-        if (Coop || Versus)
-            foreach (var (p, _) in _secondaryPlayers)
-                if (!p.IsAlive)
-                {
-                    p.Respawn(Coop ? CoopRespawnSpot() : _secondSpawn);
-                    _playerDeaths++;
-                    OnPlayerRespawn?.Invoke(p.Body.Position);
-                }
+        // overlap. Otherwise a dead secondary comes back at its own start. (It used to
+        // "stay dead" outside Versus, but nothing removed it, so a bot opponent kept
+        // fighting on negative HP.)
+        foreach (var (p, _) in _secondaryPlayers)
+            if (!p.IsAlive)
+            {
+                p.Respawn(Coop ? CoopRespawnSpot() : _secondSpawn);
+                _playerDeaths++;
+                OnPlayerRespawn?.Invoke(p.Body.Position);
+            }
 
         // Entity gravity-scale opt-out, applied right before uniform gravity integrates.
         // Fresh query so entities spawned this frame are included (as before).

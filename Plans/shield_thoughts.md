@@ -1,0 +1,2 @@
+Shield is a little awkward right now and it's not clear what the ideal shield should look like. 
+in smash, there's a rock paper scissors relationship where shield beats slash but loses to grab. here, we kind of have that, but shield also loses to waiting and then slashing. it's complicated by the fact that we allow players to move while shielding
