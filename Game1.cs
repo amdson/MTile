@@ -643,11 +643,8 @@ public class Game1 : Game
 
     // TEMP EXPERIMENT: single-frame corrector inspector (GameConfig.FreezeFrame,
     // set by scenario configs under Testing/).
-    private readonly CoastSample[] _lmTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
-    private readonly TrajectoryLm _lmProbe = new();
-    private int _lmCount;
-    // PROTOTYPE: lattice-search oracle (LatticePlanner), drawn orange next to
-    // the LM probe's lime — freeze mode only.
+    // PROTOTYPE: lattice-search oracle (LatticePlanner), drawn orange —
+    // freeze mode only.
     private readonly CoastSample[] _latticeTrajectory = new CoastSample[BallisticPredictor.MaxHorizon];
     private int _latticeCount;
     // PHASE 0/1 (Plans/LATTICE_PATH_PLANNER.md): the lattice PATH planner
@@ -664,17 +661,7 @@ public class Game1 : Game
             _config.FreezeFramePosY ?? body.Position.Y);
         body.Velocity = new Vector2(_config.FreezeFrameVelX, _config.FreezeFrameVelY);
 
-        // TEMP EXPERIMENT: nonlinear trajectory probe from the same pre-step
-        // state the corrector captures use. Render-only; drawn lime. (With
-        // FoldEngine "lm" the sim's own solved capture is the same solve —
-        // this probe stays useful for A/B against the QP engine.)
         var mc = MovementConfig.Current;
-        _lmCount = _lmProbe.Solve(
-            _sim.Chunks, body.Polygon, body.Position, body.Velocity,
-            _config.FreezeFrameInputX, mc.MaxWalkSpeed, trackProgress: true,
-            mc.FoldHoverOffset, mc.FoldClimbReachUp,
-            new Vector2(0f, Simulation.WorldGravityY), Simulation.FixedDt,
-            mc.AmbientHorizon, iterations: 30, _lmTrajectory, out float lmCost);
 
         // PROTOTYPE: lattice-search oracle from the same pre-step state. A
         // longer horizon than the ambient reflex (24 ticks) so the discrete
@@ -706,7 +693,7 @@ public class Game1 : Game
         Toast($"frozen: pos ({body.Position.X:F1},{body.Position.Y:F1}) " +
               $"vel ({body.Velocity.X:F1},{body.Velocity.Y:F1}) " +
               $"ref={cd.ReferenceCount} bal={cd.BallisticCount} sol={cd.SolvedCount} " +
-              $"lmCost={lmCost:F1} - F5 reloads config");
+              "- F5 reloads config");
     }
 
     protected override void LoadContent()
@@ -969,7 +956,6 @@ public class Game1 : Game
                 _config.FreezeFrameDown   = fresh.FreezeFrameDown;
                 _config.TimeScale         = fresh.TimeScale;
                 if (_config.FreezeFrame) _activeStage = fresh.Stage;
-                else _lmCount = 0;
                 LoadStage(Stages.Get(_activeStage));
                 if (!_config.FreezeFrame) Toast($"reloaded stage '{_activeStage}'");
             }
@@ -1477,9 +1463,6 @@ public class Game1 : Game
                 _debugOverlay.DrawTrajectory(cd.SolvedTrajectory, cd.SolvedCount, Color.Magenta);
             if (_config.DebugDrawCorrectorContacts && cd.ContactCount > 0)
                 _debugOverlay.DrawContactForces(cd.ContactPos, cd.ContactDv, cd.ContactCount);
-            // TEMP EXPERIMENT: nonlinear trajectory probe (TrajectoryLm, freeze mode only).
-            if (_lmCount > 0)
-                _debugOverlay.DrawTrajectory(_lmTrajectory, _lmCount, Color.Lime);
             // PROTOTYPE: lattice-search oracle path (LatticePlanner).
             if (_latticeCount > 0)
                 _debugOverlay.DrawTrajectory(_latticeTrajectory, _latticeCount, Color.Orange);

@@ -117,7 +117,7 @@ public class DashState : MovementState
             // the body during the burst, the corrector included.
             ctx.Body.Velocity     = vars.DashDir * BurstSpeed;
             ctx.Body.AppliedForce = -ctx.Gravity;
-            ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+            ApplyAmbient(ctx, ref vars, FoldProfile.None);
             return;
         }
         if (t - BurstSeconds < ctx.Dt) ctx.Body.Velocity = ExitVelocity(vars.DashDir);
@@ -129,7 +129,6 @@ public class DashState : MovementState
         float cap = MathF.Max(cfg.MaxAirSpeed * m.MaxAirSpeed, MathF.Abs(ctx.Body.Velocity.X));
         ctx.Body.AppliedForce = new Vector2(
             AirControl.Apply(ctx, cfg.AirAccel * m.AirAccel, cap, cfg.AirDrag * m.AirDrag), 0f);
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
-            OnLattice ? FoldProfile.Fall : FoldProfile.Stand);
+        ApplyAmbient(ctx, ref vars, FoldProfile.Fall);
     }
 }

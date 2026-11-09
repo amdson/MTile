@@ -169,8 +169,6 @@ public class MovementConfig
     // Keep it above a deliberate tap (~0.1 s) or taps start pulling.
     public float LedgeAutoPullHoldTime { get; set; } = 0.15f;
 
-    // Free-force cap of FoldReference's servo (the "ref" FoldEngine only).
-    public float GuidedMaxForce       { get; set; } = 10000f;
 
     // Reference clips (ReferenceClips/<name>.json, baked defaults in
     // ReferenceClipRegistry): LedgePull and Dropdown FOLLOW their clips as paths
@@ -250,17 +248,7 @@ public class MovementConfig
     // Hot-reloadable: edit movement_config.json while the game runs to switch
     // live. Anything but "full" deliberately cripples locomotion.
     public string CorrectorScenario             { get; set; } = "full";
-    // Ambient corner-plant redirect (cave-mouth duck-in): airborne descending
-    // ticks near a convex corner may hand-plant it, and wall-face rows near
-    // those ticks enter the solve as PlantOnly recruiters. DEFAULT OFF: the
-    // bumpy corridor is structurally a chain of cave mouths, and micro-plants
-    // on every ceiling bump shed ~6% corridor speed (76.5 → 72 px/s) while
-    // buying only ~0.1s on a real cave entry (the envelope trim + hand-catch
-    // already threads it). Flip on to playtest the trade — CaveMouthTests
-    // pins the enabled behavior either way. Maneuver plants are always on
-    // (their face rows were never filtered).
-    public bool FoldCornerPlantEnabled          { get; set; } = false;
-    // Ablation switch for the qp fold's plant-and-deflect disc (channel
+    // Ablation switch for the fold's plant-and-deflect disc (channel
     // slot 3) — hot-reloadable A/B for measuring what the redirect actually
     // buys on a course. Off masks the channel everywhere, including the
     // feature-anchored (cave-mouth) plant ticks.
@@ -272,7 +260,6 @@ public class MovementConfig
     // halting. 0 = unbounded (the bare disc).
     public float FoldRedirectForce              { get; set; } = 1500f;
     public bool  AmbientCorrectorEnabled        { get; set; } = true;
-    public int   AmbientHorizon                 { get; set; } = 10;
     // ── Fold tuning surface (CONSOLIDATION_PLAN §6) — hot-reloadable feel knobs.
     // Structural constants (HingeWeight, hinge scales, anchor leak, SupportReach)
     // stay in code: they are stability/semantics, not feel.
@@ -284,13 +271,9 @@ public class MovementConfig
     // ground-to-head height are unchanged.
     public float FoldHoverOffset                { get; set; } = 14.8f;
     public float CrouchHoverOffset              { get; set; } = 0f;
-    // Climb band: how far above the support anchor the envelope may bind a
-    // floor — a leg reach, so it is body-relative px and deliberately
-    // independent of Chunk.TileSize. Low ledges must bind for Standing; a
-    // crouch covers only surface roughness. movement_config.json also carries
-    // this key at the same value (20); no TileSize caveat applies any more.
+    // Climb band of the LatticePlanner PROTOTYPE oracle (Game1's freeze-frame
+    // overlay) — the live engine prices climbs with FoldRiseCost instead.
     public float FoldClimbReachUp               { get; set; } = 20f;
-    public float CrouchClimbReachUp             { get; set; } = 4f;
     // Lattice engine (FoldProfile.RiseCost): the state's price per px CLIMBED
     // on the planned path, traded against LatticeProgressWeight at the goal;
     // drops are free (gravity delivers them). The binding case is the body
@@ -303,13 +286,6 @@ public class MovementConfig
     // Chunk.TileSize; only the tile counts it corresponds to moved.
     public float FoldRiseCost                   { get; set; } = 16f;
     public float CrouchRiseCost                 { get; set; } = 30f;
-    // Duck budget — FoldClimbReachUp's downward mirror for the ref engine's
-    // wall classification: a frontal obstacle whose duck-under needs at most
-    // this much descent is entered by ducking; anything deeper is a give-up
-    // (raw carry into an honest bonk). Body-relative px, deliberately
-    // independent of Chunk.TileSize; movement_config.json carries the same
-    // value (16), so no sync caveat applies any more.
-    public float FoldDuckReach                  { get; set; } = 16f;
     // Fixed inner iteration budget of the per-tick fold solve (determinism
     // requires it fixed; raise for convergence, costs linearly).
     public int   FoldIterations                 { get; set; } = 16;
@@ -334,30 +310,12 @@ public class MovementConfig
     // always AWAY from the surface. Deliberately mild (below AirAccel): a
     // nudge that lets a jump thread a 1-wide hole, not a wall-run. 0 disables.
     public float FoldContactPushForce           { get; set; } = 1000f;
-    // Stand-fold engine: "qp" = the linearized channel solve (the default —
-    // what the test suite pins); "ref" = the reference-rollout engine
-    // (FoldReference: terrain-generated carry reference + PathDeform + servo;
-    // non-anchored regimes fall back to qp); "lm" = the nonlinear trajectory
-    // engine (TrajectoryLm — kept as the offline oracle, too heavy for the
-    // rollback loop); "lattice" = the ref engine's tail riding the lattice
-    // path DP's reference (FoldLattice / LatticePathPlanner; the Lattice*
-    // knobs above tune it). Hot-reloadable A/B while playtesting.
-    public string FoldEngine                    { get; set; } = "lattice";
-    // TrajectoryLm tuning: fixed LM iteration budget (fixed for determinism,
-    // like FoldIterations), residual weights, and the cap on the applied
-    // tick-0 correction (px/s² — the lone actuation bound the LM path has).
-    public int   FoldLmIterations               { get; set; } = 12;
-    public float FoldLmPenWeight                { get; set; } = 10f;
-    public float FoldLmHoverWeight              { get; set; } = 0.5f;
-    public float FoldLmProgressWeight           { get; set; } = 0.2f;
-    public float FoldLmEffortWeight             { get; set; } = 0.02f;
-    public float FoldLmMaxForce                 { get; set; } = 8000f;
-    // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — the FoldEngine
-    // "lattice" reference generator, also the freeze-frame oracle. Window =
+    // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md) — the fold's
+    // reference generator, also the freeze-frame oracle. Window =
     // the disk of radius LookaheadPx around the seed (radial horizon). ConeCos > 0 is structural (the DAG condition, §3.3) and
     // is set to "90° − ε" so every forward offset is an edge — climbing is
     // priced by RiseWeight, never filtered (with the ±3 offset table any
-    // value ≤ 0.316 admits the same edges). Sim-affecting under "lattice" —
+    // value ≤ 0.316 admits the same edges). Sim-affecting —
     // hot-reload is gated like every movement knob.
     // Planning horizon: the radius of the disk around the seed the DP searches
     // (2026-09-30; was a distance along u with a cone-footprint window). It is
@@ -408,9 +366,6 @@ public class MovementConfig
     // the freeze-frame oracle only.
     public float LatticeSeedRunPx               { get; set; } = 0f;
     public float LatticeSeedRunMinSpeed         { get; set; } = 15f;
-    // Max unresolved clearance residual (px) an ambient plan may carry and still
-    // be applied. Small: ambient assists are grazes, not commitments.
-    public float AmbientRefusalResidual         { get; set; } = 1f;
 
     // Trigger-by-feasibility gate tolerance (px): the final corrected rollout must
     // reach within this of the landing gate line, past the lip, before any

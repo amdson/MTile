@@ -58,9 +58,6 @@ public class CaveMouthTests(ITestOutputHelper output)
     private SimFrame[] Drop(Vector2 start, Vector2 vel, int frames = 240,
                             int ledgeCols = 8, int ledgeTopRow = 3)
     {
-        bool prev = MovementConfig.Current.FoldCornerPlantEnabled;
-        MovementConfig.Current.FoldCornerPlantEnabled = true;
-        try
         {
             return SimRunner.Run(new SimConfig
             {
@@ -71,7 +68,6 @@ public class CaveMouthTests(ITestOutputHelper output)
                 Frames = frames, Dt = Dt, Gravity = Gravity,
             });
         }
-        finally { MovementConfig.Current.FoldCornerPlantEnabled = prev; }
     }
 
     // A face smack: x pinned at the wall (vx collapsed) while the body

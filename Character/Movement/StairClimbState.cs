@@ -87,7 +87,7 @@ public class StairClimbState : MovementState
         vars.TimeInState += ctx.Dt;
         // Standing's baseline and Standing's fold, with the climb priced free.
         ctx.Body.AppliedForce = StandingState.FoldBaseline(ctx);
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Stairs, startGrounded: true);
+        ApplyAmbient(ctx, ref vars, FoldProfile.Stairs);
     }
 
     // A regular flight ahead: the first floor rise and the corner after it are both one

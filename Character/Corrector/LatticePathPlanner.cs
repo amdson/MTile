@@ -5,9 +5,8 @@ namespace MTile;
 
 // Lattice path planner (Plans/LATTICE_PATH_PLANNER.md): the spatial DP that
 // generates the fold's reference path. Phase 0/1 built it as a freeze-frame
-// oracle (Game1, beside the LM probe and the old state-space LatticePlanner);
-// phase 2 wires it as the FoldEngine "lattice" reference generator
-// (FoldLattice) in front of FoldReference's rows → deform → servo tail.
+// oracle (Game1, beside the old state-space LatticePlanner); it is now the
+// fold's only reference generator, tracked by LatticeTracker.
 //
 // The solve, per the plan:
 //   - a world-aligned cell grid (TileSize / LatticeCellsPerTile) over a

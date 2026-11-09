@@ -15,14 +15,11 @@ namespace MTile;
 // The corrector solve is SHARED INFRASTRUCTURE, not a class of state — any
 // state opts into as much of it as fits its physics:
 //   - ApplyAmbient (every Update ends with one, on every return path): the
-//     per-frame ambient layer assists around the state's own forces with the
-//     redirect disc (AmbientCorrector). The state passes the policy it wants —
-//     Off for states that servo against fixed contacts, where an ambient
-//     assist would fight the owned maneuver.
-//   - FoldProfile: fold states (Standing/Crouched/Falling) go further and
-//     delegate support/walk/brake/landing-catch to the ambient solve entirely,
-//     passing a fold profile to the same call; the profile shapes the
-//     reference (hover height, progress cap).
+//     state hands the ambient layer a FoldProfile. A fold profile delegates
+//     support/walk/brake/landing-catch to the lattice tracker and shapes its
+//     plan (hover height, speed, rise); FoldProfile.None means the state owns
+//     its own forces (it servos against fixed contacts, or is under someone
+//     else's control) and the ambient layer does nothing.
 //   - ManeuverCorrector.Apply: a committed maneuver whose future is PHYSICS
 //     (a launch arc) predicts its guided coast and solves body-force
 //     corrections around it, per-tick and as a trigger-by-feasibility probe
@@ -108,18 +105,8 @@ public abstract class MovementState
         body.Constraints.Add(c);
     }
 
-
-    // The lattice engine (Plans/LATTICE_PATH_PLANNER.md) changes what several
-    // states hand the ambient layer — which FoldProfile, whether a launch is
-    // an impulse or a planned rise, which launch states yield. One gate.
-    protected static bool OnLattice => MovementConfig.Current.FoldEngine == "lattice";
-
-    protected static void ApplyAmbient(EnvironmentContext ctx, PlayerAbilityState abilities,
-        ref MovementVars vars, AmbientPolicy policy, in FoldProfile fold, bool startGrounded = false)
-    {
-        if (abilities.Combat.HitstunActive) policy = AmbientPolicy.Off;
-        AmbientCorrector.Apply(ctx, policy, startGrounded, fold, ref vars);
-    }
+    protected static void ApplyAmbient(EnvironmentContext ctx, ref MovementVars vars, in FoldProfile fold)
+        => AmbientCorrector.Apply(ctx, fold, ref vars);
 
     // The animation-facing CATEGORY of this state (AnimTag.None = generic: the animator picks
     // by grounded/velocity). Replaces substring matching on state class names, which silently

@@ -44,42 +44,6 @@ public class ClimbArbitrationTests(ITestOutputHelper output)
         return SimTerrain.FromAscii(string.Join("\n", rows), originTileX: 0, originTileY: 0);
     }
 
-    // ── Full registry through the bumpy corridor: as fast as the restricted
-    //    fold, and the climb family never fires under the tunnel ceiling ──
-    [Fact]
-    public void FullRegistry_BumpyCorridor_FoldOwnsTheTunnel()
-    {
-        var p = new PlayerCharacter(new Vector2(24f, 74f));   // FULL registry
-        var bodies = new List<PhysicsBody> { p.Body };
-        var ctrl = new Controller();
-        var terrain = CorridorTerrain();
-
-        // The corridor sentinel pins the "ref" engine (the production fold for
-        // this regime); qp's corridor performance is no longer a sentinel.
-        var prevEngine = MovementConfig.Current.FoldEngine;
-        MovementConfig.Current.FoldEngine = "ref";
-        var states = new List<string>();
-        try
-        {
-            for (int f = 0; f < 800; f++)
-            {
-                ctrl.InjectInput(new PlayerInput { Right = true });
-                p.Update(ctrl, terrain, new HitboxWorld(), new HurtboxWorld(), Dt);
-                PhysicsWorld.StepSwept(bodies, terrain, Dt, Gravity);
-                states.Add(p.CurrentStateName);
-            }
-        }
-        finally { MovementConfig.Current.FoldEngine = prevEngine; }
-
-        float avg = (p.Body.Position.X - 24f) / (800 * Dt);
-        output.WriteLine($"avg {avg:F1} px/s, final x={p.Body.Position.X:F1} of 1024");
-        // Matches the fall+stand-restricted baseline (~76 px/s) — the broken
-        // mantle-cycling behavior ran at ~51 with head bonks and trough stalls.
-        Assert.True(avg > 70f, $"full-registry corridor too slow: {avg:F1} px/s");
-        Assert.True(p.Body.Position.X > 1000f, $"stalled at x={p.Body.Position.X:F1}");
-        Assert.DoesNotContain(states, s =>
-            s.Contains("Parkour") || s.Contains("Mantle") || s.Contains("ArcJump"));
-    }
 
     // ── Same-frame race at a lip: the player's jump beats the auto-climb ─────
     [Fact]

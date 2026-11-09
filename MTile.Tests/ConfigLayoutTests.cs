@@ -120,7 +120,7 @@ public class ConfigLayoutTests(ITestOutputHelper output)
     // because that kind of mutation leaks). So any key whose shipped value
     // differs from its C# default is tuning the GAME uses and no test ever sees.
     //
-    // Not hypothetical: FoldEngine sat at "qp" here while the game shipped
+    // Not hypothetical: the since-removed FoldEngine knob sat at "qp" here while the game shipped
     // "lattice", so every corrector and movement test was validating a solver
     // that does not ship. Compared by reflection rather than by calling Load,
     // to keep the no-static-mutation property the rest of this file documents.

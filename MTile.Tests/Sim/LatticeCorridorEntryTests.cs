@@ -50,9 +50,6 @@ public class LatticeCorridorEntryTests(ITestOutputHelper output)
     private static Result Run(int step, float distance, float speed, float phase)
     {
         var cfg = MovementConfig.Current;
-        string prevEngine = cfg.FoldEngine;
-        cfg.FoldEngine = "lattice";
-        try
         {
             var chunks = Terrain(step);
             var shape = PlayerCharacter.CreateBodyPolygon();
@@ -88,7 +85,6 @@ public class LatticeCorridorEntryTests(ITestOutputHelper output)
             }
             return new Result(entry >= 0, entry, peak, minVx, lattice, route, refused, noRoute, string.Join('>', states));
         }
-        finally { cfg.FoldEngine = prevEngine; }
     }
 
     private void Report(string name, Result r) =>

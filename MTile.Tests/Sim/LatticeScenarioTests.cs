@@ -6,8 +6,7 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests.Sim;
 
-// Plans/LATTICE_SCENARIOS.md, one test per encoded row, under FoldEngine
-// "lattice" (LatticeTracker: short-horizon channel QP over the path's first
+// Plans/LATTICE_SCENARIOS.md, one test per encoded row (LatticeTracker: short-horizon channel QP over the path's first
 // stretch — band + progress rows, BuildFold channels with frozen masks).
 // These pin the CORRECT behavior from the table, not today's —
 // rows the engine cannot do yet are Skip'ped with the row's blocker so they
@@ -18,12 +17,8 @@ namespace MTile.Tests.Sim;
 // standing hover 10 → rest center = floor top − 20.4; a 2-high (32 px)
 // opening fits standing by ~1 px. Walk 100 px/s; a running jump (walking
 // speed) rises ≈ 49 px over ≈ 88 px of ground.
-public class LatticeScenarioTests(ITestOutputHelper output) : IDisposable
+public class LatticeScenarioTests(ITestOutputHelper output)
 {
-    private readonly string _prevEngine = Swap("lattice");
-    private static string Swap(string e) { var p = MovementConfig.Current.FoldEngine; MovementConfig.Current.FoldEngine = e; return p; }
-    public void Dispose() => MovementConfig.Current.FoldEngine = _prevEngine;
-
     private const int Ts = Chunk.TileSize;
     private static readonly float Rest = 2f * PlayerCharacter.Radius - 3.6f;   // 20.4: hover rest below a floor top
     private static readonly PlayerInput Right = new() { Right = true };

@@ -3,8 +3,7 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-// The lattice fold engine's tracker (MovementConfig.FoldEngine "lattice" —
-// Plans/LATTICE_PATH_PLANNER.md §3.7): a SHORT-HORIZON channel QP over the
+// The fold engine's tracker (Plans/LATTICE_PATH_PLANNER.md §3.7): a SHORT-HORIZON channel QP over the
 // planned trajectory's first stretch, on CorrectionSolver.
 //
 //   nominal    the exact free rollout — v += (F_baseline + g)·dt, p += v·dt —

@@ -339,7 +339,7 @@ public class TerrainCarriedState : MovementState
         // clearance-only ambient assist acted on 3% of carried frames (mean 11
         // vs the servo's ~790); switching it off changed no test — the one
         // visible effect is the drop after a ride ends (lands at ~100 px/s, was ~70).
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
 
     }
 }

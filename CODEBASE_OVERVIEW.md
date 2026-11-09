@@ -186,7 +186,7 @@ namespace edit, and both compile globs (`MTile.Core`, and `MTile.Web`'s `..\**\*
 | [`Input/`](Character/Input/) | Raw hardware → intent: `Controller` (+`PlayerInput`), `InputParser`, `IntentBuffer`, `InputIntent`, `SmoothPen`. |
 | [`Movement/`](Character/Movement/) | The movement FSM (`Movement`, the six `*States.cs` families, `MovementPriorities`) plus its plumbing (`MovementConfig`, `MovementVars`, `MovementModifiers`, `MovementCapability`, `AirControl`, `JumpServo`). |
 | [`Action/`](Character/Action/) | The action/combat FSM: `ActionStates` (+`ActionVars`), `CombatState`, `ConditionState`, `PlayerAbilityState`, `BuildMeters`, `IHittable`. |
-| [`Corrector/`](Character/Corrector/) | The ballistic corrector stack — `AmbientCorrector`, `CorrectionSolver`, `BallisticPredictor`, `FoldReference`, `TrajectoryLm`, the `Corrector*` support types, the path tracker (`PathTracker` + its policies `GripPathPolicy` / `SlidePathPolicy`), and the geometry/path helpers (`CObstacle`, `CorridorProbe`, `ClearanceConstraints`, `ReferencePath` — clip retargeting + `ReferenceClipRegistry`, `GuidedPath`, `HermiteClip`, `LatticePlanner`). |
+| [`Corrector/`](Character/Corrector/) | The ballistic corrector stack — `AmbientCorrector`, `CorrectionSolver`, `BallisticPredictor`, the `Corrector*` support types, the path tracker (`PathTracker` + its policies `GripPathPolicy` / `SlidePathPolicy`), and the geometry/path helpers (`CObstacle`, `CorridorProbe`, `ClearanceConstraints`, `ReferencePath` — clip retargeting + `ReferenceClipRegistry`, `GuidedPath`, `HermiteClip`, `LatticePlanner`). |
 | [`Sensing/`](Character/Sensing/) | `EnvironmentContext` and the five terrain checkers it caches (`Ground`/`Ceiling`/`Wall`/`ExposedUpperCorner`/`ExposedLowerCorner`). |
 
 ### `PlayerCharacter` ([Character/PlayerCharacter.cs](Character/PlayerCharacter.cs))
@@ -217,30 +217,30 @@ Each `Update`:
 
 `MovementStates.cs` no longer exists — the states are split by family across [LocomotionStates.cs](Character/Movement/LocomotionStates.cs), [JumpStates.cs](Character/Movement/JumpStates.cs), [WallStates.cs](Character/Movement/WallStates.cs), [LedgeStates.cs](Character/Movement/LedgeStates.cs), [ClimbStates.cs](Character/Movement/ClimbStates.cs), and [ReactionStates.cs](Character/Movement/ReactionStates.cs). **All arbitration numbers live in [MovementPriorities.cs](Character/Movement/MovementPriorities.cs), which is the single source of truth** — prefer it over the band summaries in this doc.
 
-> **The corrector era** (Plans/BALLISTIC_CORRECTOR_PLAN.md +
-> Plans/CORRECTOR_CONSOLIDATION_PLAN.md): free-state locomotion is now
-> solver-driven — "the solver IS the locomotion controller". The FOLD states
-> (Standing/Falling/Crouched) attach **no** ground constraint and no spring;
-> they apply only a gravity-hold + station-friction baseline
-> (`StandingState.FoldBaseline`) and publish a `FoldProfile` (hover offset,
-> climb reach, target speed). Each frame `AmbientCorrector.Apply` predicts a
-> correction-free coast (`BallisticPredictor`), emits clearance rows against
-> exact per-tile C-space geometry (`CObstacle`, `ClearanceConstraintBuilder`)
-> plus soft envelope-reference rows (hover/progress), and solves a restricted
-> channel stack (`CorrectorChannels`: LegServo/Drive/CornerAssist/Redirect/
-> Tuck — capability = channel restriction, never casework) with the
-> preconditioned projected-gradient `CorrectionSolver`. Hover, walking,
-> braking, landing catch, 1-high climbs, ducks, and graze deflections are all
-> solver output; climb bindings are ALL-OR-NOTHING with rollout-checked
-> deliverability and hysteresis (elective refusal — the honest bonk). The
-> corrector climb family (`ParkourCorrectorState`/`ArcJumpCorrectorState`/
-> `MantleCorrectorState`) owns bigger maneuvers on the same predict→rows→solve
-> loop with its own full channel stack (`BuildManeuver`). Channel semantics
-> are physical and uniform: legs + plant-and-deflect redirect near the ground
-> (redirect only on dynamic, unsupported ticks), air control only in flight
-> (lateral + tiny vertical — no redirect against nothing). Non-fold states
-> keep their owned servo mechanics and gate ambient assists via
-> `AmbientPolicy`.
+> **The corrector era** (Plans/LATTICE_PATH_PLANNER.md; history in
+> Plans/BALLISTIC_CORRECTOR_PLAN.md + Plans/CORRECTOR_CONSOLIDATION_PLAN.md):
+> free-state locomotion is solver-driven — "the solver IS the locomotion
+> controller". The FOLD states (Standing/Falling/Crouched, and the jumps via
+> their own profiles) attach **no** ground constraint and no spring; they
+> apply only a baseline (`StandingState.FoldBaseline`: gravity hold +
+> station friction; air control in flight) and hand `ApplyAmbient` a
+> `FoldProfile` (hover offset, speed, rise cost, rising, legs). There is ONE
+> fold engine: `LatticePathPlanner` (a spatial DP over a lattice around the
+> body) gives the path's shape, and `LatticeTracker` — a 5-tick channel QP on
+> `PathTracker` + `CorrectionSolver` — picks this tick's forces: hard band
+> rows around the path, a soft progress row, speed rows, and clearance rows
+> against exact per-tile C-space geometry (`CObstacle`,
+> `ClearanceConstraintBuilder`), solved over the channel stack
+> (`CorrectorChannels.BuildFold`: LegServo/Drive/Redirect/Tuck/ContactPush,
+> with `LatticeTracker`'s mask overrides). Hover, walking, landing catch,
+> 1-high climbs and ducks are solver output. A state that passes
+> `FoldProfile.None` owns its own forces and gets nothing from the ambient
+> layer. The `qp`, `ref` and `lm` fold engines, `AmbientPolicy` and the
+> `FoldEngine` knob were removed 2026-11-09; `BallisticPredictor` and
+> `ManeuverCorrector` remain only as the climb family's trigger probe
+> (`BuildManeuver`). Known disagreements between what a state assumes and
+> what the channels do, and the planned environment → resources → states
+> refactor: Plans/MOVEMENT_RESOURCE_MODEL.md.
 >
 > **Path tracking** (Plans/PATH_TRACKER_UNIFICATION_PLAN.md, 2026-10-16):
 > `PathTracker` is the lattice tracker's bead / band / progress solve made
@@ -254,10 +254,9 @@ Each `Update`:
 > brace on the corner); `Dropdown` the feet (`BuildSlide`). Jump launches stay
 > velocity writes, with the tracker riding a jump profile (hybrid;
 > `FoldProfile.Legs` / `ImpulseJump` keep the legs from launching twice).
-> `TerrainCarried` runs with the corrector off. On the lattice engine no state
-> reaches the old ballistic-coast ambient path any more.
+> `TerrainCarried` runs with the corrector off.
 
-**Fold states**: `FallingState` (0/0, fallback), `StandingState` (10/10), `CrouchedState` (15/15) — support/locomotion via the ambient fold (above). **Wall**: `WallSlidingState(dir)` (owned; publishes `AmbientPolicy.Off`).
+**Fold states**: `FallingState` (0/0, fallback), `StandingState` (10/10), `CrouchedState` (15/15) — support/locomotion via the ambient fold (above). **Wall**: `WallSlidingState(dir)` (owned contacts; rides `FoldProfile.Fall`).
 **Stun**: `StunnedState` (25/25) — heavy-hit lockout; muted air control while `Combat.StunActive`. Preempts free air but not active jumps. `TumbleState` (**51 active / 26 passive**) — airborne while stunned, or launched and still in hitstun (`TumbleState.Tumbling`); a launch past its hitstun gives air control and jump back mid-flight: its high Active keeps it in the launch band so nothing steals the body mid-launch, while its low Passive lets a player hit mid-jump finish the arc first.
 **Launch states**: `JumpingState`, `RunningJumpState`, `DoubleJumpingState`, `WallJumpingState(dir)`, `CoveredJumpState` (under low overhangs) — set vY once, hold while button held. Actives 50–60, but **passives are only 30–48** (they're trigger-driven, not assertive).
 **Guided traversals**: the corrector climb family above at **29/29** — trigger-by-feasibility, a maneuver fires iff its corrected arc provably delivers. 29 deliberately sits *below* every launch's passive (Jump 30 … CoveredJump 48) so a player's own jump input always wins the same-frame race at a lip, while still outbidding every free state and the stun band. (The old 46/46 was a genuine bug: preemption compares candidate Passive to current Active, so climbs were in fact unbeatable.) Holds are 42–44 (`LedgeGrabState`/`LedgePullState`, wall corners via `FloatingSurfaceDistance` + ability flags), `LedgeJumpState` is 55/44, and `DropdownState` (Down+platform-drop) sits at 20/20 in the free band.

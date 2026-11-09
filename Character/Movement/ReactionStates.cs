@@ -48,7 +48,7 @@ public class GrabbedState : MovementState
 
         // No reflex assists while held. (Called even though Off: clears cross-frame
         // ambient anchor state.)
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
     }
 }
 
@@ -101,7 +101,7 @@ public class StunnedState : MovementState
 
         // No reflex assists while stunned — knockback must plow into corners honestly.
         // (Called even though Off: clears cross-frame ambient anchor state.)
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
     }
 }
 
@@ -187,7 +187,7 @@ public class TumbleState : MovementState
             ctx.Combat.Tech(ctx.CurrentFrame, ctx.Dt, TechInvulnSeconds);
             ctx.Body.Velocity = new Vector2(ctx.Body.Velocity.X * TechHorizKeep, -TechBounceVy);
             ctx.Body.AppliedForce = Vector2.Zero;
-            ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+            ApplyAmbient(ctx, ref vars, FoldProfile.None);
             return;
         }
 
@@ -199,7 +199,7 @@ public class TumbleState : MovementState
             ctx.Combat.Tech(ctx.CurrentFrame, ctx.Dt, TechInvulnSeconds);
             ctx.Body.Velocity = new Vector2(-wallDir * WallTechPushVx, -WallTechBounceVy);
             ctx.Body.AppliedForce = Vector2.Zero;
-            ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+            ApplyAmbient(ctx, ref vars, FoldProfile.None);
             return;
         }
 
@@ -218,6 +218,6 @@ public class TumbleState : MovementState
         ctx.Body.AppliedForce = force;
 
         // No reflex assists while launched — same reasoning as StunnedState.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
     }
 }

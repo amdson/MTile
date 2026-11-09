@@ -241,7 +241,7 @@ public class LedgeGrabState : MovementState
 
         // Ambient Off: body is pinned to the corner — an ambient redirect would fight
         // the hang contacts. Still called so cross-frame anchor state is cleared.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
     }
 
     // Spring toward an anchor with a saturated damper. The raw linear damping term
@@ -402,7 +402,7 @@ public class LedgePullState : MovementState
         }
         // Ambient Off: the grip solve is this state's corrector — no ambient
         // redirect on top. Still called so cross-frame anchor state is cleared.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
     }
 }
 
@@ -484,6 +484,6 @@ public class LedgeJumpState : MovementState
         // Ambient Off: the launch off the corner is a committed arc past the very
         // corner an ambient ramp would try to steer around — keep the layer out for
         // the launch frames. Still called so cross-frame anchor state is cleared.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
     }
 }

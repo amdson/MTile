@@ -6,25 +6,12 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests.Sim;
 
-// The lattice stand-fold engine (MovementConfig.FoldEngine "lattice" →
+// The lattice stand-fold engine (
 // LatticePathPlanner for the shape, LatticeTracker's short-horizon channel
 // QP for the forces; Plans/LATTICE_PATH_PLANNER.md §1 revised note).
-// The FoldRefEngineTests contracts, verbatim, for the new engine — plus a
-// rollback round trip across the lattice solve. The qp engine stays the
-// config default, so the rest of the sim suite is unaffected.
-public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
+// The fold-engine contracts, plus a rollback round trip across the lattice solve.
+public class FoldLatticeEngineTests(ITestOutputHelper output)
 {
-    private readonly string _prevEngine = Swap("lattice");
-
-    private static string Swap(string engine)
-    {
-        var prev = MovementConfig.Current.FoldEngine;
-        MovementConfig.Current.FoldEngine = engine;
-        return prev;
-    }
-
-    public void Dispose() => MovementConfig.Current.FoldEngine = _prevEngine;
-
     // 6 open rows above the floor (66 px at the 11 px grid, comfortably more
     // than the ~33 px standing body) plus a long, 64-tile floor — the old
     // 3-open-row/24-col shape gave only 48 px of headroom and 384 px of
@@ -273,7 +260,7 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
     // course (the planner runs every tick here). Generous ceiling so CI noise
     // can't flake it; the number is what matters for the rollback budget.
     [Fact]
-    public void Cost_TunnelStep_LatticeVsRef()
+    public void Cost_TunnelStep()
     {
         const int W = 64;
         int ts = Chunk.TileSize;
@@ -296,10 +283,8 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
             rows[r] = sb.ToString();
         }
         string terrain = string.Join("\n", rows);
-        double Run(string engine)
+        double Run()
         {
-            var prev = Swap(engine);
-            try
             {
                 var sim = new Simulation(SimTerrain.FromAscii(terrain),
                                          new Vector2(24f, 6 * ts - 2f * PlayerCharacter.Radius));
@@ -314,10 +299,9 @@ public class FoldLatticeEngineTests(ITestOutputHelper output) : IDisposable
                 sw.Stop();
                 return sw.Elapsed.TotalMilliseconds * 1000.0 / 540;
             }
-            finally { Swap(prev); }
         }
-        double lattice = Run("lattice"), reference = Run("ref");
-        output.WriteLine($"tunnel step: lattice {lattice:F1} us/step, ref {reference:F1} us/step");
+        double lattice = Run();
+        output.WriteLine($"tunnel step: {lattice:F1} us/step");
         Assert.True(lattice < 2000.0, $"lattice step {lattice:F0} us — orders off the budget");
     }
 

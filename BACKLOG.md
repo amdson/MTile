@@ -289,7 +289,7 @@ passes. The other three moved to the skipped table above (Slash1 hold field, Div
 
 ## 6. In-flight experiments
 
-**Redirect audit** — `Character/Corrector/FoldReference.cs` and `AmbientCorrector.cs` carry a `TEMP EXPERIMENT`:
+**Redirect audit** — *(2026-11-09: `FoldReference.cs` and the qp path in `AmbientCorrector.cs` were deleted with the `qp`/`ref`/`lm` fold engines, and the audit counters went with them; the open question below now applies only to the lattice tracker's Redirect channel.)* `Character/Corrector/FoldReference.cs` and `AmbientCorrector.cs` carried a `TEMP EXPERIMENT`:
 redirect audit counters (`AuditSolves`/`AuditMaskFrames`/`AuditFireFrames`/`AuditMaxZr`/`AuditNetZr`)
 plus a second Redirect channel grafted into the ref fold path, gated on `FoldRedirectEnabled`
 for hot A/B. **No longer uncommitted** — it landed in the `0eeab5b` "WIP working state" bundle
@@ -299,7 +299,7 @@ is clean, land it" vs "it eats vx as the qp audit measured, drop it", then strip
 fix those tests.
 
 Related ablation knobs, all hot-reloadable from `configs/movement_config.json`:
-`FoldEngine` ("qp" | "ref" | "lattice" | "lm"), `CorrectorVaultEnabled`, `FoldRedirectEnabled`.
+`CorrectorVaultEnabled`, `FoldRedirectEnabled` (`FoldEngine` is gone — the lattice is the only fold engine since 2026-11-09).
 The "lattice" engine (`LatticePathPlanner` + `LatticeTracker`, `Plans/LATTICE_PATH_PLANNER.md`) is
 the engine `movement_config.json` ships (2026-08-28); phases 0–2 built, jump/wall states on it, the
 maneuver states keep their own solves. What remains — engine decision (§4.9), perf gate, playtest

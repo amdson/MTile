@@ -29,7 +29,6 @@ public class RunningJumpLatticeTests(ITestOutputHelper output)
     [InlineData(1f / 30f)]
     public void HeldRunningJump_RisesItsOwnHeight_NoSecondLaunch(float dt)
     {
-        Assert.Equal("lattice", MovementConfig.Current.FoldEngine);
         int runIn = (int)(0.6f / dt);
         var trace = SimRunner.Run(new SimConfig
         {

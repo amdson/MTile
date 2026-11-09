@@ -63,10 +63,7 @@ public class TwoHighCorridorEntryTests(ITestOutputHelper output)
     {
         Directory.CreateDirectory(Results);
         var cfg = MovementConfig.Current;
-        string previous = cfg.FoldEngine;
-        cfg.FoldEngine = "lattice";
         var summary = new List<string> { "kind,step,distance,speed,hold,phase,entered,entryFrames,minVx,stallFrames,peakImpulse,latticeFrames,noPathFrames,newObstacleFrames,opposingRowFrames,wallResidual,endX,endY,states" };
-        try
         {
             foreach (int step in new[] { 0, 1 })
             foreach (float speed in new[] { 50f, 100f, 150f })
@@ -78,7 +75,6 @@ public class TwoHighCorridorEntryTests(ITestOutputHelper output)
             foreach (float phase in new[] { 0f, 1.8f })
                 summary.Add(Run(step, distance, 100, hold, phase));
         }
-        finally { cfg.FoldEngine = previous; }
         File.WriteAllLines(Path.Combine(Results, "summary.csv"), summary);
         File.WriteAllText(Path.Combine(Results, "movement-config.json"),
             System.Text.Json.JsonSerializer.Serialize(cfg, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
@@ -92,11 +88,10 @@ public class TwoHighCorridorEntryTests(ITestOutputHelper output)
     {
         Directory.CreateDirectory(Results);
         var cfg = MovementConfig.Current;
-        var previous = (cfg.FoldEngine, cfg.LatticeCellsPerTile, cfg.CorrectorMargin);
+        var previous = (cfg.LatticeCellsPerTile, cfg.CorrectorMargin);
         var summary = new List<string>();
         try
         {
-            cfg.FoldEngine = "lattice";
             foreach (string mode in new[] { "baseline", "qp-margin", "dense-grid", "both" })
             {
                 cfg.LatticeCellsPerTile = mode is "dense-grid" or "both" ? 8 : previous.LatticeCellsPerTile;
@@ -110,7 +105,7 @@ public class TwoHighCorridorEntryTests(ITestOutputHelper output)
             cfg.CorrectorMargin = previous.CorrectorMargin;
             summary.Add("crouch," + Run(0, 24, 100, 0, 0, "crouch", true));
         }
-        finally { (cfg.FoldEngine, cfg.LatticeCellsPerTile, cfg.CorrectorMargin) = previous; }
+        finally { (cfg.LatticeCellsPerTile, cfg.CorrectorMargin) = previous; }
         File.WriteAllLines(Path.Combine(Results, "ablations.csv"), summary);
         foreach (string row in summary) output.WriteLine(row);
         Assert.Equal(49, summary.Count);

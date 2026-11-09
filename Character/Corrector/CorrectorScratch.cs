@@ -80,12 +80,9 @@ public sealed class CorrectorScratch
     // contact position (body center at the row's tick) and the δv it shoved into
     // the applied tick-0 correction (CorrectionProblem.RowPush; force = δv/dt).
     // Cleared every frame; empty whenever nothing was applied.
-    // Elective-deliverability scratch (AmbientCorrector): the corrected rollout
-    // and the R1 stepped-reference record it is checked against. Pure per-frame
+    // The path tracker's free rollout (PathTracker.FreeRollout). Pure per-frame
     // derived data, never snapshot state.
     public readonly CoastSample[] DeliverySamples = new CoastSample[BallisticPredictor.MaxHorizon];
-    public readonly float[] RefY     = new float[BallisticPredictor.MaxHorizon];
-    public readonly bool[]  RefClimb = new bool[BallisticPredictor.MaxHorizon];
 
     public readonly Vector2[] RowPush    = new Vector2[ClearanceConstraintBuilder.MaxEvents];
     public readonly Vector2[] ContactPos = new Vector2[ClearanceConstraintBuilder.MaxEvents];
@@ -96,11 +93,7 @@ public sealed class CorrectorScratch
     // (CorrectorLedger doc) — always-on bookkeeping, unlike the capture buffers.
     public readonly CorrectorLedger Ledger = new();
 
-    // Nonlinear fold engine (MovementConfig.FoldEngine "lm") — pooled per
-    // player like everything here; stateless between solves (seed is always
-    // the straight line at current velocity), so never snapshot state.
-    public readonly TrajectoryLm Lm = new();
-    // Lattice fold engine (MovementConfig.FoldEngine "lattice") — the DP's
+    // The lattice fold engine — the DP's
     // pooled scratch plus its output polyline; fully rewritten every solve,
     // never snapshot state.
     public readonly LatticePathPlanner Lattice = new();

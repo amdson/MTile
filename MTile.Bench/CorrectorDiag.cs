@@ -14,9 +14,6 @@ namespace MTile.Bench;
 // animation solver's LM — different algorithm, different file — so the animation findings
 // say nothing about it, and `bumpy corridor` being 6-12x the cost of every other sim
 // scenario points straight at it.
-//
-// (The LM-based TrajectoryLm oracle is NOT in this path: movement_config.json ships
-// FoldEngine "ref", and the "lm" engine is a freeze-frame diagnostic.)
 internal static class CorrectorDiag
 {
     public static void Run()

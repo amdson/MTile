@@ -32,12 +32,10 @@ public class FallingState : MovementState
 
         ctx.Body.AppliedForce = force;
 
-        // Falling is a fold state: the landing catch (anchor re-binding on
-        // descent) and the graze/duck assists all run through the fold solve.
-        // High free fall is naturally unbound (anchor beyond leg reach ⇒ no
-        // envelope rows).
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
-            OnLattice ? FoldProfile.Fall : FoldProfile.Stand);
+        // Falling's plan is a level line at the body's height (obstacle
+        // avoidance only — see FoldProfile.Fall); air control above stays the
+        // state's baseline.
+        ApplyAmbient(ctx, ref vars, FoldProfile.Fall);
     }
 }
 
@@ -103,7 +101,7 @@ public class StandingState : MovementState
 
         // Fold: support, walk drive, braking, and the landing catch are all
         // delegated to the ambient solve (see the class comment above Update).
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Stand, startGrounded: true);
+        ApplyAmbient(ctx, ref vars, FoldProfile.Stand);
     }
 
     // Shared fold-state baseline, mirrored tick-for-tick by the predictor's
@@ -203,7 +201,7 @@ public class CrouchedState : MovementState
 
         // Fold: the crouch IS reference shaping (see the class comment) —
         // support and crawl-speed drive are the ambient solve's job.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Crouch, startGrounded: true);
+        ApplyAmbient(ctx, ref vars, FoldProfile.Crouch);
     }
 }
 
@@ -339,6 +337,6 @@ public class DropdownState : MovementState
         }
         // Ambient Off: the path solve is this state's corrector — the ambient layer must not
         // stack a second correction on top. Still called so cross-frame anchor state clears.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
     }
 }

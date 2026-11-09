@@ -32,7 +32,7 @@ public class JumpingState : MovementState
         // Buffered jump intent rather than a raw edge: a press up to
         // JumpBufferFrames before landing still fires. Consumed in Enter.
         if (!ctx.Intents.Peek(IntentType.Jump, ctx.CurrentFrame, out _, ctx.JumpBufferFrames)) return false;
-        if (!ctx.TryGetGround(out var ground))
+        if (!ctx.TryGetGround(out _))
         {
             // Corner push-off (movement_todo #4): a gripped corner is a
             // legal launch surface — jumping out of a hang (LedgeGrab
@@ -48,18 +48,13 @@ public class JumpingState : MovementState
             // reach, or the lip of a ledge beside the body (JumpSupportChecker).
             if (!OnStairTread(ctx) && !TryCornerLaunch(ctx, abilities, out _)
                 && !JumpSupportChecker.TryFind(ctx.Body, ctx.Chunks, out _)) return false;
-            return OnLattice || !(ctx.TryGetCeiling(out var c)
-                     && ctx.Body.Position.Y - c.Position.Y <= JumpClearance.Headroom);
+            return true;
         }
         // Hitstun/stun lock-out is enforced centrally via RequiredCapabilities.Jump
         // (the selection loop drops jump candidates while BlocksJump). Movement
         // otherwise stays free — it only blocks the cheap vertical-reset option.
-        // Low ceiling (< body headroom) overhead: head would smack — defer to CoveredJumpState.
-        // On the lattice engine there is no deferral: the DP plans the rise
-        // from under the slab — the bevel escape near an edge, an honest
-        // bonk deeper in — and CoveredJumpState yields (§7.3, row 3).
-        if (!OnLattice && ctx.TryGetCeiling(out var ceiling)
-            && ground.Position.Y - ceiling.Position.Y <= JumpClearance.Headroom) return false;
+        // No deferral under a low ceiling: the DP plans the rise from under the
+        // slab — the bevel escape near an edge, an honest bonk deeper in (§7.3, row 3).
         return true;
     }
 
@@ -131,7 +126,7 @@ public class JumpingState : MovementState
     }
 
     // The lattice-native planned rise (above), as opposed to the hybrid impulse.
-    private static bool PlannedRise(in MovementVars vars) => OnLattice && !vars.JumpImpulse;
+    private static bool PlannedRise(in MovementVars vars) => !vars.JumpImpulse;
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
     {
@@ -165,11 +160,11 @@ public class JumpingState : MovementState
         // source FSD: same kind of contact, just tuned for an airborne body.
         ctx.Body.Constraints.RemoveAll(c => c is FloatingSurfaceDistance);
         // Planned rise only where the legs can launch it (see LegsInReach).
-        vars.JumpImpulse = OnLattice && !LegsInReach(ctx);
+        vars.JumpImpulse = !LegsInReach(ctx);
         if (PlannedRise(vars))
         {
             // No source constraint, no impulse: the tracker's legs are the
-            // support and the launch (see OnLattice).
+            // support and the launch (see PlannedRise).
             vars.JumpFromCorner = !TryFindSource(ctx, out _);
             vars.JumpEntryY = ctx.Body.Position.Y;
             return;
@@ -225,7 +220,7 @@ public class JumpingState : MovementState
             var mo = ctx.Modifiers; var cf = MovementConfig.Current;
             ctx.Body.AppliedForce = new Vector2(AirControl.Apply(ctx,
                 cf.AirAccel * mo.AirAccel, cf.MaxAirSpeed * mo.MaxAirSpeed, cf.AirDrag * mo.AirDrag), 0f);
-            ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default, FoldProfile.Jump);
+            ApplyAmbient(ctx, ref vars, FoldProfile.Jump);
             return;
         }
         EnsureSource(ctx);
@@ -259,8 +254,7 @@ public class JumpingState : MovementState
         // Hybrid on the lattice engine (a launch with no legs under it — see
         // LegsInReach): the impulse above is the launch, the tracker rides the
         // rising plan with the legs off, as RunningJumpState does.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
-            OnLattice ? FoldProfile.ImpulseJump : FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.ImpulseJump);
     }
 
     private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
@@ -369,8 +363,7 @@ public class RunningJumpState : MovementState
         // Hybrid on the lattice engine (like DoubleJump/WallJump): the impulse
         // above is the launch; the tracker follows the rising plan with the
         // legs off (FoldProfile.ImpulseJump) so they don't launch it again.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
-            OnLattice ? FoldProfile.ImpulseJump : FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.ImpulseJump);
     }
 
     private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
@@ -443,8 +436,7 @@ public class DoubleJumpingState : MovementState
         // the engine allows no upward air force — and the tracker shapes the
         // arc around terrain under the Jump profile (hover off, rising along
         // intent). Unlike the ground jump, the legs play no part.
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Default,
-            OnLattice ? FoldProfile.Jump : FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.Jump);
     }
 }
 
@@ -606,7 +598,7 @@ public class CoveredJumpState : MovementState
                 ctx.Body.AppliedForce = Vector2.Zero;
                 // Off: owns its own Under ramp for the slide-out (EnsureContacts) — no
                 // ambient duplicates. Still called so stale cross-frame anchor state clears.
-                ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+                ApplyAmbient(ctx, ref vars, FoldProfile.None);
                 return;
             }
 
@@ -644,7 +636,7 @@ public class CoveredJumpState : MovementState
             float along = vars.OpenDir * ctx.Body.Velocity.X;
             slideForce.X += vars.OpenDir * AirControl.SoftClampVelocity(along, vars.SlideSpeed, cfg.WalkAccel, ctx.Dt);
             ctx.Body.AppliedForce = slideForce;
-            ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+            ApplyAmbient(ctx, ref vars, FoldProfile.None);
             return;
         }
 
@@ -660,6 +652,6 @@ public class CoveredJumpState : MovementState
 
         ctx.Body.AppliedForce = force;
 
-        ApplyAmbient(ctx, abilities, ref vars, AmbientPolicy.Off, FoldProfile.None);
+        ApplyAmbient(ctx, ref vars, FoldProfile.None);
     }
 }
