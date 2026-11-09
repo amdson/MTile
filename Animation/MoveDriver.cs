@@ -308,19 +308,21 @@ public sealed class AirborneDriver : IMoveDriver
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }
 
-// Crouching: a moving crouch plays the CrouchWalk shuffle cycle (same cadence machinery as
-// Walk); a still crouch under a solid ceiling right overhead plays DuckUnder (tucked head,
-// braced hand — LowCeiling comes from the same CeilingChecker query CrouchedState uses,
-// read-only); otherwise the generic static Crouch.
+// Crouching: CrouchWalk is the one crouch clip, moving or still. Its phase is driven by body
+// travel (CadencePhase), so a still crouch simply holds/settles the shuffle cycle rather than
+// switching to a separate static pose. The one exception is a still crouch under a solid
+// ceiling right overhead, which plays DuckUnder (tucked head, braced hand — LowCeiling comes
+// from the same CeilingChecker query CrouchedState uses, read-only). The old static Crouch
+// clip is no longer selected.
 public sealed class CrouchDriver : IMoveDriver
 {
     public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
         => s.Tag == AnimTag.Crouch;
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
     {
-        if (MathF.Abs(s.Velocity.X) > GroundLocomotionDriver.WalkSpeedThreshold)
-            return new ClipChoice(AnimClip.CrouchWalk, ClipTimeMode.CadencePhase);
-        return new ClipChoice(s.LowCeiling ? AnimClip.DuckUnder : AnimClip.Crouch, ClipTimeMode.Clock);
+        if (s.LowCeiling && MathF.Abs(s.Velocity.X) <= GroundLocomotionDriver.WalkSpeedThreshold)
+            return new ClipChoice(AnimClip.DuckUnder, ClipTimeMode.Clock);
+        return new ClipChoice(AnimClip.CrouchWalk, ClipTimeMode.CadencePhase);
     }
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }
