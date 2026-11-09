@@ -1,0 +1,109 @@
+{
+  "Name": "crouchskid",
+  "Type": "CrouchSkid",
+  "Skeleton": "biped_rabbit",
+  "Duration": 0.3,
+  "Loop": false,
+  "Scene": {
+    "Guides": [
+      {
+        "Id": "g1",
+        "Kind": "Ground",
+        "X": 0,
+        "Y": 40,
+        "W": 0,
+        "H": 0,
+        "Label": "floor"
+      }
+    ]
+  },
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.42
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 1.0472895
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 1.0472895
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -1.4695983
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.26423264
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 1.1165768
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.055066586
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": -0.054872166
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": -0.054872166
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -2.6443875
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.416572
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.8221968
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.4010988
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 1.3409842
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.3640796
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -18.1384,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    }
+  ]
+}

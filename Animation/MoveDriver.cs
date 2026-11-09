@@ -157,6 +157,7 @@ public static class MoveDrivers
             new LaunchClipDriver(AnimTag.WallJump,  AnimClip.WallJumpKick, LaunchClipDriver.WallJumpWindow),
             new LaunchClipDriver(AnimTag.DoubleJump, AnimClip.DoubleJump, LaunchClipDriver.DoubleJumpWindow),
             new LaunchClipDriver(AnimTag.Dash,      AnimClip.Dash,       LaunchClipDriver.DashWindow),
+            new SkidDriver(),
             new LandingDriver(),
             new AirborneDriver(),
             new GroundLocomotionDriver(),
@@ -243,6 +244,45 @@ public sealed class GroundLocomotionDriver : IMoveDriver
     }
 }
 
+// Knockback along the floor. A grounded hit leaves the FSM in Standing/Crouched (it only
+// mutes self-control — PlayerCharacter's PreserveExternalVelocity), so the body slides at well
+// over walking speed while the state still says "walking"; read as locomotion, the cadence
+// solve spins the stride to match and the feet tip-toe. Instead the shove plays a held,
+// clock-timed skid pose: Skid standing, CrouchSkid crouched (CrouchDriver).
+//
+// Entry is the sample's Knockback flag (hitstun muting control / a guard push's slide) with the
+// body actually travelling. The skid then HOLDS past the flag for as long as the body is still
+// faster than that stance can move itself (MaxWalkSpeed / CrouchMaxWalkSpeed, plus a margin) —
+// hitstun ends long before the slide does, and dropping into Run at 2x the run speed is the
+// exact tip-toe this exists to remove. Below that, the walk cycle can honestly carry the speed.
+public static class SkidMotion
+{
+    // Hold margin over the stance's own speed cap, so the float-spring/accel ripple right at
+    // the cap doesn't flicker skid ↔ walk on the way out.
+    public const float HoldSpeedMargin = 1.1f;
+
+    public static bool IsSkidding(in CharacterAnimSample s, in CharacterAnimState st, bool crouched)
+    {
+        if (!s.Grounded || s.GroundGap > GroundLocomotionDriver.PreContactGap) return false;
+        float speed = MathF.Abs(s.Velocity.X);
+        if (speed <= GroundLocomotionDriver.WalkSpeedThreshold) return false;
+        if (s.Knockback) return true;
+        if (st.Clip is not (AnimClip.Skid or AnimClip.CrouchSkid)) return false;
+        var mc = MovementConfig.Current;
+        float selfMax = crouched ? mc.CrouchMaxWalkSpeed : mc.MaxWalkSpeed;
+        return speed > selfMax * HoldSpeedMargin;
+    }
+}
+
+public sealed class SkidDriver : IMoveDriver
+{
+    public bool Matches(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => s.Tag != AnimTag.Crouch && SkidMotion.IsSkidding(in s, in st, crouched: false);
+    public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
+        => new(AnimClip.Skid, ClipTimeMode.Clock);
+    public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
+}
+
 // The touchdown one-shot: a landing that settles into the IDLE BAND plays the authored Land
 // clip for a moment instead of dropping straight onto Idle. Touching down into a walk or a run
 // is deliberately excluded — the feet are already cycling and a one-shot would stutter them —
@@ -308,7 +348,8 @@ public sealed class AirborneDriver : IMoveDriver
     public void Contribute(in CharacterAnimSample s, float t, FrameInputs dst) { }
 }
 
-// Crouching: CrouchWalk is the one crouch clip, moving or still. Its phase is driven by body
+// Crouching: a knockback shove plays CrouchSkid (SkidMotion). Otherwise CrouchWalk is the one
+// crouch clip, moving or still. Its phase is driven by body
 // travel (CadencePhase), so a still crouch simply holds/settles the shuffle cycle rather than
 // switching to a separate static pose. The one exception is a still crouch under a solid
 // ceiling right overhead, which plays DuckUnder (tucked head, braced hand — LowCeiling comes
@@ -320,6 +361,8 @@ public sealed class CrouchDriver : IMoveDriver
         => s.Tag == AnimTag.Crouch;
     public ClipChoice Select(in CharacterAnimSample s, in CharacterAnimState st, in AnimHistory h)
     {
+        if (SkidMotion.IsSkidding(in s, in st, crouched: true))
+            return new ClipChoice(AnimClip.CrouchSkid, ClipTimeMode.Clock);
         if (s.LowCeiling && MathF.Abs(s.Velocity.X) <= GroundLocomotionDriver.WalkSpeedThreshold)
             return new ClipChoice(AnimClip.DuckUnder, ClipTimeMode.Clock);
         return new ClipChoice(AnimClip.CrouchWalk, ClipTimeMode.CadencePhase);

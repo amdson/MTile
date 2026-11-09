@@ -242,6 +242,58 @@ public class CharacterAnimatorTests
         }
     }
 
+    // ─── knockback skids (SkidMotion) ───────────────────────────────────────────────────
+    // A grounded shove leaves the FSM in Standing/Crouched; without the skid clips the body's
+    // over-cap speed reads as locomotion and the cadence tip-toes. The shove (Knockback flag)
+    // plays the skid; it holds past the flag while the body is still faster than the stance can
+    // move itself, then hands back to locomotion.
+    [Fact]
+    public void StandingKnockback_PlaysSkid_HoldsWhileOverWalkCap_ThenReturnsToLocomotion()
+    {
+        var anim = RealAnimator();
+        float cap = MovementConfig.Current.MaxWalkSpeed * SkidMotion.HoldSpeedMargin;
+        for (int i = 0; i < 4; i++) Ground(anim, 0f);
+
+        Shoved(anim, -150f, AnimTag.None, knockback: true);
+        Assert.Equal(AnimClip.Skid, anim.State.Clip);
+        Shoved(anim, -(cap + 10f), AnimTag.None, knockback: false);   // flag gone, still sliding
+        Assert.Equal(AnimClip.Skid, anim.State.Clip);
+        Shoved(anim, -(cap - 10f), AnimTag.None, knockback: false);   // walkable speed again
+        Assert.NotEqual(AnimClip.Skid, anim.State.Clip);
+    }
+
+    [Fact]
+    public void CrouchedKnockback_PlaysCrouchSkid_ThenCrouchWalk()
+    {
+        var anim = RealAnimator();
+        float cap = MovementConfig.Current.CrouchMaxWalkSpeed * SkidMotion.HoldSpeedMargin;
+
+        Shoved(anim, -150f, AnimTag.Crouch, knockback: true);
+        Assert.Equal(AnimClip.CrouchSkid, anim.State.Clip);
+        Shoved(anim, -(cap + 10f), AnimTag.Crouch, knockback: false);
+        Assert.Equal(AnimClip.CrouchSkid, anim.State.Clip);
+        Shoved(anim, -(cap - 10f), AnimTag.Crouch, knockback: false);
+        Assert.Equal(AnimClip.CrouchWalk, anim.State.Clip);
+    }
+
+    // Speed alone never starts a skid: a fast self-propelled run is still the run.
+    [Fact]
+    public void FastRun_WithoutKnockback_IsNotASkid()
+    {
+        var anim = RealAnimator();
+        for (int i = 0; i < 6; i++) Ground(anim, 150f);
+        Assert.Equal(AnimClip.Run, anim.State.Clip);
+    }
+
+    private static void Shoved(CharacterAnimator anim, float vx, AnimTag tag, bool knockback)
+    {
+        for (int i = 0; i < 3; i++)
+            anim.Update(new CharacterAnimSample(
+                Vector2.Zero, new Vector2(vx, 0f), 1, true,
+                tag == AnimTag.Crouch ? "CrouchedState" : "StandingState", "", 1f / 60f,
+                tag: tag, knockback: knockback));
+    }
+
     private static void Fall(CharacterAnimator anim, int frames)
     {
         for (int i = 0; i < frames; i++)

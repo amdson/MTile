@@ -146,6 +146,14 @@ public readonly struct CharacterAnimSample
     // 0 (supported) for hand-built samples/tests.
     public readonly float   GroundGap;
 
+    // The body is being SHOVED, not walking itself: a hit's hitstun is muting self-control, or
+    // a guard push's slide is running — the exact window in which PlayerCharacter sets
+    // MovementModifiers.PreserveExternalVelocity so the ground states stop braking the shove.
+    // The movement FSM stays in Standing/Crouched through it, so without this the animator
+    // reads the over-cap speed as locomotion and tip-toes the cadence cycle to keep up; with
+    // it, SkidMotion picks the Skid / CrouchSkid clips. Render-only.
+    public readonly bool    Knockback;
+
     // Terrain, for the step planner's finite-tread queries (SupportQuery) — render-only
     // read, same one-way direction as every other sim read here. Null in hand-built
     // samples/tests and on hosts that don't wire it: the planner then simply never runs.
@@ -164,7 +172,7 @@ public readonly struct CharacterAnimSample
         bool hasAim = false, Vector2 aimDir = default, AnimTag tag = AnimTag.None,
         int surfaceCount = -1, bool? surfacesNear = null, bool lowCeiling = false,
         float groundGap = 0f, int recoveryFramesLeft = 0, ChunkMap chunks = null,
-        Func<float, Vector2> predictAt = null, string actionVariant = null)
+        Func<float, Vector2> predictAt = null, string actionVariant = null, bool knockback = false)
     {
         Position = position; Velocity = velocity; Facing = facing; Grounded = grounded;
         MovementState = movementState; Action = action; Dt = dt; ActionTime = actionTime;
@@ -173,6 +181,7 @@ public readonly struct CharacterAnimSample
         Surfaces = surfaces; SurfaceCount = surfaceCount; HasGrip = hasGrip; GripTarget = gripTarget;
         HasAim = hasAim; AimDir = aimDir; Tag = tag; LowCeiling = lowCeiling; GroundGap = groundGap;
         Chunks = chunks; PredictAt = predictAt; ActionVariant = actionVariant;
+        Knockback = knockback;
         // Default (hand-built samples, tests): surfaces present ⇒ near — the pre-terrain behavior.
         SurfacesNear = surfacesNear ?? (surfaces != null && (surfaceCount < 0 ? surfaces.Length : surfaceCount) > 0);
     }
@@ -184,7 +193,7 @@ public readonly struct CharacterAnimSample
         => new(Position, Velocity, facing, Grounded, MovementState, Action, Dt, ActionTime,
                ActionProgress, MovementProgress, Pins, Surfaces, HasGrip, GripTarget, HasAim, AimDir,
                Tag, SurfaceCount, SurfacesNear, LowCeiling, GroundGap, RecoveryFramesLeft, Chunks,
-               PredictAt, ActionVariant);
+               PredictAt, ActionVariant, Knockback);
 
     // How far above the body's top (px) a solid tile counts as "right over the head" for a
     // grounded, non-crouched sample's LowCeiling. Deliberately TIGHTER than the FSM's
@@ -294,6 +303,12 @@ public readonly struct CharacterAnimSample
             && p.Combat?.HitstunActive != true && p.Combat?.StunActive != true)
             recoveryLeft = Math.Max(0, cond.RecoveryExpireFrame - p.Frame);
 
+        // Shoved rather than self-propelled — the same condition PlayerCharacter uses to set
+        // PreserveExternalVelocity (hitstun muting control, or a guard push's slide).
+        var combat = p.Combat;
+        bool knockback = combat != null
+                         && ((combat.HitstunActive && combat.HitstunMutesControl) || combat.SlideActive(p.Frame));
+
         return new(pos, p.Body.Velocity, facing, p.IsGrounded,
                p.CurrentStateName, p.CurrentActionName, dt,
                p.CurrentActionVars.TimeInState,
@@ -304,7 +319,8 @@ public readonly struct CharacterAnimSample
                hasAim: hasAim, aimDir: aimDir, tag: tag, lowCeiling: lowCeiling,
                groundGap: groundGap, recoveryFramesLeft: recoveryLeft,
                chunks: chunks, predictAt: predictAt,
-               actionVariant: p.CurrentAction?.AnimationVariant(p.CurrentActionVars));
+               actionVariant: p.CurrentAction?.AnimationVariant(p.CurrentActionVars),
+               knockback: knockback);
     }
 
     // The most risers still ahead of the body for which the probe tags StepUp (the last

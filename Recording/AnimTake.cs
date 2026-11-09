@@ -78,6 +78,7 @@ public sealed class AnimTake
         public float  Ay { get; set; }
         public float  GroundGap { get; set; }   // physical float above rest height (0 = supported)
         public bool   LowCeiling { get; set; }  // solid tile right over the head (CeilingChecker)
+        public bool   Knockback { get; set; }   // shoved, not self-propelled (Skid / CrouchSkid)
         public int    Terrain { get; set; }   // index into TerrainStates
 
         public static SampleDto From(in CharacterAnimSample s, int terrainIndex)
@@ -93,6 +94,7 @@ public sealed class AnimTake
                 HasAim = s.HasAim, Ax = s.AimDir.X, Ay = s.AimDir.Y,
                 GroundGap = s.GroundGap,
                 LowCeiling = s.LowCeiling,
+                Knockback = s.Knockback,
                 Terrain = terrainIndex,
             };
             if (s.Pins is { Length: > 0 })
@@ -131,7 +133,7 @@ public sealed class AnimTake
                 new Vector2(Px, Py), new Vector2(Vx, Vy), Facing, Grounded, State, Action, Dt,
                 ActionTime, ActionProgress, MoveProgress, pins, surfaces,
                 HasGrip, new Vector2(Gx, Gy), HasAim, new Vector2(Ax, Ay), (AnimTag)Tag,
-                lowCeiling: LowCeiling, groundGap: GroundGap);
+                lowCeiling: LowCeiling, groundGap: GroundGap, knockback: Knockback);
         }
     }
 

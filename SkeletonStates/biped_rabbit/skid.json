@@ -1,0 +1,109 @@
+{
+  "Name": "skid",
+  "Type": "Skid",
+  "Skeleton": "biped_rabbit",
+  "Duration": 0.3,
+  "Loop": false,
+  "Scene": {
+    "Guides": [
+      {
+        "Id": "g1",
+        "Kind": "Ground",
+        "X": 0,
+        "Y": 40,
+        "W": 0,
+        "H": 0,
+        "Label": "floor"
+      }
+    ]
+  },
+  "Keyframes": [
+    {
+      "Time": 0,
+      "Bones": [
+        {
+          "Bone": "hip",
+          "Rotation": 0
+        },
+        {
+          "Bone": "chest",
+          "Rotation": -1.49
+        },
+        {
+          "Bone": "head",
+          "Rotation": 0
+        },
+        {
+          "Bone": "shoulder_l",
+          "Rotation": -1.57,
+          "Stretch": 0.9643816
+        },
+        {
+          "Bone": "shoulder_r",
+          "Rotation": 1.57,
+          "Stretch": 0.9643816
+        },
+        {
+          "Bone": "arm_l_upper",
+          "Rotation": -1.1975536
+        },
+        {
+          "Bone": "arm_l_lower",
+          "Rotation": -0.56549394
+        },
+        {
+          "Bone": "arm_r_upper",
+          "Rotation": 0.92762816
+        },
+        {
+          "Bone": "arm_r_lower",
+          "Rotation": 0.5261738
+        },
+        {
+          "Bone": "hip_l",
+          "Rotation": -3.14159,
+          "Stretch": 0.101040825
+        },
+        {
+          "Bone": "hip_r",
+          "Rotation": 0,
+          "Stretch": 0.101040825
+        },
+        {
+          "Bone": "leg_l_upper",
+          "Rotation": -2.41501
+        },
+        {
+          "Bone": "leg_l_lower",
+          "Rotation": 1.0505888
+        },
+        {
+          "Bone": "foot_l",
+          "Rotation": -1.8132106
+        },
+        {
+          "Bone": "leg_r_upper",
+          "Rotation": 1.5279536
+        },
+        {
+          "Bone": "leg_r_lower",
+          "Rotation": 0.9719992
+        },
+        {
+          "Bone": "foot_r",
+          "Rotation": -1.3621202
+        }
+      ],
+      "Additions": [
+        {
+          "Name": "com",
+          "Kind": "Point",
+          "Px": 0,
+          "Py": -16.0384,
+          "Dx": 0,
+          "Dy": 0
+        }
+      ]
+    }
+  ]
+}
