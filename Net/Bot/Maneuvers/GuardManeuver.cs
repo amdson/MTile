@@ -69,9 +69,13 @@ public sealed class GuardManeuver : BotManeuver
         // the designed escape between a true string's hits (S2 -> S3 lands a frame after the
         // victim is free). Refusing any hitstun (as before 2026-11-05) meant the bot never
         // guarded inside a string once every hit kept its full window.
-        if (c.HitstunActive && c.HitstunExpireFrame - v.SelfFrame > 12) return 0f;
         if (v.Dist > ThreatRange) return 0f;
         if (!IsThreat(v.TargetAction)) return 0f;
+        // GuardAction may come up inside the last 5f of hit disadvantage (GuardAction.
+        // MaxEntrySeconds); the Wait phase below holds WaitFor frames first, so what matters
+        // is the hitstun left at the RAISE (2026-11-06: S1's hitstun grew to 22f, and gating
+        // on the hitstun left NOW made the read start late and the raise miss S2).
+        if (c.HitstunActive && c.HitstunExpireFrame - v.SelfFrame - WaitFor(v.TargetAction) > 5) return 0f;
         // Beats an in-range slash (1.0): a swing is incoming, so parrying first is better.
         return 1.5f;
     }

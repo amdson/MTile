@@ -264,7 +264,6 @@ public struct PlayerData
 
     // Player-local selection.
     public TileType ActiveBlockType;
-    public bool     SpikesSelected;
 
     // Deep-copy the reference members so a captured/restored PlayerData never shares
     // mutable state with the live player or with another (repeated-restore) copy. Value

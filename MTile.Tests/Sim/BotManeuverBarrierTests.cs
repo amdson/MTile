@@ -38,7 +38,7 @@ public class BotManeuverBarrierTests
         {
             var sb = new System.Text.StringBuilder();
             for (int x = left - 1; x <= right + 1; x++)
-                sb.Append(chunks.Spikes.IsSpiked(x, y) ? '^' : chunks.GetCellState(x, y) == TileState.Solid ? 'X' : '.');
+                sb.Append(chunks.GetCellState(x, y) == TileState.Spike ? '^' : chunks.GetCellState(x, y) == TileState.Solid ? 'X' : '.');
             _out.WriteLine($"row {y}: {sb}");
         }
 

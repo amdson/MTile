@@ -107,7 +107,7 @@ public sealed class HudRenderer
             bool isSpikeSlot = i == types.Length;
             bool selected = isSpikeSlot ? spikes : !spikes && types[i] == activeBlockType;
 
-            var col = isSpikeSlot ? TilePalette.SpikeColor(player.Faction)
+            var col = isSpikeSlot ? TilePalette.SpikeColor(player.Team)
                                   : TilePalette.BaseColor(types[i]);
             var fill = selected ? col : new Color((int)(col.R * 0.4f), (int)(col.G * 0.4f), (int)(col.B * 0.4f));
             _spriteBatch.Draw(_pixel, new Rectangle(x, y0, SwatchSize, SwatchSize), fill);
@@ -340,7 +340,7 @@ public sealed class HudRenderer
 
         int sy = y + (rowH - SwatchS) / 2;
         _spriteBatch.Draw(_pixel, new Rectangle(x, sy, SwatchS, SwatchS),
-            spikes ? TilePalette.SpikeColor(player.Faction) : TilePalette.BaseColor(type));
+            spikes ? TilePalette.SpikeColor(player.Team) : TilePalette.BaseColor(type));
         Frame(x, sy, SwatchS, SwatchS, new Color(30, 30, 34));
 
         // The count comes from the reservoir, but the warning tint asks the pool that

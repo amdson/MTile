@@ -146,7 +146,7 @@ internal static class ZeusBeam
             if (gtx == lastGtx && gty == lastGty) continue;      // half-tile step revisits cells
             lastGtx = gtx; lastGty = gty;
 
-            if (chunks.GetCellState(gtx, gty) == TileState.Empty) continue;
+            if (chunks.GetCellState(gtx, gty).IsOpen()) continue;
 
             spent += TileDamage.MaxHPFor(chunks.GetCellType(gtx, gty));
             if (spent >= penetration) return d;

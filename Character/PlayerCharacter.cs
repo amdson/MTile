@@ -224,7 +224,12 @@ public class PlayerCharacter : IHittable
         // knockback below; it is (1, 1) when the guard wasn't involved.
         var guard = _abilities.Combat.ResolveGuard(hit.KnockbackImpulse, hit.BodyDamage,
                                                    _abilities.Facing, _frame, _dt);
-        if (guard.Absorbed) return hit.KnockbackImpulse;
+        if (guard.Absorbed)
+        {
+            GuardStoppedHit(in hit, CombatState.GuardParryHitstopSeconds,
+                            CombatState.GuardParryPushbackAttacker, CombatState.GuardParryPushbackVictim);
+            return hit.KnockbackImpulse;
+        }
 
         // Struggle / grab-break (COMBAT_FEEL_PLAN Phase 6). A grabbed victim's exempt
         // slash erodes THIS player's grab strength instead of dealing knockback/percent/
@@ -260,6 +265,8 @@ public class PlayerCharacter : IHittable
         if (guard.Blocked)
         {
             AddKnockback(res.TargetDeltaV * guard.KnockbackScale * MovementConfig.Current.KnockbackSpeedScale);
+            GuardStoppedHit(in hit, CombatState.GuardBlockHitstopSeconds,
+                            CombatState.GuardBlockPushbackAttacker, CombatState.GuardBlockPushbackVictim);
             return res.Impulse;
         }
         // How hard this hit actually moves us, px/s — what armor, stun and hitstun read.
@@ -323,11 +330,41 @@ public class PlayerCharacter : IHittable
                                           hit.HitstunSecondsOverride,
                                           hitstopStrength: HitResolver.ImpactStrength(res.Impulse),
                                           stunSeconds: stunSeconds,
-                                          chains: !hit.Source.IsNone);
+                                          chains: !hit.Source.IsNone,
+                                          hitstopSecondsOverride: hit.HitstopSecondsOverride);
         // Hitstop is frame-neutral: the freeze also pushes this player's own recovery /
         // combo stamps out, as it did the hitstun window inside ApplyHitstop.
         _abilities.Condition.ShiftExpiries(_abilities.Combat.TakeHitstopShift());
         return res.Impulse;
+    }
+
+    // A guard stopped this hit (2026-11-06 pacing pass): freeze both players for `seconds`
+    // (frame-neutral, like a connect's hitstop) and shove them apart along the hit line.
+    // The victim's share is applied here; the attacker's rides CombatSystem's recoil and
+    // hitstop inboxes, which its attack reads next frame (the same path a connect uses).
+    // Nothing registers as a hit: no hitstun, no LastHitFrame, so no flinch on either side.
+    private void GuardStoppedHit(in Hitbox hit, float seconds, float attackerPush, float victimPush)
+    {
+        var fromAttacker = -hit.KnockbackImpulse;
+        if (fromAttacker.LengthSquared() > 1e-6f) fromAttacker.Normalize();
+        OnGuardStopped(-fromAttacker * victimPush, seconds, CombatState.GuardPushSlideSeconds);
+        CombatSystem?.NotifyAttackerGuardStopped(in hit, fromAttacker * attackerPush, seconds,
+                                                 CombatState.GuardPushSlideSeconds);
+    }
+
+    // Either side of a guarded exchange (IHittable): shove, freeze, slide. The shove lands in
+    // Body.Velocity now; PreStep's hitstop hold stashes it and releases it on the thaw, so the
+    // bodies part as the picture unfreezes. The slide keeps the ground states from braking
+    // the shove to nothing on its first frame.
+    public void OnGuardStopped(Vector2 push, float hitstopSeconds, float slideSeconds)
+    {
+        if (push.LengthSquared() > 0f) AddKnockback(push);
+        if (slideSeconds > 0f) _abilities.Combat.BeginSlide(_frame, _dt);
+        if (hitstopSeconds > 0f)
+        {
+            _abilities.Combat.ApplyHitstop(_frame, hitstopSeconds, _dt);
+            _abilities.Condition.ShiftExpiries(_abilities.Combat.TakeHitstopShift());
+        }
     }
 
     // Called by Game1 on Health <= 0 to reset to a clean starting state. Cheaper
@@ -467,17 +504,9 @@ public class PlayerCharacter : IHittable
         set { if (TileTypes.IsPlaceable(value)) _activeBlockType = value; }
     }
 
-    // Spike-overlay selection (block picker key 5). A separate flag rather than a
-    // TileType because spikes are not a material: they overlay an existing solid cell
-    // (BLOCK_OWNERSHIP_SPIKES §2). While set, the RMB build gestures spike the cell
-    // under the cursor instead of building; _activeBlockType keeps the last material so
-    // keys 1-4 drop straight back to it. Snapshotted alongside it in PlayerData.
-    private bool _spikesSelected;
-    public bool SpikesSelected
-    {
-        get => _spikesSelected;
-        set => _spikesSelected = value;
-    }
+    // Spikes are a material (block picker key 5, TileType.Spike): the RMB build gestures
+    // lay spike tiles, and a charged release launches the crystal wave.
+    public bool SpikesSelected => _activeBlockType == TileType.Spike;
 
     public MovementState GetPreviousState(int framesBack)
     {
@@ -705,11 +734,11 @@ public class PlayerCharacter : IHittable
         // level-triggered (re-assign harmlessly). Formerly interpreted in
         // Game1/Simulation against a global static — now player-local and
         // rollback-deterministic. (The P planner toggle that lived here is gone.)
-        if (input.Num1) { _activeBlockType = TileType.Stone; _spikesSelected = false; }
-        if (input.Num2) { _activeBlockType = TileType.Dirt;  _spikesSelected = false; }
-        if (input.Num3) { _activeBlockType = TileType.Sand;  _spikesSelected = false; }
-        if (input.Num4) { _activeBlockType = TileType.Foam;  _spikesSelected = false; }
-        if (input.Num5) _spikesSelected = true;
+        if (input.Num1) _activeBlockType = TileType.Stone;
+        if (input.Num2) _activeBlockType = TileType.Dirt;
+        if (input.Num3) _activeBlockType = TileType.Sand;
+        if (input.Num4) _activeBlockType = TileType.Foam;
+        if (input.Num5) _activeBlockType = TileType.Spike;
 
         _abilities.JumpJustPressed  = input.Space && !prev.Space;
         _abilities.UpJustPressed    = input.Up    && !prev.Up;
@@ -719,12 +748,14 @@ public class PlayerCharacter : IHittable
         _abilities.Condition.Tick(_frame);
         // Expire hitstun / stun whose window closed.
         _abilities.Combat.Tick(_frame, guardHeld: input.Shift, dt);
-        // A launch is over once the body is back on the floor, not on its way up, and
-        // the hit's velocity share has bled out (Physics/Launch.cs) - not while hitstop
-        // still holds the body with the launch parked in the stash, and not while a
-        // floor-level launch is still sliding the victim along the ground.
+        // A launch is over once the hit's velocity share has bled out (Physics/Launch.cs),
+        // airborne or not (2026-11-06: no longer sticky until landing - a long fall after
+        // the launch is spent is just a fall: tumble, grab immunity and the slam stun end
+        // with it). Not while hitstop holds the body with the launch parked in the stash.
+        // A throw has no Body.Launch (the grab field flings it), so a thrown victim stays
+        // launched for the throw's hitstun instead - Thrown clears when that lapses.
         if (_abilities.Combat.Launched && !_abilities.Combat.HitstopActive && !Body.Launch.Active
-            && IsGrounded && Body.Velocity.Y >= 0f)
+            && !_abilities.Combat.Thrown)
             _abilities.Combat.Launched = false;
         // Re-read every frame so movement_config hot-reload retunes it live.
         Body.QuadraticDrag = MovementConfig.Current.QuadraticAirDrag;
@@ -780,7 +811,6 @@ public class PlayerCharacter : IHittable
             HitIds         = HitIds,
             CombatSystem   = CombatSystem,
             ActiveBlockType = _activeBlockType,
-            SpikesSelected  = _spikesSelected,
             Intents        = _intents,
             UpHeldFrames         = _inputParser.UpHeldFrames(_frame),
             UpReleasedHoldFrames = _inputParser.UpReleasedHoldFrames(_frame),
@@ -918,7 +948,8 @@ public class PlayerCharacter : IHittable
         // being steered away or clipped by the speed caps. The residual accel is
         // the victim's DI; PreserveExternalVelocity stops AirControl / the ground
         // states from braking over-cap velocity back down.
-        if (_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl)
+        if ((_abilities.Combat.HitstunActive && _abilities.Combat.HitstunMutesControl)
+            || _abilities.Combat.SlideActive(_frame))   // guard pushback slide: the shove carries
         {
             ctx.Modifiers.WalkAccel      *= CombatState.HitstunAccelScale;
             ctx.Modifiers.AirAccel       *= CombatState.HitstunAccelScale;
@@ -1050,7 +1081,6 @@ public class PlayerCharacter : IHittable
         d.Parser             = _inputParser.Capture();
         d.Intents            = _intents.Capture();
         d.ActiveBlockType    = _activeBlockType;
-        d.SpikesSelected     = _spikesSelected;
         world.Get<BodyStateComp>(Id).State = BodyState.Capture(Body);
     }
 
@@ -1078,7 +1108,6 @@ public class PlayerCharacter : IHittable
         _intents.Restore(s.Intents);
 
         _activeBlockType = s.ActiveBlockType;
-        _spikesSelected  = s.SpikesSelected;
 
         world.Get<BodyStateComp>(Id).State.RestoreInto(Body);
 

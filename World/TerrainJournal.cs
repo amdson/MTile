@@ -32,6 +32,7 @@ public sealed class TerrainJournal
         public int       Tx, Ty;
         public TileState PrevState;   // TileWrite: cell's state/type BEFORE the write
         public TileType  PrevType;
+        public byte      PrevTeam;    // spike tiles' owning team (Tile.Team)
     }
 
     private readonly List<Entry> _entries = new();
@@ -41,8 +42,9 @@ public sealed class TerrainJournal
 
     // Record a cell's prior (state, type) before it is overwritten. Sprout refs are
     // NOT journaled — they're re-linked from the restored sprout graph (see ChunkMap).
-    public void RecordTileWrite(Point chunk, int tx, int ty, TileState prevState, TileType prevType)
-        => _entries.Add(new Entry { Kind = Kind.TileWrite, Chunk = chunk, Tx = tx, Ty = ty, PrevState = prevState, PrevType = prevType });
+    public void RecordTileWrite(Point chunk, int tx, int ty, TileState prevState, TileType prevType, byte prevTeam)
+        => _entries.Add(new Entry { Kind = Kind.TileWrite, Chunk = chunk, Tx = tx, Ty = ty,
+                                    PrevState = prevState, PrevType = prevType, PrevTeam = prevTeam });
 
     // Record that a chunk was lazily created (a sprout/build landed in an unloaded
     // chunk). Inverse drops it so _dict matches the snapshot exactly.
@@ -53,13 +55,13 @@ public sealed class TerrainJournal
     // cell's prior state/type; removeChunk drops a lazily-created chunk. Both write
     // directly (no re-journaling, no break events).
     public void RewindTo(int mark,
-                         Action<Point, int, int, TileState, TileType> revertTile,
+                         Action<Point, int, int, TileState, TileType, byte> revertTile,
                          Action<Point> removeChunk)
     {
         for (int i = _entries.Count - 1; i >= mark; i--)
         {
             var e = _entries[i];
-            if (e.Kind == Kind.TileWrite) revertTile(e.Chunk, e.Tx, e.Ty, e.PrevState, e.PrevType);
+            if (e.Kind == Kind.TileWrite) revertTile(e.Chunk, e.Tx, e.Ty, e.PrevState, e.PrevType, e.PrevTeam);
             else                          removeChunk(e.Chunk);
         }
         if (mark < _entries.Count) _entries.RemoveRange(mark, _entries.Count - mark);

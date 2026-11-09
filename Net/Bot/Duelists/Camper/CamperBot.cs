@@ -95,7 +95,7 @@ public sealed class CamperBot : IRemoteInputSource
         int maxRow = (int)MathF.Floor((pos.Y + FootDrop + T) / T);
         for (int y = top; y <= maxRow; y++)
         {
-            if (sim.Chunks.GetCellState(col, y) == TileState.Empty) continue;
+            if (sim.Chunks.GetCellState(col, y).IsOpen()) continue;
             cell = new Point(col, y - 1);
             return true;
         }

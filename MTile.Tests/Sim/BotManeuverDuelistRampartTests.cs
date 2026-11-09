@@ -67,9 +67,9 @@ public class BotManeuverDuelistRampartTests(ITestOutputHelper output)
         var me = sim.SecondaryPlayers[0].Player;
         int mx = (int)MathF.Floor(me.Body.Position.X / Chunk.TileSize);
         int front = 0, back = 0;
-        foreach (var (cell, side) in sim.Chunks.Spikes.Entries)
+        foreach (var cell in SpikeTiles.All(sim.Chunks))
         {
-            if (side.Faction != me.Faction) continue;
+            if (sim.Chunks.GetCellTeam(cell.gtx, cell.gty) != me.Team) continue;
             if (cell.gtx < mx) front++; else back++;   // P1 is to the left
         }
         output.WriteLine($"spikes front {front}, back {back}");
@@ -151,7 +151,7 @@ public class BotManeuverDuelistRampartTests(ITestOutputHelper output)
                 {
                     var sb = new System.Text.StringBuilder();
                     for (int x = cx - 14; x <= cx + 14; x++)
-                        sb.Append(sim.Chunks.Spikes.IsSpiked(x, y) ? 'S' : sim.Chunks.GetCellState(x, y) != TileState.Empty ? 'X'
+                        sb.Append(sim.Chunks.GetCellState(x, y) == TileState.Spike ? 'S' : sim.Chunks.GetCellState(x, y) != TileState.Empty ? 'X'
                             : sim.Chunks.Crystals.TryGet(x, y, out var cr) ? (cr.Pending ? ',' : cr.PhaseAt(now) == CrystalPhase.Gone ? '_' : '^') : '.');
                     output.WriteLine($"      row {y}: {sb} (x0 {cx - 14})");
                 }

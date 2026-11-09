@@ -40,6 +40,20 @@ public enum TileState : byte
     Empty,
     Sprouting,
     Solid,
+    // A spike tile: a NON-blocking hazard cell clinging to a solid neighbour on any face
+    // (Plans/BLOCK_OWNERSHIP_SPIKES.md §2, reworked 2026-11-07 from an overlay on the
+    // solid cell into a tile of its own). Collision, support and probes all test
+    // `== Solid`, so a spike is invisible to them; placement treats it as open air and
+    // overwrites it (TileStates.IsOpen). Tile.Team holds the placer's team; it hurts
+    // bodies of every other team once armed (SpikeContactSystem, TileSpikeSeeds).
+    Spike,
+}
+
+public static class TileStates
+{
+    // Air for every "is there room here" question: building, mass, line scans. A spike
+    // cell is open — it neither blocks nor supports, and a block placed on it replaces it.
+    public static bool IsOpen(this TileState s) => s == TileState.Empty || s == TileState.Spike;
 }
 
 // Material type. Each type has its own max-HP (TileDamage.MaxHPFor) and render color
@@ -61,6 +75,10 @@ public enum TileType : byte
     // the peel/grab entirely (TileTypes.IsGrabbable). Authored into levels with 'H';
     // terrain generation never emits it.
     Hardened,
+    // Spike material (picker key 5). Only ever paired with TileState.Spike — never a
+    // Solid cell. Painting/placing it goes through ChunkMap.TryRequestTile like any
+    // material, which routes it to TryRequestSpike.
+    Spike,
 }
 
 // Enum-wide facts about TileType that several subsystems need to agree on. Lives here
@@ -71,7 +89,7 @@ public static class TileTypes
     // Width of every fixed-size per-material array in the codebase (material tallies,
     // the orb texture table). TileType is a contiguous byte enum starting at 0, so this
     // is its cardinality — asserted against Enum.GetValues by TileTypeTests.
-    public const int Count = 5;
+    public const int Count = 6;
 
     // Can the player select this material in the block picker and build with it? The
     // gate lives on PlayerCharacter.ActiveBlockType, which every placement verb
@@ -90,6 +108,10 @@ public struct Tile
     public TileState State;
     public TileType  Type;          // material; meaningful only when State == Solid
     public TileSproutNode Sprout;   // non-null iff State == Sprouting (i.e. node is in Growing status)
+    public byte      Team;          // placer's team (0..MaxTeams-1); meaningful only when State == Spike
+
+    // Spike tiles record their placer's team in a byte; four teams is the supported range.
+    public const int MaxTeams = 4;
 
     // Back-compat property. Existing call sites that read or assign IsSolid keep
     // working; the underlying state machine is the source of truth.

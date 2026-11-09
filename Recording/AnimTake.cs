@@ -160,7 +160,7 @@ public sealed class AnimTake
                 for (int ty = 0; ty < Chunk.Size; ty++)
                 {
                     int i = tx * Chunk.Size + ty;
-                    if (cc.State[i] == TileState.Empty) continue;
+                    if (cc.State[i].IsOpen()) continue;
                     list.Add(new TileCell
                     {
                         X = cc.Pos.X * Chunk.Size + tx,

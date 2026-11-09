@@ -4,7 +4,9 @@ using Microsoft.Xna.Framework;
 
 namespace MTile;
 
-// Contact damage from spiked cells (Plans/BLOCK_OWNERSHIP_SPIKES.md §2). Runs once per
+// Contact damage from spike tiles (Plans/BLOCK_OWNERSHIP_SPIKES.md §2). A spike tile
+// (TileState.Spike) is a non-blocking cell clinging to a solid neighbour; a body hurts
+// when it overlaps an ARMED one (ChunkMap.IsArmedSpike) placed by another team. Runs once per
 // Simulation.Step, right after the physics sweep, so it sees where bodies actually came
 // to rest this frame — and, via CapturePreStep, how fast they were going on the way in.
 //
@@ -37,14 +39,14 @@ public sealed class SpikeContactSystem
     public const float FullImpactSpeed  = 400f;
     // Per-victim re-arm time: contact ticks, it doesn't shred.
     public const float CooldownSeconds  = 0.5f;
-    // Knockback impulse away from the spiked face (Impulse mode; the victim's mass
+    // Knockback impulse away from the block the spike clings to (Impulse mode; the victim's mass
     // divides it, so ~100 px/s on a 2.5-mass player). Kept under
     // CombatState.BigHitStrength (280) so a tick never stuns or hitstops.
     public const float KnockbackImpulse = 250f;
     // Short fixed hitstun per tick — long enough to register as a hit, short enough
     // (well under CooldownSeconds) that a player standing on spikes can still jump off.
     public const float HitstunSeconds   = 0.12f;
-    // How far (px) outside a body's AABB a spiked face still counts as touching. Covers
+    // How far (px) outside a body's AABB a spike cell still counts as touching. Covers
     // the standing spring's hover over the floor and the solver's resting skin.
     public const float ContactSlop      = 3f;
     // How far below a GROUNDED player's torso AABB its feet reach: the stand fold's
@@ -65,14 +67,10 @@ public sealed class SpikeContactSystem
         return ContactDamage + (MaxImpactDamage - ContactDamage) * t;
     }
 
-    // Does a spike owned by `side` hurt a body of (faction, team)? Placer's side never;
-    // co-op players never hurt each other; two Enemy-faction parties fall back to team.
-    public static bool Opposes(in TileSpikes.Side side, Faction faction, int team, bool coop)
-    {
-        if (coop && Factions.IsPlayer(side.Faction) && Factions.IsPlayer(faction)) return false;
-        if (side.Faction != faction) return true;
-        return side.Faction == Faction.Enemy && side.Team != team;
-    }
+    // Does a spike placed by `spikeTeam` hurt a body on `team`? A pure team test: every
+    // other team, never the placer's own. (Co-op players who shouldn't hurt each other
+    // share a team.)
+    public static bool Opposes(int spikeTeam, int team) => spikeTeam != team;
 
     // Record every body's velocity before the physics sweep zeroes the normal component
     // of whatever it hits. Called by Simulation immediately before StepSwept.
@@ -87,10 +85,8 @@ public sealed class SpikeContactSystem
     // deterministic. Returns the number of ticks landed (tests/diagnostics).
     public int Apply(ChunkMap chunks, HurtboxWorld hurtboxes,
                      Func<EntityId, IHittable> resolve, Func<EntityId, PhysicsBody> bodyOf,
-                     HitIdAllocator hitIds, int frame, bool coop)
+                     HitIdAllocator hitIds, int frame)
     {
-        if (chunks.Spikes.Count == 0) { PruneCooldowns(frame); return 0; }
-
         int cooldownFrames = SimFrames.FromSeconds(CooldownSeconds, Simulation.FixedDt);
         int landed = 0;
         _seenThisFrame.Clear();
@@ -114,7 +110,7 @@ public sealed class SpikeContactSystem
             // A grounded player's torso hovers over the floor it stands on (the stand fold
             // never physically touches it) — its feet reach FootReach below the AABB.
             float footReach = target is PlayerCharacter pc && pc.IsGrounded ? FootReach : 0f;
-            if (!FindContact(chunks, body, footReach, hb.Owner, team, coop, out var normal, out var side)) continue;
+            if (!FindContact(chunks, body, footReach, team, out var normal, out int spikeTeam)) continue;
 
             _preStepVelocity.TryGetValue(body, out var vin);
             float speed  = MathF.Max(0f, -Vector2.Dot(vin, normal));
@@ -122,7 +118,7 @@ public sealed class SpikeContactSystem
 
             var hit = new Hitbox(hb.Region, hitIds.Next(), damage: 0f,
                                  knockbackImpulse: normal * KnockbackImpulse,
-                                 owner: side.Faction, source: EntityId.None,
+                                 owner: FactionOfTeam(spikeTeam), source: EntityId.None,
                                  debugColor: Color.OrangeRed, targets: HitTargets.EntitiesOnly,
                                  bodyDamage: damage, hitstunSecondsOverride: HitstunSeconds,
                                  strikeDir: normal);
@@ -134,12 +130,13 @@ public sealed class SpikeContactSystem
         return landed;
     }
 
-    // The worst (most-opposing-approach) spiked face this body is touching. The face's
-    // outward normal points from the cell toward the body.
-    private bool FindContact(ChunkMap chunks, PhysicsBody body, float footReach, Faction faction, int team,
-                             bool coop, out Vector2 normal, out TileSpikes.Side side)
+    // The worst (most-opposing-approach) armed, opposing spike cell the body overlaps.
+    // Its normal points away from the solid block the spike clings to — up off a floor,
+    // out of a wall — which is the direction a spike shoves.
+    private bool FindContact(ChunkMap chunks, PhysicsBody body, float footReach, int team,
+                             out Vector2 normal, out int spikeTeam)
     {
-        normal = default; side = default;
+        normal = default; spikeTeam = 0;
         var b = ContactBounds(body, footReach);
         const float T = Chunk.TileSize;
         int gx0 = (int)MathF.Floor((b.Left   - ContactSlop) / T);
@@ -147,40 +144,50 @@ public sealed class SpikeContactSystem
         int gy0 = (int)MathF.Floor((b.Top    - ContactSlop) / T);
         int gy1 = (int)MathF.Floor((b.Bottom + ContactSlop) / T);
         _preStepVelocity.TryGetValue(body, out var vin);
+        var center = new Vector2((b.Left + b.Right) * 0.5f, (b.Top + b.Bottom) * 0.5f);
 
         bool found = false;
         float bestSpeed = -1f;
         for (int gy = gy0; gy <= gy1; gy++)
         for (int gx = gx0; gx <= gx1; gx++)
         {
-            if (!chunks.Spikes.TryGet(gx, gy, out var s)) continue;
-            if (chunks.GetCellState(gx, gy) != TileState.Solid) continue;
-            if (!Opposes(in s, faction, team, coop)) continue;
+            if (!chunks.IsArmedSpike(gx, gy)) continue;
+            int st = chunks.GetCellTeam(gx, gy);
+            if (!Opposes(st, team)) continue;
 
-            float cl = gx * T, cr = cl + T, ct = gy * T, cb = ct + T;
-            // Signed separations: positive = gap, negative = overlap, on each axis.
-            float gapL = cl - b.Right;   // body left of the cell
-            float gapR = b.Left - cr;    // body right of the cell
-            float gapT = ct - b.Bottom;  // body above the cell
-            float gapB = b.Top - cb;     // body below the cell
-            float sx = MathF.Max(gapL, gapR);
-            float sy = MathF.Max(gapT, gapB);
-            if (sx > ContactSlop || sy > ContactSlop) continue;
-
-            // Face contact only: the body must overlap the face's span on the tangent
-            // axis (a pure corner brush doesn't count), and the face must be exposed —
-            // a spiked cell's face buried against another solid cell can't be touched.
-            Vector2 n; int nx, ny;
-            if (sx > sy) { if (sy >= 0f) continue; nx = gapL > gapR ? -1 : 1; ny = 0; }
-            else         { if (sx >= 0f) continue; nx = 0; ny = gapT > gapB ? -1 : 1; }
-            if (chunks.GetCellState(gx + nx, gy + ny) == TileState.Solid) continue;
-            n = new Vector2(nx, ny);
+            // Away from the supporting face the body is on: of the solid 4-neighbours the
+            // spike clings to, the one whose outward normal points most toward the body —
+            // so a corner spike (floor + wall) shoves a standing body straight up, not
+            // diagonally off the wall. Never unsupported in practice; fall back to up.
+            var toBody = center - new Vector2(gx * T + T * 0.5f, gy * T + T * 0.5f);
+            var n = new Vector2(0f, -1f);
+            float bestDot = float.NegativeInfinity;
+            void Face(int sx, int sy, Vector2 outward)
+            {
+                if (chunks.GetCellState(sx, sy) != TileState.Solid) return;
+                float d = Vector2.Dot(outward, toBody);
+                if (d > bestDot) { bestDot = d; n = outward; }
+            }
+            Face(gx, gy + 1, new Vector2(0f, -1f));
+            Face(gx, gy - 1, new Vector2(0f,  1f));
+            Face(gx + 1, gy, new Vector2(-1f, 0f));
+            Face(gx - 1, gy, new Vector2( 1f, 0f));
 
             float speed = MathF.Max(0f, -Vector2.Dot(vin, n));
-            if (speed > bestSpeed) { bestSpeed = speed; normal = n; side = s; found = true; }
+            if (speed > bestSpeed) { bestSpeed = speed; normal = n; spikeTeam = st; found = true; }
         }
         return found;
     }
+
+    // The synthesized hit's owner faction, from the placer's team. Downstream rules key
+    // on it (PlayerCharacter.OnHit: a player-owned impulse never takes the creature
+    // stun rule), so player teams map back to the player factions they had as spike sides.
+    private static Faction FactionOfTeam(int team) => team switch
+    {
+        Teams.Player  => Faction.Player1,
+        Teams.Player2 => Faction.Player2,
+        _             => Faction.Enemy,
+    };
 
     // The body's AABB, stretched out to the surfaces it is riding rather than touching.
     // A player's collision polygon is the torso, and it never physically rests on what

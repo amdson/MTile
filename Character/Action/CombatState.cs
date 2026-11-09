@@ -58,6 +58,18 @@ public class CombatState
     // Hits registered in the current unbroken hitstun run (1 = the hit that opened it).
     // Reset when hitstun lapses. See HitstunFullChainHits.
     public int     HitstunChain;
+    // Guard pushback slide (GuardPushSlideSeconds): control muted like hitstun until this
+    // frame, with no hitstun flag - nothing else (flinch, entry windows, grab) reads it.
+    public int     SlideExpireFrame;
+    public bool    SlideActive(int currentFrame) => currentFrame < SlideExpireFrame;
+    public void    BeginSlide(int currentFrame, float dt)
+    {
+        int expire = currentFrame + SimFrames.FromSeconds(GuardPushSlideSeconds, dt);
+        if (expire > SlideExpireFrame) SlideExpireFrame = expire;
+    }
+    // Flying from a launching hit: set on the connect, cleared the frame the launch's
+    // velocity share bleeds out (Body.Launch), mid-air included - or, for a throw, when
+    // its hitstun lapses. See PlayerCharacter.Update.
     public bool    Launched;
     // The current hitstun run began with a THROW (RegisterThrown); cleared when hitstun
     // lapses. A thrown victim is unlatchable for that whole run (Helpless), which is what
@@ -191,8 +203,8 @@ public class CombatState
     // Hitstun no longer blocks the jump (2026-11-05, play-test: "super annoying to not be
     // able to jump while getting hit"): a lightly hit player keeps the jump as an escape
     // (with muted air control); stun and a grab still take it. A LAUNCHED victim rides
-    // TumbleState for its hitstun, which outranks the jump states, so the heavies keep
-    // their ride. Wall cling / ledge grab stay blocked for the whole window so knockback
+    // TumbleState while the launch lasts (inside its hitstun), which outranks the jump
+    // states, so the heavies keep their ride. Wall cling / ledge grab stay blocked for the whole window so knockback
     // near terrain is still pressure.
     public bool BlocksJump   => StunActive || GrabbedActive;
     // Unlatchable by a grab: flying from a hit, stunned, or still in a throw's hitstun.
@@ -293,6 +305,24 @@ public class CombatState
     // 0.12 s is ~7 frames at 60 Hz — tight enough to be a read, loose enough to hit
     // on reaction to a telegraph.
     private const float GuardPerfectWindowSeconds    = 0.12f;
+    // Hitstop a guard hands BOTH players when it stops a hit (2026-11-06): a held block gets
+    // the light freeze, a perfect parry the heavy one, so the two outcomes read differently
+    // and the parry -> counter beat is something the attacker can see. Frame-neutral like
+    // every hitstop (ApplyHitstop pushes the frozen side's expiries out).
+    public  const float GuardBlockHitstopSeconds     = MinHitstopSeconds;   // 4f
+    public  const float GuardParryHitstopSeconds     = MaxHitstopSeconds;   // 10f
+    // Pushback when a guard stops a hit (2026-11-06), px/s added to each body along the hit
+    // line: the attacker is shoved back off the shield, the blocker gives a little ground on
+    // a block and holds it on a parry. The attacker's share rides the recoil inbox
+    // (CombatSystem.AddRecoil -> the attack's ApplyActionForces).
+    public  const float GuardBlockPushbackAttacker   = 100f;
+    public  const float GuardBlockPushbackVictim     = 50f;
+    public  const float GuardParryPushbackAttacker   = 160f;
+    public  const float GuardParryPushbackVictim     = 0f;
+    // How long a pushed body SLIDES: the hitstun control-mute scalars (accel, friction,
+    // PreserveExternalVelocity) apply without any hitstun, so the shove is not braked to
+    // nothing by the ground states' 2250 px/s² friction cap on the very next frame. 7f.
+    public  const float GuardPushSlideSeconds        = 0.12f;
     private const float GuardFalloffSeconds          = 0.60f;
     private const float GuardMaxDamagePenetration    = 0.75f;
     private const float GuardMaxKnockbackPenetration = 0.50f;
@@ -411,14 +441,17 @@ public class CombatState
     public void OnHitRegistered(int currentFrame, float impulse, float dt,
                                 float hitstunSecondsOverride = -1f, bool muteControl = true,
                                 bool hitstop = true, float hitstopStrength = -1f,
-                                float stunSeconds = 0f, bool chains = true)
+                                float stunSeconds = 0f, bool chains = true,
+                                float hitstopSecondsOverride = -1f)
     {
         LastHitImpulse   = impulse;
         LastHitFrame     = currentFrame;
         // How big this hit was on the hitstop scale (0 = light), stamped whether or not
         // the freeze is actually applied — a crush landing or a throw never freezes the
         // player but can still be big enough to shake the screen.
-        LastHitStopSeconds = HitstopSecondsFor(hitstopStrength >= 0f ? hitstopStrength : impulse);
+        LastHitStopSeconds = hitstopSecondsOverride >= 0f
+            ? hitstopSecondsOverride
+            : HitstopSecondsFor(hitstopStrength >= 0f ? hitstopStrength : impulse);
 
         float seconds = hitstunSecondsOverride >= 0f
             ? hitstunSecondsOverride
@@ -480,6 +513,10 @@ public class CombatState
         HitstopActive      = true;
         if (HitstunActive) HitstunExpireFrame += added;
         if (StunActive)    StunExpireFrame    += added;
+        // A frozen stance neither ages nor loses its counter window (guard hitstop).
+        if (GuardActive)   GuardStartFrame         += added;
+        if (GuardCharged)  GuardChargedExpireFrame += added;
+        if (SlideExpireFrame > currentFrame) SlideExpireFrame += added;
         _hitstopShift += added;
         return added;
     }
@@ -532,7 +569,9 @@ public class CombatState
     public void BeginGuard(int currentFrame)
     {
         GuardActive     = true;
-        GuardStartFrame = currentFrame;
+        // Raised inside a hitstop freeze: the startup and window count from the thaw, so a
+        // guard put up while frozen is neither early nor stale when play resumes.
+        GuardStartFrame = HitstopActive ? Math.Max(currentFrame, HitstopExpireFrame) : currentFrame;
     }
 
     // Drop the stance and start the re-entry cooldown. Called from GuardAction.Exit, so
@@ -656,6 +695,7 @@ public class CombatState
     {
         HitstunActive = o.HitstunActive; HitstunExpireFrame = o.HitstunExpireFrame;
         HitstunMutesControl = o.HitstunMutesControl; HitstunChain = o.HitstunChain;
+        SlideExpireFrame = o.SlideExpireFrame;
         Launched = o.Launched; Thrown = o.Thrown;
         StunActive = o.StunActive; StunExpireFrame = o.StunExpireFrame;
         StunImmuneExpireFrame = o.StunImmuneExpireFrame;

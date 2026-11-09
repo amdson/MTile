@@ -59,6 +59,14 @@ public class LobbedAreaProjectile : Projectile
     private const int   ExplosionSegments = 10;
     private const float SegmentHalfSize   = 9f;
     private const float ExplosionKnockback = 320f;
+    // The core (the body actually struck) gets a real shove — 700 impulse is Δv 280 on
+    // a player, vs the ring's 128 — and every burst hit a short fixed freeze (4f).
+    // Derived hitstop has no small setting: zero under BigHitStrength, ≥ 8f over it.
+    private const float CoreKnockback      = 700f;
+    private const float BurstHitstopSeconds = CombatState.MinHitstopSeconds;
+    // The core LAUNCHES (tumble, no dash-out, tech to escape) — GroundSlash3's decay:
+    // Δv 280 bleeds out over ~112 px. The ring stays a plain shove.
+    private const float CoreLaunchDecay    = 350f;
     // TILE damage of the burst (what it chips off terrain). Flat: a clod's terrain bite
     // doesn't grow with its size — the mound it deposits does.
     private const float ExplosionDamage   = TileDamage.TileMaxHP * 0.8f;
@@ -203,18 +211,18 @@ public class LobbedAreaProjectile : Projectile
         // near a wall and hit inside the delay used to lose it and drop to the floor.
         if (Age < ArmDelay)
         {
-            if (TerrainStruck(settleCounts: false)) Detonate(hitboxes, spawner);
+            if (TerrainStruck(settleCounts: false)) Detonate(hitboxes, spawner, bodyHit: false);
             return;
         }
 
         // Fuse 1 — contact. A thrown clod bursts on the first body it touches instead
         // of sailing through it to land somewhere behind. Hurtboxes are published
         // before the entity pass, so this is the current frame's set (Simulation.Step).
-        if (TouchesBody(spawner?.Hurtboxes)) { Detonate(hitboxes, spawner); return; }
+        if (TouchesBody(spawner?.Hurtboxes)) { Detonate(hitboxes, spawner, bodyHit: true); return; }
 
         // Fuse 2 — terrain. In free flight a clod bursts on a hard contact OR once it
         // has come to rest against terrain (a gentle set-down never strikes hard).
-        if (TerrainStruck(settleCounts: true)) Detonate(hitboxes, spawner);
+        if (TerrainStruck(settleCounts: true)) Detonate(hitboxes, spawner, bodyHit: false);
     }
 
     // Is any body we're allowed to hurt inside the clod right now? Measured on the
@@ -265,7 +273,7 @@ public class LobbedAreaProjectile : Projectile
     // The burst, shared by both fuses so a clod that hits a player reads the same as
     // one that hits the ground: the mound goes in at the site, the core hit lands on
     // whatever is at the center, and the radial segments catch everything around it.
-    private void Detonate(HitboxWorld hitboxes, IEntitySpawner spawner)
+    private void Detonate(HitboxWorld hitboxes, IEntitySpawner spawner, bool bodyHit)
     {
         // Charged tiles in the clod scale the whole burst, uncapped: a clod packed
         // with a whole charged wall is a nuke, and the player paid for every block.
@@ -323,11 +331,13 @@ public class LobbedAreaProjectile : Projectile
             hitboxes.Publish(new Hitbox(
                 new BoundingBox(center.X - core, center.Y - core, center.X + core, center.Y + core),
                 _hitId, ExplosionDamage * dmgMul,
-                coreDir * (ExplosionKnockback * kbMul),
+                coreDir * (CoreKnockback * kbMul),
                 Faction, Id, Color.Goldenrod,
                 targets: charged > 0 ? HitTargets.All : HitTargets.EntitiesOnly,
                 bodyDamage: bodyDmg,
-                origin: center));
+                origin: center,
+                launchDecay: CoreLaunchDecay,
+                hitstopSecondsOverride: BurstHitstopSeconds));
 
             // The ring grows with the charge, and the segments grow with it — the boxes
             // are spaced 2πR/N apart, so scaling R alone would just open gaps in the
@@ -347,14 +357,15 @@ public class LobbedAreaProjectile : Projectile
                     dir * (ExplosionKnockback * kbMul),
                     Faction, Id, Color.Goldenrod,
                     bodyDamage: bodyDmg,
-                    origin: center));
+                    origin: center,
+                    hitstopSecondsOverride: BurstHitstopSeconds));
             }
         }
         _detonated = true;
         // Presentation: the burst splash (particles/audio) is edge-triggered, so it
         // goes out as a sim event keyed by this entity's id — the render shell dedupes
         // it against rollback replays (Presentation/PresentationEvents.cs).
-        spawner?.NotifyMassLanded(Id, Body.Position, _tileType, _budget);
+        spawner?.NotifyMassLanded(Id, Body.Position, _tileType, _budget, bodyHit);
     }
 
     // Body damage of a burst holding `blocks` blocks (the live budget, after any carry
@@ -399,7 +410,7 @@ public class LobbedAreaProjectile : Projectile
             if (TouchesBody(spawner?.Hurtboxes, coop: spawner?.Coop == true))
             {
                 Detach();
-                Detonate(hitboxes, spawner);
+                Detonate(hitboxes, spawner, bodyHit: true);
                 return;
             }
         }
@@ -415,10 +426,11 @@ public class LobbedAreaProjectile : Projectile
             // out, and it drops to the floor. Checked BEFORE the tracker runs, so the
             // velocity the core hit reads is the one the impact left, not the one the
             // tracker is about to write back toward the point.
-            if (TouchesBody(spawner?.Hurtboxes) || TerrainStruck(settleCounts: false))
+            bool touched = TouchesBody(spawner?.Hurtboxes);
+            if (touched || TerrainStruck(settleCounts: false))
             {
                 Detach();
-                Detonate(hitboxes, spawner);
+                Detonate(hitboxes, spawner, bodyHit: touched);
                 return;
             }
         }

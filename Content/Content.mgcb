@@ -47,6 +47,12 @@
 /processorParam:Quality=Best
 /build:../Assets/Sounds/charged_blast_01.ogg;Sounds/charged_blast_01.xnb
 
+#begin ../Assets/Sounds/clod_burst_01.ogg
+/importer:OggImporter
+/processor:SoundEffectProcessor
+/processorParam:Quality=Best
+/build:../Assets/Sounds/clod_burst_01.ogg;Sounds/clod_burst_01.xnb
+
 #begin ../Assets/Sounds/dash_01.ogg
 /importer:OggImporter
 /processor:SoundEffectProcessor

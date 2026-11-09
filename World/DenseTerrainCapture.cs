@@ -22,6 +22,7 @@ public sealed class DenseTerrainCapture
         public Point       Pos;
         public TileState[] State;   // flattened, index = tx * Chunk.Size + ty
         public TileType[]  Type;
+        public byte[]      Team;    // spike tiles' team; null in captures that predate it
     }
 
     public ChunkCells[] Chunks;

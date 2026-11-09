@@ -24,6 +24,15 @@ the user 2026-10-17; the numbers below are starting points, kept as named consta
 
 ## 2. Spike overlays
 
+> **Superseded 2026-11-07: spikes are now a tile, not an overlay.** `TileType.Spike` /
+> `TileState.Spike`: a non-blocking tile in an OPEN cell touching solid on any face,
+> placed through the ordinary build gestures (painted spike mass seeks a surface via
+> `TileMassField`; Shift+RMB places one). A block built onto a spike replaces it like air.
+> The tile stores its placer's team (`Tile.Team`, up to four teams) and hurts every other
+> team — a pure team test, no co-op exemption. Any hit knocks it off and it falls when its
+> last solid support breaks (the "2× reinforcement" below is gone). Arming still uses the
+> 1.0 s seed + 0.25 s flash (`TileSpikeSeeds`). The text below is the original overlay spec.
+
 - **A placement option.** Spikes are selectable in the block picker alongside Stone / Dirt
   / Sand / Foam. Placing spikes targets an **existing solid cell** (never air) and overlays
   it — so spikes can't be spammed into the air to crush people.

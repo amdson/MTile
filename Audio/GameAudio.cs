@@ -95,6 +95,13 @@ public sealed class GameAudio
                             e.SimFrame, gain: 1f, pitch: Jitter(e.Id.A * 7 + e.Id.B), pos: e.Position);
                 break;
 
+            case PresentationKind.MassLand:
+                // Only a clod that burst ON a body booms (the ground splat stays the mound's).
+                if ((e.Payload & PresentationEvent.MassLandBodyHitBit) == 0) break;
+                _mixer.Fire(new SoundId(SoundKind.ClodBurst, e.Id.A, e.Id.B),
+                            e.SimFrame, gain: 1f, pitch: Jitter(e.Id.A * 5 + e.Id.B), pos: e.Position);
+                break;
+
             case PresentationKind.ChargedBlast:
                 _mixer.Fire(new SoundId(SoundKind.ChargedBlast, e.Id.A, e.Id.B),
                             e.SimFrame, gain: 1f, pitch: Jitter(e.Id.A * 3 + e.Id.B), pos: e.Position);

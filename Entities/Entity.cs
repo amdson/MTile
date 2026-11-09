@@ -128,7 +128,9 @@ public class Entity : IHittable
         // (CombatSystem), so both sides of the hit freeze for the same window — or,
         // below CombatState.BigHitStrength, neither does. Immovable and rooted bodies
         // have nothing to hold; grab erosion is exempt, as it is for the attacker.
-        LastHitStopSeconds = CombatState.HitstopSecondsFor(HitResolver.ImpactStrength(res.Impulse));
+        LastHitStopSeconds = hit.HitstopSecondsOverride >= 0f
+            ? hit.HitstopSecondsOverride
+            : CombatState.HitstopSecondsFor(HitResolver.ImpactStrength(res.Impulse));
         if (LastHitStopSeconds > 0f && Mass > 0f && !_rooted && hit.GrabStrengthDamage <= 0f)
         {
             int frames = SimFrames.FromSeconds(LastHitStopSeconds, Simulation.FixedDt);
@@ -297,7 +299,7 @@ public interface IEntitySpawner
     bool Coop => false;
     // A mass ball landed and erupted: a cosmetic event for the render shell (particle
     // splash, audio). Default no-op — only Simulation forwards it, as OnMassLanded.
-    void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks) { }
+    void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks, bool bodyHit = false) { }
     // A destroyed charged block detonated: the same cosmetic channel as above, sized by
     // the blast's world-space radius so the render shell doesn't have to know the
     // entity's constants. Default no-op — only Simulation forwards it, as OnChargedBlast.

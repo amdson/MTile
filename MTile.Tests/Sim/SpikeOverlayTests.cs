@@ -7,11 +7,12 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests;
 
-// Spike overlays (Plans/BLOCK_OWNERSHIP_SPIKES.md §2): picker key 5 selects spikes, the
-// RMB build gesture overlays an existing SOLID cell (never air) for 2x a stone placement,
-// the cell is reinforced 2x and loses the overlay when it breaks, and opposing bodies
-// touching it take velocity-scaled contact damage on a per-victim cooldown. The placer's
-// side — and a co-op partner — never does. All of it snapshots and replays.
+// Spike tiles (Plans/BLOCK_OWNERSHIP_SPIKES.md §2, a tile since 2026-11-07): picker key 5
+// selects the Spike material; a spike is a NON-blocking tile in an open cell touching
+// solid on any face, costs 2x a stone placement, is knocked off by any hit and falls when
+// its support breaks, and bodies of every OTHER team overlapping it take velocity-scaled
+// contact damage on a per-victim cooldown (a pure team test). All of it snapshots and
+// replays.
 public class SpikeOverlayTests(ITestOutputHelper output)
 {
     private const int FloorRow = 14;
@@ -33,14 +34,14 @@ public class SpikeOverlayTests(ITestOutputHelper output)
     private static int CellX(float worldX) => (int)MathF.Floor(worldX / T);
     private static Vector2 StandAt(float x) => new(x, FloorTop - 20f);
 
-    private static readonly TileSpikes.Side P1Side = new(Faction.Player1, Teams.Player);
-    private static readonly TileSpikes.Side P2Side = new(Faction.Player2, Teams.Player2);
+    private const int P1Side = Teams.Player;
+    private const int P2Side = Teams.Player2;
 
-    // Spike a run of floor cells centred under world x.
-    private static void SpikeFloor(ChunkMap chunks, float x, TileSpikes.Side side, int halfWidth = 3)
+    // Lay armed spikes on a run of floor cells centred under world x.
+    private static void SpikeFloor(ChunkMap chunks, float x, int team, int halfWidth = 3)
     {
         int c = CellX(x);
-        for (int gx = c - halfWidth; gx <= c + halfWidth; gx++) chunks.Spikes.Set(gx, FloorRow, side);
+        for (int gx = c - halfWidth; gx <= c + halfWidth; gx++) SpikeTiles.PlaceArmed(chunks, gx, FloorRow - 1, team);
     }
 
     private static Simulation TwoPlayers(float p1x, float p2x, bool coop = false)
@@ -88,13 +89,14 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         var sim = new Simulation(Arena(), StandAt(60f));
         Run(sim, 2, f => new PlayerInput { Num5 = true });
         Assert.True(sim.Player.SpikesSelected);
+        Assert.Equal(TileType.Spike, sim.Player.ActiveBlockType);
         Run(sim, 1, f => new PlayerInput { Num1 = true });
         Assert.False(sim.Player.SpikesSelected);
         Assert.Equal(TileType.Stone, sim.Player.ActiveBlockType);
     }
 
     [Fact]
-    public void Spikes_CannotBePlacedInAir()
+    public void Spikes_CannotBePlacedInUnsupportedAir()
     {
         var sim = new Simulation(Arena(), StandAt(60f));
         Run(sim, 30);   // settle
@@ -103,43 +105,39 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         Assert.Equal(TileState.Empty, sim.Chunks.GetCellState(ax, ay));
 
         Run(sim, 1, f => new PlayerInput { Num5 = true, MouseWorldPosition = air });
-        Run(sim, 20, f => new PlayerInput { RightClick = true, MouseWorldPosition = air });
+        Run(sim, 20, f => new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = air });
 
-        Assert.Equal(0, sim.Chunks.Spikes.Count);
-        // ...and the held RMB didn't fall through to building something there instead.
+        Assert.Equal(0, SpikeTiles.Count(sim.Chunks));
         Assert.Equal(TileState.Empty, sim.Chunks.GetCellState(ax, ay));
         Assert.Empty(sim.Chunks.ActiveSprouts);
     }
 
     [Fact]
-    public void Spikes_OnStone_CostTwiceStone_AndMarkCellWithPlacerSide()
+    public void Spikes_OnAnyFace_CostTwiceStone_AndCarryPlacerTeam()
     {
         var sim = new Simulation(Arena(), StandAt(60f));
         Run(sim, 30);
-        var target = new Vector2(60f + T, FloorTop + 0.5f * T);   // floor cell, in reach
-        int gx = CellX(target.X);
-        Assert.Equal(TileState.Solid, sim.Chunks.GetCellState(gx, FloorRow));
-        Assert.Equal(TileType.Stone, sim.Chunks.GetCellType(gx, FloorRow));
+        var target = new Vector2(60f + T, FloorTop - 0.5f * T);   // open cell on top of the floor
+        int gx = CellX(target.X), gy = FloorRow - 1;
+        Assert.Equal(TileState.Empty, sim.Chunks.GetCellState(gx, gy));
 
         Run(sim, 1, f => new PlayerInput { Num5 = true, MouseWorldPosition = target });
         var m = sim.Player.Abilities.Meters;
         float before = m.BuildMove + m.EruptMove + m.Build;
-        // Shift+RMB: the press-frame spike path. Plain RMB with spikes selected is the
-        // painter's gesture — a press in solid charges the crystal wave (todo.txt #7;
-        // SpikeOverlayCrystalWaveTests covers that gesture).
         Run(sim, 1, f => new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target });
         float after = m.BuildMove + m.EruptMove + m.Build;
 
-        // Placement SEEDS the cell (todo.txt #8); the spike overlay lands after the
-        // crystal lifecycle (SpikeOverlayCrystalTests covers the phases).
-        Assert.True(sim.Chunks.SpikeSeeds.TryGet(gx, FloorRow, out var seed));
-        Assert.Equal(Faction.Player1, seed.Side.Faction);
-        Assert.Equal(1, sim.Chunks.SpikeSeeds.Count);
-        Assert.Equal(0, sim.Chunks.Spikes.Count);
+        // Placement lays a spike TILE that is still seeding (todo.txt #8); it arms after
+        // the crystal lifecycle (SpikeOverlayCrystalTests covers the phases).
+        Assert.Equal(TileState.Spike, sim.Chunks.GetCellState(gx, gy));
+        Assert.Equal(Teams.Player, sim.Chunks.GetCellTeam(gx, gy));
+        Assert.True(sim.Chunks.SpikeSeeds.Has(gx, gy));
+        Assert.False(sim.Chunks.IsArmedSpike(gx, gy));
+        Assert.Equal(1, SpikeTiles.Count(sim.Chunks));
 
         float stone = MaterialStrengths.BuildCostFor(TileType.Stone);
         Assert.Equal(2f * stone, MaterialStrengths.SpikeBuildCost, 4);
-        // Meters regen/refill a little inside the frame; the spend dominates.
+        Assert.Equal(MaterialStrengths.SpikeBuildCost, MaterialStrengths.BuildCostFor(TileType.Spike), 4);
         float spent = before - after;
         output.WriteLine($"stone {stone:F3}  spike cost {MaterialStrengths.SpikeBuildCost:F3}  measured spend {spent:F3}");
         Assert.InRange(spent, 2f * stone - 0.6f, 2f * stone + 0.05f);
@@ -151,61 +149,51 @@ public class SpikeOverlayTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void TrySpikeCell_SpendsExactlySpikeCost_AndRefusesAirAndRespike()
+    public void TryRequestSpike_NeedsAnOpenCellTouchingSolid_OnAnyFace()
     {
         var chunks = Arena();
-        var ab = new PlayerAbilityState();
-        var ctx = new EnvironmentContext { Chunks = chunks, Faction = Faction.Player2, Team = Teams.Player2 };
-        float pool = ab.Meters.BuildMove + ab.Meters.EruptMove;
-
-        Assert.False(BlockPlaceAction.TrySpikeCell(ctx, ab, 3, FloorRow - 1));   // air
-        Assert.Equal(pool, ab.Meters.BuildMove + ab.Meters.EruptMove);
-
-        Assert.True(BlockPlaceAction.TrySpikeCell(ctx, ab, 3, FloorRow));
-        Assert.Equal(pool - MaterialStrengths.SpikeBuildCost, ab.Meters.BuildMove + ab.Meters.EruptMove, 4);
-        Assert.True(chunks.SpikeSeeds.TryGet(3, FloorRow, out var s));
-        Assert.Equal(Faction.Player2, s.Side.Faction);
-
-        Assert.False(BlockPlaceAction.TrySpikeCell(ctx, ab, 3, FloorRow));       // already seeded
-        Assert.Equal(pool - MaterialStrengths.SpikeBuildCost, ab.Meters.BuildMove + ab.Meters.EruptMove, 4);
-
-        chunks.Spikes.Set(4, FloorRow, s.Side);
-        Assert.False(BlockPlaceAction.TrySpikeCell(ctx, ab, 4, FloorRow));       // already spiked
-        Assert.Equal(pool - MaterialStrengths.SpikeBuildCost, ab.Meters.BuildMove + ab.Meters.EruptMove, 4);
+        Assert.False(chunks.TryRequestSpike(3, FloorRow, Teams.Player));        // solid
+        Assert.False(chunks.TryRequestSpike(3, FloorRow - 3, Teams.Player));    // unsupported air
+        Assert.True(chunks.TryRequestSpike(3, FloorRow - 1, Teams.Player2));    // on the floor
+        Assert.Equal(Teams.Player2, chunks.GetCellTeam(3, FloorRow - 1));
+        Assert.False(chunks.TryRequestSpike(3, FloorRow - 1, Teams.Player));    // already a spike
+        Assert.True(chunks.TryRequestSpike(35, FloorRow - 3, Teams.Player));    // beside the pillar
+        Assert.True(chunks.TryRequestSpike(5, FloorRow + 2, 3));                // under the slab: team 3
+        Assert.Equal(3, chunks.GetCellTeam(5, FloorRow + 2));
     }
 
-    // ── Reinforcement / break ───────────────────────────────────────────────────
-
     [Fact]
-    public void SpikedCell_FirstHitKnocksTheSpikeOff_AndBreakClearsIt()
+    public void SpikeTile_DoesNotBlock_AndABlockOverwritesIt()
     {
         var chunks = Arena();
-        float hp = TileDamage.MaxHPFor(TileType.Stone);
-        float hit = hp / 4f;
+        SpikeTiles.PlaceArmed(chunks, 4, FloorRow - 1, Teams.Player);
+        Assert.False(TileQuery.IsSolidAt(chunks, 4 * T + T / 2, (FloorRow - 1) * T + T / 2));
+        // A block requested onto the spike replaces it, like air.
+        Assert.NotNull(chunks.TryRequestTile(4, FloorRow - 1, TileType.Dirt));
+        Assert.Equal(TileState.Sprouting, chunks.GetCellState(4, FloorRow - 1));
+        Assert.False(chunks.SpikeSeeds.Has(4, FloorRow - 1));
+    }
 
-        int Hits(int gx)
-        {
-            for (int n = 1; n < 100; n++)
-                if (chunks.DamageCell(gx, FloorRow, hit)) return n;
-            return -1;
-        }
+    // ── Brittleness / support ───────────────────────────────────────────────────
 
-        int plain = Hits(2);
-        chunks.Spikes.Set(5, FloorRow, P1Side);
-        // The first hit spends itself on the spike: overlay gone, block undamaged.
-        Assert.False(chunks.DamageCell(5, FloorRow, hit));
-        Assert.False(chunks.Spikes.IsSpiked(5, FloorRow));
-        Assert.Equal(0f, chunks.Damage.Get(5, FloorRow));
-        int spiked = Hits(5);
-        output.WriteLine($"plain {plain} hits, then {spiked} more once the spike is off");
-        Assert.Equal(4, plain);
-        Assert.Equal(plain, spiked);
-        Assert.Equal(TileState.Empty, chunks.GetCellState(5, FloorRow));
+    [Fact]
+    public void SpikeTile_AnyHitKnocksItOff_AndItFallsWithItsSupport()
+    {
+        var chunks = Arena();
+        SpikeTiles.PlaceArmed(chunks, 5, FloorRow - 1, P1Side);
+        Assert.False(chunks.DamageCell(5, FloorRow - 1, 0.01f));
+        Assert.Equal(TileState.Empty, chunks.GetCellState(5, FloorRow - 1));
+        Assert.Equal(0f, chunks.Damage.Get(5, FloorRow));   // the block it clung to is untouched
 
-        // Any break path clears it (BreakCell is the single funnel).
-        chunks.Spikes.Set(8, FloorRow, P1Side);
+        // Breaking its only support takes it too.
+        SpikeTiles.PlaceArmed(chunks, 8, FloorRow - 1, P1Side);
         Assert.True(chunks.BreakCell(8, FloorRow));
-        Assert.Equal(0, chunks.Spikes.Count);
+        Assert.Equal(TileState.Empty, chunks.GetCellState(8, FloorRow - 1));
+
+        // ...but a spike with a second support survives losing one of them.
+        SpikeTiles.PlaceArmed(chunks, 35, FloorRow - 1, P1Side);           // floor below + pillar right
+        Assert.True(chunks.BreakCell(35, FloorRow));
+        Assert.Equal(TileState.Spike, chunks.GetCellState(35, FloorRow - 1));
     }
 
     // ── Contact damage ──────────────────────────────────────────────────────────
@@ -240,16 +228,23 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         Assert.Equal(p2.MaxHealth, p2.Health);
     }
 
+    // A pure team test: co-op doesn't exempt a partner on another team; sharing the
+    // placer's team does.
     [Fact]
-    public void Coop_PartnerTakesNoDamageFromPlacersSpikes()
+    public void SpikeDamage_IsAPureTeamTest_EvenInCoop()
     {
         var sim = TwoPlayers(40f, 200f, coop: true);
         Assert.True(sim.Coop);
         var p2 = sim.SecondaryPlayers[0].Player;
         Run(sim, 40);
         SpikeFloor(sim.Chunks, p2.Body.Position.X, P1Side);
+        Run(sim, 60);
+        Assert.True(p2.Health < p2.MaxHealth);
+
+        float hp = p2.Health;
+        p2.Team = P1Side;
         Run(sim, 120);
-        Assert.Equal(p2.MaxHealth, p2.Health);
+        Assert.Equal(hp, p2.Health);
     }
 
     [Fact]
@@ -289,7 +284,8 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         sim.AddSecondaryPlayer(StandAt(360f));
         var p2 = sim.SecondaryPlayers[0].Player;
         Run(sim, 30);
-        for (int gy = FloorRow - 4; gy < FloorRow; gy++) sim.Chunks.Spikes.Set(36, gy, P1Side);
+        for (int gy = FloorRow - 4; gy < FloorRow; gy++)
+            if (sim.Chunks.GetCellState(35, gy) == TileState.Empty) SpikeTiles.PlaceArmed(sim.Chunks, 35, gy, P1Side);
         p2.Body.Velocity = new Vector2(400f, -150f);
 
         float before = p2.Health, firstTick = 0f, vx = 0f;
@@ -311,6 +307,7 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         enemy.Faction = Faction.Enemy;
         var friendly = EntityFactory.Ball(new Vector2(260f, FloorTop - 12f));
         friendly.Faction = Faction.Player1;
+        friendly.Team    = Teams.Player;
         sim.SpawnEntity(enemy);
         sim.SpawnEntity(friendly);
         Run(sim, 40);
@@ -336,11 +333,11 @@ public class SpikeOverlayTests(ITestOutputHelper output)
 
         var snap = sim.Snapshot();
         ulong snapSum = sim.Checksum();
-        int snapSpikes = sim.Chunks.Spikes.Count;
+        int snapSpikes = SpikeTiles.Count(sim.Chunks);
 
         // P1 selects spikes and lays one more on the floor beside itself mid-window, so the
         // replay crosses a placement as well as contact ticks.
-        var target = new Vector2(sim.Player.Body.Position.X + T, FloorTop + 0.5f * T);
+        var target = new Vector2(sim.Player.Body.Position.X + T, FloorTop - 0.5f * T);
         PlayerInput P0(int f) => f == 3 ? new PlayerInput { Num5 = true, MouseWorldPosition = target }
                                : f is >= 5 and < 8 ? new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target }
                                : default;
@@ -348,12 +345,12 @@ public class SpikeOverlayTests(ITestOutputHelper output)
         var sums = new List<ulong>();
         var hp = new List<float>();
         for (int f = 0; f < 90; f++) { sim.Step(P0(f), default); sums.Add(sim.Checksum()); hp.Add(p2.Health); }
-        Assert.Equal(snapSpikes + 1, sim.Chunks.Spikes.Count);
+        Assert.Equal(snapSpikes + 1, SpikeTiles.Count(sim.Chunks));
         Assert.True(p2.Health < p2.MaxHealth);
 
         sim.Restore(snap);
         Assert.Equal(snapSum, sim.Checksum());
-        Assert.Equal(snapSpikes, sim.Chunks.Spikes.Count);   // the later placement rolled back
+        Assert.Equal(snapSpikes, SpikeTiles.Count(sim.Chunks));   // the later placement rolled back
         Assert.False(sim.Player.SpikesSelected);
 
         for (int f = 0; f < 90; f++)
@@ -365,16 +362,15 @@ public class SpikeOverlayTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public void Checksum_SeesSpikeOverlay()
+    public void Checksum_SeesSpikeTiles_AndTheirTeam()
     {
-        var sim = new Simulation(Arena(), StandAt(40f));
-        Run(sim, 5);
-        ulong a = sim.Checksum();
-        sim.Chunks.Spikes.Set(10, FloorRow, P1Side);
-        ulong b = sim.Checksum();
-        Assert.NotEqual(a, b);
-        sim.Chunks.Spikes.Clear(10, FloorRow);
-        sim.Chunks.Spikes.Set(10, FloorRow, P2Side);
-        Assert.NotEqual(b, sim.Checksum());   // side is part of it, not just presence
+        var a = Arena();
+        var b = Arena();
+        ulong h0 = a.TerrainHash;
+        Assert.Equal(h0, b.TerrainHash);
+        SpikeTiles.PlaceArmed(a, 10, FloorRow - 1, P1Side);
+        SpikeTiles.PlaceArmed(b, 10, FloorRow - 1, P2Side);
+        Assert.NotEqual(h0, a.TerrainHash);
+        Assert.NotEqual(a.TerrainHash, b.TerrainHash);   // team is part of it, not just presence
     }
 }

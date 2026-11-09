@@ -217,13 +217,17 @@ public class TumbleTechTests(ITestOutputHelper output)
         float wallLeft = 10 * Chunk.TileSize;
         // Start 90px left of the wall, mid-air, flying right at a stab-like launch speed.
         var player = new PlayerCharacter(new Vector2(wallLeft - HalfWidth() - 90f, 60f));
-        player.Body.Velocity = new Vector2(280f, 0f);
         var bodies = new List<PhysicsBody> { player.Body };
         var ctrl = new Controller();
         var hb = new HitboxWorld(); var hu = new HurtboxWorld();
 
-        // One registered hit + the launch flag: a stab's victim, in flight.
+        // One registered hit + a real launch: a stab's victim, in flight. The launch has to
+        // be a Body.Launch, not just the flag - Launched clears the frame the launch's
+        // velocity share is gone (non-sticky since 2026-11-06), so a raw velocity with the
+        // flag set would stop being a launch on frame one.
         player.Combat.OnHitRegistered(player.Frame + 1, 300f, Dt, hitstunSecondsOverride: 0.8f, hitstop: false);
+        LaunchSystem.Hit(player.Body, ref player.Body.Velocity, new Vector2(280f, 0f),
+                         MovementConfig.Current.StabLaunchDecay, 1f);
         player.Combat.Launched = true;
 
         bool sawTech = false, sawStun = false, movedAway = false;

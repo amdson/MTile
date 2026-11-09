@@ -26,7 +26,7 @@ public enum PresentationKind : byte
     TileBreak,
     TilePlace,
     PlayerRespawn,
-    MassLand,      // a thrown/lobbed mass ball landed and erupted (A/B = entity id index/generation; payload = TileType | blocks << 8)
+    MassLand,      // a thrown/lobbed mass ball landed and erupted (A/B = entity id index/generation; payload = TileType | blocks << 8 | PresentationEvent.MassLandBodyHitBit when it burst on a body)
     ChargedBlast,  // a destroyed charged block detonated (A/B = entity id index/generation; payload = blast radius in px)
     TerrainStrike, // a player's attack struck terrain (A = HitId; payload = into-surface angle in milliradians)
     Clank,         // two attacks clanked (A/B = the HitIds, lower first; payload = 1 metallic, 0 explosive)
@@ -50,6 +50,9 @@ public readonly struct PresentationId : IEquatable<PresentationId>
 
 public readonly struct PresentationEvent
 {
+    // MassLand payload flag: the clod burst on a player/enemy (above the 8-bit block count).
+    public const int MassLandBodyHitBit = 1 << 16;
+
     public readonly int             SimFrame;
     public readonly PresentationId  Id;
     public readonly Vector2         Position;

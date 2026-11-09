@@ -85,7 +85,7 @@ public sealed class RampartWallUp : BotManeuver
         foreach (var (cell, c) in field.Entries)
         {
             if (c.Pending || c.Broken || c.PhaseAt(now) == CrystalPhase.Gone) continue;
-            if (!SpikeContactSystem.Opposes(in c.Side, v.Self.Faction, v.Self.Team, coop: v.Sim.Coop)) continue;
+            if (!CrystalContactSystem.Opposes(in c.Side, v.Self.Faction, v.Self.Team, coop: v.Sim.Coop)) continue;
             float cx = cell.gtx * T + 0.5f * T, cy = cell.gty * T + 0.5f * T;
             float dx = cx - v.Me.X;
             if (MathF.Abs(dx) > range || MathF.Abs(cy - v.Me.Y) > vertical) continue;

@@ -56,6 +56,11 @@ public class DashState : MovementState
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {
         if (abilities.HasDashed) return false;
+        // A launch can't be dashed out of (Passive 56 would otherwise outbid Tumble's
+        // Active 51, and one frame of the burst replaces the launch velocity outright).
+        // Ordinary hitstun can: the dash is the escape from a combo in a tight tunnel.
+        // The way out of a tumble is the tech.
+        if (TumbleState.Tumbling(ctx.Combat)) return false;
         if (!ctx.Intents.Peek(IntentType.Dash, ctx.CurrentFrame, out _, ctx.DashBufferFrames)) return false;
         return Airborne(ctx, ctx.PreviousState(0));
     }

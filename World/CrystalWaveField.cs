@@ -27,16 +27,26 @@ namespace MTile;
 // dictionary order (which differs between a live table and a restored copy) can't leak.
 public sealed class CrystalWaveField
 {
+    // Who launched a wave. Faction is the primary side test (players are Player1 /
+    // Player2); Team breaks ties between two Enemy-faction parties, mirroring
+    // CombatSystem.AcrossTeams. See CrystalContactSystem.Opposes.
+    public readonly struct Side
+    {
+        public readonly Faction Faction;
+        public readonly int     Team;
+        public Side(Faction faction, int team) { Faction = faction; Team = team; }
+    }
+
     public struct WaveRec
     {
-        public TileSpikes.Side Side;
+        public Side            Side;
         public int             LastTouch;   // TerrainFrame
     }
 
     public struct Crystal
     {
         public EntityId        Wave;
-        public TileSpikes.Side Side;        // launcher's side: immune, like spikes
+        public Side            Side;        // launcher's side: immune
         public SproutFaces     Base;        // face of this cell the shard stands on
         public int             RequestFrame;
         public int             SeededFrame; // -1 while pending
@@ -92,7 +102,7 @@ public sealed class CrystalWaveField
     // ── Waves ───────────────────────────────────────────────────────────────────
     // Register/refresh a crystal wave. Called by its MassBall every frame before it
     // deposits, so the very first deposit already routes into crystals.
-    public void TouchWave(EntityId wave, TileSpikes.Side side, int now)
+    public void TouchWave(EntityId wave, Side side, int now)
     {
         if (wave.IsNone) return;
         _waves[wave] = new WaveRec { Side = side, LastTouch = now };

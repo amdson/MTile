@@ -74,8 +74,8 @@ public sealed class RampartSpikeMoat : BotManeuver
             int g = BarrierPlanner.GroundRow(v, gx, me.groundRow - 2, 4);
             if (g < 0) continue;
             if (v.Solid(gx, g - 1)) continue;    // covered: not a walking surface
-            var c = new Point(gx, g);
-            if (v.Sim.Chunks.Spikes.IsSpiked(c.X, c.Y) || v.Sim.Chunks.SpikeSeeds.Has(c.X, c.Y)) continue;
+            var c = new Point(gx, g - 1);   // the spike tile sits on top of the ground cell
+            if (v.Sim.Chunks.GetCellState(c.X, c.Y) == TileState.Spike) continue;
             if (!BarrierPlanner.InReach(v.Me, c, 4f)) continue;
             _cells.Add(c);
         }

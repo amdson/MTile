@@ -7,10 +7,10 @@ using Xunit.Abstractions;
 
 namespace MTile.Tests;
 
-// todo.txt #8: placing a spike SEEDS the cell (a small crystal), which flashes and then
-// grows into the ordinary 1-cell spike overlay (CrystalLifecycle.SpikePlacement:
-// 1.0 s seed + 0.25 s flash). Only the grown spike damages; seeds/flashes are harmless,
-// snapshot with the terrain and replay identically, and die with their block.
+// todo.txt #8: a placed spike tile starts as a SEED (a small crystal), which flashes and
+// then arms (CrystalLifecycle.SpikePlacement: 1.0 s seed + 0.25 s flash). Only an armed
+// spike damages; seeds/flashes are harmless, snapshot with the terrain and replay
+// identically, and die with their block.
 public class SpikeOverlayCrystalTests(ITestOutputHelper output)
 {
     private const int FloorRow = 14;
@@ -28,7 +28,7 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
     private static float FloorTop => FloorRow * T;
     private static int CellX(float worldX) => (int)MathF.Floor(worldX / T);
     private static Vector2 StandAt(float x) => new(x, FloorTop - 20f);
-    private static readonly TileSpikes.Side P1Side = new(Faction.Player1, Teams.Player);
+    private const int Spot = FloorRow - 1;   // the open row a floor spike occupies
 
     private static Simulation TwoPlayers()
     {
@@ -38,12 +38,12 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         return sim;
     }
 
-    // Seed the floor cells under world x for P1, stamped at the current terrain frame.
+    // Place P1 spike tiles on the floor under world x, seeded at the current terrain frame.
     private static void SeedFloor(ChunkMap chunks, float x, int halfWidth = 3)
     {
         int c = CellX(x);
         for (int gx = c - halfWidth; gx <= c + halfWidth; gx++)
-            Assert.True(chunks.SpikeSeeds.Set(gx, FloorRow, P1Side, chunks.TerrainFrame));
+            Assert.True(chunks.TryRequestSpike(gx, Spot, Teams.Player));
     }
 
     // ── The reusable phase machine ──────────────────────────────────────────────
@@ -92,11 +92,11 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         {
             sim.Step(default, default);
             int elapsed = sim.Chunks.TerrainFrame - seeded;
-            if (firstSpikedElapsed < 0 && sim.Chunks.Spikes.Count > 0) firstSpikedElapsed = elapsed;
+            if (firstSpikedElapsed < 0 && SpikeTiles.ArmedCount(sim.Chunks) > 0) firstSpikedElapsed = elapsed;
             if (elapsed < life.FramesToGrown)
             {
-                // Still a crystal: no overlay, no damage.
-                Assert.Equal(0, sim.Chunks.Spikes.Count);
+                // Still a crystal: not armed, no damage.
+                Assert.Equal(0, SpikeTiles.ArmedCount(sim.Chunks));
                 Assert.Equal(7, sim.Chunks.SpikeSeeds.Count);
                 Assert.Equal(p2.MaxHealth, p2.Health);
             }
@@ -106,30 +106,30 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         output.WriteLine($"spiked at +{firstSpikedElapsed} frames, first hurt at +{firstHurtElapsed}");
         Assert.Equal(life.FramesToGrown, firstSpikedElapsed);
         Assert.Equal(0, sim.Chunks.SpikeSeeds.Count);
-        Assert.Equal(7, sim.Chunks.Spikes.Count);
+        Assert.Equal(7, SpikeTiles.ArmedCount(sim.Chunks));
         // A standing body on a fresh spike is bitten the frame it grows.
         Assert.Equal(life.FramesToGrown, firstHurtElapsed);
-        Assert.True(sim.Chunks.Spikes.TryGet(CellX(p2.Body.Position.X), FloorRow, out var side));
-        Assert.Equal(Faction.Player1, side.Faction);
+        Assert.True(sim.Chunks.IsArmedSpike(CellX(p2.Body.Position.X), Spot));
+        Assert.Equal(Teams.Player, sim.Chunks.GetCellTeam(CellX(p2.Body.Position.X), Spot));
     }
 
     [Fact]
     public void SeedPhase_IsVisibleAsSeedThenFlash()
     {
         var chunks = Arena();
-        Assert.True(chunks.SpikeSeeds.Set(5, FloorRow, P1Side, chunks.TerrainFrame));
+        Assert.True(chunks.TryRequestSpike(5, Spot, Teams.Player));
         var phases = new List<CrystalPhase>();
         for (int f = 0; f < 74; f++)
         {
             chunks.TickSprouts(Simulation.FixedDt);
-            Assert.True(chunks.SpikeSeeds.TryGet(5, FloorRow, out var s));
+            Assert.True(chunks.SpikeSeeds.TryGet(5, Spot, out var s));
             phases.Add(TileSpikeSeeds.PhaseOf(s, chunks.TerrainFrame));
         }
         Assert.Equal(59, phases.FindAll(p => p == CrystalPhase.Seed).Count);    // frames 1..59
         Assert.Equal(15, phases.FindAll(p => p == CrystalPhase.Flash).Count);   // frames 60..74
         chunks.TickSprouts(Simulation.FixedDt);
-        Assert.False(chunks.SpikeSeeds.Has(5, FloorRow));
-        Assert.True(chunks.Spikes.IsSpiked(5, FloorRow));
+        Assert.False(chunks.SpikeSeeds.Has(5, Spot));
+        Assert.True(chunks.IsArmedSpike(5, Spot));
     }
 
     [Fact]
@@ -137,15 +137,14 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
     {
         var sim = new Simulation(Arena(), StandAt(60f));
         for (int f = 0; f < 30; f++) sim.Step(default);
-        var target = new Vector2(60f + T, FloorTop + 0.5f * T);
+        var target = new Vector2(60f + T, FloorTop - 0.5f * T);   // the open cell on the floor
         int gx = CellX(target.X);
         sim.Step(new PlayerInput { Num5 = true, MouseWorldPosition = target });
-        // Shift+RMB: the press-frame spike path. Plain RMB with spikes selected is the
-        // painter's gesture — a press in solid charges the crystal wave (todo.txt #7;
-        // SpikeOverlayCrystalWaveTests covers that gesture).
+        // Shift+RMB: one placement per cell. (Plain RMB paints spike mass; a press in
+        // solid charges the crystal wave — SpikeOverlayCrystalWaveTests.)
         sim.Step(new PlayerInput { RightClick = true, Shift = true, MouseWorldPosition = target });
-        Assert.True(sim.Chunks.SpikeSeeds.Has(gx, FloorRow));
-        Assert.False(sim.Chunks.Spikes.IsSpiked(gx, FloorRow));
+        Assert.True(sim.Chunks.SpikeSeeds.Has(gx, Spot));
+        Assert.False(sim.Chunks.IsArmedSpike(gx, Spot));
 
         // Holding RMB over a seeded cell doesn't re-seed or re-charge.
         var m = sim.Player.Abilities.Meters;
@@ -154,42 +153,38 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         Assert.True(m.BuildMove + m.EruptMove + m.Build >= hold0 - 1e-3f);
 
         for (int f = 0; f < CrystalLifecycle.SpikePlacement.FramesToGrown; f++) sim.Step(default);
-        Assert.True(sim.Chunks.Spikes.IsSpiked(gx, FloorRow));
-        Assert.False(sim.Chunks.SpikeSeeds.Has(gx, FloorRow));
+        Assert.True(sim.Chunks.IsArmedSpike(gx, Spot));
+        Assert.False(sim.Chunks.SpikeSeeds.Has(gx, Spot));
     }
 
     [Fact]
     public void BreakingTheBlockUnderASeed_RemovesIt_NoSpikeEverGrows()
     {
         var chunks = Arena();
-        var ab = new PlayerAbilityState();
-        var ctx = new EnvironmentContext { Chunks = chunks, Faction = Faction.Player1, Team = Teams.Player };
-        float pool = ab.Meters.BuildMove + ab.Meters.EruptMove;
-        Assert.True(BlockPlaceAction.TrySpikeCell(ctx, ab, 5, FloorRow));
+        Assert.True(chunks.TryRequestSpike(5, Spot, Teams.Player));
         chunks.TickSprouts(Simulation.FixedDt);
 
-        // The first hit knocks the seed off and leaves the block whole; stone then breaks
-        // in its usual 4 quarter-HP hits.
+        // A hit knocks the seed off and leaves the block whole.
         float hit = TileDamage.MaxHPFor(TileType.Stone) / 4f;
-        Assert.False(chunks.DamageCell(5, FloorRow, hit));
-        Assert.False(chunks.SpikeSeeds.Has(5, FloorRow));
+        Assert.False(chunks.DamageCell(5, Spot, hit));
+        Assert.Equal(TileState.Empty, chunks.GetCellState(5, Spot));
+        Assert.False(chunks.SpikeSeeds.Has(5, Spot));
         Assert.Equal(0f, chunks.Damage.Get(5, FloorRow));
-        int n = 0;
-        while (!chunks.DamageCell(5, FloorRow, hit)) Assert.True(++n < 10);
-        Assert.Equal(3, n);
+
+        // Breaking, harvesting or editing away the supporting block takes a seed with it.
+        Assert.True(chunks.TryRequestSpike(7, Spot, Teams.Player));
+        Assert.True(chunks.BreakCell(7, FloorRow));
+        Assert.Equal(TileState.Empty, chunks.GetCellState(7, Spot));
+        Assert.False(chunks.SpikeSeeds.Has(7, Spot));
+        Assert.True(chunks.TryRequestSpike(8, Spot, Teams.Player));
+        Assert.True(chunks.HarvestCell(8, FloorRow, out _));
+        Assert.False(chunks.SpikeSeeds.Has(8, Spot));
+        Assert.True(chunks.TryRequestSpike(9, Spot, Teams.Player));
+        Assert.True(chunks.EditorSetCell(9, FloorRow, TileState.Empty, TileType.Stone));
+        Assert.False(chunks.SpikeSeeds.Has(9, Spot));
 
         for (int f = 0; f < 120; f++) chunks.TickSprouts(Simulation.FixedDt);
-        Assert.Equal(0, chunks.Spikes.Count);
-        // No refund: the cost was paid at seeding.
-        Assert.Equal(pool - MaterialStrengths.SpikeBuildCost, ab.Meters.BuildMove + ab.Meters.EruptMove, 4);
-
-        // HarvestCell (block grab) and the level editor clear it too.
-        chunks.SpikeSeeds.Set(8, FloorRow, P1Side, chunks.TerrainFrame);
-        Assert.True(chunks.HarvestCell(8, FloorRow, out _));
-        Assert.False(chunks.SpikeSeeds.Has(8, FloorRow));
-        chunks.SpikeSeeds.Set(9, FloorRow, P1Side, chunks.TerrainFrame);
-        Assert.True(chunks.EditorSetCell(9, FloorRow, TileState.Solid, TileType.Dirt));
-        Assert.False(chunks.SpikeSeeds.Has(9, FloorRow));
+        Assert.Equal(0, SpikeTiles.Count(chunks));
     }
 
     [Fact]
@@ -207,13 +202,13 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         var hp = new List<float>();
         for (int f = 0; f < 90; f++) { sim.Step(default, default); sums.Add(sim.Checksum()); hp.Add(p2.Health); }
         Assert.Equal(0, sim.Chunks.SpikeSeeds.Count);
-        Assert.Equal(7, sim.Chunks.Spikes.Count);
+        Assert.Equal(7, SpikeTiles.ArmedCount(sim.Chunks));
         Assert.True(p2.Health < p2.MaxHealth);
 
         sim.Restore(snap);
         Assert.Equal(snapSum, sim.Checksum());
         Assert.Equal(7, sim.Chunks.SpikeSeeds.Count);
-        Assert.Equal(0, sim.Chunks.Spikes.Count);
+        Assert.Equal(0, SpikeTiles.ArmedCount(sim.Chunks));
         Assert.Equal(p2.MaxHealth, p2.Health);
         for (int f = 0; f < 90; f++)
         {
@@ -229,10 +224,10 @@ public class SpikeOverlayCrystalTests(ITestOutputHelper output)
         var sim = new Simulation(Arena(), StandAt(40f));
         for (int f = 0; f < 5; f++) sim.Step(default);
         ulong a = sim.Checksum();
-        sim.Chunks.SpikeSeeds.Set(10, FloorRow, P1Side, 3);
+        sim.Chunks.SpikeSeeds.Set(10, Spot, 3);
         ulong b = sim.Checksum();
-        sim.Chunks.SpikeSeeds.Clear(10, FloorRow);
-        sim.Chunks.SpikeSeeds.Set(10, FloorRow, P1Side, 4);
+        sim.Chunks.SpikeSeeds.Clear(10, Spot);
+        sim.Chunks.SpikeSeeds.Set(10, Spot, 4);
         ulong c = sim.Checksum();
         Assert.NotEqual(a, b);
         Assert.NotEqual(b, c);

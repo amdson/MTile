@@ -16,6 +16,7 @@ public static class SoundManifest
     {
         ("air_hammer", 1),
         ("charged_blast", 1),
+        ("clod_burst", 1),
         ("dash", 2),
         ("dash_slash", 1),
         ("dev_tone", 0),

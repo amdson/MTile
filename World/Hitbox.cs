@@ -96,6 +96,10 @@ public readonly struct Hitbox
     // Lets a weak multi-hit attack (hold-slash, impulse 60) still carry real
     // hitstun, and a heavy be tuned independently of its knockback number.
     public readonly float       HitstunSecondsOverride;
+    // Victim hitstop override in SECONDS. Default (< 0) derives it from the delivered
+    // impulse (CombatState.HitstopSecondsFor — zero below BigHitStrength, ≥ 8f above),
+    // which has no "small" setting; a clod burst wants a short freeze on a mid shove.
+    public readonly float       HitstopSecondsOverride;
     // Struggle / grab-break channel (COMBAT_FEEL_PLAN Phase 6). When > 0, this hit
     // erodes the GRABBER's grab strength by this amount instead of dealing the usual
     // knockback / damage / hitstun — PlayerCharacter.OnHit branches on it and returns
@@ -204,7 +208,8 @@ public readonly struct Hitbox
                   float launchImpactMass = 1f,
                   ClankKind clank = ClankKind.None,
                   float stunSeconds = 0f,
-                  float launchBounce = 0f)
+                  float launchBounce = 0f,
+                  float hitstopSecondsOverride = -1f)
     {
         Clank                = clank;
         StunSeconds          = stunSeconds;
@@ -230,6 +235,7 @@ public readonly struct Hitbox
         RecoilBreakProtected = recoilBreakProtected;
         RecoilMinMaterialHP  = recoilMinMaterialHP;
         HitstunSecondsOverride = hitstunSecondsOverride;
+        HitstopSecondsOverride = hitstopSecondsOverride;
         GrabStrengthDamage     = grabStrengthDamage;
         Mode                 = mode;
         StrikeDir            = strikeDir;

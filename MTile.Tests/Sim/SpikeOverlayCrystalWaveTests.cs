@@ -188,13 +188,13 @@ public class SpikeOverlayCrystalWaveTests(ITestOutputHelper output)
         // Hand-place a root right under P2, as a wave of P1's would.
         int gx = (int)MathF.Floor(p2.Body.Position.X / Ts);
         var wave = new EntityId(9999);
-        chunks.Crystals.TouchWave(wave, new TileSpikes.Side(Faction.Player1, Teams.Player), chunks.TerrainFrame);
+        chunks.Crystals.TouchWave(wave, new CrystalWaveField.Side(Faction.Player1, Teams.Player), chunks.TerrainFrame);
         Assert.True(chunks.TryRequestCrystal(gx, FloorRow - 1, wave));
         var life = CrystalWave.Root;
         float y0 = p2.Body.Position.Y, minY = y0, minVy = 0f;
         for (int f = 0; f < life.FramesToGrown - 1; f++)
         {
-            chunks.Crystals.TouchWave(wave, new TileSpikes.Side(Faction.Player1, Teams.Player), chunks.TerrainFrame);
+            chunks.Crystals.TouchWave(wave, new CrystalWaveField.Side(Faction.Player1, Teams.Player), chunks.TerrainFrame);
             sim.Step(default, default);
             minY = MathF.Min(minY, p2.Body.Position.Y);
             minVy = MathF.Min(minVy, p2.Body.Velocity.Y);
@@ -291,7 +291,7 @@ public class SpikeOverlayCrystalWaveTests(ITestOutputHelper output)
         Assert.Equal(nameof(BlockPaintAction), sim.Player.CurrentActionName);
         Assert.True(sim.Player.CurrentActionVars.ChargeGesture);
         sim.Step(In(floor, false));
-        Assert.False(sim.Chunks.SpikeSeeds.Has(12, FloorRow));
+        Assert.Equal(0, SpikeTiles.Count(sim.Chunks));
         Assert.Equal(0, CrystalBalls(sim));
         Assert.True(sim.Player.Abilities.Meters.CrystalWaveReady);
     }
@@ -313,34 +313,58 @@ public class SpikeOverlayCrystalWaveTests(ITestOutputHelper output)
         Assert.Equal(0, sim.Chunks.SpikeSeeds.Count);
     }
 
-    // A stroke — a press in open air — spikes every solid cell the ball passes through:
-    // paint the spikes INTO the ground. The ball lags the cursor (SmoothTime), so each
-    // cell gets a few frames and the hold lingers at the end for the ball to catch up.
+    // A stroke — a press in open air — paints spike MASS: it seeks the nearest surface
+    // through TileMassField, so skimming the air row over the floor lays spike tiles on
+    // the floor along the way. The ball lags the cursor (SmoothTime), so each cell gets a
+    // few frames and the hold lingers at the end for the ball to catch up.
     [Fact]
-    public void Stroke_FromAir_SpikesEachSolidCellTheBallCrosses()
+    public void Stroke_FromAir_SpikesTheSurfaceItSkims()
     {
         var sim = InputSim();
         sim.Step(In(CellCenter(11, FloorRow - 1), true));            // press in the air row
         Assert.False(sim.Player.CurrentActionVars.ChargeGesture);
         for (int i = 0; i < 4; i++)
-            for (int f = 0; f < 10; f++) sim.Step(In(CellCenter(11 + i, FloorRow), true));
-        for (int f = 0; f < 20; f++) sim.Step(In(CellCenter(14, FloorRow), true));
-        sim.Step(In(CellCenter(14, FloorRow), false));
-        for (int x = 11; x <= 14; x++) Assert.True(sim.Chunks.SpikeSeeds.Has(x, FloorRow), $"x={x}");
+            for (int f = 0; f < 10; f++) sim.Step(In(CellCenter(11 + i, FloorRow - 1), true));
+        for (int f = 0; f < 20; f++) sim.Step(In(CellCenter(14, FloorRow - 1), true));
+        sim.Step(In(CellCenter(14, FloorRow - 1), false));
+        var spikes = SpikeTiles.All(sim.Chunks);
+        output.WriteLine($"spikes: {string.Join(" ", spikes)}");
+        int onFloor = spikes.FindAll(c => c.gty == FloorRow - 1 && c.gtx >= 10 && c.gtx <= 15).Count;
+        Assert.True(onFloor >= 3, $"only {onFloor} spikes along the stroke");
+        Assert.All(spikes, c => Assert.Equal(TileState.Solid, sim.Chunks.GetCellState(c.gtx, c.gty + 1)));
         Assert.Equal(0f, sim.Player.Abilities.Meters.EruptMove);     // a stroke never charges
         Assert.Equal(0, CrystalBalls(sim));
     }
 
+    // Holding still a couple of cells OFF the surface still reaches it: the mass pools,
+    // forwards toward support, and the patch of spikes grows with the hold.
     [Fact]
-    public void ShiftRmb_SpikesImmediately_AsBefore()
+    public void HoldAboveTheFloor_SpikesSpreadOverTheSurfaceBelow()
     {
         var sim = InputSim();
-        var floor = CellCenter(12, FloorRow);
-        sim.Step(In(floor, true, shift: true));
-        Assert.True(sim.Chunks.SpikeSeeds.Has(12, FloorRow));
+        var p = CellCenter(13, FloorRow - 3);
+        int Count() => SpikeTiles.All(sim.Chunks).FindAll(c => c.gty == FloorRow - 1).Count;
+        for (int f = 0; f < 20; f++) sim.Step(In(p, true));
+        int early = Count();
+        for (int f = 0; f < 60; f++) sim.Step(In(p, true));
+        int late = Count();
+        output.WriteLine($"floor spikes after 20f: {early}, after 80f: {late}");
+        Assert.True(late >= 2, $"only {late} spikes under a held cursor");
+        Assert.True(late > early, "a longer hold should spread more spikes");
+    }
+
+    [Fact]
+    public void ShiftRmb_PlacesOneSpike_OnTheOpenCellBesideSolid()
+    {
+        var sim = InputSim();
+        var spot = CellCenter(12, FloorRow - 1);
+        sim.Step(In(spot, true, shift: true));
+        Assert.Equal(TileState.Spike, sim.Chunks.GetCellState(12, FloorRow - 1));
+        Assert.True(sim.Chunks.SpikeSeeds.Has(12, FloorRow - 1));
         Assert.Equal(nameof(BlockPlaceAction), sim.Player.CurrentActionName);
-        for (int f = 0; f < 40; f++) sim.Step(In(floor, true, shift: true));   // a long hold never charges
+        for (int f = 0; f < 40; f++) sim.Step(In(spot, true, shift: true));   // a long hold never charges
         Assert.Equal(0f, sim.Player.Abilities.Meters.EruptMove);
+        Assert.Equal(1, SpikeTiles.Count(sim.Chunks));
     }
 
     // Charge in the floor, pull the cursor out along the surface and release fast.

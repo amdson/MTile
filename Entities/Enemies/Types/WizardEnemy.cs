@@ -248,7 +248,7 @@ public class WizardPillarAction : EnemyActionState
             if (chunks.GetCellState(gtx, gy) != TileState.Solid) continue;
             ground = gy;
             for (int k = 1; k <= PillarHeight; k++)
-                if (chunks.GetCellState(gtx, gy - k) == TileState.Empty) open++;
+                if (chunks.GetCellState(gtx, gy - k).IsOpen()) open++;
             return true;
         }
         return false;

@@ -31,7 +31,7 @@ public static class FrameData
     //    (todo J, 2026-11-05): landing is rewarded, whiffing is the cost. S3's startup is
     //    7 so the string stays a true combo (S2's full hitstun ends the frame S3 lands).
     public static class GroundSlash1  { public const float Total = 12   / F, Startup =  5   / F, Active = 3    / F, EndLag = 36   / F, HitEndLag = 18 / F; }
-    public static class GroundSlash2  { public const float Total = 10.8f/ F, Startup =  4   / F, Active = 3    / F, EndLag = 36   / F, HitEndLag = 18 / F; }
+    public static class GroundSlash2  { public const float Total = 10.8f/ F, Startup =  4   / F, Active = 3    / F, EndLag = 47   / F, HitEndLag = 23 / F; }   // +30% over S1 (2026-11-06): stopping or being blocked at S2 costs more; S3 ignores it
     public static class GroundSlash3  { public const float Total = 16.2f/ F, Startup =  7   / F, Active = 4    / F, EndLag = 36   / F, HitEndLag = 18 / F; }
     public static class CrouchSlash   { public const float Total = 13.8f/ F, Startup =  7   / F, Active = 3    / F, EndLag =  9   / F, HitEndLag =  6 / F; }
 
@@ -46,7 +46,10 @@ public static class FrameData
 
     // ── Counters / struggle. GrabbedSlash keeps SlashLikeAction's legacy window
     //    (20% → 70% of Total): the mash is its own rhythm.
-    public static class GuardRetaliateAction { public const float Total = 10.2f / F, Startup = 4 / F, Active = 3 / F, EndLag = 7.8f / F; }
+    // GuardRetaliate: 8f startup since 2026-11-06 (was 4 - landed before anyone could see it;
+    // it still punishes a parried S2, whose tail runs ~20f past the parry). Total keeps the
+    // same 3.2f follow-through after the active window.
+    public static class GuardRetaliateAction { public const float Total = 14.2f / F, Startup = 8 / F, Active = 3 / F, EndLag = 7.8f / F; }
     public static class GrabbedSlash         { public const float Total =  9.6f / F,                                 EndLag = 9    / F; }
 
     // ── Heavy strikes: armored through the wind-up, cheap to cancel before the hitbox.
@@ -967,7 +970,7 @@ public class GroundSlash1 : SlashLikeAction
     protected override Color SlashColor          => Color.Red;
     protected override bool  RequireGround       => true;
     protected override bool  RequireAir          => false;
-    protected override float HitstunSecondsOverride => 0.30f;
+    protected override float HitstunSecondsOverride => 22f / 60f;   // 22f (was 18f = 0.30 s; +4f 2026-11-06 pacing pass - S2 lands with 7f to spare, S1-and-stop is -3)
     protected override bool  HoldVictims         => false;
     protected override float BodyDamageScale     => 0.5f;    // poke: 0.25 HP
     protected override void OnExitSetFlags(ConditionState c, int f, float dt, bool connected)
@@ -1361,19 +1364,21 @@ public class DownAirSlash : SlashLikeAction
 
     // The entity-connect bounce, shared with a down-aimed BurstAction so the two pogos
     // can't drift apart. `recoil` is the attack's (already RecoilScale'd) inbox read.
-    internal static void ApplyEntityPogo(EnvironmentContext ctx, Vector2 recoil)
+    // `scale` shrinks the whole bounce (band and sideways lean) for a caller that wants
+    // a lighter pogo; the down-air uses 1.
+    internal static void ApplyEntityPogo(EnvironmentContext ctx, Vector2 recoil, float scale = 1f)
     {
         // Recoil opposes the swing, and the swing points (mostly) down, so -Y is the
         // upward share. Clamp it into the pogo band; the floor is what makes a bounce
         // off a featherweight still feel like a bounce.
-        float bounce = MathHelper.Clamp(MathF.Abs(recoil.Y), PogoSpeed, PogoMaxSpeed);
+        float bounce = scale * MathHelper.Clamp(MathF.Abs(recoil.Y), PogoSpeed, PogoMaxSpeed);
         var v = ctx.Body.Velocity;
         // Min, not assignment: y is down, so this only ever makes the velocity MORE
         // upward. A player already rising faster than the pogo keeps their ascent.
         v.Y = MathF.Min(v.Y, -bounce);
         // Horizontal recoil is small (the chop is near-vertical) and reads fine added
         // straight on — it's just the sideways lean of an off-axis hit.
-        v.X += recoil.X;
+        v.X += recoil.X * scale;
         ctx.Body.Velocity = v;
     }
 }
@@ -2303,7 +2308,11 @@ public class GuardAction : ActionState
     // lookahead, which finds it passing at once — straight out of a live swing, so
     // it is near-instant even mid-combo. The tail keeps ticking underneath (guard
     // neither clears nor re-stamps it), so guarding is no way to skip end-lag.
-    private const float MaxEntrySeconds = 0.2f;
+    // 5f (was 0.2 s / 12f until 2026-11-06). Sized against the ground string: S2 lands
+    // with 6f of S1's hitstun left as the entry check counts it (a raise on S2's own
+    // landing frame still parries), S3 with ~1f of S2's - so a window under 6 makes
+    // S1 -> S2 true against guard while S2 -> S3 stays guardable (the user's call).
+    private const float MaxEntrySeconds = 5f / 60f;
 
     public override int ActivePriority  => 35;   // beats slash candidates (30)
     public override int PassivePriority => 40;
@@ -2438,17 +2447,18 @@ public class DashSlash : SlashLikeAction
     protected override float ArcRadiusScale      => 1.15f;
     protected override float SweepAngleDeg       => 120f;
     protected override float SweepDirection      => +1f;
-    protected override float KnockbackMagnitude  => 320f;
+    protected override float KnockbackMagnitude  => 420f;
     // A space-creating poke (todo I, 2026-11-05): no body-velocity share and a modest
-    // strike speed, so the victim's dv (~135) never reaches a stun; the lowest damage in
-    // the kit; a short launch that leaves both players free at the same moment a body
-    // length apart. The reach and the 65px dash burst are what it buys; the whiff tail
-    // (EndLag, air dash spent) is what it costs.
-    protected override float StrikeSpeed         => 180f;
+    // strike speed; the lowest damage in the kit; a launch that leaves both players free
+    // at the same moment with real space between them. Raised 180 -> 260 (2026-11-08,
+    // victim dv ~135 -> ~195, carry ~40 -> ~80 px); stun is per-hitbox (none here), so
+    // the higher dv doesn't stun. The reach and the 65px dash burst are what it buys;
+    // the whiff tail (EndLag, air dash spent) is what it costs.
+    protected override float StrikeSpeed         => 260f;
     protected override float StrikeBodyVelocityShare => 0f;
     protected override float BodyDamageScale     => 0.4f;    // 0.20 HP
     protected override float HitstunSecondsOverride => 0.20f;   // 12f, == the hit tail: neutral on hit
-    protected override float LaunchDecay         => 120f;    // ~100 px/s applied -> ~40px of carry
+    protected override float LaunchDecay         => 60f;    // sets the carry (see StrikeSpeed)
     protected override Color SlashColor          => Color.Aquamarine;
     protected override bool  RequireGround       => false;
     protected override bool  RequireAir          => false;
@@ -2503,13 +2513,18 @@ public class GuardRetaliateAction : SlashLikeAction
     protected override bool  RequireAir          => false;
 
     public override int PassivePriority => 55;
+    // Above Guard (passive 40) and the Shift+LMB grab chord (48): the counter commits.
+    // Without this a click with Shift still held (the natural input after a parry) started
+    // the counter and the lookahead evicted it for Guard, or for a grab the next tap asked
+    // for the frame hitstun ended, so it never landed (2026-11-06). Flinch (60) and a grab
+    // latch still interrupt it.
+    public override int ActivePriority  => 50;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState ab)
     {
-        // Must be charged AND have a click intent. Don't gate on GuardActive
-        // itself — the charge persists for a window even after the player
-        // releases Shift (and lets go of Guard), so they can parry → release
-        // → retaliate in a quick sequence.
+        // Must be charged AND have a click intent. Don't gate on GuardActive itself — the
+        // charge persists for a window after the parry whether Shift is released or still
+        // held, so parry → click works either way (the Shift+LMB press still emits a Click).
         if (ctx.Combat?.GuardCharged != true) return false;
         if (!ctx.Intents.Peek(IntentType.Click, ctx.CurrentFrame, out _)) return false;
         if (ctx.Combat?.BlocksAttack == true) return false;
@@ -2732,12 +2747,16 @@ public class BurstAction : ActionState
 
     // Pogo: an AIR burst aimed into DownAirSlash's bottom sextant bounces you off
     // whatever body it connects with, exactly as the down-air does — same aim wedge,
-    // same recoil scale, same 200–280 px/s band (DownAirSlash.ApplyEntityPogo).
+    // same recoil scale, but the band scaled down by PogoScale (DownAirSlash.ApplyEntityPogo).
     // Entities only: the down-air's tile bounce is a trimmed additive nudge off rock
     // that survived the chop, and the burst's shell breaks nearly everything it
     // touches, so there's no surviving surface for it to kick off in practice.
     private static bool IsPogo(in ActionVars vars)
         => !vars.IsGrounded && vars.AttackDir.Y >= DownAirSlash.AimCosThreshold;
+    // The burst's pogo is a fraction of the down-air's (2026-11-08: the full 200–280 px/s
+    // band was far too much lift off a move that already launches its victim). 0.25 ⇒
+    // 50–70 px/s — enough to arrest the fall, not a jump.
+    private const float PogoScale = 0.25f;
 
     public override int ActivePriority  => 30;
     public override int PassivePriority => 30;
@@ -2870,7 +2889,7 @@ public class BurstAction : ActionState
     {
         if (ctx.CombatSystem == null || !IsPogo(in vars)) return;
         if (ctx.CombatSystem.PeekHits(vars.HitId) <= 0) return;
-        DownAirSlash.ApplyEntityPogo(ctx, ctx.CombatSystem.PeekRecoil(vars.HitId));
+        DownAirSlash.ApplyEntityPogo(ctx, ctx.CombatSystem.PeekRecoil(vars.HitId), PogoScale);
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
@@ -2962,6 +2981,10 @@ public class BlockPaintAction : ActionState
     // sprout threshold (1.0). Above threshold so painted cells solidify with spill to
     // spare.
     private const float MassPerCell    = 6f;
+    // Painted spike mass lands at this multiple of the meter it costs (Paint), so a spike
+    // stroke can lay several spikes and reach a surface a few cells away. Shift+RMB
+    // placement stays at the full SpikeBuildCost per spike.
+    internal const float SpikeMassBoost = 4f;
     // Build reach (px) from the player center. Same number the old drag paint used,
     // carried over from Simulation.HandleBuildInput before it. A target cell that
     // borders a still-growing sprout of YOUR OWN has no reach limit (todo #5): chaining
@@ -3011,31 +3034,17 @@ public class BlockPaintAction : ActionState
 
     // ── Spike mode (todo.txt #7) ───────────────────────────────────────────────────
     //
-    // With spikes selected this is the SAME gesture as the painter's, with two
-    // substitutions: a stroke lays a spike on each solid cell the ball passes over instead
-    // of depositing mass (spikes overlay existing solid, so there is nothing to paint),
-    // and a charged fast release out of the ground launches a crystal MassBall (the
-    // crystal wave, World/CrystalWave.cs) instead of a build one. The press rule is the
-    // painter's — cursor in solid at the press means charge, open air means stroke — so
-    // there is no second arbitration to get wrong. An earlier cut (2026-10 → 2026-11-06)
-    // also let plain RMB tap/stroke spikes from a press IN solid and told that apart from
-    // a charge by whether the cursor stayed on the press CELL for 0.15 s; a 2 px hand
-    // drift across an 11 px cell edge turned a charge into a spike stroke that could never
-    // charge. Shift+RMB (BlockPlaceAction) is the deliberate one-cell spiking path and is
-    // unchanged.
-
-    // One spike per solid cell the ball enters (BlockPlaceAction's per-cell latch, via
-    // OriginCell). Measured at the ball like Paint, so spikes land where the mass would
-    // have; a ball in open air or out of reach spikes nothing.
-    private static void SpikeStroke(EnvironmentContext ctx, PlayerAbilityState ab, Vector2 ballPos, ref ActionVars vars)
-    {
-        int gtx = (int)MathF.Floor(ballPos.X / Chunk.TileSize);
-        int gty = (int)MathF.Floor(ballPos.Y / Chunk.TileSize);
-        var cell = BlockEruptionHelpers.CellCenter(gtx, gty);
-        if (cell == vars.OriginCell) return;
-        if (Vector2.DistanceSquared(ctx.Body.Position, cell) > BuildReach * BuildReach) return;
-        if (BlockPlaceAction.TrySpikeCell(ctx, ab, gtx, gty)) vars.OriginCell = cell;
-    }
+    // Spike is a material (picker key 5, TileType.Spike), so a stroke with it selected
+    // is ordinary painting: the ball deposits spike mass into TileMassField, which seeks
+    // a surface and lays spike tiles on any solid face (ChunkMap.TryRequestSpike) —
+    // skimming near a floor or wall spikes it, and holding longer spreads more. The one
+    // remaining substitution is the release: a charged fast release out of the ground
+    // launches a crystal MassBall (the crystal wave, World/CrystalWave.cs) instead of a
+    // build one. The press rule is the painter's — cursor in solid at the press means
+    // charge, open air means stroke. An earlier cut (2026-10 → 2026-11-06) told a spike
+    // tap from a charge by whether the cursor stayed on the press CELL for 0.15 s; a 2 px
+    // hand drift across an 11 px cell edge turned a charge into a stroke that could never
+    // charge. SpikeMode is latched at the press so toggling the material ends the hold.
 
     public override void Enter(EnvironmentContext ctx, PlayerAbilityState ab, ref ActionVars vars)
     {
@@ -3043,7 +3052,6 @@ public class BlockPaintAction : ActionState
         vars.BallPos     = ctx.Input.MouseWorldPosition;   // seeded under the cursor
         vars.BallVel     = Vector2.Zero;
         vars.SpikeMode   = ctx.SpikesSelected;
-        vars.OriginCell  = new Vector2(float.NaN, float.NaN);   // the spike stroke's per-cell latch
         // The mode is decided HERE and does not get re-derived per frame: cursor buried at
         // the press means this hold is a charge, open air means it's a paint stroke —
         // UNLESS there's already a charge banked, in which case the hold is a charge
@@ -3069,8 +3077,7 @@ public class BlockPaintAction : ActionState
 
         if (!vars.ChargeGesture)
         {
-            if (vars.SpikeMode) SpikeStroke(ctx, ab, vars.BallPos, ref vars);
-            else                Paint(ctx, ab, vars.BallPos, vars.BallVel.Length());
+            Paint(ctx, ab, vars.BallPos, vars.BallVel.Length());
             return;
         }
 
@@ -3159,8 +3166,11 @@ public class BlockPaintAction : ActionState
         float paid = ab.Meters.SpendForTiles(want, ctx.ActiveBlockType);
         if (paid <= 0f) return;
 
-        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, paid, ctx.ActiveBlockType,
-                                owner: BlockOwnership.OwnerFor(ctx.Faction));
+        // Spike mass is injected at SpikeMassBoost x what was paid: it has to travel to a
+        // surface through open air, and most of what spills the wrong way decays.
+        float mass = ctx.ActiveBlockType == TileType.Spike ? paid * SpikeMassBoost : paid;
+        ctx.Chunks.Mass.Deposit(ctx.Chunks, gtx, gty, mass, ctx.ActiveBlockType,
+                                owner: BlockOwnership.OwnerFor(ctx.Faction), team: ctx.Team);
     }
 
     // The build-reach rule shared by painting and placement (see BuildReach).
@@ -3216,8 +3226,6 @@ public class BlockPaintAction : ActionState
 // a bug (a tile that appears one frame after you clicked, one cell off where you aimed).
 public class BlockPlaceAction : ActionState
 {
-    private const float Reach         = BlockPaintAction.BuildReach;   // unlimited when chaining off a sprout (todo #5)
-
     public override int ActivePriority  => 8;
     public override int PassivePriority => 10;
     // Same as BlockPaintAction: an interruptible hold, transparent to entrants.
@@ -3225,11 +3233,8 @@ public class BlockPlaceAction : ActionState
 
     public override float AnimationProgress(in ActionVars vars) => -1f;
 
-    // Shift+RMB places blocks; with spikes selected (picker key 5) Shift+RMB spikes
-    // cells instead — one deliberate overlay per cell, the same gesture shape as a
-    // single placement, so spikes ride this action rather than a new ActionState.
-    // Plain RMB with spikes selected is BlockPaintAction's spike mode (todo.txt #7): the
-    // painter's gesture, spiking the cells its ball crosses, charging the crystal wave.
+    // Shift+RMB places one block per cell — spikes included: Spike is just the selected
+    // material, placed as a spike tile on an empty cell touching solid on any face.
     private static bool Held(EnvironmentContext ctx)
         => ctx.Input.RightClick && ctx.Input.Shift;
 
@@ -3259,45 +3264,19 @@ public class BlockPlaceAction : ActionState
         // single-tile line rather than re-requesting the same cell every frame.
         if (cell == vars.OriginCell) return;
 
-        if (ctx.SpikesSelected)
-        {
-            if (Vector2.DistanceSquared(ctx.Body.Position, cell) > Reach * Reach) return;
-            if (TrySpikeCell(ctx, ab, gtx, gty)) vars.OriginCell = cell;
-            return;
-        }
-
         if (!BlockPaintAction.InBuildReach(ctx, gtx, gty, cell)) return;
 
         if (!ab.Meters.CanAfford(ctx.ActiveBlockType)) return;
-        if (ctx.Chunks.TryRequestTile(gtx, gty, ctx.ActiveBlockType,
-                                      owner: BlockOwnership.OwnerFor(ctx.Faction),
-                                      source: SproutSource.Place) == null) return;
+        bool placed = ctx.ActiveBlockType == TileType.Spike
+            ? ctx.Chunks.TryRequestSpike(gtx, gty, ctx.Team)
+            : ctx.Chunks.TryRequestTile(gtx, gty, ctx.ActiveBlockType,
+                                        owner: BlockOwnership.OwnerFor(ctx.Faction),
+                                        source: SproutSource.Place) != null;
+        if (!placed) return;
 
         // Charge only for a placement that actually took.
         ab.Meters.SpendForTiles(1f, ctx.ActiveBlockType);
         vars.OriginCell = cell;
-    }
-
-    // Spike overlay (BLOCK_OWNERSHIP_SPIKES §2): only an existing SOLID cell — never air,
-    // never a still-growing sprout — so spikes can't be conjured into open space to crush
-    // someone. Not already spiked OR seeded (by anyone: no paying to repaint an enemy's
-    // spikes, no double charge for a cell whose crystal is still growing), and the full
-    // SpikeBuildCost (2× stone) must be affordable. Stamps the placer's side, which is
-    // what makes the eventual spike harmless to them and their co-op partner.
-    //
-    // todo.txt #8: this SEEDS the cell (TileSpikeSeeds) rather than spiking it — a small
-    // crystal that flashes and grows into the ordinary spike overlay after
-    // CrystalLifecycle.SpikePlacement (1.0 s seed + 0.25 s flash). The full cost is
-    // charged now, at seeding, as the instant placement used to; a seed lost to its block
-    // breaking is not refunded.
-    public static bool TrySpikeCell(EnvironmentContext ctx, PlayerAbilityState ab, int gtx, int gty)
-    {
-        if (ctx.Chunks == null || ab?.Meters == null) return false;
-        if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Solid) return false;
-        if (ctx.Chunks.Spikes.IsSpiked(gtx, gty) || ctx.Chunks.SpikeSeeds.Has(gtx, gty)) return false;
-        if (!ab.Meters.TrySpendUnits(MaterialStrengths.SpikeBuildCost)) return false;
-        ctx.Chunks.SpikeSeeds.Set(gtx, gty, new TileSpikes.Side(ctx.Faction, ctx.Team), ctx.Chunks.TerrainFrame);
-        return true;
     }
 
     public override void Telegraph(TelegraphList t, PhysicsBody body, in ActionVars vars)
@@ -3370,7 +3349,7 @@ public class BlockBurstAction : ActionState
         float distSq = Vector2.DistanceSquared(ctx.Body.Position, center);
         if (distSq > BurstReach * BurstReach) return false;
         // Empty air only — a cursor in solid is the eruption gesture's territory.
-        if (ctx.Chunks.GetCellState(gtx, gty) != TileState.Empty) return false;
+        if (!ctx.Chunks.GetCellState(gtx, gty).IsOpen()) return false;
         // If the drag-build could paint here, RMB is placing: leave the press alone.
         if (BlockPaintAction.InBuildReach(ctx, gtx, gty, center) &&
             ctx.Chunks.CanRequestTile(gtx, gty)) return false;
@@ -4154,6 +4133,9 @@ public class GrabAction : ActionState
         if (ctx.Combat?.BlocksAttack == true) return false;             // not while stunned/grabbed
         if (ctx.Combat?.HitstunActive == true) return false;            // not while in hitstun
         if (ab.Condition.RecoveryActive) return false;
+        // A charged parry owns the Shift+LMB press: it is the counter (GuardRetaliate, which
+        // reads the Click a frame after the press edge), not a grab (2026-11-06).
+        if (ctx.Combat?.GuardCharged == true) return false;
         // From-set: neutral/recovery, or over a live Guard (Shift is already down).
         if (ctx.RecoveryIndex() == null && ctx.PreviousAction(0) is not GuardAction) return false;
         // Yield the press to BlockGrabAction exactly when its own rule claims it: the
@@ -4362,7 +4344,7 @@ public class GrabbedSlash : SlashLikeAction
     protected override bool  RequireAir          => false;
     // The struggle channel: each connecting hit removes this much grab strength from
     // the grabber (GrabStrengthMax 3 ⇒ breaks on the 3rd). No hitstun is dealt.
-    protected override float GrabStrengthDamage  => 1f;
+    protected override float GrabStrengthDamage  => 0.5f;
     // A struggle hit must have zero effect on either side, not just zero knockback —
     // wearing a grab down should never also shove the grabber (see CombatState's
     // struggle-channel comment).

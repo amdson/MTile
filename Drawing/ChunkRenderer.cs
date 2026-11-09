@@ -240,33 +240,43 @@ public sealed class ChunkRenderer
     private const int   SpikeTeeth  = 2;
     private const float SpikeHeight = Chunk.TileSize * 0.4f;
 
+    // Spike tiles (TileState.Spike) are drawn as teeth on the face of each solid block
+    // the spike clings to, protruding into the spike's own cell — the same pixels the old
+    // per-block overlay drew. Armed spikes only; a seeding one draws as a seed below.
     private void DrawSpikes(ChunkMap chunks)
     {
-        if (chunks.Spikes.Count == 0) return;
         var viewport = _graphicsDevice.Viewport;
         float halfW = viewport.Width  / (2f * _camera.Zoom) + Chunk.TileSize;
         float halfH = viewport.Height / (2f * _camera.Zoom) + Chunk.TileSize;
-        foreach (var (cell, side) in chunks.Spikes.Entries)
+        const float ChunkPx = Chunk.Size * Chunk.TileSize;
+        foreach (var chunk in chunks)
         {
-            var (gtx, gty) = cell;
-            if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
-            float left = gtx * Chunk.TileSize, top = gty * Chunk.TileSize;
-            if (MathF.Abs(left - _camera.Position.X) > halfW || MathF.Abs(top - _camera.Position.Y) > halfH)
-                continue;
-            var color = TilePalette.SpikeColor(side.Faction);
-            if (chunks.GetCellState(gtx, gty - 1) != TileState.Solid) Teeth(left, top, 0, -1, color);
-            if (chunks.GetCellState(gtx, gty + 1) != TileState.Solid) Teeth(left, top, 0,  1, color);
-            if (chunks.GetCellState(gtx - 1, gty) != TileState.Solid) Teeth(left, top, -1, 0, color);
-            if (chunks.GetCellState(gtx + 1, gty) != TileState.Solid) Teeth(left, top,  1, 0, color);
+            var origin = chunk.WorldPosition;
+            if (origin.X > _camera.Position.X + halfW || origin.X + ChunkPx < _camera.Position.X - halfW) continue;
+            if (origin.Y > _camera.Position.Y + halfH || origin.Y + ChunkPx < _camera.Position.Y - halfH) continue;
+            for (int tx = 0; tx < Chunk.Size; tx++)
+            for (int ty = 0; ty < Chunk.Size; ty++)
+            {
+                ref var t = ref chunk.Tiles[tx, ty];
+                if (t.State != TileState.Spike) continue;
+                int gtx = chunk.ChunkPos.X * Chunk.Size + tx, gty = chunk.ChunkPos.Y * Chunk.Size + ty;
+                if (chunks.SpikeSeeds.Has(gtx, gty)) continue;
+                var color = TilePalette.SpikeColor(t.Team);
+                float left = gtx * Chunk.TileSize, top = gty * Chunk.TileSize;
+                const float T = Chunk.TileSize;
+                if (chunks.GetCellState(gtx, gty + 1) == TileState.Solid) Teeth(left, top + T, 0, -1, color);
+                if (chunks.GetCellState(gtx, gty - 1) == TileState.Solid) Teeth(left, top - T, 0,  1, color);
+                if (chunks.GetCellState(gtx + 1, gty) == TileState.Solid) Teeth(left + T, top, -1, 0, color);
+                if (chunks.GetCellState(gtx - 1, gty) == TileState.Solid) Teeth(left - T, top,  1, 0, color);
+            }
         }
     }
 
     // Spike seed look (todo.txt #8), drawn purely from the seed's lifecycle phase: a
-    // small crystal standing on ONE exposed face of the block (top preferred — "a crystal
-    // appears on top of the block"; else a side, else the bottom; a fully buried cell
-    // shows nothing, same as its eventual spike). Seed: a slim side-tinted shard that
-    // swells over the wait. Flash: the full shard blinking white — the last warning
-    // before it becomes the teeth DrawSpikes draws.
+    // small crystal standing on ONE supporting face of the spike tile (the block below
+    // preferred — "a crystal appears on top of the block"; else a side, else above).
+    // Seed: a slim team-tinted shard that swells over the wait. Flash: the full shard
+    // blinking white — the last warning before it becomes the teeth DrawSpikes draws.
     private const float SeedMinHeight  = Chunk.TileSize * 0.25f;
     private const float SeedMaxHeight  = Chunk.TileSize * 0.5f;
     private const float SeedHalfWidth  = Chunk.TileSize * 0.16f;
@@ -280,24 +290,25 @@ public sealed class ChunkRenderer
         float halfH = viewport.Height / (2f * _camera.Zoom) + Chunk.TileSize;
         int now = chunks.TerrainFrame;
         var life = TileSpikeSeeds.Lifecycle;
-        foreach (var (cell, seed) in chunks.SpikeSeeds.Entries)
+        foreach (var (cell, seededFrame) in chunks.SpikeSeeds.Entries)
         {
             var (gtx, gty) = cell;
-            if (chunks.GetCellState(gtx, gty) != TileState.Solid) continue;
+            if (chunks.GetCellState(gtx, gty) != TileState.Spike) continue;
             float left = gtx * Chunk.TileSize, top = gty * Chunk.TileSize;
             if (MathF.Abs(left - _camera.Position.X) > halfW || MathF.Abs(top - _camera.Position.Y) > halfH)
                 continue;
 
-            int nx, ny;
-            if      (chunks.GetCellState(gtx, gty - 1) != TileState.Solid) { nx = 0;  ny = -1; }
-            else if (chunks.GetCellState(gtx - 1, gty) != TileState.Solid) { nx = -1; ny = 0; }
-            else if (chunks.GetCellState(gtx + 1, gty) != TileState.Solid) { nx = 1;  ny = 0; }
-            else if (chunks.GetCellState(gtx, gty + 1) != TileState.Solid) { nx = 0;  ny = 1; }
+            // (sx, sy) = the supporting block; (nx, ny) = its face normal into the spike cell.
+            int sx, sy, nx, ny;
+            if      (chunks.GetCellState(gtx, gty + 1) == TileState.Solid) { sx = gtx;     sy = gty + 1; nx = 0;  ny = -1; }
+            else if (chunks.GetCellState(gtx + 1, gty) == TileState.Solid) { sx = gtx + 1; sy = gty;     nx = -1; ny = 0; }
+            else if (chunks.GetCellState(gtx - 1, gty) == TileState.Solid) { sx = gtx - 1; sy = gty;     nx = 1;  ny = 0; }
+            else if (chunks.GetCellState(gtx, gty - 1) == TileState.Solid) { sx = gtx;     sy = gty - 1; nx = 0;  ny = 1; }
             else continue;
 
-            int elapsed = now - seed.SeededFrame;
+            int elapsed = now - seededFrame;
             var phase = life.PhaseAt(elapsed);
-            var side = TilePalette.SpikeColor(seed.Side.Faction);
+            var side = TilePalette.SpikeColor(chunks.GetCellTeam(gtx, gty));
             float height; Color color;
             if (phase == CrystalPhase.Seed)
             {
@@ -311,7 +322,7 @@ public sealed class ChunkRenderer
                 bool on = ((elapsed - life.SeedFrames) / FlashBlinkFrames) % 2 == 0;
                 color  = on ? Color.White : Color.Lerp(side, Color.White, 0.5f);
             }
-            Shard(left, top, nx, ny, height, SeedHalfWidth, color);
+            Shard(sx * Chunk.TileSize, sy * Chunk.TileSize, nx, ny, height, SeedHalfWidth, color);
         }
     }
 
@@ -345,7 +356,7 @@ public sealed class ChunkRenderer
             var phase = life.PhaseAt(elapsed);
             if (phase == CrystalPhase.Gone) continue;
             float length = CrystalWave.LengthAt(in life, elapsed);
-            var side = Color.Lerp(CrystalIce, TilePalette.SpikeColor(c.Side.Faction), 0.35f);
+            var side = Color.Lerp(CrystalIce, TilePalette.SpikeColor(c.Side.Team), 0.35f);
             Color color;
             float halfWidth = CrystalWave.HalfWidth;
             if (phase == CrystalPhase.Seed)

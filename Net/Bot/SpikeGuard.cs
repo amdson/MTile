@@ -42,13 +42,15 @@ public sealed class SpikeGuard
     public static bool Hostile(BotView v, int gx, int gy)
     {
         var ch = v.Sim.Chunks;
+        // A solid cell is hostile when an opposing spike tile (armed or still seeding)
+        // clings to any of its faces — the floor under a spike, the wall behind one.
         if (ch.GetCellState(gx, gy) != TileState.Solid) return false;
-        if (ch.Spikes.TryGet(gx, gy, out var s))
-            return SpikeContactSystem.Opposes(in s, v.Self.Faction, 0, false);
-        if (ch.SpikeSeeds.TryGet(gx, gy, out var seed))
-            return SpikeContactSystem.Opposes(in seed.Side, v.Self.Faction, 0, false);
-        return false;
+        return OpposingSpike(ch, gx, gy - 1, v.Self.Team) || OpposingSpike(ch, gx, gy + 1, v.Self.Team)
+            || OpposingSpike(ch, gx - 1, gy, v.Self.Team) || OpposingSpike(ch, gx + 1, gy, v.Self.Team);
     }
+
+    private static bool OpposingSpike(ChunkMap ch, int gx, int gy, int team)
+        => ch.GetCellState(gx, gy) == TileState.Spike && SpikeContactSystem.Opposes(ch.GetCellTeam(gx, gy), team);
 
     // A cell a body can stand on: solid, not hostile, with headroom above.
     private static bool SafeFloor(BotView v, int gx, int gy)

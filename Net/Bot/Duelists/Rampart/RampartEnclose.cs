@@ -130,8 +130,9 @@ public sealed class RampartEnclose : BotManeuver
         if (!UseSpikes) return;
         // Floor under the body first (always touched by a grounded target), lid second
         // (touched only if the head is within ContactSlop, i.e. a tight box).
-        for (int x = minX; x <= maxX; x++) _spikeCells.Add(new Point(x, ground));
-        for (int x = minX; x <= maxX; x++) _spikeCells.Add(new Point(x, lidRow));
+        // Spike tiles sit in the open cell beside the solid: on top of the floor, under the lid.
+        for (int x = minX; x <= maxX; x++) _spikeCells.Add(new Point(x, ground - 1));
+        for (int x = minX; x <= maxX; x++) _spikeCells.Add(new Point(x, lidRow + 1));
     }
 
     public override bool Step(BotView v, ref PlayerInput input)

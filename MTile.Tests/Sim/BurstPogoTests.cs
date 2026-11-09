@@ -62,8 +62,9 @@ public class BurstPogoTests(ITestOutputHelper output)
         var (minVy, burst, connected) = Run(new Vector2(0f, 200f), gapAbove: 60f, lmbAt: 1, rmbAt: 4);
         Assert.True(burst, "LMB-hold then RMB should fire BurstAction.");
         Assert.True(connected, "The burst should have connected with the victim below.");
-        Assert.True(minVy <= -195f, $"Expected a pogo of at least PogoSpeed; min Vy = {minVy}");
-        Assert.True(minVy >= -300f, $"The pogo must stay inside PogoMaxSpeed; min Vy = {minVy}");
+        // The burst pogo is the down-air band × 0.25 (50–70 px/s).
+        Assert.True(minVy <= -45f, $"Expected a pogo of at least 0.25 × PogoSpeed; min Vy = {minVy}");
+        Assert.True(minVy >= -80f, $"The pogo must stay inside 0.25 × PogoMaxSpeed; min Vy = {minVy}");
     }
 
     // Control: same fall, same wind-up, aimed level — the burst still fires but must not

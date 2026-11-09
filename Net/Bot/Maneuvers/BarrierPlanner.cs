@@ -26,8 +26,9 @@ namespace MTile.Net;
 //   - The placement does NOT check bodies. A sprout growing into a body pushes it and,
 //     wedged, crushes itself (PhysicsWorld.CrushOverlappingSprouts) — so a wall planned
 //     inside the target is wasted meter. Plans keep their cells outside body boxes.
-//   - Spikes (picker key 5) only overlay an existing SOLID cell, never a sprout, so a
-//     spike pass has to wait out SproutLifetime after the blocks it lines.
+//   - Spikes (picker key 5) are tiles in an OPEN cell that must touch an existing SOLID
+//     cell (never a sprout), so a spike pass has to wait out SproutLifetime after the
+//     blocks it lines.
 internal static class BarrierPlanner
 {
     public static float Ts => Chunk.TileSize;
@@ -75,11 +76,12 @@ internal static class BarrierPlanner
         return -1;
     }
 
-    // True once the cell is anything but untouched air: solid, sprouting, or a pending
+    // True once the cell is anything but open air (a spike tile is open — a block
+    // replaces it): solid, sprouting, or a pending
     // ghost in the sprout graph. That is exactly "TryRequestTile would refuse it", i.e.
     // nothing more to spend there.
     public static bool Requested(BotView v, Point c)
-        => v.Sim.Chunks.GetCellState(c.X, c.Y) != TileState.Empty
+        => !v.Sim.Chunks.GetCellState(c.X, c.Y).IsOpen()
         || v.Sim.Chunks.Graph.TryGet(c.X, c.Y, out _);
 
     public static bool InReach(Vector2 me, Point c, float margin = 2f)
@@ -111,12 +113,14 @@ internal static class BarrierPlanner
             case TileType.Dirt:  input.Num2 = true; break;
             case TileType.Sand:  input.Num3 = true; break;
             case TileType.Foam:  input.Num4 = true; break;
+            case TileType.Spike: input.Num5 = true; break;
         }
     }
 }
 
 // Feeds an ordered cell list to the game as Shift+RMB placements (or Shift+RMB spike
-// overlays when `spikes` is set), one cell per frame. The owner keeps calling Step until
+// tiles when `spikes` is set — the cells are then the OPEN cells the spikes occupy,
+// beside the solid they cling to), one cell per frame. The owner keeps calling Step until
 // it reports Done; it reports Stalled when the plan has stopped making progress so the
 // maneuver can bail out instead of holding RMB forever.
 internal sealed class BarrierLayer
@@ -153,7 +157,7 @@ internal sealed class BarrierLayer
 
     // Done-ness of one cell for this layer's mode.
     private bool Finished(BotView v, Point c)
-        => Spikes ? (v.Sim.Chunks.Spikes.IsSpiked(c.X, c.Y) || v.Sim.Chunks.SpikeSeeds.Has(c.X, c.Y))
+        => Spikes ? v.Sim.Chunks.GetCellState(c.X, c.Y) == TileState.Spike   // seeding counts: it arms on its own
                  : BarrierPlanner.Requested(v, c);   // a seeded cell is placed: it grows on its own
 
     public Status Step(BotView v, ref PlayerInput input)

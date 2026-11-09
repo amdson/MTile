@@ -20,8 +20,7 @@ public sealed class TerrainSnapshot
     public SproutGraphData Graph;
     public Dictionary<(int gtx, int gty), float> Damage;
     public HashSet<(int gtx, int gty)>           Charge;
-    public Dictionary<(int gtx, int gty), TileSpikes.Side> Spikes;
-    public Dictionary<(int gtx, int gty), TileSpikeSeeds.Seed> SpikeSeeds;
+    public Dictionary<(int gtx, int gty), int>   SpikeSeeds;   // cell → seeded TerrainFrame
     public CrystalWaveField.Data Crystals;
     public Dictionary<(int gtx, int gty), float> Foam;
     public Dictionary<(int gtx, int gty), float> Impact;

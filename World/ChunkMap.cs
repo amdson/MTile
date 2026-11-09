@@ -26,9 +26,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
 
     // Sparse per-cell spike overlay (placer's side per cell). Reinforces the cell in
     // DamageCell and drives SpikeContactSystem. Cleared on break like Charge.
-    public readonly TileSpikes Spikes = new();
-    // Spike crystals still seeding/flashing (todo.txt #8): promoted into Spikes on their
-    // first Grown frame by TickSprouts. Harmless until then. Cleared on break like Spikes.
+    // Spike tiles (TileState.Spike) still seeding/flashing (todo.txt #8): harmless until
+    // their seed expires in TickSprouts. Cleared whenever the spike tile is replaced.
     public readonly TileSpikeSeeds SpikeSeeds = new();
     // The crystal wave (todo.txt #7): requested / seeded / grown crystals, keyed by cell.
     // Crystal cells stay EMPTY in the grid — see CrystalWaveField.
@@ -109,19 +108,24 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // type before overwriting it, so the dense grid is fully roll-back-able. Sprout
     // refs aren't journaled — they're re-linked from the restored graph (see
     // RestoreTerrain), keeping the journal entries purely value data.
-    private void WriteTile(Chunk chunk, int tx, int ty, TileState state, TileType type, TileSproutNode sprout)
+    private void WriteTile(Chunk chunk, int tx, int ty, TileState state, TileType type, TileSproutNode sprout,
+                           byte team = 0)
     {
         ref var t = ref chunk.Tiles[tx, ty];
         // Real terrain claiming a cell evicts a crystal there (a wall raised across a
         // pending wave cuts it). Crystals are value-snapshotted, so a rewind restores them.
         if (state != TileState.Empty && Crystals.Count > 0)
             Crystals.Remove(chunk.ChunkPos.X * Chunk.Size + tx, chunk.ChunkPos.Y * Chunk.Size + ty);
-        _journal.RecordTileWrite(chunk.ChunkPos, tx, ty, t.State, t.Type);
-        TerrainHash ^= CellHash(chunk.ChunkPos, tx, ty, t.State, t.Type);   // out with the old
+        // Anything replacing a spike tile takes its arming seed with it.
+        if (t.State == TileState.Spike && state != TileState.Spike)
+            SpikeSeeds.Clear(chunk.ChunkPos.X * Chunk.Size + tx, chunk.ChunkPos.Y * Chunk.Size + ty);
+        _journal.RecordTileWrite(chunk.ChunkPos, tx, ty, t.State, t.Type, t.Team);
+        TerrainHash ^= CellHash(chunk.ChunkPos, tx, ty, t.State, t.Type, t.Team);   // out with the old
         t.State  = state;
         t.Type   = type;
         t.Sprout = sprout;
-        TerrainHash ^= CellHash(chunk.ChunkPos, tx, ty, state, type);       // in with the new
+        t.Team   = state == TileState.Spike ? team : (byte)0;
+        TerrainHash ^= CellHash(chunk.ChunkPos, tx, ty, state, type, t.Team);       // in with the new
     }
 
     // ── Dense-grid fingerprint (desync guard) ───────────────────────────────────
@@ -138,14 +142,15 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // dropping one on rewind needs no special handling.
     public ulong TerrainHash { get; private set; }
 
-    private static ulong CellHash(Point cp, int tx, int ty, TileState state, TileType type)
+    private static ulong CellHash(Point cp, int tx, int ty, TileState state, TileType type, byte team)
     {
         if (state == TileState.Empty && type == default) return 0UL;
         ulong k = (ulong)(uint)cp.X * 0x9E3779B97F4A7C15UL
                 ^ (ulong)(uint)cp.Y * 0xC2B2AE3D27D4EB4FUL
                 ^ (ulong)(uint)(tx * 31 + ty) * 0x165667B19E3779F9UL
                 ^ ((ulong)(byte)state << 56)
-                ^ ((ulong)(byte)type  << 48);
+                ^ ((ulong)(byte)type  << 48)
+                ^ ((ulong)team        << 40);
         k ^= k >> 33; k *= 0xFF51AFD7ED558CCDUL;
         k ^= k >> 33; k *= 0xC4CEB9FE1A85EC53UL;
         return k ^ (k >> 33);
@@ -163,7 +168,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                 for (int ty = 0; ty < Chunk.Size; ty++)
                 {
                     ref var t = ref chunk.Tiles[tx, ty];
-                    h ^= CellHash(pos, tx, ty, t.State, t.Type);
+                    h ^= CellHash(pos, tx, ty, t.State, t.Type, t.Team);
                 }
         TerrainHash = h;
     }
@@ -264,7 +269,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             for (int ty = 0; ty < Chunk.Size; ty++)
             {
                 ref var t = ref chunk.Tiles[tx, ty];
-                h ^= CellHash(chunk.ChunkPos, tx, ty, t.State, t.Type);
+                h ^= CellHash(chunk.ChunkPos, tx, ty, t.State, t.Type, t.Team);
             }
         return h;
     }
@@ -354,6 +359,17 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             gtx * Chunk.TileSize + Chunk.TileSize * 0.5f,
             gty * Chunk.TileSize + Chunk.TileSize * 0.5f);
 
+    // Owning team of a spike tile (meaningless for any other state).
+    public int GetCellTeam(int gtx, int gty)
+    {
+        var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
+        return _dict.TryGetValue(chunkPos, out var chunk) ? chunk.Tiles[tx, ty].Team : 0;
+    }
+
+    // An armed spike tile: placed, and done seeding. What SpikeContactSystem bites with.
+    public bool IsArmedSpike(int gtx, int gty)
+        => GetCellState(gtx, gty) == TileState.Spike && !SpikeSeeds.Has(gtx, gty);
+
     // State of a cell in the global grid. Returns Empty for unloaded chunks.
     public TileState GetCellState(int gtx, int gty)
     {
@@ -414,7 +430,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                                          EntityId wave = default, byte owner = BlockOwnership.None,
                                          SproutSource source = SproutSource.Paint)
     {
-        if (GetCellState(gtx, gty) != TileState.Empty) return null;
+        // Spike tiles are open: a block requested onto one replaces it (WriteTile).
+        // Spikes themselves never sprout — they go through TryRequestSpike.
+        if (type == TileType.Spike) return null;
+        if (!GetCellState(gtx, gty).IsOpen()) return null;
         if (Graph.TryGet(gtx, gty, out _)) return null;   // already requested
 
         var faces = SolidFaces(gtx, gty);
@@ -477,7 +496,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     public bool IsForeignToWave(EntityId wave, int gtx, int gty)
     {
         var st = GetCellState(gtx, gty);
-        if (st == TileState.Empty) return false;
+        if (st.IsOpen()) return false;
         return !Waves.IsWaveCell(wave, gtx, gty);
     }
 
@@ -492,11 +511,51 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         return Crystals.TryRequest(this, gtx, gty, wave, TerrainFrame);
     }
 
+    // Place a spike tile (picker key 5's material). Spikes cling to ANY solid face, so the
+    // cell must be empty — not already a spike, which is how mass forwarding spreads a
+    // held stroke along a surface — with no sprout node and at least one solid
+    // 4-neighbour. The tile is harmless until its seed expires (TileSpikeSeeds: the
+    // 1.0 s seed + 0.25 s flash telegraph). `team` is the placer's; the spike hurts
+    // every other team.
+    public bool TryRequestSpike(int gtx, int gty, int team)
+    {
+        if (GetCellState(gtx, gty) != TileState.Empty) return false;
+        if (Graph.TryGet(gtx, gty, out _)) return false;
+        if (SolidFaces(gtx, gty) == SproutFaces.None) return false;
+        var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
+        WriteTile(GetOrCreateChunk(chunkPos), tx, ty, TileState.Spike, TileType.Spike, null,
+                  (byte)Math.Clamp(team, 0, Tile.MaxTeams - 1));
+        SpikeSeeds.Set(gtx, gty, TerrainFrame);
+        return true;
+    }
+
+    // Quietly remove a spike tile (knocked off, or its last support broke). No
+    // OnTileBroken: a spike isn't terrain, so no debris and no break sound.
+    private void ClearSpike(int gtx, int gty)
+    {
+        var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
+        if (!_dict.TryGetValue(chunkPos, out var chunk)) return;
+        if (chunk.Tiles[tx, ty].State != TileState.Spike) return;
+        WriteTile(chunk, tx, ty, TileState.Empty, TileType.Spike, null);
+    }
+
+    // A cell just stopped being solid: any spike that clung only to it falls off.
+    private void ClearOrphanedSpikesAround(int gtx, int gty)
+    {
+        foreach (var face in TileSproutNode.FaceOrder)
+        {
+            var o = TileSproutNode.FaceOffset(face);
+            int ngtx = gtx + o.X, ngty = gty + o.Y;
+            if (GetCellState(ngtx, ngty) == TileState.Spike && SolidFaces(ngtx, ngty) == SproutFaces.None)
+                ClearSpike(ngtx, ngty);
+        }
+    }
+
     // True iff TryRequestTile would create a node here: the cell is free AND has
     // something (Solid face or existing sprout) to build from. Pure query — it is how
     // BlockBurstAction tells "RMB is painting this cell" from "RMB is over dead air".
     public bool CanRequestTile(int gtx, int gty)
-        => GetCellState(gtx, gty) == TileState.Empty
+        => GetCellState(gtx, gty).IsOpen()
         && !Graph.TryGet(gtx, gty, out _)
         && (SolidFaces(gtx, gty) != SproutFaces.None || HasSproutNeighbour(gtx, gty));
 
@@ -511,7 +570,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // parked on its neighbours promote off it like any other terrain.
     public TileSproutNode ForceSprout(int gtx, int gty, TileType type, byte owner = BlockOwnership.None)
     {
-        if (GetCellState(gtx, gty) != TileState.Empty) return null;
+        if (type == TileType.Spike || !GetCellState(gtx, gty).IsOpen()) return null;
         if (Graph.TryGet(gtx, gty, out _)) return null;
 
         var faces = SolidFaces(gtx, gty);
@@ -570,9 +629,9 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         TerrainFrame++;
         Waves.Tick(SproutClock);
         if (TerrainFrame % BlockOwnership.PruneCadenceFrames == 0) Ownership.Prune(TerrainFrame);
-        // Spike seeds that finished seed+flash become real spike overlays this frame
+        // Spike seeds that finished seed+flash expire this frame, arming their spike tile
         // (before SpikeContactSystem runs later in the step, so a grown spike bites at once).
-        SpikeSeeds.Tick(TerrainFrame, Spikes);
+        SpikeSeeds.Tick(TerrainFrame);
         // Crystal wave front: pending crystals beside a grown one seed this frame.
         Crystals.Tick(this, TerrainFrame);
 
@@ -763,20 +822,18 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     // crossed the break threshold and was cleared this call.
     public bool DamageCell(int gtx, int gty, float amount)
     {
-        if (GetCellState(gtx, gty) != TileState.Solid) return false;
+        var state = GetCellState(gtx, gty);
+        // Spikes are brittle: any hit that reaches a spike tile (armed or still seeding)
+        // knocks it off. Breaking the block it clings to takes it too (BreakCell).
+        if (state == TileState.Spike)
+        {
+            if (amount > 0f) ClearSpike(gtx, gty);
+            return false;
+        }
+        if (state != TileState.Solid) return false;
         // Lookup the cell's material type so TileDamage can compare accumulated damage
         // against the per-type max HP (Sand ≈ 0.5, Dirt ≈ 1.0, Stone ≈ 2.0).
         var type = GetCellType(gtx, gty);
-        // Spikes are brittle: a hit that reaches a spiked (or still-seeding) cell knocks
-        // the spike off and spends itself doing it — the block under it is untouched by
-        // that hit. Breaking the block (BreakCell) still takes its spike with it.
-        if (Spikes.IsSpiked(gtx, gty) || SpikeSeeds.Has(gtx, gty))
-        {
-            if (amount <= 0f) return false;
-            Spikes.Clear(gtx, gty);
-            SpikeSeeds.Clear(gtx, gty);
-            return false;
-        }
         if (!Damage.ApplyDamage(gtx, gty, amount, type)) return false;
         return BreakCell(gtx, gty);
     }
@@ -808,8 +865,6 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             Charge.Clear(gtx, gty);
             Ownership.Clear(gtx, gty);
             Waves.ForgetCell(gtx, gty);
-            Spikes.Clear(gtx, gty);
-            SpikeSeeds.Clear(gtx, gty);
             DropSupportFor(gtx, gty);
             OnTileBroken?.Invoke(CellCenter(gtx, gty), sproutType);
             return true;
@@ -824,10 +879,8 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Charge.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);
         Waves.ForgetCell(gtx, gty);
-        // The spike overlay goes with the cell it sat on — and so does a spike still
-        // seeding on it (no refund: see TileSpikeSeeds).
-        Spikes.Clear(gtx, gty);
-        SpikeSeeds.Clear(gtx, gty);
+        // Spikes clinging only to this cell fall with it (no refund: see TileSpikeSeeds).
+        ClearOrphanedSpikesAround(gtx, gty);
         // Foam decay entry (if any) is invalidated by the break — without this,
         // a foam tile broken early would still trigger another BreakCell when
         // its timer expires (no-op on an empty cell, but a needless call).
@@ -847,7 +900,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
     public bool EditorSetCell(int gtx, int gty, TileState state, TileType type)
     {
         var (chunkPos, tx, ty) = GlobalCellToChunkLocal(gtx, gty);
-        if (state == TileState.Sprouting) throw new ArgumentException("editor writes Solid or Empty", nameof(state));
+        if (state is TileState.Sprouting or TileState.Spike) throw new ArgumentException("editor writes Solid or Empty", nameof(state));
         Chunk chunk;
         if (state == TileState.Empty)
         {
@@ -861,12 +914,10 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         WriteTile(chunk, tx, ty, state, state == TileState.Empty ? t.Type : type, null);
         Damage.Clear(gtx, gty);
         Charge.Clear(gtx, gty);
-        Spikes.Clear(gtx, gty);
-        SpikeSeeds.Clear(gtx, gty);
         Foam.Clear(gtx, gty);
         Ownership.Clear(gtx, gty);   // an edit is level data: nobody owns it
         Waves.ForgetCell(gtx, gty);
-        if (state == TileState.Empty) DropSupportFor(gtx, gty);
+        if (state == TileState.Empty) { DropSupportFor(gtx, gty); ClearOrphanedSpikesAround(gtx, gty); }
         return true;
     }
 
@@ -902,7 +953,6 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Graph       = Graph.Capture(),
         Damage      = Damage.Capture(),
         Charge      = Charge.Capture(),
-        Spikes      = Spikes.Capture(),
         SpikeSeeds  = SpikeSeeds.Capture(),
         Crystals    = Crystals.Capture(),
         Foam        = Foam.Capture(),
@@ -925,7 +975,6 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         Graph.Restore(s.Graph);
         Damage.Restore(s.Damage);
         Charge.Restore(s.Charge);
-        Spikes.Restore(s.Spikes);
         SpikeSeeds.Restore(s.SpikeSeeds);
         Crystals.Restore(s.Crystals);
         Foam.Restore(s.Foam);
@@ -949,15 +998,16 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
         _ghostsDirty = true;
     }
 
-    private void RevertTile(Point chunkPos, int tx, int ty, TileState prevState, TileType prevType)
+    private void RevertTile(Point chunkPos, int tx, int ty, TileState prevState, TileType prevType, byte prevTeam)
     {
         if (!_dict.TryGetValue(chunkPos, out var chunk)) return;
         ref var t = ref chunk.Tiles[tx, ty];
-        TerrainHash ^= CellHash(chunkPos, tx, ty, t.State, t.Type);
+        TerrainHash ^= CellHash(chunkPos, tx, ty, t.State, t.Type, t.Team);
         t.State  = prevState;
         t.Type   = prevType;
+        t.Team   = prevTeam;
         t.Sprout = null;   // re-linked in RestoreTerrain step 3 if this cell is Sprouting
-        TerrainHash ^= CellHash(chunkPos, tx, ty, prevState, prevType);
+        TerrainHash ^= CellHash(chunkPos, tx, ty, prevState, prevType, prevTeam);
     }
 
     // ── Full dense capture (in-game recorder) ───────────────────────────────────
@@ -974,14 +1024,16 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
             var tiles = kv.Value.Tiles;
             var state = new TileState[Chunk.Size * Chunk.Size];
             var type  = new TileType[Chunk.Size * Chunk.Size];
+            var team  = new byte[Chunk.Size * Chunk.Size];
             for (int tx = 0; tx < Chunk.Size; tx++)
                 for (int ty = 0; ty < Chunk.Size; ty++)
                 {
                     int i = tx * Chunk.Size + ty;
                     state[i] = tiles[tx, ty].State;
                     type[i]  = tiles[tx, ty].Type;
+                    team[i]  = tiles[tx, ty].Team;
                 }
-            chunks[idx++] = new DenseTerrainCapture.ChunkCells { Pos = kv.Key, State = state, Type = type };
+            chunks[idx++] = new DenseTerrainCapture.ChunkCells { Pos = kv.Key, State = state, Type = type, Team = team };
         }
         return new DenseTerrainCapture { Chunks = chunks };
     }
@@ -1014,6 +1066,7 @@ public class ChunkMap : IEnumerable<Chunk>, ISolidShapeProvider
                     ref var t = ref chunk.Tiles[tx, ty];
                     t.State  = cc.State[i];
                     t.Type   = cc.Type[i];
+                    t.Team   = cc.Team?[i] ?? 0;
                     t.Sprout = null;
                 }
         }

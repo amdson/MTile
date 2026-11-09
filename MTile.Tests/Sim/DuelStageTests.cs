@@ -40,8 +40,9 @@ public class DuelStageTests
         Assert.Equal(TileType.Sand, p1.ActiveBlockType);
 
         g.Step(default, new PlayerInput { Num1 = true });
-        g.Step(default, new PlayerInput { Num5 = true });
         Assert.Equal(TileType.Stone, p1.ActiveBlockType);
+        g.Step(default, new PlayerInput { Num5 = true });
+        Assert.Equal(TileType.Spike, p1.ActiveBlockType);   // spikes are a material
         Assert.True(p1.SpikesSelected);
         Assert.Equal(TileType.Sand, g.Player.ActiveBlockType);
         Assert.False(g.Player.SpikesSelected);

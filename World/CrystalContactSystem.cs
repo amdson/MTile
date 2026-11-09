@@ -19,13 +19,22 @@ namespace MTile;
 // Same delivery model as SpikeContactSystem (read its header): detection here, the landed
 // hit delivered through IHittable.OnHit with a synthesized Hitbox so guard, invulnerability,
 // hitstun and knockback all apply as for any attack. The launcher's side is immune to
-// both channels (SpikeContactSystem.Opposes), consistent with spikes.
+// both channels (Opposes).
 //
 // Stateless across frames: the per-wave tally lives in CrystalWaveField (terrain
 // snapshot). Victims are walked in canonical hurtbox order and cells in grid order, so
 // the result is independent of the crystal table's dictionary order.
 public sealed class CrystalContactSystem
 {
+    // Does a wave launched by `side` hurt a body of (faction, team)? Launcher's side
+    // never; co-op players never hurt each other; two Enemy-faction parties fall back to team.
+    public static bool Opposes(in CrystalWaveField.Side side, Faction faction, int team, bool coop)
+    {
+        if (coop && Factions.IsPlayer(side.Faction) && Factions.IsPlayer(faction)) return false;
+        if (side.Faction != faction) return true;
+        return side.Faction == Faction.Enemy && side.Team != team;
+    }
+
     private readonly HashSet<EntityId> _seen = new();
 
     // Returns the number of crystal hits landed this frame (tests/diagnostics).
@@ -106,7 +115,7 @@ public sealed class CrystalContactSystem
             int elapsed = now - c.SeededFrame;
             var life = c.Lifecycle;
             if (life.PhaseAt(elapsed) != CrystalPhase.Flash) continue;
-            if (!SpikeContactSystem.Opposes(in c.Side, faction, team, coop)) continue;
+            if (!Opposes(in c.Side, faction, team, coop)) continue;
             var box = CrystalWave.ShardBox(gx, gy, c.Base, CrystalWave.LengthAt(in life, elapsed));
             if (!Overlaps(box, r, 0f)) continue;
             var n = CrystalWave.Normal(c.Base);
@@ -131,7 +140,7 @@ public sealed class CrystalContactSystem
         {
             if (!field.TryGet(gx, gy, out var c) || c.Pending || c.Broken) continue;
             if (c.PhaseAt(now) != CrystalPhase.Grown) continue;
-            if (!SpikeContactSystem.Opposes(in c.Side, faction, team, coop)) continue;
+            if (!Opposes(in c.Side, faction, team, coop)) continue;
             var box = CrystalWave.ShardBox(gx, gy, c.Base, CrystalWave.GrownLength);
             if (!Overlaps(box, r, CrystalWave.ContactSlop)) continue;
             var tally = field.TallyFor(c.Wave, victim);

@@ -366,3 +366,31 @@ Milestones (status: [ ] todo, [~] in progress, [x] done @commit, [!] blocked, [?
   (WarlordEnemyTests: the player died and respawned, which resets DamageTaken). Boss fights therefore play as before.
   To finish the split, audit the ~45 enemy/projectile publish sites and give each a StunSeconds, then delete the rule.
 
+
+N. Guard pacing pass (2026-11-06). Play-test: "S1 hits, S2 is parried, I'm countered" resolved in ~10 visible frames
+(shield up f29 -> S2 parried f34 -> 4f counter lands f39) with S2 already buffered before the shield existed. The
+outcome (mash-guard parry is a legal read; grab answers the hold) stays; the beat is slowed and made readable.
+- Guard entry window 12f -> 5f (GuardAction.MaxEntrySeconds): sized so S1 -> S2 is TRUE against guard (S2 lands with
+  6f of S1's 22f hitstun left as the entry check counts it; a raise on S2's own frame still parries, so the window has
+  to be under 6) while S2 -> S3 stays guardable (S3 lands with ~1f left; raise f47-52 parries it). Went 12 -> 9 -> 6 -> 5
+  as the traces pinned the slack. (A 3f guard STARTUP was built first by misreading the ask, then reverted.)
+- Counter on Shift+LMB (convenience, user): GuardRetaliate ActivePriority 50 so neither Guard (passive 40) nor the grab
+  chord (48) can evict it through the lookahead - both did, five frames in, and it never landed. GrabAction refuses
+  while GuardCharged: a charged parry's press is the counter's (it reads the Click a frame after the press edge).
+- Guard hitstop, frame-neutral, both sides: held block 4f (MinHitstop), perfect parry 10f (MaxHitstop). ApplyHitstop
+  now also pushes GuardStartFrame / GuardChargedExpireFrame / the slide, and BeginGuard inside a freeze starts the
+  stance's clock at the thaw (so the attacker's guard-cancel can still parry the counter through the freeze - traced).
+- Guard pushback (px/s): block 100 attacker / 50 blocker, parry 160 attacker / 0. Delivered the same frame through
+  IHittable.OnGuardStopped (CombatSystem.NotifyAttackerGuardStopped resolves the attacker); PreStep's hitstop hold
+  stashes it and the bodies part on the thaw. A 7f slide (CombatState.SlideExpireFrame: the hitstun control-mute
+  scalars without hitstun) stops the 2250 px/s^2 ground brake eating it. Measured: a block separates ~10px, a parry
+  shoves the attacker ~13px (24 -> 40 at the counter, inside its ~57px reach); S3 still reaches a double-blocker (43px).
+- GuardRetaliate startup 4 -> 8 (Total 10.2 -> 14.2, same follow-through). Still punishes a parried S2 (S2's tail runs
+  ~20f past the parry).
+- GroundSlash1 hitstun 18 -> 22f (0.30 -> 0.367 s): S2 lands with 7f to spare, S1-and-stop is -3 (was -8).
+- Net sequence, point blank, P1 spamming, P2 optimal (measured): S1 f18 (0.25, hitstun to f41) -> no guard possible
+  before S2 -> S2 lands f34 (0.30, hitstun to f52) -> earliest raise f47 -> S3 parried f52 -> 10f freeze -> counter
+  (Shift held or not) lands f69: P1 -0.6, 36f stun, launched ~100px. P2 -0.55 for the exchange. A HELD guard raised
+  before S1 still blocks S1/S2 for chip (10px apart per block) and leaks S3. Jump remains the S1 -> S2 escape.
+- Bots: GuardManeuver gates its hitstun refusal on the hitstun left at the RAISE (after WaitFor), not now - the +4f on
+  S1 had pushed its read late. PulseGuard tests green. Combat group: no new reds vs the pre-pass list.

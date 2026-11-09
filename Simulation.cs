@@ -49,7 +49,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
     private readonly List<EntityId>    _restoreIdScratch = new();
     // Per-frame intersection pass; owns the cross-frame (HitId,Target) dedupe table.
     private readonly CombatSystem _combat = new();
-    // Spike-overlay contact damage (BLOCK_OWNERSHIP_SPIKES §2). Instance-owned like
+    // Spike-tile contact damage (BLOCK_OWNERSHIP_SPIKES §2). Instance-owned like
     // _combat: its per-victim cooldown table is cross-frame sim state (snapshotted).
     private readonly SpikeContactSystem _spikes = new();
     // Crystal-wave contacts (todo.txt #7): push-out while forming, damage when grown.
@@ -300,9 +300,9 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
 
     // IEntitySpawner — cosmetic: a thrown/lobbed mass ball landed and erupted. Fired from
     // inside Step; subscribers must key on (Frame, id) like the tile events do.
-    public event Action<EntityId, Vector2, TileType, int> OnMassLanded;
-    public void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks)
-        => OnMassLanded?.Invoke(id, pos, type, blocks);
+    public event Action<EntityId, Vector2, TileType, int, bool> OnMassLanded;
+    public void NotifyMassLanded(EntityId id, Vector2 pos, TileType type, int blocks, bool bodyHit = false)
+        => OnMassLanded?.Invoke(id, pos, type, blocks, bodyHit);
     // IEntitySpawner — cosmetic: a destroyed charged block went off. Same (Frame, id)
     // keying contract as OnMassLanded.
     public event Action<EntityId, Vector2, float> OnChargedBlast;
@@ -622,7 +622,7 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         // swept this same frame.
         _spikes.Apply(_chunks, _hurtboxes, ResolveHittable,
             id => _world.Has<PhysicsBodyComponent>(id) ? _world.Get<PhysicsBodyComponent>(id).Body : null,
-            _hitIds, _frame, Coop);
+            _hitIds, _frame);
         // Crystal waves: same slot and reasoning as the spikes above.
         _crystals.Apply(_chunks, _hurtboxes, ResolveHittable,
             id => _world.Has<PhysicsBodyComponent>(id) ? _world.Get<PhysicsBodyComponent>(id).Body : null,
@@ -720,14 +720,10 @@ public sealed class Simulation : IEntitySpawner, IChunkProvider, ITargetSource
         foreach (var d in _chunks.Damage.Damaged) t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x01);
         foreach (var d in _chunks.Foam.Entries)   t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x02);
         foreach (var d in _chunks.Impact.Entries) t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x03);
-        // Spike overlays: the owning side rides in the value slot + salt.
-        foreach (var d in _chunks.Spikes.Entries)
-            t ^= CellF(d.Key.gtx, d.Key.gty, d.Value.Team,
-                       0x06 ^ ((ulong)(byte)d.Value.Faction << 8));
         // Spike seeds: the seed frame is the whole clock, so it rides the value slot.
+        // (Spike tiles and their team are dense-grid state, covered by TerrainHash.)
         foreach (var d in _chunks.SpikeSeeds.Entries)
-            t ^= CellF(d.Key.gtx, d.Key.gty, d.Value.SeededFrame,
-                       0x09 ^ ((ulong)(byte)d.Value.Side.Faction << 8) ^ ((ulong)(uint)d.Value.Side.Team << 16));
+            t ^= CellF(d.Key.gtx, d.Key.gty, d.Value, 0x09);
         // Crystal wave (todo.txt #7). Cells: the seed frame is the clock (value slot);
         // request frame, wave, base face and the root/broken flags ride the salt. Salts
         // 0x0B-0x0D are this feature's.

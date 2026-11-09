@@ -80,7 +80,7 @@ public sealed class WhiffPunishManeuver : BotManeuver
         int y = BotView.Cell(v.Me).Y;
         for (int gx = a; gx <= b; gx++)
         for (int gy = y - 2; gy <= y + 2; gy++)
-            if (ch.Spikes.TryGet(gx, gy, out var side) && side.Faction != v.Self.Faction) return true;
+            if (ch.GetCellState(gx, gy) == TileState.Spike && SpikeContactSystem.Opposes(ch.GetCellTeam(gx, gy), v.Self.Team)) return true;
         return false;
     }
 

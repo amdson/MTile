@@ -74,12 +74,18 @@ public sealed class TileMassField
     // avalanche (EntityId.None = untagged manual building). `owner` is the placer
     // (BlockOwnership) every tile this deposit commits is stamped with. It is not stored
     // on the bucket: pooled mass belongs to whoever's deposit tips it over Threshold.
+    //
+    // TileType.Spike mass runs the same cascade; a commit places a spike tile
+    // (ChunkMap.TryRequestSpike, stamped with `team`) on an empty cell touching solid on
+    // any face. An existing spike counts as occupied, so a held stroke forwards past the
+    // spikes it has laid and spreads along the surface. Like `type` and `owner`, `team`
+    // is not stored on the bucket.
     public int Deposit(ChunkMap chunks, int gtx, int gty, float amount, TileType type,
-                       EntityId wave = default, byte owner = BlockOwnership.None)
-        => DepositAt(chunks, gtx, gty, amount, type, wave, owner, 0);
+                       EntityId wave = default, byte owner = BlockOwnership.None, int team = 0)
+        => DepositAt(chunks, gtx, gty, amount, type, wave, owner, team, 0);
 
     private int DepositAt(ChunkMap chunks, int gtx, int gty, float amount, TileType type,
-                          EntityId wave, byte owner, int depth)
+                          EntityId wave, byte owner, int team, int depth)
     {
         if (amount < EpsAmount || depth > MaxSpillDepth) return 0;
 
@@ -126,10 +132,12 @@ public sealed class TileMassField
         {
             bool took;
             if (crystal) took = chunks.TryRequestCrystal(gtx, gty, wave);
+            else if (type == TileType.Spike) took = chunks.TryRequestSpike(gtx, gty, team);
             else
             {
+                // A spike tile is open air to a block: the request replaces it.
                 var state = chunks.GetCellState(gtx, gty);
-                bool free = state == TileState.Empty && !chunks.Graph.TryGet(gtx, gty, out _);
+                bool free = state.IsOpen() && !chunks.Graph.TryGet(gtx, gty, out _);
                 took = free && chunks.TryRequestTile(gtx, gty, type, wave, owner) != null;
             }
             if (took)
@@ -137,7 +145,7 @@ public sealed class TileMassField
                 // Committed here. Anything left over keeps flowing outward.
                 cur -= Threshold;
                 committed++;
-                committed += Spill(chunks, gtx, gty, cur, type, wave, owner, depth);
+                committed += Spill(chunks, gtx, gty, cur, type, wave, owner, team, depth);
                 cur = 0f;
                 break;
             }
@@ -145,7 +153,7 @@ public sealed class TileMassField
             // Occupied, or free but unsupported: hand one unit to the neighbours and
             // keep looping on what's left.
             cur -= Threshold;
-            committed += Spill(chunks, gtx, gty, Threshold, type, wave, owner, depth);
+            committed += Spill(chunks, gtx, gty, Threshold, type, wave, owner, team, depth);
         }
 
         if (cur > 0f) _mass[key] = new MassBucket { Amount = cur, Wave = wave };
@@ -154,15 +162,15 @@ public sealed class TileMassField
     }
 
     private int Spill(ChunkMap chunks, int gtx, int gty, float amount, TileType type,
-                      EntityId wave, byte owner, int depth)
+                      EntityId wave, byte owner, int team, int depth)
     {
         if (amount < EpsAmount) return 0;
         float share = amount * SpillShare;
         int n = 0;
-        n += DepositAt(chunks, gtx,     gty - 1, share, type, wave, owner, depth + 1);
-        n += DepositAt(chunks, gtx + 1, gty,     share, type, wave, owner, depth + 1);
-        n += DepositAt(chunks, gtx,     gty + 1, share, type, wave, owner, depth + 1);
-        n += DepositAt(chunks, gtx - 1, gty,     share, type, wave, owner, depth + 1);
+        n += DepositAt(chunks, gtx,     gty - 1, share, type, wave, owner, team, depth + 1);
+        n += DepositAt(chunks, gtx + 1, gty,     share, type, wave, owner, team, depth + 1);
+        n += DepositAt(chunks, gtx,     gty + 1, share, type, wave, owner, team, depth + 1);
+        n += DepositAt(chunks, gtx - 1, gty,     share, type, wave, owner, team, depth + 1);
         return n;
     }
 

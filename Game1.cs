@@ -554,10 +554,11 @@ public class Game1 : Game
                          pos, (int)type);
         // Entity ids are World-minted and restored with it, so (frame, id) is the same
         // key on a rollback replay — the dedupe holds.
-        _sim.OnMassLanded += (id, pos, type, blocks) =>
+        _sim.OnMassLanded += (id, pos, type, blocks, bodyHit) =>
             _events.Emit(_sim.Frame,
                          new PresentationId(PresentationKind.MassLand, id.Index, id.Generation),
-                         pos, (int)type | (Math.Min(blocks, 255) << 8));
+                         pos, (int)type | (Math.Min(blocks, 255) << 8)
+                              | (bodyHit ? PresentationEvent.MassLandBodyHitBit : 0));
         _sim.OnTerrainStrike += (hitId, pos, dir) =>
             _events.Emit(_sim.Frame, new PresentationId(PresentationKind.TerrainStrike, hitId),
                          pos, (int)MathF.Round(MathF.Atan2(dir.Y, dir.X) * 1000f));
@@ -595,7 +596,7 @@ public class Game1 : Game
                     break;
                 case PresentationKind.MassLand:
                     Effects.MassSplash(_particles, e.Position,
-                        TilePalette.BaseColor((TileType)(e.Payload & 0xFF)), e.Payload >> 8);
+                        TilePalette.BaseColor((TileType)(e.Payload & 0xFF)), (e.Payload >> 8) & 0xFF);
                     break;
                 case PresentationKind.TerrainStrike:
                     if (_sparkedHitIds.Add(e.Id.A))

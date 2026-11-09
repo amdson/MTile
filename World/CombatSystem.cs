@@ -117,6 +117,7 @@ public sealed class CombatSystem
         _recoilByHitId.Clear();
         _entityHitsByHitId.Clear();
         _hitstopByHitId.Clear();
+        _resolveDuringApply = resolve;
 
         ResolveClanks(chunks, hitboxes, resolve);
 
@@ -480,6 +481,14 @@ public sealed class CombatSystem
         if (data == null) return;
         foreach (var (hitId, n) in data) _entityHitsByHitId[hitId] = n;
     }
+
+    // A victim STOPPED a hit with its guard (PlayerCharacter.OnHit, called from inside the
+    // OnHit dispatch below): hand the attacker its share - pushback, the same freeze, the
+    // slide - the same frame, through IHittable.OnGuardStopped. Resolved with the Apply
+    // call's own resolver; outside Apply there is no attacker to tell.
+    private Func<EntityId, IHittable> _resolveDuringApply;
+    public void NotifyAttackerGuardStopped(in Hitbox hit, Vector2 push, float hitstopSeconds, float slideSeconds)
+        => _resolveDuringApply?.Invoke(hit.Source)?.OnGuardStopped(push, hitstopSeconds, slideSeconds);
 
     // The cap (Hitbox.MaxRecoilSpeed) is applied to the running TALLY, not to each
     // contribution: the stab's tile bounce and its entity recoil can land on the same

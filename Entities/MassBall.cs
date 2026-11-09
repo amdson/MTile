@@ -110,7 +110,7 @@ public class MassBall : Projectile
         // Wave provenance: the ball IS the wave. Direction locks on the first
         // touch (drag is scalar and there's no gravity, so it never changes);
         // the tag rides the mass through spill → request → the schedule gate.
-        if (_crystal) chunks.Crystals.TouchWave(Id, new TileSpikes.Side(Faction, Team), chunks.TerrainFrame);
+        if (_crystal) chunks.Crystals.TouchWave(Id, new CrystalWaveField.Side(Faction, Team), chunks.TerrainFrame);
         else          chunks.TouchWave(Id, Body.Velocity);
         byte owner = BlockOwnership.OwnerFor(Faction);
 

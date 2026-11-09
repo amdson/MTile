@@ -18,17 +18,19 @@ public static class TilePalette
         // (115,82,56) at a glance, which is the whole point — the player needs to know
         // not to swing at it.
         TileType.Hardened => new Color(44, 38, 40),
+        TileType.Spike => new Color(200, 235, 255),  // the spike-mode ball tint
         _              => Color.Gray,
     };
 
-    // Spike-overlay tint by owning side, so a player can tell their own spikes (safe)
-    // from an opponent's (not) at a glance. Saturated and light so the teeth read
-    // against every material fill, dark stone included.
-    public static Color SpikeColor(Faction side) => side switch
+    // Spike tint by owning team, so a player can tell their own spikes (safe) from an
+    // opponent's (not) at a glance. Saturated and light so the teeth read against
+    // every material fill, dark stone included. Teams: 0 = P1, 1 = P2, 2 = enemies.
+    public static Color SpikeColor(int team) => team switch
     {
-        Faction.Player1 => new Color(120, 200, 255),   // cool blue
-        Faction.Player2 => new Color(255, 120, 110),   // warm red
-        Faction.Enemy   => new Color(200, 120, 255),   // violet
-        _               => new Color(230, 230, 230),
+        0 => new Color(120, 200, 255),   // cool blue
+        1 => new Color(255, 120, 110),   // warm red
+        2 => new Color(200, 120, 255),   // violet
+        3 => new Color(140, 235, 130),   // green
+        _ => new Color(230, 230, 230),
     };
 }

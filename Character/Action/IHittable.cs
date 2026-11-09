@@ -18,6 +18,12 @@ public interface IHittable
     // return hit.KnockbackImpulse so impulse-mode recoil behaves as before.
     Vector2 OnHit(in Hitbox hit, in Hurtbox myHurtbox);
 
+    // This entity's attack was STOPPED by a player's guard (block or parry): the attacker's
+    // half of the exchange - a shove back off the shield, the same frame-neutral freeze the
+    // blocker takes, and a short slide so the shove carries. Creatures ignore it (their
+    // recoil still arrives through the inbox); PlayerCharacter applies all three.
+    void OnGuardStopped(Vector2 push, float hitstopSeconds, float slideSeconds) { }
+
     // Stable value identity. The combat dedupe table (HitId → set of already-hit
     // targets) keys on this, and it's what snapshots record so the table survives a
     // restore (entities may be rehydrated as fresh objects). Assigned by Simulation

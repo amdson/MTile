@@ -256,7 +256,7 @@ public sealed class BuildClimbManeuver : BotManeuver
         int maxRow = BotView.Cell(v.Me + new Vector2(0f, FootDrop + Chunk.TileSize)).Y;
         for (int y = top; y <= maxRow; y++)
         {
-            if (v.Sim.Chunks.GetCellState(col, y) == TileState.Empty) continue;
+            if (v.Sim.Chunks.GetCellState(col, y).IsOpen()) continue;
             cell = new Point(col, y - 1);
             return true;
         }

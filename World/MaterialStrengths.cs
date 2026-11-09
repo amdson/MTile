@@ -67,9 +67,10 @@ public static class MaterialStrengths
         => _current.TryGetValue(type, out var m) ? m.MaxHP : TileDamage.TileMaxHP;
 
     public static float BuildCostFor(TileType type)
-        => _current.TryGetValue(type, out var m) ? m.BuildCost : 1f;
+        => type == TileType.Spike ? SpikeBuildCost
+         : _current.TryGetValue(type, out var m) ? m.BuildCost : 1f;
 
-    // Spike overlay price, in Stone placements (BLOCK_OWNERSHIP_SPIKES §2: "about twice
+    // Spike tile price, in Stone placements (BLOCK_OWNERSHIP_SPIKES §2: "about twice
     // the cost of stone placement"). Derived from Stone's loaded BuildCost rather than
     // authored separately, so retuning stone in material_strengths.json keeps spikes at
     // the same relative price.

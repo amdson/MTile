@@ -77,9 +77,9 @@ public struct ActionVars
     // "is the cursor in solid" test flips to charging the instant the first tile
     // finalizes, so a stroke could only ever place one block. See BlockPaintAction.Update.
     public bool    ChargeGesture;
-    // BlockPaintAction spike mode (todo.txt #7): the hold started with spikes selected,
-    // so a stroke spikes the cells the ball crosses (last spiked cell in OriginCell) and
-    // the eruption is a crystal wave. Latched at the press; toggling spikes ends the hold.
+    // BlockPaintAction spike mode (todo.txt #7): the hold started with Spike selected, so
+    // the stroke paints spike tiles and the eruption is a crystal wave. Latched at the
+    // press; switching material ends the hold.
     public bool    SpikeMode;
 
     public Vector2 GrabDir;           // GrabAction — hold focus / throw direction

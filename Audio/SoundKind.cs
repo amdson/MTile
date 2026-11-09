@@ -52,11 +52,12 @@ public enum SoundKind
     ChargedBlast,   // PresentationKind.ChargedBlast — a charged block detonated
     ClankMetal,     // PresentationKind.Clank, two blades met
     ClankBlast,     // PresentationKind.Clank, something blunt in the pair
+    ClodBurst,      // PresentationKind.MassLand with the body-hit bit — a clod burst on a player/enemy
 }
 
 public static class SoundKinds
 {
-    public const int Count = (int)SoundKind.ClankBlast + 1;
+    public const int Count = (int)SoundKind.ClodBurst + 1;
 
     // Stems, derived once from the enum names: PascalCase -> snake_case. This used to be
     // a hand-maintained parallel array, which silently mis-mapped every kind after the
@@ -101,6 +102,7 @@ public static class SoundKinds
         // a blunt one the charged-block boom.
         SoundKind.ClankMetal => SoundKind.GuardParry,
         SoundKind.ClankBlast => SoundKind.ChargedBlast,
+        SoundKind.ClodBurst  => SoundKind.ChargedBlast,
         SoundKind.SwingHeavy or SoundKind.Stab or SoundKind.AirHammer or SoundKind.DashSlash => SoundKind.Swing,
         _              => SoundKind.None,
     };

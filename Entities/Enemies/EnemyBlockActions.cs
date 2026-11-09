@@ -28,7 +28,7 @@ internal static class EnemyBlockCells
         => new((gtx + 0.5f) * Chunk.TileSize, (gty + 0.5f) * Chunk.TileSize);
 
     public static bool IsFree(ChunkMap chunks, int gtx, int gty)
-        => chunks.GetCellState(gtx, gty) == TileState.Empty && !chunks.Graph.TryGet(gtx, gty, out _);
+        => chunks.GetCellState(gtx, gty).IsOpen() && !chunks.Graph.TryGet(gtx, gty, out _);
 
     // Strict AABB overlap between the cell and a body. A tile grown into a body would
     // crush it (and one grown into the caster would bury it), so either is refused.

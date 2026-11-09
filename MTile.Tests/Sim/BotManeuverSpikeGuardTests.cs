@@ -17,9 +17,9 @@ public class BotManeuverSpikeGuardTests(ITestOutputHelper output)
     {
         var p2 = sim.SecondaryPlayers[0].Player;
         int fy = (int)MathF.Floor((p2.Body.Bounds.Bottom + SpikeContactSystem.FootReach + 1f) / T);
-        var side = new TileSpikes.Side(Faction.Player1, 0);
         for (int x = Math.Min(fromCol, toCol); x <= Math.Max(fromCol, toCol); x++)
-            if (sim.Chunks.GetCellState(x, fy) == TileState.Solid) sim.Chunks.Spikes.Set(x, fy, side);
+            if (sim.Chunks.GetCellState(x, fy) == TileState.Solid && sim.Chunks.GetCellState(x, fy - 1) == TileState.Empty)
+                SpikeTiles.PlaceArmed(sim.Chunks, x, fy - 1, Teams.Player);
     }
 
     private (float SpikeHurt, float Dealt, SpikeGuard G) Run(string bot, bool guard, int carpetHalf, int frames = 900)
@@ -46,7 +46,7 @@ public class BotManeuverSpikeGuardTests(ITestOutputHelper output)
         g.Enabled = guard;
 
         float spikeHurt = 0f, prev = 0f, dealt = 0f, prevP1 = 0f;
-        int spikes0 = sim.Chunks.Spikes.Count;
+        int spikes0 = SpikeTiles.Count(sim.Chunks);
         for (int f = 0; f < frames; f++)
         {
             var ib = b.Poll(sim, f);
@@ -58,7 +58,7 @@ public class BotManeuverSpikeGuardTests(ITestOutputHelper output)
             dealt += d1 < prevP1 ? d1 : d1 - prevP1;
             prevP1 = d1;
         }
-        output.WriteLine($"{bot,-8} guard {guard,-5}: spike damage {spikeHurt:F2}, dealt {dealt:F2}, spikes {spikes0}->{sim.Chunks.Spikes.Count} " +
+        output.WriteLine($"{bot,-8} guard {guard,-5}: spike damage {spikeHurt:F2}, dealt {dealt:F2}, spikes {spikes0}->{SpikeTiles.Count(sim.Chunks)} " +
                          $"(escapes {g.Escapes}, hops {g.Hops}, stops {g.Stops}, clears {g.Clears}, steers {g.Steers})");
         return (spikeHurt, dealt, g);
     }

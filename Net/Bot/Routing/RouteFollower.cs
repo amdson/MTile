@@ -220,7 +220,7 @@ public sealed class RouteFollower
         int maxRow = (int)MathF.Floor((v.Me.Y + PlayerCharacter.StandingHeight - PlayerCharacter.Radius + T) / T);
         for (int y = top; y <= maxRow; y++)
         {
-            if (v.Sim.Chunks.GetCellState(col, y) == TileState.Empty) continue;
+            if (v.Sim.Chunks.GetCellState(col, y).IsOpen()) continue;
             input.Shift = true; input.RightClick = true;
             input.MouseWorldPosition = BotView.CellCenter(new Point(col, y - 1));
             break;
