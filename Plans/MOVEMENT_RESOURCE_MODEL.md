@@ -667,10 +667,12 @@ tracker's own comment says the regime means ("drive along intent … walk into i
 | Bumpy corridor (`BumpyTunnelSpeedTests`, trace only) | 115.0 px/s, final x 600.4 | same (sub-0.1 px differences) |
 
 Got worse / changed:
-- With parkour on (r1, code defaults), parkour no longer triggers on the one-high step, bump and
-  pit (accepted in §0). The step-up is now walked by the solver: vx 54.2–67.0 (was 59.0–62.5 under
-  parkour). The 1-wide bump is walked over level (the collision hull clears it by 2.3 px; legs are
-  virtual). The 1-wide pit now shows the ledge boost (vx 87.6), which parkour had been hiding.
+- Correction (found during item 5): an earlier version of this entry said parkour stopped
+  triggering in r1. That was a measurement artifact: r2 loads the live config into the static
+  `MovementConfig.Current`, and when xUnit ran r2 first, r1 ran with the live config (parkour off)
+  instead of code defaults. The trace script now runs each class in its own process, and all
+  items were re-measured that way: with parkour on, it triggers on the step, bump and pit at every
+  item, and r1's D1–D3 numbers are unchanged by item 1.
 - r2 #6 (fall onto a block corner from x=213): Mantle no longer fires; the body is caught on the
   block by the legs (Drive peaks 1559 px/s², vx 63.8) and then rises slowly onto the top.
 - §12.4's third case (a refused plan whose last segment runs along a wall) was not constructed.
@@ -725,7 +727,7 @@ classification) is untouched.
 | Measure (trace) | Before | After |
 |---|---|---|
 | Ledge walk-off peak vx (r1 D5 / r2 #2) | 85.8 / 85.8 | 66.9 / 66.9 |
-| One-wide pit peak vx (r1 D3) | 87.6 | 64.4 |
+| One-wide bump (r1 D2, parkour on): vx min/max | 59.0/85.7 | 55.0/66.6 |
 | Flat walk, taps, jumps, running jump, landing | — | identical |
 | D6 step-up repeatability (stop distance vs flat 69.49) | 69.18–70.11 | 68.86–69.53 |
 | S1-S2-S3 hold-toward final dx (flat / step / ledge) | −47.3 / −49.1 / −26.9 | −56.6 / −53.2 / −21.8 |
@@ -773,3 +775,31 @@ Legs probe (item 2's table), and the planned rise was built on that disagreement
 re-caught by Standing on release (Legs passes again below 80 px/s). §11's jump channel replaces
 the leg servo during a jump, which is the plan's fix; I did not reorder the items. Running jump,
 double jump and the other impulse jumps are unaffected.
+
+### Item 5 — state declarations (stage 4)
+
+Change: `MovementState.Requires` and `MovementState.Uses`. The FSM (`PlayerCharacter`) computes
+`MovementResources.Available(ctx)` once per frame; a candidate whose `Requires` is not available
+is skipped, and a current state whose `Requires` lapses exits to Falling, before
+`CheckPreConditions` / `CheckConditions`. `ApplyAmbient` passes the state's `Uses` to the tracker;
+`FoldProfile` lost its availability half (`Legs`, and the `ImpulseJump` profile, which existed
+only to switch legs off).
+
+| State | Requires | Uses |
+|---|---|---|
+| Standing, Crouched | Legs | Legs, Support |
+| Falling | — (the fallback; Standing claims the body wherever Legs passes) | Air, Hands |
+| Jumping | — (item 7) | Legs, Hands; the impulse variant passes Hands until item 7 removes it |
+| RunningJump | — | Hands (impulse; item 7) |
+| DoubleJump, WallJump | — | Legs, Hands (what their profile granted before) |
+| WallSlide, Dash | — | Air, Hands |
+| StairClimb | — | Legs, Support |
+| LedgeGrab, LedgePull | — (own corner gate) | Hands (documentation: they run their own grip solve) |
+| Stunned | — (combat state) | none: ragdoll, solver off, its muted air control is its own baseline |
+
+Standing's own `CheckPreConditions`/`CheckConditions` are now `true`: nothing but `Requires = Legs`
+defines it. Crouched keeps its crouch gates on top of `Requires = Legs`. `Requires = Hands` was not
+put on WallSlide or the ledge states: their own gates are stricter, and the Hands probe has no
+grip input (the ledge states' corner lives in `PlayerAbilityState`, which the probes cannot see).
+
+Trace: r1 and r2 identical to item 4 (both run in separate processes from here on).

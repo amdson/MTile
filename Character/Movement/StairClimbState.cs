@@ -30,6 +30,7 @@ public class StairClimbState : MovementState
 
     public override int ActivePriority  => MovementPriorities.StairClimbActive;
     public override int PassivePriority => MovementPriorities.StairClimbPassive;
+    public override MovementResource Uses => MovementResource.Legs | MovementResource.Support;
     // Same capability gate as the climb family: a stunned body sliding into a flight must
     // not start climbing it (Stunned's Active 25 would otherwise lose to this 29).
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;

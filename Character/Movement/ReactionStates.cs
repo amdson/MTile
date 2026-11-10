@@ -71,6 +71,7 @@ public class StunnedState : MovementState
 {
     public override int ActivePriority  => MovementPriorities.StunnedActive;
     public override int PassivePriority => MovementPriorities.StunnedPassive;
+    public override MovementResource Uses => MovementResource.None;
 
     // Recoil flinch, not the generic ground clips: without this the muted-control window
     // is invisible (a stunned body sliding under knockback reads as a walk cycle).

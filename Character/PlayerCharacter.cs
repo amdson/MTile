@@ -850,7 +850,11 @@ public class PlayerCharacter : IHittable
         if (IsGrounded || _currentState is WallSlidingState || _currentState is LedgeGrabState)
             _abilities.HasDashed = false;
 
-        if (!_currentState.CheckConditions(ctx, _abilities, ref _moveVars))
+        // The resource layer (Plans/MOVEMENT_RESOURCE_MODEL.md §3.2/§3.3): a
+        // state whose Requires is not available can neither enter nor continue.
+        var available = MovementResources.Available(ctx);
+        if ((available & _currentState.Requires) != _currentState.Requires
+            || !_currentState.CheckConditions(ctx, _abilities, ref _moveVars))
         {
             _currentState.Exit(ctx, _abilities, ref _moveVars);
             _currentState = _stateRegistry.First(s => s is FallingState);
@@ -877,6 +881,7 @@ public class PlayerCharacter : IHittable
         {
             if (state == _currentState) continue;
             if ((state.RequiredCapabilities & blockedCaps) != 0) continue;
+            if ((available & state.Requires) != state.Requires) continue;
             if (owner != null && owner.Suppresses(state, ctx)) continue;
 
             if (state.CheckPreConditions(ctx, _abilities))

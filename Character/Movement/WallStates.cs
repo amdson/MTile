@@ -33,6 +33,7 @@ public class WallSlidingState : MovementState
 
     public override int ActivePriority => MovementPriorities.WallSlideActive;
     public override int PassivePriority => MovementPriorities.WallSlidePassive;
+    public override MovementResource Uses => MovementResource.Air | MovementResource.Hands;
     // Blocked during combat hitstun/stun (Phase 4) — a hit toward a wall can't be
     // cancelled by clinging to it.
     public override MovementCapability RequiredCapabilities => MovementCapability.WallCling;
@@ -150,6 +151,7 @@ public class WallJumpingState : MovementState
 
     public override int ActivePriority => MovementPriorities.WallJumpActive;
     public override int PassivePriority => MovementPriorities.WallJumpPassive;
+    public override MovementResource Uses => MovementResource.Legs | MovementResource.Hands;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
     public override AnimTag AnimationTag => AnimTag.WallJump;
 

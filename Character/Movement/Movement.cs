@@ -60,6 +60,14 @@ public abstract class MovementState
     // running state keeps running via CheckConditions regardless. See MovementCapability.
     public virtual MovementCapability RequiredCapabilities => MovementCapability.None;
 
+    // Resource declarations (Plans/MOVEMENT_RESOURCE_MODEL.md §3.3). Requires:
+    // resources that must be available to enter and to continue (checked by
+    // the FSM before CheckPreConditions / CheckConditions) — empty where
+    // channel access is not what defines the state. Uses: what the state asks
+    // the solver for; the fold's channel masks are (available ∧ Uses).
+    public virtual MovementResource Requires => MovementResource.None;
+    public virtual MovementResource Uses     => MovementResource.None;
+
     // Lets the currently-active state (and, for one frame after it exits, the
     // just-departed state — the loop queries PreviousState(0)) veto specific candidates
     // that priority alone would let win. Used to keep an owned maneuver (e.g. an
@@ -105,8 +113,10 @@ public abstract class MovementState
         body.Constraints.Add(c);
     }
 
-    protected static void ApplyAmbient(EnvironmentContext ctx, ref MovementVars vars, in FoldProfile fold)
-        => AmbientCorrector.Apply(ctx, fold, ref vars);
+    protected void ApplyAmbient(EnvironmentContext ctx, ref MovementVars vars, in FoldProfile fold)
+        => AmbientCorrector.Apply(ctx, fold, Uses, ref vars);
+    protected static void ApplyAmbient(EnvironmentContext ctx, ref MovementVars vars, in FoldProfile fold, MovementResource uses)
+        => AmbientCorrector.Apply(ctx, fold, uses, ref vars);
 
     // The animation-facing CATEGORY of this state (AnimTag.None = generic: the animator picks
     // by grounded/velocity). Replaces substring matching on state class names, which silently

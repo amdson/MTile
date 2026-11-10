@@ -40,7 +40,7 @@ public static class LatticeTracker
 {
 
     public static void Apply(EnvironmentContext ctx, CorrectorScratch s,
-                             in FoldProfile fold, int dir, ref MovementVars vars)
+                             in FoldProfile fold, MovementResource uses, int dir, ref MovementVars vars)
     {
         var cfg = MovementConfig.Current;
         var body = ctx.Body;
@@ -204,7 +204,7 @@ public static class LatticeTracker
         {
             Cfg = cfg, Fold = fold, Dir = dir, Speed = speed, ArcSpeed = arcSpeed,
             Origin = body.Position, Planning = planning,
-            Granted = MovementResources.Available(ctx) & fold.Uses,
+            Granted = MovementResources.Available(ctx) & uses,
             T0 = t0, SupportVy = supportVy, WalkSpeed = cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, AirSpeed = cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed,   // the PLAYER's cap: these arcs are flown on air control
         };
         PathTracker.Solve(s, settings, ref policy);

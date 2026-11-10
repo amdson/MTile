@@ -21,6 +21,7 @@ public class JumpingState : MovementState
 {
     public override int ActivePriority => MovementPriorities.JumpActive;
     public override int PassivePriority => MovementPriorities.JumpPassive;
+    public override MovementResource Uses => MovementResource.Legs | MovementResource.Hands;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
 
     private FloatingSurfaceDistance _source;
@@ -246,8 +247,8 @@ public class JumpingState : MovementState
 
         // Hybrid on the lattice engine (a launch with no legs under it — see
         // LegsInReach): the impulse above is the launch, the tracker rides the
-        // rising plan with the legs off, as RunningJumpState does.
-        ApplyAmbient(ctx, ref vars, FoldProfile.ImpulseJump);
+        // rising plan using the hands only, as RunningJumpState does.
+        ApplyAmbient(ctx, ref vars, FoldProfile.Jump, MovementResource.Hands);
     }
 
     private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
@@ -263,6 +264,7 @@ public class RunningJumpState : MovementState
 {
     public override int ActivePriority => MovementPriorities.RunningJumpActive;
     public override int PassivePriority => MovementPriorities.RunningJumpPassive;
+    public override MovementResource Uses => MovementResource.Hands;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
 
     private FloatingSurfaceDistance _source;
@@ -355,8 +357,8 @@ public class RunningJumpState : MovementState
 
         // Hybrid on the lattice engine (like DoubleJump/WallJump): the impulse
         // above is the launch; the tracker follows the rising plan with the
-        // legs off (FoldProfile.ImpulseJump) so they don't launch it again.
-        ApplyAmbient(ctx, ref vars, FoldProfile.ImpulseJump);
+        // legs unused (Uses = Hands) so they don't launch it again.
+        ApplyAmbient(ctx, ref vars, FoldProfile.Jump);
     }
 
     private static bool TryFindSource(EnvironmentContext ctx, out FloatingSurfaceDistance source)
@@ -372,6 +374,7 @@ public class DoubleJumpingState : MovementState
 {
     public override int ActivePriority => MovementPriorities.DoubleJumpActive;
     public override int PassivePriority => MovementPriorities.DoubleJumpPassive;
+    public override MovementResource Uses => MovementResource.Legs | MovementResource.Hands;
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
     public override AnimTag AnimationTag => AnimTag.DoubleJump;
 

@@ -13,6 +13,7 @@ public class FallingState : MovementState
 {
     public override int ActivePriority => MovementPriorities.FallingActive;
     public override int PassivePriority => MovementPriorities.FallingPassive;
+    public override MovementResource Uses => MovementResource.Air | MovementResource.Hands;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) => true;
@@ -43,17 +44,18 @@ public class StandingState : MovementState
 {
     public override int ActivePriority => MovementPriorities.StandingActive;
     public override int PassivePriority => MovementPriorities.StandingPassive;
+    public override MovementResource Requires => MovementResource.Legs;
+    public override MovementResource Uses => MovementResource.Legs | MovementResource.Support;
 
-    // Standing IS acting with the legs (plan §10 q2): entry and continuation
-    // are the Legs probe, the test the leg channels' masks read, so the state
+    // Standing IS acting with the legs (plan §10 q2): Requires = Legs, the
+    // probe the leg channels' masks read, so the state
     // and its channels cannot disagree (at a ledge the old strip probe ended
     // Standing while the channels still had legs — the ledge boost). The rise
     // test is support-relative, so a sprout lifting the body keeps it.
-    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-        => ctx.Legs;
+    // (Requires = Legs is checked by the FSM; nothing else defines Standing.)
+    public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities) => true;
 
-    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-        => ctx.Legs;
+    public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars) => true;
 
     // Support within reach and not launching (the Support probe) — StairClimbState's
     // entry. Standing itself is gated on the Legs probe (above).
@@ -142,6 +144,8 @@ public class CrouchedState : MovementState
     public override AnimTag AnimationTag => AnimTag.Crouch;
     public override int ActivePriority => MovementPriorities.CrouchedActive;
     public override int PassivePriority => MovementPriorities.CrouchedPassive;
+    public override MovementResource Requires => MovementResource.Legs;
+    public override MovementResource Uses => MovementResource.Legs | MovementResource.Support;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
     {

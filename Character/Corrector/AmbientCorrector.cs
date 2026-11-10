@@ -25,11 +25,6 @@ public struct FoldProfile
     // (dir, −1)^ — while a jump is held. The launch is then the tracker
     // spending the legs along a rising path; nothing fires an impulse.
     public bool  Rising;
-    // The resources the state asks the solver for (plan §3.3). Channel masks
-    // are (available ∧ Uses); a hybrid jump (the state's own impulse IS the
-    // launch) uses no legs, or they would launch it a second time.
-    public MovementResource Uses;
-
     public static FoldProfile None => default;
 
     // Falling on the lattice engine: no hover — the plan is a level line at
@@ -43,7 +38,6 @@ public struct FoldProfile
     public static FoldProfile Fall => new()
     {
         Fold = true, Hover = false, Rising = false,
-        Uses = MovementResource.Air | MovementResource.Hands,
         HoverOffset  = MovementConfig.Current.FoldHoverOffset,
         MaxSpeed     = MovementConfig.Current.CorrectorAirSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
@@ -57,18 +51,10 @@ public struct FoldProfile
     public static FoldProfile Jump => new()
     {
         Fold = true, Hover = false, Rising = true,
-        Uses = MovementResource.Legs | MovementResource.Hands,
         HoverOffset = 0f,
         MaxSpeed = MovementConfig.Current.CorrectorAirSpeed, RiseCost = 0f,
     };
 
-    // A hybrid ground jump (RunningJumpState): the state's velocity write is
-    // the launch, so the rising plan runs WITHOUT the legs — corner plants,
-    // clearance and redirect still act; nothing launches it twice.
-    public static FoldProfile ImpulseJump
-    {
-        get { var p = Jump; p.Uses = MovementResource.Hands; return p; }
-    }
 
     // Standing/Falling: hover ≈ the old spring equilibrium; 1-high ledges ramp
     // the reference (16 ≤ 20), 2-high walls never do (32 > 20).
@@ -79,7 +65,6 @@ public struct FoldProfile
         MaxSpeed     = MovementConfig.Current.MaxWalkSpeed,
         RiseCost     = MovementConfig.Current.FoldRiseCost,
         Hover        = true,
-        Uses         = MovementResource.Legs | MovementResource.Support,
     };
 
     // StairClimbState: Standing's profile with the climb priced FREE. On a regular flight
@@ -103,7 +88,6 @@ public struct FoldProfile
         MaxSpeed     = MovementConfig.Current.CrouchMaxWalkSpeed,
         RiseCost     = MovementConfig.Current.CrouchRiseCost,
         Hover        = true,
-        Uses         = MovementResource.Legs | MovementResource.Support,
     };
 }
 
@@ -174,7 +158,9 @@ public static class AmbientCorrector
     // before the physics step reads AppliedForce. Every state calls this once
     // per Update via MovementState.ApplyAmbient; stateless by design (cross-frame
     // state lives in MovementVars, scratch in ctx.Corrector).
-    public static void Apply(EnvironmentContext ctx, in FoldProfile fold, ref MovementVars vars)
+    // `uses` = the state's MovementState.Uses: the tracker grants the
+    // channels of (available ∧ uses).
+    public static void Apply(EnvironmentContext ctx, in FoldProfile fold, MovementResource uses, ref MovementVars vars)
     {
         var s = ctx.Corrector;
         if (s == null || !MovementConfig.Current.AmbientCorrectorEnabled || !fold.Fold)
@@ -183,6 +169,6 @@ public static class AmbientCorrector
             vars.AmbientChannelPrev = default;
             return;
         }
-        LatticeTracker.Apply(ctx, s, fold, ctx.Intent.CurrentHorizontal, ref vars);
+        LatticeTracker.Apply(ctx, s, fold, uses, ctx.Intent.CurrentHorizontal, ref vars);
     }
 }

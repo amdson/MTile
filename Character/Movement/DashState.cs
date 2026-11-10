@@ -37,6 +37,7 @@ public class DashState : MovementState
 
     public override int ActivePriority  => MovementPriorities.DashActive;
     public override int PassivePriority => MovementPriorities.DashPassive;
+    public override MovementResource Uses => MovementResource.Air | MovementResource.Hands;
     // Hitstun / stun / grabbed block entry (CombatState.BlockedCapabilities).
     public override MovementCapability RequiredCapabilities => MovementCapability.Jump;
     public override AnimTag AnimationTag => AnimTag.Dash;

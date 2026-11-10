@@ -37,6 +37,7 @@ public class LedgeGrabState : MovementState
 
     public override int ActivePriority  => MovementPriorities.LedgeGrabActive;
     public override int PassivePriority => MovementPriorities.LedgeGrabPassive;
+    public override MovementResource Uses => MovementResource.Hands;
     // Blocked during combat hitstun/stun (Phase 4) — a launch past a ledge can't be
     // cancelled by catching it. The pull (LedgePullState) is entered FROM a grab, so
     // gating the grab already prevents the pull; it carries the flag too for clarity.
@@ -285,6 +286,7 @@ public class LedgePullState : MovementState
 
     public override int ActivePriority  => MovementPriorities.LedgePullActive;
     public override int PassivePriority => MovementPriorities.LedgePullPassive;
+    public override MovementResource Uses => MovementResource.Hands;
     public override MovementCapability RequiredCapabilities => MovementCapability.LedgeGrab;
 
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
