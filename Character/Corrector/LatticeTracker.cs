@@ -138,22 +138,37 @@ public static class LatticeTracker
         CorrectorChannels.MarkContactPush(ctx.Chunks, s.Samples, 1, s.ContactPushLeft, s.ContactPushRight);
         for (int k = 1; k < H; k++) { s.ContactPushLeft[k] = s.ContactPushLeft[0]; s.ContactPushRight[k] = s.ContactPushRight[0]; }
 
-        // ── Reference polyline: body → first node ≥ one cell away → nodes ──
+        // ── Reference polyline: the plan's nodes, and nothing else ────────
+        // The body is NOT a vertex. It is a point near the route, projected
+        // onto it like every predicted tick is (PathTracker.Solve): its
+        // offset from the route is the band rows' business (perpendicular),
+        // and the route's own tangent is the only "along". With the body as
+        // vertex 0 the segment body → first node was read as path: its x
+        // sign is the seed's grid-snap offset (a running jump's plan is a
+        // column at the seed's x; one frame later the body is past it and
+        // the drive pushed BACKWARD at its cap), and its length counted
+        // against the arc-speed cap.
         int nv = 0;
         bool hoverColumnRows = hoverColumn;
+        float arcStart = 0f;
+        Vector2 t0 = u;
         if (havePath)
         {
-            int j = 0;
-            while (j < count - 1 && (s.LatticePath[j].Pos - body.Position).Length() < 0.9f * cell) j++;
-            nv = PathTracker.BeginPolyline(s, body.Position);
-            for (; j < count; j++) PathTracker.AppendVertex(s, ref nv, s.LatticePath[j].Pos);
+            nv = PathTracker.BeginPolyline(s, s.LatticePath[0].Pos);
+            for (int j = 1; j < count; j++) PathTracker.AppendVertex(s, ref nv, s.LatticePath[j].Pos);
             if (nv < 2) { havePath = false; nv = 0; }
+            else
+            {
+                // Where the body is along the route (first segment extended
+                // backward as a ray, so a body behind the seed still projects),
+                // and the route's direction there: where the drive pushes. A
+                // path that follows intent runs along dir; a neutral launch's
+                // escape from under a slab starts sideways toward the open
+                // side; a plain jump's column is straight up (no x at all).
+                arcStart = PathTracker.ProjectArc(s.BeadVerts, s.BeadArc, nv, body.Position);
+                PathTracker.PointAt(s.BeadVerts, s.BeadArc, nv, arcStart, out _, out t0);
+            }
         }
-        // The plan's first direction: where the drive pushes (below). A path
-        // that follows intent starts along dir; a neutral launch's escape
-        // from under a slab starts sideways toward the open side; a plain
-        // neutral jump starts straight up (no x at all).
-        Vector2 t0 = havePath ? Vector2.Normalize(s.BeadVerts[1] - s.BeadVerts[0]) : u;
         float yHover = floorY - fold.HoverOffset;
         // Grounded profiles (those that hover) cap the SPEED along the path
         // (a walk speed is a SPEED: capping x let a body on a 45° bevel run
@@ -184,7 +199,7 @@ public static class LatticeTracker
         // ── Sliding beads: outer passes of project → rows → solve ────────
         var settings = new PathTrackSettings
         {
-            H = H, Dt = dt, Origin = body.Position, VertexCount = nv,
+            H = H, Dt = dt, Origin = body.Position, VertexCount = nv, ArcStart = arcStart,
             Band = band,
             ArcSpeedCap = arcSpeed ? speed : float.PositiveInfinity,
             HoverLineY  = hoverColumnRows ? yHover : float.NaN,
@@ -196,7 +211,7 @@ public static class LatticeTracker
         {
             Cfg = cfg, Fold = fold, Dir = dir, Speed = speed, ArcSpeed = arcSpeed,
             Origin = body.Position, Near = near, Ballistic = ballistic, Planning = planning,
-            T0 = t0, SupportVy = supportVy, AirSpeed = cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed,   // the PLAYER's cap: these arcs are flown on air control
+            T0 = t0, SupportVy = supportVy, WalkSpeed = cfg.MaxWalkSpeed * ctx.Modifiers.MaxWalkSpeed, AirSpeed = cfg.MaxAirSpeed * ctx.Modifiers.MaxAirSpeed,   // the PLAYER's cap: these arcs are flown on air control
         };
         PathTracker.Solve(s, settings, ref policy);
         var pr = s.Problem;
@@ -224,7 +239,7 @@ public static class LatticeTracker
         public MovementConfig Cfg;
         public FoldProfile Fold;
         public int Dir;
-        public float Speed, SupportVy, AirSpeed;
+        public float Speed, SupportVy, AirSpeed, WalkSpeed;
         public bool ArcSpeed, Near, Ballistic, Planning;
         public Vector2 Origin, T0;
 
@@ -334,8 +349,12 @@ public static class LatticeTracker
             // the profile's speed where it has one (walk, crouch), else the
             // air cap; forward is the plan's first direction.
             ch[3].ForwardAxis = new Vector2(MathF.Sign(t0.X), 0f);
+            // ONE number in every state: a plant never adds forward speed
+            // past the walk's (a slower profile — the crouch — keeps its own).
+            // Per state, the cap moved when the state did: a ledge walk-off
+            // handed the body to Falling's 90 and the lip's plant took it to 86.
             ch[3].ForwardCap  = t0.X == 0f ? 0f
-                : float.IsFinite(speed) ? speed : AirSpeed;
+                : MathF.Min(WalkSpeed, float.IsFinite(speed) ? speed : AirSpeed);
             // ...parametrized as a force (see CorrectionSolver.Project: the
             // same disc, in Δv/dt) so its lever is commensurate with the other
             // channels' — as a Δv lever, active on every near tick, it

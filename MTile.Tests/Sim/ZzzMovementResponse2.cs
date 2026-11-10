@@ -15,6 +15,7 @@ public class ZzzMovementResponse2
         Environment.GetEnvironmentVariable("MTILE_RESP_OUT2") ?? Path.Combine(Path.GetTempPath(), "mtile_resp2.txt");
 
     private const float T = Chunk.TileSize;
+    private static bool PrintPath => Environment.GetEnvironmentVariable("MTILE_RESP_PATH") == "1";
     private static readonly PlayerInput None = default;
     private static readonly PlayerInput R = new() { Right = true };
     private static readonly PlayerInput RJ = new() { Right = true, Space = true };
@@ -41,9 +42,10 @@ public class ZzzMovementResponse2
 
     // Solo loop (SimRunner.Run's order) with ledger access.
     private static void Solo(StringBuilder sb, string title, ChunkMap terrain, Vector2 start, InputScript script,
-                             int frames, int from, int to)
+                             int frames, int from, int to, Vector2 startVel = default)
     {
         var player = new PlayerCharacter(start);
+        player.Body.Velocity = startVel;
         var bodies = new List<PhysicsBody> { player.Body };
         var ctrl = new Controller();
         var hit = new HitboxWorld(); var hurt = new HurtboxWorld();
@@ -57,11 +59,20 @@ public class ZzzMovementResponse2
             var af = player.Body.AppliedForce;
             string ch = Channels(player);
             var outcome = player.CorrectorDebug.LatticeOutcome;
+            var cd = player.CorrectorDebug; var bp = player.Body.Position;
+            string path = "";
+            if (PrintPath && cd.LatticePathFrame >= 0 && cd.LatticePathCount >= 2)
+            {
+                var v1 = cd.BeadVerts[1] - bp;
+                path = $"\n        pre-step body=({bp.X:F1},{bp.Y:F1}) v1-body=({v1.X:F1},{v1.Y:F1}) nodes-body:";
+                for (int i = 0; i < Math.Min(6, cd.LatticePathCount); i++)
+                { var d = cd.LatticePath[i].Pos - bp; path += $" ({d.X:F1},{d.Y:F1})"; }
+            }
             LaunchSystem.StepSwept(bodies, terrain, Simulation.FixedDt, new Vector2(0f, 600f));
             var b = player.Body;
             prev = new SimFrame(f, 0, b.Position.X, b.Position.Y, b.Velocity.X, b.Velocity.Y, af.X, af.Y, player.CurrentStateName, false);
             if (f >= from && f < to)
-                sb.AppendLine($"  f{f,3} x={b.Position.X,7:F2} y={b.Position.Y,6:F2} vx={b.Velocity.X,6:F1} vy={b.Velocity.Y,7:F1} F=({af.X,6:F0},{af.Y,6:F0}) {player.CurrentStateName.Replace("State", ""),-12} {outcome,-7}{ch}");
+                sb.AppendLine($"  f{f,3} x={b.Position.X,7:F2} y={b.Position.Y,6:F2} vx={b.Velocity.X,6:F1} vy={b.Velocity.Y,7:F1} F=({af.X,6:F0},{af.Y,6:F0}) {player.CurrentStateName.Replace("State", ""),-12} {outcome,-7}{ch}{path}");
         }
     }
 
@@ -108,7 +119,16 @@ public class ZzzMovementResponse2
 
         // 4. Landing from a neutral jump while holding R the whole time: x speed through the catch.
         Solo(sb, "4 jump (4f) with R held: landing", Rows(E, E, E, E, E, E, F), new Vector2(150, restY),
-            new InputScript().For(40, None).For(30, R).For(4, RJ).Forever(R), 140, 108, 132);
+            new InputScript().For(40, None).For(30, R).For(4, RJ).Forever(R), 140, 74, 132);
+
+        // 5. Fall onto flat with R held (the SettlesToHover test's setup).
+        Solo(sb, "5 fall onto flat, R held", Rows(E, E, E, E, E, E, F), new Vector2(200, restY - 40f),
+            InputScript.Always(R), 70, 14, 70, new Vector2(40f, 150f));
+
+        // 6. Fall onto the top corner of a 1-high block, R held: does the plant add forward speed?
+        foreach (float sx in new[] { 205f, 209f, 213f })
+            Solo(sb, $"6 fall onto block corner at x=220 from x={sx} (R held, vy 200)", Rows(E, E, E, E, E, Line(20, 70), F),
+                new Vector2(sx, 5 * T - 20.5f - 50f), InputScript.Always(R), 50, 0, 50, new Vector2(20f, 200f));
 
         // ── Post-hit ─────────────────────────────────────────────────────────
         // Attacker at x=200 facing +x runs the ground string (tap every 5f from f13); victim 24px ahead.

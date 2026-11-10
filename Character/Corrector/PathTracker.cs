@@ -43,7 +43,8 @@ public struct PathTrackSettings
 {
     public int     H;
     public float   Dt;
-    public Vector2 Origin;          // body position (the polyline's vertex 0)
+    public Vector2 Origin;          // body position
+    public float   ArcStart;        // the body's arc position on the polyline (0 when it IS vertex 0; may be < 0)
     public int     VertexCount;     // polyline vertices in s.BeadVerts (< 2: no path)
     public float   Band;            // perpendicular following tolerance
     public float   ArcSpeedCap;     // hard cap on along-path speed; ∞ = none
@@ -130,7 +131,7 @@ public static class PathTracker
         {
             int rowCount = set.WallRows;
             Vector2 tLast = set.FallbackTangent, qLast = set.Origin;
-            float sPrev = 0f;
+            float sPrev = set.ArcStart;
             for (int T = 0; T < H; T++)
             {
                 Vector2 delta = pass == 0 ? Vector2.Zero : s.TrackDelta[T];
@@ -151,8 +152,8 @@ public static class PathTracker
                     {
                         // A speed along the path: the body's arc position is the
                         // bead's, so the cap is the bead's own coordinate,
-                        // s_T ≤ speed·(T+1)·dt.
-                        float sFree = sT - Vector2.Dot(delta, t);
+                        // s_T − s_body ≤ speed·(T+1)·dt.
+                        float sFree = sT - set.ArcStart - Vector2.Dot(delta, t);
                         s.Rows[rowCount++] = new ClearanceRow
                             { Tick = T, Normal = -t, Depth = sFree - set.ArcSpeedCap * (T + 1) * dt, HingeScale = 1f, Reference = true };
                     }
@@ -174,7 +175,12 @@ public static class PathTracker
             // progress.
             if (havePath)
             {
-                var chord = qLast - set.Origin;
+                // ...measured from the body's own point ON the route, not from
+                // the body: the body's offset from the route is perpendicular
+                // error (the band's), and a body at rest beside the route made
+                // that offset the whole chord — "progress" pointed at the route.
+                PointAt(s.BeadVerts, s.BeadArc, nv, set.ArcStart, out var q0, out _);
+                var chord = qLast - q0;
                 if (chord.LengthSquared() > 1e-6f) tLast = Vector2.Normalize(chord);
             }
             if (policy.ProgressAuthority(s, tLast, out float capAlong))
@@ -268,7 +274,8 @@ public static class PathTracker
     }
 
     // Arc length of the nearest point on the polyline (vertices 0..nv−1,
-    // last segment extended as a ray — the honest carry past the end).
+    // last segment extended as a ray — the honest carry past the end — and
+    // the first extended backward the same way: arc < 0 behind vertex 0).
     public static float ProjectArc(ReadOnlySpan<Vector2> verts, ReadOnlySpan<float> arc, int nv, Vector2 p)
     {
         float best = float.PositiveInfinity, bestArc = 0f;
@@ -279,7 +286,8 @@ public static class PathTracker
             if (len2 < 1e-9f) continue;
             float t = Vector2.Dot(p - a, d) / len2;
             bool last = i + 2 == nv;
-            t = last ? MathF.Max(0f, t) : Math.Clamp(t, 0f, 1f);
+            if (i > 0) t = MathF.Max(0f, t);
+            if (!last) t = MathF.Min(1f, t);
             var q = a + d * t;
             float dist2 = (p - q).LengthSquared();
             if (dist2 < best) { best = dist2; bestArc = arc[i] + t * MathF.Sqrt(len2); }
@@ -321,7 +329,7 @@ public static class PathTracker
             arc[i] = i == 0 ? 0f : arc[i - 1] + (pts[i] - pts[i - 1]).Length();
         }
         totalArc = arc[ClipPathSamples];
-        float a0 = ProjectArc(pts, arc, ClipPathSamples + 1, origin);
+        float a0 = MathF.Max(0f, ProjectArc(pts, arc, ClipPathSamples + 1, origin));   // behind the clip's start = at its start
         int nv = BeginPolyline(s, origin);
         for (int i = 1; i <= ClipPathSamples; i++)
             if (arc[i] > a0 + 0.5f) AppendVertex(s, ref nv, pts[i]);
