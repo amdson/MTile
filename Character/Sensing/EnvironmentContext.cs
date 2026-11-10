@@ -214,7 +214,9 @@ public class EnvironmentContext
     private FloorProbe _floor;
 
     // Floor: a standable surface under the body (C-space floor envelope), from
-    // 2 px above the center down to leg reach.
+    // 2 px above the center down to the longer of leg reach and support reach
+    // (the envelope is the highest surface in band, so anything in leg reach
+    // is found the same either way).
     public FloorProbe Floor
     {
         get
@@ -222,8 +224,9 @@ public class EnvironmentContext
             if (!_floorProbed || _floorProbePos != Body.Position)
             {
                 var pos = Body.Position;
+                float reach = MathF.Max(CorrectorChannels.LegReach, SupportReachC);
                 float y = AmbientCorrector.FloorEnvelope(Chunks, CObstacleTemplate.For(Body.Polygon),
-                    pos.X, pos.Y - 2f, pos.Y + CorrectorChannels.LegReach, out bool found);
+                    pos.X, pos.Y - 2f, pos.Y + reach, out bool found);
                 _floor = new FloorProbe
                 {
                     Found = found, Y = y,
@@ -245,15 +248,21 @@ public class EnvironmentContext
     // Legs: the floor in leg reach and the body not leaving it.
     public bool Legs => LegsInReach && !Launching;
 
-    // Support: the standing ground probe within SupportReach of the center,
-    // not rising faster than support could push. Hold = the gravity hold's
-    // strength, full inside HoldFullDist, zero at SupportReach.
+    // Support: the Floor within support reach, not launching. Hold = the
+    // gravity hold's strength, full inside HoldFullDist, zero at SupportReach.
+    // SupportReach / HoldFullDist are center → tile top; on the C-space floor
+    // that is the Floor distance plus the hull's bottom offset, so the
+    // vertical numbers are the live gravity hold's as before, measured on the
+    // one floor geometry the legs use (one probe for FoldBaseline, the
+    // tracker's anchor and IsStandingGround — plan §10 q2).
+    private float BottomOffset => Body.Bounds.Bottom - Body.Position.Y;
+    private float SupportReachC => BallisticPredictor.SupportReach - BottomOffset;
     public bool Support(out float hold)
     {
         hold = 0f;
-        if (!TryGetGround(out var ground)) return false;
-        if (-(Body.Velocity.Y - ground.SurfaceVelocity.Y) > MovementConfig.Current.SpringMaxRiseSpeed) return false;
-        float dist = ground.Position.Y - Body.Position.Y;
+        var f = Floor;
+        if (!f.Found || Launching) return false;
+        float dist = f.Distance + BottomOffset;
         if (dist > BallisticPredictor.SupportReach) return false;
         hold = Math.Clamp((BallisticPredictor.SupportReach - dist)
             / (BallisticPredictor.SupportReach - BallisticPredictor.HoldFullDist), 0f, 1f);

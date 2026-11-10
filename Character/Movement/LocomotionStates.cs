@@ -44,31 +44,19 @@ public class StandingState : MovementState
     public override int ActivePriority => MovementPriorities.StandingActive;
     public override int PassivePriority => MovementPriorities.StandingPassive;
 
+    // Standing IS acting with the legs (plan §10 q2): entry and continuation
+    // are the Legs probe, the test the leg channels' masks read, so the state
+    // and its channels cannot disagree (at a ledge the old strip probe ended
+    // Standing while the channels still had legs — the ledge boost). The rise
+    // test is support-relative, so a sprout lifting the body keeps it.
     public override bool CheckPreConditions(EnvironmentContext ctx, PlayerAbilityState abilities)
-    {
-        return IsStandingGround(ctx);
-    }
+        => ctx.Legs;
 
     public override bool CheckConditions(EnvironmentContext ctx, PlayerAbilityState abilities, ref MovementVars vars)
-    {
-        // Stay-active uses plain ground detection — only ENTRY is gated (below). An
-        // already-standing body that's briefly flung up (e.g. a sprout growing up
-        // under it) must keep Standing so its spring tracks the lift; kicking it to
-        // Falling for a frame would slam its velocity. The launch case the entry gate
-        // guards against never has Standing as the current state (the jump does).
-        return ctx.TryGetGround(out _);
-    }
+        => ctx.Legs;
 
-    // GroundChecker's 20px ProbeSlack reports "grounded" for a body up to ~20px above
-    // rest height — which, with the slow JumpVelocity launch, holds for the whole jump
-    // window. So a quick jump-release would drop JumpingState and let Standing re-grab
-    // the still-ascending body. Refuse to grab a body rising faster than support could
-    // ever push it (SpringMaxRiseSpeed): that's a launch, not standing. ENTRY also
-    // requires support proximity (SupportReach — the gravity-hold band): a body the
-    // probe merely SEES 40px up is still flying (a pass-by, or an inbound landing whose
-    // descent will cross the engagement gate and flicker the state) — it becomes
-    // Standing when support can actually bind it. Continuation (CheckConditions) stays
-    // the plain probe: states are sticky.
+    // Support within reach and not launching (the Support probe) — StairClimbState's
+    // entry. Standing itself is gated on the Legs probe (above).
     internal static bool IsStandingGround(EnvironmentContext ctx)
     {
         return ctx.Support(out _);
@@ -127,7 +115,7 @@ public class StandingState : MovementState
         // (the Support probe's payload). A body floating above hover gets
         // mostly-real gravity.
         if (!ctx.Support(out float holdScale) || holdScale <= 0f) return Vector2.Zero;
-        ctx.TryGetGround(out var ground);
+        var floorVel = ctx.Floor.SurfaceVelocity;
         var force = new Vector2(0f, -ctx.Gravity.Y * holdScale);
         if (ctx.Intent.CurrentHorizontal == 0 && ctx.Dt > 0f)
         {
@@ -137,7 +125,7 @@ public class StandingState : MovementState
             // floor sliding sideways under planted feet carries the body with
             // it instead of the friction fighting the ride.
             float cap = MovementConfig.Current.GroundFriction * ctx.Modifiers.GroundFriction;
-            float vxRel = ctx.Body.Velocity.X - ground.SurfaceVelocity.X;
+            float vxRel = ctx.Body.Velocity.X - floorVel.X;
             force.X = Math.Clamp(-vxRel / ctx.Dt, -cap, cap) * holdScale;
         }
         return force;

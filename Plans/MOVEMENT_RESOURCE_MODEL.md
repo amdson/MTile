@@ -700,3 +700,37 @@ unless stated; the polygon bottom is center + 7.2):
 | Standing (state) | Entry: `Support`. Continuation: `TryGetGround` (no rise test, reach 29.0). Channels: `LegsInReach` (C-space) | Entry, continuation and channels are three tests. |
 | Jump source | Planned-rise vs impulse choice: `LegsInReach`. Precondition: `TryGetGround`, stair probe, gripped corner, or `JumpSupportChecker` (exposed tops to bottom + 21.8, 4 px past the sides, lips 6 px above the foot line). Continuation: ground probe with 60 px slack (`JumpSourceProbeSlack`). Running jump: `TryGetGround` | Four reaches for "can I push off". |
 | Floor (other users) | `GroundChecker` strip (states: Dropdown, WallSlide, Stunned, Tumble, Dash, CoveredJump, Crouched, the PlayerCharacter fall check). `TryGetCrouchGround` (slack + hover offset). Floor envelope (tracker, jump, dropdown) | Two geometries (strip vs C-space). |
+
+### Item 3 — collapse definitions (stage 2)
+
+Change:
+- **Standing** entry and continuation are the `Legs` probe (C-space floor in leg reach, not
+  launching) — the test the leg channels read. The old continuation was the strip ground probe
+  with no rise test; entry was `Support`.
+- **Support** is one definition on the `Floor` probe's C-space geometry: distance to the floor plus
+  the hull's bottom offset (7.2 px) against the unchanged `SupportReach` 29.8 / `HoldFullDist` 28.8,
+  so the gravity hold's vertical numbers are what the live tick applied before, now over the same
+  full-width floor the legs use. Read by `FoldBaseline`, the tracker's `anchored` (which had been
+  identical to `near`), and `IsStandingGround` (now only `StairClimbState`'s entry). The `Floor`
+  band extends to support reach. `FoldBaseline`'s friction reads the floor's velocity from the probe.
+- Not done here (by the plan's order): deleting the 60 px jump-source scan and
+  `JumpSupportChecker`; they become unused in item 7.
+
+Decision not in the plan: Support's geometry. The live hold measured from the tile top (strip
+probe), the coast predictor and planner from the C-space surface, 7.2 px apart. I kept the live
+hold's vertical numbers and moved it onto the C-space floor, so at an edge Support and Legs end
+together instead of the hold dropping 2 px early. The planner's own `SupportReach` (node
+classification) is untouched.
+
+| Measure (trace) | Before | After |
+|---|---|---|
+| Ledge walk-off peak vx (r1 D5 / r2 #2) | 85.8 / 85.8 | 66.9 / 66.9 |
+| One-wide pit peak vx (r1 D3) | 87.6 | 64.4 |
+| Flat walk, taps, jumps, running jump, landing | — | identical |
+| D6 step-up repeatability (stop distance vs flat 69.49) | 69.18–70.11 | 68.86–69.53 |
+| S1-S2-S3 hold-toward final dx (flat / step / ledge) | −47.3 / −49.1 / −26.9 | −56.6 / −53.2 / −21.8 |
+
+What is left of the ledge boost (trace, r2 #2): Standing now lasts to x 225.6 and Falling gets
+no Drive. The remaining 66.9 is Drive while still Standing on the lip (216 px/s² at f110): the
+plan's route goes down the step, and the walk-speed cap is measured along the route, so the
+descent counts as travel and x is allowed past walk speed. That is the along-path limit, item 6.

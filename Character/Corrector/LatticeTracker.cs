@@ -62,7 +62,9 @@ public static class LatticeTracker
         bool near     = ctx.LegsInReach;
         float supportVy = floorProbe.SurfaceVelocity.Y;
         bool ballistic = ctx.Launching;
-        bool anchored = dist <= BallisticPredictor.SupportReach;
+        bool anchored = ctx.Support(out _);
+        // The tracker's samples carry the floor only where the legs reach it.
+        if (!near) { floorFound = false; dist = float.PositiveInfinity; }
 
         // ── The plan ─────────────────────────────────────────────────────
         // The x speed cap: the profile's, under the walk or air modifier.
